@@ -1,15 +1,18 @@
+"""
+File: test_beclass_crawler.py
+Description: Playwright crawler test script using CDP (Chrome DevTools Protocol) to connect to a native Chrome browser instance, check registration counts, and download registrant files conditionally.
+"""
 import os
 import re
 from playwright.sync_api import sync_playwright
 
 # ==================== 爬蟲設定參數 (ponytail: 集中配置) ====================
-# 請在此貼上您從 Chrome 複製的絕對位置 (Copy selector 或 Copy XPath)
+# 從 Chrome 複製的絕對位置 (XPath)
 COUNT_SELECTOR = 'xpath=//*[@id="showme2"]/a[1]/b'
 # =========================================================================
 
 LAST_COUNT_FILE = "last_count.txt"
 DOWNLOAD_DIR = "./downloads"
-USER_DATA_DIR = "./chrome_user_data"  # 用於保存瀏覽器指紋與快取，幫助通過人機驗證
 
 def get_last_count():
     if os.path.exists(LAST_COUNT_FILE):
@@ -32,18 +35,23 @@ def run():
     print(f"上次記錄的人數: {last_count}")
 
     with sync_playwright() as p:
-        # ponytail: 使用 launch_persistent_context 模擬有歷史快取的真實瀏覽器（以利通過人機）
-        context = p.chromium.launch_persistent_context(
-            user_data_dir=USER_DATA_DIR,
-            headless=False,
-            channel="chrome",
-            args=["--disable-blink-features=AutomationControlled"]
-        )
-        
-        # ponytail: 每次啟動立即清除 Cookie，確保不會自動登入，每次皆須手動輸入帳密與驗證
-        context.clear_cookies()
-        
-        page = context.pages[0] if context.pages else context.new_page()
+        # ponytail: 連接至已手動開啟的偵錯 Chrome 瀏覽器 (CDP 模式)
+        # 這能 100% 繞過 Playwright 在啟動時產生的自動化標記與指紋偵測
+        print("正在嘗試連線至 Chrome 遠端偵錯埠 (localhost:9222)...")
+        try:
+            browser = p.chromium.connect_over_cdp("http://localhost:9222")
+            context = browser.contexts[0] if browser.contexts else browser.new_context()
+            
+            # 每次連線先清空 Cookie，確保不會自動登入，維持手動登入要求
+            context.clear_cookies()
+            
+            page = context.pages[0] if context.pages else context.new_page()
+        except Exception as e:
+            print(f"\n連線失敗: {e}")
+            print("\n*** [啟動提示] ***")
+            print("請先開啟 PowerShell 執行以下指令啟動「偵錯 Chrome」，然後再執行本腳本：")
+            print('  & "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --remote-debugging-port=9222 --user-data-dir="c:\\Users\\chris\\Desktop\\project\\union\\chrome_user_data"\n')
+            return
 
         # 1. 導向登入頁面
         login_url = "https://www.beclass.com/default.php?name=Your_Account"
@@ -51,7 +59,7 @@ def run():
         page.goto(login_url)
 
         print("\n*** [手動操作提示] ***")
-        print("1. 請在瀏覽器中手動輸入帳號密碼並完成人機驗證（此非乾淨瀏覽器，應可順利通過）。")
+        print("1. 請在瀏覽器中手動輸入帳號密碼並完成人機驗證（此為純原生瀏覽器，驗證應可順利通過）。")
         print("2. 登入成功後，請在終端機按下 [Enter] 鍵繼續執行自動化流程...")
         input()
 
@@ -65,8 +73,8 @@ def run():
             page.wait_for_load_state("networkidle")
         except Exception as e:
             print(f"找不到或無法點擊「報名表管理」連結: {e}")
-            input("\n請在終端機按下 [Enter] 鍵以關閉瀏覽器...")
-            context.close()
+            input("\n請在終端機按下 [Enter] 鍵以關閉連線...")
+            browser.close()
             return
 
         # 3. 取得當前人數
@@ -86,13 +94,13 @@ def run():
 
             if current_count is None:
                 print("未能在指定標籤中找到報名人數數字。")
-                input("\n請在終端機按下 [Enter] 鍵以關閉瀏覽器...")
-                context.close()
+                input("\n請在終端機按下 [Enter] 鍵以關閉連線...")
+                browser.close()
                 return
         except Exception as e:
             print(f"取得人數時發生錯誤: {e}")
-            input("\n請在終端機按下 [Enter] 鍵以關閉瀏覽器...")
-            context.close()
+            input("\n請在終端機按下 [Enter] 鍵以關閉連線...")
+            browser.close()
             return
 
         # 4. 判斷人數是否有變化，若有增加才下載檔案
@@ -122,8 +130,8 @@ def run():
             print(f"人數未增加 ({last_count} -> {current_count})，跳過下載操作。")
 
         print("操作完成。")
-        input("\n請在終端機按下 [Enter] 鍵以關閉瀏覽器...")
-        context.close()
+        input("\n請在終端機按下 [Enter] 鍵以關閉連線...")
+        browser.close()
 
 if __name__ == "__main__":
     run()
