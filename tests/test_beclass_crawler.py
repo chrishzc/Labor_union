@@ -1,6 +1,6 @@
 """
 File: test_beclass_crawler.py
-Description: Playwright crawler test script using CDP (Chrome DevTools Protocol) to connect to a native Chrome browser instance, check registration counts, and download registrant files conditionally.
+Description: 使用 Playwright 與 CDP (Chrome DevTools Protocol) 連接原生 Chrome 瀏覽器之爬蟲測試腳本，自動檢查報名人數變化並在人數增加時下載 Excel 檔案。
 """
 import os
 import re
