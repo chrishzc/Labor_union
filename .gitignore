@@ -13,3 +13,10 @@ wheels/
 chrome_user_data/
 downloads/
 last_count.txt
+
+# Editor configurations
+.obsidian/
+
+# Local databases/data directories
+metabase-data/
+

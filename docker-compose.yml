@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  # 1. MySQL 資料庫服務
+  db:
+    image: mysql:8.0
+    container_name: mysql_db
+    restart: always
+    environment:
+      MYSQL_DATABASE: union_db
+      MYSQL_ROOT_PASSWORD: "1234"  # 與 import_excel.py 的密碼一致
+    ports:
+      - "3306:3306"  # 將 3306 對外映射，讓本機的 Python 匯入程式可以直接連線
+    volumes:
+      # 持久化資料庫數據，防止容器重啟時資料遺失
+      - mysql-data:/var/lib/mysql
+      # Docker MySQL 初始化特性：容器首次啟動時會自動執行此資料夾下的 .sql 檔案建表
+      - ./db/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    networks:
+      - union-network
+
+  # 2. Metabase 查詢平台服務
+  metabase:
+    image: metabase/metabase:latest
+    container_name: metabase
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      # 持久化 Metabase 的系統設定（儀表板、帳號、報表等）
+      - ./metabase-data:/metabase.db
+    environment:
+      - MB_DB_TYPE=h2
+    depends_on:
+      - db  # 確保 MySQL 啟動後再啟動 Metabase
+    networks:
+      - union-network
+
+volumes:
+  mysql-data:  # 定義持久化資料卷
+
+networks:
+  union-network:
+    driver: bridge
