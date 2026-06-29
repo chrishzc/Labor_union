@@ -19,15 +19,15 @@ flowchart TD
     classDef anomaly fill:#FFEBEE,stroke:#C62828,stroke-width:2px;
 
     %% 資料源
-    GovSite["🏛️ 政府官方登記網站 (PDF/名冊)"]:::source
+    AdminDownload["👤 行政人員手動下載 (Excel/PDF)"]:::source
     BeClassSite["📝 BeClass 登記系統 (問卷)"]:::source
 
     %% 抽取 (Extract)
-    GovSite --> CrawlGov["🕷️ Playwright 模擬登入與下載"]:::process
-    BeClassSite --> CrawlBeClass["🕷️ Webhook 接收或 API 抽取"]:::process
+    AdminDownload --> FileWatcher["🔍 檔案監控服務偵測目錄變更 (watchdog)"]:::process
+    BeClassSite --> CrawlBeClass["🕷️ Webhook 接收或手動導出監控"]:::process
 
     %% 轉換與檢驗 (Transform & Validate)
-    CrawlGov --> Transform["🧪 資料格式化與強型別檢驗"]:::process
+    FileWatcher --> Transform["🧪 資料格式化與強型別檢驗"]:::process
     CrawlBeClass --> Transform
 
     %% 檢驗判斷
@@ -44,20 +44,23 @@ flowchart TD
 
 ---
 
-## 2. 資料源爬取機制 (Extract)
+## 2. 資料地端監控與讀取機制 (Extract / File Watcher)
 
-### 2.1 政府表單系統
-*   **工具技術**：使用 Python `Playwright` 進行模擬登入。
-*   **爬取路徑**：
-    *   登入地址：`https://hsinchu-nanny.hccg.gov.tw/admin/login`
-    *   定期下載最新申報名冊（格式主要為 Excel 或 PDF）。
-*   **欄位提取目標**：提取「項次、身分資格、服務開始日期、地址、客戶姓名、電話」等欄位。
+本系統取消自動化網路爬蟲，改為由行政人員定期下載資料，並由地端檔案監控服務 (File Watcher) 進行自動偵測。
 
-### 2.2 BeClass 登記系統
-*   **工具技術**：使用 Python `requests` 呼叫 BeClass API，或架設端點接收 BeClass 欄位 Webhook。
-*   **爬取路徑**：
-    *   BeClass 帳戶地址：`https://www.beclass.com/default.php?name=Your_Account`
-*   **欄位提取目標**：提取「查詢序號(case_no)、飲食習慣、餐點烹煮工具、特殊計費、週報需求與客戶聯絡資料」。
+### 2.1 檔案存放與監控設定
+*   **指定監控目錄**：地端伺服器上的 `downloads/` 資料夾（可分設 `downloads/government/` 與 `downloads/beclass/` 子目錄）。
+*   **監控技術**：使用 Python `watchdog` 庫，於背景啟動守護進程 (Daemon)。
+*   **偵測事件與規則**：
+    *   監控 `on_created` (新建檔案) 與 `on_modified` (覆蓋/更新檔案) 事件。
+    *   過濾器：僅針對副檔名為 `.xlsx`、`.xls` 的 Excel 試算表，以及 `.pdf` 檔案進行捕捉。
+    *   **防重複觸發鎖**：由於 Excel 存檔時會短暫鎖定檔案且觸發多次 write 事件，檔案監測器在接收到事件後將等待 2 秒（確認寫入完全且鎖定解除）再執行資料匯入。
+
+### 2.2 資料提取目標
+*   **政府表單名冊 (手動下載自 https://hsinchu-nanny.hccg.gov.tw/admin/login)**
+    *   **提取目標**：提取「項次、身分資格、服務開始日期、地址、客戶姓名、電話、預產期」等客戶欄位。
+*   **BeClass 登記問卷 (手動下載自 https://www.beclass.com/)**
+    *   **提取目標**：提取「查詢序號、姓名、行動電話、以及其餘 60+ 項詳細問卷欄位」。
 
 ---
 
@@ -145,25 +148,26 @@ CREATE TABLE IF NOT EXISTS line_push_tasks (
 
 ---
 
-## 6. 排程與日誌記錄規格
+## 6. 監控服務運行與日誌記錄規格
 
-### 6.1 自動化排程
-*   **執行頻率**：
-    *   政府網站爬蟲：設定 Cron Job **每日凌晨 03:00** 執行。
-    *   BeClass 同步：設定 Cron Job **每 30 分鐘** 執行一次，或採 Webhook 即時觸發。
+### 6.1 監控服務運行方式
+*   **背景守護進程 (Daemon Service)**：
+    *   檔案監控腳本（如 `file_watcher.py`）在地端主機上註冊為持續執行的作業系統服務（如 Windows Service 或 Linux systemd）。
+    *   當偵測到目標資料夾中有檔案變更，便立即執行 `import_excel.py` 的對應匯入模組。
+    *   UI 提供「一鍵重啟監控服務」與「手動立即執行掃描」的備用按鈕，防止背景監控意外掛死。
 
-### 6.2 爬蟲日誌表 (`crawler_logs`)
+### 6.2 匯入與監測日誌表 (`crawler_logs`)
 每次 Pipeline 執行完畢，無論成功或失敗，必須在 `crawler_logs` 表寫入日誌，以便於行政管理員在 Streamlit 後台進行稽核與系統除錯。
 
 ```sql
 CREATE TABLE IF NOT EXISTS crawler_logs (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '檔案處理與載入時間',
     status VARCHAR(50) NOT NULL COMMENT '執行狀態 (SUCCESS/FAILED)',
     records_inserted INT DEFAULT 0 COMMENT '本次新增筆數',
     records_updated INT DEFAULT 0 COMMENT '本次更新筆數',
     records_quarantined INT DEFAULT 0 COMMENT '本次被隔離(髒資料)筆數',
-    error_message TEXT NULL COMMENT '當狀態為 FAILED 時，儲存完整的 Python Exception Traceback',
+    error_message TEXT NULL COMMENT '當狀態為 FAILED 時，儲存檔案處理的 Exception Traceback',
     
     INDEX idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

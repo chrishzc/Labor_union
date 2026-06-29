@@ -20,3 +20,5 @@ last_count.txt
 # Local databases/data directories
 metabase-data/
 
+# Private environment variables / secrets
+.env

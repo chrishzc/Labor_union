@@ -1,0 +1,29 @@
+# Ignore Git metadata
+.git
+.gitignore
+
+# Ignore editor/IDE configurations
+.vscode
+.idea
+.obsidian
+
+# Ignore Python virtual environments and caches
+.venv
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Ignore local environment variables / secrets
+.env
+
+# Ignore local databases/data directories
+metabase-data/
+
+# Ignore local crawler outputs, caches and downloads
+chrome_user_data/
+downloads/
+last_count.txt
+
+# Ignore local Excel test data
+*.xlsx
