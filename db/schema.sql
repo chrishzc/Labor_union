@@ -158,7 +158,25 @@ CREATE TABLE IF NOT EXISTS staff_holiday_availability (
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 12. 人員可工作時間區間表
+-- 12. 可服務週間 (1:N 複選)
+CREATE TABLE IF NOT EXISTS staff_weekly_rest (
+    staff_id INT NOT NULL,
+    rest_type VARCHAR(50) NOT NULL COMMENT '放假類型 (連續服務/週休1日/週休2日/其他)',
+    custom_rest_detail VARCHAR(100) NULL COMMENT '其他週間服務的補充說明',
+    PRIMARY KEY (staff_id, rest_type),
+    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 13. 可承接胎數 (1:N 複選)
+CREATE TABLE IF NOT EXISTS staff_baby_types (
+    staff_id INT NOT NULL,
+    baby_type VARCHAR(50) NOT NULL COMMENT '胎數類型 (單胞胎/雙胞胎/其他)',
+    custom_baby_detail VARCHAR(100) NULL COMMENT '其他胎數的補充說明',
+    PRIMARY KEY (staff_id, baby_type),
+    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 14. 人員可工作時間區間表
 CREATE TABLE IF NOT EXISTS staff_availability (
     id INT AUTO_INCREMENT PRIMARY KEY,
     staff_id INT NOT NULL,
@@ -170,7 +188,7 @@ CREATE TABLE IF NOT EXISTS staff_availability (
     INDEX idx_avail_dates (start_date, end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 13. 人員已被預約/排班時間區間表
+-- 15. 人員已被預約/排班時間區間表
 CREATE TABLE IF NOT EXISTS staff_bookings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     staff_id INT NOT NULL,

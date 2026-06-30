@@ -444,14 +444,36 @@ def import_staff_sheet(cursor, df):
             detail_col='custom_holiday_detail',
             excel_detail_col='[其它].5'
         )
+        
+        # 7. Weekly Rest
+        import_checkbox_options(
+            options_list=['連續服務', '週休1日', '週休2日'],
+            summary_col='可服務週間',
+            target_table='staff_weekly_rest',
+            value_col='rest_type',
+            detail_col='custom_rest_detail',
+            excel_detail_col='[其它].3'
+        )
+        
+        # 8. Baby Types
+        import_checkbox_options(
+            options_list=['單胞胎', '雙胞胎'],
+            summary_col='可承接的胎數',
+            target_table='staff_baby_types',
+            value_col='baby_type',
+            detail_col='custom_baby_detail',
+            excel_detail_col='[其它].4'
+        )
 
     print(f"   staff 及其子表匯入完成：新增 {inserted} 筆，更新 {updated} 筆。")
 
 def main():
-    excel_path = r'C:\Users\chris\Desktop\project\union\欄位_測試用.xlsx'
-    
+    excel_path = '欄位_測試用.xlsx'
     if not os.path.exists(excel_path):
-        print(f"錯誤：找不到測試用 Excel 檔案 {excel_path}")
+        excel_path = os.path.join(os.path.dirname(__file__), '..', '欄位_測試用.xlsx')
+        
+    if not os.path.exists(excel_path):
+        print(f"錯誤：找不到測試用 Excel 檔案，路徑為：{excel_path}")
         return
 
     # 連接資料庫
