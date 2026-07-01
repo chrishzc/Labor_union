@@ -20,13 +20,14 @@ Lobar_union/
 │   ├── line/                   # LINE 平台整合相關說明
 │   ├── 地端部屬/               # 地端部署指南與安全架構
 │   ├── 管理端UI/               # Streamlit 管理介面原型與規格
-│   ├── 資料庫、資料處理/        # 資料庫欄位對應與 Data Pipeline 設計
-│   ├── 自動化系統設計規格書(總覽).md # 系統架構、安全規範與各模組功能規格書 (SRS)
-│   └── 規格書缺漏分析報告.md     # 針對目前規格書缺漏與優化方向的分析
-├── downloads/                  # 放置行政人員手動下載之原始 Excel 檔案的目錄
+│   │   └── 表格需求模板/       # 管理端所需的 Excel 報表設計模板 (帳務.xlsx、所需表格.xlsx、週報.xlsx)
+│   └── 資料庫、資料處理/        # 資料庫欄位對應與 Data Pipeline 設計
+│       ├── 資料庫來源表.xlsx    # 最新官方提供的欄位模板與參照來源表 (取代舊根目錄 欄位.xlsx)
+│       └── 假資料_範例.xlsx     # 模擬測試用的範例 Excel 檔案，供開發測試參考 (取代舊根目錄 欄位_測試用.xlsx)
+├── downloads/                  # 放置行政人員手動下載之原始 Excel 檔案的目錄 (供 File Watcher/Pipeline 讀取)
 ├── scripts/                    # 核心 Python 運作與資料處理腳本
-│   ├── generate_fake_excel.py  # 隨機生成無隱私疑慮的測試 Excel 資料 (用於開發與測試)
-│   ├── import_excel.py         # 核心 Data Pipeline：解析 Excel、清洗資料並去重匯入 MySQL
+│   ├── generate_fake_excel.py  # 隨機生成無隱私疑慮的測試 Excel 資料 (讀取「資料庫來源表.xlsx」生成)
+│   ├── import_excel.py         # 核心 Data Pipeline：解析範例 Excel、清洗資料並去重匯入 MySQL
 │   └── init_db.py              # 手動執行 schema.sql 初始化/重建資料庫結構的本機腳本
 ├── tests/                      # 單元測試與整合測試目錄
 ├── .dockerignore               # Docker 建置時忽略的檔案清單
@@ -39,10 +40,30 @@ Lobar_union/
 ├── main.py                     # 專案主程式入口 (目前為 Hello World 骨架)
 ├── pyproject.toml              # uv 專案管理配置文件 (定義專案元數據與頂層依賴)
 ├── requirements.txt            # 從 pyproject.toml 自動編譯導出的相容性依賴清單 (供傳統 pip 使用)
-├── uv.lock                     # uv 依賴鎖定檔，確保所有開發者安裝完全相同的套件版本
-├── 欄位.xlsx                   # 官方提供的欄位模板參考檔
-└── 欄位_測試用.xlsx             # 模擬測試用的範例 Excel 檔案 (供開發測試參考，實際測試資料建議透過 scripts 腳本動態生成)
+└── uv.lock                     # uv 依賴鎖定檔，確保所有開發者安裝完全相同的套件版本
 ```
+
+## 📄 2026/07/01 文件與欄位更新說明
+
+在此次大更新中，專案移除了原根目錄下的舊範本與草稿，並於 `document/` 資料夾下新增了以下核心規劃與設計模板，方便後續開發與工會行政流程對接：
+
+### 1. 管理端 UI 表格需求模板 (`document/管理端UI/表格需求模板/`)
+為確保後續開發之管理 UI 與工會現行行政流程無縫接軌，特別新增了以下三個 Excel 模板：
+*   **[帳務.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/管理端UI/表格需求模板/帳務.xlsx)**：規範行政與服務人員（月嫂）拆帳、行政服務費請款等管理端帳務報表格式。
+*   **[所需表格.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/管理端UI/表格需求模板/所需表格.xlsx)**：梳理資料庫與 Streamlit 前端介面呈現所需之核心數據表格式。
+*   **[週報.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/管理端UI/表格需求模板/週報.xlsx)**：定義每週固定生成之媒合進度、案件統計與工會行政指標統計週報格式。
+
+### 2. 最新資料庫來源表與範例資料 (`document/資料庫、資料處理/`)
+作為取代舊 `欄位.xlsx` 的最新核心欄位參照表，相較於舊版，此最新版本發生了以下重要異動，後續開發資料庫 Schema 時需特別注意：
+*   **[資料庫來源表.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/資料庫來源表.xlsx)**：
+    *   **新增 `保險表` 分頁**：全新規劃了 17 個保險相關欄位，主要用於記錄服務人員（被保人）投保與退保資訊。
+    *   **`beclass` 分頁新增與修正欄位**：
+        1.  *餐點調理喜好*：新增了 `不用料理/訂月餐` 的選項。
+        2.  *樓層計費選項文字調整*：將透天樓層服務選項由 `1-2樓`、`1-3樓` 修正為 `服務範圍2層樓`、`服務範圍3層樓`，以更符合實際服務範圍計費。
+        3.  *新增政府補助款退費欄位*：新增了政府到宅月子服務補助款申請與退款所需的銀行資訊及條款聲明（共 7 個新欄位，包括 `補助款退款:銀行代號+分行代號`、`銀行帳號`、`我確實了解並願意遵照辦理以上相關規定` 等），以驅動未來的自動化退費核准作業。
+*   **[假資料_範例.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/假資料_範例.xlsx)**：作為 Data Pipeline 匯入測試用之最新模擬 Excel 範例資料。
+
+---
 
 ### 💡 核心依賴套件選型緣由
 
@@ -123,8 +144,8 @@ docker-compose up -d
 ```mermaid
 graph TD
     A[Docker 啟動 / init_db.py] -->|1. 初始化資料庫建表| B[(MySQL: union_db)]
-    C[generate_fake_excel.py] -->|2. 讀取模板並產生測試資料| D(欄位_測試用.xlsx)
-    D -->|3. 放置於專案中| E{import_excel.py}
+    C[generate_fake_excel.py] -->|2. 讀取 資料庫來源表.xlsx 產生測試資料| D(假資料_範例.xlsx)
+    D -->|3. 放置於 document/資料庫、資料處理/ 目錄| E{import_excel.py}
     E -->|4. 資料清洗、去重並寫入| B
 ```
 
@@ -149,7 +170,7 @@ uv run scripts/generate_fake_excel.py
 # 或使用啟用虛擬環境後的 python
 python scripts/generate_fake_excel.py
 ```
-這會讀取 `欄位.xlsx` 的表頭結構，並產生含有模擬資料的 `欄位_測試用.xlsx`，作為後續匯入測試的資料來源。
+這會讀取最新欄位模板 [資料庫來源表.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/資料庫來源表.xlsx) 的表頭結構，並產生含有模擬資料的 [假資料_範例.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/假資料_範例.xlsx)，作為後續匯入測試的資料來源。
 
 ### 步驟 3：執行 Excel 資料匯入 (Data Pipeline)
 當資料庫初始化完成，且測試資料 Excel 已生成後，即可執行匯入腳本將資料清洗並寫入資料庫：
@@ -161,7 +182,7 @@ uv run scripts/import_excel.py
 python scripts/import_excel.py
 ```
 **導入邏輯特性：**
-*   腳本會自動解析 `欄位_測試用.xlsx` 中的 `HCM 月子平台 -市府`、`beclass`、`服務人員` 等工作表 (Sheets)。
+*   腳本會自動解析 [假資料_範例.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/假資料_範例.xlsx) 中的 `HCM 月子平台 -市府`、`beclass`、`服務人員` 等工作表 (Sheets)。
 *   進行資料清洗（去除非法字元、格式化日期、轉換身分狀態等）。
 *   在寫入 MySQL 前會以 `case_no` (案件編號) 等關鍵欄位進行去重比對：若資料已存在則執行 `UPDATE`，若為全新資料則執行 `INSERT`，確保不會產生重複資料。
 

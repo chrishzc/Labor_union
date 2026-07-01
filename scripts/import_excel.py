@@ -468,9 +468,9 @@ def import_staff_sheet(cursor, df):
     print(f"   staff 及其子表匯入完成：新增 {inserted} 筆，更新 {updated} 筆。")
 
 def main():
-    excel_path = '欄位_測試用.xlsx'
+    excel_path = 'document/資料庫、資料處理/假資料_範例.xlsx'
     if not os.path.exists(excel_path):
-        excel_path = os.path.join(os.path.dirname(__file__), '..', '欄位_測試用.xlsx')
+        excel_path = os.path.join(os.path.dirname(__file__), '..', 'document', '資料庫、資料處理', '假資料_範例.xlsx')
         
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到測試用 Excel 檔案，路徑為：{excel_path}")

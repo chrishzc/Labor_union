@@ -86,11 +86,16 @@ def fill_checkbox_group(row_dict, options, summary_col):
     row_dict[summary_col] = '、'.join(selected)
 
 def main():
-    input_file = r'C:\Users\chris\Desktop\project\union\欄位.xlsx'
-    output_file = r'C:\Users\chris\Desktop\project\union\欄位_測試用.xlsx'
-
+    input_file = 'document/資料庫、資料處理/資料庫來源表.xlsx'
+    output_file = 'document/資料庫、資料處理/假資料_範例.xlsx'
+    
     if not os.path.exists(input_file):
-        print(f"錯誤：找不到來源檔案 {input_file}")
+        base_dir = os.path.dirname(__file__)
+        input_file = os.path.join(base_dir, '..', 'document', '資料庫、資料處理', '資料庫來源表.xlsx')
+        output_file = os.path.join(base_dir, '..', 'document', '資料庫、資料處理', '假資料_範例.xlsx')
+        
+    if not os.path.exists(input_file):
+        print(f"錯誤：找不到來源檔案，路徑為：{input_file}")
         return
 
     print("正在讀取原始範本 Excel 的三個分頁...")
