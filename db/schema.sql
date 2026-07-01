@@ -1,5 +1,6 @@
--- 建立資料庫 (若不存在)
-CREATE DATABASE IF NOT EXISTS union_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+-- 強制重建資料庫以確保 ENUM 編碼正確
+DROP DATABASE IF EXISTS union_db;
+CREATE DATABASE union_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE union_db;
 
 -- 1. 客戶資料表 (對應 欄位.xlsx 結構)
@@ -8,6 +9,7 @@ CREATE TABLE IF NOT EXISTS clients (
     seq_num INT COMMENT '項次',
     status VARCHAR(50) COMMENT '案件狀態 (符合/不符合)',
     reject_reason TEXT COMMENT '不符合原因',
+    -- ponytail: 重構標記 - case_no 目前儲存的是 9 碼的「查詢序號(案件編號)」(例如 115000001)，舊式案號(HC115091)已被棄用。未來系統大改版時，此欄位將統一命名為 query_no 或 case_id。
     case_no VARCHAR(50) UNIQUE COMMENT '查詢序號(案件編號) - 去重唯一識別碼',
     created_at DATETIME COMMENT '報名時間(建檔)',
     ip_address VARCHAR(45) COMMENT 'IP位址',
@@ -27,6 +29,7 @@ CREATE TABLE IF NOT EXISTS clients (
     service_type VARCHAR(100) COMMENT '服務方式',
     baby_info VARCHAR(255) COMMENT '寶寶資訊',
     line_id VARCHAR(100) COMMENT 'LINE ID',
+    line_user_id VARCHAR(100) COMMENT 'LINE 平台用戶唯一識別碼 (Webhook 取得)',
     admin_notes TEXT COMMENT '管理者註記事項',
     db_created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '資料庫匯入時間',
     db_updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '資料庫更新時間',
@@ -97,6 +100,10 @@ CREATE TABLE IF NOT EXISTS staff (
     address VARCHAR(255) COMMENT '詳細地址',
     has_massage_cert BOOLEAN DEFAULT FALSE COMMENT '有嬰幼兒按摩證書嗎',
     status VARCHAR(20) DEFAULT 'active' COMMENT '在職狀態 (active/inactive)',
+    line_user_id VARCHAR(100) COMMENT 'LINE 平台用戶唯一識別碼 (Webhook 取得)',
+    weekly_rest_days JSON COMMENT '固定休假偏好 JSON 陣列 (如 ["Sunday"])',
+    service_regions JSON COMMENT '接受服務區域 JSON 陣列',
+    special_skills JSON COMMENT '特殊技能與偏好標籤 JSON 陣列',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_staff_name (name),
@@ -200,4 +207,58 @@ CREATE TABLE IF NOT EXISTS staff_bookings (
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
     INDEX idx_booking_dates (start_date, end_date)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 16. 專案與訂單資料表
+CREATE TABLE IF NOT EXISTS orders (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    client_id INT NOT NULL COMMENT '對應 clients.id',
+    staff_id INT NULL COMMENT '對應 staff.id (可為 NULL，代表尚未配對成功)',
+    `status` ENUM('洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消') DEFAULT '洽談中' COMMENT '專案狀態 (生命週期: 洽談中→訂單成立→服務中→訂單完成, 任何階段可→訂單取消)',
+    cancel_reason TEXT NULL COMMENT '當狀態變更為 訂單取消 時的取消原因說明',
+    line_group_id VARCHAR(100) NULL COMMENT '三方服務 LINE 群組 ID',
+    actual_start_date DATE NULL COMMENT '實際生產服務開始日',
+    contract_id VARCHAR(100) NULL COMMENT '好好簽線上契約 ID',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
+    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL,
+    INDEX idx_order_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 17. 媒合意願詢問中介表
+CREATE TABLE IF NOT EXISTS matching_records (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NOT NULL COMMENT '對應 orders.id',
+    staff_id INT NOT NULL COMMENT '對應 staff.id',
+    caregiver_accepted TINYINT NULL COMMENT '是否接受媒合 (NULL: 待回覆, 1: 願意, 0: 無意願)',
+    sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '詢問發送時間',
+    replied_at TIMESTAMP NULL COMMENT '回覆時間',
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
+    INDEX idx_match_order_staff (order_id, staff_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 18. 案件財務收支與轉帳紀錄表 (對照 帳務.xlsx)
+CREATE TABLE IF NOT EXISTS payments (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    order_id INT NULL COMMENT '對應 orders.id (可為 NULL，部分收支可能不屬於特定案件)',
+    case_no VARCHAR(50) NULL COMMENT '對應 clients.case_no / 查詢序號',
+    client_name VARCHAR(100) NULL COMMENT '客戶姓名備份',
+    amount_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '應收金額',
+    deposit_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '已收訂金',
+    deposit_received_at DATE NULL COMMENT '訂金收取日期',
+    balance_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '已收尾款',
+    balance_received_at DATE NULL COMMENT '尾款收取日期',
+    caregiver_fee DECIMAL(10, 2) DEFAULT 0.00 COMMENT '應轉帳給服務人員的費用',
+    caregiver_paid_at DATE NULL COMMENT '服務人員費用轉帳日期',
+    payment_status VARCHAR(50) DEFAULT '待收訂金' COMMENT '帳務狀態 (待收訂金/已收訂金/已收尾款/已結案)',
+    notes TEXT NULL COMMENT '帳務備註',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
+    INDEX idx_payment_status (payment_status),
+    INDEX idx_payment_case (case_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 

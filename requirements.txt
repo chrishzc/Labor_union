@@ -24,3 +24,5 @@ typing-extensions==4.15.0
     # via pyee
 tzdata==2026.2
     # via pandas
+watchdog==6.0.0
+    # via union (pyproject.toml)

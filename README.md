@@ -11,24 +11,37 @@
 ```text
 Lobar_union/
 ├── .venv/                      # Python 虛擬環境 (Git 已忽略)
-├── .github/                    # Git/GitHub 相關配置 (選填)
-├── .obsidian/                  # Obsidian 筆記軟體配置 (主要用於閱讀與編輯 document 下的 markdown)
+├── .github/                    # Git/GitHub 相關配置
+├── .obsidian/                  # Obsidian 筆記軟體配置 (用於閱讀與編輯 document 下的 markdown)
 ├── db/                         # 資料庫 Schema
-│   └── schema.sql              # MySQL 資料庫建表語句 (包含主外鍵、狀態約束與欄位擴充)
+│   └── schema.sql              # MySQL 資料庫建表語句 (含 5 階段狀態機、對帳 payments 表與防編碼截斷重置設定)
 ├── document/                   # 專案設計與規格說明文件
 │   ├── API/                    # API 整合設計文件
 │   ├── line/                   # LINE 平台整合相關說明
 │   ├── 地端部屬/               # 地端部署指南與安全架構
 │   ├── 管理端UI/               # Streamlit 管理介面原型與規格
 │   │   └── 表格需求模板/       # 管理端所需的 Excel 報表設計模板 (帳務.xlsx、所需表格.xlsx、週報.xlsx)
-│   └── 資料庫、資料處理/        # 資料庫欄位對應與 Data Pipeline 設計
-│       ├── 資料庫來源表.xlsx    # 最新官方提供的欄位模板與參照來源表 (取代舊根目錄 欄位.xlsx)
-│       └── 假資料_範例.xlsx     # 模擬測試用的範例 Excel 檔案，供開發測試參考 (取代舊根目錄 欄位_測試用.xlsx)
-├── downloads/                  # 放置行政人員手動下載之原始 Excel 檔案的目錄 (供 File Watcher/Pipeline 讀取)
+│   └── 資料庫、資料處理/        # 資料庫欄位對應、SSOT 業務規則與 Data Pipeline 設計
+│       ├── 資料庫來源表.xlsx    # 最新官方提供的欄位模板與參照來源表
+│       ├── 假資料_範例.xlsx     # 模擬測試用的客戶與月嫂名冊 Excel 檔案
+│       ├── 帳務.xlsx            # 自動生成且帶有雜訊的模擬對帳流水帳與對照表
+│       ├── 帳務與訂單業務規則.md # SSOT：14 碼虛擬帳號公式與 5 階段訂單狀態機
+│       └── 帳務假數據生成與關聯測試規格.md # 模擬財務流水帳與 JOIN 邏輯之設計原則
+├── downloads/                  # 檔案監控下載根目錄 (由 File Watcher 監聽，行政人員將 Excel 丟入對應目錄即可)
+│   ├── hcm/                    # 存放 HCM 月子平台 - 市府 Excel 來源檔
+│   ├── client_beclass/         # 存放客戶 BeClass Excel 來源檔
+│   ├── staff_beclass/          # 存放月嫂 BeClass Excel 來源檔
+│   └── bank/                   # 存放銀行對帳單 Excel 來源檔
 ├── scripts/                    # 核心 Python 運作與資料處理腳本
-│   ├── generate_fake_excel.py  # 隨機生成無隱私疑慮的測試 Excel 資料 (讀取「資料庫來源表.xlsx」生成)
-│   ├── import_excel.py         # 核心 Data Pipeline：解析範例 Excel、清洗資料並去重匯入 MySQL
-│   └── init_db.py              # 手動執行 schema.sql 初始化/重建資料庫結構的本機腳本
+│   ├── imports/                # 微匯入 Pipeline 專屬目錄 (Micro-Pipelines)
+│   │   ├── import_client_hcm.py     # 處理 HCM 客戶匯入 (以案件編號為唯一鍵，初始化訂單為「洽談中」)
+│   │   ├── import_client_beclass.py # 處理 BeClass 客戶匯入 (以「姓名+生日」複合作業唯一鍵去重更新)
+│   │   ├── import_staff_beclass.py  # 處理 BeClass 月嫂匯入 (以身分證字號為唯一鍵，支援 7 個子表 Delete-and-Insert)
+│   │   └── import_finance_excel.py  # 處理銀行對帳流水單 (過濾托育課程等雜訊，虛擬帳號解碼核銷 payments 表)
+│   ├── file_watcher.py         # 地端檔案自動監控服務，使用 watchdog 監控 downloads/ 子目錄變更並分發執行
+│   ├── generate_fake_excel.py  # 隨機生成無隱私疑慮的測試名冊 Excel 資料 (讀取「資料庫來源表.xlsx」)
+│   ├── generate_fake_finance.py# 生成模擬測試財務流水帳與案件對照表 (輸出「帳務.xlsx」)
+│   └── init_db.py              # 執行 schema.sql 初始化/重建資料庫結構，並強制指定連線 utf8mb4 防止編碼錯誤
 ├── tests/                      # 單元測試與整合測試目錄
 ├── .dockerignore               # Docker 建置時忽略的檔案清單
 ├── .env                        # 本地環境變數設定檔 (已在 .gitignore 中，含 LINE 密鑰等，需自行建立)
@@ -36,41 +49,52 @@ Lobar_union/
 ├── .gitignore                  # Git 忽略檔案清單
 ├── .python-version             # 指定本專案使用的 Python 版本 (3.14)
 ├── docker-compose.yml          # Docker Compose 配置文件，一鍵啟動 MySQL 資料庫服務
-├── last_count.txt              # 記錄上一次處理的資料筆數 (由腳本自動維護)
-├── main.py                     # 專案主程式入口 (目前為 Hello World 骨架)
-├── pyproject.toml              # uv 專案管理配置文件 (定義專案元數據與頂層依賴)
-├── requirements.txt            # 從 pyproject.toml 自動編譯導出的相容性依賴清單 (供傳統 pip 使用)
+├── last_count.txt              # 記錄上一次處理的資料筆數 (由舊腳本自動維護)
+├── main.py                     # 專案主程式入口 (已依賴 FileWatcher 背景執行，待後續打包落地)
+├── pyproject.toml              # uv 專案管理配置文件 (定義專案元數據與頂層依賴，新增 watchdog 等)
+├── requirements.txt            # 從 pyproject.toml 自動編譯導出的相容性依賴清單
 └── uv.lock                     # uv 依賴鎖定檔，確保所有開發者安裝完全相同的套件版本
 ```
 
-## 📄 2026/07/01 文件與欄位更新說明
+## 📄 本次更新說明 (開發實作收尾)
 
-在此次大更新中，專案移除了原根目錄下的舊範本與草稿，並於 `document/` 資料夾下新增了以下核心規劃與設計模板，方便後續開發與工會行政流程對接：
+在此次大更新中，我們針對資料庫底層、資料 Pipeline 以及行政人員地端操作流程，完成了以下的結構性優化與模組部署：
 
-### 1. 管理端 UI 表格需求模板 (`document/管理端UI/表格需求模板/`)
-為確保後續開發之管理 UI 與工會現行行政流程無縫接軌，特別新增了以下三個 Excel 模板：
-*   **[帳務.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/管理端UI/表格需求模板/帳務.xlsx)**：規範行政與服務人員（月嫂）拆帳、行政服務費請款等管理端帳務報表格式。
-*   **[所需表格.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/管理端UI/表格需求模板/所需表格.xlsx)**：梳理資料庫與 Streamlit 前端介面呈現所需之核心數據表格式。
-*   **[週報.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/管理端UI/表格需求模板/週報.xlsx)**：定義每週固定生成之媒合進度、案件統計與工會行政指標統計週報格式。
+### 1. 微服務 Pipeline 拆分與專屬目錄 (`scripts/imports/`)
+為符合工會行政人員從不同平台下載 Excel 且存放於不同資料夾的真實情境，我們將原本大而臃腫的匯入腳本拆分為 4 個獨立運作、低耦合的微 Pipeline：
+*   **[import_client_hcm.py](file:///c:/Users/chris/Desktop/project/Lobar_union%20-%20solo/scripts/imports/import_client_hcm.py)**：匯入 HCM 政府平台案件。
+    *   *去重唯一鍵*：**9 碼「查詢序號(案件編號)」** (排除覆寫 LINE 平台關聯資料)。
+    *   *生命週期同步*：在 INSERT 新客戶時，會自動在 `orders` 專案表中建立對應資料，並初始化狀態為 **`洽談中`**。
+*   **[import_client_beclass.py](file:///c:/Users/chris/Desktop/project/Lobar_union%20-%20solo/scripts/imports/import_client_beclass.py)**：匯入 BeClass 客戶名冊。
+    *   *去重組合唯一鍵*：**`姓名 (name) + 出生年月日 (birth_date)`**，避開修改 Schema 新增身分證欄位的需求。
+    *   *問卷處理*：將 60+ 個彈性的問卷調查選項全部打包為單一 `survey_details` JSON 欄位寫入。
+*   **[import_staff_beclass.py](file:///c:/Users/chris/Desktop/project/Lobar_union%20-%20solo/scripts/imports/import_staff_beclass.py)**：匯入 BeClass 服務人員（月嫂）。
+    *   *去重唯一鍵*：身分證字號。
+    *   *多表聯動*：支援月嫂核心檔案、銀行帳戶、服務地區、時段、餐點料理、交通工具、節日上班意願等 7 張子表的 `Delete-and-Insert` 對齊策略。
+*   **[import_finance_excel.py](file:///c:/Users/chris/Desktop/project/Lobar_union%20-%20solo/scripts/imports/import_finance_excel.py)**：讀取銀行下載之帳單流水帳。
+    *   *對帳核銷*：自動過濾出前綴為 `997816` 且分類碼為 `99` (月子服務) 的虛擬帳號。
+    *   *解碼還原*：將後半部的 6 碼（如 `115001`）解碼還原為 9 碼的「查詢序號」，比對存入金額 12,000 元（訂金）、68,000 元（尾款）與月嫂撥款支出 60,000 元，並執行 payments 財務核銷。
 
-### 2. 最新資料庫來源表與範例資料 (`document/資料庫、資料處理/`)
-作為取代舊 `欄位.xlsx` 的最新核心欄位參照表，相較於舊版，此最新版本發生了以下重要異動，後續開發資料庫 Schema 時需特別注意：
-*   **[資料庫來源表.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/資料庫來源表.xlsx)**：
-    *   **新增 `保險表` 分頁**：全新規劃了 17 個保險相關欄位，主要用於記錄服務人員（被保人）投保與退保資訊。
-    *   **`beclass` 分頁新增與修正欄位**：
-        1.  *餐點調理喜好*：新增了 `不用料理/訂月餐` 的選項。
-        2.  *樓層計費選項文字調整*：將透天樓層服務選項由 `1-2樓`、`1-3樓` 修正為 `服務範圍2層樓`、`服務範圍3層樓`，以更符合實際服務範圍計費。
-        3.  *新增政府補助款退費欄位*：新增了政府到宅月子服務補助款申請與退款所需的銀行資訊及條款聲明（共 7 個新欄位，包括 `補助款退款:銀行代號+分行代號`、`銀行帳號`、`我確實了解並願意遵照辦理以上相關規定` 等），以驅動未來的自動化退費核准作業。
-*   **[假資料_範例.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/假資料_範例.xlsx)**：作為 Data Pipeline 匯入測試用之最新模擬 Excel 範例資料。
+### 2. 地端檔案自動監控服務 (`scripts/file_watcher.py`)
+*   使用 `watchdog` 庫監控 `downloads/` 根目錄。
+*   **運作機制**：不限檔名，只要行政人員向 `downloads/hcm/`、`downloads/client_beclass/`、`downloads/staff_beclass/` 或 `downloads/bank/` 任一子資料夾丟入新下載的 `.xlsx`，服務就會自動捕捉，並拉起 Python 子進程調用對應的微匯入腳本進行**增量更新與舊資料複寫**。
+*   內置 **5 秒防重複觸發冷卻機制**，防止 Windows 在檔案寫入未完成時連續發送修改事件。
+
+### 3. 資料庫 ENUM 編碼與重建機制優化
+*   **解決雙重 UTF-8 編碼錯誤**：發現先前舊表建立時，`orders.status` 的 `ENUM` 值在 Windows PowerShell 內被 double-encoded 寫入，導致程式碼傳入 `'洽談中'` 被判定為資料截斷錯誤。
+*   **解決方案**：
+    1.  優化了 `db/schema.sql`，加上 `DROP DATABASE IF EXISTS` 以確保執行時舊快取被清理乾淨。
+    2.  修正 `scripts/init_db.py`，在資料庫連接建立後，強制執行 `SET NAMES utf8mb4;` 宣告，確保建表與寫入時編碼通道 100% 準確。
+    3.  將 `orders.status` 的 `ENUM` 補齊為業務規格定義的 5 個狀態：`洽談中`、`訂單成立`、`服務中`、`訂單完成`、`訂單取消`。
+*   **主鍵重構備註標記**：在 `schema.sql` 中對 `case_no` 進行了重構警告注釋，指出其目前實體儲存的是 9 碼查詢序號，舊式案號已作廢，未來大改版將重命名。
 
 ---
 
 ### 💡 核心依賴套件選型緣由
-
-為了讓後續開發者理解為什麼引入了這些套件，以下為主要依賴的選型說明：
-*   **`pandas` 與 `openpyxl`**：專案需要處理行政人員從政府平台及 BeClass 下載的 Excel 資料。`pandas` 提供強大的資料清洗、欄位映射與去重能力；`openpyxl` 則是 `pandas` 讀寫 `.xlsx` 格式檔案所必須的底層引擎。
-*   **`pymysql`**：用作 Python 連接 MySQL 資料庫的輕量化驅動程式。用於 `import_excel.py` 與 `init_db.py` 直接執行 SQL 查詢與寫入。
-*   **`playwright`**：預留用於後續網頁自動化或爬蟲任務。例如：當未來需要自動化登入政府登記網站抓取名冊，或是自動化執行某些瀏覽器流程時使用。
+*   **`pandas` 與 `openpyxl`**：處理行政人員下載的 Excel 資料，提供強大的資料清洗、欄位映射與去重能力。
+*   **`pymysql`**：Python 連接 MySQL 的輕量化驅動程式。
+*   **`watchdog`**：實現低延遲、無輪詢（No-Polling）的地端檔案目錄變更偵測監控服務。
+*   **`playwright`**：預留用於後續網頁自動化或爬蟲任務。
 
 ---
 
@@ -83,15 +107,12 @@ Lobar_union/
 
 ### 2. 安裝 Python 依賴環境
 
-本專案推薦使用現代 Python 包管理工具 **`uv`** 以獲得極速且一致的依賴同步體驗。同時亦保留了傳統的 `pip` 安裝方式。
-
 #### 💡 方式 A：使用 `uv`（強烈推薦）
 1. 安裝 `uv`（若尚未安裝）：
    ```powershell
-   # Windows PowerShell
    irm https://astral.sh/uv/install.ps1 | iex
    ```
-2. 在專案根目錄下同步依賴（會自動讀取 `.python-version` 並建立虛擬環境）：
+2. 同步並安裝依賴（含最新 `watchdog` 套件）：
    ```powershell
    uv sync
    ```

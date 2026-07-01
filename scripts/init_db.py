@@ -51,6 +51,8 @@ def main():
     
     try:
         connection = pymysql.connect(**DB_CONFIG)
+        with connection.cursor() as c:
+            c.execute("SET NAMES utf8mb4;")
         print("成功連線至 MySQL 伺服器！")
     except Exception as e:
         print(f"無法連線至 MySQL 伺服器：{e}\n請確認 Docker 中的 MySQL 容器是否已啟動，且連接埠為 3306。")
