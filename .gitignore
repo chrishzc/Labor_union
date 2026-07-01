@@ -22,9 +22,3 @@ metabase-data/
 
 # Private environment variables / secrets
 .env
-
-# ADAD development framework files
-.agents/
-system_map.yaml
-system_map.md
-scratch/
