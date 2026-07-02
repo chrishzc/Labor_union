@@ -1,0 +1,76 @@
+##### Module: ImportClientHCM
+- Type: script
+- Description: 監控並解析 HCM 月子平台 Excel 案件檔案，以「查詢序號(案件編號)」為唯一識別碼，支援新增與更新複寫寫入 MySQL clients 表。
+- Source: scripts/imports/import_client_hcm.py
+- Dependencies: [InitDB]
+- Input:
+  - excel_file: str
+  - db_config: dict
+- Output:
+  - inserted_count: int
+  - updated_count: int
+- Invariants: []
+- Preferred Pattern: none
+- Verification: []
+- Todo:
+  - [x] 撰寫 scripts/imports/import_client_hcm.py 解析 HCM 月子平台分頁
+- Checkpoint:
+  - [x] CP-5.1: 審查 HCM 月子平台資料清洗與去重更新邏輯
+
+##### Module: ImportClientBeclass
+- Type: script
+- Description: 監控並解析客戶 beclass 報名名冊 Excel 檔案，以「姓名+出生年月日」為組合唯一鍵，支援資料庫 clients 表的異動偵測與資料更新複寫。
+- Source: scripts/imports/import_client_beclass.py
+- Dependencies: [InitDB]
+- Input:
+  - excel_file: str
+  - db_config: dict
+- Output:
+  - inserted_count: int
+  - updated_count: int
+- Invariants: []
+- Preferred Pattern: none
+- Verification: []
+- Todo:
+  - [x] 撰寫 scripts/imports/import_client_beclass.py 解析 BeClass 客戶分頁
+- Checkpoint:
+  - [x] CP-5.2: 審查 BeClass 客戶資料組合唯一鍵異動更新邏輯
+
+##### Module: ImportStaffBeclass
+- Type: script
+- Description: 監控並解析服務人員 beclass 報名名冊 Excel 檔案，以「身分證字號」為唯一識別碼，支援資料庫 staff 表的異動偵測與資料更新複寫。
+- Source: scripts/imports/import_staff_beclass.py
+- Dependencies: [InitDB]
+- Input:
+  - excel_file: str
+  - db_config: dict
+- Output:
+  - inserted_count: int
+  - updated_count: int
+- Invariants: []
+- Preferred Pattern: none
+- Verification: []
+- Todo:
+  - [x] 撰寫 scripts/imports/import_staff_beclass.py 解析 BeClass 服務人員分頁
+- Checkpoint:
+  - [x] CP-5.3: 審查 BeClass 服務人員身分證字號異動更新邏輯
+
+##### Module: ImportFinanceExcel
+- Type: script
+- Description: 監控並解析合作社流水帳對帳單，依據 14 碼虛擬帳號解碼還原案號進行付款核銷與更新寫入 MySQL payments 表。
+- Source: scripts/imports/import_finance_excel.py
+- Dependencies: [InitDB]
+- Input:
+  - finance_excel: str
+  - db_config: dict
+- Output:
+  - inserted_count: int
+  - updated_count: int
+- Invariants: []
+- Preferred Pattern: none
+- Verification: []
+- Todo:
+  - [x] 撰寫 scripts/import_finance_excel.py 腳本解析帳務.xlsx
+  - [x] 實作帳務數據去重與清洗邏輯並匯入 MySQL 帳務表
+- Checkpoint:
+  - [x] CP-3.2: 審查帳務資料清洗與匯入邏輯
