@@ -153,7 +153,7 @@ CREATE TABLE IF NOT EXISTS line_push_tasks (
 ### 6.1 監控服務運行方式
 *   **背景守護進程 (Daemon Service)**：
     *   檔案監控腳本（如 `file_watcher.py`）在地端主機上註冊為持續執行的作業系統服務（如 Windows Service 或 Linux systemd）。
-    *   當偵測到目標資料夾中有檔案變更，便立即執行 `import_excel.py` 的對應匯入模組。
+    *   當偵測到目標資料夾中有檔案變更，便立即執行對應的微匯入腳本。
     *   UI 提供「一鍵重啟監控服務」與「手動立即執行掃描」的備用按鈕，防止背景監控意外掛死。
 
 ### 6.2 匯入與監測日誌表 (`crawler_logs`)

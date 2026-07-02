@@ -8,7 +8,7 @@ services:
     restart: always
     environment:
       MYSQL_DATABASE: union_db
-      MYSQL_ROOT_PASSWORD: "1234"  # 與 import_excel.py 的密碼一致
+      MYSQL_ROOT_PASSWORD: "1234"  # 與 scripts/init_db.py 的密碼一致
     ports:
       - "3306:3306"  # 將 3306 對外映射，讓本機的 Python 匯入程式可以直接連線
     volumes:

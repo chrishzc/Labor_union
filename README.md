@@ -39,8 +39,7 @@ Lobar_union/
 │   │   ├── import_staff_beclass.py  # 處理 BeClass 月嫂匯入 (以身分證字號為唯一鍵，支援 7 個子表 Delete-and-Insert)
 │   │   └── import_finance_excel.py  # 處理銀行對帳流水單 (過濾托育課程等雜訊，虛擬帳號解碼核銷 payments 表)
 │   ├── file_watcher.py         # 地端檔案自動監控服務，使用 watchdog 監控 downloads/ 子目錄變更並分發執行
-│   ├── generate_fake_excel.py  # 隨機生成無隱私疑慮的測試名冊 Excel 資料 (讀取「資料庫來源表.xlsx」)
-│   ├── generate_fake_finance.py# 生成模擬測試財務流水帳與案件對照表 (輸出「帳務.xlsx」)
+│   ├── generate_fake_data.py   # 統一生成系統測試所需假資料 (名冊 Excel 與財務對帳 Excel)
 │   └── init_db.py              # 執行 schema.sql 初始化/重建資料庫結構，並強制指定連線 utf8mb4 防止編碼錯誤
 ├── tests/                      # 單元測試與整合測試目錄
 ├── .dockerignore               # Docker 建置時忽略的檔案清單
@@ -166,8 +165,8 @@ docker-compose up -d
 graph TD
     A[Docker 啟動 / init_db.py] -->|1. 初始化資料庫建表| B[(MySQL: union_db)]
     C[generate_fake_excel.py] -->|2. 讀取 資料庫來源表.xlsx 產生測試資料| D(假資料_範例.xlsx)
-    D -->|3. 放置於 document/資料庫、資料處理/ 目錄| E{import_excel.py}
-    E -->|4. 資料清洗、去重並寫入| B
+    D -->|3. 丟入 downloads/ 對應子資料夾| E{file_watcher.py / imports 腳本}
+    E -->|4. 自動觸發微匯入並清洗寫入| B
 ```
 
 ### 步驟 1：初始化/建置資料庫表格
@@ -183,29 +182,46 @@ graph TD
     ```
 
 ### 步驟 2：生成測試 Excel 檔案
-由於真實客戶資料具備隱私，請使用模擬腳本產生符合工會欄位格式的測試資料：
+由於真實客戶與財務資料具備隱私，請使用模擬腳本統一產生測試假資料：
 ```powershell
 # 使用 uv
-uv run scripts/generate_fake_excel.py
+uv run scripts/generate_fake_data.py
 
 # 或使用啟用虛擬環境後的 python
-python scripts/generate_fake_excel.py
+python scripts/generate_fake_data.py
 ```
-這會讀取最新欄位模板 [資料庫來源表.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/資料庫來源表.xlsx) 的表頭結構，並產生含有模擬資料的 [假資料_範例.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/假資料_範例.xlsx)，作為後續匯入測試的資料來源。
+這會讀取最新欄位模板 [資料庫來源表.xlsx](document/資料庫、資料處理/資料庫來源表.xlsx)，並在 `document/資料庫、資料處理/` 下同時產生包含名冊的 [假資料_範例.xlsx](document/資料庫、資料處理/假資料_範例.xlsx) 與包含財務對帳的 [帳務.xlsx](document/資料庫、資料處理/帳務.xlsx)，且兩者的測試案號與姓名已 100% 關聯對齊。
 
 ### 步驟 3：執行 Excel 資料匯入 (Data Pipeline)
-當資料庫初始化完成，且測試資料 Excel 已生成後，即可執行匯入腳本將資料清洗並寫入資料庫：
-```powershell
-# 使用 uv
-uv run scripts/import_excel.py
+當資料庫初始化完成，且測試資料 Excel 已生成後，您可以透過以下兩種方式之一將資料清洗並寫入資料庫：
 
-# 或使用啟用虛擬環境後的 python
-python scripts/import_excel.py
+#### 方法 A：啟動檔案自動監控服務（推薦）
+啟動 `file_watcher.py` 背景服務，當您將 Excel 檔案丟入 `downloads/` 的對應子目錄時，服務會自動偵測變更並觸發匯入：
+```powershell
+# 啟動自動監控服務 (請保持此命令列視窗開啟)
+python scripts/file_watcher.py
 ```
+接著，將產生的 [假資料_範例.xlsx](document/資料庫、資料處理/假資料_範例.xlsx) 重新命名或放入以下 `downloads/` 對應專屬目錄：
+*   **HCM 客戶資料**：放入 `downloads/hcm/` (觸發 `import_client_hcm.py`)
+*   **BeClass 客戶資料**：放入 `downloads/client_beclass/` (觸發 `import_client_beclass.py`)
+*   **BeClass 服務人員資料**：放入 `downloads/staff_beclass/` (觸發 `import_staff_beclass.py`)
+
+#### 方法 B：手動執行專屬微匯入腳本
+您也可以直接手動執行 `scripts/imports/` 下對應的腳本進行資料庫增量匯入：
+```powershell
+# 匯入 HCM 客戶資料
+python scripts/imports/import_client_hcm.py
+
+# 匯入 BeClass 客戶資料
+python scripts/imports/import_client_beclass.py
+
+# 匯入 BeClass 服務人員資料
+python scripts/imports/import_staff_beclass.py
+```
+
 **導入邏輯特性：**
-*   腳本會自動解析 [假資料_範例.xlsx](file:///c:/Users/chris/Desktop/project/Lobar_union/document/資料庫、資料處理/假資料_範例.xlsx) 中的 `HCM 月子平台 -市府`、`beclass`、`服務人員` 等工作表 (Sheets)。
-*   進行資料清洗（去除非法字元、格式化日期、轉換身分狀態等）。
-*   在寫入 MySQL 前會以 `case_no` (案件編號) 等關鍵欄位進行去重比對：若資料已存在則執行 `UPDATE`，若為全新資料則執行 `INSERT`，確保不會產生重複資料。
+*   微匯入腳本會進行資料清洗（去除非法字元、格式化電話與日期、將問卷轉為 JSON 欄位等）。
+*   在寫入 MySQL 前會以唯一識別鍵（如身分證字號、案件編號或姓名+生日組合鍵）進行去重比對：若資料已存在則執行 `UPDATE`，若為全新資料則執行 `INSERT`，確保資料不重複。
 
 ---
 
@@ -222,7 +238,7 @@ python scripts/import_excel.py
     *   串接 Embedding API / 地端輕量模型，實作相似度比對與防幻覺客服自動回覆。
 3.  **地端檔案自動監控服務 (File Watcher)**：
     *   使用 `watchdog` 庫監控 `downloads/` 資料夾。
-    *   當行政人員下載新的 Excel 並丟入資料夾時，背景服務自動偵測並觸發 `import_excel.py` 進行資料更新。
+    *   當行政人員下載新的 Excel 並丟入資料夾時，背景服務自動偵測並觸發對應的微匯入腳本進行資料更新。
 4.  **Streamlit 管理 UI**：
     *   設計視覺化的 Web 介面，供工會行政人員手動調整「服務人員行事曆」及執行「案件與配對中心」的四步配對流程。
     *   串接「好好簽 (Breezysign)」等線上契約 API 進行電子合約發送與狀態追蹤。

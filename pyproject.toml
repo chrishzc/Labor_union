@@ -10,4 +10,9 @@ dependencies = [
     "pymysql>=1.1.1",
     "openpyxl>=3.1.5",
     "watchdog>=6.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "streamlit>=1.38.0",
+    "chromadb>=0.5.5",
+    "requests>=2.32.3",
 ]
