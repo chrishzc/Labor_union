@@ -1,0 +1,233 @@
+{
+  "id": "contract_client_copy",
+  "name": "📜 客戶契約 (真實 Excel 鏡像模板 - 複製版)",
+  "desc": "來自 db/templates/contracts/contract_client_copy.xlsx 之真實 Excel 定型化契約範本",
+  "template_filename": "contract_client_copy.xlsx",
+  "param_mappings": {
+    "F1": {
+      "label": "訂單單號 (F1)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "case_no"
+    },
+    "B7": {
+      "label": "簽約日期 (B7)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "actual_start_date"
+    },
+    "B8": {
+      "label": "客戶名稱 (B8)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "client_name"
+    },
+    "A9": {
+      "label": "預產期 (A9)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "due_date"
+    },
+    "C10": {
+      "label": "服務人員 (C10)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "staff_name"
+    },
+    "B24": {
+      "label": "開始日期 (B24)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "actual_start_date"
+    },
+    "D24": {
+      "label": "結束日期 (D24)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "actual_end_date"
+    },
+    "F24": {
+      "label": "希望服務天數 (F24)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "service_days"
+    },
+    "B25": {
+      "label": "雇主單價 (B25)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "caregiver_rate"
+    },
+    "F25": {
+      "label": "服務總時數 (F25)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "total_hours"
+    },
+    "B28": {
+      "label": "補助時數 (B28)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "subsidy_hours"
+    },
+    "E28": {
+      "label": "服務時段 (E28)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "service_time"
+    },
+    "D29": {
+      "label": "服務單價 (D29)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "caregiver_rate"
+    },
+    "B30": {
+      "label": "自費天數 (B30)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "service_days"
+    },
+    "D30": {
+      "label": "每日服務時數 (D30)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "service_hours_per_day"
+    },
+    "F30": {
+      "label": "費用合計 (F30)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "total_employer_self_pay_payable"
+    },
+    "F31": {
+      "label": "特殊休假 (F31)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "special_holidays"
+    },
+    "E33": {
+      "label": "政府案件編號 (E33)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "case_no"
+    },
+    "B34": {
+      "label": "訂金金額 (B34)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "deposit_amount"
+    },
+    "C34": {
+      "label": "訂金日期 (C34)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "deposit_date"
+    },
+    "E34": {
+      "label": "Email (E34)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "email"
+    },
+    "B35": {
+      "label": "第一期款 (B35)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "first_payment_amount"
+    },
+    "C35": {
+      "label": "第一期撥款日 (C35)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "salary_payment_date_1"
+    },
+    "B36": {
+      "label": "第二期款 (B36)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "second_payment_amount"
+    },
+    "C36": {
+      "label": "第二期撥款日 (C36)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "salary_payment_date_2"
+    },
+    "D36": {
+      "label": "月嫂匯款帳號 (D36)",
+      "db_table": "staff (服務人員 - 月嫂主表與撥款帳號)",
+      "db_key": "staff_bank_account"
+    },
+    "B37": {
+      "label": "樓層費用 (B37)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "floor_fee"
+    },
+    "C37": {
+      "label": "樓層費入帳日 (C37)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "deposit_date"
+    },
+    "B38": {
+      "label": "雇主自費合計金額 (B38)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "total_employer_self_pay_payable"
+    },
+    "B40": {
+      "label": "補助薪資 (B40)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "subsidy_salary"
+    },
+    "D40": {
+      "label": "雇主退款銀行代號 (D40)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "bank_code"
+    },
+    "E40": {
+      "label": "雇主退款銀行帳號 (E40)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "bank_account"
+    },
+    "B41": {
+      "label": "服務方式 (B41)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "service_mode"
+    },
+    "C41": {
+      "label": "寶寶資訊 (C41)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "baby_info"
+    },
+    "D41": {
+      "label": "生產方式 (D41)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "delivery_mode"
+    },
+    "E41": {
+      "label": "居住型態 (E41)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "residence_type"
+    },
+    "F41": {
+      "label": "其他備註 (F41)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "notes"
+    },
+    "B43": {
+      "label": "服務地址 (B43)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "address"
+    },
+    "A48": {
+      "label": "服務時段 (A48)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "service_time"
+    },
+    "B178": {
+      "label": "甲方姓名 (B178)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "client_name"
+    },
+    "E178": {
+      "label": "甲方電話 (E178)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "phone"
+    },
+    "B180": {
+      "label": "甲方通訊地址 (B180)",
+      "db_table": "clients (客戶主表 - 個人基本資料與市府申請表)",
+      "db_key": "address"
+    },
+    "B181": {
+      "label": "乙方月嫂姓名 (B181)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "staff_name"
+    },
+    "B185": {
+      "label": "立約簽署日期 (B185)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "actual_start_date"
+    },
+    "E39": {
+      "label": "每日服務時數 (E39)",
+      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
+      "db_key": "service_hours_per_day"
+    }
+  }
+}

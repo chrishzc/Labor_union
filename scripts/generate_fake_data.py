@@ -352,6 +352,159 @@ def generate_finance_data(output_file, personal_data_pool):
         
     print(f"成功！已生成財務對帳檔案：{output_file}")
 
+def generate_schedule_data():
+    """
+    為系統中的服務人員與訂單建立豐富且多樣化的月掃排班與檔期 (staff_schedule) 假資料。
+    涵蓋全部 5 種訂單狀態 ('洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消')
+    以及天數精算系統所需的不同休假模式 (連續服務 / 週休1日 / 週休2日) 與國定假日自主出勤/休假邏輯。
+    """
+    print("-> 正在生成多樣化月掃檔期、訂單生命週期狀態與行事曆假資料...")
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    from services.db_service import get_connection, generate_default_schedule
+    from datetime import date, timedelta
+    import json
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            # 1. 清空舊有排班資料
+            cursor.execute("TRUNCATE TABLE staff_schedule")
+            conn.commit()
+
+            # 2. 獲取服務人員與訂單
+            cursor.execute("SELECT id, name FROM staff ORDER BY id ASC")
+            staff_list = cursor.fetchall()
+            
+            cursor.execute("SELECT id, client_id FROM orders ORDER BY id ASC")
+            orders_list = cursor.fetchall()
+
+            if not staff_list or not orders_list:
+                print("⚠️ 提示: 資料庫尚未匯入服務人員或訂單，跳過檔期生成。")
+                return
+
+            # 3. 為月嫂配置多樣化的休假偏好 (連續服務 / 週休1日 / 週休2日)
+            rest_preferences = [
+                json.dumps(["Sunday"]),                # 週休1日 (週日)
+                json.dumps(["Saturday", "Sunday"]),    # 週休2日 (週六、週日)
+                json.dumps([]),                        # 連續服務 (不週休)
+                json.dumps(["Monday"])                 # 週休1日 (週一)
+            ]
+            for idx, staff in enumerate(staff_list):
+                pref = rest_preferences[idx % len(rest_preferences)]
+                cursor.execute("UPDATE staff SET weekly_rest_days = %s WHERE id = %s", (pref, staff['id']))
+            conn.commit()
+
+            # 4. 多樣化訂單時間與狀態情境庫 (覆蓋 2026年4月 ~ 10月，包含所有 5 種狀態)
+            schedule_scenarios = [
+                # 情境 1: 過去已完成 (歷史紅底)
+                {'start_date': date(2026, 4, 13), 'service_days': 20, 'status': '訂單完成', 'hours': 8, 'subsidy': '一般市民', 'cancel_reason': None},
+                {'start_date': date(2026, 5, 11), 'service_days': 25, 'status': '訂單完成', 'hours': 24, 'subsidy': '非市民', 'cancel_reason': None},
+                
+                # 情境 2: 目前進行中 (跨越今日 2026-07-03，進行中紅底)
+                {'start_date': date(2026, 6, 15), 'service_days': 25, 'status': '服務中', 'hours': 8, 'subsidy': '補助市民', 'cancel_reason': None},
+                {'start_date': date(2026, 6, 22), 'service_days': 20, 'status': '服務中', 'hours': 8, 'subsidy': '非市民', 'cancel_reason': None},
+                
+                # 情境 3: 近期已簽約 (黃底未來)
+                {'start_date': date(2026, 7, 20), 'service_days': 20, 'status': '訂單成立', 'hours': 8, 'subsidy': '一般市民', 'cancel_reason': None},
+                {'start_date': date(2026, 8, 3), 'service_days': 15, 'status': '訂單成立', 'hours': 4, 'subsidy': '補助市民', 'cancel_reason': None},
+                
+                # 情境 4: 洽談中 (意願詢問/黃底緩衝期)
+                {'start_date': date(2026, 8, 24), 'service_days': 20, 'status': '洽談中', 'hours': 8, 'subsidy': '非市民', 'cancel_reason': None},
+                {'start_date': date(2026, 9, 7), 'service_days': 15, 'status': '洽談中', 'hours': 8, 'subsidy': '一般市民', 'cancel_reason': None},
+                
+                # 情境 5: 訂單取消 (曾經排班但已取消，釋放檔期/白底)
+                {'start_date': date(2026, 7, 10), 'service_days': 15, 'status': '訂單取消', 'hours': 8, 'subsidy': '非市民', 'cancel_reason': '客戶因家人可協助接應而取消訂單'}
+            ]
+
+            order_idx = 0
+            total_orders_assigned = 0
+            target_staff_count = min(30, len(staff_list)) # 覆蓋前 30 位月嫂
+
+            for s_idx in range(target_staff_count):
+                staff = staff_list[s_idx]
+                staff_id = staff['id']
+
+                # 每位月嫂挑選 2~4 個不同狀態的情境
+                num_scenarios = random.choice([2, 3, 4])
+                chosen = random.sample(schedule_scenarios, min(num_scenarios, len(schedule_scenarios)))
+
+                for sc in chosen:
+                    if order_idx >= len(orders_list):
+                        break
+                    
+                    order_id = orders_list[order_idx]['id']
+                    order_idx += 1
+
+                    # 設定 actual_start_date (若狀態非洽談中)
+                    actual_start = sc['start_date'] if sc['status'] in ['訂單成立', '服務中', '訂單完成'] else None
+
+                    cursor.execute("""
+                        UPDATE orders 
+                        SET staff_id = %s,
+                            status = %s,
+                            start_date = %s,
+                            actual_start_date = %s,
+                            service_days = %s,
+                            service_hours_per_day = %s,
+                            subsidy_eligibility = %s,
+                            floor_fee = %s,
+                            cancel_reason = %s
+                        WHERE id = %s
+                    """, (
+                        staff_id, sc['status'], sc['start_date'], actual_start,
+                        sc['service_days'], sc['hours'], sc['subsidy'],
+                        random.choice([0.0, 500.0, 1000.0]), sc['cancel_reason'], order_id
+                    ))
+                    
+                    total_orders_assigned += 1
+                    conn.commit()
+
+                    # 對於非取消且有明確開始日期的案件，生成精算排班
+                    if sc['status'] != '訂單取消':
+                        generate_default_schedule(order_id, staff_id, sc['start_date'], sc['service_days'])
+
+            # 5. 增添國定假日自主出勤 / 自主休假與請假補班註記 (精算系統測試情境)
+            # 端午節 (2026-06-19) - 示範自主出勤與自主休假
+            cursor.execute("""
+                UPDATE staff_schedule 
+                SET is_work_day = TRUE, notes = '端午節國定假日月嫂自主出勤(正常算1天工作日)' 
+                WHERE work_date = '2026-06-19' AND order_id IS NOT NULL AND staff_id % 2 = 0
+            """)
+            cursor.execute("""
+                UPDATE staff_schedule 
+                SET is_work_day = FALSE, notes = '端午節國定假日月嫂自主休假(結束日順延1天)' 
+                WHERE work_date = '2026-06-19' AND order_id IS NOT NULL AND staff_id % 2 = 1
+            """)
+
+            # 隨機模擬動態請假與補班
+            cursor.execute("SELECT id, order_id, staff_id, work_date FROM staff_schedule WHERE is_work_day = TRUE ORDER BY RAND() LIMIT 12")
+            random_days = cursor.fetchall()
+            for r_day in random_days:
+                note = random.choice([
+                    '月嫂因事請假1日 (已自動順延補齊)',
+                    '產婦安排產檢彈性休假1日',
+                    '行政專員微調出勤時數與日期'
+                ])
+                cursor.execute("UPDATE staff_schedule SET is_work_day = FALSE, notes = %s WHERE id = %s", (note, r_day['id']))
+
+            conn.commit()
+
+            cursor.execute("SELECT COUNT(*) AS c FROM staff_schedule")
+            total_schedules = cursor.fetchone()['c']
+            
+            cursor.execute("SELECT status, COUNT(*) as cnt FROM orders WHERE staff_id IS NOT NULL GROUP BY status")
+            status_summary = cursor.fetchall()
+            status_str = ", ".join([f"{item['status']}: {item['cnt']}筆" for item in status_summary])
+
+            print(f"成功！已為 {target_staff_count} 位月嫂建立多樣化檔期，涵蓋訂單狀態 [{status_str}]，共生成 {total_schedules} 筆 `staff_schedule` 每日排班精算紀錄。")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"生成多樣化檔期假資料失敗: {e}")
+    finally:
+        conn.close()
+
+
 def main():
     print("正在初始化生成假資料程序...")
     
@@ -405,7 +558,11 @@ def main():
         print(f"生成財務假資料失敗: {e}")
         sys.exit(1)
         
-    print("\n====== 所有假資料生成完成，名冊與財務測試數據已 100% 關聯對齊！ ======")
+    # 3. 產生月掃檔期與行事曆假資料
+    generate_schedule_data()
+
+    print("\n====== 所有假資料生成完成，名冊、財務與月掃檔期測試數據已 100% 關聯對齊！ ======")
 
 if __name__ == "__main__":
     main()
+

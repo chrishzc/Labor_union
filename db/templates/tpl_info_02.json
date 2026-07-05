@@ -1,0 +1,27 @@
+{
+  "id": "tpl_info_02",
+  "name": "2. 訂單資訊-2 (給服務人員的產婦照顧與飲食習慣細節)",
+  "desc": "提供給月嫂閱讀之過敏體質、飲食酒油喜忌、洗澡水、哺乳方式、停車位與加收樓層費照顧細節",
+  "fields": [
+    {"id": "f_201_e1", "label": "客戶名稱", "type": "db_link", "db_key": "client_name", "width": "half"},
+    {"id": "f_202_e2", "label": "聯絡電話", "type": "db_link", "db_key": "phone", "width": "half"},
+    {"id": "f_203_e3", "label": "訂單號碼", "type": "db_link", "db_key": "case_no", "width": "half"},
+    {"id": "f_204_e4", "label": "樓層費用 (透天加收)", "type": "db_link", "db_key": "floor_fee", "width": "half"},
+    {"id": "f_205_e5", "label": "服務地址", "type": "db_link", "db_key": "address", "width": "full"},
+    {"id": "f_206_e6", "label": "飲食習慣(含是否可接受中藥)", "type": "db_link", "db_key": "dietary_habits", "width": "full"},
+    {"id": "f_207_e7", "label": "若遇無法媒合到葷食服務人員時，請問餐食部分是否可以接受蛋奶素餐食？", "type": "db_link", "db_key": "vegetarian_preference", "width": "full"},
+    {"id": "f_208_e8", "label": "餐飲含酒比例：", "type": "db_link", "db_key": "alcohol_ratio", "width": "half"},
+    {"id": "f_209_e9", "label": "料理用油：(可接受種類)", "type": "db_link", "db_key": "cooking_oil_type", "width": "half"},
+    {"id": "f_210_ea", "label": "媽咪有無過敏體質：", "type": "db_link", "db_key": "maternal_allergy", "width": "half"},
+    {"id": "f_211_eb", "label": "特殊照護時應注意事項：", "type": "db_link", "db_key": "special_care_notes", "width": "half"},
+    {"id": "f_212_ec", "label": "餐點喜忌備註：", "type": "db_link", "db_key": "meal_preferences", "width": "full"},
+    {"id": "f_213_ed", "label": "現有烹煮工具", "type": "db_link", "db_key": "cooking_tools", "width": "full"},
+    {"id": "f_214_ee", "label": "洗澡水準備：", "type": "db_link", "db_key": "bath_water_prep", "width": "half"},
+    {"id": "f_215_ef", "label": "哺乳方式：", "type": "db_link", "db_key": "breastfeeding_method", "width": "half"},
+    {"id": "f_216_f0", "label": "三節計費:甲方同意需另支付當日薪資1倍予乙方。", "type": "db_link", "db_key": "holiday_pricing_terms", "width": "full"},
+    {"id": "f_217_f1", "label": "特殊計費:胎數", "type": "db_link", "db_key": "multi_birth_count", "width": "half"},
+    {"id": "f_218_f2", "label": "透天服務樓層方式(會加收樓層費)", "type": "db_link", "db_key": "stair_floor_fee_mode", "width": "half"},
+    {"id": "f_219_f3", "label": "提供服務人員轎車停車位", "type": "db_link", "db_key": "parking_space_provided", "width": "half"},
+    {"id": "f_220_f4", "label": "服務時間內是否有其他寶寶", "type": "db_link", "db_key": "other_babies_present", "width": "half"}
+  ]
+}
