@@ -202,9 +202,14 @@ def _render_tab2_assign(orders_data, clients, staff_list):
             st.error(f"讀取媒合記錄失敗: {e}")
             match_records = []
 
-        if match_records:
+        # 僅顯示至少有一項發送紀錄或意願已更新的媒合紀錄
+        valid_matches = [
+            m for m in match_records 
+            if m['sent_info_1_at'] or m['sent_info_2_at'] or m['caregiver_accepted'] is not None
+        ]
+        if valid_matches:
             st.write("📋 當前月嫂意願詢問紀錄：")
-            for m in match_records:
+            for m in valid_matches:
                 acc_lbl = "🟢 願意接案" if m['caregiver_accepted'] == 1 else ("🔴 拒絕" if m['caregiver_accepted'] == 0 else "🟡 待回覆")
                 s1 = f"已於 {m['sent_info_1_at'].strftime('%Y-%m-%d %H:%M')}" if m['sent_info_1_at'] else "未發送"
                 s2 = f"已於 {m['sent_info_2_at'].strftime('%Y-%m-%d %H:%M')}" if m['sent_info_2_at'] else "未發送"
@@ -214,61 +219,102 @@ def _render_tab2_assign(orders_data, clients, staff_list):
         if not staff_list:
             st.warning("請先在服務人員資料表中建立服務人員。")
         else:
-            staff_options = {f"{s['name']} ({s['phone']})": s['id'] for s in staff_list if s.get('name')}
-            selected_staff_label = st.selectbox("選擇服務人員/月嫂進行操作", list(staff_options.keys()), key="match_staff_picker")
-            staff_id_to_assign = staff_options[selected_staff_label]
+            with st.expander("🎯 智慧粗篩條件控制面板 (可自訂開啟/關閉，預設全選)", expanded=True):
+                fc1, fc2 = st.columns(2)
+                with fc1:
+                    f_region = st.checkbox("☑️ 比對服務區域 (city/address 區域如香山/東區)", value=True, key="f_reg_toggle")
+                    f_schedule = st.checkbox("☑️ 排除檔期時間衝突 (含 7 天預留備用期)", value=True, key="f_sch_toggle")
+                with fc2:
+                    f_babies = st.checkbox("☑️ 比對照顧胎數上限 (單/雙胞胎)", value=True, key="f_bab_toggle")
+                    f_time = st.checkbox("☑️ 比對服務時段需求", value=True, key="f_time_toggle")
 
             try:
-                match_id = db_service.create_or_get_match_record(target_order_id, staff_id_to_assign)
-                match_records_updated = db_service.get_order_matches(target_order_id)
-                curr_match = next((m for m in match_records_updated if m['staff_id'] == staff_id_to_assign), None)
-            except Exception as e:
-                st.error(f"建立配對記錄失敗: {e}")
-                curr_match = None
+                rec_staff = db_service.get_recommended_staff_for_order(
+                    order_id=target_order_id,
+                    filter_region=f_region,
+                    filter_schedule=f_schedule,
+                    filter_babies=f_babies,
+                    filter_time=f_time
+                )
+            except Exception as err:
+                st.error(f"智慧粗篩比對計算失敗: {err}")
+                rec_staff = []
 
-            if curr_match:
-                st.markdown("##### 步驟 1 & 2: 發送需求與詢問意願")
-                col_f1, col_f2 = st.columns(2)
-                with col_f1:
-                    btn_t1 = "再次發送 訂單資訊-1" if curr_match['sent_info_1_at'] else "1️⃣ 發送 訂單資訊-1 (粗篩)"
-                    if st.button(btn_t1, key="btn_send_1"):
+            if not rec_staff:
+                st.warning("⚠️ 依據當前勾選條件，暫無符合之月嫂。建議取消部分勾選以展開搜尋範圍。")
+                staff_options = {f"{s['name']} ({s['phone']})": s['id'] for s in staff_list if s.get('name')}
+            else:
+                staff_options = {r['display_label']: r['staff_id'] for r in rec_staff}
+
+            selected_staff_label = st.selectbox("選擇服務人員/月嫂進行操作 (已自動依匹配度與檔期排序)", list(staff_options.keys()), key="match_staff_picker")
+            staff_id_to_assign = staff_options[selected_staff_label]
+
+            # 讀取既有記錄，如果沒有，不預先建立，避免產生幽靈紀錄
+            curr_match = next((m for m in match_records if m['staff_id'] == staff_id_to_assign), None)
+
+            # 即使資料庫中尚未建立紀錄，前端仍以預設未發送的狀態來渲染步驟
+            display_match = curr_match or {
+                'sent_info_1_at': None,
+                'sent_info_2_at': None,
+                'caregiver_accepted': None,
+                'staff_name': selected_staff_label.split(" (")[0]
+            }
+
+            st.markdown("##### 步驟 1 & 2: 發送需求與詢問意願")
+            col_f1, col_f2 = st.columns(2)
+            with col_f1:
+                btn_t1 = "再次發送 訂單資訊-1" if display_match['sent_info_1_at'] else "1️⃣ 發送 訂單資訊-1 (粗篩)"
+                if st.button(btn_t1, key="btn_send_1"):
+                    try:
+                        # 真正點擊發送時，才按需建立或取得配對 ID
+                        match_id = db_service.create_or_get_match_record(target_order_id, staff_id_to_assign)
                         db_service.update_matching_info_sent(match_id, 1)
                         st.success("已發送 訂單資訊-1！")
                         st.rerun()
+                    except Exception as e:
+                        st.error(f"發送失敗: {e}")
 
-                with col_f2:
-                    btn_t2 = "再次發送 訂單資訊-2" if curr_match['sent_info_2_at'] else "2️⃣ 發送 訂單資訊-2 (精篩)"
-                    if st.button(btn_t2, key="btn_send_2"):
+            with col_f2:
+                btn_t2 = "再次發送 訂單資訊-2" if display_match['sent_info_2_at'] else "2️⃣ 發送 訂單資訊-2 (精篩)"
+                if st.button(btn_t2, key="btn_send_2"):
+                    try:
+                        match_id = db_service.create_or_get_match_record(target_order_id, staff_id_to_assign)
                         db_service.update_matching_info_sent(match_id, 2)
                         st.success("已發送 訂單資訊-2！")
                         st.rerun()
+                    except Exception as e:
+                        st.error(f"發送失敗: {e}")
 
-                resp_opts = ["待回覆 (NULL)", "願意接案 (1)", "拒絕接案 (0)"]
-                c_idx = 1 if curr_match['caregiver_accepted'] == 1 else (2 if curr_match['caregiver_accepted'] == 0 else 0)
-                selected_resp = st.selectbox("更新月嫂意願狀態", resp_opts, index=c_idx, key="select_caregiver_resp")
+            resp_opts = ["待回覆 (NULL)", "願意接案 (1)", "拒絕接案 (0)"]
+            c_idx = 1 if display_match['caregiver_accepted'] == 1 else (2 if display_match['caregiver_accepted'] == 0 else 0)
+            selected_resp = st.selectbox("更新月嫂意願狀態", resp_opts, index=c_idx, key="select_caregiver_resp")
 
-                if st.button("更新意願", key="btn_update_resp"):
+            if st.button("更新意願", key="btn_update_resp"):
+                try:
+                    match_id = db_service.create_or_get_match_record(target_order_id, staff_id_to_assign)
                     accepted_val = True if selected_resp == "願意接案 (1)" else (False if selected_resp == "拒絕接案 (0)" else None)
                     db_service.reply_matching_inquiry(match_id, accepted_val)
                     st.success("月嫂意願狀態已更新！")
                     st.rerun()
+                except Exception as e:
+                    st.error(f"更新失敗: {e}")
 
-                st.markdown("---")
-                st.markdown("##### 步驟 3 & 4: 傳送履歷與定案指派")
-                if curr_match['caregiver_accepted'] == 1:
-                    st.success(f"🎉 月嫂 {curr_match['staff_name']} 已表達願意接案！")
-                    if st.button("🤝 3️⃣ 傳送履歷給客戶", key="btn_send_resume"):
-                        st.info("已模擬將月嫂履歷與去識別化資料傳送給客戶備查。")
+            st.markdown("---")
+            st.markdown("##### 步驟 3 & 4: 傳送履歷與定案指派")
+            if display_match['caregiver_accepted'] == 1:
+                st.success(f"🎉 月嫂 {display_match['staff_name']} 已表達願意接案！")
+                if st.button("🤝 3️⃣ 傳送履歷給客戶", key="btn_send_resume"):
+                    st.info("已模擬將月嫂履歷與去識別化資料傳送給客戶備查。")
 
-                    if st.button("✍️ 4️⃣ 成立訂單並定案指派", key="btn_assign_confirm"):
-                        try:
-                            db_service.assign_staff_to_order(target_order_id, staff_id_to_assign)
-                            st.success("錄用成功！訂單已成立並生成初始檔期記錄。")
-                            st.rerun()
-                        except Exception as err:
-                            st.error(f"指派失敗: {err}")
-                else:
-                    st.info("⚠️ 提示：需待月嫂回覆「願意接案」後，方可進行傳送履歷與定案指派。")
+                if st.button("✍️ 4️⃣ 成立訂單並定案指派", key="btn_assign_confirm"):
+                    try:
+                        db_service.assign_staff_to_order(target_order_id, staff_id_to_assign)
+                        st.success("錄用成功！訂單已成立並生成初始檔期記錄。")
+                        st.rerun()
+                    except Exception as err:
+                        st.error(f"指派失敗: {err}")
+            else:
+                st.info("⚠️ 提示：需待月嫂回覆「願意接案」後，方可進行傳送履歷與定案指派。")
 
     with sub_tab3:
         st.markdown(f"#### ❌ 取消訂單與紀錄原因 (案件編號: `{target_order.get('case_no') or target_order['order_id']}`)")

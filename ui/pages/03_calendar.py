@@ -245,7 +245,18 @@ def show():
                 potential_dates = [d_item['date'] for d_item in init_calc.get('day_by_day', [])]
                 date_labels_map = {f"{d.strftime('%Y-%m-%d')} ({['週一','週二','週三','週四','週五','週六','週日'][d.weekday()]})": d for d in potential_dates}
                 
-                default_rest_dates = [label for label, d in date_labels_map.items() if any(d_item['date'] == d and d_item['is_rest_day'] for d_item in init_calc.get('day_by_day', []))]
+                # 自動載入資料庫已持久化之放假日期
+                persisted_rest_dates = set()
+                raw_custom_json = target_order.get('custom_rest_dates')
+                if raw_custom_json:
+                    try:
+                        import json
+                        persisted_list = json.loads(raw_custom_json) if isinstance(raw_custom_json, str) else raw_custom_json
+                        persisted_rest_dates = {safe_date(d) for d in persisted_list if safe_date(d)}
+                    except:
+                        pass
+
+                default_rest_dates = [label for label, d in date_labels_map.items() if any(d_item['date'] == d and d_item['is_rest_day'] for d_item in init_calc.get('day_by_day', [])) or d in persisted_rest_dates]
                 
                 selected_rest_labels = st.multiselect(
                     "🗓️ 行事曆單日排休調整 (🟢 綠底休假，可跨週自訂點選)",
@@ -254,6 +265,17 @@ def show():
                     key="rest_dates_ms_page"
                 )
                 custom_leave_dates = {date_labels_map[k] for k in selected_rest_labels}
+                
+                # 「💾 儲存放假與動態順延」按鈕與防呆防護
+                all_rest_dt_list = [d.strftime("%Y-%m-%d") for d in (custom_leave_dates | custom_holiday_rest_dates)]
+                if st.button("💾 儲存放假與動態順延 (寫入資料庫)", type="primary", key="save_rest_dates_btn"):
+                    save_res = db_service.save_order_rest_dates(target_order['order_id'], all_rest_dt_list)
+                    if save_res.get('success'):
+                        st.success(f"✅ {save_res['message']}")
+                        st.balloons()
+                        st.rerun()
+                    else:
+                        st.error(f"❌ {save_res.get('message')}")
                 
             base_salary = safe_float(target_order.get('service_salary')) or (calc_days * 2000.0)
             
@@ -333,6 +355,11 @@ def show():
                                 bg_class = "status-yellow"
                                 status_label = "<span class='status-label-yellow'>🟡 已簽約</span>"
                                 client_text = f"<span class='client-text'><b>客戶: {day_info['client_name']}</b></span>"
+                        elif day_info['status'] == 'green':
+                            if not is_target_order_record:
+                                bg_class = "status-green"
+                                status_label = "<span class='status-label-green'>🟢 排定休假</span>"
+                                client_text = f"<span class='client-text'><b>休假: {day_info['client_name']}</b></span>"
                         elif day_info['status'] == 'red':
                             if not is_target_order_record:
                                 bg_class = "status-red"

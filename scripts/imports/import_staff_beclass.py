@@ -176,9 +176,20 @@ def process_import(excel_path):
             phone = clean_phone(row.get('\u884c\u52d5\u96fb\u8a71'))
 
             has_massage_cert = False
-            massage_val = row.get('\u6709\u5b30\u5e7c\u5152\u6309\u6469\u8b49\u66f8\u55ce?')
-            if pd.notna(massage_val) and str(massage_val).strip() in ['\u6709', 'Y', 'y', '1', 'True', 'true']:
+            massage_val = row.get('有嬰幼兒按摩證書嗎?')
+            if pd.notna(massage_val) and str(massage_val).strip() in ['有', 'Y', 'y', '1', 'True', 'true']:
                 has_massage_cert = True
+
+            # 解析可承接胎數 (care_babies: 1:單胞胎, 2:雙胞胎, 3:三胞胎)
+            care_babies = 1
+            twin_val = row.get('雙胞胎')
+            triplet_val = row.get('三胞胎')
+            summary_val = str(row.get('可承接的胎數', '')) if pd.notna(row.get('可承接的胎數')) else ''
+
+            if (pd.notna(triplet_val) and str(triplet_val).strip() in ['Y', 'y', '1', 'True', 'true']) or '三胞胎' in summary_val:
+                care_babies = 3
+            elif (pd.notna(twin_val) and str(twin_val).strip() in ['Y', 'y', '1', 'True', 'true']) or '雙胞胎' in summary_val:
+                care_babies = 2
 
             record = {
                 'registered_at': registered_at,
@@ -186,18 +197,19 @@ def process_import(excel_path):
                 'name': name,
                 'identity_card': identity_card,
                 'phone': phone,
-                'tel': clean_data(row.get('\u5e02\u8a71'), 'tel'),
-                'tel_ext': clean_data(row.get('\u5206\u6a5f'), 'tel_ext'),
+                'tel': clean_data(row.get('市話'), 'tel'),
+                'tel_ext': clean_data(row.get('分機'), 'tel_ext'),
                 'email': clean_data(row.get('EMAIL'), 'email'),
                 'birthday': birthday,
                 'city': city,
-                'zip_code': clean_data(row.get('\u90f5\u905e\u5340\u865f'), 'zip_code'),
+                'zip_code': clean_data(row.get('郵遞區號'), 'zip_code'),
                 'address': address,
                 'has_massage_cert': has_massage_cert,
+                'care_babies': care_babies,
                 'status': 'active'
             }
 
-            # \u4ee5\u8eab\u5206\u8b49\u5b57\u865f\u70ba\u552f\u4e00\u9375\u53bb\u91cd
+            # 以身分證字號為唯一鍵去重
             cursor.execute("SELECT id FROM staff WHERE identity_card = %s", (identity_card,))
             existing = cursor.fetchone()
 

@@ -1,20 +1,26 @@
-# Services Functional Layer Sub-System Map (ADAD Sub-Map Version 34.1)
+# Services Functional Layer Sub-System Map (ADAD Sub-Map Version 35.0)
 # Scope: services/ (Backend Data Services & Calculation Engines)
 
-version: 34.1
+version: 35.0
 scope: services_layer
 
 modules:
   DbService:
     type: service
-    description: 主資料庫與 CRUD 操作服務，提供 v_order_details 視窗查詢、36 欄位安全 mapping、safe_int 與 safe_date 防護，以及完整 15 大照護細節 (產婦過敏、飲食酒油喜忌、烹煮工具、洗澡水、哺乳方式、三節與胎數) 之 JSON 備註自動解包解析器 (JsonNotesParser Engine)。
+    description: 主資料庫與 CRUD 操作服務，提供 v_order_details 視窗查詢、36 欄位安全 mapping、safe_int 與 safe_date 防護。
     source: services/db_service.py
     dependencies: [InitDB]
-    todo:
-      - "[ ] 檢查 global_stats 的全域統計運算邏輯與邊界條件 (INV-SVC-04)"
     state: validated
     invariants:
       - "INV-SVC-03: DbService 必須自動辨識與解析 notes / care_details 欄位中的 JSON 結構，解開完整 15 項產婦照顧與環境細節欄位，打平注入訂單字典中。"
+
+  RecommendService:
+    type: service
+    description: 月嫂與客戶條件智慧粗篩比對引擎。比對 clients.city/address 與 staff.service_regions，掃描檔期重疊 (含 7 天預留備用期)，並精算匹配分與推薦列表。
+    source: services/db_service.py::get_recommended_staff_for_order
+    state: validated
+    invariants:
+      - "INV-SVC-05: 檔期衝突掃描必須將月嫂既有訂單之結束日自動加上 7 天預留備用期 [start_date, end_date + 7天]，嚴禁在備用期內重複指派。"
 
   CalendarService:
     type: service

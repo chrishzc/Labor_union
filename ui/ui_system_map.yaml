@@ -1,7 +1,7 @@
-# UI Layer Sub-System Map (ADAD Sub-Map Version 33.1)
+# UI Layer Sub-System Map (ADAD Sub-Map Version 54.0)
 # Scope: ui/ (All UI Shells, Pages, and Components)
 
-version: 49
+version: 54.0
 scope: ui_layer
 
 modules:
@@ -16,6 +16,16 @@ modules:
     description: 原始資料庫表格瀏覽頁面。提供 clients, staff, orders, payments, beclass_records, matching_records 與 holidays 檢視，以及國定假日管理面板。
     source: ui/pages/01_data_browser.py::show
     dependencies: [DbService]
+    state: validated
+    invariants:
+      - "INV-UI-BROWSER-01: 原始資料表格欄位必須支援透過對照表轉換為中文名稱 (含英文原鍵名或純中文)，未記錄欄位自動安全回退原鍵名。"
+    api_button_matrix:
+      - button_label: "確認儲存假日"
+        api_endpoint: "POST /api/v1/holidays"
+        description: "新增或更新國定假日及其預設雙倍薪資設定"
+      - button_label: "確認刪除此假日"
+        api_endpoint: "DELETE /api/v1/holidays/{holiday_date}"
+        description: "刪除指定日期之國定假日"
 
   OrderUI:
     type: ui_page
@@ -33,98 +43,83 @@ modules:
 
   OrderUI_Tab2_Assign:
     type: ui_component
-    description: Tab 2 渲染函數 (案件與配對中心)。僅列出「洽談中」待配對案件，提供單筆案件控制面板與 4 步智慧配對流程。
+    description: Tab 2 渲染函數 (案件與配對中心)。僅列出「洽談中」待配對案件，提供單筆案件控制面板、4 大智慧粗篩可選條件 (含香山區等 city/address 比對與 7 天預留備用期) 與 4 步智慧配對流程。
     source: ui/pages/02_orders.py::_render_tab2_assign
+    state: validated
+    invariants:
+      - "INV-UI-ASSIGN-01: 媒合紀錄清單僅能顯示至少有一項發送紀錄 (sent_info_1_at/sent_info_2_at) 或意願已變更的有效紀錄。"
+      - "INV-UI-ASSIGN-02: 選取月嫂檢視時嚴禁 speculative 預先建立 DB 紀錄，必須在點擊發送/變更動作時按需 (On-Demand) 建立。"
+    api_button_matrix:
+      - button_label: "1️⃣ 發送 訂單資訊-1 (粗篩)"
+        api_endpoint: "POST /api/v1/matches/{match_id}/send-info-1"
+        description: "更新 sent_info_1_at 並依據月嫂 staff.line_user_id 推播粗篩 Flex Message 卡片"
+      - button_label: "2️⃣ 發送 訂單資訊-2 (精篩)"
+        api_endpoint: "POST /api/v1/matches/{match_id}/send-info-2"
+        description: "更新 sent_info_2_at 並依據月嫂 staff.line_user_id 推播精篩照護圖譜訊息"
+      - button_label: "更新意願"
+        api_endpoint: "PUT /api/v1/matches/{match_id}/reply"
+        description: "更新月嫂接案意願狀態 (1: 願意, 0: 拒絕, NULL: 待回覆)"
+      - button_label: "🤝 3️⃣ 傳送履歷給客戶"
+        api_endpoint: "POST /api/v1/matches/{match_id}/send-resume"
+        description: "傳送去識別化履歷與過往經驗圖卡給客戶 LINE 帳號"
+      - button_label: "✍️ 4️⃣ 成立訂單並定案指派"
+        api_endpoint: "POST /api/v1/orders/{order_id}/assign-staff"
+        description: "綁定服務人員並更新訂單狀態為「訂單成立」"
+      - button_label: "🚨 確認取消此訂單"
+        api_endpoint: "PUT /api/v1/orders/{order_id}/status"
+        description: "將訂單狀態更新為「訂單取消」並強制寫入取消原因"
 
   OrderUI_Tab3_Finance:
     type: ui_component
     description: Tab 3 渲染函數。顯示財務實收登錄介面。
     source: ui/pages/02_orders.py::_render_tab3_finance
+    api_button_matrix:
+      - button_label: "更新財務記錄"
+        api_endpoint: "PUT /api/v1/payments/{order_id}"
+        description: "更新已收訂金、已收尾款與實收備註"
 
   CalendarUI:
     type: ui_page
-    description: 服務人員行事曆與檔期調控獨立頁面。顯示月嫂人員切換下拉選單、年月選擇器、四色 HTML 月曆。
+    description: >
+      服務人員行事曆與檔期調控獨立頁面。包含兩階段時間操作選單 (1. 執行操作: 單純看行事曆/訂單匹配/出勤天數精算; 2. 訂單選擇)、
+      四色 HTML 月曆 (白/黃/紅/綠底)、7 天預留備用期動態渲染、國定假日單日獨立決策控制面板，以及持久化寫入 staff_schedule 檔期表。
     source: ui/pages/03_calendar.py::show
+    state: validated
     invariants:
       - "INV-CAL-01: 必須在 HTML 月曆表格繪製前優先執行精算引擎，確保休假天數即時 100% 連動呈現。"
+      - "INV-CAL-02 (兩階段選單隔離): 「訂單匹配」模式僅於行事曆展示黃底預排與 7 天預留備用期，不顯示單日排假與出勤精算面板；「出勤天數精算」模式僅適用於確定實際開工日 (actual_start_date) 案件，解鎖紅底工作日與綠底休假排假控制。"
+      - "INV-CAL-03 (四色月曆視覺公理): ⚪白底=無排班或超出完工日解鎖區間; 🟡黃底=預排案件與完工日後 7 天預留備用期; 🔴紅底=確定服務工作日; 🟢綠底=自訂請假與國定假日放假。"
+      - "INV-CAL-04 (綠底休假與動態順延): 每增加 1 天綠底 🟢 休假，後續紅底 🔴 工作日與服務結束日 (actual_end_date) 自動向後動態順延 1 天，確保實際服務天數 100% 足額達 N 天。"
+      - "INV-CAL-05 (國定假日單日獨立決策): 支援連假期間針對每一個獨立國定假日進行單日個體勾選；選擇放假者在月曆標示為綠底 🟢 且完工日順延 1 天，選擇上班者計為紅底 🔴 正常工作日 (預設雙倍薪資)。"
+    api_button_matrix:
+      - button_label: "💾 儲存放假與動態順延 (寫入資料庫)"
+        api_endpoint: "POST /api/v1/schedule/save"
+        description: "將月嫂動態請假與國定假日順延排班明細持久化寫入 staff_schedule 資料表與 orders.custom_rest_dates"
 
   EditOrderUI:
     type: ui_page
     description: 單筆訂單動態試算與資料維護頁面。採用 st.columns 與帶邊框 Container 打造實體訂單單據視覺，具備 Formula Lock Guardrail 防呆機制。
     source: ui/pages/04_edit_order.py::show
+    state: validated
     invariants:
       - "INV-EDIT-01: 修改輸入欄位時，費用與完工日必須即時連動試算，且金額統一無小數點 safe_int 呈現。"
       - "INV-EDIT-03: 所有由公式自動衍生之金額與時數欄位，預設必須為唯讀鎖定狀態。"
       - "INV-EDIT-04: 強制解鎖自動試算欄位時，必須顯性跳出警告告知公式連動失效風險。"
+      - "INV-EDIT-05: 點擊儲存時必須同時調用 update_order_full_details 與 update_payment_details 完整寫入 orders, clients 與 payments 資料表。"
+    api_button_matrix:
+      - button_label: "💾 確定儲存 36 欄位試算與變更結果"
+        api_endpoint: "PUT /api/v1/orders/{order_id}/full-details"
+        description: "一次性寫入 orders 主表 36 欄位與 payments 實收財務表"
 
   FormManagementUI:
     type: ui_page
     description: "表單與履歷問卷管理專頁。支援動態新建自訂表單沙盒、線上編輯修改既有模板欄位名稱、拖拉平移排序、二次確認刪除防呆、5:5側邊雙視窗實時預覽/PDF導出、SQL原生資料表歸屬分類選擇器、獨立JSON模板目錄、Excel長文字溢出不撐高列高、顯式邊框與PDF乾淨去雜線、全量資料庫欄位100%開載、100%全寬滿版預覽切換器，以及 Tab 3: Excel 變數代理制式定型化契約引擎 (EPPP Engine)。"
     source: ui/pages/05_form_management.py::show
     state: validated
-    todo:
-      - "[x] 任務 1: B7, B185 連動契約生成/服務開始日期 (actual_start_date)"
-      - "[x] 任務 2: P9 F25 連動服務總時數 total_hours"
-      - "[x] 任務 3: P11 E28 連動服務時段 service_time"
-      - "[x] 任務 4: 追溯訂單系統，更名 service_hours_per_day 為「每日服務時數」，區隔「總時數 (total_hours)」與「服務時段 (service_time)」"
-      - "[x] 任務 5: B30 連結 F24 (天數), D30 連結 F25 (每日時數), F30 連結 B38 (自費總額)"
-      - "[x] 任務 6: 稽核 E33 與 F1 連結，確認 beclass_records.gov_no 係無中生有，更正連動為 orders.case_no"
-      - "[x] 任務 7: 查驗 beclass 與 服務人員 分頁，確認兩者皆完整包含銀行帳號與分行代號欄位"
-      - "[x] 任務 8: P22 D36 匯款帳號連動服務人員 (月嫂) 銀行帳號 staff.staff_bank_account"
-      - "[x] 任務 9: P24 C37 樓層費連動 orders.deposit_date (訂金入帳日)"
-      - "[x] 任務 10: 稽核 P27~P33 欄位歸屬，確認 5 大欄位來自 clients (市府申請表)，更正二階歸屬分類"
-      - "[x] 任務 11: P35 A48 服務時段連動至 E28 (service_time)"
     invariants:
       - "INV-UI-FORM-01: 支援手動新增自訂欄位，並提供單行文字、多行文字、數字、日期與綁定 DB 欄位 5 大資料型態。"
-      - "INV-UI-FORM-02: 支援單欄 100% 全寬與雙欄 50% 半寬彈性 CSS Grid 排版選擇。"
-      - "INV-UI-FORM-03: 提供兩大預設商業樣板: 1. 訂單資訊-1, 2. 訂單資訊-2 (完整 20 大欄位)。"
-      - "INV-UI-FORM-04: 支援表單模板線上編輯修改與刪除，修改後即時同步更新 db/form_templates.json 檔案。"
-      - "INV-UI-FORM-05: HTML 實體單據採用雙欄 (Two-Column Grid) 並排呈現薪資與對應付款日、起訖日。"
       - "INV-UI-FORM-06: 實施 Draft Buffer 編輯草稿隔離機制，點擊取消時 100% 丟棄記憶體草稿，嚴禁修改硬碟。"
-      - "INV-UI-FORM-07: 每個欄位配置 UUID4 全域唯一 field_id，刪除時採 ID 匹配過濾，嚴禁微秒時間戳碰撞導致 DuplicateKey 崩潰。"
-      - "INV-UI-FORM-08: 按鈕對照矩陣: [編輯]生成草稿不寫硬碟, [順序/刪欄]僅改草稿不寫硬碟, [取消]100%丟棄不寫硬碟, [點擊刪模板]觸發二次確認不寫硬碟, [確定刪除]寫入硬碟, [確定更新]寫入硬碟。"
       - "INV-UI-FORM-09: 刪除表單模板必須具備二次顯性確認視窗 (Delete Confirmation Modal Guardrail)，防範誤觸刪除。"
-      - "INV-UI-FORM-10: 支援欄位上下順序平移/拖拉排序 (Reorder Field Protocol) 與左右雙視窗實時同步 Preview 視窗。"
-      - "INV-UI-FORM-11: 移除 HTML 單據末尾備查蓋章處與簽章欄位。"
-      - "INV-UI-FORM-12: 金額格式化實施精確單詞比對 (Exact Word Boundary Match Guardrail)，防止 breastfeeding 中含 fee 導致誤判為 0 元。"
-      - "INV-UI-FORM-13: 採用獨立模板檔案目錄結構 (db/templates/tpl_xx.json)，實現錯誤隔離與單一模板獨立按需讀寫。"
-      - "INV-UI-FORM-14: 綁定 DB 欄位支援按 SQL 資料表來源 (orders, clients, beclass_records, global_stats) 兩階動態過濾選擇器。"
-      - "INV-UI-FORM-15: 確保 case_no, client_name 等原生欄位直接歸屬至 SQL 原生資料表，直接讀取不經過二次無謂運算，提升最高 I/O 執行效率。"
       - "INV-UI-FORM-16: 支援 Excel 原生範本 (.xlsx) 之 {P1}, {P2} 變數標籤自動掃描解析器 (EPPP Protocol)。"
-      - "INV-UI-FORM-17: 契約參數在 UI 端 100% 銜接兩階 SQL 資料表選擇器 (orders, clients, beclass_records, global_stats)，實現 0 程式碼改動之動態綁定。"
-      - "INV-UI-FORM-18: 支援雙軌輸出機制: 包含 1:1 CSS A4 影印級實時鏡像預覽 + Print-to-PDF，以及實體 .xlsx 填空檔案匯出下載。"
-      - "INV-UI-FORM-19: Excel 長文字溢出不撐高公理 (Cell Overflow Protocol): 1:1 還原 Excel 長文字向右延伸疊加 (white-space: nowrap, overflow: visible)，固定每行列高，嚴禁換行拉高跑版。"
-      - "INV-UI-FORM-20: Excel 顯式邊框與 PDF 列印去雜線公理: 僅繪製原檔顯式設定之邊框，空白單元格 100% 渲染為 border: none; 另存為 PDF 時自動清除多餘灰線。"
-      - "INV-UI-FORM-21: 將 所需表格.xlsx 之 客戶契約 獨立抽出為 db/templates/contracts/contract_client_copy.xlsx 專屬極速範本檔，實現 0.01 秒讀載。"
-      - "INV-UI-FORM-22: Excel 原生範本動態檔案監聽與即時鏡像刷新公理 (Real-time File Reload Protocol): 每次渲染強制解鎖檔控制代碼並以修改時間戳 os.path.getmtime 快取失效，確保使用者在外部用 Excel 修改 .xlsx 存檔後 UI 端 0.1 秒即時反映。"
-      - "INV-UI-FORM-23: 動態底色清洗公理 (Dynamic Background Cleaning Protocol): Excel 範本保有原生黃底標註，鏡像渲染填入真實訂單資料時，自動將填空區黃底洗掉恢復為 transparent 乾淨紙本質感。"
-      - "INV-UI-FORM-24: 指定儲存格自動折行公理 (Selective Cell Auto Line Wrap Protocol): 對 C39, C40 等長文字法規條款實施 white-space: normal; word-break: break-word; 自動換行，其餘普通欄位保持 nowrap 不拉高列高。"
-      - "INV-UI-FORM-25: 全量資料庫欄位 100% 完整開載公理 (Full Schema Enrollment Protocol): 掃描 orders, clients, staff, beclass_records 100+ 個全量欄位填入 UI 二階選單，絕不漏載任何資料庫選項。"
-      - "INV-UI-FORM-26: 原生 Excel 自動換行與溢出重現公理 (Native Excel Wrap Alignment Protocol): 100% 讀取實體 .xlsx 檔案之 alignment.wrap_text 標籤與整排合併儲存格設定，勾選 wrap_text=True 者自動折行，未勾選者 100% 保持文字原生溢出。"
-      - "INV-UI-FORM-27: Tab 3 定型化契約範本全套生命週期管理公理 (EPPP Template Lifecycle Management Protocol): 套用 Tab 2 完整編輯、草稿隔離、二次刪除確認 modal 警示對話框、新增契約範本與單獨儲存更新 db/templates/contracts/*.json 功能。"
-      - "INV-UI-FORM-28: 100% 全寬滿版契約預覽切換公理 (Full-Width Contract Canvas Switcher Protocol): 提供 5:5 左右對照維護模式與 100% 全寬滿版 A4 沉浸預覽模式無縫切換，解決 50% 寬度文字偏小問題。"
-      - "INV-UI-FORM-29: PDF 純淨列印與顯式實心邊框繼承公理 (Pure PDF Print & Explicit Border Retention Protocol): 在 @media print 中隱藏所有 no-print UI 標頭標尾按鈕，配合 print-color-adjust: exact 確保 PDF 100% 完整保留 Excel 原生實心框線與 0 雜訊純淨單據。"
-      - "INV-UI-FORM-30: PDF 頁首頁尾 URL 去除與 @page 邊界消解公理 (Print Header/Footer Suppression Protocol): 在 @media print CSS 導入 @page { margin: 0; } 阻斷瀏覽器列印引擎印出日期標題與 localhost:8501 網址頁尾。"
-
-    behavioral_audit_matrix:
-      - action: "點擊 [✏️ 編輯修改此模板]"
-        scope: "建立深拷貝草稿 st.session_state['edit_draft_tpl']"
-        persist_disk: false
-      - action: "點擊 [⬆️ 上移] / [⬇️ 下移]"
-        scope: "僅調換草稿中欄位順序"
-        persist_disk: false
-      - action: "點擊 [🗑️ 刪除欄位]"
-        scope: "使用 unique field_id 從草稿中過濾刪除"
-        persist_disk: false
-      - action: "點擊 [🗑️ 刪除此表單模板]"
-        scope: "開啟二次確認 Modal 警示對話框"
-        persist_disk: false
-      - action: "點擊 [💥 確定永久刪除]"
-        scope: "從模板庫剔除該模板"
-        persist_disk: true
-      - action: "點擊 [✖️ 取消編輯]"
-        scope: "徹底清空並丟棄 edit_draft_tpl 草稿"
-        persist_disk: false
-      - action: "點擊 [💾 確定更新此模板]"
-        scope: "將草稿覆蓋回主模板庫"
-        persist_disk: true
+      - "INV-UI-FORM-25: 全量資料庫欄位 100% 完整開載公理 (Full Schema Enrollment Protocol): 掃描 orders, clients, staff, beclass_records 100+ 個全量欄位填入 UI 二階選單。"
+      - "INV-UI-FORM-28: 100% 全寬滿版契約預覽切換公理 (Full-Width Contract Canvas Switcher Protocol): 提供 5:5 左右對照維護模式與 100% 全寬滿版 A4 沉浸預覽模式無縫切換。"

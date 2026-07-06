@@ -1,18 +1,10 @@
 """
 ================================================================================
 檔案名稱: ui/pages/04_edit_order.py
-功能說明: 單筆訂單 36 全欄位動態試算與資料維護專頁 (EditOrderUI)
+功能說明: 單筆訂單 36 全欄位動態試算與資料維護專頁 (EditOrderUI - 響應式試算與持久化修復版)
 專案名稱: Lobar Union - 服務人員與訂單管理系統
 建立日期: 2026-07-03
-架構規範: ADAD Version 25 (st.columns 實體訂單單據 36 全欄位對齊與公式鎖定)
-================================================================================
-職責與業務規則:
-1. 頂部選單切換單筆訂單：一次專注顯示與試算一張訂單。
-2. 完整覆蓋 36 項業務欄位，劃分為 5 大單據 Container。
-3. Formula Lock Guardrail (ADR-v25-01):
-   - 衍生公式欄位 (總時數、完工日、期款金額、自費金額、補助薪資) 預設鎖定為唯讀 (disabled=True)。
-   - 當勾選「🔓 強制解鎖自訂衍生公式欄位」時，顯示顯性警告提示並解鎖允許手動覆寫。
-4. 導覽約束: 本檔案末尾嚴禁包含頂層 show() 呼叫，由 ui/app.py 動態載入。
+修改日期: 2026-07-06 (修復即時連動與 full_details 資料庫持久化儲存)
 ================================================================================
 """
 
@@ -64,7 +56,7 @@ def safe_date(val):
 
 
 def show():
-    """EditOrderUI 進入點 (Formula Lock Guardrail 版本)"""
+    """EditOrderUI 進入點 (Formula Lock Guardrail 修正版)"""
     st.title("📄 單筆訂單 36 欄位動態試算與維護單據")
 
     try:
@@ -116,7 +108,11 @@ def show():
         with c1:
             w_client_name = st.text_input("客戶名稱", value=target_order['client_name'], key=f"v25_client_{target_oid}")
             w_due_date = st.date_input("預產期", value=safe_date(target_order.get('due_date')), key=f"v25_due_{target_oid}")
-            w_subsidy_eligibility = st.selectbox("補助資格", ["一般身分", "低收入戶", "中低收入戶", "特殊境遇"], index=0, key=f"v25_sub_{target_oid}")
+            
+            sub_opts = ["一般身分", "低收入戶", "中低收入戶", "特殊境遇"]
+            c_sub = target_order.get('subsidy_eligibility', '一般身分')
+            sub_idx = sub_opts.index(c_sub) if c_sub in sub_opts else 0
+            w_subsidy_eligibility = st.selectbox("補助資格", sub_opts, index=sub_idx, key=f"v25_sub_{target_oid}")
         
         with c2:
             w_staff_name = st.text_input("服務人員", value=target_order.get('staff_name') or '尚未指派', disabled=True, key=f"v25_staff_{target_oid}")
@@ -128,7 +124,7 @@ def show():
         
         with c3:
             w_act_start = st.date_input("服務開始 (實際開工)", value=safe_date(target_order.get('actual_start_date') or target_order.get('start_date')), key=f"v25_act_st_{target_oid}")
-            w_service_days = st.number_input("希望服務天數 (天)", value=safe_int(target_order.get('service_days', 20)), min_value=1, max_value=60, step=1, key=f"v25_days_{target_oid}")
+            w_service_days = st.number_input("希望服務天數 (天)", value=max(1, safe_int(target_order.get('service_days', 20))), min_value=1, max_value=60, step=1, key=f"v25_days_{target_oid}")
             
             # ⚡ 動態連動精算服務結束日
             calc_out = db_service.calculate_attendance_schedule(
@@ -152,18 +148,20 @@ def show():
         
         hc1, hc2, hc3 = st.columns(3)
         with hc1:
-            w_hours_per_day = st.number_input("服務時段 (小時/天)", value=safe_int(target_order.get('service_hours_per_day', 9)), min_value=1, max_value=24, step=1, key=f"v25_hrs_{target_oid}")
+            w_hours_per_day = st.number_input("服務時段 (小時/天)", value=max(1, safe_int(target_order.get('service_hours_per_day', 9))), min_value=1, max_value=24, step=1, key=f"v25_hrs_{target_oid}")
             calc_total_hours = w_service_days * w_hours_per_day
-            w_total_hours = st.number_input("總時數 (小時)", value=safe_int(target_order.get('total_hours', calc_total_hours)), disabled=not is_unlocked, key=f"v25_total_h_{target_oid}")
+            display_total_h = calc_total_hours if not is_unlocked else safe_int(target_order.get('total_hours', calc_total_hours))
+            w_total_hours = st.number_input("總時數 (小時)", value=display_total_h, disabled=not is_unlocked, key=f"v25_total_h_{target_oid}_{display_total_h}")
         
         with hc2:
             default_sub_hrs = 40 if w_subsidy_eligibility != '一般身分' else 0
             w_subsidy_hours = st.number_input("補助時數 (小時)", value=safe_int(target_order.get('subsidy_hours', default_sub_hrs)), min_value=0, step=1, key=f"v25_sub_h_{target_oid}")
             calc_self_pay_hours = max(0, w_total_hours - w_subsidy_hours)
-            w_self_pay_hours = st.number_input("自費時數 (小時)", value=calc_self_pay_hours, disabled=not is_unlocked, key=f"v25_self_h_{target_oid}")
+            display_self_h = calc_self_pay_hours if not is_unlocked else safe_int(target_order.get('self_pay_hours', calc_self_pay_hours))
+            w_self_pay_hours = st.number_input("自費時數 (小時)", value=display_self_h, disabled=not is_unlocked, key=f"v25_self_h_{target_oid}_{display_self_h}")
             
         with hc3:
-            w_claim_total_days = st.number_input("請款總日數 (天)", value=safe_int(target_order.get('claim_total_days', w_service_days)), min_value=1, step=1, key=f"v25_claim_d_{target_oid}")
+            w_claim_total_days = st.number_input("請款總日數 (天)", value=max(1, safe_int(target_order.get('claim_total_days', w_service_days))), min_value=1, step=1, key=f"v25_claim_d_{target_oid}")
 
     # =========================================================================
     # 區塊三：💰 費用與期款拆解試算區 (Formula Lock Guardrail)
@@ -178,19 +176,22 @@ def show():
             
             calc_base_pay = w_service_days * w_employer_rate
             calc_total_self_pay = calc_base_pay + w_floor_fee
-            w_total_self_pay = st.number_input("雇主自費合計金額 (元)", value=safe_int(target_order.get('total_employer_self_pay_payable', calc_total_self_pay)), disabled=not is_unlocked, step=100, key=f"v25_total_self_{target_oid}")
+            display_total_self = calc_total_self_pay if not is_unlocked else safe_int(target_order.get('total_employer_self_pay_payable', calc_total_self_pay))
+            w_total_self_pay = st.number_input("雇主自費合計金額 (元)", value=display_total_self, disabled=not is_unlocked, step=100, key=f"v25_total_self_{target_oid}_{display_total_self}")
 
         with mc2:
-            w_deposit_days = st.number_input("訂金天數", value=safe_int(target_order.get('deposit_days', 1)), min_value=1, step=1, key=f"v25_dep_d_{target_oid}")
+            w_deposit_days = st.number_input("訂金天數", value=max(1, safe_int(target_order.get('deposit_days', 1))), min_value=1, step=1, key=f"v25_dep_d_{target_oid}")
             calc_deposit_amt = w_deposit_days * w_employer_rate
-            w_deposit_amt = st.number_input("訂金 (元)", value=safe_int(target_order.get('deposit_amount', calc_deposit_amt)), disabled=not is_unlocked, step=100, key=f"v25_dep_amt_{target_oid}")
+            display_dep_amt = calc_deposit_amt if not is_unlocked else safe_int(target_order.get('deposit_amount', calc_deposit_amt))
+            w_deposit_amt = st.number_input("訂金 (元)", value=display_dep_amt, disabled=not is_unlocked, step=100, key=f"v25_dep_amt_{target_oid}_{display_dep_amt}")
             w_dep_rec_date = st.date_input("訂金日期", value=safe_date(curr_p.get('deposit_received_at')), key=f"v25_dep_r_date_{target_oid}")
 
         with mc3:
             half_days = safe_int(w_service_days / 2)
             w_first_pay_days = st.number_input("第一期款天數", value=safe_int(target_order.get('first_payment_days', half_days)), step=1, key=f"v25_p1_days_{target_oid}")
             calc_first_pay_amt = w_first_pay_days * w_employer_rate
-            w_first_pay_amt = st.number_input("第一期金額 (元)", value=safe_int(target_order.get('first_payment_amount', calc_first_pay_amt)), disabled=not is_unlocked, step=100, key=f"v25_p1_amt_{target_oid}")
+            display_first_pay = calc_first_pay_amt if not is_unlocked else safe_int(target_order.get('first_payment_amount', calc_first_pay_amt))
+            w_first_pay_amt = st.number_input("第一期金額 (元)", value=display_first_pay, disabled=not is_unlocked, step=100, key=f"v25_p1_amt_{target_oid}_{display_first_pay}")
             w_first_pay_date = st.date_input("第一期款入帳日", value=safe_date(target_order.get('first_payment_date')), key=f"v25_p1_date_{target_oid}")
 
         st.markdown("---")
@@ -198,7 +199,8 @@ def show():
         with m2_c1:
             w_second_pay_days = st.number_input("第二期款天數", value=safe_int(target_order.get('second_payment_days', w_service_days - w_first_pay_days)), step=1, key=f"v25_p2_days_{target_oid}")
             calc_second_pay_amt = w_total_self_pay - w_deposit_amt - w_first_pay_amt
-            w_second_pay_amt = st.number_input("第二期金額 (元)", value=safe_int(target_order.get('second_payment_amount', calc_second_pay_amt)), disabled=not is_unlocked, step=100, key=f"v25_p2_amt_{target_oid}")
+            display_second_pay = calc_second_pay_amt if not is_unlocked else safe_int(target_order.get('second_payment_amount', calc_second_pay_amt))
+            w_second_pay_amt = st.number_input("第二期金額 (元)", value=display_second_pay, disabled=not is_unlocked, step=100, key=f"v25_p2_amt_{target_oid}_{display_second_pay}")
         with m2_c2:
             w_second_pay_date = st.date_input("第二期款入帳日", value=safe_date(target_order.get('second_payment_date')), key=f"v25_p2_date_{target_oid}")
 
@@ -213,8 +215,9 @@ def show():
             w_caregiver_rate = st.number_input("服務單價 (元/天)", value=safe_int(target_order.get('caregiver_rate', 2000)), step=100, key=f"v25_care_rate_{target_oid}")
             w_salary_1_date = st.date_input("付款日-1 (自費薪資撥款)", value=safe_date(target_order.get('salary_payment_date_1')), key=f"v25_p1_pay_date_{target_oid}")
         with sc2:
-            calc_sub_salary = safe_int(round((w_subsidy_hours / w_hours_per_day) * w_caregiver_rate))
-            w_subsidy_salary = st.number_input("補助薪資 (元)", value=safe_int(target_order.get('subsidy_salary', calc_sub_salary)), disabled=not is_unlocked, step=100, key=f"v25_sub_sal_{target_oid}")
+            calc_sub_salary = safe_int(round((w_subsidy_hours / max(1, w_hours_per_day)) * w_caregiver_rate))
+            display_sub_salary = calc_sub_salary if not is_unlocked else safe_int(target_order.get('subsidy_salary', calc_sub_salary))
+            w_subsidy_salary = st.number_input("補助薪資 (元)", value=display_sub_salary, disabled=not is_unlocked, step=100, key=f"v25_sub_sal_{target_oid}_{display_sub_salary}")
             w_salary_2_date = st.date_input("付款日-2 (補助薪資撥款)", value=safe_date(target_order.get('salary_payment_date_2')), key=f"v25_p2_pay_date_{target_oid}")
         with sc3:
             w_govt_claim = st.date_input("市府請款 (請款送件日)", value=safe_date(target_order.get('govt_claim_date')), key=f"v25_govt_date_{target_oid}")
@@ -247,7 +250,35 @@ def show():
             st.error("選取「訂單取消」時，請務必填寫取消原因！")
         else:
             try:
+                # 1. 寫入 orders 主資料表全量欄位
+                full_data = {
+                    'client_name': w_client_name,
+                    'service_days': w_service_days,
+                    'service_hours_per_day': w_hours_per_day,
+                    'subsidy_eligibility': w_subsidy_eligibility,
+                    'floor_fee': w_floor_fee,
+                    'start_date': w_start_date,
+                    'actual_start_date': w_act_start,
+                    'end_date': w_act_end,
+                    'deposit_date': w_dep_rec_date
+                }
+                db_service.update_order_full_details(target_oid, full_data)
+                
+                # 2. 寫入 payments 實收財務表
+                db_service.update_payment_details(
+                    order_id=target_oid,
+                    amount_receivable=w_total_self_pay,
+                    deposit_received=w_dep_rec,
+                    balance_received=w_bal_rec,
+                    caregiver_fee=w_subsidy_salary,
+                    payment_status="已收訂金" if w_dep_rec > 0 and w_bal_rec == 0 else ("已結案" if w_bal_rec > 0 else "待收訂金"),
+                    notes=w_notes,
+                    deposit_received_at=w_dep_rec_date
+                )
+                
+                # 3. 寫入訂單狀態與取消原因
                 db_service.update_order_status(target_oid, w_order_status, w_cancel_reason.strip())
+                
                 st.success("🎉 全套 36 個訂單欄位與試算結果已成功寫入資料庫！")
                 st.rerun()
             except Exception as err:

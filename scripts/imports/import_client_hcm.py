@@ -181,11 +181,27 @@ def process_import(excel_path):
             cursor.execute("SELECT id FROM orders WHERE client_id = %s", (client_id,))
             order_exists = cursor.fetchone()
             if not order_exists:
+                # 取得相關欄位的值以初始化 orders 表中的對應數值
+                s_days = clean_data(record.get('service_days'), 'service_days') or 20
+                s_time_raw = record.get('service_time') or "9"
+                # 清理服務時間時數
+                import re
+                hrs_match = re.search(r'\d+', str(s_time_raw))
+                s_hours = int(hrs_match.group(0)) if hrs_match else 9
+                
+                # 身分資格轉為對應的 subsidy_eligibility
+                sub_elig = "一般市民"
+                raw_sub = str(record.get('identity_status') or '')
+                if "補助" in raw_sub or "低收" in raw_sub:
+                    sub_elig = "補助市民"
+                elif "非" in raw_sub:
+                    sub_elig = "非市民"
+
                 # 初始化建立 orders，預設 status 為「洽談中」
-                cursor.execute(
-                    "INSERT INTO orders (client_id, status) VALUES (%s, '\u6d3d\u8ac7\u4e2d')",
-                    (client_id,)
-                )
+                cursor.execute("""
+                    INSERT INTO orders (client_id, status, service_days, service_hours_per_day, subsidy_eligibility) 
+                    VALUES (%s, '洽談中', %s, %s, %s)
+                """, (client_id, s_days, s_hours, sub_elig))
                 
         conn.commit()
         print(f"匯入成功：新增 {inserted} 筆客戶資料，更新 {updated} 筆客戶資料。")

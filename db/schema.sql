@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS staff (
     status VARCHAR(20) DEFAULT 'active' COMMENT '在職狀態 (active/inactive)',
     line_user_id VARCHAR(100) COMMENT 'LINE 平台用戶唯一識別碼 (Webhook 取得)',
     weekly_rest_days JSON COMMENT '固定休假偏好 JSON 陣列 (如 ["Sunday"])',
+    care_babies INT DEFAULT 1 COMMENT '最大可照顧寶寶數量 (1:單胞胎, 2:雙胞胎, 3:三胞胎)',
     service_regions JSON COMMENT '接受服務區域 JSON 陣列',
     special_skills JSON COMMENT '特殊技能與偏好標籤 JSON 陣列',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -227,6 +228,7 @@ CREATE TABLE IF NOT EXISTS orders (
     deposit_date DATE NULL COMMENT '訂金收取日期',
     start_date DATE NULL COMMENT '預計/實際服務開始日 (AK)',
     end_date DATE NULL COMMENT '預計/實際服務結束日 (AL)',
+    custom_rest_dates JSON NULL COMMENT '排定/自訂休假日期 JSON 陣列 (如 ["2026-07-05", "2026-07-12"])',
     other_addition DECIMAL(10, 2) DEFAULT 0.00 COMMENT '其他加價 (AE)',
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

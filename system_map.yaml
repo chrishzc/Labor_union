@@ -1,33 +1,106 @@
-# Master System Map (ADAD Master Architecture Version 49)
-# Sub-Maps Architecture:
-# - UI Layer Sub-Map: ui/ui_system_map.yaml
-# - Services Layer Sub-Map: services/services_system_map.yaml
-
-version: 49
+version: 1
 scope: master_architecture
-
 sub_maps:
   ui_layer: ui/ui_system_map.yaml
   services_layer: services/services_system_map.yaml
-
+  api_layer: api/api_system_map.yaml
 modules:
   Main:
     type: entrypoint
     description: 系統主程式入口。
-    source: main.py
-    dependencies: [AppShellUI]
-    state: validated
-
+    source: '`main.py`'
+    dependencies: []
+    input: {}
+    output: {}
+    invariants: []
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo: []
+    checkpoint: []
+    state: dirty
+    fan_in_snapshot: 0
   UILayer:
     type: sub_system_layer
-    description: 前端介面與專頁分頁層。包含 AppShellUI, DataBrowserUI, OrderUI, CalendarUI, EditOrderUI, FormManagementUI。
-    sub_map_reference: ui/ui_system_map.yaml
+    description: ''
+    source: ''
+    dependencies: []
+    input: {}
+    output: {}
+    invariants: []
+    preferred_pattern: none
+    verification: []
+    decisions: []
     todo:
-      - "[ ] 審核 Master System Map 的架構內容，進行全面擴充與層級描述精緻化"
-    state: validated
-
+    - '[ ] 審核 Master System Map 的架構內容，進行全面擴充與層級描述精緻化'
+    checkpoint: []
+    state: dirty
+    fan_in_snapshot: 0
   ServicesLayer:
     type: sub_system_layer
-    description: 後端數據與排班計算服務層。包含 DbService 與 CalendarService。
-    sub_map_reference: services/services_system_map.yaml
+    description: ''
+    source: ''
+    dependencies: []
+    input: {}
+    output: {}
+    invariants: []
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo: []
+    checkpoint: []
+    state: dirty
+    fan_in_snapshot: 0
+  GenerateFakeData:
+    type: script
+    description: 假資料統一生成器。採用「時間軸推進演算法 (Sequential Timeline Generator)」，為每位月嫂維護獨立時間軸游標，確保同月嫂的案件排班前後接續、絕對獨佔且零重疊
+      (Zero Overlap)。
+    source: '`scripts/generate_fake_data.py`'
+    dependencies: []
+    input: {}
+    output: {}
+    invariants:
+    - 'INV-SCRIPT-01: 同一位服務人員 (staff_id) 產生的多筆非取消訂單 [S_i, E_i] 與 [S_j, E_j] 必須滿足 E_i
+      < S_j，嚴禁產生時間交集與衝突綁定。'
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo:
+    - '[x] 實作時間軸推進演算法，產生多樣化狀態 (訂單完成, 服務中, 訂單成立, 洽談中, 訂單取消) 與天數精算假資料'
+    checkpoint: []
+    state: planned
+    fan_in_snapshot: 0
+  FixScheduleConflicts:
+    type: script
+    description: 月嫂檔期衝突檢測與自動修復工具。掃描跨訂單時間重疊的異常，並依訂單狀態優先級 (服務中 > 訂單成立 > 洽談中) 自動解綁次要衝突訂單之 staff_id 與清理舊排班。
+    source: '`scripts/fix_schedule_conflicts.py`'
+    dependencies: []
+    input: {}
+    output: {}
+    invariants:
+    - 'INV-SCRIPT-02: 衝突檢測必須掃描所有非取消狀態且 start_date <= e2 AND end_date >= s2 的跨訂單區間。'
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo:
+    - '[x] 實作跨訂單衝突掃描 SQL 檢測與 --repair 自動修復命令'
+    checkpoint: []
+    state: planned
+    fan_in_snapshot: 0
+  StartScript:
+    type: script
+    description: 一鍵啟動與部署初始化腳本。啟動 Docker、初始化 MySQL、產生並匯入假資料，最後並行啟動 FastAPI 與 Streamlit。
+    source: '`start.bat`'
+    dependencies: [Main, GenerateFakeData]
+    input: {}
+    output: {}
+    invariants:
+    - 'INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始執行 init_db.py 防止連線逾時崩潰。'
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo:
+    - '[x] 建立 start.bat 一鍵部署腳本並通過人工驗證測試'
+    checkpoint: []
     state: validated
+    fan_in_snapshot: 0

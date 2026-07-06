@@ -1,6 +1,6 @@
 import pymysql
 import math
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 DB_CONFIG = {
     'host': '127.0.0.1',
@@ -288,6 +288,51 @@ def update_order_status(order_id: int, status: str, cancel_reason: str = None) -
     finally:
         conn.close()
 
+def update_order_full_details(order_id: int, data: dict) -> bool:
+    """更新 orders 主資料表全量欄位 (含天數、時數、資格、樓層費、起訖日與客戶姓名)"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE orders 
+                SET service_days = %s,
+                    service_hours_per_day = %s,
+                    subsidy_eligibility = %s,
+                    floor_fee = %s,
+                    start_date = %s,
+                    actual_start_date = %s,
+                    end_date = %s,
+                    deposit_date = %s
+                WHERE id = %s
+            """, (
+                data.get('service_days'),
+                data.get('service_hours_per_day'),
+                data.get('subsidy_eligibility'),
+                data.get('floor_fee'),
+                data.get('start_date'),
+                data.get('actual_start_date'),
+                data.get('end_date'),
+                data.get('deposit_date'),
+                order_id
+            ))
+            
+            # 若 clients 姓名有修改，同步更新客戶主表 name
+            if data.get('client_name'):
+                cursor.execute("""
+                    UPDATE clients c
+                    JOIN orders o ON o.client_id = c.id
+                    SET c.name = %s
+                    WHERE o.id = %s
+                """, (data.get('client_name'), order_id))
+                
+            conn.commit()
+            return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
 def update_payment_details(order_id: int, amount_receivable: float, deposit_received: float, 
                            balance_received: float, caregiver_fee: float, 
                            payment_status: str, notes: str = None,
@@ -437,7 +482,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
                         
             # 2. 疊加 staff_schedule 明細對特定日期個體設定進行覆蓋
             cursor.execute("""
-                SELECT s.*, c.name AS client_name, o.status AS order_status
+                SELECT s.*, c.name AS client_name, o.status AS order_status, o.custom_rest_dates
                 FROM staff_schedule s
                 JOIN orders o ON s.order_id = o.id
                 JOIN clients c ON o.client_id = c.id
@@ -452,10 +497,13 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
                     continue
                 day = w_date.day
                 
+                # 判斷是否為排定休假 (is_work_day == False 標示為綠底 🟢)
                 if r['order_status'] == '訂單取消':
                     status = 'white'
+                elif not r['is_work_day']:
+                    status = 'green'  # 🟢 綠底休假/請假
                 elif w_date <= today_date or r['order_status'] in ['服務中', '訂單完成']:
-                    status = 'red' if r['is_work_day'] else 'yellow'
+                    status = 'red'
                 else:
                     status = 'yellow'
                 
@@ -463,11 +511,107 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
                     'status': status,
                     'client_name': r['client_name'],
                     'order_id': r['order_id'],
-                    'is_work_day': r['is_work_day'],
-                    'is_double_pay': r['is_double_pay'],
+                    'is_work_day': bool(r['is_work_day']),
+                    'is_double_pay': bool(r['is_double_pay']),
                     'schedule_id': r['id']
                 }
             return schedule_map
+    finally:
+        conn.close()
+
+def save_order_rest_dates(order_id: int, rest_dates_list: list) -> dict:
+    """
+    持久化儲存訂單放假日期清單，並依據休假天數自動順延服務結束日 end_date。
+    確保出勤工作服務天數 100% 足額達 service_days (N 天)。
+    """
+    import json
+    from datetime import datetime, timedelta, date
+
+    def parse_date(val):
+        if not val:
+            return None
+        if isinstance(val, date):
+            return val
+        if isinstance(val, datetime):
+            return val.date()
+        try:
+            return datetime.strptime(str(val).split(" ")[0].strip(), "%Y-%m-%d").date()
+        except:
+            return None
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            # 1. 讀取訂單資訊
+            cursor.execute("""
+                SELECT id, staff_id, start_date, service_days 
+                FROM orders 
+                WHERE id = %s
+            """, (order_id,))
+            order = cursor.fetchone()
+            if not order:
+                return {'success': False, 'message': '找不到指定的訂單。'}
+
+            start_d = parse_date(order['start_date'])
+            if not start_d:
+                return {'success': False, 'message': '該訂單尚未設定有效的開始服務日期。'}
+
+            target_work_days = order['service_days'] or 20
+            staff_id = order['staff_id']
+
+            # 整理放假日期集合 (ISO 格式)
+            clean_rest_set = set()
+            for rd in rest_dates_list:
+                dt = parse_date(rd)
+                if dt:
+                    clean_rest_set.add(dt.strftime("%Y-%m-%d"))
+
+            # 2. 自動推算順延後的完工日 end_date
+            curr_date = start_d
+            work_days_count = 0
+            new_end_date = start_d
+            schedule_entries = []
+
+            while work_days_count < target_work_days:
+                date_str = curr_date.strftime("%Y-%m-%d")
+                is_work = (date_str not in clean_rest_set)
+
+                if is_work:
+                    work_days_count += 1
+                
+                new_end_date = curr_date
+                schedule_entries.append((date_str, is_work))
+                curr_date += timedelta(days=1)
+
+            # 3. 持久化更新 orders 表的 custom_rest_dates 與 end_date
+            json_rest_str = json.dumps(sorted(list(clean_rest_set)), ensure_ascii=False)
+            cursor.execute("""
+                UPDATE orders 
+                SET custom_rest_dates = %s, end_date = %s 
+                WHERE id = %s
+            """, (json_rest_str, new_end_date, order_id))
+
+            # 4. 若已被指派月嫂，覆寫更新 staff_schedule 表
+            if staff_id:
+                cursor.execute("DELETE FROM staff_schedule WHERE order_id = %s", (order_id,))
+                for date_str, is_work in schedule_entries:
+                    note = '正常服務出勤日' if is_work else '行政專員排定放假(動態順延)'
+                    cursor.execute("""
+                        INSERT INTO staff_schedule (order_id, staff_id, work_date, is_work_day, is_double_pay, notes)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        ON DUPLICATE KEY UPDATE is_work_day = VALUES(is_work_day), notes = VALUES(notes)
+                    """, (order_id, staff_id, date_str, is_work, False, note))
+
+            conn.commit()
+            return {
+                'success': True,
+                'message': f'成功儲存放假！完工日已動態順延至 {new_end_date.strftime("%Y-%m-%d")} (足額服務 {target_work_days} 天)。',
+                'new_end_date': new_end_date.strftime("%Y-%m-%d"),
+                'rest_count': len(clean_rest_set)
+            }
+    except Exception as e:
+        conn.rollback()
+        return {'success': False, 'message': f'儲存放假失敗: {str(e)}'}
     finally:
         conn.close()
 
@@ -806,5 +950,154 @@ def reply_matching_inquiry(match_id: int, accepted) -> bool:
         raise e
     finally:
         conn.close()
+
+def parse_client_district(city: str, address: str) -> str:
+    """ponytail: extract administrative district from client city and address"""
+    full_str = f"{city or ''} {address or ''}"
+    districts = ["香山區", "東區", "北區", "竹北市", "竹東鎮", "新埔鎮", "關西鎮", "湖口鄉", "新豐鄉", "芎林鄉", "橫山鄉", "北埔鄉", "寶山鄉", "峨眉鄉", "尖石鄉", "五峰鄉", "頭份市", "竹南鎮"]
+    for d in districts:
+        if d in full_str:
+            return d
+    if city:
+        return city
+    return ""
+
+def get_recommended_staff_for_order(
+    order_id: int,
+    filter_region: bool = True,
+    filter_schedule: bool = True,
+    filter_babies: bool = True,
+    filter_time: bool = True
+) -> list[dict]:
+    """
+    ADAD INV-SVC-05: 智慧粗篩比對月嫂推薦引擎 (支援 7 天預留備用期持久化掃描與 city/address 區域比對)
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT o.id AS order_id, o.start_date, o.end_date, o.actual_start_date, o.service_days, o.service_hours_per_day,
+                       c.id AS client_id, c.name AS client_name, c.city, c.address, c.baby_info, c.service_time
+                FROM orders o
+                JOIN clients c ON o.client_id = c.id
+                WHERE o.id = %s
+            """, (order_id,))
+            order_info = cursor.fetchone()
+            if not order_info:
+                return []
+
+            o_st = order_info.get('actual_start_date') or order_info.get('start_date')
+            o_ed = order_info.get('end_date')
+            client_district = parse_client_district(order_info.get('city'), order_info.get('address'))
+            client_baby = str(order_info.get('baby_info') or '')
+            is_twins = "雙胞胎" in client_baby or "2" in client_baby
+
+            cursor.execute("SELECT * FROM staff WHERE status = 'active'")
+            staff_list = cursor.fetchall()
+
+            cursor.execute("SELECT staff_id, region_name FROM staff_regions")
+            region_rows = cursor.fetchall()
+            staff_region_map = {}
+            for r in region_rows:
+                sid = r['staff_id']
+                staff_region_map.setdefault(sid, set()).add(r['region_name'])
+
+            cursor.execute("""
+                SELECT id, staff_id, start_date, end_date, actual_start_date 
+                FROM orders 
+                WHERE staff_id IS NOT NULL AND status NOT IN ('訂單取消') AND id != %s
+            """, (order_id,))
+            existing_orders = cursor.fetchall()
+
+            recommendations = []
+
+            for s in staff_list:
+                sid = s['id']
+                reasons = []
+                reject_reasons = []
+                score = 100
+
+                # 1. 服務區域比對
+                s_regions = staff_region_map.get(sid, set())
+                if s.get('service_regions'):
+                    try:
+                        import json
+                        sr_list = json.loads(s['service_regions']) if isinstance(s['service_regions'], str) else s['service_regions']
+                        s_regions.update(sr_list)
+                    except:
+                        pass
+
+                region_matched = True
+                if client_district and s_regions:
+                    if not any(client_district in r or r in client_district for r in s_regions):
+                        region_matched = False
+                        reject_reasons.append(f"區域不符 ({client_district})")
+                        score -= 40
+                    else:
+                        reasons.append(f"符合區域 ({client_district})")
+                else:
+                    reasons.append("區域可承接")
+
+                # 2. 檔期衝突掃描 (包含 7 天預留備用期持久化計算)
+                schedule_conflict = False
+                if o_st:
+                    o_end_date = o_ed or (o_st + timedelta(days=safe_int(order_info.get('service_days', 20))))
+                    for eo in existing_orders:
+                        if eo['staff_id'] == sid:
+                            eo_st = eo.get('actual_start_date') or eo.get('start_date')
+                            eo_ed = eo.get('end_date') or (eo_st + timedelta(days=20)) if eo_st else None
+                            if eo_st and eo_ed:
+                                # 包含 7 天預留備用期！
+                                eo_buffered_end = eo_ed + timedelta(days=7)
+                                if (o_st <= eo_buffered_end) and (o_end_date >= eo_st):
+                                    schedule_conflict = True
+                                    reject_reasons.append(f"檔期衝突(含7天備用期至{eo_buffered_end.strftime('%m/%d')})")
+                                    score -= 50
+                                    break
+                if not schedule_conflict:
+                    reasons.append("檔期無衝突")
+
+                # 3. 照顧胎數比對
+                care_babies = safe_int(s.get('care_babies', 1))
+                if is_twins and care_babies < 2:
+                    reject_reasons.append("不承接雙胞胎")
+                    score -= 30
+                else:
+                    reasons.append("胎數符合")
+
+                # 4. 可選條件過濾執行
+                is_eligible = True
+                if filter_region and not region_matched:
+                    is_eligible = False
+                if filter_schedule and schedule_conflict:
+                    is_eligible = False
+                if filter_babies and is_twins and care_babies < 2:
+                    is_eligible = False
+
+                if is_eligible:
+                    status_prefix = "🟢 100% 匹配" if score >= 90 else ("🟡 部分匹配" if score >= 60 else "⚠️ 條件較不符")
+                    reason_str = " | ".join(reasons)
+                    if reject_reasons:
+                        reason_str += f" (警示: {', '.join(reject_reasons)})"
+                    
+                    display_label = f"{s['name']} ({s.get('phone', '')}) - {status_prefix} [{reason_str}]"
+                    
+                    recommendations.append({
+                        'staff_id': sid,
+                        'name': s['name'],
+                        'phone': s.get('phone'),
+                        'line_user_id': s.get('line_user_id'),
+                        'score': score,
+                        'display_label': display_label,
+                        'is_perfect': score >= 90,
+                        'reasons': reasons,
+                        'reject_reasons': reject_reasons
+                    })
+
+            recommendations.sort(key=lambda x: x['score'], reverse=True)
+            return recommendations
+    finally:
+        conn.close()
+
 
 

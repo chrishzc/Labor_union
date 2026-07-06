@@ -1,0 +1,65 @@
+# API Layer Sub-System Map (ADAD Sub-Map Version 2.0)
+# Scope: api/ (FastAPI RESTful Routers and Schemas)
+
+version: 2.0
+scope: api_layer
+
+modules:
+  FastApiApp:
+    type: api_entrypoint
+    description: FastAPI REST Server 主入口，掛載 CORS、Health check 與各業務 APIRouter。
+    source: api/main.py
+    dependencies: [OrderRouter, MatchRouter, ScheduleRouter, PaymentRouter, ClientRouter, StaffRouter, HolidayRouter]
+
+  OrderRouter:
+    type: api_router
+    description: 訂單與時程精算 API 路由，提供 GET 訂單全量視圖、PUT 36 欄位全量寫入、PUT 訂單狀態更新與 POST 出勤順延計算。
+    source: api/routes/orders.py
+    dependencies: [DbService, OrderSchemas]
+    state: validated
+    invariants:
+      - "INV-API-ORD-01: 所有 API 傳入傳出必須經過 Pydantic BaseResponse 與 Schema 模型嚴格型態轉換。"
+
+  MatchRouter:
+    type: api_router
+    description: 案件與配對中心 API 路由。處理訂單資訊 1/2 發送 (根據 staff.line_user_id 推播)、月嫂意願更新、傳送履歷與定案指派。
+    source: api/routes/matches.py
+    dependencies: [DbService, MatchSchemas]
+    state: validated
+    invariants:
+      - "INV-API-MATCH-01: 發送訂單資訊 1/2 時，若 staff.line_user_id 存在，必須調用 LINE Messaging API 進行 Flex Message 實體推播。"
+
+  ScheduleRouter:
+    type: api_router
+    description: 月嫂服務人員行事曆與動態順延排班保存 API 路由。
+    source: api/routes/schedule.py
+    dependencies: [DbService]
+    state: validated
+
+  PaymentRouter:
+    type: api_router
+    description: 財務與對帳 API 路由，提供 GET 財務列表與 PUT 實收金額與備註更新。
+    source: api/routes/payments.py
+    dependencies: [DbService, PaymentSchemas]
+    state: validated
+
+  ClientRouter:
+    type: api_router
+    description: 客戶名冊 API 路由，提供 GET 客戶名冊資料表。
+    source: api/routes/clients.py
+    dependencies: [DbService]
+    state: validated
+
+  StaffRouter:
+    type: api_router
+    description: 服務人員名冊 API 路由，提供 GET 服務人員名冊資料表。
+    source: api/routes/staff.py
+    dependencies: [DbService]
+    state: validated
+
+  HolidayRouter:
+    type: api_router
+    description: 國定假日管理 API 路由，提供 GET/POST/DELETE 國定假日操作。
+    source: api/routes/holidays.py
+    dependencies: [DbService]
+    state: validated
