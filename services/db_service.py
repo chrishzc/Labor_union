@@ -152,10 +152,22 @@ def get_order_details() -> list[dict]:
             rows = cursor.fetchall()
             for r in rows:
                 r['notes'] = r.get('notes') or r.get('special_needs') or ""
-                r['due_date'] = r.get('due_date') or r.get('start_date')
-                r['actual_start_date'] = r.get('actual_start_date') or r.get('start_date')
-                r['actual_end_date'] = r.get('actual_end_date') or r.get('end_date')
-                r['deposit_received_at'] = r.get('deposit_received_at') or r.get('deposit_date')
+                def to_str_date(val):
+                    if not val:
+                        return ""
+                    if hasattr(val, "strftime"):
+                        return val.strftime("%Y-%m-%d")
+                    return str(val)
+
+                r['due_date'] = to_str_date(r.get('due_date') or r.get('start_date'))
+                r['actual_start_date'] = to_str_date(r.get('actual_start_date') or r.get('start_date'))
+                r['actual_end_date'] = to_str_date(r.get('actual_end_date') or r.get('end_date'))
+                r['deposit_received_at'] = to_str_date(r.get('deposit_received_at') or r.get('deposit_date'))
+                r['start_date'] = to_str_date(r.get('start_date'))
+                r['end_date'] = to_str_date(r.get('end_date'))
+                r['deposit_date'] = to_str_date(r.get('deposit_date'))
+                r['govt_claim_date'] = to_str_date(r.get('govt_claim_date'))
+
                 r['custom_leave_dates'] = r.get('custom_leave_dates') or ""
                 r['service_mode'] = r.get('service_mode') or "週休1日"
                 r['service_hours_per_day'] = safe_int(r.get('service_hours_per_day', 9))
@@ -184,8 +196,8 @@ def get_order_details() -> list[dict]:
                     default_pay1 = "2026-10-15"
                     default_pay2 = "2026-11-15"
 
-                r['salary_payment_date_1'] = r.get('salary_payment_date_1') or default_pay1
-                r['salary_payment_date_2'] = r.get('salary_payment_date_2') or default_pay2
+                r['salary_payment_date_1'] = to_str_date(r.get('salary_payment_date_1') or default_pay1)
+                r['salary_payment_date_2'] = to_str_date(r.get('salary_payment_date_2') or default_pay2)
                 r['phone'] = r.get('phone') or r.get('client_phone') or "0912-345-678"
                 r['address'] = r.get('address') or r.get('client_address') or "新竹市東區中央路 100 號"
                 r['total_caregiver_salary'] = safe_int(r.get('service_salary', 0)) + safe_int(r.get('subsidy_salary', 0))

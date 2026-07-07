@@ -22,3 +22,11 @@ metabase-data/
 
 # Private environment variables / secrets
 .env
+
+# ADAD (Architecture-Driven Agentic Development)
+.agents/
+# Preserve system_map files
+!**/system_map.yaml
+!**/system_map.md
+!**/*system_map.yaml
+!**/*system_map.md

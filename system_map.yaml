@@ -31,10 +31,24 @@ modules:
     preferred_pattern: none
     verification: []
     decisions: []
-    todo:
-    - '[ ] 審核 Master System Map 的架構內容，進行全面擴充與層級描述精緻化'
+    todo: []
     checkpoint: []
     state: dirty
+    fan_in_snapshot: 0
+  APILayer:
+    type: sub_system_layer
+    description: ''
+    source: ''
+    dependencies: []
+    input: {}
+    output: {}
+    invariants: []
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo: []
+    checkpoint: []
+    state: planned
     fan_in_snapshot: 0
   ServicesLayer:
     type: sub_system_layer
@@ -59,39 +73,34 @@ modules:
     dependencies: []
     input: {}
     output: {}
-    invariants:
-    - 'INV-SCRIPT-01: 同一位服務人員 (staff_id) 產生的多筆非取消訂單 [S_i, E_i] 與 [S_j, E_j] 必須滿足 E_i
-      < S_j，嚴禁產生時間交集與衝突綁定。'
+    invariants: []
     preferred_pattern: none
     verification: []
     decisions: []
-    todo:
-    - '[x] 實作時間軸推進演算法，產生多樣化狀態 (訂單完成, 服務中, 訂單成立, 洽談中, 訂單取消) 與天數精算假資料'
+    todo: []
     checkpoint: []
     state: planned
     fan_in_snapshot: 0
   FixScheduleConflicts:
     type: script
-    description: 月嫂檔期衝突檢測與自動修復工具。掃描跨訂單時間重疊的異常，並依訂單狀態優先級 (服務中 > 訂單成立 > 洽談中) 自動解綁次要衝突訂單之 staff_id 與清理舊排班。
+    description: 月嫂檔期衝突檢測與自動修復工具。
     source: '`scripts/fix_schedule_conflicts.py`'
     dependencies: []
     input: {}
     output: {}
-    invariants:
-    - 'INV-SCRIPT-02: 衝突檢測必須掃描所有非取消狀態且 start_date <= e2 AND end_date >= s2 的跨訂單區間。'
+    invariants: []
     preferred_pattern: none
     verification: []
     decisions: []
-    todo:
-    - '[x] 實作跨訂單衝突掃描 SQL 檢測與 --repair 自動修復命令'
+    todo: []
     checkpoint: []
     state: planned
     fan_in_snapshot: 0
   StartScript:
     type: script
-    description: 一鍵啟動與部署初始化腳本。啟動 Docker、初始化 MySQL、產生並匯入假資料，最後並行啟動 FastAPI 與 Streamlit。
+    description: 一鍵啟動與部署環境初始化腳本。啟動 Docker、初始化 MySQL、產生並匯入假資料，最後並行啟動 FastAPI 與 Streamlit。
     source: '`start.bat`'
-    dependencies: [Main, GenerateFakeData]
+    dependencies: []
     input: {}
     output: {}
     invariants:
@@ -99,8 +108,7 @@ modules:
     preferred_pattern: none
     verification: []
     decisions: []
-    todo:
-    - '[x] 建立 start.bat 一鍵部署腳本並通過人工驗證測試'
+    todo: []
     checkpoint: []
-    state: validated
+    state: dirty
     fan_in_snapshot: 0

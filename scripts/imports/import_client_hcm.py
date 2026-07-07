@@ -158,8 +158,8 @@ def process_import(excel_path):
                 update_cols = []
                 val_list = []
                 for k, v in record.items():
-                    # ponytail: 排除對 line_user_id 與 status 的覆寫，將 status 交給生命週期管理
-                    if k not in ['case_no', 'line_user_id', 'status']:
+                    # ponytail: 排除對 line_user_id 的覆寫，將訂單狀態交給 orders 表生命週期管理
+                    if k not in ['case_no', 'line_user_id']:
                         update_cols.append(f"`{k}` = %s")
                         val_list.append(v)
                 val_list.append(case_no)
@@ -167,8 +167,6 @@ def process_import(excel_path):
                 cursor.execute(sql, tuple(val_list))
                 updated += 1
             else:
-                # 插入時，強制設定 status 欄位為「洽談中」
-                record['status'] = '\u6d3d\u8ac7\u4e2d'
                 cols = ", ".join([f"`{k}`" for k in record.keys()])
                 places = ", ".join(["%s"] * len(record))
                 sql = f"INSERT INTO clients ({cols}) VALUES ({places})"

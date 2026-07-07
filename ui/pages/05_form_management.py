@@ -872,7 +872,7 @@ def show():
                     with col_right:
                         st.markdown("#### 👁️ 右側：實時單據與 PDF 即時預覽")
                         live_html = render_html_document(draft_tpl, target_order, global_stats)
-                        components.html(live_html, height=620, scrolling=True)
+                        st.iframe(live_html, height=620)
 
                 # =================================================================
                 # 實體單據預覽與 PDF / 圖片導出 (標準檢視視窗)
@@ -880,7 +880,7 @@ def show():
                 else:
                     st.markdown("---")
                     doc_html = render_html_document(curr_tpl, target_order, global_stats)
-                    components.html(doc_html, height=580, scrolling=True)
+                    st.iframe(doc_html, height=580)
 
     # =========================================================================
     # TAB 3: 制式定型化契約管理 (EPPP 變數代理引擎 - INV-UI-FORM-16/17/18)
@@ -977,7 +977,7 @@ def show():
             else:
                 contract_html = f"<div>預設範本</div>"
             
-            components.html(contract_html, height=1100, scrolling=True)
+            st.iframe(contract_html, height=1100)
         else:
             col_c_left, col_c_right = st.columns([1, 1])
 
@@ -1055,7 +1055,7 @@ def show():
                 else:
                     contract_html = f"<div>預設範本</div>"
 
-                components.html(contract_html, height=750, scrolling=True)
+                st.iframe(contract_html, height=750)
 
                 st.markdown("---")
                 pdf_col1, pdf_col2 = st.columns([1, 1])
