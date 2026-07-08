@@ -102,33 +102,20 @@ def clean_data(val, col_name):
 
 def process_import(excel_path):
     if not os.path.exists(excel_path):
-        print(f"\u932f\u8aa4\uff1a\u627e\u4e0d\u5230 Excel \u6a94\u6848\uff1a{excel_path}")
+        print(f"錯誤：找不到 Excel 檔案：{excel_path}")
         return 0, 0
 
-    print(f"\u89e3\u6790 Excel \u6a94\u6848\uff1a{excel_path} ...")
+    print(f"解析 Excel 檔案：{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
 
-    # \u5c0b\u627e\u5339\u914d\u7684\u5206\u9801 (\u5305\u542b '\u5ba2\u6236' \u6216 'beclass')
-    target_sheet = None
-    for name in xl.sheet_names:
-        clean_name = name.replace(" ", "").lower()
-        if '\u5ba2\u6236' in name and 'beclass' in clean_name:
-            target_sheet = name
-            break
-    # \u5982\u679c\u6c92\u627e\u5230\uff0c\u5617\u8a66\u66f4\u5bec\u9b06\u7684\u5339\u914d
-    if not target_sheet:
-        for name in xl.sheet_names:
-            clean_name = name.replace(" ", "").lower()
-            if '\u5ba2\u6236' in name or ('beclass' in clean_name and '\u670d\u52d9' not in name and '\u4eba\u54e1' not in name):
-                target_sheet = name
-                break
-
-    if not target_sheet:
-        print("\u672a\u627e\u5230\u5305\u542b '\u5ba2\u6236beclass' \u95dc\u9375\u5b57\u7684\u5de5\u4f5c\u8868\u3002\u8df3\u904e\u6b64\u6a94\u6848\u3002")
+    # ponytail: 確定每份檔案只有單一分頁，直接讀取第一個分頁，不進行名稱篩選
+    if not xl.sheet_names:
+        print("工作表為空。跳過此檔案。")
         return 0, 0
+    target_sheet = xl.sheet_names[0]
 
     df = xl.parse(target_sheet)
-    print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
+    print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
 
     try:
         conn = pymysql.connect(**DB_CONFIG)

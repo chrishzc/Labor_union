@@ -102,17 +102,11 @@ def process_import(excel_path):
     print(f"解析 Excel 檔案：{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
     
-    # 尋找匹配的分頁 (不區分大小寫、去空白)
-    target_sheet = None
-    for name in xl.sheet_names:
-        clean_name = name.replace(" ", "").lower()
-        if "hcm" in clean_name or "市府" in clean_name:
-            target_sheet = name
-            break
-            
-    if not target_sheet:
-        print("未找到包含 'HCM' 或 '市府' 關鍵字的工作表。跳過此檔案。")
+    # ponytail: 確定每份檔案只有單一分頁，直接讀取第一個分頁，不進行名稱篩選
+    if not xl.sheet_names:
+        print("工作表為空。跳過此檔案。")
         return 0, 0
+    target_sheet = xl.sheet_names[0]
         
     df = xl.parse(target_sheet)
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")

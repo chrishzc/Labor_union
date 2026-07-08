@@ -110,17 +110,11 @@ def process_import(excel_path):
     print(f"\u89e3\u6790 Excel \u6a94\u6848\uff1a{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
 
-    # \u5c0b\u627e\u5305\u542b '\u670d\u52d9\u4eba\u54e1' \u6216 'staff' \u7684\u5206\u9801
-    target_sheet = None
-    for name in xl.sheet_names:
-        clean_name = name.replace(" ", "").lower()
-        if '\u670d\u52d9\u4eba\u54e1' in name or 'staff' in clean_name:
-            target_sheet = name
-            break
-
-    if not target_sheet:
-        print("\u672a\u627e\u5230\u5305\u542b '\u670d\u52d9\u4eba\u54e1' \u95dc\u9375\u5b57\u7684\u5de5\u4f5c\u8868\u3002\u8df3\u904e\u6b64\u6a94\u6848\u3002")
+    # ponytail: 確定每份檔案只有單一分頁，直接讀取第一個分頁，不進行名稱篩選
+    if not xl.sheet_names:
+        print("工作表為空。跳過此檔案。")
         return 0, 0
+    target_sheet = xl.sheet_names[0]
 
     df = xl.parse(target_sheet)
     print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
