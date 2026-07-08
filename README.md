@@ -125,7 +125,6 @@ python scripts/file_watcher.py
 
 ---
 
-## 🤝 參與貢獻 (Contributing)
+## 🤝 開發與協作規範
 
-本專案歡迎任何形式的貢獻（修復 Bug、新增功能、優化文件等）！
-請在開始貢獻前先閱讀我們的 **[🤝 貢獻與協作指南](CONTRIBUTING.md)** 以瞭解 Fork 協作模型與 Pull Request 規範。
+本專案由固定開發人員維護。請團隊成員在進行開發與提交修改前，詳閱 **[🤝 開發與協作規範指南](CONTRIBUTING.md)** 以瞭解分支開發流程與 Pull Request (PR) 規範。
