@@ -3,7 +3,7 @@ name = "union"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.11"
 dependencies = [
     "pandas>=3.0.3",
     "playwright>=1.60.0",
@@ -15,4 +15,5 @@ dependencies = [
     "streamlit>=1.38.0",
     "chromadb>=0.5.5",
     "requests>=2.32.3",
+    "pydantic>=2.0.0",
 ]
