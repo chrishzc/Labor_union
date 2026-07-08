@@ -1,6 +1,6 @@
 ##### Module: ImportClientHCM
 - Type: script
-- Description: 監控並解析 HCM 月子平台 Excel 案件檔案，以「查詢序號(案件編號)」為唯一識別碼，支援新增與更新複寫寫入 MySQL clients 表。
+- Description: 監控並解析 HCM 月子平台 Excel 案件檔案，以「查詢序號(案件編號)」為唯一識別碼，支援新增與更新複寫寫入 MySQL clients 表。支援自動偵測 Excel 標頭列位置（相容雙列格式）。
 - Source: scripts/imports/import_client_hcm.py
 - Dependencies: [InitDB]
 - Input:
@@ -9,7 +9,8 @@
 - Output:
   - inserted_count: int
   - updated_count: int
-- Invariants: []
+- Invariants:
+  - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
 - Preferred Pattern: none
 - Verification: []
 - Todo:
@@ -19,7 +20,7 @@
 
 ##### Module: ImportClientBeclass
 - Type: script
-- Description: 監控並解析客戶 beclass 報名名冊 Excel 檔案，以「姓名+出生年月日」為組合唯一鍵，支援資料庫 clients 表的異動偵測與資料更新複寫。
+- Description: 監控並解析客戶 beclass 報名名冊 Excel 檔案，以「姓名+出生年月日」為組合唯一鍵，支援資料庫 beclass_records 表的異動偵測與資料更新複寫。BeClass 匯出格式第一列為題目編號索引，第二列才是中文欄位名，需自動偵測並跳過。欄位「報名序號」對應 query_no（非「查詢序號」）。
 - Source: scripts/imports/import_client_beclass.py
 - Dependencies: [InitDB]
 - Input:
@@ -28,7 +29,9 @@
 - Output:
   - inserted_count: int
   - updated_count: int
-- Invariants: []
+- Invariants:
+  - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
+  - 'INV-BECLASS-02: BeClass 客戶 Excel 中「報名序號」欄位對應 query_no，映射表不得使用「查詢序號」作為來源鍵。'
 - Preferred Pattern: none
 - Verification: []
 - Todo:
@@ -38,7 +41,7 @@
 
 ##### Module: ImportStaffBeclass
 - Type: script
-- Description: 監控並解析服務人員 beclass 報名名冊 Excel 檔案，以「身分證字號」為唯一識別碼，支援資料庫 staff 表的異動偵測與資料更新複寫。
+- Description: 監控並解析服務人員 beclass 報名名冊 Excel 檔案，以「身分證字號」為唯一識別碼，支援資料庫 staff 表的異動偵測與資料更新複寫。支援自動偵測 Excel 標頭列位置（相容雙列格式）。
 - Source: scripts/imports/import_staff_beclass.py
 - Dependencies: [InitDB]
 - Input:
@@ -47,7 +50,8 @@
 - Output:
   - inserted_count: int
   - updated_count: int
-- Invariants: []
+- Invariants:
+  - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
 - Preferred Pattern: none
 - Verification: []
 - Todo:
@@ -57,7 +61,7 @@
 
 ##### Module: ImportFinanceExcel
 - Type: script
-- Description: 監控並解析合作社流水帳對帳單，依據 14 碼虛擬帳號解碼還原案號進行付款核銷與更新寫入 MySQL payments 表。
+- Description: 監控並解析合作社流水帳對帳單（單一分頁），依據 14 碼虛擬帳號解碼還原案號進行付款核銷與更新寫入 MySQL payments 表。案件對照資訊（客戶姓名、月嫂姓名）從 MySQL 動態查詢，不依賴 Excel 第二分頁。
 - Source: scripts/imports/import_finance_excel.py
 - Dependencies: [InitDB]
 - Input:
@@ -66,11 +70,14 @@
 - Output:
   - inserted_count: int
   - updated_count: int
-- Invariants: []
+- Invariants:
+  - 'INV-FINANCE-01: payments 表所有後續新增欄位必須設 DEFAULT 值或允許 NULL，禁止加裸 NOT NULL 欄位，以確保固定欄位列表的 INSERT 不因 schema 擴充而崩潰。'
 - Preferred Pattern: none
 - Verification: []
 - Todo:
   - [x] 撰寫 scripts/import_finance_excel.py 腳本解析帳務.xlsx
   - [x] 實作帳務數據去重與清洗邏輯並匯入 MySQL 帳務表
+  - [x] 改由 MySQL 動態查詢案件對照，移除對 Excel 第二分頁的依賴
 - Checkpoint:
   - [x] CP-3.2: 審查帳務資料清洗與匯入邏輯
+
