@@ -1,6 +1,6 @@
 ##### Module: ImportClientHCM
 - Type: script
-- Description: 監控並解析 HCM 月子平台 Excel 案件檔案，以「查詢序號(案件編號)」為唯一識別碼，支援新增與更新複寫寫入 MySQL clients 表。支援自動偵測 Excel 標頭列位置（相容雙列格式）。
+- Description: 監控並解析 HCM 月子平台 Excel 案件檔案，以「查詢序號(案件編號)」為唯一識別碼，支援新增與更新複寫寫入 MySQL clients 表。支援自動偵測 Excel 標頭列位置（相容雙列格式），且報名時間與預產期等時間支援民國年格式自動轉換。
 - Source: scripts/imports/import_client_hcm.py
 - Dependencies: [InitDB]
 - Input:
@@ -11,7 +11,8 @@
   - updated_count: int
 - Invariants:
   - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
-  - 'INV-HCM-01: clients INSERT 不得硬寫 status 欄位值，clients.status 語意為「符合/不符合資格」，不由匯入腳本覆寫，由 DB DEFAULT (NULL) 處理。'
+  - 'INV-HCM-01: clients INSERT 時自 Excel 欄位「案件狀態」讀取 status 值，但 UPDATE 時排除 status 覆寫。'
+  - 'INV-HCM-02: 支援民國年時間格式轉換。若偵測到年份低於 200 (例如 113/09/25)，應自動將年份加 1911 後再行解析。'
   - 'INV-CLEAN-01: DATETIME 欄位（created_at）轉換失敗時必須回退為 None 並記錄至 row_errors，嚴禁傳入任意字串至 MySQL DATETIME 欄位。'
   - 'INV-CLEAN-02: 唯一鍵欄位（case_no）為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
   - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
@@ -24,7 +25,7 @@
 
 ##### Module: ImportClientBeclass
 - Type: script
-- Description: 監控並解析客戶 beclass 報名名冊 Excel 檔案，以「姓名+出生年月日」為組合唯一鍵，支援資料庫 beclass_records 表的異動偵測與資料更新複寫。BeClass 匯出格式第一列為題目編號索引，第二列才是中文欄位名，需自動偵測並跳過。欄位「報名序號」對應 query_no（非「查詢序號」）。
+- Description: 監控並解析客戶 beclass 報名名冊 Excel 檔案，以「姓名+出生年月日」為組合唯一鍵，支援資料庫 beclass_records 表 the 異動偵測與資料更新複寫。BeClass 匯出格式第一列為題目編號索引，第二列才是中文欄位名，需自動偵測並跳過。欄位「查詢序號」對應 query_no。
 - Source: scripts/imports/import_client_beclass.py
 - Dependencies: [InitDB]
 - Input:
@@ -35,7 +36,7 @@
   - updated_count: int
 - Invariants:
   - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
-  - 'INV-BECLASS-02: BeClass 客戶 Excel 中「報名序號」欄位對應 query_no，映射表不得使用「查詢序號」作為來源鍵。'
+  - 'INV-BECLASS-02: BeClass 客戶 Excel 中「查詢序號」欄位對應 query_no。'
   - 'INV-CLEAN-01: DATETIME 欄位（created_at）轉換失敗時必須回退為 None 並記錄至 row_errors。'
   - 'INV-CLEAN-02: 組合唯一鍵（name+birth_date）任一為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
   - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
@@ -90,4 +91,5 @@
   - [x] 改由 MySQL 動態查詢案件對照，移除對 Excel 第二分頁的依賴
 - Checkpoint:
   - [x] CP-3.2: 審查帳務資料清洗與匯入邏輯
+
 
