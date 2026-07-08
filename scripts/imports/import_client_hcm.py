@@ -117,17 +117,6 @@ def process_import(excel_path):
         # 強制指定 utf8mb4 字元編碼以防止 ENUM 狀態機寫入中文時遭到截斷
         cursor.execute("SET NAMES utf8mb4;")
         conn.commit()
-        
-        # ponytail: 自動偵測並修復資料庫結構，防止 clients 缺少 status 欄位引發 1054 錯誤
-        try:
-            cursor.execute("SHOW COLUMNS FROM clients LIKE 'status';")
-            if not cursor.fetchone():
-                cursor.execute("ALTER TABLE clients ADD COLUMN status VARCHAR(50) DEFAULT '洽談中' COMMENT '案件狀態 (符合/不符合)';")
-                conn.commit()
-                print("[動態修復] clients 資料表缺少 'status' 欄位，已自動新增。")
-        except Exception as mig_err:
-            pass  # 忽略修復錯誤
-            
     except Exception as e:
         print(f"資料庫連線失敗：{e}")
         return 0, 0

@@ -143,28 +143,28 @@ def process_import(excel_path):
             if not identity_card:
                 continue
 
-            # 清洗報名時間
+            # \u6e05\u6d17\u5831\u540d\u6642\u9593
             registered_at = None
-            reg_val = row.get('報名時間')
+            reg_val = row.get('\u5831\u540d\u6642\u9593')
             if pd.notna(reg_val):
                 try:
                     registered_at = pd.to_datetime(reg_val).strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
-                    # ponytail: 轉換日期失敗時設為 None，防止將非日期字串強行寫入 DATETIME 導致 1292 錯誤
-                    registered_at = None
+                    registered_at = str(reg_val).strip()
 
-            # 清洗生日
+            # \u6e05\u6d17\u751f\u65e5
             birthday = None
-            b_date_val = row.get('民國出生年月日')
+            b_date_val = row.get('\u6c11\u570b\u51fa\u751f\u5e74\u6708\u65e5')
             if pd.notna(b_date_val):
                 try:
-                    # ponytail: 使用 pd.to_datetime 進行嚴格解析，失敗則不寫入以防 MySQL 錯誤
-                    parsed_bdate = pd.to_datetime(b_date_val)
-                    birthday = parsed_bdate.strftime("%Y-%m-%d")
+                    if isinstance(b_date_val, (datetime, pd.Timestamp)):
+                        birthday = b_date_val.strftime("%Y-%m-%d")
+                    else:
+                        birthday = str(b_date_val).strip()[:10]
                 except Exception:
                     pass
             if not birthday:
-                birthday = clean_birth_date(row.get('出生年'), row.get('月'), row.get('日'))
+                birthday = clean_birth_date(row.get('\u51fa\u751f\u5e74'), row.get('\u6708'), row.get('\u65e5'))
 
             city, address = clean_city_and_address(row.get('\u7e23\u5e02'), row.get('\u5730\u5740'))
             phone = clean_phone(row.get('\u884c\u52d5\u96fb\u8a71'))
