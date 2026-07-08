@@ -1,4 +1,4 @@
-version: 1
+version: 53
 scope: master_architecture
 sub_maps:
   ui_layer: ui/ui_system_map.yaml
@@ -18,7 +18,7 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
   UILayer:
     type: sub_system_layer
@@ -33,7 +33,7 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
   APILayer:
     type: sub_system_layer
@@ -48,7 +48,7 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
-    state: planned
+    state: validated
     fan_in_snapshot: 0
   ServicesLayer:
     type: sub_system_layer
@@ -63,7 +63,7 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
   GenerateFakeData:
     type: script
@@ -79,7 +79,7 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
-    state: planned
+    state: validated
     fan_in_snapshot: 0
   FixScheduleConflicts:
     type: script
@@ -94,7 +94,7 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
-    state: planned
+    state: validated
     fan_in_snapshot: 0
   StartScript:
     type: script
@@ -110,7 +110,7 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
   OnlineScript:
     type: script
@@ -127,5 +127,5 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
-    state: planned
+    state: validated
     fan_in_snapshot: 0
