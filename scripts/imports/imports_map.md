@@ -11,6 +11,7 @@
   - updated_count: int
 - Invariants:
   - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
+  - 'INV-IMPORT-03: 寫入資料庫前必須動態過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤。'
   - 'INV-HCM-01: clients INSERT 時自 Excel 欄位「案件狀態」讀取 status 值，但 UPDATE 時排除 status 覆寫。'
   - 'INV-HCM-02: 支援民國年時間格式轉換。若偵測到年份低於 200 (例如 113/09/25)，應自動將年份加 1911 後再行解析。'
   - 'INV-CLEAN-01: DATETIME 欄位（created_at）轉換失敗時必須回退為 None 並記錄至 row_errors，嚴禁傳入任意字串至 MySQL DATETIME 欄位。'
@@ -36,6 +37,7 @@
   - updated_count: int
 - Invariants:
   - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
+  - 'INV-IMPORT-03: 寫入資料庫前必須動態過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤。'
   - 'INV-BECLASS-02: BeClass 客戶 Excel 中「查詢序號」欄位對應 query_no。'
   - 'INV-CLEAN-01: DATETIME 欄位（created_at）轉換失敗時必須回退為 None 並記錄至 row_errors。'
   - 'INV-CLEAN-02: 組合唯一鍵（name+birth_date）任一為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
@@ -60,6 +62,7 @@
   - updated_count: int
 - Invariants:
   - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
+  - 'INV-IMPORT-03: 寫入資料庫前必須動態過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤。'
   - 'INV-CLEAN-01: DATETIME 欄位（registered_at）轉換失敗時必須回退為 None 並記錄至 row_errors，嚴禁以 str() 回退傳入 MySQL DATETIME。'
   - 'INV-CLEAN-02: 唯一鍵欄位（identity_card）為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
   - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
