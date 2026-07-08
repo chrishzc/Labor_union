@@ -150,20 +150,23 @@ def process_import(excel_path):
     df = smart_parse(xl, target_sheet)
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
     
-    try:
-        conn = pymysql.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-        # 強制指定 utf8mb4 字元編碼以防止 ENUM 狀態機寫入中文時遭到截斷
-        cursor.execute("SET NAMES utf8mb4;")
-        conn.commit()
-    except Exception as e:
-        print(f"資料庫連線失敗：{e}")
-        return 0, 0
-        
     inserted = 0
     updated = 0
     import_errors = []  # INV-CLEAN-02/03: 整列跳過或欄位品質問題紀錄
-
+    
+    try:
+        conn = pymysql.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        cursor.execute("SET NAMES utf8mb4;")
+        conn.commit()
+        
+        # INV-IMPORT-03: 動態偵測 clients 資料表所有實際存在的欄位，防範 1054 錯誤
+        cursor.execute("DESCRIBE clients;")
+        db_cols = {col_info[0] for col_info in cursor.fetchall()}
+    except Exception as e:
+        print(f"資料庫連線或初始化失敗：{e}")
+        return 0, 0
+        
     try:
         for idx, row in df.iterrows():
             row_errors = []  # INV-CLEAN-01: 本列的欄位級錯誤
@@ -174,6 +177,7 @@ def process_import(excel_path):
                         record[db_col] = clean_datetime(row[excel_col], db_col, row_errors)
                     else:
                         record[db_col] = clean_data(row[excel_col], db_col)
+
 
             # 欄位清理
             if 'phone' in record:
@@ -192,6 +196,9 @@ def process_import(excel_path):
                 import_errors.append(f"  列 {idx+2}: {'; '.join(row_errors)}")
 
                 
+            # INV-IMPORT-03: 過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤
+            record = {k: v for k, v in record.items() if k in db_cols}
+
             # 比對去重
             cursor.execute("SELECT id FROM clients WHERE case_no = %s", (case_no,))
             existing = cursor.fetchone()
@@ -206,18 +213,19 @@ def process_import(excel_path):
                         update_cols.append(f"`{k}` = %s")
                         val_list.append(v)
                 val_list.append(case_no)
-                sql = f"UPDATE clients SET {', '.join(update_cols)} WHERE case_no = %s"
-                cursor.execute(sql, tuple(val_list))
+                if update_cols:
+                    sql = f"UPDATE clients SET {', '.join(update_cols)} WHERE case_no = %s"
+                    cursor.execute(sql, tuple(val_list))
                 updated += 1
             else:
-                # INV-HCM-01: 不插入 status，由 DB DEFAULT (NULL) 處理
-                # clients.status 語意為「符合/不符合資格」，不屬於匯入檔案覆寫的範圍
+                # INV-HCM-01: INSERT 時 status 欄位自 Excel 讀取（若資料庫中存在）
                 cols = ", ".join([f"`{k}`" for k in record.keys()])
                 places = ", ".join(["%s"] * len(record))
                 sql = f"INSERT INTO clients ({cols}) VALUES ({places})"
                 cursor.execute(sql, tuple(record.values()))
                 client_id = cursor.lastrowid
                 inserted += 1
+
 
                 
             # 關聯訂單與生命週期狀態機初始化

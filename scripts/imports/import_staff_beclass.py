@@ -138,9 +138,14 @@ def process_import(excel_path):
         cursor = conn.cursor()
         cursor.execute("SET NAMES utf8mb4;")
         conn.commit()
+        
+        # INV-IMPORT-03: 動態偵測 staff 表的所有實際存在欄位
+        cursor.execute("DESCRIBE staff;")
+        db_cols = {col_info[0] for col_info in cursor.fetchall()}
     except Exception as e:
-        print(f"\u8cc7\u6599\u5eab\u9023\u7dda\u5931\u6557\uff1a{e}")
+        print(f"資料庫連線或初始化失敗：{e}")
         return 0, 0
+
 
     inserted = 0
     updated = 0
@@ -222,9 +227,13 @@ def process_import(excel_path):
                 'status': 'active'
             }
 
+            # INV-IMPORT-03: 過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤
+            record = {k: v for k, v in record.items() if k in db_cols}
+
             # 以身分證字號為唯一鍵去重
             cursor.execute("SELECT id FROM staff WHERE identity_card = %s", (identity_card,))
             existing = cursor.fetchone()
+
 
             if existing:
                 staff_id = existing[0]
