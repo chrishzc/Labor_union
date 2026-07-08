@@ -189,7 +189,7 @@ def process_import(excel_path):
             phone = clean_phone(row.get('\u884c\u52d5\u96fb\u8a71'))
 
             has_massage_cert = False
-            massage_val = row.get('有嬰幼兒按摩證書嗎?')
+            massage_val = row.get('嬰幼兒按摩證書')
             if pd.notna(massage_val) and str(massage_val).strip() in ['有', 'Y', 'y', '1', 'True', 'true']:
                 has_massage_cert = True
 

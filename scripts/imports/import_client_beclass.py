@@ -26,10 +26,10 @@ DB_CONFIG = {
 }
 
 # BeClass 核心欄位對照 (其餘問卷欄位打包進 survey_details JSON)
-# INV-BECLASS-02: '報名序號' 對應 query_no（BeClass 匯出用語，非 HCM 的「查詢序號」）
+# INV-BECLASS-02: '查詢序號' 對應 query_no
 BECLASS_CORE_MAPPING = {
     '項次': 'seq_num',
-    '報名序號': 'query_no',
+    '查詢序號': 'query_no',
     '報名時間': 'created_at',
     '訂單編號': 'order_no',
     '姓名': 'name',

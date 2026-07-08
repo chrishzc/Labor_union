@@ -26,9 +26,10 @@ DB_CONFIG = {
     'charset': 'utf8mb4'
 }
 
-# 欄位映射關係 (與舊 import_excel.py 一致，但移除 案件狀態 映射以免覆寫 status)
+# 欄位映射關係 (INV-HCM-01: 新增案件狀態對應，INSERT 時寫入，UPDATE 時排除)
 CLIENTS_FIELD_MAPPING = {
     '項次': 'seq_num',
+    '案件狀態': 'status',
     '不符合原因': 'reject_reason',
     '查詢序號(案件編號)': 'case_no',
     '報名時間(建檔)': 'created_at',
@@ -108,17 +109,29 @@ def smart_parse(xl, sheet_name):
         return xl.parse(sheet_name, header=1)
     return xl.parse(sheet_name)
 
-# INV-CLEAN-01: DATETIME 欄位需透過此函式清洗，失敗必須回退 None
+# INV-CLEAN-01 & INV-HCM-02: DATETIME 欄位需透過此函式清洗，失敗必須回退 None。支援民國年格式自動轉換。
 DATETIME_COLS = {'created_at'}
 
 def clean_datetime(val, col_name, row_errors):
     if pd.isna(val) or val is None:
         return None
+    val_str = str(val).strip()
+    
+    # INV-HCM-02: 偵測民國年格式並進行轉換
+    # 格式如：113/09/25 19:05:27 或 113.10.25 或 113-09-25
+    m = re.match(r'^(\d+)[/\.\-](\d+)[/\.\-](\d+)(.*)', val_str)
+    if m:
+        year = int(m.group(1))
+        if year < 200:  # 民國年
+            gregorian_year = year + 1911
+            val_str = f"{gregorian_year}/{m.group(2)}/{m.group(3)}{m.group(4)}"
+            
     try:
-        return pd.to_datetime(val).strftime('%Y-%m-%d %H:%M:%S')
+        return pd.to_datetime(val_str).strftime('%Y-%m-%d %H:%M:%S')
     except Exception:
         row_errors.append(f"{col_name}='{str(val)[:20]}' 非日期格式，已寫入 NULL")
         return None
+
 
 def process_import(excel_path):
     if not os.path.exists(excel_path):
