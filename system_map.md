@@ -46,3 +46,11 @@
 - Invariants:
   - INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始執行 init_db.py 防止連線逾時崩潰。
 
+##### Module: OnlineScript
+- Source: `online.bat`
+- Type: script
+- Description: 一鍵啟動上線服務腳本。啟動 Docker、等待 MySQL 連線就緒，但不執行資料庫初始化與假資料生成，最後以並行方式啟動 FastAPI、Streamlit 網頁端以及地端檔案自動監控服務 (file_watcher.py)。
+- Invariants:
+  - INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始啟動後端與監控服務防止連線逾時崩潰。
+
+
