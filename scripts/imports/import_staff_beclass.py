@@ -144,27 +144,32 @@ def process_import(excel_path):
 
     inserted = 0
     updated = 0
+    import_errors = []  # INV-CLEAN-02/03
 
     try:
-        for _, row in df.iterrows():
-            name = clean_data(row.get('\u59d3\u540d'), 'name')
+        for idx, row in df.iterrows():
+            row_errors = []  # INV-CLEAN-01: 本列欄位級錯誤
+            name = clean_data(row.get('姓名'), 'name')
             if not name:
+                import_errors.append(f"  列 {idx+2}: 姓名為空，整列跳過")
                 continue
 
-            identity_card = clean_data(row.get('\u8eab\u5206\u8b49\u5b57\u865f'), 'identity_card')
-            ip_address = clean_data(row.get('IP\u4f4d\u5740'), 'ip_address')
+            identity_card = clean_data(row.get('身分證字號'), 'identity_card')
+            ip_address = clean_data(row.get('IP位址'), 'ip_address')
 
             if not identity_card:
+                import_errors.append(f"  列 {idx+2}: identity_card 為空，整列跳過")
                 continue
 
-            # \u6e05\u6d17\u5831\u540d\u6642\u9593
+            # INV-CLEAN-01: registered_at 轉換失敗回退 None，不得以 str() 傳入 MySQL DATETIME
             registered_at = None
-            reg_val = row.get('\u5831\u540d\u6642\u9593')
+            reg_val = row.get('報名時間')
             if pd.notna(reg_val):
                 try:
                     registered_at = pd.to_datetime(reg_val).strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
-                    registered_at = str(reg_val).strip()
+                    row_errors.append(f"registered_at='{str(reg_val)[:20]}' 非日期格式，已寫入 NULL")
+                    registered_at = None
 
             # \u6e05\u6d17\u751f\u65e5
             birthday = None
@@ -242,7 +247,10 @@ def process_import(excel_path):
                 staff_id = cursor.lastrowid
                 inserted += 1
 
-            # === \u5b50\u8868\u66f4\u65b0 (Delete-and-Insert) ===
+            if row_errors:
+                import_errors.append(f"  列 {idx+2}: {'; '.join(row_errors)}")
+
+            # === 子表更新 (Delete-and-Insert) ===
 
             # 1. \u9280\u884c\u5e33\u6236
             cursor.execute("DELETE FROM staff_bank_accounts WHERE staff_id = %s", (staff_id,))
@@ -306,7 +314,12 @@ def process_import(excel_path):
                 detail_col='custom_baby_detail', excel_detail_col='[\u5176\u5b83].4')
 
         conn.commit()
-        print(f"\u532f\u5165\u6210\u529f\uff1a\u65b0\u589e {inserted} \u7b46\u670d\u52d9\u4eba\u54e1\u8cc7\u6599\uff0c\u66f4\u65b0 {updated} \u7b46\u670d\u52d9\u4eba\u54e1\u8cc7\u6599\u3002")
+        print(f"匯入成功：新增 {inserted} 筆服務人員資料，更新 {updated} 筆服務人員資料。")
+        # INV-CLEAN-03: 輸出結構化錯誤摘要
+        if import_errors:
+            print(f"\n[⚠️ 匯入警告] 共 {len(import_errors)} 列有資料品質問題，請手動確認：")
+            for err in import_errors:
+                print(err)
     except Exception as err:
         conn.rollback()
         import traceback

@@ -108,6 +108,18 @@ def smart_parse(xl, sheet_name):
         return xl.parse(sheet_name, header=1)
     return xl.parse(sheet_name)
 
+# INV-CLEAN-01: DATETIME 欄位需透過此函式清洗，失敗必須回退 None
+DATETIME_COLS = {'created_at'}
+
+def clean_datetime(val, col_name, row_errors):
+    if pd.isna(val) or val is None:
+        return None
+    try:
+        return pd.to_datetime(val).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        row_errors.append(f"{col_name}='{str(val)[:20]}' 非日期格式，已寫入 NULL")
+        return None
+
 def process_import(excel_path):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
@@ -137,14 +149,19 @@ def process_import(excel_path):
         
     inserted = 0
     updated = 0
-    
+    import_errors = []  # INV-CLEAN-02/03: 整列跳過或欄位品質問題紀錄
+
     try:
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
+            row_errors = []  # INV-CLEAN-01: 本列的欄位級錯誤
             record = {}
             for excel_col, db_col in CLIENTS_FIELD_MAPPING.items():
                 if excel_col in row:
-                    record[db_col] = clean_data(row[excel_col], db_col)
-            
+                    if db_col in DATETIME_COLS:
+                        record[db_col] = clean_datetime(row[excel_col], db_col, row_errors)
+                    else:
+                        record[db_col] = clean_data(row[excel_col], db_col)
+
             # 欄位清理
             if 'phone' in record:
                 record['phone'] = clean_phone(record['phone'])
@@ -152,10 +169,15 @@ def process_import(excel_path):
                 clean_c, clean_a = clean_city_and_address(record.get('city'), record.get('address'))
                 record['city'] = clean_c
                 record['address'] = clean_a
-                
+
             case_no = record.get('case_no')
             if not case_no:
+                import_errors.append(f"  列 {idx+2}: 唯一鍵 case_no 為空，整列跳過")
                 continue
+
+            if row_errors:
+                import_errors.append(f"  列 {idx+2}: {'; '.join(row_errors)}")
+
                 
             # 比對去重
             cursor.execute("SELECT id FROM clients WHERE case_no = %s", (case_no,))
@@ -175,12 +197,15 @@ def process_import(excel_path):
                 cursor.execute(sql, tuple(val_list))
                 updated += 1
             else:
+                # INV-HCM-01: 不插入 status，由 DB DEFAULT (NULL) 處理
+                # clients.status 語意為「符合/不符合資格」，不屬於匯入檔案覆寫的範圍
                 cols = ", ".join([f"`{k}`" for k in record.keys()])
                 places = ", ".join(["%s"] * len(record))
                 sql = f"INSERT INTO clients ({cols}) VALUES ({places})"
                 cursor.execute(sql, tuple(record.values()))
                 client_id = cursor.lastrowid
                 inserted += 1
+
                 
             # 關聯訂單與生命週期狀態機初始化
             # 比對 orders 表是否已有此 client_id (或在此業務下，以 case_no 作為主要核銷欄位)
@@ -211,6 +236,12 @@ def process_import(excel_path):
                 
         conn.commit()
         print(f"匯入成功：新增 {inserted} 筆客戶資料，更新 {updated} 筆客戶資料。")
+        # INV-CLEAN-03: 輸出結構化錯誤摘要
+        if import_errors:
+            print(f"\n[⚠️ 匯入警告] 共 {len(import_errors)} 列有資料品質問題，請手動確認：")
+            for err in import_errors:
+                print(err)
+
     except Exception as err:
         conn.rollback()
         import traceback

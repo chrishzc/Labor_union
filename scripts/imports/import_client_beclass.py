@@ -116,6 +116,18 @@ def smart_parse(xl, sheet_name):
         return xl.parse(sheet_name, header=1)
     return xl.parse(sheet_name)
 
+# INV-CLEAN-01: DATETIME 欄位需透過此函式清洗，失敗必須回退 None
+DATETIME_COLS = {'created_at'}
+
+def clean_datetime(val, col_name, row_errors):
+    if pd.isna(val) or val is None:
+        return None
+    try:
+        return pd.to_datetime(val).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        row_errors.append(f"{col_name}='{str(val)[:20]}' 非日期格式，已寫入 NULL")
+        return None
+
 def process_import(excel_path):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
@@ -144,23 +156,27 @@ def process_import(excel_path):
 
     inserted = 0
     updated = 0
+    import_errors = []  # INV-CLEAN-02/03
 
     try:
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
+            row_errors = []  # INV-CLEAN-01: 本列欄位級錯誤
             record = {}
             details = {}
 
             for excel_col in df.columns:
                 if excel_col in BECLASS_CORE_MAPPING:
                     db_col = BECLASS_CORE_MAPPING[excel_col]
-                    record[db_col] = clean_data(row[excel_col], db_col)
+                    if db_col in DATETIME_COLS:
+                        record[db_col] = clean_datetime(row[excel_col], db_col, row_errors)
+                    else:
+                        record[db_col] = clean_data(row[excel_col], db_col)
                 elif excel_col not in BIRTH_RAW_COLS and not str(excel_col).startswith('Unnamed'):
-                    # \u5176\u9918 60+ \u500b\u554f\u5377\u9078\u9805\u6253\u5305\u9032 details JSON
                     val = row[excel_col]
                     if pd.notna(val):
                         details[excel_col] = str(val).strip()
 
-            # \u6b04\u4f4d\u6e05\u6d17
+            # 欄位清理
             if 'phone' in record:
                 record['phone'] = clean_phone(record['phone'])
             if 'city' in record or 'address' in record:
@@ -168,18 +184,23 @@ def process_import(excel_path):
                 record['city'] = clean_c
                 record['address'] = clean_a
 
-            # \u6e05\u6d17\u8207\u5408\u4f75\u51fa\u751f\u65e5\u671f
-            birth_year = row.get('\u51fa\u751f\u5e74')
-            birth_month = row.get('\u6708')
-            birth_day = row.get('\u65e5')
+            # 清洗與合併出生日期
+            birth_year = row.get('出生年')
+            birth_month = row.get('月')
+            birth_day = row.get('日')
             record['birth_date'] = clean_birth_date(birth_year, birth_month, birth_day)
 
             name = record.get('name')
             birth_date = record.get('birth_date')
 
-            # \u7d44\u5408\u552f\u4e00\u9375\uff1a\u59d3\u540d + \u51fa\u751f\u5e74\u6708\u65e5\uff0c\u5169\u8005\u7f3a\u4e00\u4e0d\u53ef
+            # INV-CLEAN-02: 組合唯一鍵：姓名 + 出生年月日，兩者缺一不可
             if not name or not birth_date:
+                import_errors.append(f"  列 {idx+2}: name={repr(name)} birth_date={repr(birth_date)}，組合唯一鍵缺失，整列跳過")
                 continue
+
+            if row_errors:
+                import_errors.append(f"  列 {idx+2}: {'; '.join(row_errors)}")
+
 
             # \u5c07\u554f\u5377\u7d30\u9805 dict \u8f49\u70ba JSON
             record['survey_details'] = json.dumps(details, ensure_ascii=False)
@@ -210,7 +231,13 @@ def process_import(excel_path):
                 inserted += 1
 
         conn.commit()
-        print(f"\u532f\u5165\u6210\u529f\uff1a\u65b0\u589e {inserted} \u7b46\u5ba2\u6236 BeClass \u8cc7\u6599\uff0c\u66f4\u65b0 {updated} \u7b46\u5ba2\u6236 BeClass \u8cc7\u6599\u3002")
+        print(f"匯入成功：新增 {inserted} 筆客戶 BeClass 資料，更新 {updated} 筆客戶 BeClass 資料。")
+        # INV-CLEAN-03: 輸出結構化錯誤摘要
+        if import_errors:
+            print(f"\n[⚠️ 匯入警告] 共 {len(import_errors)} 列有資料品質問題，請手動確認：")
+            for err in import_errors:
+                print(err)
+
     except Exception as err:
         conn.rollback()
         import traceback
