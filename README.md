@@ -122,3 +122,10 @@ streamlit run ui/app.py
 # 4. 啟動檔案監控
 python scripts/file_watcher.py
 ```
+
+---
+
+## 🤝 參與貢獻 (Contributing)
+
+本專案歡迎任何形式的貢獻（修復 Bug、新增功能、優化文件等）！
+請在開始貢獻前先閱讀我們的 **[🤝 貢獻與協作指南](CONTRIBUTING.md)** 以瞭解 Fork 協作模型與 Pull Request 規範。
