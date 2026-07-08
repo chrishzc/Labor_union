@@ -25,22 +25,23 @@ DB_CONFIG = {
     'charset': 'utf8mb4'
 }
 
-# BeClass \u6838\u5fc3\u6b04\u4f4d\u5c0d\u7167 (\u5176\u9918\u554f\u5377\u6b04\u4f4d\u6253\u5305\u9032 survey_details JSON)
+# BeClass 核心欄位對照 (其餘問卷欄位打包進 survey_details JSON)
+# INV-BECLASS-02: '報名序號' 對應 query_no（BeClass 匯出用語，非 HCM 的「查詢序號」）
 BECLASS_CORE_MAPPING = {
-    '\u9805\u6b21': 'seq_num',
-    '\u67e5\u8a62\u5e8f\u865f': 'query_no',
-    '\u5831\u540d\u6642\u9593': 'created_at',
-    '\u8a02\u55ae\u7de8\u865f': 'order_no',
-    '\u59d3\u540d': 'name',
-    '\u6027\u5225': 'gender',
+    '項次': 'seq_num',
+    '報名序號': 'query_no',
+    '報名時間': 'created_at',
+    '訂單編號': 'order_no',
+    '姓名': 'name',
+    '性別': 'gender',
     'Email': 'email',
-    '\u884c\u52d5\u96fb\u8a71': 'phone',
-    '\u5e02\u8a71': 'tel',
-    '\u5206\u6a5f': 'ext',
-    '\u7e23\u5e02': 'city',
-    '\u90f5\u905e\u5340\u865f': 'zip_code',
-    '\u5730\u5740': 'address',
-    '\u7ba1\u7406\u8005\u8a3b\u8a18\u4e8b\u9805': 'admin_notes'
+    '行動電話': 'phone',
+    '市話': 'tel',
+    '分機': 'ext',
+    '縣市': 'city',
+    '郵遞區號': 'zip_code',
+    '地址': 'address',
+    '管理者註記事項': 'admin_notes'
 }
 
 # \u904e\u6ffe\u6389\u7684\u751f\u65e5\u539f\u59cb\u6b04\u4f4d (\u5df2\u5408\u4f75\u5230 birth_date)
@@ -100,6 +101,21 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
+def smart_parse(xl, sheet_name):
+    """INV-IMPORT-01: 自動偵測 Excel 標頭列位置。
+    BeClass 匯出第一列為題目編號（數字），第二列才是中文欄位名。
+    若超過半數欄位為數字或 Unnamed，自動改用 header=1。
+    """
+    probe = xl.parse(sheet_name, nrows=0)
+    generic = sum(
+        1 for col in probe.columns
+        if isinstance(col, (int, float)) or str(col).startswith('Unnamed')
+    )
+    if generic > len(probe.columns) / 2:
+        print(f"[自動偵測] 第一列為索引列，以第二列作為欄位標頭")
+        return xl.parse(sheet_name, header=1)
+    return xl.parse(sheet_name)
+
 def process_import(excel_path):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
@@ -114,7 +130,7 @@ def process_import(excel_path):
         return 0, 0
     target_sheet = xl.sheet_names[0]
 
-    df = xl.parse(target_sheet)
+    df = smart_parse(xl, target_sheet)
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
 
     try:

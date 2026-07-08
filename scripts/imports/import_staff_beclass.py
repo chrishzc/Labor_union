@@ -79,6 +79,20 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
+def smart_parse(xl, sheet_name):
+    """INV-IMPORT-01: 自動偵測 Excel 標頭列位置。
+    若超過半數欄位為數字或 Unnamed，自動改用 header=1。
+    """
+    probe = xl.parse(sheet_name, nrows=0)
+    generic = sum(
+        1 for col in probe.columns
+        if isinstance(col, (int, float)) or str(col).startswith('Unnamed')
+    )
+    if generic > len(probe.columns) / 2:
+        print(f"[自動偵測] 第一列為索引列，以第二列作為欄位標頭")
+        return xl.parse(sheet_name, header=1)
+    return xl.parse(sheet_name)
+
 def import_checkbox_options(cursor, staff_id, row, options_list, target_table, value_col, detail_col=None, excel_detail_col=None):
     """\u8907\u9078\u6846\u6b04\u4f4d\u7684\u901a\u7528\u532f\u5165\u51fd\u5f0f\uff0c\u63a1\u7528 Delete-and-Insert \u7b56\u7565\u3002"""
     cursor.execute(f"DELETE FROM {target_table} WHERE staff_id = %s", (staff_id,))
@@ -116,8 +130,8 @@ def process_import(excel_path):
         return 0, 0
     target_sheet = xl.sheet_names[0]
 
-    df = xl.parse(target_sheet)
-    print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
+    df = smart_parse(xl, target_sheet)
+    print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
 
     try:
         conn = pymysql.connect(**DB_CONFIG)

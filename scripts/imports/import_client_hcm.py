@@ -94,6 +94,20 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
+def smart_parse(xl, sheet_name):
+    """INV-IMPORT-01: 自動偵測 Excel 標頭列位置。
+    若超過半數欄位為數字或 Unnamed，自動改用 header=1。
+    """
+    probe = xl.parse(sheet_name, nrows=0)
+    generic = sum(
+        1 for col in probe.columns
+        if isinstance(col, (int, float)) or str(col).startswith('Unnamed')
+    )
+    if generic > len(probe.columns) / 2:
+        print(f"[自動偵測] 第一列為索引列，以第二列作為欄位標頭")
+        return xl.parse(sheet_name, header=1)
+    return xl.parse(sheet_name)
+
 def process_import(excel_path):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
@@ -108,7 +122,7 @@ def process_import(excel_path):
         return 0, 0
     target_sheet = xl.sheet_names[0]
         
-    df = xl.parse(target_sheet)
+    df = smart_parse(xl, target_sheet)
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
     
     try:
