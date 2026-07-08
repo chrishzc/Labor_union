@@ -11,6 +11,10 @@
   - updated_count: int
 - Invariants:
   - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
+  - 'INV-HCM-01: clients INSERT 不得硬寫 status 欄位值，clients.status 語意為「符合/不符合資格」，不由匯入腳本覆寫，由 DB DEFAULT (NULL) 處理。'
+  - 'INV-CLEAN-01: DATETIME 欄位（created_at）轉換失敗時必須回退為 None 並記錄至 row_errors，嚴禁傳入任意字串至 MySQL DATETIME 欄位。'
+  - 'INV-CLEAN-02: 唯一鍵欄位（case_no）為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
+  - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
 - Preferred Pattern: none
 - Verification: []
 - Todo:
@@ -32,6 +36,9 @@
 - Invariants:
   - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
   - 'INV-BECLASS-02: BeClass 客戶 Excel 中「報名序號」欄位對應 query_no，映射表不得使用「查詢序號」作為來源鍵。'
+  - 'INV-CLEAN-01: DATETIME 欄位（created_at）轉換失敗時必須回退為 None 並記錄至 row_errors。'
+  - 'INV-CLEAN-02: 組合唯一鍵（name+birth_date）任一為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
+  - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
 - Preferred Pattern: none
 - Verification: []
 - Todo:
@@ -52,6 +59,9 @@
   - updated_count: int
 - Invariants:
   - 'INV-IMPORT-01: 解析前必須以探針列 (nrows=0) 檢查標頭型態，若超過半數欄位為數字或 Unnamed，則自動改用 header=1 重新讀取，以相容 BeClass/HCM 雙列格式匯出。'
+  - 'INV-CLEAN-01: DATETIME 欄位（registered_at）轉換失敗時必須回退為 None 並記錄至 row_errors，嚴禁以 str() 回退傳入 MySQL DATETIME。'
+  - 'INV-CLEAN-02: 唯一鍵欄位（identity_card）為 None 時整列跳過，並記錄至 import_errors（含列號與原因）。'
+  - 'INV-CLEAN-03: 匯入完成後必須輸出結構化錯誤摘要，列出所有 row_errors 以供人工確認。'
 - Preferred Pattern: none
 - Verification: []
 - Todo:
