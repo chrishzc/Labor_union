@@ -17,14 +17,10 @@ except Exception:
     pass
 
 # 資料庫連線配置
-DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
-    'database': 'union_db',
-    'charset': 'utf8mb4'
-}
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from admin.utils import get_db_connection
 
 # 欄位映射關係 (與舊 import_excel.py 一致，但移除 案件狀態 映射以免覆寫 status)
 CLIENTS_FIELD_MAPPING = {
@@ -118,7 +114,7 @@ def process_import(excel_path):
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
     
     try:
-        conn = pymysql.connect(**DB_CONFIG)
+        conn = get_db_connection()
         cursor = conn.cursor()
         # 強制指定 utf8mb4 字元編碼以防止 ENUM 狀態機寫入中文時遭到截斷
         cursor.execute("SET NAMES utf8mb4;")

@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新竹市月子工會 - LINE 帳號綁定</title>
+    <!-- 引入美觀的 Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary: #4a90e2;
+            --primary-hover: #357abd;
+            --bg-gradient: linear-gradient(135deg, #eef2f7 0%, #d9e2ec 100%);
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --text-dark: #334e68;
+            --text-muted: #627d98;
+            --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+            --error: #ef5350;
+            --success: #66bb6a;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', 'Noto Sans TC', sans-serif;
+            background: var(--bg-gradient);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            color: var(--text-dark);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 420px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: var(--shadow);
+            transition: all 0.3s ease;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* 頂部裝飾條 */
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 6px;
+            background: linear-gradient(90deg, #4a90e2 0%, #63e6be 100%);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 25px;
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+
+        .title {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-dark);
+            margin-bottom: 6px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            margin-bottom: 8px;
+            color: var(--text-dark);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px 16px;
+            border: 1px solid rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.6);
+            font-size: 16px;
+            color: var(--text-dark);
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        .form-input:focus {
+            border-color: var(--primary);
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.15);
+        }
+
+        .btn-submit {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(90deg, #4a90e2 0%, #357abd 100%);
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(74, 144, 226, 0.2);
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        .btn-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3);
+        }
+
+        .btn-submit:active {
+            transform: translateY(0);
+        }
+
+        .btn-submit:disabled {
+            background: #ccc;
+            box-shadow: none;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* 提示卡片與狀態 */
+        .status-message {
+            padding: 12px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            display: none;
+            line-height: 1.5;
+        }
+
+        .status-message.error {
+            background: rgba(239, 83, 80, 0.1);
+            border: 1px solid rgba(239, 83, 80, 0.2);
+            color: var(--error);
+            display: block;
+        }
+
+        .status-message.success {
+            background: rgba(102, 187, 106, 0.1);
+            border: 1px solid rgba(102, 187, 106, 0.2);
+            color: var(--success);
+            display: block;
+        }
+
+        .status-message.info {
+            background: rgba(74, 144, 226, 0.1);
+            border: 1px solid rgba(74, 144, 226, 0.2);
+            color: var(--primary);
+            display: block;
+        }
+
+        /* 載入遮罩 */
+        .loader-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(4px);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 10;
+            transition: opacity 0.3s ease;
+            border-radius: 20px;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid rgba(74, 144, 226, 0.1);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s infinite linear;
+            margin-bottom: 15px;
+        }
+
+        .loader-text {
+            font-size: 14px;
+            color: var(--text-muted);
+        }
+
+        /* 成功卡片 */
+        .success-card {
+            text-align: center;
+            display: none;
+        }
+
+        .success-icon {
+            width: 70px;
+            height: 70px;
+            background: rgba(102, 187, 106, 0.1);
+            color: var(--success);
+            border-radius: 50%;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 36px;
+            margin-bottom: 20px;
+            border: 2px solid rgba(102, 187, 106, 0.2);
+            animation: scaleIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .success-title {
+            font-size: 22px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            color: var(--success);
+        }
+
+        .success-text {
+            font-size: 15px;
+            color: var(--text-muted);
+            line-height: 1.6;
+            margin-bottom: 25px;
+        }
+
+        .btn-close {
+            width: 100%;
+            padding: 12px;
+            background: #f0f4f8;
+            color: var(--text-dark);
+            border: 1px solid rgba(0, 0, 0, 0.05);
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .btn-close:hover {
+            background: #e2e8f0;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        @keyframes scaleIn {
+            0% { transform: scale(0); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* 測試降級標籤 */
+        .test-badge {
+            display: inline-block;
+            background: #ff9800;
+            color: white;
+            font-size: 11px;
+            font-weight: bold;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container" id="mainCard">
+    <!-- 載入中遮罩 -->
+    <div class="loader-overlay" id="loader">
+        <div class="spinner"></div>
+        <div class="loader-text" id="loaderText">正在初始化系統...</div>
+    </div>
+
+    <!-- 一般表單卡片 -->
+    <div id="formContent">
+        <div class="header">
+            <div class="logo">Labor Union</div>
+            <div class="title" id="formTitle">服務綁定與訂單查詢</div>
+            <div class="subtitle" id="formSubtitle">請填寫您的基本資料，以完成 LINE 帳號與最新訂單的綁定與查詢。</div>
+        </div>
+
+        <div class="status-message" id="statusMessage"></div>
+
+        <form id="bindForm" onsubmit="handleFormSubmit(event)">
+            <!-- LINE User ID 欄位 (一般情況下隱藏，僅在開發測試模式下顯示) -->
+            <div class="form-group" id="userIdGroup" style="display: none;">
+                <span class="test-badge" id="testModeBadge" style="display: none;">開發測試模式</span>
+                <label class="form-label" for="lineUserId">LINE 用戶識別碼 (User ID)</label>
+                <input class="form-input" type="text" id="lineUserId" placeholder="自動獲取中..." readonly required>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="userName">您的真實姓名</label>
+                <input class="form-input" type="text" id="userName" placeholder="請輸入姓名" required autocomplete="name">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="userPhone">您的聯絡電話</label>
+                <input class="form-input" type="tel" id="userPhone" placeholder="請輸入聯絡電話（例 0912345678）" required autocomplete="tel">
+            </div>
+
+            <button class="btn-submit" type="submit" id="btnSubmit">確認綁定</button>
+        </form>
+    </div>
+
+    <!-- 重新綁定確認卡片 -->
+    <div class="success-card" id="rebindContent" style="display: none;">
+        <div class="success-icon" style="color: var(--primary); background: rgba(74, 144, 226, 0.1); border-color: rgba(74, 144, 226, 0.2);">?</div>
+        <div class="success-title" style="color: var(--primary);">確認重新綁定</div>
+        <div class="success-text" id="rebindDesc">
+            本筆訂單已有綁定另一個帳戶，請問是否確認要覆蓋舊有紀錄，並重新綁定為當前這個 LINE 帳戶？
+        </div>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button class="btn-close" style="flex: 1;" onclick="cancelRebind()">取消綁定</button>
+            <button class="btn-submit" style="flex: 1; margin-top: 0;" onclick="confirmRebind()">確認綁定</button>
+        </div>
+    </div>
+
+    <!-- 成功卡片 -->
+    <div class="success-card" id="successContent">
+        <div class="success-icon">✓</div>
+        <div class="success-title">綁定與查詢成功</div>
+        <div class="success-text" id="successDesc">
+            您的服務綁定與最新訂單查詢已成功！<br>
+            系統已自動發送最新訂單編號通知至您的 LINE 視窗。
+        </div>
+        <button class="btn-close" onclick="closeLiffWindow()">關閉視窗</button>
+    </div>
+</div>
+
+<!-- 載入 LINE LIFF SDK -->
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+    // 預設配置與狀態
+    let isTestMode = false;
+
+    // 取得 DOM 元素
+    const loader = document.getElementById('loader');
+    const loaderText = document.getElementById('loaderText');
+    const statusMessage = document.getElementById('statusMessage');
+    const lineUserIdInput = document.getElementById('lineUserId');
+    const testModeBadge = document.getElementById('testModeBadge');
+    const formContent = document.getElementById('formContent');
+    const successContent = document.getElementById('successContent');
+    const successDesc = document.getElementById('successDesc');
+    const rebindContent = document.getElementById('rebindContent');
+
+    // 輔助函式：顯示提示訊息
+    function showMessage(text, type = 'info') {
+        statusMessage.textContent = text;
+        statusMessage.className = `status-message ${type}`;
+    }
+
+    // 輔助函式：隱藏載入中
+    function hideLoader() {
+        loader.style.opacity = '0';
+        setTimeout(() => {
+            loader.style.display = 'none';
+        }, 300);
+    }
+
+    // 輔助函式：顯示載入中
+    function showLoader(text) {
+        loaderText.textContent = text;
+        loader.style.display = 'flex';
+        loader.style.opacity = '1';
+    }
+
+    // 取得 URL 查詢參數中的 userId (用於 Webhook 降級測試)
+    function getQueryParam(name) {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get(name);
+    }
+
+    // 初始化頁面
+    window.addEventListener('DOMContentLoaded', async () => {
+        try {
+            // 1. 先向後端請求 LINE 設定檔 (包含 LIFF ID)
+            const configRes = await fetch('/api/line/config');
+            if (!configRes.ok) {
+                throw new Error('無法取得後端 API 配置');
+            }
+            
+            const config = await configRes.json();
+            const liffId = config.liff_id;
+
+            // 檢查是否配置了 LIFF ID
+            if (!liffId || liffId === 'your_liff_id_here' || liffId.trim() === '') {
+                console.warn('LINE_LIFF_ID 未在環境變數中配置。進入開發測試模式。');
+                enableTestMode('系統未配置 LINE LIFF ID。請手動輸入測試用的 LINE User ID。');
+                return;
+            }
+
+            // 2. 初始化 LIFF SDK
+            await liff.init({ liffId: liffId });
+            console.log('LIFF 初始化成功');
+
+            // 3. 檢查登入狀態，若未登入則自動登入
+            if (!liff.isLoggedIn()) {
+                console.log('使用者未登入，準備導向 LINE 登入...');
+                showLoader('正在導向 LINE 登入授權...');
+                liff.login();
+                return;
+            }
+
+            // 4. 已登入，取得 User Profile
+            const profile = await liff.getProfile();
+            if (profile && profile.userId) {
+                lineUserIdInput.value = profile.userId;
+                lineUserIdInput.readOnly = true;
+                await fetchAndFillClientInfo(profile.userId);
+                hideLoader();
+            } else {
+                throw new Error('無法取得 LINE 用戶識別碼 (userId)');
+            }
+
+        } catch (error) {
+            console.error('初始化失敗:', error);
+            // 發生錯誤時降級至測試模式，並顯示錯誤提示，同時檢查有無 query string 中的 userId
+            const queryUserId = getQueryParam('userId');
+            enableTestMode(`初始化 LIFF 失敗：${error.message}`);
+            if (queryUserId) {
+                lineUserIdInput.value = queryUserId;
+                await fetchAndFillClientInfo(queryUserId);
+            }
+        }
+    });
+
+    // 查詢並帶入既有客戶資料
+    async function fetchAndFillClientInfo(userId) {
+        try {
+            const res = await fetch(`/api/line/client-info?userId=${userId}`);
+            if (res.ok) {
+                const data = await res.json();
+                if (data.status === 'success' && data.client) {
+                    document.getElementById('userName').value = data.client.name || '';
+                    document.getElementById('userPhone').value = data.client.phone || '';
+                    showMessage('已自動帶入您先前綁定之姓名與電話。若您本次訂單使用的是不同的資料，請直接修改後再按確認綁定。', 'info');
+                }
+            }
+        } catch (e) {
+            console.warn('無法自動帶入用戶資料:', e);
+        }
+    }
+
+    // 啟動測試模式 (允許手動輸入 User ID)
+    function enableTestMode(tipText) {
+        isTestMode = true;
+        document.getElementById('userIdGroup').style.display = 'block';
+        testModeBadge.style.display = 'inline-block';
+        lineUserIdInput.readOnly = false;
+        lineUserIdInput.placeholder = '請輸入模擬的 LINE User ID';
+        showMessage(tipText, 'info');
+        hideLoader();
+    }
+
+    // 提交表單綁定
+    async function handleFormSubmit(event) {
+        event.preventDefault();
+        
+        const name = document.getElementById('userName').value.trim();
+        const phone = document.getElementById('userPhone').value.trim();
+        const lineUserId = lineUserIdInput.value.trim();
+
+        if (!name || !phone || !lineUserId) {
+            showMessage('請填寫所有必要欄位。', 'error');
+            return;
+        }
+
+        showLoader('正在核對並綁定帳號...');
+        showMessage('', 'info'); // 清空提示
+
+        try {
+            const response = await fetch('/api/line/bind', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    name: name,
+                    phone: phone,
+                    line_user_id: lineUserId
+                })
+            });
+
+            const result = await response.json();
+
+            if (response.ok && result.status === 'success') {
+                // 成功綁定
+                formContent.style.display = 'none';
+                successContent.style.display = 'block';
+                
+                let desc = `您的 LINE 帳號已成功連結姓名為 <strong>${result.client_name}</strong> 的客戶資料！`;
+                if (result.order_id) {
+                    desc += `<br><br>您最新建立的服務訂單編號為：<strong>#${result.order_id}</strong>。`;
+                } else {
+                    desc += `<br><br>目前尚未建立您的案件訂單，行政專員核對名冊後將會自動為您新增。`;
+                }
+                desc += `<br><br>我們已將最新確認與訂單編號訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
+                successDesc.innerHTML = desc;
+                
+                hideLoader();
+            } else if (response.ok && result.status === 'confirm_rebind') {
+                // 需要確認是否重新綁定
+                formContent.style.display = 'none';
+                rebindContent.style.display = 'block';
+                hideLoader();
+            } else {
+                // 綁定失敗
+                showMessage(result.message || '綁定失敗，請確認資料是否正確。', 'error');
+                hideLoader();
+            }
+
+        } catch (err) {
+            console.error('提交綁定請求出錯:', err);
+            showMessage('與伺服器連線失敗，請稍後再試。', 'error');
+            hideLoader();
+        }
+    }
+
+    // 重新綁定
+    async function confirmRebind() {
+        const name = document.getElementById('userName').value.trim();
+        const phone = document.getElementById('userPhone').value.trim();
+        const lineUserId = lineUserIdInput.value.trim();
+
+        showLoader('正在覆蓋綁定資料...');
+        try {
+            const response = await fetch('/api/line/bind', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    name: name,
+                    phone: phone,
+                    line_user_id: lineUserId,
+                    force_rebind: true
+                })
+            });
+            const result = await response.json();
+            if (response.ok && result.status === 'success') {
+                rebindContent.style.display = 'none';
+                successContent.style.display = 'block';
+                
+                let desc = `您的 LINE 帳號已成功連結姓名為 <strong>${result.client_name}</strong> 的客戶資料！`;
+                if (result.order_id) {
+                    desc += `<br><br>您最新建立的服務訂單編號為：<strong>#${result.order_id}</strong>。`;
+                } else {
+                    desc += `<br><br>目前尚未建立您的案件訂單，行政專員核對名冊後將會自動為您新增。`;
+                }
+                desc += `<br><br>我們已將最新確認與訂單編號訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
+                successDesc.innerHTML = desc;
+            } else {
+                showMessage(result.message || '綁定失敗', 'error');
+            }
+        } catch (err) {
+            showMessage('與伺服器連線失敗。', 'error');
+        }
+        hideLoader();
+    }
+
+    // 取消重新綁定
+    function cancelRebind() {
+        rebindContent.style.display = 'none';
+        formContent.style.display = 'block';
+        showMessage('已取消重新綁定，原帳戶紀錄維持不變。', 'info');
+    }
+
+    // 關閉 LIFF 視窗
+    function closeLiffWindow() {
+        try {
+            if (liff && liff.isInClient()) {
+                liff.closeWindow();
+            } else {
+                // 一般瀏覽器環境
+                window.close();
+                showMessage('若視窗未自動關閉，請手動關閉此分頁。', 'info');
+            }
+        } catch (e) {
+            window.close();
+        }
+    }
+</script>
+
+</body>
+</html>

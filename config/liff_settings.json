@@ -1,0 +1,24 @@
+{
+  "theme_colors": {
+    "primary": "#4a90e2",
+    "primary_hover": "#357abd",
+    "background_gradient": "linear-gradient(135deg, #eef2f7 0%, #d9e2ec 100%)",
+    "text_dark": "#334e68",
+    "text_muted": "#627d98"
+  },
+  "typography": {
+    "font_family": "'Outfit', 'Noto Sans TC', sans-serif",
+    "title_size": "20px",
+    "subtitle_size": "14px",
+    "section_title_size": "18px",
+    "label_size": "15px"
+  },
+  "texts": {
+    "form_title": "產婦服務登記表單",
+    "form_subtitle": "請詳細填寫以下資料，送出後將為您建立專屬服務檔案並進行媒合。",
+    "submit_button": "送出完整服務登記表單",
+    "success_title": "送出成功！",
+    "success_desc": "您的服務資料已經完整登錄至系統。<br>稍後 LINE 將會推播您的「專屬訂單編號」，請關閉此頁面回到 LINE 聊天室查看。",
+    "loading_text": "資料傳送中，請稍候..."
+  }
+}

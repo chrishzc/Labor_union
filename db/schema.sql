@@ -217,6 +217,10 @@ CREATE TABLE IF NOT EXISTS orders (
     cancel_reason TEXT NULL COMMENT '當狀態變更為 訂單取消 時的取消原因說明',
     line_group_id VARCHAR(100) NULL COMMENT '三方服務 LINE 群組 ID',
     actual_start_date DATE NULL COMMENT '實際生產服務開始日',
+    actual_end_date DATE NULL COMMENT '實際生產服務結束日',
+    service_mode VARCHAR(20) DEFAULT '連續服務' COMMENT '服務模式 (連續服務/週休1日等)',
+    custom_attendance_json TEXT NULL COMMENT '客製化出勤設定 (JSON)',
+    client_approved TINYINT DEFAULT 0 COMMENT '0:待處理, 1:滿意, 2:不滿意',
     contract_id VARCHAR(100) NULL COMMENT '好好簽線上契約 ID',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -260,5 +264,47 @@ CREATE TABLE IF NOT EXISTS payments (
     INDEX idx_payment_case (case_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 19. 中華民國國定假日與補假表 (防寫死動態管理)
+CREATE TABLE IF NOT EXISTS roc_holidays (
+    holiday_date DATE PRIMARY KEY COMMENT '國定假日日期',
+    holiday_name VARCHAR(100) NOT NULL COMMENT '假日名稱',
+    is_custom BOOLEAN DEFAULT FALSE COMMENT '是否為手動新增'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;-- 20. LINE 推播任務佇列 (由 Daemon 背景發送)
+CREATE TABLE IF NOT EXISTS line_push_tasks (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    to_user_id VARCHAR(100) NOT NULL COMMENT '接收者 LINE ID',
+    message_type VARCHAR(20) DEFAULT 'text' COMMENT '訊息類型',
+    message_content TEXT NOT NULL COMMENT '訊息內容或 JSON Payload',
+    status ENUM('pending', 'sent', 'failed') DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 21. 資料異常處理事件表 (File Watcher 與 Dashboard 互動用)
+CREATE TABLE IF NOT EXISTS data_anomaly_events (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    source_platform VARCHAR(50) NOT NULL COMMENT '來源平台 (HCM/BeClass)',
+    anomaly_type VARCHAR(50) NOT NULL COMMENT '異常類型 (PHONE_FORMAT_ERROR/NAME_MISSING等)',
+    error_field VARCHAR(50) NOT NULL COMMENT '錯誤欄位',
+    error_value VARCHAR(255) COMMENT '錯誤的值',
+    raw_payload JSON NOT NULL COMMENT '原始 JSON 數據',
+    process_status ENUM('pending', 'resolved', 'ignored') DEFAULT 'pending' COMMENT '處理狀態',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 22. 系統動態設定表 (System Settings)
+CREATE TABLE IF NOT EXISTS system_settings (
+    setting_key VARCHAR(50) PRIMARY KEY COMMENT '設定鍵名',
+    setting_value TEXT COMMENT '設定值 (可能為 JSON 或字串)',
+    description VARCHAR(255) COMMENT '設定說明',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 23. RAG 知識庫問答表 (Knowledge Base FAQ)
+CREATE TABLE IF NOT EXISTS knowledge_faq (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    question TEXT NOT NULL COMMENT '知識庫原題',
+    answer TEXT NOT NULL COMMENT '標準答案',
+    category VARCHAR(50) DEFAULT '一般' COMMENT '分類標籤',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

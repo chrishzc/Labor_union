@@ -32,3 +32,9 @@ system_map.yaml
 implementation_plan.md
 walkthrough.md
 task.md
+
+# System generated agent logs & planning
+history/work_log.md
+task-*.md
+PROJECT_SPEC.md
+AGENTS.md

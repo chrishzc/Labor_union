@@ -1,16 +1,20 @@
 import sys
 import os
 import pymysql
+from dotenv import load_dotenv
+
+# 載入環境變數
+load_dotenv()
 
 # 確保中文輸出編碼正確
 sys.stdout.reconfigure(encoding='utf-8')
 
 # 資料庫連線配置 (同 import_excel.py，但先不指定 database，因為 sql 檔內含 CREATE DATABASE)
 DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
+    'host': os.getenv("DB_HOST", "127.0.0.1"),
+    'port': int(os.getenv("DB_PORT", "3306")),
+    'user': os.getenv("DB_USER", "root"),
+    'password': os.getenv("DB_PASSWORD", "1234"),
     'charset': 'utf8mb4'
 }
 
@@ -75,6 +79,27 @@ def main():
             
             connection.commit()
             print(f"\n====== 資料庫 Schema 更新成功！共執行 {success_count} 個語句 ======")
+            
+            # 匯入預設國定假日到 roc_holidays 資料表
+            try:
+                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+                if project_root not in sys.path:
+                    sys.path.append(project_root)
+                from admin.utils import ROC_HOLIDAYS
+                
+                with connection.cursor() as cursor_holiday:
+                    cursor_holiday.execute("USE union_db;")
+                    insert_query = """
+                        INSERT INTO roc_holidays (holiday_date, holiday_name, is_custom) 
+                        VALUES (%s, %s, FALSE) 
+                        ON DUPLICATE KEY UPDATE holiday_name = VALUES(holiday_name);
+                    """
+                    holiday_data = [(date_str, name) for date_str, name in ROC_HOLIDAYS.items()]
+                    cursor_holiday.executemany(insert_query, holiday_data)
+                connection.commit()
+                print(f"成功預載 {len(holiday_data)} 筆國定假日資料至 roc_holidays 表格。")
+            except Exception as holiday_err:
+                print(f"預載國定假日資料時出錯：{holiday_err}")
     except Exception as e:
         connection.rollback()
         print(f"執行失敗，已回滾所有變更。錯誤原因：{e}")

@@ -14,13 +14,11 @@
 		{"id":"5991839c4a513916","type":"text","text":"🟢 **【服務期間】**\n(服務人員與雇主)","x":300,"y":520,"width":280,"height":70,"color":"4"},
 		{"id":"4df449208c2a8850","type":"text","text":"💬 **[固定訊息] 提醒服務人員上傳寶寶日誌**","x":300,"y":635,"width":280,"height":80,"color":"6"},
 		{"id":"2725739c4f7f3acb","type":"text","text":" **[固定訊息] 提醒客戶結清尾款給服務人員**","x":300,"y":760,"width":280,"height":80,"color":"6"},
-		{"id":"b6c43b70f323ae46","type":"text","text":"**客戶在政府網填表**\n(產生訂單ID)","x":-440,"y":100,"width":280,"height":80,"color":"1"},
-		{"id":"9f68d2ac622ff54e","type":"text","text":"**電聯客戶**\n(確認細節)","x":-440,"y":210,"width":280,"height":80,"color":"3"},
 		{"id":"5e984563416e613d","type":"text","text":"客戶動作","x":-650,"y":108,"width":120,"height":72,"color":"1"},
 		{"id":"53570015aae2036f","type":"text","text":"人工動作","x":-650,"y":214,"width":120,"height":72,"color":"3"},
 		{"id":"679f00c2c6b7dbda","type":"text","text":"自動","x":-650,"y":320,"width":120,"height":72,"color":"6"},
 		{"id":"e1b4ea3f42ed3d39","type":"text","text":"💬 **[固定訊息] 確認合約內容**","x":-80,"y":100,"width":280,"height":80,"color":"6"},
-		{"id":"b5e2a54276a98b2a","type":"text","text":"🟢 **【結案前 5 天】**","x":640,"y":288,"width":280,"height":50,"color":"4"},
+		{"id":"b5e2a54276a98b2a","type":"text","text":"🟢 **【結案前 5 天】**","x":640,"y":288,"width":280,"height":52,"color":"4"},
 		{"id":"ae12b36ecd2684e1","type":"text","text":"💬 **[固定訊息] 滿意度調查 Google 表單**\n(需帶入訂單 ID 與 Mail給客戶)","x":640,"y":388,"width":280,"height":102,"color":"6"},
 		{"id":"2942dceeaa29668e","type":"text","text":"💬 **[固定訊息] 推薦回饋邀請**","x":640,"y":528,"width":280,"height":80,"color":"6"},
 		{"id":"d6701f48cdb922db","type":"text","text":"**客戶加 LINE官方帳號**(標記訂單ID)\n傳送歡迎訊息請客戶填寫 BeClass 表單\n\n","x":-460,"y":313,"width":320,"height":88,"color":"1"},
@@ -31,7 +29,11 @@
 		{"id":"21ea3397cfafd960","type":"text","text":"💬 **[固定訊息] 提醒登記與契約**\n若三天內客戶沒有填寫表單，每天發送提醒訊息","x":-441,"y":428,"width":280,"height":80,"color":"6"},
 		{"id":"909ec807ab8eac76","type":"text","text":"**詢問服務人員接案意願**\n","x":-411,"y":730,"width":222,"height":50,"color":"3"},
 		{"id":"160258cb6c75f372","type":"text","text":"**[固定訊息]確認訂單資訊**","x":-418,"y":630,"width":236,"height":72,"color":"6"},
-		{"id":"1e5a3bd1ab72dbd6","type":"text","text":"**客戶填寫beclass表單訂單成立**","x":-405,"y":540,"width":208,"height":70,"color":"6"}
+		{"id":"1e5a3bd1ab72dbd6","type":"text","text":"**客戶填寫beclass表單訂單成立**","x":-405,"y":540,"width":208,"height":70,"color":"6"},
+		{"id":"86e70ad87018808a","x":162,"y":1060,"width":250,"height":60,"type":"text","text":""},
+		{"id":"0bf39844a697e70b","x":-656,"y":-198,"width":250,"height":60,"type":"text","text":""},
+		{"id":"b6c43b70f323ae46","type":"text","text":"**客戶在政府網填表**\n(產生訂單ID)","x":-441,"y":100,"width":280,"height":80,"color":"1"},
+		{"id":"9f68d2ac622ff54e","type":"text","text":"**電聯客戶**\n(確認細節)","x":-440,"y":208,"width":280,"height":80,"color":"3"}
 	],
 	"edges":[
 		{"id":"39648e95fddb8af3","fromNode":"b6c43b70f323ae46","fromSide":"bottom","toNode":"9f68d2ac622ff54e","toSide":"top"},

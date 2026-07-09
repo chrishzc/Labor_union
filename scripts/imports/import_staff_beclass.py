@@ -16,14 +16,10 @@ try:
 except Exception:
     pass
 
-DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
-    'database': 'union_db',
-    'charset': 'utf8mb4'
-}
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from admin.utils import get_db_connection
 
 def clean_phone(phone_val):
     if pd.isna(phone_val) or not phone_val:
@@ -126,7 +122,7 @@ def process_import(excel_path):
     print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
 
     try:
-        conn = pymysql.connect(**DB_CONFIG)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SET NAMES utf8mb4;")
         conn.commit()

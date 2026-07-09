@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>新竹市月子工會 - 服務登記表單</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary: #4a90e2;
+            --primary-hover: #357abd;
+            --bg-gradient: linear-gradient(135deg, #eef2f7 0%, #d9e2ec 100%);
+            --glass-bg: rgba(255, 255, 255, 0.85);
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --text-dark: #334e68;
+            --text-muted: #627d98;
+            --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+            --error: #ef5350;
+            --success: #66bb6a;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Outfit', 'Noto Sans TC', sans-serif;
+            background: var(--bg-gradient);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 20px 10px;
+            color: var(--text-dark);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 600px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 30px 25px;
+            box-shadow: var(--shadow);
+            position: relative;
+        }
+
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 6px;
+            background: linear-gradient(90deg, #4a90e2 0%, #63e6be 100%);
+            border-top-left-radius: 20px;
+            border-top-right-radius: 20px;
+        }
+
+        .header { text-align: center; margin-bottom: 25px; }
+        .logo { font-size: 24px; font-weight: 700; color: var(--primary); margin-bottom: 8px; letter-spacing: 1px; }
+        .title { font-size: 20px; font-weight: 600; color: var(--text-dark); margin-bottom: 6px; }
+        .subtitle { font-size: 14px; color: var(--text-muted); line-height: 1.4; }
+
+        .section-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--primary);
+            margin: 30px 0 15px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid rgba(74, 144, 226, 0.2);
+        }
+
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; font-size: 15px; font-weight: 500; margin-bottom: 8px; color: var(--text-dark); }
+        .form-label.required::after { content: ' *'; color: var(--error); }
+        
+        .form-input, .form-select {
+            width: 100%; padding: 12px 16px; border: 1px solid rgba(0, 0, 0, 0.1); border-radius: 10px;
+            background: rgba(255, 255, 255, 0.8); font-size: 15px; color: var(--text-dark); outline: none; transition: all 0.2s ease;
+        }
+        .form-input:focus, .form-select:focus { border-color: var(--primary); background: #fff; box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.15); }
+        textarea.form-input { resize: vertical; min-height: 80px; }
+
+        .checkbox-group, .radio-group {
+            display: flex; flex-direction: column; gap: 10px;
+            background: rgba(255, 255, 255, 0.5); padding: 15px; border-radius: 10px; border: 1px solid rgba(0,0,0,0.05);
+        }
+        .checkbox-item, .radio-item { display: flex; align-items: flex-start; gap: 10px; }
+        .checkbox-item input[type="checkbox"], .radio-item input[type="radio"] { 
+            margin-top: 3px; width: 18px; height: 18px; accent-color: var(--primary);
+        }
+        .checkbox-item label, .radio-item label { font-size: 15px; color: var(--text-dark); line-height: 1.4; cursor: pointer; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+
+        .btn-submit {
+            width: 100%; padding: 16px; background: linear-gradient(90deg, #4a90e2 0%, #357abd 100%);
+            color: #fff; border: none; border-radius: 12px; font-size: 18px; font-weight: 600; cursor: pointer;
+            box-shadow: 0 4px 15px rgba(74, 144, 226, 0.2); transition: all 0.3s ease; margin-top: 20px;
+        }
+        .btn-submit:hover { transform: translateY(-2px); box-shadow: 0 6px 20px rgba(74, 144, 226, 0.3); }
+
+        .status-message {
+            padding: 15px; border-radius: 10px; margin-bottom: 20px; font-size: 15px; display: none; line-height: 1.5;
+        }
+        .status-message.error { background: rgba(239, 83, 80, 0.1); border: 1px solid rgba(239, 83, 80, 0.2); color: var(--error); display: block; }
+
+        .loader-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(4px); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 100;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 5px solid rgba(74, 144, 226, 0.1); border-top-color: var(--primary);
+            border-radius: 50%; animation: spin 1s infinite linear; margin-bottom: 15px;
+        }
+
+        /* 成功卡片 */
+        .success-card { text-align: center; display: none; padding: 20px 0; }
+        .success-icon {
+            width: 80px; height: 80px; background: rgba(102, 187, 106, 0.1); color: var(--success); border-radius: 50%;
+            display: inline-flex; justify-content: center; align-items: center; font-size: 40px; margin: 0 auto 20px auto;
+            border: 2px solid rgba(102, 187, 106, 0.2);
+        }
+        .success-title { font-size: 22px; font-weight: 600; color: var(--text-dark); margin-bottom: 10px; }
+        .success-desc { font-size: 16px; color: var(--text-muted); line-height: 1.6; margin-bottom: 25px; }
+        
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+
+        @media (max-width: 480px) {
+            .grid-2 { grid-template-columns: 1fr; }
+            .container { padding: 20px 15px; }
+        }
+    </style>
+</head>
+<body>
+
+<div class="container" id="mainContainer">
+    <div class="header" id="formHeader">
+        <div class="logo">新竹市月子工會</div>
+        <div class="title">產婦服務登記表單</div>
+        <div class="subtitle">請詳細填寫以下資料，送出後將為您建立專屬服務檔案並進行媒合。</div>
+    </div>
+
+    <div id="statusMessage" class="status-message"></div>
+
+    <form id="registerForm">
+        <!-- Section 1: 基本資料 -->
+        <div class="section-title">👩 1. 基本資料</div>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label required">產婦姓名</label>
+                <input type="text" class="form-input" id="name" required placeholder="請填寫真實姓名">
+            </div>
+            <div class="form-group">
+                <label class="form-label">身分證字號</label>
+                <input type="text" class="form-input" id="id_number" placeholder="身分證字號">
+            </div>
+        </div>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label">出生年月日</label>
+                <input type="date" class="form-input" id="birth_date">
+            </div>
+            <div class="form-group">
+                <label class="form-label">性別</label>
+                <select class="form-select" id="gender">
+                    <option value="女">女</option>
+                </select>
+            </div>
+        </div>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label required">行動電話</label>
+                <input type="tel" class="form-input" id="phone" required placeholder="例如: 0912345678">
+            </div>
+            <div class="form-group">
+                <label class="form-label">市話 (含分機)</label>
+                <input type="tel" class="form-input" id="tel" placeholder="例如: 03-5551234 ext 12">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="email" placeholder="example@gmail.com">
+        </div>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label">縣市</label>
+                <input type="text" class="form-input" id="city" placeholder="例如: 新竹市">
+            </div>
+            <div class="form-group">
+                <label class="form-label">郵遞區號</label>
+                <input type="text" class="form-input" id="zip_code" placeholder="例如: 300">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label required">服務地址</label>
+            <input type="text" class="form-input" id="address" required placeholder="請填寫完整地址 (含巷弄樓層)">
+        </div>
+
+        <!-- Section 2: 照護與環境 -->
+        <div class="section-title">🍼 2. 照護與環境</div>
+        <div class="grid-2">
+            <div class="form-group">
+                <label class="form-label required">預產期 (或已生產日期)</label>
+                <input type="date" class="form-input" id="expected_date" required>
+            </div>
+            <div class="form-group">
+                <label class="form-label required">預計服務天數</label>
+                <input type="number" class="form-input" id="service_days" required min="1" max="60" placeholder="例如: 30">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">胎數 (第一胎、第二胎...)</label>
+            <input type="text" class="form-input" data-survey="特殊計費:胎數" placeholder="例如: 第一胎">
+        </div>
+        <div class="form-group">
+            <label class="form-label">服務時間內是否有其他大寶/寶寶</label>
+            <input type="text" class="form-input" data-survey="服務時間內是否有其他寶寶" placeholder="例如: 無 / 有一個3歲大寶">
+        </div>
+        
+        <div class="form-group">
+            <label class="form-label">哺乳方式</label>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="breastfeed" value="母乳" id="bf1"><label for="bf1">母乳</label></div>
+                <div class="radio-item"><input type="radio" name="breastfeed" value="配方奶" id="bf2"><label for="bf2">配方奶</label></div>
+                <div class="radio-item"><input type="radio" name="breastfeed" value="母乳+配方奶" id="bf3"><label for="bf3">母乳+配方奶</label></div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">洗澡水準備</label>
+            <div class="checkbox-group">
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="一般熱水" id="bw1"><label for="bw1">一般熱水</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="薑水" id="bw2"><label for="bw2">薑水</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="洗澡水準備：" value="中藥包" id="bw3"><label for="bw3">中藥包</label></div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">媽咪有無過敏體質</label>
+            <textarea class="form-input" data-survey="5媽咪有無過敏體質：" placeholder="若無請填無"></textarea>
+        </div>
+        <div class="form-group">
+            <label class="form-label">特殊照護時應注意事項</label>
+            <textarea class="form-input" data-survey="特殊照護時應注意事項：" placeholder="例如: 剖腹產、有妊娠糖尿病等"></textarea>
+        </div>
+
+        <!-- Section 3: 飲食偏好 -->
+        <div class="section-title">🍲 3. 飲食偏好</div>
+        <div class="form-group">
+            <label class="form-label">月子餐點調理喜好/飲食習慣</label>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="diet" value="葷食" id="dt1"><label for="dt1">葷食</label></div>
+                <div class="radio-item"><input type="radio" name="diet" value="素食" id="dt2"><label for="dt2">素食</label></div>
+                <div class="radio-item"><input type="radio" name="diet" value="不用料理/訂月餐" id="dt3"><label for="dt3">不用料理/訂月餐</label></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">若遇無法媒合到葷食人員時，是否可接受蛋奶素人員？</label>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="veg_staff" value="可接受" id="vs1"><label for="vs1">可接受</label></div>
+                <div class="radio-item"><input type="radio" name="veg_staff" value="無法接受" id="vs2"><label for="vs2">無法接受</label></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">可以接受中藥補品</label>
+            <div class="checkbox-group">
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="茶飲" id="hm1"><label for="hm1">茶飲</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="藥飲" id="hm2"><label for="hm2">藥飲</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="藥膳" id="hm3"><label for="hm3">藥膳</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="可以接受中藥補品：□茶飲 □藥飲 □藥膳" value="無法接受中藥補品" id="hm4"><label for="hm4">無法接受中藥補品</label></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">餐飲含酒比例</label>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="alcohol" value="全酒" id="al1"><label for="al1">全酒</label></div>
+                <div class="radio-item"><input type="radio" name="alcohol" value="半酒" id="al2"><label for="al2">半酒</label></div>
+                <div class="radio-item"><input type="radio" name="alcohol" value="米酒水" id="al3"><label for="al3">米酒水</label></div>
+                <div class="radio-item"><input type="radio" name="alcohol" value="無酒料理" id="al4"><label for="al4">無酒料理</label></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">料理用油 (可接受種類)</label>
+            <div class="checkbox-group">
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="苦茶油(前兩週)" id="oil1"><label for="oil1">苦茶油(前兩週)</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="麻油(後兩週)" id="oil2"><label for="oil2">麻油(後兩週)</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="橄欖油" id="oil3"><label for="oil3">橄欖油</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="3．料理用油：(可接受種類)" value="一般食用油" id="oil4"><label for="oil4">一般食用油</label></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">餐點喜忌備註</label>
+            <textarea class="form-input" data-survey="餐點喜忌備註：" placeholder="例如: 不吃牛、不吃內臟等"></textarea>
+        </div>
+
+        <!-- Section 4: 居家設備與環境 -->
+        <div class="section-title">🍳 4. 居家設備與環境</div>
+        <div class="form-group">
+            <label class="form-label">烹煮與加熱工具 (請勾選家中有的設備)</label>
+            <div class="checkbox-group">
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="炒菜鍋"><label>炒菜鍋</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="大同電鍋"><label>大同電鍋</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="電子鍋"><label>電子鍋</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="微波爐"><label>微波爐</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="烤箱"><label>烤箱</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="奶瓶消毒鍋"><label>奶瓶消毒鍋</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="洗碗機"><label>洗碗機</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="烹煮工具" value="(煮/泡 洗澡大豐草/艾草水) 的鍋或盆"><label>(煮/泡 洗澡大豐草)的鍋或盆</label></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">透天服務樓層方式 (會加收樓層費)</label>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="floor_fee" value="大樓公寓無樓層問題"><label>大樓公寓無樓層問題</label></div>
+                <div class="radio-item"><input type="radio" name="floor_fee" value="服務範圍2層樓(+100/元)每日"><label>服務範圍2層樓(+100/元)每日</label></div>
+                <div class="radio-item"><input type="radio" name="floor_fee" value="服務範圍3層樓(+200/元)每日"><label>服務範圍3層樓(+200/元)每日</label></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">提供服務人員轎車停車位</label>
+            <div class="radio-group">
+                <div class="radio-item"><input type="radio" name="parking" value="有"><label>有</label></div>
+                <div class="radio-item"><input type="radio" name="parking" value="無(願意負擔停車費用)"><label>無 (願意負擔停車費用)</label></div>
+            </div>
+        </div>
+
+        <!-- Section 5: 費用與同意條款 -->
+        <div class="section-title">💰 5. 費用與同意條款</div>
+        <div class="form-group">
+            <label class="form-label">特殊計費：甲方同意需另支付當日薪資 1 倍予乙方</label>
+            <div class="checkbox-group">
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="特殊計費:甲方同意需另支付當日薪資1倍予乙方。" value="年節農曆過年初一"><label>年節農曆過年初一</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="特殊計費:甲方同意需另支付當日薪資1倍予乙方。" value="年節農曆過年初二"><label>年節農曆過年初二</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="特殊計費:甲方同意需另支付當日薪資1倍予乙方。" value="年節農曆過年初三"><label>年節農曆過年初三</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="特殊計費:甲方同意需另支付當日薪資1倍予乙方。" value="端午節"><label>端午節</label></div>
+                <div class="checkbox-item"><input type="checkbox" data-survey-array="特殊計費:甲方同意需另支付當日薪資1倍予乙方。" value="中秋節"><label>中秋節</label></div>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">補助款退款: 銀行代號與名稱</label>
+            <input type="text" class="form-input" data-survey="補助款退款:銀行代號+分行代號" placeholder="例如: 004 台灣銀行">
+        </div>
+        <div class="form-group">
+            <label class="form-label">銀行帳號</label>
+            <input type="text" class="form-input" data-survey="銀行帳號" placeholder="請輸入完整帳號">
+        </div>
+        <div class="form-group">
+            <label class="form-label required">確認條款</label>
+            <div class="checkbox-group">
+                <div class="checkbox-item"><input type="checkbox" id="agree1" required><label for="agree1">※已確實詳閱退費原則</label></div>
+                <div class="checkbox-item"><input type="checkbox" id="agree2" required><label for="agree2">我確實了解並願意遵照辦理以上相關規定，說明及退費原則 (勾選後等同簽名確認)</label></div>
+                <div class="checkbox-item"><input type="checkbox" id="agree3" required><label for="agree3">需自行負擔銀行轉帳手續費</label></div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn-submit">送出完整服務登記表單</button>
+    </form>
+
+    <!-- 成功畫面 -->
+    <div id="successCard" class="success-card">
+        <div class="success-icon">✓</div>
+        <div class="success-title">送出成功！</div>
+        <div class="success-desc">您的服務資料已經完整登錄至系統。<br>稍後 LINE 將會推播您的「專屬訂單編號」，請關閉此頁面回到 LINE 聊天室查看。</div>
+        <button class="btn-submit" onclick="liff.closeWindow()">關閉視窗</button>
+    </div>
+
+    <!-- 載入中遮罩 -->
+    <div class="loader-overlay" id="loaderOverlay">
+        <div class="spinner"></div>
+        <div style="font-size: 15px; font-weight:500; color:var(--text-dark);">資料傳送中，請稍候...</div>
+    </div>
+</div>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+    let currentLineUserId = "mock_line_user_id";
+
+    async function initializeLiff() {
+        try {
+            // 1. 動態載入 LIFF 與外觀設定
+            const configRes = await fetch('/api/config/liff');
+            const appConfig = await configRes.json();
+            
+            // 套用顏色主題
+            if (appConfig.theme_colors) {
+                document.documentElement.style.setProperty('--primary', appConfig.theme_colors.primary);
+                document.documentElement.style.setProperty('--primary-hover', appConfig.theme_colors.primary_hover);
+                document.documentElement.style.setProperty('--bg-gradient', appConfig.theme_colors.background_gradient);
+                document.documentElement.style.setProperty('--text-dark', appConfig.theme_colors.text_dark);
+                document.documentElement.style.setProperty('--text-muted', appConfig.theme_colors.text_muted);
+            }
+            // 套用文字設定
+            if (appConfig.texts) {
+                const titleEl = document.querySelector('.title');
+                if (titleEl) titleEl.textContent = appConfig.texts.form_title;
+                const subtitleEl = document.querySelector('.subtitle');
+                if (subtitleEl) subtitleEl.textContent = appConfig.texts.form_subtitle;
+                const btnEl = document.querySelector('.btn-submit');
+                if (btnEl) btnEl.textContent = appConfig.texts.submit_button;
+                const sucTitle = document.querySelector('.success-title');
+                if (sucTitle) sucTitle.innerHTML = appConfig.texts.success_title;
+                const sucDesc = document.querySelector('.success-desc');
+                if (sucDesc) sucDesc.innerHTML = appConfig.texts.success_desc;
+            }
+
+            // 2. 初始化 LIFF
+            const response = await fetch('/api/line/config');
+            const config = await response.json();
+            
+            if (config.liff_id && config.liff_id !== "your_liff_id_here") {
+                await liff.init({ liffId: config.liff_id });
+                if (liff.isLoggedIn()) {
+                    const profile = await liff.getProfile();
+                    currentLineUserId = profile.userId;
+                } else {
+                    liff.login();
+                }
+            } else {
+                console.warn("LIFF ID未設定，使用 Mock ID");
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.has('userId')) currentLineUserId = urlParams.get('userId');
+            }
+        } catch (error) {
+            console.error("初始化失敗", error);
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('userId')) currentLineUserId = urlParams.get('userId');
+        }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+        initializeLiff();
+    });
+
+    document.getElementById("registerForm").addEventListener("submit", async function(e) {
+        e.preventDefault();
+        
+        const loader = document.getElementById("loaderOverlay");
+        const statusMsg = document.getElementById("statusMessage");
+        statusMsg.style.display = "none";
+        statusMsg.className = "status-message";
+        loader.style.display = "flex";
+
+        try {
+            // 收集 survey_details
+            let surveyDetails = {};
+            
+            // 處理一般 text/textarea 的 survey 資料
+            document.querySelectorAll('input[data-survey], textarea[data-survey]').forEach(el => {
+                if (el.value.trim()) {
+                    surveyDetails[el.getAttribute('data-survey')] = el.value.trim();
+                }
+            });
+
+            // 處理單選 Radio 的 survey 資料 (透過 name)
+            const radioGroups = ['breastfeed', 'diet', 'veg_staff', 'alcohol', 'floor_fee', 'parking'];
+            const radioKeys = {
+                'breastfeed': '哺乳方式：',
+                'diet': '月子餐點調理喜好/飲食習慣：',
+                'veg_staff': '呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？',
+                'alcohol': '2．餐飲含酒比例：',
+                'floor_fee': '透天服務樓層方式(會加收樓層費)',
+                'parking': '提供服務人員轎車停車位'
+            };
+            radioGroups.forEach(groupName => {
+                const checked = document.querySelector(`input[name="${groupName}"]:checked`);
+                if (checked) {
+                    surveyDetails[radioKeys[groupName]] = checked.value;
+                }
+            });
+
+            // 處理多選 Checkbox 的 survey 資料 (透過 data-survey-array)
+            let arrayData = {};
+            document.querySelectorAll('input[type="checkbox"][data-survey-array]:checked').forEach(el => {
+                const key = el.getAttribute('data-survey-array');
+                if (!arrayData[key]) arrayData[key] = [];
+                arrayData[key].push(el.value);
+            });
+            for (const [key, valArray] of Object.entries(arrayData)) {
+                surveyDetails[key] = valArray.join(', ');
+            }
+            
+            // 加入強制同意項目
+            surveyDetails['※已確實詳閱退費原則：'] = document.getElementById('agree1').checked ? 'Y' : '';
+            surveyDetails['我確實了解並願意遵照辦理以上相關規定，說明及退費原則(勾選後等同簽名確認)'] = document.getElementById('agree2').checked ? 'Y' : '';
+            surveyDetails['需自行負擔銀行轉帳手續費'] = document.getElementById('agree3').checked ? 'Y' : '';
+
+            const payload = {
+                name: document.getElementById("name").value,
+                id_number: document.getElementById("id_number").value || "",
+                birth_date: document.getElementById("birth_date").value || "",
+                phone: document.getElementById("phone").value,
+                tel: document.getElementById("tel").value || "",
+                expected_date: document.getElementById("expected_date").value,
+                service_days: parseInt(document.getElementById("service_days").value, 10),
+                address: document.getElementById("address").value,
+                gender: document.getElementById("gender").value,
+                email: document.getElementById("email").value || "",
+                city: document.getElementById("city").value || "",
+                zip_code: document.getElementById("zip_code").value || "",
+                line_user_id: currentLineUserId,
+                survey_details: surveyDetails
+            };
+
+            const response = await fetch('/api/line/register', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const result = await response.json();
+            
+            loader.style.display = "none";
+            
+            if (response.ok && result.status === "success") {
+                document.getElementById("formHeader").style.display = "none";
+                document.getElementById("registerForm").style.display = "none";
+                document.getElementById("successCard").style.display = "block";
+            } else {
+                statusMsg.textContent = result.message || "發生未知錯誤，請重試。";
+                statusMsg.className = "status-message error";
+            }
+        } catch (error) {
+            console.error(error);
+            loader.style.display = "none";
+            statusMsg.textContent = "系統連線錯誤，請檢查網路狀態。";
+            statusMsg.className = "status-message error";
+        }
+    });
+</script>
+</body>
+</html>
