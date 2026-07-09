@@ -1,0 +1,55 @@
+##### Module: InitDB
+- Type: script
+- Description: 資料庫初始化腳本，執行 schema.sql 以建立與重建 MySQL 資料庫結構。
+- Source: scripts/init_db.py
+- Dependencies: []
+- Input:
+  - schema_sql: db/schema.sql
+- Output:
+  - success: boolean
+- Invariants: []
+- Preferred Pattern: none
+- Verification: []
+- Todo:
+  - [x] 在 clients 表新增 line_user_id (VARCHAR(100))
+  - [x] 在 staff 表新增 line_user_id (VARCHAR(100)), weekly_rest_days (JSON), service_regions (JSON), special_skills (JSON)
+  - [x] 新增 orders 表 (包含 status, client_id, staff_id, cancel_reason, line_group_id, actual_start_date, contract_id 等欄位)
+  - [x] 新增 matching_records 中介表 (包含 order_id, staff_id, caregiver_accepted, sent_at 等欄位)
+  - [x] 在 db/schema.sql 新增帳務相關資料表 (以對照 帳務.xlsx 的收支與月嫂轉帳紀錄)
+  - [x] 【架構重構】在 schema.sql 中標註未來將移除 case_no，並全面改用「查詢序號(案件編號)」作為關聯主鍵
+- Checkpoint:
+  - [x] CP-2.1: 審查 schema.sql 新增之表格與欄位設計是否符合系統擴充需求
+  - [x] CP-3.1: 審查 schema.sql 新增之帳務收支資料表結構設計
+  - [x] CP-4.1: 審查主鍵重構與「帳務與訂單業務規則.md」的實作對齊狀況
+
+##### Module: GenerateFakeData
+- Type: script
+- Description: 模擬生成系統測試所需假資料，包含客戶、服務人員名冊 Excel 以及合作社流水帳與對照表 Excel。
+- Source: scripts/generate_fake_data.py
+- Dependencies: []
+- Input: {}
+- Output:
+  - success: boolean
+- Invariants: []
+- Preferred Pattern: none
+- Verification: []
+- Todo:
+  - [x] 撰寫 scripts/generate_fake_data.py 統一生成各類測試 Excel 假資料
+- Checkpoint: []
+
+##### Module: FileWatcher
+- Type: service
+- Description: 地端檔案監控服務，監控 downloads/ 下各專屬子資料夾，當有新檔案寫入或現有檔案更新時，自動觸發對應的微匯入腳本。
+- Source: scripts/file_watcher.py
+- Dependencies: [ImportClientHCM, ImportClientBeclass, ImportStaffBeclass, ImportFinanceExcel]
+- Input:
+  - watch_dir: downloads/
+- Output:
+  - running: boolean
+- Invariants: []
+- Preferred Pattern: none
+- Verification: []
+- Todo:
+  - [x] 撰寫 scripts/file_watcher.py 實作 watchdog 檔案監控並分發觸發邏輯
+- Checkpoint:
+  - [x] CP-6.1: 審查地端檔案監控與對應腳本觸發之穩定性

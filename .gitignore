@@ -23,7 +23,7 @@ metabase-data/
 # Private environment variables / secrets
 .env
 
-# ADAD Workflow configuration & maps (local architecture tools)
+# ADAD (Architecture-Driven Agentic Development)
 .agents/
 system_map.md
 system_map.yaml
@@ -38,3 +38,9 @@ history/work_log.md
 task-*.md
 PROJECT_SPEC.md
 AGENTS.md
+
+# Preserve system_map files
+!**/system_map.yaml
+!**/system_map.md
+!**/*system_map.yaml
+!**/*system_map.md

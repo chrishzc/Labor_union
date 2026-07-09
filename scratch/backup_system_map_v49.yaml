@@ -1,0 +1,33 @@
+# Master System Map (ADAD Master Architecture Version 49)
+# Sub-Maps Architecture:
+# - UI Layer Sub-Map: ui/ui_system_map.yaml
+# - Services Layer Sub-Map: services/services_system_map.yaml
+
+version: 49
+scope: master_architecture
+
+sub_maps:
+  ui_layer: ui/ui_system_map.yaml
+  services_layer: services/services_system_map.yaml
+
+modules:
+  Main:
+    type: entrypoint
+    description: 系統主程式入口。
+    source: main.py
+    dependencies: [AppShellUI]
+    state: validated
+
+  UILayer:
+    type: sub_system_layer
+    description: 前端介面與專頁分頁層。包含 AppShellUI, DataBrowserUI, OrderUI, CalendarUI, EditOrderUI, FormManagementUI。
+    sub_map_reference: ui/ui_system_map.yaml
+    todo:
+      - "[ ] 審核 Master System Map 的架構內容，進行全面擴充與層級描述精緻化"
+    state: validated
+
+  ServicesLayer:
+    type: sub_system_layer
+    description: 後端數據與排班計算服務層。包含 DbService 與 CalendarService。
+    sub_map_reference: services/services_system_map.yaml
+    state: validated

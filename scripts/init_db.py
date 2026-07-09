@@ -1,20 +1,16 @@
 import sys
 import os
 import pymysql
-from dotenv import load_dotenv
-
-# 載入環境變數
-load_dotenv()
 
 # 確保中文輸出編碼正確
 sys.stdout.reconfigure(encoding='utf-8')
 
 # 資料庫連線配置 (同 import_excel.py，但先不指定 database，因為 sql 檔內含 CREATE DATABASE)
 DB_CONFIG = {
-    'host': os.getenv("DB_HOST", "127.0.0.1"),
-    'port': int(os.getenv("DB_PORT", "3306")),
-    'user': os.getenv("DB_USER", "root"),
-    'password': os.getenv("DB_PASSWORD", "1234"),
+    'host': '127.0.0.1',
+    'port': 3306,
+    'user': 'root',
+    'password': '1234',
     'charset': 'utf8mb4'
 }
 
@@ -80,26 +76,35 @@ def main():
             connection.commit()
             print(f"\n====== 資料庫 Schema 更新成功！共執行 {success_count} 個語句 ======")
             
-            # 匯入預設國定假日到 roc_holidays 資料表
-            try:
-                project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-                if project_root not in sys.path:
-                    sys.path.append(project_root)
-                from admin.utils import ROC_HOLIDAYS
-                
-                with connection.cursor() as cursor_holiday:
-                    cursor_holiday.execute("USE union_db;")
-                    insert_query = """
-                        INSERT INTO roc_holidays (holiday_date, holiday_name, is_custom) 
-                        VALUES (%s, %s, FALSE) 
-                        ON DUPLICATE KEY UPDATE holiday_name = VALUES(holiday_name);
-                    """
-                    holiday_data = [(date_str, name) for date_str, name in ROC_HOLIDAYS.items()]
-                    cursor_holiday.executemany(insert_query, holiday_data)
-                connection.commit()
-                print(f"成功預載 {len(holiday_data)} 筆國定假日資料至 roc_holidays 表格。")
-            except Exception as holiday_err:
-                print(f"預載國定假日資料時出錯：{holiday_err}")
+            # 預載 2026 年中華民國核心國定假日
+            holidays_2026 = [
+                ('2026-01-01', '中華民國開國紀念日(元旦)', True),
+                ('2026-02-17', '農曆除夕', True),
+                ('2026-02-18', '春節初一', True),
+                ('2026-02-19', '春節初二', True),
+                ('2026-02-20', '春節初三', True),
+                ('2026-02-21', '春節初四', True),
+                ('2026-02-22', '春節初五', True),
+                ('2026-02-27', '和平紀念日(補假)', True),
+                ('2026-02-28', '和平紀念日', True),
+                ('2026-04-03', '兒童節', True),
+                ('2026-04-04', '清明節/民族掃墓節', True),
+                ('2026-06-19', '端午節', True),
+                ('2026-09-25', '中秋節', True),
+                ('2026-10-09', '國慶日(補假)', True),
+                ('2026-10-10', '國慶日', True)
+            ]
+            
+            with connection.cursor() as cursor:
+                for date_str, name, is_double in holidays_2026:
+                    cursor.execute("""
+                        INSERT INTO holidays (holiday_date, holiday_name, is_double_pay_default)
+                        VALUES (%s, %s, %s)
+                        ON DUPLICATE KEY UPDATE holiday_name = %s, is_double_pay_default = %s
+                    """, (date_str, name, is_double, name, is_double))
+            connection.commit()
+            print("====== 2026 年中華民國國定假日預載成功 ======")
+            
     except Exception as e:
         connection.rollback()
         print(f"執行失敗，已回滾所有變更。錯誤原因：{e}")

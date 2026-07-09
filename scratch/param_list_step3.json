@@ -1,0 +1,380 @@
+[
+  {
+    "coord": "F1",
+    "row": 1,
+    "col": 6,
+    "orig_text": "訂單編號((市府表單))",
+    "param_tag": "P1"
+  },
+  {
+    "coord": "B7",
+    "row": 7,
+    "col": 2,
+    "orig_text": "TODAY()",
+    "param_tag": "P2"
+  },
+  {
+    "coord": "B8",
+    "row": 8,
+    "col": 2,
+    "orig_text": "客戶名稱(市府表單)",
+    "param_tag": "P3"
+  },
+  {
+    "coord": "A9",
+    "row": 9,
+    "col": 1,
+    "orig_text": "預產期(市府表單)",
+    "param_tag": "P4"
+  },
+  {
+    "coord": "C10",
+    "row": 10,
+    "col": 3,
+    "orig_text": "服務人員(綁定好的服務人員)",
+    "param_tag": "P5"
+  },
+  {
+    "coord": "B24",
+    "row": 24,
+    "col": 2,
+    "orig_text": "開始日期(市府表單)",
+    "param_tag": "P6"
+  },
+  {
+    "coord": "D24",
+    "row": 24,
+    "col": 4,
+    "orig_text": "結束日期(市府表單)",
+    "param_tag": "P7"
+  },
+  {
+    "coord": "F24",
+    "row": 24,
+    "col": 6,
+    "orig_text": "希望服務天數(市府表單)",
+    "param_tag": "P8"
+  },
+  {
+    "coord": "B25",
+    "row": 25,
+    "col": 2,
+    "orig_text": "雇主單價(訂單系統)",
+    "param_tag": "P9"
+  },
+  {
+    "coord": "F25",
+    "row": 25,
+    "col": 6,
+    "orig_text": "時數(市府表單)",
+    "param_tag": "P10"
+  },
+  {
+    "coord": "B28",
+    "row": 28,
+    "col": 2,
+    "orig_text": "補助時數(訂單系統)",
+    "param_tag": "P11"
+  },
+  {
+    "coord": "E28",
+    "row": 28,
+    "col": 5,
+    "orig_text": "服務時段(市府表單)",
+    "param_tag": "P12"
+  },
+  {
+    "coord": "A29",
+    "row": 29,
+    "col": 1,
+    "orig_text": "三、自費服務時數及費用單價:",
+    "param_tag": "P13"
+  },
+  {
+    "coord": "C29",
+    "row": 29,
+    "col": 3,
+    "orig_text": "服務時薪費用:",
+    "param_tag": "P14"
+  },
+  {
+    "coord": "D29",
+    "row": 29,
+    "col": 4,
+    "orig_text": "服務單價(訂單系統)",
+    "param_tag": "P15"
+  },
+  {
+    "coord": "B30",
+    "row": 30,
+    "col": 2,
+    "orig_text": "=F24",
+    "param_tag": "P16"
+  },
+  {
+    "coord": "D30",
+    "row": 30,
+    "col": 4,
+    "orig_text": "=F25",
+    "param_tag": "P17"
+  },
+  {
+    "coord": "F30",
+    "row": 30,
+    "col": 6,
+    "orig_text": "=B38",
+    "param_tag": "P18"
+  },
+  {
+    "coord": "F31",
+    "row": 31,
+    "col": 6,
+    "orig_text": "特殊休假(訂單系統)",
+    "param_tag": "P19"
+  },
+  {
+    "coord": "E33",
+    "row": 33,
+    "col": 5,
+    "orig_text": "政府編號(市府表單)",
+    "param_tag": "P20"
+  },
+  {
+    "coord": "A34",
+    "row": 34,
+    "col": 1,
+    "orig_text": "訂金",
+    "param_tag": "P21"
+  },
+  {
+    "coord": "B34",
+    "row": 34,
+    "col": 2,
+    "orig_text": "訂金(訂單系統)",
+    "param_tag": "P22"
+  },
+  {
+    "coord": "C34",
+    "row": 34,
+    "col": 3,
+    "orig_text": "訂金日期(訂單系統)",
+    "param_tag": "P23"
+  },
+  {
+    "coord": "E34",
+    "row": 34,
+    "col": 5,
+    "orig_text": "Email(市府表單)",
+    "param_tag": "P24"
+  },
+  {
+    "coord": "A35",
+    "row": 35,
+    "col": 1,
+    "orig_text": "第一期款",
+    "param_tag": "P25"
+  },
+  {
+    "coord": "B35",
+    "row": 35,
+    "col": 2,
+    "orig_text": "第一期款(訂單系統)",
+    "param_tag": "P26"
+  },
+  {
+    "coord": "C35",
+    "row": 35,
+    "col": 3,
+    "orig_text": "第一期款入帳日(訂單系統)",
+    "param_tag": "P27"
+  },
+  {
+    "coord": "D35",
+    "row": 35,
+    "col": 4,
+    "orig_text": "服務款項匯款帳號：(代收付)",
+    "param_tag": "P28"
+  },
+  {
+    "coord": "A36",
+    "row": 36,
+    "col": 1,
+    "orig_text": "第二期款",
+    "param_tag": "P29"
+  },
+  {
+    "coord": "B36",
+    "row": 36,
+    "col": 2,
+    "orig_text": "第二期款(訂單系統)",
+    "param_tag": "P30"
+  },
+  {
+    "coord": "C36",
+    "row": 36,
+    "col": 3,
+    "orig_text": "第二期款入帳日(訂單系統)",
+    "param_tag": "P31"
+  },
+  {
+    "coord": "D36",
+    "row": 36,
+    "col": 4,
+    "orig_text": "還不確定要給哪個帳號，但要連接帳號資訊",
+    "param_tag": "P32"
+  },
+  {
+    "coord": "A37",
+    "row": 37,
+    "col": 1,
+    "orig_text": "樓層費用",
+    "param_tag": "P33"
+  },
+  {
+    "coord": "B37",
+    "row": 37,
+    "col": 2,
+    "orig_text": "樓層費用(訂單系統)",
+    "param_tag": "P34"
+  },
+  {
+    "coord": "C37",
+    "row": 37,
+    "col": 3,
+    "orig_text": "訂金日期(訂單系統)",
+    "param_tag": "P35"
+  },
+  {
+    "coord": "B38",
+    "row": 38,
+    "col": 2,
+    "orig_text": "雇主自費合計金額(訂單系統)",
+    "param_tag": "P36"
+  },
+  {
+    "coord": "D38",
+    "row": 38,
+    "col": 4,
+    "orig_text": "應匯款項 (逾時未匯款者，乙方可暫停合約。)",
+    "param_tag": "P37"
+  },
+  {
+    "coord": "B39",
+    "row": 39,
+    "col": 2,
+    "orig_text": "=IFERROR(VLOOKUP($F$1,'[1]2019AP訂單6-9月'!C$1:AI$1048576,10,0),\"- \")",
+    "param_tag": "P38"
+  },
+  {
+    "coord": "E39",
+    "row": 39,
+    "col": 5,
+    "orig_text": "=E28",
+    "param_tag": "P39"
+  },
+  {
+    "coord": "B40",
+    "row": 40,
+    "col": 2,
+    "orig_text": "補助薪資(訂單系統)",
+    "param_tag": "P40"
+  },
+  {
+    "coord": "D40",
+    "row": 40,
+    "col": 4,
+    "orig_text": "雇主帳號: 銀行代號+分行代號(BECLASS)",
+    "param_tag": "P41"
+  },
+  {
+    "coord": "E40",
+    "row": 40,
+    "col": 5,
+    "orig_text": "銀行帳號(BECLASS)",
+    "param_tag": "P42"
+  },
+  {
+    "coord": "B41",
+    "row": 41,
+    "col": 2,
+    "orig_text": "服務方式(市府表單)",
+    "param_tag": "P43"
+  },
+  {
+    "coord": "C41",
+    "row": 41,
+    "col": 3,
+    "orig_text": "寶寶資訊(市府表單)",
+    "param_tag": "P44"
+  },
+  {
+    "coord": "D41",
+    "row": 41,
+    "col": 4,
+    "orig_text": "生產方式(市府表單)",
+    "param_tag": "P45"
+  },
+  {
+    "coord": "E41",
+    "row": 41,
+    "col": 5,
+    "orig_text": "居住型態(市府表單)",
+    "param_tag": "P46"
+  },
+  {
+    "coord": "F41",
+    "row": 41,
+    "col": 6,
+    "orig_text": "其他備註(市府表單)",
+    "param_tag": "P47"
+  },
+  {
+    "coord": "B43",
+    "row": 43,
+    "col": 2,
+    "orig_text": "地址(市府表單)",
+    "param_tag": "P48"
+  },
+  {
+    "coord": "A48",
+    "row": 48,
+    "col": 1,
+    "orig_text": "服務時段(市府表單)",
+    "param_tag": "P49"
+  },
+  {
+    "coord": "B178",
+    "row": 178,
+    "col": 2,
+    "orig_text": "客戶名稱(市府表單)",
+    "param_tag": "P50"
+  },
+  {
+    "coord": "E178",
+    "row": 178,
+    "col": 5,
+    "orig_text": "客戶電話(市府表單)",
+    "param_tag": "P51"
+  },
+  {
+    "coord": "B180",
+    "row": 180,
+    "col": 2,
+    "orig_text": "地址(市府表單)",
+    "param_tag": "P52"
+  },
+  {
+    "coord": "B181",
+    "row": 181,
+    "col": 2,
+    "orig_text": "=C10",
+    "param_tag": "P53"
+  },
+  {
+    "coord": "B185",
+    "row": 185,
+    "col": 2,
+    "orig_text": "TODAY()",
+    "param_tag": "P54"
+  }
+]

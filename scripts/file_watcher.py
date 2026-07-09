@@ -33,21 +33,41 @@ _last_triggered = {}  # {filepath: last_trigger_timestamp}
 class XlsxHandler(FileSystemEventHandler):
     def __init__(self, watch_dir, script_path):
         self.watch_dir = os.path.abspath(watch_dir)
-        self.script_path = script_path
+        # ponytail: Use absolute paths to prevent CWD dependency issues
+        self.script_path = os.path.abspath(script_path)
 
     def _trigger(self, event_path):
-        # \u50c5\u8655\u7406 .xlsx \u6a94\u6848
+        # 1. 僅處理 .xlsx 檔案
         if not event_path.lower().endswith('.xlsx'):
             return
-        # \u51b7\u537b\u6a5f\u5236\uff1a\u907f\u514d\u540c\u4e00\u6a94\u6848\u5728\u77ed\u6642\u9593\u5167\u91cd\u8907\u89f8\u767c
+            
+        # 2. 忽略 Excel 自動產生的隱藏暫存檔
+        filename = os.path.basename(event_path)
+        if filename.startswith('~$'):
+            return
+
+        # 3. 確保檔案已寫入完畢 (未被鎖定)
+        # 嘗試以 "a" 模式開啟，若因正在寫入而被鎖定則進行延遲重試
+        retry_count = 5
+        for i in range(retry_count):
+            try:
+                with open(event_path, "a"):
+                    break
+            except IOError:
+                time.sleep(0.5)
+        else:
+            print(f"[警告] 檔案 {filename} 仍處於佔用或寫入狀態，跳過本次匯入")
+            return
+
+        # 4. 冷卻機制：避免同一檔案在短時間內重複觸發
         now = time.time()
         last = _last_triggered.get(event_path, 0)
         if now - last < COOLDOWN_SECONDS:
             return
         _last_triggered[event_path] = now
 
-        print(f"\n[\u5075\u6e2c\u5230\u6a94\u6848\u8b8a\u66f4] {event_path}")
-        print(f"  \u89f8\u767c\u8173\u672c: {self.script_path}")
+        print(f"\n[偵測到檔案變更] {event_path}")
+        print(f"  觸發腳本: {self.script_path}")
         try:
             result = subprocess.run(
                 [sys.executable, self.script_path, event_path],
@@ -59,11 +79,11 @@ class XlsxHandler(FileSystemEventHandler):
             if result.stdout:
                 print(result.stdout.strip())
             if result.stderr:
-                print(f"[\u8b66\u544a] {result.stderr.strip()}")
+                print(f"[警告] {result.stderr.strip()}")
             if result.returncode != 0:
-                print(f"[\u932f\u8aa4] \u8173\u672c\u56de\u50b3\u975e\u96f6\u8fd4\u56de\u78bc: {result.returncode}")
+                print(f"[錯誤] 腳本回傳非零返回碼: {result.returncode}")
         except Exception as e:
-            print(f"[\u7121\u6cd5\u57f7\u884c\u8173\u672c] {e}")
+            print(f"[無法執行腳本] {e}")
 
     def on_created(self, event):
         if not event.is_directory:

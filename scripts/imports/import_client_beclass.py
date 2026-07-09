@@ -21,22 +21,23 @@ import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from admin.utils import get_db_connection
 
-# BeClass \u6838\u5fc3\u6b04\u4f4d\u5c0d\u7167 (\u5176\u9918\u554f\u5377\u6b04\u4f4d\u6253\u5305\u9032 survey_details JSON)
+# BeClass 核心欄位對照 (其餘問卷欄位打包進 survey_details JSON)
+# INV-BECLASS-02: '查詢序號' 對應 query_no
 BECLASS_CORE_MAPPING = {
-    '\u9805\u6b21': 'seq_num',
-    '\u67e5\u8a62\u5e8f\u865f': 'query_no',
-    '\u5831\u540d\u6642\u9593': 'created_at',
-    '\u8a02\u55ae\u7de8\u865f': 'order_no',
-    '\u59d3\u540d': 'name',
-    '\u6027\u5225': 'gender',
+    '項次': 'seq_num',
+    '查詢序號': 'query_no',
+    '報名時間': 'created_at',
+    '訂單編號': 'order_no',
+    '姓名': 'name',
+    '性別': 'gender',
     'Email': 'email',
-    '\u884c\u52d5\u96fb\u8a71': 'phone',
-    '\u5e02\u8a71': 'tel',
-    '\u5206\u6a5f': 'ext',
-    '\u7e23\u5e02': 'city',
-    '\u90f5\u905e\u5340\u865f': 'zip_code',
-    '\u5730\u5740': 'address',
-    '\u7ba1\u7406\u8005\u8a3b\u8a18\u4e8b\u9805': 'admin_notes'
+    '行動電話': 'phone',
+    '市話': 'tel',
+    '分機': 'ext',
+    '縣市': 'city',
+    '郵遞區號': 'zip_code',
+    '地址': 'address',
+    '管理者註記事項': 'admin_notes'
 }
 
 # \u904e\u6ffe\u6389\u7684\u751f\u65e5\u539f\u59cb\u6b04\u4f4d (\u5df2\u5408\u4f75\u5230 birth_date)
@@ -96,64 +97,87 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
+def smart_parse(xl, sheet_name):
+    """INV-IMPORT-01: 自動偵測 Excel 標頭列位置。
+    BeClass 匯出第一列為題目編號（數字），第二列才是中文欄位名。
+    若超過半數欄位為數字或 Unnamed，自動改用 header=1。
+    """
+    probe = xl.parse(sheet_name, nrows=0)
+    generic = sum(
+        1 for col in probe.columns
+        if isinstance(col, (int, float)) or str(col).startswith('Unnamed')
+    )
+    if generic > len(probe.columns) / 2:
+        print(f"[自動偵測] 第一列為索引列，以第二列作為欄位標頭")
+        return xl.parse(sheet_name, header=1)
+    return xl.parse(sheet_name)
+
+# INV-CLEAN-01: DATETIME 欄位需透過此函式清洗，失敗必須回退 None
+DATETIME_COLS = {'created_at'}
+
+def clean_datetime(val, col_name, row_errors):
+    if pd.isna(val) or val is None:
+        return None
+    try:
+        return pd.to_datetime(val).strftime('%Y-%m-%d %H:%M:%S')
+    except Exception:
+        row_errors.append(f"{col_name}='{str(val)[:20]}' 非日期格式，已寫入 NULL")
+        return None
+
 def process_import(excel_path):
     if not os.path.exists(excel_path):
-        print(f"\u932f\u8aa4\uff1a\u627e\u4e0d\u5230 Excel \u6a94\u6848\uff1a{excel_path}")
+        print(f"錯誤：找不到 Excel 檔案：{excel_path}")
         return 0, 0
 
-    print(f"\u89e3\u6790 Excel \u6a94\u6848\uff1a{excel_path} ...")
+    print(f"解析 Excel 檔案：{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
 
-    # \u5c0b\u627e\u5339\u914d\u7684\u5206\u9801 (\u5305\u542b '\u5ba2\u6236' \u6216 'beclass')
-    target_sheet = None
-    for name in xl.sheet_names:
-        clean_name = name.replace(" ", "").lower()
-        if '\u5ba2\u6236' in name and 'beclass' in clean_name:
-            target_sheet = name
-            break
-    # \u5982\u679c\u6c92\u627e\u5230\uff0c\u5617\u8a66\u66f4\u5bec\u9b06\u7684\u5339\u914d
-    if not target_sheet:
-        for name in xl.sheet_names:
-            clean_name = name.replace(" ", "").lower()
-            if '\u5ba2\u6236' in name or ('beclass' in clean_name and '\u670d\u52d9' not in name and '\u4eba\u54e1' not in name):
-                target_sheet = name
-                break
-
-    if not target_sheet:
-        print("\u672a\u627e\u5230\u5305\u542b '\u5ba2\u6236beclass' \u95dc\u9375\u5b57\u7684\u5de5\u4f5c\u8868\u3002\u8df3\u904e\u6b64\u6a94\u6848\u3002")
+    # ponytail: 確定每份檔案只有單一分頁，直接讀取第一個分頁，不進行名稱篩選
+    if not xl.sheet_names:
+        print("工作表為空。跳過此檔案。")
         return 0, 0
+    target_sheet = xl.sheet_names[0]
 
-    df = xl.parse(target_sheet)
-    print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
+    df = smart_parse(xl, target_sheet)
+    print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SET NAMES utf8mb4;")
         conn.commit()
+        
+        # INV-IMPORT-03: 動態偵測 beclass_records 表的所有實際存在欄位
+        cursor.execute("DESCRIBE beclass_records;")
+        db_cols = {col_info[0] for col_info in cursor.fetchall()}
     except Exception as e:
-        print(f"\u8cc7\u6599\u5eab\u9023\u7dda\u5931\u6557\uff1a{e}")
+        print(f"資料庫連線或初始化失敗：{e}")
         return 0, 0
+
 
     inserted = 0
     updated = 0
+    import_errors = []  # INV-CLEAN-02/03
 
     try:
-        for _, row in df.iterrows():
+        for idx, row in df.iterrows():
+            row_errors = []  # INV-CLEAN-01: 本列欄位級錯誤
             record = {}
             details = {}
 
             for excel_col in df.columns:
                 if excel_col in BECLASS_CORE_MAPPING:
                     db_col = BECLASS_CORE_MAPPING[excel_col]
-                    record[db_col] = clean_data(row[excel_col], db_col)
+                    if db_col in DATETIME_COLS:
+                        record[db_col] = clean_datetime(row[excel_col], db_col, row_errors)
+                    else:
+                        record[db_col] = clean_data(row[excel_col], db_col)
                 elif excel_col not in BIRTH_RAW_COLS and not str(excel_col).startswith('Unnamed'):
-                    # \u5176\u9918 60+ \u500b\u554f\u5377\u9078\u9805\u6253\u5305\u9032 details JSON
                     val = row[excel_col]
                     if pd.notna(val):
                         details[excel_col] = str(val).strip()
 
-            # \u6b04\u4f4d\u6e05\u6d17
+            # 欄位清理
             if 'phone' in record:
                 record['phone'] = clean_phone(record['phone'])
             if 'city' in record or 'address' in record:
@@ -161,18 +185,23 @@ def process_import(excel_path):
                 record['city'] = clean_c
                 record['address'] = clean_a
 
-            # \u6e05\u6d17\u8207\u5408\u4f75\u51fa\u751f\u65e5\u671f
-            birth_year = row.get('\u51fa\u751f\u5e74')
-            birth_month = row.get('\u6708')
-            birth_day = row.get('\u65e5')
+            # 清洗與合併出生日期
+            birth_year = row.get('出生年')
+            birth_month = row.get('月')
+            birth_day = row.get('日')
             record['birth_date'] = clean_birth_date(birth_year, birth_month, birth_day)
 
             name = record.get('name')
             birth_date = record.get('birth_date')
 
-            # \u7d44\u5408\u552f\u4e00\u9375\uff1a\u59d3\u540d + \u51fa\u751f\u5e74\u6708\u65e5\uff0c\u5169\u8005\u7f3a\u4e00\u4e0d\u53ef
+            # INV-CLEAN-02: 組合唯一鍵：姓名 + 出生年月日，兩者缺一不可
             if not name or not birth_date:
+                import_errors.append(f"  列 {idx+2}: name={repr(name)} birth_date={repr(birth_date)}，組合唯一鍵缺失，整列跳過")
                 continue
+
+            if row_errors:
+                import_errors.append(f"  列 {idx+2}: {'; '.join(row_errors)}")
+
 
             # \u5c07\u554f\u5377\u7d30\u9805 dict \u8f49\u70ba JSON
             record['survey_details'] = json.dumps(details, ensure_ascii=False)
@@ -182,7 +211,11 @@ def process_import(excel_path):
                 "SELECT id FROM beclass_records WHERE name = %s AND birth_date = %s",
                 (name, birth_date)
             )
+            # INV-IMPORT-03: 過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤
+            record = {k: v for k, v in record.items() if k in db_cols}
+
             existing = cursor.fetchone()
+
 
             if existing:
                 update_cols = []
@@ -203,7 +236,13 @@ def process_import(excel_path):
                 inserted += 1
 
         conn.commit()
-        print(f"\u532f\u5165\u6210\u529f\uff1a\u65b0\u589e {inserted} \u7b46\u5ba2\u6236 BeClass \u8cc7\u6599\uff0c\u66f4\u65b0 {updated} \u7b46\u5ba2\u6236 BeClass \u8cc7\u6599\u3002")
+        print(f"匯入成功：新增 {inserted} 筆客戶 BeClass 資料，更新 {updated} 筆客戶 BeClass 資料。")
+        # INV-CLEAN-03: 輸出結構化錯誤摘要
+        if import_errors:
+            print(f"\n[⚠️ 匯入警告] 共 {len(import_errors)} 列有資料品質問題，請手動確認：")
+            for err in import_errors:
+                print(err)
+
     except Exception as err:
         conn.rollback()
         import traceback

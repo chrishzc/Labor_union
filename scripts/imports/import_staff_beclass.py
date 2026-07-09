@@ -75,6 +75,20 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
+def smart_parse(xl, sheet_name):
+    """INV-IMPORT-01: 自動偵測 Excel 標頭列位置。
+    若超過半數欄位為數字或 Unnamed，自動改用 header=1。
+    """
+    probe = xl.parse(sheet_name, nrows=0)
+    generic = sum(
+        1 for col in probe.columns
+        if isinstance(col, (int, float)) or str(col).startswith('Unnamed')
+    )
+    if generic > len(probe.columns) / 2:
+        print(f"[自動偵測] 第一列為索引列，以第二列作為欄位標頭")
+        return xl.parse(sheet_name, header=1)
+    return xl.parse(sheet_name)
+
 def import_checkbox_options(cursor, staff_id, row, options_list, target_table, value_col, detail_col=None, excel_detail_col=None):
     """\u8907\u9078\u6846\u6b04\u4f4d\u7684\u901a\u7528\u532f\u5165\u51fd\u5f0f\uff0c\u63a1\u7528 Delete-and-Insert \u7b56\u7565\u3002"""
     cursor.execute(f"DELETE FROM {target_table} WHERE staff_id = %s", (staff_id,))
@@ -106,53 +120,57 @@ def process_import(excel_path):
     print(f"\u89e3\u6790 Excel \u6a94\u6848\uff1a{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
 
-    # \u5c0b\u627e\u5305\u542b '\u670d\u52d9\u4eba\u54e1' \u6216 'staff' \u7684\u5206\u9801
-    target_sheet = None
-    for name in xl.sheet_names:
-        clean_name = name.replace(" ", "").lower()
-        if '\u670d\u52d9\u4eba\u54e1' in name or 'staff' in clean_name:
-            target_sheet = name
-            break
-
-    if not target_sheet:
-        print("\u672a\u627e\u5230\u5305\u542b '\u670d\u52d9\u4eba\u54e1' \u95dc\u9375\u5b57\u7684\u5de5\u4f5c\u8868\u3002\u8df3\u904e\u6b64\u6a94\u6848\u3002")
+    # ponytail: 確定每份檔案只有單一分頁，直接讀取第一個分頁，不進行名稱篩選
+    if not xl.sheet_names:
+        print("工作表為空。跳過此檔案。")
         return 0, 0
+    target_sheet = xl.sheet_names[0]
 
-    df = xl.parse(target_sheet)
-    print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
+    df = smart_parse(xl, target_sheet)
+    print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
 
     try:
         conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SET NAMES utf8mb4;")
         conn.commit()
+        
+        # INV-IMPORT-03: 動態偵測 staff 表的所有實際存在欄位
+        cursor.execute("DESCRIBE staff;")
+        db_cols = {col_info[0] for col_info in cursor.fetchall()}
     except Exception as e:
-        print(f"\u8cc7\u6599\u5eab\u9023\u7dda\u5931\u6557\uff1a{e}")
+        print(f"資料庫連線或初始化失敗：{e}")
         return 0, 0
+
 
     inserted = 0
     updated = 0
+    import_errors = []  # INV-CLEAN-02/03
 
     try:
-        for _, row in df.iterrows():
-            name = clean_data(row.get('\u59d3\u540d'), 'name')
+        for idx, row in df.iterrows():
+            row_errors = []  # INV-CLEAN-01: 本列欄位級錯誤
+            name = clean_data(row.get('姓名'), 'name')
             if not name:
+                import_errors.append(f"  列 {idx+2}: 姓名為空，整列跳過")
                 continue
 
-            identity_card = clean_data(row.get('\u8eab\u5206\u8b49\u5b57\u865f'), 'identity_card')
-            ip_address = clean_data(row.get('IP\u4f4d\u5740'), 'ip_address')
+            identity_card = clean_data(row.get('身分證字號'), 'identity_card')
+            ip_address = clean_data(row.get('IP位址'), 'ip_address')
 
             if not identity_card:
+                import_errors.append(f"  列 {idx+2}: identity_card 為空，整列跳過")
                 continue
 
-            # \u6e05\u6d17\u5831\u540d\u6642\u9593
+            # INV-CLEAN-01: registered_at 轉換失敗回退 None，不得以 str() 傳入 MySQL DATETIME
             registered_at = None
-            reg_val = row.get('\u5831\u540d\u6642\u9593')
+            reg_val = row.get('報名時間')
             if pd.notna(reg_val):
                 try:
                     registered_at = pd.to_datetime(reg_val).strftime("%Y-%m-%d %H:%M:%S")
                 except Exception:
-                    registered_at = str(reg_val).strip()
+                    row_errors.append(f"registered_at='{str(reg_val)[:20]}' 非日期格式，已寫入 NULL")
+                    registered_at = None
 
             # \u6e05\u6d17\u751f\u65e5
             birthday = None
@@ -172,9 +190,20 @@ def process_import(excel_path):
             phone = clean_phone(row.get('\u884c\u52d5\u96fb\u8a71'))
 
             has_massage_cert = False
-            massage_val = row.get('\u6709\u5b30\u5e7c\u5152\u6309\u6469\u8b49\u66f8\u55ce?')
-            if pd.notna(massage_val) and str(massage_val).strip() in ['\u6709', 'Y', 'y', '1', 'True', 'true']:
+            massage_val = row.get('嬰幼兒按摩證書')
+            if pd.notna(massage_val) and str(massage_val).strip() in ['有', 'Y', 'y', '1', 'True', 'true']:
                 has_massage_cert = True
+
+            # 解析可承接胎數 (care_babies: 1:單胞胎, 2:雙胞胎, 3:三胞胎)
+            care_babies = 1
+            twin_val = row.get('雙胞胎')
+            triplet_val = row.get('三胞胎')
+            summary_val = str(row.get('可承接的胎數', '')) if pd.notna(row.get('可承接的胎數')) else ''
+
+            if (pd.notna(triplet_val) and str(triplet_val).strip() in ['Y', 'y', '1', 'True', 'true']) or '三胞胎' in summary_val:
+                care_babies = 3
+            elif (pd.notna(twin_val) and str(twin_val).strip() in ['Y', 'y', '1', 'True', 'true']) or '雙胞胎' in summary_val:
+                care_babies = 2
 
             record = {
                 'registered_at': registered_at,
@@ -182,20 +211,25 @@ def process_import(excel_path):
                 'name': name,
                 'identity_card': identity_card,
                 'phone': phone,
-                'tel': clean_data(row.get('\u5e02\u8a71'), 'tel'),
-                'tel_ext': clean_data(row.get('\u5206\u6a5f'), 'tel_ext'),
+                'tel': clean_data(row.get('市話'), 'tel'),
+                'tel_ext': clean_data(row.get('分機'), 'tel_ext'),
                 'email': clean_data(row.get('EMAIL'), 'email'),
                 'birthday': birthday,
                 'city': city,
-                'zip_code': clean_data(row.get('\u90f5\u905e\u5340\u865f'), 'zip_code'),
+                'zip_code': clean_data(row.get('郵遞區號'), 'zip_code'),
                 'address': address,
                 'has_massage_cert': has_massage_cert,
+                'care_babies': care_babies,
                 'status': 'active'
             }
 
-            # \u4ee5\u8eab\u5206\u8b49\u5b57\u865f\u70ba\u552f\u4e00\u9375\u53bb\u91cd
+            # INV-IMPORT-03: 過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤
+            record = {k: v for k, v in record.items() if k in db_cols}
+
+            # 以身分證字號為唯一鍵去重
             cursor.execute("SELECT id FROM staff WHERE identity_card = %s", (identity_card,))
             existing = cursor.fetchone()
+
 
             if existing:
                 staff_id = existing[0]
@@ -218,7 +252,10 @@ def process_import(excel_path):
                 staff_id = cursor.lastrowid
                 inserted += 1
 
-            # === \u5b50\u8868\u66f4\u65b0 (Delete-and-Insert) ===
+            if row_errors:
+                import_errors.append(f"  列 {idx+2}: {'; '.join(row_errors)}")
+
+            # === 子表更新 (Delete-and-Insert) ===
 
             # 1. \u9280\u884c\u5e33\u6236
             cursor.execute("DELETE FROM staff_bank_accounts WHERE staff_id = %s", (staff_id,))
@@ -282,7 +319,12 @@ def process_import(excel_path):
                 detail_col='custom_baby_detail', excel_detail_col='[\u5176\u5b83].4')
 
         conn.commit()
-        print(f"\u532f\u5165\u6210\u529f\uff1a\u65b0\u589e {inserted} \u7b46\u670d\u52d9\u4eba\u54e1\u8cc7\u6599\uff0c\u66f4\u65b0 {updated} \u7b46\u670d\u52d9\u4eba\u54e1\u8cc7\u6599\u3002")
+        print(f"匯入成功：新增 {inserted} 筆服務人員資料，更新 {updated} 筆服務人員資料。")
+        # INV-CLEAN-03: 輸出結構化錯誤摘要
+        if import_errors:
+            print(f"\n[⚠️ 匯入警告] 共 {len(import_errors)} 列有資料品質問題，請手動確認：")
+            for err in import_errors:
+                print(err)
     except Exception as err:
         conn.rollback()
         import traceback

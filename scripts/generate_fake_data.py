@@ -9,9 +9,11 @@
 """
 import sys
 import os
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import random
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+from services.db_service import save_order_rest_dates, generate_default_schedule, get_connection
 
 # 確保中文輸出編碼正確
 try:
@@ -132,12 +134,20 @@ def generate_roster_data(input_file, output_file, personal_data_pool, num_record
         row['姓名'] = p_data['name']
         row['性別'] = random.choice(['男', '女'])
         row['行動電話'] = p_data['phone']
+        row['縣市'] = random.choice(['新竹市', '新竹縣', '苗栗縣'])
         row['地址'] = p_data['address']
         row['LINE ID'] = p_data['line_id']
         
         row['希望服務天數'] = random.choice([15, 20, 30, 40])
         row['生產方式'] = random.choice(['自然產', '剖腹產'])
         row['寶寶資訊'] = random.choice(['第一胎', '第二胎', '雙胞胎'])
+        
+        # 增加多樣性隨機欄位
+        row['身分資格'] = random.choice(['一般市民', '一般市民', '一般市民', '低收入戶', '中低收入戶', '非市民'])
+        row['服務時間'] = random.choice(['9小時', '9小時', '8小時', '24小時'])
+        row['居住型態'] = random.choice(['公寓', '大樓', '透天'])
+        row['服務方式'] = random.choice(['週休1日', '週休2日', '連續服務'])
+        
         row['管理者註記事項'] = f"服務期間:{due_date}~{service_date} (測試)"
         
         fake_clients_rows.append(row)
@@ -260,6 +270,24 @@ def generate_finance_data(output_file, personal_data_pool):
     base_cases = [f"1150000{i:02d}" for i in range(1, 11)]
     client_names = [personal_data_pool[i]['name'] for i in range(10)]
     
+    # 預先生成各筆案件的隨機日數、單價與金額，以確保兩分頁一致
+    case_details = {}
+    for idx, case_no in enumerate(base_cases):
+        days = random.choice([15, 20, 25, 30])
+        rate = random.choice([2000, 2200, 2500])
+        amount_receivable = days * rate
+        deposit = random.choice([1, 2]) * rate
+        balance = amount_receivable - deposit
+        caregiver_fee = int(amount_receivable * 0.85)
+        case_details[case_no] = {
+            'days': days,
+            'rate': rate,
+            'amount_receivable': amount_receivable,
+            'deposit': deposit,
+            'balance': balance,
+            'caregiver_fee': caregiver_fee
+        }
+
     # 1. 生成「資料庫」分頁 (案件對照表)
     db_rows = []
     for idx, case_no in enumerate(base_cases):
@@ -270,12 +298,11 @@ def generate_finance_data(output_file, personal_data_pool):
         va_suffix = f"115{seq:03d}"
         virtual_account = f"99781699{va_suffix}"
         
-        amount_receivable = 80000
-        caregiver_fee = 60000
+        details = case_details[case_no]
         
         db_rows.append([
             "HC", seq, "新竹市月子服務工會", name, 115.0, seq, 1.0, virtual_account,
-            amount_receivable, caregiver_fee, name, f"{case_no}案"
+            details['amount_receivable'], details['caregiver_fee'], name, f"{case_no}案"
         ])
         
     df_db = pd.DataFrame(db_rows)
@@ -295,39 +322,41 @@ def generate_finance_data(output_file, personal_data_pool):
     ])
     
     # 依序為 10 筆案件生成：
-    # 1. 存入訂金 12,000 (所有案件)
-    # 2. 存入尾款 68,000 (部分案件)
-    # 3. 支出月嫂費用 60,000 (部分案件)
+    # 1. 存入訂金
+    # 2. 存入尾款 (部分案件)
+    # 3. 支出月嫂費用 (部分案件)
     for idx, case_no in enumerate(base_cases):
         seq = idx + 1
         va_suffix = f"115{seq:03d}"
         va = f"99781699{va_suffix}"
         
+        details = case_details[case_no]
+        
         tx_time_dep = f"2026/07/{seq:02d} 10:00:00"
         tx_date_dep = f"2026/07/{seq:02d}"
         
-        # 1. 存入訂金 (12,000)
-        current_balance += 12000
+        # 1. 存入訂金
+        current_balance += details['deposit']
         tx_rows.append([
-            base_account, tx_time_dep, tx_date_dep, tx_date_dep, "虛擬帳入", "TWD", None, 12000, current_balance, va, None
+            base_account, tx_time_dep, tx_date_dep, tx_date_dep, "虛擬帳入", "TWD", None, details['deposit'], current_balance, va, None
         ])
         
-        # 2. 存入尾款 (68,000) (只有 seq 1-7 有存入尾款)
+        # 2. 存入尾款 (只有 seq 1-7 有存入尾款)
         if seq <= 7:
             tx_time_bal = f"2026/07/{seq+10:02d} 14:00:00"
             tx_date_bal = f"2026/07/{seq+10:02d}"
-            current_balance += 68000
+            current_balance += details['balance']
             tx_rows.append([
-                base_account, tx_time_bal, tx_date_bal, tx_date_bal, "虛擬帳入", "TWD", None, 68000, current_balance, va, None
+                base_account, tx_time_bal, tx_date_bal, tx_date_bal, "虛擬帳入", "TWD", None, details['balance'], current_balance, va, None
             ])
             
-        # 3. 支出月嫂費用 (60,000) (只有 seq 1-5 結案撥款)
+        # 3. 支出月嫂費用 (只有 seq 1-5 結案撥款)
         if seq <= 5:
             tx_time_pay = f"2026/07/{seq+15:02d} 16:00:00"
             tx_date_pay = f"2026/07/{seq+15:02d}"
-            current_balance -= 60000
+            current_balance -= details['caregiver_fee']
             tx_rows.append([
-                base_account, tx_time_pay, tx_date_pay, tx_date_pay, "一般轉出", "TWD", 60000, None, current_balance, f"月嫂撥款 {personal_data_pool[idx]['name']}", None
+                base_account, tx_time_pay, tx_date_pay, tx_date_pay, "一般轉出", "TWD", details['caregiver_fee'], None, current_balance, f"月嫂撥款 {personal_data_pool[idx]['name']}", None
             ])
             
     # 4. 插入雜訊款項 (非 997816 開頭，或分類碼非 99 的托育學費等雜訊，用來驗證 Pipeline 過濾能力)
@@ -351,6 +380,186 @@ def generate_finance_data(output_file, personal_data_pool):
         df_db.to_excel(writer, sheet_name='資料庫', index=False, header=False)
         
     print(f"成功！已生成財務對帳檔案：{output_file}")
+
+def generate_schedule_data():
+    """
+    為系統中的服務人員與訂單建立豐富且多樣化的月掃排班與檔期 (staff_schedule) 假資料。
+    涵蓋全部 5 種訂單狀態 ('洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消')
+    以及天數精算系統所需的不同休假模式 (連續服務 / 週休1日 / 週休2日) 與國定假日自主出勤/休假邏輯。
+    """
+    print("-> 正在生成多樣化月掃檔期、訂單生命週期狀態與行事曆假資料...")
+    sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+    from services.db_service import get_connection, generate_default_schedule
+    from datetime import date, timedelta
+    import json
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            # 1. 清空舊有排班資料
+            cursor.execute("TRUNCATE TABLE staff_schedule")
+            conn.commit()
+
+            # 2. 獲取服務人員與訂單
+            cursor.execute("SELECT id, name FROM staff ORDER BY id ASC")
+            staff_list = cursor.fetchall()
+            
+            cursor.execute("SELECT id, client_id FROM orders ORDER BY id ASC")
+            orders_list = cursor.fetchall()
+
+            if not staff_list or not orders_list:
+                print("⚠️ 提示: 資料庫尚未匯入服務人員或訂單，跳過檔期生成。")
+                return
+
+            # 3. 為月嫂配置多樣化的休假偏好 (連續服務 / 週休1日 / 週休2日)
+            rest_preferences = [
+                json.dumps(["Sunday"]),                # 週休1日 (週日)
+                json.dumps(["Saturday", "Sunday"]),    # 週休2日 (週六、週日)
+                json.dumps([]),                        # 連續服務 (不週休)
+                json.dumps(["Monday"])                 # 週休1日 (週一)
+            ]
+            for idx, staff in enumerate(staff_list):
+                pref = rest_preferences[idx % len(rest_preferences)]
+                cursor.execute("UPDATE staff SET weekly_rest_days = %s WHERE id = %s", (pref, staff['id']))
+            conn.commit()
+
+            # 4. 時間軸推進演算法 (Sequential Timeline Generator): 確保每位月嫂的檔期絕對零重疊
+            today = date(2026, 7, 6) # 當前系統基準日
+            order_idx = 0
+            total_orders_assigned = 0
+            target_staff_count = min(30, len(staff_list))
+
+            cancel_reasons = [
+                '客戶因家人可協助接應而取消訂單',
+                '產婦預產期大幅提前變更，協調取消',
+                '客戶改選擇月子中心服務'
+            ]
+
+            for s_idx in range(target_staff_count):
+                staff = staff_list[s_idx]
+                staff_id = staff['id']
+
+                # 每位月嫂從 2026年4月開始維護獨立的時間軸游標
+                # 為製造不同月嫂開工的時間差，加上小隨機偏移
+                cursor_date = date(2026, 4, 1) + timedelta(days=random.randint(0, 5))
+                num_scenarios = random.choice([2, 3, 4])
+
+                for _ in range(num_scenarios):
+                    if order_idx >= len(orders_list):
+                        break
+                    
+                    order_id = orders_list[order_idx]['id']
+                    order_idx += 1
+
+                    # 15% 概率產生訂單取消的範例
+                    is_cancelled = (random.random() < 0.15)
+                    
+                    # 算起訖區間
+                    start_d = cursor_date + timedelta(days=random.randint(3, 8))
+                    service_days = random.choice([15, 20, 25, 30])
+                    hours = random.choice([4, 8, 24])
+                    subsidy = random.choice(['一般市民', '補助市民', '非市民'])
+
+                    if is_cancelled:
+                        status = '訂單取消'
+                        actual_start = None
+                        cancel_reason = random.choice(cancel_reasons)
+                        end_d = start_d + timedelta(days=service_days)
+                        # 取消案件不影響時間軸推進，月嫂檔期保持釋放
+                    else:
+                        cancel_reason = None
+                        # 先生成排班明細以取得精算後的正確結束日
+                        generate_default_schedule(order_id, staff_id, start_d, service_days)
+                        
+                        # 30% 機會為該訂單動態設定 1~3 天自訂放假日期並測試持久化與完工日自動順延
+                        if random.random() < 0.3:
+                            sample_rests = [
+                                (start_d + timedelta(days=random.randint(2, service_days - 2))).strftime("%Y-%m-%d")
+                                for _ in range(random.randint(1, 3))
+                            ]
+                            save_order_rest_dates(order_id, sample_rests)
+
+                        # 查出最新的 end_date
+                        cursor.execute("SELECT end_date FROM orders WHERE id = %s", (order_id,))
+                        res = cursor.fetchone()
+                        end_d = res['end_date'] if (res and res['end_date']) else start_d + timedelta(days=service_days)
+
+                        # 按真實時間軸關聯狀態 (Today = 2026-07-06)
+                        if end_d < today:
+                            status = '訂單完成'
+                        elif start_d <= today <= end_d:
+                            status = '服務中'
+                        else:
+                            status = random.choice(['訂單成立', '訂單成立', '洽談中'])
+
+                        actual_start = start_d if status in ['訂單成立', '服務中', '訂單完成'] else None
+                        
+                        # 時間軸推進至此案件結束日之後 (休息 4~12 天接下一案)
+                        cursor_date = end_d + timedelta(days=random.randint(4, 12))
+
+                    cursor.execute("""
+                        UPDATE orders 
+                        SET staff_id = %s,
+                            status = %s,
+                            start_date = %s,
+                            actual_start_date = %s,
+                            end_date = %s,
+                            service_days = %s,
+                            service_hours_per_day = %s,
+                            subsidy_eligibility = %s,
+                            floor_fee = %s,
+                            cancel_reason = %s
+                        WHERE id = %s
+                    """, (
+                        staff_id, status, start_d, actual_start, end_d,
+                        service_days, hours, subsidy,
+                        random.choice([0.0, 500.0, 1000.0]), cancel_reason, order_id
+                    ))
+                    
+                    total_orders_assigned += 1
+                    conn.commit()
+
+            # 5. 增添國定假日自主出勤 / 自主休假與請假補班註記 (精算系統測試情境)
+            # 端午節 (2026-06-19) - 示範自主出勤與自主休假
+            cursor.execute("""
+                UPDATE staff_schedule 
+                SET is_work_day = TRUE, notes = '端午節國定假日月嫂自主出勤(正常算1天工作日)' 
+                WHERE work_date = '2026-06-19' AND order_id IS NOT NULL AND staff_id % 2 = 0
+            """)
+            cursor.execute("""
+                UPDATE staff_schedule 
+                SET is_work_day = FALSE, notes = '端午節國定假日月嫂自主休假(結束日順延1天)' 
+                WHERE work_date = '2026-06-19' AND order_id IS NOT NULL AND staff_id % 2 = 1
+            """)
+
+            # 隨機模擬動態請假與補班
+            cursor.execute("SELECT id, order_id, staff_id, work_date FROM staff_schedule WHERE is_work_day = TRUE ORDER BY RAND() LIMIT 12")
+            random_days = cursor.fetchall()
+            for r_day in random_days:
+                note = random.choice([
+                    '月嫂因事請假1日 (已自動順延補齊)',
+                    '產婦安排產檢彈性休假1日',
+                    '行政專員微調出勤時數與日期'
+                ])
+                cursor.execute("UPDATE staff_schedule SET is_work_day = FALSE, notes = %s WHERE id = %s", (note, r_day['id']))
+
+            conn.commit()
+
+            cursor.execute("SELECT COUNT(*) AS c FROM staff_schedule")
+            total_schedules = cursor.fetchone()['c']
+            
+            cursor.execute("SELECT status, COUNT(*) as cnt FROM orders WHERE staff_id IS NOT NULL GROUP BY status")
+            status_summary = cursor.fetchall()
+            status_str = ", ".join([f"{item['status']}: {item['cnt']}筆" for item in status_summary])
+
+            print(f"成功！已為 {target_staff_count} 位月嫂建立多樣化檔期，涵蓋訂單狀態 [{status_str}]，共生成 {total_schedules} 筆 `staff_schedule` 每日排班精算紀錄。")
+
+    except Exception as e:
+        conn.rollback()
+        print(f"生成多樣化檔期假資料失敗: {e}")
+    finally:
+        conn.close()
+
 
 def main():
     print("正在初始化生成假資料程序...")
@@ -405,7 +614,11 @@ def main():
         print(f"生成財務假資料失敗: {e}")
         sys.exit(1)
         
-    print("\n====== 所有假資料生成完成，名冊與財務測試數據已 100% 關聯對齊！ ======")
+    # 3. 產生月掃檔期與行事曆假資料
+    generate_schedule_data()
+
+    print("\n====== 所有假資料生成完成，名冊、財務與月掃檔期測試數據已 100% 關聯對齊！ ======")
 
 if __name__ == "__main__":
     main()
+

@@ -803,3 +803,37 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
             conn.close()
             
     return {"status": "success"}
+
+
+# ==========================================
+# 🔌 GitHub 整合路由 (RESTful Endpoints)
+# ==========================================
+from fastapi.middleware.cors import CORSMiddleware
+from api.routes import orders, matches, schedule, payments, clients, staff, holidays
+from fastapi.responses import RedirectResponse
+from api.schemas.base import BaseResponse
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.get("/", include_in_schema=False)
+def root_redirect():
+    return RedirectResponse(url="/docs")
+
+@app.get("/health", response_model=BaseResponse[dict], tags=["Health"])
+def health_check():
+    return BaseResponse(data={"status": "healthy", "service": "Lobar Union API"}, message="API Server is running normally")
+
+# 註冊業務模組 Routers
+app.include_router(orders.router)
+app.include_router(matches.router)
+app.include_router(schedule.router)
+app.include_router(payments.router)
+app.include_router(clients.router)
+app.include_router(staff.router)
+app.include_router(holidays.router)
