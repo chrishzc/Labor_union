@@ -2,6 +2,9 @@ import os
 import re
 import json
 
+# 自動切換到專案根目錄，確保相對路徑正常
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 file_path = os.path.abspath('api/main.py')
 with open(file_path, 'r', encoding='utf-8') as f:
     content = f.read()

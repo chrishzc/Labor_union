@@ -5,6 +5,9 @@ import requests
 import signal
 import os
 
+# 切換工作目錄到專案根目錄，使 FastAPI 啟動及相對路徑皆能正確運作
+os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+
 def run_ngrok():
     # 執行 ngrok 並把它的黑畫面 UI 隱藏 (--log=stdout)，改為純背景輸出
     # 將輸出導向 DEVNULL 避免畫面太亂被 ngrok 訊息洗版

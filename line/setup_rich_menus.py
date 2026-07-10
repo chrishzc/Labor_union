@@ -78,9 +78,13 @@ def main():
     with open(config_path, 'r', encoding='utf-8') as f:
         menu_config = json.load(f)
 
+    line_dir = os.path.dirname(os.path.abspath(__file__))
+    default_img_path = os.path.join(line_dir, "default_menu.jpg")
+    caregiver_img_path = os.path.join(line_dir, "caregiver_menu.jpg")
+
     print("=== 建立預設選單 (一般用戶) ===")
     default_conf = menu_config.get("default_menu", {})
-    create_rich_menu_image("default_menu.jpg", 
+    create_rich_menu_image(default_img_path, 
                            default_conf["buttons"][0]["text"], 
                            default_conf["buttons"][1]["text"], 
                            bg_color=default_conf.get("background_color", "#f5f5f5"), 
@@ -103,7 +107,7 @@ def main():
             }
         ]
     }
-    default_id = create_and_upload_rich_menu(default_menu_json, "default_menu.jpg")
+    default_id = create_and_upload_rich_menu(default_menu_json, default_img_path)
     
     print("=== 設定為系統預設選單 ===")
     res_default = requests.post(f"https://api.line.me/v2/bot/user/all/richmenu/{default_id}", headers=HEADERS)
@@ -114,7 +118,7 @@ def main():
 
     print("\n=== 建立月嫂專屬選單 ===")
     caregiver_conf = menu_config.get("caregiver_menu", {})
-    create_rich_menu_image("caregiver_menu.jpg", 
+    create_rich_menu_image(caregiver_img_path, 
                            caregiver_conf["buttons"][0]["text"], 
                            caregiver_conf["buttons"][1]["text"], 
                            bg_color=caregiver_conf.get("background_color", "#fff1f2"), 
@@ -137,7 +141,7 @@ def main():
             }
         ]
     }
-    caregiver_id = create_and_upload_rich_menu(caregiver_menu_json, "caregiver_menu.jpg")
+    caregiver_id = create_and_upload_rich_menu(caregiver_menu_json, caregiver_img_path)
     
     print("=== 儲存月嫂選單 ID 至設定檔 ===")
     set_setting("caregiver_rich_menu_id", caregiver_id, "月嫂專屬的圖文選單ID")

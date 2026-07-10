@@ -1,4 +1,4 @@
-version: 53
+version: 1
 scope: master_architecture
 sub_maps:
   ui_layer: ui/ui_system_map.yaml
@@ -6,54 +6,12 @@ sub_maps:
   api_layer: api/api_system_map.yaml
 modules:
   Main:
-    type: entrypoint
+    type: sub_system_layer
     description: 系統主程式入口。
     source: '`main.py`'
-    dependencies: []
-    input: {}
-    output: {}
-    invariants: []
-    preferred_pattern: none
-    verification: []
-    decisions: []
-    todo: []
-    checkpoint: []
-    state: validated
-    fan_in_snapshot: 0
-  UILayer:
-    type: sub_system_layer
-    description: ''
-    source: ''
-    dependencies: []
-    input: {}
-    output: {}
-    invariants: []
-    preferred_pattern: none
-    verification: []
-    decisions: []
-    todo: []
-    checkpoint: []
-    state: validated
-    fan_in_snapshot: 0
-  APILayer:
-    type: sub_system_layer
-    description: ''
-    source: ''
-    dependencies: []
-    input: {}
-    output: {}
-    invariants: []
-    preferred_pattern: none
-    verification: []
-    decisions: []
-    todo: []
-    checkpoint: []
-    state: validated
-    fan_in_snapshot: 0
-  ServicesLayer:
-    type: sub_system_layer
-    description: ''
-    source: ''
+    domain: null
+    subsystem: null
+    map_file: system_map.md
     dependencies: []
     input: {}
     output: {}
@@ -70,6 +28,9 @@ modules:
     description: 假資料統一生成器。採用「時間軸推進演算法 (Sequential Timeline Generator)」，為每位月嫂維護獨立時間軸游標，確保同月嫂的案件排班前後接續、絕對獨佔且零重疊
       (Zero Overlap)。
     source: '`scripts/generate_fake_data.py`'
+    domain: null
+    subsystem: null
+    map_file: system_map.md
     dependencies: []
     input: {}
     output: {}
@@ -85,6 +46,9 @@ modules:
     type: script
     description: 月嫂檔期衝突檢測與自動修復工具。
     source: '`scripts/fix_schedule_conflicts.py`'
+    domain: null
+    subsystem: null
+    map_file: system_map.md
     dependencies: []
     input: {}
     output: {}
@@ -100,6 +64,9 @@ modules:
     type: script
     description: 一鍵啟動與部署環境初始化腳本。啟動 Docker、初始化 MySQL、產生並匯入假資料，最後並行啟動 FastAPI 與 Streamlit。
     source: '`start.bat`'
+    domain: null
+    subsystem: null
+    map_file: system_map.md
     dependencies: []
     input: {}
     output: {}
@@ -117,6 +84,9 @@ modules:
     description: 一鍵啟動上線服務腳本。啟動 Docker、等待 MySQL 連線就緒，但不執行資料庫初始化與假資料生成，最後以並行方式啟動 FastAPI、Streamlit
       網頁端以及地端檔案自動監控服務 (file_watcher.py)。
     source: '`online.bat`'
+    domain: null
+    subsystem: null
+    map_file: system_map.md
     dependencies: []
     input: {}
     output: {}
@@ -129,3 +99,4 @@ modules:
     checkpoint: []
     state: validated
     fan_in_snapshot: 0
+domains: {}

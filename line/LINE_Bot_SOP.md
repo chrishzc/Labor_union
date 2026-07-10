@@ -84,7 +84,7 @@
 ---
 
 ## 3. 雙層圖文選單 (Rich Menu) 系統
-**建置腳本**：`scripts/setup_rich_menus.py`
+**建置腳本**：`line/setup_rich_menus.py`
 **運作邏輯**：系統支援同時存在兩套選單，方便區分一般客戶與服務人員。
 
 ### 精準動作細節：
@@ -109,8 +109,8 @@
     *   控制 LIFF 網頁的外觀與顯示標題。
     *   **特殊設計**：可直接修改 `theme_colors.primary` 與 `background_gradient` 替換工會的網頁主題色（例如櫻花粉、工會藍）。
 3.  **`config/line_menu.json`**：
-    *   控制那兩張圖文選單上的按鈕文字 (`text`)、動作指令與顏色。
-    *   **⚠️ 唯一例外**：因為圖文選單是註冊在 LINE 的雲端伺服器上，所以修改此檔案後，**必須手動執行 `uv run python scripts/setup_rich_menus.py`**，讓系統重新畫一張新選單傳給 LINE，改動才會生效。
+    *   **控制那兩張圖文選單上的按鈕文字 (`text`)、動作指令與顏色。
+    *   **⚠️ 唯一例外**：因為圖文選單是註冊在 LINE 的雲端伺服器上，所以修改此檔案後，**必須手動執行 `uv run python line/setup_rich_menus.py`**，讓系統重新畫一張新選單傳給 LINE，改動才會生效。
 
 4.  **`db/form_templates.json` (內部管理設定檔)**：
     *   這個檔案用來定義「合約書」或「月嫂行前通知單」要呈現哪些欄位（例如：新生兒數量、飲食喜忌、樓層費等）。
