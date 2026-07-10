@@ -21,7 +21,14 @@ import sys
 import os
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 from admin.utils import get_db_connection
-
+DB_CONFIG = {
+    'host': '127.0.0.1',
+    'port': 3306,
+    'user': 'root',
+    'password': '1234',
+    'database': 'union_db',
+    'charset': 'utf8mb4'
+}
 def decode_va_to_case_no(virtual_account):
     """
     將 14 碼虛擬帳號解碼還原為 9 碼案件編號 (查詢序號)。
