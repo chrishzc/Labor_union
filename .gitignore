@@ -25,6 +25,20 @@ metabase-data/
 
 # ADAD (Architecture-Driven Agentic Development)
 .agents/
+system_map.md
+system_map.yaml
+*scripts_map.md
+*imports_map.md
+implementation_plan.md
+walkthrough.md
+task.md
+
+# System generated agent logs & planning
+history/work_log.md
+task-*.md
+PROJECT_SPEC.md
+AGENTS.md
+
 # Preserve system_map files
 !**/system_map.yaml
 !**/system_map.md

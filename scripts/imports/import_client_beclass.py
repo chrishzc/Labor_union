@@ -16,14 +16,10 @@ try:
 except Exception:
     pass
 
-DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
-    'database': 'union_db',
-    'charset': 'utf8mb4'
-}
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from admin.utils import get_db_connection
 
 # BeClass 核心欄位對照 (其餘問卷欄位打包進 survey_details JSON)
 # INV-BECLASS-02: '查詢序號' 對應 query_no
@@ -146,7 +142,7 @@ def process_import(excel_path):
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
 
     try:
-        conn = pymysql.connect(**DB_CONFIG)
+        conn = get_db_connection()
         cursor = conn.cursor()
         cursor.execute("SET NAMES utf8mb4;")
         conn.commit()

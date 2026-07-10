@@ -17,6 +17,10 @@ except Exception:
     pass
 
 # 資料庫連線配置
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+from admin.utils import get_db_connection
 DB_CONFIG = {
     'host': '127.0.0.1',
     'port': 3306,
@@ -25,7 +29,6 @@ DB_CONFIG = {
     'database': 'union_db',
     'charset': 'utf8mb4'
 }
-
 def decode_va_to_case_no(virtual_account):
     """
     將 14 碼虛擬帳號解碼還原為 9 碼案件編號 (查詢序號)。
@@ -164,7 +167,7 @@ def main():
     print(f"成功解析出 {len(payments_data)} 筆符合月子服務的財務帳務紀錄。已忽略雜訊虛擬帳號交易: {ignored_va_count} 筆。")
     
     try:
-        conn = pymysql.connect(**DB_CONFIG)
+        conn = get_db_connection()
         cursor = conn.cursor()
     except Exception as conn_err:
         print(f"資料庫連線失敗：{conn_err}")

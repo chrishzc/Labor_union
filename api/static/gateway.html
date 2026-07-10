@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>新竹市月子工會 - 服務確認入口</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary: #4a90e2;
+            --primary-hover: #357abd;
+            --secondary: #63e6be;
+            --bg-gradient: linear-gradient(135deg, #eef2f7 0%, #d9e2ec 100%);
+            --glass-bg: rgba(255, 255, 255, 0.7);
+            --glass-border: rgba(255, 255, 255, 0.4);
+            --text-dark: #334e68;
+            --text-muted: #627d98;
+            --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.08);
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Outfit', 'Noto Sans TC', sans-serif;
+            background: var(--bg-gradient);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+            color: var(--text-dark);
+        }
+
+        .container {
+            width: 100%;
+            max-width: 420px;
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: var(--shadow);
+            position: relative;
+            overflow: hidden;
+            text-align: center;
+        }
+
+        .container::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 6px;
+            background: linear-gradient(90deg, var(--primary) 0%, var(--secondary) 100%);
+        }
+
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+        }
+
+        .title {
+            font-size: 20px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            font-size: 14px;
+            color: var(--text-muted);
+            line-height: 1.5;
+            margin-bottom: 30px;
+        }
+
+        /* 選擇按鈕區域 */
+        .option-card {
+            background: rgba(255, 255, 255, 0.85);
+            border: 1px solid var(--glass-border);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 15px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-decoration: none;
+            color: var(--text-dark);
+            box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+        }
+
+        .option-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(74, 144, 226, 0.15);
+            border-color: var(--primary);
+        }
+
+        .option-icon {
+            font-size: 32px;
+            margin-bottom: 10px;
+            color: var(--primary);
+        }
+
+        .option-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .option-desc {
+            font-size: 13px;
+            color: var(--text-muted);
+        }
+
+        /* 載入遮罩 */
+        .loader-overlay {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(4px);
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 10;
+        }
+
+        .spinner {
+            width: 40px; height: 40px;
+            border: 4px solid rgba(74, 144, 226, 0.1);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1s infinite linear;
+            margin-bottom: 15px;
+        }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <div class="header">
+        <div class="logo">新竹市月子工會</div>
+        <div class="title">歡迎！請選擇您的狀態</div>
+        <div class="subtitle">為協助您快速完成服務建檔，請告訴我們您是否已經填寫過申請表單？</div>
+    </div>
+
+    <!-- 選項 1 -->
+    <a href="#" class="option-card" onclick="navigateTo('/bind-page')">
+        <div class="option-icon">📝</div>
+        <div class="option-title">已登記服務 / 補助</div>
+        <div class="option-desc">我已經登記過政府補助或是填寫過 BeClass 表單，我要直接綁定查詢進度。</div>
+    </a>
+
+    <!-- 選項 2 -->
+    <a href="#" class="option-card" onclick="navigateTo('/register-page')">
+        <div class="option-icon">✨</div>
+        <div class="option-title">尚未填寫登記表單</div>
+        <div class="option-desc">我是新客戶，尚未填寫任何資料，我要現在填寫並建立服務訂單。</div>
+    </a>
+
+    <!-- 載入中遮罩 -->
+    <div class="loader-overlay" id="loaderOverlay">
+        <div class="spinner"></div>
+        <div class="loader-text" id="loaderText">正在準備您的專屬通道...</div>
+    </div>
+</div>
+
+<script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+    let currentUserId = '';
+
+    // 嘗試從 URL 獲取 fallback userId
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlUserId = urlParams.get('userId');
+    if (urlUserId) {
+        currentUserId = urlUserId;
+    }
+
+    async function initLiff() {
+        try {
+            const response = await fetch('/api/line/config');
+            if (!response.ok) throw new Error('無法獲取 LIFF 設定');
+            const config = await response.json();
+
+            await liff.init({ liffId: config.liff_id });
+            
+            if (!liff.isLoggedIn()) {
+                liff.login({ redirectUri: window.location.href });
+                return;
+            }
+
+            const profile = await liff.getProfile();
+            currentUserId = profile.userId;
+            
+            document.getElementById('loaderOverlay').style.display = 'none';
+        } catch (err) {
+            console.error('LIFF Initialization failed', err);
+            // 如果 LIFF 失敗但 URL 有 userId，我們也放行
+            if (currentUserId) {
+                document.getElementById('loaderOverlay').style.display = 'none';
+            } else {
+                document.getElementById('loaderText').innerText = '載入失敗，請嘗試重新整理。';
+                setTimeout(() => { document.getElementById('loaderOverlay').style.display = 'none'; }, 1500);
+            }
+        }
+    }
+
+    function navigateTo(path) {
+        document.getElementById('loaderOverlay').style.display = 'flex';
+        document.getElementById('loaderText').innerText = '正在為您跳轉...';
+        
+        let url = path;
+        if (currentUserId) {
+            url += `?userId=${encodeURIComponent(currentUserId)}`;
+        }
+        window.location.href = url;
+    }
+
+    window.onload = initLiff;
+</script>
+</body>
+</html>
