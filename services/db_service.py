@@ -2,12 +2,17 @@ import pymysql
 import math
 from datetime import datetime, date, timedelta
 
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
 DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
-    'database': 'union_db',
+    'host': os.getenv('DB_HOST', '127.0.0.1'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', '1234'),
+    'database': os.getenv('DB_DATABASE', 'union_db'),
     'charset': 'utf8mb4'
 }
 
