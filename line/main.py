@@ -776,10 +776,11 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
                     # 清除舊排班
                     cursor.execute("DELETE FROM staff_bookings WHERE staff_id = %s AND client_id = %s", (staff_id, client_id))
                     
+                    refined_details = schedule_res.get('day_by_day', [])
                     # 寫入工作日排班
                     for day in refined_details:
-                        d_date = datetime.strptime(day["日期"], "%Y-%m-%d").date()
-                        if day["是否計入工作日"] == "是":
+                        d_date = day["date"]
+                        if day["is_work_day"]:
                             cursor.execute("""
                                 INSERT INTO staff_bookings (staff_id, client_id, start_date, end_date)
                                 VALUES (%s, %s, %s, %s)
