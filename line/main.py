@@ -20,10 +20,14 @@ from fastapi.responses import FileResponse
 # 載入環境變數
 load_dotenv()
 
-# 確保 sys.path 能載入 admin.utils
+# 確保 sys.path 能載入 services
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from admin.utils import calculate_refined_attendance_dates, get_db_connection
-from admin.settings_manager import get_setting
+from services.db_service import get_connection as get_db_connection, calculate_attendance_schedule
+
+def get_setting(key: str, default: str = "") -> str:
+    """從環境變數讀取設定，取代舊版 admin.settings_manager"""
+    env_key = key.upper()
+    return os.getenv(env_key, default)
 
 def load_webhook_replies():
     config_path = os.path.join(os.path.dirname(__file__), "..", "config", "webhook_replies.json")
@@ -135,7 +139,7 @@ app = FastAPI(
 )
 
 # 掛載靜態目錄以託管 LIFF 網頁
-app.mount("/static", StaticFiles(directory="api/static"), name="static")
+app.mount("/static", StaticFiles(directory="line/static"), name="static")
 
 # LINE LIFF 配置獲取端點
 @app.get("/api/line/config")
@@ -406,17 +410,17 @@ async def root_post(payload: dict, request: Request):
 @app.get("/gateway")
 async def serve_gateway_page():
     """前導選擇頁面 (自動相容舊版 LIFF 設定)"""
-    return FileResponse("api/static/gateway.html")
+    return FileResponse("line/static/gateway.html")
 
 @app.get("/bind-page")
 async def serve_bind_page():
     """提供舊客查詢與綁定專用的路徑"""
-    return FileResponse("api/static/bind.html")
+    return FileResponse("line/static/bind.html")
 
 @app.get("/register-page")
 async def serve_register_page():
     """全新客戶原生註冊頁面"""
-    return FileResponse("api/static/register.html")
+    return FileResponse("line/static/register.html")
 
 # ----------------- 1. LINE WEBHOOK 接收 -----------------
 class LineWebhookPayload(BaseModel):
@@ -757,9 +761,10 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
                             rest_days = []
                             
                     # 自動執行天數精算順延
-                    end_d, _, _, refined_details = calculate_refined_attendance_dates(
-                        start_d, service_days, "週休 1 日", rest_days, {}
+                    schedule_res = calculate_attendance_schedule(
+                        start_d, service_days, "週休1日", rest_days, set()
                     )
+                    end_d = schedule_res.get('actual_end_date')
                     
                     # 更新狀態
                     cursor.execute("""
