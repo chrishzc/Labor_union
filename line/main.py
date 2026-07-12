@@ -704,7 +704,17 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         
                         # 攔截「我是月嫂」關鍵字切換選單
                         if "我是月嫂" in user_text:
-                            caregiver_menu_id = get_setting("caregiver_rich_menu_id", "")
+                            caregiver_menu_id = ""
+                            config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+                            ids_path = os.path.join(config_dir, "rich_menu_ids.json")
+                            if os.path.exists(ids_path):
+                                try:
+                                    with open(ids_path, "r", encoding="utf-8") as f:
+                                        ids_data = json.load(f)
+                                        caregiver_menu_id = ids_data.get("caregiver_rich_menu_id", "")
+                                except Exception as e:
+                                    print(f"[LINE Webhook] Failed to read rich_menu_ids.json: {e}")
+                            
                             if caregiver_menu_id:
                                 line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or get_setting("line_channel_access_token")
                                 headers = {"Authorization": f"Bearer {line_token}"}
