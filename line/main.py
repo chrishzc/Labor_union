@@ -11,6 +11,7 @@ import json
 import asyncio
 import requests
 import sys
+import uuid
 from datetime import datetime, timedelta, date
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
@@ -217,13 +218,38 @@ async def line_bind(payload: LineBindPayload):
                         "message": "本筆訂單已有綁定另一個帳戶，請問是否重新綁定？"
                     }
                 else:
-                    # 使用者同意強制重新綁定
-                    cursor.execute("""
-                        UPDATE clients 
-                        SET line_user_id = %s 
-                        WHERE id = %s
-                    """, (line_user_id, client_id))
-                    print(f"[API Bind] Forced rebind success: client_id={client_id} rebound to line_user_id={line_user_id}")
+                    # 使用者同意重新綁定，寫入 JSON 暫存檔等待人工確認
+                    request_data = {
+                        "request_id": str(uuid.uuid4()),
+                        "client_id": client_id,
+                        "client_name": db_name,
+                        "old_line_user_id": db_line_user_id,
+                        "new_line_user_id": line_user_id,
+                        "request_time": datetime.now().isoformat()
+                    }
+                    
+                    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+                    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
+                    
+                    existing_requests = []
+                    if os.path.exists(rebind_json_path):
+                        with open(rebind_json_path, "r", encoding="utf-8") as f:
+                            try:
+                                existing_requests = json.load(f)
+                            except json.JSONDecodeError:
+                                existing_requests = []
+                    
+                    existing_requests.append(request_data)
+                    
+                    with open(rebind_json_path, "w", encoding="utf-8") as f:
+                        json.dump(existing_requests, f, ensure_ascii=False, indent=2)
+                    
+                    print(f"[API Bind] Rebind request saved for client_id={client_id}")
+                    
+                    return {
+                        "status": "pending_approval",
+                        "message": "您的帳號重新綁定申請已送出，請耐心等待服務人員審核與確認。"
+                    }
             elif not db_line_user_id or db_line_user_id.strip() == "":
                 # 原本為空，正常綁定
                 cursor.execute("""
@@ -281,6 +307,127 @@ async def line_bind(payload: LineBindPayload):
 
 from typing import Optional, Dict, Any
 
+class RebindActionPayload(BaseModel):
+    request_id: str
+
+@app.get("/api/line/rebind_requests")
+def get_rebind_requests():
+    """
+    [前端管理 API] 取得所有待確認的重新綁定申請
+    """
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
+    
+    if not os.path.exists(rebind_json_path):
+        return {"status": "success", "data": []}
+        
+    try:
+        with open(rebind_json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {"status": "success", "data": data}
+    except Exception as e:
+        return {"status": "error", "message": f"讀取暫存檔失敗：{str(e)}"}
+
+@app.post("/api/line/rebind_requests/approve")
+def approve_rebind_request(payload: RebindActionPayload):
+    """
+    [前端管理 API] 確認並執行重新綁定申請
+    """
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
+    
+    if not os.path.exists(rebind_json_path):
+        return {"status": "error", "message": "找不到暫存檔案"}
+        
+    try:
+        with open(rebind_json_path, "r", encoding="utf-8") as f:
+            requests_data = json.load(f)
+            
+        target_request = next((r for r in requests_data if r["request_id"] == payload.request_id), None)
+        
+        if not target_request:
+            return {"status": "error", "message": "找不到該筆申請"}
+            
+        # 寫入資料庫
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    UPDATE clients 
+                    SET line_user_id = %s 
+                    WHERE id = %s
+                """, (target_request["new_line_user_id"], target_request["client_id"]))
+                
+                # 推播成功訊息給客戶
+                success_msg = f"【系統通知】\n服務綁定與查詢成功！您的帳號重新綁定申請已審核通過，成功連結至客戶「{target_request['client_name']}」的登記資料。\n"
+                cursor.execute("""
+                    INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                    VALUES (%s, %s, 'pending')
+                """, (target_request["new_line_user_id"], success_msg))
+                
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
+        finally:
+            conn.close()
+            
+        # 移除 JSON 中的暫存紀錄
+        requests_data = [r for r in requests_data if r["request_id"] != payload.request_id]
+        with open(rebind_json_path, "w", encoding="utf-8") as f:
+            json.dump(requests_data, f, ensure_ascii=False, indent=2)
+            
+        return {"status": "success", "message": "已確認並完成重新綁定"}
+    except Exception as e:
+        return {"status": "error", "message": f"伺服器錯誤：{str(e)}"}
+
+@app.post("/api/line/rebind_requests/reject")
+def reject_rebind_request(payload: RebindActionPayload):
+    """
+    [前端管理 API] 拒絕重新綁定申請
+    """
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
+    
+    if not os.path.exists(rebind_json_path):
+        return {"status": "error", "message": "找不到暫存檔案"}
+        
+    try:
+        with open(rebind_json_path, "r", encoding="utf-8") as f:
+            requests_data = json.load(f)
+            
+        target_request = next((r for r in requests_data if r["request_id"] == payload.request_id), None)
+        
+        if not target_request:
+            return {"status": "error", "message": "找不到該筆申請"}
+            
+        # 推播失敗訊息給客戶
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                reject_msg = f"【系統通知】\n您的帳號重新綁定申請已被管理員拒絕。如有疑問請聯繫客服專員。"
+                cursor.execute("""
+                    INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                    VALUES (%s, %s, 'pending')
+                """, (target_request["new_line_user_id"], reject_msg))
+                conn.commit()
+        except Exception as e:
+            conn.rollback()
+            print(f"[API Bind] Push reject message failed: {e}")
+        finally:
+            conn.close()
+            
+        # 移除 JSON 中的暫存紀錄
+        requests_data = [r for r in requests_data if r["request_id"] != payload.request_id]
+        with open(rebind_json_path, "w", encoding="utf-8") as f:
+            json.dump(requests_data, f, ensure_ascii=False, indent=2)
+            
+        return {"status": "success", "message": "已拒絕該筆重新綁定申請"}
+    except Exception as e:
+        return {"status": "error", "message": f"伺服器錯誤：{str(e)}"}
+
+from typing import Optional, Dict, Any
+
 class LineRegisterPayload(BaseModel):
     name: str
     phone: str
@@ -298,15 +445,6 @@ class LineRegisterPayload(BaseModel):
     zip_code: Optional[str] = ""
     survey_details: Dict[str, Any] = {}
 
-
-@app.get("/api/config/liff")
-async def get_liff_config():
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "liff_settings.json")
-    try:
-        with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except Exception as e:
-        return {"error": str(e)}
 
 @app.post("/api/line/register")
 async def line_register(payload: LineRegisterPayload):
@@ -815,7 +953,7 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
 # 🔌 GitHub 整合路由 (RESTful Endpoints)
 # ==========================================
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import orders, matches, schedule, payments, clients, staff, holidays
+from api.routes import orders, matches, schedule, payments, clients, staff, holidays, line_system_config
 from fastapi.responses import RedirectResponse
 from api.schemas.base import BaseResponse
 
@@ -843,3 +981,4 @@ app.include_router(payments.router)
 app.include_router(clients.router)
 app.include_router(staff.router)
 app.include_router(holidays.router)
+app.include_router(line_system_config.router)
