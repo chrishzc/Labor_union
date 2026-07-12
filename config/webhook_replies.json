@@ -1,5 +1,5 @@
 {
-  "caregiver_switch_success": "yes身分驗證成功！已為您切換至【月嫂專屬選單】。\n\n您現在可以使用下方的專屬功能查詢訂單與班表了。",
+  "caregiver_switch_success": "身分驗證成功！已為您切換至【月嫂專屬選單】。\n\n您現在可以使用下方的專屬功能查詢訂單與班表了。",
   "caregiver_switch_fail": "切換選單失敗 (Error {status_code})，請聯絡系統管理員。",
   "caregiver_menu_not_set": "系統尚未設定月嫂專屬選單，請聯絡管理員進行設定。",
   "esc_success": "已為您解除月嫂身分，切換回【一般用戶預設選單】。",

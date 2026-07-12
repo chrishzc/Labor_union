@@ -8,6 +8,11 @@
 ## 1. 🎨 前端網頁外觀設定 (`liff_settings.json`)
 此檔案控制了使用者開啟「產婦服務登記表單 (LIFF)」時的網頁外觀與文字。
 
+### 📡 管理 API 接口
+前端管理後台可透過以下 API 進行設定存取與修改：
+- **GET** `/api/config/liff`：取得目前網頁外觀設定
+- **PUT** `/api/config/liff`：傳送 JSON 結構儲存並覆寫外觀設定
+
 ### 重要參數說明：
 - **`theme_colors.primary`**: 主要按鈕與強調元素的顏色。
 - **`theme_colors.background_gradient`**: 網頁背景的漸層顏色。
@@ -30,13 +35,18 @@
 ## 2. 📱 LINE 圖文選單設定 (`line_menu.json`)
 此檔案控制了 LINE 官方帳號下方的「圖文選單 (Rich Menu)」按鈕文字與底圖顏色。包含 `default_menu` (一般用戶) 與 `caregiver_menu` (月嫂專區) 兩個區塊。
 
+### 📡 管理 API 接口與自動更新
+前端管理後台可透過以下 API 進行設定存取與修改：
+- **GET** `/api/config/line_menu`：取得目前圖文選單設定
+- **PUT** `/api/config/line_menu`：傳送 JSON 結構儲存並覆寫圖文選單設定。
+  > ⚡ **自動化生效機制**：當呼叫 PUT API 儲存成功後，系統將會在背景自動觸發執行 `setup_rich_menus.py` 腳本。LINE 官方帳號的選單會在幾秒內自動更新，不需工程師介入！
+
 ### 重要參數說明：
 - **`background_color`**: 選單的背景底色。
 - **`buttons[].text`**: 顯示在圖片按鈕上的文字。
 - **`buttons[].color`**: 按鈕文字的顏色。
 
-> ⚠️ **注意**：修改此檔案後**不會立刻生效**！
-> 因為圖文選單必須重新上傳給 LINE 伺服器，修改完畢存檔後，請務必請工程師或管理員執行以下指令，選單才會更新：
+> ⚠️ **注意**：如果您是手動在伺服器上修改此檔案 (沒有透過 API)，修改後請務必請工程師或管理員執行以下指令，選單才會更新：
 > ```bash
 > uv run python scripts/setup_rich_menus.py
 > ```
@@ -45,6 +55,11 @@
 
 ## 3. 💬 機器人自動回覆文案 (`webhook_replies.json`)
 此檔案管理了當用戶在 LINE 中觸發特定行為時，機器人主動推播的文字訊息。
+
+### 📡 管理 API 接口
+前端管理後台可透過以下 API 進行設定存取與修改：
+- **GET** `/api/config/webhook_replies`：取得目前自動回覆設定
+- **PUT** `/api/config/webhook_replies`：傳送 JSON 結構儲存並覆寫自動回覆設定
 
 ### 重要參數說明：
 - **`caregiver_switch_success`**: 當月嫂輸入「我是月嫂」且切換成功時的回覆。
@@ -66,6 +81,31 @@
 第一行
 第二行
 ```
+
+---
+
+## 4. 🗂️ 重新綁定申請暫存檔 (`rebind_requests.json`)
+此檔案用於暫存使用者「要求重新綁定 LINE 帳號」的申請。當舊客戶的資料已經被另一個 LINE 帳號綁定時，他們可以在前端申請重新綁定，申請記錄會暫存於此。
+
+### ⚠️ 前端工程師注意事項：
+**請勿直接讀寫此檔案**。由於可能發生併發衝突，請務必使用後端提供的 API 來存取與操作申請紀錄：
+
+1. **取得所有待確認名單**
+   - **Method**: `GET`
+   - **Endpoint**: `/api/line/rebind_requests`
+   - **Response**: 回傳 JSON 陣列，包含 `request_id`, `client_name`, `old_line_user_id`, `new_line_user_id` 等資訊。
+
+2. **管理員核准申請**
+   - **Method**: `POST`
+   - **Endpoint**: `/api/line/rebind_requests/approve`
+   - **Payload**: `{"request_id": "req_..."}`
+   - **Action**: 後端會自動寫入資料庫覆蓋、從 JSON 刪除暫存，並推播成功訊息給客戶。
+
+3. **管理員拒絕申請**
+   - **Method**: `POST`
+   - **Endpoint**: `/api/line/rebind_requests/reject`
+   - **Payload**: `{"request_id": "req_..."}`
+   - **Action**: 後端會從 JSON 刪除該暫存，並推播拒絕訊息給客戶。
 
 ---
 ### 🚨 編輯 JSON 的注意事項
