@@ -289,6 +289,7 @@ SELECT
     c.name AS client_name,
     c.phone AS client_phone,
     c.case_no AS case_no,
+    c.service_type AS service_mode,
     s.id AS staff_id,
     s.name AS staff_name,
     s.phone AS staff_phone,

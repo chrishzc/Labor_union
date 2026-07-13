@@ -226,8 +226,9 @@ def get_order_details() -> list[dict]:
                     return str(val)
 
                 r['due_date'] = to_str_date(r.get('due_date') or r.get('start_date'))
-                r['actual_start_date'] = to_str_date(r.get('actual_start_date') or r.get('start_date'))
-                r['actual_end_date'] = to_str_date(r.get('actual_end_date') or r.get('end_date'))
+                # 實際服務日期不可用預期日期補值，否則尚未開工的訂單會被誤判。
+                r['actual_start_date'] = to_str_date(r.get('actual_start_date'))
+                r['actual_end_date'] = to_str_date(r.get('actual_end_date'))
                 r['deposit_received_at'] = to_str_date(r.get('deposit_received_at') or r.get('deposit_date'))
                 r['start_date'] = to_str_date(r.get('start_date'))
                 r['end_date'] = to_str_date(r.get('end_date'))
@@ -395,7 +396,7 @@ def update_order_full_details(order_id: int, data: dict) -> bool:
                 data.get('start_date'),
                 data.get('actual_start_date'),
                 data.get('end_date'),
-                data.get('actual_end_date') or data.get('end_date'),
+                data.get('actual_end_date'),
                 data.get('deposit_date'),
                 order_id
             ))

@@ -9,6 +9,8 @@
 """
 import sys
 import os
+import argparse
+from collections import Counter
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import random
 import pandas as pd
@@ -561,7 +563,297 @@ def generate_schedule_data():
         conn.close()
 
 
+LIFECYCLE_SCENARIOS = (
+    "new_inquiry",
+    "matching_in_progress",
+    "deposit_received",
+    "in_service",
+    "completed_pending_settlement",
+    "closed",
+    "cancelled",
+)
+
+
+def _scenario_counts(total: int, overrides: dict | None = None) -> dict:
+    """Return a deterministic, complete lifecycle mix for the available orders."""
+    weights = {
+        "new_inquiry": 20,
+        "matching_in_progress": 15,
+        "deposit_received": 15,
+        "in_service": 20,
+        "completed_pending_settlement": 10,
+        "closed": 15,
+        "cancelled": 5,
+    }
+    if overrides:
+        weights.update({name: max(0, int(value)) for name, value in overrides.items() if name in weights})
+        return {name: min(total, weights[name]) for name in LIFECYCLE_SCENARIOS}
+
+    counts = {name: total * weight // 100 for name, weight in weights.items()}
+    remainder = total - sum(counts.values())
+    for name in LIFECYCLE_SCENARIOS[:remainder]:
+        counts[name] += 1
+    return counts
+
+
+def _scenario_note(scenario: str, boundary_tag: str | None = None) -> str | None:
+    notes = {
+        "new_inquiry": [None, "客戶初次來電，待確認服務天數與預產期。", "等待客戶補齊地址及家庭需求。"],
+        "matching_in_progress": ["已發送多位月嫂媒合邀請，等待回覆。", "客戶偏好具雙胞胎照護經驗的服務人員。"],
+        "deposit_received": ["已收訂金，待產期前一週再次確認。", "服務開始前一天請月嫂先電話聯繫客戶。"],
+        "in_service": ["客戶反映寶寶夜間作息不穩，已請月嫂加強紀錄。", "國定假日由月嫂自主出勤，依規則計薪。"],
+        "completed_pending_settlement": ["服務已完成，待客戶確認尾款匯入。", "月嫂費預計次月 15 日撥款。"],
+        "closed": ["帳務與服務紀錄均已確認，案件結案。", "客戶滿意度回訪完成。"],
+        "cancelled": ["客戶改由家人照護，取消服務。", "預產期變動，暫停本次申請。"],
+    }
+    note = random.choice(notes[scenario])
+    return f"{note or ''} [{boundary_tag}]".strip() if boundary_tag else note
+
+
+def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, balance, caregiver_fee, notes,
+                    deposit_at=None, balance_at=None, caregiver_paid_at=None):
+    cursor.execute("""
+        INSERT INTO payments (
+            case_no, client_name, amount_receivable, deposit_received, deposit_received_at,
+            balance_received, balance_received_at, caregiver_fee, caregiver_paid_at,
+            payment_status, notes
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON DUPLICATE KEY UPDATE
+            client_name = VALUES(client_name), amount_receivable = VALUES(amount_receivable),
+            deposit_received = VALUES(deposit_received), deposit_received_at = VALUES(deposit_received_at),
+            balance_received = VALUES(balance_received), balance_received_at = VALUES(balance_received_at),
+            caregiver_fee = VALUES(caregiver_fee), caregiver_paid_at = VALUES(caregiver_paid_at),
+            payment_status = VALUES(payment_status), notes = VALUES(notes)
+    """, (case_no, client_name, amount, deposit, deposit_at, balance, balance_at,
+          caregiver_fee, caregiver_paid_at, status, notes))
+
+
+def _write_scenario_schedule(cursor, order_id: int, staff_id: int, start: date, service_days: int) -> date:
+    """Create a simple deterministic schedule in the caller's transaction."""
+    work_days = 0
+    current_day = start
+    last_day = start
+    while work_days < service_days:
+        is_sunday = current_day.weekday() == 6
+        is_work_day = not is_sunday
+        note = "週日預設休假" if is_sunday else "生命週期假資料正常服務日"
+        cursor.execute("""
+            INSERT INTO staff_schedule (order_id, staff_id, work_date, is_work_day, is_double_pay, notes)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (order_id, staff_id, current_day, is_work_day, False, note))
+        if is_work_day:
+            work_days += 1
+        last_day = current_day
+        current_day += timedelta(days=1)
+    return last_day
+
+
+def _assign_available_staff(cursor, staff_ids: list[int], desired_start: date) -> tuple[int, date]:
+    """Choose a staff member whose generated schedule does not overlap the requested start."""
+    availability = []
+    for staff_id in staff_ids:
+        cursor.execute("SELECT MAX(work_date) AS last_date FROM staff_schedule WHERE staff_id = %s", (staff_id,))
+        last_date = cursor.fetchone()["last_date"]
+        if last_date is None or last_date < desired_start:
+            availability.append((staff_id, desired_start))
+        else:
+            availability.append((staff_id, last_date + timedelta(days=4)))
+    available_now = [item for item in availability if item[1] == desired_start]
+    return random.choice(available_now) if available_now else min(availability, key=lambda item: item[1])
+
+
+def validate_lifecycle_data(cursor, reference_date: date) -> list[str]:
+    """Validate the database invariants required by the generated lifecycle fixtures."""
+    errors = []
+    checks = [
+        ("""SELECT COUNT(*) AS count FROM orders
+            WHERE status = '洽談中' AND (staff_id IS NOT NULL OR actual_start_date IS NOT NULL OR actual_end_date IS NOT NULL
+            OR start_date < %s)""", (reference_date,), "洽談中案件違反未指派或兩週後開始規則"),
+        ("""SELECT COUNT(*) AS count FROM orders o
+            LEFT JOIN clients c ON c.id = o.client_id
+            WHERE status IN ('服務中', '訂單完成') AND (o.staff_id IS NULL OR o.actual_start_date IS NULL)""", (), "服務中/完成案件缺少月嫂或實際開始日"),
+        ("""SELECT COUNT(*) AS count FROM orders o
+            LEFT JOIN staff_schedule ss ON ss.order_id = o.id AND ss.work_date > %s
+            WHERE o.status = '訂單取消' AND (o.cancel_reason IS NULL OR o.cancel_reason = '' OR ss.id IS NOT NULL)""", (reference_date,), "取消案件缺少原因或仍有未來排班"),
+        ("""SELECT COUNT(*) AS count FROM payments p
+            LEFT JOIN clients c ON c.case_no = p.case_no
+            WHERE c.id IS NULL""", (), "付款資料含不存在的 case_no"),
+    ]
+    for query, params, message in checks:
+        cursor.execute(query, params)
+        if cursor.fetchone()["count"]:
+            errors.append(message)
+    return errors
+
+
+def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
+                                 scenario_counts: dict | None = None) -> dict:
+    """Generate valid lifecycle, payment, matching, note, and boundary fixtures in MySQL."""
+    if seed is not None:
+        random.seed(seed)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT o.id AS order_id, c.id AS client_id, c.case_no, c.name AS client_name
+                FROM orders o JOIN clients c ON c.id = o.client_id
+                WHERE c.case_no IS NOT NULL AND c.case_no <> '' ORDER BY o.id
+            """)
+            orders = cursor.fetchall()
+            cursor.execute("SELECT id FROM staff ORDER BY id")
+            staff_ids = [row["id"] for row in cursor.fetchall()]
+            if not orders or not staff_ids:
+                return {
+                    "generation_summary": {},
+                    "validation_result": "skipped: orders, clients, or staff data is not imported yet",
+                }
+
+            cursor.execute("DELETE FROM matching_records")
+            cursor.execute("DELETE FROM staff_schedule")
+            cursor.execute("""
+                UPDATE orders SET staff_id = NULL, actual_start_date = NULL, actual_end_date = NULL,
+                    cancel_reason = NULL, custom_rest_dates = NULL
+            """)
+
+            counts = _scenario_counts(len(orders), scenario_counts)
+            plan = [name for name, count in counts.items() for _ in range(count)]
+            while len(plan) < len(orders):
+                plan.append("new_inquiry")
+            random.shuffle(plan)
+            summary = Counter()
+
+            for index, order in enumerate(orders):
+                scenario = plan[index]
+                days = random.choice([15, 20, 25, 30])
+                hours = random.choice([8, 9, 24])
+                floor_fee = random.choice([0, 0, 500, 1000])
+                amount = days * hours * random.choice([300, 350]) + floor_fee
+                caregiver_fee = int(amount * 0.75)
+                boundary_tag = None
+                if index == 0:
+                    boundary_tag = "BOUNDARY_CROSS_MONTH"
+                elif index == 1:
+                    boundary_tag = "BOUNDARY_WEEKEND_HOLIDAY"
+                elif index == 2:
+                    boundary_tag = "CONFLICT_TEST_EXCLUDED_FROM_NORMAL_SCHEDULE"
+                note = _scenario_note(scenario, boundary_tag)
+
+                if scenario == "new_inquiry":
+                    start = reference_date + timedelta(days=14 + random.randint(0, 45))
+                    end = start + timedelta(days=days)
+                    cursor.execute("""
+                        UPDATE orders SET staff_id = NULL, status = '洽談中', start_date = %s, end_date = %s,
+                            actual_start_date = NULL, actual_end_date = NULL, service_days = %s,
+                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = NULL WHERE id = %s
+                    """, (start, end, days, hours, floor_fee, order["order_id"]))
+                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, note)
+
+                elif scenario == "matching_in_progress":
+                    start = reference_date + timedelta(days=14 + random.randint(0, 30))
+                    end = start + timedelta(days=days)
+                    cursor.execute("""
+                        UPDATE orders SET staff_id = NULL, status = '洽談中', start_date = %s, end_date = %s,
+                            actual_start_date = NULL, actual_end_date = NULL, service_days = %s,
+                            service_hours_per_day = %s, floor_fee = %s WHERE id = %s
+                    """, (start, end, days, hours, floor_fee, order["order_id"]))
+                    for candidate_id in random.sample(staff_ids, min(len(staff_ids), random.randint(2, 5))):
+                        reply = random.choice([None, None, 0, 1])
+                        cursor.execute("""
+                            INSERT INTO matching_records (order_id, staff_id, caregiver_accepted, sent_at, replied_at)
+                            VALUES (%s, %s, %s, NOW(), CASE WHEN %s IS NULL THEN NULL ELSE NOW() END)
+                        """, (order["order_id"], candidate_id, reply, reply))
+                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, note)
+
+                elif scenario == "cancelled":
+                    start = reference_date + timedelta(days=random.randint(2, 30))
+                    cursor.execute("""
+                        UPDATE orders SET staff_id = NULL, status = '訂單取消', start_date = %s, end_date = %s,
+                            actual_start_date = NULL, actual_end_date = NULL, service_days = %s,
+                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = %s WHERE id = %s
+                    """, (start, start + timedelta(days=days), days, hours, floor_fee,
+                          "客戶改由家人照護，取消服務", order["order_id"]))
+                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, note)
+
+                else:
+                    if scenario == "deposit_received":
+                        start = reference_date + timedelta(days=random.randint(7, 40))
+                        status, deposit, balance = "訂單成立", max(1000, amount // 10), 0
+                        actual_start, actual_end = None, None
+                    elif scenario == "in_service":
+                        start = reference_date - timedelta(days=random.randint(1, min(days - 1, 10)))
+                        status, deposit, balance = "服務中", max(1000, amount // 10), 0
+                        actual_start, actual_end = start, start + timedelta(days=days)
+                    elif scenario == "completed_pending_settlement":
+                        start = reference_date - timedelta(days=days + random.randint(3, 20))
+                        status, deposit, balance = "訂單完成", max(1000, amount // 10), 0
+                        actual_start, actual_end = start, start + timedelta(days=days)
+                    else:  # closed
+                        start = reference_date - timedelta(days=days + random.randint(10, 40))
+                        status, deposit, balance = "訂單完成", max(1000, amount // 10), amount - max(1000, amount // 10)
+                        actual_start, actual_end = start, start + timedelta(days=days)
+
+                    staff_id, start = _assign_available_staff(cursor, staff_ids, start)
+                    if scenario in ("in_service", "completed_pending_settlement", "closed"):
+                        actual_start = start
+                        actual_end = start + timedelta(days=days)
+
+                    cursor.execute("""
+                        UPDATE orders SET staff_id = %s, status = %s, start_date = %s, end_date = %s,
+                            actual_start_date = %s, actual_end_date = %s, service_days = %s,
+                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = NULL WHERE id = %s
+                    """, (staff_id, status, start, start + timedelta(days=days), actual_start, actual_end,
+                          days, hours, floor_fee, order["order_id"]))
+
+                    # A conflict fixture stays visible in orders but deliberately has no schedule row.
+                    if boundary_tag != "CONFLICT_TEST_EXCLUDED_FROM_NORMAL_SCHEDULE":
+                        scheduled_end = _write_scenario_schedule(cursor, order["order_id"], staff_id, start, days)
+                        if scenario == "deposit_received":
+                            cursor.execute("""
+                                UPDATE orders SET end_date = %s, actual_start_date = NULL, actual_end_date = NULL WHERE id = %s
+                            """, (scheduled_end, order["order_id"]))
+                        else:
+                            cursor.execute("""
+                                UPDATE orders SET end_date = %s, actual_end_date = %s WHERE id = %s
+                            """, (scheduled_end, scheduled_end, order["order_id"]))
+
+                    _upsert_payment(
+                        cursor, order["case_no"], order["client_name"],
+                        "已結案" if scenario == "closed" else "已收訂金",
+                        amount, deposit, balance, caregiver_fee if scenario == "closed" else 0, note,
+                        start - timedelta(days=3), actual_end if balance else None,
+                        actual_end + timedelta(days=15) if scenario == "closed" else None,
+                    )
+
+                cursor.execute("UPDATE clients SET admin_notes = %s WHERE id = %s", (note, order["client_id"]))
+                summary[scenario] += 1
+
+            errors = validate_lifecycle_data(cursor, reference_date)
+            if errors:
+                raise RuntimeError("; ".join(errors))
+            conn.commit()
+            return {"generation_summary": dict(summary), "validation_result": "pass"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def parse_cli_args():
+    parser = argparse.ArgumentParser(description="Generate lifecycle-aware fake data")
+    parser.add_argument("--reference-date", default=date.today().isoformat(), help="YYYY-MM-DD baseline for lifecycle data")
+    parser.add_argument("--seed", type=int, default=20260713, help="Deterministic random seed")
+    return parser.parse_args()
+
+
 def main():
+    args = parse_cli_args()
+    try:
+        reference_date = datetime.strptime(args.reference_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise SystemExit(f"--reference-date must use YYYY-MM-DD: {exc}")
+    random.seed(args.seed)
     print("正在初始化生成假資料程序...")
     
     # 確保資料處理資料夾存在
@@ -615,7 +907,12 @@ def main():
         sys.exit(1)
         
     # 3. 產生月掃檔期與行事曆假資料
-    generate_schedule_data()
+    try:
+        lifecycle_result = generate_lifecycle_scenarios(reference_date, args.seed)
+        print(f"Lifecycle summary: {lifecycle_result['generation_summary']}; validation: {lifecycle_result['validation_result']}")
+    except Exception as e:
+        print(f"Lifecycle generation failed: {e}")
+        sys.exit(1)
 
     print("\n====== 所有假資料生成完成，名冊、財務與月掃檔期測試數據已 100% 關聯對齊！ ======")
 

@@ -43,10 +43,37 @@
 - Observability: not_required
 
 ##### Module: GenerateFakeData
-- Source: `scripts/generate_fake_data.py`
+- Source: scripts/generate_fake_data.py
 - Type: script
 - Description: 假資料統一生成器。採用「時間軸推進演算法 (Sequential Timeline Generator)」，為每位月嫂維護獨立時間軸游標，確保同月嫂的案件排班前後接續、絕對獨佔且零重疊 (Zero Overlap)。
 - Observability: not_required
+- Complexity: medium
+- Input:
+  - reference_date: optional YYYY-MM-DD generation baseline
+  - seed: optional deterministic integer
+  - scenario_counts: optional lifecycle scenario count overrides
+- Output:
+  - generation_summary: counts by lifecycle, payment state, and boundary fixture
+  - validation_result: pass or explicit invariant failures
+- Algorithm:
+  - Accept a configurable `reference_date` and deterministic random seed; use the same reference date for all lifecycle calculations.
+  - Generate clients with unique `case_no`, then generate orders from a scenario matrix: new inquiry, matching in progress, deposit received awaiting service, in service, completed awaiting settlement, closed, and cancelled.
+  - For new inquiries, enforce `status = 洽談中`, no `staff_id`, no actual service dates, no matching or schedule rows, and `start_date >= reference_date + 14 days`.
+  - For matching scenarios, generate 2–5 matching records with a mixture of pending, declined, and accepted replies, without assigning a final staff member or generating a schedule.
+  - For assigned scenarios, generate staff assignment, payments, and non-overlapping schedules only when the lifecycle state allows them; derive actual dates only for in-service or completed cases.
+  - Generate notes from scenario-specific templates, including empty, routine administrative, follow-up, and boundary-data notes.
+  - Add explicit boundary fixtures for cross-month/year dates, February, weekends, holidays, custom rest dates, adjacent and intentionally conflicting staff schedules, cancellation/refund combinations, partial payments, and missing optional LINE or BeClass data.
+  - Validate relational integrity and lifecycle invariants before committing; roll back or fail with a summary if any invariant is violated.
+- Invariants:
+  - `洽談中` orders have no assigned staff, actual service dates, matching record, or staff schedule, and start at least 14 days after `reference_date`.
+  - `服務中` and `訂單完成` orders have an assigned staff member and actual start date; cancelled orders have a cancel reason and no future active schedule.
+  - Every payment uses an existing `clients.case_no`; `payments` never contains `order_id`.
+  - Normal assigned schedules for one staff member must not overlap; intentionally conflicting fixtures must be explicitly marked as conflict-test data.
+  - Generated note content must be compatible with the lifecycle state.
+- Verification:
+  - case: {"input": {"scenario": "new_inquiry", "reference_date": "2026-07-13"}, "expect": {"status": "洽談中", "staff_id": null, "actual_start_date": null, "min_start_date": "2026-07-27"}}
+  - case: {"input": {"scenario": "matching_in_progress"}, "expect": {"staff_id": null, "matching_record_count_min": 2, "schedule_count": 0}}
+  - case: {"input": {"scenario": "cancelled"}, "expect": {"cancel_reason_required": true, "future_schedule_count": 0}}
 
 ##### Module: FixScheduleConflicts
 - Source: `scripts/fix_schedule_conflicts.py`

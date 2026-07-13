@@ -55,6 +55,13 @@ def safe_date(val):
     return val
 
 
+def safe_optional_date(val):
+    """將可為空的資料庫日期轉為 Streamlit 可接受的日期或 None。"""
+    if not val:
+        return None
+    return safe_date(val)
+
+
 def render_editor(target_oid, orders_data, payments_raw, key_prefix="v25"):
     """
     可重用的單筆訂單編輯器渲染函式 (EditOrderUI Core)。
@@ -105,27 +112,32 @@ def render_editor(target_oid, orders_data, payments_raw, key_prefix="v25"):
             w_staff_name = st.text_input("服務人員", value=target_order.get('staff_name') or '尚未指派', disabled=True, key=f"{key_prefix}_staff_{target_oid}")
             s_mode_opts = ["週休1日", "週休2日", "連續服務"]
             c_mode = target_order.get('service_mode', '週休1日')
-            mode_idx = s_mode_opts.index(c_mode) if c_mode in s_mode_opts else 0
-            w_service_mode = st.selectbox("休假方式 (每週預設排休)", s_mode_opts, index=mode_idx, key=f"{key_prefix}_mode_{target_oid}")
+            # 休假方式以客戶申請資料 clients.service_type 為準，僅供本頁計算。
+            # 此欄位不屬於 orders，不能顯示成可編輯卻未被儲存的選單。
+            w_service_mode = c_mode if c_mode in s_mode_opts else '週休1日'
+            st.text_input("休假方式 (客戶申請)", value=w_service_mode, disabled=True, key=f"{key_prefix}_mode_{target_oid}")
             w_start_date = st.date_input("預期服務開始日", value=safe_date(target_order.get('start_date')), key=f"{key_prefix}_st_{target_oid}")
         
         with c3:
-            w_act_start = st.date_input("服務開始 (實際開工)", value=safe_date(target_order.get('actual_start_date') or target_order.get('start_date')), key=f"{key_prefix}_act_st_{target_oid}")
+            w_act_start = st.date_input("服務開始 (實際開工)", value=safe_optional_date(target_order.get('actual_start_date')), key=f"{key_prefix}_act_st_{target_oid}")
             w_service_days = st.number_input("希望服務天數 (天)", value=max(1, safe_int(target_order.get('service_days', 20))), min_value=1, max_value=60, step=1, key=f"{key_prefix}_days_{target_oid}")
             
-            # ⚡ 動態連動精算服務結束日
-            calc_out = db_service.calculate_attendance_schedule(
-                actual_start_date=w_act_start,
-                target_service_days=w_service_days,
-                service_mode=w_service_mode
-            )
-            calc_act_end = calc_out.get('actual_end_date', w_act_start + timedelta(days=w_service_days-1))
+            # 只有已確認實際開始日才計算實際結束日，避免預期日期或今天被寫回。
+            calc_act_end = None
+            if w_act_start:
+                calc_out = db_service.calculate_attendance_schedule(
+                    actual_start_date=w_act_start,
+                    target_service_days=w_service_days,
+                    service_mode=w_service_mode
+                )
+                calc_act_end = calc_out.get('actual_end_date', w_act_start + timedelta(days=w_service_days-1))
             
             if not is_unlocked:
-                st.markdown(f"• ⚡ **服務結束 (🔒 自動精算)**: <b style='color:#2E7D32;'>{calc_act_end.strftime('%Y-%m-%d')}</b>", unsafe_allow_html=True)
+                end_text = calc_act_end.strftime('%Y-%m-%d') if calc_act_end else '尚未設定實際服務開始日'
+                st.markdown(f"• ⚡ **服務結束 (🔒 自動精算)**: <b style='color:#2E7D32;'>{end_text}</b>", unsafe_allow_html=True)
                 w_act_end = calc_act_end
             else:
-                w_act_end = st.date_input("服務結束 (🔓 自訂)", value=safe_date(target_order.get('actual_end_date') or calc_act_end), key=f"{key_prefix}_act_end_custom_{target_oid}")
+                w_act_end = st.date_input("服務結束 (🔓 自訂)", value=safe_optional_date(target_order.get('actual_end_date')) or calc_act_end, key=f"{key_prefix}_act_end_custom_{target_oid}")
 
     # =========================================================================
     # 區塊二：⏱️ 服務時數與請款天數統計區

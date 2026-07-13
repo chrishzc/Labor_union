@@ -36,6 +36,8 @@ modules:
     context_priority: {}
     state: validated
     fan_in_snapshot: 0
+    known_symbols:
+    - main
   UILayer:
     type: sub_system_layer
     description: 使用者介面層，包含 Streamlit 各個頁面與元件。
@@ -67,6 +69,9 @@ modules:
     context_priority: {}
     state: planned
     fan_in_snapshot: 0
+    known_symbols:
+    - load_pages
+    - main
   APILayer:
     type: sub_system_layer
     description: FastAPI 應用程式介面層，負責處理 HTTP 請求。
@@ -129,29 +134,114 @@ modules:
     context_priority: {}
     state: planned
     fan_in_snapshot: 0
+    known_symbols:
+    - add_or_update_holiday
+    - assign_staff_to_order
+    - calculate_attendance_schedule
+    - create_or_get_match_record
+    - create_order
+    - delete_holiday
+    - generate_default_schedule
+    - get_connection
+    - get_order_details
+    - get_order_matches
+    - get_recommended_staff_for_order
+    - get_staff_monthly_schedule
+    - get_table_data
+    - parse_beclass_survey_details
+    - parse_client_district
+    - reply_matching_inquiry
+    - safe_date
+    - safe_float
+    - safe_int
+    - save_order_rest_dates
+    - update_matching_info_sent
+    - update_order_full_details
+    - update_order_status
+    - update_payment_details
+    - update_schedule_day
+    - update_table_row
   GenerateFakeData:
     type: script
     description: 假資料統一生成器。採用「時間軸推進演算法 (Sequential Timeline Generator)」，為每位月嫂維護獨立時間軸游標，確保同月嫂的案件排班前後接續、絕對獨佔且零重疊
       (Zero Overlap)。
-    source: '`scripts/generate_fake_data.py`'
+    source: scripts/generate_fake_data.py
     domain: null
     subsystem: null
     map_file: system_map.md
     dependencies: []
-    input: {}
-    output: {}
+    input:
+      reference_date: optional YYYY-MM-DD generation baseline
+      seed: optional deterministic integer
+      scenario_counts: optional lifecycle scenario count overrides
+    output:
+      generation_summary: counts by lifecycle, payment state, and boundary fixture
+      validation_result: pass or explicit invariant failures
     exceptions: []
-    invariants: []
+    invariants:
+    - '`洽談中` orders have no assigned staff, actual service dates, matching record,
+      or staff schedule, and start at least 14 days after `reference_date`.'
+    - '`服務中` and `訂單完成` orders have an assigned staff member and actual start date;
+      cancelled orders have a cancel reason and no future active schedule.'
+    - Every payment uses an existing `clients.case_no`; `payments` never contains
+      `order_id`.
+    - Normal assigned schedules for one staff member must not overlap; intentionally
+      conflicting fixtures must be explicitly marked as conflict-test data.
+    - Generated note content must be compatible with the lifecycle state.
     preferred_pattern: none
-    verification: []
+    verification:
+    - case:
+        input:
+          scenario: new_inquiry
+          reference_date: '2026-07-13'
+        expect:
+          status: 洽談中
+          staff_id: null
+          actual_start_date: null
+          min_start_date: '2026-07-27'
+    - case:
+        input:
+          scenario: matching_in_progress
+        expect:
+          staff_id: null
+          matching_record_count_min: 2
+          schedule_count: 0
+    - case:
+        input:
+          scenario: cancelled
+        expect:
+          cancel_reason_required: true
+          future_schedule_count: 0
     decisions: []
     todo: []
     checkpoint: []
     observability:
       mode: not_required
       signals: []
-    complexity: low
-    algorithm: []
+    complexity: medium
+    algorithm:
+    - Accept a configurable `reference_date` and deterministic random seed; use the
+      same reference date for all lifecycle calculations.
+    - 'Generate clients with unique `case_no`, then generate orders from a scenario
+      matrix: new inquiry, matching in progress, deposit received awaiting service,
+      in service, completed awaiting settlement, closed, and cancelled.'
+    - For new inquiries, enforce `status = 洽談中`, no `staff_id`, no actual service
+      dates, no matching or schedule rows, and `start_date >= reference_date + 14
+      days`.
+    - For matching scenarios, generate 2–5 matching records with a mixture of pending,
+      declined, and accepted replies, without assigning a final staff member or generating
+      a schedule.
+    - For assigned scenarios, generate staff assignment, payments, and non-overlapping
+      schedules only when the lifecycle state allows them; derive actual dates only
+      for in-service or completed cases.
+    - Generate notes from scenario-specific templates, including empty, routine administrative,
+      follow-up, and boundary-data notes.
+    - Add explicit boundary fixtures for cross-month/year dates, February, weekends,
+      holidays, custom rest dates, adjacent and intentionally conflicting staff schedules,
+      cancellation/refund combinations, partial payments, and missing optional LINE
+      or BeClass data.
+    - Validate relational integrity and lifecycle invariants before committing; roll
+      back or fail with a summary if any invariant is violated.
     idempotency:
       level: unknown
       side_effects: []
@@ -159,8 +249,23 @@ modules:
     required_context: []
     forbidden_context: []
     context_priority: {}
-    state: validated
+    state: dirty
     fan_in_snapshot: 0
+    known_symbols:
+    - fill_checkbox_group
+    - generate_fake_address
+    - generate_fake_due_date
+    - generate_fake_id_card
+    - generate_fake_ip
+    - generate_fake_line_id
+    - generate_fake_name
+    - generate_fake_phone
+    - generate_fake_service_start_date
+    - generate_fake_signup_time
+    - generate_finance_data
+    - generate_roster_data
+    - generate_schedule_data
+    - main
   FixScheduleConflicts:
     type: script
     description: 月嫂檔期衝突檢測與自動修復工具。
@@ -192,6 +297,9 @@ modules:
     context_priority: {}
     state: validated
     fan_in_snapshot: 0
+    known_symbols:
+    - detect_schedule_conflicts
+    - repair_schedule_conflicts
   StartScript:
     type: script
     description: 一鍵啟動與部署環境初始化腳本。啟動 Docker、初始化 MySQL、產生並匯入假資料，最後並行啟動 FastAPI 與 Streamlit。

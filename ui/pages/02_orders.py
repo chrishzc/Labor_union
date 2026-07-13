@@ -96,10 +96,6 @@ def _render_tab1_overview(orders_data):
     st.caption("💡 點選任一筆訂單標題列即可原地展開，進行 36 欄位編輯 (手風琴模式：同時只會展開一筆，點開其他筆會自動收合前一筆)；欄位內容與「📄 訂單動態試算與維護」頁面完全共用同一套邏輯，修改後請記得點擊「💾 確定儲存」按鈕。")
 
     df_filtered = df_filtered.copy()
-    if 'actual_end_date' not in df_filtered.columns or df_filtered['actual_end_date'].isnull().all():
-        if 'end_date' in df_filtered.columns:
-            df_filtered['actual_end_date'] = df_filtered['end_date']
-
     try:
         payments_raw = db_service.get_table_data('payments')
     except Exception as e:
