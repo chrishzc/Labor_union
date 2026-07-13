@@ -1,7 +1,7 @@
 # UI Functional Layer Sub-System Map (Version 54.0)
 
 > **Scope**: `ui/` 所有介面與元件層  
-> **Master Reference**: [`../system_map.yaml`](file:///c:/Users/chris/Desktop/project/Lobar_union---solo/system_map.yaml)
+> **Master Reference**: [`../system_map.yaml`](file:///c:/Users/chris/Desktop/project/Labor_union/system_map.yaml)
 
 ---
 
@@ -16,7 +16,7 @@
 - Source: `ui/pages/01_data_browser.py`
 - Type: ui_page
 - State: `validated`
-- Description: 原始資料庫表格瀏覽頁面與國定假日管理面板。支援 7 大資料表欄位動態中文化對照與切換。
+- Description: 原始資料庫表格瀏覽頁面與國定假日管理面板。支援 8 大資料表（包含銀行帳戶子表）欄位動態中文化對照與切換。
 - Invariants:
   - `INV-UI-BROWSER-01`: 原始資料表格欄位必須支援透過對照表轉換為中文名稱 (含英文原鍵名或純中文)，未記錄欄位自動安全回退原鍵名。
 - API Button Matrix:
@@ -38,7 +38,7 @@
   - `🤝 3️⃣ 傳送履歷給客戶` ➔ `POST /api/v1/matches/{match_id}/send-resume`
   - `✍️ 4️⃣ 成立訂單並定案指派` ➔ `POST /api/v1/orders/{order_id}/assign-staff`
   - `🚨 確認取消此訂單` ➔ `PUT /api/v1/orders/{order_id}/status`
-  - `更新財務記錄` ➔ `PUT /api/v1/payments/{order_id}`
+  - `更新財務記錄` ➔ `PUT /api/v1/payments/{case_no}`
 
 ##### Module: CalendarUI (完整四色月曆與排假精算專頁)
 - Source: `ui/pages/03_calendar.py`

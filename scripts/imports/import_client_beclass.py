@@ -34,9 +34,7 @@ BECLASS_CORE_MAPPING = {
     '\u9805\u6b21': 'seq_num',
     '\u67e5\u8a62\u5e8f\u865f': 'query_no',
     '\u5831\u540d\u6642\u9593': 'created_at',
-    '\u8a02\u55ae\u7de8\u865f': 'order_no',
     '\u59d3\u540d': 'name',
-    '\u6027\u5225': 'gender',
     'Email': 'email',
     '\u884c\u52d5\u96fb\u8a71': 'phone',
     '\u5e02\u8a71': 'tel',
@@ -44,6 +42,8 @@ BECLASS_CORE_MAPPING = {
     '\u7e23\u5e02': 'city',
     '\u90f5\u905e\u5340\u865f': 'zip_code',
     '\u5730\u5740': 'address',
+    '補助款退款:銀行代號+分行代號': 'refund_bank_code',
+    '銀行帳號': 'refund_account_no',
     '\u7ba1\u7406\u8005\u8a3b\u8a18\u4e8b\u9805': 'admin_notes'
 }
 

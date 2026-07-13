@@ -5,7 +5,7 @@
   "fields": [
     {"id": "f_201_e1", "label": "客戶名稱", "type": "db_link", "db_key": "client_name", "width": "half"},
     {"id": "f_202_e2", "label": "聯絡電話", "type": "db_link", "db_key": "phone", "width": "half"},
-    {"id": "f_203_e3", "label": "訂單號碼", "type": "db_link", "db_key": "case_no", "width": "half"},
+    {"id": "f_203_e3", "label": "案件編號", "type": "db_link", "db_key": "case_no", "width": "half"},
     {"id": "f_204_e4", "label": "樓層費用 (透天加收)", "type": "db_link", "db_key": "floor_fee", "width": "half"},
     {"id": "f_205_e5", "label": "服務地址", "type": "db_link", "db_key": "address", "width": "full"},
     {"id": "f_206_e6", "label": "飲食習慣(含是否可接受中藥)", "type": "db_link", "db_key": "dietary_habits", "width": "full"},

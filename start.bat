@@ -12,18 +12,18 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
-:: 2. Activate Virtual Environment
-echo [Step 2] Activating Python virtual environment...
-if not exist .venv\Scripts\activate.bat (
+:: 2. Set Python path
+echo [Step 2] Setting Python environment...
+if not exist .venv\Scripts\python.exe (
     echo [Error] Virtual environment .venv not found. Please install dependencies first.
     pause
     exit /b 1
 )
-call .venv\Scripts\activate.bat
+set PY=.venv\Scripts\python.exe
 
 :: 3. Wait for database
 echo [Step 3] Waiting for MySQL database to become ready...
-python scripts/wait_for_db.py
+%PY% scripts/wait_for_db.py
 if %errorlevel% neq 0 (
     echo [Error] Database connection timeout!
     pause
@@ -32,7 +32,7 @@ if %errorlevel% neq 0 (
 
 :: 4. Initialize Database
 echo [Step 4] Initializing database schema (schema.sql)...
-python scripts/init_db.py
+%PY% scripts/init_db.py
 if %errorlevel% neq 0 (
     echo [Error] Database initialization failed!
     pause
@@ -44,7 +44,7 @@ if %errorlevel% neq 0 (
 ::    schedule allocation / order-status randomization. That step runs again
 ::    later in Step 10, after real data has been imported.)
 echo [Step 5] Generating roster and finance fake data (initial pass, schedule allocation will be skipped until data is imported)...
-python scripts/generate_fake_data.py
+%PY% scripts/generate_fake_data.py
 if %errorlevel% neq 0 (
     echo [Error] Fake data generation failed!
     pause
@@ -53,7 +53,7 @@ if %errorlevel% neq 0 (
 
 :: 6. Import Data
 echo [Step 6] Importing client HCM data...
-python scripts/imports/import_client_hcm.py
+%PY% scripts/imports/import_client_hcm.py
 if %errorlevel% neq 0 (
     echo [Error] HCM import failed!
     pause
@@ -61,7 +61,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [Step 7] Importing client BeClass data...
-python scripts/imports/import_client_beclass.py
+%PY% scripts/imports/import_client_beclass.py
 if %errorlevel% neq 0 (
     echo [Error] Client BeClass import failed!
     pause
@@ -69,7 +69,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [Step 8] Importing caregiver BeClass data...
-python scripts/imports/import_staff_beclass.py
+%PY% scripts/imports/import_staff_beclass.py
 if %errorlevel% neq 0 (
     echo [Error] Caregiver BeClass import failed!
     pause
@@ -77,7 +77,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [Step 9] Importing finance payment data...
-python scripts/imports/import_finance_excel.py
+%PY% scripts/imports/import_finance_excel.py
 if %errorlevel% neq 0 (
     echo [Error] Finance import failed!
     pause
@@ -88,7 +88,7 @@ if %errorlevel% neq 0 (
 ::     timeline-advancement algorithm can allocate caregivers and diversify
 ::     order statuses (in negotiation / in service / completed / cancelled).
 echo [Step 10] Allocating caregiver schedules and diversifying order statuses...
-python scripts/generate_fake_data.py
+%PY% scripts/generate_fake_data.py
 if %errorlevel% neq 0 (
     echo [Error] Schedule allocation failed!
     pause
@@ -101,10 +101,10 @@ echo ==========================================
 
 :: 11. Launch servers concurrently
 echo [Step 11] Launching FastAPI server and ngrok...
-start "FastAPI & ngrok" cmd /k "call .venv\Scripts\activate.bat && python line\start_line_bot.py"
+start "LINE Bot & ngrok" cmd /k "call .venv\Scripts\activate.bat && python line\start_line_bot.py"
 
 echo [Step 12] Launching Streamlit interface...
-start "Streamlit Client UI" cmd /k "call .venv\Scripts\activate.bat && streamlit run ui/app.py"
+start "Streamlit Client UI" cmd /k ".venv\Scripts\streamlit.exe run ui/app.py"
 
 echo ==========================================
 echo System is running in the background!

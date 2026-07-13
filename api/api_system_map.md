@@ -1,7 +1,7 @@
 # API Layer Sub-System Map (Version 2.0)
 
 > **Scope**: `api/` RESTful API 服務層  
-> **Master Reference**: [`../system_map.yaml`](file:///c:/Users/chris/Desktop/project/Lobar_union---solo/system_map.yaml)
+> **Master Reference**: [`../system_map.yaml`](file:///c:/Users/chris/Desktop/project/Labor_union/system_map.yaml)
 
 ---
 
@@ -48,7 +48,7 @@
 - State: `validated`
 - Endpoints:
   - `GET /api/v1/payments`
-  - `PUT /api/v1/payments/{order_id}`
+  - `PUT /api/v1/payments/{case_no}`
 
 ##### Module: ClientRouter
 - Source: `api/routes/clients.py`

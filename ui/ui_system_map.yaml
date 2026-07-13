@@ -13,7 +13,7 @@ modules:
 
   DataBrowserUI:
     type: ui_page
-    description: 原始資料庫表格瀏覽頁面。提供 clients, staff, orders, payments, beclass_records, matching_records 與 holidays 檢視，以及國定假日管理面板。
+    description: 原始資料庫表格瀏覽頁面。提供 clients, staff, orders, payments, beclass_records, matching_records, holidays 與 staff_bank_accounts 檢視，以及國定假日管理面板。
     source: ui/pages/01_data_browser.py::show
     dependencies: [DbService]
     state: validated
@@ -75,7 +75,7 @@ modules:
     source: ui/pages/02_orders.py::_render_tab3_finance
     api_button_matrix:
       - button_label: "更新財務記錄"
-        api_endpoint: "PUT /api/v1/payments/{order_id}"
+        api_endpoint: "PUT /api/v1/payments/{case_no}"
         description: "更新已收訂金、已收尾款與實收備註"
 
   CalendarUI:

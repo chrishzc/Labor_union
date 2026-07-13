@@ -43,7 +43,7 @@
     "data": [
       {
         "id": 1,
-        "order_no": "HC115628",
+        "case_no": "115000001",
         "source_platform": "beclass",
         "anomaly_type": "PHONE_FORMAT_ERROR",
         "invalid_data": { "phone": "0912-34" },
@@ -64,7 +64,7 @@
       "raw_payload": {
         "項次": 1,
         "查詢序號": 28755000,
-        "訂單編號": "HC115628",
+        "查詢序號(案件編號)": "115000001",
         "姓名": "陳小姐",
         "行動電話": "0912-34",
         "地址": "新竹市東區和平街"
@@ -425,7 +425,7 @@ FastAPI webhooks 接口定義於 `POST /webhook`。
 {
   "form_id": "30525d069a79b3597af1",
   "query_no": "28755000",
-  "order_no": "HC115628",
+  "case_no": "115000001",
   "submit_time": "2026-05-07 20:34:19",
   "personal_data": {
     "name": "陳小姐",

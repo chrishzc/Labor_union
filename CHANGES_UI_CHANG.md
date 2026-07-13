@@ -39,3 +39,13 @@
 ---
 
 如需查看更詳細的逐次修改歷程（含每次修改的問題背景、實作細節與測試注意事項），可參考 `graceAdd/alterContent.md`（此檔案已被 `.gitignore` 排除，不會出現在本分支的 GitHub 內容中，僅存在於本機）。
+
+
+---
+
+## 2026-07-13 - Case number normalization
+
+- All customer-facing order and case identifiers now use clients.case_no exclusively.
+- Removed the legacy order_no specification and obsolete order-number labels from the UI, forms, API examples, and LINE documents.
+- LINE binding and LIFF screens now query and display clients.case_no; internal orders.id (order_id) remains only for database relations and is never shown as an order number.
+- When a LINE-native registration has not yet received a case number, the user is informed that administrative issuance is pending instead of receiving an internal ID.

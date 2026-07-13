@@ -58,14 +58,22 @@ def get_connection():
 
 def get_table_data(table_name: str) -> list[dict]:
     """讀取指定原始資料表的內容"""
-    allowed_tables = ['clients', 'staff', 'orders', 'payments', 'beclass_records', 'matching_records', 'holidays']
+    allowed_tables = ['clients', 'staff', 'orders', 'payments', 'beclass_records', 'matching_records', 'holidays', 'staff_bank_accounts']
     if table_name not in allowed_tables:
         raise ValueError(f"不允許查詢此資料表: {table_name}")
 
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(f"SELECT * FROM `{table_name}`")
+            if table_name == 'orders':
+                cursor.execute("""
+                    SELECT c.case_no, s.name AS staff_name, o.*
+                    FROM orders o
+                    LEFT JOIN clients c ON o.client_id = c.id
+                    LEFT JOIN staff s ON o.staff_id = s.id
+                """)
+            else:
+                cursor.execute(f"SELECT * FROM `{table_name}`")
             return cursor.fetchall()
     finally:
         conn.close()
@@ -80,6 +88,7 @@ TABLE_PRIMARY_KEYS = {
     'beclass_records': 'id',
     'matching_records': 'id',
     'holidays': 'holiday_date',
+    'staff_bank_accounts': 'id',
 }
 
 # 系統自動管理欄位，一律唯讀，不允許透過即時編輯表格寫入，避免破壞主鍵/去重與時間戳記追蹤
@@ -296,11 +305,15 @@ def create_order(client_id: int, service_days: int, service_hours_per_day: int,
             client_name = client['name'] if client else None
             case_no = client['case_no'] if client else None
             
-            # 3. 同步建立 payments 流水帳
+            if not case_no:
+                raise ValueError("客戶尚未取得 case_no，無法建立案件帳務資料")
+
+            # 3. 同步建立以 case_no 為唯一鍵的 payments 流水帳
             cursor.execute("""
-                INSERT INTO payments (order_id, case_no, client_name, payment_status)
-                VALUES (%s, %s, %s, '待收訂金')
-            """, (order_id, case_no, client_name))
+                INSERT INTO payments (case_no, client_name, payment_status)
+                VALUES (%s, %s, '待收訂金')
+                ON DUPLICATE KEY UPDATE client_name = VALUES(client_name)
+            """, (case_no, client_name))
             
             conn.commit()
             return order_id
@@ -371,6 +384,7 @@ def update_order_full_details(order_id: int, data: dict) -> bool:
                     start_date = %s,
                     actual_start_date = %s,
                     end_date = %s,
+                    actual_end_date = %s,
                     deposit_date = %s
                 WHERE id = %s
             """, (
@@ -381,6 +395,7 @@ def update_order_full_details(order_id: int, data: dict) -> bool:
                 data.get('start_date'),
                 data.get('actual_start_date'),
                 data.get('end_date'),
+                data.get('actual_end_date') or data.get('end_date'),
                 data.get('deposit_date'),
                 order_id
             ))
@@ -402,7 +417,7 @@ def update_order_full_details(order_id: int, data: dict) -> bool:
     finally:
         conn.close()
 
-def update_payment_details(order_id: int, amount_receivable: float, deposit_received: float, 
+def update_payment_details(case_no: str, amount_receivable: float, deposit_received: float,
                            balance_received: float, caregiver_fee: float, 
                            payment_status: str, notes: str = None,
                            deposit_received_at = None, balance_received_at = None,
@@ -422,14 +437,14 @@ def update_payment_details(order_id: int, amount_receivable: float, deposit_rece
                     caregiver_paid_at = %s,
                     payment_status = %s, 
                     notes = %s 
-                WHERE order_id = %s
+                WHERE case_no = %s
             """, (
                 amount_receivable, deposit_received, deposit_received_at,
                 balance_received, balance_received_at, caregiver_fee, caregiver_paid_at,
-                payment_status, notes, order_id
+                payment_status, notes, case_no
             ))
             conn.commit()
-            return True
+            return cursor.rowcount > 0
     except Exception as e:
         conn.rollback()
         raise e
@@ -652,13 +667,13 @@ def save_order_rest_dates(order_id: int, rest_dates_list: list) -> dict:
                 schedule_entries.append((date_str, is_work))
                 curr_date += timedelta(days=1)
 
-            # 3. 持久化更新 orders 表的 custom_rest_dates 與 end_date
+            # 3. 持久化更新 orders 表的 custom_rest_dates 與 end_date/actual_end_date
             json_rest_str = json.dumps(sorted(list(clean_rest_set)), ensure_ascii=False)
             cursor.execute("""
                 UPDATE orders 
-                SET custom_rest_dates = %s, end_date = %s 
+                SET custom_rest_dates = %s, end_date = %s, actual_end_date = %s 
                 WHERE id = %s
-            """, (json_rest_str, new_end_date, order_id))
+            """, (json_rest_str, new_end_date, new_end_date, order_id))
 
             # 4. 若已被指派月嫂，覆寫更新 staff_schedule 表
             if staff_id:
@@ -743,9 +758,9 @@ def generate_default_schedule(order_id: int, staff_id: int, start_date, service_
                     work_days_count += 1
                 curr_date += timedelta(days=1)
                 
-            # 更新訂單的預計服務結束日 (為排班的最後一天)
+            # 更新訂單的預計服務結束日 與 實際服務結束日 (為排班的最後一天)
             last_date = curr_date - timedelta(days=1)
-            cursor.execute("UPDATE orders SET end_date = %s WHERE id = %s", (last_date, order_id))
+            cursor.execute("UPDATE orders SET end_date = %s, actual_end_date = %s WHERE id = %s", (last_date, last_date, order_id))
             
             conn.commit()
             return True

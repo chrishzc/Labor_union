@@ -4,7 +4,7 @@
     "name": "1. 訂單資訊-1 (給服務人員的工時與派單資訊)",
     "desc": "派單前提供給月嫂閱讀之工時、地址、服務起訖日、自費/補助薪資與總薪資單據",
     "fields": [
-      {"id": "f_101", "label": "訂單號碼(市府單號)", "type": "db_link", "db_key": "case_no", "width": "half"},
+      {"id": "f_101", "label": "案件編號 (case_no)", "type": "db_link", "db_key": "case_no", "width": "half"},
       {"id": "f_102", "label": "服務人員姓名", "type": "db_link", "db_key": "staff_name", "width": "half"},
       {"id": "f_103", "label": "客戶名稱", "type": "db_link", "db_key": "client_name", "width": "full"},
       {"id": "f_104", "label": "服務開始日期", "type": "db_link", "db_key": "actual_start_date", "width": "half"},
@@ -28,7 +28,7 @@
     "fields": [
       {"id": "f_201", "label": "客戶名稱", "type": "db_link", "db_key": "client_name", "width": "half"},
       {"id": "f_202", "label": "聯絡電話", "type": "db_link", "db_key": "phone", "width": "half"},
-      {"id": "f_203", "label": "訂單號碼", "type": "db_link", "db_key": "case_no", "width": "half"},
+      {"id": "f_203", "label": "案件編號", "type": "db_link", "db_key": "case_no", "width": "half"},
       {"id": "f_204", "label": "樓層費用 (透天加收)", "type": "db_link", "db_key": "floor_fee", "width": "half"},
       {"id": "f_205", "label": "服務地址", "type": "db_link", "db_key": "address", "width": "full"},
       {"id": "f_206", "label": "飲食習慣(含是否可接受中藥)", "type": "db_link", "db_key": "dietary_habits", "width": "full"},

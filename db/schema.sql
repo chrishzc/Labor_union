@@ -56,15 +56,13 @@ CREATE TABLE IF NOT EXISTS crawler_logs (
     message TEXT COMMENT '日誌詳細說明或錯誤原因'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. BeClass 報名紀錄表
+-- 4. BeClass 報名紀錄表（主關聯欄位為 beclass_records.query_no <=> clients.case_no；案件識別一律以 clients.case_no 為準）
 CREATE TABLE IF NOT EXISTS beclass_records (
     id INT AUTO_INCREMENT PRIMARY KEY,
     seq_num INT COMMENT '項次',
-    query_no VARCHAR(50) UNIQUE COMMENT '查詢序號',
-    order_no VARCHAR(50) COMMENT '訂單編號',
+    query_no VARCHAR(50) UNIQUE COMMENT '查詢序號 - 與 clients.case_no 進行主關聯',
     created_at VARCHAR(50) COMMENT '報名時間',
     name VARCHAR(100) COMMENT '姓名',
-    gender VARCHAR(10) COMMENT '性別',
     email VARCHAR(100) COMMENT 'Email',
     birth_date DATE COMMENT '生日',
     phone VARCHAR(20) COMMENT '行動電話',
@@ -73,6 +71,8 @@ CREATE TABLE IF NOT EXISTS beclass_records (
     city VARCHAR(50) COMMENT '縣市',
     zip_code VARCHAR(10) COMMENT '郵遞區號',
     address VARCHAR(255) COMMENT '地址',
+    refund_bank_code VARCHAR(50) COMMENT '補助款退款:銀行代號+分行代號',
+    refund_account_no VARCHAR(50) COMMENT '補助款退款:銀行帳號',
     survey_details JSON COMMENT 'BeClass 問卷詳細內容 (包含餐點、用油、烹煮工具、特殊計費等 JSON)',
     admin_notes TEXT COMMENT '管理者註記事項',
     db_created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -217,6 +217,7 @@ CREATE TABLE IF NOT EXISTS orders (
     cancel_reason TEXT NULL COMMENT '當狀態變更為 訂單取消 時的取消原因說明',
     line_group_id VARCHAR(100) NULL COMMENT '三方服務 LINE 群組 ID',
     actual_start_date DATE NULL COMMENT '實際生產服務開始日',
+    actual_end_date DATE NULL COMMENT '實際生產服務結束日',
     contract_id VARCHAR(100) NULL COMMENT '好好簽線上契約 ID',
     
     -- 新增與計算公式直接關聯的基礎欄位
@@ -255,8 +256,7 @@ CREATE TABLE IF NOT EXISTS matching_records (
 -- 18. 案件財務收支與轉帳紀錄表 (對照 帳務.xlsx)
 CREATE TABLE IF NOT EXISTS payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    order_id INT NULL COMMENT '對應 orders.id (可為 NULL，部分收支可能不屬於特定案件)',
-    case_no VARCHAR(50) NULL COMMENT '對應 clients.case_no / 查詢序號',
+    case_no VARCHAR(50) NOT NULL COMMENT '對應 clients.case_no / 查詢序號；帳務唯一案件識別碼',
     client_name VARCHAR(100) NULL COMMENT '客戶姓名備份',
     amount_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '應收金額',
     deposit_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '已收訂金',
@@ -269,9 +269,9 @@ CREATE TABLE IF NOT EXISTS payments (
     notes TEXT NULL COMMENT '帳務備註',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE SET NULL,
     INDEX idx_payment_status (payment_status),
-    INDEX idx_payment_case (case_no)
+    UNIQUE KEY uq_payments_case_no (case_no),
+    CONSTRAINT fk_payments_case_no FOREIGN KEY (case_no) REFERENCES clients(case_no) ON UPDATE CASCADE ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -283,6 +283,7 @@ SELECT
     o.cancel_reason,
     o.line_group_id,
     o.actual_start_date,
+    o.actual_end_date,
     o.contract_id,
     c.id AS client_id,
     c.name AS client_name,
