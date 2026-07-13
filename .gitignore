@@ -20,6 +20,9 @@ last_count.txt
 # Local databases/data directories
 metabase-data/
 
+# Grace 個人協作紀錄資料夾 (不隨專案上傳至遠端 repo)
+graceAdd/
+
 # Private environment variables / secrets
 .env
 

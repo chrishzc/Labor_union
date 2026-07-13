@@ -9,6 +9,7 @@ import os
 import re
 import pymysql
 import pandas as pd
+from dotenv import load_dotenv
 
 # 確保中文輸出編碼正確
 try:
@@ -16,20 +17,22 @@ try:
 except Exception:
     pass
 
+# 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+
 # 資料庫連線配置
 DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
-    'database': 'union_db',
+    'host': os.getenv('DB_HOST', '127.0.0.1'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', '1234'),
+    'database': os.getenv('DB_DATABASE', 'union_db'),
     'charset': 'utf8mb4'
 }
 
-# 欄位映射關係 (INV-HCM-01: 新增案件狀態對應，INSERT 時寫入，UPDATE 時排除)
+# 欄位映射關係 (與舊 import_excel.py 一致，但移除 案件狀態 映射以免覆寫 status)
 CLIENTS_FIELD_MAPPING = {
     '項次': 'seq_num',
-    '案件狀態': 'status',
     '不符合原因': 'reject_reason',
     '查詢序號(案件編號)': 'case_no',
     '報名時間(建檔)': 'created_at',
@@ -95,44 +98,6 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
-def smart_parse(xl, sheet_name):
-    """INV-IMPORT-01: 自動偵測 Excel 標頭列位置。
-    若超過半數欄位為數字或 Unnamed，自動改用 header=1。
-    """
-    probe = xl.parse(sheet_name, nrows=0)
-    generic = sum(
-        1 for col in probe.columns
-        if isinstance(col, (int, float)) or str(col).startswith('Unnamed')
-    )
-    if generic > len(probe.columns) / 2:
-        print(f"[自動偵測] 第一列為索引列，以第二列作為欄位標頭")
-        return xl.parse(sheet_name, header=1)
-    return xl.parse(sheet_name)
-
-# INV-CLEAN-01 & INV-HCM-02: DATETIME 欄位需透過此函式清洗，失敗必須回退 None。支援民國年格式自動轉換。
-DATETIME_COLS = {'created_at'}
-
-def clean_datetime(val, col_name, row_errors):
-    if pd.isna(val) or val is None:
-        return None
-    val_str = str(val).strip()
-    
-    # INV-HCM-02: 偵測民國年格式並進行轉換
-    # 格式如：113/09/25 19:05:27 或 113.10.25 或 113-09-25
-    m = re.match(r'^(\d+)[/\.\-](\d+)[/\.\-](\d+)(.*)', val_str)
-    if m:
-        year = int(m.group(1))
-        if year < 200:  # 民國年
-            gregorian_year = year + 1911
-            val_str = f"{gregorian_year}/{m.group(2)}/{m.group(3)}{m.group(4)}"
-            
-    try:
-        return pd.to_datetime(val_str).strftime('%Y-%m-%d %H:%M:%S')
-    except Exception:
-        row_errors.append(f"{col_name}='{str(val)[:20]}' 非日期格式，已寫入 NULL")
-        return None
-
-
 def process_import(excel_path):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
@@ -141,44 +106,41 @@ def process_import(excel_path):
     print(f"解析 Excel 檔案：{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
     
-    # ponytail: 確定每份檔案只有單一分頁，直接讀取第一個分頁，不進行名稱篩選
-    if not xl.sheet_names:
-        print("工作表為空。跳過此檔案。")
+    # 尋找匹配的分頁 (不區分大小寫、去空白)
+    target_sheet = None
+    for name in xl.sheet_names:
+        clean_name = name.replace(" ", "").lower()
+        if "hcm" in clean_name or "市府" in clean_name:
+            target_sheet = name
+            break
+            
+    if not target_sheet:
+        print("未找到包含 'HCM' 或 '市府' 關鍵字的工作表。跳過此檔案。")
         return 0, 0
-    target_sheet = xl.sheet_names[0]
         
-    df = smart_parse(xl, target_sheet)
+    df = xl.parse(target_sheet)
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
-    
-    inserted = 0
-    updated = 0
-    import_errors = []  # INV-CLEAN-02/03: 整列跳過或欄位品質問題紀錄
     
     try:
         conn = pymysql.connect(**DB_CONFIG)
         cursor = conn.cursor()
+        # 強制指定 utf8mb4 字元編碼以防止 ENUM 狀態機寫入中文時遭到截斷
         cursor.execute("SET NAMES utf8mb4;")
         conn.commit()
-        
-        # INV-IMPORT-03: 動態偵測 clients 資料表所有實際存在的欄位，防範 1054 錯誤
-        cursor.execute("DESCRIBE clients;")
-        db_cols = {col_info[0] for col_info in cursor.fetchall()}
     except Exception as e:
-        print(f"資料庫連線或初始化失敗：{e}")
+        print(f"資料庫連線失敗：{e}")
         return 0, 0
         
+    inserted = 0
+    updated = 0
+    
     try:
-        for idx, row in df.iterrows():
-            row_errors = []  # INV-CLEAN-01: 本列的欄位級錯誤
+        for _, row in df.iterrows():
             record = {}
             for excel_col, db_col in CLIENTS_FIELD_MAPPING.items():
                 if excel_col in row:
-                    if db_col in DATETIME_COLS:
-                        record[db_col] = clean_datetime(row[excel_col], db_col, row_errors)
-                    else:
-                        record[db_col] = clean_data(row[excel_col], db_col)
-
-
+                    record[db_col] = clean_data(row[excel_col], db_col)
+            
             # 欄位清理
             if 'phone' in record:
                 record['phone'] = clean_phone(record['phone'])
@@ -186,19 +148,11 @@ def process_import(excel_path):
                 clean_c, clean_a = clean_city_and_address(record.get('city'), record.get('address'))
                 record['city'] = clean_c
                 record['address'] = clean_a
-
+                
             case_no = record.get('case_no')
             if not case_no:
-                import_errors.append(f"  列 {idx+2}: 唯一鍵 case_no 為空，整列跳過")
                 continue
-
-            if row_errors:
-                import_errors.append(f"  列 {idx+2}: {'; '.join(row_errors)}")
-
                 
-            # INV-IMPORT-03: 過濾掉資料庫中實際不存在的欄位，防止 1054 錯誤
-            record = {k: v for k, v in record.items() if k in db_cols}
-
             # 比對去重
             cursor.execute("SELECT id FROM clients WHERE case_no = %s", (case_no,))
             existing = cursor.fetchone()
@@ -213,20 +167,16 @@ def process_import(excel_path):
                         update_cols.append(f"`{k}` = %s")
                         val_list.append(v)
                 val_list.append(case_no)
-                if update_cols:
-                    sql = f"UPDATE clients SET {', '.join(update_cols)} WHERE case_no = %s"
-                    cursor.execute(sql, tuple(val_list))
+                sql = f"UPDATE clients SET {', '.join(update_cols)} WHERE case_no = %s"
+                cursor.execute(sql, tuple(val_list))
                 updated += 1
             else:
-                # INV-HCM-01: INSERT 時 status 欄位自 Excel 讀取（若資料庫中存在）
                 cols = ", ".join([f"`{k}`" for k in record.keys()])
                 places = ", ".join(["%s"] * len(record))
                 sql = f"INSERT INTO clients ({cols}) VALUES ({places})"
                 cursor.execute(sql, tuple(record.values()))
                 client_id = cursor.lastrowid
                 inserted += 1
-
-
                 
             # 關聯訂單與生命週期狀態機初始化
             # 比對 orders 表是否已有此 client_id (或在此業務下，以 case_no 作為主要核銷欄位)
@@ -257,12 +207,6 @@ def process_import(excel_path):
                 
         conn.commit()
         print(f"匯入成功：新增 {inserted} 筆客戶資料，更新 {updated} 筆客戶資料。")
-        # INV-CLEAN-03: 輸出結構化錯誤摘要
-        if import_errors:
-            print(f"\n[⚠️ 匯入警告] 共 {len(import_errors)} 列有資料品質問題，請手動確認：")
-            for err in import_errors:
-                print(err)
-
     except Exception as err:
         conn.rollback()
         import traceback
