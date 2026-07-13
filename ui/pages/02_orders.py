@@ -405,8 +405,8 @@ def _render_tab3_finance(orders_data):
         return
 
     pay_options = {
-        f"案件 #{p['case_no']} - 客戶: {p['client_name']} [狀態: {p['payment_status']}]": p['order_id']
-        for p in payments_raw if p['order_id'] is not None
+        f"案件 #{p['case_no']} - 客戶: {p['client_name']} [狀態: {p['payment_status']}]": p['case_no']
+        for p in payments_raw if p.get('case_no')
     }
 
     if not pay_options:
@@ -414,15 +414,15 @@ def _render_tab3_finance(orders_data):
         return
 
     selected_pay_label = st.selectbox("選擇欲更新帳務的訂單", list(pay_options.keys()), key="fin_pay_picker")
-    pay_order_id = pay_options[selected_pay_label]
+    pay_case_no = pay_options[selected_pay_label]
 
-    current_pay = next((p for p in payments_raw if p['order_id'] == pay_order_id), None)
-    current_view_order = next((o for o in orders_data if o['order_id'] == pay_order_id), None)
+    current_pay = next((p for p in payments_raw if p.get('case_no') == pay_case_no), None)
+    current_view_order = next((o for o in orders_data if o.get('case_no') == pay_case_no), None)
 
     if not (current_pay and current_view_order):
         return
 
-    st.markdown(f"### 案件資訊：案件編號 `{current_view_order.get('case_no') or pay_order_id}` - 客戶 **{current_view_order['client_name']}** (狀態: `{current_view_order['order_status']}`)")
+    st.markdown(f"### 案件資訊：案件編號 `{pay_case_no}` - 客戶 **{current_view_order['client_name']}** (狀態: `{current_view_order['order_status']}`)")
 
     col_calc, col_input = st.columns(2)
 
@@ -481,7 +481,7 @@ def _render_tab3_finance(orders_data):
         if st.button("更新財務記錄", key="btn_update_finance"):
             try:
                 db_service.update_payment_details(
-                    order_id=pay_order_id,
+                    case_no=pay_case_no,
                     amount_receivable=amount_receivable,
                     deposit_received=deposit_received,
                     balance_received=balance_received,
@@ -493,7 +493,7 @@ def _render_tab3_finance(orders_data):
                     caregiver_paid_at=caregiver_paid_at if caregiver_fee > 0 else None
                 )
                 if payment_status == '已收訂金' and current_view_order['order_status'] == '洽談中':
-                    db_service.update_order_status(pay_order_id, '訂單成立')
+                    db_service.update_order_status(current_view_order['order_id'], '訂單成立')
                     st.info("檢測到已收訂金，訂單狀態已自動標記為「訂單成立」！")
                 st.success("財務資料更新成功！")
                 st.rerun()

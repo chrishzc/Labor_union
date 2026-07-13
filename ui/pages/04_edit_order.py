@@ -75,7 +75,7 @@ def render_editor(target_oid, orders_data, payments_raw, key_prefix="v25"):
     st.write("🔒 **公式欄位安全鎖定**")
     is_unlocked = st.checkbox("🔓 強制解鎖自訂衍生公式欄位", value=False, key=f"{key_prefix}_unlock_toggle_{target_oid}")
 
-    curr_p = next((p for p in payments_raw if p['order_id'] == target_oid), {})
+    curr_p = next((p for p in payments_raw if p.get('case_no') == target_order.get('case_no')), {})
 
     # 若開啟解鎖，跳出警告 Alert (INV-EDIT-04)
     if is_unlocked:
@@ -237,7 +237,6 @@ def render_editor(target_oid, orders_data, payments_raw, key_prefix="v25"):
             st.error("選取「訂單取消」時，請務必填寫取消原因！")
         else:
             try:
-                # 1. 寫入 orders 主資料表全量欄位
                 full_data = {
                     'client_name': w_client_name,
                     'service_days': w_service_days,
@@ -247,13 +246,14 @@ def render_editor(target_oid, orders_data, payments_raw, key_prefix="v25"):
                     'start_date': w_start_date,
                     'actual_start_date': w_act_start,
                     'end_date': w_act_end,
+                    'actual_end_date': w_act_end,
                     'deposit_date': w_dep_rec_date
                 }
                 db_service.update_order_full_details(target_oid, full_data)
                 
                 # 2. 寫入 payments 實收財務表
                 db_service.update_payment_details(
-                    order_id=target_oid,
+                    case_no=target_order['case_no'],
                     amount_receivable=w_total_self_pay,
                     deposit_received=w_dep_rec,
                     balance_received=w_bal_rec,

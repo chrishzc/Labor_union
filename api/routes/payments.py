@@ -15,15 +15,15 @@ def get_all_payments():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.put("/{order_id}", response_model=BaseResponse[bool])
+@router.put("/{case_no}", response_model=BaseResponse[bool])
 def update_payment(
     req: PaymentUpdateRequest,
-    order_id: int = Path(..., description="訂單 ID")
+    case_no: str = Path(..., description="客戶案件編號 (clients.case_no)")
 ):
-    """更新特定訂單之實收訂金、尾款、月嫂費用與帳務備註"""
+    """依客戶案件編號更新實收訂金、尾款、月嫂費用與帳務備註"""
     try:
         success = db_service.update_payment_details(
-            order_id=order_id,
+            case_no=case_no,
             amount_receivable=req.amount_receivable,
             deposit_received=req.deposit_received,
             balance_received=req.balance_received,

@@ -48,7 +48,7 @@
 - State: `validated`
 - Endpoints:
   - `GET /api/v1/payments`
-  - `PUT /api/v1/payments/{order_id}`
+  - `PUT /api/v1/payments/{case_no}`
 
 ##### Module: ClientRouter
 - Source: `api/routes/clients.py`

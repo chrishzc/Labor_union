@@ -65,6 +65,7 @@ DB_COLUMN_LABEL_MAP = {
     "cancel_reason": "取消原因",
     "line_group_id": "LINE群組ID",
     "actual_start_date": "實際服務開始日",
+    "actual_end_date": "實際服務結束日",
     "contract_id": "線上契約ID",
     "service_hours_per_day": "每日服務時數",
     "subsidy_eligibility": "補助資格",
@@ -74,9 +75,9 @@ DB_COLUMN_LABEL_MAP = {
     "end_date": "預計結束日",
     "custom_rest_dates": "自訂休假日期",
     "other_addition": "其他加價",
+    "staff_name": "服務人員姓名",
     
     # 財務 (payments)
-    "order_id": "訂單ID",
     "client_name": "客戶姓名",
     "amount_receivable": "應收金額",
     "deposit_received": "已收訂金",
@@ -217,7 +218,10 @@ def show():
         reverse_rename_map = {v: k for k, v in rename_map.items()}
 
         # 系統唯讀欄位 (id、建檔/更新時間等) 一律鎖定不可編輯，避免破壞主鍵與追蹤紀錄
-        readonly_cols = db_service.READONLY_SYSTEM_COLUMNS
+        readonly_cols = set(db_service.READONLY_SYSTEM_COLUMNS)
+        if table_name == "orders":
+            readonly_cols.add("case_no")
+            readonly_cols.add("staff_name")
         column_config = {}
         for original_col, display_col in rename_map.items():
             if original_col in readonly_cols:

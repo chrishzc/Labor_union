@@ -38,7 +38,7 @@
   - `🤝 3️⃣ 傳送履歷給客戶` ➔ `POST /api/v1/matches/{match_id}/send-resume`
   - `✍️ 4️⃣ 成立訂單並定案指派` ➔ `POST /api/v1/orders/{order_id}/assign-staff`
   - `🚨 確認取消此訂單` ➔ `PUT /api/v1/orders/{order_id}/status`
-  - `更新財務記錄` ➔ `PUT /api/v1/payments/{order_id}`
+  - `更新財務記錄` ➔ `PUT /api/v1/payments/{case_no}`
 
 ##### Module: CalendarUI (完整四色月曆與排假精算專頁)
 - Source: `ui/pages/03_calendar.py`

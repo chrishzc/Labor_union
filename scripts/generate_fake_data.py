@@ -503,6 +503,7 @@ def generate_schedule_data():
                             start_date = %s,
                             actual_start_date = %s,
                             end_date = %s,
+                            actual_end_date = %s,
                             service_days = %s,
                             service_hours_per_day = %s,
                             subsidy_eligibility = %s,
@@ -511,7 +512,7 @@ def generate_schedule_data():
                         WHERE id = %s
                     """, (
                         staff_id, status, start_d, actual_start, end_d,
-                        service_days, hours, subsidy,
+                        end_d, service_days, hours, subsidy,
                         random.choice([0.0, 500.0, 1000.0]), cancel_reason, order_id
                     ))
                     

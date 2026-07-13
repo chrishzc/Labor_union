@@ -75,7 +75,7 @@ modules:
     source: ui/pages/02_orders.py::_render_tab3_finance
     api_button_matrix:
       - button_label: "更新財務記錄"
-        api_endpoint: "PUT /api/v1/payments/{order_id}"
+        api_endpoint: "PUT /api/v1/payments/{case_no}"
         description: "更新已收訂金、已收尾款與實收備註"
 
   CalendarUI:
