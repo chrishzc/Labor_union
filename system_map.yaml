@@ -6,7 +6,7 @@ sub_maps:
   api_layer: api/api_system_map.yaml
 modules:
   Main:
-    type: sub_system_layer
+    type: entrypoint
     description: 系統主程式入口。
     source: '`main.py`'
     domain: null
@@ -15,13 +15,119 @@ modules:
     dependencies: []
     input: {}
     output: {}
+    exceptions: []
     invariants: []
     preferred_pattern: none
     verification: []
     decisions: []
     todo: []
     checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
     state: validated
+    fan_in_snapshot: 0
+  UILayer:
+    type: sub_system_layer
+    description: 使用者介面層，包含 Streamlit 各個頁面與元件。
+    source: '`ui/app.py`'
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies: []
+    input: {}
+    output: {}
+    exceptions: []
+    invariants: []
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    state: planned
+    fan_in_snapshot: 0
+  APILayer:
+    type: sub_system_layer
+    description: FastAPI 應用程式介面層，負責處理 HTTP 請求。
+    source: '`api/main.py`'
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies: []
+    input: {}
+    output: {}
+    exceptions: []
+    invariants: []
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    state: planned
+    fan_in_snapshot: 0
+  ServicesLayer:
+    type: sub_system_layer
+    description: 後端服務與資料庫操作層，處理核心商業邏輯與資料庫存取。
+    source: '`services/db_service.py`'
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies: []
+    input: {}
+    output: {}
+    exceptions: []
+    invariants: []
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    state: planned
     fan_in_snapshot: 0
   GenerateFakeData:
     type: script
@@ -34,12 +140,25 @@ modules:
     dependencies: []
     input: {}
     output: {}
+    exceptions: []
     invariants: []
     preferred_pattern: none
     verification: []
     decisions: []
     todo: []
     checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
     state: validated
     fan_in_snapshot: 0
   FixScheduleConflicts:
@@ -52,12 +171,25 @@ modules:
     dependencies: []
     input: {}
     output: {}
+    exceptions: []
     invariants: []
     preferred_pattern: none
     verification: []
     decisions: []
     todo: []
     checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
     state: validated
     fan_in_snapshot: 0
   StartScript:
@@ -70,6 +202,7 @@ modules:
     dependencies: []
     input: {}
     output: {}
+    exceptions: []
     invariants:
     - 'INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始執行 init_db.py 防止連線逾時崩潰。'
     preferred_pattern: none
@@ -77,6 +210,18 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
     state: validated
     fan_in_snapshot: 0
   OnlineScript:
@@ -90,6 +235,7 @@ modules:
     dependencies: []
     input: {}
     output: {}
+    exceptions: []
     invariants:
     - 'INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始啟動後端與監控服務防止連線逾時崩潰。'
     preferred_pattern: none
@@ -97,6 +243,22 @@ modules:
     decisions: []
     todo: []
     checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
     state: validated
     fan_in_snapshot: 0
 domains: {}
+environment:
+  state: validated
+  services:
+  - name: db

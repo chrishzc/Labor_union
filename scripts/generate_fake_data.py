@@ -231,7 +231,6 @@ def generate_roster_data(input_file, output_file, personal_data_pool, num_record
         clients_signup_dt = datetime.strptime(fake_clients_rows[i]['報名時間(建檔)'], "%Y/%m/%d %H:%M:%S")
         row['報名時間'] = clients_signup_dt.strftime("%m-%d %H:%M")
         
-        row['訂單編號'] = f"HC115{random.randint(100, 999):03d}"
         row['姓名'] = p_data['name']
         row['性別'] = random.choice(['男', '女'])
         row['Email'] = p_data['email']

@@ -339,7 +339,7 @@ def format_db_value(db_k: str, val_raw) -> str:
 # 按 SQL 資料庫資料表來源原生歸屬分層組織全系統欄位 (INV-UI-FORM-14/15/25 全量資料庫欄位 100% 完整開載公理)
 DB_TABLE_FIELDS = {
     "orders (訂單主表 - 36 大業務與金額 calculations)": {
-        "case_no": "訂單號碼 (case_no)",
+        "case_no": "案件編號 (case_no)",
         "start_date": "預期服務開始日 (start_date)",
         "actual_start_date": "服務開始 (actual_start_date)",
         "actual_end_date": "服務結束 (actual_end_date)",

@@ -3,7 +3,7 @@
   "name": "1. 訂單資訊-1 (給服務人員的工時與派單資訊)",
   "desc": "派單前提供給月嫂閱讀之工時、地址、服務起訖日、自費/補助薪資與總薪資單據",
   "fields": [
-    {"id": "f_101_c1", "label": "訂單號碼(市府單號)", "type": "db_link", "db_key": "case_no", "width": "half"},
+    {"id": "f_101_c1", "label": "案件編號 (case_no)", "type": "db_link", "db_key": "case_no", "width": "half"},
     {"id": "f_102_c2", "label": "服務人員姓名", "type": "db_link", "db_key": "staff_name", "width": "half"},
     {"id": "f_103_c3", "label": "客戶名稱", "type": "db_link", "db_key": "client_name", "width": "full"},
     {"id": "f_104_c4", "label": "服務開始日期", "type": "db_link", "db_key": "actual_start_date", "width": "half"},

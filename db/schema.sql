@@ -56,15 +56,13 @@ CREATE TABLE IF NOT EXISTS crawler_logs (
     message TEXT COMMENT '日誌詳細說明或錯誤原因'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 4. BeClass 報名紀錄表
+-- 4. BeClass 報名紀錄表（主關聯欄位為 beclass_records.query_no <=> clients.case_no；案件識別一律以 clients.case_no 為準）
 CREATE TABLE IF NOT EXISTS beclass_records (
     id INT AUTO_INCREMENT PRIMARY KEY,
     seq_num INT COMMENT '項次',
-    query_no VARCHAR(50) UNIQUE COMMENT '查詢序號',
-    order_no VARCHAR(50) COMMENT '訂單編號',
+    query_no VARCHAR(50) UNIQUE COMMENT '查詢序號 - 與 clients.case_no 進行主關聯',
     created_at VARCHAR(50) COMMENT '報名時間',
     name VARCHAR(100) COMMENT '姓名',
-    gender VARCHAR(10) COMMENT '性別',
     email VARCHAR(100) COMMENT 'Email',
     birth_date DATE COMMENT '生日',
     phone VARCHAR(20) COMMENT '行動電話',
@@ -73,6 +71,8 @@ CREATE TABLE IF NOT EXISTS beclass_records (
     city VARCHAR(50) COMMENT '縣市',
     zip_code VARCHAR(10) COMMENT '郵遞區號',
     address VARCHAR(255) COMMENT '地址',
+    refund_bank_code VARCHAR(50) COMMENT '補助款退款:銀行代號+分行代號',
+    refund_account_no VARCHAR(50) COMMENT '補助款退款:銀行帳號',
     survey_details JSON COMMENT 'BeClass 問卷詳細內容 (包含餐點、用油、烹煮工具、特殊計費等 JSON)',
     admin_notes TEXT COMMENT '管理者註記事項',
     db_created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

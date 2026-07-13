@@ -13,7 +13,7 @@ modules:
 
   DataBrowserUI:
     type: ui_page
-    description: 原始資料庫表格瀏覽頁面。提供 clients, staff, orders, payments, beclass_records, matching_records 與 holidays 檢視，以及國定假日管理面板。
+    description: 原始資料庫表格瀏覽頁面。提供 clients, staff, orders, payments, beclass_records, matching_records, holidays 與 staff_bank_accounts 檢視，以及國定假日管理面板。
     source: ui/pages/01_data_browser.py::show
     dependencies: [DbService]
     state: validated

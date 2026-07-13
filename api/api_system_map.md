@@ -1,7 +1,7 @@
 # API Layer Sub-System Map (Version 2.0)
 
 > **Scope**: `api/` RESTful API 服務層  
-> **Master Reference**: [`../system_map.yaml`](file:///c:/Users/chris/Desktop/project/Lobar_union---solo/system_map.yaml)
+> **Master Reference**: [`../system_map.yaml`](file:///c:/Users/chris/Desktop/project/Labor_union/system_map.yaml)
 
 ---
 

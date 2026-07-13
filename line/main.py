@@ -192,7 +192,7 @@ async def line_bind(payload: LineBindPayload):
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             # 1. 進行姓名與電話之雙重精確比對（防同名同姓錯誤綁定），同時查詢現有的 line_user_id
             cursor.execute("""
-                SELECT id, name, line_user_id FROM clients 
+                SELECT id, name, case_no, line_user_id FROM clients
                 WHERE name = %s AND REPLACE(REPLACE(phone, '-', ''), ' ', '') = %s 
                 ORDER BY id DESC LIMIT 1
             """, (name, normalized_phone))
@@ -207,6 +207,7 @@ async def line_bind(payload: LineBindPayload):
                 
             client_id = client["id"]
             db_name = client["name"]
+            case_no = client["case_no"]
             db_line_user_id = client["line_user_id"]
             
             # 2. 處理 line_user_id 寫入與覆蓋邏輯
@@ -262,22 +263,12 @@ async def line_bind(payload: LineBindPayload):
                 # 已經綁定過了，且 ID 相同，不需要重複寫入
                 print(f"[API Bind] Skipped write: client_id={client_id} already bound to current line_user_id")
             
-            # 3. 查詢該客戶最新日期建立的一筆訂單 (依 created_at 與 id 降序)
-            cursor.execute("""
-                SELECT id FROM orders 
-                WHERE client_id = %s 
-                ORDER BY created_at DESC, id DESC LIMIT 1
-            """, (client_id,))
-            order = cursor.fetchone()
-            
-            order_id = order["id"] if order else None
-            
-            # 4. 寫入一條 pending 的 LINE 推播訊息告知綁定成功與最新訂單編號
+            # 3. 案件識別一律使用 clients.case_no，orders.id 僅為內部關聯主鍵。
             success_msg = f"【系統通知】\n服務綁定與查詢成功！您的 LINE 帳號已連結至客戶「{db_name}」的登記資料。\n"
-            if order_id:
-                success_msg += f"您目前最新日期的服務訂單編號為：#{order_id}。\n"
+            if case_no:
+                success_msg += f"您的案件編號為：{case_no}。\n"
             else:
-                success_msg += "目前尚未建立您的案件訂單，行政專員核對名冊後將自動為您建立，請稍候。\n"
+                success_msg += "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
             success_msg += "後續有最新媒合進度或排班通知，系統將會主動為您推播。"
             
             cursor.execute("""
@@ -286,14 +277,14 @@ async def line_bind(payload: LineBindPayload):
             """, (line_user_id, success_msg))
             
             conn.commit()
-            print(f"[API Bind] Successfully processed client_id={client_id} for line_user_id={line_user_id}. Order ID: {order_id}")
+            print(f"[API Bind] Successfully processed client_id={client_id} for line_user_id={line_user_id}. Case no: {case_no}")
             
             return {
                 "status": "success",
                 "message": "綁定與查詢成功！",
                 "client_name": db_name,
                 "client_id": client_id,
-                "order_id": order_id
+                "case_no": case_no
             }
     except Exception as e:
         conn.rollback()
@@ -464,7 +455,7 @@ async def line_register(payload: LineRegisterPayload):
             """, (name, normalized_phone, payload.address, payload.service_days, payload.expected_date, line_user_id, payload.gender, payload.city))
             client_id = conn.insert_id()
             
-            # 2. 寫入 orders
+            # 2. 建立內部訂單關聯；orders.id 不作為對外案件識別。
             cursor.execute("""
                 INSERT INTO orders (client_id)
                 VALUES (%s)
@@ -476,19 +467,20 @@ async def line_register(payload: LineRegisterPayload):
             final_survey["預產期"] = payload.expected_date
             final_survey["預計服務天數"] = payload.service_days
             final_survey["身分證字號"] = payload.id_number
+            final_survey["性別"] = payload.gender
             final_survey["資料來源"] = "LINE 原生表單"
             
             survey_details_json = json.dumps(final_survey, ensure_ascii=False)
             
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
-                INSERT INTO beclass_records (name, gender, email, birth_date, phone, tel, ext, city, zip_code, address, created_at, survey_details)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (name, payload.gender, payload.email, payload.birth_date if payload.birth_date else None, normalized_phone, payload.tel, payload.ext, payload.city, payload.zip_code, payload.address, now_str, survey_details_json))
+                INSERT INTO beclass_records (name, email, birth_date, phone, tel, ext, city, zip_code, address, created_at, survey_details)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (name, payload.email, payload.birth_date if payload.birth_date else None, normalized_phone, payload.tel, payload.ext, payload.city, payload.zip_code, payload.address, now_str, survey_details_json))
             
-            # 4. 寫入推播任務
+            # 4. 寫入推播任務。LINE 原生登記尚未取得市府案件編號時，不以 order_id 取代。
             success_msg = f"【系統通知】\n服務登記與綁定成功！\n您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n"
-            success_msg += f"您剛建立的服務訂單編號為：#{order_id}。\n"
+            success_msg += "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
             success_msg += "工會行政專員將於上班時間透過 LINE 與您聯繫確認服務細節，請您耐心等候！"
             
             cursor.execute("""
@@ -501,7 +493,7 @@ async def line_register(payload: LineRegisterPayload):
                 "status": "success",
                 "client_id": client_id,
                 "client_name": name,
-                "order_id": order_id
+                "case_no": None
             }
     except Exception as e:
         conn.rollback()

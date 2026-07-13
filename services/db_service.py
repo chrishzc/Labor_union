@@ -58,7 +58,7 @@ def get_connection():
 
 def get_table_data(table_name: str) -> list[dict]:
     """讀取指定原始資料表的內容"""
-    allowed_tables = ['clients', 'staff', 'orders', 'payments', 'beclass_records', 'matching_records', 'holidays']
+    allowed_tables = ['clients', 'staff', 'orders', 'payments', 'beclass_records', 'matching_records', 'holidays', 'staff_bank_accounts']
     if table_name not in allowed_tables:
         raise ValueError(f"不允許查詢此資料表: {table_name}")
 
@@ -80,6 +80,7 @@ TABLE_PRIMARY_KEYS = {
     'beclass_records': 'id',
     'matching_records': 'id',
     'holidays': 'holiday_date',
+    'staff_bank_accounts': 'id',
 }
 
 # 系統自動管理欄位，一律唯讀，不允許透過即時編輯表格寫入，避免破壞主鍵/去重與時間戳記追蹤

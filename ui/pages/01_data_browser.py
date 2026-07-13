@@ -53,6 +53,12 @@ DB_COLUMN_LABEL_MAP = {
     "service_regions": "服務區域偏好",
     "special_skills": "特殊技能與標籤",
     
+    # 服務人員銀行帳戶 (staff_bank_accounts)
+    "bank_code": "銀行代碼(3碼)",
+    "branch_code": "分行代碼(4碼)",
+    "account_no": "銀行帳號",
+    "is_primary": "是否為主要帳戶",
+    
     # 訂單 (orders)
     "client_id": "客戶ID",
     "staff_id": "服務人員ID",
@@ -83,8 +89,9 @@ DB_COLUMN_LABEL_MAP = {
     
     # BeClass 報名記錄 (beclass_records)
     "query_no": "查詢序號",
-    "order_no": "訂單編號",
     "ext": "分機",
+    "refund_bank_code": "補助款退款:銀行代號+分行代號",
+    "refund_account_no": "補助款退款:銀行帳號",
     "survey_details": "問卷詳細內容JSON",
     
     # 媒合記錄 (matching_records)
@@ -124,7 +131,8 @@ def show():
         "財務帳務 (payments)": "payments",
         "客戶BeClass表單 (beclass_records)": "beclass_records",
         "媒合意願記錄 (matching_records)": "matching_records",
-        "國定假日設定 (holidays)": "holidays"
+        "國定假日設定 (holidays)": "holidays",
+        "服務人員銀行帳戶 (staff_bank_accounts)": "staff_bank_accounts"
     }
     
     col_sel1, col_sel2 = st.columns([2, 1])

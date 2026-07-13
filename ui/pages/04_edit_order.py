@@ -89,7 +89,7 @@ def render_editor(target_oid, orders_data, payments_raw, key_prefix="v25"):
     # 區塊一：📌 案件基本與時程排定 (含預產期與休假方式)
     # =========================================================================
     with st.container(border=True):
-        st.markdown(f"### 📌 一、案件基本與時程排定 (訂單編號: `{target_order.get('case_no') or target_oid}`)")
+        st.markdown(f"### 📌 一、案件基本與時程排定 (案件編號: `{target_order.get('case_no') or target_oid}`)")
         
         c1, c2, c3 = st.columns(3)
         with c1:
