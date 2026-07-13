@@ -21,7 +21,7 @@ def run_ngrok():
 def run_fastapi():
     # 啟動 FastAPI 伺服器 (這個保留在前景，讓您能看到 print 跟錯誤訊息)
     return subprocess.Popen(
-        ["uv", "run", "uvicorn", "api.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+        ["uv", "run", "uvicorn", "line.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
         shell=True
     )
 

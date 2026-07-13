@@ -6,13 +6,12 @@ import requests
 from PIL import Image, ImageDraw, ImageFont
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from admin.settings_manager import get_setting, set_setting
 from dotenv import load_dotenv
 
 load_dotenv()
 
-LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or get_setting("line_channel_access_token")
-LIFF_ID = os.getenv("LINE_LIFF_ID") or get_setting("line_liff_id")
+LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN")
+LIFF_ID = os.getenv("LINE_LIFF_ID")
 
 if not LINE_CHANNEL_ACCESS_TOKEN:
     print("Error: LINE_CHANNEL_ACCESS_TOKEN not found.")
@@ -143,9 +142,16 @@ def main():
     }
     caregiver_id = create_and_upload_rich_menu(caregiver_menu_json, caregiver_img_path)
     
-    print("=== 儲存月嫂選單 ID 至設定檔 ===")
-    set_setting("caregiver_rich_menu_id", caregiver_id, "月嫂專屬的圖文選單ID")
-    print(f"Saved caregiver_rich_menu_id: {caregiver_id} to DB")
+    print("=== 儲存選單 ID 至設定檔 ===")
+    rich_menu_ids = {
+        "default_rich_menu_id": default_id,
+        "caregiver_rich_menu_id": caregiver_id
+    }
+    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
+    ids_path = os.path.join(config_dir, "rich_menu_ids.json")
+    with open(ids_path, "w", encoding="utf-8") as f:
+        json.dump(rich_menu_ids, f, ensure_ascii=False, indent=2)
+    print(f"Saved rich menu IDs to {ids_path}")
     
     print("\n[SUCCESS] LINE Rich Menus setup completed!")
 
