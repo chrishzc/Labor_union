@@ -9,6 +9,7 @@ import os
 import re
 import pymysql
 import pandas as pd
+from dotenv import load_dotenv
 
 # 確保中文輸出編碼正確
 try:
@@ -16,13 +17,16 @@ try:
 except Exception:
     pass
 
+# 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+
 # 資料庫連線配置
 DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
-    'database': 'union_db',
+    'host': os.getenv('DB_HOST', '127.0.0.1'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', '1234'),
+    'database': os.getenv('DB_DATABASE', 'union_db'),
     'charset': 'utf8mb4'
 }
 
@@ -49,35 +53,6 @@ def decode_va_to_case_no(virtual_account):
     case_no = f"{year}0000{int(seq):02d}"
     return case_no
 
-def load_case_info_from_db():
-    # ponytail: 從 MySQL 資料庫動態載入客戶、案號、月嫂姓名以避免依賴 Excel 第二分頁
-    case_info = {}
-    try:
-        conn = pymysql.connect(**DB_CONFIG)
-        with conn.cursor() as cursor:
-            sql = """
-            SELECT 
-                c.case_no, 
-                c.name AS client_name, 
-                s.name AS staff_name 
-            FROM orders o
-            JOIN clients c ON o.client_id = c.id
-            LEFT JOIN staff s ON o.staff_id = s.id
-            WHERE c.case_no IS NOT NULL AND c.case_no != '';
-            """
-            cursor.execute(sql)
-            for row in cursor.fetchall():
-                c_no = row[0]
-                case_info[c_no] = {
-                    'client_name': row[1],
-                    'staff_name': row[2] if row[2] else "",
-                    'amount_receivable': 80000.0,  # 預設應收金額
-                    'caregiver_fee': 60000.0      # 預設月嫂費用
-                }
-    except Exception as e:
-        print(f"[警告] 無法從資料庫載入對照表資訊: {e}")
-    return case_info
-
 def main():
     excel_path = "document/資料庫、資料處理/帳務.xlsx"
     if not os.path.exists(excel_path):
@@ -87,10 +62,28 @@ def main():
     print(f"開始解析帳務 Excel：{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
     
-    # 從資料庫動態載入對照關係
-    case_info = load_case_info_from_db()
+    # 1. 讀取「資料庫」分頁 (Sheet 1) 以獲取案件對照與應收金額
+    db_sheet_name = xl.sheet_names[1]
+    df_db = xl.parse(db_sheet_name)
     
-    # 2. 讀取「合作社帳戶」分頁 (整個 Excel 的第一個/唯一一個分頁) 交易流水帳
+    # 解析案件對照表 (從資料庫分頁中建立映射)
+    case_info = {} # {case_no: {client_name, amount_receivable, caregiver_fee}}
+    for _, row in df_db.iterrows():
+        # 對照表格式：[前綴, 序號, 工會, 姓名, 年度, 案號, 狀態, 虛擬帳號, 應收, 月嫂費用, 備份姓名, 備註案號]
+        va = str(row.iloc[7]).strip() if pd.notna(row.iloc[7]) else ""
+        case_no_raw = str(row.iloc[11]).strip() if pd.notna(row.iloc[11]) else ""
+        # 去除備註中的 "案" 字以取得純數字編號
+        case_no = case_no_raw.replace("案", "")
+        name = str(row.iloc[3]) if pd.notna(row.iloc[3]) else ""
+        
+        if case_no and va:
+            case_info[case_no] = {
+                'client_name': name,
+                'amount_receivable': float(row.iloc[8]) if pd.notna(row.iloc[8]) else 80000.0,
+                'caregiver_fee': float(row.iloc[9]) if pd.notna(row.iloc[9]) else 60000.0
+            }
+            
+    # 2. 讀取「合作社帳戶」分頁 (Sheet 0) 交易流水帳
     tx_sheet_name = xl.sheet_names[0]
     df_tx = xl.parse(tx_sheet_name)
     
@@ -145,8 +138,7 @@ def main():
                 # 搜尋此月嫂名字對應的案件編號
                 matched_case_no = None
                 for c_no, info in case_info.items():
-                    # 優先比對資料庫查出的月嫂姓名 (staff_name)，相容比對 client_name
-                    if info.get('staff_name') == caregiver_name or info.get('client_name') == caregiver_name:
+                    if info['client_name'] == caregiver_name:
                         matched_case_no = c_no
                         break
                         
