@@ -10,7 +10,7 @@ services:
       MYSQL_DATABASE: union_db
       MYSQL_ROOT_PASSWORD: "1234"  # 與 scripts/init_db.py 的密碼一致
     ports:
-      - "3307:3306"  # 將 3307 對外映射，避開本機 3306 佔用，讓本機的 Python 匯入程式可以直接連線
+      - "3306:3306"  # 將 3307 對外映射，避開本機 3306 佔用，讓本機的 Python 匯入程式可以直接連線
     volumes:
       # 持久化資料庫數據，防止容器重啟時資料遺失
       - mysql-data:/var/lib/mysql
