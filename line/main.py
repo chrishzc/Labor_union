@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 File: api/main.py
 Description: LINE 與 好好簽 Webhook 接收後端服務 (API Server)
@@ -54,7 +54,7 @@ async def line_message_sender_daemon():
             try:
                 with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                     cursor.execute("""
-                        SELECT * FROM line_push_tasks 
+                        SELECT * FROM line_tasks 
                         WHERE status = 'pending' 
                         ORDER BY id ASC LIMIT 5
                     """)
@@ -108,9 +108,9 @@ async def line_message_sender_daemon():
                 try:
                     with conn.cursor() as cursor:
                         if success:
-                            cursor.execute("UPDATE line_push_tasks SET status = 'sent' WHERE id = %s", (task_id,))
+                            cursor.execute("UPDATE line_tasks SET status = 'sent' WHERE id = %s", (task_id,))
                         else:
-                            cursor.execute("UPDATE line_push_tasks SET status = 'failed' WHERE id = %s", (task_id,))
+                            cursor.execute("UPDATE line_tasks SET status = 'failed' WHERE id = %s", (task_id,))
                             print(f"[LINE Sender] Task #{task_id} failed: {err_msg}")
                         conn.commit()
                 finally:
@@ -272,7 +272,7 @@ async def line_bind(payload: LineBindPayload):
             success_msg += "後續有最新媒合進度或排班通知，系統將會主動為您推播。"
             
             cursor.execute("""
-                INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                INSERT INTO line_tasks (to_user_id, message_content, status)
                 VALUES (%s, %s, 'pending')
             """, (line_user_id, success_msg))
             
@@ -352,7 +352,7 @@ def approve_rebind_request(payload: RebindActionPayload):
                 # 推播成功訊息給客戶
                 success_msg = f"【系統通知】\n服務綁定與查詢成功！您的帳號重新綁定申請已審核通過，成功連結至客戶「{target_request['client_name']}」的登記資料。\n"
                 cursor.execute("""
-                    INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                    INSERT INTO line_tasks (to_user_id, message_content, status)
                     VALUES (%s, %s, 'pending')
                 """, (target_request["new_line_user_id"], success_msg))
                 
@@ -398,7 +398,7 @@ def reject_rebind_request(payload: RebindActionPayload):
             with conn.cursor() as cursor:
                 reject_msg = f"【系統通知】\n您的帳號重新綁定申請已被管理員拒絕。如有疑問請聯繫客服專員。"
                 cursor.execute("""
-                    INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                    INSERT INTO line_tasks (to_user_id, message_content, status)
                     VALUES (%s, %s, 'pending')
                 """, (target_request["new_line_user_id"], reject_msg))
                 conn.commit()
@@ -484,7 +484,7 @@ async def line_register(payload: LineRegisterPayload):
             success_msg += "工會行政專員將於上班時間透過 LINE 與您聯繫確認服務細節，請您耐心等候！"
             
             cursor.execute("""
-                INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                INSERT INTO line_tasks (to_user_id, message_content, status)
                 VALUES (%s, %s, 'pending')
             """, (line_user_id, success_msg))
             
@@ -610,7 +610,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         
                         # 寫入推播任務佇列，由背景發送
                         cursor.execute("""
-                            INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                            INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (%s, %s, 'pending')
                         """, (user_id, welcome_msg))
                         print(f"[LINE Webhook] Queued welcome message for new user {user_id}")
@@ -642,7 +642,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         
                         msg = "感謝您的確認！您已同意接案，工會已將您的履歷推播給客戶，後續有進一步消息會立刻通知您！"
                         cursor.execute("""
-                            INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                            INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                         """, (staff_id, msg))
                         print(f"[LINE Webhook] Caregiver #{staff_id} willing for Order #{order_id}")
@@ -657,7 +657,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         
                         msg = "已記錄您的回覆，期待下次為您媒合合適的案件！"
                         cursor.execute("""
-                            INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                            INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                         """, (staff_id, msg))
                         print(f"[LINE Webhook] Caregiver #{staff_id} unwilling for Order #{order_id}")
@@ -668,7 +668,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         
                         msg = "感謝您的確認！行政專員正為您產製電子契約條款，完成後會發送連結至您的 LINE 進行線上簽署。"
                         cursor.execute("""
-                            INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                            INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM clients WHERE id = (SELECT client_id FROM orders WHERE id = %s)), 'mock_client_line_id'), %s, 'pending')
                         """, (order_id, msg))
                         print(f"[LINE Webhook] Client approved resume for Order #{order_id}")
@@ -679,7 +679,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         
                         msg = "已收到您的回饋，工會將為您重新進行媒合篩選，請稍候。"
                         cursor.execute("""
-                            INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                            INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM clients WHERE id = (SELECT client_id FROM orders WHERE id = %s)), 'mock_client_line_id'), %s, 'pending')
                         """, (order_id, msg))
                         print(f"[LINE Webhook] Client rejected resume for Order #{order_id}")
@@ -723,7 +723,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                                 reply_msg = replies.get("caregiver_menu_not_set")
                                 
                             cursor.execute("""
-                                INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                                INSERT INTO line_tasks (to_user_id, message_content, status)
                                 VALUES (%s, %s, 'pending')
                             """, (user_id, reply_msg))
                             print(f"[LINE Webhook] Intercepted keyword '{user_text}', switched Rich Menu for User: {user_id}")
@@ -744,7 +744,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                                 reply_msg = replies.get("esc_fail").replace("{status_code}", str(res.status_code))
                                 
                             cursor.execute("""
-                                INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                                INSERT INTO line_tasks (to_user_id, message_content, status)
                                 VALUES (%s, %s, 'pending')
                             """, (user_id, reply_msg))
                             print(f"[LINE Webhook] Intercepted keyword '{user_text}', unlinked Rich Menu for User: {user_id}")
@@ -771,7 +771,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                             reply_msg = replies.get("bind_link_msg").replace("{bind_url}", bind_url)
                             
                             cursor.execute("""
-                                INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                                INSERT INTO line_tasks (to_user_id, message_content, status)
                                 VALUES (%s, %s, 'pending')
                             """, (user_id, reply_msg))
                             print(f"[LINE Webhook] Intercepted keyword '{user_text}', queued query link for User: {user_id}")
@@ -838,7 +838,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                             # Fallback to Push Daemon
                             if user_id:
                                 cursor.execute("""
-                                    INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                                    INSERT INTO line_tasks (to_user_id, message_content, status)
                                     VALUES (%s, %s, 'pending')
                                 """, (user_id, reply_msg))
                                 print(f"[LINE Webhook] Queued push message for {user_id}")
@@ -929,13 +929,13 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
                     # 發送 LINE 訊息 (移除 emoji 以免 CP950 錯誤)
                     client_msg = f"恭喜！您與月嫂 {ord['staff_name']} 的服務契約已線上簽署完畢！系統已自動為您登載排班出勤。實際服務區間為：{start_d.strftime('%Y-%m-%d')} ~ {end_d.strftime('%Y-%m-%d')}。"
                     cursor.execute("""
-                        INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                        INSERT INTO line_tasks (to_user_id, message_content, status)
                         VALUES (COALESCE((SELECT line_user_id FROM clients WHERE id = %s), 'mock_client_line_id'), %s, 'pending')
                     """, (client_id, client_msg))
                     
                     staff_msg = f"恭喜！您與客戶 {ord['client_name']} 的服務合約已完成線上簽署！系統已為您登載排班日程：{start_d.strftime('%Y-%m-%d')} ~ {end_d.strftime('%Y-%m-%d')}，請做好服務準備。"
                     cursor.execute("""
-                        INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                        INSERT INTO line_tasks (to_user_id, message_content, status)
                         VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                     """, (staff_id, staff_msg))
                     
