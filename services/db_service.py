@@ -1,11 +1,11 @@
+import os
 import pymysql
 import math
 from datetime import datetime, date, timedelta
-
-import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
 
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', '127.0.0.1'),
@@ -61,12 +61,64 @@ def get_table_data(table_name: str) -> list[dict]:
     allowed_tables = ['clients', 'staff', 'orders', 'payments', 'beclass_records', 'matching_records', 'holidays']
     if table_name not in allowed_tables:
         raise ValueError(f"不允許查詢此資料表: {table_name}")
-        
+
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute(f"SELECT * FROM `{table_name}`")
             return cursor.fetchall()
+    finally:
+        conn.close()
+
+# 資料庫原始資料瀏覽頁面 (01_data_browser.py) 專用：可即時編輯資料表的主鍵欄位對照
+# holidays 使用 holiday_date 作為主鍵，其餘資料表皆使用自增 id 作為主鍵
+TABLE_PRIMARY_KEYS = {
+    'clients': 'id',
+    'staff': 'id',
+    'orders': 'id',
+    'payments': 'id',
+    'beclass_records': 'id',
+    'matching_records': 'id',
+    'holidays': 'holiday_date',
+}
+
+# 系統自動管理欄位，一律唯讀，不允許透過即時編輯表格寫入，避免破壞主鍵/去重與時間戳記追蹤
+READONLY_SYSTEM_COLUMNS = {
+    'id', 'db_created_at', 'db_updated_at', 'created_at', 'updated_at',
+    'sent_at', 'replied_at',
+}
+
+def update_table_row(table_name: str, row_id, updates: dict) -> bool:
+    """
+    通用單列更新函式，供「資料庫原始資料瀏覽」頁面的即時編輯表格使用。
+    row_id 為該資料表主鍵值 (多數表為 id，holidays 為 holiday_date)。
+    updates 為 {欄位名: 新值} 的字典，僅允許白名單資料表與非唯讀欄位。
+    """
+    if table_name not in TABLE_PRIMARY_KEYS:
+        raise ValueError(f"不允許編輯此資料表: {table_name}")
+
+    pk_col = TABLE_PRIMARY_KEYS[table_name]
+
+    # 過濾唯讀欄位與主鍵本身，避免被誤改
+    safe_updates = {k: v for k, v in updates.items() if k not in READONLY_SYSTEM_COLUMNS and k != pk_col}
+    if not safe_updates:
+        return False
+
+    set_clause = ", ".join(f"`{col}` = %s" for col in safe_updates.keys())
+    values = list(safe_updates.values()) + [row_id]
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"UPDATE `{table_name}` SET {set_clause} WHERE `{pk_col}` = %s",
+                values
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception as e:
+        conn.rollback()
+        raise e
     finally:
         conn.close()
 

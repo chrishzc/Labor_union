@@ -23,6 +23,11 @@ import importlib
 from services import db_service
 importlib.reload(db_service)
 
+# 04_edit_order.py 檔名以數字開頭，無法用一般 import 語法載入，改用 importlib 動態載入
+# 目的：重用其 render_editor() 共用編輯邏輯，讓分頁一的手風琴展開面板可直接內嵌顯示
+_edit_order_mod = importlib.import_module("ui.pages.04_edit_order")
+importlib.reload(_edit_order_mod)
+
 title = "📦 訂單與帳務管理系統"
 
 def safe_float(val) -> float:
@@ -88,67 +93,87 @@ def _render_tab1_overview(orders_data):
         ]
 
     st.write(f"顯示 {len(df_filtered)} 筆訂單：")
-
-    display_cols = {
-        "notes": "備註",
-        "case_no": "訂單編號",
-        "service_hours_per_day": "服務時段",
-        "start_date": "預期服務開始日",
-        "client_name": "客戶名稱",
-        "service_days": "希望服務天數",
-        "subsidy_eligibility": "補助資格",
-        "total_hours": "總時數",
-        "subsidy_hours": "補助時數",
-        "self_pay_hours": "自費時數",
-        "claim_total_days": "請款總日數",
-        "floor_fee": "樓層費用",
-        "deposit_received_at": "訂金日期",
-        "employer_hourly_rate": "雇主單價",
-        "deposit_days": "訂金天數",
-        "deposit_amount": "訂金",
-        "first_payment_date": "第一期款入帳日",
-        "first_payment_days": "第一期款天數",
-        "first_payment_amount": "第一期金額",
-        "second_payment_date": "第二期款入帳日",
-        "second_payment_days": "第二期款天數",
-        "second_payment_amount": "第二期金額",
-        "total_employer_self_pay_payable": "雇主自費合計金額",
-        "order_status": "訂單成立狀態",
-        "staff_name": "服務人員",
-        "service_salary": "服務單價",
-        "salary_payment_date_1": "付款日-1",
-        "subsidy_salary": "補助薪資",
-        "salary_payment_date_2": "付款日-2",
-        "govt_claim_date": "市府請款",
-        "actual_start_date": "服務開始",
-        "actual_end_date": "服務結束",
-        "custom_leave_dates": "特殊休假",
-        "service_mode": "休假方式",
-        "due_date": "預產期",
-        "cancel_reason": "取消原因"
-    }
+    st.caption("💡 點選任一筆訂單標題列即可原地展開，進行 36 欄位編輯 (手風琴模式：同時只會展開一筆，點開其他筆會自動收合前一筆)；欄位內容與「📄 訂單動態試算與維護」頁面完全共用同一套邏輯，修改後請記得點擊「💾 確定儲存」按鈕。")
 
     df_filtered = df_filtered.copy()
     if 'actual_end_date' not in df_filtered.columns or df_filtered['actual_end_date'].isnull().all():
         if 'end_date' in df_filtered.columns:
             df_filtered['actual_end_date'] = df_filtered['end_date']
 
-    existing_cols = [col for col in display_cols.keys() if col in df_filtered.columns]
-    df_display = df_filtered[existing_cols].copy()
-    
-    # 統一將所有費用與金額欄位轉換為整數 (防範 NaN)
-    money_cols = [
-        "floor_fee", "deposit_amount", "initial_payment_payable", 
-        "first_payment_amount", "second_payment_amount", 
-        "total_employer_self_pay_payable", "service_salary", "subsidy_salary",
-        "employer_hourly_rate", "caregiver_rate"
-    ]
-    for col in money_cols:
-        if col in df_display.columns:
-            df_display[col] = df_display[col].apply(safe_int)
+    try:
+        payments_raw = db_service.get_table_data('payments')
+    except Exception as e:
+        st.error(f"讀取財務帳務資料失敗，暫時無法展開編輯面板: {e}")
+        return
 
-    df_display = df_display.rename(columns=display_cols)
-    st.dataframe(df_display, width='stretch', hide_index=True)
+    # 依篩選/搜尋後的結果排序，逐筆訂單以 expander 呈現 (取代原本 st.dataframe 的完整表格)
+    filtered_order_ids = df_filtered['order_id'].tolist() if 'order_id' in df_filtered.columns else []
+    ordered_rows = [o for oid in filtered_order_ids for o in orders_data if o['order_id'] == oid]
+
+    if not ordered_rows:
+        st.info("沒有符合篩選/搜尋條件的訂單。")
+        return
+
+    # 手風琴核心邏輯說明 (重要限制)：
+    # 1. st.expander 純粹是「畫面端」元件，使用者點開/收合它時瀏覽器不會通知 Python 端、
+    #    也不會觸發 rerun，因此無法用它偵測「使用者剛剛點了哪一個」。
+    # 2. st.radio 雖然能觸發 rerun，但它是「單一整塊」元件——所有選項畫在同一個 widget 裡，
+    #    Streamlit 無法在某個選項中間插入其他內容，導致展開內容永遠只能出現在整份清單的最後面，
+    #    無法緊接在被點選的那一列下方 (這正是前一版被使用者指出的問題)。
+    # 為了做到「點哪一列，內容就緊接在那一列正下方展開」，改成逐列各自使用一個 st.button 作為
+    # 該列的可點擊標題列 (按鈕點擊事件 Streamlit 能正確偵測並觸發 rerun)，
+    # 並在該按鈕的下一行程式碼立刻判斷是否要渲染展開內容，
+    # 如此展開內容自然會被畫在該列按鈕與下一列按鈕之間，而不是集中在清單最後。
+    # 搭配 session_state 記錄「目前展開中」的唯一訂單 ID，點別筆時前一筆會自動收合。
+    ACCORDION_STATE_KEY = "tab1_accordion_open_order_id"
+    if ACCORDION_STATE_KEY not in st.session_state:
+        st.session_state[ACCORDION_STATE_KEY] = None
+
+    currently_open_id = st.session_state[ACCORDION_STATE_KEY]
+
+    # 用 CSS 把按鈕外觀改造成一般清單列的橫條卡片樣式 (置左對齊、滿版寬度)，
+    # 視覺上更接近可點擊的表格列，而不是預設置中的小按鈕。
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stButton"] > button {
+            width: 100%;
+            text-align: left;
+            justify-content: flex-start;
+            border-radius: 6px;
+            padding: 0.5rem 0.75rem;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+    for o in ordered_rows:
+        oid = o['order_id']
+        is_open = (currently_open_id == oid)
+
+        row_label = (
+            f"{'🔻' if is_open else '▶️'} 案件 #{o.get('case_no') or oid} ｜ {o['client_name']} ｜ "
+            f"[{o['order_status']}] ｜ 月嫂: {o.get('staff_name') or '尚未指派'} ｜ "
+            f"預期開始: {o.get('start_date') or '未定'} ｜ "
+            f"天數: {safe_int(o.get('service_days'))} ｜ "
+            f"雇主自費合計: {safe_int(o.get('total_employer_self_pay_payable')):,} 元"
+        )
+
+        if st.button(row_label, key=f"tab1_row_btn_{oid}"):
+            st.session_state[ACCORDION_STATE_KEY] = None if is_open else oid
+            st.rerun()
+
+        # 展開內容緊接在這一列的按鈕之後渲染，下一輪 for 迴圈才會畫下一列的按鈕，
+        # 因此視覺上內容會直接出現在被點選的那一列正下方，而不是整份清單的最後面。
+        if is_open:
+            with st.container(border=True):
+                _edit_order_mod.render_editor(
+                    target_oid=oid,
+                    orders_data=orders_data,
+                    payments_raw=payments_raw,
+                    key_prefix=f"tab1_acc_{oid}"
+                )
 
 
 def _render_tab2_assign(orders_data, clients, staff_list):
@@ -246,75 +271,104 @@ def _render_tab2_assign(orders_data, clients, staff_list):
             else:
                 staff_options = {r['display_label']: r['staff_id'] for r in rec_staff}
 
-            selected_staff_label = st.selectbox("選擇服務人員/月嫂進行操作 (已自動依匹配度與檔期排序)", list(staff_options.keys()), key="match_staff_picker")
-            staff_id_to_assign = staff_options[selected_staff_label]
+            # ---------------------------------------------------------------
+            # 步驟 1：粗篩發送 (多選) - 一次勾選多位候選月嫂批次發送 訂單資訊-1
+            # ---------------------------------------------------------------
+            st.markdown("##### 步驟 1: 發送 訂單資訊-1 (粗篩，可複選多位月嫂)")
+            selected_staff_labels = st.multiselect(
+                "選擇服務人員/月嫂進行粗篩發送 (已自動依匹配度與檔期排序)",
+                list(staff_options.keys()),
+                key="match_staff_multipicker"
+            )
+            selected_staff_ids = [staff_options[label] for label in selected_staff_labels]
 
-            # 讀取既有記錄，如果沒有，不預先建立，避免產生幽靈紀錄
-            curr_match = next((m for m in match_records if m['staff_id'] == staff_id_to_assign), None)
-
-            # 即使資料庫中尚未建立紀錄，前端仍以預設未發送的狀態來渲染步驟
-            display_match = curr_match or {
-                'sent_info_1_at': None,
-                'sent_info_2_at': None,
-                'caregiver_accepted': None,
-                'staff_name': selected_staff_label.split(" (")[0]
-            }
-
-            st.markdown("##### 步驟 1 & 2: 發送需求與詢問意願")
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                btn_t1 = "再次發送 訂單資訊-1" if display_match['sent_info_1_at'] else "1️⃣ 發送 訂單資訊-1 (粗篩)"
-                if st.button(btn_t1, key="btn_send_1"):
-                    try:
-                        # 真正點擊發送時，才按需建立或取得配對 ID
-                        match_id = db_service.create_or_get_match_record(target_order_id, staff_id_to_assign)
-                        db_service.update_matching_info_sent(match_id, 1)
-                        st.success("已發送 訂單資訊-1！")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"發送失敗: {e}")
-
-            with col_f2:
-                btn_t2 = "再次發送 訂單資訊-2" if display_match['sent_info_2_at'] else "2️⃣ 發送 訂單資訊-2 (精篩)"
-                if st.button(btn_t2, key="btn_send_2"):
-                    try:
-                        match_id = db_service.create_or_get_match_record(target_order_id, staff_id_to_assign)
-                        db_service.update_matching_info_sent(match_id, 2)
-                        st.success("已發送 訂單資訊-2！")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"發送失敗: {e}")
-
-            resp_opts = ["待回覆 (NULL)", "願意接案 (1)", "拒絕接案 (0)"]
-            c_idx = 1 if display_match['caregiver_accepted'] == 1 else (2 if display_match['caregiver_accepted'] == 0 else 0)
-            selected_resp = st.selectbox("更新月嫂意願狀態", resp_opts, index=c_idx, key="select_caregiver_resp")
-
-            if st.button("更新意願", key="btn_update_resp"):
+            if st.button("1️⃣ 發送 訂單資訊-1 給已勾選月嫂 (粗篩)", key="btn_send_1_batch", disabled=not selected_staff_ids):
                 try:
-                    match_id = db_service.create_or_get_match_record(target_order_id, staff_id_to_assign)
-                    accepted_val = True if selected_resp == "願意接案 (1)" else (False if selected_resp == "拒絕接案 (0)" else None)
-                    db_service.reply_matching_inquiry(match_id, accepted_val)
-                    st.success("月嫂意願狀態已更新！")
+                    for sid in selected_staff_ids:
+                        match_id = db_service.create_or_get_match_record(target_order_id, sid)
+                        db_service.update_matching_info_sent(match_id, 1)
+                    st.success(f"已對 {len(selected_staff_ids)} 位月嫂發送 訂單資訊-1！")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"更新失敗: {e}")
+                    st.error(f"發送失敗: {e}")
+
+            st.markdown("---")
+
+            # ---------------------------------------------------------------
+            # 步驟 2：意願狀態更新 + 精篩發送對象勾選 (合併為單一清單)
+            # 清單來源＝所有「已發送過訂單資訊-1」的月嫂 (曾經粗篩發送過的名單)
+            # ---------------------------------------------------------------
+            sent1_matches = [m for m in match_records if m['sent_info_1_at']]
+
+            st.markdown("##### 步驟 2: 更新月嫂意願 ＆ 發送 訂單資訊-2 (精篩，可複選多位月嫂)")
+
+            if not sent1_matches:
+                st.info("⚠️ 尚無月嫂收到 訂單資訊-1，請先完成步驟 1 的粗篩發送。")
+            else:
+                resp_opts = ["待回覆 (NULL)", "願意接案 (1)", "拒絕接案 (0)"]
+                staff_ids_for_step2 = []
+
+                for m in sent1_matches:
+                    m_staff_id = m['staff_id']
+                    c_idx = 1 if m['caregiver_accepted'] == 1 else (2 if m['caregiver_accepted'] == 0 else 0)
+
+                    col_name, col_resp, col_chk = st.columns([2, 2, 1.2])
+                    with col_name:
+                        s2_lbl = "已於 " + m['sent_info_2_at'].strftime('%Y-%m-%d %H:%M') if m['sent_info_2_at'] else "尚未發送-2"
+                        st.write(f"**{m['staff_name']}**\n\n({s2_lbl})")
+                    with col_resp:
+                        new_resp = st.selectbox(
+                            "意願狀態", resp_opts, index=c_idx,
+                            key=f"resp_select_{m['id']}", label_visibility="collapsed"
+                        )
+                        new_accepted_val = True if new_resp == "願意接案 (1)" else (False if new_resp == "拒絕接案 (0)" else None)
+                        if new_accepted_val != (True if m['caregiver_accepted'] == 1 else (False if m['caregiver_accepted'] == 0 else None)):
+                            try:
+                                db_service.reply_matching_inquiry(m['id'], new_accepted_val)
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"意願更新失敗: {e}")
+                    with col_chk:
+                        checked = st.checkbox("發送-2", key=f"send2_chk_{m['id']}")
+                        if checked:
+                            staff_ids_for_step2.append(m_staff_id)
+
+                if st.button("2️⃣ 發送 訂單資訊-2 給已勾選月嫂 (精篩)", key="btn_send_2_batch", disabled=not staff_ids_for_step2):
+                    try:
+                        for sid in staff_ids_for_step2:
+                            match_id = db_service.create_or_get_match_record(target_order_id, sid)
+                            db_service.update_matching_info_sent(match_id, 2)
+                        st.success(f"已對 {len(staff_ids_for_step2)} 位月嫂發送 訂單資訊-2！")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"發送失敗: {e}")
 
             st.markdown("---")
             st.markdown("##### 步驟 3 & 4: 傳送履歷與定案指派")
-            if display_match['caregiver_accepted'] == 1:
-                st.success(f"🎉 月嫂 {display_match['staff_name']} 已表達願意接案！")
+
+            accepted_matches = [m for m in match_records if m['caregiver_accepted'] == 1]
+            if accepted_matches:
+                final_options = {m['staff_name']: m['staff_id'] for m in accepted_matches}
+                final_staff_label = st.selectbox(
+                    "選擇要成立訂單的月嫂 (僅列出已願意接案者)",
+                    list(final_options.keys()),
+                    key="final_assign_staff_picker"
+                )
+                final_staff_id = final_options[final_staff_label]
+
+                st.success(f"🎉 月嫂 {final_staff_label} 已表達願意接案！")
                 if st.button("🤝 3️⃣ 傳送履歷給客戶", key="btn_send_resume"):
                     st.info("已模擬將月嫂履歷與去識別化資料傳送給客戶備查。")
 
                 if st.button("✍️ 4️⃣ 成立訂單並定案指派", key="btn_assign_confirm"):
                     try:
-                        db_service.assign_staff_to_order(target_order_id, staff_id_to_assign)
+                        db_service.assign_staff_to_order(target_order_id, final_staff_id)
                         st.success("錄用成功！訂單已成立並生成初始檔期記錄。")
                         st.rerun()
                     except Exception as err:
                         st.error(f"指派失敗: {err}")
             else:
-                st.info("⚠️ 提示：需待月嫂回覆「願意接案」後，方可進行傳送履歷與定案指派。")
+                st.info("⚠️ 提示：需待至少一位月嫂回覆「願意接案」後，方可進行傳送履歷與定案指派。")
 
     with sub_tab3:
         st.markdown(f"#### ❌ 取消訂單與紀錄原因 (案件編號: `{target_order.get('case_no') or target_order['order_id']}`)")

@@ -1,16 +1,20 @@
 import sys
 import os
 import pymysql
+from dotenv import load_dotenv
 
 # 確保中文輸出編碼正確
 sys.stdout.reconfigure(encoding='utf-8')
 
+# 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 # 資料庫連線配置 (同 import_excel.py，但先不指定 database，因為 sql 檔內含 CREATE DATABASE)
 DB_CONFIG = {
-    'host': '127.0.0.1',
-    'port': 3306,
-    'user': 'root',
-    'password': '1234',
+    'host': os.getenv('DB_HOST', '127.0.0.1'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'user': os.getenv('DB_USER', 'root'),
+    'password': os.getenv('DB_PASSWORD', '1234'),
     'charset': 'utf8mb4'
 }
 

@@ -183,13 +183,16 @@ def show():
     try:
         # 從服務層獲取資料，不包含任何 SQL 或資料庫連線代碼
         raw_data = db_service.get_table_data(table_name)
-        
+
         if not raw_data:
             st.info(f"資料表 `{table_name}` 目前沒有任何數據。")
             return
-            
+
         df = pd.DataFrame(raw_data)
-        
+
+        # 主鍵欄位 (用於即時編輯後回寫資料庫的比對依據)
+        pk_col = db_service.TABLE_PRIMARY_KEYS.get(table_name, "id")
+
         # 簡易搜尋過濾功能
         search_query = st.text_input("🔍 搜尋表格內容", "")
         if search_query:
@@ -199,14 +202,71 @@ def show():
             filtered_df = df[mask].copy()
         else:
             filtered_df = df.copy()
-            
+
         # 套用 ADAD INV-UI-BROWSER-01 欄位標籤轉換
         rename_map = {col: format_col_header(col, header_mode) for col in filtered_df.columns}
         display_df = filtered_df.rename(columns=rename_map)
+        reverse_rename_map = {v: k for k, v in rename_map.items()}
+
+        # 系統唯讀欄位 (id、建檔/更新時間等) 一律鎖定不可編輯，避免破壞主鍵與追蹤紀錄
+        readonly_cols = db_service.READONLY_SYSTEM_COLUMNS
+        column_config = {}
+        for original_col, display_col in rename_map.items():
+            if original_col in readonly_cols:
+                column_config[display_col] = st.column_config.Column(disabled=True)
 
         st.write(f"共 {len(filtered_df)} 筆資料 (總共 {len(df)} 筆)")
-        st.dataframe(display_df, width='stretch')
-        
+        st.caption("💡 可直接在表格中點選儲存格修改內容（灰色欄位為系統欄位，唯讀鎖定），修改完成後請務必點擊下方「💾 儲存變更」按鈕才會真正寫入資料庫。")
+
+        edited_display_df = st.data_editor(
+            display_df,
+            width='stretch',
+            num_rows="fixed",
+            column_config=column_config,
+            disabled=[rename_map[pk_col]] if pk_col in rename_map else False,
+            key=f"editor_{table_name}",
+        )
+
+        if st.button("💾 儲存變更", type="primary"):
+            # 還原欄位名稱回原始英文鍵名，逐列比對差異並只送出真正改動過的欄位
+            edited_df = edited_display_df.rename(columns=reverse_rename_map)
+            original_df = filtered_df.set_index(pk_col, drop=False)
+            edited_df = edited_df.set_index(pk_col, drop=False)
+
+            updated_rows = 0
+            errors = []
+            for row_id, edited_row in edited_df.iterrows():
+                if row_id not in original_df.index:
+                    continue
+                original_row = original_df.loc[row_id]
+                changed_fields = {}
+                for col in edited_df.columns:
+                    if col == pk_col or col in readonly_cols:
+                        continue
+                    old_val = original_row.get(col)
+                    new_val = edited_row.get(col)
+                    # 統一轉為字串比較，避免 NaN/None/型態不一致誤判為有變動
+                    old_str = "" if pd.isna(old_val) else str(old_val)
+                    new_str = "" if pd.isna(new_val) else str(new_val)
+                    if old_str != new_str:
+                        changed_fields[col] = None if pd.isna(new_val) else new_val
+
+                if changed_fields:
+                    try:
+                        db_service.update_table_row(table_name, row_id, changed_fields)
+                        updated_rows += 1
+                    except Exception as row_err:
+                        errors.append(f"第 {row_id} 筆更新失敗: {row_err}")
+
+            if errors:
+                for err_msg in errors:
+                    st.error(err_msg)
+            if updated_rows > 0:
+                st.success(f"✅ 已成功儲存 {updated_rows} 筆變更資料！")
+                st.rerun()
+            elif not errors:
+                st.info("目前沒有偵測到任何欄位變動。")
+
     except Exception as e:
         st.error(f"讀取資料表出錯: {e}")
 

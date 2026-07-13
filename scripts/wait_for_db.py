@@ -4,9 +4,11 @@
 檔案名稱: scripts/wait_for_db.py
 描述: 輪詢探測 MySQL 3306 埠，確認資料庫已初始化並可接受連線，防範後續腳本連線逾時。
 """
+import os
 import time
 import sys
 import pymysql
+from dotenv import load_dotenv
 
 # 確保中文輸出編碼正確
 try:
@@ -14,16 +16,19 @@ try:
 except Exception:
     pass
 
+# 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
+load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))
+
 def main():
     print("⏳ 正在等待 MySQL 資料庫啟動完成 (最長等待 30 秒)...")
     t = 0
     while t < 30:
         try:
             conn = pymysql.connect(
-                host='127.0.0.1',
-                port=3306,
-                user='root',
-                password='1234',
+                host=os.getenv('DB_HOST', '127.0.0.1'),
+                port=int(os.getenv('DB_PORT', 3306)),
+                user=os.getenv('DB_USER', 'root'),
+                password=os.getenv('DB_PASSWORD', '1234'),
                 charset='utf8mb4'
             )
             conn.close()
