@@ -67,7 +67,7 @@ def get_table_data(table_name: str) -> list[dict]:
         with conn.cursor() as cursor:
             if table_name == 'orders':
                 cursor.execute("""
-                    SELECT o.*, c.case_no, s.name AS staff_name
+                    SELECT c.case_no, s.name AS staff_name, o.*
                     FROM orders o
                     LEFT JOIN clients c ON o.client_id = c.id
                     LEFT JOIN staff s ON o.staff_id = s.id
