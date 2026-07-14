@@ -100,8 +100,8 @@ echo Initialization and import completed successfully!
 echo ==========================================
 
 :: 11. Launch servers concurrently
-echo [Step 11] Launching FastAPI server...
-start "FastAPI Server" cmd /k ".venv\Scripts\uvicorn.exe line.main:app --reload --port 8000"
+echo [Step 11] Launching FastAPI server and ngrok...
+start "LINE Bot & ngrok" cmd /k "call .venv\Scripts\activate.bat && python line\start_line_bot.py"
 
 echo [Step 12] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ".venv\Scripts\streamlit.exe run ui/app.py"
