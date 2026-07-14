@@ -16,6 +16,66 @@ DB_USER = os.getenv("DB_USER", "root")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "1234")
 DB_DATABASE = os.getenv("DB_DATABASE", "union_db")
 
+HISTORICAL_HEADER_ALIASES = {
+    "client_name": {"client_name", "name", "客戶", "客戶姓名", "姓名"},
+    "case_no": {"case_no", "案件編號", "查詢序號", "訂單編號"},
+    "start_date": {"start_date", "服務開始", "服務開始日", "實際服務開始日"},
+    "end_date": {"end_date", "服務結束", "服務結束日", "實際服務結束日"},
+    "status": {"status", "狀態", "訂單狀態", "訂單成立狀態"},
+    "staff_name": {"staff_name", "服務人員", "月嫂", "月嫂姓名"},
+}
+LEGACY_IDENTIFIER_HEADERS = {"id", "order_id", "orderid", "訂單id", "訂單_id"}
+
+
+def normalize_header(value) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().lower().replace(" ", "")
+
+
+def normalize_case_no(value) -> str | None:
+    if pd.isna(value) or str(value).strip() == "":
+        return None
+    text = str(value).strip()
+    return text[:-2] if text.endswith(".0") and text[:-2].isdigit() else text
+
+
+def load_historical_frame(excel_path: str) -> pd.DataFrame:
+    """Load a named export or the strict six-column legacy layout.
+
+    Named imports use an allowlist, so unknown columns (including id/order_id)
+    are ignored. Headerless files with extra columns are rejected rather than
+    silently shifting values into the wrong fields.
+    """
+    raw = pd.read_excel(excel_path, header=None)
+    if raw.empty:
+        return raw
+
+    first_row = [normalize_header(value) for value in raw.iloc[0].tolist()]
+    alias_to_field = {
+        normalize_header(alias): field
+        for field, aliases in HISTORICAL_HEADER_ALIASES.items()
+        for alias in aliases
+    }
+    recognized = {alias_to_field[value] for value in first_row if value in alias_to_field}
+    if {"client_name", "case_no"}.issubset(recognized):
+        selected = {}
+        for position, header in enumerate(first_row):
+            if header in LEGACY_IDENTIFIER_HEADERS:
+                continue
+            field = alias_to_field.get(header)
+            if field and field not in selected:
+                selected[field] = raw.iloc[1:, position].reset_index(drop=True)
+        return pd.DataFrame(selected)
+
+    if raw.shape[1] != 6:
+        raise ValueError(
+            "無表頭歷史訂單必須正好有 6 欄；偵測到額外欄位，為避免 id/order_id 造成欄位位移已停止匯入"
+        )
+    raw = raw.copy()
+    raw.columns = ["client_name", "case_no", "start_date", "end_date", "status", "staff_name"]
+    return raw
+
 def parse_excel_date(val):
     if pd.isna(val) or val == "" or str(val).strip() == "":
         return None
@@ -57,7 +117,7 @@ def main():
         
     try:
         # header=None 表示第一行就是資料
-        df = pd.read_excel(excel_path, header=None)
+        df = load_historical_frame(excel_path)
     except Exception as e:
         print(f"錯誤: 無法讀取 Excel 檔案 - {str(e)}")
         sys.exit(1)
@@ -86,14 +146,14 @@ def main():
         for idx, row in df.iterrows():
             line_num = idx + 1
             # 欄位解析，防範欄位不足或 NaN
-            client_name = str(row[0]).strip() if len(row) > 0 and not pd.isna(row[0]) else None
-            case_no = str(row[1]).strip() if len(row) > 1 and not pd.isna(row[1]) else None
-            start_date_raw = row[2] if len(row) > 2 else None
+            client_name = str(row.get("client_name")).strip() if pd.notna(row.get("client_name")) else None
+            case_no = normalize_case_no(row.get("case_no"))
+            start_date_raw = row.get("start_date")
             # 欄位 4 (行[3]): 服務結束時間，因只更新這三個指定欄位，此欄位暫不寫入資料庫
             # 欄位 5 (行[4]): status
-            status_raw = row[4] if len(row) > 4 else None
+            status_raw = row.get("status")
             # 欄位 6 (行[5]): staff_name
-            staff_name = str(row[5]).strip() if len(row) > 5 and not pd.isna(row[5]) else None
+            staff_name = str(row.get("staff_name")).strip() if pd.notna(row.get("staff_name")) else None
             
             if not client_name:
                 warnings.append(f"第 {line_num} 行：缺少客戶姓名，已跳過該行。")
@@ -112,13 +172,13 @@ def main():
                 updated_any = False
                 for c_row in client_res:
                     c_id = c_row['id']
-                    cursor.execute("SELECT id FROM orders WHERE client_id = %s", (c_id,))
+                    cursor.execute("SELECT case_no FROM orders WHERE client_id = %s", (c_id,))
                     order_res_list = cursor.fetchall()
                     
                     for o_row in order_res_list:
-                        o_id = o_row['id']
+                        resolved_case_no = o_row['case_no']
                         try:
-                            cursor.execute("UPDATE orders SET status = '訂單取消' WHERE id = %s", (o_id,))
+                            cursor.execute("UPDATE orders SET status = '訂單取消' WHERE case_no = %s", (resolved_case_no,))
                             success_count += 1
                             updated_any = True
                         except Exception as e:
@@ -130,7 +190,7 @@ def main():
                 
             # 1. 查詢 client 與 order
             cursor.execute("""
-                SELECT o.id AS order_id FROM orders o
+                SELECT o.case_no FROM orders o
                 JOIN clients c ON o.client_id = c.id
                 WHERE c.name = %s AND c.case_no = %s
             """, (client_name, case_no))
@@ -140,7 +200,7 @@ def main():
                 warnings.append(f"第 {line_num} 行：客戶「{client_name}」(案號 {case_no}) 在資料庫中找不到對應的訂單，已跳過更新。")
                 continue
                 
-            order_id = order_res['order_id']
+            resolved_case_no = order_res['case_no']
             
             # 2. 查詢 staff_id
             staff_id = None
@@ -165,8 +225,8 @@ def main():
                 cursor.execute("""
                     UPDATE orders
                     SET actual_start_date = %s, status = %s, staff_id = %s
-                    WHERE id = %s
-                """, (actual_start_date, status, staff_id, order_id))
+                    WHERE case_no = %s
+                """, (actual_start_date, status, staff_id, resolved_case_no))
                 success_count += 1
             except Exception as e:
                 warnings.append(f"第 {line_num} 行：寫入資料庫時出錯 - {str(e)}")

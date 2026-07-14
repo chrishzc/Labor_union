@@ -67,7 +67,7 @@
 - Invariants:
   - `洽談中` orders have no assigned staff, actual service dates, matching record, or staff schedule, and start at least 14 days after `reference_date`.
   - `服務中` and `訂單完成` orders have an assigned staff member and actual start date; cancelled orders have a cancel reason and no future active schedule.
-  - Every payment uses an existing `clients.case_no`; `payments` never contains `order_id`.
+  - Every payment uses an existing `clients.case_no` as its sole case relationship.
   - Normal assigned schedules for one staff member must not overlap; intentionally conflicting fixtures must be explicitly marked as conflict-test data.
   - Generated note content must be compatible with the lifecycle state.
 - Verification:

@@ -18,9 +18,9 @@
 - State: `validated`
 - Endpoints:
   - `GET /api/v1/orders`
-  - `GET /api/v1/orders/{order_id}`
-  - `PUT /api/v1/orders/{order_id}/full-details`
-  - `PUT /api/v1/orders/{order_id}/status`
+  - `GET /api/v1/orders/{case_no}`
+  - `PUT /api/v1/orders/{case_no}/full-details`
+  - `PUT /api/v1/orders/{case_no}/status`
   - `POST /api/v1/orders/calculate-schedule`
 
 ##### Module: MatchRouter
@@ -28,12 +28,12 @@
 - Type: api_router
 - State: `validated`
 - Endpoints:
-  - `GET /api/v1/matches/recommend-staff`
+  - `GET /api/v1/matches/recommend-staff?case_no={case_no}`
   - `POST /api/v1/matches/{match_id}/send-info-1` (根據 staff.line_user_id 推播)
   - `POST /api/v1/matches/{match_id}/send-info-2` (根據 staff.line_user_id 推播)
   - `PUT /api/v1/matches/{match_id}/reply`
   - `POST /api/v1/matches/{match_id}/send-resume`
-  - `POST /api/v1/orders/{order_id}/assign-staff`
+  - `POST /api/v1/orders/{case_no}/assign-staff`
 
 ##### Module: ScheduleRouter
 - Source: `api/routes/schedule.py`
@@ -41,6 +41,7 @@
 - State: `validated`
 - Endpoints:
   - `POST /api/v1/schedule/save`
+  - Request body 使用 `case_no` 關聯案件與排班，不接受內部自增識別碼
 
 ##### Module: PaymentRouter
 - Source: `api/routes/payments.py`

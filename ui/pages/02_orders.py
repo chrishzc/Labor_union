@@ -103,8 +103,8 @@ def _render_tab1_overview(orders_data):
         return
 
     # 依篩選/搜尋後的結果排序，逐筆訂單以 expander 呈現 (取代原本 st.dataframe 的完整表格)
-    filtered_order_ids = df_filtered['order_id'].tolist() if 'order_id' in df_filtered.columns else []
-    ordered_rows = [o for oid in filtered_order_ids for o in orders_data if o['order_id'] == oid]
+    filtered_case_nos = df_filtered['case_no'].tolist() if 'case_no' in df_filtered.columns else []
+    ordered_rows = [o for case_no in filtered_case_nos for o in orders_data if o['case_no'] == case_no]
 
     if not ordered_rows:
         st.info("沒有符合篩選/搜尋條件的訂單。")
@@ -120,12 +120,12 @@ def _render_tab1_overview(orders_data):
     # 該列的可點擊標題列 (按鈕點擊事件 Streamlit 能正確偵測並觸發 rerun)，
     # 並在該按鈕的下一行程式碼立刻判斷是否要渲染展開內容，
     # 如此展開內容自然會被畫在該列按鈕與下一列按鈕之間，而不是集中在清單最後。
-    # 搭配 session_state 記錄「目前展開中」的唯一訂單 ID，點別筆時前一筆會自動收合。
-    ACCORDION_STATE_KEY = "tab1_accordion_open_order_id"
+    # 搭配 session_state 記錄「目前展開中」的唯一案件編號，點別筆時前一筆會自動收合。
+    ACCORDION_STATE_KEY = "tab1_accordion_open_case_no"
     if ACCORDION_STATE_KEY not in st.session_state:
         st.session_state[ACCORDION_STATE_KEY] = None
 
-    currently_open_id = st.session_state[ACCORDION_STATE_KEY]
+    currently_open_case_no = st.session_state[ACCORDION_STATE_KEY]
 
     # 用 CSS 把按鈕外觀改造成一般清單列的橫條卡片樣式 (置左對齊、滿版寬度)，
     # 視覺上更接近可點擊的表格列，而不是預設置中的小按鈕。
@@ -145,19 +145,19 @@ def _render_tab1_overview(orders_data):
     )
 
     for o in ordered_rows:
-        oid = o['order_id']
-        is_open = (currently_open_id == oid)
+        case_no = o['case_no']
+        is_open = (currently_open_case_no == case_no)
 
         row_label = (
-            f"{'🔻' if is_open else '▶️'} 案件 #{o.get('case_no') or oid} ｜ {o['client_name']} ｜ "
+            f"{'🔻' if is_open else '▶️'} 案件 #{case_no} ｜ {o['client_name']} ｜ "
             f"[{o['order_status']}] ｜ 月嫂: {o.get('staff_name') or '尚未指派'} ｜ "
             f"預期開始: {o.get('start_date') or '未定'} ｜ "
             f"天數: {safe_int(o.get('service_days'))} ｜ "
             f"雇主自費合計: {safe_int(o.get('total_employer_self_pay_payable')):,} 元"
         )
 
-        if st.button(row_label, key=f"tab1_row_btn_{oid}"):
-            st.session_state[ACCORDION_STATE_KEY] = None if is_open else oid
+        if st.button(row_label, key=f"tab1_row_btn_{case_no}"):
+            st.session_state[ACCORDION_STATE_KEY] = None if is_open else case_no
             st.rerun()
 
         # 展開內容緊接在這一列的按鈕之後渲染，下一輪 for 迴圈才會畫下一列的按鈕，
@@ -165,10 +165,10 @@ def _render_tab1_overview(orders_data):
         if is_open:
             with st.container(border=True):
                 _edit_order_mod.render_editor(
-                    target_oid=oid,
+                    target_case_no=case_no,
                     orders_data=orders_data,
                     payments_raw=payments_raw,
-                    key_prefix=f"tab1_acc_{oid}"
+                    key_prefix=f"tab1_acc_{case_no}"
                 )
 
 
@@ -183,14 +183,14 @@ def _render_tab2_assign(orders_data, clients, staff_list):
         return
 
     target_case_options = {
-        f"案件 #{o.get('case_no') or o['order_id']} - 客戶: {o['client_name']} ({o['subsidy_eligibility']}, {o['service_days']}天)": o['order_id']
+        f"案件 #{o['case_no']} - 客戶: {o['client_name']} ({o['subsidy_eligibility']}, {o['service_days']}天)": o['case_no']
         for o in pending_orders
     }
 
     st.markdown("### ⚙️ 單筆待配對案件控制面板")
     selected_case_label = st.selectbox("🎯 選擇待配對與指派之案件", list(target_case_options.keys()), key="tab2_case_picker")
-    target_order_id = target_case_options[selected_case_label]
-    target_order = next((o for o in pending_orders if o['order_id'] == target_order_id), None)
+    target_case_no = target_case_options[selected_case_label]
+    target_order = next((o for o in pending_orders if o['case_no'] == target_case_no), None)
 
     if not target_order:
         return
@@ -199,7 +199,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
     sub_tab1, sub_tab2, sub_tab3 = st.tabs(["👁️ 檢視案件詳情", "⚡ 4步智慧配對與指派", "❌ 取消訂單與紀錄原因"])
 
     with sub_tab1:
-        st.markdown(f"#### 案件基本資訊 (案件編號: `{target_order.get('case_no') or target_order['order_id']}`)")
+        st.markdown(f"#### 案件基本資訊 (案件編號: `{target_case_no}`)")
         cd1, cd2 = st.columns(2)
         with cd1:
             st.write(f"- **客戶姓名**: {target_order['client_name']}")
@@ -216,9 +216,9 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                 st.error(f"- **取消原因**: {target_order.get('cancel_reason') or '未註明'}")
 
     with sub_tab2:
-        st.markdown(f"#### ⚡ 4步智慧配對與指派 (案件 #{target_order.get('case_no') or target_order['order_id']})")
+        st.markdown(f"#### ⚡ 4步智慧配對與指派 (案件 #{target_case_no})")
         try:
-            match_records = db_service.get_order_matches(target_order_id)
+            match_records = db_service.get_order_matches(target_case_no)
         except Exception as e:
             st.error(f"讀取媒合記錄失敗: {e}")
             match_records = []
@@ -251,7 +251,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
 
             try:
                 rec_staff = db_service.get_recommended_staff_for_order(
-                    order_id=target_order_id,
+                    case_no=target_case_no,
                     filter_region=f_region,
                     filter_schedule=f_schedule,
                     filter_babies=f_babies,
@@ -281,7 +281,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
             if st.button("1️⃣ 發送 訂單資訊-1 給已勾選月嫂 (粗篩)", key="btn_send_1_batch", disabled=not selected_staff_ids):
                 try:
                     for sid in selected_staff_ids:
-                        match_id = db_service.create_or_get_match_record(target_order_id, sid)
+                        match_id = db_service.create_or_get_match_record(target_case_no, sid)
                         db_service.update_matching_info_sent(match_id, 1)
                     st.success(f"已對 {len(selected_staff_ids)} 位月嫂發送 訂單資訊-1！")
                     st.rerun()
@@ -332,7 +332,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                 if st.button("2️⃣ 發送 訂單資訊-2 給已勾選月嫂 (精篩)", key="btn_send_2_batch", disabled=not staff_ids_for_step2):
                     try:
                         for sid in staff_ids_for_step2:
-                            match_id = db_service.create_or_get_match_record(target_order_id, sid)
+                            match_id = db_service.create_or_get_match_record(target_case_no, sid)
                             db_service.update_matching_info_sent(match_id, 2)
                         st.success(f"已對 {len(staff_ids_for_step2)} 位月嫂發送 訂單資訊-2！")
                         st.rerun()
@@ -358,7 +358,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
 
                 if st.button("✍️ 4️⃣ 成立訂單並定案指派", key="btn_assign_confirm"):
                     try:
-                        db_service.assign_staff_to_order(target_order_id, final_staff_id)
+                        db_service.assign_staff_to_order(target_case_no, final_staff_id)
                         st.success("錄用成功！訂單已成立並生成初始檔期記錄。")
                         st.rerun()
                     except Exception as err:
@@ -367,7 +367,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                 st.info("⚠️ 提示：需待至少一位月嫂回覆「願意接案」後，方可進行傳送履歷與定案指派。")
 
     with sub_tab3:
-        st.markdown(f"#### ❌ 取消訂單與紀錄原因 (案件編號: `{target_order.get('case_no') or target_order['order_id']}`)")
+        st.markdown(f"#### ❌ 取消訂單與紀錄原因 (案件編號: `{target_case_no}`)")
         if target_order['order_status'] == '訂單取消':
             st.warning(f"此案件先前已標記為「訂單取消」。原因：{target_order.get('cancel_reason') or '未註明'}")
         
@@ -378,7 +378,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                 st.error("請務必填寫取消原因後再提交！")
             else:
                 try:
-                    db_service.update_order_status(target_order_id, '訂單取消', cancel_reason_input.strip())
+                    db_service.update_order_status(target_case_no, '訂單取消', cancel_reason_input.strip())
                     st.success("訂單已標記為「訂單取消」，取消原因已儲存！")
                     st.rerun()
                 except Exception as e:
@@ -420,6 +420,11 @@ def _render_tab3_finance(orders_data):
 
     st.markdown(f"### 案件資訊：案件編號 `{pay_case_no}` - 客戶 **{current_view_order['client_name']}** (狀態: `{current_view_order['order_status']}`)")
 
+    # ponytail: Show the 14-digit virtual account corresponding to the selected case
+    va_display = db_service.generate_virtual_account(pay_case_no)
+    if va_display:
+        st.markdown(f"**🔗 專屬虛擬帳號**: `{va_display}`")
+
     col_calc, col_input = st.columns(2)
 
     with col_calc:
@@ -433,26 +438,64 @@ def _render_tab3_finance(orders_data):
         st.write(f"- **應付月嫂薪資**: {safe_int(current_view_order['service_salary']):,} 元")
 
     with col_input:
-        st.markdown("#### ✍️ 實收與轉帳欄位登錄")
+        st.markdown("#### ✍️ 三階段應收與實收登錄")
 
-        amount_receivable = st.number_input(
-            "應收總金額 (系統自費總額)",
-            value=safe_int(current_pay['amount_receivable']) if safe_int(current_pay['amount_receivable']) > 0 else safe_int(current_view_order['total_employer_self_pay_payable']),
-            step=100,
-            key="fin_amount_rec"
-        )
+        st.markdown("##### 1. 訂金")
+        dep_amt_col, dep_rec_col = st.columns(2)
+        with dep_amt_col:
+            deposit_receivable = st.number_input(
+                "訂金－應收金額",
+                value=safe_int(current_pay.get('deposit_receivable')) or safe_int(current_view_order['initial_payment_payable']),
+                step=100,
+                key="fin_dep_due_amt",
+            )
+        with dep_rec_col:
+            deposit_received = st.number_input("訂金－實收金額", value=safe_int(current_pay.get('deposit_received')), step=100, key="fin_dep_rec")
+        dep_due_col, dep_at_col = st.columns(2)
+        with dep_due_col:
+            deposit_due_date = st.date_input("訂金－應收日期", value=safe_date(current_pay.get('deposit_due_date') or current_view_order.get('deposit_date')), key="fin_dep_due_date")
+        with dep_at_col:
+            deposit_received_at = st.date_input("訂金－實收日期", value=safe_date(current_pay.get('deposit_received_at')), key="fin_dep_date")
 
-        col_dep_val, col_dep_date = st.columns(2)
-        with col_dep_val:
-            deposit_received = st.number_input("已收訂金", value=safe_int(current_pay['deposit_received']), step=100, key="fin_dep_rec")
-        with col_dep_date:
-            deposit_received_at = st.date_input("訂金收取日期", value=safe_date(current_pay['deposit_received_at']), key="fin_dep_date")
+        st.markdown("##### 2. 第一期")
+        p1_amt_col, p1_rec_col = st.columns(2)
+        with p1_amt_col:
+            first_payment_receivable = st.number_input(
+                "第一期－應收金額",
+                value=safe_int(current_pay.get('first_payment_receivable')) or safe_int(current_view_order['first_payment_amount']),
+                step=100,
+                key="fin_p1_due_amt",
+            )
+        with p1_rec_col:
+            first_payment_received = st.number_input("第一期－實收金額", value=safe_int(current_pay.get('first_payment_received')), step=100, key="fin_p1_rec")
+        p1_due_col, p1_at_col = st.columns(2)
+        with p1_due_col:
+            first_payment_due_date = st.date_input("第一期－應收日期", value=safe_date(current_pay.get('first_payment_due_date') or current_view_order.get('first_payment_date')), key="fin_p1_due_date")
+        with p1_at_col:
+            first_payment_received_at = st.date_input("第一期－實收日期", value=safe_date(current_pay.get('first_payment_received_at')), key="fin_p1_date")
 
-        col_bal_val, col_bal_date = st.columns(2)
-        with col_bal_val:
-            balance_received = st.number_input("已收尾款", value=safe_int(current_pay['balance_received']), step=100, key="fin_bal_rec")
-        with col_bal_date:
-            balance_received_at = st.date_input("尾款收取日期", value=safe_date(current_pay['balance_received_at']), key="fin_bal_date")
+        st.markdown("##### 3. 第二期")
+        p2_amt_col, p2_rec_col = st.columns(2)
+        with p2_amt_col:
+            second_payment_receivable = st.number_input(
+                "第二期－應收金額",
+                value=safe_int(current_pay.get('second_payment_receivable')) or safe_int(current_view_order['second_payment_amount']),
+                step=100,
+                key="fin_p2_due_amt",
+            )
+        with p2_rec_col:
+            second_payment_received = st.number_input("第二期－實收金額", value=safe_int(current_pay.get('second_payment_received')), step=100, key="fin_p2_rec")
+        p2_due_col, p2_at_col = st.columns(2)
+        with p2_due_col:
+            second_payment_due_date = st.date_input("第二期－應收日期", value=safe_date(current_pay.get('second_payment_due_date') or current_view_order.get('second_payment_date')), key="fin_p2_due_date")
+        with p2_at_col:
+            second_payment_received_at = st.date_input("第二期－實收日期", value=safe_date(current_pay.get('second_payment_received_at')), key="fin_p2_date")
+
+        amount_receivable = deposit_receivable + first_payment_receivable + second_payment_receivable
+        amount_received = deposit_received + first_payment_received + second_payment_received
+        total_due_col, total_rec_col = st.columns(2)
+        total_due_col.metric("應收總額", f"{amount_receivable:,.0f} 元")
+        total_rec_col.metric("實收總額", f"{amount_received:,.0f} 元")
 
         col_care_val, col_care_date = st.columns(2)
         with col_care_val:
@@ -465,10 +508,14 @@ def _render_tab3_finance(orders_data):
         with col_care_date:
             caregiver_paid_at = st.date_input("月嫂轉帳日期", value=safe_date(current_pay['caregiver_paid_at']), key="fin_care_date")
 
+        payment_status_list = ["待收訂金", "已收訂金", "已收一期款", "已收二期款", "已結案"]
+        default_status = current_pay['payment_status']
+        if default_status not in payment_status_list:
+            default_status = "待收訂金"
         payment_status = st.selectbox(
             "帳務狀態",
-            ["待收訂金", "已收訂金", "已收尾款", "已結案"],
-            index=["待收訂金", "已收訂金", "已收尾款", "已結案"].index(current_pay['payment_status']),
+            payment_status_list,
+            index=payment_status_list.index(default_status),
             key="fin_status_select"
         )
 
@@ -478,18 +525,25 @@ def _render_tab3_finance(orders_data):
             try:
                 db_service.update_payment_details(
                     case_no=pay_case_no,
-                    amount_receivable=amount_receivable,
+                    deposit_receivable=deposit_receivable,
                     deposit_received=deposit_received,
-                    balance_received=balance_received,
+                    first_payment_receivable=first_payment_receivable,
+                    first_payment_received=first_payment_received,
+                    second_payment_receivable=second_payment_receivable,
+                    second_payment_received=second_payment_received,
                     caregiver_fee=caregiver_fee,
                     payment_status=payment_status,
                     notes=notes,
+                    deposit_due_date=deposit_due_date,
                     deposit_received_at=deposit_received_at if deposit_received > 0 else None,
-                    balance_received_at=balance_received_at if balance_received > 0 else None,
+                    first_payment_due_date=first_payment_due_date,
+                    first_payment_received_at=first_payment_received_at if first_payment_received > 0 else None,
+                    second_payment_due_date=second_payment_due_date,
+                    second_payment_received_at=second_payment_received_at if second_payment_received > 0 else None,
                     caregiver_paid_at=caregiver_paid_at if caregiver_fee > 0 else None
                 )
                 if payment_status == '已收訂金' and current_view_order['order_status'] == '洽談中':
-                    db_service.update_order_status(current_view_order['order_id'], '訂單成立')
+                    db_service.update_order_status(current_view_order['case_no'], '訂單成立')
                     st.info("檢測到已收訂金，訂單狀態已自動標記為「訂單成立」！")
                 st.success("財務資料更新成功！")
                 st.rerun()

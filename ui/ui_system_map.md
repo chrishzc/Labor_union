@@ -36,8 +36,8 @@
   - `2️⃣ 發送 訂單資訊-2 (精篩)` ➔ `POST /api/v1/matches/{match_id}/send-info-2` (根據 staff.line_user_id 推播)
   - `更新意願` ➔ `PUT /api/v1/matches/{match_id}/reply`
   - `🤝 3️⃣ 傳送履歷給客戶` ➔ `POST /api/v1/matches/{match_id}/send-resume`
-  - `✍️ 4️⃣ 成立訂單並定案指派` ➔ `POST /api/v1/orders/{order_id}/assign-staff`
-  - `🚨 確認取消此訂單` ➔ `PUT /api/v1/orders/{order_id}/status`
+  - `✍️ 4️⃣ 成立訂單並定案指派` ➔ `POST /api/v1/orders/{case_no}/assign-staff`
+  - `🚨 確認取消此訂單` ➔ `PUT /api/v1/orders/{case_no}/status`
   - `更新財務記錄` ➔ `PUT /api/v1/payments/{case_no}`
 
 ##### Module: CalendarUI (完整四色月曆與排假精算專頁)
@@ -65,7 +65,7 @@
   - `INV-EDIT-04`: 強制解鎖自動試算欄位時，必須顯性跳出警告告知公式連動失效風險。
   - `INV-EDIT-05`: 點擊儲存時必須同時調用 `update_order_full_details` 與 `update_payment_details` 完整寫入 orders, clients 與 payments 資料表。
 - API Button Matrix:
-  - `💾 確定儲存 36 欄位試算與變更結果` ➔ `PUT /api/v1/orders/{order_id}/full-details`
+  - `💾 確定儲存 36 欄位試算與變更結果` ➔ `PUT /api/v1/orders/{case_no}/full-details`
 
 ##### Module: FormManagementUI
 - Source: `ui/pages/05_form_management.py`

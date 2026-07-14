@@ -225,7 +225,7 @@
 * **Request Body**：
   ```json
   {
-    "order_id": 12,
+    "case_no": "115000001",
     "filter_no_conflict": true,
     "filter_region": true,
     "filter_special_skills": ["大寶餐專長"]
@@ -253,7 +253,7 @@
 * **Request Body**：
   ```json
   {
-    "order_id": 12,
+    "case_no": "115000001",
     "caregiver_id": 5,
     "custom_notes": "週六需要配合加班半天"
   }
@@ -271,7 +271,7 @@
 * **Request Body**：
   ```json
   {
-    "order_id": 12,
+    "case_no": "115000001",
     "caregiver_id": 5
   }
   ```
@@ -288,7 +288,7 @@
 * **Request Body**：
   ```json
   {
-    "order_id": 12,
+    "case_no": "115000001",
     "caregiver_id": 5,
     "contract_details": {
       "start_date": "2026-08-10",
@@ -332,14 +332,14 @@ FastAPI webhooks 接口定義於 `POST /webhook`。
         "timestamp": 1462629479859,
         "mode": "active",
         "postback": {
-          "data": "action=caregiver_accept&order_id=12&caregiver_id=5"
+          "data": "action=caregiver_accept&case_no=115000001&staff_id=5"
         }
       }
     ]
   }
   ```
 * **地端處理邏輯**：
-  1. Webhook 解析 postback data 參數：`action=caregiver_accept`、`order_id=12`。
+  1. Webhook 解析 postback data 參數：`action=caregiver_accept`、`case_no=115000001`。
   2. 搜尋 `matching_records` 資料表，將狀態更新為 `caregiver_accepted = 1`。
   3. 回傳 LINE 官方帳號訊息：「感謝您的回覆！我們已將您的意願同步給行政專員，待客戶確認後將會為您發送合約書。」
 
@@ -397,7 +397,7 @@ FastAPI webhooks 接口定義於 `POST /webhook`。
         "action": {
           "type": "postback",
           "label": "我願意接案",
-          "data": "action=caregiver_accept&order_id=12&caregiver_id=5"
+          "data": "action=caregiver_accept&case_no=115000001&staff_id=5"
         }
       },
       {
@@ -406,7 +406,7 @@ FastAPI webhooks 接口定義於 `POST /webhook`。
         "action": {
           "type": "postback",
           "label": "無意願",
-          "data": "action=caregiver_decline&order_id=12&caregiver_id=5"
+          "data": "action=caregiver_decline&case_no=115000001&staff_id=5"
         }
       }
     ]

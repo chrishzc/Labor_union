@@ -20,18 +20,25 @@ def update_payment(
     req: PaymentUpdateRequest,
     case_no: str = Path(..., description="客戶案件編號 (clients.case_no)")
 ):
-    """依客戶案件編號更新實收訂金、尾款、月嫂費用與帳務備註"""
+    """依客戶案件編號更新實收訂金、一期款、二期款、月嫂費用與帳務備註"""
     try:
         success = db_service.update_payment_details(
             case_no=case_no,
-            amount_receivable=req.amount_receivable,
+            deposit_receivable=req.deposit_receivable,
             deposit_received=req.deposit_received,
-            balance_received=req.balance_received,
+            first_payment_receivable=req.first_payment_receivable,
+            first_payment_received=req.first_payment_received,
+            second_payment_receivable=req.second_payment_receivable,
+            second_payment_received=req.second_payment_received,
             caregiver_fee=req.caregiver_fee,
             payment_status=req.payment_status,
             notes=req.notes,
+            deposit_due_date=req.deposit_due_date,
             deposit_received_at=req.deposit_received_at,
-            balance_received_at=req.balance_received_at,
+            first_payment_due_date=req.first_payment_due_date,
+            first_payment_received_at=req.first_payment_received_at,
+            second_payment_due_date=req.second_payment_due_date,
+            second_payment_received_at=req.second_payment_received_at,
             caregiver_paid_at=req.caregiver_paid_at
         )
         return BaseResponse(data=success, message="成功更新實收帳務資訊")

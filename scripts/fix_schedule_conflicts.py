@@ -47,10 +47,10 @@ def detect_schedule_conflicts():
                 SELECT 
                     o1.staff_id, 
                     s.name AS staff_name, 
-                    o1.id AS order1_id, o1.status AS status1, o1.start_date AS s1, o1.end_date AS e1,
-                    o2.id AS order2_id, o2.status AS status2, o2.start_date AS s2, o2.end_date AS e2
+                    o1.case_no AS order1_case_no, o1.status AS status1, o1.start_date AS s1, o1.end_date AS e1,
+                    o2.case_no AS order2_case_no, o2.status AS status2, o2.start_date AS s2, o2.end_date AS e2
                 FROM orders o1
-                JOIN orders o2 ON o1.staff_id = o2.staff_id AND o1.id < o2.id
+                JOIN orders o2 ON o1.staff_id = o2.staff_id AND o1.case_no < o2.case_no
                 JOIN staff s ON o1.staff_id = s.id
                 WHERE o1.status NOT IN ('訂單取消') 
                   AND o2.status NOT IN ('訂單取消')
@@ -69,8 +69,8 @@ def detect_schedule_conflicts():
                 print(f"⚠️ 發現 {len(conflicts)} 筆月嫂檔期重疊衝突案件：")
                 for idx, c in enumerate(conflicts, 1):
                     print(f"  [{idx}] 月嫂: {c['staff_name']} (ID:{c['staff_id']})")
-                    print(f"      - 訂單 #{c['order1_id']} [{c['status1']}]: {c['s1']} ~ {c['e1']}")
-                    print(f"      - 訂單 #{c['order2_id']} [{c['status2']}]: {c['s2']} ~ {c['e2']}")
+                    print(f"      - 案件 #{c['order1_case_no']} [{c['status1']}]: {c['s1']} ~ {c['e1']}")
+                    print(f"      - 案件 #{c['order2_case_no']} [{c['status2']}]: {c['s2']} ~ {c['e2']}")
             return conflicts
     finally:
         conn.close()
@@ -97,23 +97,23 @@ def repair_schedule_conflicts():
 
                 # 決定保留者與解綁者
                 if p1 >= p2:
-                    keep_id, unbind_id = c['order1_id'], c['order2_id']
+                    keep_case_no, unbind_case_no = c['order1_case_no'], c['order2_case_no']
                     unbind_status = c['status2']
                 else:
-                    keep_id, unbind_id = c['order2_id'], c['order1_id']
+                    keep_case_no, unbind_case_no = c['order2_case_no'], c['order1_case_no']
                     unbind_status = c['status1']
 
                 # 解綁次要訂單的 staff_id 並將其狀態降級為 '洽談中' 或標記無月嫂
                 cursor.execute("""
                     UPDATE orders 
                     SET staff_id = NULL, status = '洽談中' 
-                    WHERE id = %s
-                """, (unbind_id,))
+                    WHERE case_no = %s
+                """, (unbind_case_no,))
 
                 # 刪除解綁訂單舊有的排班細項
-                cursor.execute("DELETE FROM staff_schedule WHERE order_id = %s", (unbind_id,))
+                cursor.execute("DELETE FROM staff_schedule WHERE case_no = %s", (unbind_case_no,))
                 repaired_count += 1
-                print(f"  - 已自動將衝突訂單 #{unbind_id} (原狀態: {unbind_status}) 解綁月嫂，保留權重較高之訂單 #{keep_id}。")
+                print(f"  - 已自動將衝突案件 #{unbind_case_no} (原狀態: {unbind_status}) 解綁月嫂，保留權重較高之案件 #{keep_case_no}。")
 
             conn.commit()
             print(f"✅ 修復完成！共解除 {repaired_count} 筆衝突綁定並修復行事曆。")
@@ -133,4 +133,3 @@ if __name__ == "__main__":
         print("✅ ADAD 不變量驗證成功 (INV-SCRIPT-01/02)！所有月嫂檔期嚴格獨佔且無時間重疊。")
     else:
         detect_schedule_conflicts()
-

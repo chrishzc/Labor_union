@@ -47,5 +47,5 @@
 
 - All customer-facing order and case identifiers now use clients.case_no exclusively.
 - Removed the legacy order_no specification and obsolete order-number labels from the UI, forms, API examples, and LINE documents.
-- LINE binding and LIFF screens now query and display clients.case_no; internal orders.id (order_id) remains only for database relations and is never shown as an order number.
+- LINE binding, LIFF screens, database relations, and APIs now use `case_no`; the former internal numeric order key has been removed.
 - When a LINE-native registration has not yet received a case number, the user is informed that administrative issuance is pending instead of receiving an internal ID.

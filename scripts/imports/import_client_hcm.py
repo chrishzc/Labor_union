@@ -180,7 +180,7 @@ def process_import(excel_path):
                 
             # 關聯訂單與生命週期狀態機初始化
             # 比對 orders 表是否已有此 client_id (或在此業務下，以 case_no 作為主要核銷欄位)
-            cursor.execute("SELECT id FROM orders WHERE client_id = %s", (client_id,))
+            cursor.execute("SELECT case_no FROM orders WHERE case_no = %s", (case_no,))
             order_exists = cursor.fetchone()
             if not order_exists:
                 # 取得相關欄位的值以初始化 orders 表中的對應數值
@@ -201,9 +201,9 @@ def process_import(excel_path):
 
                 # 初始化建立 orders，預設 status 為「洽談中」
                 cursor.execute("""
-                    INSERT INTO orders (client_id, status, service_days, service_hours_per_day, subsidy_eligibility) 
-                    VALUES (%s, '洽談中', %s, %s, %s)
-                """, (client_id, s_days, s_hours, sub_elig))
+                    INSERT INTO orders (case_no, client_id, status, service_days, service_hours_per_day, subsidy_eligibility)
+                    VALUES (%s, %s, '洽談中', %s, %s, %s)
+                """, (case_no, client_id, s_days, s_hours, sub_elig))
                 
         conn.commit()
         print(f"匯入成功：新增 {inserted} 筆客戶資料，更新 {updated} 筆客戶資料。")

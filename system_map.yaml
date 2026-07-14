@@ -67,7 +67,7 @@ modules:
     required_context: []
     forbidden_context: []
     context_priority: {}
-    state: planned
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - load_pages
@@ -132,9 +132,10 @@ modules:
     required_context: []
     forbidden_context: []
     context_priority: {}
-    state: planned
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
+    - _resolve_case_no
     - add_or_update_holiday
     - assign_staff_to_order
     - calculate_attendance_schedule
@@ -142,7 +143,10 @@ modules:
     - create_order
     - delete_holiday
     - generate_default_schedule
+    - generate_virtual_account
+    - get_case_order_details
     - get_connection
+    - get_order_by_case_no
     - get_order_details
     - get_order_matches
     - get_recommended_staff_for_order
@@ -183,8 +187,7 @@ modules:
       or staff schedule, and start at least 14 days after `reference_date`.'
     - '`服務中` and `訂單完成` orders have an assigned staff member and actual start date;
       cancelled orders have a cancel reason and no future active schedule.'
-    - Every payment uses an existing `clients.case_no`; `payments` never contains
-      `order_id`.
+    - Every payment uses an existing `clients.case_no` as its sole case relationship.
     - Normal assigned schedules for one staff member must not overlap; intentionally
       conflicting fixtures must be explicitly marked as conflict-test data.
     - Generated note content must be compatible with the lifecycle state.
@@ -252,6 +255,11 @@ modules:
     state: dirty
     fan_in_snapshot: 0
     known_symbols:
+    - _assign_available_staff
+    - _scenario_counts
+    - _scenario_note
+    - _upsert_payment
+    - _write_scenario_schedule
     - fill_checkbox_group
     - generate_fake_address
     - generate_fake_due_date
@@ -263,9 +271,12 @@ modules:
     - generate_fake_service_start_date
     - generate_fake_signup_time
     - generate_finance_data
+    - generate_lifecycle_scenarios
     - generate_roster_data
     - generate_schedule_data
     - main
+    - parse_cli_args
+    - validate_lifecycle_data
   FixScheduleConflicts:
     type: script
     description: 月嫂檔期衝突檢測與自動修復工具。

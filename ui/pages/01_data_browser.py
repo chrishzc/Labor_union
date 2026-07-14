@@ -79,14 +79,24 @@ DB_COLUMN_LABEL_MAP = {
     
     # 財務 (payments)
     "client_name": "客戶姓名",
-    "amount_receivable": "應收金額",
-    "deposit_received": "已收訂金",
-    "deposit_received_at": "訂金收取日期",
-    "balance_received": "已收尾款",
-    "balance_received_at": "尾款收取日期",
+    "deposit_receivable": "訂金－應收金額",
+    "deposit_received": "訂金－實收金額",
+    "deposit_due_date": "訂金－應收日期",
+    "deposit_received_at": "訂金－實收日期",
+    "first_payment_receivable": "第一期－應收金額",
+    "first_payment_received": "第一期－實收金額",
+    "first_payment_due_date": "第一期－應收日期",
+    "first_payment_received_at": "第一期－實收日期",
+    "second_payment_receivable": "第二期－應收金額",
+    "second_payment_received": "第二期－實收金額",
+    "second_payment_due_date": "第二期－應收日期",
+    "second_payment_received_at": "第二期－實收日期",
+    "amount_receivable": "應收總額",
+    "amount_received": "實收總額",
     "caregiver_fee": "月嫂應轉帳費用",
     "caregiver_paid_at": "月嫂費用轉帳日",
     "payment_status": "帳務狀態",
+    "virtual_account": "虛擬帳號",
     
     # BeClass 報名記錄 (beclass_records)
     "query_no": "查詢序號",
@@ -199,6 +209,10 @@ def show():
 
         df = pd.DataFrame(raw_data)
 
+        # ponytail: If viewing payments, dynamically calculate and insert the virtual_account column
+        if table_name == "payments" and not df.empty and "case_no" in df.columns:
+            df["virtual_account"] = df["case_no"].apply(db_service.generate_virtual_account)
+
         # 主鍵欄位 (用於即時編輯後回寫資料庫的比對依據)
         pk_col = db_service.TABLE_PRIMARY_KEYS.get(table_name, "id")
 
@@ -222,6 +236,8 @@ def show():
         if table_name == "orders":
             readonly_cols.add("case_no")
             readonly_cols.add("staff_name")
+        if table_name == "payments":
+            readonly_cols.add("virtual_account")
         column_config = {}
         for original_col, display_col in rename_map.items():
             if original_col in readonly_cols:

@@ -279,13 +279,19 @@ def generate_finance_data(output_file, personal_data_pool):
         amount_receivable = days * rate
         deposit = random.choice([1, 2]) * rate
         balance = amount_receivable - deposit
+
+        # ponytail: Split balance into first and second payments
+        first_payment = balance // 2
+        second_payment = balance - first_payment
+
         caregiver_fee = int(amount_receivable * 0.85)
         case_details[case_no] = {
             'days': days,
             'rate': rate,
             'amount_receivable': amount_receivable,
             'deposit': deposit,
-            'balance': balance,
+            'first_payment': first_payment,
+            'second_payment': second_payment,
             'caregiver_fee': caregiver_fee
         }
 
@@ -342,13 +348,22 @@ def generate_finance_data(output_file, personal_data_pool):
             base_account, tx_time_dep, tx_date_dep, tx_date_dep, "虛擬帳入", "TWD", None, details['deposit'], current_balance, va, None
         ])
         
-        # 2. 存入尾款 (只有 seq 1-7 有存入尾款)
+        # 2. 存入第一期款 (只有 seq 1-7 有存入)
         if seq <= 7:
-            tx_time_bal = f"2026/07/{seq+10:02d} 14:00:00"
-            tx_date_bal = f"2026/07/{seq+10:02d}"
-            current_balance += details['balance']
+            tx_time_p1 = f"2026/07/{seq+10:02d} 14:00:00"
+            tx_date_p1 = f"2026/07/{seq+10:02d}"
+            current_balance += details['first_payment']
             tx_rows.append([
-                base_account, tx_time_bal, tx_date_bal, tx_date_bal, "虛擬帳入", "TWD", None, details['balance'], current_balance, va, None
+                base_account, tx_time_p1, tx_date_p1, tx_date_p1, "虛擬帳入", "TWD", None, details['first_payment'], current_balance, va, None
+            ])
+
+        # 3. 存入第二期款 (只有 seq 1-5 有存入)
+        if seq <= 5:
+            tx_time_p2 = f"2026/07/{seq+18:02d} 11:00:00"
+            tx_date_p2 = f"2026/07/{seq+18:02d}"
+            current_balance += details['second_payment']
+            tx_rows.append([
+                base_account, tx_time_p2, tx_date_p2, tx_date_p2, "虛擬帳入", "TWD", None, details['second_payment'], current_balance, va, None
             ])
             
         # 3. 支出月嫂費用 (只有 seq 1-5 結案撥款)
@@ -405,7 +420,7 @@ def generate_schedule_data():
             cursor.execute("SELECT id, name FROM staff ORDER BY id ASC")
             staff_list = cursor.fetchall()
             
-            cursor.execute("SELECT id, client_id FROM orders ORDER BY id ASC")
+            cursor.execute("SELECT case_no, client_id FROM orders ORDER BY case_no ASC")
             orders_list = cursor.fetchall()
 
             if not staff_list or not orders_list:
@@ -449,7 +464,7 @@ def generate_schedule_data():
                     if order_idx >= len(orders_list):
                         break
                     
-                    order_id = orders_list[order_idx]['id']
+                    case_no = orders_list[order_idx]['case_no']
                     order_idx += 1
 
                     # 15% 概率產生訂單取消的範例
@@ -470,7 +485,7 @@ def generate_schedule_data():
                     else:
                         cancel_reason = None
                         # 先生成排班明細以取得精算後的正確結束日
-                        generate_default_schedule(order_id, staff_id, start_d, service_days)
+                        generate_default_schedule(case_no, staff_id, start_d, service_days)
                         
                         # 30% 機會為該訂單動態設定 1~3 天自訂放假日期並測試持久化與完工日自動順延
                         if random.random() < 0.3:
@@ -478,10 +493,10 @@ def generate_schedule_data():
                                 (start_d + timedelta(days=random.randint(2, service_days - 2))).strftime("%Y-%m-%d")
                                 for _ in range(random.randint(1, 3))
                             ]
-                            save_order_rest_dates(order_id, sample_rests)
+                            save_order_rest_dates(case_no, sample_rests)
 
                         # 查出最新的 end_date
-                        cursor.execute("SELECT end_date FROM orders WHERE id = %s", (order_id,))
+                        cursor.execute("SELECT end_date FROM orders WHERE case_no = %s", (case_no,))
                         res = cursor.fetchone()
                         end_d = res['end_date'] if (res and res['end_date']) else start_d + timedelta(days=service_days)
 
@@ -511,11 +526,11 @@ def generate_schedule_data():
                             subsidy_eligibility = %s,
                             floor_fee = %s,
                             cancel_reason = %s
-                        WHERE id = %s
+                        WHERE case_no = %s
                     """, (
                         staff_id, status, start_d, actual_start, end_d,
                         end_d, service_days, hours, subsidy,
-                        random.choice([0.0, 500.0, 1000.0]), cancel_reason, order_id
+                        random.choice([0.0, 500.0, 1000.0]), cancel_reason, case_no
                     ))
                     
                     total_orders_assigned += 1
@@ -526,16 +541,16 @@ def generate_schedule_data():
             cursor.execute("""
                 UPDATE staff_schedule 
                 SET is_work_day = TRUE, notes = '端午節國定假日月嫂自主出勤(正常算1天工作日)' 
-                WHERE work_date = '2026-06-19' AND order_id IS NOT NULL AND staff_id % 2 = 0
+                WHERE work_date = '2026-06-19' AND case_no IS NOT NULL AND staff_id % 2 = 0
             """)
             cursor.execute("""
                 UPDATE staff_schedule 
                 SET is_work_day = FALSE, notes = '端午節國定假日月嫂自主休假(結束日順延1天)' 
-                WHERE work_date = '2026-06-19' AND order_id IS NOT NULL AND staff_id % 2 = 1
+                WHERE work_date = '2026-06-19' AND case_no IS NOT NULL AND staff_id % 2 = 1
             """)
 
             # 隨機模擬動態請假與補班
-            cursor.execute("SELECT id, order_id, staff_id, work_date FROM staff_schedule WHERE is_work_day = TRUE ORDER BY RAND() LIMIT 12")
+            cursor.execute("SELECT id, case_no, staff_id, work_date FROM staff_schedule WHERE is_work_day = TRUE ORDER BY RAND() LIMIT 12")
             random_days = cursor.fetchall()
             for r_day in random_days:
                 note = random.choice([
@@ -610,25 +625,45 @@ def _scenario_note(scenario: str, boundary_tag: str | None = None) -> str | None
     return f"{note or ''} [{boundary_tag}]".strip() if boundary_tag else note
 
 
-def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, balance, caregiver_fee, notes,
-                    deposit_at=None, balance_at=None, caregiver_paid_at=None):
+def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, first_pay, second_pay, caregiver_fee, notes,
+                    deposit_at=None, first_pay_at=None, second_pay_at=None, caregiver_paid_at=None):
+    planned_deposit = max(1000, amount // 10)
+    planned_balance = max(0, amount - planned_deposit)
+    planned_first = planned_balance // 2
+    planned_second = planned_balance - planned_first
+    amount_received = deposit + first_pay + second_pay
     cursor.execute("""
         INSERT INTO payments (
-            case_no, client_name, amount_receivable, deposit_received, deposit_received_at,
-            balance_received, balance_received_at, caregiver_fee, caregiver_paid_at,
+            case_no, client_name,
+            deposit_receivable, deposit_received, deposit_due_date, deposit_received_at,
+            first_payment_receivable, first_payment_received, first_payment_due_date, first_payment_received_at,
+            second_payment_receivable, second_payment_received, second_payment_due_date, second_payment_received_at,
+            amount_receivable, amount_received,
+            caregiver_fee, caregiver_paid_at,
             payment_status, notes
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             client_name = VALUES(client_name), amount_receivable = VALUES(amount_receivable),
-            deposit_received = VALUES(deposit_received), deposit_received_at = VALUES(deposit_received_at),
-            balance_received = VALUES(balance_received), balance_received_at = VALUES(balance_received_at),
+            amount_received = VALUES(amount_received),
+            deposit_receivable = VALUES(deposit_receivable), deposit_received = VALUES(deposit_received),
+            deposit_due_date = VALUES(deposit_due_date), deposit_received_at = VALUES(deposit_received_at),
+            first_payment_receivable = VALUES(first_payment_receivable), first_payment_received = VALUES(first_payment_received),
+            first_payment_due_date = VALUES(first_payment_due_date), first_payment_received_at = VALUES(first_payment_received_at),
+            second_payment_receivable = VALUES(second_payment_receivable), second_payment_received = VALUES(second_payment_received),
+            second_payment_due_date = VALUES(second_payment_due_date), second_payment_received_at = VALUES(second_payment_received_at),
             caregiver_fee = VALUES(caregiver_fee), caregiver_paid_at = VALUES(caregiver_paid_at),
             payment_status = VALUES(payment_status), notes = VALUES(notes)
-    """, (case_no, client_name, amount, deposit, deposit_at, balance, balance_at,
-          caregiver_fee, caregiver_paid_at, status, notes))
+    """, (
+        case_no, client_name,
+        planned_deposit, deposit, deposit_at, deposit_at,
+        planned_first, first_pay, first_pay_at, first_pay_at,
+        planned_second, second_pay, second_pay_at, second_pay_at,
+        amount, amount_received,
+        caregiver_fee, caregiver_paid_at, status, notes,
+    ))
 
 
-def _write_scenario_schedule(cursor, order_id: int, staff_id: int, start: date, service_days: int) -> date:
+def _write_scenario_schedule(cursor, case_no: str, staff_id: int, start: date, service_days: int) -> date:
     """Create a simple deterministic schedule in the caller's transaction."""
     work_days = 0
     current_day = start
@@ -638,9 +673,9 @@ def _write_scenario_schedule(cursor, order_id: int, staff_id: int, start: date, 
         is_work_day = not is_sunday
         note = "週日預設休假" if is_sunday else "生命週期假資料正常服務日"
         cursor.execute("""
-            INSERT INTO staff_schedule (order_id, staff_id, work_date, is_work_day, is_double_pay, notes)
+            INSERT INTO staff_schedule (case_no, staff_id, work_date, is_work_day, is_double_pay, notes)
             VALUES (%s, %s, %s, %s, %s, %s)
-        """, (order_id, staff_id, current_day, is_work_day, False, note))
+        """, (case_no, staff_id, current_day, is_work_day, False, note))
         if is_work_day:
             work_days += 1
         last_day = current_day
@@ -673,7 +708,7 @@ def validate_lifecycle_data(cursor, reference_date: date) -> list[str]:
             LEFT JOIN clients c ON c.id = o.client_id
             WHERE status IN ('服務中', '訂單完成') AND (o.staff_id IS NULL OR o.actual_start_date IS NULL)""", (), "服務中/完成案件缺少月嫂或實際開始日"),
         ("""SELECT COUNT(*) AS count FROM orders o
-            LEFT JOIN staff_schedule ss ON ss.order_id = o.id AND ss.work_date > %s
+            LEFT JOIN staff_schedule ss ON ss.case_no = o.case_no AND ss.work_date > %s
             WHERE o.status = '訂單取消' AND (o.cancel_reason IS NULL OR o.cancel_reason = '' OR ss.id IS NOT NULL)""", (reference_date,), "取消案件缺少原因或仍有未來排班"),
         ("""SELECT COUNT(*) AS count FROM payments p
             LEFT JOIN clients c ON c.case_no = p.case_no
@@ -696,9 +731,9 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT o.id AS order_id, c.id AS client_id, c.case_no, c.name AS client_name
+                SELECT o.case_no, c.id AS client_id, c.name AS client_name
                 FROM orders o JOIN clients c ON c.id = o.client_id
-                WHERE c.case_no IS NOT NULL AND c.case_no <> '' ORDER BY o.id
+                WHERE o.case_no IS NOT NULL AND o.case_no <> '' ORDER BY o.case_no
             """)
             orders = cursor.fetchall()
             cursor.execute("SELECT id FROM staff ORDER BY id")
@@ -745,9 +780,9 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                     cursor.execute("""
                         UPDATE orders SET staff_id = NULL, status = '洽談中', start_date = %s, end_date = %s,
                             actual_start_date = NULL, actual_end_date = NULL, service_days = %s,
-                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = NULL WHERE id = %s
-                    """, (start, end, days, hours, floor_fee, order["order_id"]))
-                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, note)
+                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = NULL WHERE case_no = %s
+                    """, (start, end, days, hours, floor_fee, order["case_no"]))
+                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note)
 
                 elif scenario == "matching_in_progress":
                     start = reference_date + timedelta(days=14 + random.randint(0, 30))
@@ -755,42 +790,71 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                     cursor.execute("""
                         UPDATE orders SET staff_id = NULL, status = '洽談中', start_date = %s, end_date = %s,
                             actual_start_date = NULL, actual_end_date = NULL, service_days = %s,
-                            service_hours_per_day = %s, floor_fee = %s WHERE id = %s
-                    """, (start, end, days, hours, floor_fee, order["order_id"]))
+                            service_hours_per_day = %s, floor_fee = %s WHERE case_no = %s
+                    """, (start, end, days, hours, floor_fee, order["case_no"]))
                     for candidate_id in random.sample(staff_ids, min(len(staff_ids), random.randint(2, 5))):
                         reply = random.choice([None, None, 0, 1])
                         cursor.execute("""
-                            INSERT INTO matching_records (order_id, staff_id, caregiver_accepted, sent_at, replied_at)
+                            INSERT INTO matching_records (case_no, staff_id, caregiver_accepted, sent_at, replied_at)
                             VALUES (%s, %s, %s, NOW(), CASE WHEN %s IS NULL THEN NULL ELSE NOW() END)
-                        """, (order["order_id"], candidate_id, reply, reply))
-                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, note)
+                        """, (order["case_no"], candidate_id, reply, reply))
+                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note)
 
                 elif scenario == "cancelled":
                     start = reference_date + timedelta(days=random.randint(2, 30))
                     cursor.execute("""
                         UPDATE orders SET staff_id = NULL, status = '訂單取消', start_date = %s, end_date = %s,
                             actual_start_date = NULL, actual_end_date = NULL, service_days = %s,
-                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = %s WHERE id = %s
+                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = %s WHERE case_no = %s
                     """, (start, start + timedelta(days=days), days, hours, floor_fee,
-                          "客戶改由家人照護，取消服務", order["order_id"]))
-                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, note)
+                          "客戶改由家人照護，取消服務", order["case_no"]))
+                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note)
 
                 else:
+                    deposit = max(1000, amount // 10)
+                    balance = amount - deposit
+                    first_pay = balance // 2
+                    second_pay = balance - first_pay
+
                     if scenario == "deposit_received":
                         start = reference_date + timedelta(days=random.randint(7, 40))
-                        status, deposit, balance = "訂單成立", max(1000, amount // 10), 0
+                        status = "訂單成立"
+                        p_status = "已收訂金"
+                        p_deposit = deposit
+                        p_first = 0
+                        p_second = 0
+                        p_first_at = None
+                        p_second_at = None
                         actual_start, actual_end = None, None
                     elif scenario == "in_service":
                         start = reference_date - timedelta(days=random.randint(1, min(days - 1, 10)))
-                        status, deposit, balance = "服務中", max(1000, amount // 10), 0
+                        status = "服務中"
+                        p_status = "已收一期款"
+                        p_deposit = deposit
+                        p_first = first_pay
+                        p_second = 0
+                        p_first_at = start + timedelta(days=5)
+                        p_second_at = None
                         actual_start, actual_end = start, start + timedelta(days=days)
                     elif scenario == "completed_pending_settlement":
                         start = reference_date - timedelta(days=days + random.randint(3, 20))
-                        status, deposit, balance = "訂單完成", max(1000, amount // 10), 0
+                        status = "訂單完成"
+                        p_status = "已收一期款"
+                        p_deposit = deposit
+                        p_first = first_pay
+                        p_second = 0
+                        p_first_at = start + timedelta(days=5)
+                        p_second_at = None
                         actual_start, actual_end = start, start + timedelta(days=days)
                     else:  # closed
                         start = reference_date - timedelta(days=days + random.randint(10, 40))
-                        status, deposit, balance = "訂單完成", max(1000, amount // 10), amount - max(1000, amount // 10)
+                        status = "訂單完成"
+                        p_status = "已結案"
+                        p_deposit = deposit
+                        p_first = first_pay
+                        p_second = second_pay
+                        p_first_at = start + timedelta(days=5)
+                        p_second_at = start + timedelta(days=days)
                         actual_start, actual_end = start, start + timedelta(days=days)
 
                     staff_id, start = _assign_available_staff(cursor, staff_ids, start)
@@ -801,27 +865,27 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                     cursor.execute("""
                         UPDATE orders SET staff_id = %s, status = %s, start_date = %s, end_date = %s,
                             actual_start_date = %s, actual_end_date = %s, service_days = %s,
-                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = NULL WHERE id = %s
+                            service_hours_per_day = %s, floor_fee = %s, cancel_reason = NULL WHERE case_no = %s
                     """, (staff_id, status, start, start + timedelta(days=days), actual_start, actual_end,
-                          days, hours, floor_fee, order["order_id"]))
+                          days, hours, floor_fee, order["case_no"]))
 
                     # A conflict fixture stays visible in orders but deliberately has no schedule row.
                     if boundary_tag != "CONFLICT_TEST_EXCLUDED_FROM_NORMAL_SCHEDULE":
-                        scheduled_end = _write_scenario_schedule(cursor, order["order_id"], staff_id, start, days)
+                        scheduled_end = _write_scenario_schedule(cursor, order["case_no"], staff_id, start, days)
                         if scenario == "deposit_received":
                             cursor.execute("""
-                                UPDATE orders SET end_date = %s, actual_start_date = NULL, actual_end_date = NULL WHERE id = %s
-                            """, (scheduled_end, order["order_id"]))
+                                UPDATE orders SET end_date = %s, actual_start_date = NULL, actual_end_date = NULL WHERE case_no = %s
+                            """, (scheduled_end, order["case_no"]))
                         else:
                             cursor.execute("""
-                                UPDATE orders SET end_date = %s, actual_end_date = %s WHERE id = %s
-                            """, (scheduled_end, scheduled_end, order["order_id"]))
+                                UPDATE orders SET end_date = %s, actual_end_date = %s WHERE case_no = %s
+                            """, (scheduled_end, scheduled_end, order["case_no"]))
 
                     _upsert_payment(
                         cursor, order["case_no"], order["client_name"],
-                        "已結案" if scenario == "closed" else "已收訂金",
-                        amount, deposit, balance, caregiver_fee if scenario == "closed" else 0, note,
-                        start - timedelta(days=3), actual_end if balance else None,
+                        p_status, amount, p_deposit, p_first, p_second,
+                        caregiver_fee if scenario == "closed" else 0, note,
+                        start - timedelta(days=3), p_first_at, p_second_at,
                         actual_end + timedelta(days=15) if scenario == "closed" else None,
                     )
 

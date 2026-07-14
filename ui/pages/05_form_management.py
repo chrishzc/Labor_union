@@ -519,12 +519,12 @@ def show():
     with col_order:
         if "特定單筆案件" in scope_mode and orders_data:
             order_opts = {
-                f"案件 #{o.get('case_no') or o['order_id']} - 客戶: {o['client_name']} [{o['order_status']}] (月嫂: {o.get('staff_name') or '尚未指派'})": o['order_id']
+                f"案件 #{o['case_no']} - 客戶: {o['client_name']} [{o['order_status']}] (月嫂: {o.get('staff_name') or '尚未指派'})": o['case_no']
                 for o in orders_data
             }
             sel_label = st.selectbox("🎯 選擇連動測試的訂單案件", list(order_opts.keys()), key="sbs_order_picker")
-            target_oid = order_opts[sel_label]
-            target_order = next((o for o in orders_data if o['order_id'] == target_oid), None)
+            target_case_no = order_opts[sel_label]
+            target_order = next((o for o in orders_data if o['case_no'] == target_case_no), None)
         else:
                 st.info("💡 目前切換為「全域/多案件統計模式」，無須鎖定單一訂單。")
 

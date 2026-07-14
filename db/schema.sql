@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS staff_bookings (
 
 -- 16. 專案與訂單資料表
 CREATE TABLE IF NOT EXISTS orders (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL PRIMARY KEY COMMENT '案件唯一識別碼；對應 clients.case_no',
     client_id INT NOT NULL COMMENT '對應 clients.id',
     staff_id INT NULL COMMENT '對應 staff.id (可為 NULL，代表尚未配對成功)',
     `status` ENUM('洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消') DEFAULT '洽談中' COMMENT '專案狀態 (生命週期: 洽談中→訂單成立→服務中→訂單完成, 任何階段可→訂單取消)',
@@ -233,6 +233,7 @@ CREATE TABLE IF NOT EXISTS orders (
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_orders_case_no FOREIGN KEY (case_no) REFERENCES clients(case_no) ON UPDATE CASCADE ON DELETE RESTRICT,
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL,
     INDEX idx_order_status (status)
@@ -241,16 +242,16 @@ CREATE TABLE IF NOT EXISTS orders (
 -- 17. 媒合意願詢問中介表
 CREATE TABLE IF NOT EXISTS matching_records (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    order_id INT NOT NULL COMMENT '對應 orders.id',
+    case_no VARCHAR(50) NOT NULL COMMENT '對應 orders.case_no',
     staff_id INT NOT NULL COMMENT '對應 staff.id',
     caregiver_accepted TINYINT NULL COMMENT '是否接受媒合 (NULL: 待回覆, 1: 願意, 0: 無意願)',
     sent_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '詢問發送時間',
     replied_at TIMESTAMP NULL COMMENT '回覆時間',
     sent_info_1_at DATETIME NULL COMMENT '給服務人員的訂單資訊-1 發送時間',
     sent_info_2_at DATETIME NULL COMMENT '給服務人員的訂單資訊-2 發送時間',
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    CONSTRAINT fk_matching_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
-    INDEX idx_match_order_staff (order_id, staff_id)
+    UNIQUE KEY uq_matching_case_staff (case_no, staff_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 18. 案件財務收支與轉帳紀錄表 (對照 帳務.xlsx)
@@ -258,14 +259,23 @@ CREATE TABLE IF NOT EXISTS payments (
     id INT AUTO_INCREMENT PRIMARY KEY,
     case_no VARCHAR(50) NOT NULL COMMENT '對應 clients.case_no / 查詢序號；帳務唯一案件識別碼',
     client_name VARCHAR(100) NULL COMMENT '客戶姓名備份',
-    amount_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '應收金額',
-    deposit_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '已收訂金',
-    deposit_received_at DATE NULL COMMENT '訂金收取日期',
-    balance_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '已收尾款',
-    balance_received_at DATE NULL COMMENT '尾款收取日期',
+    deposit_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '訂金應收金額',
+    deposit_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '訂金實收金額',
+    deposit_due_date DATE NULL COMMENT '訂金應收日期',
+    deposit_received_at DATE NULL COMMENT '訂金實收日期',
+    first_payment_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '第一期應收金額',
+    first_payment_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '第一期實收金額',
+    first_payment_due_date DATE NULL COMMENT '第一期應收日期',
+    first_payment_received_at DATE NULL COMMENT '第一期實收日期',
+    second_payment_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '第二期應收金額',
+    second_payment_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '第二期實收金額',
+    second_payment_due_date DATE NULL COMMENT '第二期應收日期',
+    second_payment_received_at DATE NULL COMMENT '第二期實收日期',
+    amount_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '應收總額',
+    amount_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '實收總額',
     caregiver_fee DECIMAL(10, 2) DEFAULT 0.00 COMMENT '應轉帳給服務人員的費用',
     caregiver_paid_at DATE NULL COMMENT '服務人員費用轉帳日期',
-    payment_status VARCHAR(50) DEFAULT '待收訂金' COMMENT '帳務狀態 (待收訂金/已收訂金/已收尾款/已結案)',
+    payment_status VARCHAR(50) DEFAULT '待收訂金' COMMENT '帳務狀態 (待收訂金/已收訂金/已收一期款/已收二期款/已結案)',
     notes TEXT NULL COMMENT '帳務備註',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -278,7 +288,7 @@ CREATE TABLE IF NOT EXISTS payments (
 -- 19. 訂單與帳務整合檢視表 (獨立拆分訂金與樓層費，並提供首筆應付加總)
 CREATE OR REPLACE VIEW v_order_details AS
 SELECT 
-    o.id AS order_id,
+    o.case_no AS case_no,
     o.status AS order_status,
     o.cancel_reason,
     o.line_group_id,
@@ -288,7 +298,6 @@ SELECT
     c.id AS client_id,
     c.name AS client_name,
     c.phone AS client_phone,
-    c.case_no AS case_no,
     c.service_type AS service_mode,
     s.id AS staff_id,
     s.name AS staff_name,
@@ -482,7 +491,7 @@ CREATE TABLE IF NOT EXISTS holidays (
 -- 21. 服務人員排班與行事曆明細表
 CREATE TABLE IF NOT EXISTS staff_schedule (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    order_id INT NOT NULL COMMENT '對應 orders.id',
+    case_no VARCHAR(50) NOT NULL COMMENT '對應 orders.case_no',
     staff_id INT NOT NULL COMMENT '對應 staff.id',
     work_date DATE NOT NULL COMMENT '工作日期',
     is_work_day BOOLEAN DEFAULT TRUE COMMENT '是否為工作日 (FALSE代表放假/休假)',
@@ -490,10 +499,10 @@ CREATE TABLE IF NOT EXISTS staff_schedule (
     notes VARCHAR(255) NULL COMMENT '行政人員調整備註',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (order_id) REFERENCES orders(id) ON DELETE CASCADE,
+    CONSTRAINT fk_schedule_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
     UNIQUE KEY ukey_staff_date (staff_id, work_date),
-    INDEX idx_schedule_order (order_id)
+    INDEX idx_schedule_case_no (case_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

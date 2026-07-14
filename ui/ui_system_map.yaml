@@ -63,10 +63,10 @@ modules:
         api_endpoint: "POST /api/v1/matches/{match_id}/send-resume"
         description: "傳送去識別化履歷與過往經驗圖卡給客戶 LINE 帳號"
       - button_label: "✍️ 4️⃣ 成立訂單並定案指派"
-        api_endpoint: "POST /api/v1/orders/{order_id}/assign-staff"
+        api_endpoint: "POST /api/v1/orders/{case_no}/assign-staff"
         description: "綁定服務人員並更新訂單狀態為「訂單成立」"
       - button_label: "🚨 確認取消此訂單"
-        api_endpoint: "PUT /api/v1/orders/{order_id}/status"
+        api_endpoint: "PUT /api/v1/orders/{case_no}/status"
         description: "將訂單狀態更新為「訂單取消」並強制寫入取消原因"
 
   OrderUI_Tab3_Finance:
@@ -108,7 +108,7 @@ modules:
       - "INV-EDIT-05: 點擊儲存時必須同時調用 update_order_full_details 與 update_payment_details 完整寫入 orders, clients 與 payments 資料表。"
     api_button_matrix:
       - button_label: "💾 確定儲存 36 欄位試算與變更結果"
-        api_endpoint: "PUT /api/v1/orders/{order_id}/full-details"
+        api_endpoint: "PUT /api/v1/orders/{case_no}/full-details"
         description: "一次性寫入 orders 主表 36 欄位與 payments 實收財務表"
 
   FormManagementUI:

@@ -50,8 +50,52 @@ def decode_va_to_case_no(virtual_account):
     seq = code_part[3:]     # 001
     
     # 還原成 9 碼案件編號：115 + 0000 + 01 (即 115000001)
-    case_no = f"{year}0000{int(seq):02d}"
+    case_no = f"{year}{int(seq):06d}"
     return case_no
+
+
+def normalize_header(value) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).strip().lower().replace(" ", "")
+
+
+def get_sheet_name(xl: pd.ExcelFile, expected: str) -> str:
+    matches = {normalize_header(name): name for name in xl.sheet_names}
+    try:
+        return matches[normalize_header(expected)]
+    except KeyError as exc:
+        raise ValueError(f"帳務活頁簿缺少必要分頁：{expected}") from exc
+
+
+def load_case_reference(xl: pd.ExcelFile) -> pd.DataFrame:
+    """Load the fixed, headerless 12-column reference sheet safely.
+
+    This legacy sheet has no column labels, so an added column cannot be
+    identified reliably. Refuse any changed width instead of allowing a
+    positional shift to corrupt case numbers or amounts.
+    """
+    raw = xl.parse(get_sheet_name(xl, "資料庫"), header=None)
+    if raw.shape[1] != 12:
+        raise ValueError(
+            f"帳務『資料庫』分頁必須正好有 12 欄，目前為 {raw.shape[1]} 欄；"
+            "為避免 id/order_id 等額外欄位造成位移，已停止匯入"
+        )
+    return raw
+
+
+def load_transactions(xl: pd.ExcelFile) -> pd.DataFrame:
+    """Find the bank header row and select transaction fields by name."""
+    raw = xl.parse(get_sheet_name(xl, "合作社帳戶"), header=None)
+    required = {"記帳日期", "交易摘要", "支出", "存入", "虛擬帳號/轉帳備註"}
+    for row_index in range(min(10, len(raw))):
+        headers = [str(value).strip() if pd.notna(value) else "" for value in raw.iloc[row_index]]
+        if required.issubset(set(headers)):
+            data = raw.iloc[row_index + 1:].copy()
+            data.columns = headers
+            # Explicit allowlist: unknown fields, including id/order_id, are ignored.
+            return data[["記帳日期", "交易摘要", "支出", "存入", "虛擬帳號/轉帳備註"]]
+    raise ValueError("帳務『合作社帳戶』分頁找不到必要的交易欄名")
 
 def main():
     excel_path = "document/資料庫、資料處理/帳務.xlsx"
@@ -63,8 +107,7 @@ def main():
     xl = pd.ExcelFile(excel_path)
     
     # 1. 讀取「資料庫」分頁 (Sheet 1) 以獲取案件對照與應收金額
-    db_sheet_name = xl.sheet_names[1]
-    df_db = xl.parse(db_sheet_name)
+    df_db = load_case_reference(xl)
     
     # 解析案件對照表 (從資料庫分頁中建立映射)
     case_info = {} # {case_no: {client_name, amount_receivable, caregiver_fee}}
@@ -84,25 +127,26 @@ def main():
             }
             
     # 2. 讀取「合作社帳戶」分頁 (Sheet 0) 交易流水帳
-    tx_sheet_name = xl.sheet_names[0]
-    df_tx = xl.parse(tx_sheet_name)
+    df_tx = load_transactions(xl)
     
     # 建立案件的累計收款/付款結果
     payments_data = {} # {case_no: {deposit, deposit_at, balance, balance_at, caregiver_paid, caregiver_paid_at}}
     
-    # 遍歷流水帳交易 (跳過首兩行明細標頭與中文表頭，從 index 2 開始)
     ignored_va_count = 0
-    for idx in range(2, len(df_tx)):
-        row = df_tx.iloc[idx]
-        if pd.isna(row.iloc[0]):
+    for _, row in df_tx.iterrows():
+        if pd.isna(row.get('記帳日期')):
             continue
             
-        va = str(row.iloc[9]).strip() if pd.notna(row.iloc[9]) else ""
+        va_value = row.get('虛擬帳號/轉帳備註')
+        va = str(va_value).strip() if pd.notna(va_value) else ""
         
         # 支出/存入金額與交易日期
-        tx_date_str = str(row.iloc[2]).strip() if pd.notna(row.iloc[2]) else None
-        expense = float(row.iloc[6]) if pd.notna(row.iloc[6]) and str(row.iloc[6]).strip() else 0.0
-        income = float(row.iloc[7]) if pd.notna(row.iloc[7]) and str(row.iloc[7]).strip() else 0.0
+        tx_date_value = row.get('記帳日期')
+        expense_value = row.get('支出')
+        income_value = row.get('存入')
+        tx_date_str = str(tx_date_value).strip() if pd.notna(tx_date_value) else None
+        expense = float(expense_value) if pd.notna(expense_value) and str(expense_value).strip() else 0.0
+        income = float(income_value) if pd.notna(income_value) and str(income_value).strip() else 0.0
         
         # (A) 處理存入交易 (訂金/尾款) -> 透過虛擬帳號解碼
         if income > 0 and va:
@@ -115,22 +159,27 @@ def main():
                 
             if case_no not in payments_data:
                 payments_data[case_no] = {
-                    'deposit': 0.0, 'deposit_at': None,
-                    'balance': 0.0, 'balance_at': None,
-                    'caregiver_paid': 0.0, 'caregiver_paid_at': None
+                    'deposit_received': 0.0, 'deposit_received_at': None,
+                    'first_payment_received': 0.0, 'first_payment_received_at': None,
+                    'second_payment_received': 0.0, 'second_payment_received_at': None,
+                    'caregiver_fee': 0.0, 'caregiver_paid_at': None
                 }
                 
-            # 套用固定金額測試規格進行歸戶判斷
-            if income == 12000.0:
-                payments_data[case_no]['deposit'] = 12000.0
-                payments_data[case_no]['deposit_at'] = tx_date_str
-            elif income == 68000.0:
-                payments_data[case_no]['balance'] = 68000.0
-                payments_data[case_no]['balance_at'] = tx_date_str
+            # ponytail: Reconcile chronologically (1st deposit, 2nd first payment, 3rd second payment)
+            if payments_data[case_no]['deposit_received'] == 0.0:
+                payments_data[case_no]['deposit_received'] = income
+                payments_data[case_no]['deposit_received_at'] = tx_date_str
+            elif payments_data[case_no]['first_payment_received'] == 0.0:
+                payments_data[case_no]['first_payment_received'] = income
+                payments_data[case_no]['first_payment_received_at'] = tx_date_str
+            else:
+                payments_data[case_no]['second_payment_received'] = income
+                payments_data[case_no]['second_payment_received_at'] = tx_date_str
                 
         # (B) 處理支出交易 (轉帳給月嫂) -> 透過交易摘要的月嫂姓名比對案件
         elif expense > 0:
-            summary = str(row.iloc[4]).strip() if pd.notna(row.iloc[4]) else ""
+            summary_value = row.get('交易摘要')
+            summary = str(summary_value).strip() if pd.notna(summary_value) else ""
             # 尋找是否符合 "月嫂[姓名]費" 格式
             match = re.search(r"月嫂(.*?)費", summary)
             if match:
@@ -145,11 +194,12 @@ def main():
                 if matched_case_no:
                     if matched_case_no not in payments_data:
                         payments_data[matched_case_no] = {
-                            'deposit': 0.0, 'deposit_at': None,
-                            'balance': 0.0, 'balance_at': None,
-                            'caregiver_paid': 0.0, 'caregiver_paid_at': None
+                            'deposit_received': 0.0, 'deposit_received_at': None,
+                            'first_payment_received': 0.0, 'first_payment_received_at': None,
+                            'second_payment_received': 0.0, 'second_payment_received_at': None,
+                            'caregiver_fee': 0.0, 'caregiver_paid_at': None
                         }
-                    payments_data[matched_case_no]['caregiver_paid'] = expense
+                    payments_data[matched_case_no]['caregiver_fee'] = expense
                     payments_data[matched_case_no]['caregiver_paid_at'] = tx_date_str
 
     # 3. 寫入/更新至 MySQL payments 資料表
@@ -167,18 +217,30 @@ def main():
     
     sql_upsert = """
     INSERT INTO payments (
-        case_no, client_name, amount_receivable, 
-        deposit_received, deposit_received_at, 
-        balance_received, balance_received_at, 
+        case_no, client_name,
+        deposit_receivable, deposit_received, deposit_due_date, deposit_received_at,
+        first_payment_receivable, first_payment_received, first_payment_due_date, first_payment_received_at,
+        second_payment_receivable, second_payment_received, second_payment_due_date, second_payment_received_at,
+        amount_receivable, amount_received,
         caregiver_fee, caregiver_paid_at, 
         payment_status
     ) VALUES (
-        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
     ) ON DUPLICATE KEY UPDATE
+        deposit_receivable = VALUES(deposit_receivable),
         deposit_received = VALUES(deposit_received),
+        deposit_due_date = VALUES(deposit_due_date),
         deposit_received_at = VALUES(deposit_received_at),
-        balance_received = VALUES(balance_received),
-        balance_received_at = VALUES(balance_received_at),
+        first_payment_receivable = VALUES(first_payment_receivable),
+        first_payment_received = VALUES(first_payment_received),
+        first_payment_due_date = VALUES(first_payment_due_date),
+        first_payment_received_at = VALUES(first_payment_received_at),
+        second_payment_receivable = VALUES(second_payment_receivable),
+        second_payment_received = VALUES(second_payment_received),
+        second_payment_due_date = VALUES(second_payment_due_date),
+        second_payment_received_at = VALUES(second_payment_received_at),
+        amount_receivable = VALUES(amount_receivable),
+        amount_received = VALUES(amount_received),
         caregiver_fee = VALUES(caregiver_fee),
         caregiver_paid_at = VALUES(caregiver_paid_at),
         payment_status = VALUES(payment_status);
@@ -197,9 +259,20 @@ def main():
             info = case_info.get(case_no, {'client_name': '未知客戶', 'amount_receivable': 80000.0, 'caregiver_fee': 60000.0})
             
             # 判斷對帳狀態
-            if pay['balance'] > 0:
+            dep_rec = pay.get('deposit_received', 0.0)
+            p1_rec = pay.get('first_payment_received', 0.0)
+            p2_rec = pay.get('second_payment_received', 0.0)
+            amount_receivable = info['amount_receivable']
+            deposit_receivable = dep_rec
+            first_payment_receivable = p1_rec
+            second_payment_receivable = max(amount_receivable - deposit_receivable - first_payment_receivable, p2_rec)
+            amount_received = dep_rec + p1_rec + p2_rec
+
+            if dep_rec > 0 and p1_rec > 0 and p2_rec > 0:
                 status = "已結案"
-            elif pay['deposit'] > 0:
+            elif dep_rec > 0 and p1_rec > 0:
+                status = "已收一期款"
+            elif dep_rec > 0:
                 status = "已收訂金"
             else:
                 status = "待收訂金"
@@ -207,12 +280,21 @@ def main():
             cursor.execute(sql_upsert, (
                 case_no,
                 info['client_name'],
-                info['amount_receivable'],
-                pay['deposit'],
-                pay['deposit_at'],
-                pay['balance'],
-                pay['balance_at'],
-                pay['caregiver_paid'],
+                deposit_receivable,
+                dep_rec,
+                pay['deposit_received_at'],
+                pay['deposit_received_at'],
+                first_payment_receivable,
+                p1_rec,
+                pay['first_payment_received_at'],
+                pay['first_payment_received_at'],
+                second_payment_receivable,
+                p2_rec,
+                pay['second_payment_received_at'],
+                pay['second_payment_received_at'],
+                amount_receivable,
+                amount_received,
+                pay['caregiver_fee'],
                 pay['caregiver_paid_at'],
                 status
             ))

@@ -11,9 +11,11 @@
 - Source: `services/db_service.py`
 - Type: service
 - State: `validated`
-- Description: 主資料庫與 CRUD 操作服務，提供 `v_order_details` 視窗查詢、36 欄位安全 mapping、safe_int 與 safe_date 防護、`update_order_full_details` 全量更新。
+- Description: 主資料庫與 CRUD 操作服務；訂單公開識別一律使用唯一 `case_no`，並以同一案件編號載入 BeClass 服務細項。
 - Invariants:
   - `INV-SVC-03`: `DbService` 必須自動辨識與解析 `notes` / `care_details` 欄位中的 JSON 結構，解開完整 15 項產婦照顧與環境細節欄位，打平注入訂單字典中。
+  - `INV-SVC-06`: 服務層所有訂單、媒合與排班公開介面只能使用唯一 `case_no`；過渡期 legacy ID 僅能在資料庫雙寫內部使用。
+  - `INV-SVC-07`: BeClass 服務細項只能透過 `beclass_records.query_no = case_no` 一對一載入，不得以客戶姓名推測關聯。
 
 ##### Module: RecommendService
 - Source: `services/db_service.py::get_recommended_staff_for_order`
