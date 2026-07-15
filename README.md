@@ -1,4 +1,18 @@
-# 新竹市月子照顧服務人員職業工會 - LINE 應用與行政流程自動化系統
+# 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
+
+## 2026-07 帳務與管理介面更新
+
+- 全系統訂單關聯鍵統一為 `case_no`，不再使用 `orders.id`／`order_id`。
+- 帳務拆分為 `client_payments` 與 `staff_payments`：客戶三期收款與月嫂逐指派應付分開管理。
+- 管理端「帳務明細總覽」分開顯示客戶收款、月嫂應付，可依案件編號、訂單狀態與付款狀態篩選；選擇案件後才載入交易明細。
+- 新增應付帳款 Excel：月嫂款使用永豐銀行代碼 31，退還補助款使用台新銀行代碼 633。
+- 新增分季核銷補助清冊與年度總表，補助天數固定顯示至小數點後 2 位。
+- 新增服務人員契約 Excel 鏡像輸出，以及對應的契約、帳務與財務報表 FastAPI。
+- FastAPI 的正式 ASGI 入口為 `line.main:app`。
+
+最近一次整合版本：`0f9c11f`。
+
+---
 
 本專案旨在為「新竹市月子照顧服務人員職業工會」開發地端運作的 **LINE 客服與行政流程自動化系統**。透過將行政人員手動下載的 Excel 名冊自動化匯入資料庫，並提供 Streamlit 管理後台，未來將延伸串接 LINE Messaging API 實現半自動化客戶配對、合約發送與 RAG 客服問答。
 
@@ -114,7 +128,7 @@ Lobar_union/
 docker-compose up -d
 
 # 2. 啟動 FastAPI 後端
-uvicorn api.main:app --reload
+uvicorn line.main:app --reload
 
 # 3. 啟動 Streamlit 管理介面
 streamlit run ui/app.py
