@@ -53,12 +53,19 @@ DB_COLUMN_LABEL_MAP = {
     "service_regions": "服務區域偏好",
     "special_skills": "特殊技能與標籤",
     
+    # 服務人員銀行帳戶 (staff_bank_accounts)
+    "bank_code": "銀行代碼(3碼)",
+    "branch_code": "分行代碼(4碼)",
+    "account_no": "銀行帳號",
+    "is_primary": "是否為主要帳戶",
+    
     # 訂單 (orders)
     "client_id": "客戶ID",
     "staff_id": "服務人員ID",
     "cancel_reason": "取消原因",
     "line_group_id": "LINE群組ID",
     "actual_start_date": "實際服務開始日",
+    "actual_end_date": "實際服務結束日",
     "contract_id": "線上契約ID",
     "service_hours_per_day": "每日服務時數",
     "subsidy_eligibility": "補助資格",
@@ -68,23 +75,15 @@ DB_COLUMN_LABEL_MAP = {
     "end_date": "預計結束日",
     "custom_rest_dates": "自訂休假日期",
     "other_addition": "其他加價",
+    "staff_name": "服務人員姓名",
     
-    # 財務 (payments)
-    "order_id": "訂單ID",
-    "client_name": "客戶姓名",
-    "amount_receivable": "應收金額",
-    "deposit_received": "已收訂金",
-    "deposit_received_at": "訂金收取日期",
-    "balance_received": "已收尾款",
-    "balance_received_at": "尾款收取日期",
-    "caregiver_fee": "月嫂應轉帳費用",
-    "caregiver_paid_at": "月嫂費用轉帳日",
-    "payment_status": "帳務狀態",
+
     
     # BeClass 報名記錄 (beclass_records)
     "query_no": "查詢序號",
-    "order_no": "訂單編號",
     "ext": "分機",
+    "refund_bank_code": "補助款退款:銀行代號+分行代號",
+    "refund_account_no": "補助款退款:銀行帳號",
     "survey_details": "問卷詳細內容JSON",
     
     # 媒合記錄 (matching_records)
@@ -121,10 +120,10 @@ def show():
         "客戶名冊 (clients)": "clients",
         "服務人員/月嫂名冊 (staff)": "staff",
         "訂單資料 (orders)": "orders",
-        "財務帳務 (payments)": "payments",
         "客戶BeClass表單 (beclass_records)": "beclass_records",
         "媒合意願記錄 (matching_records)": "matching_records",
-        "國定假日設定 (holidays)": "holidays"
+        "國定假日設定 (holidays)": "holidays",
+        "服務人員銀行帳戶 (staff_bank_accounts)": "staff_bank_accounts"
     }
     
     col_sel1, col_sel2 = st.columns([2, 1])
@@ -190,6 +189,8 @@ def show():
 
         df = pd.DataFrame(raw_data)
 
+
+
         # 主鍵欄位 (用於即時編輯後回寫資料庫的比對依據)
         pk_col = db_service.TABLE_PRIMARY_KEYS.get(table_name, "id")
 
@@ -209,7 +210,11 @@ def show():
         reverse_rename_map = {v: k for k, v in rename_map.items()}
 
         # 系統唯讀欄位 (id、建檔/更新時間等) 一律鎖定不可編輯，避免破壞主鍵與追蹤紀錄
-        readonly_cols = db_service.READONLY_SYSTEM_COLUMNS
+        readonly_cols = set(db_service.READONLY_SYSTEM_COLUMNS)
+        if table_name == "orders":
+            readonly_cols.add("case_no")
+            readonly_cols.add("staff_name")
+
         column_config = {}
         for original_col, display_col in rename_map.items():
             if original_col in readonly_cols:

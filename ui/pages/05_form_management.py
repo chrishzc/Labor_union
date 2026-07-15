@@ -24,6 +24,9 @@ import time
 from datetime import datetime, date
 import math
 import importlib
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 from services import db_service
 importlib.reload(db_service)
 
@@ -34,6 +37,49 @@ title = "📋 表單與履歷問卷管理"
 JSON_TPL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "form_templates.json")
 TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "templates")
 CONTRACTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "templates", "contracts")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
+
+
+def fetch_staff_contract_context(case_no: str, assignment_id: int | None = None) -> dict:
+    """Read staff-contract facts from FastAPI without writing the workbook."""
+    query = urlencode({"assignment_id": assignment_id}) if assignment_id else ""
+    url = f"{API_BASE_URL}/api/v1/contracts/staff/{case_no}"
+    if query:
+        url = f"{url}?{query}"
+    try:
+        with urlopen(url, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise ValueError(f"契約資料 API 回應 {error.code}: {detail}") from error
+    except URLError as error:
+        raise ValueError(f"無法連線契約資料 API ({API_BASE_URL}): {error.reason}") from error
+
+    if not payload.get("success", False) or not isinstance(payload.get("data"), dict):
+        raise ValueError(payload.get("error") or payload.get("message") or "契約資料 API 未回傳資料")
+    return payload["data"]
+
+
+def flatten_staff_contract_context(context: dict) -> dict:
+    """Flatten the read-only API payload into existing Excel mapping keys."""
+    order = context.get("order") or {}
+    client = context.get("client") or {}
+    assignment = context.get("assignment") or {}
+    staff = context.get("staff") or {}
+
+    flat = {
+        **{key: value for key, value in order.items() if value is not None},
+        **{key: value for key, value in assignment.items() if value is not None},
+        "client_name": client.get("name"),
+        "client_phone": client.get("phone"),
+        "city": client.get("city"),
+        "address": client.get("address"),
+        "service_type": client.get("service_type"),
+        "service_time": client.get("service_time"),
+        "staff_name": staff.get("name"),
+        "staff_phone": staff.get("phone"),
+    }
+    return {key: value for key, value in flat.items() if value is not None}
 
 def generate_field_id() -> str:
     """產生全域絕對不重複的 field_id (INV-UI-FORM-07 防碰撞防線)"""
@@ -160,7 +206,13 @@ def render_excel_contract_mirror(contract_config: dict, target_order: dict, glob
                 text_color = "#0D47A1" if not target_order else "#111111"
                 font_weight_css = "bold"
                 
-                if db_k in global_stats:
+                if p_info.get('status') == 'pending':
+                    cell_val = "暫不連動"
+                    bg_color = "#FFF3CD"
+                    text_color = "#9C6500"
+                elif db_k == '__today__':
+                    cell_val = date.today().strftime('%Y-%m-%d')
+                elif db_k in global_stats:
                     cell_val = format_db_value(db_k, global_stats[db_k])
                 elif target_order and db_k in target_order:
                     cell_val = format_db_value(db_k, target_order.get(db_k, ''))
@@ -339,7 +391,7 @@ def format_db_value(db_k: str, val_raw) -> str:
 # 按 SQL 資料庫資料表來源原生歸屬分層組織全系統欄位 (INV-UI-FORM-14/15/25 全量資料庫欄位 100% 完整開載公理)
 DB_TABLE_FIELDS = {
     "orders (訂單主表 - 36 大業務與金額 calculations)": {
-        "case_no": "訂單號碼 (case_no)",
+        "case_no": "案件編號 (case_no)",
         "start_date": "預期服務開始日 (start_date)",
         "actual_start_date": "服務開始 (actual_start_date)",
         "actual_end_date": "服務結束 (actual_end_date)",
@@ -369,10 +421,9 @@ DB_TABLE_FIELDS = {
         "staff_name": "服務人員 (staff_name)",
         "caregiver_rate": "服務單價 (caregiver_rate)",
         "special_holidays": "特殊休假 (special_holidays)",
-        "service_salary": "自費服務薪資 (service_salary)",
-        "salary_payment_date_1": "付款日-1 (月嫂自費薪資撥款日)",
+        "service_salary": "服務薪資 (service_salary)",
+        "salary_payment_date_1": "預計發薪日 (salary_payment_date_1)",
         "subsidy_salary": "補助薪資金額 (subsidy_salary)",
-        "salary_payment_date_2": "付款日-2 (月嫂補助薪資撥款日)",
         "total_caregiver_salary": "總薪資 (total_caregiver_salary)",
         "govt_claim_date": "市府請款日 (govt_claim_date)"
     },
@@ -519,12 +570,26 @@ def show():
     with col_order:
         if "特定單筆案件" in scope_mode and orders_data:
             order_opts = {
-                f"案件 #{o.get('case_no') or o['order_id']} - 客戶: {o['client_name']} [{o['order_status']}] (月嫂: {o.get('staff_name') or '尚未指派'})": o['order_id']
+                f"案件 #{o['case_no']} - 客戶: {o['client_name']} [{o['order_status']}] (月嫂: {o.get('staff_name') or '尚未指派'})": o['case_no']
                 for o in orders_data
             }
             sel_label = st.selectbox("🎯 選擇連動測試的訂單案件", list(order_opts.keys()), key="sbs_order_picker")
-            target_oid = order_opts[sel_label]
-            target_order = next((o for o in orders_data if o['order_id'] == target_oid), None)
+            target_case_no = order_opts[sel_label]
+            target_order = next((o for o in orders_data if o['case_no'] == target_case_no), None)
+            if target_order:
+                try:
+                    client_rows = db_service.get_table_data('clients')
+                    client_row = next((row for row in client_rows if row.get('case_no') == target_case_no), None)
+                    if client_row:
+                        target_order = {
+                            **target_order,
+                            **{
+                                key: client_row.get(key, '')
+                                for key in ('service_time', 'service_type', 'delivery_type', 'residence_type', 'city')
+                            },
+                        }
+                except Exception:
+                    pass
         else:
                 st.info("💡 目前切換為「全域/多案件統計模式」，無須鎖定單一訂單。")
 
@@ -569,8 +634,9 @@ def show():
                 st.session_state['builder_fields'] = [
                     {"id": generate_field_id(), "label": "客戶姓名", "type": "db_link", "db_key": "client_name", "width": "half"},
                     {"id": generate_field_id(), "label": "案件編號", "type": "db_link", "db_key": "case_no", "width": "half"},
-                    {"id": generate_field_id(), "label": "自費服務薪資", "type": "db_link", "db_key": "service_salary", "width": "half"},
-                    {"id": generate_field_id(), "label": "付款日-1 (自費薪資撥款日)", "type": "db_link", "db_key": "salary_payment_date_1", "width": "half"},
+                    {"id": generate_field_id(), "label": "服務薪資", "type": "db_link", "db_key": "service_salary", "width": "half"},
+                    {"id": generate_field_id(), "label": "樓層費", "type": "db_link", "db_key": "floor_fee", "width": "half"},
+                    {"id": generate_field_id(), "label": "預計發薪日", "type": "db_link", "db_key": "salary_payment_date_1", "width": "half"},
                     {"id": generate_field_id(), "label": "服務地址", "type": "db_link", "db_key": "address", "width": "full"},
                     {"id": generate_field_id(), "label": "注意事項與簽名聲明", "type": "textarea", "db_key": "", "width": "full"}
                 ]
@@ -904,6 +970,27 @@ def show():
             curr_contract = next((c for c in contracts if c['name'] == sel_c_name), contracts[0])
             curr_cid = curr_contract['id']
 
+        contract_target_order = target_order
+        if curr_cid == "contract_staff_service":
+            if not target_order:
+                contract_target_order = None
+                st.info("請先選擇案件，再載入服務人員契約資料。")
+            else:
+                assignment_text = st.text_input(
+                    "服務人員指派 ID（同案有多位月嫂時必填）",
+                    key=f"staff_contract_assignment_{target_order['case_no']}",
+                ).strip()
+                try:
+                    assignment_id = int(assignment_text) if assignment_text else None
+                    if assignment_id is not None and assignment_id < 1:
+                        raise ValueError("指派 ID 必須為正整數")
+                    contract_target_order = flatten_staff_contract_context(
+                        fetch_staff_contract_context(target_order["case_no"], assignment_id)
+                    )
+                except ValueError as error:
+                    contract_target_order = None
+                    st.warning(f"服務人員契約資料未載入：{error}")
+
         with c_view_mode_col:
             view_mode = st.radio("畫面排版視角 (INV-UI-FORM-28)", ["🌓 5:5 左右對照維護", "🔍 100% 全寬滿版預覽"], horizontal=True, key=f"v_mode_{curr_cid}")
 
@@ -972,8 +1059,8 @@ def show():
                 else:
                     param_values[p_tag] = f"<span style='color:#D32F2F; text-decoration:underline;'>___{p_info.get('label')}___</span>"
 
-            if curr_contract.get('template_filename') == "contract_client_copy.xlsx":
-                contract_html = render_excel_contract_mirror(curr_contract, target_order, global_stats)
+            if curr_contract.get('template_filename', '').lower().endswith('.xlsx'):
+                contract_html = render_excel_contract_mirror(curr_contract, contract_target_order, global_stats)
             else:
                 contract_html = f"<div>預設範本</div>"
             
@@ -1050,8 +1137,8 @@ def show():
                     else:
                         param_values[p_tag] = f"<span style='color:#D32F2F; text-decoration:underline;'>___{p_info.get('label')}___</span>"
 
-                if curr_contract.get('template_filename') == "contract_client_copy.xlsx":
-                    contract_html = render_excel_contract_mirror(curr_contract, target_order, global_stats)
+                if curr_contract.get('template_filename', '').lower().endswith('.xlsx'):
+                    contract_html = render_excel_contract_mirror(curr_contract, contract_target_order, global_stats)
                 else:
                     contract_html = f"<div>預設範本</div>"
 
@@ -1063,7 +1150,7 @@ def show():
                     st.download_button(
                         "📄 一鍵導出為 PDF / 印表機套印",
                         data=contract_html.encode('utf-8'),
-                        file_name=f"{curr_contract['name']}_{target_order.get('case_no', 'SAMPLE') if target_order else 'DEMO'}.html",
+                        file_name=f"{curr_contract['name']}_{contract_target_order.get('case_no', 'SAMPLE') if contract_target_order else 'DEMO'}.html",
                         mime="text/html",
                         key=f"dl_c_pdf_{curr_cid}",
                         use_container_width=True

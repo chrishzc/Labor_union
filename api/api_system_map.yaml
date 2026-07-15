@@ -19,6 +19,7 @@ modules:
     state: validated
     invariants:
       - "INV-API-ORD-01: 所有 API 傳入傳出必須經過 Pydantic BaseResponse 與 Schema 模型嚴格型態轉換。"
+      - "INV-API-ORD-02: 訂單資源一律以唯一 case_no 作為對外識別。"
 
   MatchRouter:
     type: api_router
@@ -28,17 +29,26 @@ modules:
     state: validated
     invariants:
       - "INV-API-MATCH-01: 發送訂單資訊 1/2 時，若 staff.line_user_id 存在，必須調用 LINE Messaging API 進行 Flex Message 實體推播。"
+      - "INV-API-MATCH-02: 媒合與指派一律以 case_no 關聯唯一案件。"
 
   ScheduleRouter:
     type: api_router
     description: 月嫂服務人員行事曆與動態順延排班保存 API 路由。
     source: api/routes/schedule.py
-    dependencies: [DbService]
+    dependencies: [DbService, ScheduleSchemas]
+    state: validated
+    invariants:
+      - "INV-API-SCHEDULE-01: 排班寫入一律使用 case_no 關聯唯一案件。"
+
+  ScheduleSchemas:
+    type: api_schema
+    description: 驗證案件排班日期、工作日與薪資日標記。
+    source: api/schemas/schedule.py
     state: validated
 
   PaymentRouter:
     type: api_router
-    description: 財務與對帳 API 路由，提供 GET 財務列表與 PUT 實收金額與備註更新。
+    description: 舊 payments API 相容路由；所有端點回傳 HTTP 410，客戶與月嫂新帳務 API 尚待建立。
     source: api/routes/payments.py
     dependencies: [DbService, PaymentSchemas]
     state: validated

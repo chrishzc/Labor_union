@@ -40,6 +40,33 @@ def load_webhook_replies():
         return {}
 
 
+def ensure_order_for_case_no(cursor, client_id: int, case_no: str) -> None:
+    """正式案件編號核發後，建立或取得該案件唯一的訂單。"""
+    if not case_no or not str(case_no).strip():
+        return
+
+    normalized_case_no = str(case_no).strip()
+    cursor.execute(
+        "SELECT client_id FROM orders WHERE case_no = %s",
+        (normalized_case_no,),
+    )
+    existing_order = cursor.fetchone()
+    if existing_order:
+        existing_client_id = (
+            existing_order.get("client_id")
+            if isinstance(existing_order, dict)
+            else existing_order[0]
+        )
+        if existing_client_id != client_id:
+            raise ValueError(f"案件編號 {normalized_case_no} 已連結其他客戶")
+        return
+
+    cursor.execute("""
+        INSERT INTO orders (case_no, client_id)
+        VALUES (%s, %s)
+    """, (normalized_case_no, client_id))
+
+
 # ----------------- 背景非同步 LINE 發送器 Daemon -----------------
 async def line_message_sender_daemon():
     print("[LINE Daemon] Background LINE sender daemon started")
@@ -192,7 +219,7 @@ async def line_bind(payload: LineBindPayload):
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             # 1. 進行姓名與電話之雙重精確比對（防同名同姓錯誤綁定），同時查詢現有的 line_user_id
             cursor.execute("""
-                SELECT id, name, line_user_id FROM clients 
+                SELECT id, name, case_no, line_user_id FROM clients
                 WHERE name = %s AND REPLACE(REPLACE(phone, '-', ''), ' ', '') = %s 
                 ORDER BY id DESC LIMIT 1
             """, (name, normalized_phone))
@@ -207,6 +234,7 @@ async def line_bind(payload: LineBindPayload):
                 
             client_id = client["id"]
             db_name = client["name"]
+            case_no = client["case_no"]
             db_line_user_id = client["line_user_id"]
             
             # 2. 處理 line_user_id 寫入與覆蓋邏輯
@@ -262,22 +290,14 @@ async def line_bind(payload: LineBindPayload):
                 # 已經綁定過了，且 ID 相同，不需要重複寫入
                 print(f"[API Bind] Skipped write: client_id={client_id} already bound to current line_user_id")
             
-            # 3. 查詢該客戶最新日期建立的一筆訂單 (依 created_at 與 id 降序)
-            cursor.execute("""
-                SELECT id FROM orders 
-                WHERE client_id = %s 
-                ORDER BY created_at DESC, id DESC LIMIT 1
-            """, (client_id,))
-            order = cursor.fetchone()
-            
-            order_id = order["id"] if order else None
-            
-            # 4. 寫入一條 pending 的 LINE 推播訊息告知綁定成功與最新訂單編號
+            # 3. 取得正式案件編號後，才建立或取得唯一訂單。
+            ensure_order_for_case_no(cursor, client_id, case_no)
+
             success_msg = f"【系統通知】\n服務綁定與查詢成功！您的 LINE 帳號已連結至客戶「{db_name}」的登記資料。\n"
-            if order_id:
-                success_msg += f"您目前最新日期的服務訂單編號為：#{order_id}。\n"
+            if case_no:
+                success_msg += f"您的案件編號為：{case_no}。\n"
             else:
-                success_msg += "目前尚未建立您的案件訂單，行政專員核對名冊後將自動為您建立，請稍候。\n"
+                success_msg += "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
             success_msg += "後續有最新媒合進度或排班通知，系統將會主動為您推播。"
             
             cursor.execute("""
@@ -286,14 +306,14 @@ async def line_bind(payload: LineBindPayload):
             """, (line_user_id, success_msg))
             
             conn.commit()
-            print(f"[API Bind] Successfully processed client_id={client_id} for line_user_id={line_user_id}. Order ID: {order_id}")
+            print(f"[API Bind] Successfully processed client_id={client_id} for line_user_id={line_user_id}. Case no: {case_no}")
             
             return {
                 "status": "success",
                 "message": "綁定與查詢成功！",
                 "client_name": db_name,
                 "client_id": client_id,
-                "order_id": order_id
+                "case_no": case_no
             }
     except Exception as e:
         conn.rollback()
@@ -357,6 +377,24 @@ def approve_rebind_request(payload: RebindActionPayload):
                     SET line_user_id = %s 
                     WHERE id = %s
                 """, (target_request["new_line_user_id"], target_request["client_id"]))
+
+                cursor.execute(
+                    "SELECT case_no FROM clients WHERE id = %s",
+                    (target_request["client_id"],),
+                )
+                client_row = cursor.fetchone()
+                client_case_no = (
+                    client_row.get("case_no")
+                    if isinstance(client_row, dict)
+                    else client_row[0]
+                    if client_row
+                    else None
+                )
+                ensure_order_for_case_no(
+                    cursor,
+                    target_request["client_id"],
+                    client_case_no,
+                )
                 
                 # 推播成功訊息給客戶
                 success_msg = f"【系統通知】\n服務綁定與查詢成功！您的帳號重新綁定申請已審核通過，成功連結至客戶「{target_request['client_name']}」的登記資料。\n"
@@ -464,31 +502,26 @@ async def line_register(payload: LineRegisterPayload):
             """, (name, normalized_phone, payload.address, payload.service_days, payload.expected_date, line_user_id, payload.gender, payload.city))
             client_id = conn.insert_id()
             
-            # 2. 寫入 orders
-            cursor.execute("""
-                INSERT INTO orders (client_id)
-                VALUES (%s)
-            """, (client_id,))
-            order_id = conn.insert_id()
-            
-            # 3. 寫入 beclass_records 確保後台查詢一致性
+            # 2. 寫入 beclass_records 確保後台查詢一致性。
+            # LINE 原生登記尚未取得正式 case_no，此時不得建立 orders。
             final_survey = payload.survey_details.copy()
             final_survey["預產期"] = payload.expected_date
             final_survey["預計服務天數"] = payload.service_days
             final_survey["身分證字號"] = payload.id_number
+            final_survey["性別"] = payload.gender
             final_survey["資料來源"] = "LINE 原生表單"
             
             survey_details_json = json.dumps(final_survey, ensure_ascii=False)
             
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
-                INSERT INTO beclass_records (name, gender, email, birth_date, phone, tel, ext, city, zip_code, address, created_at, survey_details)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (name, payload.gender, payload.email, payload.birth_date if payload.birth_date else None, normalized_phone, payload.tel, payload.ext, payload.city, payload.zip_code, payload.address, now_str, survey_details_json))
+                INSERT INTO beclass_records (name, email, birth_date, phone, tel, ext, city, zip_code, address, created_at, survey_details)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (name, payload.email, payload.birth_date if payload.birth_date else None, normalized_phone, payload.tel, payload.ext, payload.city, payload.zip_code, payload.address, now_str, survey_details_json))
             
-            # 4. 寫入推播任務
+            # 3. 寫入推播任務。尚未取得正式案件編號時只保留登記資料。
             success_msg = f"【系統通知】\n服務登記與綁定成功！\n您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n"
-            success_msg += f"您剛建立的服務訂單編號為：#{order_id}。\n"
+            success_msg += "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
             success_msg += "工會行政專員將於上班時間透過 LINE 與您聯繫確認服務細節，請您耐心等候！"
             
             cursor.execute("""
@@ -501,7 +534,7 @@ async def line_register(payload: LineRegisterPayload):
                 "status": "success",
                 "client_id": client_id,
                 "client_name": name,
-                "order_id": order_id
+                "case_no": None
             }
     except Exception as e:
         conn.rollback()
@@ -634,10 +667,10 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                             params[k] = v
                             
                     action = params.get("action")
-                    order_id = params.get("order_id")
+                    case_no = params.get("case_no")
                     staff_id = params.get("staff_id")
                     
-                    if not action or not order_id:
+                    if not action or not case_no:
                         continue
                         
                     # 月嫂同意
@@ -645,52 +678,59 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         cursor.execute("""
                             UPDATE matching_records 
                             SET caregiver_accepted = 1, replied_at = CURRENT_TIMESTAMP
-                            WHERE order_id = %s AND staff_id = %s
-                        """, (order_id, staff_id))
+                            WHERE case_no = %s AND staff_id = %s
+                        """, (case_no, staff_id))
                         
                         msg = "感謝您的確認！您已同意接案，工會已將您的履歷推播給客戶，後續有進一步消息會立刻通知您！"
                         cursor.execute("""
                             INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                         """, (staff_id, msg))
-                        print(f"[LINE Webhook] Caregiver #{staff_id} willing for Order #{order_id}")
+                        print(f"[LINE Webhook] Caregiver #{staff_id} willing for case #{case_no}")
                         
                     # 月嫂拒絕
                     elif action == "unwilling":
                         cursor.execute("""
                             UPDATE matching_records 
                             SET caregiver_accepted = 0, replied_at = CURRENT_TIMESTAMP
-                            WHERE order_id = %s AND staff_id = %s
-                        """, (order_id, staff_id))
+                            WHERE case_no = %s AND staff_id = %s
+                        """, (case_no, staff_id))
                         
                         msg = "已記錄您的回覆，期待下次為您媒合合適的案件！"
                         cursor.execute("""
                             INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                         """, (staff_id, msg))
-                        print(f"[LINE Webhook] Caregiver #{staff_id} unwilling for Order #{order_id}")
+                        print(f"[LINE Webhook] Caregiver #{staff_id} unwilling for case #{case_no}")
                         
                     # 客戶滿意
                     elif action == "client_approve":
-                        cursor.execute("UPDATE orders SET client_approved = 1 WHERE id = %s", (order_id,))
+                        cursor.execute("UPDATE orders SET client_approved = 1 WHERE case_no = %s", (case_no,))
                         
                         msg = "感謝您的確認！行政專員正為您產製電子契約條款，完成後會發送連結至您的 LINE 進行線上簽署。"
                         cursor.execute("""
+<<<<<<< HEAD
                             INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM clients WHERE id = (SELECT client_id FROM orders WHERE id = %s)), 'mock_client_line_id'), %s, 'pending')
                         """, (order_id, msg))
                         print(f"[LINE Webhook] Client approved resume for Order #{order_id}")
+=======
+                            INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                            VALUES (COALESCE((SELECT line_user_id FROM clients WHERE case_no = %s), 'mock_client_line_id'), %s, 'pending')
+                        """, (case_no, msg))
+                        print(f"[LINE Webhook] Client approved resume for case #{case_no}")
+>>>>>>> 529f2c00d4cb1b38b638b7c9e2d7967a203f7bb5
                         
                     # 客戶拒絕
                     elif action == "client_reject":
-                        cursor.execute("UPDATE orders SET client_approved = 2 WHERE id = %s", (order_id,))
+                        cursor.execute("UPDATE orders SET client_approved = 2 WHERE case_no = %s", (case_no,))
                         
                         msg = "已收到您的回饋，工會將為您重新進行媒合篩選，請稍候。"
                         cursor.execute("""
                             INSERT INTO line_tasks (to_user_id, message_content, status)
-                            VALUES (COALESCE((SELECT line_user_id FROM clients WHERE id = (SELECT client_id FROM orders WHERE id = %s)), 'mock_client_line_id'), %s, 'pending')
-                        """, (order_id, msg))
-                        print(f"[LINE Webhook] Client rejected resume for Order #{order_id}")
+                            VALUES (COALESCE((SELECT line_user_id FROM clients WHERE case_no = %s), 'mock_client_line_id'), %s, 'pending')
+                        """, (case_no, msg))
+                        print(f"[LINE Webhook] Client rejected resume for case #{case_no}")
                 
                 # 處理文字對答與 RAG
                 elif event_type == "message":
@@ -890,12 +930,12 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
                 ord = cursor.fetchone()
                 
                 if ord:
-                    order_id = ord["id"]
+                    case_no = ord["case_no"]
                     staff_id = ord["staff_id"]
                     client_id = ord["client_id"]
                     service_days = ord["service_days"] if ord["service_days"] else 24
                     
-                    print(f"[Breezy Webhook] Found order #{order_id}, triggering auto schedule refiner for {ord['staff_name']}")
+                    print(f"[Breezy Webhook] Found case #{case_no}, triggering auto schedule refiner for {ord['staff_name']}")
                     
                     start_d = ord["actual_start_date"]
                     if not start_d:
@@ -918,8 +958,8 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
                     cursor.execute("""
                         UPDATE orders 
                         SET status = '訂單成立', actual_start_date = %s, actual_end_date = %s, service_mode = '週休 1 日'
-                        WHERE id = %s
-                    """, (start_d, end_d, order_id))
+                        WHERE case_no = %s
+                    """, (start_d, end_d, case_no))
                     
                     # 清除舊排班
                     cursor.execute("DELETE FROM staff_bookings WHERE staff_id = %s AND client_id = %s", (staff_id, client_id))
@@ -948,7 +988,7 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
                     """, (staff_id, staff_msg))
                     
                     conn.commit()
-                    print(f"[Breezy Webhook] Order #{order_id} processed. Schedule set to {start_d} ~ {end_d}")
+                    print(f"[Breezy Webhook] Case #{case_no} processed. Schedule set to {start_d} ~ {end_d}")
             
         except Exception as e:
             conn.rollback()
@@ -963,7 +1003,7 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
 # 🔌 GitHub 整合路由 (RESTful Endpoints)
 # ==========================================
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import orders, matches, schedule, payments, clients, staff, holidays, line_system_config
+from api.routes import orders, matches, schedule, payments, clients, staff, holidays, line_system_config, client_payments, staff_payments, contracts, finance_reports
 from fastapi.responses import RedirectResponse
 from api.schemas.base import BaseResponse
 
@@ -992,3 +1032,7 @@ app.include_router(clients.router)
 app.include_router(staff.router)
 app.include_router(holidays.router)
 app.include_router(line_system_config.router)
+app.include_router(client_payments.router)
+app.include_router(staff_payments.router)
+app.include_router(contracts.router)
+app.include_router(finance_reports.router)

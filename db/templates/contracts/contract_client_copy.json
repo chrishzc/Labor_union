@@ -115,9 +115,9 @@
       "db_key": "first_payment_amount"
     },
     "C35": {
-      "label": "第一期撥款日 (C35)",
+      "label": "第一期應收日期 (C35)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "salary_payment_date_1"
+      "db_key": "first_payment_date"
     },
     "B36": {
       "label": "第二期款 (B36)",
@@ -125,9 +125,9 @@
       "db_key": "second_payment_amount"
     },
     "C36": {
-      "label": "第二期撥款日 (C36)",
+      "label": "第二期應收日期 (C36)",
       "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "salary_payment_date_2"
+      "db_key": "second_payment_date"
     },
     "D36": {
       "label": "月嫂匯款帳號 (D36)",

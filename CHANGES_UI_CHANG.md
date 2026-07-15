@@ -1,4 +1,37 @@
-# UI_CHANG 分支異動說明
+# UI_CHANG 變更說明
+
+## 2026-07-15－帳務拆分、財務報表與契約介面
+
+### 帳務明細總覽（Page 2）
+
+- 客戶帳務與月嫂帳務改成兩張獨立表格，欄位不再交錯。
+- 客戶收款總覽顯示訂金、第一期、第二期各自的應收金額、實收金額、應收日期、實收日期，以及應收／實收總額與未收餘額。
+- 月嫂應付總覽逐筆顯示案件、服務人員、指派、服務時數、單價、服務薪資、樓層費、調整額、應付／實付／未付餘額、應付日期、實付日期與付款狀態。
+- 支援案件編號、訂單狀態及客戶／月嫂付款狀態篩選。
+- 選擇案件後，自動透過 `GET /api/v1/client-payments/{case_no}` 與 `GET /api/v1/staff-payments/{case_no}` 取得該案件交易明細；不預先載入其他案件。
+- 人工補登或沖正交易必須填寫外部識別與原因，摘要金額仍由交易明細計算。
+
+### 應付帳款查詢／輸出（Page 2）
+
+- 可預覽並下載每月應付帳款 Excel。
+- 月嫂薪資由永豐銀行代碼 31 出款；客戶退還補助款由台新銀行代碼 633 出款。
+- 「退還補助款」與尚未啟用的「解約退款」已明確分開。
+
+### 核銷補助清冊（Page 2）
+
+- 新增分季核銷與年度總表預覽及 Excel 下載。
+- 一般市民與補助市民分區顯示；當季沒有補助市民時不顯示下半部。
+- 補助天數依補助時數除以每日服務時數計算，固定顯示至小數點後 2 位。
+
+### 表單管理與 FastAPI
+
+- 新增服務人員契約 Excel 鏡像輸出，不修改原始模板。
+- 新增客戶收款、月嫂應付、契約內容、應付帳款及補助核銷報表 API。
+- FastAPI 正式啟動入口修正為 `line.main:app`。
+
+對應整合 commit：`0f9c11f`。
+
+---
 
 本文件彙整 `UI_CHANG` 分支相較於 `main` 的主要功能異動，供組長 review 時快速掌握改動重點與影響範圍。
 
@@ -39,3 +72,13 @@
 ---
 
 如需查看更詳細的逐次修改歷程（含每次修改的問題背景、實作細節與測試注意事項），可參考 `graceAdd/alterContent.md`（此檔案已被 `.gitignore` 排除，不會出現在本分支的 GitHub 內容中，僅存在於本機）。
+
+
+---
+
+## 2026-07-13 - Case number normalization
+
+- All customer-facing order and case identifiers now use clients.case_no exclusively.
+- Removed the legacy order_no specification and obsolete order-number labels from the UI, forms, API examples, and LINE documents.
+- LINE binding, LIFF screens, database relations, and APIs now use `case_no`; the former internal numeric order key has been removed.
+- When a LINE-native registration has not yet received a case number, the user is informed that administrative issuance is pending instead of receiving an internal ID.

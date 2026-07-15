@@ -1,9 +1,9 @@
 {
   "id": "tpl_info_01",
   "name": "1. 訂單資訊-1 (給服務人員的工時與派單資訊)",
-  "desc": "派單前提供給月嫂閱讀之工時、地址、服務起訖日、自費/補助薪資與總薪資單據",
+  "desc": "派單前提供給月嫂閱讀之工時、地址、服務起訖日、服務薪資與樓層費單據",
   "fields": [
-    {"id": "f_101_c1", "label": "訂單號碼(市府單號)", "type": "db_link", "db_key": "case_no", "width": "half"},
+    {"id": "f_101_c1", "label": "案件編號 (case_no)", "type": "db_link", "db_key": "case_no", "width": "half"},
     {"id": "f_102_c2", "label": "服務人員姓名", "type": "db_link", "db_key": "staff_name", "width": "half"},
     {"id": "f_103_c3", "label": "客戶名稱", "type": "db_link", "db_key": "client_name", "width": "full"},
     {"id": "f_104_c4", "label": "服務開始日期", "type": "db_link", "db_key": "actual_start_date", "width": "half"},
@@ -12,11 +12,9 @@
     {"id": "f_107_c7", "label": "希望服務天數", "type": "db_link", "db_key": "service_days", "width": "half"},
     {"id": "f_108_c8", "label": "服務地址", "type": "db_link", "db_key": "address", "width": "full"},
     {"id": "f_109_c9", "label": "服務單價 (日薪)", "type": "db_link", "db_key": "caregiver_rate", "width": "half"},
-    {"id": "f_110_ca", "label": "自費服務薪資", "type": "db_link", "db_key": "service_salary", "width": "half"},
-    {"id": "f_111_cb", "label": "付款日-1 (月嫂自費薪資撥款日)", "type": "db_link", "db_key": "salary_payment_date_1", "width": "half"},
-    {"id": "f_112_cc", "label": "補助薪資金額", "type": "db_link", "db_key": "subsidy_salary", "width": "half"},
-    {"id": "f_113_cd", "label": "付款日-2 (月嫂補助薪資撥款日)", "type": "db_link", "db_key": "salary_payment_date_2", "width": "half"},
-    {"id": "f_114_ce", "label": "總薪資 (自費+補助合計)", "type": "db_link", "db_key": "total_caregiver_salary", "width": "full"},
+    {"id": "f_110_ca", "label": "服務薪資", "type": "db_link", "db_key": "service_salary", "width": "half"},
+    {"id": "f_111_cb", "label": "預計發薪日", "type": "db_link", "db_key": "salary_payment_date_1", "width": "half"},
+    {"id": "f_112_cc", "label": "樓層費", "type": "db_link", "db_key": "floor_fee", "width": "half"},
     {"id": "f_115_cf", "label": "特殊假日與注意事項備註", "type": "db_link", "db_key": "notes", "width": "full"}
   ]
 }

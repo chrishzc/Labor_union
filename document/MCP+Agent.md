@@ -33,12 +33,12 @@ MCP 伺服器將暴露以下 Tools 給 LLM：
 | 工具名稱 (`tool_name`) | 對應 API / 服務層功能 | 參數說明 | 描述 / 業務規則 |
 | :--- | :--- | :--- | :--- |
 | `get_orders` | `GET /api/v1/orders` | `status` (Optional) | 取得所有訂單的基本狀態與列表 |
-| `get_order_details` | `GET /api/v1/orders/{order_id}` | `order_id` (Required) | 取得單筆訂單之 36 欄位詳細試算資訊 |
-| `calculate_schedule` | `POST /api/v1/orders/calculate-schedule` | `order_id`, `custom_leaves`, `holidays_off` | **出勤天數精算**：傳入請假日期與國定假日放假名單，回傳順延後之 `actual_end_date` 與每日排班狀態 |
-| `save_schedule` | `POST /api/v1/schedule/save` | `order_id`, `schedule_data` | 將精算後的排班紀錄與順延完工日寫入資料庫 |
-| `recommend_staff` | `GET /api/v1/matches/recommend-staff` | `order_id` | 根據訂單需求，依檔期與地區推薦合適月嫂 |
+| `get_order_details` | `GET /api/v1/orders/{case_no}` | `case_no` (Required) | 取得單筆訂單之 36 欄位詳細試算資訊 |
+| `calculate_schedule` | `POST /api/v1/orders/calculate-schedule` | `case_no`, `custom_leaves`, `holidays_off` | **出勤天數精算**：傳入請假日期與國定假日放假名單，回傳順延後之 `actual_end_date` 與每日排班狀態 |
+| `save_schedule` | `POST /api/v1/schedule/save` | `case_no`, `schedule_data` | 將精算後的排班紀錄與順延完工日寫入資料庫 |
+| `recommend_staff` | `GET /api/v1/matches/recommend-staff` | `case_no` | 根據訂單需求，依檔期與地區推薦合適月嫂 |
 | `send_match_notification` | `POST /api/v1/matches/{match_id}/send-info-{step}` | `match_id`, `step` (1: 粗篩, 2: 精篩, 3: 履歷) | 透過 Line 推播媒合資訊或履歷給月嫂或客戶 |
-| `assign_staff` | `POST /api/v1/orders/{order_id}/assign-staff` | `order_id`, `staff_id` | 正式定案指派月嫂，鎖定檔期並建立訂單 |
+| `assign_staff` | `POST /api/v1/orders/{case_no}/assign-staff` | `case_no`, `staff_id` | 正式定案指派月嫂，鎖定檔期並建立訂單 |
 | `manage_holidays` | `GET/POST/DELETE /api/v1/holidays` | `action` (list/add/delete), `holiday_date` | 管理系統內的國定假日名單 |
 
 ---
@@ -97,16 +97,16 @@ mcp = FastMCP("LobarUnionAdmin")
 API_BASE_URL = "http://localhost:8000/api/v1"
 
 @mcp.tool()
-def get_order_details(order_id: int) -> str:
+def get_order_details(case_no: str) -> str:
     """取得單筆訂單的詳細 36 欄位資訊與當前結束日。"""
     try:
-        response = requests.get(f"{API_BASE_URL}/orders/{order_id}")
+        response = requests.get(f"{API_BASE_URL}/orders/{case_no}")
         return str(response.json())
     except Exception as e:
         return f"無法取得訂單資訊: {str(e)}"
 
 @mcp.tool()
-def calculate_and_save_schedule(order_id: int, custom_leaves: list, holidays_off: list) -> str:
+def calculate_and_save_schedule(case_no: str, custom_leaves: list, holidays_off: list) -> str:
     """
     計算並儲存出勤排假。
     custom_leaves: 請假日期列表 (例如 ['2026-10-01'])
@@ -116,7 +116,7 @@ def calculate_and_save_schedule(order_id: int, custom_leaves: list, holidays_off
     try:
         # 1. 呼叫精算 API
         calc_payload = {"custom_leaves": custom_leaves, "holidays_off": holidays_off}
-        calc_res = requests.post(f"{API_BASE_URL}/orders/{order_id}/calculate-schedule", json=calc_payload)
+        calc_res = requests.post(f"{API_BASE_URL}/orders/calculate-schedule", json=calc_payload)
         if calc_res.status_code != 200:
             return f"試算失敗: {calc_res.text}"
         
@@ -124,7 +124,7 @@ def calculate_and_save_schedule(order_id: int, custom_leaves: list, holidays_off
         
         # 2. 儲存排班結果
         save_res = requests.post(f"{API_BASE_URL}/schedule/save", json={
-            "order_id": order_id,
+            "case_no": case_no,
             "actual_end_date": schedule_data.get("actual_end_date"),
             "schedule_days": schedule_data.get("days")
         })
@@ -136,10 +136,10 @@ def calculate_and_save_schedule(order_id: int, custom_leaves: list, holidays_off
         return f"執行過程中發生錯誤: {str(e)}"
 
 @mcp.tool()
-def recommend_and_match_staff(order_id: int) -> str:
+def recommend_and_match_staff(case_no: str) -> str:
     """根據訂單推薦合適的服務人員（月嫂）。"""
     try:
-        response = requests.get(f"{API_BASE_URL}/matches/recommend-staff?order_id={order_id}")
+        response = requests.get(f"{API_BASE_URL}/matches/recommend-staff?case_no={case_no}")
         return str(response.json())
     except Exception as e:
         return f"推薦失敗: {str(e)}"

@@ -41,6 +41,8 @@ history/work_log.md
 task-*.md
 PROJECT_SPEC.md
 AGENTS.md
+scratch/
+system_map.schema.json
 
 # Preserve system_map files
 !**/system_map.yaml

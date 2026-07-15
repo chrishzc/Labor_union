@@ -84,7 +84,7 @@ flowchart TD
 ```sql
 CREATE TABLE IF NOT EXISTS data_anomaly_events (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    order_no VARCHAR(50) NULL COMMENT '關聯之訂單編號或查詢序號',
+    case_no VARCHAR(50) NULL COMMENT '關聯 clients.case_no 的案件識別碼',
     source_platform VARCHAR(50) NOT NULL COMMENT '來源平台 (government/beclass)',
     anomaly_type VARCHAR(50) NOT NULL COMMENT '異常類型 (如 PHONE_FORMAT_ERROR 等)',
     invalid_data JSON NOT NULL COMMENT '包含錯誤欄位與值的 JSON 數據 (例如 {"phone": "0912345"})',
@@ -112,8 +112,8 @@ CREATE TABLE IF NOT EXISTS data_anomaly_events (
 為防止重複爬取或接收 BeClass 資料導致資料庫髒亂，系統必須以 **唯一識別碼** 進行 `UPSERT` 寫入。
 
 ### 4.1 唯一識別碼定義
-*   **政府登記資料**：以 `case_no` (查詢序號/案件編號) 為唯一主鍵。
-*   **BeClass 登記資料**：以 `query_no` (查詢序號) 或 `order_no` (訂單編號) 為唯一主鍵。
+*   **政府登記資料**：以 `clients.case_no` (查詢序號/案件編號) 為唯一主鍵。
+*   **BeClass 登記資料**：以 `query_no` 作為來源去重鍵；與客戶案件關聯及所有業務上的案件識別，一律使用 `clients.case_no`。
 
 ### 4.2 UPSERT 判定邏輯
 1.  **步驟一**：讀取一筆新爬取/接收的資料，提取其唯一識別碼。
@@ -132,7 +132,7 @@ CREATE TABLE IF NOT EXISTS data_anomaly_events (
 ```sql
 CREATE TABLE IF NOT EXISTS line_push_tasks (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    order_no VARCHAR(50) NOT NULL COMMENT '關聯之訂單編號',
+    case_no VARCHAR(50) NOT NULL COMMENT '關聯 clients.case_no 的案件識別碼',
     task_type VARCHAR(50) NOT NULL DEFAULT 'REMIND_REGISTRATION' COMMENT '推播任務類型',
     push_status VARCHAR(20) DEFAULT 'pending' COMMENT '推播狀態 (pending:待發送/sent:已發送/failed:發送失敗)',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

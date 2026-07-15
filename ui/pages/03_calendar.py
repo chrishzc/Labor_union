@@ -166,8 +166,8 @@ def show():
                 ed_d_tmp = st_d_tmp + timedelta(days=days_cnt_tmp - 1) if st_d_tmp else None
                 st_str = st_d_tmp.strftime('%Y-%m-%d') if st_d_tmp else '未定'
                 ed_str = ed_d_tmp.strftime('%Y-%m-%d') if ed_d_tmp else '未定'
-                label = f"訂單 #{o.get('case_no') or o['order_id']} {o['client_name']} {o['order_status']} ({st_str} ~ {ed_str})"
-                order_menu_opts[label] = o['order_id']
+                label = f"訂單 #{o['case_no']} {o['client_name']} {o['order_status']} ({st_str} ~ {ed_str})"
+                order_menu_opts[label] = o['case_no']
                 
             selected_order_label = st.selectbox(
                 "2. 訂單選擇", 
@@ -175,9 +175,9 @@ def show():
                 index=0,
                 disabled=(action_mode == "不連動，單純看行事曆")
             )
-            calc_order_id = order_menu_opts[selected_order_label]
-            if calc_order_id:
-                target_order = next((o for o in all_orders if o['order_id'] == calc_order_id), None)
+            calc_case_no = order_menu_opts[selected_order_label]
+            if calc_case_no:
+                target_order = next((o for o in all_orders if o['case_no'] == calc_case_no), None)
 
         # 4. 訂單匹配模式的黃底試算準備
         if action_mode == "訂單匹配" and target_order:
@@ -199,7 +199,7 @@ def show():
                     if curr.year == cal_year and curr.month == cal_month:
                         buffer_days_set.add(curr.day)
                     curr += timedelta(days=1)
-            st.info(f"🤝 正在預覽案件 #{target_order.get('case_no') or target_order['order_id']} ({target_order['client_name']}) 的預排檔期 (黃底) 與 7 天預留備用期 (黃底)。")
+            st.info(f"🤝 正在預覽案件 #{target_order['case_no']} ({target_order['client_name']}) 的預排檔期 (黃底) 與 7 天預留備用期 (黃底)。")
 
         # 5. 出勤天數精算模式：在繪製月曆前優先執行精算控制面板 (確保解鎖預留備用期與連動月曆)
         if action_mode == "出勤天數精算" and target_order:
@@ -215,7 +215,7 @@ def show():
                     holiday_dates_map[label] = hd
                     
             st.markdown("---")
-            st.markdown(f"### ⚙️ 出勤天數精算控制面板 (案件編號: `{target_order.get('case_no') or target_order['order_id']}` - {target_order['client_name']})")
+            st.markdown(f"### ⚙️ 出勤天數精算控制面板 (案件編號: `{target_order['case_no']}` - {target_order['client_name']})")
             
             col_m1, col_m2 = st.columns(2)
             with col_m1:
@@ -269,7 +269,7 @@ def show():
                 # 「💾 儲存放假與動態順延」按鈕與防呆防護
                 all_rest_dt_list = [d.strftime("%Y-%m-%d") for d in (custom_leave_dates | custom_holiday_rest_dates)]
                 if st.button("💾 儲存放假與動態順延 (寫入資料庫)", type="primary", key="save_rest_dates_btn"):
-                    save_res = db_service.save_order_rest_dates(target_order['order_id'], all_rest_dt_list)
+                    save_res = db_service.save_order_rest_dates(target_order['case_no'], all_rest_dt_list)
                     if save_res.get('success'):
                         st.success(f"✅ {save_res['message']}")
                         st.balloons()

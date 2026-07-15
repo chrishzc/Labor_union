@@ -52,20 +52,84 @@ def safe_date(val):
             return None
     return val
 
+def generate_virtual_account(case_no) -> str:
+    """
+    ponytail: 依據 9 碼的「查詢序號(案件編號)」(例如 115000001) 計算對應的 14 碼虛擬帳號。
+    如果長度不符合 9 碼，則嘗試回退提取所有數字做基本填充處理。
+    """
+    if not case_no:
+        return ""
+    case_no_str = str(case_no).strip()
+    if len(case_no_str) == 9 and case_no_str.isdigit():
+        year = case_no_str[:3]
+        try:
+            seq = int(case_no_str[3:])
+            return f"99781699{year}{seq:03d}"
+        except ValueError:
+            pass
+    # fallback
+    digits = "".join(filter(str.isdigit, case_no_str))
+    if len(digits) >= 3:
+        year = digits[:3]
+        try:
+            seq = int(digits[3:]) if digits[3:] else 0
+            return f"99781699{year}{seq:03d}"
+        except ValueError:
+            pass
+    return ""
+
 def get_connection():
     """建立並回傳資料庫連線"""
     return pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
 
+
+def _resolve_case_no(case_ref) -> str:
+    """Normalize the canonical case number used by every order operation."""
+    case_no = str(case_ref or "").strip()
+    if not case_no:
+        raise ValueError("case_no 不可為空")
+    return case_no
+
+
+def get_order_by_case_no(case_no: str) -> dict | None:
+    """Fetch the unique order identified by case_no."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT o.case_no, o.client_id, o.staff_id, o.status, o.cancel_reason,
+                       o.line_group_id, o.actual_start_date, o.actual_end_date,
+                       o.contract_id, o.service_days, o.service_hours_per_day,
+                       o.subsidy_eligibility, o.floor_fee, o.deposit_date,
+                       o.start_date, o.end_date, o.custom_rest_dates,
+                       o.other_addition, o.created_at, o.updated_at,
+                       c.name AS client_name, s.name AS staff_name
+                FROM orders o
+                JOIN clients c ON c.case_no = o.case_no
+                LEFT JOIN staff s ON s.id = o.staff_id
+                WHERE o.case_no = %s
+            """, (_resolve_case_no(case_no),))
+            return cursor.fetchone()
+    finally:
+        conn.close()
+
 def get_table_data(table_name: str) -> list[dict]:
     """讀取指定原始資料表的內容"""
-    allowed_tables = ['clients', 'staff', 'orders', 'payments', 'beclass_records', 'matching_records', 'holidays']
+    allowed_tables = ['clients', 'staff', 'orders', 'beclass_records', 'matching_records', 'holidays', 'staff_bank_accounts']
     if table_name not in allowed_tables:
         raise ValueError(f"不允許查詢此資料表: {table_name}")
 
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(f"SELECT * FROM `{table_name}`")
+            if table_name == 'orders':
+                cursor.execute("""
+                    SELECT o.*, s.name AS staff_name
+                    FROM orders o
+                    LEFT JOIN staff s ON o.staff_id = s.id
+                """)
+            else:
+                cursor.execute(f"SELECT * FROM `{table_name}`")
             return cursor.fetchall()
     finally:
         conn.close()
@@ -75,11 +139,11 @@ def get_table_data(table_name: str) -> list[dict]:
 TABLE_PRIMARY_KEYS = {
     'clients': 'id',
     'staff': 'id',
-    'orders': 'id',
-    'payments': 'id',
+    'orders': 'case_no',
     'beclass_records': 'id',
     'matching_records': 'id',
     'holidays': 'holiday_date',
+    'staff_bank_accounts': 'id',
 }
 
 # 系統自動管理欄位，一律唯讀，不允許透過即時編輯表格寫入，避免破壞主鍵/去重與時間戳記追蹤
@@ -197,11 +261,11 @@ def get_order_details() -> list[dict]:
             # 嘗試讀取 beclass_records survey_details 進行關聯
             survey_map = {}
             try:
-                cursor.execute("SELECT client_name, survey_details FROM beclass_records WHERE survey_details IS NOT NULL")
+                cursor.execute("SELECT query_no, survey_details FROM beclass_records WHERE survey_details IS NOT NULL")
                 b_rows = cursor.fetchall()
                 for br in b_rows:
-                    if br.get('client_name') and br.get('survey_details'):
-                        survey_map[br['client_name']] = parse_beclass_survey_details(br['survey_details'])
+                    if br.get('query_no') and br.get('survey_details'):
+                        survey_map[str(br['query_no']).strip()] = parse_beclass_survey_details(br['survey_details'])
             except Exception:
                 pass
 
@@ -217,8 +281,9 @@ def get_order_details() -> list[dict]:
                     return str(val)
 
                 r['due_date'] = to_str_date(r.get('due_date') or r.get('start_date'))
-                r['actual_start_date'] = to_str_date(r.get('actual_start_date') or r.get('start_date'))
-                r['actual_end_date'] = to_str_date(r.get('actual_end_date') or r.get('end_date'))
+                # 實際服務日期不可用預期日期補值，否則尚未開工的訂單會被誤判。
+                r['actual_start_date'] = to_str_date(r.get('actual_start_date'))
+                r['actual_end_date'] = to_str_date(r.get('actual_end_date'))
                 r['deposit_received_at'] = to_str_date(r.get('deposit_received_at') or r.get('deposit_date'))
                 r['start_date'] = to_str_date(r.get('start_date'))
                 r['end_date'] = to_str_date(r.get('end_date'))
@@ -260,8 +325,7 @@ def get_order_details() -> list[dict]:
                 r['total_caregiver_salary'] = safe_int(r.get('service_salary', 0)) + safe_int(r.get('subsidy_salary', 0))
 
                 # 注入解包出來的 15 大照護細節欄位
-                c_name = r.get('client_name')
-                c_details = survey_map.get(c_name) or parse_beclass_survey_details(r.get('notes'))
+                c_details = survey_map.get(str(r.get('case_no') or '').strip(), {})
                 for dk, dv in c_details.items():
                     r[dk] = dv
 
@@ -269,49 +333,53 @@ def get_order_details() -> list[dict]:
     finally:
         conn.close()
 
-def create_order(client_id: int, service_days: int, service_hours_per_day: int, 
+
+def get_case_order_details() -> list[dict]:
+    """Return order view rows identified by case_no."""
+    return get_order_details()
+
+def create_order(case_no: str, service_days: int, service_hours_per_day: int,
                  subsidy_eligibility: str, floor_fee: float = 0.0, 
                  deposit_date = None, start_date = None, end_date = None, 
-                 other_addition: float = 0.0, status: str = '洽談中') -> int:
-    """新增一筆訂單，並同步建立關聯的 payments 帳務記錄"""
+                 other_addition: float = 0.0, status: str = '洽談中') -> str:
+    """依正式 case_no 建立或取得唯一訂單，並同步建立帳務記錄。"""
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            # 1. 寫入 orders 實體表
+            cursor.execute("SELECT id, name FROM clients WHERE case_no = %s", (case_no,))
+            client = cursor.fetchone()
+            if not client:
+                raise ValueError(f"找不到 case_no={case_no} 的客戶")
+
             cursor.execute("""
                 INSERT INTO orders (
-                    client_id, status, service_days, service_hours_per_day, 
+                    case_no, client_id, status, service_days, service_hours_per_day,
                     subsidy_eligibility, floor_fee, deposit_date, start_date, end_date, other_addition
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE case_no = VALUES(case_no)
             """, (
-                client_id, status, service_days, service_hours_per_day,
+                case_no, client['id'], status, service_days, service_hours_per_day,
                 subsidy_eligibility, floor_fee, deposit_date, start_date, end_date, other_addition
             ))
-            order_id = conn.insert_id()
-            
-            # 2. 獲取客戶姓名與案號以寫入 payments 備份
-            cursor.execute("SELECT name, case_no FROM clients WHERE id = %s", (client_id,))
-            client = cursor.fetchone()
-            client_name = client['name'] if client else None
-            case_no = client['case_no'] if client else None
-            
-            # 3. 同步建立 payments 流水帳
+
             cursor.execute("""
-                INSERT INTO payments (order_id, case_no, client_name, payment_status)
-                VALUES (%s, %s, %s, '待收訂金')
-            """, (order_id, case_no, client_name))
+                INSERT IGNORE INTO client_payments (case_no, payment_status)
+                VALUES (%s, '待收訂金')
+            """, (case_no,))
             
             conn.commit()
-            return order_id
+            return case_no
     except Exception as e:
         conn.rollback()
         raise e
     finally:
         conn.close()
 
-def assign_staff_to_order(order_id: int, staff_id: int) -> bool:
+def assign_staff_to_order(case_no: str, staff_id: int) -> bool:
     """為訂單指派服務人員，將狀態改為「訂單成立」並自動產生預設的每日排班"""
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
@@ -319,18 +387,18 @@ def assign_staff_to_order(order_id: int, staff_id: int) -> bool:
             cursor.execute("""
                 UPDATE orders 
                 SET staff_id = %s, status = '訂單成立' 
-                WHERE id = %s
-            """, (staff_id, order_id))
+                WHERE case_no = %s
+            """, (staff_id, case_no))
             
             # 2. 獲取訂單的開始日期與服務天數，以進行自動排班
-            cursor.execute("SELECT start_date, service_days FROM orders WHERE id = %s", (order_id,))
+            cursor.execute("SELECT start_date, service_days FROM orders WHERE case_no = %s", (case_no,))
             order_info = cursor.fetchone()
             
             conn.commit()
             
             # 3. 呼叫 generate_default_schedule 產生排班 (若 start_date 存在)
             if order_info and order_info['start_date'] and order_info['service_days']:
-                generate_default_schedule(order_id, staff_id, order_info['start_date'], order_info['service_days'])
+                generate_default_schedule(case_no, staff_id, order_info['start_date'], order_info['service_days'])
                 
             return True
     except Exception as e:
@@ -339,16 +407,17 @@ def assign_staff_to_order(order_id: int, staff_id: int) -> bool:
     finally:
         conn.close()
 
-def update_order_status(order_id: int, status: str, cancel_reason: str = None) -> bool:
+def update_order_status(case_no: str, status: str, cancel_reason: str = None) -> bool:
     """更新訂單狀態與取消原因"""
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
                 UPDATE orders 
                 SET status = %s, cancel_reason = %s 
-                WHERE id = %s
-            """, (status, cancel_reason, order_id))
+                WHERE case_no = %s
+            """, (status, cancel_reason, case_no))
             conn.commit()
             return True
     except Exception as e:
@@ -357,8 +426,9 @@ def update_order_status(order_id: int, status: str, cancel_reason: str = None) -
     finally:
         conn.close()
 
-def update_order_full_details(order_id: int, data: dict) -> bool:
+def update_order_full_details(case_no: str, data: dict) -> bool:
     """更新 orders 主資料表全量欄位 (含天數、時數、資格、樓層費、起訖日與客戶姓名)"""
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
@@ -371,8 +441,9 @@ def update_order_full_details(order_id: int, data: dict) -> bool:
                     start_date = %s,
                     actual_start_date = %s,
                     end_date = %s,
+                    actual_end_date = %s,
                     deposit_date = %s
-                WHERE id = %s
+                WHERE case_no = %s
             """, (
                 data.get('service_days'),
                 data.get('service_hours_per_day'),
@@ -381,18 +452,18 @@ def update_order_full_details(order_id: int, data: dict) -> bool:
                 data.get('start_date'),
                 data.get('actual_start_date'),
                 data.get('end_date'),
+                data.get('actual_end_date'),
                 data.get('deposit_date'),
-                order_id
+                case_no
             ))
             
             # 若 clients 姓名有修改，同步更新客戶主表 name
             if data.get('client_name'):
                 cursor.execute("""
                     UPDATE clients c
-                    JOIN orders o ON o.client_id = c.id
                     SET c.name = %s
-                    WHERE o.id = %s
-                """, (data.get('client_name'), order_id))
+                    WHERE c.case_no = %s
+                """, (data.get('client_name'), case_no))
                 
             conn.commit()
             return True
@@ -402,39 +473,7 @@ def update_order_full_details(order_id: int, data: dict) -> bool:
     finally:
         conn.close()
 
-def update_payment_details(order_id: int, amount_receivable: float, deposit_received: float, 
-                           balance_received: float, caregiver_fee: float, 
-                           payment_status: str, notes: str = None,
-                           deposit_received_at = None, balance_received_at = None,
-                           caregiver_paid_at = None) -> bool:
-    """更新 payments 資料表的實收財務欄位與日期"""
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                UPDATE payments 
-                SET amount_receivable = %s, 
-                    deposit_received = %s, 
-                    deposit_received_at = %s,
-                    balance_received = %s, 
-                    balance_received_at = %s,
-                    caregiver_fee = %s, 
-                    caregiver_paid_at = %s,
-                    payment_status = %s, 
-                    notes = %s 
-                WHERE order_id = %s
-            """, (
-                amount_receivable, deposit_received, deposit_received_at,
-                balance_received, balance_received_at, caregiver_fee, caregiver_paid_at,
-                payment_status, notes, order_id
-            ))
-            conn.commit()
-            return True
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
+
 
 def add_or_update_holiday(holiday_date, holiday_name: str, is_double_pay_default: bool = True) -> bool:
     """新增或更新國定假日"""
@@ -472,7 +511,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
     """
     獲取月嫂在指定年月的每日檔期狀態。
     導入 ADR-v3-01 預產期 7 天緩衝鎖定與服務中解鎖機制。
-    回傳字典: { date_day(int): { 'status': 'white'/'yellow'/'red', 'client_name': '...', 'order_id': ..., 'is_work_day': bool } }
+    回傳字典: { date_day(int): { 'status': 'white'/'yellow'/'red', 'client_name': '...', 'case_no': ..., 'is_work_day': bool } }
     """
     from datetime import date, datetime, timedelta
     conn = get_connection()
@@ -496,7 +535,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
         with conn.cursor() as cursor:
             # 1. 讀取月嫂所有有效訂單 (洽談中/訂單成立/服務中/訂單完成) 進行動態天數與緩衝期計算
             cursor.execute("""
-                SELECT o.id AS order_id, o.status AS order_status, o.start_date, o.end_date, 
+                SELECT o.case_no, o.status AS order_status, o.start_date, o.end_date,
                        o.actual_start_date, o.service_days, c.name AS client_name
                 FROM orders o
                 JOIN clients c ON o.client_id = c.id
@@ -525,7 +564,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
                         schedule_map[curr.day] = {
                             'status': main_color,
                             'client_name': o['client_name'],
-                            'order_id': o['order_id'],
+                            'case_no': o['case_no'],
                             'is_work_day': True,
                             'is_double_pay': False
                         }
@@ -543,7 +582,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
                                 schedule_map[curr.day] = {
                                     'status': 'yellow',
                                     'client_name': f"{o['client_name']} (預留備用期)",
-                                    'order_id': o['order_id'],
+                                    'case_no': o['case_no'],
                                     'is_work_day': False,
                                     'is_double_pay': False
                                 }
@@ -553,7 +592,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
             cursor.execute("""
                 SELECT s.*, c.name AS client_name, o.status AS order_status, o.custom_rest_dates
                 FROM staff_schedule s
-                JOIN orders o ON s.order_id = o.id
+                JOIN orders o ON s.case_no = o.case_no
                 JOIN clients c ON o.client_id = c.id
                 WHERE s.staff_id = %s AND YEAR(s.work_date) = %s AND MONTH(s.work_date) = %s
             """, (staff_id, year, month))
@@ -579,7 +618,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
                 schedule_map[day] = {
                     'status': status,
                     'client_name': r['client_name'],
-                    'order_id': r['order_id'],
+                    'case_no': r['case_no'],
                     'is_work_day': bool(r['is_work_day']),
                     'is_double_pay': bool(r['is_double_pay']),
                     'schedule_id': r['id']
@@ -588,7 +627,7 @@ def get_staff_monthly_schedule(staff_id: int, year: int, month: int) -> dict[int
     finally:
         conn.close()
 
-def save_order_rest_dates(order_id: int, rest_dates_list: list) -> dict:
+def save_order_rest_dates(case_no: str, rest_dates_list: list) -> dict:
     """
     持久化儲存訂單放假日期清單，並依據休假天數自動順延服務結束日 end_date。
     確保出勤工作服務天數 100% 足額達 service_days (N 天)。
@@ -608,15 +647,16 @@ def save_order_rest_dates(order_id: int, rest_dates_list: list) -> dict:
         except:
             return None
 
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             # 1. 讀取訂單資訊
             cursor.execute("""
-                SELECT id, staff_id, start_date, service_days 
+                SELECT case_no, staff_id, start_date, service_days
                 FROM orders 
-                WHERE id = %s
-            """, (order_id,))
+                WHERE case_no = %s
+            """, (case_no,))
             order = cursor.fetchone()
             if not order:
                 return {'success': False, 'message': '找不到指定的訂單。'}
@@ -652,24 +692,24 @@ def save_order_rest_dates(order_id: int, rest_dates_list: list) -> dict:
                 schedule_entries.append((date_str, is_work))
                 curr_date += timedelta(days=1)
 
-            # 3. 持久化更新 orders 表的 custom_rest_dates 與 end_date
+            # 3. 持久化更新 orders 表的 custom_rest_dates 與 end_date/actual_end_date
             json_rest_str = json.dumps(sorted(list(clean_rest_set)), ensure_ascii=False)
             cursor.execute("""
                 UPDATE orders 
-                SET custom_rest_dates = %s, end_date = %s 
-                WHERE id = %s
-            """, (json_rest_str, new_end_date, order_id))
+                SET custom_rest_dates = %s, end_date = %s, actual_end_date = %s 
+                WHERE case_no = %s
+            """, (json_rest_str, new_end_date, new_end_date, case_no))
 
             # 4. 若已被指派月嫂，覆寫更新 staff_schedule 表
             if staff_id:
-                cursor.execute("DELETE FROM staff_schedule WHERE order_id = %s", (order_id,))
+                cursor.execute("DELETE FROM staff_schedule WHERE case_no = %s", (case_no,))
                 for date_str, is_work in schedule_entries:
                     note = '正常服務出勤日' if is_work else '行政專員排定放假(動態順延)'
                     cursor.execute("""
-                        INSERT INTO staff_schedule (order_id, staff_id, work_date, is_work_day, is_double_pay, notes)
+                        INSERT INTO staff_schedule (case_no, staff_id, work_date, is_work_day, is_double_pay, notes)
                         VALUES (%s, %s, %s, %s, %s, %s)
                         ON DUPLICATE KEY UPDATE is_work_day = VALUES(is_work_day), notes = VALUES(notes)
-                    """, (order_id, staff_id, date_str, is_work, False, note))
+                    """, (case_no, staff_id, date_str, is_work, False, note))
 
             conn.commit()
             return {
@@ -684,9 +724,10 @@ def save_order_rest_dates(order_id: int, rest_dates_list: list) -> dict:
     finally:
         conn.close()
 
-def generate_default_schedule(order_id: int, staff_id: int, start_date, service_days: int) -> bool:
+def generate_default_schedule(case_no: str, staff_id: int, start_date, service_days: int) -> bool:
     """根據開始日期與服務天數，自動生成一筆預設排班。預設排除週日放假，且將國定假日標記為放假/待確認"""
     from datetime import datetime, timedelta
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         # 1. 取得該月嫂與國定假日配置
@@ -730,11 +771,11 @@ def generate_default_schedule(order_id: int, staff_id: int, start_date, service_
                 
                 # 寫入 staff_schedule
                 cursor.execute("""
-                    INSERT INTO staff_schedule (order_id, staff_id, work_date, is_work_day, is_double_pay, notes)
+                    INSERT INTO staff_schedule (case_no, staff_id, work_date, is_work_day, is_double_pay, notes)
                     VALUES (%s, %s, %s, %s, %s, %s)
                     ON DUPLICATE KEY UPDATE is_work_day = %s
                 """, (
-                    order_id, staff_id, curr_date, is_work, False,
+                    case_no, staff_id, curr_date, is_work, False,
                     "國定假日預設放假" if is_holiday else ("週休預設放假" if is_weekend else None),
                     is_work
                 ))
@@ -743,9 +784,9 @@ def generate_default_schedule(order_id: int, staff_id: int, start_date, service_
                     work_days_count += 1
                 curr_date += timedelta(days=1)
                 
-            # 更新訂單的預計服務結束日 (為排班的最後一天)
+            # 更新訂單的預計服務結束日 與 實際服務結束日 (為排班的最後一天)
             last_date = curr_date - timedelta(days=1)
-            cursor.execute("UPDATE orders SET end_date = %s WHERE id = %s", (last_date, order_id))
+            cursor.execute("UPDATE orders SET end_date = %s, actual_end_date = %s WHERE case_no = %s", (last_date, last_date, case_no))
             
             conn.commit()
             return True
@@ -755,39 +796,42 @@ def generate_default_schedule(order_id: int, staff_id: int, start_date, service_
     finally:
         conn.close()
 
-def update_schedule_day(order_id: int, staff_id: int, work_date, is_work_day: bool, is_double_pay: bool, notes: str = None) -> bool:
-    """手動新增/修改單日排班狀態，若 order_id 為 None 則刪除排班明細以釋放檔期"""
+def update_schedule_day(case_no: str | None, staff_id: int, work_date, is_work_day: bool, is_double_pay: bool, notes: str = None) -> bool:
+    """手動新增/修改單日排班；case_no 為 None 時釋放該日檔期。"""
+    if case_no is not None:
+        case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            if order_id is None:
+            if case_no is None:
                 # 釋放檔期，直接刪除排班記錄
                 cursor.execute("""
                     DELETE FROM staff_schedule 
                     WHERE staff_id = %s AND work_date = %s
                 """, (staff_id, work_date))
             else:
-                # 寫入或更新排班，支援變更訂單關聯 (ON DUPLICATE KEY UPDATE order_id = ...)
                 cursor.execute("""
-                    INSERT INTO staff_schedule (order_id, staff_id, work_date, is_work_day, is_double_pay, notes)
+                    INSERT INTO staff_schedule (case_no, staff_id, work_date, is_work_day, is_double_pay, notes)
                     VALUES (%s, %s, %s, %s, %s, %s)
-                    ON DUPLICATE KEY UPDATE order_id = %s, is_work_day = %s, is_double_pay = %s, notes = %s
+                    ON DUPLICATE KEY UPDATE
+                        case_no = VALUES(case_no),
+                        is_work_day = VALUES(is_work_day),
+                        is_double_pay = VALUES(is_double_pay), notes = VALUES(notes)
                 """, (
-                    order_id, staff_id, work_date, is_work_day, is_double_pay, notes,
-                    order_id, is_work_day, is_double_pay, notes
+                    case_no, staff_id, work_date, is_work_day, is_double_pay, notes
                 ))
             
             # 動態重新計算服務天數，並修正訂單的結束日期
-            if order_id is not None:
+            if case_no is not None:
                 cursor.execute("""
                     SELECT COUNT(*) AS total_work_days, MAX(work_date) AS last_date
                     FROM staff_schedule 
-                    WHERE order_id = %s AND staff_id = %s AND is_work_day = TRUE
-                """, (order_id, staff_id))
+                    WHERE case_no = %s AND staff_id = %s AND is_work_day = TRUE
+                """, (case_no, staff_id))
                 summary = cursor.fetchone()
                 if summary and summary['last_date']:
                     # 更新訂單結束日
-                    cursor.execute("UPDATE orders SET end_date = %s WHERE id = %s", (summary['last_date'], order_id))
+                    cursor.execute("UPDATE orders SET end_date = %s WHERE case_no = %s", (summary['last_date'], case_no))
                 
             conn.commit()
             return True
@@ -797,8 +841,9 @@ def update_schedule_day(order_id: int, staff_id: int, work_date, is_work_day: bo
     finally:
         conn.close()
 
-def get_order_matches(order_id: int) -> list[dict]:
+def get_order_matches(case_no: str) -> list[dict]:
     """獲取特定訂單的所有媒合意願記錄與發送狀態"""
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
@@ -806,23 +851,27 @@ def get_order_matches(order_id: int) -> list[dict]:
                 SELECT m.*, s.name AS staff_name, s.phone AS staff_phone
                 FROM matching_records m
                 JOIN staff s ON m.staff_id = s.id
-                WHERE m.order_id = %s
+                WHERE m.case_no = %s
                 ORDER BY m.sent_at DESC
-            """, (order_id,))
+            """, (case_no,))
             return cursor.fetchall()
     finally:
         conn.close()
 
-def create_or_get_match_record(order_id: int, staff_id: int) -> int:
+def create_or_get_match_record(case_no: str, staff_id: int) -> int:
     """獲取或建立一筆媒合意願紀錄"""
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute("SELECT id FROM matching_records WHERE order_id = %s AND staff_id = %s", (order_id, staff_id))
+            cursor.execute("SELECT id FROM matching_records WHERE case_no = %s AND staff_id = %s", (case_no, staff_id))
             r = cursor.fetchone()
             if r:
                 return r['id']
-            cursor.execute("INSERT INTO matching_records (order_id, staff_id) VALUES (%s, %s)", (order_id, staff_id))
+            cursor.execute("""
+                INSERT INTO matching_records (case_no, staff_id)
+                VALUES (%s, %s)
+            """, (case_no, staff_id))
             conn.commit()
             return cursor.lastrowid
     finally:
@@ -1032,7 +1081,7 @@ def parse_client_district(city: str, address: str) -> str:
     return ""
 
 def get_recommended_staff_for_order(
-    order_id: int,
+    case_no: str,
     filter_region: bool = True,
     filter_schedule: bool = True,
     filter_babies: bool = True,
@@ -1041,16 +1090,17 @@ def get_recommended_staff_for_order(
     """
     ADAD INV-SVC-05: 智慧粗篩比對月嫂推薦引擎 (支援 7 天預留備用期持久化掃描與 city/address 區域比對)
     """
+    case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT o.id AS order_id, o.start_date, o.end_date, o.actual_start_date, o.service_days, o.service_hours_per_day,
+                SELECT o.case_no, o.start_date, o.end_date, o.actual_start_date, o.service_days, o.service_hours_per_day,
                        c.id AS client_id, c.name AS client_name, c.city, c.address, c.baby_info, c.service_time
                 FROM orders o
                 JOIN clients c ON o.client_id = c.id
-                WHERE o.id = %s
-            """, (order_id,))
+                WHERE o.case_no = %s
+            """, (case_no,))
             order_info = cursor.fetchone()
             if not order_info:
                 return []
@@ -1072,10 +1122,10 @@ def get_recommended_staff_for_order(
                 staff_region_map.setdefault(sid, set()).add(r['region_name'])
 
             cursor.execute("""
-                SELECT id, staff_id, start_date, end_date, actual_start_date 
+                SELECT case_no, staff_id, start_date, end_date, actual_start_date
                 FROM orders 
-                WHERE staff_id IS NOT NULL AND status NOT IN ('訂單取消') AND id != %s
-            """, (order_id,))
+                WHERE staff_id IS NOT NULL AND status NOT IN ('訂單取消') AND case_no != %s
+            """, (case_no,))
             existing_orders = cursor.fetchall()
 
             recommendations = []

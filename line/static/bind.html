@@ -353,8 +353,8 @@
         <div class="success-icon">✓</div>
         <div class="success-title">綁定與查詢成功</div>
         <div class="success-text" id="successDesc">
-            您的服務綁定與最新訂單查詢已成功！<br>
-            系統已自動發送最新訂單編號通知至您的 LINE 視窗。
+            您的服務綁定與最新案件查詢已成功！<br>
+            系統已自動發送案件編號通知至您的 LINE 視窗。
         </div>
         <button class="btn-close" onclick="closeLiffWindow()">關閉視窗</button>
     </div>
@@ -523,12 +523,12 @@
                 successContent.style.display = 'block';
                 
                 let desc = `您的 LINE 帳號已成功連結姓名為 <strong>${result.client_name}</strong> 的客戶資料！`;
-                if (result.order_id) {
-                    desc += `<br><br>您最新建立的服務訂單編號為：<strong>#${result.order_id}</strong>。`;
+                if (result.case_no) {
+                    desc += `<br><br>您的案件編號為：<strong>${result.case_no}</strong>。`;
                 } else {
-                    desc += `<br><br>目前尚未建立您的案件訂單，行政專員核對名冊後將會自動為您新增。`;
+                    desc += `<br><br>您的案件編號尚待行政核發；完成核對後將主動通知您。`;
                 }
-                desc += `<br><br>我們已將最新確認與訂單編號訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
+                desc += `<br><br>我們已將最新確認與案件編號訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
                 successDesc.innerHTML = desc;
                 
                 hideLoader();
@@ -574,12 +574,12 @@
                 successContent.style.display = 'block';
                 
                 let desc = `您的 LINE 帳號已成功連結姓名為 <strong>${result.client_name}</strong> 的客戶資料！`;
-                if (result.order_id) {
-                    desc += `<br><br>您最新建立的服務訂單編號為：<strong>#${result.order_id}</strong>。`;
+                if (result.case_no) {
+                    desc += `<br><br>您的案件編號為：<strong>${result.case_no}</strong>。`;
                 } else {
-                    desc += `<br><br>目前尚未建立您的案件訂單，行政專員核對名冊後將會自動為您新增。`;
+                    desc += `<br><br>您的案件編號尚待行政核發；完成核對後將主動通知您。`;
                 }
-                desc += `<br><br>我們已將最新確認與訂單編號訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
+                desc += `<br><br>我們已將最新確認與案件編號訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
                 successDesc.innerHTML = desc;
             } else {
                 showMessage(result.message || '綁定失敗', 'error');
