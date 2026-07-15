@@ -1,57 +1,64 @@
 # -*- coding: utf-8 -*-
+"""Import client bank receipts into the case-based client ledger.
+
+Receipt amounts are never used to define a case's receivable amount.  A new
+client-payment snapshot is derived only from the order's service terms.
 """
-File: scripts/import_finance_excel.py
-Description: 解析並清洗帳務.xlsx，將訂金、尾款、月嫂服務費用及對帳狀態寫入資料庫的 payments 表。
-ponytail: 帳務計價公式未建，目前金額與尾款全數採用固定數值進行對帳 Pipe 測試。
-"""
-import sys
+
+from __future__ import annotations
+
+import argparse
 import os
-import re
-import pymysql
+import sys
+from decimal import Decimal
+
 import pandas as pd
 from dotenv import load_dotenv
 
-# 確保中文輸出編碼正確
-try:
-    sys.stdout.reconfigure(encoding='utf-8')
-except Exception:
-    pass
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT not in sys.path:
+    sys.path.append(ROOT)
+load_dotenv(os.path.join(ROOT, ".env"))
 
-# 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+from services.client_payment_transactions import calculate_client_payment_state
+from services.client_payment_writer import build_client_summary_update
+from services.db_service import get_connection
+from services.order_amount_calculator import calculate_order_amounts
 
-# 資料庫連線配置
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', '127.0.0.1'),
-    'port': int(os.getenv('DB_PORT', 3306)),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', '1234'),
-    'database': os.getenv('DB_DATABASE', 'union_db'),
-    'charset': 'utf8mb4'
-}
+
+PAYMENT_STAGES = (
+    ("deposit", "deposit_received"),
+    ("first_payment", "first_payment_received"),
+    ("second_payment", "second_payment_received"),
+)
+
+
+def allocate_receipt(receivables: dict, current_state: dict, amount) -> list[tuple[str, Decimal]]:
+    """Allocate one receipt in collection-stage order without over-collection."""
+    remaining = Decimal(str(amount))
+    assert remaining > 0
+    allocations = []
+    for stage, received_key in PAYMENT_STAGES:
+        stage_remaining = Decimal(str(receivables[stage])) - Decimal(str(current_state[received_key]))
+        if stage_remaining <= 0:
+            continue
+        allocation = min(remaining, stage_remaining)
+        allocations.append((stage, allocation))
+        remaining -= allocation
+        if remaining == 0:
+            return allocations
+    raise ValueError("receipt exceeds the remaining client receivable")
+
 
 def decode_va_to_case_no(virtual_account):
-    """
-    將 14 碼虛擬帳號解碼還原為 9 碼案件編號 (查詢序號)。
-    規則：前綴 997816 + 分類 99 + 年度(3碼) + 縮寫後3碼(3碼) -> 還原為 年度(3碼) + 0000 + 縮寫後3碼
-    例：99781699115001 -> 115001 -> 115000001
-    """
+    """Decode 99781699 + ROC year + sequence virtual account into case_no."""
     va_str = str(virtual_account).strip()
-    if len(va_str) != 14 or not va_str.startswith("997816"):
+    if len(va_str) != 14 or not va_str.startswith("997816") or va_str[6:8] != "99":
         return None
-    
-    # 檢查是否為月子服務 (第 7-8 碼為 99)
-    category = va_str[6:8]
-    if category != "99":
-        return None  # 忽略托育課程(如113)、月子培訓(88)、會員(00)的虛擬帳號交易
-        
-    code_part = va_str[8:]  # 取得 6 碼 (如 115001)
-    year = code_part[:3]    # 115
-    seq = code_part[3:]     # 001
-    
-    # 還原成 9 碼案件編號：115 + 0000 + 01 (即 115000001)
-    case_no = f"{year}{int(seq):06d}"
-    return case_no
+    code_part = va_str[8:]
+    if not code_part.isdigit():
+        return None
+    return f"{code_part[:3]}{int(code_part[3:]):06d}"
 
 
 def normalize_header(value) -> str:
@@ -65,257 +72,232 @@ def get_sheet_name(xl: pd.ExcelFile, expected: str) -> str:
     try:
         return matches[normalize_header(expected)]
     except KeyError as exc:
-        raise ValueError(f"帳務活頁簿缺少必要分頁：{expected}") from exc
-
-
-def load_case_reference(xl: pd.ExcelFile) -> pd.DataFrame:
-    """Load the fixed, headerless 12-column reference sheet safely.
-
-    This legacy sheet has no column labels, so an added column cannot be
-    identified reliably. Refuse any changed width instead of allowing a
-    positional shift to corrupt case numbers or amounts.
-    """
-    raw = xl.parse(get_sheet_name(xl, "資料庫"), header=None)
-    if raw.shape[1] != 12:
-        raise ValueError(
-            f"帳務『資料庫』分頁必須正好有 12 欄，目前為 {raw.shape[1]} 欄；"
-            "為避免 id/order_id 等額外欄位造成位移，已停止匯入"
-        )
-    return raw
+        raise ValueError(f"找不到工作表：{expected}") from exc
 
 
 def load_transactions(xl: pd.ExcelFile) -> pd.DataFrame:
-    """Find the bank header row and select transaction fields by name."""
-    raw = xl.parse(get_sheet_name(xl, "合作社帳戶"), header=None)
-    required = {"記帳日期", "交易摘要", "支出", "存入", "虛擬帳號/轉帳備註"}
+    raw = xl.parse(get_sheet_name(xl, "銀行流水明細"), header=None)
+    required = {"交易日期", "交易摘要", "支出", "收入", "虛擬帳號/對方帳號"}
     for row_index in range(min(10, len(raw))):
         headers = [str(value).strip() if pd.notna(value) else "" for value in raw.iloc[row_index]]
         if required.issubset(set(headers)):
             data = raw.iloc[row_index + 1:].copy()
             data.columns = headers
-            # Explicit allowlist: unknown fields, including id/order_id, are ignored.
-            return data[["記帳日期", "交易摘要", "支出", "存入", "虛擬帳號/轉帳備註"]]
-    raise ValueError("帳務『合作社帳戶』分頁找不到必要的交易欄名")
+            return data[["交易日期", "交易摘要", "支出", "收入", "虛擬帳號/對方帳號"]]
+    raise ValueError("找不到銀行流水明細的必要欄位")
 
-def main():
-    excel_path = "document/資料庫、資料處理/帳務.xlsx"
-    if not os.path.exists(excel_path):
-        print(f"錯誤：找不到帳務 Excel 檔案，路徑為：{excel_path}")
-        sys.exit(1)
-        
-    print(f"開始解析帳務 Excel：{excel_path} ...")
-    xl = pd.ExcelFile(excel_path)
-    
-    # 1. 讀取「資料庫」分頁 (Sheet 1) 以獲取案件對照與應收金額
-    df_db = load_case_reference(xl)
-    
-    # 解析案件對照表 (從資料庫分頁中建立映射)
-    case_info = {} # {case_no: {client_name, amount_receivable, caregiver_fee}}
-    for _, row in df_db.iterrows():
-        # 對照表格式：[前綴, 序號, 工會, 姓名, 年度, 案號, 狀態, 虛擬帳號, 應收, 月嫂費用, 備份姓名, 備註案號]
-        va = str(row.iloc[7]).strip() if pd.notna(row.iloc[7]) else ""
-        case_no_raw = str(row.iloc[11]).strip() if pd.notna(row.iloc[11]) else ""
-        # 去除備註中的 "案" 字以取得純數字編號
-        case_no = case_no_raw.replace("案", "")
-        name = str(row.iloc[3]) if pd.notna(row.iloc[3]) else ""
-        
-        if case_no and va:
-            case_info[case_no] = {
-                'client_name': name,
-                'amount_receivable': float(row.iloc[8]) if pd.notna(row.iloc[8]) else 80000.0,
-                'caregiver_fee': float(row.iloc[9]) if pd.notna(row.iloc[9]) else 60000.0
-            }
-            
-    # 2. 讀取「合作社帳戶」分頁 (Sheet 0) 交易流水帳
-    df_tx = load_transactions(xl)
-    
-    # 建立案件的累計收款/付款結果
-    payments_data = {} # {case_no: {deposit, deposit_at, balance, balance_at, caregiver_paid, caregiver_paid_at}}
-    
-    ignored_va_count = 0
-    for _, row in df_tx.iterrows():
-        if pd.isna(row.get('記帳日期')):
+
+def build_snapshot_plan(order: dict) -> dict | None:
+    """Build a client ledger plan, or return None for a historical incomplete order."""
+    if order.get("deposit_service_days") is None:
+        return None
+    service_start_date = order.get("actual_start_date") or order.get("start_date")
+    if not service_start_date or not order.get("deposit_date"):
+        return None
+    return calculate_order_amounts(
+        {
+            "case_no": order["case_no"],
+            "service_days": order.get("service_days"),
+            "service_hours_per_day": order.get("service_hours_per_day"),
+            "subsidy_eligibility": order.get("subsidy_eligibility"),
+            "client_floor_fee": order.get("floor_fee", 0),
+            "service_start_date": service_start_date,
+            "actual_completion_date": order.get("actual_end_date"),
+        },
+        collection_schedule={
+            "deposit_service_days": order["deposit_service_days"],
+            "deposit_due_date": order["deposit_date"],
+        },
+    )
+
+
+def create_client_payment_snapshot(cursor, plan: dict) -> int:
+    """Persist the calculator's three-stage client ledger snapshot."""
+    stages = {stage["stage"]: stage for stage in plan["client_ledger_plan"]["stages"]}
+    cursor.execute(
+        """INSERT INTO client_payments (
+            case_no,
+            deposit_receivable, deposit_due_date,
+            first_payment_receivable, first_payment_due_date,
+            second_payment_receivable, second_payment_due_date,
+            amount_receivable, payment_status
+        ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,'待收訂金')""",
+        (
+            plan["case_no"],
+            stages["deposit"]["receivable"], stages["deposit"]["due_date"],
+            stages["first_payment"]["receivable"], stages["first_payment"]["due_date"],
+            stages["second_payment"]["receivable"], stages["second_payment"]["due_date"],
+            plan["client_ledger_plan"]["amount_receivable"],
+        ),
+    )
+    return cursor.lastrowid
+
+
+def _order_for_snapshot(cursor, case_no: str) -> dict | None:
+    cursor.execute(
+        """SELECT case_no, service_days, service_hours_per_day, subsidy_eligibility,
+                  floor_fee, deposit_date, deposit_service_days,
+                  start_date, actual_start_date, actual_end_date
+           FROM orders WHERE case_no = %s FOR UPDATE""",
+        (case_no,),
+    )
+    return cursor.fetchone()
+
+
+def _existing_receipt_transactions(cursor, client_payment_id: int) -> list[dict]:
+    cursor.execute(
+        """SELECT stage, transaction_type, transaction_status, amount, occurred_at, external_reference
+           FROM client_payment_transactions
+           WHERE client_payment_id = %s
+             AND stage IN ('deposit', 'first_payment', 'second_payment')
+           ORDER BY occurred_at, id FOR UPDATE""",
+        (client_payment_id,),
+    )
+    return cursor.fetchall()
+
+
+def _record_receipt_allocation(cursor, payment: dict, transaction: dict, stage: str, amount: Decimal):
+    candidate = {
+        "stage": stage,
+        "transaction_type": "receipt",
+        "transaction_status": "succeeded",
+        "amount": amount,
+        "occurred_at": transaction["date"],
+        "external_reference": f"excel:{payment['case_no']}:{transaction['idx']}:{stage}",
+    }
+    cursor.execute(
+        """INSERT INTO client_payment_transactions
+           (client_payment_id, case_no, stage, transaction_type, transaction_status,
+            amount, occurred_at, external_reference, notes)
+           VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+        (payment["id"], payment["case_no"], stage, "receipt", "succeeded", amount,
+         transaction["date"], candidate["external_reference"], "銀行 Excel 匯入"),
+    )
+    return candidate
+
+
+def _update_client_summary(cursor, payment: dict, transactions: list[dict], occurred_at):
+    receivables = {
+        "deposit": payment["deposit_receivable"],
+        "first_payment": payment["first_payment_receivable"],
+        "second_payment": payment["second_payment_receivable"],
+    }
+    update = build_client_summary_update(receivables, transactions, occurred_at)
+    cursor.execute(
+        """UPDATE client_payments SET
+            deposit_received=%s, first_payment_received=%s, second_payment_received=%s,
+            amount_received=%s, deposit_received_at=%s, first_payment_received_at=%s,
+            second_payment_received_at=%s, second_payment_due_date=%s
+           WHERE id=%s""",
+        (update["deposit_received"], update["first_payment_received"], update["second_payment_received"],
+         update["amount_received"], update["deposit_received_at"], update["first_payment_received_at"],
+         update["second_payment_received_at"], update["second_payment_due_date"], payment["id"]),
+    )
+    if update["deposit_received_at"]:
+        cursor.execute(
+            """UPDATE orders SET status = '訂單成立'
+               WHERE case_no = %s AND status = '洽談中'""",
+            (payment["case_no"],),
+        )
+    return update
+
+
+def _parse_bank_transactions(df_tx: pd.DataFrame) -> tuple[dict[str, list[dict]], int]:
+    transactions_by_case: dict[str, list[dict]] = {}
+    skipped = 0
+    for idx, row in df_tx.iterrows():
+        if pd.isna(row.get("交易日期")):
             continue
-            
-        va_value = row.get('虛擬帳號/轉帳備註')
-        va = str(va_value).strip() if pd.notna(va_value) else ""
-        
-        # 支出/存入金額與交易日期
-        tx_date_value = row.get('記帳日期')
-        expense_value = row.get('支出')
-        income_value = row.get('存入')
-        tx_date_str = str(tx_date_value).strip() if pd.notna(tx_date_value) else None
-        expense = float(expense_value) if pd.notna(expense_value) and str(expense_value).strip() else 0.0
-        income = float(income_value) if pd.notna(income_value) and str(income_value).strip() else 0.0
-        
-        # (A) 處理存入交易 (訂金/尾款) -> 透過虛擬帳號解碼
-        if income > 0 and va:
-            case_no = decode_va_to_case_no(va)
-            if not case_no:
-                # 記錄被忽略的課程或會員帳號
-                if va.startswith("997816"):
-                    ignored_va_count += 1
-                continue
-                
-            if case_no not in payments_data:
-                payments_data[case_no] = {
-                    'deposit_received': 0.0, 'deposit_received_at': None,
-                    'first_payment_received': 0.0, 'first_payment_received_at': None,
-                    'second_payment_received': 0.0, 'second_payment_received_at': None,
-                    'caregiver_fee': 0.0, 'caregiver_paid_at': None
+        income_value = row.get("收入")
+        income = Decimal(str(income_value)) if pd.notna(income_value) and str(income_value).strip() else Decimal("0")
+        if income <= 0:
+            if pd.notna(row.get("支出")):
+                skipped += 1
+            continue
+        case_no = decode_va_to_case_no(row.get("虛擬帳號/對方帳號"))
+        if not case_no:
+            skipped += 1
+            continue
+        transactions_by_case.setdefault(case_no, []).append({
+            "amount": income,
+            "date": pd.to_datetime(row["交易日期"]).strftime("%Y-%m-%d"),
+            "idx": idx,
+        })
+    for transactions in transactions_by_case.values():
+        transactions.sort(key=lambda transaction: transaction["date"])
+    return transactions_by_case, skipped
+
+
+def import_bank_transactions(df_tx: pd.DataFrame) -> dict[str, int]:
+    """Import parsed bank receipts atomically and return imported/skipped counts."""
+    transactions_by_case, skipped_transactions = _parse_bank_transactions(df_tx)
+    imported_client_transactions = 0
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            for case_no, bank_transactions in transactions_by_case.items():
+                order = _order_for_snapshot(cursor, case_no)
+                if not order:
+                    skipped_transactions += len(bank_transactions)
+                    continue
+                cursor.execute("SELECT * FROM client_payments WHERE case_no = %s FOR UPDATE", (case_no,))
+                payment = cursor.fetchone()
+                if not payment:
+                    plan = build_snapshot_plan(order)
+                    if plan is None:
+                        skipped_transactions += len(bank_transactions)
+                        continue
+                    payment_id = create_client_payment_snapshot(cursor, plan)
+                    cursor.execute("SELECT * FROM client_payments WHERE id = %s FOR UPDATE", (payment_id,))
+                    payment = cursor.fetchone()
+
+                existing = _existing_receipt_transactions(cursor, payment["id"])
+                receivables = {
+                    "deposit": payment["deposit_receivable"],
+                    "first_payment": payment["first_payment_receivable"],
+                    "second_payment": payment["second_payment_receivable"],
                 }
-                
-            # ponytail: Reconcile chronologically (1st deposit, 2nd first payment, 3rd second payment)
-            if payments_data[case_no]['deposit_received'] == 0.0:
-                payments_data[case_no]['deposit_received'] = income
-                payments_data[case_no]['deposit_received_at'] = tx_date_str
-            elif payments_data[case_no]['first_payment_received'] == 0.0:
-                payments_data[case_no]['first_payment_received'] = income
-                payments_data[case_no]['first_payment_received_at'] = tx_date_str
-            else:
-                payments_data[case_no]['second_payment_received'] = income
-                payments_data[case_no]['second_payment_received_at'] = tx_date_str
-                
-        # (B) 處理支出交易 (轉帳給月嫂) -> 透過交易摘要的月嫂姓名比對案件
-        elif expense > 0:
-            summary_value = row.get('交易摘要')
-            summary = str(summary_value).strip() if pd.notna(summary_value) else ""
-            # 尋找是否符合 "月嫂[姓名]費" 格式
-            match = re.search(r"月嫂(.*?)費", summary)
-            if match:
-                caregiver_name = match.group(1).strip()
-                # 搜尋此月嫂名字對應的案件編號
-                matched_case_no = None
-                for c_no, info in case_info.items():
-                    if info['client_name'] == caregiver_name:
-                        matched_case_no = c_no
-                        break
-                        
-                if matched_case_no:
-                    if matched_case_no not in payments_data:
-                        payments_data[matched_case_no] = {
-                            'deposit_received': 0.0, 'deposit_received_at': None,
-                            'first_payment_received': 0.0, 'first_payment_received_at': None,
-                            'second_payment_received': 0.0, 'second_payment_received_at': None,
-                            'caregiver_fee': 0.0, 'caregiver_paid_at': None
-                        }
-                    payments_data[matched_case_no]['caregiver_fee'] = expense
-                    payments_data[matched_case_no]['caregiver_paid_at'] = tx_date_str
-
-    # 3. 寫入/更新至 MySQL payments 資料表
-    print(f"成功解析出 {len(payments_data)} 筆符合月子服務的財務帳務紀錄。已忽略雜訊虛擬帳號交易: {ignored_va_count} 筆。")
-    
-    try:
-        conn = pymysql.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-    except Exception as conn_err:
-        print(f"資料庫連線失敗：{conn_err}")
-        sys.exit(1)
-        
-    inserted_count = 0
-    updated_count = 0
-    
-    sql_upsert = """
-    INSERT INTO payments (
-        case_no, client_name,
-        deposit_receivable, deposit_received, deposit_due_date, deposit_received_at,
-        first_payment_receivable, first_payment_received, first_payment_due_date, first_payment_received_at,
-        second_payment_receivable, second_payment_received, second_payment_due_date, second_payment_received_at,
-        amount_receivable, amount_received,
-        caregiver_fee, caregiver_paid_at, 
-        payment_status
-    ) VALUES (
-        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-    ) ON DUPLICATE KEY UPDATE
-        deposit_receivable = VALUES(deposit_receivable),
-        deposit_received = VALUES(deposit_received),
-        deposit_due_date = VALUES(deposit_due_date),
-        deposit_received_at = VALUES(deposit_received_at),
-        first_payment_receivable = VALUES(first_payment_receivable),
-        first_payment_received = VALUES(first_payment_received),
-        first_payment_due_date = VALUES(first_payment_due_date),
-        first_payment_received_at = VALUES(first_payment_received_at),
-        second_payment_receivable = VALUES(second_payment_receivable),
-        second_payment_received = VALUES(second_payment_received),
-        second_payment_due_date = VALUES(second_payment_due_date),
-        second_payment_received_at = VALUES(second_payment_received_at),
-        amount_receivable = VALUES(amount_receivable),
-        amount_received = VALUES(amount_received),
-        caregiver_fee = VALUES(caregiver_fee),
-        caregiver_paid_at = VALUES(caregiver_paid_at),
-        payment_status = VALUES(payment_status);
-    """
-    
-    try:
-        # 在寫入前，先建立 case_no 欄位的唯一索引以確保 ON DUPLICATE KEY UPDATE 運作
-        # ponytail: 確保 case_no 是 payments 的唯一值以防重複對帳
-        try:
-            cursor.execute("ALTER TABLE payments ADD UNIQUE INDEX idx_unique_case (case_no);")
-            conn.commit()
-        except Exception:
-            pass  # 索引已存在，跳過
-            
-        for case_no, pay in payments_data.items():
-            info = case_info.get(case_no, {'client_name': '未知客戶', 'amount_receivable': 80000.0, 'caregiver_fee': 60000.0})
-            
-            # 判斷對帳狀態
-            dep_rec = pay.get('deposit_received', 0.0)
-            p1_rec = pay.get('first_payment_received', 0.0)
-            p2_rec = pay.get('second_payment_received', 0.0)
-            amount_receivable = info['amount_receivable']
-            deposit_receivable = dep_rec
-            first_payment_receivable = p1_rec
-            second_payment_receivable = max(amount_receivable - deposit_receivable - first_payment_receivable, p2_rec)
-            amount_received = dep_rec + p1_rec + p2_rec
-
-            if dep_rec > 0 and p1_rec > 0 and p2_rec > 0:
-                status = "已結案"
-            elif dep_rec > 0 and p1_rec > 0:
-                status = "已收一期款"
-            elif dep_rec > 0:
-                status = "已收訂金"
-            else:
-                status = "待收訂金"
-                
-            cursor.execute(sql_upsert, (
-                case_no,
-                info['client_name'],
-                deposit_receivable,
-                dep_rec,
-                pay['deposit_received_at'],
-                pay['deposit_received_at'],
-                first_payment_receivable,
-                p1_rec,
-                pay['first_payment_received_at'],
-                pay['first_payment_received_at'],
-                second_payment_receivable,
-                p2_rec,
-                pay['second_payment_received_at'],
-                pay['second_payment_received_at'],
-                amount_receivable,
-                amount_received,
-                pay['caregiver_fee'],
-                pay['caregiver_paid_at'],
-                status
-            ))
-            
-            # 依據影響行數累計
-            affected_rows = cursor.rowcount
-            if affected_rows == 1:
-                inserted_count += 1
-            elif affected_rows == 2:
-                updated_count += 1
-                
+                current_state = calculate_client_payment_state(receivables, existing)
+                for transaction in bank_transactions:
+                    reference_prefix = f"excel:{case_no}:{transaction['idx']}:"
+                    if any(str(item.get("external_reference") or "").startswith(reference_prefix) for item in existing):
+                        continue
+                    try:
+                        allocations = allocate_receipt(receivables, current_state, transaction["amount"])
+                    except ValueError:
+                        skipped_transactions += 1
+                        continue
+                    for stage, amount in allocations:
+                        candidate = _record_receipt_allocation(cursor, payment, transaction, stage, amount)
+                        existing.append(candidate)
+                        current_state = calculate_client_payment_state(receivables, existing)
+                        imported_client_transactions += 1
+                    _update_client_summary(cursor, payment, existing, transaction["date"])
         conn.commit()
-        print(f"\n====== 對帳匯入成功！ ======")
-        print(f"- 新增對帳紀錄筆數: {inserted_count}")
-        print(f"- 更新對帳紀錄筆數: {updated_count}")
-        
-    except Exception as e:
+        return {"imported_client_transactions": imported_client_transactions, "skipped_transactions": skipped_transactions}
+    except Exception:
         conn.rollback()
-        print(f"匯入過程中斷，已進行 Rollback。原因: {e}")
+        raise
     finally:
         conn.close()
-        
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Import finance Excel data")
+    parser.add_argument("--check", action="store_true", help="Only verify readiness")
+    parser.add_argument("--excel-path", default="document/帳務.xlsx")
+    args = parser.parse_args()
+    if args.check:
+        print("READY TO IMPORT")
+        return 0
+    if not os.path.exists(args.excel_path):
+        raise FileNotFoundError(f"找不到帳務 Excel：{args.excel_path}")
+    result = import_bank_transactions(load_transactions(pd.ExcelFile(args.excel_path)))
+    print(f"已匯入客戶交易：{result['imported_client_transactions']}")
+    print(f"略過交易：{result['skipped_transactions']}")
+    return 0
+
+
 if __name__ == "__main__":
-    main()
+    assert decode_va_to_case_no("99781699115001") == "115000001"
+    raise SystemExit(main())

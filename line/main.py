@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 File: api/main.py
 Description: LINE 與 好好簽 Webhook 接收後端服務 (API Server)
@@ -996,7 +996,7 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
 # 🔌 GitHub 整合路由 (RESTful Endpoints)
 # ==========================================
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import orders, matches, schedule, payments, clients, staff, holidays, line_system_config
+from api.routes import orders, matches, schedule, payments, clients, staff, holidays, line_system_config, client_payments, staff_payments, contracts, finance_reports
 from fastapi.responses import RedirectResponse
 from api.schemas.base import BaseResponse
 
@@ -1025,3 +1025,7 @@ app.include_router(clients.router)
 app.include_router(staff.router)
 app.include_router(holidays.router)
 app.include_router(line_system_config.router)
+app.include_router(client_payments.router)
+app.include_router(staff_payments.router)
+app.include_router(contracts.router)
+app.include_router(finance_reports.router)

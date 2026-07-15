@@ -8,12 +8,12 @@
 ### 🏛️ API 功能層模組全覽表
 
 ##### Module: FastApiApp
-- Source: `api/main.py`
+- Source: api/main.py
 - Type: api_entrypoint
 - Description: FastAPI REST Server 主入口，掛載 CORS、Health check 與各業務 APIRouter。
 
 ##### Module: OrderRouter
-- Source: `api/routes/orders.py`
+- Source: api/routes/orders.py
 - Type: api_router
 - State: `validated`
 - Endpoints:
@@ -24,7 +24,7 @@
   - `POST /api/v1/orders/calculate-schedule`
 
 ##### Module: MatchRouter
-- Source: `api/routes/matches.py`
+- Source: api/routes/matches.py
 - Type: api_router
 - State: `validated`
 - Endpoints:
@@ -36,7 +36,7 @@
   - `POST /api/v1/orders/{case_no}/assign-staff`
 
 ##### Module: ScheduleRouter
-- Source: `api/routes/schedule.py`
+- Source: api/routes/schedule.py
 - Type: api_router
 - State: `validated`
 - Endpoints:
@@ -44,29 +44,27 @@
   - Request body 使用 `case_no` 關聯案件與排班，不接受內部自增識別碼
 
 ##### Module: PaymentRouter
-- Source: `api/routes/payments.py`
+- Source: api/routes/payments.py
 - Type: api_router
 - State: `validated`
-- Endpoints:
-  - `GET /api/v1/payments`
-  - `PUT /api/v1/payments/{case_no}`
+- Description: 舊 payments API 相容路由；所有端點回傳 HTTP 410，客戶與月嫂新帳務 API 尚待建立。
 
 ##### Module: ClientRouter
-- Source: `api/routes/clients.py`
+- Source: api/routes/clients.py
 - Type: api_router
 - State: `validated`
 - Endpoints:
   - `GET /api/v1/clients`
 
 ##### Module: StaffRouter
-- Source: `api/routes/staff.py`
+- Source: api/routes/staff.py
 - Type: api_router
 - State: `validated`
 - Endpoints:
   - `GET /api/v1/staff`
 
 ##### Module: HolidayRouter
-- Source: `api/routes/holidays.py`
+- Source: api/routes/holidays.py
 - Type: api_router
 - State: `validated`
 - Endpoints:

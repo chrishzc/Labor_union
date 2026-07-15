@@ -20,6 +20,8 @@ import pandas as pd
 from datetime import datetime
 import math
 import importlib
+import os
+import requests
 from services import db_service
 importlib.reload(db_service)
 
@@ -68,8 +70,8 @@ def safe_date(val):
 
 
 def _render_tab1_overview(orders_data):
-    """Tab 1: 訂單期款與月嫂薪資預估總覽 (OrderUI_Tab1_Overview)"""
-    st.subheader("訂單期款與月嫂薪資預估總覽")
+    """Tab 1: 訂單資訊總覽 (OrderUI_Tab1_Overview)"""
+    st.subheader("訂單資訊總覽")
     if not orders_data:
         st.info("目前尚無任何訂單資料。")
         return
@@ -96,11 +98,7 @@ def _render_tab1_overview(orders_data):
     st.caption("💡 點選任一筆訂單標題列即可原地展開，進行 36 欄位編輯 (手風琴模式：同時只會展開一筆，點開其他筆會自動收合前一筆)；欄位內容與「📄 訂單動態試算與維護」頁面完全共用同一套邏輯，修改後請記得點擊「💾 確定儲存」按鈕。")
 
     df_filtered = df_filtered.copy()
-    try:
-        payments_raw = db_service.get_table_data('payments')
-    except Exception as e:
-        st.error(f"讀取財務帳務資料失敗，暫時無法展開編輯面板: {e}")
-        return
+    payments_raw = []
 
     # 依篩選/搜尋後的結果排序，逐筆訂單以 expander 呈現 (取代原本 st.dataframe 的完整表格)
     filtered_case_nos = df_filtered['case_no'].tolist() if 'case_no' in df_filtered.columns else []
@@ -173,8 +171,8 @@ def _render_tab1_overview(orders_data):
 
 
 def _render_tab2_assign(orders_data, clients, staff_list):
-    """Tab 2: 案件與配對中心 (OrderUI_Tab2_MatchingCenter) - 僅處理「洽談中」待配對案件"""
-    st.subheader("🤝 案件與配對中心 (Clients, Orders & Matching)")
+    """Tab 2: 月嫂配對中心 (OrderUI_Tab2_MatchingCenter) - 僅處理「洽談中」待配對案件"""
+    st.subheader("🤝 月嫂配對中心 (Clients, Orders & Matching)")
     
     pending_orders = [o for o in orders_data if o['order_status'] == '洽談中']
 
@@ -385,172 +383,496 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                     st.error(f"取消訂單失敗: {e}")
 
 
-def _render_tab3_finance(orders_data):
-    """Tab 3: 更新實收財務 (OrderUI_Tab3_Finance)"""
-    st.subheader("更新實收財務欄位與日期")
-    st.write("在收到訂金、尾款，或向月嫂轉帳後，可在此更新實際金額與入帳日期。")
+def _render_legacy_mixed_payment_overview(orders_data):
+    """Render a filterable payment overview; load transaction detail on demand."""
+    st.subheader("帳務明細總覽")
+    st.caption("先顯示全部案件的帳務摘要；展開並載入案件後，才會取得客戶與服務人員交易明細。")
 
     try:
-        payments_raw = db_service.get_table_data('payments')
-    except Exception as e:
-        st.error(f"無法讀取財務帳務原始資料: {e}")
+        client_payments = _payment_api_request("/client-payments") or []
+        staff_payments = _payment_api_request("/staff-payments") or []
+    except requests.RequestException as err:
+        st.error(f"讀取帳務總覽失敗：{err}")
         return
 
-    if not payments_raw:
-        st.info("目前沒有帳務紀錄。")
-        return
-
-    pay_options = {
-        f"案件 #{p['case_no']} - 客戶: {p['client_name']} [狀態: {p['payment_status']}]": p['case_no']
-        for p in payments_raw if p.get('case_no')
+    orders_by_case = {
+        str(order.get("case_no")): order
+        for order in orders_data
+        if order.get("case_no")
     }
+    client_by_case = {
+        str(payment.get("case_no")): payment
+        for payment in client_payments
+        if payment.get("case_no")
+    }
+    staff_by_case = {}
+    for payment in staff_payments:
+        case_no = str(payment.get("case_no") or "")
+        if case_no:
+            staff_by_case.setdefault(case_no, []).append(payment)
 
-    if not pay_options:
-        st.info("目前沒有關聯訂單的帳務紀錄。")
+    case_numbers = sorted(set(orders_by_case) | set(client_by_case) | set(staff_by_case))
+    if not case_numbers:
+        st.info("目前沒有可顯示的案件。")
         return
 
-    selected_pay_label = st.selectbox("選擇欲更新帳務的訂單", list(pay_options.keys()), key="fin_pay_picker")
-    pay_case_no = pay_options[selected_pay_label]
+    overview_rows = []
+    for case_no in case_numbers:
+        order = orders_by_case.get(case_no, {})
+        client_payment = client_by_case.get(case_no, {})
+        staff_rows = staff_by_case.get(case_no, [])
+        client_receivable = sum(
+            safe_float(client_payment.get(f"{stage}_receivable"))
+            for stage in ("deposit", "first_payment", "second_payment")
+        )
+        client_received = sum(
+            safe_float(client_payment.get(f"{stage}_received"))
+            for stage in ("deposit", "first_payment", "second_payment")
+        )
+        staff_payable = sum(safe_float(row.get("total_payable")) for row in staff_rows)
+        staff_paid = sum(safe_float(row.get("paid_amount")) for row in staff_rows)
+        client_state = "尚未建立" if not client_payment else (
+            "已收清" if client_received >= client_receivable else "待收款"
+        )
+        staff_state = "尚未建立" if not staff_rows else (
+            "已付款" if staff_paid >= staff_payable else "待付款"
+        )
+        overview_rows.append({
+            "案件編號": case_no,
+            "訂單狀態": order.get("order_status") or order.get("status") or "—",
+            "客戶應收總額": client_receivable,
+            "客戶實收總額": client_received,
+            "客戶未收餘額": client_receivable - client_received,
+            "客戶付款狀態": client_state,
+            "月嫂應付總額": staff_payable,
+            "月嫂實付總額": staff_paid,
+            "月嫂未付餘額": staff_payable - staff_paid,
+            "月嫂付款狀態": staff_state,
+        })
 
-    current_pay = next((p for p in payments_raw if p.get('case_no') == pay_case_no), None)
-    current_view_order = next((o for o in orders_data if o.get('case_no') == pay_case_no), None)
-
-    if not (current_pay and current_view_order):
-        return
-
-    st.markdown(f"### 案件資訊：案件編號 `{pay_case_no}` - 客戶 **{current_view_order['client_name']}** (狀態: `{current_view_order['order_status']}`)")
-
-    # ponytail: Show the 14-digit virtual account corresponding to the selected case
-    va_display = db_service.generate_virtual_account(pay_case_no)
-    if va_display:
-        st.markdown(f"**🔗 專屬虛擬帳號**: `{va_display}`")
-
-    col_calc, col_input = st.columns(2)
-
-    with col_calc:
-        st.markdown("#### 📐 系統計算應收預估")
-        st.write(f"- **樓層費**: {safe_int(current_view_order['floor_fee']):,} 元")
-        st.write(f"- **預估訂金**: {safe_int(current_view_order['deposit_amount']):,} 元")
-        st.write(f"- **首筆應收 (訂金+樓層)**: {safe_int(current_view_order['initial_payment_payable']):,} 元")
-        st.write(f"- **第一期款**: {safe_int(current_view_order['first_payment_amount']):,} 元")
-        st.write(f"- **第二期款**: {safe_int(current_view_order['second_payment_amount']):,} 元")
-        st.write(f"- **雇主自費合計**: {safe_int(current_view_order['total_employer_self_pay_payable']):,} 元")
-        st.write(f"- **應付月嫂薪資**: {safe_int(current_view_order['service_salary']):,} 元")
-
-    with col_input:
-        st.markdown("#### ✍️ 三階段應收與實收登錄")
-
-        st.markdown("##### 1. 訂金")
-        dep_amt_col, dep_rec_col = st.columns(2)
-        with dep_amt_col:
-            deposit_receivable = st.number_input(
-                "訂金－應收金額",
-                value=safe_int(current_pay.get('deposit_receivable')) or safe_int(current_view_order['initial_payment_payable']),
-                step=100,
-                key="fin_dep_due_amt",
-            )
-        with dep_rec_col:
-            deposit_received = st.number_input("訂金－實收金額", value=safe_int(current_pay.get('deposit_received')), step=100, key="fin_dep_rec")
-        dep_due_col, dep_at_col = st.columns(2)
-        with dep_due_col:
-            deposit_due_date = st.date_input("訂金－應收日期", value=safe_date(current_pay.get('deposit_due_date') or current_view_order.get('deposit_date')), key="fin_dep_due_date")
-        with dep_at_col:
-            deposit_received_at = st.date_input("訂金－實收日期", value=safe_date(current_pay.get('deposit_received_at')), key="fin_dep_date")
-
-        st.markdown("##### 2. 第一期")
-        p1_amt_col, p1_rec_col = st.columns(2)
-        with p1_amt_col:
-            first_payment_receivable = st.number_input(
-                "第一期－應收金額",
-                value=safe_int(current_pay.get('first_payment_receivable')) or safe_int(current_view_order['first_payment_amount']),
-                step=100,
-                key="fin_p1_due_amt",
-            )
-        with p1_rec_col:
-            first_payment_received = st.number_input("第一期－實收金額", value=safe_int(current_pay.get('first_payment_received')), step=100, key="fin_p1_rec")
-        p1_due_col, p1_at_col = st.columns(2)
-        with p1_due_col:
-            first_payment_due_date = st.date_input("第一期－應收日期", value=safe_date(current_pay.get('first_payment_due_date') or current_view_order.get('first_payment_date')), key="fin_p1_due_date")
-        with p1_at_col:
-            first_payment_received_at = st.date_input("第一期－實收日期", value=safe_date(current_pay.get('first_payment_received_at')), key="fin_p1_date")
-
-        st.markdown("##### 3. 第二期")
-        p2_amt_col, p2_rec_col = st.columns(2)
-        with p2_amt_col:
-            second_payment_receivable = st.number_input(
-                "第二期－應收金額",
-                value=safe_int(current_pay.get('second_payment_receivable')) or safe_int(current_view_order['second_payment_amount']),
-                step=100,
-                key="fin_p2_due_amt",
-            )
-        with p2_rec_col:
-            second_payment_received = st.number_input("第二期－實收金額", value=safe_int(current_pay.get('second_payment_received')), step=100, key="fin_p2_rec")
-        p2_due_col, p2_at_col = st.columns(2)
-        with p2_due_col:
-            second_payment_due_date = st.date_input("第二期－應收日期", value=safe_date(current_pay.get('second_payment_due_date') or current_view_order.get('second_payment_date')), key="fin_p2_due_date")
-        with p2_at_col:
-            second_payment_received_at = st.date_input("第二期－實收日期", value=safe_date(current_pay.get('second_payment_received_at')), key="fin_p2_date")
-
-        amount_receivable = deposit_receivable + first_payment_receivable + second_payment_receivable
-        amount_received = deposit_received + first_payment_received + second_payment_received
-        total_due_col, total_rec_col = st.columns(2)
-        total_due_col.metric("應收總額", f"{amount_receivable:,.0f} 元")
-        total_rec_col.metric("實收總額", f"{amount_received:,.0f} 元")
-
-        col_care_val, col_care_date = st.columns(2)
-        with col_care_val:
-            caregiver_fee = st.number_input(
-                "實際付給月嫂費用",
-                value=safe_int(current_pay['caregiver_fee']) if safe_int(current_pay['caregiver_fee']) > 0 else safe_int(current_view_order['service_salary']),
-                step=100,
-                key="fin_care_fee"
-            )
-        with col_care_date:
-            caregiver_paid_at = st.date_input("月嫂轉帳日期", value=safe_date(current_pay['caregiver_paid_at']), key="fin_care_date")
-
-        payment_status_list = ["待收訂金", "已收訂金", "已收一期款", "已收二期款", "已結案"]
-        default_status = current_pay['payment_status']
-        if default_status not in payment_status_list:
-            default_status = "待收訂金"
-        payment_status = st.selectbox(
-            "帳務狀態",
-            payment_status_list,
-            index=payment_status_list.index(default_status),
-            key="fin_status_select"
+    overview_df = pd.DataFrame(overview_rows)
+    filter_col1, filter_col2, filter_col3 = st.columns(3)
+    with filter_col1:
+        case_keyword = st.text_input("案件編號", key="payment_overview_case_filter").strip()
+    with filter_col2:
+        order_statuses = sorted(
+            status for status in overview_df["訂單狀態"].dropna().unique() if status != "—"
+        )
+        selected_order_statuses = st.multiselect(
+            "訂單狀態", order_statuses, key="payment_overview_order_status"
+        )
+    with filter_col3:
+        payment_states = sorted(
+            set(overview_df["客戶付款狀態"]) | set(overview_df["月嫂付款狀態"])
+        )
+        selected_payment_states = st.multiselect(
+            "付款狀態", payment_states, key="payment_overview_payment_status"
         )
 
-        notes = st.text_area("對帳備註", value=current_pay['notes'] or "", key="fin_notes_area")
+    filtered_df = overview_df.copy()
+    if case_keyword:
+        filtered_df = filtered_df[
+            filtered_df["案件編號"].str.contains(case_keyword, case=False, na=False)
+        ]
+    if selected_order_statuses:
+        filtered_df = filtered_df[filtered_df["訂單狀態"].isin(selected_order_statuses)]
+    if selected_payment_states:
+        filtered_df = filtered_df[
+            filtered_df["客戶付款狀態"].isin(selected_payment_states)
+            | filtered_df["月嫂付款狀態"].isin(selected_payment_states)
+        ]
 
-        if st.button("更新財務記錄", key="btn_update_finance"):
+    st.caption(f"共 {len(filtered_df)} 筆案件")
+    st.dataframe(filtered_df, width="stretch", hide_index=True)
+    if filtered_df.empty:
+        return
+
+    selected_case_no = st.selectbox(
+        "選擇案件查看明細",
+        filtered_df["案件編號"].tolist(),
+        key="payment_overview_selected_case",
+    )
+    with st.expander(f"案件 {selected_case_no} 帳務與交易明細", expanded=False):
+        load_detail = st.button("載入／重新整理交易明細", key=f"load_payment_detail_{selected_case_no}")
+        cache_key = f"payment_detail_{selected_case_no}"
+        if load_detail:
             try:
-                db_service.update_payment_details(
-                    case_no=pay_case_no,
-                    deposit_receivable=deposit_receivable,
-                    deposit_received=deposit_received,
-                    first_payment_receivable=first_payment_receivable,
-                    first_payment_received=first_payment_received,
-                    second_payment_receivable=second_payment_receivable,
-                    second_payment_received=second_payment_received,
-                    caregiver_fee=caregiver_fee,
-                    payment_status=payment_status,
-                    notes=notes,
-                    deposit_due_date=deposit_due_date,
-                    deposit_received_at=deposit_received_at if deposit_received > 0 else None,
-                    first_payment_due_date=first_payment_due_date,
-                    first_payment_received_at=first_payment_received_at if first_payment_received > 0 else None,
-                    second_payment_due_date=second_payment_due_date,
-                    second_payment_received_at=second_payment_received_at if second_payment_received > 0 else None,
-                    caregiver_paid_at=caregiver_paid_at if caregiver_fee > 0 else None
-                )
-                if payment_status == '已收訂金' and current_view_order['order_status'] == '洽談中':
-                    db_service.update_order_status(current_view_order['case_no'], '訂單成立')
-                    st.info("檢測到已收訂金，訂單狀態已自動標記為「訂單成立」！")
-                st.success("財務資料更新成功！")
-                st.rerun()
-            except Exception as e:
-                st.error(f"更新失敗: {e}")
+                try:
+                    client_payment = _payment_api_request(f"/client-payments/{selected_case_no}")
+                except requests.HTTPError as err:
+                    if err.response is None or err.response.status_code != 404:
+                        raise
+                    client_payment = None
+                staff_detail = _payment_api_request(f"/staff-payments/{selected_case_no}") or []
+            except requests.RequestException as err:
+                st.error(f"讀取案件明細失敗：{err}")
+                return
+            st.session_state[cache_key] = (client_payment, staff_detail)
+
+        detail = st.session_state.get(cache_key)
+        if not detail:
+            st.info("按下「載入／重新整理交易明細」後才會讀取交易紀錄。")
+            return
+        client_payment, staff_detail = detail
+        client_tab, staff_tab = st.tabs(["客戶帳務與交易", "服務人員帳務與交易"])
+        with client_tab:
+            _render_client_payment_ledger(selected_case_no, client_payment)
+        with staff_tab:
+            _render_staff_payment_ledger(selected_case_no, staff_detail)
 
 
+def _render_tab3_finance(orders_data):
+    """Render separate client and staff payment overviews with on-demand detail."""
+    st.subheader("帳務明細總覽")
+    st.caption("客戶收款與月嫂應付分開顯示；展開案件後才讀取交易明細。")
+    try:
+        client_payments = _payment_api_request("/client-payments") or []
+        staff_payments = _payment_api_request("/staff-payments") or []
+    except requests.RequestException as err:
+        st.error(f"讀取帳務總覽失敗：{err}")
+        return
+
+    order_status_by_case = {
+        str(order.get("case_no")): order.get("order_status") or order.get("status") or "—"
+        for order in orders_data
+        if order.get("case_no")
+    }
+    filter_col1, filter_col2 = st.columns(2)
+    with filter_col1:
+        case_keyword = st.text_input("案件編號", key="payment_overview_case_filter").strip()
+    with filter_col2:
+        status_options = sorted(set(order_status_by_case.values()) - {"—"})
+        selected_order_statuses = st.multiselect(
+            "訂單狀態", status_options, key="payment_overview_order_status"
+        )
+
+    def matches_order_filter(case_no):
+        status = order_status_by_case.get(str(case_no), "—")
+        return (
+            (not case_keyword or case_keyword.lower() in str(case_no).lower())
+            and (not selected_order_statuses or status in selected_order_statuses)
+        )
+
+    client_rows = []
+    for payment in client_payments:
+        case_no = str(payment.get("case_no") or "")
+        if not case_no or not matches_order_filter(case_no):
+            continue
+        receivable = sum(safe_float(payment.get(f"{stage}_receivable")) for stage in ("deposit", "first_payment", "second_payment"))
+        received = sum(safe_float(payment.get(f"{stage}_received")) for stage in ("deposit", "first_payment", "second_payment"))
+        client_rows.append({
+            "案件編號": case_no,
+            "訂單狀態": order_status_by_case.get(case_no, "—"),
+            "訂金應收": safe_float(payment.get("deposit_receivable")),
+            "訂金實收": safe_float(payment.get("deposit_received")),
+            "訂金應收日": payment.get("deposit_due_date"),
+            "訂金實收日": payment.get("deposit_received_at"),
+            "第一期應收": safe_float(payment.get("first_payment_receivable")),
+            "第一期實收": safe_float(payment.get("first_payment_received")),
+            "第一期應收日": payment.get("first_payment_due_date"),
+            "第一期實收日": payment.get("first_payment_received_at"),
+            "第二期應收": safe_float(payment.get("second_payment_receivable")),
+            "第二期實收": safe_float(payment.get("second_payment_received")),
+            "第二期應收日": payment.get("second_payment_due_date"),
+            "第二期實收日": payment.get("second_payment_received_at"),
+            "應收總額": receivable,
+            "實收總額": received,
+            "未收餘額": receivable - received,
+            "付款狀態": "已收清" if received >= receivable else "待收款",
+        })
+
+    staff_rows = []
+    for payment in staff_payments:
+        case_no = str(payment.get("case_no") or "")
+        if not case_no or not matches_order_filter(case_no):
+            continue
+        payable = safe_float(payment.get("total_payable"))
+        paid = safe_float(payment.get("amount_paid"))
+        staff_rows.append({
+            "案件編號": case_no,
+            "訂單狀態": order_status_by_case.get(case_no, "—"),
+            "服務人員": payment.get("staff_id"),
+            "指派序號": payment.get("assignment_id"),
+            "服務時數": safe_float(payment.get("service_hours")),
+            "服務單價": safe_float(payment.get("hourly_rate")),
+            "服務薪資": safe_float(payment.get("service_salary")),
+            "樓層費": safe_float(payment.get("floor_fee_amount")),
+            "調整額": safe_float(payment.get("adjustment_amount")),
+            "應付金額": payable,
+            "實付金額": paid,
+            "未付餘額": payable - paid,
+            "應付日期": payment.get("due_date"),
+            "實付日期": payment.get("paid_at"),
+            "付款狀態": payment.get("payment_status"),
+        })
+
+    client_tab, staff_tab = st.tabs(["客戶收款總覽", "月嫂應付總覽"])
+    with client_tab:
+        client_df = pd.DataFrame(client_rows)
+        client_states = sorted(client_df["付款狀態"].dropna().unique()) if not client_df.empty else []
+        selected_client_states = st.multiselect("客戶付款狀態", client_states, key="client_payment_state_filter")
+        if selected_client_states:
+            client_df = client_df[client_df["付款狀態"].isin(selected_client_states)]
+        st.caption(f"共 {len(client_df)} 筆客戶帳務")
+        st.dataframe(client_df, width="stretch", hide_index=True)
+    with staff_tab:
+        staff_df = pd.DataFrame(staff_rows)
+        staff_states = sorted(staff_df["付款狀態"].dropna().unique()) if not staff_df.empty else []
+        selected_staff_states = st.multiselect("月嫂付款狀態", staff_states, key="staff_payment_state_filter")
+        if selected_staff_states:
+            staff_df = staff_df[staff_df["付款狀態"].isin(selected_staff_states)]
+        st.caption(f"共 {len(staff_df)} 筆月嫂帳務")
+        st.dataframe(staff_df, width="stretch", hide_index=True)
+
+    detail_cases = sorted(set(client_df.get("案件編號", [])) | set(staff_df.get("案件編號", [])))
+    if not detail_cases:
+        return
+    selected_case_no = st.selectbox("選擇案件查看交易明細", detail_cases, key="payment_overview_selected_case")
+    with st.expander(f"案件 {selected_case_no} 客戶／月嫂交易明細", expanded=False):
+        if selected_case_no:
+            try:
+                try:
+                    client_detail = _payment_api_request(f"/client-payments/{selected_case_no}")
+                except requests.HTTPError as err:
+                    if err.response is None or err.response.status_code != 404:
+                        raise
+                    client_detail = None
+                staff_detail = _payment_api_request(f"/staff-payments/{selected_case_no}") or []
+            except requests.RequestException as err:
+                st.error(f"讀取案件明細失敗：{err}")
+                return
+            st.session_state[f"payment_detail_{selected_case_no}"] = (client_detail, staff_detail)
+
+        detail = st.session_state.get(f"payment_detail_{selected_case_no}")
+        if not detail:
+            st.info("按下「載入／重新整理交易明細」後才會讀取交易紀錄。")
+            return
+        client_detail, staff_detail = detail
+        detail_client_tab, detail_staff_tab = st.tabs(["客戶帳務與交易", "月嫂帳務與交易"])
+        with detail_client_tab:
+            _render_client_payment_ledger(selected_case_no, client_detail)
+        with detail_staff_tab:
+            _render_staff_payment_ledger(selected_case_no, staff_detail)
+
+
+def _payment_api_request(path, method="GET", payload=None):
+    """Access payment ledgers only through FastAPI; never write summary columns directly."""
+    base_url = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
+    response = requests.request(
+        method,
+        f"{base_url}/api/v1{path}",
+        json=payload,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json().get("data")
+
+
+def _render_client_payment_ledger(case_no, payment):
+    if not payment:
+        st.info("此案件尚未建立客戶帳務摘要。")
+        return
+
+    stages = [
+        ("訂金", "deposit"),
+        ("第一期", "first_payment"),
+        ("第二期", "second_payment"),
+    ]
+    rows = []
+    total_receivable = total_received = 0.0
+    for label, key in stages:
+        receivable = safe_float(payment.get(f"{key}_receivable"))
+        received = safe_float(payment.get(f"{key}_received"))
+        total_receivable += receivable
+        total_received += received
+        rows.append({
+            "階段": label,
+            "應收金額": receivable,
+            "實收金額": received,
+            "應收日期": payment.get(f"{key}_due_date"),
+            "實收日期": payment.get(f"{key}_received_at"),
+        })
+    rows.append({"階段": "合計", "應收金額": total_receivable, "實收金額": total_received, "應收日期": None, "實收日期": None})
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    subsidy_return = safe_float(payment.get("subsidy_return_receivable"))
+    if subsidy_return:
+        st.markdown("#### 退還補助款")
+        st.dataframe(pd.DataFrame([{
+            "應退金額": subsidy_return,
+            "已退金額": safe_float(payment.get("subsidy_return_refunded")),
+            "應退日期": payment.get("subsidy_return_due_date"),
+            "退還日期": payment.get("subsidy_return_at"),
+        }]), width="stretch", hide_index=True)
+
+    transactions = payment.get("transactions") or []
+    with st.expander("客戶交易明細", expanded=False):
+        if transactions:
+            st.dataframe(pd.DataFrame(transactions), width="stretch", hide_index=True)
+        else:
+            st.info("尚無交易明細。")
+        with st.form(f"client_payment_transaction_{case_no}"):
+            st.markdown("補登／沖正交易")
+            stage = st.selectbox("階段", ["deposit", "first_payment", "second_payment"], format_func={"deposit": "訂金", "first_payment": "第一期", "second_payment": "第二期"}.get)
+            transaction_type = st.selectbox("交易類型", ["receipt", "reversal"], format_func={"receipt": "收款", "reversal": "沖正"}.get)
+            amount = st.number_input("金額", min_value=0.01, step=1.0)
+            occurred_at = st.date_input("交易日期", value=datetime.today().date())
+            external_reference = st.text_input("銀行流水號／外部識別", key=f"client_reference_{case_no}")
+            notes = st.text_area("調整原因（必填）", key=f"client_reason_{case_no}")
+            submitted = st.form_submit_button("新增客戶交易")
+        if submitted:
+            if not external_reference.strip() or not notes.strip():
+                st.error("請填寫銀行流水號／外部識別與調整原因。")
+            else:
+                try:
+                    _payment_api_request("/client-payments/transaction", "POST", {"case_no": case_no, "stage": stage, "transaction_type": transaction_type, "amount": amount, "occurred_at": occurred_at.isoformat(), "external_reference": external_reference.strip(), "notes": notes.strip()})
+                except requests.RequestException as err:
+                    st.error(f"新增客戶交易失敗：{err}")
+                else:
+                    st.success("已新增交易，帳務摘要已由交易明細重新計算。")
+                    st.rerun()
+
+
+def _render_staff_payment_ledger(case_no, payments):
+    if not payments:
+        st.info("此案件尚無服務人員應付帳務。")
+        return
+
+    rows = []
+    for payment in payments:
+        payable = safe_float(payment.get("total_payable"))
+        paid = safe_float(payment.get("amount_paid"))
+        rows.append({
+            "服務人員（ID）": payment.get("staff_id"), "指派序號": payment.get("assignment_id"),
+            "服務時數": safe_float(payment.get("service_hours")), "單價": safe_float(payment.get("hourly_rate")),
+            "服務薪資": safe_float(payment.get("service_salary")), "樓層費": safe_float(payment.get("floor_fee_amount")),
+            "調整額": safe_float(payment.get("adjustment_amount")), "應付金額": payable,
+            "實付金額": paid, "未付餘額": payable - paid, "應付日期": payment.get("due_date"),
+            "實付日期": payment.get("paid_at"), "狀態": payment.get("payment_status"),
+        })
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+
+    for payment in payments:
+        payment_id = payment.get("id")
+        staff_id = payment.get("staff_id")
+        with st.expander(f"服務人員 {staff_id}／指派 {payment.get('assignment_id')} 的交易明細", expanded=False):
+            transactions = payment.get("transactions") or []
+            if transactions:
+                st.dataframe(pd.DataFrame(transactions), width="stretch", hide_index=True)
+            else:
+                st.info("尚無交易明細。")
+            with st.form(f"staff_payment_transaction_{payment_id}"):
+                st.markdown("補登／沖正交易")
+                transaction_type = st.selectbox("交易類型", ["transfer", "reversal"], format_func={"transfer": "付款", "reversal": "沖正"}.get, key=f"staff_transaction_type_{payment_id}")
+                amount = st.number_input("金額", min_value=0.01, step=1.0, key=f"staff_amount_{payment_id}")
+                occurred_at = st.date_input("交易日期", value=datetime.today().date(), key=f"staff_date_{payment_id}")
+                external_reference = st.text_input("銀行流水號／外部識別", key=f"staff_reference_{payment_id}")
+                notes = st.text_area("調整原因（必填）", key=f"staff_reason_{payment_id}")
+                submitted = st.form_submit_button("新增服務人員交易")
+            if submitted:
+                if not external_reference.strip() or not notes.strip():
+                    st.error("請填寫銀行流水號／外部識別與調整原因。")
+                else:
+                    try:
+                        _payment_api_request("/staff-payments/transaction", "POST", {"staff_payment_id": payment_id, "transaction_type": transaction_type, "amount": amount, "occurred_at": occurred_at.isoformat(), "external_reference": external_reference.strip(), "notes": notes.strip()})
+                    except requests.RequestException as err:
+                        st.error(f"新增服務人員交易失敗：{err}")
+                    else:
+                        st.success("已新增交易，帳務摘要已由交易明細重新計算。")
+                        st.rerun()
+
+
+def _finance_report_request(path, params=None, download=False):
+    """Read finance reports exclusively through the FastAPI router."""
+    base_url = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
+    response = requests.get(
+        f"{base_url}/api/v1/finance-reports{path}",
+        params=params,
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.content if download else (response.json().get("data") or {})
+
+
+def _render_tab4_accounts_payable():
+    """唯讀查詢指定月份的應付帳款，並提供銀行匯款 Excel。"""
+    st.subheader("應付帳款查詢／輸出")
+    st.caption("本頁僅供查詢與下載，不會將任何帳款標記為已付款、已退款或已提交。")
+
+    today = datetime.today()
+    year_col, month_col = st.columns(2)
+    with year_col:
+        selected_year = st.selectbox("年份", list(range(today.year - 2, today.year + 3)), index=2, key="accounts_payable_year")
+    with month_col:
+        selected_month = st.selectbox("月份", list(range(1, 13)), index=today.month - 1, format_func=lambda month: f"{month:02d} 月", key="accounts_payable_month")
+    target_month = f"{selected_year:04d}-{selected_month:02d}"
+    try:
+        preview = _finance_report_request("/accounts-payable", {"target_month": target_month})
+    except requests.RequestException as err:
+        st.error(f"讀取 {target_month} 應付帳款失敗：{err}")
+        return
+    fixed_columns = ["月份-銀行代碼-流水號", "銀行名稱", "客戶or服務人員姓名", "銀行帳號", "銀行代號(碼)", "金額", "身分證字號(匯款到永豐才要填)", "案件編號", "匯款日期"]
+    preview_df = pd.DataFrame(preview.get("payable_rows") or []).reindex(columns=fixed_columns)
+    bank_totals = preview.get("bank_totals") or {}
+    total_col1, total_col2 = st.columns(2)
+    total_col1.metric("永豐銀行月嫂款（31）", f"{safe_float(bank_totals.get('31', 0)):,.0f} 元")
+    total_col2.metric("台新銀行退還補助款（633）", f"{safe_float(bank_totals.get('633', 0)):,.0f} 元")
+    st.write(f"共 {len(preview_df)} 筆待匯款項")
+    st.dataframe(preview_df, width="stretch", hide_index=True)
+    try:
+        xlsx_bytes = _finance_report_request("/accounts-payable/export", {"target_month": target_month}, download=True)
+    except requests.RequestException as err:
+        st.error(f"下載應付帳款 Excel 失敗：{err}")
+        return
+    st.download_button("下載應付帳款 Excel", data=xlsx_bytes, file_name=f"應付帳款_{target_month}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_accounts_payable_xlsx")
+
+
+def _render_tab5_subsidy_reconciliation():
+    """Render read-only quarterly subsidy registers and annual summaries."""
+    st.subheader("核銷補助清冊")
+
+    today = datetime.today()
+    selected_year = st.selectbox("申請年度", list(range(today.year - 2, today.year + 3)), index=2, key="subsidy_reconciliation_year")
+    quarterly_tab, annual_tab = st.tabs(["分季核銷", "年度總表"])
+    with quarterly_tab:
+        selected_quarter = st.selectbox("申請季度", [1, 2, 3, 4], format_func=lambda quarter: f"第 {quarter} 季", key="subsidy_reconciliation_quarter")
+        params = {"application_year": selected_year, "quarter": selected_quarter}
+        try:
+            report = _finance_report_request("/subsidy-reconciliation/quarterly", params)
+        except requests.RequestException as err:
+            st.error(f"讀取季度核銷清冊失敗：{err}")
+        else:
+            st.markdown("#### 一般市民")
+            st.dataframe(pd.DataFrame(report.get("general_citizen_rows") or []), width="stretch", hide_index=True)
+            subsidized_rows = report.get("subsidized_citizen_rows") or []
+            if subsidized_rows:
+                st.markdown("#### 補助市民")
+                st.dataframe(pd.DataFrame(subsidized_rows), width="stretch", hide_index=True)
+            try:
+                xlsx_bytes = _finance_report_request("/subsidy-reconciliation/quarterly/export", params, download=True)
+            except requests.RequestException as err:
+                st.error(f"下載分季核銷 Excel 失敗：{err}")
+            else:
+                st.download_button("下載分季核銷 Excel", data=xlsx_bytes, file_name=f"核銷補助清冊_{selected_year}_Q{selected_quarter}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_quarterly_subsidy_reconciliation")
+    with annual_tab:
+        params = {"application_year": selected_year}
+        try:
+            report = _finance_report_request("/subsidy-reconciliation/annual", params)
+        except requests.RequestException as err:
+            st.error(f"讀取年度補助總表失敗：{err}")
+        else:
+            st.markdown("#### 一般市民")
+            st.dataframe(pd.DataFrame(report.get("general_citizen_rows") or []), width="stretch", hide_index=True)
+            subsidized_rows = report.get("subsidized_citizen_rows") or []
+            if subsidized_rows:
+                st.markdown("#### 補助市民")
+                st.dataframe(pd.DataFrame(subsidized_rows), width="stretch", hide_index=True)
+            try:
+                xlsx_bytes = _finance_report_request("/subsidy-reconciliation/annual/export", params, download=True)
+            except requests.RequestException as err:
+                st.error(f"下載年度補助 Excel 失敗：{err}")
+            else:
+                st.download_button("下載年度補助 Excel", data=xlsx_bytes, file_name=f"年度補助總表_{selected_year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_annual_subsidy_summary")
 def show():
     """殼層：讀取初始資料並分發至各 Tab 渲染函數 (OrderUI)"""
     st.title("📦 訂單與帳務管理系統")
@@ -564,7 +886,13 @@ def show():
         st.error(f"初始化載入資料失敗: {e}")
         return
 
-    tab1, tab2, tab3 = st.tabs(["📊 訂單總覽與計算對帳", "🤝 案件與配對中心", "💰 更新實收財務"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 訂單資訊總覽",
+        "🤝 月嫂配對中心",
+        "💰 訂單帳務總覽",
+        "📤 應付帳款查詢/輸出",
+        "核銷補助清冊",
+    ])
 
     with tab1:
         _render_tab1_overview(orders_data)
@@ -574,3 +902,9 @@ def show():
 
     with tab3:
         _render_tab3_finance(orders_data)
+
+    with tab4:
+        _render_tab4_accounts_payable()
+
+    with tab5:
+        _render_tab5_subsidy_reconciliation()

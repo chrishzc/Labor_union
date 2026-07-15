@@ -1,0 +1,33 @@
+{
+  "id": "contract_staff_service",
+  "name": "服務人員契約（真實 Excel 鏡像模板）",
+  "desc": "以複製後的服務人員契約 Excel 作為唯讀鏡像模板。",
+  "template_filename": "服務人員契約.xlsx",
+  "param_mappings": {
+    "F1": {"label": "案件編號", "db_table": "orders", "db_key": "case_no"},
+    "C4": {"label": "服務人員姓名", "db_table": "staff", "db_key": "staff_name"},
+    "B5": {"label": "雇主姓名", "db_table": "clients", "db_key": "client_name"},
+    "B6": {"label": "預計開始日期", "db_table": "orders", "db_key": "start_date"},
+    "D6": {"label": "服務天數", "db_table": "orders", "db_key": "service_days"},
+    "B7": {"label": "服務開始日期", "db_table": "orders", "db_key": "start_date"},
+    "D7": {"label": "服務結束日期", "db_table": "orders", "db_key": "end_date"},
+    "G7": {"label": "服務天數", "db_table": "orders", "db_key": "service_days"},
+    "B8": {"label": "服務時段（clients.service_time）", "db_table": "clients.service_time", "db_key": "service_time"},
+    "B9": {"label": "休假方式（clients.service_type）", "db_table": "clients.service_type", "db_key": "service_type"},
+    "B10": {"label": "服務單價", "db_table": "orders", "db_key": "service_unit_price"},
+    "E8": {"label": "胎數（BeClass survey_details）", "db_table": "beclass_records.survey_details", "db_key": "multi_birth_count"},
+    "F8": {"label": "生產方式（clients.delivery_type）", "db_table": "clients.delivery_type", "db_key": "delivery_type"},
+    "H8": {"label": "居住型態（clients.residence_type）", "db_table": "clients.residence_type", "db_key": "residence_type"},
+    "D15": {"label": "服務區域（clients.city）", "db_table": "clients.city", "db_key": "city"},
+    "B24": {"label": "服務地址", "db_table": "clients", "db_key": "address"},
+    "B94": {"label": "服務人員姓名", "db_table": "staff", "db_key": "staff_name"},
+    "B96": {"label": "服務人員電話", "db_table": "staff", "db_key": "staff_phone"},
+    "B13": {"label": "補助費用（暫不連動）", "db_table": "待新帳務金額公式", "db_key": "", "status": "pending"},
+    "C13": {"label": "補助費用日期（暫不連動）", "db_table": "待新帳務金額公式", "db_key": "", "status": "pending"},
+    "B15": {"label": "自費金額（暫不連動）", "db_table": "待新帳務金額公式", "db_key": "", "status": "pending"},
+    "C15": {"label": "自費金額日期（暫不連動）", "db_table": "待新帳務金額公式", "db_key": "", "status": "pending"},
+    "F10": {"label": "費用合計（暫不連動）", "db_table": "待新帳務金額公式", "db_key": "", "status": "pending"},
+    "B19": {"label": "總計（暫不連動）", "db_table": "待新帳務金額公式", "db_key": "", "status": "pending"},
+    "A97": {"label": "契約當天日期", "db_table": "系統產生", "db_key": "__today__"}
+  }
+}

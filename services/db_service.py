@@ -115,7 +115,7 @@ def get_order_by_case_no(case_no: str) -> dict | None:
 
 def get_table_data(table_name: str) -> list[dict]:
     """讀取指定原始資料表的內容"""
-    allowed_tables = ['clients', 'staff', 'orders', 'payments', 'beclass_records', 'matching_records', 'holidays', 'staff_bank_accounts']
+    allowed_tables = ['clients', 'staff', 'orders', 'beclass_records', 'matching_records', 'holidays', 'staff_bank_accounts']
     if table_name not in allowed_tables:
         raise ValueError(f"不允許查詢此資料表: {table_name}")
 
@@ -140,7 +140,6 @@ TABLE_PRIMARY_KEYS = {
     'clients': 'id',
     'staff': 'id',
     'orders': 'case_no',
-    'payments': 'id',
     'beclass_records': 'id',
     'matching_records': 'id',
     'holidays': 'holiday_date',
@@ -366,10 +365,9 @@ def create_order(case_no: str, service_days: int, service_hours_per_day: int,
             ))
 
             cursor.execute("""
-                INSERT INTO payments (case_no, client_name, payment_status)
-                VALUES (%s, %s, '待收訂金')
-                ON DUPLICATE KEY UPDATE client_name = VALUES(client_name)
-            """, (case_no, client['name']))
+                INSERT IGNORE INTO client_payments (case_no, payment_status)
+                VALUES (%s, '待收訂金')
+            """, (case_no,))
             
             conn.commit()
             return case_no
@@ -475,56 +473,7 @@ def update_order_full_details(case_no: str, data: dict) -> bool:
     finally:
         conn.close()
 
-def update_payment_details(case_no: str, deposit_receivable: float, deposit_received: float,
-                           first_payment_receivable: float, first_payment_received: float,
-                           second_payment_receivable: float, second_payment_received: float,
-                           caregiver_fee: float, payment_status: str, notes: str = None,
-                           deposit_due_date = None, deposit_received_at = None,
-                           first_payment_due_date = None, first_payment_received_at = None,
-                           second_payment_due_date = None, second_payment_received_at = None,
-                           caregiver_paid_at = None) -> bool:
-    """更新 payments 三階段應收／實收資料；總額由各階段自動加總。"""
-    amount_receivable = sum((deposit_receivable, first_payment_receivable, second_payment_receivable))
-    amount_received = sum((deposit_received, first_payment_received, second_payment_received))
-    conn = get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                UPDATE payments 
-                SET deposit_receivable = %s,
-                    deposit_received = %s,
-                    deposit_due_date = %s,
-                    deposit_received_at = %s,
-                    first_payment_receivable = %s,
-                    first_payment_received = %s,
-                    first_payment_due_date = %s,
-                    first_payment_received_at = %s,
-                    second_payment_receivable = %s,
-                    second_payment_received = %s,
-                    second_payment_due_date = %s,
-                    second_payment_received_at = %s,
-                    amount_receivable = %s,
-                    amount_received = %s,
-                    caregiver_fee = %s, 
-                    caregiver_paid_at = %s,
-                    payment_status = %s, 
-                    notes = %s 
-                WHERE case_no = %s
-            """, (
-                deposit_receivable, deposit_received, deposit_due_date, deposit_received_at,
-                first_payment_receivable, first_payment_received, first_payment_due_date, first_payment_received_at,
-                second_payment_receivable, second_payment_received, second_payment_due_date, second_payment_received_at,
-                amount_receivable, amount_received,
-                caregiver_fee, caregiver_paid_at,
-                payment_status, notes, case_no
-            ))
-            conn.commit()
-            return cursor.rowcount > 0
-    except Exception as e:
-        conn.rollback()
-        raise e
-    finally:
-        conn.close()
+
 
 def add_or_update_holiday(holiday_date, holiday_name: str, is_double_pay_default: bool = True) -> bool:
     """新增或更新國定假日"""

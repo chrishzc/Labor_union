@@ -71,9 +71,10 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
     參數:
       target_case_no: 欲編輯案件的正式案件編號 (必須已由呼叫端選定，此函式不再提供下拉選單)
       orders_data: db_service.get_order_details() 的完整結果
-      payments_raw: db_service.get_table_data('payments') 的完整結果
+      payments_raw: 保留相容性的空白帳務資料；舊 payments 已停用
       key_prefix: Streamlit widget key 前綴，避免同頁面內多個展開面板的 key 互相衝突
     """
+    assert isinstance(orders_data, list)
     target_order = next((o for o in orders_data if o['case_no'] == target_case_no), None)
     if not target_order:
         st.warning("找不到此訂單資料，可能已被刪除或狀態已變更，請重新整理頁面。")
@@ -212,12 +213,12 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
         sc1, sc2, sc3 = st.columns(3)
         with sc1:
             w_caregiver_rate = st.number_input("服務單價 (元/天)", value=safe_int(target_order.get('caregiver_rate', 2000)), step=100, key=f"{key_prefix}_care_rate_{target_case_no}")
-            w_salary_1_date = st.date_input("付款日-1 (自費薪資撥款)", value=safe_date(target_order.get('salary_payment_date_1')), key=f"{key_prefix}_p1_pay_date_{target_case_no}")
+            w_salary_1_date = st.date_input("預計發薪日", value=safe_date(target_order.get('salary_payment_date_1')), key=f"{key_prefix}_p1_pay_date_{target_case_no}")
         with sc2:
+            st.number_input("服務薪資 (元)", value=safe_int(target_order.get('service_salary')), disabled=True, step=100, key=f"{key_prefix}_service_salary_{target_case_no}")
             calc_sub_salary = safe_int(round((w_subsidy_hours / max(1, w_hours_per_day)) * w_caregiver_rate))
             display_sub_salary = calc_sub_salary if not is_unlocked else safe_int(target_order.get('subsidy_salary', calc_sub_salary))
             w_subsidy_salary = st.number_input("補助薪資 (元)", value=display_sub_salary, disabled=not is_unlocked, step=100, key=f"{key_prefix}_sub_sal_{target_case_no}_{display_sub_salary}")
-            w_salary_2_date = st.date_input("付款日-2 (補助薪資撥款)", value=safe_date(target_order.get('salary_payment_date_2')), key=f"{key_prefix}_p2_pay_date_{target_case_no}")
         with sc3:
             w_govt_claim = st.date_input("市府請款 (請款送件日)", value=safe_date(target_order.get('govt_claim_date')), key=f"{key_prefix}_govt_date_{target_case_no}")
 
@@ -276,35 +277,7 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
                 }
                 db_service.update_order_full_details(target_case_no, full_data)
                 
-                # 2. 寫入 payments 實收財務表
-                p_status = "待收訂金"
-                if w_dep_rec > 0:
-                    p_status = "已收訂金"
-                if w_p1_rec > 0:
-                    p_status = "已收一期款"
-                if w_p2_rec > 0:
-                    p_status = "已收二期款"
-                if w_dep_rec > 0 and w_p1_rec > 0 and w_p2_rec > 0:
-                    p_status = "已結案"
-
-                db_service.update_payment_details(
-                    case_no=target_order['case_no'],
-                    deposit_receivable=w_deposit_amt + w_floor_fee,
-                    deposit_received=w_dep_rec,
-                    first_payment_receivable=w_first_pay_amt,
-                    first_payment_received=w_p1_rec,
-                    second_payment_receivable=w_second_pay_amt,
-                    second_payment_received=w_p2_rec,
-                    caregiver_fee=w_subsidy_salary,
-                    payment_status=p_status,
-                    notes=w_notes,
-                    deposit_due_date=w_dep_due_date,
-                    deposit_received_at=w_dep_rec_date if w_dep_rec > 0 else None,
-                    first_payment_due_date=w_first_pay_due_date,
-                    first_payment_received_at=w_p1_rec_date if w_p1_rec > 0 else None,
-                    second_payment_due_date=w_second_pay_due_date,
-                    second_payment_received_at=w_p2_rec_date if w_p2_rec > 0 else None,
-                )
+                # 舊 payments 已停用；新帳務由新帳務介面寫入 client/staff ledgers。
                 
                 # 3. 寫入訂單狀態與取消原因
                 db_service.update_order_status(target_case_no, w_order_status, w_cancel_reason.strip())
@@ -321,7 +294,7 @@ def show():
 
     try:
         orders_data = db_service.get_order_details()
-        payments_raw = db_service.get_table_data('payments')
+        payments_raw = []
     except Exception as e:
         st.error(f"讀取資料庫失敗: {e}")
         return

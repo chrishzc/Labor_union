@@ -48,7 +48,7 @@ modules:
 
   PaymentRouter:
     type: api_router
-    description: 財務與對帳 API 路由，提供 GET 財務列表與 PUT 實收金額與備註更新。
+    description: 舊 payments API 相容路由；所有端點回傳 HTTP 410，客戶與月嫂新帳務 API 尚待建立。
     source: api/routes/payments.py
     dependencies: [DbService, PaymentSchemas]
     state: validated

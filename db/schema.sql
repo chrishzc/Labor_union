@@ -226,16 +226,19 @@ CREATE TABLE IF NOT EXISTS orders (
     subsidy_eligibility VARCHAR(100) DEFAULT '非市民' COMMENT '補助資格 (一般市民/補助市民/非市民)',
     floor_fee DECIMAL(10, 2) DEFAULT 0.00 COMMENT '樓層費用 (O)',
     deposit_date DATE NULL COMMENT '訂金收取日期',
+    deposit_service_days INT NULL COMMENT '訂金服務天數；NULL 表示歷史案件待人工補登',
     start_date DATE NULL COMMENT '預計/實際服務開始日 (AK)',
     end_date DATE NULL COMMENT '預計/實際服務結束日 (AL)',
     custom_rest_dates JSON NULL COMMENT '排定/自訂休假日期 JSON 陣列 (如 ["2026-07-05", "2026-07-12"])',
-    other_addition DECIMAL(10, 2) DEFAULT 0.00 COMMENT '其他加價 (AE)',
     
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_orders_case_no FOREIGN KEY (case_no) REFERENCES clients(case_no) ON UPDATE CASCADE ON DELETE RESTRICT,
     FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE CASCADE,
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE SET NULL,
+    CONSTRAINT chk_orders_deposit_service_days_nonnegative CHECK (
+        deposit_service_days IS NULL OR deposit_service_days >= 0
+    ),
     INDEX idx_order_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
@@ -285,7 +288,155 @@ CREATE TABLE IF NOT EXISTS payments (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
--- 19. 訂單與帳務整合檢視表 (獨立拆分訂金與樓層費，並提供首筆應付加總)
+-- 19. 客戶帳務摘要（一案一筆；實際金流保存在 client_payment_transactions）
+CREATE TABLE IF NOT EXISTS client_payments (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL COMMENT '唯一案件鍵，對應 orders.case_no',
+    deposit_receivable DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    deposit_received DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    deposit_due_date DATE NULL,
+    deposit_received_at DATE NULL COMMENT '訂金全額核銷日；部分入款見交易明細',
+    first_payment_receivable DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    first_payment_received DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    first_payment_due_date DATE NULL,
+    first_payment_received_at DATE NULL COMMENT '第一期全額核銷日',
+    second_payment_receivable DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    second_payment_received DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    second_payment_due_date DATE NULL,
+    second_payment_received_at DATE NULL COMMENT '第二期全額核銷日',
+    amount_receivable DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '三階段應收總額',
+    amount_received DECIMAL(12, 2) NOT NULL DEFAULT 0.00 COMMENT '三階段實收總額',
+    subsidy_refund_receivable DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    subsidy_refund_refunded DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    subsidy_refund_due_date DATE NULL,
+    subsidy_refund_at DATE NULL COMMENT '補助退款全額完成日',
+    subsidy_return_receivable DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    subsidy_return_refunded DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    subsidy_return_due_date DATE NULL,
+    subsidy_return_at DATE NULL,
+    payment_status VARCHAR(50) NOT NULL DEFAULT '待收訂金',
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_client_payments_case_no (case_no),
+    CONSTRAINT fk_client_payments_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 20. 客戶實際金流明細（可記錄部分入款、退款、沖正及失敗交易）
+CREATE TABLE IF NOT EXISTS client_payment_transactions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    client_payment_id BIGINT NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    stage ENUM('deposit', 'first_payment', 'second_payment', 'subsidy_refund', 'subsidy_return', 'adjustment') NOT NULL,
+    transaction_type ENUM('receipt', 'refund', 'reversal') NOT NULL,
+    transaction_status ENUM('succeeded', 'failed', 'reversed') NOT NULL DEFAULT 'succeeded',
+    amount DECIMAL(12, 2) NOT NULL,
+    occurred_at DATE NULL,
+    external_reference VARCHAR(100) NULL COMMENT '銀行流水或金流平台唯一識別',
+    reversal_of_transaction_id BIGINT NULL,
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_client_payment_tx_reference (external_reference),
+    INDEX idx_client_payment_tx_case_stage (case_no, stage),
+    CONSTRAINT fk_client_payment_tx_summary FOREIGN KEY (client_payment_id) REFERENCES client_payments(id) ON DELETE CASCADE,
+    CONSTRAINT fk_client_payment_tx_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_client_payment_tx_reversal FOREIGN KEY (reversal_of_transaction_id) REFERENCES client_payment_transactions(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 21. 案件月嫂服務指派（同一案件可分成多段，由不同月嫂承接）
+CREATE TABLE IF NOT EXISTS case_staff_assignments (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    staff_id INT NOT NULL,
+    assignment_sequence INT NOT NULL COMMENT '同案服務區段順序，從 1 起',
+    assigned_start_date DATE NULL,
+    assigned_end_date DATE NULL,
+    planned_hours DECIMAL(10, 2) NULL,
+    actual_hours DECIMAL(10, 2) NULL,
+    hourly_rate DECIMAL(10, 2) NULL,
+    floor_fee_allocated DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    status ENUM('planned', 'active', 'completed', 'replaced', 'cancelled') NOT NULL DEFAULT 'planned',
+    replacement_reason VARCHAR(255) NULL,
+    replaced_assignment_id BIGINT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_case_assignment_sequence (case_no, assignment_sequence),
+    INDEX idx_assignment_staff_status (staff_id, status),
+    CONSTRAINT fk_assignment_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_assignment_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_assignment_replaced FOREIGN KEY (replaced_assignment_id) REFERENCES case_staff_assignments(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 22. 月嫂應付摘要（一筆正式服務指派最多對應一筆）
+CREATE TABLE IF NOT EXISTS staff_payments (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    assignment_id BIGINT NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    staff_id INT NOT NULL,
+    service_hours DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    hourly_rate DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
+    service_salary DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    floor_fee_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    adjustment_amount DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    total_payable DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    amount_paid DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    due_date DATE NULL,
+    paid_at DATE NULL COMMENT '全額實付完成日；部分轉帳見交易明細',
+    payment_status ENUM('pending', 'partially_paid', 'paid', 'cancelled', 'review_required') NOT NULL DEFAULT 'pending',
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_payment_assignment (assignment_id),
+    INDEX idx_staff_payment_staff_status (staff_id, payment_status),
+    INDEX idx_staff_payment_case_no (case_no),
+    CONSTRAINT fk_staff_payment_assignment FOREIGN KEY (assignment_id) REFERENCES case_staff_assignments(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_payment_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_payment_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 23. 月嫂實際轉帳明細（可記錄分次轉帳、失敗、退匯與沖正）
+CREATE TABLE IF NOT EXISTS staff_payment_transactions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    staff_payment_id BIGINT NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    staff_id INT NOT NULL,
+    transaction_type ENUM('transfer', 'reversal', 'return') NOT NULL,
+    transaction_status ENUM('succeeded', 'failed', 'reversed') NOT NULL DEFAULT 'succeeded',
+    amount DECIMAL(12, 2) NOT NULL,
+    occurred_at DATE NULL,
+    external_reference VARCHAR(100) NULL,
+    reversal_of_transaction_id BIGINT NULL,
+    notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_payment_tx_reference (external_reference),
+    INDEX idx_staff_payment_tx_staff (staff_id, occurred_at),
+    CONSTRAINT fk_staff_payment_tx_summary FOREIGN KEY (staff_payment_id) REFERENCES staff_payments(id) ON DELETE CASCADE,
+    CONSTRAINT fk_staff_payment_tx_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_payment_tx_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_payment_tx_reversal FOREIGN KEY (reversal_of_transaction_id) REFERENCES staff_payment_transactions(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 24. 舊 payments 中無法安全歸屬的月嫂金額待覆核項目
+CREATE TABLE IF NOT EXISTS payment_migration_reviews (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    legacy_payment_id INT NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    legacy_caregiver_fee DECIMAL(12, 2) NOT NULL,
+    legacy_caregiver_paid_at DATE NULL,
+    reason VARCHAR(255) NOT NULL,
+    review_status ENUM('pending', 'resolved', 'dismissed') NOT NULL DEFAULT 'pending',
+    resolved_at TIMESTAMP NULL,
+    resolution_notes TEXT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_payment_migration_review_legacy (legacy_payment_id),
+    INDEX idx_payment_migration_review_case (case_no, review_status),
+    CONSTRAINT fk_payment_migration_review_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 25. 訂單與帳務整合檢視表 (獨立拆分訂金與樓層費，並提供首筆應付加總)
 CREATE OR REPLACE VIEW v_order_details AS
 SELECT 
     o.case_no AS case_no,
@@ -311,7 +462,6 @@ SELECT
     o.deposit_date,
     o.start_date,
     o.end_date,
-    o.other_addition,
     
     -- 1. 時數計算
     (o.service_days * o.service_hours_per_day) AS total_hours,
@@ -446,16 +596,19 @@ SELECT
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-            (GREATEST(0, (o.service_days * o.service_hours_per_day) - CASE WHEN o.subsidy_eligibility = '一般市民' THEN 40 WHEN o.subsidy_eligibility = '補助市民' THEN 120 ELSE 0 END) * 
-             CASE WHEN o.subsidy_eligibility = '一般市民' THEN 300 WHEN o.subsidy_eligibility = '補助市民' THEN 350 ELSE 320 END) + COALESCE(o.other_addition, 0)
+            (o.service_days * o.service_hours_per_day) *
+            CASE WHEN o.subsidy_eligibility = '一般市民' THEN 300 WHEN o.subsidy_eligibility = '補助市民' THEN 350 ELSE 320 END
         ELSE NULL 
-    END AS service_salary,
+    END AS service_salary, -- 月嫂純薪資；樓層費以 floor_fee 獨立顯示與支付
     
-    CASE 
-        WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.end_date IS NOT NULL THEN 
+    CASE
+        WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.end_date IS NOT NULL
+             AND o.subsidy_eligibility = '補助市民' THEN
+            DATE_ADD(LAST_DAY(DATE_ADD(o.end_date, INTERVAL 1 MONTH)), INTERVAL 15 DAY)
+        WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.end_date IS NOT NULL THEN
             DATE_ADD(LAST_DAY(o.end_date), INTERVAL 15 DAY)
         ELSE NULL 
-    END AS salary_payment_date_1,
+    END AS salary_payment_date_1, -- 單次發薪：一般次月 15 日；補助市民次次月 15 日
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
@@ -463,12 +616,6 @@ SELECT
              CASE WHEN o.subsidy_eligibility = '一般市民' THEN 300 WHEN o.subsidy_eligibility = '補助市民' THEN 350 ELSE 320 END)
         ELSE NULL 
     END AS subsidy_salary,
-    
-    CASE 
-        WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.end_date IS NOT NULL THEN 
-            DATE_ADD(LAST_DAY(o.end_date), INTERVAL 46 DAY)
-        ELSE NULL 
-    END AS salary_payment_date_2,
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.subsidy_eligibility != '非市民' AND o.end_date IS NOT NULL THEN 
