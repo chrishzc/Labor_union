@@ -19,6 +19,7 @@ CONFIG_FILES = {
     "line_menus": "line_menu.json",
     "liff": "liff_settings.json",
     "customer_service": "customer_service.json",
+    "message_schedules": "message_schedules.json",
 }
 
 T = TypeVar("T", bound=BaseModel)

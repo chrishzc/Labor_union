@@ -87,6 +87,17 @@ GET /api/config/customer-service
 PUT /api/config/customer-service
 ```
 
+### `message_schedules.json`
+
+管理新好友 D+1、D+2、D+3 等排程。排程只引用 `message_templates.json` 中已啟用的範本 ID，顯示時區預設為 `Asia/Taipei`。
+
+```text
+GET /api/config/message-schedules
+PUT /api/config/message-schedules
+```
+
+後端會檢查時間格式、重複天數及範本是否存在；儲存排程不會立即補發歷史任務，只影響之後建立的任務。
+
 ### `rich_menu_ids.json`
 
 由 Rich Menu 發布器寫入的 LINE 平台 ID，不是前端可編輯設定。
@@ -131,3 +142,4 @@ LINE 用戶照片應在 Webhook 收到 message ID 後下載至受控儲存區，
 - 目前設定 API 尚未加入管理員登入；正式開放給前端前必須加上權限保護。
 - API 只操作固定白名單檔案，不能由前端傳入任意檔案路徑。
 - Rich Menu 發布會呼叫 LINE API，應限制為管理員操作。
+- 月嫂驗證查詢及角色管理接口需使用 `X-Internal-API-Key`；正式前應再接管理員登入與角色權限。

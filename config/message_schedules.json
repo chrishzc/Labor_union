@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "timezone": "Asia/Taipei",
+  "schedules": [
+    {
+      "id": "new_user_onboarding",
+      "name": "新好友三日引導",
+      "enabled": true,
+      "trigger": "follow",
+      "restart_on_refollow": false,
+      "steps": [
+        {"day": 1, "send_time": "10:00", "template_id": "new_user_d1"},
+        {"day": 2, "send_time": "10:00", "template_id": "new_user_d2"},
+        {"day": 3, "send_time": "10:00", "template_id": "new_user_d3"}
+      ]
+    }
+  ]
+}

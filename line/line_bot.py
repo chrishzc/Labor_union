@@ -3,19 +3,24 @@
 File: api/main.py
 Description: LINE 與 好好簽 Webhook 接收後端服務 (API Server)
 """
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 import pymysql
 import os
 import json
 import asyncio
-import requests
 import sys
 import uuid
-from datetime import datetime, timedelta, date
+import re
+import secrets
+from datetime import datetime, timedelta, date, timezone
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from line.worker import wake_worker
+from line.security import verify_line_signature
+from services.line_task_service import enqueue_line_task
+from services.webhook_event_service import register_event
 
 # 載入環境變數
 load_dotenv()
@@ -43,6 +48,71 @@ def load_message_templates():
     except Exception as e:
         print(f"[LINE Webhook] Failed to load message templates: {e}")
         return {}
+
+
+def _load_rich_menu_id(role: str) -> str:
+    key_by_role = {
+        "caregiver": "caregiver_rich_menu_id",
+        "union_staff": "union_staff_rich_menu_id",
+        "customer": "default_rich_menu_id",
+    }
+    path = os.path.join(os.path.dirname(__file__), "..", "config", "rich_menu_ids.json")
+    try:
+        with open(path, "r", encoding="utf-8") as stream:
+            return json.load(stream).get(key_by_role[role], "")
+    except (OSError, ValueError, KeyError):
+        return ""
+
+
+def _require_internal_api_key(x_internal_api_key: str | None) -> None:
+    expected = os.getenv("INTERNAL_API_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Internal API authentication is not configured")
+    if not secrets.compare_digest(x_internal_api_key or "", expected):
+        raise HTTPException(status_code=401, detail="Invalid internal API key")
+
+
+def _show_caregiver_code_in_terminal() -> bool:
+    """Allow sensitive verification output only in an explicit dev-like environment."""
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    enabled = os.getenv("SHOW_CAREGIVER_VERIFICATION_CODE", "true").strip().lower()
+    return app_env in {"development", "dev", "local", "test"} and enabled in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _create_onboarding_tasks(cursor, user_id: str, source_event_id: str | None) -> None:
+    schedule_path = os.path.join(os.path.dirname(__file__), "..", "config", "message_schedules.json")
+    templates = load_message_templates()
+    try:
+        with open(schedule_path, "r", encoding="utf-8") as stream:
+            schedule_config = json.load(stream)
+            schedules = schedule_config.get("schedules", [])
+    except (OSError, ValueError):
+        return
+    onboarding = next((item for item in schedules if item.get("id") == "new_user_onboarding" and item.get("enabled")), None)
+    if not onboarding:
+        return
+    for step in onboarding.get("steps", []):
+        template_id = step.get("template_id")
+        content = templates.get(template_id)
+        if not content:
+            continue
+        send_time = step.get("send_time", "10:00")
+        day = int(step.get("day", 0))
+        hour, minute = map(int, send_time.split(":"))
+        schedule_zone = ZoneInfo(schedule_config.get("timezone", "Asia/Taipei"))
+        local_now = datetime.now(schedule_zone)
+        local_target = (local_now + timedelta(days=day)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0
+        )
+        # MySQL currently stores UTC in a timezone-naive DATETIME column.
+        scheduled_at = local_target.astimezone(timezone.utc).replace(tzinfo=None)
+        enqueue_line_task(
+            cursor, to_user_id=user_id, message_content=content,
+            scheduled_at=scheduled_at, source_event_id=source_event_id,
+            idempotency_key=f"onboarding:{user_id}:d{day}",
+        )
 
 
 def ensure_order_for_case_no(cursor, client_id: int, case_no: str) -> None:
@@ -477,13 +547,7 @@ async def health_check():
 @router.post("/")
 async def root_post(payload: dict, request: Request):
     if "events" in payload:
-        print("[LINE Webhook] 警告：收到發送至根目錄 (/) 的 Webhook 請求。自動轉發至 line_webhook 處理。")
-        try:
-            parsed_payload = LineWebhookPayload(**payload)
-            return await line_webhook(parsed_payload, request)
-        except Exception as e:
-            print(f"[LINE Webhook] 根目錄 Webhook 轉發解析失敗: {e}")
-            return {"status": "error", "message": str(e)}
+        raise HTTPException(status_code=400, detail="Use /webhook/line so the raw signed body can be verified")
     return {"status": "active", "message": "Root POST active"}
 
 @router.get("/liff-page")
@@ -502,6 +566,50 @@ async def serve_register_page():
     """全新客戶原生註冊頁面"""
     return FileResponse("line/static/register.html")
 
+
+@router.get("/api/line/caregiver-verifications")
+def list_pending_caregiver_verifications(x_internal_api_key: str | None = Header(default=None)):
+    """Return active codes only to an authenticated internal staff client."""
+    _require_internal_api_key(x_internal_api_key)
+    conn = get_db_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id, line_user_id, verification_code, attempt_count,
+                       max_attempts, expires_at, created_at
+                FROM caregiver_verification_codes
+                WHERE status='pending' AND expires_at > NOW()
+                ORDER BY created_at DESC
+                """
+            )
+            return {"status": "success", "data": cursor.fetchall()}
+    finally:
+        conn.close()
+
+
+@router.put("/api/line/users/{user_id}/role/{role}")
+def set_line_user_role(user_id: str, role: str, x_internal_api_key: str | None = Header(default=None)):
+    """Internal role administration endpoint for customer/caregiver/union_staff."""
+    _require_internal_api_key(x_internal_api_key)
+    if role not in {"customer", "caregiver", "union_staff"}:
+        raise HTTPException(status_code=422, detail="Unsupported LINE user role")
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO line_users (line_user_id, role, status, last_event_at)
+                VALUES (%s,%s,'active',NOW())
+                ON DUPLICATE KEY UPDATE role=VALUES(role), status='active', last_event_at=NOW()
+                """,
+                (user_id, role),
+            )
+            conn.commit()
+        return {"status": "success", "line_user_id": user_id, "role": role}
+    finally:
+        conn.close()
+
 # ----------------- 1. LINE WEBHOOK 接收 -----------------
 class LineWebhookPayload(BaseModel):
     events: list = []
@@ -519,13 +627,25 @@ async def line_webhook_get():
 @router.post("/webhook/line/")
 @router.post("/webhook")
 @router.post("/webhook/")
-async def line_webhook(payload: LineWebhookPayload, request: Request):
+async def line_webhook(request: Request):
+    raw_body = await request.body()
+    signature = request.headers.get("x-line-signature", "")
+    channel_secret = os.getenv("LINE_CHANNEL_SECRET", "")
+    if not verify_line_signature(raw_body, signature, channel_secret):
+        raise HTTPException(status_code=401, detail="Invalid LINE webhook signature")
+    try:
+        payload = LineWebhookPayload.model_validate_json(raw_body)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid LINE webhook payload") from exc
     print(f"[LINE Webhook] Received line webhook. Events count: {len(payload.events)}")
     
     conn = get_db_connection()
     try:
-        with conn.cursor() as cursor:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             for event in payload.events:
+                if not register_event(cursor, event):
+                    print(f"[LINE Webhook] Duplicate event ignored: {event.get('webhookEventId')}")
+                    continue
                 event_type = event.get("type")
                 
                 # 處理新用戶加入好友 (follow) 事件
@@ -535,6 +655,15 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                     print(f"[LINE Webhook] Follow event received from User: {user_id}")
                     
                     if user_id:
+                        cursor.execute(
+                            """
+                            INSERT INTO line_users (line_user_id, status, followed_at, last_event_at, onboarding_started_at)
+                            VALUES (%s, 'active', NOW(), NOW(), NOW())
+                            ON DUPLICATE KEY UPDATE status='active', followed_at=NOW(),
+                                blocked_at=NULL, last_event_at=NOW()
+                            """,
+                            (user_id,),
+                        )
                         liff_id = os.getenv("LINE_LIFF_ID", "")
                         if not liff_id or liff_id == "your_liff_id_here":
                             liff_id = get_setting("line_liff_id", "")
@@ -559,13 +688,35 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         )
                         
                         # 寫入推播任務佇列，由背景發送
-                        cursor.execute("""
-                            INSERT INTO line_tasks (to_user_id, message_content, status)
-                            VALUES (%s, %s, 'pending')
-                        """, (user_id, welcome_msg))
+                        enqueue_line_task(
+                            cursor, to_user_id=user_id, message_content=welcome_msg,
+                            source_event_id=event.get("webhookEventId"),
+                            idempotency_key=f"welcome:{event.get('webhookEventId') or user_id}",
+                        )
+                        _create_onboarding_tasks(cursor, user_id, event.get("webhookEventId"))
                         print(f"[LINE Webhook] Queued welcome message for new user {user_id}")
+
+                elif event_type == "unfollow":
+                    source = event.get("source", {})
+                    user_id = source.get("userId", "")
+                    if user_id:
+                        cursor.execute(
+                            """
+                            UPDATE line_users SET status='blocked', blocked_at=NOW(), last_event_at=NOW()
+                            WHERE line_user_id=%s
+                            """,
+                            (user_id,),
+                        )
+                        cursor.execute(
+                            """
+                            UPDATE line_tasks SET status='cancelled'
+                            WHERE to_user_id=%s AND status='pending'
+                              AND idempotency_key LIKE 'onboarding:%%'
+                            """,
+                            (user_id,),
+                        )
                 
-                if event_type == "postback":
+                elif event_type == "postback":
                     postback_data = event["postback"].get("data", "")
                     print(f"[LINE Webhook] Postback data received: {postback_data}")
                     
@@ -643,61 +794,112 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         user_id = source.get("userId", "")
                         reply_token = event.get("replyToken", "")
                         print(f"[LINE Webhook] Text message received from {user_id}: {user_text}")
-                        
-                        # 攔截「我是月嫂」關鍵字切換選單
-                        if "我是月嫂" in user_text:
-                            caregiver_menu_id = ""
-                            config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-                            ids_path = os.path.join(config_dir, "rich_menu_ids.json")
-                            if os.path.exists(ids_path):
-                                try:
-                                    with open(ids_path, "r", encoding="utf-8") as f:
-                                        ids_data = json.load(f)
-                                        caregiver_menu_id = ids_data.get("caregiver_rich_menu_id", "")
-                                except Exception as e:
-                                    print(f"[LINE Webhook] Failed to read rich_menu_ids.json: {e}")
-                            
-                            if caregiver_menu_id:
-                                line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or get_setting("line_channel_access_token")
-                                headers = {"Authorization": f"Bearer {line_token}"}
-                                res = requests.post(f"https://api.line.me/v2/bot/user/{user_id}/richmenu/{caregiver_menu_id}", headers=headers)
-                                
-                                if res.status_code == 200:
-                                    replies = load_message_templates()
-                                    reply_msg = replies.get("caregiver_switch_success")
-                                else:
-                                    replies = load_message_templates()
-                                    reply_msg = replies.get("caregiver_switch_fail").replace("{status_code}", str(res.status_code))
+
+                        cursor.execute("SELECT role FROM line_users WHERE line_user_id=%s", (user_id,))
+                        role_row = cursor.fetchone()
+                        current_role = role_row["role"] if role_row else "customer"
+                        if current_role == "union_staff" and user_text.strip() in {"工會選單", "開啟客服系統", "月嫂驗證管理"}:
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id, task_type="rich_menu_link",
+                                payload={
+                                    "rich_menu_id": _load_rich_menu_id("union_staff"),
+                                    "success_message": "已切換至工會人員客服選單。",
+                                },
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"union-menu:{event.get('webhookEventId')}",
+                            )
+                            continue
+
+                        # 六位數月嫂身分驗證碼
+                        if re.fullmatch(r"\d{6}", user_text.strip()):
+                            cursor.execute(
+                                """
+                                SELECT * FROM caregiver_verification_codes
+                                WHERE line_user_id=%s AND status='pending'
+                                  AND expires_at >= NOW()
+                                ORDER BY id DESC LIMIT 1 FOR UPDATE
+                                """,
+                                (user_id,),
+                            )
+                            verification = cursor.fetchone()
+                            templates = load_message_templates()
+                            if verification and verification["verification_code"] == user_text.strip():
+                                cursor.execute(
+                                    "UPDATE caregiver_verification_codes SET status='verified', verified_at=NOW() WHERE id=%s",
+                                    (verification["id"],),
+                                )
+                                cursor.execute(
+                                    """
+                                    INSERT INTO line_users (line_user_id, role, status, last_event_at)
+                                    VALUES (%s,'caregiver','active',NOW())
+                                    ON DUPLICATE KEY UPDATE role='caregiver', status='active', last_event_at=NOW()
+                                    """,
+                                    (user_id,),
+                                )
+                                menu_id = _load_rich_menu_id("caregiver")
+                                enqueue_line_task(
+                                    cursor, to_user_id=user_id, task_type="rich_menu_link",
+                                    payload={"rich_menu_id": menu_id, "success_message": templates.get("caregiver_switch_success", "月嫂身分驗證成功。")},
+                                    source_event_id=event.get("webhookEventId"),
+                                    idempotency_key=f"caregiver-verified:{verification['id']}",
+                                )
                             else:
-                                replies = load_message_templates()
-                                reply_msg = replies.get("caregiver_menu_not_set")
-                                
-                            cursor.execute("""
-                                INSERT INTO line_tasks (to_user_id, message_content, status)
-                                VALUES (%s, %s, 'pending')
-                            """, (user_id, reply_msg))
-                            print(f"[LINE Webhook] Intercepted keyword '{user_text}', switched Rich Menu for User: {user_id}")
+                                if verification:
+                                    attempts = verification["attempt_count"] + 1
+                                    new_status = "locked" if attempts >= verification["max_attempts"] else "pending"
+                                    cursor.execute(
+                                        "UPDATE caregiver_verification_codes SET attempt_count=%s, status=%s WHERE id=%s",
+                                        (attempts, new_status, verification["id"]),
+                                    )
+                                enqueue_line_task(
+                                    cursor, to_user_id=user_id,
+                                    message_content=templates.get("caregiver_verification_failed", "驗證碼錯誤或已失效。"),
+                                    source_event_id=event.get("webhookEventId"),
+                                    idempotency_key=f"caregiver-code-failed:{event.get('webhookEventId')}",
+                                )
+                            continue
+                        
+                        # 攔截「我是月嫂」並建立短時效驗證碼，不再直接切換身分
+                        if "我是月嫂" in user_text:
+                            code = f"{secrets.randbelow(1_000_000):06d}"
+                            cursor.execute(
+                                "UPDATE caregiver_verification_codes SET status='cancelled' WHERE line_user_id=%s AND status='pending'",
+                                (user_id,),
+                            )
+                            cursor.execute(
+                                """
+                                INSERT INTO caregiver_verification_codes (line_user_id, verification_code, expires_at)
+                                VALUES (%s,%s,DATE_ADD(NOW(), INTERVAL 10 MINUTE))
+                                """,
+                                (user_id, code),
+                            )
+                            verification_id = cursor.lastrowid
+                            templates = load_message_templates()
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id,
+                                message_content=templates.get("caregiver_verification_requested", "請向工會取得六位數驗證碼。"),
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"caregiver-code-request:{verification_id}",
+                            )
+                            print(f"[LINE Webhook] Caregiver verification #{verification_id} created for {user_id}")
+                            if _show_caregiver_code_in_terminal():
+                                print("=" * 60)
+                                print("[LINE Webhook][DEV] 月嫂身分驗證碼")
+                                print(f"LINE User ID : {user_id}")
+                                print(f"驗證碼       : {code}")
+                                print("有效時間     : 10 分鐘（最多輸錯 5 次）")
+                                print("=" * 60)
                             continue
                             
                         # 攔截「esc」關鍵字恢復預設選單
                         if user_text.lower().strip() == "esc":
-                            line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or get_setting("line_channel_access_token")
-                            headers = {"Authorization": f"Bearer {line_token}"}
-                            # 呼叫 DELETE 移除使用者的個人化選單，自動退回系統預設選單
-                            res = requests.delete(f"https://api.line.me/v2/bot/user/{user_id}/richmenu", headers=headers)
-                            
-                            if res.status_code == 200:
-                                replies = load_message_templates()
-                                reply_msg = replies.get("esc_success")
-                            else:
-                                replies = load_message_templates()
-                                reply_msg = replies.get("esc_fail").replace("{status_code}", str(res.status_code))
-                                
-                            cursor.execute("""
-                                INSERT INTO line_tasks (to_user_id, message_content, status)
-                                VALUES (%s, %s, 'pending')
-                            """, (user_id, reply_msg))
-                            print(f"[LINE Webhook] Intercepted keyword '{user_text}', unlinked Rich Menu for User: {user_id}")
+                            replies = load_message_templates()
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id, task_type="rich_menu_unlink",
+                                payload={"success_message": replies.get("esc_success", "已切換回一般用戶選單。")},
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"menu-unlink:{event.get('webhookEventId')}",
+                            )
                             continue
 
                         # 攔截「查詢訂單」或「綁定」關鍵字對話流
@@ -720,88 +922,42 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                             replies = load_message_templates()
                             reply_msg = replies.get("bind_link_msg").replace("{bind_url}", bind_url)
                             
-                            cursor.execute("""
-                                INSERT INTO line_tasks (to_user_id, message_content, status)
-                                VALUES (%s, %s, 'pending')
-                            """, (user_id, reply_msg))
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id, message_content=reply_msg,
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"bind-link:{event.get('webhookEventId')}",
+                            )
                             print(f"[LINE Webhook] Intercepted keyword '{user_text}', queued query link for User: {user_id}")
                             continue
                         
-                        # 動態取得 RAG 設定與初始化 ChromaDB
-                        import chromadb
-                        mode = get_setting("embedding_mode", "default")
-                        embedding_function = None
-                        try:
-                            if mode == "openai":
-                                import chromadb.utils.embedding_functions as embedding_functions
-                                api_key = get_setting("openai_api_key", "")
-                                if api_key:
-                                    embedding_function = embedding_functions.OpenAIEmbeddingFunction(
-                                        api_key=api_key,
-                                        model_name="text-embedding-3-small"
-                                    )
-                            elif mode == "local":
-                                import chromadb.utils.embedding_functions as embedding_functions
-                                embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                                    model_name="shibing624/text2vec-base-chinese"
-                                )
-                        except ImportError:
-                            pass
-                            
-                        # 連線至 ChromaDB
-                        try:
-                            client = chromadb.PersistentClient(path="./db/chroma_data")
-                            if embedding_function:
-                                collection = client.get_or_create_collection("union_faq", embedding_function=embedding_function)
-                            else:
-                                collection = client.get_or_create_collection("union_faq")
-                                
-                            # 如果資料庫為空，可能出現 ValueError，用 try-except 包裝查詢
-                            reply_msg = "很抱歉，我不太懂您的意思，已經幫您轉交給行政專員為您人工處理。"
-                            try:
-                                results = collection.query(
-                                    query_texts=[user_text],
-                                    n_results=1
-                                )
-                                if results and results['distances'] and len(results['distances'][0]) > 0:
-                                    distance = results['distances'][0][0]
-                                    if distance < 1.0: # 依據模型可調整閾值
-                                        reply_msg = results['metadatas'][0][0].get("answer", reply_msg)
-                            except Exception as query_e:
-                                print(f"[LINE Webhook] ChromaDB Query Error (Empty DB?): {query_e}")
-                            
-                            # 決定回覆模式
-                            reply_mode = get_setting("line_reply_mode", "push_daemon")
-                            if reply_mode == "reply_sdk":
-                                try:
-                                    from linebot import LineBotApi
-                                    from linebot.models import TextSendMessage
-                                    token = get_setting("line_channel_access_token", "")
-                                    if token and reply_token:
-                                        line_bot_api = LineBotApi(token)
-                                        line_bot_api.reply_message(reply_token, TextSendMessage(text=reply_msg))
-                                        print("[LINE Webhook] SDK Replied.")
-                                        continue
-                                except Exception as e:
-                                    print(f"[LINE Webhook] SDK Reply Failed: {e}, falling back to push.")
-                                    
-                            # Fallback to Push Daemon
-                            if user_id:
-                                cursor.execute("""
-                                    INSERT INTO line_tasks (to_user_id, message_content, status)
-                                    VALUES (%s, %s, 'pending')
-                                """, (user_id, reply_msg))
-                                print(f"[LINE Webhook] Queued push message for {user_id}")
-                            
-                        except Exception as e:
-                            print(f"[LINE Webhook] RAG Processing Error: {e}")
+                        enqueue_line_task(
+                            cursor, to_user_id=user_id, task_type="rag_reply",
+                            payload={"user_text": user_text},
+                            source_event_id=event.get("webhookEventId"),
+                            idempotency_key=f"rag:{event.get('webhookEventId')}",
+                        )
 
                         
+            completed_event_ids = [
+                event.get("webhookEventId") for event in payload.events
+                if event.get("webhookEventId")
+            ]
+            if completed_event_ids:
+                placeholders = ",".join(["%s"] * len(completed_event_ids))
+                cursor.execute(
+                    f"""
+                    UPDATE line_webhook_events
+                    SET processing_status='completed', processed_at=NOW(), error_message=NULL
+                    WHERE webhook_event_id IN ({placeholders})
+                    """,
+                    completed_event_ids,
+                )
             conn.commit()
             wake_worker()
     except Exception as e:
         conn.rollback()
         print(f"[LINE Webhook] Webhook handler failed: {e}")
+        raise HTTPException(status_code=500, detail="LINE webhook processing failed") from e
     finally:
         conn.close()
         

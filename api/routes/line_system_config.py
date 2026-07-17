@@ -19,6 +19,7 @@ from api.schemas.line_config import (
     MessageTemplate,
     MessageTemplatePreviewRequest,
     MessageTemplatesConfig,
+    MessageSchedulesConfig,
     RichMenuDefinition,
 )
 from services.json_config_service import (
@@ -132,6 +133,25 @@ def preview_message_template(template_id: str, payload: MessageTemplatePreviewRe
             "{" + variable.name + "}", payload.variables.get(variable.name, "")
         )
     return {"message_type": "text", "content": rendered}
+
+
+# ---------------------------------------------------------------------------
+# Scheduled messages
+# ---------------------------------------------------------------------------
+@router.get("/message-schedules", response_model=MessageSchedulesConfig)
+def get_message_schedules():
+    return _read("message_schedules", MessageSchedulesConfig)
+
+
+@router.put("/message-schedules", response_model=MessageSchedulesConfig)
+def replace_message_schedules(payload: MessageSchedulesConfig):
+    templates = _read("message_templates", MessageTemplatesConfig)
+    enabled_template_ids = {item.id for item in templates.templates if item.enabled}
+    missing = sorted({step.template_id for item in payload.schedules for step in item.steps} - enabled_template_ids)
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Unknown or disabled templates: {', '.join(missing)}")
+    _save("message_schedules", payload)
+    return payload
 
 
 # ---------------------------------------------------------------------------

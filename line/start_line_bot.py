@@ -1,80 +1,314 @@
-import subprocess
-import time
-import sys
-import requests
-import signal
+"""Start and supervise the local FastAPI + ngrok development environment."""
+
+from __future__ import annotations
+
 import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
 
-# 確保在 Windows cmd 下能正確輸出 Unicode (Emoji) 符號，避免 cp950 編碼錯誤
-if hasattr(sys.stdout, 'reconfigure'):
-    sys.stdout.reconfigure(encoding='utf-8')
+import requests
 
-# 切換工作目錄到專案根目錄，使 FastAPI 啟動及相對路徑皆能正確運作
-os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-def run_ngrok():
-    # 執行 ngrok 並把它的黑畫面 UI 隱藏 (--log=stdout)，改為純背景輸出
-    # 將輸出導向 DEVNULL 避免畫面太亂被 ngrok 訊息洗版
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+os.chdir(PROJECT_ROOT)
+
+
+def _resolve_ngrok() -> str:
+    executable = shutil.which("ngrok")
+    if executable:
+        return executable
+    local_executable = PROJECT_ROOT / ".venv" / "Scripts" / "ngrok.exe"
+    if local_executable.exists():
+        return str(local_executable)
+    raise FileNotFoundError("找不到 ngrok，請先安裝並確認 ngrok 可從終端執行。")
+
+
+def run_ngrok() -> subprocess.Popen[str]:
     return subprocess.Popen(
-        ["ngrok", "http", "8000", "--log=stdout"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        shell=True # 在 Windows 上使用 shell=True 確保指令能正確找到 ngrok
+        [_resolve_ngrok(), "http", "8000", "--log=stdout"],
+        cwd=PROJECT_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        shell=False,
     )
 
-def run_fastapi():
-    # 啟動 FastAPI 伺服器 (這個保留在前景，讓您能看到 print 跟錯誤訊息)
+
+def run_fastapi() -> subprocess.Popen[bytes]:
+    # 使用啟動本檔案的同一個 Python，避免 uv 選到另一套 Python 環境。
     return subprocess.Popen(
-        ["uv", "run", "uvicorn", "api.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
-        shell=True
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "api.main:app",
+            "--reload",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "8000",
+        ],
+        cwd=PROJECT_ROOT,
+        shell=False,
     )
 
-def main():
-    print("=" * 60)
-    print("🚀 正在啟動 LINE Bot 開發環境 (FastAPI + ngrok)...")
-    print("=" * 60)
-    
-    ngrok_process = run_ngrok()
-    print("▶ ngrok 已在背景啟動 (對應 Port: 8000)")
-    
-    fastapi_process = run_fastapi()
-    print("▶ FastAPI 伺服器已啟動")
 
-    # 等待 ngrok 準備好並取得網址
-    print("⏳ 正在為您向 ngrok 索取免費 HTTPS 網址，請稍候...\n")
-    time.sleep(4) # 等待 4 秒讓 ngrok 連線到雲端伺服器
-    try:
-        # ngrok 啟動後，會在本地端 4040 port 提供一個 API 可以查詢目前的網址
-        res = requests.get("http://127.0.0.1:4040/api/tunnels")
-        if res.status_code == 200:
-            data = res.json()
-            tunnels = data.get("tunnels", [])
-            for t in tunnels:
-                if t.get("proto") == "https":
-                    public_url = t.get("public_url")
-                    print("✨" * 25)
-                    print(f"🎉 啟動成功！請複製以下網址至 LINE Developer 後台：")
-                    print(f"👉 Webhook 網址: {public_url}/webhook/line\n")
-                    print(f"🎉 這是您的 LIFF 測試表單網址：")
-                    print(f"👉 LIFF 網址: {public_url}/api/static/register.html")
-                    print("✨" * 25 + "\n")
-                    print("💡 提示：按 Ctrl+C 可以同時關閉伺服器與 ngrok")
-                    break
-    except Exception as e:
-        print("⚠️ 無法自動獲取 ngrok 網址，請確認 ngrok 是否有正確安裝或登入。")
+def _relay_output(process: subprocess.Popen[str], prefix: str) -> None:
+    if process.stdout is None:
+        return
+    for line in process.stdout:
+        clean_line = line.rstrip()
+        if clean_line:
+            print(f"[{prefix}] {clean_line}")
 
-    # 保持主程式運行，直到使用者按下 Ctrl+C
+
+def _terminate_process_tree(process: subprocess.Popen, service_name: str) -> None:
+    if process.poll() is not None:
+        return
+    print(f"[SHUTDOWN] 正在關閉 {service_name}（PID: {process.pid}）...")
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+        )
+    else:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+
+
+def _wait_for_tunnel(ngrok_process: subprocess.Popen, timeout_seconds: int = 15) -> str | None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if ngrok_process.poll() is not None:
+            return None
+        try:
+            response = requests.get("http://127.0.0.1:4040/api/tunnels", timeout=1)
+            response.raise_for_status()
+            for tunnel in response.json().get("tunnels", []):
+                if tunnel.get("proto") == "https":
+                    return tunnel.get("public_url")
+        except requests.RequestException:
+            pass
+        time.sleep(0.5)
+    return None
+
+
+def _print_urls(public_url: str) -> None:
+    print("✨" * 25)
+    print("🎉 啟動成功！請將以下完整網址設定到 LINE Developers：")
+    print(f"👉 Webhook 網址: {public_url}/webhook/line")
+    print("\n🎉 LIFF 測試表單網址：")
+    print(f"👉 LIFF 網址: {public_url}/api/static/register.html")
+    print("✨" * 25)
+    print("\n💡 FastAPI 或 ngrok 任一方停止時，另一方也會自動關閉。")
+    print("💡 按 Ctrl+C 可正常關閉兩個服務。")
+
+
+class ServiceFailure(RuntimeError):
+    """A supervised service stopped or failed to become ready."""
+
+
+def _failure_popup_enabled() -> bool:
+    value = os.getenv("ENABLE_SERVER_FAILURE_POPUP", "false").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _ask_console_restart(message: str) -> bool:
+    """Ask an interactive developer terminal whether both services should restart."""
+    print("\n" + "=" * 60)
+    print(f"[SERVER ERROR] {message}")
+    print("ngrok 與 FastAPI 已自動關閉。")
+    print("=" * 60)
+
+    if not sys.stdin or not sys.stdin.isatty():
+        print("[EXIT] 目前不是互動式終端，無法讀取 y/n，服務將直接關閉。")
+        return False
+
+    while True:
+        try:
+            answer = input("是否要重新啟動 ngrok & FastAPI？(y/n): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print("\n[EXIT] 已取消重新啟動。")
+            return False
+        if answer in {"y", "yes"}:
+            return True
+        if answer in {"n", "no"}:
+            return False
+        print("請輸入 y（重新啟動）或 n（關閉）。")
+
+
+def _ask_restart(message: str) -> bool:
+    """Show a blocking Windows dialog. Return True for restart."""
+    if not _failure_popup_enabled():
+        return _ask_console_restart(message)
+
+    prompt = f"{message}\n\n服務已安全關閉。是否重新啟動 LINE Bot？"
     try:
-        fastapi_process.wait()
-    except KeyboardInterrupt:
-        print("\n🛑 收到終止指令 (Ctrl+C)，正在安全關閉伺服器與 ngrok...")
-        fastapi_process.terminate()
-        ngrok_process.terminate()
-        
-        # Windows 的 subprocess.terminate() 有時無法完全砍掉 shell=True 的子進程
-        # 我們直接透過 taskkill 清理乾淨
-        os.system("taskkill /f /im ngrok.exe >nul 2>&1")
-        sys.exit(0)
+        import tkinter as tk
+
+        selection = {"restart": False}
+        window = tk.Tk()
+        window.title("LINE Bot 伺服器異常")
+        window.resizable(False, False)
+        window.attributes("-topmost", True)
+
+        body = tk.Frame(window, padx=28, pady=22)
+        body.pack(fill="both", expand=True)
+        tk.Label(
+            body,
+            text="LINE Bot 伺服器異常",
+            font=("Microsoft JhengHei UI", 15, "bold"),
+            fg="#B91C1C",
+        ).pack(anchor="w")
+        tk.Label(
+            body,
+            text=prompt,
+            font=("Microsoft JhengHei UI", 10),
+            justify="left",
+            wraplength=430,
+            pady=18,
+        ).pack(anchor="w")
+
+        buttons = tk.Frame(body)
+        buttons.pack(fill="x")
+
+        def choose_restart() -> None:
+            selection["restart"] = True
+            window.destroy()
+
+        def choose_close() -> None:
+            window.destroy()
+
+        tk.Button(
+            buttons,
+            text="重新啟動",
+            width=14,
+            command=choose_restart,
+            bg="#2563EB",
+            fg="white",
+        ).pack(side="left", padx=(0, 12))
+        tk.Button(
+            buttons,
+            text="關閉",
+            width=14,
+            command=choose_close,
+        ).pack(side="right")
+
+        window.protocol("WM_DELETE_WINDOW", choose_close)
+        window.update_idletasks()
+        x = (window.winfo_screenwidth() - window.winfo_width()) // 2
+        y = (window.winfo_screenheight() - window.winfo_height()) // 2
+        window.geometry(f"+{x}+{y}")
+        window.focus_force()
+        window.mainloop()
+        return selection["restart"]
+    except Exception as exc:
+        print(f"[WARNING] 自訂錯誤視窗無法顯示：{exc}")
+        if os.name != "nt":
+            return False
+        # Windows 內建備援視窗：Retry=重新啟動、Cancel=關閉。
+        import ctypes
+
+        retry = ctypes.windll.user32.MessageBoxW(
+            None,
+            prompt,
+            "LINE Bot 伺服器異常",
+            0x00000005 | 0x00000010 | 0x00040000,
+        )
+        return retry == 4
+
+
+def _run_supervised_session() -> None:
+    print("=" * 60)
+    print("🚀 正在啟動 LINE Bot 開發環境（FastAPI + ngrok）...")
+    print("=" * 60)
+
+    ngrok_process: subprocess.Popen | None = None
+    fastapi_process: subprocess.Popen | None = None
+
+    try:
+        ngrok_process = run_ngrok()
+        print(f"▶ ngrok 已啟動（PID: {ngrok_process.pid}，對應 Port: 8000）")
+        threading.Thread(
+            target=_relay_output,
+            args=(ngrok_process, "ngrok"),
+            daemon=True,
+        ).start()
+
+        fastapi_process = run_fastapi()
+        print(f"▶ FastAPI 已啟動（PID: {fastapi_process.pid}）")
+        print("⏳ 正在等待 ngrok Tunnel 就緒...")
+
+        public_url = _wait_for_tunnel(ngrok_process)
+        if not public_url:
+            exit_code = ngrok_process.poll()
+            if exit_code is not None:
+                raise ServiceFailure(f"ngrok 啟動失敗或已停止。\nExit Code：{exit_code}")
+            else:
+                raise ServiceFailure("ngrok 在 15 秒內未建立 Tunnel。\n請查看終端的 [ngrok] 日誌。")
+
+        _print_urls(public_url)
+
+        while True:
+            ngrok_code = ngrok_process.poll()
+            fastapi_code = fastapi_process.poll()
+            if ngrok_code is not None:
+                print(f"\n[ERROR] ngrok 已停止，Exit Code: {ngrok_code}")
+                print("[INFO] FastAPI 將一併關閉，避免留下無法接收 LINE Webhook 的服務。")
+                raise ServiceFailure(
+                    f"ngrok 已異常中斷。\nExit Code：{ngrok_code}\nFastAPI 已一併關閉。"
+                )
+            if fastapi_code is not None:
+                print(f"\n[ERROR] FastAPI 已停止，Exit Code: {fastapi_code}")
+                print("[INFO] ngrok 將一併關閉，避免留下無後端的公開 Tunnel。")
+                raise ServiceFailure(
+                    f"FastAPI 已異常中斷。\nExit Code：{fastapi_code}\nngrok 已一併關閉。"
+                )
+            time.sleep(0.5)
+    finally:
+        if fastapi_process is not None:
+            _terminate_process_tree(fastapi_process, "FastAPI")
+        if ngrok_process is not None:
+            _terminate_process_tree(ngrok_process, "ngrok")
+
+
+def main() -> int:
+    while True:
+        try:
+            _run_supervised_session()
+        except KeyboardInterrupt:
+            print("\n[STOP] 收到 Ctrl+C，LINE Bot 開發環境已正常關閉。")
+            return 0
+        except (ServiceFailure, FileNotFoundError) as exc:
+            message = str(exc)
+            print(f"[ERROR] {message}")
+        except Exception as exc:
+            message = f"啟動器發生未預期錯誤：{exc}"
+            print(f"[ERROR] {message}")
+
+        if _ask_restart(message):
+            print("[RESTART] 使用者選擇重新啟動，1 秒後重新建立 FastAPI 與 ngrok...")
+            time.sleep(1)
+            continue
+
+        print("[EXIT] 使用者選擇關閉，請於需要時手動重新啟動。")
+        return 1
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

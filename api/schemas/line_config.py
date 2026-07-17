@@ -50,6 +50,38 @@ class MessageTemplatePreviewRequest(BaseModel):
     variables: dict[str, str] = {}
 
 
+class MessageScheduleStep(BaseModel):
+    day: int = Field(ge=0, le=365)
+    send_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    template_id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+
+
+class MessageSchedule(BaseModel):
+    id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_-]*$")
+    name: str = Field(min_length=1, max_length=100)
+    enabled: bool = True
+    trigger: Literal["follow"] = "follow"
+    restart_on_refollow: bool = False
+    steps: list[MessageScheduleStep] = Field(min_length=1)
+
+
+class MessageSchedulesConfig(BaseModel):
+    version: int = Field(default=1, ge=1)
+    timezone: str = Field(min_length=1)
+    schedules: list[MessageSchedule]
+
+    @model_validator(mode="after")
+    def unique_ids(self):
+        ids = [item.id for item in self.schedules]
+        if len(ids) != len(set(ids)):
+            raise ValueError("message schedule ids must be unique")
+        for schedule in self.schedules:
+            days = [step.day for step in schedule.steps]
+            if len(days) != len(set(days)):
+                raise ValueError(f"schedule {schedule.id} contains duplicate days")
+        return self
+
+
 class MenuBounds(BaseModel):
     x: int = Field(ge=0)
     y: int = Field(ge=0)

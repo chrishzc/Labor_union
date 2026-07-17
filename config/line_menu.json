@@ -64,6 +64,38 @@
           "action": {"type": "message", "text": "班表查詢", "uri": null, "uri_source": "literal", "data": null}
         }
       ]
+    },
+    {
+      "id": "union_staff_menu",
+      "name": "工會人員客服選單",
+      "enabled": true,
+      "selected": true,
+      "set_as_default": false,
+      "chat_bar_text": "工會客服",
+      "size": {"width": 2500, "height": 843},
+      "appearance": {
+        "background_color": "#ECFDF5",
+        "image_mode": "generated",
+        "image_path": "line/union_staff_menu.jpg"
+      },
+      "buttons": [
+        {
+          "id": "customer_service_entry",
+          "label": "客服系統",
+          "text_color": "#FFFFFF",
+          "background_color": "#047857",
+          "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
+          "action": {"type": "message", "text": "開啟客服系統", "uri": null, "uri_source": "literal", "data": null}
+        },
+        {
+          "id": "caregiver_verification_admin",
+          "label": "月嫂驗證",
+          "text_color": "#FFFFFF",
+          "background_color": "#059669",
+          "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
+          "action": {"type": "message", "text": "月嫂驗證管理", "uri": null, "uri_source": "literal", "data": null}
+        }
+      ]
     }
   ]
 }

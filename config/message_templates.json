@@ -196,12 +196,52 @@
       "name": "新好友 D+1",
       "category": "scheduled_push",
       "message_type": "text",
-      "enabled": false,
+      "enabled": true,
       "content": "歡迎加入工會 LINE 官方帳號，今天帶您了解第一項服務。",
       "variables": [],
       "usage": [
         "schedule"
       ]
+    },
+    {
+      "id": "new_user_d2",
+      "name": "新好友 D+2",
+      "category": "scheduled_push",
+      "message_type": "text",
+      "enabled": true,
+      "content": "加入第二天，您可以透過下方選單查詢案件與聯絡工會專員。",
+      "variables": [],
+      "usage": ["schedule"]
+    },
+    {
+      "id": "new_user_d3",
+      "name": "新好友 D+3",
+      "category": "scheduled_push",
+      "message_type": "text",
+      "enabled": true,
+      "content": "加入第三天，如有服務需求或疑問，歡迎隨時透過 LINE 聯絡工會。",
+      "variables": [],
+      "usage": ["schedule"]
+    },
+    {
+      "id": "caregiver_verification_requested",
+      "name": "月嫂驗證碼待輸入",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "月嫂身分需要工會驗證。請向工會服務人員取得六位數驗證碼，並直接在此聊天室輸入。驗證碼於 10 分鐘後失效。",
+      "variables": [],
+      "usage": ["webhook"]
+    },
+    {
+      "id": "caregiver_verification_failed",
+      "name": "月嫂驗證失敗",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "驗證碼錯誤或已失效，請向工會服務人員重新取得驗證碼。",
+      "variables": [],
+      "usage": ["webhook"]
     }
   ]
 }
