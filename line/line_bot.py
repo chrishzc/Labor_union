@@ -29,13 +29,19 @@ def get_setting(key: str, default: str = "") -> str:
     env_key = key.upper()
     return os.getenv(env_key, default)
 
-def load_webhook_replies():
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "webhook_replies.json")
+def load_message_templates():
+    """Return enabled text templates keyed by template id."""
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "message_templates.json")
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+        return {
+            item["id"]: item["content"]
+            for item in data.get("templates", [])
+            if item.get("enabled", True) and item.get("message_type", "text") == "text"
+        }
     except Exception as e:
-        print(f"[LINE Webhook] Failed to load webhook replies: {e}")
+        print(f"[LINE Webhook] Failed to load message templates: {e}")
         return {}
 
 
@@ -657,13 +663,13 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                                 res = requests.post(f"https://api.line.me/v2/bot/user/{user_id}/richmenu/{caregiver_menu_id}", headers=headers)
                                 
                                 if res.status_code == 200:
-                                    replies = load_webhook_replies()
+                                    replies = load_message_templates()
                                     reply_msg = replies.get("caregiver_switch_success")
                                 else:
-                                    replies = load_webhook_replies()
+                                    replies = load_message_templates()
                                     reply_msg = replies.get("caregiver_switch_fail").replace("{status_code}", str(res.status_code))
                             else:
-                                replies = load_webhook_replies()
+                                replies = load_message_templates()
                                 reply_msg = replies.get("caregiver_menu_not_set")
                                 
                             cursor.execute("""
@@ -681,10 +687,10 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                             res = requests.delete(f"https://api.line.me/v2/bot/user/{user_id}/richmenu", headers=headers)
                             
                             if res.status_code == 200:
-                                replies = load_webhook_replies()
+                                replies = load_message_templates()
                                 reply_msg = replies.get("esc_success")
                             else:
-                                replies = load_webhook_replies()
+                                replies = load_message_templates()
                                 reply_msg = replies.get("esc_fail").replace("{status_code}", str(res.status_code))
                                 
                             cursor.execute("""
@@ -711,7 +717,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                                     proto = request.headers.get("x-forwarded-proto", "http")
                                     bind_url = f"{proto}://{host}/gateway?userId={user_id}"
                                 
-                            replies = load_webhook_replies()
+                            replies = load_message_templates()
                             reply_msg = replies.get("bind_link_msg").replace("{bind_url}", bind_url)
                             
                             cursor.execute("""

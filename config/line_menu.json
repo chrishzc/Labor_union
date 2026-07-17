@@ -1,39 +1,69 @@
 {
-  "default_menu": {
-    "name": "Default User Menu",
-    "chat_bar_text": "用戶選單",
-    "background_color": "#f5f5f5",
-    "buttons": [
-      {
-        "text": "訂單查詢",
-        "color": "#1E3A8A",
-        "action_type": "liff"
+  "version": 1,
+  "menus": [
+    {
+      "id": "default_menu",
+      "name": "一般用戶選單",
+      "enabled": true,
+      "selected": true,
+      "set_as_default": true,
+      "chat_bar_text": "用戶選單",
+      "size": {"width": 2500, "height": 843},
+      "appearance": {
+        "background_color": "#F5F5F5",
+        "image_mode": "generated",
+        "image_path": "line/default_menu.jpg"
       },
-      {
-        "text": "尋找專員",
-        "color": "#3B82F6",
-        "action_type": "message",
-        "action_text": "尋找專員"
-      }
-    ]
-  },
-  "caregiver_menu": {
-    "name": "Caregiver Menu",
-    "chat_bar_text": "月嫂專區",
-    "background_color": "#fff1f2",
-    "buttons": [
-      {
-        "text": "訂單查詢",
-        "color": "#BE123C",
-        "action_type": "message",
-        "action_text": "訂單查詢"
+      "buttons": [
+        {
+          "id": "order_query",
+          "label": "訂單查詢",
+          "text_color": "#FFFFFF",
+          "background_color": "#1E3A8A",
+          "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
+          "action": {"type": "uri", "uri_source": "liff", "uri": null, "text": null, "data": null}
+        },
+        {
+          "id": "contact_staff",
+          "label": "尋找專員",
+          "text_color": "#FFFFFF",
+          "background_color": "#3B82F6",
+          "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
+          "action": {"type": "message", "text": "尋找專員", "uri": null, "uri_source": "literal", "data": null}
+        }
+      ]
+    },
+    {
+      "id": "caregiver_menu",
+      "name": "月嫂專屬選單",
+      "enabled": true,
+      "selected": true,
+      "set_as_default": false,
+      "chat_bar_text": "月嫂專區",
+      "size": {"width": 2500, "height": 843},
+      "appearance": {
+        "background_color": "#FFF1F2",
+        "image_mode": "generated",
+        "image_path": "line/caregiver_menu.jpg"
       },
-      {
-        "text": "班表查詢",
-        "color": "#F43F5E",
-        "action_type": "message",
-        "action_text": "班表查詢"
-      }
-    ]
-  }
+      "buttons": [
+        {
+          "id": "order_query",
+          "label": "訂單查詢",
+          "text_color": "#FFFFFF",
+          "background_color": "#BE123C",
+          "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
+          "action": {"type": "message", "text": "訂單查詢", "uri": null, "uri_source": "literal", "data": null}
+        },
+        {
+          "id": "schedule_query",
+          "label": "班表查詢",
+          "text_color": "#FFFFFF",
+          "background_color": "#F43F5E",
+          "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
+          "action": {"type": "message", "text": "班表查詢", "uri": null, "uri_source": "literal", "data": null}
+        }
+      ]
+    }
+  ]
 }
