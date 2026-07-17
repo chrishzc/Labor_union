@@ -44,12 +44,12 @@
 ---
 
 ## 1. Webhook 自動回覆機制
-**程式位置**：`api/main.py` -> `@app.post("/webhook/line")`
+**程式位置**：`line/line_bot.py` 的 LINE Router，由 `api/main.py` 掛載
 **運作邏輯**：LINE 官方帳號收到訊息後，會將用戶對話事件傳送到此路由，系統根據「關鍵字」進行攔截與處理。
 
 ### 精準動作細節：
 *   **非同步推播機制**：
-    為了避免處理超時，Webhook 收到訊息後**不會直接卡住等待發送**，而是將準備要回覆的訊息內容與該用戶的 `user_id`，以 SQL 語法寫入 `line_push_tasks` 資料表。後端有一支 `line_message_sender_daemon` 背景程式會每 2 秒輪詢一次資料庫，自動把訊息推播給用戶。
+    為了避免處理超時，Webhook 收到訊息後**不會直接卡住等待發送**，而是將準備要回覆的訊息內容、該用戶的 `user_id` 與 `scheduled_at` 寫入 `line_tasks`。Webhook commit 後喚醒 `line/worker.py`；Worker 會在新任務通知或最近排程時間到達時執行，不再每 2 秒輪詢。
 *   **攔截關鍵字：「我是月嫂」**
     *   **動作**：系統會向 LINE API 發送 `POST` 請求，強制將該用戶的介面切換為「月嫂專屬圖文選單」。
     *   **回覆**：寫入資料庫推播「身分驗證成功」之訊息 (文字由 `webhook_replies.json` 定義)。若系統尚未設定月嫂選單，則提示「系統尚未設定」。

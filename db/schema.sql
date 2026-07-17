@@ -658,9 +658,10 @@ CREATE TABLE IF NOT EXISTS line_tasks (
     to_user_id VARCHAR(100) NOT NULL COMMENT '接收訊息的 LINE 用戶唯一識別碼',
     message_content TEXT NOT NULL COMMENT '推播訊息內容',
     status VARCHAR(20) DEFAULT 'pending' COMMENT '推播狀態 (pending:待發送/sent:已發送/failed:發送失敗)',
+    scheduled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '預定發送時間；未指定時立即執行',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_push_status (status)
+    INDEX idx_line_tasks_due (status, scheduled_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 23. 系統異常事件紀錄表
@@ -673,16 +674,5 @@ CREATE TABLE IF NOT EXISTS system_alerts (
     resolved_at TIMESTAMP NULL COMMENT '排除時間',
     resolved_by VARCHAR(50) NULL COMMENT '處理人員',
     INDEX idx_alert_status (status)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 22. LINE 待推播任務隊列
-CREATE TABLE IF NOT EXISTS line_tasks (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    to_user_id VARCHAR(100) NOT NULL COMMENT '接收訊息的 LINE 用戶唯一識別碼',
-    message_content TEXT NOT NULL COMMENT '推播訊息內容',
-    status VARCHAR(20) DEFAULT 'pending' COMMENT '推播狀態 (pending:待發送/sent:已發送/failed:發送失敗)',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_push_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 

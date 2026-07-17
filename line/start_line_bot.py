@@ -5,6 +5,10 @@ import requests
 import signal
 import os
 
+# 確保在 Windows cmd 下能正確輸出 Unicode (Emoji) 符號，避免 cp950 編碼錯誤
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 # 切換工作目錄到專案根目錄，使 FastAPI 啟動及相對路徑皆能正確運作
 os.chdir(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
@@ -21,7 +25,7 @@ def run_ngrok():
 def run_fastapi():
     # 啟動 FastAPI 伺服器 (這個保留在前景，讓您能看到 print 跟錯誤訊息)
     return subprocess.Popen(
-        ["uv", "run", "uvicorn", "line.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
+        ["uv", "run", "uvicorn", "api.main:app", "--reload", "--host", "0.0.0.0", "--port", "8000"],
         shell=True
     )
 

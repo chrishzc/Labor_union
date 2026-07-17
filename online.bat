@@ -36,7 +36,7 @@ echo ==========================================
 
 :: 4. Launch servers concurrently
 echo [Step 4] Launching FastAPI server...
-start "FastAPI Server" cmd /k ".venv\Scripts\uvicorn.exe line.main:app --reload --port 8000"
+start "FastAPI Server" cmd /k ".venv\Scripts\uvicorn.exe api.main:app --port 8000"
 
 echo [Step 5] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ".venv\Scripts\streamlit.exe run ui/app.py"
