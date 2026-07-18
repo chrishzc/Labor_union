@@ -49,28 +49,27 @@ Webhook 不再同步呼叫 LINE API 或 ChromaDB。一般文字建立 `rag_reply
 `line_users.role`：
 
 - `customer`：一般需求方／媽媽。
-- `caregiver`：服務人員／月嫂。
+- `staff`：服務人員／月嫂，與資料庫 `staff` 主表統一。
 - `union_staff`：工會官方與監督方。
 
 Rich Menu 現為三組：一般客戶、月嫂、工會人員。工會人員 Menu 預留客服系統與月嫂驗證管理入口。
 
-## 月嫂六位數驗證流程
+## 月嫂人工確認流程
 
 ```text
 使用者輸入「我是月嫂」
-  -> 後端產生密碼學安全的 6 位數字
-  -> 保存 10 分鐘、最多 5 次嘗試
-  -> 工會內部接口查詢有效驗證碼
-  -> 工會服務人員告知月嫂
-  -> 月嫂在 LINE 輸入驗證碼
-  -> 驗證成功後 role=caregiver
+  -> 建立 staff_verification 待審請求
+  -> 工會服務人員在開發終端或正式 Web/UI 核准
+  -> 核准後 role=staff
   -> Worker 綁定月嫂 Rich Menu
 ```
 
 內部接口必須帶 `X-Internal-API-Key`，其值對應 `.env` 的 `INTERNAL_API_KEY`：
 
 ```text
-GET /api/line/caregiver-verifications
+GET /api/line/staff/review-requests?request_type=staff_verification
+POST /api/line/staff/review-requests/staff_verification/{request_id}/approve
+POST /api/line/staff/review-requests/staff_verification/{request_id}/reject
 PUT /api/line/users/{user_id}/role/{role}
 ```
 
@@ -85,6 +84,6 @@ PUT /api/line/users/{user_id}/role/{role}
 
 ## 工作人員統一待審接口補充
 
-月嫂驗證與客戶重新綁定共用 MySQL `line_confirmation_requests`，並提供統一的 `/api/line/staff/review-requests` 介面，供未來工會客服前端顯示同一份待處理清單。月嫂驗證碼仍在申請時產生，由工作人員決定是否交付。既有重新綁定接口保留相容性，但所有工作人員接口均要求 `X-Internal-API-Key`。
+月嫂身分確認與客戶重新綁定共用 MySQL `line_confirmation_requests`，並提供統一的 `/api/line/staff/review-requests` 介面，供未來工會客服前端顯示同一份待處理清單。月嫂申請由工會人員核准後直接切換身分，不產生驗證碼。所有工作人員接口均要求 `X-Internal-API-Key`。
 
-開發環境可由 `start_line_bot.py` 非阻塞輪詢 `client_rebind` 待審項目，終端輸入 `y/n` 時呼叫同一組正式 approve／reject API，不在 LIFF 請求內等待人工輸入。
+開發環境由 `start_line_bot.py` 建立只綁定 `127.0.0.1` 的一次性通知入口。Webhook成功提交月嫂身分或客戶重新綁定申請後，直接推送一筆通知，終端立即顯示`y/n`並呼叫同一組正式approve／reject API；不再每3秒查詢待審API。啟動時只掃描一次既有待審資料，避免服務重啟期間的申請被遺漏。

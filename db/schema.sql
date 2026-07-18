@@ -702,7 +702,7 @@ CREATE TABLE IF NOT EXISTS line_webhook_events (
 CREATE TABLE IF NOT EXISTS line_users (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     line_user_id VARCHAR(100) NOT NULL,
-    role ENUM('customer','caregiver','union_staff') NOT NULL DEFAULT 'customer',
+    role ENUM('customer','staff','union_staff') NOT NULL DEFAULT 'customer',
     status ENUM('active','blocked','unknown') NOT NULL DEFAULT 'active',
     followed_at DATETIME NULL,
     blocked_at DATETIME NULL,
@@ -715,21 +715,16 @@ CREATE TABLE IF NOT EXISTS line_users (
     INDEX idx_line_user_role_status (role, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 31. LINE 人工確認請求（月嫂驗證與舊客戶重新綁定）
+-- 31. LINE 人工確認請求（月嫂身分確認與舊客戶重新綁定）
 CREATE TABLE IF NOT EXISTS line_confirmation_requests (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    request_type ENUM('caregiver_verification','client_rebind') NOT NULL,
+    request_type ENUM('staff_verification','client_rebind') NOT NULL,
     line_user_id VARCHAR(100) NOT NULL,
     client_id INT NULL,
     client_name VARCHAR(100) NULL,
     old_line_user_id VARCHAR(100) NULL,
     new_line_user_id VARCHAR(100) NULL,
-    verification_code CHAR(6) NULL,
-    status ENUM('pending','approved','rejected','verified','expired','locked','cancelled') NOT NULL DEFAULT 'pending',
-    attempt_count INT NOT NULL DEFAULT 0,
-    max_attempts INT NOT NULL DEFAULT 5,
-    expires_at DATETIME NULL,
-    verified_at DATETIME NULL,
+    status ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
     reviewed_by_line_user_id VARCHAR(100) NULL,
     reviewed_at DATETIME NULL,
     resolved_at DATETIME NULL,

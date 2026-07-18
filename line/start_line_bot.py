@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import os
+import json
+import queue
+import secrets
 import shutil
 import subprocess
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 import requests
@@ -22,6 +26,19 @@ if hasattr(sys.stderr, "reconfigure"):
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 os.chdir(PROJECT_ROOT)
 load_dotenv(PROJECT_ROOT / ".env")
+
+
+def _prepare_development_review_auth() -> None:
+    """Create a process-local internal key for the dev reviewer when absent."""
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    if app_env not in {"development", "dev", "local", "test"}:
+        return
+    if not os.getenv("INTERNAL_API_KEY", "").strip():
+        os.environ["INTERNAL_API_KEY"] = secrets.token_urlsafe(32)
+        print("[REVIEW] 已建立本次開發程序專用的內部API金鑰。")
+
+
+_prepare_development_review_auth()
 
 
 def _resolve_ngrok() -> str:
@@ -127,37 +144,45 @@ class ServiceFailure(RuntimeError):
     """A supervised service stopped or failed to become ready."""
 
 
-class DevRebindConsoleReviewer:
-    """Non-blocking y/n reviewer that reuses the authenticated staff API."""
+class DevLineConsoleReviewer:
+    """Non-blocking y/n reviewer for all LINE confirmation requests."""
 
     def __init__(self) -> None:
         app_env = os.getenv("APP_ENV", "development").strip().lower()
-        flag = os.getenv("ENABLE_REBIND_CONSOLE_REVIEW", "false").strip().lower()
+        flag = os.getenv("ENABLE_LINE_REVIEW_CONSOLE", "true").strip().lower()
         self.enabled = (
             app_env in {"development", "dev", "local", "test"}
             and flag in {"1", "true", "yes", "on"}
         )
         self.api_key = os.getenv("INTERNAL_API_KEY", "").strip()
         self.current: dict | None = None
-        self.next_poll_at = 0.0
+        self.notifications: queue.Queue[dict] = queue.Queue()
         self._warned = False
+        self._recovered_pending = False
 
         if self.enabled and os.name != "nt":
             print("[REVIEW] 終端 y/n 審核目前只支援 Windows，已停用。")
             self.enabled = False
         if self.enabled and not self.api_key:
-            print("[REVIEW] 缺少 INTERNAL_API_KEY，重新綁定終端審核已停用。")
+            print("[REVIEW] 缺少 INTERNAL_API_KEY，LINE 終端審核已停用。")
             self.enabled = False
 
     @property
     def headers(self) -> dict[str, str]:
         return {"X-Internal-API-Key": self.api_key}
 
-    def _load_next_request(self) -> None:
+    def enqueue(self, notification: dict) -> None:
+        if self.enabled:
+            self.notifications.put(notification)
+
+    def recover_pending_once(self) -> None:
+        """One startup recovery scan; normal operation is push-only."""
+        if not self.enabled or self._recovered_pending:
+            return
+        self._recovered_pending = True
         try:
             response = requests.get(
                 "http://127.0.0.1:8000/api/line/staff/review-requests",
-                params={"request_type": "client_rebind"},
                 headers=self.headers,
                 timeout=2,
             )
@@ -166,29 +191,65 @@ class DevRebindConsoleReviewer:
             self._warned = False
         except (requests.RequestException, ValueError) as exc:
             if not self._warned:
-                print(f"[REVIEW] 暫時無法取得重新綁定待審資料：{exc}")
+                print(f"[REVIEW] 暫時無法取得 LINE 待審資料：{exc}")
                 self._warned = True
             return
 
         if not requests_data:
             return
-        self.current = requests_data[0]
+        for request_item in requests_data:
+            self.notifications.put({
+                "type": request_item.get("type"),
+                "request_id": str(request_item.get("request_id")),
+            })
+
+    def _load_notified_request(self, notification: dict) -> None:
+        request_type = notification.get("type")
+        request_id = str(notification.get("request_id"))
+        try:
+            response = requests.get(
+                "http://127.0.0.1:8000/api/line/staff/review-requests",
+                params={"request_type": request_type},
+                headers=self.headers,
+                timeout=2,
+            )
+            response.raise_for_status()
+            requests_data = response.json().get("data", [])
+            self._warned = False
+        except (requests.RequestException, ValueError) as exc:
+            print(f"[REVIEW] 無法載入待審資料：{exc}")
+            return
+
+        self.current = next(
+            (item for item in requests_data if str(item.get("request_id")) == request_id),
+            None,
+        )
+        if self.current is None:
+            return
         details = self.current.get("details") or {}
         print("\n" + "=" * 60)
-        print("[REBind Review] 收到舊客戶重新綁定申請")
-        print(f"申請編號：{self.current.get('request_id', '')}")
-        print(f"客戶名稱：{details.get('client_name', '')}")
-        print(f"舊 LINE ID：{details.get('old_line_user_id', '')}")
-        print(f"新 LINE ID：{details.get('new_line_user_id', '')}")
-        print("是否核准重新綁定？(y/n): ", end="", flush=True)
+        request_type = self.current.get("type", "")
+        if request_type == "staff_verification":
+            print("[Staff Review] 收到月嫂身分申請")
+            print(f"申請編號：{self.current.get('request_id', '')}")
+            print(f"LINE User ID：{details.get('line_user_id', '')}")
+            print("是否核准月嫂身分？(y/n): ", end="", flush=True)
+        else:
+            print("[Rebind Review] 收到舊客戶重新綁定申請")
+            print(f"申請編號：{self.current.get('request_id', '')}")
+            print(f"客戶名稱：{details.get('client_name', '')}")
+            print(f"舊 LINE ID：{details.get('old_line_user_id', '')}")
+            print(f"新 LINE ID：{details.get('new_line_user_id', '')}")
+            print("是否核准重新綁定？(y/n): ", end="", flush=True)
 
     def _submit(self, action: str) -> None:
         if not self.current:
             return
         request_id = self.current.get("request_id")
+        request_type = self.current.get("type")
         try:
             response = requests.post(
-                f"http://127.0.0.1:8000/api/line/staff/review-requests/client_rebind/{request_id}/{action}",
+                f"http://127.0.0.1:8000/api/line/staff/review-requests/{request_type}/{request_id}/{action}",
                 headers=self.headers,
                 timeout=10,
             )
@@ -199,17 +260,16 @@ class DevRebindConsoleReviewer:
             print(f"[REVIEW] 審核提交失敗，申請仍保留待審：{exc}")
         finally:
             self.current = None
-            self.next_poll_at = time.monotonic() + 1
 
     def tick(self) -> None:
         if not self.enabled:
             return
-        now = time.monotonic()
         if self.current is None:
-            if now < self.next_poll_at:
+            try:
+                notification = self.notifications.get_nowait()
+            except queue.Empty:
                 return
-            self.next_poll_at = now + 3
-            self._load_next_request()
+            self._load_notified_request(notification)
             return
 
         import msvcrt
@@ -225,6 +285,60 @@ class DevRebindConsoleReviewer:
             self._submit("reject")
         elif answer not in {"\r", "\n"}:
             print("\n請輸入 y（核准）或 n（拒絕）: ", end="", flush=True)
+
+
+class DevReviewNotificationServer:
+    """Loopback-only one-shot notification receiver for the dev supervisor."""
+
+    def __init__(self, reviewer: DevLineConsoleReviewer) -> None:
+        self.reviewer = reviewer
+        self.server: ThreadingHTTPServer | None = None
+        self.thread: threading.Thread | None = None
+
+    def start(self) -> None:
+        if not self.reviewer.enabled:
+            return
+        reviewer = self.reviewer
+        api_key = self.reviewer.api_key
+
+        class NotificationHandler(BaseHTTPRequestHandler):
+            def do_POST(self) -> None:
+                if self.path != "/notify":
+                    self.send_error(404)
+                    return
+                received_key = self.headers.get("X-Internal-API-Key", "")
+                if not secrets.compare_digest(received_key, api_key):
+                    self.send_error(401)
+                    return
+                try:
+                    content_length = min(int(self.headers.get("Content-Length", "0")), 4096)
+                    payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                    if payload.get("type") not in {"staff_verification", "client_rebind"}:
+                        raise ValueError("unsupported request type")
+                    reviewer.enqueue(payload)
+                except (ValueError, UnicodeDecodeError, json.JSONDecodeError):
+                    self.send_error(400)
+                    return
+                self.send_response(204)
+                self.end_headers()
+
+            def log_message(self, _format: str, *_args) -> None:
+                return
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), NotificationHandler)
+        port = self.server.server_address[1]
+        os.environ["DEV_REVIEW_NOTIFY_URL"] = f"http://127.0.0.1:{port}/notify"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        print(f"[REVIEW] 一次性通知入口已啟動（127.0.0.1:{port}）。")
+
+    def stop(self) -> None:
+        os.environ.pop("DEV_REVIEW_NOTIFY_URL", None)
+        if self.server is not None:
+            self.server.shutdown()
+            self.server.server_close()
+        if self.thread is not None:
+            self.thread.join(timeout=2)
 
 
 def _failure_popup_enabled() -> bool:
@@ -344,8 +458,12 @@ def _run_supervised_session() -> None:
 
     ngrok_process: subprocess.Popen | None = None
     fastapi_process: subprocess.Popen | None = None
+    line_reviewer = DevLineConsoleReviewer()
+    review_notifier = DevReviewNotificationServer(line_reviewer)
 
     try:
+        # Must start before FastAPI so the child process inherits the callback URL.
+        review_notifier.start()
         ngrok_process = run_ngrok()
         print(f"▶ ngrok 已啟動（PID: {ngrok_process.pid}，對應 Port: 8000）")
         threading.Thread(
@@ -367,7 +485,8 @@ def _run_supervised_session() -> None:
                 raise ServiceFailure("ngrok 在 15 秒內未建立 Tunnel。\n請查看終端的 [ngrok] 日誌。")
 
         _print_urls(public_url)
-        rebind_reviewer = DevRebindConsoleReviewer()
+        # Recover requests left pending before this development session once only.
+        line_reviewer.recover_pending_once()
 
         while True:
             ngrok_code = ngrok_process.poll()
@@ -384,9 +503,10 @@ def _run_supervised_session() -> None:
                 raise ServiceFailure(
                     f"FastAPI 已異常中斷。\nExit Code：{fastapi_code}\nngrok 已一併關閉。"
                 )
-            rebind_reviewer.tick()
+            line_reviewer.tick()
             time.sleep(0.5)
     finally:
+        review_notifier.stop()
         if fastapi_process is not None:
             _terminate_process_tree(fastapi_process, "FastAPI")
         if ngrok_process is not None:

@@ -34,7 +34,7 @@
       ]
     },
     {
-      "id": "caregiver_menu",
+      "id": "staff_menu",
       "name": "月嫂專屬選單",
       "enabled": true,
       "selected": true,
@@ -44,7 +44,7 @@
       "appearance": {
         "background_color": "#FFF1F2",
         "image_mode": "generated",
-        "image_path": "line/caregiver_menu.jpg"
+        "image_path": "line/staff_menu.jpg"
       },
       "buttons": [
         {
@@ -88,7 +88,7 @@
           "action": {"type": "message", "text": "開啟客服系統", "uri": null, "uri_source": "literal", "data": null}
         },
         {
-          "id": "caregiver_verification_admin",
+          "id": "staff_verification_admin",
           "label": "月嫂驗證",
           "text_color": "#FFFFFF",
           "background_color": "#059669",

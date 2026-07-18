@@ -231,4 +231,18 @@ ENABLE_SERVER_FAILURE_POPUP=false
 - 刪除空的 `config/rebind_requests.json`，同步更新設定、SOP、階段報告與資料字典。
 - 已重建開發 DB，並驗證重新綁定核准／拒絕、統一待審、月嫂驗證碼查看及有效簽章 Webhook 的完整月嫂角色切換流程；測試資料已清除。
 
+## LINE 月嫂角色統一與人工核准（2026-07-18）
 
+- 將LINE月嫂角色從`caregiver`統一為既有資料模型使用的`staff`，並同步Schema、Python、Rich Menu、訊息範本與文件。
+- 使用者輸入「我是月嫂」後建立`staff_verification`待審請求，不再產生六位數驗證碼。
+- 工會人員按下核准即直接完成身分確認、把`line_users.role`改為`staff`，並由Worker綁定月嫂專屬選單。
+- 開發模式使用`ENABLE_LINE_REVIEW_CONSOLE`控制終端`y/n`審核；正式模式強制停用終端審核，Web/UI可串接相同的受保護approve／reject API。
+- 開發啟動器會在未設定內部金鑰時建立單次程序隨機金鑰，不保存到`.env`；正式環境仍必須自行設定`INTERNAL_API_KEY`。
+- 已重建開發Schema並完成有效簽章Webhook、待審、核准、角色與請求狀態整合測試；測試資料已清除。
+
+### 開發終端審核改為事件推送
+
+- 移除每3秒查詢待審API的固定輪詢與大量`GET /api/line/staff/review-requests`存取紀錄。
+- `start_line_bot.py`在開發期間建立loopback-only的一次性通知入口；Webhook提交待審資料後立即推送一筆事件。
+- 終端收到事件後才載入該筆資料並顯示`y/n`；啟動時僅補查一次既有pending請求。
+- 通知入口使用單次程序內部金鑰，不公開到ngrok；正式Web/UI接口與資料庫待審機制不變。

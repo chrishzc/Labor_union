@@ -10,8 +10,8 @@ import os
 import json
 import asyncio
 import sys
-import re
 import secrets
+import requests
 from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -51,7 +51,7 @@ def load_message_templates():
 
 def _load_rich_menu_id(role: str) -> str:
     key_by_role = {
-        "caregiver": "caregiver_rich_menu_id",
+        "staff": "staff_rich_menu_id",
         "union_staff": "union_staff_rich_menu_id",
         "customer": "default_rich_menu_id",
     }
@@ -71,13 +71,22 @@ def _require_internal_api_key(x_internal_api_key: str | None) -> None:
         raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
-def _show_caregiver_code_in_terminal() -> bool:
-    """Allow sensitive verification output only in an explicit dev-like environment."""
-    app_env = os.getenv("APP_ENV", "development").strip().lower()
-    enabled = os.getenv("SHOW_CAREGIVER_VERIFICATION_CODE", "true").strip().lower()
-    return app_env in {"development", "dev", "local", "test"} and enabled in {
-        "1", "true", "yes", "on"
-    }
+def _notify_development_reviewer(request_type: str, request_id: str | int) -> None:
+    """Push one review event to the local dev supervisor; never affect webhook success."""
+    notify_url = os.getenv("DEV_REVIEW_NOTIFY_URL", "").strip()
+    internal_key = os.getenv("INTERNAL_API_KEY", "").strip()
+    if not notify_url or not internal_key:
+        return
+    try:
+        response = requests.post(
+            notify_url,
+            json={"type": request_type, "request_id": str(request_id)},
+            headers={"X-Internal-API-Key": internal_key},
+            timeout=1,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"[LINE Review] Development notification failed: {exc}")
 
 
 def _create_onboarding_tasks(cursor, user_id: str, source_event_id: str | None) -> None:
@@ -241,6 +250,7 @@ async def line_bind(payload: LineBindPayload):
                     )
                     request_id = cursor.lastrowid
                     conn.commit()
+                    _notify_development_reviewer("client_rebind", request_id)
                     print(
                         f"[API Bind] Rebind request {request_id} saved "
                         f"for client_id={client_id}"
@@ -566,36 +576,14 @@ async def serve_register_page():
     return FileResponse("line/static/register.html")
 
 
-@router.get("/api/line/caregiver-verifications")
-def list_pending_caregiver_verifications(x_internal_api_key: str | None = Header(default=None)):
-    """Return active codes only to an authenticated internal staff client."""
-    _require_internal_api_key(x_internal_api_key)
-    conn = get_db_connection()
-    try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT id, line_user_id, verification_code, attempt_count,
-                       max_attempts, expires_at, created_at
-                FROM line_confirmation_requests
-                WHERE request_type='caregiver_verification'
-                  AND status='pending' AND expires_at > NOW()
-                ORDER BY created_at DESC
-                """
-            )
-            return {"status": "success", "data": cursor.fetchall()}
-    finally:
-        conn.close()
-
-
 @router.get("/api/line/staff/review-requests")
 def list_staff_review_requests(
     request_type: str | None = None,
     x_internal_api_key: str | None = Header(default=None),
 ):
-    """Unified staff queue for rebind and caregiver verification requests."""
+    """Unified union-staff queue for rebind and service-staff role requests."""
     _require_internal_api_key(x_internal_api_key)
-    if request_type not in {None, "client_rebind", "caregiver_verification"}:
+    if request_type not in {None, "client_rebind", "staff_verification"}:
         raise HTTPException(status_code=422, detail="Unsupported review request type")
 
     items = []
@@ -613,23 +601,22 @@ def list_staff_review_requests(
                     "actions": ["approve", "reject"],
                 })
 
-    if request_type in {None, "caregiver_verification"}:
+    if request_type in {None, "staff_verification"}:
         conn = get_db_connection()
         try:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute(
                     """
-                    SELECT id, line_user_id, attempt_count, max_attempts,
-                           expires_at, created_at
+                    SELECT id, line_user_id, created_at
                     FROM line_confirmation_requests
-                    WHERE request_type='caregiver_verification'
-                      AND status='pending' AND expires_at > NOW()
+                    WHERE request_type='staff_verification'
+                      AND status='pending'
                     ORDER BY created_at
                     """
                 )
                 for request_item in cursor.fetchall():
                     items.append({
-                        "type": "caregiver_verification",
+                        "type": "staff_verification",
                         "request_id": str(request_item["id"]),
                         "status": "pending",
                         "created_at": request_item["created_at"],
@@ -650,11 +637,11 @@ def approve_staff_review_request(
     request_id: str,
     x_internal_api_key: str | None = Header(default=None),
 ):
-    """Approve a rebind, or acknowledge a caregiver request and reveal its code."""
+    """Approve a rebind or directly approve a service-staff LINE role request."""
     _require_internal_api_key(x_internal_api_key)
     if request_type == "client_rebind":
         return approve_rebind_request(RebindActionPayload(request_id=request_id), x_internal_api_key)
-    if request_type != "caregiver_verification":
+    if request_type != "staff_verification":
         raise HTTPException(status_code=422, detail="Unsupported review request type")
 
     conn = get_db_connection()
@@ -662,21 +649,49 @@ def approve_staff_review_request(
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             cursor.execute(
                 """
-                SELECT id, line_user_id, verification_code, expires_at
+                SELECT id, line_user_id
                 FROM line_confirmation_requests
-                WHERE id=%s AND request_type='caregiver_verification'
-                  AND status='pending' AND expires_at > NOW()
+                WHERE id=%s AND request_type='staff_verification'
+                  AND status='pending' FOR UPDATE
                 """,
                 (request_id,),
             )
             request_item = cursor.fetchone()
             if not request_item:
-                raise HTTPException(status_code=404, detail="Caregiver verification request not found or expired")
-            return {
-                "status": "success",
-                "message": "請將驗證碼提供給申請月嫂，由本人在 LINE 輸入完成驗證。",
-                "data": request_item,
-            }
+                raise HTTPException(status_code=404, detail="Staff verification request not found")
+            cursor.execute(
+                "UPDATE line_confirmation_requests SET status='approved', reviewed_at=NOW(), resolved_at=NOW() WHERE id=%s",
+                (request_id,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO line_users (line_user_id, role, status, last_event_at)
+                VALUES (%s,'staff','active',NOW())
+                ON DUPLICATE KEY UPDATE role='staff', status='active', last_event_at=NOW()
+                """,
+                (request_item["line_user_id"],),
+            )
+            templates = load_message_templates()
+            enqueue_line_task(
+                cursor,
+                to_user_id=request_item["line_user_id"],
+                task_type="rich_menu_link",
+                payload={
+                    "rich_menu_id": _load_rich_menu_id("staff"),
+                    "success_message": templates.get("staff_switch_success", "月嫂身分已由工會確認通過。"),
+                },
+                idempotency_key=f"staff-review-approved:{request_id}",
+            )
+            conn.commit()
+        wake_worker()
+        return {
+            "status": "success",
+            "message": "已核准月嫂身分並切換專屬選單",
+            "data": request_item,
+        }
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -687,11 +702,11 @@ def reject_staff_review_request(
     request_id: str,
     x_internal_api_key: str | None = Header(default=None),
 ):
-    """Reject a rebind or cancel a pending caregiver verification code."""
+    """Reject a rebind or a pending service-staff role request."""
     _require_internal_api_key(x_internal_api_key)
     if request_type == "client_rebind":
         return reject_rebind_request(RebindActionPayload(request_id=request_id), x_internal_api_key)
-    if request_type != "caregiver_verification":
+    if request_type != "staff_verification":
         raise HTTPException(status_code=422, detail="Unsupported review request type")
 
     conn = get_db_connection()
@@ -700,14 +715,14 @@ def reject_staff_review_request(
             cursor.execute(
                 """
                 SELECT id, line_user_id FROM line_confirmation_requests
-                WHERE id=%s AND request_type='caregiver_verification'
+                WHERE id=%s AND request_type='staff_verification'
                   AND status='pending' FOR UPDATE
                 """,
                 (request_id,),
             )
             request_item = cursor.fetchone()
             if not request_item:
-                raise HTTPException(status_code=404, detail="Caregiver verification request not found")
+                raise HTTPException(status_code=404, detail="Staff verification request not found")
             cursor.execute(
                 "UPDATE line_confirmation_requests SET status='cancelled', reviewed_at=NOW(), resolved_at=NOW() WHERE id=%s",
                 (request_id,),
@@ -717,10 +732,10 @@ def reject_staff_review_request(
                 cursor,
                 to_user_id=request_item["line_user_id"],
                 message_content=templates.get(
-                    "caregiver_verification_rejected",
+                    "staff_verification_rejected",
                     "您的月嫂身分驗證申請未通過，請聯絡工會服務人員。",
                 ),
-                idempotency_key=f"caregiver-review-rejected:{request_id}",
+                idempotency_key=f"staff-review-rejected:{request_id}",
             )
             conn.commit()
         wake_worker()
@@ -734,9 +749,9 @@ def reject_staff_review_request(
 
 @router.put("/api/line/users/{user_id}/role/{role}")
 def set_line_user_role(user_id: str, role: str, x_internal_api_key: str | None = Header(default=None)):
-    """Internal role administration endpoint for customer/caregiver/union_staff."""
+    """Internal role administration endpoint for customer/staff/union_staff."""
     _require_internal_api_key(x_internal_api_key)
-    if role not in {"customer", "caregiver", "union_staff"}:
+    if role not in {"customer", "staff", "union_staff"}:
         raise HTTPException(status_code=422, detail="Unsupported LINE user role")
     conn = get_db_connection()
     try:
@@ -783,6 +798,7 @@ async def line_webhook(request: Request):
         raise HTTPException(status_code=400, detail="Invalid LINE webhook payload") from exc
     print(f"[LINE Webhook] Received line webhook. Events count: {len(payload.events)}")
     
+    review_notifications: list[tuple[str, int]] = []
     conn = get_db_connection()
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
@@ -890,7 +906,7 @@ async def line_webhook(request: Request):
                             INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                         """, (staff_id, msg))
-                        print(f"[LINE Webhook] Caregiver #{staff_id} willing for case #{case_no}")
+                        print(f"[LINE Webhook] Staff #{staff_id} willing for case #{case_no}")
                         
                     # 月嫂拒絕
                     elif action == "unwilling":
@@ -905,7 +921,7 @@ async def line_webhook(request: Request):
                             INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                         """, (staff_id, msg))
-                        print(f"[LINE Webhook] Caregiver #{staff_id} unwilling for case #{case_no}")
+                        print(f"[LINE Webhook] Staff #{staff_id} unwilling for case #{case_no}")
                         
                     # 客戶滿意
                     elif action == "client_approve":
@@ -954,87 +970,29 @@ async def line_webhook(request: Request):
                             )
                             continue
 
-                        # 六位數月嫂身分驗證碼
-                        if re.fullmatch(r"\d{6}", user_text.strip()):
-                            cursor.execute(
-                                """
-                                SELECT * FROM line_confirmation_requests
-                                WHERE request_type='caregiver_verification'
-                                  AND line_user_id=%s AND status='pending'
-                                  AND expires_at >= NOW()
-                                ORDER BY id DESC LIMIT 1 FOR UPDATE
-                                """,
-                                (user_id,),
-                            )
-                            verification = cursor.fetchone()
-                            templates = load_message_templates()
-                            if verification and verification["verification_code"] == user_text.strip():
-                                cursor.execute(
-                                    "UPDATE line_confirmation_requests SET status='verified', verified_at=NOW(), resolved_at=NOW() WHERE id=%s",
-                                    (verification["id"],),
-                                )
-                                cursor.execute(
-                                    """
-                                    INSERT INTO line_users (line_user_id, role, status, last_event_at)
-                                    VALUES (%s,'caregiver','active',NOW())
-                                    ON DUPLICATE KEY UPDATE role='caregiver', status='active', last_event_at=NOW()
-                                    """,
-                                    (user_id,),
-                                )
-                                menu_id = _load_rich_menu_id("caregiver")
-                                enqueue_line_task(
-                                    cursor, to_user_id=user_id, task_type="rich_menu_link",
-                                    payload={"rich_menu_id": menu_id, "success_message": templates.get("caregiver_switch_success", "月嫂身分驗證成功。")},
-                                    source_event_id=event.get("webhookEventId"),
-                                    idempotency_key=f"caregiver-verified:{verification['id']}",
-                                )
-                            else:
-                                if verification:
-                                    attempts = verification["attempt_count"] + 1
-                                    new_status = "locked" if attempts >= verification["max_attempts"] else "pending"
-                                    cursor.execute(
-                                        "UPDATE line_confirmation_requests SET attempt_count=%s, status=%s, resolved_at=CASE WHEN %s='locked' THEN NOW() ELSE resolved_at END WHERE id=%s",
-                                        (attempts, new_status, new_status, verification["id"]),
-                                    )
-                                enqueue_line_task(
-                                    cursor, to_user_id=user_id,
-                                    message_content=templates.get("caregiver_verification_failed", "驗證碼錯誤或已失效。"),
-                                    source_event_id=event.get("webhookEventId"),
-                                    idempotency_key=f"caregiver-code-failed:{event.get('webhookEventId')}",
-                                )
-                            continue
-                        
-                        # 攔截「我是月嫂」並建立短時效驗證碼，不再直接切換身分
+                        # 攔截「我是月嫂」並建立人工確認請求，不直接切換身分。
                         if "我是月嫂" in user_text:
-                            code = f"{secrets.randbelow(1_000_000):06d}"
                             cursor.execute(
-                                "UPDATE line_confirmation_requests SET status='cancelled', resolved_at=NOW() WHERE request_type='caregiver_verification' AND line_user_id=%s AND status='pending'",
+                                "UPDATE line_confirmation_requests SET status='cancelled', resolved_at=NOW() WHERE request_type='staff_verification' AND line_user_id=%s AND status='pending'",
                                 (user_id,),
                             )
                             cursor.execute(
                                 """
-                                INSERT INTO line_confirmation_requests (
-                                    request_type, line_user_id, verification_code, expires_at
-                                ) VALUES ('caregiver_verification',%s,%s,DATE_ADD(NOW(), INTERVAL 10 MINUTE))
+                                INSERT INTO line_confirmation_requests (request_type, line_user_id)
+                                VALUES ('staff_verification',%s)
                                 """,
-                                (user_id, code),
+                                (user_id,),
                             )
-                            verification_id = cursor.lastrowid
+                            request_id = cursor.lastrowid
+                            review_notifications.append(("staff_verification", request_id))
                             templates = load_message_templates()
                             enqueue_line_task(
                                 cursor, to_user_id=user_id,
-                                message_content=templates.get("caregiver_verification_requested", "請向工會取得六位數驗證碼。"),
+                                message_content=templates.get("staff_verification_requested", "月嫂身分申請已送出，請等待工會人員確認。"),
                                 source_event_id=event.get("webhookEventId"),
-                                idempotency_key=f"caregiver-code-request:{verification_id}",
+                                idempotency_key=f"staff-verification-request:{request_id}",
                             )
-                            print(f"[LINE Webhook] Caregiver verification #{verification_id} created for {user_id}")
-                            if _show_caregiver_code_in_terminal():
-                                print("=" * 60)
-                                print("[LINE Webhook][DEV] 月嫂身分驗證碼")
-                                print(f"LINE User ID : {user_id}")
-                                print(f"驗證碼       : {code}")
-                                print("有效時間     : 10 分鐘（最多輸錯 5 次）")
-                                print("=" * 60)
+                            print(f"[LINE Webhook] Staff verification request #{request_id} created for {user_id}")
                             continue
                             
                         # 攔截「esc」關鍵字恢復預設選單
@@ -1100,6 +1058,8 @@ async def line_webhook(request: Request):
                 )
             conn.commit()
             wake_worker()
+            for request_type, request_id in review_notifications:
+                _notify_development_reviewer(request_type, request_id)
     except Exception as e:
         conn.rollback()
         print(f"[LINE Webhook] Webhook handler failed: {e}")

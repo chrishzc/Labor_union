@@ -149,7 +149,7 @@ LINE 用戶照片應在 Webhook 收到 message ID 後下載至受控儲存區，
 ```text
 GET  /api/line/staff/review-requests
 GET  /api/line/staff/review-requests?request_type=client_rebind
-GET  /api/line/staff/review-requests?request_type=caregiver_verification
+GET  /api/line/staff/review-requests?request_type=staff_verification
 POST /api/line/staff/review-requests/{request_type}/{request_id}/approve
 POST /api/line/staff/review-requests/{request_type}/{request_id}/reject
 ```
@@ -160,7 +160,7 @@ POST /api/line/staff/review-requests/{request_type}/{request_id}/reject
 X-Internal-API-Key: <INTERNAL_API_KEY>
 ```
 
-`client_rebind` 的 approve 會更新客戶 LINE 綁定，reject 會保留原綁定並通知申請者。`caregiver_verification` 在申請時即產生六位數驗證碼；approve 會向工作人員回傳既有驗證碼，仍需由月嫂本人在 LINE 輸入，reject 則取消驗證碼並通知申請者。兩種請求共用 MySQL `line_confirmation_requests`。
+`client_rebind` 的 approve 會更新客戶 LINE 綁定，reject 會保留原綁定並通知申請者。`staff_verification` 的 approve 會直接將 LINE 角色切換為 `staff` 並綁定月嫂選單，reject 則保留原角色並通知申請者。兩種請求共用 MySQL `line_confirmation_requests`，不產生月嫂驗證碼。
 
 舊版 `/api/line/rebind_requests`、`approve`、`reject` 接口暫時保留相容性，但現在同樣要求內部 API Key。
 
@@ -170,4 +170,4 @@ X-Internal-API-Key: <INTERNAL_API_KEY>
 ENABLE_REBIND_CONSOLE_REVIEW=true
 ```
 
-`start_line_bot.py` 會透過統一待審 API 取得重新綁定申請，並在終端接受 `y` 核准、`n` 拒絕。正式環境 `APP_ENV=production` 時此功能強制停用。
+開發時，Webhook提交月嫂身分或重新綁定申請後，會向`start_line_bot.py`在`127.0.0.1`建立的臨時入口推送一次通知，終端隨即接受`y`核准、`n`拒絕，不會固定輪詢待審API。啟動器只在啟動時補查一次既有待審資料。此功能由`ENABLE_LINE_REVIEW_CONSOLE`控制，正式環境`APP_ENV=production`時強制停用；正式Web/UI使用相同API。

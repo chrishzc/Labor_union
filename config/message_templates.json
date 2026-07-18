@@ -2,7 +2,7 @@
   "version": 1,
   "templates": [
     {
-      "id": "caregiver_switch_success",
+      "id": "staff_switch_success",
       "name": "月嫂身分驗證成功",
       "category": "webhook_reply",
       "message_type": "text",
@@ -15,7 +15,7 @@
       ]
     },
     {
-      "id": "caregiver_switch_fail",
+      "id": "staff_switch_fail",
       "name": "月嫂選單切換失敗",
       "category": "webhook_reply",
       "message_type": "text",
@@ -33,7 +33,7 @@
       ]
     },
     {
-      "id": "caregiver_menu_not_set",
+      "id": "staff_menu_not_set",
       "name": "月嫂選單尚未設定",
       "category": "webhook_reply",
       "message_type": "text",
@@ -224,27 +224,17 @@
       "usage": ["schedule"]
     },
     {
-      "id": "caregiver_verification_requested",
-      "name": "月嫂驗證碼待輸入",
+      "id": "staff_verification_requested",
+      "name": "月嫂身分等待確認",
       "category": "webhook_reply",
       "message_type": "text",
       "enabled": true,
-      "content": "月嫂身分需要工會驗證。請向工會服務人員取得六位數驗證碼，並直接在此聊天室輸入。驗證碼於 10 分鐘後失效。",
+      "content": "月嫂身分申請已送出，請等待工會服務人員確認。確認通過後，系統會自動切換至月嫂專屬選單。",
       "variables": [],
       "usage": ["webhook"]
     },
     {
-      "id": "caregiver_verification_failed",
-      "name": "月嫂驗證失敗",
-      "category": "webhook_reply",
-      "message_type": "text",
-      "enabled": true,
-      "content": "驗證碼錯誤或已失效，請向工會服務人員重新取得驗證碼。",
-      "variables": [],
-      "usage": ["webhook"]
-    },
-    {
-      "id": "caregiver_verification_rejected",
+      "id": "staff_verification_rejected",
       "name": "月嫂驗證申請未通過",
       "category": "webhook_reply",
       "message_type": "text",
