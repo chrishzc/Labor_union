@@ -242,6 +242,16 @@
       "content": "驗證碼錯誤或已失效，請向工會服務人員重新取得驗證碼。",
       "variables": [],
       "usage": ["webhook"]
+    },
+    {
+      "id": "caregiver_verification_rejected",
+      "name": "月嫂驗證申請未通過",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "您的月嫂身分驗證申請未通過，請聯絡工會服務人員確認資格。",
+      "variables": [],
+      "usage": ["webhook"]
     }
   ]
 }

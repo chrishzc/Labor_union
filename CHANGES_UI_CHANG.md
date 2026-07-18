@@ -27,7 +27,7 @@
 
 - 新增服務人員契約 Excel 鏡像輸出，不修改原始模板。
 - 新增客戶收款、月嫂應付、契約內容、應付帳款及補助核銷報表 API。
-- FastAPI 正式啟動入口改為 `api.main:app`；`line.main` 僅保留舊程式相容匯入。
+- FastAPI 正式啟動入口為 `api.main:app`；舊的 `line.main` 相容入口已移除。
 
 對應整合 commit：`0f9c11f`。
 

@@ -627,7 +627,7 @@ JOIN clients c ON o.client_id = c.id
 LEFT JOIN staff s ON o.staff_id = s.id;
 
 
--- 20. 中華民國國定假日表
+-- 26. 中華民國國定假日表
 CREATE TABLE IF NOT EXISTS holidays (
     holiday_date DATE PRIMARY KEY COMMENT '假日日期',
     holiday_name VARCHAR(100) NOT NULL COMMENT '假日名稱',
@@ -635,7 +635,7 @@ CREATE TABLE IF NOT EXISTS holidays (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
--- 21. 服務人員排班與行事曆明細表
+-- 27. 服務人員排班與行事曆明細表
 CREATE TABLE IF NOT EXISTS staff_schedule (
     id INT AUTO_INCREMENT PRIMARY KEY,
     case_no VARCHAR(50) NOT NULL COMMENT '對應 orders.case_no',
@@ -652,7 +652,7 @@ CREATE TABLE IF NOT EXISTS staff_schedule (
     INDEX idx_schedule_case_no (case_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 22. LINE 待推播任務隊列
+-- 28. LINE 待推播任務隊列
 CREATE TABLE IF NOT EXISTS line_tasks (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     to_user_id VARCHAR(100) NOT NULL COMMENT '接收訊息的 LINE 用戶唯一識別碼',
@@ -679,7 +679,7 @@ CREATE TABLE IF NOT EXISTS line_tasks (
     INDEX idx_line_tasks_processing (status, processing_started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 23. LINE Webhook 事件收件匣與去重
+-- 29. LINE Webhook 事件收件匣與去重
 CREATE TABLE IF NOT EXISTS line_webhook_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     webhook_event_id VARCHAR(64) NOT NULL,
@@ -698,7 +698,7 @@ CREATE TABLE IF NOT EXISTS line_webhook_events (
     INDEX idx_line_webhook_status (processing_status, received_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 24. LINE 使用者角色與好友狀態
+-- 30. LINE 使用者角色與好友狀態
 CREATE TABLE IF NOT EXISTS line_users (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     line_user_id VARCHAR(100) NOT NULL,
@@ -715,21 +715,32 @@ CREATE TABLE IF NOT EXISTS line_users (
     INDEX idx_line_user_role_status (role, status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 25. 月嫂身分六位數驗證碼（短時效、限制嘗試次數）
-CREATE TABLE IF NOT EXISTS caregiver_verification_codes (
+-- 31. LINE 人工確認請求（月嫂驗證與舊客戶重新綁定）
+CREATE TABLE IF NOT EXISTS line_confirmation_requests (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    request_type ENUM('caregiver_verification','client_rebind') NOT NULL,
     line_user_id VARCHAR(100) NOT NULL,
-    verification_code CHAR(6) NOT NULL,
-    status ENUM('pending','verified','expired','locked','cancelled') NOT NULL DEFAULT 'pending',
+    client_id INT NULL,
+    client_name VARCHAR(100) NULL,
+    old_line_user_id VARCHAR(100) NULL,
+    new_line_user_id VARCHAR(100) NULL,
+    verification_code CHAR(6) NULL,
+    status ENUM('pending','approved','rejected','verified','expired','locked','cancelled') NOT NULL DEFAULT 'pending',
     attempt_count INT NOT NULL DEFAULT 0,
     max_attempts INT NOT NULL DEFAULT 5,
-    expires_at DATETIME NOT NULL,
+    expires_at DATETIME NULL,
     verified_at DATETIME NULL,
+    reviewed_by_line_user_id VARCHAR(100) NULL,
+    reviewed_at DATETIME NULL,
+    resolved_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_caregiver_code_pending (line_user_id, status, expires_at)
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_confirmation_pending (request_type, status, created_at),
+    INDEX idx_confirmation_requester (line_user_id, request_type, status),
+    CONSTRAINT fk_confirmation_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 26. 系統異常事件紀錄表
+-- 32. 系統異常事件紀錄表
 CREATE TABLE IF NOT EXISTS system_alerts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     event_type VARCHAR(50) NOT NULL COMMENT '異常事件類型',

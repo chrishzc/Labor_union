@@ -83,3 +83,8 @@ PUT /api/line/users/{user_id}/role/{role}
 - 正式部署前替所有 `/api/config` 管理接口加入管理員驗證；Rich Menu 發布權限不可公開。
 - 若 FastAPI 改成多程序或多主機，`asyncio.Event` 要改成 Redis／RabbitMQ 等跨程序通知。
 
+## 工作人員統一待審接口補充
+
+月嫂驗證與客戶重新綁定共用 MySQL `line_confirmation_requests`，並提供統一的 `/api/line/staff/review-requests` 介面，供未來工會客服前端顯示同一份待處理清單。月嫂驗證碼仍在申請時產生，由工作人員決定是否交付。既有重新綁定接口保留相容性，但所有工作人員接口均要求 `X-Internal-API-Key`。
+
+開發環境可由 `start_line_bot.py` 非阻塞輪詢 `client_rebind` 待審項目，終端輸入 `y/n` 時呼叫同一組正式 approve／reject API，不在 LIFF 請求內等待人工輸入。

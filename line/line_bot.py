@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """
 File: api/main.py
 Description: LINE 與 好好簽 Webhook 接收後端服務 (API Server)
@@ -10,7 +10,6 @@ import os
 import json
 import asyncio
 import sys
-import uuid
 import re
 import secrets
 from datetime import datetime, timedelta, date, timezone
@@ -221,33 +220,31 @@ async def line_bind(payload: LineBindPayload):
                         "message": "本筆訂單已有綁定另一個帳戶，請問是否重新綁定？"
                     }
                 else:
-                    # 使用者同意重新綁定，寫入 JSON 暫存檔等待人工確認
-                    request_data = {
-                        "request_id": str(uuid.uuid4()),
-                        "client_id": client_id,
-                        "client_name": db_name,
-                        "old_line_user_id": db_line_user_id,
-                        "new_line_user_id": line_user_id,
-                        "request_time": datetime.now().isoformat()
-                    }
-                    
-                    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-                    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
-                    
-                    existing_requests = []
-                    if os.path.exists(rebind_json_path):
-                        with open(rebind_json_path, "r", encoding="utf-8") as f:
-                            try:
-                                existing_requests = json.load(f)
-                            except json.JSONDecodeError:
-                                existing_requests = []
-                    
-                    existing_requests.append(request_data)
-                    
-                    with open(rebind_json_path, "w", encoding="utf-8") as f:
-                        json.dump(existing_requests, f, ensure_ascii=False, indent=2)
-                    
-                    print(f"[API Bind] Rebind request saved for client_id={client_id}")
+                    # 使用者同意重新綁定，寫入統一確認請求表等待人工確認。
+                    cursor.execute(
+                        """
+                        UPDATE line_confirmation_requests
+                        SET status='cancelled', resolved_at=NOW()
+                        WHERE request_type='client_rebind' AND client_id=%s
+                          AND line_user_id=%s AND status='pending'
+                        """,
+                        (client_id, line_user_id),
+                    )
+                    cursor.execute(
+                        """
+                        INSERT INTO line_confirmation_requests (
+                            request_type, line_user_id, client_id, client_name,
+                            old_line_user_id, new_line_user_id
+                        ) VALUES ('client_rebind', %s, %s, %s, %s, %s)
+                        """,
+                        (line_user_id, client_id, db_name, db_line_user_id, line_user_id),
+                    )
+                    request_id = cursor.lastrowid
+                    conn.commit()
+                    print(
+                        f"[API Bind] Rebind request {request_id} saved "
+                        f"for client_id={client_id}"
+                    )
                     
                     return {
                         "status": "pending_approval",
@@ -307,47 +304,51 @@ class RebindActionPayload(BaseModel):
     request_id: str
 
 @router.get("/api/line/rebind_requests")
-def get_rebind_requests():
+def get_rebind_requests(x_internal_api_key: str | None = Header(default=None)):
     """
     [前端管理 API] 取得所有待確認的重新綁定申請
     """
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
-    
-    if not os.path.exists(rebind_json_path):
-        return {"status": "success", "data": []}
-        
+    _require_internal_api_key(x_internal_api_key)
+    conn = get_db_connection()
     try:
-        with open(rebind_json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {"status": "success", "data": data}
-    except Exception as e:
-        return {"status": "error", "message": f"讀取暫存檔失敗：{str(e)}"}
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id AS request_id, client_id, client_name,
+                       old_line_user_id, new_line_user_id,
+                       created_at AS request_time
+                FROM line_confirmation_requests
+                WHERE request_type='client_rebind' AND status='pending'
+                ORDER BY created_at
+                """
+            )
+            return {"status": "success", "data": cursor.fetchall()}
+    finally:
+        conn.close()
 
 @router.post("/api/line/rebind_requests/approve")
-def approve_rebind_request(payload: RebindActionPayload):
+def approve_rebind_request(
+    payload: RebindActionPayload,
+    x_internal_api_key: str | None = Header(default=None),
+):
     """
     [前端管理 API] 確認並執行重新綁定申請
     """
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
-    
-    if not os.path.exists(rebind_json_path):
-        return {"status": "error", "message": "找不到暫存檔案"}
-        
+    _require_internal_api_key(x_internal_api_key)
+    conn = get_db_connection()
     try:
-        with open(rebind_json_path, "r", encoding="utf-8") as f:
-            requests_data = json.load(f)
-            
-        target_request = next((r for r in requests_data if r["request_id"] == payload.request_id), None)
-        
-        if not target_request:
-            return {"status": "error", "message": "找不到該筆申請"}
-            
-        # 寫入資料庫
-        conn = get_db_connection()
-        try:
-            with conn.cursor() as cursor:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT * FROM line_confirmation_requests
+                    WHERE id=%s AND request_type='client_rebind'
+                      AND status='pending' FOR UPDATE
+                    """,
+                    (payload.request_id,),
+                )
+                target_request = cursor.fetchone()
+                if not target_request:
+                    return {"status": "error", "message": "找不到待審核的重新綁定申請"}
                 cursor.execute("""
                     UPDATE clients 
                     SET line_user_id = %s 
@@ -378,69 +379,67 @@ def approve_rebind_request(payload: RebindActionPayload):
                     INSERT INTO line_tasks (to_user_id, message_content, status)
                     VALUES (%s, %s, 'pending')
                 """, (target_request["new_line_user_id"], success_msg))
-                
-                conn.commit()
-                wake_worker()
-        except Exception as e:
-            conn.rollback()
-            return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
-        finally:
-            conn.close()
-            
-        # 移除 JSON 中的暫存紀錄
-        requests_data = [r for r in requests_data if r["request_id"] != payload.request_id]
-        with open(rebind_json_path, "w", encoding="utf-8") as f:
-            json.dump(requests_data, f, ensure_ascii=False, indent=2)
-            
+                cursor.execute(
+                    """
+                    UPDATE line_confirmation_requests
+                    SET status='approved', reviewed_at=NOW(), resolved_at=NOW()
+                    WHERE id=%s
+                    """,
+                    (payload.request_id,),
+                )
+        conn.commit()
+        wake_worker()
         return {"status": "success", "message": "已確認並完成重新綁定"}
     except Exception as e:
-        return {"status": "error", "message": f"伺服器錯誤：{str(e)}"}
+        conn.rollback()
+        return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
+    finally:
+        conn.close()
 
 @router.post("/api/line/rebind_requests/reject")
-def reject_rebind_request(payload: RebindActionPayload):
+def reject_rebind_request(
+    payload: RebindActionPayload,
+    x_internal_api_key: str | None = Header(default=None),
+):
     """
     [前端管理 API] 拒絕重新綁定申請
     """
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
-    
-    if not os.path.exists(rebind_json_path):
-        return {"status": "error", "message": "找不到暫存檔案"}
-        
+    _require_internal_api_key(x_internal_api_key)
+    conn = get_db_connection()
     try:
-        with open(rebind_json_path, "r", encoding="utf-8") as f:
-            requests_data = json.load(f)
-            
-        target_request = next((r for r in requests_data if r["request_id"] == payload.request_id), None)
-        
-        if not target_request:
-            return {"status": "error", "message": "找不到該筆申請"}
-            
-        # 推播失敗訊息給客戶
-        conn = get_db_connection()
-        try:
-            with conn.cursor() as cursor:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT * FROM line_confirmation_requests
+                    WHERE id=%s AND request_type='client_rebind'
+                      AND status='pending' FOR UPDATE
+                    """,
+                    (payload.request_id,),
+                )
+                target_request = cursor.fetchone()
+                if not target_request:
+                    return {"status": "error", "message": "找不到待審核的重新綁定申請"}
                 reject_msg = f"【系統通知】\n您的帳號重新綁定申請已被管理員拒絕。如有疑問請聯繫客服專員。"
                 cursor.execute("""
                     INSERT INTO line_tasks (to_user_id, message_content, status)
                     VALUES (%s, %s, 'pending')
                 """, (target_request["new_line_user_id"], reject_msg))
-                conn.commit()
-                wake_worker()
-        except Exception as e:
-            conn.rollback()
-            print(f"[API Bind] Push reject message failed: {e}")
-        finally:
-            conn.close()
-            
-        # 移除 JSON 中的暫存紀錄
-        requests_data = [r for r in requests_data if r["request_id"] != payload.request_id]
-        with open(rebind_json_path, "w", encoding="utf-8") as f:
-            json.dump(requests_data, f, ensure_ascii=False, indent=2)
-            
+                cursor.execute(
+                    """
+                    UPDATE line_confirmation_requests
+                    SET status='rejected', reviewed_at=NOW(), resolved_at=NOW()
+                    WHERE id=%s
+                    """,
+                    (payload.request_id,),
+                )
+        conn.commit()
+        wake_worker()
         return {"status": "success", "message": "已拒絕該筆重新綁定申請"}
     except Exception as e:
-        return {"status": "error", "message": f"伺服器錯誤：{str(e)}"}
+        conn.rollback()
+        return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
+    finally:
+        conn.close()
 
 from typing import Optional, Dict, Any
 
@@ -578,12 +577,157 @@ def list_pending_caregiver_verifications(x_internal_api_key: str | None = Header
                 """
                 SELECT id, line_user_id, verification_code, attempt_count,
                        max_attempts, expires_at, created_at
-                FROM caregiver_verification_codes
-                WHERE status='pending' AND expires_at > NOW()
+                FROM line_confirmation_requests
+                WHERE request_type='caregiver_verification'
+                  AND status='pending' AND expires_at > NOW()
                 ORDER BY created_at DESC
                 """
             )
             return {"status": "success", "data": cursor.fetchall()}
+    finally:
+        conn.close()
+
+
+@router.get("/api/line/staff/review-requests")
+def list_staff_review_requests(
+    request_type: str | None = None,
+    x_internal_api_key: str | None = Header(default=None),
+):
+    """Unified staff queue for rebind and caregiver verification requests."""
+    _require_internal_api_key(x_internal_api_key)
+    if request_type not in {None, "client_rebind", "caregiver_verification"}:
+        raise HTTPException(status_code=422, detail="Unsupported review request type")
+
+    items = []
+    if request_type in {None, "client_rebind"}:
+        rebind_result = get_rebind_requests(x_internal_api_key)
+        if rebind_result.get("status") == "success":
+            for request_item in rebind_result.get("data", []):
+                items.append({
+                    "type": "client_rebind",
+                    "request_id": request_item.get("request_id"),
+                    "status": "pending",
+                    "created_at": request_item.get("request_time"),
+                    "display_name": request_item.get("client_name"),
+                    "details": request_item,
+                    "actions": ["approve", "reject"],
+                })
+
+    if request_type in {None, "caregiver_verification"}:
+        conn = get_db_connection()
+        try:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, line_user_id, attempt_count, max_attempts,
+                           expires_at, created_at
+                    FROM line_confirmation_requests
+                    WHERE request_type='caregiver_verification'
+                      AND status='pending' AND expires_at > NOW()
+                    ORDER BY created_at
+                    """
+                )
+                for request_item in cursor.fetchall():
+                    items.append({
+                        "type": "caregiver_verification",
+                        "request_id": str(request_item["id"]),
+                        "status": "pending",
+                        "created_at": request_item["created_at"],
+                        "display_name": request_item["line_user_id"],
+                        "details": request_item,
+                        "actions": ["approve", "reject"],
+                    })
+        finally:
+            conn.close()
+
+    items.sort(key=lambda item: str(item.get("created_at") or ""))
+    return {"status": "success", "data": items}
+
+
+@router.post("/api/line/staff/review-requests/{request_type}/{request_id}/approve")
+def approve_staff_review_request(
+    request_type: str,
+    request_id: str,
+    x_internal_api_key: str | None = Header(default=None),
+):
+    """Approve a rebind, or acknowledge a caregiver request and reveal its code."""
+    _require_internal_api_key(x_internal_api_key)
+    if request_type == "client_rebind":
+        return approve_rebind_request(RebindActionPayload(request_id=request_id), x_internal_api_key)
+    if request_type != "caregiver_verification":
+        raise HTTPException(status_code=422, detail="Unsupported review request type")
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id, line_user_id, verification_code, expires_at
+                FROM line_confirmation_requests
+                WHERE id=%s AND request_type='caregiver_verification'
+                  AND status='pending' AND expires_at > NOW()
+                """,
+                (request_id,),
+            )
+            request_item = cursor.fetchone()
+            if not request_item:
+                raise HTTPException(status_code=404, detail="Caregiver verification request not found or expired")
+            return {
+                "status": "success",
+                "message": "請將驗證碼提供給申請月嫂，由本人在 LINE 輸入完成驗證。",
+                "data": request_item,
+            }
+    finally:
+        conn.close()
+
+
+@router.post("/api/line/staff/review-requests/{request_type}/{request_id}/reject")
+def reject_staff_review_request(
+    request_type: str,
+    request_id: str,
+    x_internal_api_key: str | None = Header(default=None),
+):
+    """Reject a rebind or cancel a pending caregiver verification code."""
+    _require_internal_api_key(x_internal_api_key)
+    if request_type == "client_rebind":
+        return reject_rebind_request(RebindActionPayload(request_id=request_id), x_internal_api_key)
+    if request_type != "caregiver_verification":
+        raise HTTPException(status_code=422, detail="Unsupported review request type")
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id, line_user_id FROM line_confirmation_requests
+                WHERE id=%s AND request_type='caregiver_verification'
+                  AND status='pending' FOR UPDATE
+                """,
+                (request_id,),
+            )
+            request_item = cursor.fetchone()
+            if not request_item:
+                raise HTTPException(status_code=404, detail="Caregiver verification request not found")
+            cursor.execute(
+                "UPDATE line_confirmation_requests SET status='cancelled', reviewed_at=NOW(), resolved_at=NOW() WHERE id=%s",
+                (request_id,),
+            )
+            templates = load_message_templates()
+            enqueue_line_task(
+                cursor,
+                to_user_id=request_item["line_user_id"],
+                message_content=templates.get(
+                    "caregiver_verification_rejected",
+                    "您的月嫂身分驗證申請未通過，請聯絡工會服務人員。",
+                ),
+                idempotency_key=f"caregiver-review-rejected:{request_id}",
+            )
+            conn.commit()
+        wake_worker()
+        return {"status": "success", "message": "已拒絕月嫂驗證申請"}
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
 
@@ -814,8 +958,9 @@ async def line_webhook(request: Request):
                         if re.fullmatch(r"\d{6}", user_text.strip()):
                             cursor.execute(
                                 """
-                                SELECT * FROM caregiver_verification_codes
-                                WHERE line_user_id=%s AND status='pending'
+                                SELECT * FROM line_confirmation_requests
+                                WHERE request_type='caregiver_verification'
+                                  AND line_user_id=%s AND status='pending'
                                   AND expires_at >= NOW()
                                 ORDER BY id DESC LIMIT 1 FOR UPDATE
                                 """,
@@ -825,7 +970,7 @@ async def line_webhook(request: Request):
                             templates = load_message_templates()
                             if verification and verification["verification_code"] == user_text.strip():
                                 cursor.execute(
-                                    "UPDATE caregiver_verification_codes SET status='verified', verified_at=NOW() WHERE id=%s",
+                                    "UPDATE line_confirmation_requests SET status='verified', verified_at=NOW(), resolved_at=NOW() WHERE id=%s",
                                     (verification["id"],),
                                 )
                                 cursor.execute(
@@ -848,8 +993,8 @@ async def line_webhook(request: Request):
                                     attempts = verification["attempt_count"] + 1
                                     new_status = "locked" if attempts >= verification["max_attempts"] else "pending"
                                     cursor.execute(
-                                        "UPDATE caregiver_verification_codes SET attempt_count=%s, status=%s WHERE id=%s",
-                                        (attempts, new_status, verification["id"]),
+                                        "UPDATE line_confirmation_requests SET attempt_count=%s, status=%s, resolved_at=CASE WHEN %s='locked' THEN NOW() ELSE resolved_at END WHERE id=%s",
+                                        (attempts, new_status, new_status, verification["id"]),
                                     )
                                 enqueue_line_task(
                                     cursor, to_user_id=user_id,
@@ -863,13 +1008,14 @@ async def line_webhook(request: Request):
                         if "我是月嫂" in user_text:
                             code = f"{secrets.randbelow(1_000_000):06d}"
                             cursor.execute(
-                                "UPDATE caregiver_verification_codes SET status='cancelled' WHERE line_user_id=%s AND status='pending'",
+                                "UPDATE line_confirmation_requests SET status='cancelled', resolved_at=NOW() WHERE request_type='caregiver_verification' AND line_user_id=%s AND status='pending'",
                                 (user_id,),
                             )
                             cursor.execute(
                                 """
-                                INSERT INTO caregiver_verification_codes (line_user_id, verification_code, expires_at)
-                                VALUES (%s,%s,DATE_ADD(NOW(), INTERVAL 10 MINUTE))
+                                INSERT INTO line_confirmation_requests (
+                                    request_type, line_user_id, verification_code, expires_at
+                                ) VALUES ('caregiver_verification',%s,%s,DATE_ADD(NOW(), INTERVAL 10 MINUTE))
                                 """,
                                 (user_id, code),
                             )

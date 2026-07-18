@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 
 # 確保中文輸出編碼正確
 sys.stdout.reconfigure(encoding='utf-8')
+sys.stderr.reconfigure(encoding='utf-8')
 
 # 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", ".env"))

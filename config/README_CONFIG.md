@@ -102,9 +102,7 @@ PUT /api/config/message-schedules
 
 由 Rich Menu 發布器寫入的 LINE 平台 ID，不是前端可編輯設定。
 
-### `rebind_requests.json`
-
-目前保存重新綁定待審資料，不屬於靜態設定。後續多人使用時建議移入 MySQL。
+重新綁定待審資料不再存放於 `config`。月嫂驗證與客戶重新綁定均保存在 MySQL `line_confirmation_requests`，`config` 目錄只保存可由管理介面維護的靜態設定。
 
 ## 圖片與附件儲存建議（後續工作）
 
@@ -143,3 +141,33 @@ LINE 用戶照片應在 Webhook 收到 message ID 後下載至受控儲存區，
 - API 只操作固定白名單檔案，不能由前端傳入任意檔案路徑。
 - Rich Menu 發布會呼叫 LINE API，應限制為管理員操作。
 - 月嫂驗證查詢及角色管理接口需使用 `X-Internal-API-Key`；正式前應再接管理員登入與角色權限。
+
+## 工會工作人員統一待審接口
+
+月嫂資格驗證與舊客戶重新綁定可由同一個工作人員佇列取得：
+
+```text
+GET  /api/line/staff/review-requests
+GET  /api/line/staff/review-requests?request_type=client_rebind
+GET  /api/line/staff/review-requests?request_type=caregiver_verification
+POST /api/line/staff/review-requests/{request_type}/{request_id}/approve
+POST /api/line/staff/review-requests/{request_type}/{request_id}/reject
+```
+
+以上接口一律要求：
+
+```http
+X-Internal-API-Key: <INTERNAL_API_KEY>
+```
+
+`client_rebind` 的 approve 會更新客戶 LINE 綁定，reject 會保留原綁定並通知申請者。`caregiver_verification` 在申請時即產生六位數驗證碼；approve 會向工作人員回傳既有驗證碼，仍需由月嫂本人在 LINE 輸入，reject 則取消驗證碼並通知申請者。兩種請求共用 MySQL `line_confirmation_requests`。
+
+舊版 `/api/line/rebind_requests`、`approve`、`reject` 接口暫時保留相容性，但現在同樣要求內部 API Key。
+
+開發環境可設定：
+
+```env
+ENABLE_REBIND_CONSOLE_REVIEW=true
+```
+
+`start_line_bot.py` 會透過統一待審 API 取得重新綁定申請，並在終端接受 `y` 核准、`n` 拒絕。正式環境 `APP_ENV=production` 時此功能強制停用。

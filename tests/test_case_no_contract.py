@@ -1,6 +1,7 @@
 import json
 
-from line.main import app, ensure_order_for_case_no
+from api.main import app
+from line.line_bot import ensure_order_for_case_no
 
 
 class FakeCursor:
