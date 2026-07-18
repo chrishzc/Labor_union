@@ -1,8 +1,57 @@
+import re
 import streamlit as st
 import pandas as pd
 from services import db_service
 
 title = "🔍 資料庫原始資料瀏覽"
+
+# 可編輯欄位白名單 (僅本頁面即時編輯表格適用)：只有白名單內的欄位開放編輯，
+# 其餘（含未來新增欄位）一律鎖定唯讀。對照依據:
+# document/管理端UI/資料庫原始資料瀏覽_頁面欄位開放權限建議表.xlsx
+EDITABLE_COLUMNS = {
+    'clients': {
+        'reject_reason', 'ip_address', 'name', 'gender', 'phone', 'city', 'address',
+        'identity_status', 'service_time', 'due_month', 'service_start_date', 'notes',
+        'service_days', 'residence_type', 'delivery_type', 'service_type', 'baby_info',
+        'line_id', 'admin_notes',
+    },
+    'staff': {
+        'registered_at', 'ip_address', 'phone', 'tel', 'tel_ext', 'email', 'city',
+        'zip_code', 'address', 'has_massage_cert', 'weekly_rest_days', 'service_regions',
+        'special_skills', 'name', 'identity_card', 'birthday', 'care_babies',
+    },
+    'orders': {
+        'line_group_id', 'contract_id',
+    },
+    'beclass_records': {
+        'seq_num', 'email', 'tel', 'ext', 'city', 'zip_code', 'address',
+        'refund_bank_code', 'refund_account_no', 'admin_notes',
+    },
+    # 全表建議唯讀：須透過「案件與配對中心」(02_orders.py) 的專屬按鈕操作
+    'matching_records': set(),
+    # 全表建議唯讀：已有專屬「國定假日管理面板」處理新增/更新/刪除
+    'holidays': set(),
+    'staff_bank_accounts': {
+        'bank_code', 'branch_code', 'account_no', 'is_primary',
+    },
+}
+
+# 限制輸入選項的欄位：改用下拉選單，不能自由輸入文字
+COLUMN_VALID_OPTIONS = {
+    'clients': {
+        'gender': ['男', '女'],
+        'delivery_type': ['自然產', '剖腹產'],
+        'service_type': ['週休2日', '週休1日', '連續服務'],
+    },
+}
+
+# 格式檢核欄位 (建議表「說明備註」標註「檢核OO格式」者)：空值視為清空允許通過
+_PHONE_FORMAT = (re.compile(r'^09\d{8}$'), '請輸入正確的行動電話格式 (例如 0912345678)')
+_EMAIL_FORMAT = (re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$'), '請輸入正確的 Email 格式')
+COLUMN_FORMAT_VALIDATORS = {
+    'clients': {'phone': _PHONE_FORMAT},
+    'staff': {'email': _EMAIL_FORMAT},
+}
 
 # ADAD INV-UI-BROWSER-01: 資料庫全量欄位中文對照映射表
 DB_COLUMN_LABEL_MAP = {
@@ -209,19 +258,25 @@ def show():
         display_df = filtered_df.rename(columns=rename_map)
         reverse_rename_map = {v: k for k, v in rename_map.items()}
 
-        # 系統唯讀欄位 (id、建檔/更新時間等) 一律鎖定不可編輯，避免破壞主鍵與追蹤紀錄
-        readonly_cols = set(db_service.READONLY_SYSTEM_COLUMNS)
-        if table_name == "orders":
-            readonly_cols.add("case_no")
-            readonly_cols.add("staff_name")
+        # 可編輯欄位白名單：僅白名單內的欄位開放編輯，其餘（含未來新增欄位）一律鎖定唯讀
+        editable_cols = EDITABLE_COLUMNS.get(table_name, set())
+        # 限制輸入選項的欄位改用下拉選單，避免自由輸入文字造成不合法的值
+        valid_options = COLUMN_VALID_OPTIONS.get(table_name, {})
+        # 格式檢核欄位 (行動電話、Email)
+        format_validators = COLUMN_FORMAT_VALIDATORS.get(table_name, {})
 
         column_config = {}
         for original_col, display_col in rename_map.items():
-            if original_col in readonly_cols:
+            if original_col in valid_options:
+                column_config[display_col] = st.column_config.SelectboxColumn(
+                    options=valid_options[original_col],
+                    required=False,
+                )
+            elif original_col not in editable_cols:
                 column_config[display_col] = st.column_config.Column(disabled=True)
 
         st.write(f"共 {len(filtered_df)} 筆資料 (總共 {len(df)} 筆)")
-        st.caption("💡 可直接在表格中點選儲存格修改內容（灰色欄位為系統欄位，唯讀鎖定），修改完成後請務必點擊下方「💾 儲存變更」按鈕才會真正寫入資料庫。")
+        st.caption("💡 可直接在表格中點選儲存格修改內容（灰色欄位為系統/關聯欄位，唯讀鎖定；下拉選單欄位僅能從清單中選擇），修改完成後請務必點擊下方「💾 儲存變更」按鈕才會真正寫入資料庫。")
 
         edited_display_df = st.data_editor(
             display_df,
@@ -246,7 +301,7 @@ def show():
                 original_row = original_df.loc[row_id]
                 changed_fields = {}
                 for col in edited_df.columns:
-                    if col == pk_col or col in readonly_cols:
+                    if col == pk_col or col not in editable_cols:
                         continue
                     old_val = original_row.get(col)
                     new_val = edited_row.get(col)
@@ -256,7 +311,18 @@ def show():
                     if old_str != new_str:
                         changed_fields[col] = None if pd.isna(new_val) else new_val
 
-                if changed_fields:
+                # 儲存前檢核格式限定欄位（行動電話、Email），空值視為清空允許通過
+                format_err = None
+                for col, val in changed_fields.items():
+                    if col in format_validators and val:
+                        pattern, err_msg = format_validators[col]
+                        if not pattern.match(str(val)):
+                            format_err = f"第 {row_id} 筆欄位 {col} 格式錯誤: {err_msg}"
+                            break
+
+                if format_err:
+                    errors.append(format_err)
+                elif changed_fields:
                     try:
                         db_service.update_table_row(table_name, row_id, changed_fields)
                         updated_rows += 1

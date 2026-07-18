@@ -96,7 +96,7 @@ def fill_checkbox_group(row_dict, options, summary_col):
         row_dict[opt] = 'Y' if opt in selected else None
     row_dict[summary_col] = '、'.join(selected)
 
-def generate_roster_data(input_file, output_file, personal_data_pool, num_records):
+def generate_roster_data(input_file, output_file, personal_data_pool, staff_data_pool, num_records):
     """
     產生包含 HCM 客戶、BeClass 客戶與服務人員的測試名冊 Excel 檔案。
     """
@@ -162,7 +162,7 @@ def generate_roster_data(input_file, output_file, personal_data_pool, num_record
 
     for i in range(num_records):
         row = staff_template_row.copy()
-        p_data = personal_data_pool[i]
+        p_data = staff_data_pool[i]
         
         row['項次'] = i + 1
         row['查詢序號'] = f"E{100+i:03d}{p_data['name']}"
@@ -325,7 +325,7 @@ def generate_finance_data(output_file, personal_data_pool):
         None, None, None, None, None, None, None, "列印時間:2026/08/01 10:00:00", None, None
     ])
     tx_rows.append([
-        "帳號", "交易時間", "記帳日期", "入帳日期", "交易摘要", "幣別", "支出", "存入", "餘額", "虛擬帳號/轉帳備註", "備用"
+        "帳號", "交易時間", "交易日期", "入帳日期", "交易摘要", "幣別", "支出", "收入", "餘額", "虛擬帳號/對方帳號", "備用"
     ])
     
     # 依序為 10 筆案件生成：
@@ -392,7 +392,7 @@ def generate_finance_data(output_file, personal_data_pool):
     
     print("正在將分頁寫入財務對帳 Excel 檔案中...")
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-        df_tx.to_excel(writer, sheet_name='合作社帳戶', index=False, header=False)
+        df_tx.to_excel(writer, sheet_name='銀行流水明細', index=False, header=False)
         df_db.to_excel(writer, sheet_name='資料庫', index=False, header=False)
         
     print(f"成功！已生成財務對帳檔案：{output_file}")
@@ -628,7 +628,10 @@ def _scenario_note(scenario: str, boundary_tag: str | None = None) -> str | None
 def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, first_pay, second_pay, caregiver_fee, notes,
                     deposit_at=None, first_pay_at=None, second_pay_at=None, caregiver_paid_at=None):
     assert case_no
-    assert amount == deposit + first_pay + second_pay
+    # 注意：amount 為應收總額（amount_receivable），deposit/first_pay/second_pay 為「目前已收」金額
+    # （amount_received），兩者本來就是不同概念，尚未收款的情境下 deposit/first_pay/second_pay 皆為 0
+    # 而 amount 仍是實際應收全額，因此這裡不應斷言兩者相等。
+    assert deposit + first_pay + second_pay <= amount
     planned_deposit = max(1000, amount // 10)
     planned_balance = max(0, amount - planned_deposit)
     planned_first = planned_balance // 2
@@ -695,15 +698,30 @@ def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, first
         ))
 
 
-def _write_scenario_schedule(cursor, case_no: str, staff_id: int, start: date, service_days: int) -> date:
-    """Create a simple deterministic schedule in the caller's transaction."""
+def _rest_weekdays_for_service_mode(service_mode: str | None) -> set[int]:
+    """依客戶登記的服務方式決定每週固定休假的星期集合，對齊 db_service.calculate_attendance_schedule 的判斷規則。"""
+    if service_mode == '週休2日':
+        return {5, 6}   # Saturday, Sunday
+    if service_mode == '連續服務':
+        return set()    # 不週休
+    return {6}          # 預設/週休1日 -> Sunday
+
+
+def _write_scenario_schedule(cursor, case_no: str, staff_id: int, start: date, service_days: int,
+                              service_mode: str | None = None) -> date:
+    """Create a simple deterministic schedule in the caller's transaction.
+
+    休假的星期須對齊該案件客戶登記的服務方式 (週休1日/週休2日/連續服務)，
+    否則會跟「出勤天數精算」頁面即時試算出來的結果對不起來。
+    """
+    rest_weekdays = _rest_weekdays_for_service_mode(service_mode)
     work_days = 0
     current_day = start
     last_day = start
     while work_days < service_days:
-        is_sunday = current_day.weekday() == 6
-        is_work_day = not is_sunday
-        note = "週日預設休假" if is_sunday else "生命週期假資料正常服務日"
+        is_rest_day = current_day.weekday() in rest_weekdays
+        is_work_day = not is_rest_day
+        note = f"{service_mode or '週休1日'}固定休假" if is_rest_day else "生命週期假資料正常服務日"
         cursor.execute("""
             INSERT INTO staff_schedule (case_no, staff_id, work_date, is_work_day, is_double_pay, notes)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -763,7 +781,7 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
     try:
         with conn.cursor() as cursor:
             cursor.execute("""
-                SELECT o.case_no, c.id AS client_id, c.name AS client_name
+                SELECT o.case_no, c.id AS client_id, c.name AS client_name, c.service_type
                 FROM orders o JOIN clients c ON c.id = o.client_id
                 WHERE o.case_no IS NOT NULL AND o.case_no <> '' ORDER BY o.case_no
             """)
@@ -903,7 +921,10 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
 
                     # A conflict fixture stays visible in orders but deliberately has no schedule row.
                     if boundary_tag != "CONFLICT_TEST_EXCLUDED_FROM_NORMAL_SCHEDULE":
-                        scheduled_end = _write_scenario_schedule(cursor, order["case_no"], staff_id, start, days)
+                        scheduled_end = _write_scenario_schedule(
+                            cursor, order["case_no"], staff_id, start, days,
+                            service_mode=order.get("service_type"),
+                        )
                         if scenario == "deposit_received":
                             cursor.execute("""
                                 UPDATE orders SET end_date = %s, actual_start_date = NULL, actual_end_date = NULL WHERE case_no = %s
@@ -987,10 +1008,31 @@ def main():
             'ip': ip,
             'id_card': id_card
         })
-        
+
+    # 服務人員（月嫂）需使用獨立於客戶的個資池，避免同一列的客戶與月嫂姓名/電話/地址/身分證完全相同
+    staff_data_pool = []
+    for i in range(num_records):
+        name = generate_fake_name()
+        phone = generate_fake_phone()
+        email = f"test_{phone[-4:]}@example.com"
+        address = generate_fake_address()
+        line_id = generate_fake_line_id()
+        ip = generate_fake_ip()
+        id_card = generate_fake_id_card()
+
+        staff_data_pool.append({
+            'name': name,
+            'phone': phone,
+            'email': email,
+            'address': address,
+            'line_id': line_id,
+            'ip': ip,
+            'id_card': id_card
+        })
+
     # 1. 產生名冊假資料
     try:
-        generate_roster_data(input_file, roster_output_file, personal_data_pool, num_records)
+        generate_roster_data(input_file, roster_output_file, personal_data_pool, staff_data_pool, num_records)
     except Exception as e:
         print(f"生成名冊假資料失敗: {e}")
         sys.exit(1)
