@@ -571,7 +571,7 @@
 - Description: 一鍵啟動上線服務腳本。啟動 Docker、等待 MySQL 連線就緒，但不執行資料庫初始化與假資料生成，最後以並行方式啟動 FastAPI、Streamlit 網頁端以及地端檔案自動監控服務 (file_watcher.py)。
 - Observability: not_required
 - Invariants:
-  - FastAPI 必須以實際 ASGI 入口 `line.main:app` 啟動，不得指向不存在的 `api.main:app`。
+  - FastAPI 必須以實際 ASGI 入口 `api.main:app` 啟動。
 
 ##### Module: ContractContextRouter
 - Type: api_router
@@ -620,13 +620,13 @@
 ##### Module: FinanceRouterRegistration
 - Type: api_entrypoint
 - State: `planned`
-- Source: line/main.py
+- Source: api/main.py
 - Description: Register contract and finance-report routers with the running FastAPI application.
 - Complexity: low
 - Invariants:
   - Register each new router exactly once without removing existing routers.
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('line/main.py').read_text(encoding='utf-8'); assert 'contracts.router' in s and 'finance_reports.router' in s; print('FINANCE ROUTERS REGISTERED')"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "FINANCE ROUTERS REGISTERED"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('api/main.py').read_text(encoding='utf-8'); assert 'contracts.router' in s and 'finance_reports.router' in s; print('FINANCE ROUTERS REGISTERED')"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "FINANCE ROUTERS REGISTERED"}
 - Observability: not_required
 - Invariants:
   - INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始啟動後端與監控服務防止連線逾時崩潰。

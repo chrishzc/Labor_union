@@ -20,6 +20,7 @@ from services.db_service import save_order_rest_dates, generate_default_schedule
 # 確保中文輸出編碼正確
 try:
     sys.stdout.reconfigure(encoding='utf-8')
+    sys.stderr.reconfigure(encoding='utf-8')
 except Exception:
     pass
 

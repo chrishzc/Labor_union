@@ -3,20 +3,23 @@
 File: api/main.py
 Description: LINE 與 好好簽 Webhook 接收後端服務 (API Server)
 """
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel
 import pymysql
 import os
 import json
 import asyncio
-import requests
 import sys
-import uuid
-from datetime import datetime, timedelta, date
-from contextlib import asynccontextmanager
+import secrets
+import requests
+from datetime import datetime, timedelta, date, timezone
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
+from line.worker import wake_worker
+from line.security import verify_line_signature
+from services.line_task_service import enqueue_line_task
+from services.webhook_event_service import register_event
 
 # 載入環境變數
 load_dotenv()
@@ -30,14 +33,94 @@ def get_setting(key: str, default: str = "") -> str:
     env_key = key.upper()
     return os.getenv(env_key, default)
 
-def load_webhook_replies():
-    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "webhook_replies.json")
+def load_message_templates():
+    """Return enabled text templates keyed by template id."""
+    config_path = os.path.join(os.path.dirname(__file__), "..", "config", "message_templates.json")
     try:
         with open(config_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+        return {
+            item["id"]: item["content"]
+            for item in data.get("templates", [])
+            if item.get("enabled", True) and item.get("message_type", "text") == "text"
+        }
     except Exception as e:
-        print(f"[LINE Webhook] Failed to load webhook replies: {e}")
+        print(f"[LINE Webhook] Failed to load message templates: {e}")
         return {}
+
+
+def _load_rich_menu_id(role: str) -> str:
+    key_by_role = {
+        "staff": "staff_rich_menu_id",
+        "union_staff": "union_staff_rich_menu_id",
+        "customer": "default_rich_menu_id",
+    }
+    path = os.path.join(os.path.dirname(__file__), "..", "config", "rich_menu_ids.json")
+    try:
+        with open(path, "r", encoding="utf-8") as stream:
+            return json.load(stream).get(key_by_role[role], "")
+    except (OSError, ValueError, KeyError):
+        return ""
+
+
+def _require_internal_api_key(x_internal_api_key: str | None) -> None:
+    expected = os.getenv("INTERNAL_API_KEY", "")
+    if not expected:
+        raise HTTPException(status_code=503, detail="Internal API authentication is not configured")
+    if not secrets.compare_digest(x_internal_api_key or "", expected):
+        raise HTTPException(status_code=401, detail="Invalid internal API key")
+
+
+def _notify_development_reviewer(request_type: str, request_id: str | int) -> None:
+    """Push one review event to the local dev supervisor; never affect webhook success."""
+    notify_url = os.getenv("DEV_REVIEW_NOTIFY_URL", "").strip()
+    internal_key = os.getenv("INTERNAL_API_KEY", "").strip()
+    if not notify_url or not internal_key:
+        return
+    try:
+        response = requests.post(
+            notify_url,
+            json={"type": request_type, "request_id": str(request_id)},
+            headers={"X-Internal-API-Key": internal_key},
+            timeout=1,
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        print(f"[LINE Review] Development notification failed: {exc}")
+
+
+def _create_onboarding_tasks(cursor, user_id: str, source_event_id: str | None) -> None:
+    schedule_path = os.path.join(os.path.dirname(__file__), "..", "config", "message_schedules.json")
+    templates = load_message_templates()
+    try:
+        with open(schedule_path, "r", encoding="utf-8") as stream:
+            schedule_config = json.load(stream)
+            schedules = schedule_config.get("schedules", [])
+    except (OSError, ValueError):
+        return
+    onboarding = next((item for item in schedules if item.get("id") == "new_user_onboarding" and item.get("enabled")), None)
+    if not onboarding:
+        return
+    for step in onboarding.get("steps", []):
+        template_id = step.get("template_id")
+        content = templates.get(template_id)
+        if not content:
+            continue
+        send_time = step.get("send_time", "10:00")
+        day = int(step.get("day", 0))
+        hour, minute = map(int, send_time.split(":"))
+        schedule_zone = ZoneInfo(schedule_config.get("timezone", "Asia/Taipei"))
+        local_now = datetime.now(schedule_zone)
+        local_target = (local_now + timedelta(days=day)).replace(
+            hour=hour, minute=minute, second=0, microsecond=0
+        )
+        # MySQL currently stores UTC in a timezone-naive DATETIME column.
+        scheduled_at = local_target.astimezone(timezone.utc).replace(tzinfo=None)
+        enqueue_line_task(
+            cursor, to_user_id=user_id, message_content=content,
+            scheduled_at=scheduled_at, source_event_id=source_event_id,
+            idempotency_key=f"onboarding:{user_id}:d{day}",
+        )
 
 
 def ensure_order_for_case_no(cursor, client_id: int, case_no: str) -> None:
@@ -67,117 +150,17 @@ def ensure_order_for_case_no(cursor, client_id: int, case_no: str) -> None:
     """, (normalized_case_no, client_id))
 
 
-# ----------------- 背景非同步 LINE 發送器 Daemon -----------------
-async def line_message_sender_daemon():
-    print("[LINE Daemon] Background LINE sender daemon started")
-    line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
-    
-    while True:
-        try:
-            await asyncio.sleep(2.0) # 每 2 秒輪詢一次
-            
-            conn = get_db_connection()
-            pending_tasks = []
-            try:
-                with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                    cursor.execute("""
-                        SELECT * FROM line_tasks 
-                        WHERE status = 'pending' 
-                        ORDER BY id ASC LIMIT 5
-                    """)
-                    pending_tasks = cursor.fetchall()
-            finally:
-                conn.close()
-                
-            for task in pending_tasks:
-                task_id = task["id"]
-                to_user = task["to_user_id"]
-                content = task["message_content"]
-                
-                print(f"[LINE Sender] Found pending task #{task_id} for User: {to_user}")
-                
-                success = False
-                err_msg = ""
-                
-                # Mock 發送 (避免 print 訊息內容以防 CP950 崩潰)
-                if line_token == "mock_token" or not line_token:
-                    print(f"[LINE Mock] Sent message successfully for Task ID: {task_id}")
-                    success = True
-                else:
-                    # 調用 LINE Messaging API
-                    url = "https://api.line.me/v2/bot/message/push"
-                    headers = {
-                        "Content-Type": "application/json",
-                        "Authorization": f"Bearer {line_token}"
-                    }
-                    payload = {
-                        "to": to_user,
-                        "messages": [
-                            {
-                                "type": "text",
-                                "text": content
-                            }
-                        ]
-                    }
-                    try:
-                        res = requests.post(url, json=payload, headers=headers, timeout=5)
-                        if res.status_code == 200:
-                            success = True
-                        else:
-                            success = False
-                            err_msg = f"HTTP {res.status_code}: {res.text}"
-                    except Exception as ex:
-                        success = False
-                        err_msg = str(ex)
-                        
-                # 更新狀態
-                conn = get_db_connection()
-                try:
-                    with conn.cursor() as cursor:
-                        if success:
-                            cursor.execute("UPDATE line_tasks SET status = 'sent' WHERE id = %s", (task_id,))
-                        else:
-                            cursor.execute("UPDATE line_tasks SET status = 'failed' WHERE id = %s", (task_id,))
-                            print(f"[LINE Sender] Task #{task_id} failed: {err_msg}")
-                        conn.commit()
-                finally:
-                    conn.close()
-                    
-        except Exception as e:
-            print(f"[LINE Daemon] Daemon loop error: {e}")
-
-# 生命週期管理
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # 啟動背景線程
-    daemon_task = asyncio.create_task(line_message_sender_daemon())
-    yield
-    # 關閉背景線程
-    daemon_task.cancel()
-    try:
-        await daemon_task
-    except asyncio.CancelledError:
-        pass
-
-app = FastAPI(
-    title="Labor Union Webhook & API",
-    description="LINE & BreezySign Webhook receiver backend",
-    version="1.0.0",
-    lifespan=lifespan
-)
-
-# 掛載靜態目錄以託管 LIFF 網頁
-app.mount("/static", StaticFiles(directory="line/static"), name="static")
+router = APIRouter(tags=["LINE"])
 
 # LINE LIFF 配置獲取端點
-@app.get("/api/line/config")
+@router.get("/api/line/config")
 async def get_line_config():
     liff_id = os.getenv("LINE_LIFF_ID", "")
     if not liff_id or liff_id == "your_liff_id_here":
         liff_id = get_setting("line_liff_id", "")
     return {"liff_id": liff_id}
 
-@app.get("/api/line/client-info")
+@router.get("/api/line/client-info")
 async def get_client_info(userId: str):
     """查詢使用者的 LINE ID 是否已有綁定紀錄，有的話回傳最近一筆姓名電話以利自動帶入"""
     if not userId:
@@ -203,7 +186,7 @@ class LineBindPayload(BaseModel):
     line_user_id: str
     force_rebind: bool = False
 
-@app.post("/api/line/bind")
+@router.post("/api/line/bind")
 async def line_bind(payload: LineBindPayload):
     name = payload.name.strip()
     phone = payload.phone.strip()
@@ -246,33 +229,32 @@ async def line_bind(payload: LineBindPayload):
                         "message": "本筆訂單已有綁定另一個帳戶，請問是否重新綁定？"
                     }
                 else:
-                    # 使用者同意重新綁定，寫入 JSON 暫存檔等待人工確認
-                    request_data = {
-                        "request_id": str(uuid.uuid4()),
-                        "client_id": client_id,
-                        "client_name": db_name,
-                        "old_line_user_id": db_line_user_id,
-                        "new_line_user_id": line_user_id,
-                        "request_time": datetime.now().isoformat()
-                    }
-                    
-                    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-                    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
-                    
-                    existing_requests = []
-                    if os.path.exists(rebind_json_path):
-                        with open(rebind_json_path, "r", encoding="utf-8") as f:
-                            try:
-                                existing_requests = json.load(f)
-                            except json.JSONDecodeError:
-                                existing_requests = []
-                    
-                    existing_requests.append(request_data)
-                    
-                    with open(rebind_json_path, "w", encoding="utf-8") as f:
-                        json.dump(existing_requests, f, ensure_ascii=False, indent=2)
-                    
-                    print(f"[API Bind] Rebind request saved for client_id={client_id}")
+                    # 使用者同意重新綁定，寫入統一確認請求表等待人工確認。
+                    cursor.execute(
+                        """
+                        UPDATE line_confirmation_requests
+                        SET status='cancelled', resolved_at=NOW()
+                        WHERE request_type='client_rebind' AND client_id=%s
+                          AND line_user_id=%s AND status='pending'
+                        """,
+                        (client_id, line_user_id),
+                    )
+                    cursor.execute(
+                        """
+                        INSERT INTO line_confirmation_requests (
+                            request_type, line_user_id, client_id, client_name,
+                            old_line_user_id, new_line_user_id
+                        ) VALUES ('client_rebind', %s, %s, %s, %s, %s)
+                        """,
+                        (line_user_id, client_id, db_name, db_line_user_id, line_user_id),
+                    )
+                    request_id = cursor.lastrowid
+                    conn.commit()
+                    _notify_development_reviewer("client_rebind", request_id)
+                    print(
+                        f"[API Bind] Rebind request {request_id} saved "
+                        f"for client_id={client_id}"
+                    )
                     
                     return {
                         "status": "pending_approval",
@@ -306,6 +288,7 @@ async def line_bind(payload: LineBindPayload):
             """, (line_user_id, success_msg))
             
             conn.commit()
+            wake_worker()
             print(f"[API Bind] Successfully processed client_id={client_id} for line_user_id={line_user_id}. Case no: {case_no}")
             
             return {
@@ -330,48 +313,52 @@ from typing import Optional, Dict, Any
 class RebindActionPayload(BaseModel):
     request_id: str
 
-@app.get("/api/line/rebind_requests")
-def get_rebind_requests():
+@router.get("/api/line/rebind_requests")
+def get_rebind_requests(x_internal_api_key: str | None = Header(default=None)):
     """
     [前端管理 API] 取得所有待確認的重新綁定申請
     """
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
-    
-    if not os.path.exists(rebind_json_path):
-        return {"status": "success", "data": []}
-        
+    _require_internal_api_key(x_internal_api_key)
+    conn = get_db_connection()
     try:
-        with open(rebind_json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {"status": "success", "data": data}
-    except Exception as e:
-        return {"status": "error", "message": f"讀取暫存檔失敗：{str(e)}"}
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id AS request_id, client_id, client_name,
+                       old_line_user_id, new_line_user_id,
+                       created_at AS request_time
+                FROM line_confirmation_requests
+                WHERE request_type='client_rebind' AND status='pending'
+                ORDER BY created_at
+                """
+            )
+            return {"status": "success", "data": cursor.fetchall()}
+    finally:
+        conn.close()
 
-@app.post("/api/line/rebind_requests/approve")
-def approve_rebind_request(payload: RebindActionPayload):
+@router.post("/api/line/rebind_requests/approve")
+def approve_rebind_request(
+    payload: RebindActionPayload,
+    x_internal_api_key: str | None = Header(default=None),
+):
     """
     [前端管理 API] 確認並執行重新綁定申請
     """
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
-    
-    if not os.path.exists(rebind_json_path):
-        return {"status": "error", "message": "找不到暫存檔案"}
-        
+    _require_internal_api_key(x_internal_api_key)
+    conn = get_db_connection()
     try:
-        with open(rebind_json_path, "r", encoding="utf-8") as f:
-            requests_data = json.load(f)
-            
-        target_request = next((r for r in requests_data if r["request_id"] == payload.request_id), None)
-        
-        if not target_request:
-            return {"status": "error", "message": "找不到該筆申請"}
-            
-        # 寫入資料庫
-        conn = get_db_connection()
-        try:
-            with conn.cursor() as cursor:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT * FROM line_confirmation_requests
+                    WHERE id=%s AND request_type='client_rebind'
+                      AND status='pending' FOR UPDATE
+                    """,
+                    (payload.request_id,),
+                )
+                target_request = cursor.fetchone()
+                if not target_request:
+                    return {"status": "error", "message": "找不到待審核的重新綁定申請"}
                 cursor.execute("""
                     UPDATE clients 
                     SET line_user_id = %s 
@@ -402,67 +389,67 @@ def approve_rebind_request(payload: RebindActionPayload):
                     INSERT INTO line_tasks (to_user_id, message_content, status)
                     VALUES (%s, %s, 'pending')
                 """, (target_request["new_line_user_id"], success_msg))
-                
-                conn.commit()
-        except Exception as e:
-            conn.rollback()
-            return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
-        finally:
-            conn.close()
-            
-        # 移除 JSON 中的暫存紀錄
-        requests_data = [r for r in requests_data if r["request_id"] != payload.request_id]
-        with open(rebind_json_path, "w", encoding="utf-8") as f:
-            json.dump(requests_data, f, ensure_ascii=False, indent=2)
-            
+                cursor.execute(
+                    """
+                    UPDATE line_confirmation_requests
+                    SET status='approved', reviewed_at=NOW(), resolved_at=NOW()
+                    WHERE id=%s
+                    """,
+                    (payload.request_id,),
+                )
+        conn.commit()
+        wake_worker()
         return {"status": "success", "message": "已確認並完成重新綁定"}
     except Exception as e:
-        return {"status": "error", "message": f"伺服器錯誤：{str(e)}"}
+        conn.rollback()
+        return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
+    finally:
+        conn.close()
 
-@app.post("/api/line/rebind_requests/reject")
-def reject_rebind_request(payload: RebindActionPayload):
+@router.post("/api/line/rebind_requests/reject")
+def reject_rebind_request(
+    payload: RebindActionPayload,
+    x_internal_api_key: str | None = Header(default=None),
+):
     """
     [前端管理 API] 拒絕重新綁定申請
     """
-    config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-    rebind_json_path = os.path.join(config_dir, "rebind_requests.json")
-    
-    if not os.path.exists(rebind_json_path):
-        return {"status": "error", "message": "找不到暫存檔案"}
-        
+    _require_internal_api_key(x_internal_api_key)
+    conn = get_db_connection()
     try:
-        with open(rebind_json_path, "r", encoding="utf-8") as f:
-            requests_data = json.load(f)
-            
-        target_request = next((r for r in requests_data if r["request_id"] == payload.request_id), None)
-        
-        if not target_request:
-            return {"status": "error", "message": "找不到該筆申請"}
-            
-        # 推播失敗訊息給客戶
-        conn = get_db_connection()
-        try:
-            with conn.cursor() as cursor:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT * FROM line_confirmation_requests
+                    WHERE id=%s AND request_type='client_rebind'
+                      AND status='pending' FOR UPDATE
+                    """,
+                    (payload.request_id,),
+                )
+                target_request = cursor.fetchone()
+                if not target_request:
+                    return {"status": "error", "message": "找不到待審核的重新綁定申請"}
                 reject_msg = f"【系統通知】\n您的帳號重新綁定申請已被管理員拒絕。如有疑問請聯繫客服專員。"
                 cursor.execute("""
                     INSERT INTO line_tasks (to_user_id, message_content, status)
                     VALUES (%s, %s, 'pending')
                 """, (target_request["new_line_user_id"], reject_msg))
-                conn.commit()
-        except Exception as e:
-            conn.rollback()
-            print(f"[API Bind] Push reject message failed: {e}")
-        finally:
-            conn.close()
-            
-        # 移除 JSON 中的暫存紀錄
-        requests_data = [r for r in requests_data if r["request_id"] != payload.request_id]
-        with open(rebind_json_path, "w", encoding="utf-8") as f:
-            json.dump(requests_data, f, ensure_ascii=False, indent=2)
-            
+                cursor.execute(
+                    """
+                    UPDATE line_confirmation_requests
+                    SET status='rejected', reviewed_at=NOW(), resolved_at=NOW()
+                    WHERE id=%s
+                    """,
+                    (payload.request_id,),
+                )
+        conn.commit()
+        wake_worker()
         return {"status": "success", "message": "已拒絕該筆重新綁定申請"}
     except Exception as e:
-        return {"status": "error", "message": f"伺服器錯誤：{str(e)}"}
+        conn.rollback()
+        return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
+    finally:
+        conn.close()
 
 from typing import Optional, Dict, Any
 
@@ -484,7 +471,7 @@ class LineRegisterPayload(BaseModel):
     survey_details: Dict[str, Any] = {}
 
 
-@app.post("/api/line/register")
+@router.post("/api/line/register")
 async def line_register(payload: LineRegisterPayload):
     name = payload.name.strip()
     phone = payload.phone.strip()
@@ -530,6 +517,7 @@ async def line_register(payload: LineRegisterPayload):
             """, (line_user_id, success_msg))
             
             conn.commit()
+            wake_worker()
             return {
                 "status": "success",
                 "client_id": client_id,
@@ -543,7 +531,7 @@ async def line_register(payload: LineRegisterPayload):
     finally:
         conn.close()
 
-@app.get("/")
+@router.get("/")
 async def health_check():
     db_ok = False
     db_msg = ""
@@ -565,58 +553,259 @@ async def health_check():
         }
     }
 
-@app.post("/")
+@router.post("/")
 async def root_post(payload: dict, request: Request):
     if "events" in payload:
-        print("[LINE Webhook] 警告：收到發送至根目錄 (/) 的 Webhook 請求。自動轉發至 line_webhook 處理。")
-        try:
-            parsed_payload = LineWebhookPayload(**payload)
-            return await line_webhook(parsed_payload, request)
-        except Exception as e:
-            print(f"[LINE Webhook] 根目錄 Webhook 轉發解析失敗: {e}")
-            return {"status": "error", "message": str(e)}
+        raise HTTPException(status_code=400, detail="Use /webhook/line so the raw signed body can be verified")
     return {"status": "active", "message": "Root POST active"}
 
-@app.get("/liff-page")
-@app.get("/gateway")
+@router.get("/liff-page")
+@router.get("/gateway")
 async def serve_gateway_page():
     """前導選擇頁面 (自動相容舊版 LIFF 設定)"""
     return FileResponse("line/static/gateway.html")
 
-@app.get("/bind-page")
+@router.get("/bind-page")
 async def serve_bind_page():
     """提供舊客查詢與綁定專用的路徑"""
     return FileResponse("line/static/bind.html")
 
-@app.get("/register-page")
+@router.get("/register-page")
 async def serve_register_page():
     """全新客戶原生註冊頁面"""
     return FileResponse("line/static/register.html")
+
+
+@router.get("/api/line/staff/review-requests")
+def list_staff_review_requests(
+    request_type: str | None = None,
+    x_internal_api_key: str | None = Header(default=None),
+):
+    """Unified union-staff queue for rebind and service-staff role requests."""
+    _require_internal_api_key(x_internal_api_key)
+    if request_type not in {None, "client_rebind", "staff_verification"}:
+        raise HTTPException(status_code=422, detail="Unsupported review request type")
+
+    items = []
+    if request_type in {None, "client_rebind"}:
+        rebind_result = get_rebind_requests(x_internal_api_key)
+        if rebind_result.get("status") == "success":
+            for request_item in rebind_result.get("data", []):
+                items.append({
+                    "type": "client_rebind",
+                    "request_id": request_item.get("request_id"),
+                    "status": "pending",
+                    "created_at": request_item.get("request_time"),
+                    "display_name": request_item.get("client_name"),
+                    "details": request_item,
+                    "actions": ["approve", "reject"],
+                })
+
+    if request_type in {None, "staff_verification"}:
+        conn = get_db_connection()
+        try:
+            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, line_user_id, created_at
+                    FROM line_confirmation_requests
+                    WHERE request_type='staff_verification'
+                      AND status='pending'
+                    ORDER BY created_at
+                    """
+                )
+                for request_item in cursor.fetchall():
+                    items.append({
+                        "type": "staff_verification",
+                        "request_id": str(request_item["id"]),
+                        "status": "pending",
+                        "created_at": request_item["created_at"],
+                        "display_name": request_item["line_user_id"],
+                        "details": request_item,
+                        "actions": ["approve", "reject"],
+                    })
+        finally:
+            conn.close()
+
+    items.sort(key=lambda item: str(item.get("created_at") or ""))
+    return {"status": "success", "data": items}
+
+
+@router.post("/api/line/staff/review-requests/{request_type}/{request_id}/approve")
+def approve_staff_review_request(
+    request_type: str,
+    request_id: str,
+    x_internal_api_key: str | None = Header(default=None),
+):
+    """Approve a rebind or directly approve a service-staff LINE role request."""
+    _require_internal_api_key(x_internal_api_key)
+    if request_type == "client_rebind":
+        return approve_rebind_request(RebindActionPayload(request_id=request_id), x_internal_api_key)
+    if request_type != "staff_verification":
+        raise HTTPException(status_code=422, detail="Unsupported review request type")
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id, line_user_id
+                FROM line_confirmation_requests
+                WHERE id=%s AND request_type='staff_verification'
+                  AND status='pending' FOR UPDATE
+                """,
+                (request_id,),
+            )
+            request_item = cursor.fetchone()
+            if not request_item:
+                raise HTTPException(status_code=404, detail="Staff verification request not found")
+            cursor.execute(
+                "UPDATE line_confirmation_requests SET status='approved', reviewed_at=NOW(), resolved_at=NOW() WHERE id=%s",
+                (request_id,),
+            )
+            cursor.execute(
+                """
+                INSERT INTO line_users (line_user_id, role, status, last_event_at)
+                VALUES (%s,'staff','active',NOW())
+                ON DUPLICATE KEY UPDATE role='staff', status='active', last_event_at=NOW()
+                """,
+                (request_item["line_user_id"],),
+            )
+            templates = load_message_templates()
+            enqueue_line_task(
+                cursor,
+                to_user_id=request_item["line_user_id"],
+                task_type="rich_menu_link",
+                payload={
+                    "rich_menu_id": _load_rich_menu_id("staff"),
+                    "success_message": templates.get("staff_switch_success", "月嫂身分已由工會確認通過。"),
+                },
+                idempotency_key=f"staff-review-approved:{request_id}",
+            )
+            conn.commit()
+        wake_worker()
+        return {
+            "status": "success",
+            "message": "已核准月嫂身分並切換專屬選單",
+            "data": request_item,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@router.post("/api/line/staff/review-requests/{request_type}/{request_id}/reject")
+def reject_staff_review_request(
+    request_type: str,
+    request_id: str,
+    x_internal_api_key: str | None = Header(default=None),
+):
+    """Reject a rebind or a pending service-staff role request."""
+    _require_internal_api_key(x_internal_api_key)
+    if request_type == "client_rebind":
+        return reject_rebind_request(RebindActionPayload(request_id=request_id), x_internal_api_key)
+    if request_type != "staff_verification":
+        raise HTTPException(status_code=422, detail="Unsupported review request type")
+
+    conn = get_db_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id, line_user_id FROM line_confirmation_requests
+                WHERE id=%s AND request_type='staff_verification'
+                  AND status='pending' FOR UPDATE
+                """,
+                (request_id,),
+            )
+            request_item = cursor.fetchone()
+            if not request_item:
+                raise HTTPException(status_code=404, detail="Staff verification request not found")
+            cursor.execute(
+                "UPDATE line_confirmation_requests SET status='cancelled', reviewed_at=NOW(), resolved_at=NOW() WHERE id=%s",
+                (request_id,),
+            )
+            templates = load_message_templates()
+            enqueue_line_task(
+                cursor,
+                to_user_id=request_item["line_user_id"],
+                message_content=templates.get(
+                    "staff_verification_rejected",
+                    "您的月嫂身分驗證申請未通過，請聯絡工會服務人員。",
+                ),
+                idempotency_key=f"staff-review-rejected:{request_id}",
+            )
+            conn.commit()
+        wake_worker()
+        return {"status": "success", "message": "已拒絕月嫂驗證申請"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+@router.put("/api/line/users/{user_id}/role/{role}")
+def set_line_user_role(user_id: str, role: str, x_internal_api_key: str | None = Header(default=None)):
+    """Internal role administration endpoint for customer/staff/union_staff."""
+    _require_internal_api_key(x_internal_api_key)
+    if role not in {"customer", "staff", "union_staff"}:
+        raise HTTPException(status_code=422, detail="Unsupported LINE user role")
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO line_users (line_user_id, role, status, last_event_at)
+                VALUES (%s,%s,'active',NOW())
+                ON DUPLICATE KEY UPDATE role=VALUES(role), status='active', last_event_at=NOW()
+                """,
+                (user_id, role),
+            )
+            conn.commit()
+        return {"status": "success", "line_user_id": user_id, "role": role}
+    finally:
+        conn.close()
 
 # ----------------- 1. LINE WEBHOOK 接收 -----------------
 class LineWebhookPayload(BaseModel):
     events: list = []
     destination: str = ""
 
-@app.get("/webhook/line")
-@app.get("/webhook/line/")
-@app.get("/webhook")
-@app.get("/webhook/")
+@router.get("/webhook/line")
+@router.get("/webhook/line/")
+@router.get("/webhook")
+@router.get("/webhook/")
 async def line_webhook_get():
     print("[LINE Webhook] Received GET request (possibly URL verification or redirect)")
     return {"status": "ok", "message": "LINE Webhook endpoint is active"}
 
-@app.post("/webhook/line")
-@app.post("/webhook/line/")
-@app.post("/webhook")
-@app.post("/webhook/")
-async def line_webhook(payload: LineWebhookPayload, request: Request):
+@router.post("/webhook/line")
+@router.post("/webhook/line/")
+@router.post("/webhook")
+@router.post("/webhook/")
+async def line_webhook(request: Request):
+    raw_body = await request.body()
+    signature = request.headers.get("x-line-signature", "")
+    channel_secret = os.getenv("LINE_CHANNEL_SECRET", "")
+    if not verify_line_signature(raw_body, signature, channel_secret):
+        raise HTTPException(status_code=401, detail="Invalid LINE webhook signature")
+    try:
+        payload = LineWebhookPayload.model_validate_json(raw_body)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid LINE webhook payload") from exc
     print(f"[LINE Webhook] Received line webhook. Events count: {len(payload.events)}")
     
+    review_notifications: list[tuple[str, int]] = []
     conn = get_db_connection()
     try:
-        with conn.cursor() as cursor:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             for event in payload.events:
+                if not register_event(cursor, event):
+                    print(f"[LINE Webhook] Duplicate event ignored: {event.get('webhookEventId')}")
+                    continue
                 event_type = event.get("type")
                 
                 # 處理新用戶加入好友 (follow) 事件
@@ -626,6 +815,15 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                     print(f"[LINE Webhook] Follow event received from User: {user_id}")
                     
                     if user_id:
+                        cursor.execute(
+                            """
+                            INSERT INTO line_users (line_user_id, status, followed_at, last_event_at, onboarding_started_at)
+                            VALUES (%s, 'active', NOW(), NOW(), NOW())
+                            ON DUPLICATE KEY UPDATE status='active', followed_at=NOW(),
+                                blocked_at=NULL, last_event_at=NOW()
+                            """,
+                            (user_id,),
+                        )
                         liff_id = os.getenv("LINE_LIFF_ID", "")
                         if not liff_id or liff_id == "your_liff_id_here":
                             liff_id = get_setting("line_liff_id", "")
@@ -650,13 +848,35 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         )
                         
                         # 寫入推播任務佇列，由背景發送
-                        cursor.execute("""
-                            INSERT INTO line_tasks (to_user_id, message_content, status)
-                            VALUES (%s, %s, 'pending')
-                        """, (user_id, welcome_msg))
+                        enqueue_line_task(
+                            cursor, to_user_id=user_id, message_content=welcome_msg,
+                            source_event_id=event.get("webhookEventId"),
+                            idempotency_key=f"welcome:{event.get('webhookEventId') or user_id}",
+                        )
+                        _create_onboarding_tasks(cursor, user_id, event.get("webhookEventId"))
                         print(f"[LINE Webhook] Queued welcome message for new user {user_id}")
+
+                elif event_type == "unfollow":
+                    source = event.get("source", {})
+                    user_id = source.get("userId", "")
+                    if user_id:
+                        cursor.execute(
+                            """
+                            UPDATE line_users SET status='blocked', blocked_at=NOW(), last_event_at=NOW()
+                            WHERE line_user_id=%s
+                            """,
+                            (user_id,),
+                        )
+                        cursor.execute(
+                            """
+                            UPDATE line_tasks SET status='cancelled'
+                            WHERE to_user_id=%s AND status='pending'
+                              AND idempotency_key LIKE 'onboarding:%%'
+                            """,
+                            (user_id,),
+                        )
                 
-                if event_type == "postback":
+                elif event_type == "postback":
                     postback_data = event["postback"].get("data", "")
                     print(f"[LINE Webhook] Postback data received: {postback_data}")
                     
@@ -686,7 +906,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                             INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                         """, (staff_id, msg))
-                        print(f"[LINE Webhook] Caregiver #{staff_id} willing for case #{case_no}")
+                        print(f"[LINE Webhook] Staff #{staff_id} willing for case #{case_no}")
                         
                     # 月嫂拒絕
                     elif action == "unwilling":
@@ -701,7 +921,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                             INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
                         """, (staff_id, msg))
-                        print(f"[LINE Webhook] Caregiver #{staff_id} unwilling for case #{case_no}")
+                        print(f"[LINE Webhook] Staff #{staff_id} unwilling for case #{case_no}")
                         
                     # 客戶滿意
                     elif action == "client_approve":
@@ -709,7 +929,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         
                         msg = "感謝您的確認！行政專員正為您產製電子契約條款，完成後會發送連結至您的 LINE 進行線上簽署。"
                         cursor.execute("""
-                            INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                            INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM clients WHERE case_no = %s), 'mock_client_line_id'), %s, 'pending')
                         """, (case_no, msg))
                         print(f"[LINE Webhook] Client approved resume for case #{case_no}")
@@ -720,7 +940,7 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         
                         msg = "已收到您的回饋，工會將為您重新進行媒合篩選，請稍候。"
                         cursor.execute("""
-                            INSERT INTO line_push_tasks (to_user_id, message_content, status)
+                            INSERT INTO line_tasks (to_user_id, message_content, status)
                             VALUES (COALESCE((SELECT line_user_id FROM clients WHERE case_no = %s), 'mock_client_line_id'), %s, 'pending')
                         """, (case_no, msg))
                         print(f"[LINE Webhook] Client rejected resume for case #{case_no}")
@@ -734,61 +954,56 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                         user_id = source.get("userId", "")
                         reply_token = event.get("replyToken", "")
                         print(f"[LINE Webhook] Text message received from {user_id}: {user_text}")
-                        
-                        # 攔截「我是月嫂」關鍵字切換選單
+
+                        cursor.execute("SELECT role FROM line_users WHERE line_user_id=%s", (user_id,))
+                        role_row = cursor.fetchone()
+                        current_role = role_row["role"] if role_row else "customer"
+                        if current_role == "union_staff" and user_text.strip() in {"工會選單", "開啟客服系統", "月嫂驗證管理"}:
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id, task_type="rich_menu_link",
+                                payload={
+                                    "rich_menu_id": _load_rich_menu_id("union_staff"),
+                                    "success_message": "已切換至工會人員客服選單。",
+                                },
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"union-menu:{event.get('webhookEventId')}",
+                            )
+                            continue
+
+                        # 攔截「我是月嫂」並建立人工確認請求，不直接切換身分。
                         if "我是月嫂" in user_text:
-                            caregiver_menu_id = ""
-                            config_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config")
-                            ids_path = os.path.join(config_dir, "rich_menu_ids.json")
-                            if os.path.exists(ids_path):
-                                try:
-                                    with open(ids_path, "r", encoding="utf-8") as f:
-                                        ids_data = json.load(f)
-                                        caregiver_menu_id = ids_data.get("caregiver_rich_menu_id", "")
-                                except Exception as e:
-                                    print(f"[LINE Webhook] Failed to read rich_menu_ids.json: {e}")
-                            
-                            if caregiver_menu_id:
-                                line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or get_setting("line_channel_access_token")
-                                headers = {"Authorization": f"Bearer {line_token}"}
-                                res = requests.post(f"https://api.line.me/v2/bot/user/{user_id}/richmenu/{caregiver_menu_id}", headers=headers)
-                                
-                                if res.status_code == 200:
-                                    replies = load_webhook_replies()
-                                    reply_msg = replies.get("caregiver_switch_success")
-                                else:
-                                    replies = load_webhook_replies()
-                                    reply_msg = replies.get("caregiver_switch_fail").replace("{status_code}", str(res.status_code))
-                            else:
-                                replies = load_webhook_replies()
-                                reply_msg = replies.get("caregiver_menu_not_set")
-                                
-                            cursor.execute("""
-                                INSERT INTO line_tasks (to_user_id, message_content, status)
-                                VALUES (%s, %s, 'pending')
-                            """, (user_id, reply_msg))
-                            print(f"[LINE Webhook] Intercepted keyword '{user_text}', switched Rich Menu for User: {user_id}")
+                            cursor.execute(
+                                "UPDATE line_confirmation_requests SET status='cancelled', resolved_at=NOW() WHERE request_type='staff_verification' AND line_user_id=%s AND status='pending'",
+                                (user_id,),
+                            )
+                            cursor.execute(
+                                """
+                                INSERT INTO line_confirmation_requests (request_type, line_user_id)
+                                VALUES ('staff_verification',%s)
+                                """,
+                                (user_id,),
+                            )
+                            request_id = cursor.lastrowid
+                            review_notifications.append(("staff_verification", request_id))
+                            templates = load_message_templates()
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id,
+                                message_content=templates.get("staff_verification_requested", "月嫂身分申請已送出，請等待工會人員確認。"),
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"staff-verification-request:{request_id}",
+                            )
+                            print(f"[LINE Webhook] Staff verification request #{request_id} created for {user_id}")
                             continue
                             
                         # 攔截「esc」關鍵字恢復預設選單
                         if user_text.lower().strip() == "esc":
-                            line_token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN") or get_setting("line_channel_access_token")
-                            headers = {"Authorization": f"Bearer {line_token}"}
-                            # 呼叫 DELETE 移除使用者的個人化選單，自動退回系統預設選單
-                            res = requests.delete(f"https://api.line.me/v2/bot/user/{user_id}/richmenu", headers=headers)
-                            
-                            if res.status_code == 200:
-                                replies = load_webhook_replies()
-                                reply_msg = replies.get("esc_success")
-                            else:
-                                replies = load_webhook_replies()
-                                reply_msg = replies.get("esc_fail").replace("{status_code}", str(res.status_code))
-                                
-                            cursor.execute("""
-                                INSERT INTO line_tasks (to_user_id, message_content, status)
-                                VALUES (%s, %s, 'pending')
-                            """, (user_id, reply_msg))
-                            print(f"[LINE Webhook] Intercepted keyword '{user_text}', unlinked Rich Menu for User: {user_id}")
+                            replies = load_message_templates()
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id, task_type="rich_menu_unlink",
+                                payload={"success_message": replies.get("esc_success", "已切換回一般用戶選單。")},
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"menu-unlink:{event.get('webhookEventId')}",
+                            )
                             continue
 
                         # 攔截「查詢訂單」或「綁定」關鍵字對話流
@@ -808,90 +1023,47 @@ async def line_webhook(payload: LineWebhookPayload, request: Request):
                                     proto = request.headers.get("x-forwarded-proto", "http")
                                     bind_url = f"{proto}://{host}/gateway?userId={user_id}"
                                 
-                            replies = load_webhook_replies()
+                            replies = load_message_templates()
                             reply_msg = replies.get("bind_link_msg").replace("{bind_url}", bind_url)
                             
-                            cursor.execute("""
-                                INSERT INTO line_tasks (to_user_id, message_content, status)
-                                VALUES (%s, %s, 'pending')
-                            """, (user_id, reply_msg))
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id, message_content=reply_msg,
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"bind-link:{event.get('webhookEventId')}",
+                            )
                             print(f"[LINE Webhook] Intercepted keyword '{user_text}', queued query link for User: {user_id}")
                             continue
                         
-                        # 動態取得 RAG 設定與初始化 ChromaDB
-                        import chromadb
-                        mode = get_setting("embedding_mode", "default")
-                        embedding_function = None
-                        try:
-                            if mode == "openai":
-                                import chromadb.utils.embedding_functions as embedding_functions
-                                api_key = get_setting("openai_api_key", "")
-                                if api_key:
-                                    embedding_function = embedding_functions.OpenAIEmbeddingFunction(
-                                        api_key=api_key,
-                                        model_name="text-embedding-3-small"
-                                    )
-                            elif mode == "local":
-                                import chromadb.utils.embedding_functions as embedding_functions
-                                embedding_function = embedding_functions.SentenceTransformerEmbeddingFunction(
-                                    model_name="shibing624/text2vec-base-chinese"
-                                )
-                        except ImportError:
-                            pass
-                            
-                        # 連線至 ChromaDB
-                        try:
-                            client = chromadb.PersistentClient(path="./db/chroma_data")
-                            if embedding_function:
-                                collection = client.get_or_create_collection("union_faq", embedding_function=embedding_function)
-                            else:
-                                collection = client.get_or_create_collection("union_faq")
-                                
-                            # 如果資料庫為空，可能出現 ValueError，用 try-except 包裝查詢
-                            reply_msg = "很抱歉，我不太懂您的意思，已經幫您轉交給行政專員為您人工處理。"
-                            try:
-                                results = collection.query(
-                                    query_texts=[user_text],
-                                    n_results=1
-                                )
-                                if results and results['distances'] and len(results['distances'][0]) > 0:
-                                    distance = results['distances'][0][0]
-                                    if distance < 1.0: # 依據模型可調整閾值
-                                        reply_msg = results['metadatas'][0][0].get("answer", reply_msg)
-                            except Exception as query_e:
-                                print(f"[LINE Webhook] ChromaDB Query Error (Empty DB?): {query_e}")
-                            
-                            # 決定回覆模式
-                            reply_mode = get_setting("line_reply_mode", "push_daemon")
-                            if reply_mode == "reply_sdk":
-                                try:
-                                    from linebot import LineBotApi
-                                    from linebot.models import TextSendMessage
-                                    token = get_setting("line_channel_access_token", "")
-                                    if token and reply_token:
-                                        line_bot_api = LineBotApi(token)
-                                        line_bot_api.reply_message(reply_token, TextSendMessage(text=reply_msg))
-                                        print("[LINE Webhook] SDK Replied.")
-                                        continue
-                                except Exception as e:
-                                    print(f"[LINE Webhook] SDK Reply Failed: {e}, falling back to push.")
-                                    
-                            # Fallback to Push Daemon
-                            if user_id:
-                                cursor.execute("""
-                                    INSERT INTO line_tasks (to_user_id, message_content, status)
-                                    VALUES (%s, %s, 'pending')
-                                """, (user_id, reply_msg))
-                                print(f"[LINE Webhook] Queued push message for {user_id}")
-                            
-                        except Exception as e:
-                            print(f"[LINE Webhook] RAG Processing Error: {e}")
+                        enqueue_line_task(
+                            cursor, to_user_id=user_id, task_type="rag_reply",
+                            payload={"user_text": user_text},
+                            source_event_id=event.get("webhookEventId"),
+                            idempotency_key=f"rag:{event.get('webhookEventId')}",
+                        )
 
                         
+            completed_event_ids = [
+                event.get("webhookEventId") for event in payload.events
+                if event.get("webhookEventId")
+            ]
+            if completed_event_ids:
+                placeholders = ",".join(["%s"] * len(completed_event_ids))
+                cursor.execute(
+                    f"""
+                    UPDATE line_webhook_events
+                    SET processing_status='completed', processed_at=NOW(), error_message=NULL
+                    WHERE webhook_event_id IN ({placeholders})
+                    """,
+                    completed_event_ids,
+                )
             conn.commit()
+            wake_worker()
+            for request_type, request_id in review_notifications:
+                _notify_development_reviewer(request_type, request_id)
     except Exception as e:
         conn.rollback()
         print(f"[LINE Webhook] Webhook handler failed: {e}")
+        raise HTTPException(status_code=500, detail="LINE webhook processing failed") from e
     finally:
         conn.close()
         
@@ -904,7 +1076,7 @@ class BreezySignWebhookPayload(BaseModel):
     status: str
     signed_at: str = ""
 
-@app.post("/webhook/breezysign")
+@router.post("/webhook/breezysign")
 async def breezysign_webhook(payload: BreezySignWebhookPayload):
     print(f"[Breezy Webhook] Received webhook for contract {payload.contract_id} with status {payload.status}")
     
@@ -981,6 +1153,7 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
                     """, (staff_id, staff_msg))
                     
                     conn.commit()
+                    wake_worker()
                     print(f"[Breezy Webhook] Case #{case_no} processed. Schedule set to {start_d} ~ {end_d}")
             
         except Exception as e:
@@ -992,40 +1165,3 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
     return {"status": "success"}
 
 
-# ==========================================
-# 🔌 GitHub 整合路由 (RESTful Endpoints)
-# ==========================================
-from fastapi.middleware.cors import CORSMiddleware
-from api.routes import orders, matches, schedule, payments, clients, staff, holidays, line_system_config, client_payments, staff_payments, contracts, finance_reports
-from fastapi.responses import RedirectResponse
-from api.schemas.base import BaseResponse
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.get("/", include_in_schema=False)
-def root_redirect():
-    return RedirectResponse(url="/docs")
-
-@app.get("/health", response_model=BaseResponse[dict], tags=["Health"])
-def health_check():
-    return BaseResponse(data={"status": "healthy", "service": "Lobar Union API"}, message="API Server is running normally")
-
-# 註冊業務模組 Routers
-app.include_router(orders.router)
-app.include_router(matches.router)
-app.include_router(schedule.router)
-app.include_router(payments.router)
-app.include_router(clients.router)
-app.include_router(staff.router)
-app.include_router(holidays.router)
-app.include_router(line_system_config.router)
-app.include_router(client_payments.router)
-app.include_router(staff_payments.router)
-app.include_router(contracts.router)
-app.include_router(finance_reports.router)

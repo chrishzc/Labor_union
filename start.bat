@@ -1,4 +1,7 @@
 @echo off
+chcp 65001 >nul
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
 echo ==========================================
 echo Lobar Union System Startup Script
 echo ==========================================
@@ -101,7 +104,7 @@ echo ==========================================
 
 :: 11. Launch servers concurrently
 echo [Step 11] Launching FastAPI server and ngrok...
-start "LINE Bot & ngrok" cmd /k "call .venv\Scripts\activate.bat && python line\start_line_bot.py"
+start "FastAPI & ngrok" cmd /k "call .venv\Scripts\activate.bat && python line\start_line_bot.py"
 
 echo [Step 12] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ".venv\Scripts\streamlit.exe run ui/app.py"

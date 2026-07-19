@@ -1684,7 +1684,7 @@ modules:
     output: {}
     exceptions: []
     invariants:
-    - FastAPI 必須以實際 ASGI 入口 `line.main:app` 啟動，不得指向不存在的 `api.main:app`。
+    - FastAPI 必須以實際 ASGI 入口 `api.main:app` 啟動。
     preferred_pattern: none
     verification: []
     decisions: []
@@ -1829,7 +1829,7 @@ modules:
     type: api_entrypoint
     description: Register contract and finance-report routers with the running FastAPI
       application.
-    source: line/main.py
+    source: api/main.py
     domain: null
     subsystem: null
     map_file: system_map.md
@@ -1846,7 +1846,7 @@ modules:
         argv:
         - .venv\Scripts\python.exe
         - -c
-        - from pathlib import Path; s=Path('line/main.py').read_text(encoding='utf-8');
+        - from pathlib import Path; s=Path('api/main.py').read_text(encoding='utf-8');
           assert 'contracts.router' in s and 'finance_reports.router' in s; print('FINANCE
           ROUTERS REGISTERED')
         cwd: project

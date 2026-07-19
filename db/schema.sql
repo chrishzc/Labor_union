@@ -627,7 +627,7 @@ JOIN clients c ON o.client_id = c.id
 LEFT JOIN staff s ON o.staff_id = s.id;
 
 
--- 20. 中華民國國定假日表
+-- 26. 中華民國國定假日表
 CREATE TABLE IF NOT EXISTS holidays (
     holiday_date DATE PRIMARY KEY COMMENT '假日日期',
     holiday_name VARCHAR(100) NOT NULL COMMENT '假日名稱',
@@ -635,7 +635,7 @@ CREATE TABLE IF NOT EXISTS holidays (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
--- 21. 服務人員排班與行事曆明細表
+-- 27. 服務人員排班與行事曆明細表
 CREATE TABLE IF NOT EXISTS staff_schedule (
     id INT AUTO_INCREMENT PRIMARY KEY,
     case_no VARCHAR(50) NOT NULL COMMENT '對應 orders.case_no',
@@ -652,18 +652,90 @@ CREATE TABLE IF NOT EXISTS staff_schedule (
     INDEX idx_schedule_case_no (case_no)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 22. LINE 待推播任務隊列
+-- 28. LINE 待推播任務隊列
 CREATE TABLE IF NOT EXISTS line_tasks (
-    id INT AUTO_INCREMENT PRIMARY KEY,
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
     to_user_id VARCHAR(100) NOT NULL COMMENT '接收訊息的 LINE 用戶唯一識別碼',
-    message_content TEXT NOT NULL COMMENT '推播訊息內容',
-    status VARCHAR(20) DEFAULT 'pending' COMMENT '推播狀態 (pending:待發送/sent:已發送/failed:發送失敗)',
+    task_type VARCHAR(50) NOT NULL DEFAULT 'line_push' COMMENT 'line_push/rag_reply/rich_menu_link/rich_menu_unlink',
+    message_content TEXT NULL COMMENT '文字推播內容',
+    payload_json JSON NULL COMMENT '非純文字任務參數',
+    status ENUM('pending','processing','sent','failed','cancelled') NOT NULL DEFAULT 'pending',
+    scheduled_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '預定發送時間；未指定時立即執行',
+    processing_started_at DATETIME NULL,
+    retry_count INT NOT NULL DEFAULT 0,
+    max_retries INT NOT NULL DEFAULT 3,
+    next_retry_at DATETIME NULL,
+    sent_at DATETIME NULL,
+    failed_at DATETIME NULL,
+    error_code VARCHAR(100) NULL,
+    error_message TEXT NULL,
+    line_request_id VARCHAR(100) NULL,
+    source_event_id VARCHAR(64) NULL,
+    idempotency_key VARCHAR(100) NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_push_status (status)
+    UNIQUE KEY uk_line_task_idempotency (idempotency_key),
+    INDEX idx_line_tasks_due (status, scheduled_at, next_retry_at, id),
+    INDEX idx_line_tasks_processing (status, processing_started_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 23. 系統異常事件紀錄表
+-- 29. LINE Webhook 事件收件匣與去重
+CREATE TABLE IF NOT EXISTS line_webhook_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    webhook_event_id VARCHAR(64) NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    source_type VARCHAR(30) NULL,
+    source_user_id VARCHAR(100) NULL,
+    source_group_id VARCHAR(100) NULL,
+    event_timestamp BIGINT NULL,
+    is_redelivery BOOLEAN NOT NULL DEFAULT FALSE,
+    processing_status ENUM('received','processing','completed','failed','ignored') NOT NULL DEFAULT 'received',
+    payload_json JSON NOT NULL,
+    received_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at DATETIME NULL,
+    error_message TEXT NULL,
+    UNIQUE KEY uk_line_webhook_event_id (webhook_event_id),
+    INDEX idx_line_webhook_status (processing_status, received_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 30. LINE 使用者角色與好友狀態
+CREATE TABLE IF NOT EXISTS line_users (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    line_user_id VARCHAR(100) NOT NULL,
+    role ENUM('customer','staff','union_staff') NOT NULL DEFAULT 'customer',
+    status ENUM('active','blocked','unknown') NOT NULL DEFAULT 'active',
+    followed_at DATETIME NULL,
+    blocked_at DATETIME NULL,
+    last_event_at DATETIME NULL,
+    onboarding_started_at DATETIME NULL,
+    onboarding_completed_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_line_user_id (line_user_id),
+    INDEX idx_line_user_role_status (role, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 31. LINE 人工確認請求（月嫂身分確認與舊客戶重新綁定）
+CREATE TABLE IF NOT EXISTS line_confirmation_requests (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    request_type ENUM('staff_verification','client_rebind') NOT NULL,
+    line_user_id VARCHAR(100) NOT NULL,
+    client_id INT NULL,
+    client_name VARCHAR(100) NULL,
+    old_line_user_id VARCHAR(100) NULL,
+    new_line_user_id VARCHAR(100) NULL,
+    status ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+    reviewed_by_line_user_id VARCHAR(100) NULL,
+    reviewed_at DATETIME NULL,
+    resolved_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_confirmation_pending (request_type, status, created_at),
+    INDEX idx_confirmation_requester (line_user_id, request_type, status),
+    CONSTRAINT fk_confirmation_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 32. 系統異常事件紀錄表
 CREATE TABLE IF NOT EXISTS system_alerts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     event_type VARCHAR(50) NOT NULL COMMENT '異常事件類型',
@@ -674,5 +746,4 @@ CREATE TABLE IF NOT EXISTS system_alerts (
     resolved_by VARCHAR(50) NULL COMMENT '處理人員',
     INDEX idx_alert_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
 

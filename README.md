@@ -8,7 +8,7 @@
 - 新增應付帳款 Excel：月嫂款使用永豐銀行代碼 31，退還補助款使用台新銀行代碼 633。
 - 新增分季核銷補助清冊與年度總表，補助天數固定顯示至小數點後 2 位。
 - 新增服務人員契約 Excel 鏡像輸出，以及對應的契約、帳務與財務報表 FastAPI。
-- FastAPI 的正式 ASGI 入口為 `line.main:app`。
+- FastAPI 的正式 ASGI 入口為 `api.main:app`；LINE、LIFF 與 Webhook 以子路由掛載。
 
 最近一次整合版本：`0f9c11f`。
 
@@ -128,7 +128,7 @@ Lobar_union/
 docker-compose up -d
 
 # 2. 啟動 FastAPI 後端
-uvicorn line.main:app --reload
+uvicorn api.main:app --reload
 
 # 3. 啟動 Streamlit 管理介面
 streamlit run ui/app.py

@@ -1,0 +1,247 @@
+{
+  "version": 1,
+  "templates": [
+    {
+      "id": "staff_switch_success",
+      "name": "月嫂身分驗證成功",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "身分驗證成功！已為您切換至【月嫂專屬選單】。\n\n您現在可以使用下方的專屬功能查詢訂單與班表了。",
+      "variables": [],
+      "usage": [
+        "webhook",
+        "customer_service"
+      ]
+    },
+    {
+      "id": "staff_switch_fail",
+      "name": "月嫂選單切換失敗",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "切換選單失敗 (Error {status_code})，請聯絡系統管理員。",
+      "variables": [
+        {
+          "name": "status_code",
+          "required": true,
+          "description": "LINE API HTTP 狀態碼"
+        }
+      ],
+      "usage": [
+        "webhook"
+      ]
+    },
+    {
+      "id": "staff_menu_not_set",
+      "name": "月嫂選單尚未設定",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "系統尚未設定月嫂專屬選單，請聯絡管理員進行設定。",
+      "variables": [],
+      "usage": [
+        "webhook"
+      ]
+    },
+    {
+      "id": "esc_success",
+      "name": "解除月嫂身分成功",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "已為您解除月嫂身分，切換回【一般用戶預設選單】。",
+      "variables": [],
+      "usage": [
+        "webhook"
+      ]
+    },
+    {
+      "id": "esc_fail",
+      "name": "解除月嫂身分失敗",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "切換回預設選單失敗 (Error {status_code})，請聯絡系統管理員。",
+      "variables": [
+        {
+          "name": "status_code",
+          "required": true,
+          "description": "LINE API HTTP 狀態碼"
+        }
+      ],
+      "usage": [
+        "webhook"
+      ]
+    },
+    {
+      "id": "bind_link_msg",
+      "name": "帳號綁定連結",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "您好！請點擊以下連結進行案件查詢與帳號綁定：\n\n{bind_url}\n\n請在網頁中輸入您的真實姓名與行動電話，系統核對後將會回傳您的案件編號。如有任何問題，請聯絡公會專員。",
+      "variables": [
+        {
+          "name": "bind_url",
+          "required": true,
+          "description": "LIFF 或網頁綁定網址"
+        }
+      ],
+      "usage": [
+        "webhook",
+        "customer_service"
+      ]
+    },
+    {
+      "id": "register_success",
+      "name": "服務登記成功",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "【系統通知】\n服務登記與綁定成功！\n您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n您的案件編號為：{case_no}。\n如案件編號尚未核發，行政完成核對後將主動通知您。",
+      "variables": [
+        {
+          "name": "name",
+          "required": true,
+          "description": "客戶姓名"
+        },
+        {
+          "name": "case_no",
+          "required": false,
+          "description": "案件編號"
+        }
+      ],
+      "usage": [
+        "webhook",
+        "push"
+      ]
+    },
+    {
+      "id": "bind_success_new_order",
+      "name": "首次綁定成功",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "【系統通知】\n已為您綁定與查詢成功。\n您的 LINE 帳號已綁定至客戶「{name}」的資料庫。\n您的案件編號為：{case_no}。",
+      "variables": [
+        {
+          "name": "name",
+          "required": true,
+          "description": "客戶姓名"
+        },
+        {
+          "name": "case_no",
+          "required": false,
+          "description": "案件編號"
+        }
+      ],
+      "usage": [
+        "webhook",
+        "push"
+      ]
+    },
+    {
+      "id": "bind_success_existing",
+      "name": "既有帳號查詢成功",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "【系統通知】\n您已經綁定過了。\n您的 LINE 帳號已關聯至客戶「{name}」。\n您的案件編號為：{case_no}。",
+      "variables": [
+        {
+          "name": "name",
+          "required": true,
+          "description": "客戶姓名"
+        },
+        {
+          "name": "case_no",
+          "required": false,
+          "description": "案件編號"
+        }
+      ],
+      "usage": [
+        "webhook",
+        "push"
+      ]
+    },
+    {
+      "id": "bind_confirm_rebind",
+      "name": "確認重新綁定",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "您之前已經綁定過另一個帳戶，請問是否重新綁定？",
+      "variables": [],
+      "usage": [
+        "webhook",
+        "customer_service"
+      ]
+    },
+    {
+      "id": "bind_fail_no_data",
+      "name": "綁定查無資料",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "查無符合的資料，請確認您的姓名與電話是否與留存資料一致。",
+      "variables": [],
+      "usage": [
+        "webhook",
+        "customer_service"
+      ]
+    },
+    {
+      "id": "new_user_d1",
+      "name": "新好友 D+1",
+      "category": "scheduled_push",
+      "message_type": "text",
+      "enabled": true,
+      "content": "歡迎加入工會 LINE 官方帳號，今天帶您了解第一項服務。",
+      "variables": [],
+      "usage": [
+        "schedule"
+      ]
+    },
+    {
+      "id": "new_user_d2",
+      "name": "新好友 D+2",
+      "category": "scheduled_push",
+      "message_type": "text",
+      "enabled": true,
+      "content": "加入第二天，您可以透過下方選單查詢案件與聯絡工會專員。",
+      "variables": [],
+      "usage": ["schedule"]
+    },
+    {
+      "id": "new_user_d3",
+      "name": "新好友 D+3",
+      "category": "scheduled_push",
+      "message_type": "text",
+      "enabled": true,
+      "content": "加入第三天，如有服務需求或疑問，歡迎隨時透過 LINE 聯絡工會。",
+      "variables": [],
+      "usage": ["schedule"]
+    },
+    {
+      "id": "staff_verification_requested",
+      "name": "月嫂身分等待確認",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "月嫂身分申請已送出，請等待工會服務人員確認。確認通過後，系統會自動切換至月嫂專屬選單。",
+      "variables": [],
+      "usage": ["webhook"]
+    },
+    {
+      "id": "staff_verification_rejected",
+      "name": "月嫂驗證申請未通過",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "您的月嫂身分驗證申請未通過，請聯絡工會服務人員確認資格。",
+      "variables": [],
+      "usage": ["webhook"]
+    }
+  ]
+}

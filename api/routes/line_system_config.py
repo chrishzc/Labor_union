@@ -1,86 +1,313 @@
-from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel
-from typing import Dict, Any
-import os
-import json
+"""Validated configuration APIs for LINE, LIFF and customer service clients."""
+
+from __future__ import annotations
+
 import subprocess
+from pathlib import Path
+from typing import TypeVar
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Response, status
+from pydantic import BaseModel, ValidationError
+
+from api.schemas.line_config import (
+    CustomerServiceConfig,
+    LiffField,
+    LiffPage,
+    LiffSettingsConfig,
+    LiffTheme,
+    LineMenusConfig,
+    MessageTemplate,
+    MessageTemplatePreviewRequest,
+    MessageTemplatesConfig,
+    MessageSchedulesConfig,
+    RichMenuDefinition,
+)
+from services.json_config_service import (
+    find_by_id,
+    read_config,
+    upsert_by_id,
+    write_config,
+)
+
 
 router = APIRouter(prefix="/api/config", tags=["System Config"])
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+T = TypeVar("T", bound=BaseModel)
 
-CONFIG_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "config")
-SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "line")
 
-class ConfigPayload(BaseModel):
-    data: Dict[str, Any]
-
-def read_json_config(filename: str):
-    file_path = os.path.join(CONFIG_DIR, filename)
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=404, detail=f"Configuration file {filename} not found.")
+def _read(name: str, model: type[T]) -> T:
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading {filename}: {str(e)}")
+        return read_config(name, model)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=f"Configuration {name} not found") from exc
+    except (ValueError, ValidationError) as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid stored configuration: {exc}") from exc
 
-def write_json_config(filename: str, data: dict):
-    file_path = os.path.join(CONFIG_DIR, filename)
+
+def _save(name: str, value: BaseModel) -> None:
     try:
-        with open(file_path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error writing to {filename}: {str(e)}")
+        write_config(name, value)
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Unable to save configuration: {exc}") from exc
 
-def trigger_rich_menu_update():
-    """在背景執行圖文選單更新腳本"""
-    script_path = os.path.join(SCRIPTS_DIR, "setup_rich_menus.py")
-    try:
-        # 使用 subprocess 呼叫腳本，這會在背景獨立執行
-        print("[System Config] Triggering rich menu update...")
-        subprocess.run(["uv", "run", "python", script_path], check=True)
-        print("[System Config] Rich menu update completed successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"[System Config] Failed to update rich menu: {e}")
-    except Exception as e:
-        print(f"[System Config] Error running setup script: {e}")
 
-# ----------------- LIFF Settings -----------------
-@router.get("/liff")
-async def get_liff_config():
-    """取得 LIFF 網頁外觀設定"""
-    return read_json_config("liff_settings.json")
+def _publish_rich_menus() -> None:
+    subprocess.run(
+        ["uv", "run", "python", "line/setup_rich_menus.py"],
+        cwd=PROJECT_ROOT,
+        check=True,
+    )
 
-@router.put("/liff")
-async def update_liff_config(payload: ConfigPayload):
-    """更新 LIFF 網頁外觀設定"""
-    write_json_config("liff_settings.json", payload.data)
-    return {"status": "success", "message": "LIFF 設定已更新"}
 
-# ----------------- Webhook Replies -----------------
-@router.get("/webhook_replies")
-async def get_webhook_replies():
-    """取得 LINE 機器人自動回覆文案設定"""
-    return read_json_config("webhook_replies.json")
+# ---------------------------------------------------------------------------
+# Message templates
+# ---------------------------------------------------------------------------
+@router.get("/message-templates", response_model=MessageTemplatesConfig)
+def get_message_templates():
+    return _read("message_templates", MessageTemplatesConfig)
 
-@router.put("/webhook_replies")
-async def update_webhook_replies(payload: ConfigPayload):
-    """更新 LINE 機器人自動回覆文案設定"""
-    write_json_config("webhook_replies.json", payload.data)
-    return {"status": "success", "message": "自動回覆文案已更新"}
 
-# ----------------- LINE Menu Settings -----------------
-@router.get("/line_menu")
-async def get_line_menu_config():
-    """取得 LINE 圖文選單設定"""
-    return read_json_config("line_menu.json")
+@router.put("/message-templates", response_model=MessageTemplatesConfig)
+def replace_message_templates(payload: MessageTemplatesConfig):
+    _save("message_templates", payload)
+    return payload
 
-@router.put("/line_menu")
-async def update_line_menu_config(payload: ConfigPayload, background_tasks: BackgroundTasks):
-    """更新 LINE 圖文選單設定，並自動觸發更新腳本上傳至 LINE"""
-    write_json_config("line_menu.json", payload.data)
-    # 將更新動作排入背景任務
-    background_tasks.add_task(trigger_rich_menu_update)
-    return {
-        "status": "success", 
-        "message": "圖文選單設定已儲存，系統正在背景自動上傳並更新選單，請稍候即可在 LINE 中看見變更。"
-    }
+
+@router.post(
+    "/message-templates",
+    response_model=MessageTemplate,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_message_template(payload: MessageTemplate):
+    config = _read("message_templates", MessageTemplatesConfig)
+    if find_by_id(config.templates, payload.id):
+        raise HTTPException(status_code=409, detail="Template id already exists")
+    config.templates.append(payload)
+    validated = MessageTemplatesConfig.model_validate(config)
+    _save("message_templates", validated)
+    return payload
+
+
+@router.get("/message-templates/{template_id}", response_model=MessageTemplate)
+def get_message_template(template_id: str):
+    config = _read("message_templates", MessageTemplatesConfig)
+    item = find_by_id(config.templates, template_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Template not found")
+    return item
+
+
+@router.put("/message-templates/{template_id}", response_model=MessageTemplate)
+def update_message_template(template_id: str, payload: MessageTemplate):
+    if payload.id != template_id:
+        raise HTTPException(status_code=400, detail="Path id and payload id must match")
+    config = _read("message_templates", MessageTemplatesConfig)
+    if not find_by_id(config.templates, template_id):
+        raise HTTPException(status_code=404, detail="Template not found")
+    config.templates = upsert_by_id(config.templates, payload)
+    _save("message_templates", MessageTemplatesConfig.model_validate(config))
+    return payload
+
+
+@router.delete("/message-templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_message_template(template_id: str):
+    config = _read("message_templates", MessageTemplatesConfig)
+    original_count = len(config.templates)
+    config.templates = [item for item in config.templates if item.id != template_id]
+    if len(config.templates) == original_count:
+        raise HTTPException(status_code=404, detail="Template not found")
+    _save("message_templates", MessageTemplatesConfig.model_validate(config))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/message-templates/{template_id}/preview")
+def preview_message_template(template_id: str, payload: MessageTemplatePreviewRequest):
+    item = get_message_template(template_id)
+    if item.message_type == "flex":
+        return {"message_type": "flex", "content": item.content}
+    rendered = str(item.content)
+    for variable in item.variables:
+        if variable.required and variable.name not in payload.variables:
+            raise HTTPException(status_code=422, detail=f"Missing variable: {variable.name}")
+        rendered = rendered.replace(
+            "{" + variable.name + "}", payload.variables.get(variable.name, "")
+        )
+    return {"message_type": "text", "content": rendered}
+
+
+# ---------------------------------------------------------------------------
+# Scheduled messages
+# ---------------------------------------------------------------------------
+@router.get("/message-schedules", response_model=MessageSchedulesConfig)
+def get_message_schedules():
+    return _read("message_schedules", MessageSchedulesConfig)
+
+
+@router.put("/message-schedules", response_model=MessageSchedulesConfig)
+def replace_message_schedules(payload: MessageSchedulesConfig):
+    templates = _read("message_templates", MessageTemplatesConfig)
+    enabled_template_ids = {item.id for item in templates.templates if item.enabled}
+    missing = sorted({step.template_id for item in payload.schedules for step in item.steps} - enabled_template_ids)
+    if missing:
+        raise HTTPException(status_code=422, detail=f"Unknown or disabled templates: {', '.join(missing)}")
+    _save("message_schedules", payload)
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Rich menus
+# ---------------------------------------------------------------------------
+@router.get("/line-menus", response_model=LineMenusConfig)
+def get_line_menus():
+    return _read("line_menus", LineMenusConfig)
+
+
+@router.put("/line-menus", response_model=LineMenusConfig)
+def replace_line_menus(payload: LineMenusConfig):
+    _save("line_menus", payload)
+    return payload
+
+
+@router.post("/line-menus", response_model=RichMenuDefinition, status_code=201)
+def create_line_menu(payload: RichMenuDefinition):
+    config = _read("line_menus", LineMenusConfig)
+    if find_by_id(config.menus, payload.id):
+        raise HTTPException(status_code=409, detail="Menu id already exists")
+    config.menus.append(payload)
+    _save("line_menus", LineMenusConfig.model_validate(config))
+    return payload
+
+
+@router.get("/line-menus/{menu_id}", response_model=RichMenuDefinition)
+def get_line_menu(menu_id: str):
+    config = _read("line_menus", LineMenusConfig)
+    item = find_by_id(config.menus, menu_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Menu not found")
+    return item
+
+
+@router.put("/line-menus/{menu_id}", response_model=RichMenuDefinition)
+def update_line_menu(menu_id: str, payload: RichMenuDefinition):
+    if payload.id != menu_id:
+        raise HTTPException(status_code=400, detail="Path id and payload id must match")
+    config = _read("line_menus", LineMenusConfig)
+    if not find_by_id(config.menus, menu_id):
+        raise HTTPException(status_code=404, detail="Menu not found")
+    config.menus = upsert_by_id(config.menus, payload)
+    _save("line_menus", LineMenusConfig.model_validate(config))
+    return payload
+
+
+@router.delete("/line-menus/{menu_id}", status_code=204)
+def delete_line_menu(menu_id: str):
+    config = _read("line_menus", LineMenusConfig)
+    item = find_by_id(config.menus, menu_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="Menu not found")
+    if item.set_as_default:
+        raise HTTPException(status_code=409, detail="Default menu cannot be deleted")
+    config.menus = [menu for menu in config.menus if menu.id != menu_id]
+    _save("line_menus", LineMenusConfig.model_validate(config))
+    return Response(status_code=204)
+
+
+@router.post("/line-menus/{menu_id}/preview")
+def preview_line_menu(menu_id: str):
+    return {"status": "valid", "menu": get_line_menu(menu_id)}
+
+
+@router.post("/line-menus/{menu_id}/publish", status_code=202)
+def publish_line_menu(menu_id: str, background_tasks: BackgroundTasks):
+    menu = get_line_menu(menu_id)
+    if not menu.enabled:
+        raise HTTPException(status_code=409, detail="Disabled menu cannot be published")
+    # The current publisher synchronizes all enabled menus in one operation.
+    background_tasks.add_task(_publish_rich_menus)
+    return {"status": "accepted", "menu_id": menu_id}
+
+
+# ---------------------------------------------------------------------------
+# LIFF settings and dynamic fields
+# ---------------------------------------------------------------------------
+@router.get("/liff", response_model=LiffSettingsConfig)
+def get_liff_config():
+    return _read("liff", LiffSettingsConfig)
+
+
+@router.put("/liff", response_model=LiffSettingsConfig)
+def replace_liff_config(payload: LiffSettingsConfig):
+    _save("liff", payload)
+    return payload
+
+
+@router.put("/liff/theme", response_model=LiffTheme)
+def update_liff_theme(payload: LiffTheme):
+    config = _read("liff", LiffSettingsConfig)
+    config.theme = payload
+    _save("liff", config)
+    return payload
+
+
+@router.put("/liff/pages/{page_id}", response_model=LiffPage)
+def update_liff_page(page_id: str, payload: LiffPage):
+    config = _read("liff", LiffSettingsConfig)
+    config.pages[page_id] = payload
+    _save("liff", LiffSettingsConfig.model_validate(config))
+    return payload
+
+
+@router.post("/liff/pages/{page_id}/fields", response_model=LiffField, status_code=201)
+def create_liff_field(page_id: str, payload: LiffField):
+    config = _read("liff", LiffSettingsConfig)
+    page = config.pages.get(page_id)
+    if not page:
+        raise HTTPException(status_code=404, detail="LIFF page not found")
+    if find_by_id(page.fields, payload.id):
+        raise HTTPException(status_code=409, detail="Field id already exists")
+    page.fields.append(payload)
+    page.fields.sort(key=lambda field: field.order)
+    _save("liff", LiffSettingsConfig.model_validate(config))
+    return payload
+
+
+@router.put("/liff/pages/{page_id}/fields/{field_id}", response_model=LiffField)
+def update_liff_field(page_id: str, field_id: str, payload: LiffField):
+    if payload.id != field_id:
+        raise HTTPException(status_code=400, detail="Path id and payload id must match")
+    config = _read("liff", LiffSettingsConfig)
+    page = config.pages.get(page_id)
+    if not page or not find_by_id(page.fields, field_id):
+        raise HTTPException(status_code=404, detail="LIFF field not found")
+    page.fields = upsert_by_id(page.fields, payload)
+    page.fields.sort(key=lambda field: field.order)
+    _save("liff", LiffSettingsConfig.model_validate(config))
+    return payload
+
+
+@router.delete("/liff/pages/{page_id}/fields/{field_id}", status_code=204)
+def delete_liff_field(page_id: str, field_id: str):
+    config = _read("liff", LiffSettingsConfig)
+    page = config.pages.get(page_id)
+    field = find_by_id(page.fields, field_id) if page else None
+    if not field:
+        raise HTTPException(status_code=404, detail="LIFF field not found")
+    if field.system_field:
+        raise HTTPException(status_code=409, detail="System field cannot be deleted")
+    page.fields = [item for item in page.fields if item.id != field_id]
+    _save("liff", LiffSettingsConfig.model_validate(config))
+    return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Customer service static settings
+# ---------------------------------------------------------------------------
+@router.get("/customer-service", response_model=CustomerServiceConfig)
+def get_customer_service_config():
+    return _read("customer_service", CustomerServiceConfig)
+
+
+@router.put("/customer-service", response_model=CustomerServiceConfig)
+def update_customer_service_config(payload: CustomerServiceConfig):
+    _save("customer_service", payload)
+    return payload

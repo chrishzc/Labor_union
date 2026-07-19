@@ -1,114 +1,173 @@
-# 系統外部設定檔 (JSON Config) 使用說明
+# LINE／LIFF 可編輯設定規格
 
-本資料夾 (`config/`) 包含了系統中可以讓管理員直接修改的外部設定檔。這些檔案採用 JSON 格式，您可以使用任何純文字編輯器（如記事本、VS Code）打開並修改。
-**修改存檔後，大部分設定將會即時生效，不需重啟伺服器。**
+本目錄保存可由 Web 或 UI 管理端透過 FastAPI 修改的靜態設定。前端不應直接讀寫檔案，而應串接 `/api/config` API；後端會使用 Pydantic 驗證並以原子替換方式寫入 JSON。
 
----
+## 設定檔
 
-## 1. 🎨 前端網頁外觀設定 (`liff_settings.json`)
-此檔案控制了使用者開啟「產婦服務登記表單 (LIFF)」時的網頁外觀與文字。
+### `message_templates.json`
 
-### 📡 管理 API 接口
-前端管理後台可透過以下 API 進行設定存取與修改：
-- **GET** `/api/config/liff`：取得目前網頁外觀設定
-- **PUT** `/api/config/liff`：傳送 JSON 結構儲存並覆寫外觀設定
+統一管理 Webhook 回覆、主動推播、排程推播與私人客服常用回覆。
 
-### 重要參數說明：
-- **`theme_colors.primary`**: 主要按鈕與強調元素的顏色。
-- **`theme_colors.background_gradient`**: 網頁背景的漸層顏色。
-- **`typography.title_size`**: 網頁大標題的文字大小 (預設 `20px`)。
-- **`texts.form_title`**: 網頁最上方的大標題。
-- **`texts.success_desc`**: 使用者成功送出表單後，畫面上顯示的提示文字（支援 `<br>` 換行標籤）。
+- `id`：程式使用的穩定識別碼。
+- `category`：`webhook_reply`、`push`、`scheduled_push` 或 `customer_service`。
+- `message_type`：`text` 或 `flex`。
+- `content`：文字或 Flex JSON。
+- `variables`：可替換參數，例如 `{bind_url}`。
+- `usage`：允許使用此範本的功能。
 
-### 常用的顏色代碼 (Hex Color) 參考：
-| 顏色風格 | Primary (主色) | Background Gradient (背景漸層) |
-| :--- | :--- | :--- |
-| **經典工會藍 (預設)** | `#4a90e2` | `linear-gradient(135deg, #eef2f7 0%, #d9e2ec 100%)` |
-| **溫暖櫻花粉** | `#ff85a2` | `linear-gradient(135deg, #fff0f3 0%, #ffe4e8 100%)` |
-| **質感薄荷綠** | `#42b883` | `linear-gradient(135deg, #e8f7f0 0%, #d1efe1 100%)` |
-| **沉穩曜石黑** | `#333333` | `linear-gradient(135deg, #f5f5f5 0%, #e0e0e0 100%)` |
+API：
 
-> 💡 **提示**：若想尋找其他顏色代碼，可以至 Google 搜尋「Color Picker」，挑選喜歡的顏色後複製其 HEX 碼 (包含 `#` 號) 貼上即可。
-
----
-
-## 2. 📱 LINE 圖文選單設定 (`line_menu.json`)
-此檔案控制了 LINE 官方帳號下方的「圖文選單 (Rich Menu)」按鈕文字與底圖顏色。包含 `default_menu` (一般用戶) 與 `caregiver_menu` (月嫂專區) 兩個區塊。
-
-### 📡 管理 API 接口與自動更新
-前端管理後台可透過以下 API 進行設定存取與修改：
-- **GET** `/api/config/line_menu`：取得目前圖文選單設定
-- **PUT** `/api/config/line_menu`：傳送 JSON 結構儲存並覆寫圖文選單設定。
-  > ⚡ **自動化生效機制**：當呼叫 PUT API 儲存成功後，系統將會在背景自動觸發執行 `setup_rich_menus.py` 腳本。LINE 官方帳號的選單會在幾秒內自動更新，不需工程師介入！
-
-### 重要參數說明：
-- **`background_color`**: 選單的背景底色。
-- **`buttons[].text`**: 顯示在圖片按鈕上的文字。
-- **`buttons[].color`**: 按鈕文字的顏色。
-
-> ⚠️ **注意**：如果您是手動在伺服器上修改此檔案 (沒有透過 API)，修改後請務必請工程師或管理員執行以下指令，選單才會更新：
-> ```bash
-> uv run python scripts/setup_rich_menus.py
-> ```
-
----
-
-## 3. 💬 機器人自動回覆文案 (`webhook_replies.json`)
-此檔案管理了當用戶在 LINE 中觸發特定行為時，機器人主動推播的文字訊息。
-
-### 📡 管理 API 接口
-前端管理後台可透過以下 API 進行設定存取與修改：
-- **GET** `/api/config/webhook_replies`：取得目前自動回覆設定
-- **PUT** `/api/config/webhook_replies`：傳送 JSON 結構儲存並覆寫自動回覆設定
-
-### 重要參數說明：
-- **`caregiver_switch_success`**: 當月嫂輸入「我是月嫂」且切換成功時的回覆。
-- **`esc_success`**: 當輸入「esc」退回一般用戶時的回覆。
-- **`bind_link_msg`**: 當用戶輸入「查詢訂單」時，彈出的綁定連結引導文案。
-- **`register_success`**: 新用戶填完表單後，系統在 LINE 中回傳案件編號的恭喜訊息。
-
-### 特殊變數替換 (請勿刪除)：
-在此檔案中，您會看到一些用大括號 `{}` 包起來的英文字，這是系統自動帶入資料的「變數」，修改文案時**請保留它們**：
-- `{bind_url}`：系統會自動替換成用戶專屬的 LIFF 綁定網址。
-- `{name}`：系統會自動替換成客戶或月嫂的真實姓名。
-- `{case_no}`：系統會自動替換成 `clients.case_no` 案件編號。
-- `{status_code}`：系統會自動替換成錯誤代碼。
-
-### 如何換行？
-在 JSON 檔案中，請使用 `\n` 來代表換行。
-例如：`"第一行\n第二行"`，在 LINE 裡面就會呈現為：
-```
-第一行
-第二行
+```text
+GET    /api/config/message-templates
+PUT    /api/config/message-templates
+POST   /api/config/message-templates
+GET    /api/config/message-templates/{template_id}
+PUT    /api/config/message-templates/{template_id}
+DELETE /api/config/message-templates/{template_id}
+POST   /api/config/message-templates/{template_id}/preview
 ```
 
----
+### `line_menu.json`
 
-## 4. 🗂️ 重新綁定申請暫存檔 (`rebind_requests.json`)
-此檔案用於暫存使用者「要求重新綁定 LINE 帳號」的申請。當舊客戶的資料已經被另一個 LINE 帳號綁定時，他們可以在前端申請重新綁定，申請記錄會暫存於此。
+管理多組 Rich Menu 的尺寸、顏色、按鈕區域及 LINE Action。
 
-### ⚠️ 前端工程師注意事項：
-**請勿直接讀寫此檔案**。由於可能發生併發衝突，請務必使用後端提供的 API 來存取與操作申請紀錄：
+Action 支援：
 
-1. **取得所有待確認名單**
-   - **Method**: `GET`
-   - **Endpoint**: `/api/line/rebind_requests`
-   - **Response**: 回傳 JSON 陣列，包含 `request_id`, `client_name`, `old_line_user_id`, `new_line_user_id` 等資訊。
+- `message`：點擊後向官方帳號傳文字。
+- `uri`：開啟固定 URL。
+- `uri`＋`uri_source: liff`：開啟目前設定的 LIFF。
+- `postback`：傳送 postback data。
 
-2. **管理員核准申請**
-   - **Method**: `POST`
-   - **Endpoint**: `/api/line/rebind_requests/approve`
-   - **Payload**: `{"request_id": "req_..."}`
-   - **Action**: 後端會自動寫入資料庫覆蓋、從 JSON 刪除暫存，並推播成功訊息給客戶。
+API：
 
-3. **管理員拒絕申請**
-   - **Method**: `POST`
-   - **Endpoint**: `/api/line/rebind_requests/reject`
-   - **Payload**: `{"request_id": "req_..."}`
-   - **Action**: 後端會從 JSON 刪除該暫存，並推播拒絕訊息給客戶。
+```text
+GET    /api/config/line-menus
+PUT    /api/config/line-menus
+POST   /api/config/line-menus
+GET    /api/config/line-menus/{menu_id}
+PUT    /api/config/line-menus/{menu_id}
+DELETE /api/config/line-menus/{menu_id}
+POST   /api/config/line-menus/{menu_id}/preview
+POST   /api/config/line-menus/{menu_id}/publish
+```
 
----
-### 🚨 編輯 JSON 的注意事項
-1. 所有的文字與參數都必須被**雙引號 `"`** 包起來。
-2. 每一行結尾必須有**逗號 `,`** (除了該區塊的最後一行)。
-3. 如果修改後系統發生異常，請檢查是否不小心刪除了雙引號或逗號，可使用線上工具 (如 JSONLint) 檢查格式是否正確。
+儲存與發布分開。修改 JSON 不會立即更動 LINE；呼叫 `publish` 才會執行 `line/setup_rich_menus.py`。
+
+圖片上傳 API 暫未建立。JSON 的 `appearance.image_path` 只保存圖片位置。
+
+### `liff_settings.json`
+
+管理 LIFF 主題、頁面文字及動態問題。
+
+- `system_field: true` 是後端必要欄位，API 禁止刪除。
+- 自訂問題使用 `system_field: false`，可由前端新增、修改、排序與刪除。
+- 選擇題必須提供 `options`。
+- 自訂答案後續可保存至既有 `survey_details` JSON，不必每次修改 DB schema。
+
+API：
+
+```text
+GET    /api/config/liff
+PUT    /api/config/liff
+PUT    /api/config/liff/theme
+PUT    /api/config/liff/pages/{page_id}
+POST   /api/config/liff/pages/{page_id}/fields
+PUT    /api/config/liff/pages/{page_id}/fields/{field_id}
+DELETE /api/config/liff/pages/{page_id}/fields/{field_id}
+```
+
+### `customer_service.json`
+
+目前只保存私人客服的靜態設定：服務時間、狀態顯示、閒置時間及固定回覆。聊天訊息、客服指派、已讀狀態與標籤不應存 JSON，後續應存 MySQL。
+
+API：
+
+```text
+GET /api/config/customer-service
+PUT /api/config/customer-service
+```
+
+### `message_schedules.json`
+
+管理新好友 D+1、D+2、D+3 等排程。排程只引用 `message_templates.json` 中已啟用的範本 ID，顯示時區預設為 `Asia/Taipei`。
+
+```text
+GET /api/config/message-schedules
+PUT /api/config/message-schedules
+```
+
+後端會檢查時間格式、重複天數及範本是否存在；儲存排程不會立即補發歷史任務，只影響之後建立的任務。
+
+### `rich_menu_ids.json`
+
+由 Rich Menu 發布器寫入的 LINE 平台 ID，不是前端可編輯設定。
+
+重新綁定待審資料不再存放於 `config`。月嫂驗證與客戶重新綁定均保存在 MySQL `line_confirmation_requests`，`config` 目錄只保存可由管理介面維護的靜態設定。
+
+## 圖片與附件儲存建議（後續工作）
+
+目前 `db/schema.sql` 沒有圖片、附件或媒體資料表。本次不修改 DB。
+
+後續建議建立共用 `media_assets` 表，Rich Menu 圖片與 LINE 用戶照片共用，以欄位分類：
+
+```text
+id
+category            rich_menu / line_user_upload / contract / other
+owner_type          line_user / menu / case / message
+owner_id
+storage_provider    local / nas / s3
+storage_key
+original_filename
+mime_type
+file_size
+sha256
+line_message_id
+created_at
+expires_at
+deleted_at
+```
+
+不建議將圖片二進位直接存 MySQL BLOB。建議優先順序：
+
+1. 正式環境：S3 相容物件儲存，例如 Cloudflare R2、AWS S3 或 MinIO。
+2. 地端環境：NAS 或專用媒體目錄，DB 只保存路徑與中繼資料。
+3. 開發環境：專案外的 writable media 目錄，避免把用戶照片提交 Git。
+
+LINE 用戶照片應在 Webhook 收到 message ID 後下載至受控儲存區，再建立 `media_assets` 紀錄；不要長期依賴 LINE 暫時下載網址。
+
+## 安全注意事項
+
+- 目前設定 API 尚未加入管理員登入；正式開放給前端前必須加上權限保護。
+- API 只操作固定白名單檔案，不能由前端傳入任意檔案路徑。
+- Rich Menu 發布會呼叫 LINE API，應限制為管理員操作。
+- 月嫂驗證查詢及角色管理接口需使用 `X-Internal-API-Key`；正式前應再接管理員登入與角色權限。
+
+## 工會工作人員統一待審接口
+
+月嫂資格驗證與舊客戶重新綁定可由同一個工作人員佇列取得：
+
+```text
+GET  /api/line/staff/review-requests
+GET  /api/line/staff/review-requests?request_type=client_rebind
+GET  /api/line/staff/review-requests?request_type=staff_verification
+POST /api/line/staff/review-requests/{request_type}/{request_id}/approve
+POST /api/line/staff/review-requests/{request_type}/{request_id}/reject
+```
+
+以上接口一律要求：
+
+```http
+X-Internal-API-Key: <INTERNAL_API_KEY>
+```
+
+`client_rebind` 的 approve 會更新客戶 LINE 綁定，reject 會保留原綁定並通知申請者。`staff_verification` 的 approve 會直接將 LINE 角色切換為 `staff` 並綁定月嫂選單，reject 則保留原角色並通知申請者。兩種請求共用 MySQL `line_confirmation_requests`，不產生月嫂驗證碼。
+
+舊版 `/api/line/rebind_requests`、`approve`、`reject` 接口暫時保留相容性，但現在同樣要求內部 API Key。
+
+開發環境可設定：
+
+```env
+ENABLE_REBIND_CONSOLE_REVIEW=true
+```
+
+開發時，Webhook提交月嫂身分或重新綁定申請後，會向`start_line_bot.py`在`127.0.0.1`建立的臨時入口推送一次通知，終端隨即接受`y`核准、`n`拒絕，不會固定輪詢待審API。啟動器只在啟動時補查一次既有待審資料。此功能由`ENABLE_LINE_REVIEW_CONSOLE`控制，正式環境`APP_ENV=production`時強制停用；正式Web/UI使用相同API。
