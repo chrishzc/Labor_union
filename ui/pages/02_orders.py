@@ -873,19 +873,8 @@ def _render_tab5_subsidy_reconciliation():
                 st.error(f"下載年度補助 Excel 失敗：{err}")
             else:
                 st.download_button("下載年度補助 Excel", data=xlsx_bytes, file_name=f"年度補助總表_{selected_year}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="download_annual_subsidy_summary")
-def show():
-    """殼層：讀取初始資料並分發至各 Tab 渲染函數 (OrderUI)"""
-    st.title("📦 訂單與帳務管理系統")
-    st.write("本系統串接了 `v_order_details` 整合計算檢視表，提供訂單生命週期、指派配對以及帳務實收狀態的管理。")
-
-    try:
-        orders_data = db_service.get_order_details()
-        clients = db_service.get_table_data('clients')
-        staff_list = db_service.get_table_data('staff')
-    except Exception as e:
-        st.error(f"初始化載入資料失敗: {e}")
-        return
-
+def _render_order_page_shell(orders_data, clients, staff_list):
+    """Render Page 2's fixed tab layout from data loaded by ``show``."""
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 訂單資訊總覽",
         "🤝 月嫂配對中心",
@@ -908,3 +897,19 @@ def show():
 
     with tab5:
         _render_tab5_subsidy_reconciliation()
+
+
+def show():
+    """Load Page 2's initial data, then delegate all tab rendering to OrderUI."""
+    st.title("📦 訂單與帳務管理系統")
+    st.write("本系統串接了 `v_order_details` 整合計算檢視表，提供訂單生命週期、指派配對以及帳務實收狀態的管理。")
+
+    try:
+        orders_data = db_service.get_order_details()
+        clients = db_service.get_table_data('clients')
+        staff_list = db_service.get_table_data('staff')
+    except Exception as e:
+        st.error(f"初始化載入資料失敗: {e}")
+        return
+
+    _render_order_page_shell(orders_data, clients, staff_list)

@@ -102,7 +102,7 @@ def get_order_by_case_no(case_no: str) -> dict | None:
                        o.contract_id, o.service_days, o.service_hours_per_day,
                        o.subsidy_eligibility, o.floor_fee, o.deposit_date,
                        o.start_date, o.end_date, o.custom_rest_dates,
-                       o.other_addition, o.created_at, o.updated_at,
+                       o.created_at, o.updated_at,
                        c.name AS client_name, s.name AS staff_name
                 FROM orders o
                 JOIN clients c ON c.case_no = o.case_no
@@ -341,7 +341,7 @@ def get_case_order_details() -> list[dict]:
 def create_order(case_no: str, service_days: int, service_hours_per_day: int,
                  subsidy_eligibility: str, floor_fee: float = 0.0, 
                  deposit_date = None, start_date = None, end_date = None, 
-                 other_addition: float = 0.0, status: str = '洽談中') -> str:
+                 status: str = '洽談中') -> str:
     """依正式 case_no 建立或取得唯一訂單，並同步建立帳務記錄。"""
     case_no = _resolve_case_no(case_no)
     conn = get_connection()
@@ -355,13 +355,13 @@ def create_order(case_no: str, service_days: int, service_hours_per_day: int,
             cursor.execute("""
                 INSERT INTO orders (
                     case_no, client_id, status, service_days, service_hours_per_day,
-                    subsidy_eligibility, floor_fee, deposit_date, start_date, end_date, other_addition
+                    subsidy_eligibility, floor_fee, deposit_date, start_date, end_date
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE case_no = VALUES(case_no)
             """, (
                 case_no, client['id'], status, service_days, service_hours_per_day,
-                subsidy_eligibility, floor_fee, deposit_date, start_date, end_date, other_addition
+                subsidy_eligibility, floor_fee, deposit_date, start_date, end_date
             ))
 
             cursor.execute("""

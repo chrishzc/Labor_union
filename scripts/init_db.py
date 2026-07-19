@@ -1,5 +1,6 @@
 import sys
 import os
+from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
 
@@ -18,6 +19,39 @@ DB_CONFIG = {
     'password': os.getenv('DB_PASSWORD', '1234'),
     'charset': 'utf8mb4'
 }
+
+
+def load_schema_parts(cursor, schema_parts_dir):
+    """Execute UTF-8 schema fragments in lexical filename order."""
+    parts_dir = Path(schema_parts_dir)
+    assert parts_dir.name == "schema_parts" or parts_dir.exists()
+    loaded_parts = []
+    for part_path in sorted(parts_dir.glob("*.sql"), key=lambda path: path.name):
+        sql_content = part_path.read_text(encoding="utf-8")
+        statements = []
+        current_stmt = []
+        for line in sql_content.split("\n"):
+            if line.strip().startswith("--"):
+                continue
+            segments = line.split(";")
+            for segment_index, segment in enumerate(segments):
+                current_stmt.append(segment)
+                if segment_index < len(segments) - 1:
+                    statement = "\n".join(current_stmt).strip()
+                    if statement:
+                        statements.append(statement)
+                    current_stmt = []
+        trailing = "\n".join(current_stmt).strip()
+        if trailing:
+            statements.append(trailing)
+
+        try:
+            for statement in statements:
+                cursor.execute(statement)
+        except Exception as exc:
+            raise RuntimeError(f"載入 schema part 失敗：{part_path.name}: {exc}") from exc
+        loaded_parts.append(part_path.name)
+    return loaded_parts
 
 def main():
     schema_path = r'db/schema.sql'
@@ -77,6 +111,11 @@ def main():
                     print(f"執行第 {i+1} 個語句時出錯：{stmt_err}")
                     print(f"出錯語句：\n{stmt_clean[:200]}...\n")
                     raise stmt_err
+
+            schema_parts_dir = Path(schema_path).parent / "schema_parts"
+            loaded_parts = load_schema_parts(cursor, schema_parts_dir)
+            if loaded_parts:
+                print(f"已依序載入 Schema parts：{', '.join(loaded_parts)}")
             
             connection.commit()
             print(f"\n====== 資料庫 Schema 更新成功！共執行 {success_count} 個語句 ======")
@@ -113,6 +152,7 @@ def main():
     except Exception as e:
         connection.rollback()
         print(f"執行失敗，已回滾所有變更。錯誤原因：{e}")
+        raise
     finally:
         connection.close()
         print("資料庫連線已關閉。")

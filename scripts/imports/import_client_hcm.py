@@ -99,10 +99,19 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
+def _result(inserted=0, skipped_existing=0, review_required=0, failed=0):
+    return {
+        "inserted": inserted,
+        "skipped_existing": skipped_existing,
+        "review_required": review_required,
+        "failed": failed,
+    }
+
+
 def process_import(excel_path):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
-        return 0, 0
+        return _result(review_required=1)
         
     print(f"解析 Excel 檔案：{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
@@ -117,7 +126,7 @@ def process_import(excel_path):
             
     if not target_sheet:
         print("未找到包含 'HCM' 或 '市府' 關鍵字的工作表。跳過此檔案。")
-        return 0, 0
+        return _result(review_required=1)
         
     df = xl.parse(target_sheet)
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
@@ -130,10 +139,11 @@ def process_import(excel_path):
         conn.commit()
     except Exception as e:
         print(f"資料庫連線失敗：{e}")
-        return 0, 0
+        return _result(failed=1)
         
     inserted = 0
-    updated = 0
+    skipped_existing = 0
+    review_required = 0
     
     try:
         for _, row in df.iterrows():
@@ -152,6 +162,7 @@ def process_import(excel_path):
                 
             case_no = record.get('case_no')
             if not case_no:
+                review_required += 1
                 continue
                 
             # 比對去重
@@ -159,64 +170,46 @@ def process_import(excel_path):
             existing = cursor.fetchone()
             
             if existing:
-                client_id = existing[0]
-                update_cols = []
-                val_list = []
-                for k, v in record.items():
-                    # ponytail: 排除對 line_user_id 的覆寫，將訂單狀態交給 orders 表生命週期管理
-                    if k not in ['case_no', 'line_user_id']:
-                        update_cols.append(f"`{k}` = %s")
-                        val_list.append(v)
-                val_list.append(case_no)
-                sql = f"UPDATE clients SET {', '.join(update_cols)} WHERE case_no = %s"
-                cursor.execute(sql, tuple(val_list))
-                updated += 1
-            else:
-                cols = ", ".join([f"`{k}`" for k in record.keys()])
-                places = ", ".join(["%s"] * len(record))
-                sql = f"INSERT INTO clients ({cols}) VALUES ({places})"
-                cursor.execute(sql, tuple(record.values()))
-                client_id = cursor.lastrowid
-                inserted += 1
+                skipped_existing += 1
+                continue
+
+            cols = ", ".join([f"`{k}`" for k in record.keys()])
+            places = ", ".join(["%s"] * len(record))
+            sql = f"INSERT INTO clients ({cols}) VALUES ({places})"
+            cursor.execute(sql, tuple(record.values()))
+            client_id = cursor.lastrowid
+            inserted += 1
                 
             # 關聯訂單與生命週期狀態機初始化
-            # 比對 orders 表是否已有此 client_id (或在此業務下，以 case_no 作為主要核銷欄位)
-            cursor.execute("SELECT case_no FROM orders WHERE case_no = %s", (case_no,))
-            order_exists = cursor.fetchone()
-            if not order_exists:
-                # 取得相關欄位的值以初始化 orders 表中的對應數值
-                s_days = clean_data(record.get('service_days'), 'service_days') or 20
-                s_time_raw = record.get('service_time') or "9"
-                # 清理服務時間時數
-                import re
-                hrs_match = re.search(r'\d+', str(s_time_raw))
-                s_hours = int(hrs_match.group(0)) if hrs_match else 9
-                
-                # 身分資格轉為對應的 subsidy_eligibility
-                sub_elig = "一般市民"
-                raw_sub = str(record.get('identity_status') or '')
-                if "補助" in raw_sub or "低收" in raw_sub:
-                    sub_elig = "補助市民"
-                elif "非" in raw_sub:
-                    sub_elig = "非市民"
+            s_days = clean_data(record.get('service_days'), 'service_days') or 20
+            s_time_raw = record.get('service_time') or "9"
+            hrs_match = re.search(r'\d+', str(s_time_raw))
+            s_hours = int(hrs_match.group(0)) if hrs_match else 9
 
-                # 初始化建立 orders，預設 status 為「洽談中」
-                cursor.execute("""
-                    INSERT INTO orders (case_no, client_id, status, service_days, service_hours_per_day, subsidy_eligibility)
-                    VALUES (%s, %s, '洽談中', %s, %s, %s)
-                """, (case_no, client_id, s_days, s_hours, sub_elig))
+            sub_elig = "一般市民"
+            raw_sub = str(record.get('identity_status') or '')
+            if "補助" in raw_sub or "低收" in raw_sub:
+                sub_elig = "補助市民"
+            elif "非" in raw_sub:
+                sub_elig = "非市民"
+
+            cursor.execute("""
+                INSERT INTO orders (case_no, client_id, status, service_days, service_hours_per_day, subsidy_eligibility)
+                VALUES (%s, %s, '洽談中', %s, %s, %s)
+            """, (case_no, client_id, s_days, s_hours, sub_elig))
                 
         conn.commit()
-        print(f"匯入成功：新增 {inserted} 筆客戶資料，更新 {updated} 筆客戶資料。")
+        print(f"匯入成功：新增 {inserted} 筆，略過既有 {skipped_existing} 筆，待確認 {review_required} 筆。")
     except Exception as err:
         conn.rollback()
         import traceback
         traceback.print_exc()
         print(f"執行出錯已 Rollback：{err}")
+        return _result(skipped_existing=skipped_existing, review_required=review_required, failed=1)
     finally:
         conn.close()
         
-    return inserted, updated
+    return _result(inserted=inserted, skipped_existing=skipped_existing, review_required=review_required)
 
 if __name__ == "__main__":
     # 提供預設本機路徑或接收命令列參數

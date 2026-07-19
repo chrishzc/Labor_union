@@ -12,6 +12,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 from services.db_service import get_connection
+from services.payment_batch_service import prepare_monthly_payments
 
 
 EXPORT_HEADERS = (
@@ -54,36 +55,36 @@ def _as_decimal(value) -> Decimal:
 
 def _fetch_payables(target_month: str) -> list[dict]:
     first_day, last_day = _month_bounds(target_month)
+    settlement_rows = prepare_monthly_payments(target_month)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT sp.id AS source_payment_id,
-                       sp.case_no,
-                       sp.due_date AS transfer_date,
-                       sp.total_payable - sp.amount_paid AS amount,
-                       s.name AS recipient_name,
-                       s.identity_card,
-                       sba.account_no,
-                       sba.bank_code AS recipient_bank_code
-                FROM staff_payments sp
-                JOIN staff s ON s.id = sp.staff_id
-                LEFT JOIN staff_bank_accounts sba ON sba.id = (
-                    SELECT sba2.id
-                    FROM staff_bank_accounts sba2
-                    WHERE sba2.staff_id = sp.staff_id
-                      AND sba2.is_primary = 1
-                    ORDER BY sba2.id
-                    LIMIT 1
+            staff_by_id = {}
+            staff_ids = sorted({int(row["staff_id"]) for row in settlement_rows})
+            if staff_ids:
+                placeholders = ", ".join(["%s"] * len(staff_ids))
+                cursor.execute(
+                    f"""
+                    SELECT s.id AS staff_id,
+                           s.name AS recipient_name,
+                           s.identity_card,
+                           sba.account_no,
+                           sba.bank_code AS recipient_bank_code
+                    FROM staff s
+                    LEFT JOIN staff_bank_accounts sba ON sba.id = (
+                        SELECT sba2.id
+                        FROM staff_bank_accounts sba2
+                        WHERE sba2.staff_id = s.id
+                          AND sba2.is_primary = 1
+                        ORDER BY sba2.id
+                        LIMIT 1
+                    )
+                    WHERE s.id IN ({placeholders})
+                    """,
+                    tuple(staff_ids),
                 )
-                WHERE sp.payment_status IN ('pending', 'partially_paid')
-                  AND sp.due_date BETWEEN %s AND %s
-                  AND sp.total_payable - sp.amount_paid > 0
-                """,
-                (first_day, last_day),
-            )
-            staff_rows = cursor.fetchall()
+                staff_by_id = {int(row["staff_id"]): row for row in cursor.fetchall()}
+
             cursor.execute(
                 """
                 SELECT cp.id AS source_payment_id,
@@ -107,14 +108,27 @@ def _fetch_payables(target_month: str) -> list[dict]:
         conn.close()
 
     rows = []
-    for row in staff_rows:
+    for settlement in settlement_rows:
+        amount = _as_decimal(settlement["remaining_amount"])
+        if amount <= 0:
+            continue
+        staff = staff_by_id.get(int(settlement["staff_id"]), {})
         rows.append({
-            **row,
+            "source_payment_id": settlement["settlement_id"],
+            "case_no": ",".join(str(case_no) for case_no in settlement.get("case_nos", [])),
+            "transfer_date": settlement["transfer_date"],
+            "amount": amount,
+            "recipient_name": staff.get("recipient_name"),
+            "identity_card": staff.get("identity_card"),
+            "account_no": staff.get("account_no"),
+            "recipient_bank_code": staff.get("recipient_bank_code"),
             "outgoing_bank_code": "31",
             "outgoing_bank_name": OUTGOING_BANKS["31"],
-            "source_type": "staff_payment",
+            "source_type": "staff_monthly_settlement",
         })
     for row in client_rows:
+        if _as_decimal(row["amount"]) <= 0:
+            continue
         rows.append({
             **row,
             "identity_card": "",
@@ -125,7 +139,6 @@ def _fetch_payables(target_month: str) -> list[dict]:
     rows.sort(key=lambda row: (
         row["outgoing_bank_code"],
         row["transfer_date"],
-        str(row["case_no"]),
         row["source_payment_id"],
     ))
     return rows

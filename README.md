@@ -1,5 +1,15 @@
 # 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
 
+## 2026-07-20 最近更新
+
+- 完成財務導入與核帳流程的第二階段：新增 Legacy / Sinopac / Taishin 匯入格式支援，並補齊帳務正規化驗證測試（`tests/imports/*`）。
+- 新增/修訂服務層與資料庫 schema：支援月嫂逐月薪酬、行政補助歸還、補助對帳流程、財務警報管道，並同步調整 `system_map`/`services_system_map`/`api_system_map`。
+- 新增「財務警報」後台頁面（`ui/pages/06_finance_alerts.py`）與對應 API/Service；並擴充測試覆蓋（帳務、補助、交易分類、交易指紋、匯入與移轉）。
+- 新增 ADAD 遷移腳本與資料清理腳本：`migrate_remove_other_addition.py`、`migrate_adad_task_snapshots.py`，確保欄位清理與快照遷移可受控執行。
+- 同步更新 `CHANGES_UI_CHANG.md`，並補齊新 schema 分拆 SQL（`db/schema_parts/*`）以便版本升級。
+
+---
+
 ## 2026-07 帳務與管理介面更新
 
 - 全系統訂單關聯鍵統一為 `case_no`，不再使用 `orders.id`／`order_id`。
