@@ -105,10 +105,20 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
+
+def _result(inserted=0, skipped_existing=0, review_required=0, failed=0):
+    return {
+        "inserted": inserted,
+        "skipped_existing": skipped_existing,
+        "review_required": review_required,
+        "failed": failed,
+    }
+
+
 def process_import(excel_path):
     if not os.path.exists(excel_path):
         print(f"\u932f\u8aa4\uff1a\u627e\u4e0d\u5230 Excel \u6a94\u6848\uff1a{excel_path}")
-        return 0, 0
+        return _result(review_required=1)
 
     print(f"\u89e3\u6790 Excel \u6a94\u6848\uff1a{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
@@ -130,7 +140,7 @@ def process_import(excel_path):
 
     if not target_sheet:
         print("\u672a\u627e\u5230\u5305\u542b '\u5ba2\u6236beclass' \u95dc\u9375\u5b57\u7684\u5de5\u4f5c\u8868\u3002\u8df3\u904e\u6b64\u6a94\u6848\u3002")
-        return 0, 0
+        return _result(review_required=1)
 
     df = xl.parse(target_sheet)
     print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
@@ -142,10 +152,11 @@ def process_import(excel_path):
         conn.commit()
     except Exception as e:
         print(f"\u8cc7\u6599\u5eab\u9023\u7dda\u5931\u6557\uff1a{e}")
-        return 0, 0
+        return _result(failed=1)
 
     inserted = 0
-    updated = 0
+    skipped_existing = 0
+    review_required = 0
 
     try:
         for _, row in df.iterrows():
@@ -176,52 +187,52 @@ def process_import(excel_path):
             birth_day = row.get('\u65e5')
             record['birth_date'] = clean_birth_date(birth_year, birth_month, birth_day)
 
-            name = record.get('name')
-            birth_date = record.get('birth_date')
-
-            # \u7d44\u5408\u552f\u4e00\u9375\uff1a\u59d3\u540d + \u51fa\u751f\u5e74\u6708\u65e5\uff0c\u5169\u8005\u7f3a\u4e00\u4e0d\u53ef
-            if not name or not birth_date:
+            query_no = record.get('query_no')
+            if not query_no:
+                review_required += 1
                 continue
-
             # \u5c07\u554f\u5377\u7d30\u9805 dict \u8f49\u70ba JSON
             record['survey_details'] = json.dumps(details, ensure_ascii=False)
 
-            # \u4ee5\u300c\u59d3\u540d + \u51fa\u751f\u5e74\u6708\u65e5\u300d\u7d44\u5408\u9375\u6bd4\u5c0d\u53bb\u91cd
+            # \u50c5\u4f7f\u7528 query_no \u67e5\u627e\u76f8\u95dc\u8cc7\u6599
             cursor.execute(
-                "SELECT id FROM beclass_records WHERE name = %s AND birth_date = %s",
-                (name, birth_date)
+                "SELECT COUNT(*) AS existing_cnt FROM beclass_records WHERE query_no = %s",
+                (query_no,)
             )
             existing = cursor.fetchone()
+            existing_cnt = int(existing[0]) if existing and existing[0] is not None else 0
 
-            if existing:
-                update_cols = []
-                val_list = []
-                for k, v in record.items():
-                    if k not in ['name', 'birth_date']:
-                        update_cols.append(f"`{k}` = %s")
-                        val_list.append(v)
-                val_list.extend([name, birth_date])
-                sql = f"UPDATE beclass_records SET {', '.join(update_cols)} WHERE name = %s AND birth_date = %s"
-                cursor.execute(sql, tuple(val_list))
-                updated += 1
-            else:
+            if existing_cnt == 0:
                 cols = ", ".join([f"`{k}`" for k in record.keys()])
                 places = ", ".join(["%s"] * len(record))
                 sql = f"INSERT INTO beclass_records ({cols}) VALUES ({places})"
                 cursor.execute(sql, tuple(record.values()))
                 inserted += 1
+            elif existing_cnt == 1:
+                skipped_existing += 1
+            else:
+                review_required += 1
 
         conn.commit()
-        print(f"\u532f\u5165\u6210\u529f\uff1a\u65b0\u589e {inserted} \u7b46\u5ba2\u6236 BeClass \u8cc7\u6599\uff0c\u66f4\u65b0 {updated} \u7b46\u5ba2\u6236 BeClass \u8cc7\u6599\u3002")
+        print(
+            f"\u532f\u5165\u5b8c\u6210\uff1a\u65b0\u589e {inserted} \u7b46\u5ba2\u6236 BeClass \u8cc7\u6599\uff0c"
+            f"\u7565\u904e {skipped_existing} \u7b46\u3001\u9700\u5be9\u67e5 {review_required} \u7b46\u3002"
+        )
     except Exception as err:
         conn.rollback()
         import traceback
         traceback.print_exc()
         print(f"\u57f7\u884c\u51fa\u932f\u5df2 Rollback\uff1a{err}")
+        return _result(
+            inserted=0,
+            skipped_existing=skipped_existing,
+            review_required=review_required,
+            failed=1
+        )
     finally:
         conn.close()
 
-    return inserted, updated
+    return _result(inserted=inserted, skipped_existing=skipped_existing, review_required=review_required)
 
 if __name__ == "__main__":
     excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/\u8cc7\u6599\u5eab\u3001\u8cc7\u6599\u8655\u7406/\u5047\u8cc7\u6599_\u7bc4\u4f8b.xlsx"

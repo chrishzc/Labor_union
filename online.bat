@@ -1,4 +1,6 @@
 @echo off
+setlocal
+cd /d "%~dp0"
 chcp 65001 >nul
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
@@ -22,11 +24,11 @@ if not exist .venv\Scripts\python.exe (
     pause
     exit /b 1
 )
-set PY=.venv\Scripts\python.exe
+set "PY=%CD%\.venv\Scripts\python.exe"
 
 :: 3. Wait for database
 echo [Step 3] Waiting for MySQL database to become ready...
-%PY% scripts/wait_for_db.py
+"%PY%" scripts/wait_for_db.py
 if %errorlevel% neq 0 (
     echo [Error] Database connection timeout!
     pause
@@ -39,13 +41,13 @@ echo ==========================================
 
 :: 4. Launch servers concurrently
 echo [Step 4] Launching FastAPI server...
-start "FastAPI Server" cmd /k ".venv\Scripts\uvicorn.exe api.main:app --port 8000"
+start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
 
 echo [Step 5] Launching Streamlit interface...
-start "Streamlit Client UI" cmd /k ".venv\Scripts\streamlit.exe run ui/app.py"
+start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
 
 echo [Step 6] Launching File Watcher Service...
-start "File Watcher" cmd /k ".venv\Scripts\python.exe scripts/file_watcher.py"
+start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
 
 echo ==========================================
 echo Lobar Union System online services are running!

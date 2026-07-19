@@ -1,5 +1,15 @@
 # UI_CHANG 變更說明
 
+## 2026-07-20
+
+### 近期版本更新
+- 財務匯入流程新增 Legacy / Sinopac / Taishin 匯入支援，並補齊 `tests/imports/*` 驗證案例。
+- `ui/pages/06_finance_alerts.py` 新增「財務警示」頁面，並補上 `api`、`services` 與 `ui` 對應測試。
+- 新增 ADAD 套件相關遷移腳本：`scripts/migrate_remove_other_addition.py`、`scripts/migrate_adad_task_snapshots.py`。
+- 更新 `CHANGES_UI_CHANG.md`、`db/schema_parts/*` 與 `system_map` 對齊本次變更。
+
+---
+
 ## 2026-07-15－帳務拆分、財務報表與契約介面
 
 ### 帳務明細總覽（Page 2）
