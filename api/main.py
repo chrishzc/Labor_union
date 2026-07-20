@@ -10,6 +10,7 @@ from api.routes import (
     client_payments,
     clients,
     contracts,
+    finance_alerts,
     finance_reports,
     holidays,
     line_system_config,
@@ -67,6 +68,7 @@ app.include_router(client_payments.router)
 app.include_router(staff_payments.router)
 app.include_router(contracts.router)
 app.include_router(finance_reports.router)
+app.include_router(finance_alerts.router)
 
 
 @app.get("/health", response_model=BaseResponse[dict], tags=["Health"])

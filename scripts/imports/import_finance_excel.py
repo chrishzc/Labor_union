@@ -8,9 +8,11 @@ client-payment snapshot is derived only from the order's service terms.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from decimal import Decimal
+from typing import Any, Mapping
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -23,7 +25,14 @@ load_dotenv(os.path.join(ROOT, ".env"))
 from services.client_payment_transactions import calculate_client_payment_state
 from services.client_payment_writer import build_client_summary_update
 from services.db_service import get_connection
+from services.client_receipt_reconciliation import reconcile_client_receipt
+from services.client_subsidy_return_transactions import record_client_subsidy_return
+from services.finance_identity_maps import load_finance_identity_maps
+from services.finance_import_staging import stage_finance_rows
+from services.government_subsidy_reconciliation import reconcile_government_subsidy
 from services.order_amount_calculator import calculate_order_amounts
+from services.staff_actual_transfers import reconcile_staff_actual_transfer
+from scripts.imports.finance_statement_normalizer import normalize_workbook
 
 
 PAYMENT_STAGES = (
@@ -282,6 +291,254 @@ def import_bank_transactions(df_tx: pd.DataFrame) -> dict[str, int]:
         conn.close()
 
 
+_STAFF_COMPONENTS = (
+    ("regular_salary", "service_salary"),
+    ("floor_fee", "floor_fee_amount"),
+    ("adjustment", "adjustment_amount"),
+)
+
+
+def _identity_ids(value: Any) -> list[int] | None:
+    """Decode the immutable classifier identity set without guessing."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(value, list):
+        return None
+    if any(isinstance(item, bool) or not isinstance(item, int) or item < 1 for item in value):
+        return None
+    return value
+
+
+def _load_dispatch_row(cursor: Any, row_id: int) -> Mapping[str, Any]:
+    cursor.execute(
+        """SELECT id, classification_type, matched_identity_ids,
+                  resolved_counterparty_account, debit
+           FROM finance_import_rows WHERE id=%s FOR UPDATE""",
+        (row_id,),
+    )
+    row = cursor.fetchone()
+    if not isinstance(row, Mapping):
+        raise RuntimeError("inserted finance import row was not found")
+    return row
+
+
+def _staff_transfer_candidates(
+    cursor: Any,
+    dispatch_row: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return exact, complete staff transfer plans; zero/many means review."""
+    staff_ids = _identity_ids(dispatch_row.get("matched_identity_ids"))
+    if staff_ids is None or len(staff_ids) != 1:
+        return []
+    try:
+        debit = Decimal(str(dispatch_row.get("debit")))
+    except Exception:
+        return []
+    if not debit.is_finite() or debit <= 0:
+        return []
+
+    classification_type = dispatch_row.get("classification_type")
+    payment_phase = (
+        "second_subsidy" if classification_type == "staff_legacy_subsidy" else None
+    )
+    if payment_phase is None and classification_type != "staff_salary":
+        return []
+
+    cursor.execute(
+        """SELECT id, staff_id
+           FROM staff_monthly_settlements
+           WHERE staff_id=%s AND status IN ('finalized','partially_paid')
+           ORDER BY settlement_month, id
+           FOR UPDATE""",
+        (staff_ids[0],),
+    )
+    settlements = cursor.fetchall()
+    plans: list[dict[str, Any]] = []
+    for settlement in settlements:
+        if not isinstance(settlement, Mapping):
+            raise TypeError("cursor must return mapping settlement rows")
+        settlement_id = settlement.get("id")
+        cursor.execute(
+            """SELECT id AS settlement_detail_id, service_salary,
+                      legacy_subsidy_payable, floor_fee_amount,
+                      adjustment_amount, legacy_subsidy_status, review_required
+               FROM staff_monthly_settlement_details
+               WHERE settlement_id=%s AND staff_id=%s
+               ORDER BY id
+               FOR UPDATE""",
+            (settlement_id, staff_ids[0]),
+        )
+        detail_rows = cursor.fetchall()
+        if not detail_rows:
+            continue
+
+        details: dict[int, Mapping[str, Any]] = {}
+        for row in detail_rows:
+            if not isinstance(row, Mapping):
+                raise TypeError("cursor must return mapping settlement detail rows")
+            detail_id = row.get("settlement_detail_id")
+            if isinstance(detail_id, bool) or not isinstance(detail_id, int):
+                raise ValueError("settlement detail id must be an integer")
+            details[detail_id] = row
+        cursor.execute(
+            """SELECT sta.settlement_detail_id, sta.component_type,
+                      sta.allocated_amount, sat.transaction_type
+               FROM staff_transfer_allocations sta
+               JOIN staff_actual_transfers sat ON sat.id=sta.transfer_id
+               WHERE sta.settlement_detail_id IN (
+                   SELECT id FROM staff_monthly_settlement_details
+                   WHERE settlement_id=%s
+               )
+                 AND sta.review_status='approved'
+                 AND sat.transaction_status='succeeded'
+               ORDER BY sta.id
+               FOR UPDATE""",
+            (settlement_id,),
+        )
+        paid: dict[tuple[int, str], Decimal] = {}
+        for row in cursor.fetchall():
+            if not isinstance(row, Mapping):
+                raise TypeError("cursor must return mapping allocation rows")
+            sign = Decimal("-1") if row.get("transaction_type") == "reversal" else Decimal("1")
+            key = (row.get("settlement_detail_id"), row.get("component_type"))
+            paid[key] = paid.get(key, Decimal("0")) + sign * Decimal(
+                str(row.get("allocated_amount") or 0)
+            )
+
+        phase = payment_phase
+        if phase is None:
+            has_legacy = any(
+                Decimal(str(detail.get("legacy_subsidy_payable") or 0)) > 0
+                for detail in details.values()
+            )
+            phase = "first_salary" if has_legacy else "normal"
+
+        components = (
+            (("legacy_subsidy", "legacy_subsidy_payable"),)
+            if phase == "second_subsidy"
+            else _STAFF_COMPONENTS
+        )
+        allocations: list[dict[str, Any]] = []
+        valid = True
+        for detail_id, detail in details.items():
+            if phase == "second_subsidy" and (
+                detail.get("legacy_subsidy_status") != "confirmed"
+                or bool(detail.get("review_required"))
+            ):
+                valid = False
+                break
+            for component_type, column in components:
+                amount = Decimal(str(detail.get(column) or 0))
+                remaining = amount - paid.get((detail_id, component_type), Decimal("0"))
+                if remaining < 0:
+                    valid = False
+                    break
+                if remaining > 0:
+                    allocations.append(
+                        {
+                            "settlement_detail_id": detail_id,
+                            "component_type": component_type,
+                            "allocated_amount": remaining,
+                            "allocation_method": "explicit",
+                        }
+                    )
+            if not valid:
+                break
+        if valid and allocations and sum(
+            (item["allocated_amount"] for item in allocations), Decimal("0")
+        ) == debit:
+            plans.append(
+                {
+                    "settlement_id": settlement_id,
+                    "payment_phase": phase,
+                    "allocations": allocations,
+                }
+            )
+    return plans
+
+
+def _dispatch_inserted_row(cursor: Any, staged_row: Mapping[str, Any]) -> dict[str, Any]:
+    row_id = int(staged_row["row_id"])
+    classification_type = staged_row.get("classification_type")
+    if classification_type == "client_receipt":
+        return reconcile_client_receipt(cursor, row_id)
+    if classification_type == "client_subsidy_return":
+        row = _load_dispatch_row(cursor, row_id)
+        identities = _identity_ids(row.get("matched_identity_ids"))
+        if identities is None or len(identities) != 1:
+            return {"result": "pending", "reason": "matched_identity_not_unique"}
+        return record_client_subsidy_return(cursor, identities[0], row_id)
+    if classification_type == "government_subsidy":
+        return reconcile_government_subsidy(cursor, row_id)
+    if classification_type in {"staff_salary", "staff_legacy_subsidy"}:
+        row = _load_dispatch_row(cursor, row_id)
+        plans = _staff_transfer_candidates(cursor, row)
+        if len(plans) != 1:
+            return {"result": "pending", "reason": "staff_transfer_plan_not_unique"}
+        plan = plans[0]
+        return reconcile_staff_actual_transfer(
+            cursor,
+            row_id,
+            plan["settlement_id"],
+            plan["payment_phase"],
+            plan["allocations"],
+        )
+    return {"result": "pending", "reason": "non_business_review"}
+
+
+def import_finance_workbook(excel_path: str) -> dict[str, Any]:
+    """Normalize, append-only stage, and reconcile one workbook atomically."""
+    normalized_result = normalize_workbook(excel_path)
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            identity_maps = load_finance_identity_maps(cursor)
+            staging = stage_finance_rows(cursor, normalized_result, identity_maps)
+            inserted_rows = 0
+            skipped_existing = 0
+            pending_rows: list[int] = []
+            reconciled_counts: dict[str, int] = {}
+            for staged_row in staging["staged_rows"]:
+                if staged_row.get("result") == "skipped_existing":
+                    skipped_existing += 1
+                    continue
+                inserted_rows += 1
+                result = _dispatch_inserted_row(cursor, staged_row)
+                row_id = int(staged_row["row_id"])
+                if result.get("result") in {"reconciled", "existing"}:
+                    classification_type = str(staged_row.get("classification_type"))
+                    reconciled_counts[classification_type] = (
+                        reconciled_counts.get(classification_type, 0) + 1
+                    )
+                else:
+                    pending_rows.append(row_id)
+            cursor.execute(
+                """UPDATE finance_import_batches
+                   SET status='completed', completed_at=CURRENT_TIMESTAMP,
+                       failure_message=NULL
+                   WHERE id=%s AND status='staged'""",
+                (staging["batch_id"],),
+            )
+            if getattr(cursor, "rowcount", 1) != 1:
+                raise RuntimeError("finance import batch completion failed")
+        connection.commit()
+        return {
+            "batch_id": staging["batch_id"],
+            "inserted_rows": inserted_rows,
+            "skipped_existing": skipped_existing,
+            "reconciled_counts": reconciled_counts,
+            "pending_rows": pending_rows,
+        }
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description="Import finance Excel data")
     parser.add_argument("--check", action="store_true", help="Only verify readiness")
@@ -292,9 +549,11 @@ def main():
         return 0
     if not os.path.exists(args.excel_path):
         raise FileNotFoundError(f"找不到帳務 Excel：{args.excel_path}")
-    result = import_bank_transactions(load_transactions(pd.ExcelFile(args.excel_path)))
-    print(f"已匯入客戶交易：{result['imported_client_transactions']}")
-    print(f"略過交易：{result['skipped_transactions']}")
+    result = import_finance_workbook(args.excel_path)
+    print(f"batch_id: {result['batch_id']}")
+    print(f"inserted_rows: {result['inserted_rows']}")
+    print(f"skipped_existing: {result['skipped_existing']}")
+    print(f"pending_rows: {len(result['pending_rows'])}")
     return 0
 
 

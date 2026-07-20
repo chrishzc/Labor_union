@@ -1,57 +1,112 @@
+"""Read-only preparation of monthly staff settlement bank transfers."""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from decimal import Decimal
+import re
+from typing import Any
+
 from services.db_service import get_connection
 
 
-def prepare_monthly_payments(target_month: str) -> list[dict]:
-    """
-    Prepare unpaid staff payments (pending or partially_paid) due in the target_month (e.g., '2026-07').
-    Returns a list of dicts, each containing:
-      - staff_payment_id: int
-      - case_no: str
-      - staff_id: int
-      - due_date: str (YYYY-MM-DD)
-      - total_payable: float
-      - amount_paid: float
-      - remaining_amount: float
-    """
-    try:
-        parts = target_month.split("-")
-        year = int(parts[0])
-        month = int(parts[1])
-    except (ValueError, IndexError):
+def _month_start(target_month: str) -> date:
+    if not isinstance(target_month, str) or not re.fullmatch(
+        r"\d{4}-(0[1-9]|1[0-2])", target_month
+    ):
         raise ValueError("Invalid target_month format. Expected 'YYYY-MM'.")
+    return datetime.strptime(target_month, "%Y-%m").date().replace(day=1)
 
-    import calendar
-    _, last_day = calendar.monthrange(year, month)
-    start_date = f"{year:04d}-{month:02d}-01"
-    end_date = f"{year:04d}-{month:02d}-{last_day:02d}"
 
-    conn = get_connection()
+def _money(value: Any) -> Decimal:
+    return Decimal(str(value or 0))
+
+
+def prepare_monthly_payments(target_month: str) -> list[dict]:
+    """Return one payable row per finalized monthly staff settlement.
+
+    The salary month comes exclusively from ``settlement_month``.  Bank dates
+    are not used to infer it, and this read-only preparation never creates a
+    transfer or changes a settlement.
+    """
+    settlement_month = _month_start(target_month)
+    connection = get_connection()
     try:
-        with conn.cursor() as cursor:
-            cursor.execute("""
-                SELECT id, case_no, staff_id, due_date, total_payable, amount_paid, payment_status
-                FROM staff_payments
-                WHERE due_date >= %s AND due_date <= %s
-                  AND payment_status IN ('pending', 'partially_paid')
-                ORDER BY due_date ASC, id ASC
-            """, (start_date, end_date))
-            
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT sms.id AS settlement_id,
+                       sms.staff_id,
+                       sms.total_payable,
+                       sms.total_paid,
+                       smsd.staff_payment_id,
+                       smsd.case_no,
+                       sp.due_date
+                FROM staff_monthly_settlements sms
+                JOIN staff_monthly_settlement_details smsd
+                  ON smsd.settlement_id = sms.id
+                JOIN staff_payments sp
+                  ON sp.id = smsd.staff_payment_id
+                WHERE sms.settlement_month = %s
+                  AND sms.status IN ('finalized', 'partially_paid')
+                  AND sms.total_payable - sms.total_paid > 0
+                ORDER BY sms.id, smsd.id
+                """,
+                (settlement_month,),
+            )
             rows = cursor.fetchall()
-            results = []
-            for row in rows:
-                total = float(row["total_payable"])
-                paid = float(row["amount_paid"])
-                remaining = total - paid
-                if remaining > 0:
-                    results.append({
-                        "staff_payment_id": row["id"],
-                        "case_no": row["case_no"],
-                        "staff_id": row["staff_id"],
-                        "due_date": row["due_date"].strftime("%Y-%m-%d") if row["due_date"] else None,
-                        "total_payable": total,
-                        "amount_paid": paid,
-                        "remaining_amount": remaining
-                    })
-            return results
     finally:
-        conn.close()
+        connection.close()
+
+    grouped: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        settlement_id = int(row["settlement_id"])
+        group = grouped.setdefault(
+            settlement_id,
+            {
+                "settlement_id": settlement_id,
+                "staff_id": int(row["staff_id"]),
+                "total_payable": _money(row["total_payable"]),
+                "total_paid": _money(row["total_paid"]),
+                "case_nos": [],
+                "staff_payment_ids": [],
+                "due_dates": set(),
+                "missing_due_date": False,
+            },
+        )
+        if int(row["staff_id"]) != group["staff_id"]:
+            raise ValueError("settlement details contain inconsistent staff_id")
+
+        staff_payment_id = int(row["staff_payment_id"])
+        if staff_payment_id not in group["staff_payment_ids"]:
+            group["staff_payment_ids"].append(staff_payment_id)
+        case_no = str(row["case_no"])
+        if case_no not in group["case_nos"]:
+            group["case_nos"].append(case_no)
+
+        due_date = row["due_date"]
+        if due_date is None:
+            group["missing_due_date"] = True
+        else:
+            group["due_dates"].add(due_date)
+
+    preparation_rows = []
+    for group in grouped.values():
+        remaining = group["total_payable"] - group["total_paid"]
+        if (
+            remaining <= 0
+            or group["missing_due_date"]
+            or len(group["due_dates"]) != 1
+        ):
+            continue
+        transfer_date = next(iter(group.pop("due_dates")))
+        group.pop("missing_due_date")
+        preparation_rows.append(
+            {
+                **group,
+                "transfer_date": transfer_date,
+                "remaining_amount": remaining,
+            }
+        )
+
+    return preparation_rows

@@ -1,0 +1,107 @@
+from __future__ import annotations
+
+import importlib
+import json
+
+import pandas as pd
+
+
+beclass = importlib.import_module("scripts.imports.import_client_beclass")
+
+
+class Cursor:
+    def __init__(self, counts=None, fail_on=None):
+        self.counts = counts or {}
+        self.fail_on = fail_on
+        self.calls = []
+        self.current_query_no = None
+
+    def execute(self, sql, params=None):
+        compact = " ".join(sql.split())
+        self.calls.append((compact, params))
+        if self.fail_on and self.fail_on in compact:
+            raise RuntimeError("injected insert failure")
+        if compact.startswith("SELECT COUNT(*) AS existing_cnt FROM beclass_records"):
+            self.current_query_no = params[0]
+
+    def fetchone(self):
+        return (self.counts.get(self.current_query_no, 0),)
+
+
+class Connection:
+    def __init__(self, cursor):
+        self.cursor_value = cursor
+        self.rollbacks = 0
+        self.closed = False
+
+    def cursor(self):
+        return self.cursor_value
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        self.rollbacks += 1
+
+    def close(self):
+        self.closed = True
+
+
+class Workbook:
+    sheet_names = ["客戶 BeClass"]
+
+    def __init__(self, frame):
+        self.frame = frame
+
+    def parse(self, sheet_name):
+        assert sheet_name == "客戶 BeClass"
+        return self.frame
+
+
+def _patch_import(monkeypatch, frame, connection):
+    monkeypatch.setattr(beclass.os.path, "exists", lambda _path: True)
+    monkeypatch.setattr(beclass.pd, "ExcelFile", lambda _path: Workbook(frame))
+    monkeypatch.setattr(beclass.pymysql, "connect", lambda **_kwargs: connection)
+
+
+def test_query_no_is_the_only_deduplication_key(monkeypatch):
+    frame = pd.DataFrame([
+        {"查詢序號": "new-001", "姓名": "同名客戶", "出生年": 80, "月": 1, "日": 2, "問卷答案": "保留內容"},
+        {"查詢序號": "old-001", "姓名": "同名客戶", "出生年": 80, "月": 1, "日": 2, "問卷答案": "不得覆寫"},
+        {"查詢序號": "dup-001", "姓名": "衝突客戶"},
+        {"查詢序號": None, "姓名": "缺查詢序號"},
+    ])
+    cursor = Cursor(counts={"old-001": 1, "dup-001": 2})
+    connection = Connection(cursor)
+    _patch_import(monkeypatch, frame, connection)
+
+    result = beclass.process_import("client-beclass.xlsx")
+    statements = [sql for sql, _ in cursor.calls]
+
+    assert result == {"inserted": 1, "skipped_existing": 1, "review_required": 2, "failed": 0}
+    assert not any(sql.startswith("UPDATE") for sql in statements)
+    assert sum(sql.startswith("INSERT INTO beclass_records") for sql in statements) == 1
+
+    insert_sql, insert_params = next(
+        (sql, params) for sql, params in cursor.calls if sql.startswith("INSERT INTO beclass_records")
+    )
+    columns = [part.strip().strip("`") for part in insert_sql.split("(", 1)[1].split(")", 1)[0].split(",")]
+    inserted_record = dict(zip(columns, insert_params))
+    assert inserted_record["query_no"] == "new-001"
+    assert json.loads(inserted_record["survey_details"]) == {"問卷答案": "保留內容"}
+    assert connection.rollbacks == 0
+    assert connection.closed is True
+
+
+def test_insert_failure_rolls_back(monkeypatch):
+    frame = pd.DataFrame([{"查詢序號": "new-001", "姓名": "新客戶", "問卷答案": "完整內容"}])
+    cursor = Cursor(fail_on="INSERT INTO beclass_records")
+    connection = Connection(cursor)
+    _patch_import(monkeypatch, frame, connection)
+
+    result = beclass.process_import("client-beclass.xlsx")
+
+    assert result["inserted"] == 0
+    assert result["failed"] == 1
+    assert connection.rollbacks == 1
+    assert connection.closed is True

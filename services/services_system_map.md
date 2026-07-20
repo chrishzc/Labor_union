@@ -1,34 +1,1194 @@
-# Services Functional Layer Sub-System Map (Version 35.0)
+# Services System Map
 
-> **Scope**: `services/` 數據服務層  
-> **Master Reference**: [`../system_map.yaml`](file:///c:/Users/chris/Desktop/project/Labor_union/system_map.yaml)
-
----
-
-### 🏛️ Services 功能層模組全覽表
+- Version: 36
 
 ##### Module: DbService
-- Source: services/db_service.py
+- Sub Map: services_layer
 - Type: service
 - State: `validated`
-- Description: 主資料庫與 CRUD 操作服務；訂單公開識別一律使用唯一 `case_no`，並以同一案件編號載入 BeClass 服務細項。
+- Source: services/db_service.py::safe_float,safe_int,safe_date,generate_virtual_account,get_connection,_resolve_case_no,get_order_by_case_no,get_table_data,update_table_row,parse_beclass_survey_details,get_order_details,get_case_order_details,create_order,assign_staff_to_order,update_order_status,update_order_full_details,add_or_update_holiday,delete_holiday,get_staff_monthly_schedule,save_order_rest_dates,generate_default_schedule,update_schedule_day,get_order_matches,create_or_get_match_record,update_matching_info_sent,reply_matching_inquiry,parse_client_district
+- Dependencies: [InitDB]
+- Description: 主資料庫與 CRUD 操作服務；訂單公開識別一律使用唯一 case_no，並以同一案件編號載入 BeClass 服務細項。
+- Complexity: low
+- Input:
+  - case_no: 訂單唯一公開識別鍵。
+  - create_order_fields: service_days、service_hours_per_day、subsidy_eligibility、floor_fee、日期與 status。
+- Output:
+  - order_record: 以 case_no 識別的訂單資料；不得含 other_addition。
+  - created_order: 保留 floor_fee 與既有 client_payments 初始化的新增訂單結果。
 - Invariants:
-  - `INV-SVC-03`: `DbService` 必須自動辨識與解析 `notes` / `care_details` 欄位中的 JSON 結構，解開完整 15 項產婦照顧與環境細節欄位，打平注入訂單字典中。
-  - `INV-SVC-06`: 服務層所有訂單、媒合與排班公開介面只能使用唯一 `case_no`；過渡期 legacy ID 僅能在資料庫雙寫內部使用。
-  - `INV-SVC-07`: BeClass 服務細項只能透過 `beclass_records.query_no = case_no` 一對一載入，不得以客戶姓名推測關聯。
+  - INV-SVC-03: DbService 必須自動辨識與解析 notes / care_details 欄位中的 JSON 結構，解開完整 15 項產婦照顧與環境細節欄位，打平注入訂單字典中。
+  - INV-SVC-06: 服務層所有訂單、媒合與排班公開介面只能使用唯一 case_no；過渡期 legacy ID 僅能在資料庫雙寫內部使用。
+  - INV-SVC-07: BeClass 服務細項只能透過 beclass_records.query_no = case_no 一對一載入，不得以客戶姓名推測關聯。
+  - get_order_by_case_no() 的 SELECT、create_order() 的函式簽名與 INSERT 欄位／值均不得出現 other_addition。
+  - floor_fee 必須維持獨立欄位；不得合併至 service_salary 或以 other_addition 替代。
+  - create_order() 必須維持 case_no 正規化與 client_payments 初始化行為。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_db_service_order_other_addition_removal.py"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\db_service.py"], "cwd": "project", "expect_exit": 0}
+- Non Goals:
+  - 不修改 db/schema.sql 或執行資料庫 migration。
+  - 不修改 DataBrowserUI 的舊欄位標籤、PaymentSchema 或其他 DbService 函式。
+- Observability: not_required
 
 ##### Module: RecommendService
-- Source: services/db_service.py::get_recommended_staff_for_order
+- Sub Map: services_layer
 - Type: service
 - State: `validated`
-- Description: 月嫂與客戶條件智慧粗篩比對引擎。比對 `clients.city`/`address` 與 `staff.service_regions` (如香山區/北區/東區)，自動掃描檔期時間衝突 (包含 7 天預留備用期)，並精算匹配分數與推薦列表。
+- Source: services/db_service.py::get_recommended_staff_for_order
+- Description: 月嫂與客戶條件智慧粗篩比對引擎。比對 clients.city/address 與 staff.service_regions，掃描檔期重疊 (含 7 天預留備用期)，並精算匹配分與推薦列表。
+- Complexity: low
 - Invariants:
-  - `INV-SVC-05`: 檔期衝突掃描必須將月嫂既有訂單之結束日自動加上 7 天預留備用期 `[start_date, end_date + 7天]`，嚴禁在備用期內重複指派。
+  - INV-SVC-05: 檔期衝突掃描必須將月嫂既有訂單之結束日自動加上 7 天預留備用期 [start_date, end_date + 7天]，嚴禁在備用期內重複指派。
+- Observability: not_required
 
 ##### Module: CalendarService
-- Source: services/db_service.py::calculate_attendance_schedule
+- Sub Map: services_layer
 - Type: service
-- Description: 排班與行事曆精算引擎。包含出勤天數精算、每週預設排休帶入、動態休假順延計算與國定假日加給計費。
+- State: `validated`
+- Source: services/db_service.py::calculate_attendance_schedule
+- Description: 排班與行事曆精算引擎。包含 calculate_attendance_schedule 出勤天數精算、每週預設排休帶入、動態休假順延計算與國定假日加給計費。
+- Complexity: low
 - Invariants:
-  - `INV-SVC-01`: `calculate_attendance_schedule` 必須依據 `service_mode` 自動鎖定週休1日 (週日) 或週休2日 (週六日) 的每週排休。
-  - `INV-SVC-02`: `custom_holiday_rest_dates` 為 None 時，預設將服務區間內所有國定假日全數納入放假順延。
+  - INV-SVC-01: calculate_attendance_schedule 必須依據 service_mode 自動鎖定週休1日 (週日) 或週休2日 (週六日) 的每週排休。
+  - INV-SVC-02: custom_holiday_rest_dates 為 None 時，預設將服務區間內所有國定假日全數納入放假順延。
+- Observability: not_required
+
+##### Module: PaymentRules
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/payment_rules.py::evaluate_payment_boundary
+- Description: 提供可獨立測試的帳務邊界規則：服務指派時數與樓層費分配、同月嫂跨案待付款，以及成功／失敗／沖正交易的淨額計算。
+- Complexity: medium
+- Input:
+  - scenario: assignment_allocation, staff_portfolio or transaction_net
+  - payment_data: scenario-specific amounts, assignments or transactions
+- Output:
+  - validation_result: accepted totals or explicit validation error
+- Algorithm:
+  - 服務指派時數與樓層費必須為非負值，且加總不得超過訂單總時數與樓層費；結案時兩者必須分別恰等於訂單數值。
+  - 同月嫂的待付款依每筆服務指派／case_no 獨立計數，不以 staff_id 覆蓋或合併案件。
+  - 只有成功交易計入淨額；失敗交易忽略，沖正與退匯以反向金額抵銷原成功交易。
+- Invariants:
+  - 不得將同一案件的完整樓層費重複分配給多位月嫂。
+  - 不得以 `orders.staff_id` 推測服務指派或月嫂應付款。
+  - 交易金額必須大於零；重複外部交易識別必須被拒絕。
+- Verification:
+  - case: {"input": {"scenario": "assignment_allocation", "order_hours": 180, "floor_fee": 900, "finalized": true, "assignments": [{"staff_id": 7, "hours": 45, "floor_fee": 300}, {"staff_id": 9, "hours": 135, "floor_fee": 600}]}, "expect": {"valid": true, "assigned_hours": 180, "allocated_floor_fee": 900}}
+  - case: {"input": {"scenario": "staff_portfolio", "staff_id": 7, "payments": [{"case_no": "115000001", "status": "pending"}, {"case_no": "115000002", "status": "pending"}]}, "expect": {"valid": true, "pending_payment_count": 2, "case_count": 2}}
+  - case: {"input": {"scenario": "transaction_net", "positive_types": ["transfer"], "negative_types": ["return", "reversal"], "transactions": [{"external_reference": "a", "transaction_type": "transfer", "transaction_status": "succeeded", "amount": 1000}, {"external_reference": "b", "transaction_type": "transfer", "transaction_status": "failed", "amount": 500}, {"external_reference": "c", "transaction_type": "return", "transaction_status": "succeeded", "amount": 250}]}, "expect": {"valid": true, "net_amount": 750}}
+- Observability: not_required
+
+##### Module: OrderAmountCalculator
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/order_amount_calculator.py
+- Description: Pure source-of-truth calculation for proposed client receivables, staff payables, subsidy claims, and payment dates before any ledger snapshot is written.
+- Complexity: medium
+- Input:
+  - order_terms: case_no, claim total days/hours, service start date, subsidy eligibility, client floor-fee amount, and actual completion date
+  - assignments: optional staff service segments with their own hours, rate, and allocated floor fee
+  - collection_schedule: contract-selected deposit day count and deposit due date; first/second stage days and dates are derived by rule
+- Output:
+  - client_ledger_plan: three receivable stages, total prepaid amount, and reserved subsidy-return amount
+  - staff_payment_plans: one payable per assignment, with salary, floor fee, and due date
+  - subsidy_plan: claim amount, completion quarter, application month, and eligibility flag
+- Algorithm:
+  - Derive subsidy hours from eligibility and total service hours: general citizen min(40, total service hours), subsidized citizen min(120, total service hours), non-citizen 0; reject invalid stage day counts and assignment totals above the order total.
+  - Derive client rate from eligibility: non-citizen 350, general citizen 300, full-subsidy citizen 0. Calculate client receivables with that rate and explicit client floor fee. First stage days equal min(15, max(0, claim total days minus deposit days)); second stage days equal the remaining days.
+  - Calculate each staff payable from its assignment snapshot, keeping service salary and floor fee separate; no adjustment is applied here.
+  - Calculate the case-level government subsidy claim by allocating subsidy hours across staff assignments in proportion to actual service hours, then summing allocated hours times each staff service rate. If the client prepaid subsidy amount is positive, reserve that amount as subsidy return; a zero client rate produces no client refund even when subsidy hours are positive.
+  - First payment due date equals service start date. The second payment due date is initially null; after the first payment is fully received, ClientPaymentWriteService persists its actual received date plus 15 days. If second stage days are zero, its persisted date remains null and the UI displays 0. Derive staff due date from completion date: next month 15th when client receivable is positive, otherwise the following month 15th; derive subsidy claim quarter and its next-quarter application month.
+- Invariants:
+  - The calculator is pure and must not import database, UI, or transaction-writing modules.
+  - Returned totals are proposals only; persisted payment rows remain immutable snapshots, and manual adjustments are stored separately by ledger writers.
+  - A full-subsidy case with client rate zero must have zero client receivable and zero subsidy-return amount.
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_amount_calculator.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: AccountingSourceProjection
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/accounting_source_projection.py
+- Description: Read a case's accounting source facts from normalized raw tables, without using legacy payment tables or computed order views.
+- Complexity: medium
+- Input:
+  - case_no: canonical case identifier
+- Output:
+  - accounting_source: raw client, BeClass, order, and staff-assignment facts keyed by case_no
+  - missing_terms: explicit list of contract schedule terms absent from raw data and therefore not eligible for implicit defaults
+- Algorithm:
+  - Read client identity/contact facts from clients, order service facts from orders, and original application/refund facts from beclass_records by query_no = case_no.
+  - Read every staff service segment from case_staff_assignments joined to staff; preserve each segment's actual/planned hours, hourly rate, and allocated floor fee.
+  - Return raw source values only. Do not query payments, client_payments, staff_payments, v_order_details, or use fixed subsidy/rate fallbacks.
+  - Flag missing contract schedule dates/day splits so the caller must supply the dates selected in the order form before invoking OrderAmountCalculator.
+- Invariants:
+  - All source reads use case_no; no orders.id or order_id is selected or accepted.
+  - Client data comes from clients and beclass_records; staff recipient data comes from staff and case_staff_assignments.
+  - Missing money inputs are explicit errors/gaps, never replaced by legacy fixed values.
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_accounting_source_projection.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: PaymentService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/payment_service.py
+- Description: 提供新帳務表的服務指派、月嫂應付與轉帳寫入服務；所有金額先經 PaymentRules 驗證，舊 payments 不得被讀寫。
+- Complexity: medium
+- Input:
+  - case_no: canonical order identifier
+  - assignment: staff, hours, hourly rate and floor-fee allocation
+  - staff_payment: assignment-linked payable and transfer transaction
+- Output:
+  - case_staff_assignment: validated service segment
+  - staff_payment: assignment-linked payable with recalculated paid amount
+- Algorithm:
+  - 建立服務指派前鎖定案件既有分配，交由 PaymentRules 驗證時數與樓層費上限後寫入 case_staff_assignments。
+  - 月嫂應付只能由 assignment_id 建立；服務薪資、樓層費與調整金額計算 total_payable，不從 orders.staff_id 推測。
+  - 寫入月嫂交易前驗證外部識別不重複，依成功轉帳、退匯與沖正重新計算 amount_paid 與 payment_status。
+- Invariants:
+  - 不得讀寫 legacy payments 表。
+  - 月嫂應付必須關聯一筆正式服務指派；同一指派最多一筆應付摘要。
+  - 任何新交易的 external_reference 重複時必須拒絕，失敗交易不得增加 amount_paid。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_payment_service.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: StaffPaymentTransactionService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/staff_payment_transactions.py
+- Description: 記錄月嫂實際轉帳、失敗、退匯與沖正，並以成功交易淨額重算 staff_payments.amount_paid、paid_at 與 payment_status。
+- Complexity: medium
+- Input:
+  - staff_payment_id: assignment-linked payable identifier
+  - transaction: type, status, amount, occurred_at and external_reference
+- Output:
+  - staff_payment_state: recalculated amount_paid and payment_status
+- Algorithm:
+  - 鎖定 staff_payments 與既有交易，拒絕重複 external_reference。
+  - 寫入新交易後，以 PaymentRules 將成功 transfer 加總、成功 return/reversal 扣回，失敗交易不計入。
+  - 淨額為零時為 pending；介於零與 total_payable 為 partially_paid；等於 total_payable 為 paid；不得超過應付總額。
+- Invariants:
+  - 不得修改 staff_payments.total_payable 或其他服務指派金額。
+  - failed 交易不得增加 amount_paid；重複 external_reference 必須拒絕。
+  - 只讀寫 staff_payments 與 staff_payment_transactions，不得讀寫 client_payments 或 legacy payments。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_staff_payment_transactions.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: ClientPaymentTransactionService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/client_payment_transactions.py
+- Description: 重算客戶訂金、第一期、第二期實收；退還補助金額尚未啟用，不參與目前交易計算。
+- Complexity: medium
+- Input:
+  - client_payment_id: case-linked client ledger identifier
+  - transaction: stage, type, status, amount, occurred_at and external_reference
+- Output:
+  - client_payment_state: recalculated stage totals and settlement dates
+- Algorithm:
+  - 鎖定客戶帳務與既有交易，拒絕重複 external_reference。
+  - 訂金／第一期／第二期僅以 receipt 減 reversal 計入實收；不得接受 subsidy_refund、subsidy_return 或 refund 交易。
+  - 每一階段淨額不得為負或超過該階段應收；三階段實收加總為 amount_received。
+- Invariants:
+  - 不得讀寫 staff_payments、staff_payment_transactions 或 legacy payments。
+  - failed 交易不得改變摘要；重複 external_reference 必須拒絕。
+  - 退還補助欄位不參與目前的計算或寫入。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_transactions.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: ClientPaymentWriteService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/client_payment_writer.py
+- Description: 將客戶金流交易實際寫入新表，並依所有交易重算客戶帳務摘要與各期結清日。
+- Complexity: medium
+- Input:
+  - cursor: 由呼叫端持有 transaction 的 cursor；既有 API wrapper 可自行建立連線後呼叫同一核心
+  - client_payment_id: case-linked client ledger identifier
+  - transaction: stage、type、status、amount、occurred_at、external_reference 與可空 finance_import_row_id
+- Output:
+  - transaction_id: 新增或完全相同既有交易的 id
+  - client_payment_state: persisted stage receipts, subsidy refund and amount_received
+- Algorithm:
+  - 鎖定客戶帳務與既有交易，將候選交易先交 ClientPaymentTransactionService 計算，超額或重複識別一律回滾。
+  - 寫入交易，再重算訂金、第一期、第二期摘要；只有三個收款階段計入 amount_received，退款功能暫不啟用。
+  - 階段淨額首度等於應收時記錄完成日；應收為零的階段不得產生完成日。第一期首度結清時，若第二期應收大於零，將第二期應收日設為第一期實收日加 15 天；第一期遭沖正而未結清時清空該日期。
+  - 訂金首次全額核銷時，僅將目前為洽談中的同一 case_no 案件自動更新為訂單成立；歷史資料仍可在單筆訂單頁以受稽核的人工流程建立。
+- Invariants:
+  - cursor-bound 核心不得自行建立連線、commit、rollback 或 close；銀行核銷交易必須填 finance_import_row_id，人工補登可為 NULL。
+  - 完全相同 external_reference 的重試只可回 existing transaction id；內容不同或只存在部分預期交易時必須拒絕，不得覆寫。
+  - 不得讀寫 staff_* 或 legacy payments 表。
+  - failed 交易不得改變任何摘要金額或結清日。
+  - subsidy_refund 與 subsidy_return 不得計入 amount_received 或寫入目前流程。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_writer.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceNormalizedRowValidator
+- Sub Map: services_layer
+- Type: import_contract
+- State: `planned`
+- Source: scripts/imports/finance_normalized_row.py::validate_normalized_row
+- Description: 定義三種銀行格式共用的正規化流水列契約，並在事件分類或資料庫寫入前驗證欄位與型別。
+- Complexity: medium
+- Input:
+  - row: 待驗證的正規化銀行流水列
+- Output:
+  - validated_row: 通過契約且不改變原值的流水列
+- Invariants:
+  - 必要欄位固定為 format_id、source_file、source_bank_account、sheet_name、source_row、source_reference、transaction_date、transaction_time、posting_date、value_date、debit、credit、direction、balance、currency、summary、memo、counterparty_name、counterparty_account、cancellation_code、bank_references、warnings、raw_payload。
+  - format_id 只允許 legacy、taishin、sinopac；normalized row 只保存 Excel 一基底的 source_row。header_row 僅屬 adapter 的定位輸入，不是 normalized row 欄位。
+  - 日期使用 ISO `YYYY-MM-DD` 字串，時間使用 ISO `HH:MM:SS` 字串；未知值使用 None，不得用空字串代替。
+  - debit、credit 與 balance 使用 Decimal 或 None；direction 只允許 incoming、outgoing、unknown。只有單側正金額可判 incoming 或 outgoing，其餘必須為 unknown 並附警示。
+  - identifiers 與 bank_references 的值使用字串或 None，保留前導零；source_reference 在銀行唯一識別優先序未確認前必須為 None。
+  - warnings 為不重複的字串陣列；raw_payload 使用來源原始表頭文字作 key，值必須為 JSON-safe scalar，且不得修改活頁簿或寫資料庫。
+- Algorithm:
+  - 檢查精確必要欄位、列號、enum、ISO 日期時間、Decimal 金額、字串 identifiers、warnings 及 raw_payload 型別。
+  - 依 debit/credit 驗證 direction 一致性；無法唯一判斷方向時要求 unknown 且至少有 direction_ambiguous 或 direction_missing 警示。
+  - 驗證成功時原樣回傳輸入列，失敗時列出欄位級錯誤。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_normalized_row.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceStatementFormatDetector
+- Sub Map: services_layer
+- Type: import_adapter
+- State: `planned`
+- Source: scripts/imports/finance_formats/detector.py::detect_statement_format
+- Description: 依工作表名稱與表頭內容辨識歷史、台新、永豐三種銀行對帳單格式，不依賴檔名。
+- Complexity: medium
+- Input:
+  - excel_path: 待辨識的 Excel 路徑
+- Output:
+  - format_id: legacy、taishin 或 sinopac
+  - sheet_name: 找到有效表頭的工作表名稱
+  - header_row: 一基底表頭列號
+- Invariants:
+  - 必須掃描所有工作表的前 40 列，且檔名變更不得影響結果。
+  - 只有唯一格式符合時才能成功；零個或多個格式符合時必須回傳明確錯誤。
+  - 不得匯入資料庫模組、分類交易類型或修改活頁簿。
+- Algorithm:
+  - 以各格式必要欄位集合與可接受工作表名稱提示評分，工作表名稱只能協助判斷，不能取代表頭必要欄位。
+  - 回傳唯一符合格式、實際工作表名稱與表頭列；保留診斷資訊供上層顯示。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_format_detector.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceTransactionFingerprint
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_transaction_fingerprint.py::build_dedup_fingerprint
+- Dependencies: [FinanceNormalizedRowValidator]
+- Description: 由銀行流水的穩定交易特徵建立系統 SHA-256 去重指紋，只用於跨檔案辨識同一銀行列，不宣稱為銀行原生流水號。
+- Complexity: medium
+- Input:
+  - normalized_row: 通過 FinanceNormalizedRowValidator 的流水列
+- Output:
+  - dedup_fingerprint: 64 字元小寫 SHA-256 hex
+- Invariants:
+  - 固定欄位順序為銀行來源、本方帳號、交易日期、交易時間、方向、支出、存入、交易後餘額、摘要、原始備註及銷帳編號。
+  - legacy 與 sinopac 正規化為同一銀行來源；不得包含檔名、工作表、Excel 列號或會重置的台新序號。
+  - 文字採 Unicode NFKC 及空白正規化；金額採固定兩位 Decimal；空值採固定空字串。
+  - 指紋只判斷同一銀行列被重複帶入；不得把同秒同備註但其他交易特徵不同的兩筆實際交易合併。
+- Algorithm:
+  - 驗證 normalized row，依固定規則正規化各穩定欄位，以不可歧義分隔方式串接後計算 SHA-256。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_transaction_fingerprint.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: LegacyFinanceStatementAdapter
+- Sub Map: services_layer
+- Type: import_adapter
+- State: `planned`
+- Source: scripts/imports/finance_formats/legacy.py::normalize_legacy_rows
+- Dependencies: [FinanceNormalizedRowValidator]
+- Description: 從多分頁歷史對帳單找到指定表頭並轉為共用銀行流水列，不依賴固定分頁位置。
+- Complexity: medium
+- Input:
+  - excel_path: 歷史對帳單路徑
+  - sheet_name: 格式偵測器辨識的工作表
+  - header_row: 格式偵測器辨識的表頭列
+- Output:
+  - normalized_rows: 共用銀行流水列序列
+- Invariants:
+  - 必須以表頭名稱取欄，不得以固定欄號、分頁索引或檔名取值。
+  - 帳號、銷帳編號及銀行參考號必須以字串保留前導零；原始列須完整保存在 raw_payload。
+  - 每列只判斷支出或存入方向，不得判斷業務交易類型或寫資料庫。
+- Algorithm:
+  - 讀取偵測到的工作表與表頭，略過空白及合計列，正規化日期、金額、摘要、備註、帳號、銷帳編號與來源參考號。
+  - 無法安全轉換的列保留列號及警示，不得用姓名或金額猜測缺少欄位。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_legacy_finance_adapter.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: TaishinFinanceStatementAdapter
+- Sub Map: services_layer
+- Type: import_adapter
+- State: `planned`
+- Source: scripts/imports/finance_formats/taishin.py::normalize_taishin_rows
+- Dependencies: [FinanceNormalizedRowValidator]
+- Description: 將台新交易明細查詢的九欄格式轉為共用銀行流水列，保留備註中的對象姓名與帳號原文。
+- Complexity: medium
+- Input:
+  - excel_path: 台新對帳單路徑
+  - sheet_name: 格式偵測器辨識的工作表
+  - header_row: 格式偵測器辨識的表頭列
+- Output:
+  - normalized_rows: 共用銀行流水列序列
+- Invariants:
+  - 必須以範例的九個表頭名稱取欄，不得依賴固定表頭列或檔名。
+  - 備註原文與由備註擷取的對象帳號必須分開保存；擷取失敗須留下警示，不得猜測。
+  - 每列只判斷支出或存入方向，不得判斷政府撥款、客戶退款或服務人員轉帳。
+- Algorithm:
+  - 讀取台新九欄資料，正規化交易日、入帳日、時間、支出、存入、餘額、摘要及備註。
+  - 從備註擷取明確帳號字串並保留前導零；沒有明確帳號時回傳空值及 account_not_found 警示。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_taishin_finance_adapter.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: SinopacFinanceStatementAdapter
+- Sub Map: services_layer
+- Type: import_adapter
+- State: `planned`
+- Source: scripts/imports/finance_formats/sinopac.py::normalize_sinopac_rows
+- Dependencies: [FinanceNormalizedRowValidator]
+- Description: 將永豐交易明細報表的十五欄格式轉為共用銀行流水列，完整保留銷帳編號與銀行參考資訊，並依已確認欄位優先序解析支出對象帳號。
+- Complexity: medium
+- Input:
+  - excel_path: 永豐對帳單路徑
+  - sheet_name: 格式偵測器辨識的工作表
+  - header_row: 格式偵測器辨識的表頭列
+- Output:
+  - normalized_rows: 共用銀行流水列序列
+- Invariants:
+  - 必須以範例的十五個表頭名稱取欄，不得依賴固定表頭列或檔名。
+  - 銷帳編號、序號、交易序號及參考號必須以字串保存；原始列須完整保存在 raw_payload。
+  - 「備註」與「存摺備註」的原文必須完整保留；本 adapter 沒有主檔帳號 mapping，不得依數字長度猜測 counterparty_account。
+  - counterparty_account 保持空值；outgoing 的完整帳號比對由 FinanceTransactionClassifier 使用 staff_accounts 執行，incoming 不得解析這兩欄為對象帳號。
+  - 每列只判斷支出或存入方向，不得判斷客戶入款或服務人員薪資。
+  - 支出與存入同時為正時 direction 必須為 unknown 並附 direction_ambiguous；兩者皆空或皆非正值時 direction 必須為 unknown 並附 direction_missing。
+- Algorithm:
+  - 讀取永豐十五欄資料，正規化日期、支出、存入、餘額、摘要、備註、銷帳編號與各銀行參考欄位。
+  - 本節點只保留「備註」至 memo、「存摺備註」至 bank_references，不解析任意數字候選；由下游對正式主檔完整帳號做精確比對。
+  - 保留更正及沖正資訊供後續判斷，但本節點不合併或刪除交易列。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_sinopac_finance_adapter.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceStatementNormalizationPipeline
+- Sub Map: services_layer
+- Type: import_pipeline
+- State: `planned`
+- Source: scripts/imports/finance_statement_normalizer.py::normalize_workbook
+- Dependencies: [FinanceStatementFormatDetector, LegacyFinanceStatementAdapter, TaishinFinanceStatementAdapter, SinopacFinanceStatementAdapter, FinanceNormalizedRowValidator]
+- Description: 以內容偵測三種 Excel 格式，呼叫對應 adapter 並回傳同一 normalized row 契約。
+- Complexity: medium
+- Input:
+  - excel_path: 任意檔名的銀行 Excel 路徑
+- Output:
+  - format_id: legacy、taishin 或 sinopac
+  - sheet_name: 實際資料工作表
+  - header_row: Excel 一基底表頭列
+  - normalized_rows: 已通過共用 validator 的流水列
+- Invariants:
+  - 只能依 FinanceStatementFormatDetector 結果選 adapter，不得依檔名或例外 fallback 猜格式。
+  - 所有輸出列必須再次通過 FinanceNormalizedRowValidator；本節點不得連線資料庫或分類業務事件。
+  - 空資料表可回傳零列，但格式、工作表與表頭資訊仍須保留。
+- Algorithm:
+  - 偵測唯一格式、工作表及表頭列，依 format_id 映射到單一 adapter。
+  - 驗證每列後回傳偵測 metadata 與正規化列。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_statement_normalizer.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceTransactionClassifier
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_transaction_classifier.py::classify_finance_transaction
+- Dependencies: [FinanceNormalizedRowValidator]
+- Description: 依已確認銀行、方向、銷帳編號、備註與精確帳號候選分類銀行事件；分類不等於核銷。
+- Complexity: medium
+- Input:
+  - row: normalized finance row
+  - client_refund_accounts: exact account string 到 client ids 的 mapping
+  - staff_accounts: exact account string 到 staff ids 的 mapping
+- Output:
+  - classification_type: client_receipt、government_subsidy、client_subsidy_return、staff_salary、staff_legacy_subsidy 或 non_business_review
+  - matched_identity_ids: 唯一分類身分候選
+  - resolved_counterparty_account: 精確唯一命中的完整帳號；無唯一帳號時為 None
+  - reason: 分類依據或待確認原因
+- Invariants:
+  - 永豐存入只有有效 `99781699` 加六碼銷帳編號才可分類 client_receipt。
+  - 台新存入只有 memo 包含「新竹市政府」才可分類 government_subsidy；其他台新存入一律 non_business_review。
+  - 台新支出只以 counterparty_account 精確匹配唯一客戶退款帳戶或唯一服務人員帳戶；同時命中、零個或多個命中一律 non_business_review。
+  - 永豐支出以 staff_accounts 的完整帳號逐一比對 memo 原文；memo 零命中時才比對 bank_references 的「存摺備註」。只有完整帳號唯一命中同一 staff 時分類 staff_salary；零命中、命中多位 staff 或同一欄命中多個不同帳號時一律 non_business_review。
+  - 台新或永豐只有精確帳號唯一命中時才回傳 resolved_counterparty_account，且必須等於實際命中的 mapping key；incoming、零命中、多帳號或身分歧義時必須為 None。
+  - 姓名不得取代帳號匹配；本節點不得寫資料庫或依金額選案件、批次或月結。
+- Algorithm:
+  - 先驗證 normalized row，再依 format_id 與 direction 套用固定分類矩陣。
+  - 台新出帳使用 adapter 已解析的 counterparty_account；永豐出帳使用完整 staff account 對備註原文做主欄、備用欄兩階段比對。只有單一身分類別、單一 id 與單一完整帳號時成功並回傳 resolved_counterparty_account。
+  - 其餘回傳 non_business_review 與可機讀 reason。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_transaction_classifier.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceImportStagingService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_import_staging.py::stage_finance_rows
+- Dependencies: [FinanceStatementNormalizationPipeline, FinanceTransactionFingerprint, FinanceImportRawStagingSchema, FinanceTransactionClassifier]
+- Description: 將一次 Excel 正規化結果以 append-only 方式寫入 staging；已存在 fingerprint 只新增來源 occurrence，不覆寫 canonical row 或正式帳務。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+  - normalized_result: FinanceStatementNormalizationPipeline output
+  - identity_maps: 客戶退款與服務人員精確帳號 mapping
+- Output:
+  - batch_id: 匯入批次 id
+  - staged_rows: row id、dedup_fingerprint、分類類型、matched_identity_ids、resolved_counterparty_account、核銷狀態及 result（inserted 或 skipped_existing）
+- Invariants:
+  - 必須先保存 batch，再逐列計算 fingerprint；首次出現保存 canonical row 與 occurrence，已存在時只新增 occurrence 並回傳 skipped_existing。
+  - 原始 normalized 欄位、bank_references、warnings、raw_payload 必須完整保存，JSON 使用 Decimal-safe 編碼。
+  - 首次 fingerprint 分類時，必須將 classifier 的 resolved_counterparty_account 寫入獨立解析欄位；不得覆寫原始 counterparty_account。只有 classifier 回傳精確唯一帳號時才可寫非空值。
+  - 已存在 fingerprint 不得 UPDATE、重新分類、重新核銷或建立任何正式交易；既有人工調整結果必須保持不變。
+  - 新 fingerprint 分類完成後 reconciliation_status 仍為 pending；本節點不得建立客戶、政府、退款或薪資正式交易。
+  - 同一批次內完全相同 fingerprint 的後續列須保存 occurrence 並建立來源重複警示；同秒同備註但 fingerprint 不同的列必須各自保存。
+  - 任一列寫入失敗由呼叫端交易 rollback；不得回傳部分成功批次。
+- Algorithm:
+  - 插入 batch，逐列計算 fingerprint 並查 canonical row；命中時只插 occurrence，未命中時插 canonical row、occurrence並呼叫 classifier，再保存分類、身分候選與 resolved_counterparty_account。
+  - 回傳 batch id 與每列 inserted/skipped_existing 結果；正式核銷交由下游服務。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_staging.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: SubsidyClaimWorkflowService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/subsidy_claim_workflow.py::create_subsidy_claim_batch,submit_subsidy_claim_batch,approve_subsidy_claim_batch
+- Dependencies: [PaymentSchema, SubsidyClaimBatchSchema]
+- Description: 以明確年度、季度與 revision 建立正式補助申請快照，並執行送件及正常全額核准狀態轉換。
+- Complexity: medium
+- Input:
+  - application_year: 明確申報年度
+  - quarter: 明確完工季度
+  - revision: 明確批次版本
+  - items: case、assignment、staff、hours、unit price、requested amount 快照
+- Output:
+  - batch: 持久化批次 header 與 items
+  - result: created、submitted、approved 或 review_required
+- Invariants:
+  - 不得推測 revision、補件或跨批次關係；requested_amount 必須逐項等於 claimed_hours 乘 unit_price，header 為明細合計。
+  - 每個 assignment 的 case_no 與 staff_id 必須與正式指派一致；同批次不得重複 assignment。
+  - 送件後申請時數、單價與 requested_amount 不可修改。
+  - P0 正常核准要求所有 item approved_amount 完整提供且等於 requested_amount；部分、差額或缺項維持 submitted 並回 review_required。
+  - 相同年度、季度、revision 重試只有快照完全相同才 idempotent；不同內容不得覆寫。
+- Algorithm:
+  - 驗證 Decimal 與明確 keys，鎖定指派資料，建立 draft header/items 或驗證同一快照重試。
+  - submit 設 submitted_at 並凍結；approve 僅接受全項全額核准並設 approved_at/總額。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_subsidy_claim_workflow.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: StaffMonthlySettlementService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/staff_monthly_settlements.py::create_staff_monthly_settlement,finalize_staff_monthly_settlement
+- Dependencies: [PaymentSchema, StaffMonthlySettlementSchema, StaffMonthlySettlementDetailSchema]
+- Description: 以呼叫端明確提供的月份與 revision 建立服務人員跨案件月結快照並完成正常月結。
+- Complexity: medium
+- Input:
+  - staff_id: 服務人員
+  - settlement_month: 明確月份首日，不從銀行日期推測
+  - revision: 明確版本
+  - details: 要納入的 staff_payment ids 與已確認舊制補助資料
+- Output:
+  - settlement: header、details、應付總額與狀態
+  - result: created、existing、finalized 或 review_required
+- Invariants:
+  - settlement_month 必須明確為月份首日；不得由銀行 occurred_at 推測或處理跨月歸屬。
+  - 每筆 staff_payment 必須屬於同一 staff，case_no 與 assignment 一致；服務薪資、樓層費與調整額複製為不可變快照。
+  - staff_payments 的正式狀態欄位為 payment_status；同一 staff_payment 已存在於 status 不等於 cancelled 的其他月結時不得再次納入，必須回 review_required。
+  - 新制明細 legacy_subsidy_payable 必須為零；舊制非零補助只有呼叫端提供 confirmed 狀態與明確證據時可接受。
+  - detail payable 為組成合計，header total 為 details 合計，total_paid 初始為零。
+  - 同 staff、month、revision 重試只有快照完全相同才 idempotent；finalized 後不可修改。
+- Algorithm:
+  - 驗證明確 month/revision 與 detail 唯一性，以 staff_payments.payment_status 讀取來源，並鎖定檢查 staff_payment 未被其他未取消月結納入後建立快照。
+  - 無 review_required 且所有合計一致時才 finalize；否則保留 draft/review_required。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_staff_monthly_settlements.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: ClientPaymentSnapshotService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/client_payment_snapshots.py::create_client_payment_snapshot
+- Dependencies: [PaymentSchema, OrderAmountCalculator]
+- Description: 由案件明確條件建立不可由銀行實收反推的三階段客戶應收快照。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+  - order: case_no、服務條件、補助資格、樓層費及必要日期
+  - collection_schedule: 訂金天數與三階段到期資料
+- Output:
+  - payment_id: client_payments id
+  - plan: OrderAmountCalculator 的三階段及補助退還計畫
+  - result: created、existing 或 review_required
+- Invariants:
+  - 應收只由 OrderAmountCalculator 與 order/collection schedule 建立；不得讀取銀行金額、舊 Excel 金額或固定預設值。
+  - case_no 已有快照時不得覆寫；只有既有三階段與新計畫完全相同才回 existing，否則 review_required。
+  - 缺 deposit_service_days、deposit date 或 service start date 時不得建立，回 review_required。
+  - subsidy_return 計畫只隨 output 回傳；在客戶尚未全額實付前不得直接建立正式退還義務。
+- Algorithm:
+  - 驗證必要案件資料；actual_start_date 優先於 start_date 作為服務開始日，缺 deposit_service_days、deposit date 或服務開始日即回 review_required。
+  - 呼叫 OrderAmountCalculator 產生 client_ledger_plan，依 deposit、first_payment、second_payment 三個 stage 名稱明確映射至正式 deposit_*、first_payment_*、second_payment_* 欄位與 amount_receivable；不得把 stages 巢狀物件或 subsidy_return_amount 當成 client_payments 欄位。
+  - 鎖定 case_no 既有 client payment；不存在則插入三階段 receivable/due dates，存在則比較不可變快照；subsidy_return 計畫只隨 output 回傳。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_snapshots.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: ClientSubsidyReturnObligationService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/client_subsidy_return_obligations.py::activate_subsidy_return_obligation
+- Dependencies: [PaymentSchema, OrderAmountCalculator, ClientPaymentSnapshotService]
+- Description: 在客戶三階段已全額實付後，以明確計算結果與到期日啟用 canonical 補助款退還義務。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+  - client_payment_id: 客戶帳務摘要
+  - calculated_return_amount: 本次明確 OrderAmountCalculator 結果
+  - due_date: 呼叫端明確提供的退還到期日，可為 None 但不得推測
+- Output:
+  - obligation: subsidy_return_receivable、refunded、due_date、remaining
+  - result: activated、existing 或 review_required
+- Invariants:
+  - 只有 amount_received 等於 amount_receivable 且 calculated_return_amount 大於零時可啟用；未全額實付不得建立義務。
+  - 只可寫 subsidy_return_* canonical 欄位，不得寫 legacy subsidy_refund_* 或一般退款類型。
+  - calculated_return_amount 必須由呼叫端明確提供；due_date 未知時保存 NULL，不得從銀行日期、申報季或資格推測。
+  - 已存在義務只有金額及 due_date 完全相同才 idempotent；不同內容回 review_required，不覆寫。
+- Algorithm:
+  - 鎖定 client_payments，驗證全額收款與尚未建立/相同的義務。
+  - 寫入 subsidy_return_receivable/due_date，refunded 保持既有零值並回傳 remaining。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_subsidy_return_obligations.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: ClientSubsidyReturnTransactionService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/client_subsidy_return_transactions.py::record_client_subsidy_return
+- Dependencies: [PaymentSchema, ClientSubsidyReturnObligationService, FinanceImportRawStagingSchema, FinanceTransactionFingerprint]
+- Description: 將已唯一匹配的台新支出登記為 subsidy_return refund 交易，並重算 canonical 已退與完成日。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+  - client_payment_id: 唯一待退義務
+  - finance_import_row_id: 已分類 client_subsidy_return 的台新支出
+- Output:
+  - transaction_id: client_payment_transactions id
+  - obligation: 重算後 refunded、remaining、return_at
+  - result: reconciled、existing 或 pending
+- Invariants:
+  - staging row 必須是台新 outgoing、classification_type=client_subsidy_return、debit 大於零且仍 pending；帳號身分必須已唯一確認。
+  - staging matched_identity_ids 必須恰好包含輸入 client_payment_id，否則保持 pending；不得只以相同待退餘額配對。
+  - 正常 P0 要求 debit 完全等於 subsidy_return_receivable 減 refunded；部分、超退或差額維持 staging pending，不建立正式交易。
+  - 正式交易 external_reference 必須由 staging row 的 dedup_fingerprint 固定產生 `fp:<fingerprint>`；不得由呼叫端傳入或以檔名、列號、姓名、金額、source_reference 或 staging id 代替。
+  - 正式交易欄位固定為 stage=subsidy_return、transaction_type=refund、transaction_status=succeeded；occurred_at 只使用銀行 transaction_date，秒級 transaction_time 保留在關聯 staging row；完成日寫 client_payments.subsidy_return_at，不得使用系統現在時間或 legacy subsidy_refund_*。
+  - 已退金額必須由所有 succeeded subsidy_return refund 扣除有效 reversal 後重算；不得只以本次金額覆寫摘要。
+  - staging 完成只可寫 reconciliation_status、reconciliation_reference 與 reconciled_at；不得寫入不存在的 reconciled_transaction_id。
+  - 交易、摘要重算與 staging reconciled 必須在同一 transaction；重試只允許完全相同既有交易。
+- Algorithm:
+  - 鎖定 staging row 與 client payment，驗證分類、matched_identity_ids、精確金額、dedup_fingerprint 及未退餘額。
+  - 以銀行 transaction_date 插入 refund，秒級時間留在 staging；依所有成功 subsidy_return refund 與 reversal 淨額重算 refunded/subsidy_return_at，並以 external reference 標記 staging reconciled。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_subsidy_return_transactions.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: GovernmentSubsidyReconciliationService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/government_subsidy_reconciliation.py::reconcile_government_subsidy
+- Dependencies: [FinanceImportRawStagingSchema, FinanceTransactionFingerprint, SubsidyClaimBatchSchema, GovernmentSubsidyTransactionSchema]
+- Description: 將唯一且全額相符的台新政府入款核銷至一個正式已核准申請批次及其案件明細。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+  - finance_import_row_id: 已分類政府補助的 staging row
+  - confirmed_batch_id: 可選的人工作業確認批次，只能縮小候選，不能繞過驗證
+- Output:
+  - result: reconciled、existing 或 pending
+  - batch_id: 成功唯一批次或 None
+  - bank_amount: 實際存入
+  - expected_amount: 批次核准總額
+- Invariants:
+  - staging row 必須是台新 incoming、classification_type=government_subsidy、credit 大於零且仍 pending。
+  - P0 候選只接受 status=approved 且 paid_amount=0 的批次；必須恰有一個批次，其 approved_amount 等於銀行 credit 及 item approved 合計。
+  - 零候選、多候選、短撥、溢撥、部分撥款或跨批次一律保持 pending，不更新正式交易或金額。
+  - 正式交易 external_reference 必須由 staging row 的 dedup_fingerprint 固定產生 `fp:<fingerprint>`；不得由呼叫端傳入或以 Excel 列號、金額、source_reference 或 staging id 產生。
+  - 成功時逐 item allocation 等於 approved_amount，批次與 items paid_amount 更新為核准額且狀態 paid；requested/approved 不得覆寫。
+- Algorithm:
+  - 鎖 staging row，依 confirmed id 或 exact approved total 找 approved/未撥候選並要求唯一。
+  - 建立政府 receipt 與逐 item allocation，更新 paid 投影與 staging reconciliation，全部同一 transaction。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_government_subsidy_reconciliation.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: StaffActualTransferService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/staff_actual_transfers.py::reconcile_staff_actual_transfer
+- Dependencies: [FinanceImportRawStagingSchema, FinanceTransactionFingerprint, StaffMonthlySettlementSchema, StaffMonthlySettlementDetailSchema, StaffActualTransferSchema, StaffTransferAllocationSchema]
+- Description: 將唯一服務人員帳號與唯一月結的銀行支出保存為獨立實際轉帳，並以明確 allocation 核銷月結明細。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+  - finance_import_row_id: 已分類的服務人員支出 staging row
+  - settlement_id: 已唯一確認的月結
+  - payment_phase: normal、first_salary 或 second_subsidy
+  - allocations: 明確 settlement detail、component type 與 allocated amount
+- Output:
+  - result: reconciled、existing 或 pending
+  - transfer_id: 成功實際轉帳 id
+  - settlement: 重算 total_paid 與 status
+- Invariants:
+  - staging row 必須 outgoing、debit 大於零、仍 pending，且分類為 staff_salary 或 staff_legacy_subsidy；resolved_counterparty_account 必須非空並精確唯一對應 settlement.staff_id。原始 counterparty_account 只供稽核，不得取代解析欄位驗證。
+  - transfer external_reference 必須由 staging row 的 dedup_fingerprint 固定產生 `fp:<fingerprint>`；不得由呼叫端傳入或由 Excel 列號、姓名、金額、source_reference 或 staging id 產生。
+  - settlement 必須 finalized 或 partially_paid；所有 allocation detail 必須屬於同一 settlement/staff，allocation 加總完全等於銀行 debit。
+  - normal/first_salary 不得配置 legacy_subsidy component；second_subsidy 只能配置 confirmed legacy_subsidy component。allocation_method 必須 explicit，不得 FIFO、比例或同額猜測。
+  - 每一 component 本次 normal path 必須精確支付其未付餘額；部分、超付、跨月或不唯一回推保持 pending，不建立正式 transfer。
+  - transfer、allocations、月結 total_paid/status 與 staging reconciled 必須同 transaction；同一銀行列重試只允許完全相同既有事件。
+- Algorithm:
+  - 鎖 staging row、settlement、details、既有 allocations 與 staff bank owner，使用 resolved_counterparty_account 驗證分類、身分、phase 及 dedup_fingerprint。
+  - 驗證明確 allocation 完整支付選定 component 且總額等於 debit，建立 transfer/allocations。
+  - 依成功 allocation 淨額重算 settlement total_paid/status，再標記 staging reconciled。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_staff_actual_transfers_service.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceIdentityMapLoader
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_identity_maps.py::load_finance_identity_maps
+- Dependencies: [PaymentSchema, StaffMonthlySettlementSchema]
+- Description: 從正式客戶補助退還義務與服務人員收款資料建立精確帳號 mapping，供銀行流水分類使用；姓名只保留顯示，不作匹配鍵。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+- Output:
+  - client_refund_accounts: 對方帳號到未結清 client_payment_id 清單
+  - staff_accounts: 對方帳號到 staff_id 清單
+- Invariants:
+  - 只載入非空且正規化後仍可精確比較的帳號；不得截斷、補零或由姓名推測。
+  - 客戶 mapping 只包含 subsidy_return_receivable 大於 subsidy_return_refunded 的正式義務。
+  - 服務人員 mapping 必須納入 staff_bank_accounts 的全部已登記帳號，不得只取 is_primary=1；同一 staff 的多個帳號皆映射至同一 staff_id。
+  - 同一帳號命中多個客戶義務或多位服務人員時必須保留全部候選，由 classifier 歸類 non_business_review；不得自行選第一筆。
+  - 本節點唯讀，不得建立或更新主檔、帳務、月結或交易。
+- Algorithm:
+  - 查詢待退補助款義務與客戶退款帳號，建立 account -> client_payment_ids。
+  - 查詢服務人員全部已登記收款帳號（包含非主帳號），建立 account -> staff_ids；所有 id 排序後回傳以確保結果穩定。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_identity_maps.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: ClientVirtualAccountResolver
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/client_virtual_account_resolver.py::resolve_client_virtual_account
+- Dependencies: [PaymentSchema]
+- Description: 從永豐銀行的銷帳編號依既有虛擬帳號規則解出案件編號，並驗證正式案件唯一存在。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+  - cancellation_code: 永豐 bank_references 中原樣保存的「銷帳編號」
+- Output:
+  - result: resolved 或 pending
+  - case_no: 唯一存在的案件編號或 None
+  - reason: 無法解析、案件不存在或案件不唯一的原因
+- Invariants:
+  - 只接受完整 14 碼數字，固定前綴為 `99781699`；後 6 碼固定拆為民國年 3 碼與流水號 3 碼，不得由金額、姓名、備註、檔名或列號推測。
+  - canonical case_no 固定為民國年 3 碼加上流水號左補零至 6 碼，例如 `115001` 反解為 `115000001`；必須以完整 9 碼查詢 orders.case_no 並且恰好命中一筆才回 resolved。
+  - 本節點只負責解析與驗證，不分類銀行流水、不建立客戶帳務或交易。
+- Algorithm:
+  - 驗證銷帳編號格式與固定前綴，將末 3 碼流水號左補零至 6 碼，與民國年 3 碼串成 9 碼候選 case_no。
+  - 查詢 orders 並要求唯一命中；回傳 resolved 或具明確 reason 的 pending。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_virtual_account_resolver.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: ClientReceiptReconciliationService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/client_receipt_reconciliation.py::reconcile_client_receipt
+- Dependencies: [PaymentSchema, ClientPaymentFinanceLinkMigration, FinanceImportRawStagingSchema, FinanceTransactionFingerprint, ClientVirtualAccountResolver, ClientPaymentSnapshotService, ClientPaymentWriteService]
+- Description: 將已分類且虛擬帳號唯一命中案件的永豐入款，依訂金、第一期、第二期順序核銷至客戶帳務。
+- Complexity: medium
+- Input:
+  - cursor: transaction cursor
+  - finance_import_row_id: 已分類 client_receipt 的 canonical staging row
+- Output:
+  - result: reconciled、existing 或 pending
+  - transaction_ids: 本次跨階段建立的客戶交易 ids
+  - client_payment_id: 唯一客戶帳務摘要
+- Invariants:
+  - staging row 必須是永豐 incoming、credit 大於零且仍 pending；虛擬帳號只可取自 bank_references 中原樣保存的「銷帳編號」，並交 ClientVirtualAccountResolver 精確解出唯一存在的 case_no，不得使用更正註記或備註替代。
+  - 客戶應收快照只由訂單條件與 OrderAmountCalculator 建立；不得用銀行金額反推應收。
+  - 入款依 deposit、first_payment、second_payment 的未收餘額順序分配；超收或缺必要訂單條件時保持 pending，不建立正式交易。
+  - 每個階段 external_reference 固定為 `fp:<fingerprint>:<stage>`，finance_import_row_id 指向同一 canonical row；不得使用檔名、列號或 staging id。
+  - 所有交易、摘要重算、訂單狀態推進及 staging reconciled 必須使用同一 cursor 且位於同一 transaction；只能呼叫 ClientPaymentWriteService 的 cursor-bound 核心，重試只允許完全相同既有交易集合。
+- Algorithm:
+  - 鎖 staging row，驗證 fingerprint，將 bank_references 的銷帳編號交 resolver 取得唯一 case_no；鎖 orders 並以 actual_start_date 優先、否則 start_date 組成明確條件，取得或建立不覆寫的 client payment snapshot。
+  - 計算各階段未收餘額並完整分配本次 credit，逐階段新增 receipt transaction。
+  - 重算三階段摘要與完成日，必要時推進訂單狀態，再標記 staging reconciled。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_receipt_reconciliation.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceImport
+- Sub Map: services_layer
+- Type: import_pipeline
+- State: `planned`
+- Source: scripts/imports/import_finance_excel.py
+- Dependencies: [FinanceStatementNormalizationPipeline, FinanceIdentityMapLoader, FinanceImportStagingService, ClientReceiptReconciliationService, ClientSubsidyReturnTransactionService, GovernmentSubsidyReconciliationService, StaffActualTransferService]
+- Description: 由任意檔名的歷史、台新或永豐 Excel 建立匯入批次；先 append-only 保存與分類所有流水，再只對唯一且完全符合 P0 正常規則的新流水執行正式核銷。
+- Invariants:
+  - 不得以客戶姓名或月嫂姓名作為唯一帳務關聯鍵。
+  - 三種格式只能由內容 detector 選擇 adapter，不依檔名；每列先寫 canonical staging/occurrence，分類與核銷不得覆寫原始流水。
+  - 已存在 dedup_fingerprint 只新增 occurrence 並回 skipped_existing，不得重新分類、重新核銷或覆寫人工調整。
+  - 客戶入款只接受永豐 incoming 且有效虛擬帳號；台新政府入款只接受備註含「新竹市政府」。
+  - 台新 outgoing 只以精確帳號分類客戶補助退還或舊制服務人員補助款；永豐 outgoing 由 classifier 以全部已登記服務人員完整帳號先比對備註、零命中才比對存摺備註，唯一命中時才分類服務人員薪資。
+  - 精確唯一命中的完整帳號必須保存於 resolved_counterparty_account 供正式核銷及人工審核；原始 counterparty_account 不得被分類流程覆寫。
+  - 政府補助、客戶退補助及服務人員轉帳只在候選唯一、金額完整相符且下游 service 回 reconciled 時建立正式交易；其他情況保留 pending/non_business_review。
+  - 銀行流水只能登記實際金額與日期，不得反推或覆寫應收、應付、申請核准額或月結月份。
+  - 系統不執行銀行轉帳；本入口只匯入銀行已發生的交易並核銷既有義務。
+  - 任一資料庫錯誤必須 rollback 整批；不得留下部分成功 batch。
+  - 同一檔案混合 skipped_existing 與 inserted rows 時，既有列只新增 occurrence，新列仍須正常分類與 dispatch；不得因局部重複跳過整批。
+  - 跨檔名、工作表或列號重匯相同 fingerprint 時，不得覆蓋 canonical row、人工調整或正式帳務；只允許新增 occurrence。
+  - 同秒同備註但 fingerprint 不同的兩筆交易都必須保存；若兩筆命中同一已完成或已被前筆占用的客戶應收義務，後筆必須保持 pending、不得超收，並保留 suspected_duplicate_business_match 警示。
+  - 客戶入款的虛擬帳號錯誤、案件不存在／不唯一、超收或殘缺重試皆須保留 canonical staging 與 occurrence，且不得建立或修改正式客戶交易、三期實收摘要及案件狀態。
+- Observability: not_required
+- Complexity: medium
+- Input:
+  - excel_path: 任意檔名的歷史、台新或永豐 Excel 路徑
+- Output:
+  - batch_id: finance import batch id
+  - inserted_rows: 新 canonical 流水數
+  - skipped_existing: 已存在 fingerprint、只新增 occurrence 的流水數
+  - reconciled_counts: 四類正式核銷成功數
+  - pending_rows: 尚待人工確認或不屬 P0 正常流程的 canonical row ids
+- Algorithm:
+  - 呼叫 normalizer 取得唯一格式、工作表、表頭與完整 normalized rows；在同一 DB transaction 載入精確帳號 maps 並呼叫 append-only staging。
+  - skipped_existing 只記錄 occurrence，不進入下游；inserted row 依 classification_type dispatch。
+  - client_receipt 呼叫 ClientReceiptReconciliationService；government_subsidy 呼叫 exact batch reconciliation；client_subsidy_return 呼叫 exact obligation reconciliation。
+  - staff_salary/staff_legacy_subsidy 只在帳號唯一且該 staff 恰有一個符合 phase 的 finalized/partially_paid 月結時，建立全部未付 component 的 explicit allocations；總額不等於 debit 或候選不唯一時保持 pending。
+  - non_business_review 與任何下游 pending 結果只回報 pending_rows；全部 inserted rows處理完才將 batch 標記 completed 並 commit。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_finance_excel.py", "tests\\test_finance_import_orchestrator.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_statement_normalizer.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_boundary_safety.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_client_receipt_boundaries.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+
+##### Module: FinanceImportClientSubsidyReturnIntegrationTest
+- Sub Map: services_layer
+- Type: integration_test
+- State: `planned`
+- Source: tests/test_finance_import_client_subsidy_return_integration.py
+- Dependencies: [FinanceImport, FinanceStatementNormalizationPipeline, FinanceImportStagingService, FinanceTransactionClassifier, ClientSubsidyReturnTransactionService]
+- Description: 驗證 B3 補助款退還客戶由台新 Excel 經 normalization、append-only staging、分類至正式退款核銷的完整鏈路，並確認差額、身分歧義與負向事件不會造成正式帳務副作用。
+- Complexity: medium
+- Input:
+  - taishin_workbook_fixture: 包含台新支出、退款帳號及銀行交易日期的最小 Excel fixture
+  - client_return_obligation_fixture: 應退 1500、已退 250、剩餘 1250 的正式客戶退款義務
+  - boundary_variants: 少退、超退、共享帳號、failed、return 與 reversal 事件
+- Output:
+  - pipeline_result: batch、canonical staging、classification、reconciliation 與 pending 結果
+  - persisted_effects: 正式退款交易、已退摘要、完成日及 occurrence 數量
+- Invariants:
+  - 測試必須從實體台新 Excel fixture 呼叫 FinanceImport 公開入口，不得直接偽造已分類 staging row 取代 normalization、staging 或 classifier。
+  - 基準義務固定為應退 1500、已退 250、剩餘 1250；只有支出 1250 且退款帳號唯一命中時可建立一筆 succeeded subsidy_return refund 並完成核銷。
+  - 支出 1249.99 或 1250.01 必須保持 pending，且不得新增正式退款交易、不得修改已退 250 或完成日。
+  - 同一退款帳號對應多個 client_payment_id 時必須保持 non_business_review 或 pending，且正式帳務寫入為零；不得依姓名或相同待退金額選擇候選。
+  - 既有 failed refund 不得增加已退摘要；return 或有效 reversal 必須從 succeeded refund 淨額扣回，重新匯入銀行列不得錯誤覆寫摘要。
+  - 每個案例都必須保留 import batch、canonical staging、occurrence、fingerprint、raw payload 與原始銀行日期；pending 不得造成任何正式帳務副作用。
+  - 完全相同 workbook 重跑只允許 skipped_existing 或 existing，不得新增第二筆正式退款交易或覆蓋人工／既有核銷結果。
+- Algorithm:
+  - 以最小台新 Excel fixture 建立基準成功案例，準備唯一退款帳號及應退 1500、已退 250 的義務資料。
+  - 經 FinanceImport 公開入口執行 normalization、identity map、staging、classifier 與 ClientSubsidyReturnTransactionService，核對各層資料與正式交易結果。
+  - 逐一替換銀行支出為 1249.99、1250.01 及共享帳號資料，驗證維持 pending 且零正式寫入。
+  - 預載 failed、return 與 reversal 交易後重跑完整鏈路，驗證退款淨額、未退餘額與完成日只由有效交易投影。
+  - 對成功與 pending fixture 各執行 deterministic rerun，驗證 occurrence 增加但 canonical row 與正式帳務不重複。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_client_subsidy_return_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", ".pytest-b3-client-subsidy-return"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceImportGovernmentSubsidyIntegrationTest
+- Sub Map: services_layer
+- Type: integration_test
+- State: `planned`
+- Source: tests/test_finance_import_government_subsidy_integration.py
+- Dependencies: [FinanceImport, FinanceStatementNormalizationPipeline, FinanceImportStagingService, FinanceTransactionClassifier, GovernmentSubsidyReconciliationService]
+- Description: 驗證 B4 政府補助撥入由台新 Excel 經 normalization、append-only staging、分類至政府補助核銷的完整鏈路，並確認差額、多候選、分次與跨批次款項不會被自動核銷。
+- Complexity: medium
+- Input:
+  - taishin_workbook_fixture: 備註包含新竹市政府及實際存入金額的最小台新 Excel fixture
+  - approved_claim_batch_fixture: 已核准且未撥款、核准總額 1000 的正式補助申報批次與明細
+  - boundary_variants: 實收 900、1100、600 加 400、同額多批次及跨批次候選
+- Output:
+  - pipeline_result: batch、canonical staging、classification、reconciliation 與 pending 結果
+  - persisted_effects: 政府補助交易、allocation、批次及明細 paid 投影與 occurrence 數量
+- Invariants:
+  - 測試必須從實體台新 Excel fixture 呼叫 FinanceImport 公開入口，不得直接偽造已分類 staging row 取代 normalization、staging 或 classifier。
+  - 基準批次固定為 status=approved、approved_amount=1000、paid_amount=0，且 item approved 合計為 1000；只有單筆存入 1000 且候選批次唯一時可建立正式政府補助 receipt 與逐 item allocation。
+  - 單筆存入 900 或 1100 必須保持 pending，且不得新增正式政府補助交易、allocation，亦不得更新批次或明細 paid_amount 與狀態。
+  - 分次存入 600 加 400 時，第一筆不得提前核銷整批，第二筆亦不得與先前 pending 流水自動合併；兩筆均須各自保留 canonical staging 與 occurrence。
+  - 存在兩個同額且皆符合條件的批次時必須保持 pending，不得依季度、建立順序、銀行日期或第一筆候選自行選擇。
+  - 單筆銀行款不得拆分至多個批次；跨批次候選或需要跨批次分配時維持 pending，正式帳務寫入為零。
+  - 成功核銷不得覆寫 requested_amount 或 approved_amount；transaction amount 與 allocation 合計必須等於銀行實收 1000，批次及明細只能更新 paid 投影。
+  - 每個案例都必須保留 import batch、canonical staging、occurrence、fingerprint、raw payload 與原始銀行日期；pending 不得造成任何正式帳務副作用。
+  - 完全相同 workbook 重跑只允許 skipped_existing 或 existing，不得新增第二筆正式交易、allocation 或覆蓋既有核銷結果。
+- Algorithm:
+  - 以最小台新 Excel fixture 建立唯一且精確 1000 的成功案例，準備一個 approved/未撥批次及其 400、600 明細。
+  - 經 FinanceImport 公開入口執行 normalization、staging、classifier 與 GovernmentSubsidyReconciliationService，核對各層資料與正式交易結果。
+  - 分別以 900、1100 及兩個同額批次執行完整鏈路，驗證 staging 保持 pending 且所有正式補助表零寫入。
+  - 依序匯入 600 與 400 的不同銀行流水，驗證不得跨流水累加或提前結清批次。
+  - 建立需要跨兩批次分配的候選，驗證單筆款項不得自動拆分。
+  - 對成功與 pending fixture 執行 deterministic rerun，驗證 occurrence 增加但 canonical row 與正式帳務不重複。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_government_subsidy_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b4-government-subsidy"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceImportStaffActualTransferIntegrationTest
+- Sub Map: services_layer
+- Type: integration_test
+- State: `planned`
+- Source: tests/test_finance_import_staff_actual_transfer_integration.py
+- Dependencies: [FinanceImport, FinanceStatementNormalizationPipeline, FinanceImportStagingService, FinanceTransactionClassifier, StaffActualTransferService]
+- Description: 驗證 B5 服務人員實際轉帳由永豐或台新 Excel 經 normalization、append-only staging、分類、月結候選至 transfer/allocation 核銷的完整鏈路，並確認帳號歧義、跨月候選、舊制金額差異與 component 重複不會造成正式帳務副作用。
+- Complexity: medium
+- Input:
+  - bank_workbook_fixtures: 永豐一般薪資支出與台新舊制第二次補助款支出的最小真實 Excel fixtures
+  - staff_identity_fixture: 同一服務人員的多個有效完整帳號，以及共享帳號的歧義資料
+  - settlement_fixture: finalized 或 partially_paid 月結、不可變月份、明細應付 component 與既有 allocation ledger
+- Output:
+  - pipeline_result: batch、canonical staging、classification、月結候選、reconciliation 與 pending 結果
+  - persisted_effects: staff actual transfer、逐 component allocation、月結 paid 投影與 occurrence 數量
+- Invariants:
+  - 測試必須從實體永豐或台新 Excel fixture 呼叫 FinanceImport 公開入口，不得直接偽造已分類 staging row、月結候選或 allocation plan 取代 normalization、staging、classifier 或 importer dispatch。
+  - 同一 staff_id 的多個已登記完整帳號必須能在各自獨立銀行流水中識別為同一服務人員；同一帳號對應多位服務人員、同列命中多個帳號或帳號無匹配時必須保持 non_business_review 或 pending，正式 transfer/allocation 寫入為零。
+  - 一般薪資只接受永豐 outgoing staff_salary；只有唯一 finalized/partially_paid 月結且全部未付 regular_salary、floor_fee、adjustment component 合計精確等於銀行 debit 時，才可建立一筆實際 transfer 與 explicit allocations。
+  - 找不到月結、存在多個同額候選月結或候選跨不同 settlement_month 時必須保持 pending；不得依銀行交易日期、月份接近度、建立順序、最舊月份或第一筆候選猜測薪資歸屬月份。
+  - 舊制第二次補助款只接受台新 outgoing staff_legacy_subsidy，且只能核銷唯一月結內 status=confirmed、review_required=false 的完整 legacy_subsidy 未付 component；實際金額不符時保持 pending，不得修改應付金額強制對平。
+  - 同一 settlement detail 可依不同 component_type 建立多筆 allocation；相同 `(settlement_detail_id, component_type)` 在同一 transfer、重跑或後續銀行列中不得重複配置，已付 component 不得再次核銷。
+  - 成功核銷只可更新月結 total_paid/status 與 staging reconciliation；不得覆寫 settlement_month、total_payable、明細 payable component、staff_payment 來源或銀行交易日期。
+  - 每個案例都必須保留 import batch、canonical staging、occurrence、fingerprint、raw payload、原始備註／存摺備註與銀行日期；pending 不得造成任何正式帳務副作用。
+  - 對成功與 pending fixture 的完全相同 workbook 重跑只允許 skipped_existing 或 existing，occurrence 增加但不得新增第二筆 transfer、重複 allocation 或覆蓋既有／人工核銷結果。
+- Algorithm:
+  - 以永豐最小 Excel fixture 建立唯一服務人員、唯一 finalized 月結及同明細 regular_salary/floor_fee 的精確成功案例，經公開入口核對完整鏈路與正式 paid 投影。
+  - 對同一服務人員的另一有效帳號建立獨立 fixture，驗證兩個帳號皆以帳號而非姓名辨識同一 staff_id；再建立共享帳號與同列多帳號案例驗證零正式寫入。
+  - 建立零月結、同額雙月結及跨月份候選，驗證 importer 不使用銀行日期或候選排序猜測 settlement_month。
+  - 以台新 fixture 建立 confirmed legacy_subsidy 精確成功案例，再替換為金額不符、未確認或 review_required component，驗證全部保持 pending。
+  - 建立同一 detail 不同 component 的合法配置與已付相同 component 的第二筆銀行列，驗證不同 component 可共存、相同 key 不得重複。
+  - 對所有成功與 pending fixture 執行 deterministic rerun，驗證 occurrence 增加但 canonical row 與正式帳務不重複。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_staff_actual_transfer_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b5-staff-actual-transfer"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceAlertDetectionService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_alert_detection.py::create_or_get_finance_alert
+- Dependencies: [FinanceAlertSchema, FinanceImportRawStagingSchema]
+- Description: 將 pending、review 與 warnings 以 deterministic identity 保存為警示；只負責偵測持久化與 detected event 的重跑保護。
+- Complexity: medium
+- Input:
+  - alert_detection: alert_code、canonical source identity、原因、row/batch、候選與金額稽核快照
+- Output:
+  - alert: 新建或既有 current workflow projection
+  - result: created 或 existing
+- Invariants:
+  - create-or-get 必須以 FinanceAlertSchema 的 alert_key 鎖定；完全相同輸入回 existing，不新增事件、不重開 resolved，也不覆寫人工 claim／resolve。
+  - 同一 alert_key 若 canonical source、alert_code 或既有稽核快照發生衝突，必須 fail-fast，不得靜默更新成新案件。
+  - 新警示必須同時建立唯一 detected event；若 alert 已存在但 detected event 遺失，視為部分殘留並 fail-fast，不得自行補成看似成功。
+- Algorithm:
+  - 驗證非空 alert code、來源 domain/type/id 與 row/batch 關係，正規化 JSON 及 Decimal 稽核快照後建立 deterministic alert_key 與 detected event_key。
+  - 鎖定相同 alert_key；不存在時建立 alert 與 detected event，存在時逐欄比對 immutable detection snapshot 與 detected event。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_alert_detection.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b6-finance-alert-detection"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceAlertEventService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_alert_events.py::append_finance_alert_event
+- Dependencies: [FinanceAlertSchema, PaymentSchema, StaffActualTransferSchema, GovernmentSubsidyTransactionSchema]
+- Description: 附加人工 workflow 或既有正式交易的不可變警示事件；只驗證來源引用與事件去重，不建立或修改正式交易。
+- Complexity: medium
+- Input:
+  - event: alert_id、唯一 event_key、事件類型、occurred_at、actor／reason、event snapshot、source_type／source_id；retransferred 另含 original_source_id
+- Output:
+  - event: 新建或既有 append-only event
+  - result: created 或 existing
+- Invariants:
+  - event_key 必須唯一；完全相同內容重跑回 existing，任何 immutable 欄位衝突必須 fail-fast。
+  - claimed／resolved 只能引用既有 finance_alert，並保存明確 actor；resolved 必須保存非空 reason。
+  - 正式來源只允許 client_payment_transaction、staff_payment_transaction、staff_actual_transfer、government_subsidy_transaction；必須依 source_type 讀取對應正式表，不得只相信呼叫端傳入的 source_id。
+  - failed 必須引用 transaction_status=failed；returned 必須引用 transaction_type=return 或 refund 且 status=succeeded；reversed 必須引用 transaction_type=reversal 或 status=reversed 的正式列。
+  - retransferred 必須同時引用 original_source_id 與新的 source_id；兩者必須屬於相同 source_type，新列為成功 transfer／receipt 且 external_reference 非空並與原列不同。本服務不得產生 external_reference、交易、allocation 或正式淨額。
+  - 所有事件只可 INSERT finance_alert_events；不得 UPDATE 或 DELETE 既有事件。
+- Algorithm:
+  - 驗證 alert、事件類型、時間與必要 actor／reason，依 event_type 解析允許的正式 source_type。
+  - 對正式來源以固定 source_type→table mapping 和參數化主鍵鎖定讀取，比對 transaction type/status/external_reference；不得接受任意 table 名稱。對 workflow 來源鎖定 finance_alert。
+  - retransferred 額外鎖定同表原交易，驗證新舊 ID 與 external_reference 不同，且新列是成功 transfer／receipt。
+  - 以 event_key 鎖定查詢；不存在時新增，存在時逐欄比對 immutable event snapshot。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_alert_events.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b6-finance-alert-events"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceAlertWorkflowService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_alert_workflow.py::list_finance_alerts,get_finance_alert,claim_finance_alert,resolve_finance_alert
+- Dependencies: [FinanceAlertSchema, FinanceAlertEventService]
+- Description: 提供財務警示的稽核查詢、原子認領與解除；只更新人工 workflow projection，事件新增委派給 FinanceAlertEventService。
+- Complexity: medium
+- Input:
+  - filters: status、alert_code、source_domain、limit 與 offset
+  - workflow_action: alert_id、非空 operator reference、claim 或 resolve reason
+- Output:
+  - alert: current workflow projection 與完整事件歷程
+  - result: existing、claimed、resolved 或 conflict
+- Invariants:
+  - list/detail 只讀 finance_alerts 與 finance_alert_events；不得依候選排序、姓名、相同金額或最近日期自動選定正式對象。
+  - claim 必須鎖定 alert；open 可由 operator 認領，同一 operator 重試回 existing，其他 operator 對 claimed 警示得到 conflict。
+  - resolved 警示不得重開或重新認領；claim 與 resolve 不得覆寫 detection snapshot、source identity 或既有人工欄位。
+  - resolve 必須接受非空 operator 與 reason；可由已認領者解除，或由明確 operator 直接解除 open 警示，並附加唯一 resolved event。
+  - claimed event 與 resolved event 必須透過 FinanceAlertEventService append；事件衝突或部分殘留必須 fail-fast。
+  - workflow 不得建立或修改 transaction、allocation、應收、應付、核准額、paid projection 或 staging reconciliation。
+- Algorithm:
+  - list 驗證 filters 與分頁範圍後穩定排序讀取；detail 讀取單一 alert 及依 occurred_at/id 排序的完整事件歷程。
+  - claim 以 row lock 驗證 open/claimed/resolved 狀態；更新 claimant projection 後，以 deterministic event_key 委派附加 claimed event。
+  - resolve 以 row lock 驗證 operator 與狀態，保留既有 claimant；更新 resolution projection 後，以 deterministic event_key 委派附加 resolved event。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_alert_workflow.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b6-finance-alert-workflow"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceAlertWorkflowLifecycleIntegrationTest
+- Sub Map: services_layer
+- Type: integration_test
+- State: `planned`
+- Source: tests/test_finance_alert_workflow_lifecycle_integration.py
+- Dependencies: [FinanceAlertSchema, FinanceAlertDetectionService, FinanceAlertEventService, FinanceAlertWorkflowService, FinanceImportStagingService]
+- Description: 驗證 B6 pending／review 警示的偵測持久化、人工認領／解除、deterministic rerun 與部分殘留保護。
+- Complexity: medium
+- Input:
+  - boundary_alert_fixtures: CLIENT、RETURN、SUBSIDY、STAFF、COMMON 的 pending／review 與金額差額案例
+  - operators: 不同人工處理者及 claim／resolve 原因
+- Output:
+  - persisted_alerts: current workflow projection、audit snapshot 與 append-only events
+  - protected_staging_state: staging reconciliation 與原始流水前後一致性
+- Invariants:
+  - 每個警示必須保存 row/batch 或明確正式來源、alert_code、原因、候選、expected、actual、difference；pending 警示不得造成正式帳務寫入。
+  - 完全相同 detection、claim 與 resolve 重跑只回 existing，不新增 alert 或 workflow event，不覆寫人工結果，也不重開 resolved。
+  - 同一 operator claim 重試必須 idempotent；另一 operator 搶占已認領警示必須 conflict 且不改變 claimant。
+  - resolve 必須保存 actor、reason、time 與事件；解除警示不得被視為 transaction、allocation 或 reconciliation 成功。
+  - 部分殘留、相同 alert_key 對應不同 source 或 event_key 內容衝突時必須 fail-fast。
+- Algorithm:
+  - 從既有 B3、B4、B5 邊界 fixture 產生 pending/review 結果，建立或取得警示並核對完整 audit snapshot。
+  - 以兩名 operator 驗證 claim idempotency 與競爭衝突，再以明確 reason resolve 並核對 append-only history。
+  - 對 detection、claim 與 resolve 執行 deterministic rerun，確認 existing 與人工結果保護。
+  - 注入相同 key 不同內容及部分殘留資料，驗證 fail-fast 且 staging 原始內容與 reconciliation 狀態維持原狀。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_alert_workflow_lifecycle_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b6-finance-alert-workflow-lifecycle"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceAlertFormalEventIntegrationTest
+- Sub Map: services_layer
+- Type: integration_test
+- State: `planned`
+- Source: tests/test_finance_alert_formal_event_integration.py
+- Dependencies: [FinanceAlertSchema, FinanceAlertDetectionService, FinanceAlertEventService, ClientSubsidyReturnTransactionService, GovernmentSubsidyReconciliationService, StaffActualTransferService]
+- Description: 驗證 B6 failed／退匯／重匯／沖正警示只引用既有正式事件，且不建立另一份正式淨額或帳務投影。
+- Complexity: medium
+- Input:
+  - lifecycle_fixtures: failed、returned、retransferred、reversed 的既有正式交易事件
+  - alerts: 已存在且仍可附加來源歷程的警示
+- Output:
+  - lifecycle_events: append-only 正式來源警示事件
+  - protected_finance_state: transaction、allocation、應收／應付及 paid projection 前後一致性
+- Invariants:
+  - failed、returned、retransferred、reversed 必須引用既有正式事件；不存在或狀態不符時 fail-fast。
+  - retransfer 必須引用同一正式來源類型的原事件與具有新 external_reference 的成功新事件。
+  - 完全相同 event 重跑只回 existing；相同 event_key 不同內容必須 fail-fast。
+  - 附加警示事件前後，正式 transaction、allocation、應收／應付、paid projection 與 staging reconciliation 必須完全一致。
+  - 警示服務不得計算或保存正式淨額；正式淨額仍由既有 domain service 的結果驗證。
+- Algorithm:
+  - 建立既有正式 failed、return、reversal 與新 external_reference retransfer fixture，先記錄各 domain 正式狀態快照。
+  - 逐一附加來源事件並重跑，核對 created／existing、事件引用與 append-only history。
+  - 注入不存在來源、狀態不符、舊 reference 重用與 event_key 衝突，驗證 fail-fast。
+  - 比對前後正式 domain 快照及既有服務淨額結果，確認只有 finance_alert_events 增加。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_alert_formal_event_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b6-finance-alert-formal-event"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: MonthlyPaymentPreparation
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/payment_batch_service.py
+- Dependencies: [StaffMonthlySettlementSchema, StaffMonthlySettlementDetailSchema, StaffMonthlySettlementService]
+- Description: 由已完成月結產生每位服務人員每月一筆待匯資料；系統不執行銀行轉帳。
+- Complexity: medium
+- Input:
+  - target_month: 明確薪資歸屬月份 YYYY-MM
+- Output:
+  - preparation_rows: 每個月結一筆 settlement_id、staff_id、transfer_date、remaining_amount 與案件清單
+- Invariants:
+  - 只選 settlement_month 等於 target_month 首日，status 為 finalized 或 partially_paid，且 total_payable-total_paid 大於零的月結。
+  - 每個 settlement_id 只輸出一列；不得退回逐 staff_payment_id 或把同一服務人員跨案件拆成多筆銀行款。
+  - transfer_date 只使用該月結明細來源 staff_payments 已保存的 due_date；正常流程要求所有明細具有同一非空 due_date，不一致時列為 review_required 且不輸出待匯列。
+  - 產生或重跑清單不得建立或更新任何實際 transfer、allocation 或 payment transaction。
+- Algorithm:
+  - 解析 target_month，查詢符合條件的 settlement headers 與 details/source due dates。
+  - 依 settlement 分組，要求唯一 due_date，彙總 case_no 清單並輸出一列剩餘月結金額；不寫資料庫。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_payment_batch_service.py", "-q"], "cwd": "project", "expect_exit": 0}
+- Observability: not_required
+
+##### Module: SubsidyClaimReporting
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/subsidy_claim_service.py
+- Complexity: medium
+- Input:
+  - cases: completed case records containing case_no, subsidy_hours, actual_end_date, and end_date
+  - application_year: calendar year in which the quarterly claim is due
+- Output:
+  - quarterly_candidates: cases grouped by the April, July, October, or January claim month
+  - annual_overview: application-year totals for expected, submitted, approved, and paid claims
+- Description: 依完工季度產生 4／7／10／1 月補助申請清單，並提供年度補助總覽。
+- Invariants:
+  - 僅納入 subsidy_hours 大於 0、已完工且未列入同一申請批次的案件。
+  - 季度歸屬以 actual_end_date 為主，無值時才使用 end_date。
+  - 年度總覽必須分別統計應申請、已送件、已核准與已撥款。
+- Algorithm:
+  - Ignore cases with zero subsidy hours or no completion date; use actual_end_date before end_date.
+  - Map completion quarter Q1/Q2/Q3/Q4 to claim due month April/July/October/January, with Q4 due in the following application year.
+  - Group only records whose claim due date belongs to application_year.
+  - Return expected totals from candidate cases; until claim-status persistence exists, submitted, approved, and paid totals must be explicit zeroes rather than inferred values.
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_subsidy_claim_service.py", "-q"], "cwd": "project", "expect_exit": 0}
+- Observability: not_required
+
+##### Module: AccountsPayableExport
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/accounts_payable_export.py
+- Dependencies: [MonthlyPaymentPreparation, ClientSubsidyReturnObligationService]
+- Description: Build the union's monthly outgoing staff-settlement and client subsidy-return list and downloadable Excel workbook. 解約退款功能不啟用。
+- Complexity: medium
+- Input:
+  - target_month: YYYY-MM, the month of transfer due dates
+- Output:
+  - payable_rows: rows with month-bank-sequence, outgoing bank, recipient identity, recipient bank details, amount, case_no, and transfer date
+  - xlsx_bytes: downloadable workbook with the approved fixed column order and per-outgoing-bank totals
+- Invariants:
+  - Include only positive unpaid amounts; staff rows必須來自 MonthlyPaymentPreparation 的一月結一列，客戶列使用 canonical subsidy_return 未退餘額及明確 due_date。
+  - 月嫂款使用出款銀行代碼 31（永豐銀行）；客戶退還補助款使用 633（台新銀行）。解約退款不得納入。
+  - Assign serials independently per target month and outgoing bank, beginning at 1; the identifier format is month-outgoing_bank_code-serial.
+  - Spreadsheet columns must be 月份-銀行代碼-流水號, 銀行名稱, 客戶or服務人員姓名, 銀行帳號, 銀行代號(碼), 金額, 身分證字號(匯款到永豐才要填), 案件編號, 匯款日期.
+  - Export preparation must not create or update any payment transaction.
+- Algorithm:
+  - Read staff settlement preparation rows and canonical client subsidy-return balances, enrich each unique recipient's bank data, and emit Yongfeng and Taishin rows.
+  - Staff case column joins the settlement's case_no list for audit only; it must not split the bank amount. Sort by outgoing bank, transfer date, and source id, then assign independent month-bank serials.
+  - Create an XLSX workbook with the fixed headers, yellow header styling, rows, and both outgoing-bank totals.
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_accounts_payable_export.py", "-q"], "cwd": "project", "expect_exit": 0}
+- Observability: not_required
+
+##### Module: SubsidyReconciliationRegister
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/subsidy_reconciliation_register.py
+- Description: Build read-only quarterly subsidy reconciliation registers and annual summaries, including downloadable Excel workbooks.
+- Complexity: medium
+- Input:
+  - application_year: year of the quarterly claim application or annual summary
+  - quarter: 1 through 4 for a quarterly register
+- Output:
+  - quarterly_rows: separate general-citizen and subsidized-citizen row sets with XLSX bytes
+  - annual_rows: separate general-citizen and subsidized-citizen row sets with XLSX bytes
+- Invariants:
+  - Include only completed cases with positive subsidy hours; determine the claim quarter from actual_end_date.
+  - Use case_no as the city order number, actual_start_date and actual_end_date as the service dates, and the employer's address from clients.
+  - Read the employer identity card only from the BeClass survey_details JSON associated by query_no = case_no.
+  - subsidy_days equals subsidy_hours divided by service_hours_per_day, rounded to and displayed with exactly two decimal places in the preview and XLSX.
+  - General citizens are the upper section; subsidized citizens are a lower independent section only when it has rows.
+  - Quarterly XLSX signing cells must always be blank; the service must not write claim, payment, or order data.
+- Algorithm:
+  - Read eligible completed orders with client, primary staff, and BeClass data, then calculate the claim period from actual_end_date.
+  - Classify records by subsidy eligibility. Derive subsidy hours as min(40, total service hours) for general citizens and min(120, total service hours) for subsidized citizens; then derive days, amount, and register fields, and sort each section by case_no.
+  - Build quarterly and annual workbooks with their approved column sets and optional lower subsidized-citizen section.
+- Verification:
+  - command: {"argv": [".venv\\\\Scripts\\\\python.exe", "-m", "pytest", "tests\\\\test_subsidy_reconciliation_register.py", "-q"], "cwd": "project", "expect_exit": 0}
+- Observability: not_required
+
+<!-- SERVICES_MODULES_END -->

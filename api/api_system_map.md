@@ -1,73 +1,234 @@
-# API Layer Sub-System Map (Version 2.0)
+# API Layer Sub-System Map (Version 3.0)
 
 > **Scope**: `api/` RESTful API 服務層  
-> **Master Reference**: [`../system_map.yaml`](file:///c:/Users/chris/Desktop/project/Labor_union/system_map.yaml)
+> **Master Reference**: [`../system_map.md`](../system_map.md)
 
 ---
 
-### 🏛️ API 功能層模組全覽表
-
-##### Module: FastApiApp
-- Source: api/main.py
-- Type: api_entrypoint
-- Description: FastAPI REST Server 主入口，掛載 CORS、Health check 與各業務 APIRouter。
+### API 功能層模組全覽表
 
 ##### Module: OrderRouter
+- Sub Map: api_layer
 - Source: api/routes/orders.py
 - Type: api_router
 - State: `validated`
-- Endpoints:
-  - `GET /api/v1/orders`
-  - `GET /api/v1/orders/{case_no}`
-  - `PUT /api/v1/orders/{case_no}/full-details`
-  - `PUT /api/v1/orders/{case_no}/status`
-  - `POST /api/v1/orders/calculate-schedule`
+- Description: 訂單與時程精算 API 路由。
+- Dependencies: [DbService, OrderSchemas]
+- Observability: not_required
 
 ##### Module: MatchRouter
+- Sub Map: api_layer
 - Source: api/routes/matches.py
 - Type: api_router
 - State: `validated`
-- Endpoints:
-  - `GET /api/v1/matches/recommend-staff?case_no={case_no}`
-  - `POST /api/v1/matches/{match_id}/send-info-1` (根據 staff.line_user_id 推播)
-  - `POST /api/v1/matches/{match_id}/send-info-2` (根據 staff.line_user_id 推播)
-  - `PUT /api/v1/matches/{match_id}/reply`
-  - `POST /api/v1/matches/{match_id}/send-resume`
-  - `POST /api/v1/orders/{case_no}/assign-staff`
+- Description: 案件與配對中心 API 路由。
+- Dependencies: [DbService, MatchSchemas]
+- Observability: not_required
 
 ##### Module: ScheduleRouter
+- Sub Map: api_layer
 - Source: api/routes/schedule.py
 - Type: api_router
 - State: `validated`
-- Endpoints:
-  - `POST /api/v1/schedule/save`
-  - Request body 使用 `case_no` 關聯案件與排班，不接受內部自增識別碼
+- Description: 月嫂服務人員行事曆與動態順延排班保存 API 路由。
+- Dependencies: [DbService, ScheduleSchemas]
+- Observability: not_required
+
+##### Module: ScheduleSchemas
+- Sub Map: api_layer
+- Source: api/schemas/schedule.py
+- Type: api_schema
+- State: `validated`
+- Description: 驗證案件排班日期、工作日與薪資日標記。
+- Dependencies: []
+- Observability: not_required
 
 ##### Module: PaymentRouter
-- Source: api/routes/payments.py
+- Sub Map: api_layer
+- Source: api/routes/payments.py::get_all_payments,update_payment
 - Type: api_router
 - State: `validated`
-- Description: 舊 payments API 相容路由；所有端點回傳 HTTP 410，客戶與月嫂新帳務 API 尚待建立。
+- Description: 舊 payments API 相容路由；所有端點回傳 HTTP 410。
+- Dependencies: [DbService, PaymentSchemas]
+- Observability: not_required
 
 ##### Module: ClientRouter
+- Sub Map: api_layer
 - Source: api/routes/clients.py
 - Type: api_router
 - State: `validated`
-- Endpoints:
-  - `GET /api/v1/clients`
+- Description: 客戶名冊 API 路由。
+- Dependencies: [DbService]
+- Observability: not_required
 
 ##### Module: StaffRouter
+- Sub Map: api_layer
 - Source: api/routes/staff.py
 - Type: api_router
 - State: `validated`
-- Endpoints:
-  - `GET /api/v1/staff`
+- Description: 服務人員名冊 API 路由。
+- Dependencies: [DbService]
+- Observability: not_required
 
 ##### Module: HolidayRouter
+- Sub Map: api_layer
 - Source: api/routes/holidays.py
 - Type: api_router
 - State: `validated`
-- Endpoints:
-  - `GET /api/v1/holidays`
-  - `POST /api/v1/holidays`
-  - `DELETE /api/v1/holidays/{holiday_date}`
+- Description: 國定假日管理 API 路由。
+- Dependencies: [DbService]
+- Observability: not_required
+
+##### Module: LegacyPaymentAPIFreeze
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/payments.py::_legacy_payments_removed
+- Description: 停用舊 /api/v1/payments 路由，避免讀寫已淘汰的 payments 表。
+- Invariants:
+  - 不得呼叫 legacy payments 的資料服務。
+  - 所有端點必須回傳明確的 HTTP 410 停用訊息。
+- Verification:
+  - must_have_assertions
+- Observability: not_required
+
+##### Module: ClientPaymentRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/client_payments.py
+- Description: 提供 `/api/v1/client-payments` 的客戶收款與帳務摘要 API；退還補助款可查閱，解約退款功能不啟用。
+- Invariants:
+  - Payload 不接受任何月嫂帳務欄位。
+  - 新增交易僅接受 deposit、first_payment、second_payment 階段；不得接受解約 refund。
+  - 新增交易僅接受 receipt 與必要的 reversal；人工補登必須有非空原因。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_payment_routers.py", "-q"], "cwd": "project", "expect_exit": 0}
+- Observability: not_required
+
+##### Module: StaffPaymentRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/staff_payments.py
+- Description: 提供 `/api/v1/staff-payments` 的月嫂應付與一次發薪實付 API。
+- Invariants:
+  - Payload 不接受任何客戶收款或退款欄位。
+  - 人工補登付款交易必須有非空原因，且不得直接覆寫 staff_payments 摘要。
+- Observability: not_required
+
+##### Module: ContractContextRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/contracts.py
+- Description: Read-only staff-service contract context by case_no and formal assignment.
+- Complexity: medium
+- Input:
+  - case_no: canonical order identifier
+  - assignment_id: optional formal assignment selector
+- Output:
+  - staff_contract_context: order, client, BeClass, selected assignment and staff facts
+- Algorithm:
+  - Read order and client contract facts by case_no, then BeClass by query_no = case_no.
+  - Read formal case_staff_assignments; require assignment_id when more than one active assignment exists, and never infer the recipient from orders.staff_id.
+  - Return null for approved-but-unmapped template fields; never write orders, templates, or payments.
+- Invariants:
+  - All reads use case_no and optional assignment_id; no orders.id or legacy payment view is used.
+  - The endpoint is read-only and does not alter the original contract workbook.
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_contract_context_router.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceReportRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/finance_reports.py
+- Description: Read-only accounts-payable and subsidy-reconciliation previews and XLSX downloads.
+- Complexity: low
+- Input:
+  - target_month: YYYY-MM for accounts payable
+  - reconciliation_period: year and optional quarter
+- Output:
+  - finance_reports: JSON previews and XLSX attachments
+- Algorithm:
+  - Delegate payable generation to AccountsPayableExport and reconciliation generation to SubsidyReconciliationRegister.
+  - Return preview rows without workbook bytes in JSON endpoints; return workbook bytes only from explicit export endpoints.
+  - Validate inputs at the API boundary and do not write payment, claim, refund, or order state.
+- Invariants:
+  - All endpoints are read-only.
+  - 解約退款功能停用；但到期且未退還的 client subsidy-return 必須可在預覽與匯出中出現。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_report_router.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceAlertRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/finance_alerts.py
+- Dependencies: [FinanceAlertWorkflowService]
+- Description: 提供財務警示清單、詳細資料、人工認領與解除端點；警示建立及正式交易修正不對 UI 開放。
+- Complexity: medium
+- Input:
+  - filters: status、alert_code、source_domain 及分頁條件
+  - workflow_action: alert_id、非空 operator reference 與 resolve reason
+- Output:
+  - alerts: 稽核清單、詳細快照與事件歷程
+  - action_result: existing、claimed、resolved 或 conflict
+- Invariants:
+  - Router 只提供 list、detail、claim、resolve；不得提供任意 PATCH、任意事件建立或由 UI 建立警示的端點。
+  - claim／resolve 必須委派 FinanceAlertWorkflowService，不得直接更新 finance_alerts、finance_alert_events 或任何正式帳務表。
+  - conflict、not found 與 invalid transition 必須使用明確 HTTP 狀態；不得吞掉成成功。
+  - resolve reason 與 operator reference 必須非空；本階段不在 B6 內另建 RBAC 或身份系統。
+- Algorithm:
+  - 驗證查詢與 action payload，將 list/detail/claim/resolve 委派給 FinanceAlertWorkflowService。
+  - 回傳候選 snapshot、expected/actual/difference 與事件歷程；不推測候選或觸發正式核銷。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_alert_router.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b6-finance-alert-router"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceRouterRegistration
+- Sub Map: api_layer
+- Type: api_entrypoint
+- State: `planned`
+- Source: api/main.py
+- Description: Register contract, finance-report and finance-alert routers with the running FastAPI application.
+- Complexity: low
+- Invariants:
+  - Register each new router exactly once without removing existing routers.
+  - finance_alerts.router 必須只註冊一次；不得用另一個 FastAPI app 或重複 prefix 規避既有入口。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('api/main.py').read_text(encoding='utf-8'); assert 'contracts.router' in s and 'finance_reports.router' in s and 'finance_alerts.router' in s; assert s.count('app.include_router(finance_alerts.router)') == 1; print('FINANCE ROUTERS REGISTERED')"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "FINANCE ROUTERS REGISTERED"}
+- Observability: not_required
+- Invariants:
+  - INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始啟動後端與監控服務防止連線逾時崩潰。
+
+##### Module: OrderSchemas
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/orders.py
+- Description: 訂單完整更新、狀態更新與排班試算的 API 請求資料模型。
+- Dependencies: []
+- Observability: not_required
+
+##### Module: MatchSchemas
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/matches.py
+- Description: 媒合回覆與服務人員指派的 API 請求資料模型。
+- Dependencies: []
+- Observability: not_required
+
+##### Module: PaymentSchemas
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/payments.py
+- Description: 舊付款更新相容路由的 API 請求資料模型。
+- Dependencies: []
+- Observability: not_required
