@@ -10,7 +10,9 @@
 import sys
 import os
 import argparse
+import json
 from collections import Counter
+from decimal import Decimal
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 import random
 import pandas as pd
@@ -97,7 +99,8 @@ def fill_checkbox_group(row_dict, options, summary_col):
         row_dict[opt] = 'Y' if opt in selected else None
     row_dict[summary_col] = '、'.join(selected)
 
-def generate_roster_data(input_file, output_file, personal_data_pool, staff_data_pool, num_records):
+def generate_roster_data(input_file, output_file, personal_data_pool, staff_data_pool, num_records,
+                         align_beclass_case_no: bool = False):
     """
     產生包含 HCM 客戶、BeClass 客戶與服務人員的測試名冊 Excel 檔案。
     """
@@ -150,6 +153,8 @@ def generate_roster_data(input_file, output_file, personal_data_pool, staff_data
         row['服務時間'] = random.choice(['9小時', '9小時', '8小時', '24小時'])
         row['居住型態'] = random.choice(['公寓', '大樓', '透天'])
         row['服務方式'] = random.choice(['週休1日', '週休2日', '連續服務'])
+        if align_beclass_case_no and case_no == 115000009:
+            row['身分資格'] = '低收入戶'
         
         row['管理者註記事項'] = f"服務期間:{due_date}~{service_date} (測試)"
         
@@ -172,6 +177,10 @@ def generate_roster_data(input_file, output_file, personal_data_pool, staff_data
         row['姓名'] = p_data['name']
         row['銀行帳號'] = str(random.randint(100000000000, 999999999999))
         row['銀行代3碼+分行代號4碼'] = f"{random.randint(100, 999):03d}{random.randint(1000, 9999):04d}"
+        if align_beclass_case_no:
+            row['銀行帳號'] = f"{800000000000 + i:012d}"
+            row['銀行代碼3碼+分行代號4碼'] = "8070014"
+            row.pop('銀行代3碼+分行代號4碼', None)
         row['身分證字號'] = p_data['id_card']
         row['行動電話'] = p_data['phone']
         row['EMAIL'] = p_data['email']
@@ -229,7 +238,11 @@ def generate_roster_data(input_file, output_file, personal_data_pool, staff_data
         p_data = personal_data_pool[i]
         
         row['項次'] = i + 1
-        row['查詢序號'] = base_query_no + i
+        row['查詢序號'] = (
+            str(base_case_no + i + 1)
+            if align_beclass_case_no
+            else base_query_no + i
+        )
         
         clients_signup_dt = datetime.strptime(fake_clients_rows[i]['報名時間(建檔)'], "%Y/%m/%d %H:%M:%S")
         row['報名時間'] = clients_signup_dt.strftime("%m-%d %H:%M")
@@ -249,6 +262,9 @@ def generate_roster_data(input_file, output_file, personal_data_pool, staff_data
                 row[col] = 'Y' if random.random() > 0.5 else None
         
         row['管理者註記事項'] = random.choice(['大寶1歲', '二寶出生', '需要提早', None])
+        if align_beclass_case_no:
+            row['補助款退款:銀行代號+分行代號'] = '8070014'
+            row['銀行帳號'] = f"{700000000000 + i:012d}"
         
         fake_beclass_rows.append(row)
 
@@ -261,6 +277,23 @@ def generate_roster_data(input_file, output_file, personal_data_pool, staff_data
         df_beclass_result.to_excel(writer, sheet_name='beclass', index=False)
         
     print(f"成功！已生成名冊檔案：{output_file}")
+
+
+def generate_historical_order_fixture(output_file: str, personal_data_pool: list[dict]) -> None:
+    """Create a strict historical-order file for insert-only duplicate verification."""
+    rows = []
+    for index, person in enumerate(personal_data_pool, start=1):
+        rows.append(
+            {
+                "client_name": person["name"],
+                "case_no": f"1150000{index:02d}",
+                "start_date": None,
+                "end_date": None,
+                "status": "洽談中",
+                "staff_name": None,
+            }
+        )
+    pd.DataFrame(rows).to_excel(output_file, index=False)
 
 def generate_finance_data(output_file, personal_data_pool):
     """
@@ -590,6 +623,62 @@ LIFECYCLE_SCENARIOS = (
 )
 
 
+# These cases are deterministic overlays on top of the normal lifecycle mix.
+# Keeping the remaining cases random is intentional: the fixture must retain
+# the original breadth of statuses, service modes, hours, and notes.
+BOUNDARY_CASES = {
+    "115000003": {"scenario": "in_service", "boundary_type": "two_caregiver_active_handoff"},
+    "115000004": {"scenario": "closed", "boundary_type": "two_caregiver_completed_handoff"},
+    "115000005": {"scenario": "cancelled", "boundary_type": "cancelled_deposit_refund"},
+    "115000008": {"scenario": "in_service", "boundary_type": "three_caregiver_active_handoff"},
+    "115000009": {"scenario": "closed", "boundary_type": "three_caregiver_completed_prorated"},
+    "115000013": {"scenario": "in_service", "boundary_type": "first_payment_partial_then_overpay"},
+    "115000014": {"scenario": "closed", "boundary_type": "second_payment_single_overpay"},
+    "115000018": {"scenario": "in_service", "boundary_type": "double_pay_schedule_day"},
+}
+
+BOUNDARY_SERVICE_DAYS = {
+    "115000003": 20,
+    "115000004": 25,
+    "115000008": 30,
+    "115000009": 30,
+}
+
+
+def build_lifecycle_fixture_plan(case_nos: list[str], seed: int | None = None) -> dict[str, dict]:
+    """Return a mixed lifecycle plan with deterministic boundary overlays.
+
+    The base mix deliberately remains the pre-existing weighted mix.  Only the
+    named boundary cases are forced to the state required for their fact; all
+    other cases retain shuffled lifecycle diversity.
+    """
+    if seed is not None:
+        random.seed(seed)
+    counts = _scenario_counts(len(case_nos))
+    scenarios = [name for name, count in counts.items() for _ in range(count)]
+    while len(scenarios) < len(case_nos):
+        scenarios.append("new_inquiry")
+    random.shuffle(scenarios)
+    plan = {}
+    for case_no, scenario in zip(case_nos, scenarios):
+        boundary = BOUNDARY_CASES.get(case_no)
+        plan[case_no] = {
+            "scenario": boundary["scenario"] if boundary else scenario,
+            "boundary_type": boundary["boundary_type"] if boundary else "none",
+        }
+    return plan
+
+
+def fixture_admin_note(boundary_type: str, expected: str = "normal lifecycle fixture") -> str:
+    """Create the stable admin-note marker consumed by reconciliation scans."""
+    if boundary_type == "none":
+        return "fixture_type=normal; boundary_type=none"
+    return (
+        "fixture_type=boundary; "
+        f"boundary_type={boundary_type}; owner_module=GenerateFakeData; expected={expected}"
+    )
+
+
 def _scenario_counts(total: int, overrides: dict | None = None) -> dict:
     """Return a deterministic, complete lifecycle mix for the available orders."""
     weights = {
@@ -626,8 +715,40 @@ def _scenario_note(scenario: str, boundary_tag: str | None = None) -> str | None
     return f"{note or ''} [{boundary_tag}]".strip() if boundary_tag else note
 
 
+def _derive_payment_dates(payment_created_at: date, service_start_date: date | None,
+                          service_end_date: date | None, deposit_received_at: date | None,
+                          first_payment_received_at: date | None,
+                          second_payment_received_at: date | None,
+                          completed_service: bool) -> dict[str, date | None]:
+    """Return the six client-payment dates from the lifecycle fixture rules.
+
+    Receipt dates intentionally retain the exact values subsequently written to
+    ``client_payment_transactions.occurred_at``.  The balance due date is the
+    earlier of the contractual 15-day term and the actual service end date.
+    """
+    assert payment_created_at
+    if first_payment_received_at:
+        assert service_start_date
+    if completed_service:
+        assert first_payment_received_at and service_end_date
+
+    return {
+        "deposit_due_date": payment_created_at + timedelta(days=3),
+        "deposit_received_at": deposit_received_at,
+        "first_payment_due_date": service_start_date if first_payment_received_at else None,
+        "first_payment_received_at": first_payment_received_at,
+        "second_payment_due_date": (
+            min(first_payment_received_at + timedelta(days=15), service_end_date)
+            if completed_service else None
+        ),
+        "second_payment_received_at": second_payment_received_at,
+    }
+
+
 def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, first_pay, second_pay, caregiver_fee, notes,
-                    deposit_at=None, first_pay_at=None, second_pay_at=None, caregiver_paid_at=None):
+                    payment_created_at: date, service_start_date: date | None,
+                    service_end_date: date | None, deposit_at=None, first_pay_at=None,
+                    second_pay_at=None, caregiver_paid_at=None, completed_service=False):
     assert case_no
     # 注意：amount 為應收總額（amount_receivable），deposit/first_pay/second_pay 為「目前已收」金額
     # （amount_received），兩者本來就是不同概念，尚未收款的情境下 deposit/first_pay/second_pay 皆為 0
@@ -638,6 +759,20 @@ def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, first
     planned_first = planned_balance // 2
     planned_second = planned_balance - planned_first
     amount_received = deposit + first_pay + second_pay
+    if deposit:
+        assert deposit_at
+    if first_pay:
+        assert first_pay_at
+    if second_pay:
+        assert second_pay_at
+    payment_dates = _derive_payment_dates(
+        payment_created_at, service_start_date, service_end_date,
+        deposit_at if deposit else None,
+        first_pay_at if first_pay else None,
+        second_pay_at if second_pay else None,
+        completed_service,
+    )
+    fixture_notes = f"{notes or ''} [lifecycle_fixture]".strip()
     cursor.execute("""
         INSERT INTO client_payments (
             case_no,
@@ -645,8 +780,8 @@ def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, first
             first_payment_receivable, first_payment_received, first_payment_due_date, first_payment_received_at,
             second_payment_receivable, second_payment_received, second_payment_due_date, second_payment_received_at,
             amount_receivable, amount_received,
-            payment_status, notes
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            payment_status, notes, created_at
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ON DUPLICATE KEY UPDATE
             amount_receivable = VALUES(amount_receivable),
             amount_received = VALUES(amount_received),
@@ -656,14 +791,14 @@ def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, first
             first_payment_due_date = VALUES(first_payment_due_date), first_payment_received_at = VALUES(first_payment_received_at),
             second_payment_receivable = VALUES(second_payment_receivable), second_payment_received = VALUES(second_payment_received),
             second_payment_due_date = VALUES(second_payment_due_date), second_payment_received_at = VALUES(second_payment_received_at),
-            payment_status = VALUES(payment_status), notes = VALUES(notes)
+            payment_status = VALUES(payment_status), notes = VALUES(notes), created_at = VALUES(created_at)
     """, (
         case_no,
-        planned_deposit, deposit, deposit_at, deposit_at,
-        planned_first, first_pay, first_pay_at, first_pay_at,
-        planned_second, second_pay, second_pay_at, second_pay_at,
+        planned_deposit, deposit, payment_dates["deposit_due_date"], payment_dates["deposit_received_at"],
+        planned_first, first_pay, payment_dates["first_payment_due_date"], payment_dates["first_payment_received_at"],
+        planned_second, second_pay, payment_dates["second_payment_due_date"], payment_dates["second_payment_received_at"],
         amount, amount_received,
-        status, notes,
+        status, fixture_notes, payment_created_at,
     ))
     cursor.execute("SELECT id FROM client_payments WHERE case_no = %s", (case_no,))
     client_payment_id = cursor.fetchone()["id"]
@@ -693,7 +828,7 @@ def _upsert_payment(cursor, case_no, client_name, status, amount, deposit, first
             case_no,
             stage,
             received_amount,
-            occurred_at or date.today(),
+            occurred_at,
             f"fake:{case_no}:{stage}",
             "假資料產生器建立的收款明細",
         ))
@@ -734,18 +869,107 @@ def _write_scenario_schedule(cursor, case_no: str, staff_id: int, start: date, s
     return last_day
 
 
-def _assign_available_staff(cursor, staff_ids: list[int], desired_start: date) -> tuple[int, date]:
-    """Choose a staff member whose generated schedule does not overlap the requested start."""
-    availability = []
+def _schedule_end_date(start: date, service_days: int, service_mode: str | None = None) -> date:
+    """Return the calendar end date after the requested number of work days."""
+    rest_weekdays = _rest_weekdays_for_service_mode(service_mode)
+    work_days = 0
+    current_day = start
+    while True:
+        if current_day.weekday() not in rest_weekdays:
+            work_days += 1
+            if work_days == service_days:
+                return current_day
+        current_day += timedelta(days=1)
+
+
+def _schedule_start_for_completed_service(end_on_or_before: date, service_days: int,
+                                          service_mode: str | None = None) -> tuple[date, date]:
+    """Build a completed-service window whose final work day is not in the future."""
+    rest_weekdays = _rest_weekdays_for_service_mode(service_mode)
+    end = end_on_or_before
+    while end.weekday() in rest_weekdays:
+        end -= timedelta(days=1)
+    work_days = 0
+    current_day = end
+    while True:
+        if current_day.weekday() not in rest_weekdays:
+            work_days += 1
+            if work_days == service_days:
+                return current_day, end
+        current_day -= timedelta(days=1)
+
+
+def _assign_available_staff(cursor, staff_ids: list[int], desired_start: date,
+                            desired_end: date) -> int:
+    """Choose a staff member without moving the caller's lifecycle window."""
+    available_staff = []
     for staff_id in staff_ids:
-        cursor.execute("SELECT MAX(work_date) AS last_date FROM staff_schedule WHERE staff_id = %s", (staff_id,))
-        last_date = cursor.fetchone()["last_date"]
-        if last_date is None or last_date < desired_start:
-            availability.append((staff_id, desired_start))
-        else:
-            availability.append((staff_id, last_date + timedelta(days=4)))
-    available_now = [item for item in availability if item[1] == desired_start]
-    return random.choice(available_now) if available_now else min(availability, key=lambda item: item[1])
+        cursor.execute(
+            """SELECT (
+                   SELECT COUNT(*) FROM staff_schedule
+                   WHERE staff_id = %s AND work_date BETWEEN %s AND %s
+               ) + (
+                   SELECT COUNT(*) FROM case_staff_assignments
+                   WHERE staff_id = %s AND status <> 'cancelled'
+                     AND assigned_start_date <= %s AND assigned_end_date >= %s
+               ) AS count""",
+            (staff_id, desired_start, desired_end,
+             staff_id, desired_end, desired_start),
+        )
+        if cursor.fetchone()["count"] == 0:
+            available_staff.append(staff_id)
+    if not available_staff:
+        raise RuntimeError(
+            f"{desired_start} 至 {desired_end} 無可用月嫂；不得移動生命週期日期避開衝突"
+        )
+    return random.choice(available_staff)
+
+
+def _segment_work_day_counts(case_no: str, total_work_days: int) -> list[int]:
+    """Return exact boundary handoff sizes without changing other cases."""
+    if case_no == "115000003":
+        return [10, 10]
+    if case_no == "115000004":
+        return [12, 13]
+    if case_no in ("115000008", "115000009"):
+        base, remainder = divmod(total_work_days, 3)
+        return [base + (1 if index < remainder else 0) for index in range(3)]
+    return [total_work_days]
+
+
+def _prorate_amount(total, weights: list[int]) -> list[Decimal]:
+    """Allocate a money total proportionally and put rounding residue in the last segment."""
+    total_amount = Decimal(str(total)).quantize(Decimal("0.01"))
+    weight_total = sum(weights)
+    if weight_total <= 0:
+        raise ValueError("proration weights must be positive")
+    allocated = []
+    remaining = total_amount
+    for weight in weights[:-1]:
+        portion = (total_amount * Decimal(weight) / Decimal(weight_total)).quantize(
+            Decimal("0.01")
+        )
+        allocated.append(portion)
+        remaining -= portion
+    allocated.append(remaining.quantize(Decimal("0.01")))
+    return allocated
+
+
+def _schedule_rows_for_segment(start: date, work_days: int,
+                               service_mode: str | None) -> tuple[list[tuple[date, bool]], date]:
+    """Return every calendar row through the segment's final service day."""
+    rest_weekdays = _rest_weekdays_for_service_mode(service_mode)
+    rows = []
+    completed = 0
+    current_day = start
+    while completed < work_days:
+        is_work_day = current_day.weekday() not in rest_weekdays
+        rows.append((current_day, is_work_day))
+        if is_work_day:
+            completed += 1
+        if completed < work_days:
+            current_day += timedelta(days=1)
+    return rows, current_day
 
 
 def validate_lifecycle_data(cursor, reference_date: date) -> list[str]:
@@ -758,12 +982,78 @@ def validate_lifecycle_data(cursor, reference_date: date) -> list[str]:
         ("""SELECT COUNT(*) AS count FROM orders o
             LEFT JOIN clients c ON c.id = o.client_id
             WHERE status IN ('服務中', '訂單完成') AND (o.staff_id IS NULL OR o.actual_start_date IS NULL)""", (), "服務中/完成案件缺少月嫂或實際開始日"),
+        ("""SELECT COUNT(*) AS count FROM orders
+            WHERE status = '訂單成立'
+              AND (actual_start_date IS NOT NULL OR actual_end_date IS NOT NULL OR start_date < %s)""",
+         (reference_date,), "訂單成立案件不得有實際服務日期，且預計開始日不得早於基準日"),
+        ("""SELECT COUNT(*) AS count FROM orders
+            WHERE status = '服務中'
+              AND (actual_start_date IS NULL OR actual_end_date IS NULL
+                   OR actual_start_date > %s OR actual_end_date < %s
+                   OR actual_start_date > actual_end_date)""",
+         (reference_date, reference_date), "服務中案件日期未涵蓋基準日"),
+        ("""SELECT COUNT(*) AS count FROM orders
+            WHERE status = '訂單完成'
+              AND (actual_start_date IS NULL OR actual_end_date IS NULL
+                   OR actual_start_date > actual_end_date OR actual_end_date > %s)""",
+         (reference_date,), "訂單完成案件的實際服務日期落在基準日之後"),
+        ("""SELECT COUNT(*) AS count FROM orders
+            WHERE status = '訂單取消'
+              AND (actual_start_date IS NOT NULL OR actual_end_date IS NOT NULL)""",
+         (), "訂單取消案件不得保留實際服務日期"),
         ("""SELECT COUNT(*) AS count FROM orders o
             LEFT JOIN staff_schedule ss ON ss.case_no = o.case_no AND ss.work_date > %s
             WHERE o.status = '訂單取消' AND (o.cancel_reason IS NULL OR o.cancel_reason = '' OR ss.id IS NOT NULL)""", (reference_date,), "取消案件缺少原因或仍有未來排班"),
         ("""SELECT COUNT(*) AS count FROM client_payments cp
             LEFT JOIN orders o ON o.case_no = cp.case_no
             WHERE o.case_no IS NULL""", (), "客戶帳務資料含不存在的 case_no"),
+        ("""SELECT COUNT(*) AS count FROM client_payments cp
+            WHERE cp.notes LIKE '%%[lifecycle_fixture]%%'
+              AND cp.deposit_due_date <> DATE_ADD(DATE(cp.created_at), INTERVAL 3 DAY)""", (),
+         "生命週期假資料的訂金應收日未對齊帳務建立日加三天"),
+        ("""SELECT COUNT(*) AS count FROM client_payments cp
+            JOIN orders o ON o.case_no = cp.case_no
+            WHERE cp.notes LIKE '%%[lifecycle_fixture]%%'
+              AND cp.first_payment_received > 0
+              AND (cp.first_payment_due_date IS NULL OR cp.first_payment_due_date <> o.start_date)""", (),
+         "生命週期假資料的一期應收日未對齊服務開始日"),
+        ("""SELECT COUNT(*) AS count FROM client_payments cp
+            JOIN orders o ON o.case_no = cp.case_no
+            WHERE cp.notes LIKE '%%[lifecycle_fixture]%%'
+              AND o.status = '訂單完成'
+              AND (cp.second_payment_due_date IS NULL
+                   OR cp.second_payment_due_date <> LEAST(DATE_ADD(cp.first_payment_received_at, INTERVAL 15 DAY), o.end_date))""", (),
+         "生命週期假資料的尾款應收日未對齊一期實收加十五天或服務結束日"),
+        ("""SELECT COUNT(*) AS count FROM client_payments cp
+            WHERE cp.notes LIKE '%%[lifecycle_fixture]%%'
+              AND ((cp.deposit_received > 0 AND NOT EXISTS (
+                    SELECT 1 FROM client_payment_transactions tx
+                    WHERE tx.client_payment_id = cp.id AND tx.stage = 'deposit'
+                      AND tx.transaction_status = 'succeeded'
+                      AND tx.external_reference = CONCAT('fake:', cp.case_no, ':deposit')
+                      AND tx.occurred_at <=> cp.deposit_received_at
+                  )) OR (cp.deposit_received = 0 AND cp.deposit_received_at IS NOT NULL))""", (),
+         "生命週期假資料的訂金實收日未與交易發生日完全一致"),
+        ("""SELECT COUNT(*) AS count FROM client_payments cp
+            WHERE cp.notes LIKE '%%[lifecycle_fixture]%%'
+              AND ((cp.first_payment_received > 0 AND NOT EXISTS (
+                    SELECT 1 FROM client_payment_transactions tx
+                    WHERE tx.client_payment_id = cp.id AND tx.stage = 'first_payment'
+                      AND tx.transaction_status = 'succeeded'
+                      AND tx.external_reference = CONCAT('fake:', cp.case_no, ':first_payment')
+                      AND tx.occurred_at <=> cp.first_payment_received_at
+                  )) OR (cp.first_payment_received = 0 AND cp.first_payment_received_at IS NOT NULL))""", (),
+         "生命週期假資料的一期實收日未與交易發生日完全一致"),
+        ("""SELECT COUNT(*) AS count FROM client_payments cp
+            WHERE cp.notes LIKE '%%[lifecycle_fixture]%%'
+              AND ((cp.second_payment_received > 0 AND NOT EXISTS (
+                    SELECT 1 FROM client_payment_transactions tx
+                    WHERE tx.client_payment_id = cp.id AND tx.stage = 'second_payment'
+                      AND tx.transaction_status = 'succeeded'
+                      AND tx.external_reference = CONCAT('fake:', cp.case_no, ':second_payment')
+                      AND tx.occurred_at <=> cp.second_payment_received_at
+                  )) OR (cp.second_payment_received = 0 AND cp.second_payment_received_at IS NOT NULL))""", (),
+         "生命週期假資料的尾款實收日未與交易發生日完全一致"),
     ]
     for query, params, message in checks:
         cursor.execute(query, params)
@@ -803,25 +1093,48 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
             """)
 
             counts = _scenario_counts(len(orders), scenario_counts)
-            plan = [name for name, count in counts.items() for _ in range(count)]
-            while len(plan) < len(orders):
-                plan.append("new_inquiry")
-            random.shuffle(plan)
+            if scenario_counts is None:
+                fixture_plan = build_lifecycle_fixture_plan(
+                    [order["case_no"] for order in orders],
+                    seed=seed,
+                )
+            else:
+                scenarios = [name for name, count in counts.items() for _ in range(count)]
+                while len(scenarios) < len(orders):
+                    scenarios.append("new_inquiry")
+                random.shuffle(scenarios)
+                fixture_plan = {
+                    order["case_no"]: {"scenario": scenario, "boundary_type": "none"}
+                    for order, scenario in zip(orders, scenarios)
+                }
+            conflict_case_no = next(
+                (
+                    order["case_no"]
+                    for order in reversed(orders)
+                    if fixture_plan[order["case_no"]]["boundary_type"] == "none"
+                    and fixture_plan[order["case_no"]]["scenario"]
+                    in ("in_service", "completed_pending_settlement", "closed")
+                ),
+                None,
+            )
             summary = Counter()
 
             for index, order in enumerate(orders):
-                scenario = plan[index]
+                fixture = fixture_plan[order["case_no"]]
+                scenario = fixture["scenario"]
+                boundary_type = fixture["boundary_type"]
                 days = random.choice([15, 20, 25, 30])
+                days = BOUNDARY_SERVICE_DAYS.get(order["case_no"], days)
                 hours = random.choice([8, 9, 24])
                 floor_fee = random.choice([0, 0, 500, 1000])
                 amount = days * hours * random.choice([300, 350]) + floor_fee
                 caregiver_fee = int(amount * 0.75)
                 boundary_tag = None
-                if index == 0:
+                if order["case_no"] == "115000001":
                     boundary_tag = "BOUNDARY_CROSS_MONTH"
-                elif index == 1:
+                elif order["case_no"] == "115000002":
                     boundary_tag = "BOUNDARY_WEEKEND_HOLIDAY"
-                elif index == 2:
+                elif order["case_no"] == conflict_case_no:
                     boundary_tag = "CONFLICT_TEST_EXCLUDED_FROM_NORMAL_SCHEDULE"
                 note = _scenario_note(scenario, boundary_tag)
 
@@ -833,7 +1146,10 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                             actual_start_date = NULL, actual_end_date = NULL, service_days = %s,
                             service_hours_per_day = %s, floor_fee = %s, cancel_reason = NULL WHERE case_no = %s
                     """, (start, end, days, hours, floor_fee, order["case_no"]))
-                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note)
+                    _upsert_payment(
+                        cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note,
+                        start - timedelta(days=6), start, end,
+                    )
 
                 elif scenario == "matching_in_progress":
                     start = reference_date + timedelta(days=14 + random.randint(0, 30))
@@ -849,7 +1165,10 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                             INSERT INTO matching_records (case_no, staff_id, caregiver_accepted, sent_at, replied_at)
                             VALUES (%s, %s, %s, NOW(), CASE WHEN %s IS NULL THEN NULL ELSE NOW() END)
                         """, (order["case_no"], candidate_id, reply, reply))
-                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note)
+                    _upsert_payment(
+                        cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note,
+                        start - timedelta(days=6), start, end,
+                    )
 
                 elif scenario == "cancelled":
                     start = reference_date + timedelta(days=random.randint(2, 30))
@@ -859,7 +1178,10 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                             service_hours_per_day = %s, floor_fee = %s, cancel_reason = %s WHERE case_no = %s
                     """, (start, start + timedelta(days=days), days, hours, floor_fee,
                           "客戶改由家人照護，取消服務", order["case_no"]))
-                    _upsert_payment(cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note)
+                    _upsert_payment(
+                        cursor, order["case_no"], order["client_name"], "待收訂金", amount, 0, 0, 0, 0, note,
+                        start - timedelta(days=6), start, start + timedelta(days=days),
+                    )
 
                 else:
                     deposit = max(1000, amount // 10)
@@ -888,7 +1210,11 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                         p_second_at = None
                         actual_start, actual_end = start, start + timedelta(days=days)
                     elif scenario == "completed_pending_settlement":
-                        start = reference_date - timedelta(days=days + random.randint(3, 20))
+                        start, completed_end = _schedule_start_for_completed_service(
+                            reference_date - timedelta(days=random.randint(1, 20)),
+                            days,
+                            order.get("service_type"),
+                        )
                         status = "訂單完成"
                         p_status = "已收一期款"
                         p_deposit = deposit
@@ -896,9 +1222,13 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                         p_second = 0
                         p_first_at = start + timedelta(days=5)
                         p_second_at = None
-                        actual_start, actual_end = start, start + timedelta(days=days)
+                        actual_start, actual_end = start, completed_end
                     else:  # closed
-                        start = reference_date - timedelta(days=days + random.randint(10, 40))
+                        start, completed_end = _schedule_start_for_completed_service(
+                            reference_date - timedelta(days=random.randint(1, 40)),
+                            days,
+                            order.get("service_type"),
+                        )
                         status = "訂單完成"
                         p_status = "已結案"
                         p_deposit = deposit
@@ -906,12 +1236,22 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                         p_second = second_pay
                         p_first_at = start + timedelta(days=5)
                         p_second_at = start + timedelta(days=days)
-                        actual_start, actual_end = start, start + timedelta(days=days)
+                        actual_start, actual_end = start, completed_end
 
-                    staff_id, start = _assign_available_staff(cursor, staff_ids, start)
+                    expected_end = _schedule_end_date(start, days, order.get("service_type"))
+                    staff_id = (
+                        random.choice(staff_ids)
+                        if scenario == "deposit_received"
+                        else _assign_available_staff(cursor, staff_ids, start, expected_end)
+                    )
                     if scenario in ("in_service", "completed_pending_settlement", "closed"):
                         actual_start = start
-                        actual_end = start + timedelta(days=days)
+                        actual_end = expected_end
+                        p_first_at = start + timedelta(days=5)
+                        if scenario == "closed":
+                            p_second_at = actual_end
+
+                    service_end = start + timedelta(days=days)
 
                     cursor.execute("""
                         UPDATE orders SET staff_id = %s, status = %s, start_date = %s, end_date = %s,
@@ -921,11 +1261,12 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                           days, hours, floor_fee, order["case_no"]))
 
                     # A conflict fixture stays visible in orders but deliberately has no schedule row.
-                    if boundary_tag != "CONFLICT_TEST_EXCLUDED_FROM_NORMAL_SCHEDULE":
+                    if scenario != "deposit_received" and boundary_tag != "CONFLICT_TEST_EXCLUDED_FROM_NORMAL_SCHEDULE":
                         scheduled_end = _write_scenario_schedule(
                             cursor, order["case_no"], staff_id, start, days,
                             service_mode=order.get("service_type"),
                         )
+                        service_end = scheduled_end
                         if scenario == "deposit_received":
                             cursor.execute("""
                                 UPDATE orders SET end_date = %s, actual_start_date = NULL, actual_end_date = NULL WHERE case_no = %s
@@ -934,16 +1275,25 @@ def generate_lifecycle_scenarios(reference_date: date, seed: int | None = None,
                             cursor.execute("""
                                 UPDATE orders SET end_date = %s, actual_end_date = %s WHERE case_no = %s
                             """, (scheduled_end, scheduled_end, order["case_no"]))
+                            actual_end = scheduled_end
+
+                    if scenario == "closed":
+                        p_second_at = service_end
 
                     _upsert_payment(
                         cursor, order["case_no"], order["client_name"],
                         p_status, amount, p_deposit, p_first, p_second,
                         caregiver_fee if scenario == "closed" else 0, note,
+                        start - timedelta(days=6), start, service_end,
                         start - timedelta(days=3), p_first_at, p_second_at,
                         actual_end + timedelta(days=15) if scenario == "closed" else None,
+                        completed_service=scenario in ("completed_pending_settlement", "closed"),
                     )
 
-                cursor.execute("UPDATE clients SET admin_notes = %s WHERE id = %s", (note, order["client_id"]))
+                cursor.execute(
+                    "UPDATE clients SET admin_notes = %s WHERE id = %s",
+                    (fixture_admin_note(boundary_type, note or scenario), order["client_id"]),
+                )
                 summary[scenario] += 1
 
             errors = validate_lifecycle_data(cursor, reference_date)
@@ -962,11 +1312,831 @@ def parse_cli_args():
     parser = argparse.ArgumentParser(description="Generate lifecycle-aware fake data")
     parser.add_argument("--reference-date", default=date.today().isoformat(), help="YYYY-MM-DD baseline for lifecycle data")
     parser.add_argument("--seed", type=int, default=20260713, help="Deterministic random seed")
+    parser.add_argument("--seed-db", action="store_true", help="Import the generated 50-case roster then seed lifecycle facts")
+    parser.add_argument("--replace-demo-db", action="store_true", help="Clear only generator-owned demo facts; requires --seed-db")
     return parser.parse_args()
+
+
+def _core_case_nos() -> list[str]:
+    return [f"1150000{number:02d}" for number in range(1, 51)]
+
+
+def _clear_generator_owned_demo_data(cursor) -> None:
+    """Delete only tables owned by this fixture, in child-to-parent FK order.
+
+    Legacy ``payments`` deliberately does not appear here: it is outside this
+    generator's ownership and must never be read or mutated by seed mode.
+    """
+    tables = (
+        "finance_import_occurrences", "finance_import_rows", "finance_import_batches",
+        "staff_transfer_allocations", "staff_actual_transfers",
+        "staff_monthly_settlement_details", "staff_monthly_settlements",
+        "staff_payment_transactions", "staff_payments", "actual_hours_adjustments",
+        "staff_schedule_assignment_reviews",
+        "client_payment_transactions", "client_payments", "matching_records",
+        "staff_schedule", "case_staff_assignments", "orders", "beclass_records",
+        "staff_bank_accounts", "staff_regions", "staff_time_slots",
+        "staff_cooking_skills", "staff_transportation",
+        "staff_holiday_availability", "staff_weekly_rest", "staff_baby_types",
+        "staff", "clients",
+    )
+    for table in tables:
+        cursor.execute(f"DELETE FROM {table}")
+
+
+def _prepare_seed_database(replace_demo_db: bool) -> None:
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            if replace_demo_db:
+                _clear_generator_owned_demo_data(cursor)
+            else:
+                placeholders = ", ".join(["%s"] * len(_core_case_nos()))
+                cursor.execute(
+                    f"SELECT COUNT(*) AS count FROM clients WHERE case_no IN ({placeholders})",
+                    tuple(_core_case_nos()),
+                )
+                if cursor.fetchone()["count"]:
+                    raise RuntimeError(
+                        "核心假資料案號已存在；請改用 --replace-demo-db，或改用未包含 115000001 至 115000050 的資料庫。"
+                    )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _import_seed_master_data(roster_output_file: str,
+                             historical_output_file: str) -> dict[str, dict]:
+    """Use the approved insert-only importers for all seed master records."""
+    from scripts.imports.import_client_hcm import process_import as import_hcm
+    from scripts.imports.import_client_beclass import process_import as import_beclass
+    from scripts.imports.import_staff_beclass import process_import as import_staff
+    from scripts.import_historical_orders import process_import as import_historical
+
+    results = {
+        "clients": import_hcm(roster_output_file),
+        "beclass": import_beclass(roster_output_file),
+        "staff": import_staff(roster_output_file),
+        "historical_orders": import_historical(historical_output_file),
+    }
+    failures = {
+        name: result for name, result in results.items()
+        if result.get("failed") or result.get("review_required")
+        or (
+            result.get("inserted") != 50
+            if name != "historical_orders"
+            else result.get("skipped_existing") != 50
+        )
+    }
+    if failures:
+        raise RuntimeError(f"主檔 insert-only 匯入不完整：{failures}")
+    return results
+
+
+def _write_boundary_transaction(cursor, payment_id: int, case_no: str, stage: str,
+                                transaction_type: str, amount: int, occurred_at: date,
+                                reference_suffix: str, notes: str) -> None:
+    cursor.execute(
+        """INSERT INTO client_payment_transactions (
+               client_payment_id, case_no, stage, transaction_type, transaction_status,
+               amount, occurred_at, external_reference, notes
+           ) VALUES (%s,%s,%s,%s,'succeeded',%s,%s,%s,%s)""",
+        (
+            payment_id, case_no, stage, transaction_type, amount, occurred_at,
+            f"fake:{case_no}:boundary:{reference_suffix}", notes,
+        ),
+    )
+
+
+def seed_client_payment_boundary_facts(reference_date: date) -> None:
+    """Overlay exceptional receipts/refund facts after normal lifecycle setup.
+
+    The canonical summary is deliberately updated to the transaction *net*
+    amount.  This keeps the fixture useful to reconciliation code without
+    creating a synthetic alert or calling any alert detector.
+    """
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            for case_no in ("115000013", "115000014", "115000005"):
+                cursor.execute(
+                    "SELECT id, deposit_received, second_payment_received FROM client_payments WHERE case_no=%s",
+                    (case_no,),
+                )
+                payment = cursor.fetchone()
+                if not payment:
+                    raise RuntimeError(f"缺少邊界案件的 client_payments：{case_no}")
+                if case_no == "115000013":
+                    cursor.execute(
+                        "DELETE FROM client_payment_transactions WHERE client_payment_id=%s AND stage='first_payment' AND external_reference LIKE %s",
+                        (payment["id"], f"fake:{case_no}:%"),
+                    )
+                    first_at = reference_date - timedelta(days=2)
+                    for sequence in range(1, 4):
+                        _write_boundary_transaction(
+                            cursor, payment["id"], case_no, "first_payment", "receipt", 1000,
+                            first_at + timedelta(days=sequence - 1), f"first-{sequence}",
+                            "boundary: first payment partial receipt then overpay",
+                        )
+                    cursor.execute(
+                        """UPDATE client_payments
+                           SET first_payment_receivable=2500, first_payment_received=3000,
+                               first_payment_received_at=%s,
+                               amount_received=deposit_received + 3000 + second_payment_received,
+                               payment_status='待對帳超收'
+                           WHERE id=%s""",
+                        (first_at + timedelta(days=2), payment["id"]),
+                    )
+                elif case_no == "115000014":
+                    cursor.execute(
+                        "DELETE FROM client_payment_transactions WHERE client_payment_id=%s AND stage='second_payment' AND external_reference LIKE %s",
+                        (payment["id"], f"fake:{case_no}:%"),
+                    )
+                    second_at = reference_date - timedelta(days=1)
+                    _write_boundary_transaction(
+                        cursor, payment["id"], case_no, "second_payment", "receipt", 3000,
+                        second_at, "second-overpay", "boundary: single second-payment overpay",
+                    )
+                    cursor.execute(
+                        """UPDATE client_payments
+                           SET second_payment_receivable=2500, second_payment_received=3000,
+                               second_payment_received_at=%s,
+                               amount_received=deposit_received + first_payment_received + 3000,
+                               payment_status='待對帳超收'
+                           WHERE id=%s""",
+                        (second_at, payment["id"]),
+                    )
+                else:
+                    cursor.execute(
+                        "DELETE FROM client_payment_transactions WHERE client_payment_id=%s AND external_reference LIKE %s",
+                        (payment["id"], f"fake:{case_no}:%"),
+                    )
+                    cursor.execute(
+                        """SELECT refund_bank_code, refund_account_no
+                           FROM beclass_records WHERE query_no=%s""",
+                        (case_no,),
+                    )
+                    refund_account = cursor.fetchone()
+                    if not refund_account or not refund_account.get("refund_account_no"):
+                        raise RuntimeError(f"取消退款案缺少 BeClass 退款帳號：{case_no}")
+                    deposit_at = reference_date - timedelta(days=4)
+                    refund_at = reference_date - timedelta(days=3)
+                    _write_boundary_transaction(
+                        cursor, payment["id"], case_no, "deposit", "receipt", 1000,
+                        deposit_at, "cancel-deposit", "boundary: cancelled order deposit receipt",
+                    )
+                    _write_boundary_transaction(
+                        cursor, payment["id"], case_no, "deposit", "refund", 1000,
+                        refund_at, "cancel-refund",
+                        "boundary: refund target "
+                        f"{refund_account.get('refund_bank_code')}/"
+                        f"{refund_account['refund_account_no']}",
+                    )
+                    cursor.execute(
+                        """UPDATE client_payments
+                           SET deposit_receivable=1000, deposit_received=0, deposit_received_at=NULL,
+                               first_payment_received=0, first_payment_received_at=NULL,
+                               second_payment_received=0, second_payment_received_at=NULL,
+                               amount_received=0, payment_status='已退款'
+                           WHERE id=%s""",
+                        (payment["id"],),
+                    )
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _finance_duplicate_normalized_result(reference_date: date, source_file: str,
+                                         source_row: int) -> dict:
+    """Build one stable bank fact whose file location is intentionally variable."""
+    transaction_date = reference_date - timedelta(days=7)
+    row = {
+        "format_id": "taishin",
+        "source_file": source_file,
+        "source_bank_account": "8120000000000000",
+        "sheet_name": "交易明細查詢",
+        "source_row": source_row,
+        "source_reference": None,
+        "transaction_date": transaction_date.isoformat(),
+        "transaction_time": "09:08:07",
+        "posting_date": transaction_date.isoformat(),
+        "value_date": None,
+        "debit": Decimal("1200.00"),
+        "credit": None,
+        "direction": "outgoing",
+        "balance": Decimal("8000.00"),
+        "currency": "TWD",
+        "summary": "假資料重複匯入測試",
+        "memo": "同一筆流水跨檔重複匯入",
+        "counterparty_name": None,
+        "counterparty_account": "0012345678901234",
+        "cancellation_code": None,
+        "bank_references": {"sequence": "fixture-duplicate", "amount": "1200.00"},
+        "warnings": ["fixture_duplicate_import"],
+        "raw_payload": {"支出金額": "1200.00", "備註": "跨檔重複匯入假資料"},
+    }
+    return {
+        "format_id": "taishin",
+        "sheet_name": "交易明細查詢",
+        "header_row": 16,
+        "normalized_rows": [row],
+    }
+
+
+def seed_finance_import_duplicate_fact(reference_date: date) -> dict:
+    """Persist two batches pointing at one canonical bank row via the staging service."""
+    from services.finance_import_staging import stage_finance_rows
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            first = stage_finance_rows(
+                cursor,
+                _finance_duplicate_normalized_result(
+                    reference_date, "fixture_duplicate_a.xlsx", 17
+                ),
+                {"client_refund_accounts": {}, "staff_accounts": {}},
+            )
+            second = stage_finance_rows(
+                cursor,
+                _finance_duplicate_normalized_result(
+                    reference_date, "fixture_duplicate_b.xlsx", 23
+                ),
+                {"client_refund_accounts": {}, "staff_accounts": {}},
+            )
+            first_row = first["staged_rows"][0]
+            second_row = second["staged_rows"][0]
+            if (
+                first["batch_id"] == second["batch_id"]
+                or first_row["row_id"] != second_row["row_id"]
+                or first_row["result"] != "inserted"
+                or second_row["result"] != "skipped_existing"
+            ):
+                raise RuntimeError("財務匯入重複事實未形成兩批次、一 canonical row、兩 occurrences")
+        conn.commit()
+        return {
+            "batch_ids": [first["batch_id"], second["batch_id"]],
+            "canonical_row_id": first_row["row_id"],
+            "occurrence_count": 2,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def seed_assignment_payroll_facts(reference_date: date) -> dict:
+    """Build assignment-owned schedules and the completed-case payroll chain."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """SELECT o.case_no, o.status, o.staff_id, o.actual_start_date,
+                          o.actual_end_date, o.service_days, o.service_hours_per_day,
+                          o.floor_fee, c.service_type, c.identity_status
+                   FROM orders o JOIN clients c ON c.id = o.client_id
+                   WHERE o.status IN ('服務中', '訂單完成')
+                   ORDER BY o.case_no"""
+            )
+            orders = cursor.fetchall()
+            cursor.execute("SELECT id FROM staff ORDER BY id")
+            staff_ids = [row["id"] for row in cursor.fetchall()]
+            if not orders or not staff_ids:
+                raise RuntimeError("無法建立正式指派：缺少服務中/完成案件或月嫂")
+
+            for table in (
+                "staff_transfer_allocations", "staff_actual_transfers",
+                "staff_monthly_settlement_details", "staff_monthly_settlements",
+                "staff_payment_transactions", "staff_payments",
+                "case_staff_assignments",
+            ):
+                cursor.execute(f"SELECT COUNT(*) AS count FROM {table}")
+                if cursor.fetchone()["count"]:
+                    raise RuntimeError(f"正式指派播種前 {table} 必須為空")
+
+            cursor.execute(
+                """SELECT cp.case_no FROM client_payments cp
+                   WHERE cp.notes LIKE '%CONFLICT_TEST_EXCLUDED_FROM_NORMAL_SCHEDULE%'
+                   LIMIT 1"""
+            )
+            conflict = cursor.fetchone()
+            conflict_case_no = conflict["case_no"] if conflict else None
+            cursor.execute("DELETE FROM staff_schedule")
+
+            assignments = []
+            double_pay_written = False
+            for order in orders:
+                case_no = order["case_no"]
+                work_day_counts = _segment_work_day_counts(
+                    case_no, int(order["service_days"])
+                )
+                hours_per_day = Decimal(str(order["service_hours_per_day"]))
+                floor_allocations = _prorate_amount(
+                    order.get("floor_fee") or 0, work_day_counts
+                )
+                hourly_rate = Decimal(
+                    250 + (int(case_no[-2:]) % 3) * 25
+                ).quantize(Decimal("0.01"))
+                total_hours = sum(work_day_counts) * hours_per_day
+                subsidy_total = Decimal("0.00")
+                if case_no == "115000009":
+                    identity = str(order.get("identity_status") or "")
+                    subsidy_cap = 120 if ("低" in identity or "補助" in identity) else 40
+                    subsidy_hours = min(Decimal(subsidy_cap), total_hours)
+                    subsidy_total = (subsidy_hours * hourly_rate).quantize(Decimal("0.01"))
+                subsidy_allocations = _prorate_amount(
+                    subsidy_total, [count * int(hours_per_day) for count in work_day_counts]
+                )
+
+                segment_start = order["actual_start_date"]
+                used_staff = set()
+                first_staff_id = None
+                final_end = None
+                mark_double_pay = case_no == "115000018"
+                for sequence, (work_days, floor_amount, subsidy_amount) in enumerate(
+                    zip(work_day_counts, floor_allocations, subsidy_allocations), start=1
+                ):
+                    schedule_rows, segment_end = _schedule_rows_for_segment(
+                        segment_start, work_days, order.get("service_type")
+                    )
+                    preferred = []
+                    if sequence == 1 and order.get("staff_id") in staff_ids:
+                        preferred.append(order["staff_id"])
+                    candidates = preferred + [
+                        staff_id for staff_id in staff_ids
+                        if staff_id not in used_staff and staff_id not in preferred
+                    ]
+                    staff_id = _assign_available_staff(
+                        cursor, candidates, segment_start, segment_end
+                    )
+                    used_staff.add(staff_id)
+                    first_staff_id = first_staff_id or staff_id
+                    service_hours = (Decimal(work_days) * hours_per_day).quantize(
+                        Decimal("0.01")
+                    )
+                    assignment_status = "active" if order["status"] == "服務中" else "completed"
+                    cursor.execute(
+                        """INSERT INTO case_staff_assignments (
+                               case_no, staff_id, assignment_sequence,
+                               assigned_start_date, assigned_end_date,
+                               planned_hours, actual_hours, hourly_rate,
+                               floor_fee_allocated, status, replacement_reason
+                           ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,NULL)""",
+                        (
+                            case_no, staff_id, sequence, segment_start, segment_end,
+                            service_hours, service_hours, hourly_rate,
+                            floor_amount, assignment_status,
+                        ),
+                    )
+                    assignment_id = cursor.lastrowid
+                    double_pay_hours = Decimal("0.00")
+                    if case_no != conflict_case_no:
+                        double_marked_in_segment = False
+                        for work_date, is_work_day in schedule_rows:
+                            is_double_pay = bool(
+                                mark_double_pay and is_work_day and not double_marked_in_segment
+                            )
+                            if is_double_pay:
+                                double_marked_in_segment = True
+                                double_pay_written = True
+                                double_pay_hours += hours_per_day
+                            note = (
+                                "boundary: double-pay service day"
+                                if is_double_pay
+                                else (
+                                    "assignment-owned service day"
+                                    if is_work_day
+                                    else f"{order.get('service_type') or '週休1日'}固定休假"
+                                )
+                            )
+                            cursor.execute(
+                                """INSERT INTO staff_schedule (
+                                       case_no, staff_id, assignment_id, work_date,
+                                       is_work_day, is_double_pay, notes
+                                   ) VALUES (%s,%s,%s,%s,%s,%s,%s)""",
+                                (
+                                    case_no, staff_id, assignment_id, work_date,
+                                    is_work_day, is_double_pay, note,
+                                ),
+                            )
+                        mark_double_pay = False
+
+                    assignments.append(
+                        {
+                            "assignment_id": assignment_id,
+                            "case_no": case_no,
+                            "staff_id": staff_id,
+                            "status": assignment_status,
+                            "service_hours": service_hours,
+                            "hourly_rate": hourly_rate,
+                            "floor_fee": floor_amount,
+                            "double_pay_amount": (
+                                double_pay_hours * hourly_rate
+                            ).quantize(Decimal("0.01")),
+                            "subsidy_amount": subsidy_amount,
+                            "segment_end": segment_end,
+                        }
+                    )
+                    final_end = segment_end
+                    segment_start = segment_end + timedelta(days=1)
+
+                cursor.execute(
+                    """UPDATE orders
+                       SET staff_id=%s, end_date=%s, actual_end_date=%s
+                       WHERE case_no=%s""",
+                    (first_staff_id, final_end, final_end, case_no),
+                )
+
+            if not double_pay_written:
+                raise RuntimeError("115000018 未建立雙薪服務日")
+
+            completed_payments = []
+            for assignment in assignments:
+                service_salary = (
+                    assignment["service_hours"] * assignment["hourly_rate"]
+                ).quantize(Decimal("0.01"))
+                total_payable = (
+                    service_salary + assignment["floor_fee"]
+                    + assignment["double_pay_amount"]
+                ).quantize(Decimal("0.01"))
+                is_completed = assignment["status"] == "completed"
+                paid_at = reference_date if is_completed else None
+                cursor.execute(
+                    """INSERT INTO staff_payments (
+                           assignment_id, case_no, staff_id, service_hours,
+                           hourly_rate, service_salary, floor_fee_amount,
+                           adjustment_amount, total_payable, amount_paid,
+                           due_date, paid_at, payment_status, notes
+                       ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+                    (
+                        assignment["assignment_id"], assignment["case_no"],
+                        assignment["staff_id"], assignment["service_hours"],
+                        assignment["hourly_rate"], service_salary,
+                        assignment["floor_fee"], assignment["double_pay_amount"],
+                        total_payable, total_payable if is_completed else Decimal("0.00"),
+                        assignment["segment_end"] + timedelta(days=15), paid_at,
+                        "paid" if is_completed else "pending",
+                        "fixture assignment payable",
+                    ),
+                )
+                payment_id = cursor.lastrowid
+                if is_completed:
+                    cursor.execute(
+                        """INSERT INTO staff_payment_transactions (
+                               staff_payment_id, case_no, staff_id,
+                               transaction_type, transaction_status, amount,
+                               occurred_at, external_reference, notes
+                           ) VALUES (%s,%s,%s,'transfer','succeeded',%s,%s,%s,%s)""",
+                        (
+                            payment_id, assignment["case_no"], assignment["staff_id"],
+                            total_payable, paid_at,
+                            f"fake:staff-payment:{assignment['assignment_id']}",
+                            "fixture completed assignment transfer projection",
+                        ),
+                    )
+                    completed_payments.append(
+                        {
+                            **assignment,
+                            "payment_id": payment_id,
+                            "service_salary": service_salary,
+                            "total_payable": total_payable,
+                            "settlement_month": assignment["segment_end"].replace(day=1),
+                        }
+                    )
+
+            settlement_groups = {}
+            for payment in completed_payments:
+                key = (payment["staff_id"], payment["settlement_month"])
+                settlement_groups.setdefault(key, []).append(payment)
+
+            settlement_count = 0
+            transfer_count = 0
+            for (staff_id, settlement_month), payments in settlement_groups.items():
+                settlement_total = sum(
+                    (payment["total_payable"] + payment["subsidy_amount"] for payment in payments),
+                    Decimal("0.00"),
+                ).quantize(Decimal("0.01"))
+                cursor.execute(
+                    """INSERT INTO staff_monthly_settlements (
+                           staff_id, settlement_month, revision,
+                           total_payable, total_paid, status, finalized_at
+                       ) VALUES (%s,%s,1,%s,%s,'paid',%s)""",
+                    (staff_id, settlement_month, settlement_total, settlement_total, reference_date),
+                )
+                settlement_id = cursor.lastrowid
+                settlement_count += 1
+                details = []
+                for payment in payments:
+                    detail_payable = (
+                        payment["total_payable"] + payment["subsidy_amount"]
+                    ).quantize(Decimal("0.01"))
+                    cursor.execute(
+                        """INSERT INTO staff_monthly_settlement_details (
+                               settlement_id, staff_payment_id, case_no, assignment_id,
+                               staff_id, service_salary, legacy_subsidy_payable,
+                               floor_fee_amount, adjustment_amount, payable_amount,
+                               legacy_subsidy_status, review_required, review_note
+                           ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,FALSE,%s)""",
+                        (
+                            settlement_id, payment["payment_id"], payment["case_no"],
+                            payment["assignment_id"], staff_id,
+                            payment["service_salary"], payment["subsidy_amount"],
+                            payment["floor_fee"], payment["double_pay_amount"],
+                            detail_payable,
+                            "confirmed" if payment["subsidy_amount"] else "not_applicable",
+                            (
+                                "fixture subsidy prorated by actual service hours"
+                                if payment["subsidy_amount"] else None
+                            ),
+                        ),
+                    )
+                    details.append((cursor.lastrowid, payment))
+
+                cursor.execute(
+                    """SELECT bank_code, branch_code, account_no
+                       FROM staff_bank_accounts
+                       WHERE staff_id=%s AND is_primary=TRUE
+                       ORDER BY id LIMIT 1""",
+                    (staff_id,),
+                )
+                bank = cursor.fetchone()
+                if not bank or bank["bank_code"] != "807" or bank["branch_code"] != "0014":
+                    raise RuntimeError(f"月嫂 {staff_id} 缺少 807/0014 主薪轉帳號")
+                cursor.execute(
+                    """INSERT INTO staff_actual_transfers (
+                           settlement_id, staff_id, payment_phase,
+                           transaction_type, transaction_status, amount, occurred_at,
+                           source_bank, source_account, counterparty_account,
+                           external_reference, raw_import_reference, review_status
+                       ) VALUES (%s,%s,'normal','transfer','succeeded',%s,%s,
+                                 '合作社','03201800231313',%s,%s,%s,'confirmed')""",
+                    (
+                        settlement_id, staff_id, settlement_total, reference_date,
+                        bank["account_no"],
+                        f"fake:settlement:{settlement_id}",
+                        f"fixture:settlement:{settlement_id}",
+                    ),
+                )
+                transfer_id = cursor.lastrowid
+                transfer_count += 1
+                for detail_id, payment in details:
+                    components = (
+                        ("regular_salary", payment["service_salary"]),
+                        ("legacy_subsidy", payment["subsidy_amount"]),
+                        ("floor_fee", payment["floor_fee"]),
+                        ("adjustment", payment["double_pay_amount"]),
+                    )
+                    for component_type, amount in components:
+                        if amount <= 0:
+                            continue
+                        cursor.execute(
+                            """INSERT INTO staff_transfer_allocations (
+                                   transfer_id, settlement_detail_id, allocated_amount,
+                                   component_type, allocation_method, review_status
+                               ) VALUES (%s,%s,%s,%s,'explicit','approved')""",
+                            (transfer_id, detail_id, amount, component_type),
+                        )
+
+        conn.commit()
+        return {
+            "assignment_count": len(assignments),
+            "completed_payment_count": len(completed_payments),
+            "settlement_count": settlement_count,
+            "transfer_count": transfer_count,
+            "conflict_case_no": conflict_case_no,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def validate_seed_database(reference_date: date) -> dict:
+    """Run independent SQL reconciliation after every seed fact has been written."""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            checks = [
+                (
+                    """SELECT COUNT(*) AS count FROM orders
+                       WHERE status='訂單完成'
+                         AND (actual_start_date IS NULL OR actual_end_date IS NULL
+                              OR actual_start_date > actual_end_date
+                              OR actual_end_date > %s)""",
+                    (reference_date,),
+                    "完成案件含未來或顛倒的實際服務日期",
+                ),
+                (
+                    """SELECT COUNT(*) AS count FROM orders o
+                       LEFT JOIN (
+                           SELECT case_no, SUM(actual_hours) AS hours
+                           FROM case_staff_assignments
+                           WHERE status <> 'cancelled' GROUP BY case_no
+                       ) a ON a.case_no=o.case_no
+                       WHERE o.status IN ('服務中','訂單完成')
+                         AND ABS(COALESCE(a.hours,0)
+                                 - o.service_days * o.service_hours_per_day) > 0.01""",
+                    (),
+                    "案件服務時數與正式指派實際時數不平衡",
+                ),
+                (
+                    """SELECT COUNT(*) AS count FROM staff_schedule ss
+                       LEFT JOIN case_staff_assignments a ON a.id=ss.assignment_id
+                       WHERE ss.assignment_id IS NULL OR a.id IS NULL
+                          OR a.case_no <> ss.case_no OR a.staff_id <> ss.staff_id
+                          OR ss.work_date < a.assigned_start_date
+                          OR ss.work_date > a.assigned_end_date""",
+                    (),
+                    "排班未由同案同月嫂的正式 assignment 擁有",
+                ),
+                (
+                    """SELECT COUNT(*) AS count FROM case_staff_assignments a
+                       LEFT JOIN staff_payments sp ON sp.assignment_id=a.id
+                       WHERE a.status <> 'cancelled' AND sp.id IS NULL""",
+                    (),
+                    "正式指派缺少月嫂應付摘要",
+                ),
+                (
+                    """SELECT COUNT(*) AS count FROM staff_monthly_settlements s
+                       LEFT JOIN (
+                           SELECT settlement_id, SUM(payable_amount) AS amount
+                           FROM staff_monthly_settlement_details GROUP BY settlement_id
+                       ) d ON d.settlement_id=s.id
+                       WHERE ABS(s.total_payable-COALESCE(d.amount,0)) > 0.01
+                          OR ABS(s.total_paid-s.total_payable) > 0.01""",
+                    (),
+                    "月結摘要與月結明細不平衡",
+                ),
+                (
+                    """SELECT COUNT(*) AS count FROM staff_actual_transfers t
+                       LEFT JOIN (
+                           SELECT transfer_id, SUM(allocated_amount) AS amount
+                           FROM staff_transfer_allocations GROUP BY transfer_id
+                       ) a ON a.transfer_id=t.id
+                       WHERE ABS(t.amount-COALESCE(a.amount,0)) > 0.01""",
+                    (),
+                    "月嫂實際轉帳與轉帳分配不平衡",
+                ),
+                (
+                    """SELECT COUNT(*) AS count FROM staff_monthly_settlement_details d
+                       LEFT JOIN (
+                           SELECT settlement_detail_id, SUM(allocated_amount) AS amount
+                           FROM staff_transfer_allocations GROUP BY settlement_detail_id
+                       ) a ON a.settlement_detail_id=d.id
+                       WHERE ABS(d.payable_amount-COALESCE(a.amount,0)) > 0.01""",
+                    (),
+                    "月結明細與轉帳分配不平衡",
+                ),
+                (
+                    """SELECT COUNT(*) AS count FROM client_payments cp
+                       LEFT JOIN (
+                           SELECT client_payment_id,
+                                  SUM(CASE WHEN transaction_type='refund'
+                                           THEN -amount ELSE amount END) AS net_amount
+                           FROM client_payment_transactions
+                           WHERE transaction_status='succeeded'
+                           GROUP BY client_payment_id
+                       ) tx ON tx.client_payment_id=cp.id
+                       WHERE ABS(cp.amount_received-COALESCE(tx.net_amount,0)) > 0.01""",
+                    (),
+                    "客戶收款摘要與成功交易淨額不一致",
+                ),
+                (
+                    """SELECT COUNT(*) AS count FROM clients
+                       WHERE admin_notes IS NULL
+                          OR admin_notes NOT LIKE 'fixture_type=%%; boundary_type=%%'""",
+                    (),
+                    "客戶邊界標籤格式不完整",
+                ),
+                (
+                    "SELECT COUNT(*) AS count FROM finance_alerts",
+                    (),
+                    "finance_alerts 必須維持 0 筆",
+                ),
+                (
+                    "SELECT COUNT(*) AS count FROM finance_alert_events",
+                    (),
+                    "finance_alert_events 必須維持 0 筆",
+                ),
+            ]
+            errors = []
+            for statement, params, message in checks:
+                cursor.execute(statement, params)
+                if cursor.fetchone()["count"]:
+                    errors.append(message)
+
+            expected_assignment_counts = {
+                "115000003": (2, "active"),
+                "115000004": (2, "completed"),
+                "115000008": (3, "active"),
+                "115000009": (3, "completed"),
+            }
+            for case_no, (expected_count, expected_status) in expected_assignment_counts.items():
+                cursor.execute(
+                    """SELECT assignment_sequence, assigned_start_date,
+                              assigned_end_date, status
+                       FROM case_staff_assignments WHERE case_no=%s
+                       ORDER BY assignment_sequence""",
+                    (case_no,),
+                )
+                rows = cursor.fetchall()
+                if len(rows) != expected_count or any(
+                    row["status"] != expected_status for row in rows
+                ):
+                    errors.append(f"{case_no} 正式交接指派數量或狀態錯誤")
+                elif any(
+                    rows[index - 1]["assigned_end_date"] + timedelta(days=1)
+                    != rows[index]["assigned_start_date"]
+                    for index in range(1, len(rows))
+                ):
+                    errors.append(f"{case_no} 多月嫂交接有重疊或空窗")
+
+            cursor.execute(
+                """SELECT COUNT(*) AS count FROM staff_schedule
+                   WHERE case_no='115000018' AND is_work_day=TRUE
+                     AND is_double_pay=TRUE"""
+            )
+            if cursor.fetchone()["count"] < 1:
+                errors.append("115000018 缺少雙薪服務日")
+
+            cursor.execute(
+                """SELECT COUNT(*) AS count FROM case_staff_assignments
+                   WHERE case_no='115000005'"""
+            )
+            cancelled_assignment_count = cursor.fetchone()["count"]
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM staff_schedule WHERE case_no='115000005'"
+            )
+            if cancelled_assignment_count or cursor.fetchone()["count"]:
+                errors.append("115000005 取消案仍有指派或排班")
+
+            cursor.execute(
+                """SELECT COUNT(*) AS batches,
+                          (SELECT COUNT(*) FROM finance_import_rows) AS canonical_rows,
+                          (SELECT COUNT(*) FROM finance_import_occurrences) AS occurrences
+                   FROM finance_import_batches"""
+            )
+            staging = cursor.fetchone()
+            if staging != {"batches": 2, "canonical_rows": 1, "occurrences": 2}:
+                errors.append(f"財務匯入暫存重複事實數量錯誤：{staging}")
+
+            cursor.execute(
+                """SELECT COALESCE(SUM(d.legacy_subsidy_payable),0) AS subsidy,
+                          COALESCE(SUM(a.floor_fee_allocated),0) AS allocated_floor,
+                          o.floor_fee AS order_floor
+                   FROM orders o
+                   JOIN case_staff_assignments a ON a.case_no=o.case_no
+                   LEFT JOIN staff_monthly_settlement_details d
+                          ON d.assignment_id=a.id
+                   WHERE o.case_no='115000009'
+                   GROUP BY o.floor_fee"""
+            )
+            prorated = cursor.fetchone()
+            if (
+                not prorated
+                or Decimal(str(prorated["subsidy"])) <= 0
+                or Decimal(str(prorated["allocated_floor"]))
+                != Decimal(str(prorated["order_floor"]))
+            ):
+                errors.append("115000009 補助或樓層費未依服務段落完整分配")
+
+            if errors:
+                raise RuntimeError("; ".join(errors))
+
+            cursor.execute("SELECT COUNT(*) AS count FROM clients")
+            client_count = cursor.fetchone()["count"]
+            cursor.execute("SELECT COUNT(*) AS count FROM orders")
+            order_count = cursor.fetchone()["count"]
+            cursor.execute("SELECT COUNT(*) AS count FROM case_staff_assignments")
+            assignment_count = cursor.fetchone()["count"]
+            cursor.execute("SELECT COUNT(*) AS count FROM staff_schedule")
+            schedule_count = cursor.fetchone()["count"]
+            return {
+                "result": "pass",
+                "clients": client_count,
+                "orders": order_count,
+                "assignments": assignment_count,
+                "schedule_rows": schedule_count,
+                "finance_batches": staging["batches"],
+                "finance_canonical_rows": staging["canonical_rows"],
+                "finance_occurrences": staging["occurrences"],
+            }
+    finally:
+        conn.close()
 
 
 def main():
     args = parse_cli_args()
+    if args.replace_demo_db and not args.seed_db:
+        raise SystemExit("--replace-demo-db 必須與 --seed-db 一起使用")
     try:
         reference_date = datetime.strptime(args.reference_date, "%Y-%m-%d").date()
     except ValueError as exc:
@@ -981,6 +2151,7 @@ def main():
     
     input_file = os.path.join(output_dir, '資料庫來源表.xlsx')
     roster_output_file = os.path.join(output_dir, '假資料_範例.xlsx')
+    historical_output_file = os.path.join(output_dir, '假資料_歷史訂單.xlsx')
     finance_output_file = os.path.join(output_dir, '帳務.xlsx')
     
     if not os.path.exists(input_file):
@@ -1033,7 +2204,12 @@ def main():
 
     # 1. 產生名冊假資料
     try:
-        generate_roster_data(input_file, roster_output_file, personal_data_pool, staff_data_pool, num_records)
+        generate_roster_data(
+            input_file, roster_output_file, personal_data_pool, staff_data_pool, num_records,
+            align_beclass_case_no=args.seed_db,
+        )
+        if args.seed_db:
+            generate_historical_order_fixture(historical_output_file, personal_data_pool)
     except Exception as e:
         print(f"生成名冊假資料失敗: {e}")
         sys.exit(1)
@@ -1047,7 +2223,21 @@ def main():
         
     # 3. 產生月掃檔期與行事曆假資料
     try:
+        if args.seed_db:
+            _prepare_seed_database(args.replace_demo_db)
+            import_result = _import_seed_master_data(
+                roster_output_file, historical_output_file
+            )
+            print(f"Seed master imports: {import_result}")
         lifecycle_result = generate_lifecycle_scenarios(reference_date, args.seed)
+        if args.seed_db:
+            seed_client_payment_boundary_facts(reference_date)
+            assignment_result = seed_assignment_payroll_facts(reference_date)
+            print(f"Assignment/payroll facts: {assignment_result}")
+            staging_result = seed_finance_import_duplicate_fact(reference_date)
+            print(f"Finance duplicate staging: {staging_result}")
+            reconciliation_result = validate_seed_database(reference_date)
+            print(f"Seed reconciliation: {reconciliation_result}")
         print(f"Lifecycle summary: {lifecycle_result['generation_summary']}; validation: {lifecycle_result['validation_result']}")
     except Exception as e:
         print(f"Lifecycle generation failed: {e}")
@@ -1057,4 +2247,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
