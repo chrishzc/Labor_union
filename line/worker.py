@@ -13,6 +13,12 @@ import pymysql
 import requests
 
 from services.db_service import get_connection as get_db_connection
+from services.line_rich_menu_service import (
+    import_legacy_rich_menu_ids,
+    next_publication_run_at,
+    process_due_publications,
+    recover_stale_publications,
+)
 
 
 _wakeup_event = asyncio.Event()
@@ -306,12 +312,22 @@ async def process_due_tasks() -> None:
 
 async def worker_loop() -> None:
     print("[LINE Worker] Reliable worker started")
+    imported = await asyncio.to_thread(import_legacy_rich_menu_ids)
+    if imported:
+        print(f"[LINE Worker] Imported {imported} legacy Rich Menu ID(s)")
     await asyncio.to_thread(_recover_stale_tasks)
+    await asyncio.to_thread(recover_stale_publications)
     while True:
         try:
             await process_due_tasks()
+            await asyncio.to_thread(process_due_publications)
             _wakeup_event.clear()
             next_at = await asyncio.to_thread(_next_run_at)
+            next_publication_at = await asyncio.to_thread(next_publication_run_at)
+            if next_at is None or (
+                next_publication_at is not None and next_publication_at < next_at
+            ):
+                next_at = next_publication_at
             if _wakeup_event.is_set():
                 continue
             # Notification is primary; a low-frequency scan recovers a task if

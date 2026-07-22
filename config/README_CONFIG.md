@@ -31,6 +31,10 @@ POST   /api/config/message-templates/{template_id}/preview
 
 管理多組 Rich Menu 的尺寸、顏色、按鈕區域及 LINE Action。
 
+- `audience_role`：明確對應 `customer`、`staff` 或 `union_staff`。
+- `appearance.image_mode`：`generated` 使用設定產圖；`uploaded` 使用受控媒體資產。
+- `appearance.image_asset_id`：上傳圖片對應的 MySQL `media_assets.id`。
+
 Action 支援：
 
 - `message`：點擊後向官方帳號傳文字。
@@ -42,6 +46,7 @@ API：
 
 ```text
 GET    /api/config/line-menus
+GET    /api/config/line-menus/state
 PUT    /api/config/line-menus
 POST   /api/config/line-menus
 GET    /api/config/line-menus/{menu_id}
@@ -49,11 +54,19 @@ PUT    /api/config/line-menus/{menu_id}
 DELETE /api/config/line-menus/{menu_id}
 POST   /api/config/line-menus/{menu_id}/preview
 POST   /api/config/line-menus/{menu_id}/publish
+POST   /api/v1/line/rich-menus/preview
+POST   /api/v1/line/rich-menus/{menu_id}/images
+GET    /api/v1/line/rich-menus/publications
+GET    /api/v1/line/rich-menus/publications/{publication_id}
+POST   /api/v1/line/rich-menus/publications/{publication_id}/retry
 ```
 
-儲存與發布分開。修改 JSON 不會立即更動 LINE；呼叫 `publish` 才會執行 `line/setup_rich_menus.py`。
+儲存與發布分開。修改 JSON 不會立即更動 LINE；發布接口會建立持久化工作並喚醒 Worker，
+一次只發布指定 Menu。設定更新須帶 `If-Match` revision，舊畫面會收到 409。
 
-圖片上傳 API 暫未建立。JSON 的 `appearance.image_path` 只保存圖片位置。
+圖片上傳會檢查實際 JPEG／PNG 格式、尺寸與檔案大小，再重新編碼為 JPEG。圖片本體位於
+`MEDIA_STORAGE_ROOT`（正式環境建議 NAS 或受控磁碟），MySQL `media_assets` 保存路徑、
+MIME、大小、尺寸與 SHA-256；不將圖片 BLOB 存入 MySQL，也不提交 Git。
 
 ### `liff_settings.json`
 
@@ -177,6 +190,8 @@ API_BASE_URL=http://127.0.0.1:8000
 ADMIN_SESSION_MINUTES=30
 ENABLE_ADMIN_AUTH=true
 ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
+MEDIA_STORAGE_ROOT=.local_media
+MEDIA_STORAGE_PROVIDER=local
 ```
 
 `ENABLE_ADMIN_AUTH=false` 僅能在 `APP_ENV=development/dev/local/test` 略過帳號登入；正式環境

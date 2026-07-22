@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import subprocess
 import threading
-from pathlib import Path
 from typing import TypeVar
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, ValidationError
 
 from api.schemas.line_config import (
@@ -32,6 +30,12 @@ from services.json_config_service import (
     write_config,
 )
 from api.dependencies.admin_auth import require_line_manager, require_line_viewer
+from line.worker import wake_worker
+from services.line_rich_menu_service import (
+    RichMenuPublicationConflictError,
+    RichMenuPublicationNotFoundError,
+    create_publication_job,
+)
 
 
 router = APIRouter(
@@ -40,10 +44,10 @@ router = APIRouter(
     dependencies=[Depends(require_line_viewer)],
 )
 public_router = APIRouter(prefix="/api/config", tags=["Public LINE Config"])
-PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 T = TypeVar("T", bound=BaseModel)
 MESSAGE_TEMPLATE_LOCK = threading.RLock()
 MESSAGE_SCHEDULE_LOCK = threading.RLock()
+LINE_MENU_LOCK = threading.RLock()
 
 
 def _read(name: str, model: type[T]) -> T:
@@ -60,14 +64,6 @@ def _save(name: str, value: BaseModel) -> None:
         write_config(name, value)
     except OSError as exc:
         raise HTTPException(status_code=500, detail=f"Unable to save configuration: {exc}") from exc
-
-
-def _publish_rich_menus() -> None:
-    subprocess.run(
-        ["uv", "run", "python", "line/setup_rich_menus.py"],
-        cwd=PROJECT_ROOT,
-        check=True,
-    )
 
 
 def _normalize_revision(value: str | None) -> str | None:
@@ -95,6 +91,15 @@ def _require_message_schedule_revision(if_match: str | None) -> None:
         raise HTTPException(
             status_code=409,
             detail="訊息排程已被其他人修改，請重新載入後再儲存",
+        )
+
+
+def _require_line_menu_revision(if_match: str | None) -> None:
+    expected = _normalize_revision(if_match)
+    if expected and expected != config_revision("line_menus"):
+        raise HTTPException(
+            status_code=409,
+            detail="Rich Menu 已被其他人修改，請重新載入後再儲存",
         )
 
 
@@ -339,19 +344,45 @@ def get_line_menus():
     return _read("line_menus", LineMenusConfig)
 
 
+@router.get("/line-menus/state")
+def get_line_menus_state():
+    return {
+        "revision": config_revision("line_menus"),
+        "config": _read("line_menus", LineMenusConfig),
+    }
+
+
 @router.put("/line-menus", response_model=LineMenusConfig, dependencies=[Depends(require_line_manager)])
-def replace_line_menus(payload: LineMenusConfig):
-    _save("line_menus", payload)
+def replace_line_menus(
+    payload: LineMenusConfig,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    with LINE_MENU_LOCK:
+        _require_line_menu_revision(if_match)
+        _save("line_menus", payload)
+    request.state.audit_action = "line.rich_menus.replace"
+    request.state.audit_resource_type = "line_rich_menu_config"
+    request.state.audit_details = {"menu_count": len(payload.menus)}
     return payload
 
 
 @router.post("/line-menus", response_model=RichMenuDefinition, status_code=201, dependencies=[Depends(require_line_manager)])
-def create_line_menu(payload: RichMenuDefinition):
-    config = _read("line_menus", LineMenusConfig)
-    if find_by_id(config.menus, payload.id):
-        raise HTTPException(status_code=409, detail="Menu id already exists")
-    config.menus.append(payload)
-    _save("line_menus", LineMenusConfig.model_validate(config))
+def create_line_menu(
+    payload: RichMenuDefinition,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    with LINE_MENU_LOCK:
+        _require_line_menu_revision(if_match)
+        config = _read("line_menus", LineMenusConfig)
+        if find_by_id(config.menus, payload.id):
+            raise HTTPException(status_code=409, detail="Menu id already exists")
+        config.menus.append(payload)
+        _save("line_menus", LineMenusConfig.model_validate(config))
+    request.state.audit_action = "line.rich_menu.create"
+    request.state.audit_resource_type = "line_rich_menu_config"
+    request.state.audit_resource_id = payload.id
     return payload
 
 
@@ -365,27 +396,46 @@ def get_line_menu(menu_id: str):
 
 
 @router.put("/line-menus/{menu_id}", response_model=RichMenuDefinition, dependencies=[Depends(require_line_manager)])
-def update_line_menu(menu_id: str, payload: RichMenuDefinition):
+def update_line_menu(
+    menu_id: str,
+    payload: RichMenuDefinition,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
     if payload.id != menu_id:
         raise HTTPException(status_code=400, detail="Path id and payload id must match")
-    config = _read("line_menus", LineMenusConfig)
-    if not find_by_id(config.menus, menu_id):
-        raise HTTPException(status_code=404, detail="Menu not found")
-    config.menus = upsert_by_id(config.menus, payload)
-    _save("line_menus", LineMenusConfig.model_validate(config))
+    with LINE_MENU_LOCK:
+        _require_line_menu_revision(if_match)
+        config = _read("line_menus", LineMenusConfig)
+        if not find_by_id(config.menus, menu_id):
+            raise HTTPException(status_code=404, detail="Menu not found")
+        config.menus = upsert_by_id(config.menus, payload)
+        _save("line_menus", LineMenusConfig.model_validate(config))
+    request.state.audit_action = "line.rich_menu.update"
+    request.state.audit_resource_type = "line_rich_menu_config"
+    request.state.audit_resource_id = menu_id
     return payload
 
 
 @router.delete("/line-menus/{menu_id}", status_code=204, dependencies=[Depends(require_line_manager)])
-def delete_line_menu(menu_id: str):
-    config = _read("line_menus", LineMenusConfig)
-    item = find_by_id(config.menus, menu_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Menu not found")
-    if item.set_as_default:
-        raise HTTPException(status_code=409, detail="Default menu cannot be deleted")
-    config.menus = [menu for menu in config.menus if menu.id != menu_id]
-    _save("line_menus", LineMenusConfig.model_validate(config))
+def delete_line_menu(
+    menu_id: str,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    with LINE_MENU_LOCK:
+        _require_line_menu_revision(if_match)
+        config = _read("line_menus", LineMenusConfig)
+        item = find_by_id(config.menus, menu_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Menu not found")
+        if item.set_as_default:
+            raise HTTPException(status_code=409, detail="Default menu cannot be deleted")
+        config.menus = [menu for menu in config.menus if menu.id != menu_id]
+        _save("line_menus", LineMenusConfig.model_validate(config))
+    request.state.audit_action = "line.rich_menu.delete"
+    request.state.audit_resource_type = "line_rich_menu_config"
+    request.state.audit_resource_id = menu_id
     return Response(status_code=204)
 
 
@@ -395,13 +445,19 @@ def preview_line_menu(menu_id: str):
 
 
 @router.post("/line-menus/{menu_id}/publish", status_code=202, dependencies=[Depends(require_line_manager)])
-def publish_line_menu(menu_id: str, background_tasks: BackgroundTasks):
-    menu = get_line_menu(menu_id)
-    if not menu.enabled:
-        raise HTTPException(status_code=409, detail="Disabled menu cannot be published")
-    # The current publisher synchronizes all enabled menus in one operation.
-    background_tasks.add_task(_publish_rich_menus)
-    return {"status": "accepted", "menu_id": menu_id}
+def publish_line_menu(menu_id: str, request: Request):
+    principal = request.state.admin_principal
+    try:
+        publication = create_publication_job(menu_id, principal.id)
+    except RichMenuPublicationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except RichMenuPublicationConflictError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    request.state.audit_action = "line.rich_menu.publish"
+    request.state.audit_resource_type = "line_rich_menu_publication"
+    request.state.audit_resource_id = str(publication["id"])
+    wake_worker()
+    return {"status": "accepted", "menu_id": menu_id, "publication_id": publication["id"]}
 
 
 # ---------------------------------------------------------------------------

@@ -352,3 +352,36 @@ ENABLE_SERVER_FAILURE_POPUP=false
 - 任務取消、立即執行、失敗重試、attempt history 與開發模式 API 整合測試通過。
 - 排程排序／日期預覽及 UI 無固定輪詢檢查通過。
 - 測試資料已清除，未建立一次性 Python 檔案。
+
+## feat: 新增三角色 Rich Menu 管理與可靠發布流程
+
+### 新增
+
+- `api/routes/line_rich_menus.py`、`api/schemas/line_rich_menus.py`：圖片、預覽、發布、歷史與重試 API。
+- `services/media_storage_service.py`：圖片格式／尺寸驗證、重新編碼、受控檔案儲存及 SHA-256 中繼資料。
+- `services/line_rich_menu_service.py`：單一選單可靠發布、狀態重試、LINE ID 與角色重新綁定。
+- `ui/components/line_rich_menu_manager.py`：三角色草稿編輯、按鈕 Action、預覽、圖片及發布管理。
+- `tests/test_line_rich_menu_management.py`：設定、圖片、安全驗證、API、發布與重新綁定測試。
+
+### 修改
+
+- `db/schema.sql`：新增 `media_assets`、`line_rich_menu_publications`。
+- `config/line_menu.json`：升級 version 2，加入 customer／staff／union_staff 角色映射。
+- `api/routes/line_system_config.py`：Rich Menu revision、If-Match、稽核與相容發布入口。
+- `api/schemas/line_config.py`：角色、唯一預設選單、按鈕重疊與安全 URI 驗證。
+- `line/worker.py`、`line/line_bot.py`：發布工作處理、角色重綁與 DB Rich Menu ID 優先。
+- `line/setup_rich_menus.py`：改為可靠發布服務 CLI 包裝器。
+- `ui/pages/07_line_management.py`、`ui/services/line_api_client.py`：接入 Rich Menu 管理頁。
+- `.env.example`、`.gitignore`、`pyproject.toml`、`uv.lock` 與相關文件同步更新。
+
+### 刪除
+
+- 無。
+
+### 驗證
+
+- 開發 Schema 初始化成功，共 42 個 statement。
+- 8 項 Rich Menu 整合測試通過；LINE HTTP 全部使用 Mock。
+- OpenAPI 共 102 條路由，5.4 必要路由完整。
+- 測試資料庫紀錄及媒體檔案殘留均為 0。
+- 未建立一次性 Python 檔案。

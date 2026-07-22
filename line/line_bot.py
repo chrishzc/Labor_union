@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse
 from line.worker import wake_worker
 from line.security import verify_line_signature
 from services.line_task_service import enqueue_line_task
+from services.line_rich_menu_service import get_current_rich_menu_id
 from services.webhook_event_service import register_event
 
 # 載入環境變數
@@ -50,6 +51,9 @@ def load_message_templates():
 
 
 def _load_rich_menu_id(role: str) -> str:
+    current_id = get_current_rich_menu_id(role)
+    if current_id:
+        return current_id
     key_by_role = {
         "staff": "staff_rich_menu_id",
         "union_staff": "union_staff_rich_menu_id",

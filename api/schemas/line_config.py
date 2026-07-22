@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, model_validator
@@ -112,6 +113,9 @@ class MenuAction(BaseModel):
             raise ValueError("message action requires text")
         if self.type == "uri" and self.uri_source == "literal" and not self.uri:
             raise ValueError("literal uri action requires uri")
+        if self.type == "uri" and self.uri_source == "literal" and self.uri:
+            if urlparse(self.uri).scheme.lower() not in {"http", "https"}:
+                raise ValueError("literal uri action only supports http or https")
         if self.type == "postback" and not self.data:
             raise ValueError("postback action requires data")
         return self
@@ -135,11 +139,19 @@ class RichMenuAppearance(BaseModel):
     background_color: str = "#F5F5F5"
     image_mode: Literal["generated", "uploaded"] = "generated"
     image_path: str | None = None
+    image_asset_id: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def validate_uploaded_image(self):
+        if self.image_mode == "uploaded" and not (self.image_asset_id or self.image_path):
+            raise ValueError("uploaded image mode requires an image asset")
+        return self
 
 
 class RichMenuDefinition(BaseModel):
     id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     name: str = Field(min_length=1, max_length=300)
+    audience_role: Literal["customer", "staff", "union_staff"]
     enabled: bool = True
     selected: bool = True
     set_as_default: bool = False
@@ -158,6 +170,18 @@ class RichMenuDefinition(BaseModel):
                 raise ValueError(f"button {button.id} exceeds menu width")
             if button.bounds.y + button.bounds.height > self.size.height:
                 raise ValueError(f"button {button.id} exceeds menu height")
+        for index, button in enumerate(self.buttons):
+            for other in self.buttons[index + 1 :]:
+                separated = (
+                    button.bounds.x + button.bounds.width <= other.bounds.x
+                    or other.bounds.x + other.bounds.width <= button.bounds.x
+                    or button.bounds.y + button.bounds.height <= other.bounds.y
+                    or other.bounds.y + other.bounds.height <= button.bounds.y
+                )
+                if not separated:
+                    raise ValueError(f"buttons {button.id} and {other.id} overlap")
+        if self.set_as_default and self.audience_role != "customer":
+            raise ValueError("only the customer menu can be the default menu")
         return self
 
 
@@ -170,6 +194,13 @@ class LineMenusConfig(BaseModel):
         ids = [item.id for item in self.menus]
         if len(ids) != len(set(ids)):
             raise ValueError("rich menu ids must be unique")
+        enabled = [item for item in self.menus if item.enabled]
+        roles = [item.audience_role for item in enabled]
+        if len(roles) != len(set(roles)):
+            raise ValueError("only one enabled rich menu is allowed for each audience role")
+        defaults = [item for item in enabled if item.set_as_default]
+        if len(defaults) != 1:
+            raise ValueError("exactly one enabled default rich menu is required")
         return self
 
 

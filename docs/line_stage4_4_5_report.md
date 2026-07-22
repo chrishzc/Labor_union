@@ -124,6 +124,18 @@ PUT /api/line/users/{user_id}/role/{role}
 - 管理頁只在載入、操作或手動重新整理時查詢，不使用 3 秒固定輪詢。Webhook、人工立即執行與
   重試會喚醒 Worker，既有低頻掃描僅作通知遺失的容錯。
 
+## 第五階段 5.4：Rich Menu 管理中心
+
+- 三種選單加入 `audience_role`，固定對應 `customer`、`staff`、`union_staff`；預設選單只能屬於 customer。
+- 管理 UI 可編輯名稱、尺寸、顏色、按鈕範圍與 Action，支援自動產圖、安全圖片上傳及預覽。
+- Rich Menu JSON 使用 revision／`If-Match` 防止舊畫面覆蓋新版；按鈕越界、重疊與非 HTTP(S) 網址會被拒絕。
+- 新增 `media_assets`，圖片本體存受控檔案系統／NAS，DB 僅存路徑、尺寸、MIME、SHA-256 等中繼資料。
+- 新增 `line_rich_menu_publications`，保存發布快照、狀態、LINE Menu ID、圖片、重試與錯誤；發布失敗不替換舊版。
+- Worker 一次只發布指定 Menu；發布成功後，staff／union_staff 使用者會收到具冪等鍵的重新綁定任務。
+- `line_bot.py` 優先從 MySQL 讀取目前發布 ID，`rich_menu_ids.json` 暫時保留過渡相容。
+- Worker 首次啟動會把 JSON 內既有 ID 登記為目前版本，不會重新發布或呼叫 LINE。
+- 管理頁只在操作或按下重新整理時讀取發布紀錄，不使用固定輪詢。
+
 ## 工作人員統一待審接口補充
 
 月嫂身分確認與客戶重新綁定共用 MySQL `line_confirmation_requests`，並提供統一的 `/api/line/staff/review-requests` 介面，供未來工會客服前端顯示同一份待處理清單。月嫂申請由工會人員核准後直接切換身分，不產生驗證碼。所有工作人員接口均要求 `X-Internal-API-Key`。

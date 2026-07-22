@@ -78,6 +78,35 @@ class LineAdminApiClient:
             return payload["data"]
         return payload
 
+    def _request_bytes(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str | None = None,
+        json: dict[str, Any] | None = None,
+    ) -> bytes:
+        headers = {"X-Internal-API-Key": self.internal_api_key}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            response = requests.request(
+                method,
+                f"{self.base_url}{path}",
+                headers=headers,
+                json=json,
+                timeout=15,
+            )
+        except requests.RequestException as exc:
+            raise LineAdminApiError(f"無法連線到 FastAPI：{exc}") from exc
+        if not response.ok:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = response.text
+            raise LineAdminApiError(str(detail or "API 請求失敗"), status_code=response.status_code)
+        return response.content
+
     def login(self, username: str, password: str) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -211,6 +240,114 @@ class LineAdminApiClient:
         return self._request(
             "POST",
             f"/api/v1/line/tasks/{task_id}/{action}",
+            token=token,
+            json={"reason": reason},
+        )
+
+    def line_menu_state(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/config/line-menus/state", token=token)
+
+    def update_line_menus(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+        *,
+        revision: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "PUT",
+            "/api/config/line-menus",
+            token=token,
+            json=payload,
+            extra_headers={"If-Match": revision},
+        )
+
+    def preview_line_menu(self, token: str | None, menu: dict[str, Any]) -> bytes:
+        return self._request_bytes(
+            "POST",
+            "/api/v1/line/rich-menus/preview",
+            token=token,
+            json=menu,
+        )
+
+    def upload_line_menu_image(
+        self,
+        token: str | None,
+        menu_id: str,
+        *,
+        filename: str,
+        content: bytes,
+        content_type: str,
+    ) -> dict[str, Any]:
+        headers = {"X-Internal-API-Key": self.internal_api_key}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        try:
+            response = requests.post(
+                f"{self.base_url}/api/v1/line/rich-menus/{menu_id}/images",
+                headers=headers,
+                files={"image": (filename, content, content_type)},
+                timeout=30,
+            )
+        except requests.RequestException as exc:
+            raise LineAdminApiError(f"無法上傳圖片：{exc}") from exc
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+        if not response.ok:
+            detail = payload.get("detail") if isinstance(payload, dict) else response.text
+            raise LineAdminApiError(str(detail or "圖片上傳失敗"), status_code=response.status_code)
+        return payload["data"]
+
+    def publish_line_menu(
+        self,
+        token: str | None,
+        menu_id: str,
+        *,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/line/rich-menus/{menu_id}/publish",
+            token=token,
+            json={"reason": reason},
+        )
+
+    def line_menu_publications(
+        self,
+        token: str | None,
+        *,
+        menu_id: str | None = None,
+        status: str | None = None,
+        page: int = 1,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/line/rich-menus/publications",
+            token=token,
+            params={
+                key: value
+                for key, value in {
+                    "menu_id": menu_id,
+                    "status": status,
+                    "page": page,
+                    "page_size": 20,
+                }.items()
+                if value not in {None, ""}
+            },
+        )
+
+    def retry_line_menu_publication(
+        self,
+        token: str | None,
+        publication_id: int,
+        *,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/line/rich-menus/publications/{publication_id}/retry",
             token=token,
             json={"reason": reason},
         )

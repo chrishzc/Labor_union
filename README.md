@@ -209,6 +209,27 @@ POST /api/v1/line/tasks/{task_id}/run-now
 POST /api/v1/line/tasks/{task_id}/retry
 ```
 
+#### 5.4 Rich Menu 管理中心
+
+Rich Menu 分頁已接上三種角色選單，可修改名稱、角色、尺寸、顏色、按鈕範圍及
+Message／URI／LIFF／Postback Action，並可產生預覽、上傳圖片、保存草稿及建立發布工作。
+草稿使用 revision／`If-Match` 防止多人互相覆蓋；發布與儲存分離，不會因修改設定就直接
+更動 LINE 官方帳號。
+
+發布工作保存在 `line_rich_menu_publications`，由既有 Worker 喚醒後執行單一 Menu 建立、
+圖片上傳及預設選單設定。成功後，`staff`／`union_staff` 角色會分批建立 `rich_menu_link`
+任務切換至新版；失敗保留舊版並提供錯誤與人工重試。圖片本體放在 `MEDIA_STORAGE_ROOT`，
+MySQL `media_assets` 只保存中繼資料與 SHA-256，不保存 BLOB。
+
+```text
+GET  /api/config/line-menus/state
+POST /api/v1/line/rich-menus/preview
+POST /api/v1/line/rich-menus/{menu_id}/images
+POST /api/v1/line/rich-menus/{menu_id}/publish
+GET  /api/v1/line/rich-menus/publications
+POST /api/v1/line/rich-menus/publications/{publication_id}/retry
+```
+
 #### 手動啟動個別服務
 若需單獨除錯，可在啟動 Docker 後手動執行以下指令：
 ```powershell

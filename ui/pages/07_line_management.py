@@ -5,6 +5,7 @@ from __future__ import annotations
 import streamlit as st
 
 from ui.components.line_message_manager import render_message_manager
+from ui.components.line_rich_menu_manager import render_rich_menu_manager
 from ui.components.line_schedule_manager import render_schedule_manager
 from ui.components.line_task_manager import render_task_manager
 from ui.services.line_api_client import LineAdminApiClient, LineAdminApiError
@@ -135,13 +136,15 @@ def show() -> None:
         with task_tab:
             render_task_manager(client, token, profile)
 
+    with tabs[3]:
+        render_rich_menu_manager(client, token, profile)
+
     panels = [
-        ("Rich Menu 管理", "三種角色選單、按鈕與發布流程"),
         ("LIFF 設定", "頁面文字、欄位與主題設定"),
         ("人工審查", "月嫂身分申請與客戶重新綁定"),
         ("客服入口", "工會人員客服系統"),
         ("操作紀錄", "管理員異動稽核"),
     ]
-    for tab, (name, description) in zip(tabs[3:], panels):
+    for tab, (name, description) in zip(tabs[4:], panels):
         with tab:
             _planned_panel(name, description)

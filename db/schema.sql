@@ -831,3 +831,60 @@ CREATE TABLE IF NOT EXISTS line_task_attempts (
     CONSTRAINT fk_line_task_attempt_task FOREIGN KEY (task_id)
         REFERENCES line_tasks(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 37. 共用媒體資產中繼資料（圖片本體存於受控檔案系統／NAS／物件儲存）
+CREATE TABLE IF NOT EXISTS media_assets (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    category ENUM('rich_menu','line_user_upload','contract','other') NOT NULL,
+    owner_type VARCHAR(50) NULL,
+    owner_id VARCHAR(100) NULL,
+    storage_provider ENUM('local','nas','s3') NOT NULL DEFAULT 'local',
+    storage_key VARCHAR(500) NOT NULL,
+    original_filename VARCHAR(255) NULL,
+    mime_type VARCHAR(100) NOT NULL,
+    file_size BIGINT NOT NULL,
+    sha256 CHAR(64) NOT NULL,
+    width INT NULL,
+    height INT NULL,
+    created_by_admin_user_id BIGINT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME NULL,
+    UNIQUE KEY uk_media_storage_key (storage_key),
+    INDEX idx_media_owner (category, owner_type, owner_id, deleted_at),
+    INDEX idx_media_sha256 (sha256),
+    CONSTRAINT fk_media_created_by FOREIGN KEY (created_by_admin_user_id)
+        REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 38. LINE Rich Menu 發布工作與版本歷史
+CREATE TABLE IF NOT EXISTS line_rich_menu_publications (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    menu_config_id VARCHAR(100) NOT NULL,
+    audience_role ENUM('customer','staff','union_staff') NOT NULL,
+    config_revision CHAR(64) NOT NULL,
+    config_snapshot JSON NOT NULL,
+    status ENUM('pending','processing','published','failed') NOT NULL DEFAULT 'pending',
+    line_rich_menu_id VARCHAR(100) NULL,
+    previous_line_rich_menu_id VARCHAR(100) NULL,
+    image_asset_id BIGINT NULL,
+    requested_by_admin_user_id BIGINT NULL,
+    retry_count INT NOT NULL DEFAULT 0,
+    max_retries INT NOT NULL DEFAULT 3,
+    next_retry_at DATETIME NULL,
+    processing_started_at DATETIME NULL,
+    is_current BOOLEAN NOT NULL DEFAULT FALSE,
+    error_code VARCHAR(100) NULL,
+    error_message TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at DATETIME NULL,
+    published_at DATETIME NULL,
+    failed_at DATETIME NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_rich_menu_publish_due (status, next_retry_at, id),
+    INDEX idx_rich_menu_current (menu_config_id, is_current, published_at),
+    INDEX idx_rich_menu_role (audience_role, status, published_at),
+    CONSTRAINT fk_rich_menu_publish_asset FOREIGN KEY (image_asset_id)
+        REFERENCES media_assets(id) ON DELETE SET NULL,
+    CONSTRAINT fk_rich_menu_publish_admin FOREIGN KEY (requested_by_admin_user_id)
+        REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
