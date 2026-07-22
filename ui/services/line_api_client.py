@@ -48,6 +48,7 @@ class LineAdminApiClient:
         token: str | None = None,
         json: dict[str, Any] | None = None,
         extra_headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
     ) -> Any:
         headers = {"X-Internal-API-Key": self.internal_api_key}
         if token:
@@ -60,6 +61,7 @@ class LineAdminApiClient:
                 f"{self.base_url}{path}",
                 headers=headers,
                 json=json,
+                params=params,
                 timeout=8,
             )
         except requests.RequestException as exc:
@@ -157,4 +159,58 @@ class LineAdminApiClient:
             "/api/config/message-templates/preview",
             token=token,
             json={"template": template, "variables": variables},
+        )
+
+    def message_schedule_state(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/config/message-schedules/state", token=token)
+
+    def update_message_schedules(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+        *,
+        revision: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "PUT",
+            "/api/config/message-schedules",
+            token=token,
+            json=payload,
+            extra_headers={"If-Match": revision},
+        )
+
+    def line_task_summary(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/v1/line/tasks/summary", token=token)
+
+    def line_tasks(
+        self,
+        token: str | None,
+        *,
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/line/tasks",
+            token=token,
+            params={key: value for key, value in filters.items() if value not in {None, ""}},
+        )
+
+    def line_task_detail(self, token: str | None, task_id: int) -> dict[str, Any]:
+        return self._request("GET", f"/api/v1/line/tasks/{task_id}", token=token)
+
+    def line_task_action(
+        self,
+        token: str | None,
+        task_id: int,
+        action: str,
+        *,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        if action not in {"cancel", "run-now", "retry"}:
+            raise ValueError("不支援的 LINE 任務操作")
+        return self._request(
+            "POST",
+            f"/api/v1/line/tasks/{task_id}/{action}",
+            token=token,
+            json={"reason": reason},
         )

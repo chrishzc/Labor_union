@@ -188,6 +188,27 @@ LINE 管理中心的「訊息管理」已接上 `config/message_templates.json`�
 啟用中的 D+1～D+3 排程所引用的範本不能停用或刪除；必須先在後續排程管理頁解除引用。
 已經建立於 `line_tasks` 的待發送任務保存建立當時的訊息快照，不會因範本文字更新而被改寫。
 
+#### 5.3 排程與 Worker 任務管理
+
+LINE 管理中心的「排程任務」已接上 D+N 排程編輯器及 Worker 任務佇列。排程可設定時區、
+D+天數、發送時間、訊息範本、啟停及重新加入好友是否重跑；儲存時使用 revision／`If-Match`
+避免多人同時修改互相覆蓋。排程變更只影響之後建立的新任務，既有 `line_tasks` 不回溯更新。
+
+任務管理提供狀態統計、條件篩選、分頁、詳細內容與每次執行歷史。依角色可取消待執行任務、
+將待執行任務改成立即執行，或把失敗任務重新排入。所有人工操作均經資料庫狀態鎖與管理稽核；
+Worker 仍採 Webhook／管理操作喚醒加低頻容錯掃描，前端不會固定每數秒輪詢。
+
+```text
+GET  /api/config/message-schedules/state
+PUT  /api/config/message-schedules
+GET  /api/v1/line/tasks/summary
+GET  /api/v1/line/tasks
+GET  /api/v1/line/tasks/{task_id}
+POST /api/v1/line/tasks/{task_id}/cancel
+POST /api/v1/line/tasks/{task_id}/run-now
+POST /api/v1/line/tasks/{task_id}/retry
+```
+
 #### 手動啟動個別服務
 若需單獨除錯，可在啟動 Docker 後手動執行以下指令：
 ```powershell

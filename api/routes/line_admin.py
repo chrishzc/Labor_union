@@ -71,11 +71,14 @@ def line_admin_health():
 def line_admin_capabilities():
     return BaseResponse(
         data={
-            "stage": "5.1",
+            "stage": "5.3",
             "available": {
                 "health_overview": True,
                 "message_template_api": True,
                 "message_schedule_api": True,
+                "message_schedule_editor": True,
+                "line_task_admin_api": True,
+                "line_task_attempt_history": True,
                 "rich_menu_api": True,
                 "liff_config_api": True,
                 "customer_service_config_api": True,
@@ -85,11 +88,10 @@ def line_admin_capabilities():
                 "audit_log": True,
             },
             "planned_pages": [
-                "訊息管理中心",
                 "LINE 設定中心",
                 "Rich Menu 管理",
                 "LIFF 管理",
-                "任務與人工審查",
+                "人工審查",
                 "客服入口",
                 "操作紀錄",
             ],

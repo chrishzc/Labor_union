@@ -813,3 +813,21 @@ CREATE TABLE IF NOT EXISTS system_alerts (
     resolved_by VARCHAR(50) NULL COMMENT '處理人員',
     INDEX idx_alert_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 36. LINE 任務每次執行嘗試紀錄
+CREATE TABLE IF NOT EXISTS line_task_attempts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    attempt_no INT NOT NULL,
+    outcome ENUM('running','sent','retry_scheduled','failed') NOT NULL DEFAULT 'running',
+    retryable BOOLEAN NULL,
+    error_code VARCHAR(100) NULL,
+    error_message TEXT NULL,
+    line_request_id VARCHAR(100) NULL,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME NULL,
+    UNIQUE KEY uk_line_task_attempt_no (task_id, attempt_no),
+    INDEX idx_line_task_attempt_outcome_time (outcome, started_at),
+    CONSTRAINT fk_line_task_attempt_task FOREIGN KEY (task_id)
+        REFERENCES line_tasks(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -77,6 +78,10 @@ class MessageSchedulesConfig(BaseModel):
 
     @model_validator(mode="after")
     def unique_ids(self):
+        try:
+            ZoneInfo(self.timezone)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"unknown timezone: {self.timezone}") from exc
         ids = [item.id for item in self.schedules]
         if len(ids) != len(set(ids)):
             raise ValueError("message schedule ids must be unique")

@@ -112,10 +112,16 @@ POST /api/config/message-templates/preview
 
 ```text
 GET /api/config/message-schedules
+GET /api/config/message-schedules/state
 PUT /api/config/message-schedules
 ```
 
-後端會檢查時間格式、重複天數及範本是否存在；儲存排程不會立即補發歷史任務，只影響之後建立的任務。
+`state` 會同時回傳設定與 SHA-256 revision；管理前端更新時以 `If-Match` 帶回 revision，
+若設定已被其他人更新會回傳 409，避免覆蓋新版。後端會檢查 IANA 時區、時間格式、
+重複天數及啟用中的範本是否存在；儲存排程不會立即補發或修改歷史任務，只影響之後建立的任務。
+
+`restart_on_refollow=true` 表示使用者解除封鎖或重新加入時，取消既有尚未發送的 onboarding
+任務並依當次 follow 事件重新建立；設為 `false` 時沿用首次建立的穩定冪等規則。
 
 ### `rich_menu_ids.json`
 

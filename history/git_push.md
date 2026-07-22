@@ -319,3 +319,36 @@ ENABLE_SERVER_FAILURE_POPUP=false
 - 舊 revision 與 D+1 引用範本刪除均回 409。
 - UI payload builder 通過文字變數與 Flex JSON 測試。
 - 未直接修改現有訊息範本資料，未建立一次性 Python 檔案。
+
+## feat: 新增 LINE D+排程與 Worker 任務管理中心
+
+### 新增
+
+- `api/routes/line_tasks.py`、`api/schemas/line_tasks.py`：任務清單、統計、明細、取消、立即執行與失敗重試 API。
+- `services/line_task_admin_service.py`：具 transaction、資料列鎖與狀態防呆的任務管理服務。
+- `ui/components/line_schedule_manager.py`：D+N 排程編輯、日期預覽及多人修改衝突防護。
+- `ui/components/line_task_manager.py`：Worker 任務監控、篩選、分頁、執行歷史與人工操作介面。
+- `tests/test_line_task_admin.py`：任務狀態、執行紀錄、管理 API、排程與無固定輪詢測試。
+
+### 修改
+
+- `db/schema.sql`：新增 `line_task_attempts`，保存每次 Worker 嘗試的結果與錯誤。
+- `line/worker.py`：任務執行前後寫入 attempt history。
+- `line/line_bot.py`：實作 `restart_on_refollow` 的取消與重建語意。
+- `api/routes/line_system_config.py`、`api/schemas/line_config.py`：排程 state、revision、時區與範本檢查。
+- `api/main.py`：註冊 LINE 任務管理路由。
+- `api/routes/line_admin.py`：管理中心能力版本更新為 5.3，標示排程編輯、任務管理與執行歷史已可用。
+- `ui/pages/07_line_management.py`、`ui/services/line_api_client.py`：接入排程與任務管理功能。
+- README、設定說明、LINE 階段報告、工作紀錄與資料字典同步更新。
+
+### 刪除
+
+- 無。
+
+### 驗證
+
+- `scripts/init_db.py` 成功套用 40 個 Schema statement。
+- Python 編譯與 FastAPI OpenAPI 路由載入成功。
+- 任務取消、立即執行、失敗重試、attempt history 與開發模式 API 整合測試通過。
+- 排程排序／日期預覽及 UI 無固定輪詢檢查通過。
+- 測試資料已清除，未建立一次性 Python 檔案。

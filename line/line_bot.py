@@ -101,6 +101,17 @@ def _create_onboarding_tasks(cursor, user_id: str, source_event_id: str | None) 
     onboarding = next((item for item in schedules if item.get("id") == "new_user_onboarding" and item.get("enabled")), None)
     if not onboarding:
         return
+    restart_on_refollow = bool(onboarding.get("restart_on_refollow", False))
+    if restart_on_refollow:
+        cursor.execute(
+            """
+            UPDATE line_tasks
+            SET status='cancelled'
+            WHERE to_user_id=%s AND status='pending'
+              AND idempotency_key LIKE 'onboarding:%%'
+            """,
+            (user_id,),
+        )
     for step in onboarding.get("steps", []):
         template_id = step.get("template_id")
         content = templates.get(template_id)
@@ -116,10 +127,14 @@ def _create_onboarding_tasks(cursor, user_id: str, source_event_id: str | None) 
         )
         # MySQL currently stores UTC in a timezone-naive DATETIME column.
         scheduled_at = local_target.astimezone(timezone.utc).replace(tzinfo=None)
+        if restart_on_refollow and source_event_id:
+            idempotency_key = f"onboarding:{user_id}:{source_event_id}:d{day}"
+        else:
+            idempotency_key = f"onboarding:{user_id}:d{day}"
         enqueue_line_task(
             cursor, to_user_id=user_id, message_content=content,
             scheduled_at=scheduled_at, source_event_id=source_event_id,
-            idempotency_key=f"onboarding:{user_id}:d{day}",
+            idempotency_key=idempotency_key,
         )
 
 

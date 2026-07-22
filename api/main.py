@@ -20,6 +20,7 @@ from api.routes import (
     holidays,
     line_system_config,
     line_admin,
+    line_tasks,
     matches,
     multi_caregiver_case_assignments,
     multi_caregiver_schedule,
@@ -77,6 +78,7 @@ app.mount("/static", StaticFiles(directory="line/static"), name="static")
 app.include_router(line_router)
 app.include_router(admin_auth.router)
 app.include_router(line_admin.router)
+app.include_router(line_tasks.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)

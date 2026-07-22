@@ -43,6 +43,7 @@ public_router = APIRouter(prefix="/api/config", tags=["Public LINE Config"])
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 T = TypeVar("T", bound=BaseModel)
 MESSAGE_TEMPLATE_LOCK = threading.RLock()
+MESSAGE_SCHEDULE_LOCK = threading.RLock()
 
 
 def _read(name: str, model: type[T]) -> T:
@@ -85,6 +86,15 @@ def _require_message_template_revision(if_match: str | None) -> None:
         raise HTTPException(
             status_code=409,
             detail="訊息範本已被其他人修改，請重新載入後再儲存",
+        )
+
+
+def _require_message_schedule_revision(if_match: str | None) -> None:
+    expected = _normalize_revision(if_match)
+    if expected and expected != config_revision("message_schedules"):
+        raise HTTPException(
+            status_code=409,
+            detail="訊息排程已被其他人修改，請重新載入後再儲存",
         )
 
 
@@ -289,14 +299,35 @@ def get_message_schedules():
     return _read("message_schedules", MessageSchedulesConfig)
 
 
+@router.get("/message-schedules/state")
+def get_message_schedules_state():
+    return {
+        "revision": config_revision("message_schedules"),
+        "config": _read("message_schedules", MessageSchedulesConfig),
+    }
+
+
 @router.put("/message-schedules", response_model=MessageSchedulesConfig, dependencies=[Depends(require_line_manager)])
-def replace_message_schedules(payload: MessageSchedulesConfig):
-    templates = _read("message_templates", MessageTemplatesConfig)
-    enabled_template_ids = {item.id for item in templates.templates if item.enabled}
-    missing = sorted({step.template_id for item in payload.schedules for step in item.steps} - enabled_template_ids)
-    if missing:
-        raise HTTPException(status_code=422, detail=f"Unknown or disabled templates: {', '.join(missing)}")
-    _save("message_schedules", payload)
+def replace_message_schedules(
+    payload: MessageSchedulesConfig,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+):
+    with MESSAGE_SCHEDULE_LOCK:
+        _require_message_schedule_revision(if_match)
+        templates = _read("message_templates", MessageTemplatesConfig)
+        enabled_template_ids = {item.id for item in templates.templates if item.enabled}
+        missing = sorted({step.template_id for item in payload.schedules for step in item.steps} - enabled_template_ids)
+        if missing:
+            raise HTTPException(status_code=422, detail=f"Unknown or disabled templates: {', '.join(missing)}")
+        _save("message_schedules", payload)
+    request.state.audit_action = "line.message_schedules.replace"
+    request.state.audit_resource_type = "line_message_schedules"
+    request.state.audit_details = {
+        "timezone": payload.timezone,
+        "schedule_count": len(payload.schedules),
+        "step_count": sum(len(item.steps) for item in payload.schedules),
+    }
     return payload
 
 

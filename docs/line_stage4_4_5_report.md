@@ -110,6 +110,20 @@ PUT /api/line/users/{user_id}/role/{role}
 - 訊息異動寫入 `admin_audit_logs`，保存動作、範本 ID 與非敏感摘要；單純預覽不記為異動。
 - 範本修改只影響之後的 Webhook 與新建立任務；已存在 `line_tasks` 的訊息快照不回溯修改。
 
+## 第五階段 5.3：排程與 Worker 任務管理
+
+- 「排程任務」頁已接上 D+N onboarding 排程編輯器，可設定 IANA 時區、D+天數、發送時間、
+  範本、啟停與重新加入好友是否重跑。
+- 排程設定使用 revision／`If-Match` 與同程序寫入鎖，舊畫面修改會回 409；只允許引用啟用中的範本。
+- 排程變更只影響後續 follow 建立的新任務；既有 `line_tasks` 保存原時間與訊息快照。
+- 任務管理提供統計、篩選、分頁、內容明細與人工取消、立即執行、失敗重試；每個操作均受 RBAC、
+  資料列狀態鎖及 `admin_audit_logs` 保護。
+- 新增 `line_task_attempts`，逐次保存 Worker 執行序號、結果、是否可重試、錯誤、LINE request ID
+  與起訖時間，便於客服判斷任務為何失敗。
+- UI 日期以 `Asia/Taipei` 顯示，資料庫仍保存 UTC；「今日成功」亦依台北日界統計。
+- 管理頁只在載入、操作或手動重新整理時查詢，不使用 3 秒固定輪詢。Webhook、人工立即執行與
+  重試會喚醒 Worker，既有低頻掃描僅作通知遺失的容錯。
+
 ## 工作人員統一待審接口補充
 
 月嫂身分確認與客戶重新綁定共用 MySQL `line_confirmation_requests`，並提供統一的 `/api/line/staff/review-requests` 介面，供未來工會客服前端顯示同一份待處理清單。月嫂申請由工會人員核准後直接切換身分，不產生驗證碼。所有工作人員接口均要求 `X-Internal-API-Key`。
