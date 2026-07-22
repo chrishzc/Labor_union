@@ -1010,10 +1010,28 @@
 - Sub Map: root
 - Source: start.bat
 - Type: script
-- Description: 一鍵啟動與部署環境初始化腳本。啟動 Docker、初始化 MySQL、產生並匯入假資料，最後並行啟動 FastAPI 與 Streamlit。
+- Description: 一鍵開發環境初始化腳本。固定切換至專案根目錄，啟動Docker、初始化MySQL、產生並匯入假資料，再委派根目錄開發啟動器監控FastAPI與ngrok，並啟動Streamlit。
 - Observability: not_required
 - Invariants:
   - INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始執行 init_db.py 防止連線逾時崩潰。
+
+##### Module: DevFastApiNgrokLauncher
+- Sub Map: root
+- Source: start_fastapi_ngrok.py
+- Type: script
+- Description: 開發用FastAPI與ngrok一鍵啟動器，負責雙程序生命週期監控、異常重啟，以及LINE人工待審的一次性本機通知。
+- Input:
+  - project_root: 啟動器所在的專案根目錄
+  - fastapi_entrypoint: api.main:app
+  - tunnel_target: 127.0.0.1:8000
+- Output:
+  - development_services: FastAPI與ngrok受監控程序
+  - line_webhook_url: ngrok公開網址加上/webhook/line
+- Invariants:
+  - 僅供開發環境使用；正式環境不得依賴ngrok。
+  - FastAPI與ngrok任一程序異常停止時，另一程序必須一併安全關閉。
+  - LINE人工審核通知入口只綁定127.0.0.1，不得透過ngrok公開。
+- Observability: terminal
 
 ##### Module: OnlineScript
 - Sub Map: root

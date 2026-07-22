@@ -26,6 +26,16 @@ if not exist .venv\Scripts\python.exe (
 )
 set "PY=%CD%\.venv\Scripts\python.exe"
 
+:: Production/online mode must use the persistent key configured in .env.
+if not defined INTERNAL_API_KEY (
+    for /f "usebackq delims=" %%K in (`"%PY%" -c "import os; from dotenv import load_dotenv; load_dotenv(); print(os.getenv('INTERNAL_API_KEY',''))"`) do set "INTERNAL_API_KEY=%%K"
+)
+if not defined INTERNAL_API_KEY (
+    echo [Error] INTERNAL_API_KEY is missing. Configure it in .env before online startup.
+    pause
+    exit /b 1
+)
+
 :: 3. Wait for database
 echo [Step 3] Waiting for MySQL database to become ready...
 "%PY%" scripts/wait_for_db.py
@@ -38,6 +48,8 @@ if %errorlevel% neq 0 (
 echo ==========================================
 echo Database connection ready! Starting services...
 echo ==========================================
+echo [Notice] ngrok is development-only and is not started by online.bat.
+echo [Notice] LINE public webhook access requires the Cloudflare Tunnel planned for Stage 5.2.
 
 :: 4. Launch servers concurrently
 echo [Step 4] Launching FastAPI server...

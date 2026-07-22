@@ -16,6 +16,7 @@ from services.db_service import get_connection as get_db_connection
 
 
 _wakeup_event = asyncio.Event()
+_worker_task: asyncio.Task[None] | None = None
 RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
 
 
@@ -261,12 +262,22 @@ async def worker_loop() -> None:
 
 
 def start_worker() -> asyncio.Task[None]:
-    return asyncio.create_task(worker_loop(), name="line-task-worker")
+    global _worker_task
+    _worker_task = asyncio.create_task(worker_loop(), name="line-task-worker")
+    return _worker_task
+
+
+def worker_is_running() -> bool:
+    return _worker_task is not None and not _worker_task.done()
 
 
 async def stop_worker(task: asyncio.Task[None]) -> None:
+    global _worker_task
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    finally:
+        if _worker_task is task:
+            _worker_task = None

@@ -246,3 +246,76 @@ ENABLE_SERVER_FAILURE_POPUP=false
 - `start_line_bot.py`在開發期間建立loopback-only的一次性通知入口；Webhook提交待審資料後立即推送一筆事件。
 - 終端收到事件後才載入該筆資料並顯示`y/n`；啟動時僅補查一次既有pending請求。
 - 通知入口使用單次程序內部金鑰，不公開到ngrok；正式Web/UI接口與資料庫待審機制不變。
+
+## 第五階段5.1：開發啟動器整理（2026-07-20）
+
+- `line/start_line_bot.py`搬移並更名為根目錄`start_fastapi_ngrok.py`。
+- `start.bat`改用新路徑，並固定從專案根目錄、同一個虛擬環境Python執行所有開發初始化與服務。
+- `online.bat`確認為正式啟動腳本，只啟動FastAPI、Streamlit與File Watcher，不啟動ngrok；新增5.2將改接Cloudflare Tunnel的提示。
+- 更新README、設定說明及LINE階段報告；未建立一次性Python檔案。
+## feat: 新增 LINE 管理中心登入、角色權限與安全 API 骨架
+
+### 新增
+
+- `api/dependencies/admin_auth.py`：內部服務金鑰與管理員 Session／角色依賴。
+- `api/routes/admin_auth.py`、`api/schemas/admin_auth.py`：登入、登出、目前登入者及 Session 延長。
+- `api/routes/line_admin.py`：LINE 系統能力與健康狀態。
+- `services/admin_auth_service.py`：管理員帳號、scrypt 密碼、Session 與稽核服務。
+- `scripts/create_admin.py`：建立管理員的永久維運工具。
+- `ui/services/line_api_client.py`：Streamlit 伺服器端安全 API Client。
+- `ui/pages/07_line_management.py`：LINE 管理中心登入與八個功能分頁骨架。
+- `tests/test_admin_auth_security.py`：密碼、角色、設定路由及金鑰邊界測試。
+
+### 修改
+
+- `db/schema.sql`：新增管理員、Session、操作稽核三張資料表。
+- `api/main.py`：註冊新路由、CORS 白名單與管理異動稽核。
+- `api/routes/line_system_config.py`：設定 API 加入 `line_viewer`／`line_manager` 權限，保留公開 LIFF 讀取。
+- `line/worker.py`：提供 Worker 執行狀態給管理中心健康檢查。
+- `start.bat`：前後端與開發審核器共用內部金鑰。
+- `online.bat`：正式模式強制要求 `.env` 固定內部金鑰。
+- `.env.example`、`README.md`、`config/README_CONFIG.md`、`docs/line_stage4_4_5_report.md`：補齊設定、建立管理員與階段說明。
+
+### 刪除
+
+- 無。
+
+### 驗證
+
+- 成功合併 `upstream/main`，無衝突。
+- Python 語法編譯通過；FastAPI OpenAPI 共 85 個路由，新增管理接口均已註冊。
+- 未帶內部金鑰的 LINE 管理接口回 503；公開 `GET /api/config/liff` 回 200。
+- `scripts/init_db.py` 成功執行 39 個 SQL 語句並載入所有 Schema parts。
+- 專案虛擬環境未安裝 pytest，改採直接 Python 斷言與路由／Schema 檢查；未新增一次性 Python 測試檔案。
+## chore: 新增開發模式略過 LINE 管理員登入開關
+
+- 新增 `ENABLE_ADMIN_AUTH` 環境開關。
+- 僅允許 development／dev／local／test 略過登入；production 強制登入。
+- 開發略過模式仍要求 `X-Internal-API-Key`。
+- LINE 管理中心直接使用開發管理員身分並顯示安全提示。
+- `.env.example` 保持 `ENABLE_ADMIN_AUTH=true`，本機開發 `.env` 設為 `false`。
+- 補充開發／正式模式切換測試與操作文件。
+## feat: 完成 LINE 訊息管理中心與排程引用防呆
+
+### 新增
+
+- `ui/components/line_message_manager.py`：訊息範本完整管理介面。
+- `tests/test_line_message_management.py`：訊息內容、Flex JSON、版本衝突及排程引用測試。
+
+### 修改
+
+- `ui/pages/07_line_management.py`：訊息管理 Tab 接入正式元件。
+- `ui/services/line_api_client.py`：新增訊息範本 CRUD、草稿預覽與 revision Header。
+- `api/routes/line_system_config.py`：新增 state／草稿預覽、排程引用防呆、同程序鎖、409 版本衝突及稽核摘要。
+- `api/schemas/line_config.py`：新增草稿預覽 Request Schema。
+- `services/json_config_service.py`：新增 SHA-256 設定 revision。
+- `api/main.py`：預覽請求不再誤記為異動；支援資源 ID 與操作摘要稽核。
+- README、設定說明、LINE 階段報告與工作紀錄同步更新。
+
+### 驗證
+
+- Python 語法與 OpenAPI 87 個路由載入成功。
+- 訊息 state／草稿預覽回 200。
+- 舊 revision 與 D+1 引用範本刪除均回 409。
+- UI payload builder 通過文字變數與 Flex JSON 測試。
+- 未直接修改現有訊息範本資料，未建立一次性 Python 檔案。

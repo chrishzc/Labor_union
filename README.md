@@ -144,9 +144,49 @@ Lobar_union/
 # 開發/測試環境啟動
 .\start.bat
 
+# 只啟動並監控FastAPI與ngrok（不初始化DB、不啟動UI）
+.\.venv\Scripts\python.exe .\start_fastapi_ngrok.py
+
 # 生產/上線環境啟動
 .\online.bat
 ```
+
+`online.bat`不啟動開發用ngrok。正式環境的公開入口已移至第七階段，預定改用 Tailscale Funnel。
+
+### LINE 管理中心（第五階段 5.1）
+
+Streamlit 現在提供「LINE 管理中心」入口。FastAPI 使用兩層驗證：由後端服務持有的
+`X-Internal-API-Key`，以及登入後取得的短時效管理員 Session。瀏覽器不會直接取得內部金鑰。
+
+第一次使用前先初始化開發資料庫，再建立一個管理員：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\init_db.py
+.\.venv\Scripts\python.exe scripts\create_admin.py --role system_admin
+```
+
+`scripts/create_admin.py` 是可重複使用的管理工具，不會建立預設密碼。管理員密碼以 scrypt
+雜湊保存，Session 原始值只回傳一次，資料庫僅保存 SHA-256 雜湊。正式啟動前必須在 `.env`
+設定固定且足夠長的 `INTERNAL_API_KEY`；`online.bat` 缺少此值會拒絕啟動。
+
+開發期間若不想重複登入，可設定：
+
+```env
+APP_ENV=development
+ENABLE_ADMIN_AUTH=false
+```
+
+此模式只略過帳號 Session，`X-Internal-API-Key` 仍會驗證。`APP_ENV=production` 永遠強制
+啟用登入，不受此開關影響。
+
+#### 5.2 訊息管理中心
+
+LINE 管理中心的「訊息管理」已接上 `config/message_templates.json`，支援搜尋、分類／狀態
+篩選、新增、修改、複製、文字與 Flex JSON 預覽、啟停及二次確認刪除。管理介面會帶入
+設定檔內容 revision，若其他管理員已先修改，後端回傳 409 並要求重新載入，避免覆蓋新版。
+
+啟用中的 D+1～D+3 排程所引用的範本不能停用或刪除；必須先在後續排程管理頁解除引用。
+已經建立於 `line_tasks` 的待發送任務保存建立當時的訊息快照，不會因範本文字更新而被改寫。
 
 #### 手動啟動個別服務
 若需單獨除錯，可在啟動 Docker 後手動執行以下指令：

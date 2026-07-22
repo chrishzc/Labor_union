@@ -82,8 +82,36 @@ PUT /api/line/users/{user_id}/role/{role}
 - 正式部署前替所有 `/api/config` 管理接口加入管理員驗證；Rich Menu 發布權限不可公開。
 - 若 FastAPI 改成多程序或多主機，`asyncio.Event` 要改成 Redis／RabbitMQ 等跨程序通知。
 
+## 第五階段 5.1：LINE 管理中心安全入口
+
+5.1 已將既有 Streamlit UI 接到 FastAPI 的 LINE 管理入口骨架：
+
+```text
+管理員瀏覽器
+  -> Streamlit（伺服器端保存內部金鑰）
+  -> X-Internal-API-Key + Bearer Session
+  -> FastAPI 管理員驗證與角色權限
+  -> LINE 設定／Worker 狀態／後續人工審查 API
+```
+
+- 新增 `admin_users`、`admin_sessions`、`admin_audit_logs`。
+- Session 預設 30 分鐘，可由 `ADMIN_SESSION_MINUTES` 調整；登出後立即撤銷。
+- 角色依序為 `line_viewer`、`line_agent`、`line_manager`、`system_admin`。
+- LINE 管理中心 5.1 先提供登入、系統健康、Worker／DB／LINE 金鑰設定狀態與後續分頁骨架。
+- 訊息管理、排程、Rich Menu、LIFF、人工審查、客服與稽核頁會在後續 5.x 逐頁接上現有 API。
+- 第六階段換用 LINE 官方 SDK 時只替換 LINE 邊界實作；管理員驗證、CORS、Session、RBAC 與稽核不由 SDK 提供，會繼續保留。
+
+## 第五階段 5.2：訊息管理中心
+
+- Streamlit 訊息管理頁已接上 FastAPI 與 `message_templates.json`。
+- 支援範本搜尋、篩選、新增、修改、複製、文字／Flex JSON 預覽、啟停與二次確認刪除。
+- 以 SHA-256 內容 revision 與 `If-Match` 防止舊畫面覆蓋其他管理員的新修改。
+- 啟用中的 D+1～D+3 排程引用範本時，後端拒絕停用或刪除並回傳引用排程與天數。
+- 訊息異動寫入 `admin_audit_logs`，保存動作、範本 ID 與非敏感摘要；單純預覽不記為異動。
+- 範本修改只影響之後的 Webhook 與新建立任務；已存在 `line_tasks` 的訊息快照不回溯修改。
+
 ## 工作人員統一待審接口補充
 
 月嫂身分確認與客戶重新綁定共用 MySQL `line_confirmation_requests`，並提供統一的 `/api/line/staff/review-requests` 介面，供未來工會客服前端顯示同一份待處理清單。月嫂申請由工會人員核准後直接切換身分，不產生驗證碼。所有工作人員接口均要求 `X-Internal-API-Key`。
 
-開發環境由 `start_line_bot.py` 建立只綁定 `127.0.0.1` 的一次性通知入口。Webhook成功提交月嫂身分或客戶重新綁定申請後，直接推送一筆通知，終端立即顯示`y/n`並呼叫同一組正式approve／reject API；不再每3秒查詢待審API。啟動時只掃描一次既有待審資料，避免服務重啟期間的申請被遺漏。
+開發環境由專案根目錄的`start_fastapi_ngrok.py`建立只綁定`127.0.0.1`的一次性通知入口。Webhook成功提交月嫂身分或客戶重新綁定申請後，直接推送一筆通知，終端立即顯示`y/n`並呼叫同一組正式approve／reject API；不再每3秒查詢待審API。啟動時只掃描一次既有待審資料，避免服務重啟期間的申請被遺漏。

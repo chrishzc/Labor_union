@@ -50,6 +50,11 @@ class MessageTemplatePreviewRequest(BaseModel):
     variables: dict[str, str] = {}
 
 
+class MessageTemplateDraftPreviewRequest(BaseModel):
+    template: MessageTemplate
+    variables: dict[str, str] = {}
+
+
 class MessageScheduleStep(BaseModel):
     day: int = Field(ge=0, le=365)
     send_time: str = Field(pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")

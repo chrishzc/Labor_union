@@ -750,7 +750,59 @@ CREATE TABLE IF NOT EXISTS line_confirmation_requests (
     CONSTRAINT fk_confirmation_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 32. 系統異常事件紀錄表
+-- 32. 管理後台帳號（LINE 管理中心與其他內部管理功能共用）
+CREATE TABLE IF NOT EXISTS admin_users (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(100) NOT NULL,
+    password_hash VARCHAR(512) NOT NULL COMMENT 'scrypt 雜湊；不得保存明碼密碼',
+    display_name VARCHAR(100) NOT NULL,
+    linked_line_user_id VARCHAR(100) NULL COMMENT '選填：對應 line_users.line_user_id',
+    role ENUM('line_viewer','line_agent','line_manager','system_admin') NOT NULL DEFAULT 'line_viewer',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    last_login_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_admin_username (username),
+    UNIQUE KEY uk_admin_linked_line_user (linked_line_user_id),
+    CONSTRAINT fk_admin_linked_line_user FOREIGN KEY (linked_line_user_id)
+        REFERENCES line_users(line_user_id) ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 33. 管理後台短時效登入 Session
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    admin_user_id BIGINT NOT NULL,
+    session_token_hash CHAR(64) NOT NULL COMMENT 'SHA-256；原始 Session Token 只回傳一次',
+    expires_at DATETIME NOT NULL,
+    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_admin_session_token_hash (session_token_hash),
+    INDEX idx_admin_session_active (admin_user_id, revoked_at, expires_at),
+    CONSTRAINT fk_admin_session_user FOREIGN KEY (admin_user_id)
+        REFERENCES admin_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 34. 管理後台操作稽核紀錄
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    admin_user_id BIGINT NULL,
+    action VARCHAR(100) NOT NULL,
+    resource_type VARCHAR(100) NULL,
+    resource_id VARCHAR(255) NULL,
+    request_path VARCHAR(500) NULL,
+    http_method VARCHAR(10) NULL,
+    result_status INT NULL,
+    ip_address VARCHAR(64) NULL,
+    details_json JSON NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_admin_audit_actor_time (admin_user_id, created_at),
+    INDEX idx_admin_audit_resource (resource_type, resource_id, created_at),
+    CONSTRAINT fk_admin_audit_user FOREIGN KEY (admin_user_id)
+        REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 35. 系統異常事件紀錄表
 CREATE TABLE IF NOT EXISTS system_alerts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     event_type VARCHAR(50) NOT NULL COMMENT '異常事件類型',

@@ -43,7 +43,7 @@ adad_tmp/
 adad/
 
 # System generated agent logs & planning
-history/work_log.md
+history/
 task-*.md
 PROJECT_SPEC.md
 AGENTS.md

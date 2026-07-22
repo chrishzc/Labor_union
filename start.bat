@@ -1,4 +1,6 @@
 @echo off
+setlocal
+cd /d "%~dp0"
 chcp 65001 >nul
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
@@ -22,11 +24,23 @@ if not exist .venv\Scripts\python.exe (
     pause
     exit /b 1
 )
-set PY=.venv\Scripts\python.exe
+set "PY=%CD%\.venv\Scripts\python.exe"
+
+:: Make FastAPI, the terminal reviewer and Streamlit share one internal key.
+:: Prefer .env; when absent, create an ephemeral key for this development run.
+if not defined INTERNAL_API_KEY (
+    for /f "usebackq delims=" %%K in (`"%PY%" -c "import os,secrets; from dotenv import load_dotenv; load_dotenv(); print(os.getenv('INTERNAL_API_KEY') or secrets.token_urlsafe(32))"`) do set "INTERNAL_API_KEY=%%K"
+)
+if not defined INTERNAL_API_KEY (
+    echo [Error] Unable to prepare INTERNAL_API_KEY.
+    pause
+    exit /b 1
+)
+echo [Security] FastAPI and Streamlit share one internal API key for this run.
 
 :: 3. Wait for database
 echo [Step 3] Waiting for MySQL database to become ready...
-%PY% scripts/wait_for_db.py
+"%PY%" scripts/wait_for_db.py
 if %errorlevel% neq 0 (
     echo [Error] Database connection timeout!
     pause
@@ -35,7 +49,7 @@ if %errorlevel% neq 0 (
 
 :: 4. Initialize Database
 echo [Step 4] Initializing database schema (schema.sql)...
-%PY% scripts/init_db.py
+"%PY%" scripts/init_db.py
 if %errorlevel% neq 0 (
     echo [Error] Database initialization failed!
     pause
@@ -47,7 +61,7 @@ if %errorlevel% neq 0 (
 ::    schedule allocation / order-status randomization. That step runs again
 ::    later in Step 10, after real data has been imported.)
 echo [Step 5] Generating roster and finance fake data (initial pass, schedule allocation will be skipped until data is imported)...
-%PY% scripts/generate_fake_data.py
+"%PY%" scripts/generate_fake_data.py
 if %errorlevel% neq 0 (
     echo [Error] Fake data generation failed!
     pause
@@ -56,7 +70,7 @@ if %errorlevel% neq 0 (
 
 :: 6. Import Data
 echo [Step 6] Importing client HCM data...
-%PY% scripts/imports/import_client_hcm.py
+"%PY%" scripts/imports/import_client_hcm.py
 if %errorlevel% neq 0 (
     echo [Error] HCM import failed!
     pause
@@ -64,7 +78,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [Step 7] Importing client BeClass data...
-%PY% scripts/imports/import_client_beclass.py
+"%PY%" scripts/imports/import_client_beclass.py
 if %errorlevel% neq 0 (
     echo [Error] Client BeClass import failed!
     pause
@@ -72,7 +86,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [Step 8] Importing caregiver BeClass data...
-%PY% scripts/imports/import_staff_beclass.py
+"%PY%" scripts/imports/import_staff_beclass.py
 if %errorlevel% neq 0 (
     echo [Error] Caregiver BeClass import failed!
     pause
@@ -80,7 +94,7 @@ if %errorlevel% neq 0 (
 )
 
 echo [Step 9] Importing finance payment data...
-%PY% scripts/imports/import_finance_excel.py
+"%PY%" scripts/imports/import_finance_excel.py
 if %errorlevel% neq 0 (
     echo [Error] Finance import failed!
     pause
@@ -91,7 +105,7 @@ if %errorlevel% neq 0 (
 ::     timeline-advancement algorithm can allocate caregivers and diversify
 ::     order statuses (in negotiation / in service / completed / cancelled).
 echo [Step 10] Allocating caregiver schedules and diversifying order statuses...
-%PY% scripts/generate_fake_data.py
+"%PY%" scripts/generate_fake_data.py
 if %errorlevel% neq 0 (
     echo [Error] Schedule allocation failed!
     pause
@@ -104,10 +118,10 @@ echo ==========================================
 
 :: 11. Launch servers concurrently
 echo [Step 11] Launching FastAPI server and ngrok...
-start "FastAPI & ngrok" cmd /k "call .venv\Scripts\activate.bat && python line\start_line_bot.py"
+start "FastAPI & ngrok" cmd /k ""%PY%" start_fastapi_ngrok.py"
 
 echo [Step 12] Launching Streamlit interface...
-start "Streamlit Client UI" cmd /k ".venv\Scripts\streamlit.exe run ui/app.py"
+start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py"
 
 echo ==========================================
 echo System is running in the background!

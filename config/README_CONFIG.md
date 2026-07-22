@@ -87,6 +87,25 @@ GET /api/config/customer-service
 PUT /api/config/customer-service
 ```
 
+## 訊息管理中心（5.2）
+
+前端讀取訊息範本與內容 revision：
+
+```text
+GET /api/config/message-templates/state
+```
+
+新增、修改、刪除時會把 revision 放入 `If-Match` Header。內容已被其他人更新時回傳 409，
+前端必須重新載入。草稿預覽使用：
+
+```text
+POST /api/config/message-templates/preview
+```
+
+啟用中的 `message_schedules.json` 若仍引用某個範本，該範本不可停用或刪除。JSON 寫入採
+同程序鎖與原子檔案替換；目前正式架構為單一 FastAPI 程序，未來多程序時應改用集中式
+設定儲存或分散式鎖。
+
 ### `message_schedules.json`
 
 管理新好友 D+1、D+2、D+3 等排程。排程只引用 `message_templates.json` 中已啟用的範本 ID，顯示時區預設為 `Asia/Taipei`。
@@ -137,10 +156,25 @@ LINE 用戶照片應在 Webhook 收到 message ID 後下載至受控儲存區，
 
 ## 安全注意事項
 
-- 目前設定 API 尚未加入管理員登入；正式開放給前端前必須加上權限保護。
+- 第五階段 5.1 已加入資料庫管理員登入、短時效 Session、角色權限與操作稽核。
+- `/api/config` 的管理讀取至少需要 `line_viewer`；新增、修改、刪除與發布需要 `line_manager`。
+- 公開 LIFF 註冊頁使用的 `GET /api/config/liff` 維持公開，其餘 LIFF 修改接口受保護。
 - API 只操作固定白名單檔案，不能由前端傳入任意檔案路徑。
 - Rich Menu 發布會呼叫 LINE API，應限制為管理員操作。
-- 月嫂驗證查詢及角色管理接口需使用 `X-Internal-API-Key`；正式前應再接管理員登入與角色權限。
+- 月嫂驗證查詢及角色管理底層接口仍需使用 `X-Internal-API-Key`；Web/UI 經由後端 Client 呼叫，不把金鑰交給瀏覽器。
+
+相關環境變數：
+
+```env
+INTERNAL_API_KEY=<固定長隨機值>
+API_BASE_URL=http://127.0.0.1:8000
+ADMIN_SESSION_MINUTES=30
+ENABLE_ADMIN_AUTH=true
+ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
+```
+
+`ENABLE_ADMIN_AUTH=false` 僅能在 `APP_ENV=development/dev/local/test` 略過帳號登入；正式環境
+即使誤設為 `false` 仍會強制驗證。略過登入不會關閉 `X-Internal-API-Key`。
 
 ## 工會工作人員統一待審接口
 
@@ -170,4 +204,4 @@ X-Internal-API-Key: <INTERNAL_API_KEY>
 ENABLE_REBIND_CONSOLE_REVIEW=true
 ```
 
-開發時，Webhook提交月嫂身分或重新綁定申請後，會向`start_line_bot.py`在`127.0.0.1`建立的臨時入口推送一次通知，終端隨即接受`y`核准、`n`拒絕，不會固定輪詢待審API。啟動器只在啟動時補查一次既有待審資料。此功能由`ENABLE_LINE_REVIEW_CONSOLE`控制，正式環境`APP_ENV=production`時強制停用；正式Web/UI使用相同API。
+開發時，Webhook提交月嫂身分或重新綁定申請後，會向專案根目錄`start_fastapi_ngrok.py`在`127.0.0.1`建立的臨時入口推送一次通知，終端隨即接受`y`核准、`n`拒絕，不會固定輪詢待審API。啟動器只在啟動時補查一次既有待審資料。此功能由`ENABLE_LINE_REVIEW_CONSOLE`控制，正式環境`APP_ENV=production`時強制停用；正式Web/UI使用相同API。
