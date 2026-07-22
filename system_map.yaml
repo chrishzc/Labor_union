@@ -295,7 +295,8 @@ modules:
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
-    todo: []
+    todo:
+    - 建立獨立擴充播種腳本 scripts/seed_boundary_anomalies.py，以專用案號 115900001 起增量寫入 A~G 類別型態、格式與業務異常數據及四大領域警示。
     checkpoint: []
     observability:
       mode: not_required
