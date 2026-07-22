@@ -12,7 +12,7 @@ CASE_FACTS = {
     "contract_id": "C-1",
     "service_days": 20,
     "service_hours_per_day": 9,
-    "subsidy_eligibility": "一般市民",
+    "client_identity_status": "一般市民",
     "floor_fee": 500,
     "start_date": "2026-06-01",
     "end_date": "2026-06-20",
@@ -110,9 +110,12 @@ def test_contract_context_uses_formal_assignment_not_orders_staff_id(monkeypatch
     assert result["order"]["case_no"] == "115000001"
     assert result["assignment"]["assignment_id"] == 1
     assert result["staff"]["name"] == "月嫂1"
+    assert result["client"]["identity_status"] == "一般市民"
     assert result["beclass"]["query_no"] == "115000001"
     assert "orders.staff_id" not in " ".join(cursor.sql)
     assert "v_order_details" not in " ".join(cursor.sql)
+    assert "c.identity_status AS client_identity_status" in " ".join(cursor.sql)
+    assert "clients.identity_status" not in " ".join(cursor.sql)
     assert connection.closed is True
 
 

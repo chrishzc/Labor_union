@@ -399,7 +399,6 @@ DB_TABLE_FIELDS = {
         "service_hours_per_day": "每日服務時數 (service_hours_per_day)",
         "service_time": "服務時段 (service_time)",
         "service_mode": "服務方式 (service_mode)",
-        "subsidy_eligibility": "身分補助資格 (subsidy_eligibility)",
         "total_hours": "服務總時數 (total_hours)",
         "subsidy_hours": "補助時數 (subsidy_hours)",
         "self_pay_hours": "自費時數 (self_pay_hours)",
@@ -441,7 +440,8 @@ DB_TABLE_FIELDS = {
         "residence_type": "居住型態 (residence_type)",
         "notes": "其他備註事項 (notes)",
         "id_card": "身分證字號 (id_card)",
-        "line_id": "LINE ID (line_id)"
+        "line_id": "LINE ID (line_id)",
+        "identity_status": "身分資格（唯讀） (identity_status)"
     },
     "staff (服務人員 - 月嫂主表與撥款帳號)": {
         "staff_name": "月嫂姓名 (staff_name)",
@@ -547,6 +547,21 @@ def show():
     """FormManagementUI 進入點 (5:5 雙視窗 Side-by-Side + 拖拉排序 + 二次確認刪除)"""
     st.title("📋 表單與履歷問卷管理專區")
 
+    form_db_table_fields = {table_name: dict(fields) for table_name, fields in DB_TABLE_FIELDS.items()}
+    order_table_name = "orders (訂單主表 - 36 大業務與金額 calculations)"
+    form_db_table_fields[order_table_name] = {
+        key: label
+        for key, label in form_db_table_fields[order_table_name].items()
+        if not (key.startswith("subsidy") and key.endswith("eligibility"))
+    }
+    form_db_table_fields["clients (客戶主表 - 個人基本資料與市府申請表)"]["identity_status"] = "身分資格（唯讀） (identity_status)"
+
+    def form_table_for_key(db_key: str) -> str:
+        for table_name, fields in form_db_table_fields.items():
+            if db_key in fields:
+                return table_name
+        return next(iter(form_db_table_fields))
+
     try:
         orders_data = db_service.get_order_details()
     except Exception as e:
@@ -556,7 +571,10 @@ def show():
     global_stats = {
         "global_active_orders_count": len([o for o in orders_data if o.get('order_status') in ['服務中', '訂單成立']]),
         "global_active_staff_count": len(set([o['staff_name'] for o in orders_data if o.get('staff_name')])),
-        "global_subsidy_orders_count": len([o for o in orders_data if o.get('subsidy_eligibility') != '一般身分']),
+        "global_subsidy_orders_count": len([
+            o for o in orders_data
+            if o.get('identity_status') not in {None, '', '一般身分', '一般市民'}
+        ]),
         "global_total_receivable_sum": sum([safe_int(o.get('total_employer_self_pay_payable')) for o in orders_data]),
         "global_govt_claim_count": len([o for o in orders_data if o.get('govt_claim_date')])
     }
@@ -585,7 +603,7 @@ def show():
                             **target_order,
                             **{
                                 key: client_row.get(key, '')
-                                for key in ('service_time', 'service_type', 'delivery_type', 'residence_type', 'city')
+                                for key in ('service_time', 'service_type', 'delivery_type', 'residence_type', 'city', 'identity_status')
                             },
                         }
                 except Exception:
@@ -676,12 +694,12 @@ def show():
                         if f['type'] == "db_link":
                             curr_db_k = f.get('db_key', 'client_name')
                             curr_tbl = get_table_for_key(curr_db_k)
-                            tbl_list = list(DB_TABLE_FIELDS.keys())
+                            tbl_list = list(form_db_table_fields.keys())
                             c_t_idx = tbl_list.index(curr_tbl) if curr_tbl in tbl_list else 0
                             
                             sel_tbl = st.selectbox("1️⃣ 資料表來源", tbl_list, index=c_t_idx, key=f"sbs_tbl_t1_{fid}")
                             
-                            tbl_fmap = DB_TABLE_FIELDS[sel_tbl]
+                            tbl_fmap = form_db_table_fields[sel_tbl]
                             f_keys = list(tbl_fmap.keys())
                             c_k_idx = f_keys.index(curr_db_k) if curr_db_k in f_keys else 0
                             f['db_key'] = st.selectbox("2️⃣ 綁定目標欄位", f_keys, index=c_k_idx, format_func=lambda x: tbl_fmap[x], key=f"sbs_fl_db_t1_{fid}")
@@ -879,12 +897,12 @@ def show():
                                     if f['type'] == "db_link":
                                         curr_db_k = f.get('db_key', 'client_name')
                                         curr_tbl = get_table_for_key(curr_db_k)
-                                        tbl_list = list(DB_TABLE_FIELDS.keys())
+                                        tbl_list = list(form_db_table_fields.keys())
                                         c_t_idx = tbl_list.index(curr_tbl) if curr_tbl in tbl_list else 0
                                         
                                         sel_tbl = st.selectbox("1️⃣ 資料表來源", tbl_list, index=c_t_idx, key=f"se_tbl_{draft_tpl['id']}_{fid}")
                                         
-                                        tbl_fmap = DB_TABLE_FIELDS[sel_tbl]
+                                        tbl_fmap = form_db_table_fields[sel_tbl]
                                         f_keys = list(tbl_fmap.keys())
                                         c_k_idx = f_keys.index(curr_db_k) if curr_db_k in f_keys else 0
                                         f['db_key'] = st.selectbox("2️⃣ 綁定目標欄位", f_keys, index=c_k_idx, format_func=lambda x: tbl_fmap[x], key=f"se_db_{draft_tpl['id']}_{fid}")
@@ -1084,16 +1102,16 @@ def show():
                             st.markdown(f"**📌 參數標籤 `{{{p_tag}}}`** — `{p_info.get('label', '填空欄位')}`")
                             
                             curr_db_k = p_info.get('db_key', 'client_name')
-                            curr_tbl = get_table_for_key(curr_db_k)
+                            curr_tbl = form_table_for_key(curr_db_k)
                             
-                            tbl_list = list(DB_TABLE_FIELDS.keys())
+                            tbl_list = list(form_db_table_fields.keys())
                             c_t_idx = tbl_list.index(curr_tbl) if curr_tbl in tbl_list else 0
                             
                             c_col1, c_col2 = st.columns([1.5, 1.5])
                             with c_col1:
                                 sel_tbl = st.selectbox("1️⃣ 選取 DB 資料表", tbl_list, index=c_t_idx, key=f"eppp_tbl_{curr_cid}_{p_tag}")
                             with c_col2:
-                                tbl_fmap = DB_TABLE_FIELDS[sel_tbl]
+                                tbl_fmap = form_db_table_fields[sel_tbl]
                                 f_keys = list(tbl_fmap.keys())
                                 c_k_idx = f_keys.index(curr_db_k) if curr_db_k in f_keys else 0
                                 sel_fkey = st.selectbox("2️⃣ 綁定目標欄位", f_keys, index=c_k_idx, format_func=lambda x: tbl_fmap[x], key=f"eppp_fkey_{curr_cid}_{p_tag}")

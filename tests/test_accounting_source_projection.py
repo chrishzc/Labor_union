@@ -17,7 +17,7 @@ class FakeCursor:
         if "FROM orders o" in sql:
             self._result = {
                 "status": "服務中", "service_days": 20, "service_hours_per_day": 9,
-                "subsidy_eligibility": "一般市民", "floor_fee": 900,
+                "floor_fee": 900,
                 "start_date": "2026-05-01", "end_date": "2026-05-20",
                 "actual_start_date": "2026-05-01", "actual_end_date": "2026-05-20",
                 "client_id": 3, "client_name": "王小明", "identity_status": "一般市民",
@@ -63,6 +63,8 @@ def test_projects_raw_source_tables_and_explicit_gaps(monkeypatch):
 
     assert result["case_no"] == "115000001"
     assert result["client"]["client_name"] == "王小明"
+    assert result["client"]["identity_status"] == "一般市民"
+    assert "clients.identity_status" not in result["order"]
     assert result["beclass"]["refund_account_no"] == "00123"
     assert result["staff_assignments"][0]["actual_hours"] == 175
     assert result["staff_primary_bank_accounts"][0]["account_no"] == "12345"
@@ -71,6 +73,8 @@ def test_projects_raw_source_tables_and_explicit_gaps(monkeypatch):
     assert "payments" not in queries.lower()
     assert "v_order_details" not in queries.lower()
     assert "order_id" not in queries.lower()
+    assert "o.clients.identity_status" not in queries
+    assert "c.identity_status" in queries
     assert connection.closed is True
 
 

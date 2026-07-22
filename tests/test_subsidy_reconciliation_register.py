@@ -40,21 +40,21 @@ class FakeConnection:
 def test_quarterly_register_uses_actual_dates_and_optional_lower_section(monkeypatch):
     connection = FakeConnection([
         {
-            "case_no": "115000002", "subsidy_eligibility": "\u4e00\u822c\u5e02\u6c11",
+            "case_no": "115000002", "identity_status": "\u4e00\u822c\u5e02\u6c11",
             "actual_start_date": date(2026, 1, 3), "actual_end_date": date(2026, 2, 2),
             "service_days": 20, "service_hours_per_day": 9, "employer_name": "\u738b\u5c0f\u660e",
             "employer_address": "\u53f0\u5317\u5e02\u4e2d\u6b63\u5340", "staff_name": "\u6708\u5ac2\u7532",
             "survey_details": {"\u8eab\u5206\u8b49\u5b57\u865f": "A123456789"},
         },
         {
-            "case_no": "115000001", "subsidy_eligibility": "\u88dc\u52a9\u5e02\u6c11",
+            "case_no": "115000001", "identity_status": "\u88dc\u52a9\u5e02\u6c11",
             "actual_start_date": date(2026, 2, 1), "actual_end_date": date(2026, 3, 1),
             "service_days": 20, "service_hours_per_day": 9, "employer_name": "\u9673\u5c0f\u7f8e",
             "employer_address": "\u65b0\u5317\u5e02\u677f\u6a4b\u5340", "staff_name": "\u6708\u5ac2\u4e59",
             "survey_details": '{"\u8eab\u5206\u8b49\u5b57\u865f": "B223456789"}',
         },
         {
-            "case_no": "115000003", "subsidy_eligibility": "\u4e00\u822c\u5e02\u6c11",
+            "case_no": "115000003", "identity_status": "\u4e00\u822c\u5e02\u6c11",
             "actual_start_date": date(2026, 4, 1), "actual_end_date": date(2026, 4, 30),
             "service_days": 20, "service_hours_per_day": 8, "employer_name": "\u4e0d\u61c9\u5165\u5217",
             "employer_address": "", "staff_name": "", "survey_details": {},
@@ -70,6 +70,8 @@ def test_quarterly_register_uses_actual_dates_and_optional_lower_section(monkeyp
     assert result["subsidized_citizen_rows"][0]["\u7c3d\u9818"] == ""
     assert connection.closed is True
     assert "INSERT" not in connection.cursor_instance.executed[0][0].upper()
+    assert "c.identity_status" in connection.cursor_instance.executed[0][0]
+    assert "clients.identity_status" not in connection.cursor_instance.executed[0][0]
 
     workbook = load_workbook(BytesIO(result["xlsx_bytes"]))
     worksheet = workbook["\u5206\u5b63\u6838\u92b7"]
@@ -83,7 +85,7 @@ def test_annual_summary_omits_subsidized_section_and_repairs_legacy_key(monkeypa
     legacy_key = "\u8eab\u5206\u8b49\u5b57\u865f".encode("utf-8").decode("latin1")
     monkeypatch.setattr(register, "get_connection", lambda: FakeConnection([
         {
-            "case_no": "115000010", "subsidy_eligibility": "\u4e00\u822c\u5e02\u6c11",
+            "case_no": "115000010", "identity_status": "\u4e00\u822c\u5e02\u6c11",
             "actual_start_date": "2026-07-01", "actual_end_date": "2026-07-20",
             "service_days": 20, "service_hours_per_day": 8, "employer_name": "\u6797\u592a\u592a",
             "employer_address": "\u6843\u5712\u5e02", "staff_name": "\u6708\u5ac2\u4e19",
@@ -120,7 +122,7 @@ def test_invalid_quarter_is_rejected_before_database_access(monkeypatch):
 
 def test_register_caps_subsidy_hours_at_case_total_service_hours():
     row = register._to_register_row({
-        "case_no": "115000011", "subsidy_eligibility": "一般市民",
+        "case_no": "115000011", "identity_status": "一般市民",
         "actual_start_date": date(2026, 1, 1), "actual_end_date": date(2026, 1, 3),
         "service_days": 3, "service_hours_per_day": 9,
         "employer_name": "王小明", "employer_address": "台北市", "staff_name": "月嫂甲",

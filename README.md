@@ -1,5 +1,22 @@
 # 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
 
+> 目前版本：**v0.2.0**（2026-07-22）｜ADAD Master System Map：**54.0**
+
+## v0.2.0 版本重點
+
+- 正式導入 assignment-owned 多月嫂排班：支援兩位／三位月嫂連續交接、個別排班、雙薪日與實際時數隔離。
+- 訂單修改改採 preview／apply 同步流程，明確處理指派配置、排班移除、薪資鎖定與 append-only 稽核快照。
+- 客戶資格唯一來源統一為 `clients.identity_status`，移除訂單層重複資格來源並補上安全遷移與 UI／API 驗證。
+- 強化帳務匯入、客戶收款對帳、應付帳款摘要／固定九欄匯出，以及補助核銷資料流。
+- 擴充 50 筆既有生命週期假資料：加入多月嫂交接、雙薪、超收、退款與跨批次重複匯入，同時保留原有狀態與排班多樣性。
+- 完成案件日期防呆：服務中涵蓋基準日、已完成案件不得出現未來實際服務日期、取消案件維持零實際時數。
+- 財務警示判斷器與警示生命週期仍列為後續 post-seed 工作；本版假資料不建立 `finance_alerts`／`finance_alert_events`。
+- `file_watcher.py` 明確使用 UTF-8 開啟監控檔案，避免 Windows 預設編碼造成非 ASCII 路徑或內容處理差異。
+
+驗證基準：本版 30 個變更測試檔共 `177 passed`；整合 commits 為 `aecca9b` 至 `3cabb4c`。
+
+---
+
 ## 2026-07-20 最近更新
 
 - 完成財務導入與核帳流程的第二階段：新增 Legacy / Sinopac / Taishin 匯入格式支援，並補齊帳務正規化驗證測試（`tests/imports/*`）。
@@ -20,7 +37,7 @@
 - 新增服務人員契約 Excel 鏡像輸出，以及對應的契約、帳務與財務報表 FastAPI。
 - FastAPI 的正式 ASGI 入口為 `api.main:app`；LINE、LIFF 與 Webhook 以子路由掛載。
 
-最近一次整合版本：`0f9c11f`。
+上一個帳務整合版本：`0f9c11f`。
 
 ---
 
@@ -81,8 +98,8 @@ Lobar_union/
 ├── online.bat                  # 一鍵啟動生產上線服務 (啟動 Docker, wait_for_db, 啟動 services / watcher)
 ├── pyproject.toml              # uv 專案管理配置文件
 ├── requirements.txt            # 從 pyproject.toml 自動編譯導出的相容性依賴清單
-├── system_map.yaml             # ADAD 系統架構 SSOT 記憶與狀態事實來源 (Version 53)
-├── system_map.md               # ADAD 系統架構 SSOT 說明文件 (Version 53)
+├── system_map.yaml             # ADAD 系統架構 SSOT 記憶與狀態事實來源 (Version 54)
+├── system_map.md               # ADAD 系統架構 SSOT 說明文件 (Version 54)
 └── uv.lock                     # uv 依賴鎖定檔
 ```
 
@@ -93,7 +110,7 @@ Lobar_union/
 在本次更新中，我們主要進行了以下優化與擴展：
 * **API 服務層與 UI 前端整合**：全面導入 FastAPI RESTful API 後端與 Streamlit 前端分離架構，並擴展 UI 表單與履歷問卷管理頁面（Tab 3 變數代理 EPPP 契約引擎）。
 * **Data Pipeline 優化**：重構並優化微服務 Pipeline 導入流程，支援客戶、月嫂 BeClass 名冊及 HCM 系統的自動化去重與安全防護。
-* **ADAD 架構更新**：系統架構已升級至 Version 53.0，確保 SSOT 一致性並加入 `safe_int()` 邊界防護防止程式崩潰。
+* **ADAD 架構更新**：系統架構已升級至 Version 54.0，補齊跨子地圖帳務 staging 合約、多月嫂內部 helper 所有權及 Task v3 timeout，維持 SSOT 與 pre-commit 一致。
 
 ---
 

@@ -108,7 +108,7 @@ def build_snapshot_plan(order: dict) -> dict | None:
             "case_no": order["case_no"],
             "service_days": order.get("service_days"),
             "service_hours_per_day": order.get("service_hours_per_day"),
-            "subsidy_eligibility": order.get("subsidy_eligibility"),
+            "identity_status": order.get("identity_status"),
             "client_floor_fee": order.get("floor_fee", 0),
             "service_start_date": service_start_date,
             "actual_completion_date": order.get("actual_end_date"),
@@ -144,10 +144,12 @@ def create_client_payment_snapshot(cursor, plan: dict) -> int:
 
 def _order_for_snapshot(cursor, case_no: str) -> dict | None:
     cursor.execute(
-        """SELECT case_no, service_days, service_hours_per_day, subsidy_eligibility,
-                  floor_fee, deposit_date, deposit_service_days,
-                  start_date, actual_start_date, actual_end_date
-           FROM orders WHERE case_no = %s FOR UPDATE""",
+        """SELECT o.case_no, o.service_days, o.service_hours_per_day, c.identity_status,
+                  o.floor_fee, o.deposit_date, o.deposit_service_days,
+                  o.start_date, o.actual_start_date, o.actual_end_date
+           FROM orders o
+           JOIN clients c ON c.id = o.client_id
+           WHERE o.case_no = %s FOR UPDATE""",
         (case_no,),
     )
     return cursor.fetchone()

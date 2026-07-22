@@ -17,7 +17,9 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
+from datetime import timedelta
+from calendar import monthrange
 import math
 import importlib
 import os
@@ -69,6 +71,61 @@ def safe_date(val):
     return val
 
 
+def _parse_date(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if hasattr(value, "date"):
+        return value.date()
+    if isinstance(value, (str, bytes)):
+        try:
+            return datetime.strptime(str(value).split(" ")[0].strip(), "%Y-%m-%d").date()
+        except:
+            return None
+    return None
+
+
+def _month_index(date_value: date, offset: int) -> date:
+    month_index = date_value.year * 12 + (date_value.month - 1) + offset
+    year = month_index // 12
+    month = month_index % 12 + 1
+    return datetime(year=year, month=month, day=15).date()
+
+
+def _derive_service_end_date(order: dict) -> date | None:
+    actual_end = _parse_date(order.get("actual_end_date"))
+    if actual_end:
+        return actual_end
+
+    actual_start = _parse_date(order.get("actual_start_date"))
+    service_days = safe_int(order.get("service_days"))
+    if not actual_start or not service_days:
+        return None
+    return actual_start + timedelta(days=max(service_days - 1, 0))
+
+
+def _derive_staff_payment_date(order: dict) -> str:
+    """依實際服務起日與身份類別，預估服務人員付款日。"""
+    end_date = _derive_service_end_date(order)
+    if not end_date:
+        return ""
+
+    identity_status = str(order.get("identity_status") or "").strip()
+    month_delta = 2 if identity_status == "補助市民" else 1
+    return _month_index(end_date, month_delta).isoformat()
+
+
+def _derive_subsidy_refund_date(order: dict) -> str:
+    """依實際服務起日與身份類別，預估補助退款日。"""
+    end_date = _derive_service_end_date(order)
+    identity_status = str(order.get("identity_status") or "").strip()
+    if not end_date or identity_status == "非市民":
+        return ""
+
+    month_end_day = monthrange(end_date.year, end_date.month)[1]
+    return (datetime(end_date.year, end_date.month, month_end_day).date() + timedelta(days=5)).isoformat()
+
 def _render_tab1_overview(orders_data):
     """Tab 1: 訂單資訊總覽 (OrderUI_Tab1_Overview)"""
     st.subheader("訂單資訊總覽")
@@ -81,7 +138,6 @@ def _render_tab1_overview(orders_data):
     status_filter = st.multiselect(
         "篩選訂單狀態",
         options=["洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"],
-        default=["洽談中", "訂單成立", "服務中", "訂單完成"]
     )
 
     df_filtered = df_orders[df_orders['order_status'].isin(status_filter)] if status_filter else df_orders
@@ -94,18 +150,50 @@ def _render_tab1_overview(orders_data):
             df_filtered['staff_name'].str.contains(search_name, case=False, na=False)
         ]
 
-    st.write(f"顯示 {len(df_filtered)} 筆訂單：")
-    st.caption("💡 點選任一筆訂單標題列即可原地展開，進行 36 欄位編輯 (手風琴模式：同時只會展開一筆，點開其他筆會自動收合前一筆)；欄位內容與「📄 訂單動態試算與維護」頁面完全共用同一套邏輯，修改後請記得點擊「💾 確定儲存」按鈕。")
-
     df_filtered = df_filtered.copy()
     payments_raw = []
 
+    total_orders = len(df_filtered)
+    if not total_orders:
+        st.info("沒有符合篩選/搜尋條件的訂單。")
+        return
+
+    page_size = 10
+    page_count = math.ceil(total_orders / page_size)
+    page_number = st.selectbox(
+        "訂單頁碼（每頁最多 10 筆）",
+        options=list(range(page_count)),
+        format_func=lambda page: f"第 {page + 1} 頁",
+        key="tab1_overview_page_number",
+    )
+    selected_view = st.selectbox("選擇要瀏覽的資料表", ["訂單清單（含展開編輯）", "服務人員付款日/補助退款日"], key="tab1_table_view")
+    page_start = page_number * page_size
+    page_end = min(page_start + page_size, total_orders)
+    st.write(
+        f"共 {total_orders} 筆訂單，目前顯示第 {page_start + 1}–{page_end} 筆（每頁最多 10 筆）。"
+    )
+    st.caption("💡 點選任一筆訂單標題列即可原地展開，進行 36 欄位編輯 (手風琴模式：同時只會展開一筆，點開其他筆會自動收合前一筆)；欄位內容與「📄 訂單動態試算與維護」頁面完全共用同一套邏輯，修改後請記得點擊「💾 確定儲存」按鈕。")
+
     # 依篩選/搜尋後的結果排序，逐筆訂單以 expander 呈現 (取代原本 st.dataframe 的完整表格)
-    filtered_case_nos = df_filtered['case_no'].tolist() if 'case_no' in df_filtered.columns else []
+    filtered_case_nos = df_filtered.iloc[page_start:page_end]['case_no'].tolist() if 'case_no' in df_filtered.columns else []
     ordered_rows = [o for case_no in filtered_case_nos for o in orders_data if o['case_no'] == case_no]
 
     if not ordered_rows:
         st.info("沒有符合篩選/搜尋條件的訂單。")
+        return
+
+    if selected_view == "服務人員付款日/補助退款日":
+        payment_rows = []
+        for o in ordered_rows:
+            case_no = str(o["case_no"]).strip()
+            payment_rows.append({
+                "案件編號": case_no,
+                "客戶姓名": o.get("client_name") or "",
+                "服務人員": o.get("staff_name") or "尚未指派",
+                "服務人員付款日": _derive_staff_payment_date(o),
+                "補助退款日": _derive_subsidy_refund_date(o),
+            })
+        st.dataframe(pd.DataFrame(payment_rows), width="stretch", hide_index=True)
         return
 
     # 手風琴核心邏輯說明 (重要限制)：
@@ -149,6 +237,7 @@ def _render_tab1_overview(orders_data):
         row_label = (
             f"{'🔻' if is_open else '▶️'} 案件 #{case_no} ｜ {o['client_name']} ｜ "
             f"[{o['order_status']}] ｜ 月嫂: {o.get('staff_name') or '尚未指派'} ｜ "
+            f"身分資格: {o.get('identity_status') or '未設定'} ｜ "
             f"預期開始: {o.get('start_date') or '未定'} ｜ "
             f"天數: {safe_int(o.get('service_days'))} ｜ "
             f"雇主自費合計: {safe_int(o.get('total_employer_self_pay_payable')):,} 元"
@@ -181,7 +270,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
         return
 
     target_case_options = {
-        f"案件 #{o['case_no']} - 客戶: {o['client_name']} ({o['subsidy_eligibility']}, {o['service_days']}天)": o['case_no']
+        f"案件 #{o['case_no']} - 客戶: {o['client_name']} ({o.get('identity_status') or '未設定'}, {o['service_days']}天)": o['case_no']
         for o in pending_orders
     }
 
@@ -202,7 +291,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
         with cd1:
             st.write(f"- **客戶姓名**: {target_order['client_name']}")
             st.write(f"- **聯絡電話**: {target_order.get('phone', '未提供')}")
-            st.write(f"- **身分資格**: {target_order['subsidy_eligibility']}")
+            st.write(f"- **身分資格（唯讀）**: {target_order.get('identity_status') or '未設定'}")
             st.write(f"- **預計服務開始日**: {target_order.get('start_date', '未定')}")
             st.write(f"- **預計服務結束日**: {target_order.get('end_date', '未定')}")
         with cd2:
@@ -537,6 +626,15 @@ def _render_tab3_finance(orders_data):
         for order in orders_data
         if order.get("case_no")
     }
+    order_payment_dates_by_case = {
+        str(order.get("case_no")): {
+            "deposit_due_date": order.get("deposit_date"),
+            "first_payment_due_date": order.get("first_payment_date"),
+            "second_payment_due_date": order.get("second_payment_date"),
+        }
+        for order in orders_data
+        if order.get("case_no")
+    }
     filter_col1, filter_col2 = st.columns(2)
     with filter_col1:
         case_keyword = st.text_input("案件編號", key="payment_overview_case_filter").strip()
@@ -560,20 +658,24 @@ def _render_tab3_finance(orders_data):
             continue
         receivable = sum(safe_float(payment.get(f"{stage}_receivable")) for stage in ("deposit", "first_payment", "second_payment"))
         received = sum(safe_float(payment.get(f"{stage}_received")) for stage in ("deposit", "first_payment", "second_payment"))
+        payment_dates = order_payment_dates_by_case.get(case_no, {})
+        deposit_due_date = payment.get("deposit_due_date") or payment_dates.get("deposit_due_date")
+        first_payment_due_date = payment.get("first_payment_due_date") or payment_dates.get("first_payment_due_date")
+        second_payment_due_date = payment.get("second_payment_due_date") or payment_dates.get("second_payment_due_date")
         client_rows.append({
             "案件編號": case_no,
             "訂單狀態": order_status_by_case.get(case_no, "—"),
             "訂金應收": safe_float(payment.get("deposit_receivable")),
             "訂金實收": safe_float(payment.get("deposit_received")),
-            "訂金應收日": payment.get("deposit_due_date"),
+            "訂金應收日": deposit_due_date,
             "訂金實收日": payment.get("deposit_received_at"),
             "第一期應收": safe_float(payment.get("first_payment_receivable")),
             "第一期實收": safe_float(payment.get("first_payment_received")),
-            "第一期應收日": payment.get("first_payment_due_date"),
+            "第一期應收日": first_payment_due_date,
             "第一期實收日": payment.get("first_payment_received_at"),
             "第二期應收": safe_float(payment.get("second_payment_receivable")),
             "第二期實收": safe_float(payment.get("second_payment_received")),
-            "第二期應收日": payment.get("second_payment_due_date"),
+            "第二期應收日": second_payment_due_date,
             "第二期實收日": payment.get("second_payment_received_at"),
             "應收總額": receivable,
             "實收總額": received,
@@ -807,13 +909,36 @@ def _render_tab4_accounts_payable():
         selected_month = st.selectbox("月份", list(range(1, 13)), index=today.month - 1, format_func=lambda month: f"{month:02d} 月", key="accounts_payable_month")
     target_month = f"{selected_year:04d}-{selected_month:02d}"
     try:
-        preview = _finance_report_request("/accounts-payable", {"target_month": target_month})
+        export_preview = _finance_report_request("/accounts-payable", {"target_month": target_month, "view": "export"})
+        try:
+            summary_preview = _finance_report_request("/accounts-payable-summary", {"target_month": target_month})
+        except requests.HTTPError as err:
+            if getattr(err.response, "status_code", None) == 404:
+                summary_preview = _finance_report_request("/accounts-payable", {"target_month": target_month, "view": "summary"})
+            else:
+                raise
     except requests.RequestException as err:
         st.error(f"讀取 {target_month} 應付帳款失敗：{err}")
         return
+
+    summary_headers = summary_preview.get("headers") or []
+    summary_df = pd.DataFrame(summary_preview.get("summary_rows") or []).reindex(columns=summary_headers)
+    st.markdown("### 已完成訂單帳務總覽（比對用）")
+    st.dataframe(summary_df, width="stretch", hide_index=True)
+    if summary_totals := summary_preview.get("totals") or {}:
+        st.caption(
+            f"合計｜應付薪資 {safe_float(summary_totals.get('payable_salary', 0)):,.0f} 元、"
+            f"已付薪資 {safe_float(summary_totals.get('paid_salary', 0)):,.0f} 元、"
+            f"薪資未付 {safe_float(summary_totals.get('salary_outstanding', 0)):,.0f} 元、"
+            f"應付補助款 {safe_float(summary_totals.get('subsidy_receivable', 0)):,.0f} 元、"
+            f"已退補助款 {safe_float(summary_totals.get('subsidy_refunded', 0)):,.0f} 元、"
+            f"補助剩餘 {safe_float(summary_totals.get('subsidy_remaining', 0)):,.0f} 元"
+        )
+
+    st.markdown("### 匯款匯出預覽")
     fixed_columns = ["月份-銀行代碼-流水號", "銀行名稱", "客戶or服務人員姓名", "銀行帳號", "銀行代號(碼)", "金額", "身分證字號(匯款到永豐才要填)", "案件編號", "匯款日期"]
-    preview_df = pd.DataFrame(preview.get("payable_rows") or []).reindex(columns=fixed_columns)
-    bank_totals = preview.get("bank_totals") or {}
+    preview_df = pd.DataFrame(export_preview.get("payable_rows") or []).reindex(columns=fixed_columns)
+    bank_totals = export_preview.get("bank_totals") or {}
     total_col1, total_col2 = st.columns(2)
     total_col1.metric("永豐銀行月嫂款（31）", f"{safe_float(bank_totals.get('31', 0)):,.0f} 元")
     total_col2.metric("台新銀行退還補助款（633）", f"{safe_float(bank_totals.get('633', 0)):,.0f} 元")

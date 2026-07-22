@@ -15,6 +15,9 @@ from api.routes import (
     holidays,
     line_system_config,
     matches,
+    multi_caregiver_case_assignments,
+    multi_caregiver_schedule,
+    multi_caregiver_schedule_read,
     orders,
     payments,
     schedule,
@@ -59,6 +62,9 @@ app.include_router(line_router)
 app.include_router(orders.router)
 app.include_router(matches.router)
 app.include_router(schedule.router)
+app.include_router(multi_caregiver_case_assignments.router)
+app.include_router(multi_caregiver_schedule.router)
+app.include_router(multi_caregiver_schedule_read.router)
 app.include_router(payments.router)
 app.include_router(clients.router)
 app.include_router(staff.router)

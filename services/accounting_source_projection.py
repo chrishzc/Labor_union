@@ -37,7 +37,7 @@ def load_case_accounting_source(case_no: str) -> dict[str, Any]:
             cursor.execute(
                 """
                 SELECT o.case_no, o.status, o.service_days, o.service_hours_per_day,
-                       o.subsidy_eligibility, o.floor_fee, o.start_date, o.end_date,
+                       o.floor_fee, o.start_date, o.end_date,
                        o.actual_start_date, o.actual_end_date,
                        c.id AS client_id, c.name AS client_name, c.identity_status,
                        c.phone AS client_phone, c.city AS client_city,
@@ -91,7 +91,7 @@ def load_case_accounting_source(case_no: str) -> dict[str, Any]:
         "order": {
             key: case_row.get(key)
             for key in (
-                "status", "service_days", "service_hours_per_day", "subsidy_eligibility",
+                "status", "service_days", "service_hours_per_day",
                 "floor_fee", "start_date", "end_date", "actual_start_date", "actual_end_date",
             )
         },

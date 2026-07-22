@@ -13,10 +13,13 @@ import pandas as pd
 from datetime import datetime, timedelta
 import math
 import importlib
+import os
+import requests
 from services import db_service
 importlib.reload(db_service)
 
 title = "📄 訂單動態試算與維護"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 def safe_float(val) -> float:
     if val is None:
@@ -104,10 +107,14 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
             w_client_name = st.text_input("客戶名稱", value=target_order['client_name'], key=f"{key_prefix}_client_{target_case_no}")
             w_due_date = st.date_input("預產期", value=safe_date(target_order.get('due_date')), key=f"{key_prefix}_due_{target_case_no}")
             
-            sub_opts = ["一般身分", "低收入戶", "中低收入戶", "特殊境遇"]
-            c_sub = target_order.get('subsidy_eligibility', '一般身分')
-            sub_idx = sub_opts.index(c_sub) if c_sub in sub_opts else 0
-            w_subsidy_eligibility = st.selectbox("補助資格", sub_opts, index=sub_idx, key=f"{key_prefix}_sub_{target_case_no}")
+            client_identity_status = target_order.get('identity_status') or '未設定'
+            st.text_input(
+                "身分資格（唯讀）",
+                value=client_identity_status,
+                disabled=True,
+                key=f"{key_prefix}_identity_{target_case_no}",
+                help="身分資格由客戶主檔管理；訂單編輯不可修改。",
+            )
         
         with c2:
             w_staff_name = st.text_input("服務人員", value=target_order.get('staff_name') or '尚未指派', disabled=True, key=f"{key_prefix}_staff_{target_case_no}")
@@ -154,7 +161,7 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
             w_total_hours = st.number_input("總時數 (小時)", value=display_total_h, disabled=not is_unlocked, key=f"{key_prefix}_total_h_{target_case_no}_{display_total_h}")
         
         with hc2:
-            default_sub_hrs = 40 if w_subsidy_eligibility != '一般身分' else 0
+            default_sub_hrs = 40 if client_identity_status == '一般市民' else 0
             w_subsidy_hours = st.number_input("補助時數 (小時)", value=safe_int(target_order.get('subsidy_hours', default_sub_hrs)), min_value=0, step=1, key=f"{key_prefix}_sub_h_{target_case_no}")
             calc_self_pay_hours = max(0, w_total_hours - w_subsidy_hours)
             display_self_h = calc_self_pay_hours if not is_unlocked else safe_int(target_order.get('self_pay_hours', calc_self_pay_hours))
@@ -184,7 +191,12 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
             calc_deposit_amt = w_deposit_days * w_employer_rate
             display_dep_amt = calc_deposit_amt if not is_unlocked else safe_int(target_order.get('deposit_amount', calc_deposit_amt))
             w_deposit_amt = st.number_input("訂金 (元)", value=display_dep_amt, disabled=not is_unlocked, step=100, key=f"{key_prefix}_dep_amt_{target_case_no}_{display_dep_amt}")
-            w_dep_due_date = st.date_input("訂金應收日期", value=safe_date(curr_p.get('deposit_due_date') or target_order.get('deposit_date')), key=f"{key_prefix}_dep_due_date_{target_case_no}")
+            w_dep_due_date = st.date_input(
+                "訂金應收日期",
+                value=safe_optional_date(curr_p.get('deposit_due_date') or target_order.get('deposit_date')),
+                key=f"{key_prefix}_dep_due_date_{target_case_no}",
+                help="公會人員手動填寫；未填時維持空白。",
+            )
 
         with mc3:
             half_days = safe_int(w_service_days / 2)
@@ -258,34 +270,183 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
                 w_cancel_reason = st.text_area("取消原因 (選取訂單取消時強制填寫)", value=target_order.get('cancel_reason') or "", key=f"{key_prefix}_cancel_rea_{target_case_no}")
 
     st.markdown("---")
-    if st.button("💾 確定儲存 36 欄位試算與變更結果", key=f"btn_save_{key_prefix}_{target_case_no}", type="primary"):
-        if w_order_status == "訂單取消" and not w_cancel_reason.strip():
-            st.error("選取「訂單取消」時，請務必填寫取消原因！")
+    st.markdown("### 🔄 訂單、月嫂指派與行事曆同步")
+    st.caption("服務天數、日期或時數變更必須先預覽，再明確確認排班移除後套用；本頁不會直接寫入訂單、指派或帳務資料。")
+
+    if w_order_status != target_order["order_status"]:
+        st.warning("訂單狀態／取消流程不屬於本次排班同步；請先還原狀態後再套用同步變更。")
+        return
+    if not w_act_start or not w_act_end:
+        st.warning("請先提供實際開工日與服務結束日，才能建立可驗證的同步計畫。")
+        return
+
+    def api_request(path, *, method="GET", payload=None):
+        response = requests.request(
+            method,
+            f"{API_BASE_URL}{path}",
+            json=payload,
+            timeout=15,
+        )
+        try:
+            body = response.json()
+        except ValueError:
+            body = {"detail": response.text}
+        if not response.ok:
+            raise ValueError(f"HTTP {response.status_code}: {body.get('detail') or body.get('message') or body}")
+        if not body.get("success", False):
+            raise ValueError(body.get("error") or body.get("message") or "同步 API 請求失敗")
+        return body.get("data") or {}
+
+    try:
+        current_assignments = api_request(
+            f"/api/v1/cases/{target_case_no}/assignment-schedules"
+        ).get("assignments", [])
+        staff_records = api_request("/api/v1/staff")
+    except (requests.RequestException, ValueError) as error:
+        st.error(f"無法讀取正式指派或服務人員：{error}")
+        return
+
+    staff_options = {"請明確選擇月嫂": None}
+    for staff in staff_records:
+        staff_id = staff.get("id")
+        staff_name = staff.get("name")
+        if isinstance(staff_id, int) and staff_name:
+            staff_options[f"#{staff_id}｜{staff_name}"] = staff_id
+
+    st.markdown("#### 完整正式服務指派計畫")
+    st.caption("減少既有列會把未列出的正式指派列為取消候選；預覽會顯示其受影響日排班，套用前仍須明確確認。")
+    assignment_count = st.number_input(
+        "指派區段數", min_value=1, max_value=8,
+        value=max(1, len(current_assignments)), step=1,
+        key=f"{key_prefix}_assignment_count_{target_case_no}",
+    )
+    assignment_plan = []
+    for index in range(assignment_count):
+        current = current_assignments[index] if index < len(current_assignments) else {}
+        current_staff_id = current.get("staff_id")
+        labels = list(staff_options)
+        selected_index = next(
+            (position for position, label in enumerate(labels) if staff_options[label] == current_staff_id),
+            0,
+        )
+        with st.container(border=True):
+            left, middle, right = st.columns(3)
+            with left:
+                selected_label = st.selectbox(
+                    f"第 {index + 1} 段月嫂", labels, index=selected_index,
+                    key=f"{key_prefix}_assignment_staff_{target_case_no}_{index}",
+                )
+            with middle:
+                assigned_start = st.date_input(
+                    f"第 {index + 1} 段開始日",
+                    value=safe_date(current.get("assigned_start_date") or w_act_start),
+                    key=f"{key_prefix}_assignment_start_{target_case_no}_{index}",
+                )
+            with right:
+                assigned_end = st.date_input(
+                    f"第 {index + 1} 段結束日",
+                    value=safe_date(current.get("assigned_end_date") or w_act_end),
+                    key=f"{key_prefix}_assignment_end_{target_case_no}_{index}",
+                )
+        selected_staff_id = staff_options[selected_label]
+        if selected_staff_id is not None:
+            assignment_plan.append({
+                "assignment_id": current.get("id"),
+                "staff_id": selected_staff_id,
+                "assignment_sequence": index + 1,
+                "assigned_start_date": assigned_start.isoformat(),
+                "assigned_end_date": assigned_end.isoformat(),
+            })
+
+    missing_staff_rows = assignment_count - len(assignment_plan)
+    order_change = {
+        "client_name": w_client_name,
+        "service_days": int(w_service_days),
+        "service_hours_per_day": int(w_hours_per_day),
+        "floor_fee": int(w_floor_fee),
+        "deposit_date": w_dep_due_date.isoformat() if w_dep_due_date else None,
+        "start_date": w_start_date.isoformat(),
+        "end_date": w_act_end.isoformat(),
+        "actual_start_date": w_act_start.isoformat(),
+        "actual_end_date": w_act_end.isoformat(),
+    }
+    preview_request = {"order_change": order_change, "assignment_plan": assignment_plan}
+    preview_state_key = f"{key_prefix}_assignment_sync_preview_{target_case_no}"
+
+    if st.button("🔍 預覽訂單與指派同步", key=f"{key_prefix}_assignment_sync_preview_button_{target_case_no}", type="primary"):
+        if missing_staff_rows:
+            st.error("每一個指派區段都必須明確選擇月嫂，不能使用預設或推測值。")
         else:
             try:
-                full_data = {
-                    'client_name': w_client_name,
-                    'service_days': w_service_days,
-                    'service_hours_per_day': w_hours_per_day,
-                    'subsidy_eligibility': w_subsidy_eligibility,
-                    'floor_fee': w_floor_fee,
-                    'start_date': w_start_date,
-                    'actual_start_date': w_act_start,
-                    'end_date': w_act_end,
-                    'actual_end_date': w_act_end,
-                    'deposit_date': w_dep_due_date
-                }
-                db_service.update_order_full_details(target_case_no, full_data)
-                
-                # 舊 payments 已停用；新帳務由新帳務介面寫入 client/staff ledgers。
-                
-                # 3. 寫入訂單狀態與取消原因
-                db_service.update_order_status(target_case_no, w_order_status, w_cancel_reason.strip())
-                
-                st.success("🎉 全套 36 個訂單欄位與試算結果已成功寫入資料庫！")
+                preview = api_request(
+                    f"/api/v1/orders/{target_case_no}/assignment-synchronization/preview",
+                    method="POST", payload=preview_request,
+                )
+                st.session_state[preview_state_key] = {"request": preview_request, "preview": preview}
                 st.rerun()
-            except Exception as err:
-                st.error(f"儲存失敗: {err}")
+            except (requests.RequestException, ValueError) as error:
+                st.error(f"同步預覽失敗：{error}")
+
+    preview_state = st.session_state.get(preview_state_key)
+    if not preview_state:
+        return
+    if preview_state["request"] != preview_request:
+        st.info("訂單或指派計畫已變更；請重新執行同步預覽。")
+        return
+
+    preview = preview_state["preview"]
+    st.markdown("#### 預覽結果")
+    preview_left, preview_middle, preview_right = st.columns(3)
+    preview_left.metric("目標時數", preview.get("target_hours", 0))
+    preview_middle.metric("提議時數", preview.get("proposed_actual_hours", 0))
+    preview_right.metric("差額", preview.get("difference", 0))
+    if preview.get("blocking_reasons"):
+        st.error(f"無法直接套用：{preview['blocking_reasons']}")
+    required_removals = preview.get("required_schedule_removals", [])
+    removal_options = {
+        f"排班 #{item['schedule_id']}｜指派 #{item['assignment_id']}｜{item['work_date']}": item["schedule_id"]
+        for item in required_removals
+    }
+    selected_removal_labels = st.multiselect(
+        "明確確認要移除的日排班", list(removal_options),
+        key=f"{key_prefix}_assignment_sync_removals_{target_case_no}",
+    )
+    selected_removal_ids = [removal_options[label] for label in selected_removal_labels]
+    applied_by = st.text_input(
+        "操作識別", key=f"{key_prefix}_assignment_sync_applied_by_{target_case_no}",
+        help="請輸入實際執行確認的人員識別。",
+    )
+    confirmed = st.checkbox(
+        "我已確認以上完整指派、時數差額與所有排班移除。",
+        key=f"{key_prefix}_assignment_sync_confirm_{target_case_no}",
+    )
+    can_apply = preview.get("sync_status") == "in_sync"
+    if st.button(
+        "💾 確定儲存並套用同步", key=f"{key_prefix}_assignment_sync_apply_button_{target_case_no}",
+        disabled=not can_apply,
+    ):
+        if set(selected_removal_ids) != {item["schedule_id"] for item in required_removals}:
+            st.error("必須逐筆且完整確認預覽要求移除的日排班。")
+        elif not confirmed:
+            st.error("請先確認完整指派與排班移除計畫。")
+        elif not applied_by.strip():
+            st.error("操作識別不可空白。")
+        else:
+            try:
+                api_request(
+                    f"/api/v1/orders/{target_case_no}/assignment-synchronization/apply",
+                    method="POST",
+                    payload={
+                        **preview_request,
+                        "schedule_change_plan": {"remove_schedule_ids": selected_removal_ids},
+                        "applied_by": applied_by.strip(),
+                    },
+                )
+                st.session_state.pop(preview_state_key, None)
+                st.success("訂單、正式指派與日排班已在同一交易中套用；行事曆重新開啟時會讀取最新正式排班。")
+                st.rerun()
+            except (requests.RequestException, ValueError) as error:
+                st.error(f"同步套用失敗：{error}")
 
 
 def show():

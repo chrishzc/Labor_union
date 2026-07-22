@@ -88,7 +88,7 @@ def _fetch_completed_cases() -> list[dict]:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT o.case_no, o.subsidy_eligibility, o.actual_start_date,
+                SELECT o.case_no, c.identity_status, o.actual_start_date,
                        o.actual_end_date, o.service_days, o.service_hours_per_day,
                        c.name AS employer_name, c.address AS employer_address,
                        s.name AS staff_name, br.survey_details
@@ -97,7 +97,7 @@ def _fetch_completed_cases() -> list[dict]:
                 LEFT JOIN staff s ON s.id = o.staff_id
                 LEFT JOIN beclass_records br ON br.query_no = o.case_no
                 WHERE o.actual_end_date IS NOT NULL
-                  AND o.subsidy_eligibility IN (%s, %s)
+                  AND c.identity_status IN (%s, %s)
                 ORDER BY o.case_no
                 """,
                 (GENERAL_CITIZEN, SUBSIDIZED_CITIZEN),
@@ -121,14 +121,14 @@ def _to_register_row(source: dict) -> dict | None:
     daily_hours = Decimal(str(source.get("service_hours_per_day") or 0))
     service_days = Decimal(str(source.get("service_days") or 0))
     subsidy_hours, unit_price = _subsidy_terms(
-        source.get("subsidy_eligibility"), service_days * daily_hours,
+        source.get("identity_status"), service_days * daily_hours,
     )
     if not actual_start or not actual_end or subsidy_hours <= 0 or daily_hours <= 0:
         return None
 
     return {
         "\u5e02\u5e9c\u8a02\u55ae\u865f\u78bc": str(source["case_no"]),
-        "\u88dc\u52a9\u8cc7\u683c": source["subsidy_eligibility"],
+        "\u88dc\u52a9\u8cc7\u683c": source["identity_status"],
         "\u670d\u52d9\u958b\u59cb": actual_start,
         "\u670d\u52d9\u7d50\u675f": actual_end,
         "\u88dc\u52a9\u6642\u6578": subsidy_hours,

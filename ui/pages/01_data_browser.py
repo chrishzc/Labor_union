@@ -11,7 +11,7 @@ title = "🔍 資料庫原始資料瀏覽"
 EDITABLE_COLUMNS = {
     'clients': {
         'reject_reason', 'ip_address', 'name', 'gender', 'phone', 'city', 'address',
-        'identity_status', 'service_time', 'due_month', 'service_start_date', 'notes',
+        'service_time', 'due_month', 'service_start_date', 'notes',
         'service_days', 'residence_type', 'delivery_type', 'service_type', 'baby_info',
         'line_id', 'admin_notes',
     },
@@ -117,7 +117,6 @@ DB_COLUMN_LABEL_MAP = {
     "actual_end_date": "實際服務結束日",
     "contract_id": "線上契約ID",
     "service_hours_per_day": "每日服務時數",
-    "subsidy_eligibility": "補助資格",
     "floor_fee": "樓層費用",
     "deposit_date": "訂金收取日期",
     "start_date": "預計開始日",
@@ -340,4 +339,3 @@ def show():
 
     except Exception as e:
         st.error(f"讀取資料表出錯: {e}")
-

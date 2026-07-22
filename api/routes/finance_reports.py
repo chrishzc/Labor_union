@@ -33,6 +33,25 @@ def _payable_preview(target_month: str) -> dict[str, Any]:
     }
 
 
+def _payable_summary_preview(target_month: str) -> dict[str, Any]:
+    report = accounts_payable_export.build_completed_order_payables_summary(target_month)
+    summary_rows = []
+    for row in report["summary_rows"]:
+        summary_rows.append({
+            key: float(value) if isinstance(value, Decimal) else value
+            for key, value in row.items()
+        })
+    totals = {
+        key: float(value) if isinstance(value, Decimal) else value
+        for key, value in report["totals"].items()
+    }
+    return {
+        "summary_rows": summary_rows,
+        "totals": totals,
+        "headers": accounts_payable_export.ACCOUNTS_PAYABLE_SUMMARY_HEADERS,
+    }
+
+
 def _xlsx_response(workbook_bytes: bytes, filename: str) -> StreamingResponse:
     return StreamingResponse(
         iter([workbook_bytes]),
@@ -44,10 +63,27 @@ def _xlsx_response(workbook_bytes: bytes, filename: str) -> StreamingResponse:
 @router.get("/accounts-payable", response_model=BaseResponse[dict[str, Any]])
 def preview_accounts_payable(
     target_month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    view: str = Query("summary", pattern=r"^(summary|export)$"),
 ):
-    """Return the monthly transfer preview without workbook bytes."""
+    """Return the monthly payable payload.\n\n    - view=summary: completed-case summary rows for payment status overview.\n    - view=export: transfer export rows in the fixed 9-column specification.\n    """
     try:
-        return BaseResponse(data=_payable_preview(target_month), message="Accounts payable preview")
+        if view == "export":
+            return BaseResponse(data=_payable_preview(target_month), message="Accounts payable export preview")
+        return BaseResponse(data=_payable_summary_preview(target_month), message="Accounts payable summary preview")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/accounts-payable-summary", response_model=BaseResponse[dict[str, Any]])
+def preview_accounts_payable_summary(
+    target_month: str = Query(..., pattern=r"^\d{4}-(0[1-9]|1[0-2])$"),
+    view: str = Query("summary", pattern=r"^(summary|export)$"),
+):
+    """Return accounts-payable output.\n\n    - view=summary (default): completed-case summary rows for payment status overview.\n    - view=export: transfer export rows in the fixed 9-column specification.\n    """
+    try:
+        if view == "export":
+            return BaseResponse(data=_payable_preview(target_month), message="Accounts payable export preview")
+        return BaseResponse(data=_payable_summary_preview(target_month), message="Accounts payable summary preview")
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

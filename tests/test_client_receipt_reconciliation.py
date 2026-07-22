@@ -33,7 +33,7 @@ def order(**changes):
         "status": "洽談中",
         "service_days": 20,
         "service_hours_per_day": 9,
-        "subsidy_eligibility": "一般市民",
+        "identity_status": "一般市民",
         "floor_fee": Decimal("0"),
         "deposit_date": "2026-07-01",
         "deposit_service_days": 5,
@@ -75,7 +75,7 @@ class Cursor:
         self.executed.append((compact, params))
         if "FROM finance_import_rows WHERE id" in compact:
             self.current = self.staging
-        elif "FROM orders WHERE case_no" in compact and "SELECT case_no, status" in compact:
+        elif "FROM orders o JOIN clients c ON c.id = o.client_id" in compact and "SELECT o.case_no, o.status" in compact:
             self.current = self.order_row
         elif "WHERE finance_import_row_id = %s" in compact:
             self.current = self.existing
@@ -278,3 +278,5 @@ def test_source_does_not_open_or_finish_transactions():
     assert ".close(" not in text
     assert "record_client_payment_transaction(" not in text
     assert "record_client_payment_transaction_with_cursor" in text
+    assert "JOIN clients c ON c.id = o.client_id" in text
+    assert "clients.identity_status" not in text

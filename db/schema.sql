@@ -223,7 +223,6 @@ CREATE TABLE IF NOT EXISTS orders (
     -- 新增與計算公式直接關聯的基礎欄位
     service_days INT DEFAULT 0 COMMENT '服務天數 (N)',
     service_hours_per_day INT DEFAULT 0 COMMENT '每日服務時數 (J)',
-    subsidy_eligibility VARCHAR(100) DEFAULT '非市民' COMMENT '補助資格 (一般市民/補助市民/非市民)',
     floor_fee DECIMAL(10, 2) DEFAULT 0.00 COMMENT '樓層費用 (O)',
     deposit_date DATE NULL COMMENT '訂金收取日期',
     deposit_service_days INT NULL COMMENT '訂金服務天數；NULL 表示歷史案件待人工補登',
@@ -368,6 +367,22 @@ CREATE TABLE IF NOT EXISTS case_staff_assignments (
     CONSTRAINT fk_assignment_replaced FOREIGN KEY (replaced_assignment_id) REFERENCES case_staff_assignments(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 21a. 多月嫂例外實際時數人工覆寫稽核（append-only）
+CREATE TABLE IF NOT EXISTS actual_hours_adjustments (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    assignment_id BIGINT NOT NULL,
+    previous_actual_hours DECIMAL(10, 2) NOT NULL,
+    adjusted_actual_hours DECIMAL(10, 2) NOT NULL,
+    adjustment_reason VARCHAR(255) NOT NULL,
+    adjusted_by VARCHAR(100) NOT NULL,
+    adjusted_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_actual_hours_adjustment_assignment (assignment_id, adjusted_at),
+    CONSTRAINT chk_actual_hours_adjustment_previous_nonnegative CHECK (previous_actual_hours >= 0),
+    CONSTRAINT chk_actual_hours_adjustment_adjusted_nonnegative CHECK (adjusted_actual_hours >= 0),
+    CONSTRAINT fk_actual_hours_adjustment_assignment
+        FOREIGN KEY (assignment_id) REFERENCES case_staff_assignments(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 22. 月嫂應付摘要（一筆正式服務指派最多對應一筆）
 CREATE TABLE IF NOT EXISTS staff_payments (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -457,7 +472,7 @@ SELECT
     -- 基礎實體欄位
     o.service_days,
     o.service_hours_per_day,
-    o.subsidy_eligibility,
+    c.identity_status,
     o.floor_fee,           -- 樓層費用 (獨立顯示，生成契約用)
     o.deposit_date,
     o.start_date,
@@ -468,37 +483,37 @@ SELECT
     
     -- 2. 補助時數與自費時數
     CASE 
-        WHEN o.subsidy_eligibility = '一般市民' THEN 40
-        WHEN o.subsidy_eligibility = '補助市民' THEN 120
+        WHEN c.identity_status = '一般市民' THEN 40
+        WHEN c.identity_status = '補助市民' THEN 120
         ELSE 0 
     END AS subsidy_hours,
     
     GREATEST(0, (o.service_days * o.service_hours_per_day) - 
         CASE 
-            WHEN o.subsidy_eligibility = '一般市民' THEN 40
-            WHEN o.subsidy_eligibility = '補助市民' THEN 120
+            WHEN c.identity_status = '一般市民' THEN 40
+            WHEN c.identity_status = '補助市民' THEN 120
             ELSE 0 
         END
     ) AS self_pay_hours,
     
     -- 3. 雇主單價與訂金天數
     CASE 
-        WHEN o.subsidy_eligibility = '非市民' THEN 350
+        WHEN c.identity_status = '非市民' THEN 350
         ELSE 300 
     END AS employer_unit_price,
     
     CASE 
-        WHEN o.subsidy_eligibility = '補助市民' THEN 0
+        WHEN c.identity_status = '補助市民' THEN 0
         ELSE 5 
     END AS deposit_days,
     
     -- 4. 純訂金金額 (獨立欄位，生成契約用)
     (CASE 
-        WHEN o.subsidy_eligibility = '補助市民' THEN 0
+        WHEN c.identity_status = '補助市民' THEN 0
         ELSE 5 
     END * 
      CASE 
-        WHEN o.subsidy_eligibility = '非市民' THEN 350
+        WHEN c.identity_status = '非市民' THEN 350
         ELSE 300 
      END * 
      o.service_hours_per_day
@@ -506,11 +521,11 @@ SELECT
     
     -- 5. 首筆應付總額 = 純訂金 + 樓層費
     ((CASE 
-        WHEN o.subsidy_eligibility = '補助市民' THEN 0
+        WHEN c.identity_status = '補助市民' THEN 0
         ELSE 5 
       END * 
       CASE 
-        WHEN o.subsidy_eligibility = '非市民' THEN 350
+        WHEN c.identity_status = '非市民' THEN 350
         ELSE 300 
       END * 
       o.service_hours_per_day
@@ -525,63 +540,63 @@ SELECT
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-            GREATEST(0, o.service_days - CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END)
+            GREATEST(0, o.service_days - CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END)
         ELSE NULL 
     END AS remaining_days,
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-            LEAST(15, GREATEST(0, o.service_days - CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END))
+            LEAST(15, GREATEST(0, o.service_days - CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END))
         ELSE NULL 
     END AS first_payment_days,
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-            LEAST(15, GREATEST(0, o.service_days - CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END)) * 
+            LEAST(15, GREATEST(0, o.service_days - CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END)) *
             o.service_hours_per_day * 
-            CASE WHEN o.subsidy_eligibility = '非市民' THEN 350 ELSE 300 END
+            CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END
         ELSE NULL 
     END AS first_payment_amount,
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') AND 
-             (o.service_days - CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END - 15) > 0 THEN 
+             (o.service_days - CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END - 15) > 0 THEN
             DATE_ADD(o.start_date, INTERVAL 15 DAY)
         ELSE NULL 
     END AS second_payment_date,
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-            GREATEST(0, o.service_days - CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END - 15)
+            GREATEST(0, o.service_days - CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END - 15)
         ELSE NULL 
     END AS second_payment_days,
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-            GREATEST(0, o.service_days - CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END - 15) * 
+            GREATEST(0, o.service_days - CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END - 15) *
             o.service_hours_per_day * 
-            CASE WHEN o.subsidy_eligibility = '非市民' THEN 350 ELSE 300 END
+            CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END
         ELSE NULL 
     END AS second_payment_amount,
     
     -- 7. 雇主自費合計金額 (首筆 + 後續款項之總和，若後續款項未計算則只包含首筆)
     (
-      ((CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END * CASE WHEN o.subsidy_eligibility = '非市民' THEN 350 ELSE 300 END * o.service_hours_per_day) + COALESCE(o.floor_fee, 0)) +
+      ((CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END * CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END * o.service_hours_per_day) + COALESCE(o.floor_fee, 0)) +
       COALESCE(
         CASE 
             WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-                LEAST(15, GREATEST(0, o.service_days - CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END)) * 
+                LEAST(15, GREATEST(0, o.service_days - CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END)) *
                 o.service_hours_per_day * 
-                CASE WHEN o.subsidy_eligibility = '非市民' THEN 350 ELSE 300 END
+                CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END
             ELSE 0 
         END, 0
       ) +
       COALESCE(
         CASE 
             WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-                GREATEST(0, o.service_days - CASE WHEN o.subsidy_eligibility = '補助市民' THEN 0 ELSE 5 END - 15) * 
+                GREATEST(0, o.service_days - CASE WHEN c.identity_status = '補助市民' THEN 0 ELSE 5 END - 15) *
                 o.service_hours_per_day * 
-                CASE WHEN o.subsidy_eligibility = '非市民' THEN 350 ELSE 300 END
+                CASE WHEN c.identity_status = '非市民' THEN 350 ELSE 300 END
             ELSE 0 
         END, 0
       )
@@ -589,21 +604,21 @@ SELECT
     
     -- 8. 服務人員 (月嫂) 薪資與付款日計算
     CASE 
-        WHEN o.subsidy_eligibility = '一般市民' THEN 300
-        WHEN o.subsidy_eligibility = '補助市民' THEN 350
+        WHEN c.identity_status = '一般市民' THEN 300
+        WHEN c.identity_status = '補助市民' THEN 350
         ELSE 320 
     END AS service_unit_price,
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
             (o.service_days * o.service_hours_per_day) *
-            CASE WHEN o.subsidy_eligibility = '一般市民' THEN 300 WHEN o.subsidy_eligibility = '補助市民' THEN 350 ELSE 320 END
+            CASE WHEN c.identity_status = '一般市民' THEN 300 WHEN c.identity_status = '補助市民' THEN 350 ELSE 320 END
         ELSE NULL 
     END AS service_salary, -- 月嫂純薪資；樓層費以 floor_fee 獨立顯示與支付
     
     CASE
         WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.end_date IS NOT NULL
-             AND o.subsidy_eligibility = '補助市民' THEN
+             AND c.identity_status = '補助市民' THEN
             DATE_ADD(LAST_DAY(DATE_ADD(o.end_date, INTERVAL 1 MONTH)), INTERVAL 15 DAY)
         WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.end_date IS NOT NULL THEN
             DATE_ADD(LAST_DAY(o.end_date), INTERVAL 15 DAY)
@@ -612,13 +627,13 @@ SELECT
     
     CASE 
         WHEN o.status NOT IN ('洽談中', '訂單取消') THEN 
-            (CASE WHEN o.subsidy_eligibility = '一般市民' THEN 40 WHEN o.subsidy_eligibility = '補助市民' THEN 120 ELSE 0 END * 
-             CASE WHEN o.subsidy_eligibility = '一般市民' THEN 300 WHEN o.subsidy_eligibility = '補助市民' THEN 350 ELSE 320 END)
+            (CASE WHEN c.identity_status = '一般市民' THEN 40 WHEN c.identity_status = '補助市民' THEN 120 ELSE 0 END *
+             CASE WHEN c.identity_status = '一般市民' THEN 300 WHEN c.identity_status = '補助市民' THEN 350 ELSE 320 END)
         ELSE NULL 
     END AS subsidy_salary,
     
     CASE 
-        WHEN o.status NOT IN ('洽談中', '訂單取消') AND o.subsidy_eligibility != '非市民' AND o.end_date IS NOT NULL THEN 
+        WHEN o.status NOT IN ('洽談中', '訂單取消') AND c.identity_status != '非市民' AND o.end_date IS NOT NULL THEN
             DATE_ADD(LAST_DAY(o.end_date), INTERVAL 5 DAY)
         ELSE NULL 
     END AS govt_claim_date
@@ -746,4 +761,3 @@ CREATE TABLE IF NOT EXISTS system_alerts (
     resolved_by VARCHAR(50) NULL COMMENT '處理人員',
     INDEX idx_alert_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-

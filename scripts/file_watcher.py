@@ -52,7 +52,7 @@ class XlsxHandler(FileSystemEventHandler):
         retry_count = 5
         for i in range(retry_count):
             try:
-                with open(event_path, "a"):
+                with open(event_path, "a", encoding="utf-8"):
                     break
             except IOError:
                 time.sleep(0.5)

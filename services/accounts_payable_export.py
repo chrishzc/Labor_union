@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from io import BytesIO
 import re
@@ -32,6 +32,20 @@ OUTGOING_BANKS = {
     "633": "台新銀行",
 }
 
+ACCOUNTS_PAYABLE_SUMMARY_HEADERS = (
+    "案件編號",
+    "客戶姓名",
+    "完成日期",
+    "服務人員付款日",
+    "補助退款日",
+    "應付薪資",
+    "已付薪資",
+    "薪資未付",
+    "應付補助款",
+    "已退補助款",
+    "補助剩餘",
+)
+
 
 def _month_bounds(target_month: str) -> tuple[date, date]:
     if not isinstance(target_month, str) or not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", target_month):
@@ -51,6 +65,65 @@ def _month_bounds(target_month: str) -> tuple[date, date]:
 
 def _as_decimal(value) -> Decimal:
     return Decimal(str(value or 0))
+
+
+def _to_date(value) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if hasattr(value, "date"):
+        return value.date()
+    try:
+        return datetime.strptime(str(value).split(" ")[0].strip(), "%Y-%m-%d").date()
+    except:
+        return None
+
+
+def _safe_int(value) -> int:
+    try:
+        return int(value or 0)
+    except:
+        return 0
+
+
+def _month_index(base_date: date, month_offset: int) -> date:
+    month_index = base_date.year * 12 + (base_date.month - 1) + month_offset
+    year = month_index // 12
+    month = month_index % 12 + 1
+    return date(year=year, month=month, day=15)
+
+
+def _derive_service_end_date(row: dict) -> date | None:
+    actual_end_date = _to_date(row.get("actual_end_date"))
+    if actual_end_date:
+        return actual_end_date
+
+    actual_start_date = _to_date(row.get("actual_start_date"))
+    service_days = _safe_int(row.get("service_days"))
+    if not actual_start_date or not service_days:
+        return None
+    return actual_start_date + timedelta(days=max(service_days - 1, 0))
+
+
+def _derive_staff_payment_date(row: dict) -> str:
+    end_date = _derive_service_end_date(row)
+    if not end_date:
+        return ""
+
+    identity_status = str(row.get("identity_status") or "").strip()
+    month_offset = 2 if identity_status == "補助市民" else 1
+    return _month_index(end_date, month_offset).isoformat()
+
+
+def _derive_subsidy_refund_date(row: dict) -> str:
+    end_date = _derive_service_end_date(row)
+    identity_status = str(row.get("identity_status") or "").strip()
+    if not end_date or identity_status == "非市民":
+        return ""
+
+    month_end_day = monthrange(end_date.year, end_date.month)[1]
+    return (date(end_date.year, end_date.month, month_end_day) + timedelta(days=5)).isoformat()
 
 
 def _fetch_payables(target_month: str) -> list[dict]:
@@ -211,4 +284,108 @@ def build_accounts_payable_export(target_month: str) -> dict:
         "payable_rows": payable_rows,
         "xlsx_bytes": _build_workbook(payable_rows, bank_totals),
         "bank_totals": bank_totals,
+    }
+
+
+def build_completed_order_payables_summary(target_month: str) -> dict:
+    """Build a read-only summary for completed cases in a specific completion month."""
+    first_day, last_day = _month_bounds(target_month)
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT o.case_no,
+                       c.name AS client_name,
+                       COALESCE(
+                           o.actual_end_date,
+                           CASE
+                               WHEN o.actual_start_date IS NOT NULL AND o.service_days IS NOT NULL
+                               THEN DATE_ADD(o.actual_start_date, INTERVAL o.service_days - 1 DAY)
+                               ELSE NULL
+                           END
+                       ) AS completion_date,
+                       o.actual_start_date,
+                       o.service_days,
+                       c.identity_status,
+                       COALESCE(sp_agg.total_payable, 0) AS payable_salary,
+                       COALESCE(sp_agg.amount_paid, 0) AS paid_salary,
+                       cp.subsidy_return_at,
+                       cp.subsidy_return_receivable,
+                       cp.subsidy_return_refunded
+                FROM orders o
+                JOIN clients c ON c.id = o.client_id
+                LEFT JOIN client_payments cp ON cp.case_no = o.case_no
+                LEFT JOIN (
+                    SELECT case_no,
+                           SUM(total_payable) AS total_payable,
+                           SUM(amount_paid) AS amount_paid
+                    FROM staff_payments
+                    WHERE payment_status <> 'cancelled'
+                    GROUP BY case_no
+                ) sp_agg ON sp_agg.case_no = o.case_no
+                WHERE o.status = '訂單完成'
+                  AND COALESCE(
+                      o.actual_end_date,
+                      CASE
+                          WHEN o.actual_start_date IS NOT NULL AND o.service_days IS NOT NULL
+                          THEN DATE_ADD(o.actual_start_date, INTERVAL o.service_days - 1 DAY)
+                          ELSE NULL
+                      END
+                  ) BETWEEN %s AND %s
+                ORDER BY o.case_no
+                """,
+                (first_day, last_day),
+            )
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    summary_rows = []
+    total_payable_salary = Decimal("0")
+    total_paid_salary = Decimal("0")
+    total_salary_outstanding = Decimal("0")
+    total_subsidy_receivable = Decimal("0")
+    total_subsidy_refunded = Decimal("0")
+    total_subsidy_remaining = Decimal("0")
+
+    for row in rows:
+        payable_salary = _as_decimal(row["payable_salary"])
+        paid_salary = _as_decimal(row["paid_salary"])
+        subsidy_receivable = _as_decimal(row["subsidy_return_receivable"])
+        subsidy_refunded = _as_decimal(row["subsidy_return_refunded"])
+        salary_outstanding = payable_salary - paid_salary
+        subsidy_remaining = subsidy_receivable - subsidy_refunded
+
+        summary_rows.append({
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[0]: row["case_no"],
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[1]: row["client_name"] or "",
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[2]: row["completion_date"],
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[3]: _derive_staff_payment_date(row),
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[4]: _derive_subsidy_refund_date(row),
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[5]: payable_salary,
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[6]: paid_salary,
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[7]: salary_outstanding,
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[8]: subsidy_receivable,
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[9]: subsidy_refunded,
+            ACCOUNTS_PAYABLE_SUMMARY_HEADERS[10]: subsidy_remaining,
+        })
+
+        total_payable_salary += payable_salary
+        total_paid_salary += paid_salary
+        total_salary_outstanding += salary_outstanding
+        total_subsidy_receivable += subsidy_receivable
+        total_subsidy_refunded += subsidy_refunded
+        total_subsidy_remaining += subsidy_remaining
+
+    return {
+        "summary_rows": summary_rows,
+        "totals": {
+            "payable_salary": total_payable_salary,
+            "paid_salary": total_paid_salary,
+            "salary_outstanding": total_salary_outstanding,
+            "subsidy_receivable": total_subsidy_receivable,
+            "subsidy_refunded": total_subsidy_refunded,
+            "subsidy_remaining": total_subsidy_remaining,
+        },
     }
