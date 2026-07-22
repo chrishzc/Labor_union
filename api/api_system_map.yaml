@@ -75,7 +75,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: dirty
     fan_in_snapshot: 1
     known_symbols:
     - apply_order_assignment_synchronization
@@ -731,7 +731,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - api_health_check

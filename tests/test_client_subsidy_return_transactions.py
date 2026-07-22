@@ -51,6 +51,7 @@ def row(**changes):
         "subsidy_return_receivable": Decimal("1500.00"),
         "subsidy_return_refunded": Decimal("250.00"),
         "subsidy_return_at": None,
+        "subsidy_return_review_status": None,
     }
     value.update(changes)
     return value
@@ -216,6 +217,23 @@ def test_missing_bank_date_stays_pending_without_writes():
     assert result["result"] == "pending"
     assert result["reason"] == "transaction_date_missing_or_invalid"
     assert len(cursor.executed) == 1
+
+
+def test_review_required_obligation_stays_pending_without_formal_refund_writes():
+    cursor = Cursor([row(subsidy_return_review_status="review_required")])
+
+    result = record_client_subsidy_return(cursor, 9, 31)
+
+    assert result["result"] == "pending"
+    assert result["reason"] == "subsidy_return_review_required"
+    assert result["obligation"] == {
+        "subsidy_return_receivable": Decimal("1500"),
+        "subsidy_return_refunded": Decimal("250"),
+        "subsidy_return_remaining": Decimal("1250"),
+        "subsidy_return_at": None,
+    }
+    assert len(cursor.executed) == 1
+    assert not any(sql.startswith(("INSERT", "UPDATE")) for sql, _ in cursor.executed)
 
 
 def test_retry_returns_only_completely_identical_existing_transaction():

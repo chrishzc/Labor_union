@@ -1,4 +1,4 @@
-# Master System Map (Version 54.0)
+# Master System Map (Version 56.0)
 
 > **ADAD 分層子地圖架構 (Sub-Maps Architecture)**:
 > 1. **UI 介面層子地圖**: [`ui/ui_system_map.yaml`](file:///c:/Users/chris/Desktop/project/Labor_union/ui/ui_system_map.yaml) | [`ui/ui_system_map.md`](file:///c:/Users/chris/Desktop/project/Labor_union/ui/ui_system_map.md)
@@ -76,66 +76,32 @@
 - Source: scripts/generate_fake_data.py
 - Type: script
 - State: `dirty`
-- Description: 假資料統一生成器。預設流程必須保留既有名冊、Excel 財務與生命週期情境，並在同一次生成中整合正式多月嫂指派、assignment-owned 日排班及正規化帳務。
-- Dependencies: [ClientHcmInsertOnlyImporter, ClientBeClassInsertOnlyImporter, StaffBeClassInsertOnlyImporter, HistoricalOrderInsertOnlyImporter, FinanceImportStagingContract, PaymentSchema, MultiCaregiverScheduleSchema, FinanceImportRawStagingSchema, StaffMonthlySettlementSchema, StaffMonthlySettlementDetailSchema, StaffActualTransferSchema, StaffTransferAllocationSchema]
-- Complexity: medium
+- Description: 已凍結的歷史假資料產生器，僅供人工閱讀既有資料結構與情境設計；不再是可執行工具、啟動流程或可被匯入的執行期模組。任何新增假資料條件必須建立獨立腳本、獨立測試與獨立 ADAD 節點／Task。
+- Dependencies: []
+- Complexity: low
 - Input:
-  - default_generation: 未帶旗標時的既有名冊（假資料_模板.xlsx）與 Excel 財務檔（帳務.xlsx）生成流程；必須 100% 保留原有 50 筆個人資料池與導出檔案結構。
-  - seed_db: 可選的資料庫獨立播種與對帳模式；在保留 50 筆既有核心生命週期案件（115000001 至 115000050）的前提下，寫入資料庫並自動完成全表帳務與時數對帳。
-  - replace_demo_db: 僅與 --seed-db 同時提供的明確假資料取代模式；清空目前設定資料庫的所有 base-table 資料列後，重新建立完整整合播種資料庫。
-  - seed: 可重跑的亂數種子
-  - reference_date: 情境相對日期基準
+  - source_reference: 人工唯讀檢視 scripts/generate_fake_data.py 內既有歷史邏輯；不構成 CLI、import 或函式呼叫介面。
+  - attempted_invocation: 任何直接執行、import 或呼叫 main() 的嘗試都必須立即拒絕。
 - Output:
-  - generation_summary: 已建立的客戶、月嫂、案件、正式指派、日排班與帳務列計數及案件編號範圍。
-  - reconciliation_report: 逐案與逐月嫂的時數、應付、收款、月結及轉帳分配重算結果。
+  - frozen_error: 固定、可辨識的非零退出訊息，說明 GenerateFakeData 已凍結且新需求必須另建產生腳本。
 - Invariants:
-  - 預設未帶旗標執行時，必須 100% 保持既有名冊與 Excel 財務檔生成流程，不得改動產出檔名、工作表結構或破壞原始假資料。
-  - `--seed-db` 必須透過既有 ClientHcm／ClientBeClass／StaffBeClass／HistoricalOrder insert-only importer 建立主檔，並透過 FinanceImportStagingService 建立匯入暫存；不得在本生成器複製或繞過其主檔去重、完整性與跨批次去重規則。
-  - 未帶 `--replace-demo-db` 時，任一核心 case_no 已存在即拒絕播種，不得覆寫既有主檔或人工資料；帶入該旗標時僅可依 FK 安全順序清除本生成器擁有的 clients、beclass_records、staff、orders 與其衍生子表資料，嚴禁讀取、寫入或清除 legacy payments、schema、migration 或非播種資料表。
-  - 指定案號只作為固定邊界覆蓋層；其餘案件必須保留既有七種生命週期混合、隨機服務天數／每日時數／樓層費／服務方式／固定休假與一般備註，不得將 50 案簡化為同一狀態、同一時數或同一排班模板。
-  - 不得 INSERT、UPDATE 或查詢 legacy payments；假帳務必須寫入 client_payments 與 client_payment_transactions。
-  - 各生命週期狀態具備明確不可變金流與時數約束：
-    - 「洽談中」：零實際服務時間（actual_hours = 0）、無月嫂日排班指派、無第一期及尾款金流。
-    - 「訂單成立」：實收訂金（經由客戶虛擬帳號 99781699 + case_no 轉帳）、無實際服務時間（actual_hours = 0）。
-    - 「服務中」：實收訂金 + 第一期款（經由客戶虛擬帳號轉帳）、計算月嫂實際服務時數與排班指派。
-    - 「訂單完成」：實收訂金 + 第一期 + 第二期款（經由客戶虛擬帳號）+ 月嫂發薪撥款（經由 staff_bank_accounts 銀行代碼/分行/帳號）+ 依身分與時數進行補助對帳。
-    - 「訂單取消」：實際服務時間為 0（actual_hours = 0），若已收訂金必須產生退款交易列（經由 beclass_records 之 refund_bank_code 與 refund_account_no 退回）。
-  - 生命週期日期必須相對於 reference_date 合法：洽談中／訂單成立的 actual_start_date、actual_end_date 為 NULL 且預計開始日不早於基準日；服務中滿足 actual_start_date <= reference_date <= actual_end_date；訂單完成滿足 actual_start_date <= actual_end_date <= reference_date；訂單取消的實際服務日期為 NULL。
-  - 月嫂衝突只能改選在既定服務區間內無重疊的其他月嫂；不得為了避開既有排班而把服務中或訂單完成案件推到 reference_date 之後。無可用月嫂時必須失敗並回滾。
-  - 多月嫂服務指派與日排班約束：
-    - 支援單案一至多位月嫂服務指派（case_staff_assignments），包含單一月嫂與多月嫂無縫連續交接（前一段 end_date + 1 天 = 後一段 start_date）。
-    - 依據服務指派產生 assignment-owned 日層級排班列（staff_schedule），考量月嫂固定休假偏好（weekly_rest_days）與國定假日決定工作日，同一訂單多月嫂在同一天不得重疊指派。
-    - 全案所有未取消指派的實際服務時數（actual_hours）加總必須精確等於 orders.service_days * orders.service_hours_per_day。
-  - 後續完整衍生帳務鏈 (Downstream Accounting Chain) 約束：
-    - 客戶帳務（client_payments 與 client_payment_transactions）：依服務階段產生應收摘要與虛擬帳號實收流水；取消案件產生退款交易列（退回至 beclass_records 之退款帳號）。client_payments 必須完整填入 6 大應收與實收日期欄位（deposit_due_date, deposit_received_at, first_payment_due_date, first_payment_received_at, second_payment_due_date, second_payment_received_at），且實收日期必須與 client_payment_transactions 之 occurred_at 100% 精確一致。
-    - 月嫂應付薪資（staff_payments）：每筆未取消指派恰好對應一筆 staff_payments 記錄，保存實際時數、單價、樓層費分配（floor_fee_allocated）與應付總額（total_payable）。
-    - 月嫂月結總表與明細（staff_monthly_settlements 與 staff_monthly_settlement_details）：依結算週期歸集該月嫂當期所有應付指派，產生月結總表與對應的細項紀錄。
-    - 銀行實際轉帳與金額分配（staff_actual_transfers 與 staff_transfer_allocations）：建立合作社銀行出款流水（帶入月嫂姓名與轉帳金額），並透過 staff_transfer_allocations 將轉帳金額精確分配至月結明細（settlement_detail_id），不得超額或重複分配。
-  - 帳務金流必須完整綁定 3 大帳號機制：
-    - 客戶繳款虛擬帳號：由 99781699 + case_no 演算法推導，作為客戶入款對帳依據。
-    - 客戶退款銀行帳號：寫入 beclass_records.refund_bank_code（如 8070014）與 refund_account_no，作為訂金退款對帳依據。
-    - 月嫂領薪銀行帳號：寫入 staff_bank_accounts 1:N 子表（代碼 807、分行 0014、帳號），作為月嫂發薪與轉帳對帳依據。
-  - 資料庫播種必須確保全表與全欄位完整性：
-    - staff 主表 19 欄位全數填滿，並播種 8 大選項子表（staff_bank_accounts, staff_regions, staff_time_slots, staff_cooking_skills, staff_transportation, staff_holiday_availability, staff_weekly_rest, staff_baby_types）。
-    - beclass_records 必須填滿並包含 refund_bank_code 與 refund_account_no。
-    - orders 必須正確填入主責月嫂 staff_id。
-    - 邊界案件的 clients.admin_notes 必須依 fixture_type、boundary_type、owner_module、expected 的固定鍵值格式標記；其餘正常案件統一標示 fixture_type=normal 與 boundary_type=none。
-  - 指定邊界矩陣：115000003（服務中）兩段各 10 天 active 交接、115000004（完成）兩段 12/13 天 completed 交接、115000008/115000009 三段連續交接，且 115000009 的 actual_hours、補助快照與 floor_fee_allocated 依時數比例分配；同案不同 assignment_id 的日期不得重疊。
-  - 115000018 必須至少有一筆服務日 staff_schedule.is_double_pay = TRUE；115000013 的第一期 2,500 應收對應三筆 1,000 成功入款，115000014 的第二期 2,500 應收對應單筆 3,000 成功入款，115000005 的已收訂金取消案必須退回 beclass_records.refund_account_no 且無服務指派／排班時數。
-  - 匯入暫存必須以至少兩個 finance_import_batches、一筆跨批次唯一的 finance_import_rows 與多筆同 fingerprint 的 finance_import_occurrences 表達重複匯入；不得建立第二筆 canonical row。
-  - 警示與 pending 流水連動約束：生成器播種跨檔重複匯入測試之 pending 銀行流水時，必須同步呼叫 FinanceAlertDetectionService 建立 1 筆 open 狀態警示案件與 detected 稽核事件，供帳務警示中心顯示與驗證。
-  - --seed-db 播種後必須執行獨立 SQL 全表對帳：驗證 orders.service_days * service_hours_per_day == 實際服務時數加總，client_payment_transactions 淨額與 client_payments 一致，且 staff_monthly_settlements 與 staff_transfer_allocations 金額 100% 平衡。
+  - scripts/generate_fake_data.py 必須在任何 import、CLI 解析、路徑建立、檔案讀寫或資料庫連線前 fail fast；直接執行與 import 都必須非零失敗並回傳 frozen_error。
+  - `main()` 不得再啟動歷史生成流程；既有參數（包含 --seed-db、--replace-demo-db、--seed 與 --reference-date）全部失效且不得觸發任何副作用。
+  - 凍結後不得建立、更新或刪除名冊、Excel、排班、帳務、資料庫資料或其他產物；既有假資料檔與既有資料列保持原狀。
+  - 既有歷史實作全文只保留為人工參考，禁止其他程式碼 import、呼叫或把它當成函式庫／執行期相依。
+  - 本次 Task 只允許加入凍結閘門與將既有測試改為凍結契約測試；不得修正、重構、擴充或重新啟用任何歷史生成邏輯。
+  - 所有新增假資料條件都必須使用不同的 source path，建立獨立命名的 ADAD 節點、Task 與測試；不得把 Dependencies 或 consumers 加回 GenerateFakeData。
 - Algorithm:
-  - 未帶旗標時：走既有 50 筆個人資料池與名冊／帳務 Excel 檔導出邏輯。
-  - --seed-db 模式：先拒絕既有核心 case_no，或在 --replace-demo-db 時以 FK 安全順序清除僅限播種擁有的資料；接著以既有 insert-only importer 建立 50 筆主檔，再保留原有生命週期隨機分布並套用指定案號邊界覆蓋。依據各案件生命週期狀態寫入 case_staff_assignments（含指定 2/3 月嫂連續交接）、assignment-owned staff_schedule（日排班含指定雙薪）、client_payments、client_payment_transactions（含部分入款／超收／退款）、由 FinanceImportStagingService 建立 finance_import_batches / rows / occurrences（重複 fingerprint Fact）並調用 FinanceAlertDetectionService 建立對應 alert、staff_payments、staff_monthly_settlements / details 及 staff_actual_transfers / staff_transfer_allocations，並執行全表對帳與包含 1 筆 open 警示的驗證。
-  - 建立每案日期時先依生命週期相對 reference_date 產生固定服務區間，再以該完整區間查找無重疊月嫂；不可用月嫂不得改寫區間，應中止播種。排班完成後再次以 SQL 驗證所有狀態日期關係。
+  - 模組載入時於 docstring 後、所有 import 與其他可執行敘述前拋出固定 frozen_error，確保直接執行與 import 都不會進入歷史生成程式。
+  - 保留閘門後方的既有歷史實作供人工閱讀；不得由任何啟動腳本、測試或正式模組到達該段程式。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_generate_fake_data.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_client_hcm_insert_only.py", "tests\\test_import_client_beclass_insert_only.py", "tests\\test_import_staff_beclass_insert_only.py", "tests\\test_import_historical_orders_insert_only.py", "tests\\test_finance_import_staging.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\generate_fake_data.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - TODO:
-  - (獨立異常資料產生器，目前尚無此腳本需新建) 在 scripts/ 下新建 seed_boundary_anomalies.py 腳本，作用為專門增量寫入 A~G 類別欄位型態、格式與業務異常數據（案號 115900001 起），供後台 UI（Page 6 警示中心等）驗收防護功能。
+  - 後續需要 A~G 類別邊界資料時，另建 scripts/seed_boundary_anomalies.py、同名獨立 ADAD 節點／Task 與專屬測試；不得解除或修改本凍結節點。
 - Non Goals:
-  - 不打亂或改變 50 筆既有客戶與 Excel 生成流程。
+  - 不再產生、更新、重播、修復或對帳既有 50 筆客戶、月嫂、案件、排班、Excel 或帳務假資料。
+  - 不把 GenerateFakeData 當作未來新腳本的共用函式庫，也不在本節點新增任何條件、schema 相容或業務規則。
 - Observability: not_required
 
 ##### Module: FinanceImportStagingContract
@@ -143,7 +109,7 @@
 - Type: dependency_contract
 - State: `planned`
 - Source: document/資料庫、資料處理/帳務假數據生成與關聯測試規格.md
-- Description: Master map 對 services_layer／FinanceImportStagingService 的跨子地圖依賴合約，供 GenerateFakeData 以正式 staging 介面建立匯入批次、canonical row 與 occurrence，而不複製下層服務實作。
+- Description: Master map 對 services_layer／FinanceImportStagingService 的跨子地圖依賴合約，供後續獨立建立的假資料或匯入腳本以正式 staging 介面建立匯入批次、canonical row 與 occurrence，而不複製下層服務實作；已凍結的 GenerateFakeData 不再使用本合約。
 - Input:
   - normalized_result: 已正規化且保留來源欄位、銀行參照與 raw payload 的匯入結果
   - identity_maps: 客戶退款與服務人員精確帳號 mapping
@@ -152,9 +118,9 @@
 - Invariants:
   - 實作唯一落點仍為 services_layer 的 FinanceImportStagingService；本合約不持有 Source 或資料庫寫入邏輯。
   - 同 fingerprint 只能有一筆 canonical row；重複匯入只新增 occurrence，不得覆寫或重新分類既有 canonical row。
-  - GenerateFakeData 必須呼叫正式 staging 介面，不得自行複製其去重 SQL 或略過 append-only 邊界。
+  - 後續獨立建立的假資料或匯入腳本若需寫入 staging，必須呼叫正式 staging 介面，不得自行複製其去重 SQL 或略過 append-only 邊界。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_staging.py", "tests\\test_generate_fake_data.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_staging.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Non Goals:
   - 不取代、不搬移或重複宣告 services_layer 的 FinanceImportStagingService 實作節點。
 - Observability: not_required
@@ -172,7 +138,7 @@
   - staff_assignments: one or more caregiver service segments per case
   - cash_transactions: immutable client receipts/subsidy returns and legacy-compatible staff payable transactions
 - Output:
-  - client_payments: one client ledger summary per case_no
+  - client_payments: one client ledger summary per case_no，含補助退還義務與可空人工覆核狀態／原因
   - client_payment_transactions: many actual client cash events per case_no
   - case_staff_assignments: many caregiver service segments per case_no
   - staff_payments: one payable obligation per caregiver service assignment
@@ -187,6 +153,7 @@
   - `actual_hours_adjustments` 逐筆記錄人工覆寫前後時數、原因、操作者與時間；不取代指派或排班歷史。
   - 樓層費由案件明確分配至各服務指派；結案時計算所有指派的薪資與樓層費，加總後才形成案件對月嫂的總應付。
   - `orders.deposit_service_days` 保存訂單表單選定的訂金天數；可為 null 以保留未補齊的歷史案件，任何自動建帳流程遇到 null 必須停止並回報人工補齊，不得套用舊 5／0 天預設。
+  - `client_payments.subsidy_return_review_status` 與 `subsidy_return_review_reason` 保存補助退還自動核銷暫停狀態；status 只允許 NULL 或 review_required，正常義務與歷史完成狀態仍由 receivable/refunded/at 推導。
   - 所有訂單計價與檢視 SQL 以 orders.client_id 關聯 clients.identity_status；移除 clients.identity_status 及所有以該欄位計算的來源。
 - Invariants:
   - `client_payments.case_no` 必須唯一且存在於 `orders.case_no`；`staff_payments.case_no` 不得唯一，唯一應付鍵為正式服務指派。
@@ -200,11 +167,12 @@
   - `orders` 不得存在 `other_addition`；`service_salary` 是純薪資，月嫂總應付以 `service_salary + floor_fee` 表示。
   - clients.identity_status 是身分資格的唯一儲存來源，訂單與帳務表不得保存或寫入 clients.identity_status 的副本。
   - 客戶帳務的 `subsidy_return_*` 只表示退還客戶預付補助款，不得用於一般退款或解約退款；legacy `subsidy_refund_*` 只保留相容，不得成為新流程寫入目標。
+  - subsidy_return_review_status=review_required 時不得進入銀行流水自動核銷，但不得清除 subsidy_return_receivable、subsidy_return_due_date 或使該筆離開預定月份歷史清單。
   - `orders.deposit_service_days` 為非負整數且不得超過 `orders.service_days`；不得由身分資格或舊檢視表推測其值。
   - 新的跨案銀行事件不得拆成多筆偽造 external_reference 寫入 `staff_payment_transactions`。
   - `actual_hours` 的人工覆寫必須寫入 append-only 稽核紀錄，包含正式指派、調整前後值、非空原因、操作者與時間；不得覆寫或刪除既有稽核列。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema.sql').read_text(encoding='utf-8'); tables=('client_payments','client_payment_transactions','case_staff_assignments','staff_payments','staff_payment_transactions','payment_migration_reviews','actual_hours_adjustments'); assert all(f'CREATE TABLE IF NOT EXISTS {n}' in s for n in tables); assert all(c in s for c in ('subsidy_return_receivable','subsidy_return_refunded','subsidy_return_due_date','subsidy_return_at')); print('CORE PAYMENT SCHEMA DECLARED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "CORE PAYMENT SCHEMA DECLARED"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema.sql').read_text(encoding='utf-8'); tables=('client_payments','client_payment_transactions','case_staff_assignments','staff_payments','staff_payment_transactions','payment_migration_reviews','actual_hours_adjustments'); assert all(f'CREATE TABLE IF NOT EXISTS {n}' in s for n in tables); assert all(c in s for c in ('subsidy_return_receivable','subsidy_return_refunded','subsidy_return_due_date','subsidy_return_at','subsidy_return_review_status','subsidy_return_review_reason')); print('CORE PAYMENT SCHEMA DECLARED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "CORE PAYMENT SCHEMA DECLARED"}
 - Observability: not_required
 
 ##### Module: ClientIdentityStatusSourceMigration
@@ -597,8 +565,8 @@
 - Type: service
 - State: `planned`
 - Source: services/order_assignment_synchronization.py::apply_order_assignment_sync
-- Dependencies: [PaymentSchema, MultiCaregiverScheduleSchema, OrderAssignmentChangeAuditSchema, MultiCaregiverAssignmentRules, MultiCaregiverScheduleGenerationTransactionService, ActualHoursAdjustmentConfirmationService, OrderAssignmentSynchronizationPreviewService]
-- Description: 重新驗證管理者明確提交的訂單變更、完整目標正式月嫂指派計畫與明確排班移除計畫；僅在預覽等價驗證、帳務鎖定與時數總和均通過時，以單一交易更新訂單、正式指派與受影響 assignment-owned 日排班，確認總時數並寫入 append-only 稽核快照。
+- Dependencies: [PaymentSchema, MultiCaregiverScheduleSchema, OrderAssignmentChangeAuditSchema, MultiCaregiverAssignmentRules, MultiCaregiverScheduleGenerationTransactionService, ActualHoursAdjustmentConfirmationService, OrderAssignmentSynchronizationPreviewService, ClientSubsidyReturnObligationService, OrderAmountCalculator, AccountingSourceProjection]
+- Description: 重新驗證管理者明確提交的訂單變更、完整目標正式月嫂指派計畫與明確排班移除計畫；僅在預覽等價驗證、帳務鎖定與時數總和均通過時，以單一交易更新訂單、正式指派與受影響 assignment-owned 日排班，確認總時數、檢測滿額收款自動啟用補助退還義務並寫入 append-only 稽核快照。
 - Complexity: medium
 - Input:
   - case_no: 明確指定的 canonical case number
@@ -611,6 +579,8 @@
 - Algorithm:
   - 以 case_no 鎖定訂單、既有指派與受影響排班；再次執行與 OrderAssignmentSynchronizationPreviewService 等價的驗證，拒絕 stale plan、同月嫂日期衝突、legacy 排班衝突、未明確分配、未覆蓋目標時數或與當前 required_schedule_removals 不完全一致的 schedule_change_plan。
   - 僅在所有驗證通過後，刪除明確列出的受影響 assignment-owned 排班列，在同一 transaction 更新訂單服務欄位與可編輯訂單主資料、同步該 case_no 的客戶姓名，建立或更新明確正式指派，取消完整目標計畫中未列出且未鎖定的指派，並以交易內生成器補足受影響有效指派的新日期排班；不得變更 clients.identity_status、其他案件或 legacy 排班。
+  - 觸發點 2（收清後完工）：更新 actual_end_date 時，若該案 client_payments 已為滿額收款 (amount_received == amount_receivable) 且未啟用義務，透過 AccountingSourceProjection 與 OrderAmountCalculator 計算 subsidy_return_amount，若大於零且身分資格支援，於同一個 transaction 內呼叫 ClientSubsidyReturnObligationService (activate_subsidy_return_obligation) 啟用補助退還義務。
+  - 投影、計算或義務啟用發生非業務預期錯誤時必須拋出並由外層 rollback；不得吞掉例外後提交已完工但未建立義務的部分結果。
   - 以 ActualHoursAdjustmentConfirmationService 的同等 Decimal 確認邏輯驗證所有未取消指派 actual_hours 總和恰等於 orders.service_days × orders.service_hours_per_day；不相等即 rollback。
   - 同一交易最後新增 OrderAssignmentChangeAuditSchema 稽核快照並 commit，回傳已套用結果；任何例外均 rollback。
 - Invariants:
@@ -620,6 +590,8 @@
   - 已有非 cancelled staff_payments、有效月結明細或 actual_hours_adjustments 的受影響指派不得重排、取消、改日期或改算 actual_hours；必須回傳具體鎖定／人工覆寫原因。
   - 所有未取消正式指派的 actual_hours 必須以 Decimal 精確等於訂單總服務時數；取消指派不得計入總和，legacy assignment_id 為 NULL 排班不得被採用、移除或覆寫。
   - 只可刪除 schedule_change_plan 明確列出的、屬於受影響正式指派的排班列；必須拒絕遺漏、多列、其他案件、其他指派或 legacy 列。
+  - 當完工流程寫入/更新 actual_end_date 時，若案件已滿額收款且未啟用義務，必須在同一 transaction 內觸發 activate_subsidy_return_obligation。
+  - 觸發點 2 必須使用 AccountingSourceProjection 的 transaction cursor 版本；任何非明確 review_required 結果的錯誤都必須 rollback 整個 apply。
   - 不建立、修改或取消 staff_payments、staff_monthly_settlements、轉帳或其明細；既有財務資料只能作為鎖定依據。
   - 身分資格只能讀取 clients.identity_status；不得讀寫 clients.identity_status 或修改 clients.identity_status。
   - 每次成功 apply 必須新增一筆 OrderAssignmentChangeAuditSchema 稽核列；失敗或拒絕不得新增稽核列。
@@ -740,7 +712,7 @@
   - total_payable 與 total_paid 不得為負；total_paid 不得超過 total_payable。
   - finalized 月結不得覆寫應付總額或重新歸屬月份。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; p=Path('db/schema_parts/20_staff_monthly_settlements.sql'); s=p.read_text(encoding='utf-8'); assert 'CREATE TABLE IF NOT EXISTS staff_monthly_settlements' in s; assert 'FOREIGN KEY (staff_id)' in s; assert 'settlement_month' in s and 'total_payable' in s and 'total_paid' in s; assert 'staff_monthly_settlement_details' not in s and 'staff_actual_transfers' not in s; print('STAFF MONTHLY SETTLEMENT SCHEMA DECLARED')"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "STAFF MONTHLY SETTLEMENT SCHEMA DECLARED"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; p=Path('db/schema_parts/20_staff_monthly_settlements.sql'); s=p.read_text(encoding='utf-8'); assert 'CREATE TABLE IF NOT EXISTS staff_monthly_settlements' in s; assert 'FOREIGN KEY (staff_id)' in s; assert 'settlement_month' in s and 'total_payable' in s and 'total_paid' in s; assert 'staff_monthly_settlement_details' not in s and 'staff_actual_transfers' not in s; print('STAFF MONTHLY SETTLEMENT SCHEMA DECLARED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "STAFF MONTHLY SETTLEMENT SCHEMA DECLARED"}
 - Observability: not_required
 
 ##### Module: StaffMonthlySettlementDetailSchema
@@ -766,7 +738,7 @@
   - case_no、assignment_id 必須與來源 staff_payment 一致；payable_amount 必須等於已凍結應付構成合計且不得為負。
   - 月結 finalized 後明細不可刪除、換月或覆寫；未確認的舊制補助構成必須標記 review_required。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema_parts/30_staff_monthly_settlement_details.sql').read_text(encoding='utf-8'); assert 'CREATE TABLE IF NOT EXISTS staff_monthly_settlement_details' in s; assert all(x in s for x in ('settlement_id','staff_payment_id','case_no','assignment_id','payable_amount','legacy_subsidy_payable')); assert 'FOREIGN KEY (settlement_id)' in s and 'FOREIGN KEY (staff_payment_id)' in s; assert 'staff_actual_transfers' not in s; print('STAFF MONTHLY SETTLEMENT DETAIL SCHEMA DECLARED')"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "STAFF MONTHLY SETTLEMENT DETAIL SCHEMA DECLARED"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema_parts/30_staff_monthly_settlement_details.sql').read_text(encoding='utf-8'); assert 'CREATE TABLE IF NOT EXISTS staff_monthly_settlement_details' in s; assert all(x in s for x in ('settlement_id','staff_payment_id','case_no','assignment_id','payable_amount','legacy_subsidy_payable')); assert 'FOREIGN KEY (settlement_id)' in s and 'FOREIGN KEY (staff_payment_id)' in s; assert 'staff_actual_transfers' not in s; print('STAFF MONTHLY SETTLEMENT DETAIL SCHEMA DECLARED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "STAFF MONTHLY SETTLEMENT DETAIL SCHEMA DECLARED"}
 - Observability: not_required
 
 ##### Module: StaffActualTransferSchema
@@ -982,6 +954,28 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_finance_link_schema.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
+##### Module: ClientPaymentSubsidyReturnReviewMigration
+- Sub Map: root
+- Type: database_schema
+- State: `planned`
+- Source: db/schema_parts/97_client_payment_subsidy_return_review.sql
+- Dependencies: [PaymentSchema, DatabaseSchemaLoader]
+- Description: 以 additive、可重複執行的 ALTER migration，讓既有資料庫取得補助退款人工覆核狀態與原因欄位；不得以重跑 init_db 取代正式升級。
+- Complexity: low
+- Input:
+  - client_payments: 既有客戶帳務摘要表與歷史義務資料
+- Output:
+  - subsidy_return_review_status: 可空 review_required 狀態
+  - subsidy_return_review_reason: 可空人工覆核原因
+- Invariants:
+  - migration 必須使用 INFORMATION_SCHEMA 分別檢查兩個欄位後才 ADD COLUMN，重複執行不得失敗或重複欄位。
+  - 只允許新增 nullable 欄位；不得刪除、重建、重新命名或更新任何 client_payments 歷史資料。
+  - 欄位型別、允許值及語意必須與 db/schema.sql 的 PaymentSchema 完全一致。
+  - migration 檔可由 DatabaseSchemaLoader 解析；正式環境只套用此 additive migration，不得執行會重建資料的 init_db。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_subsidy_return_review_schema.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
 ##### Module: RemoveOtherAdditionMigration
 - Sub Map: root
 - Type: migration
@@ -1008,12 +1002,6 @@
 - Description: 月嫂檔期衝突檢測與自動修復工具。
 - Observability: not_required
 
-##### Module: StartScript
-- Sub Map: root
-- Source: start.bat
-- Type: script
-- Description: 一鍵啟動與部署環境初始化腳本。啟動 Docker、初始化 MySQL、產生並匯入假資料，最後並行啟動 FastAPI 與 Streamlit。
-- Observability: not_required
 - Invariants:
   - INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始執行 init_db.py 防止連線逾時崩潰。
 
@@ -1095,26 +1083,28 @@
 ##### Module: ClientBeClassInsertOnlyImporter
 - Sub Map: root
 - Type: script
-- State: `planned`
+- State: `dirty`
 - Source: scripts/imports/import_client_beclass.py
-- Description: 匯入客戶 BeClass 資料時以 query_no 去重；既有資料不得覆寫，缺 query_no 或衝突時回報 review_required。
+- Description: 匯入客戶 BeClass 資料時以 query_no 去重；未提供命令列路徑時固定讀取假資料_模板.xlsx，既有資料不得覆寫，缺 query_no 或衝突時回報 review_required。
 - Complexity: medium
 - Input:
-  - excel_path: 客戶 BeClass 名冊
+  - excel_path: 可選的客戶 BeClass 名冊路徑；未提供時固定使用 document/資料庫、資料處理/假資料_模板.xlsx
   - query_no: BeClass 資料庫唯一識別鍵
 - Output:
   - result: inserted、skipped_existing 或 review_required 的逐筆結果與計數
 - Invariants:
+  - CLI 未提供 excel_path 時必須讀取 document/資料庫、資料處理/假資料_模板.xlsx；不得再回退至假資料_範例.xlsx。明確提供路徑時仍必須使用該路徑。
   - query_no 已存在時不得 UPDATE beclass_records，且不得用姓名與生日判斷既有資料。
   - 缺 query_no、query_no 衝突或無法確認唯一性時必須 review_required；不得新增半套問卷資料。
   - 新增資料必須完整保存 survey_details；重跑同一 query_no 只回 skipped_existing。
 - Algorithm:
+  - 先解析可選命令列路徑；無參數時選用固定的假資料_模板.xlsx，有參數時保留呼叫者指定路徑。
   - 解析 BeClass 核心欄位與 survey_details，先驗證非空 query_no。
   - 以 query_no 查詢既有 beclass_records；既有者只累計 skipped_existing。
   - 僅對全新 query_no 新增完整核心欄位與 JSON 問卷快照。
   - 將缺鍵、衝突與寫入失敗區分回報；寫入失敗 rollback，絕不更新既有列。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_client_beclass_insert_only.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-client-beclass-insert-only"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_client_beclass_insert_only.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-client-beclass-insert-only"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: StaffBeClassInsertOnlyImporter
@@ -1270,6 +1260,38 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_migrate_adad_task_snapshots.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-adad-task-snapshot-runner"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability:
   - log: migration_manifest.json
+
+##### Module: BackfillSubsidyReturnObligations
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: scripts/backfill_subsidy_return_obligations.py
+- Dependencies: [PaymentSchema, ClientSubsidyReturnObligationService, OrderAmountCalculator, AccountingSourceProjection]
+- Description: 以兩階段安全性、可預演、可稽核的方式，掃描歷史已全額收款且符合條件但尚未啟用補助款退還義務的案件，重算到期日並寫入正式義務。
+- Complexity: medium
+- Input:
+  - mode: 預設 --dry-run（產生含 checksum 之 manifest.json），帶入 --apply --manifest manifest.json 才執行正式寫入
+  - database_config: 由 .env 或明確測試設定取得的資料庫連線
+- Output:
+  - backfill_manifest: 含掃描筆數、符合筆數、已啟用筆數、跳過原因、Checksum 與 Audit log 的 JSON 報告
+- Invariants:
+  - 兩階段安全性：--dry-run 必須輸出 manifest.json；--apply 必須指定 --manifest 並驗證 checksum，不得無 manifest 直接全載寫入。
+  - 預設 --dry-run 不得寫入資料庫或改寫既有帳務欄位。
+  - 只有 amount_received 等於 amount_receivable 且 actual_end_date 非空且 calculated_return_amount 大於零的歷史案件可建立義務。
+  - 遇到 OrderAmountCalculator 不支援的身分類別（如低收入戶）必須標記為 review_required 並跳過，不得自行轉為其他資格或預設為 0。
+  - --apply 執行時，必須逐案下 SELECT ... FOR UPDATE 鎖定列並重新核對完工與滿額條件後，才在獨立 Transaction 中調用 activate_subsidy_return_obligation()。
+  - --apply 不得信任 manifest 內的舊計價事實；每案必須在鎖定後透過 AccountingSourceProjection 重新讀取 actual_end_date、identity_status、服務條件與 collection_schedule，重新計算金額及到期日，且與 manifest 完全一致才可啟用。
+  - 已存在相同退還義務之案件僅記錄 skipped_existing，不同義務則記錄 review_required 並拒絕覆寫。
+- Algorithm:
+  - 查詢 client_payments 結合 orders 與 clients，尋找 amount_received == amount_receivable 且 subsidy_return_receivable 為空或零之案件。
+  - 透過 AccountingSourceProjection 載入資料，驗證 actual_end_date 非空且身份資格支援。以 OrderAmountCalculator 計算 subsidy_return_amount，並以 calculate_subsidy_return_due_date 計算到期日（實際完成月份月底＋5天）。
+  - 若為 --dry-run 模式，輸出含預計啟用案件、狀態、Audit Log 與 SHA-256 Checksum 之 manifest.json。
+  - 若為 --apply 模式，校驗 manifest checksum，逐案建立 connection/transaction，鎖定並重新投影及計算；單案成功即 commit、失敗即 rollback 並記錄後繼續，其餘案件不得被連帶回滾。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_backfill_subsidy_return_obligations.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
 
 ---
 

@@ -38,6 +38,10 @@ def load_finance_identity_maps(cursor: Any) -> dict[str, dict[str, list[int]]]:
            FROM client_payments cp
            JOIN beclass_records br ON br.query_no=cp.case_no
            WHERE cp.subsidy_return_receivable > cp.subsidy_return_refunded
+             AND (
+                 cp.subsidy_return_review_status IS NULL
+                 OR cp.subsidy_return_review_status <> 'review_required'
+             )
            ORDER BY cp.id, br.id"""
     )
     client_rows = cursor.fetchall()

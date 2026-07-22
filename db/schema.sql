@@ -313,6 +313,8 @@ CREATE TABLE IF NOT EXISTS client_payments (
     subsidy_return_refunded DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     subsidy_return_due_date DATE NULL,
     subsidy_return_at DATE NULL,
+    subsidy_return_review_status ENUM('review_required') NULL COMMENT '補助退還人工覆核狀態；NULL 表示未暫停自動核銷',
+    subsidy_return_review_reason TEXT NULL COMMENT '補助退還需人工覆核的原因',
     payment_status VARCHAR(50) NOT NULL DEFAULT '待收訂金',
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

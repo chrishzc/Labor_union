@@ -235,5 +235,5 @@ def process_import(excel_path):
     return _result(inserted=inserted, skipped_existing=skipped_existing, review_required=review_required)
 
 if __name__ == "__main__":
-    excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/\u8cc7\u6599\u5eab\u3001\u8cc7\u6599\u8655\u7406/\u5047\u8cc7\u6599_\u7bc4\u4f8b.xlsx"
+    excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/資料庫、資料處理/假資料_模板.xlsx"
     process_import(excel_arg)

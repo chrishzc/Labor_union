@@ -1,6 +1,6 @@
 # Services System Map
 
-- Version: 36
+- Version: 37
 
 ##### Module: DbService
 - Sub Map: services_layer
@@ -116,23 +116,25 @@
 - Type: service
 - State: `planned`
 - Source: services/accounting_source_projection.py
-- Description: Read a case's accounting source facts from normalized raw tables, without using legacy payment tables or computed order views.
+- Dependencies: [PaymentSchema]
+- Description: 以單一 canonical 投影讀取案件計價所需的訂單、客戶、服務指派與收款排程原始事實；支援呼叫端持有的 transaction cursor，避免帳務寫入流程另開連線讀到不同快照。
 - Complexity: medium
 - Input:
-  - case_no: canonical case identifier
+  - cursor: 可選；呼叫端持有 transaction 時必須傳入，wrapper 未傳入時才自行取得唯讀 connection
+  - case_no: canonical order identifier
 - Output:
-  - accounting_source: raw client, BeClass, order, and staff-assignment facts keyed by case_no
-  - missing_terms: explicit list of contract schedule terms absent from raw data and therefore not eligible for implicit defaults
+  - accounting_source: order、client、BeClass、staff_assignments、staff_primary_bank_accounts、collection_schedule 與 missing_terms
 - Algorithm:
-  - Read client identity/contact facts from clients, order service facts from orders, and original application/refund facts from beclass_records by query_no = case_no.
-  - Read every staff service segment from case_staff_assignments joined to staff; preserve each segment's actual/planned hours, hourly rate, and allocated floor fee.
-  - Return raw source values only. Do not query payments, client_payments, staff_payments, v_order_details, or use fixed subsidy/rate fallbacks.
-  - Flag missing contract schedule dates/day splits so the caller must supply the dates selected in the order form before invoking OrderAmountCalculator.
+  - `load_case_accounting_source_with_cursor(cursor, case_no)` 只使用傳入 cursor 讀取 canonical source，不 commit、rollback、close 或建立 connection。
+  - `load_case_accounting_source(case_no)` 是相容 wrapper，自行取得唯讀 connection 後委派同一 transaction-safe 核心並關閉連線。
+  - 讀取 clients、orders、beclass_records、case_staff_assignments、staff 與 staff_bank_accounts 原始事實；collection_schedule 只讀 orders.deposit_service_days 與 client_payments.deposit_due_date。
+  - 缺少訂金天數、訂金日期、服務開始日、指派單價等條件時列入 missing_terms，不套用固定天數、費率或 legacy 檢視表預設。
 - Invariants:
-  - All source reads use case_no; no orders.id or order_id is selected or accepted.
-  - Client data comes from clients and beclass_records; staff recipient data comes from staff and case_staff_assignments.
-  - Missing money inputs are explicit errors/gaps, never replaced by legacy fixed values.
-  - Order eligibility must be read only as clients.identity_status; this projection must not select, return, or derive clients.identity_status from orders.
+  - 寫入型服務與回補 apply 必須使用 transaction cursor 版本；不得在既有 transaction 中另開 connection。
+  - 所有 source reads 使用 case_no；身分資格只讀 clients.identity_status，不得接受或回傳 orders 上的資格副本。
+  - 本節點只讀，不得更新訂單、帳務、服務指派或交易；不得 commit、rollback 或 close 呼叫端 cursor/connection。
+  - 所有呼叫端共用此投影，不得各自重複拼接 orders、clients、case_staff_assignments 與 client_payments 計價 SQL。
+  - 缺失計價或排程條件必須明確列入 missing_terms，不得以 legacy 固定值補齊。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_accounting_source_projection.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
@@ -216,6 +218,7 @@
 - Type: service
 - State: `planned`
 - Source: services/client_payment_writer.py
+- Dependencies: [PaymentSchema, ClientSubsidyReturnObligationService, OrderAmountCalculator, AccountingSourceProjection]
 - Description: 將客戶金流交易實際寫入新表，並依所有交易重算客戶帳務摘要與各期結清日。
 - Complexity: medium
 - Input:
@@ -230,14 +233,16 @@
   - 寫入交易，再重算訂金、第一期、第二期摘要；只有三個收款階段計入 amount_received，退款功能暫不啟用。
   - 階段淨額首度等於應收時記錄完成日；應收為零的階段不得產生完成日。第一期首度結清時，若第二期應收大於零，將第二期應收日設為第一期實收日加 15 天；第一期遭沖正而未結清時清空該日期。
   - 訂金首次全額核銷時，僅將目前為洽談中的同一 case_no 案件自動更新為訂單成立；歷史資料仍可在單筆訂單頁以受稽核的人工流程建立。
+  - 觸發點 1（完工後收清）：在成功寫入 succeeded 收款交易且更新後 amount_received 等於 amount_receivable 時，透過 AccountingSourceProjection 載入訂單條件與 clients.identity_status，由 OrderAmountCalculator 計算 subsidy_return_amount。若案件具實際完成日 (actual_end_date) 且應退金額大於零，在同一個資料庫 transaction 中呼叫 ClientSubsidyReturnObligationService (activate_subsidy_return_obligation) 啟用補助退還義務。
+  - 沖正防護（Reversal Policy）：若案件已存在生效的補助退還義務 (subsidy_return_receivable > 0)，後續發生沖正交易致使 amount_received < amount_receivable 時，在同一 transaction 持久化 subsidy_return_review_status=review_required 與明確原因，暫停銀行流水自動核銷；不得清除原始義務或預定退款日。
+  - 案件再次精確收清時，只有重新投影、計算並確認既有義務金額與到期日完全一致後，才可清除 review status/reason；投影、計算或啟用例外必須使整筆收款交易 rollback，不得靜默忽略。
 - Invariants:
-  - cursor-bound 核心不得自行建立連線、commit、rollback 或 close；銀行核銷交易必須填 finance_import_row_id，人工補登可為 NULL。
-  - 完全相同 external_reference 的重試只可回 existing transaction id；內容不同或只存在部分預期交易時必須拒絕，不得覆寫。
-  - 不得讀寫 staff_* 或 legacy payments 表。
-  - failed 交易不得改變任何摘要金額或結清日。
-  - subsidy_refund 與 subsidy_return 不得計入 amount_received 或寫入目前流程。
+  - 必須透過 AccountingSourceProjection 讀取訂單條件與 clients.identity_status，不得在服務內自行拼接 SQL。
+  - 在成功寫入 succeeded 收款交易且 amount_received 等於 amount_receivable 時，若具備 actual_end_date 必須在同一 transaction 內呼叫 activate_subsidy_return_obligation；未全額、沖正、超收、缺少實際完成日或應退金額為零均不得建立正式義務。
+  - 已經建立義務後遭遇沖正致未全額實付者，必須將狀態設為 review_required 並暫停未支付義務出帳，不得保留為可自動出帳狀態。
+  - review_required 必須持久化於 PaymentSchema；只改函式回傳值不構成狀態變更。歷史應付清單仍依預定日期納入該筆並顯示覆核狀態。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_writer.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_writer.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: FinanceNormalizedRowValidator
@@ -584,8 +589,8 @@
 - Sub Map: services_layer
 - Type: service
 - State: `planned`
-- Source: services/client_subsidy_return_obligations.py::activate_subsidy_return_obligation
-- Dependencies: [PaymentSchema, OrderAmountCalculator, ClientPaymentSnapshotService]
+- Source: services/client_subsidy_return_obligations.py::activate_subsidy_return_obligation,calculate_subsidy_return_due_date
+- Dependencies: [PaymentSchema, OrderAmountCalculator, ClientPaymentSnapshotService, AccountingSourceProjection]
 - Description: 在客戶三階段已全額實付後，以明確計算結果與到期日啟用 canonical 補助款退還義務。
 - Complexity: medium
 - Input:
@@ -600,13 +605,17 @@
   - 只有 amount_received 等於 amount_receivable 且 calculated_return_amount 大於零時可啟用；未全額實付不得建立義務。
   - 只可寫 subsidy_return_* canonical 欄位，不得寫 legacy subsidy_refund_* 或一般退款類型。
   - calculated_return_amount 必須由呼叫端明確提供；due_date 未知時保存 NULL，不得從銀行日期、申報季或資格推測。
+  - 補助退還到期日公式統一為「實際完成日當月月底＋5天」（若無實際完成日則傳入 NULL）。正式呼叫端必須使用 calculate_subsidy_return_due_date() 計算到期日。
+  - 不支援的歷史身分類別（非一般市民/補助市民/非市民者，如低收入戶）必須拒絕自動啟用，回傳 review_required。
+  - activate_subsidy_return_obligation 必須透過 AccountingSourceProjection 的 transaction cursor 投影自行驗證 clients.identity_status；不得只依賴呼叫端預先檢查。
   - 已存在義務只有金額及 due_date 完全相同才 idempotent；不同內容回 review_required，不覆寫。
 - Algorithm:
-  - 鎖定 client_payments，驗證全額收款與尚未建立/相同的義務。
+  - 提供 calculate_subsidy_return_due_date(actual_completion_date) 輔助函式，計算實際完成月份月底＋5天之到期日。
+  - 鎖定 client_payments，透過同一 cursor 投影 clients.identity_status，驗證全額收款、身分資格合法性與尚未建立/相同的義務。
   - 寫入 subsidy_return_receivable/due_date，refunded 保持既有零值並回傳 remaining。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_subsidy_return_obligations.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_subsidy_return_obligations.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: ClientSubsidyReturnTransactionService
@@ -629,6 +638,7 @@
   - staging row 必須是台新 outgoing、classification_type=client_subsidy_return、debit 大於零且仍 pending；帳號身分必須已唯一確認。
   - staging matched_identity_ids 必須恰好包含輸入 client_payment_id，否則保持 pending；不得只以相同待退餘額配對。
   - 正常 P0 要求 debit 完全等於 subsidy_return_receivable 減 refunded；部分、超退或差額維持 staging pending，不建立正式交易。
+  - subsidy_return_review_status=review_required 的義務必須維持 staging pending，不得建立正式 refund 交易或更新 refunded；人工解除覆核後才可重新分類核銷。
   - 正式交易 external_reference 必須由 staging row 的 dedup_fingerprint 固定產生 `fp:<fingerprint>`；不得由呼叫端傳入或以檔名、列號、姓名、金額、source_reference 或 staging id 代替。
   - 正式交易欄位固定為 stage=subsidy_return、transaction_type=refund、transaction_status=succeeded；occurred_at 只使用銀行 transaction_date，秒級 transaction_time 保留在關聯 staging row；完成日寫 client_payments.subsidy_return_at，不得使用系統現在時間或 legacy subsidy_refund_*。
   - 已退金額必須由所有 succeeded subsidy_return refund 扣除有效 reversal 後重算；不得只以本次金額覆寫摘要。
@@ -639,7 +649,7 @@
   - 以銀行 transaction_date 插入 refund，秒級時間留在 staging；依所有成功 subsidy_return refund 與 reversal 淨額重算 refunded/subsidy_return_at，並以 external reference 標記 staging reconciled。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_subsidy_return_transactions.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_subsidy_return_transactions.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: GovernmentSubsidyReconciliationService
@@ -722,7 +732,7 @@
   - staff_accounts: 對方帳號到 staff_id 清單
 - Invariants:
   - 只載入非空且正規化後仍可精確比較的帳號；不得截斷、補零或由姓名推測。
-  - 客戶 mapping 只包含 subsidy_return_receivable 大於 subsidy_return_refunded 的正式義務。
+  - 客戶 mapping 只包含 subsidy_return_receivable 大於 subsidy_return_refunded 且 subsidy_return_review_status 非 review_required 的正式義務；覆核中義務不得進入自動分類候選。
   - 服務人員 mapping 必須納入 staff_bank_accounts 的全部已登記帳號，不得只取 is_primary=1；同一 staff 的多個帳號皆映射至同一 staff_id。
   - 同一帳號命中多個客戶義務或多位服務人員時必須保留全部候選，由 classifier 歸類 non_business_review；不得自行選第一筆。
   - 本節點唯讀，不得建立或更新主檔、帳務、月結或交易。
@@ -731,7 +741,7 @@
   - 查詢服務人員全部已登記收款帳號（包含非主帳號），建立 account -> staff_ids；所有 id 排序後回傳以確保結果穩定。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_identity_maps.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_identity_maps.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: ClientVirtualAccountResolver
@@ -1146,23 +1156,30 @@
 - Type: service
 - State: `planned`
 - Source: services/accounts_payable_export.py
-- Dependencies: [MonthlyPaymentPreparation, ClientSubsidyReturnObligationService]
-- Description: Build the union's monthly outgoing staff-settlement and client subsidy-return list and downloadable Excel workbook. 解約退款功能不啟用。
+- Dependencies: [PaymentSchema, ClientSubsidyReturnObligationService]
+- Description: 依預定付款／退款日期查詢指定月份曾經應出帳的完整清單，並產生會計查詢預覽與銀行匯款 Excel；付款狀態只供顯示，不影響歷史清單納入。解約退款功能不啟用。
 - Complexity: medium
 - Input:
-  - target_month: YYYY-MM, the month of transfer due dates
+  - target_month: YYYY-MM，服務人員付款日或補助退款日所屬月份
 - Output:
-  - payable_rows: rows with month-bank-sequence, outgoing bank, recipient identity, recipient bank details, amount, case_no, and transfer date
+  - payable_rows: 指定月份完整應出帳紀錄；服務人員同月合併為一人一列，包含月份銀行流水號、出款銀行、收款人身分與銀行資料、原始應出帳總額、案件編號清單、預定付款／退款日期及顯示用付款／覆核狀態
   - xlsx_bytes: downloadable workbook with the approved fixed column order and per-outgoing-bank totals
 - Invariants:
-  - Include only positive unpaid amounts; staff rows必須來自 MonthlyPaymentPreparation 的一月結一列，客戶列使用 canonical subsidy_return 未退餘額及明確 due_date。
+  - 服務人員列只納入 od.order_status 為訂單成立、服務中或訂單完成的案件，並依 COALESCE(od.salary_payment_date_1, sp.due_date) 的年份月份是否等於 target_month 納入；優先使用 v_order_details 的推算預計發薪日 salary_payment_date_1（當月15日），當其為空時才以 sp.due_date 補齊；金額使用原始 total_payable，不得以 settlement_month、目前未付餘額或付款狀態決定是否顯示。
+  - 同一 staff_id 在 target_month 內因完成多個訂單產生的全部 staff_payments 必須合併為一筆服務人員出帳列，金額精確等於各筆原始 total_payable 加總；不得依姓名、銀行帳號、案件或付款狀態拆成多筆。
+  - 服務人員合併列的案件編號欄必須保留該月所有來源 case_no，去重後以穩定順序串接，確保總出帳金額可追溯至每筆訂單。
+  - 補助退款列只納入 od.order_status 為訂單成立、服務中或訂單完成，且 cp.subsidy_return_receivable 大於 0 的正式補助退還義務；依 COALESCE(od.govt_claim_date, cp.subsidy_return_due_date) 的年份月份是否等於 target_month 納入，優先使用 v_order_details 的推算市府請款／退款日 govt_claim_date，當其為空時才以 cp.subsidy_return_due_date 補齊。金額只可使用原始 cp.subsidy_return_receivable，不得使用 od.subsidy_salary 或其他推算金額；不得以 subsidy_return_refunded、目前未退餘額或 subsidy_return_review_status 過濾。
+  - 待付、部分付款及已結清紀錄都必須保留在其預定付款／退款月份的歷史清單；付款狀態只可作為顯示資訊。
+  - 已建立 cp.subsidy_return_receivable 大於 0 正式義務的客戶列，即使 subsidy_return_review_status=review_required 仍須保留於其預定退款月份，payable_rows 顯示待人工覆核；不得以該狀態過濾歷史資料。尚未建立正額正式義務的零額覆核候選不得進入待匯或預覽清單；固定九欄銀行 XLSX 亦不得新增或刪除欄位。
+  - 日期尚未到不構成排除條件；選取未來月份時必須能預先產生該月份應出帳明細，且不得使用實際銀行出帳日期作為查詢依據。
   - 月嫂款使用出款銀行代碼 31（永豐銀行）；客戶退還補助款使用 633（台新銀行）。解約退款不得納入。
   - Assign serials independently per target month and outgoing bank, beginning at 1; the identifier format is month-outgoing_bank_code-serial.
   - Spreadsheet columns must be 月份-銀行代碼-流水號, 銀行名稱, 客戶or服務人員姓名, 銀行帳號, 銀行代號(碼), 金額, 身分證字號(匯款到永豐才要填), 案件編號, 匯款日期.
   - Export preparation must not create or update any payment transaction.
 - Algorithm:
-  - Read staff settlement preparation rows and canonical client subsidy-return balances, enrich each unique recipient's bank data, and emit Yongfeng and Taishin rows.
-  - Staff case column joins the settlement's case_no list for audit only; it must not split the bank amount. Sort by outgoing bank, transfer date, and source id, then assign independent month-bank serials.
+  - 先限制 od.order_status 為訂單成立、服務中或訂單完成，再依 target_month 篩選 COALESCE(od.salary_payment_date_1, sp.due_date) 與 COALESCE(od.govt_claim_date, cp.subsidy_return_due_date)，讀取各自原始應出帳金額及付款／覆核狀態；優先以 v_order_details 的推算日期作為匯款日期與月份歸屬依據。
+  - 服務人員來源依 staff_id 與 target_month 分組，加總 total_payable 並合併去重後的 case_no；每位服務人員在同月只產生一筆永豐月嫂款出帳列。
+  - 補助退款只讀取 cp.subsidy_return_receivable 大於 0 的正式義務並以該原始金額輸出，不得以 od.subsidy_salary 推算或補值；補齊收款人銀行資料後產生永豐月嫂款與台新補助退款列，依出款銀行、預定付款／退款日期及來源 id 排序，再分別編列月份銀行流水號。
   - Create an XLSX workbook with the fixed headers, yellow header styling, rows, and both outgoing-bank totals.
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_accounts_payable_export.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0}

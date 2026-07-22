@@ -137,8 +137,13 @@ def test_zero_receivable_stage_never_gets_a_settlement_date():
     assert result["second_payment_due_date"] is None
 
 
-def test_cursor_core_inserts_bank_link_recalculates_summary_and_returns_id():
+def test_cursor_core_inserts_bank_link_recalculates_summary_and_returns_id(monkeypatch):
     cursor = FakeCursor()
+    monkeypatch.setattr(
+        writer,
+        "_activate_subsidy_return_obligation_after_full_receipt",
+        lambda _cursor, _payment: None,
+    )
 
     result = writer.record_client_payment_transaction_with_cursor(cursor, 1, _candidate())
 
@@ -167,7 +172,7 @@ def test_failed_transaction_is_stored_without_changing_summary_or_settlement_dat
     assert not any(statement.startswith("UPDATE") for statement, _ in cursor.executed)
 
 
-def test_same_finance_import_row_can_be_allocated_across_multiple_stages():
+def test_same_finance_import_row_can_be_allocated_across_multiple_stages(monkeypatch):
     settled_deposit = _existing()
     cursor = FakeCursor(
         transactions=[settled_deposit],
@@ -178,6 +183,11 @@ def test_same_finance_import_row_can_be_allocated_across_multiple_stages():
             "first_payment_receivable": Decimal("500"),
             "second_payment_receivable": Decimal("0"),
         },
+    )
+    monkeypatch.setattr(
+        writer,
+        "_activate_subsidy_return_obligation_after_full_receipt",
+        lambda _cursor, _payment: None,
     )
 
     result = writer.record_client_payment_transaction_with_cursor(
@@ -310,6 +320,11 @@ def test_bank_fingerprint_reference_requires_finance_import_row_id():
 def test_compatibility_wrapper_owns_commit_and_close(monkeypatch):
     connection = FakeConnection()
     monkeypatch.setattr(writer, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        writer,
+        "_activate_subsidy_return_obligation_after_full_receipt",
+        lambda _cursor, _payment: None,
+    )
 
     result = writer.record_client_payment_transaction(
         1,
@@ -326,3 +341,176 @@ def test_compatibility_wrapper_owns_commit_and_close(monkeypatch):
     assert connection.committed is True
     assert connection.rolled_back is False
     assert connection.closed is True
+
+
+def test_full_payment_triggers_subsidy_return_activation(monkeypatch):
+    cursor = FakeCursor(
+        payment={
+            "id": 1,
+            "case_no": "115000001",
+            "deposit_receivable": Decimal("1000"),
+            "first_payment_receivable": Decimal("0"),
+            "second_payment_receivable": Decimal("0"),
+            "amount_receivable": Decimal("1000"),
+        }
+    )
+    monkeypatch.setattr(
+        writer,
+        "_activate_subsidy_return_obligation_after_full_receipt",
+        lambda cur, pay: {"obligation": {"subsidy_return_receivable": 12000}, "result": "activated"},
+    )
+
+    result = writer.record_client_payment_transaction_with_cursor(cursor, 1, _candidate(amount=Decimal("1000")))
+
+    assert result["amount_received"] == 1000.0
+    assert result["subsidy_return_activation"]["result"] == "activated"
+    assert result["subsidy_return_review_status"] is None
+    assert any(
+        "subsidy_return_review_status=NULL" in statement
+        for statement, _ in cursor.executed
+    )
+
+
+def test_reversal_when_obligation_active_persists_review_required():
+    existing_receipt = _existing()
+    cursor = FakeCursor(
+        payment={
+            "id": 1,
+            "case_no": "115000001",
+            "deposit_receivable": Decimal("1000"),
+            "first_payment_receivable": Decimal("0"),
+            "second_payment_receivable": Decimal("0"),
+            "amount_receivable": Decimal("1000"),
+            "subsidy_return_receivable": Decimal("12000"),
+        },
+        transactions=[existing_receipt],
+    )
+
+    result = writer.record_client_payment_transaction_with_cursor(
+        cursor,
+        1,
+        _candidate(
+            transaction_type="reversal",
+            amount=Decimal("1000"),
+            external_reference="fp:rev-1",
+        ),
+    )
+
+    assert result["amount_received"] == 0.0
+    assert result["subsidy_return_review_status"] == "review_required"
+    review_write = next(
+        (statement, params)
+        for statement, params in cursor.executed
+        if "subsidy_return_review_status=%s" in statement
+    )
+    assert review_write[1] == (
+        "review_required",
+        "client_receipt_reversal_below_receivable",
+        1,
+    )
+    assert "subsidy_return_receivable" not in review_write[0]
+    assert "subsidy_return_due_date" not in review_write[0]
+
+
+def test_activation_uses_projection_and_obligation_with_same_cursor(monkeypatch):
+    cursor = FakeCursor()
+    projected = {
+        "order": {
+            "service_days": 20,
+            "service_hours_per_day": 8,
+            "floor_fee": 0,
+            "start_date": "2026-06-01",
+            "actual_start_date": "2026-06-02",
+            "actual_end_date": "2026-06-28",
+        },
+        "client": {"identity_status": "一般市民"},
+        "collection_schedule": {
+            "deposit_service_days": 5,
+            "deposit_due_date": "2026-05-15",
+        },
+    }
+    calls = {}
+
+    def fake_projection(seen_cursor, case_no):
+        calls["projection"] = (seen_cursor, case_no)
+        return projected
+
+    def fake_calculator(order_terms, assignments, collection_schedule):
+        calls["calculator"] = (order_terms, assignments, collection_schedule)
+        return {"client_ledger_plan": {"subsidy_return_amount": 12000}}
+
+    def fake_activate(seen_cursor, payment_id, amount, due_date):
+        calls["activation"] = (seen_cursor, payment_id, amount, due_date)
+        return {"obligation": {"subsidy_return_receivable": amount}, "result": "activated"}
+
+    monkeypatch.setattr(writer, "load_case_accounting_source_with_cursor", fake_projection)
+    monkeypatch.setattr(writer, "calculate_order_amounts", fake_calculator)
+    monkeypatch.setattr(writer, "activate_subsidy_return_obligation", fake_activate)
+
+    result = writer._activate_subsidy_return_obligation_after_full_receipt(
+        cursor, {"id": 1, "case_no": "115000001"}
+    )
+
+    assert calls["projection"] == (cursor, "115000001")
+    assert calls["calculator"][0]["identity_status"] == "一般市民"
+    assert calls["calculator"][0]["service_start_date"] == "2026-06-02"
+    assert calls["calculator"][1] == []
+    assert calls["calculator"][2] is projected["collection_schedule"]
+    assert calls["activation"] == (
+        cursor,
+        1,
+        Decimal("12000"),
+        "2026-07-05",
+    )
+    assert result["result"] == "activated"
+
+
+def test_projection_failure_rolls_back_entire_wrapper_transaction(monkeypatch):
+    connection = FakeConnection()
+    monkeypatch.setattr(writer, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        writer,
+        "load_case_accounting_source_with_cursor",
+        lambda _cursor, _case_no: (_ for _ in ()).throw(RuntimeError("projection failed")),
+    )
+
+    with pytest.raises(RuntimeError, match="projection failed"):
+        writer.record_client_payment_transaction(
+            1,
+            "deposit",
+            "receipt",
+            "succeeded",
+            1000,
+            "2026-07-14",
+            "fp:bank-1",
+            finance_import_row_id=31,
+        )
+
+    assert connection.committed is False
+    assert connection.rolled_back is True
+    assert connection.closed is True
+
+
+def test_activation_review_result_is_persisted(monkeypatch):
+    cursor = FakeCursor()
+    monkeypatch.setattr(
+        writer,
+        "_activate_subsidy_return_obligation_after_full_receipt",
+        lambda _cursor, _payment: {"obligation": None, "result": "review_required"},
+    )
+
+    result = writer.record_client_payment_transaction_with_cursor(
+        cursor, 1, _candidate()
+    )
+
+    assert result["subsidy_return_review_status"] == "review_required"
+    assert result["subsidy_return_review_reason"] == "subsidy_return_obligation_requires_review"
+    assert any(
+        params == (
+            "review_required",
+            "subsidy_return_obligation_requires_review",
+            1,
+        )
+        for statement, params in cursor.executed
+        if "subsidy_return_review_status=%s" in statement
+    )

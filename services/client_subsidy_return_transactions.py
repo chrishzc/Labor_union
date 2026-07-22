@@ -155,7 +155,7 @@ def record_client_subsidy_return(
                   fir.reconciliation_reference, fir.matched_identity_ids,
                   cp.id AS client_payment_id, cp.case_no,
                   cp.subsidy_return_receivable, cp.subsidy_return_refunded,
-                  cp.subsidy_return_at
+                  cp.subsidy_return_at, cp.subsidy_return_review_status
            FROM finance_import_rows fir
            JOIN client_payments cp ON cp.id=%s
            WHERE fir.id=%s
@@ -171,6 +171,9 @@ def record_client_subsidy_return(
     receivable = _decimal(row.get("subsidy_return_receivable", 0), "subsidy_return_receivable")
     stored_refunded = _decimal(row.get("subsidy_return_refunded", 0), "subsidy_return_refunded")
     obligation = _obligation(receivable, stored_refunded, row.get("subsidy_return_at"))
+
+    if row.get("subsidy_return_review_status") == "review_required":
+        return _pending(obligation, "subsidy_return_review_required")
 
     fingerprint = row.get("dedup_fingerprint")
     if not isinstance(fingerprint, str) or not _FINGERPRINT.fullmatch(fingerprint):

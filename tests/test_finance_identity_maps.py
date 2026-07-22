@@ -35,6 +35,16 @@ def test_loads_only_unsettled_client_obligations_from_beclass_case_join():
     assert "br.refund_account_no" in sql
 
 
+def test_review_required_client_obligations_are_excluded_from_auto_mapping():
+    cursor = Cursor()
+
+    load_finance_identity_maps(cursor)
+
+    sql = cursor.executed[0]
+    assert "cp.subsidy_return_review_status IS NULL" in sql
+    assert "cp.subsidy_return_review_status <> 'review_required'" in sql
+
+
 def test_staff_mapping_includes_every_registered_account_without_primary_filter():
     cursor = Cursor(
         staff_rows=[

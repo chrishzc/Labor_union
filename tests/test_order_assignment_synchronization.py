@@ -92,7 +92,7 @@ def standard_responses(sql, _params):
         return []
     if "FROM staff WHERE" in sql:
         return [{"weekly_rest_days": '["Sunday"]'}]
-    if "FROM holidays" in sql or "FROM staff_schedule" in sql:
+    if "FROM holidays" in sql or "FROM staff_schedule" in sql or "FROM client_payments" in sql:
         return []
     raise AssertionError(sql)
 
@@ -121,6 +121,172 @@ def test_preview_marks_empty_plan_as_requires_allocation(monkeypatch):
     assert result["sync_status"] == "requires_allocation"
     assert result["blocking_reasons"] == [{"code": "assignment_plan_required"}]
     assert not any("FOR UPDATE" in sql.upper() for sql, _ in connection.cursor_obj.executed)
+    assert not any("UPDATE clients" in sql for sql, _ in connection.cursor_obj.executed)
+    assert not any("UPDATE orders" in sql for sql, _ in connection.cursor_obj.executed)
+
+
+def test_apply_activates_subsidy_return_obligation_when_paid_and_completed(monkeypatch):
+    called = []
+    projection_calls = []
+
+    def mock_responses(sql, params):
+        if sql.startswith(("UPDATE", "DELETE", "INSERT")):
+            return []
+        if "FROM client_payments" in sql:
+            return [{
+                "id": 1,
+                "case_no": "C-1",
+                "amount_receivable": Decimal("10000"),
+                "amount_received": Decimal("10000"),
+                "subsidy_return_receivable": None,
+                "deposit_due_date": "2026-07-01",
+            }]
+        if "FROM case_staff_assignments" in sql:
+            return [{"id": 7, "assignment_id": 7, "staff_id": 11, "assignment_sequence": 1, "assigned_start_date": date(2026, 7, 1), "assigned_end_date": date(2026, 7, 31), "status": "planned", "planned_hours": Decimal("16"), "actual_hours": Decimal("16"), "service_hours": Decimal("16"), "hourly_rate": Decimal("400"), "floor_fee_amount": Decimal("0")}]
+        if "FROM clients" in sql or "FROM orders" in sql:
+            return [{"case_no": "C-1", "name": "舊客戶", "identity_status": "一般市民"}]
+        return standard_responses(sql, params)
+
+    connection = Connection(mock_responses)
+    monkeypatch.setattr(sync, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        sync,
+        "generate_assignment_schedule_in_transaction",
+        lambda _cursor, assignment_id: {"assignment_schedule": [], "actual_hours": Decimal("16"), "assignment_id": assignment_id},
+    )
+    monkeypatch.setattr(
+        sync,
+        "load_case_accounting_source_with_cursor",
+        lambda cursor, case_no: projection_calls.append((cursor, case_no)) or {
+            "order": {
+                "service_days": Decimal("2"),
+                "service_hours_per_day": Decimal("8"),
+                "floor_fee": Decimal("0"),
+                "actual_start_date": date(2026, 8, 3),
+                "actual_end_date": date(2026, 8, 4),
+            },
+            "client": {"identity_status": "一般市民"},
+            "staff_assignments": [{
+                "assignment_id": 7,
+                "staff_id": 11,
+                "actual_hours": Decimal("16"),
+                "hourly_rate": Decimal("400"),
+                "floor_fee_allocated": Decimal("0"),
+                "status": "planned",
+            }],
+            "collection_schedule": {
+                "deposit_service_days": Decimal("1"),
+                "deposit_due_date": date(2026, 7, 1),
+            },
+            "missing_terms": [],
+        },
+    )
+    monkeypatch.setattr(
+        sync,
+        "calculate_order_amounts",
+        lambda order_terms, assignments, schedule: {
+            "client_ledger_plan": {"subsidy_return_amount": Decimal("12000")}
+        },
+    )
+
+    def activate(cursor, payment_id, amount, due_date):
+        called.append((cursor, payment_id, amount, due_date))
+        return {"result": "activated", "obligation": {"due_date": due_date}}
+
+    monkeypatch.setattr(
+        sync,
+        "activate_subsidy_return_obligation",
+        activate,
+    )
+    connection.cursor_obj.lastrowid = 501
+    connection.cursor_obj.rowcount = 1
+
+    change = order_change()
+    change["floor_fee"] = Decimal("0")
+
+    result = sync.apply_order_assignment_sync(
+        "C-1", change, assignment_plan(), {"remove_schedule_ids": []}, "admin"
+    )
+
+    assert len(called) == 1
+    assert projection_calls == [(connection.cursor_obj, "C-1")]
+    assert called[0][0] is connection.cursor_obj
+    assert called[0][1:] == (1, Decimal("12000"), "2026-09-05")
+    assert result["subsidy_return_obligation"]["result"] == "activated"
+    assert connection.commits == 1 and connection.rollbacks == 0
+
+
+def test_apply_rolls_back_when_subsidy_return_projection_or_calculation_fails(monkeypatch):
+    def responses(sql, params):
+        if sql.startswith(("UPDATE", "DELETE", "INSERT")):
+            return []
+        if "FROM client_payments" in sql:
+            return [{
+                "id": 1,
+                "amount_receivable": Decimal("10000"),
+                "amount_received": Decimal("10000"),
+                "subsidy_return_receivable": None,
+            }]
+        return standard_responses(sql, params)
+
+    connection = Connection(responses)
+    connection.cursor_obj.lastrowid = 501
+    connection.cursor_obj.rowcount = 1
+    monkeypatch.setattr(sync, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        sync,
+        "generate_assignment_schedule_in_transaction",
+        lambda _cursor, assignment_id: {
+            "assignment_schedule": [],
+            "actual_hours": Decimal("16"),
+            "assignment_id": assignment_id,
+        },
+    )
+    monkeypatch.setattr(
+        sync,
+        "load_case_accounting_source_with_cursor",
+        lambda _cursor, _case_no: {
+            "order": {
+                "service_days": Decimal("2"),
+                "service_hours_per_day": Decimal("8"),
+                "floor_fee": Decimal("0"),
+                "actual_start_date": date(2026, 8, 3),
+                "actual_end_date": date(2026, 8, 4),
+            },
+            "client": {"identity_status": "一般市民"},
+            "staff_assignments": [{
+                "assignment_id": 7,
+                "staff_id": 11,
+                "actual_hours": Decimal("16"),
+                "hourly_rate": Decimal("400"),
+                "floor_fee_allocated": Decimal("0"),
+                "status": "planned",
+            }],
+            "collection_schedule": {
+                "deposit_service_days": Decimal("1"),
+                "deposit_due_date": date(2026, 7, 1),
+            },
+            "missing_terms": [],
+        },
+    )
+
+    def fail_calculation(*_args):
+        raise RuntimeError("calculation failed")
+
+    monkeypatch.setattr(sync, "calculate_order_amounts", fail_calculation)
+    change = order_change()
+    change["floor_fee"] = Decimal("0")
+
+    with pytest.raises(RuntimeError, match="calculation failed"):
+        sync.apply_order_assignment_sync(
+            "C-1", change, assignment_plan(), {"remove_schedule_ids": []}, "admin"
+        )
+
+    assert connection.commits == 0 and connection.rollbacks == 1
+    assert not any(
+        "INSERT INTO order_assignment_change_audits" in sql
+        for sql, _params in connection.cursor_obj.executed
+    )
 
 
 def test_preview_reports_payment_lock_and_legacy_schedule(monkeypatch):

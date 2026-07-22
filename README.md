@@ -1,6 +1,13 @@
 # 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
 
-> 目前版本：**v0.2.0**（2026-07-22）｜ADAD Master System Map：**54.0**
+> 目前版本：**v0.2.0**（2026-07-22）｜ADAD Master System Map：**56.0**
+
+## 2026-07-22 待推送更新
+
+- 應付帳款匯出改依預定付款／退款日期月份取數；月嫂款按 `staff_id` 彙總，補助退款保留原始應退金額，固定九欄與分銀行流水號契約不變。
+- `GenerateFakeData` 已正式凍結：`scripts/generate_fake_data.py` 僅供人工參考，直接執行或匯入都會立即停止。新增假資料條件必須另建用途明確的腳本與測試；ADAD 登記由專案維護者在審查時處理，一般開發者不需操作 ADAD 工具。
+- 客戶 BeClass 匯入未指定路徑時，固定讀取 `document/資料庫、資料處理/假資料_模板.xlsx`。
+- 已移除會重設資料庫並執行假資料產生器的 `start.bat`；開發環境請依下方手動啟動步驟操作。
 
 ## v0.2.0 版本重點
 
@@ -88,13 +95,12 @@ Lobar_union/
 │   │   ├── import_finance_excel.py  # 處理銀行對帳流水單
 │   │   └── import_staff_beclass.py  # 處理 BeClass 月嫂匯入
 │   ├── file_watcher.py         # 地端檔案自動監控服務
-│   ├── generate_fake_data.py   # 測試假資料生成腳本
+│   ├── generate_fake_data.py   # 已凍結的歷史假資料腳本（僅供人工參考，不可執行或匯入）
 │   ├── fix_schedule_conflicts.py # 月嫂檔期衝突檢測與自動修復工具
 │   ├── init_db.py              # 資料庫初始化與 Schema 導入
 │   └── wait_for_db.py          # 輪詢檢測 MySQL 連線就緒腳本
 ├── docker-compose.yml          # Docker Compose 配置文件，一鍵啟動 MySQL 8.0 持久化容器
 ├── main.py                     # 專案主程式入口 (FastAPI 與 Streamlit 同時啟動或導向)
-├── start.bat                   # 一鍵啟動開發測試環境 (啟動 Docker, init_db, generate_fake_data, 啟動服務)
 ├── online.bat                  # 一鍵啟動生產上線服務 (啟動 Docker, wait_for_db, 啟動 services / watcher)
 ├── pyproject.toml              # uv 專案管理配置文件
 ├── requirements.txt            # 從 pyproject.toml 自動編譯導出的相容性依賴清單
@@ -116,16 +122,9 @@ Lobar_union/
 
 ## 🛠️ 開發環境與部署架設指南
 
-本專案提供了兩個 Windows 批次檔，以簡化不同環境下的啟動程序：
+本專案保留 `online.bat` 作為正式服務啟動腳本。會重設資料庫並產生假資料的 `start.bat` 已移除；開發與測試環境請改用手動啟動流程。
 
 ### 1. 批次檔說明
-
-#### 🚀 `start.bat` (開發與測試環境一鍵啟動)
-此腳本適合開發、測試或重新初始化資料時使用。執行流程如下：
-* 以背景模式啟動 Docker 中的 MySQL 8.0 容器。
-* 使用 `wait_for_db.py` 腳本輪詢，直到 MySQL 資料庫成功建立並可接受連線。
-* **⚠️ 注意**：自動執行 `init_db.py` 重置資料庫，並透過 `generate_fake_data.py` 重新生成乾淨的測試假資料。
-* 最後，並行啟動 FastAPI 後端與 Streamlit 管理前端。
 
 #### 🌐 `online.bat` (生產上線環境一鍵啟動)
 此腳本適合生產環境正式上線使用。執行流程如下：
@@ -138,12 +137,9 @@ Lobar_union/
 
 ### 2. 啟動方式
 
-#### 使用一鍵批次檔 (推薦)
-直接在 Windows 終端機 (PowerShell) 中執行所需的批次檔：
+#### 正式環境批次啟動
+直接在 Windows 終端機（PowerShell）中執行：
 ```powershell
-# 開發/測試環境啟動
-.\start.bat
-
 # 生產/上線環境啟動
 .\online.bat
 ```
@@ -163,6 +159,8 @@ streamlit run ui/app.py
 # 4. 啟動檔案監控
 python scripts/file_watcher.py
 ```
+
+`scripts/init_db.py` 會初始化資料庫，僅能在明確確認目標資料庫後個別執行。請勿執行或匯入 `scripts/generate_fake_data.py`；需要新增測試資料時，應建立用途明確的獨立播種腳本及對應測試。一般開發者不需安裝或操作 ADAD，依標準 Git、Python 與 pytest 流程開發即可。
 
 ---
 

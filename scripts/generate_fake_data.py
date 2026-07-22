@@ -10,6 +10,10 @@
 嚴禁隨意修改本檔案或變更其生成的 50 筆案件格式。
 若需擴充任何欄位型態、格式錯誤或業務異常測試資料，請新建並使用 scripts/seed_boundary_anomalies.py。
 """
+raise SystemExit(
+    "GenerateFakeData 已凍結，僅供人工參考；新增假資料需求請建立獨立腳本與 ADAD 節點。"
+)
+
 import sys
 import os
 import argparse

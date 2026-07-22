@@ -12,7 +12,6 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 
 from services.db_service import get_connection
-from services.payment_batch_service import prepare_monthly_payments
 
 
 EXPORT_HEADERS = (
@@ -128,50 +127,61 @@ def _derive_subsidy_refund_date(row: dict) -> str:
 
 def _fetch_payables(target_month: str) -> list[dict]:
     first_day, last_day = _month_bounds(target_month)
-    settlement_rows = prepare_monthly_payments(target_month)
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            staff_by_id = {}
-            staff_ids = sorted({int(row["staff_id"]) for row in settlement_rows})
-            if staff_ids:
-                placeholders = ", ".join(["%s"] * len(staff_ids))
-                cursor.execute(
-                    f"""
-                    SELECT s.id AS staff_id,
-                           s.name AS recipient_name,
-                           s.identity_card,
-                           sba.account_no,
-                           sba.bank_code AS recipient_bank_code
-                    FROM staff s
-                    LEFT JOIN staff_bank_accounts sba ON sba.id = (
-                        SELECT sba2.id
-                        FROM staff_bank_accounts sba2
-                        WHERE sba2.staff_id = s.id
-                          AND sba2.is_primary = 1
-                        ORDER BY sba2.id
-                        LIMIT 1
-                    )
-                    WHERE s.id IN ({placeholders})
-                    """,
-                    tuple(staff_ids),
+            cursor.execute(
+                """
+                SELECT sp.id AS source_payment_id,
+                       sp.staff_id,
+                       sp.case_no,
+                       COALESCE(od.salary_payment_date_1, sp.due_date) AS transfer_date,
+                       sp.total_payable AS amount,
+                       sp.amount_paid,
+                       sp.payment_status,
+                       s.name AS recipient_name,
+                       s.identity_card,
+                       sba.account_no,
+                       sba.bank_code AS recipient_bank_code
+                FROM staff_payments sp
+                JOIN staff s ON s.id = sp.staff_id
+                LEFT JOIN v_order_details od ON od.case_no = sp.case_no
+                LEFT JOIN staff_bank_accounts sba ON sba.id = (
+                    SELECT sba2.id
+                    FROM staff_bank_accounts sba2
+                    WHERE sba2.staff_id = s.id
+                      AND sba2.is_primary = 1
+                    ORDER BY sba2.id
+                    LIMIT 1
                 )
-                staff_by_id = {int(row["staff_id"]): row for row in cursor.fetchall()}
+                WHERE COALESCE(od.salary_payment_date_1, sp.due_date) BETWEEN %s AND %s
+                AND od.order_status IN ('訂單成立', '服務中', '訂單完成')
+                ORDER BY sp.staff_id, COALESCE(od.salary_payment_date_1, sp.due_date), sp.id
+                """,
+                (first_day, last_day),
+            )
+            staff_rows = cursor.fetchall()
 
             cursor.execute(
                 """
                 SELECT cp.id AS source_payment_id,
                        cp.case_no,
-                       cp.subsidy_return_due_date AS transfer_date,
-                       cp.subsidy_return_receivable - cp.subsidy_return_refunded AS amount,
+                       COALESCE(od.govt_claim_date, cp.subsidy_return_due_date) AS transfer_date,
+                       cp.subsidy_return_receivable AS amount,
+                       cp.subsidy_return_refunded,
+                       cp.subsidy_return_review_status,
+                       cp.subsidy_return_review_reason,
                        c.name AS recipient_name,
                        br.refund_account_no AS account_no,
                        br.refund_bank_code AS recipient_bank_code
                 FROM client_payments cp
                 JOIN clients c ON c.case_no = cp.case_no
+                LEFT JOIN v_order_details od ON od.case_no = cp.case_no
                 LEFT JOIN beclass_records br ON br.query_no = cp.case_no
-                WHERE cp.subsidy_return_due_date BETWEEN %s AND %s
-                  AND cp.subsidy_return_receivable - cp.subsidy_return_refunded > 0
+                WHERE COALESCE(od.govt_claim_date, cp.subsidy_return_due_date) BETWEEN %s AND %s
+                AND od.order_status IN ('訂單成立', '服務中', '訂單完成')
+                AND cp.subsidy_return_receivable > 0
+                ORDER BY COALESCE(od.govt_claim_date, cp.subsidy_return_due_date), cp.id
                 """,
                 (first_day, last_day),
             )
@@ -180,38 +190,74 @@ def _fetch_payables(target_month: str) -> list[dict]:
     finally:
         conn.close()
 
+    staff_groups = {}
+    for row in staff_rows:
+        staff_id = int(row["staff_id"])
+        group = staff_groups.setdefault(staff_id, {
+            "source_payment_ids": [],
+            "case_nos": set(),
+            "transfer_dates": [],
+            "amount": Decimal("0"),
+            "payment_statuses": set(),
+            "recipient_name": row.get("recipient_name"),
+            "identity_card": row.get("identity_card"),
+            "account_no": row.get("account_no"),
+            "recipient_bank_code": row.get("recipient_bank_code"),
+        })
+        group["source_payment_ids"].append(int(row["source_payment_id"]))
+        group["case_nos"].add(str(row["case_no"]))
+        group["transfer_dates"].append(row["transfer_date"])
+        group["amount"] += _as_decimal(row["amount"])
+        if row.get("payment_status"):
+            group["payment_statuses"].add(str(row["payment_status"]))
+
     rows = []
-    for settlement in settlement_rows:
-        amount = _as_decimal(settlement["remaining_amount"])
-        if amount <= 0:
-            continue
-        staff = staff_by_id.get(int(settlement["staff_id"]), {})
+    for group in staff_groups.values():
+        transfer_date = min(
+            group["transfer_dates"],
+            key=lambda value: _to_date(value) or date.max,
+        )
         rows.append({
-            "source_payment_id": settlement["settlement_id"],
-            "case_no": ",".join(str(case_no) for case_no in settlement.get("case_nos", [])),
-            "transfer_date": settlement["transfer_date"],
-            "amount": amount,
-            "recipient_name": staff.get("recipient_name"),
-            "identity_card": staff.get("identity_card"),
-            "account_no": staff.get("account_no"),
-            "recipient_bank_code": staff.get("recipient_bank_code"),
+            "source_payment_id": min(group["source_payment_ids"]),
+            "case_no": ",".join(sorted(group["case_nos"])),
+            "transfer_date": transfer_date,
+            "amount": group["amount"],
+            "recipient_name": group.get("recipient_name"),
+            "identity_card": group.get("identity_card"),
+            "account_no": group.get("account_no"),
+            "recipient_bank_code": group.get("recipient_bank_code"),
             "outgoing_bank_code": "31",
             "outgoing_bank_name": OUTGOING_BANKS["31"],
-            "source_type": "staff_monthly_settlement",
+            "source_type": "staff_payment",
+            "payment_status": ",".join(sorted(group["payment_statuses"])),
+            "review_status": "",
+            "review_reason": "",
         })
     for row in client_rows:
-        if _as_decimal(row["amount"]) <= 0:
+        receivable = _as_decimal(row["amount"])
+        if receivable <= 0:
             continue
+        refunded = _as_decimal(row.get("subsidy_return_refunded"))
+        if refunded <= 0:
+            payment_status = "pending"
+        elif refunded < receivable:
+            payment_status = "partially_paid"
+        else:
+            payment_status = "paid"
         rows.append({
             **row,
+            "amount": receivable,
             "identity_card": "",
             "outgoing_bank_code": "633",
             "outgoing_bank_name": OUTGOING_BANKS["633"],
             "source_type": "client_subsidy_return",
+            "payment_status": payment_status,
+            "review_status": row.get("subsidy_return_review_status") or "",
+            "review_reason": row.get("subsidy_return_review_reason") or "",
         })
     rows.sort(key=lambda row: (
         row["outgoing_bank_code"],
-        row["transfer_date"],
+        _to_date(row["transfer_date"]) or date.max,
         row["source_payment_id"],
     ))
     return rows
@@ -278,6 +324,10 @@ def build_accounts_payable_export(target_month: str) -> dict:
             EXPORT_HEADERS[6]: source_row.get("identity_card") or "",
             EXPORT_HEADERS[7]: str(source_row["case_no"]),
             EXPORT_HEADERS[8]: source_row["transfer_date"],
+            "預定付款／退款日期": source_row["transfer_date"],
+            "付款狀態": source_row.get("payment_status") or "",
+            "覆核狀態": source_row.get("review_status") or "",
+            "覆核原因": source_row.get("review_reason") or "",
         })
 
     return {
