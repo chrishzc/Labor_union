@@ -1328,6 +1328,7 @@ def _clear_generator_owned_demo_data(cursor) -> None:
     generator's ownership and must never be read or mutated by seed mode.
     """
     tables = (
+        "finance_alert_events", "finance_alerts",
         "finance_import_occurrences", "finance_import_rows", "finance_import_batches",
         "staff_transfer_allocations", "staff_actual_transfers",
         "staff_monthly_settlement_details", "staff_monthly_settlements",
@@ -1579,6 +1580,28 @@ def seed_finance_import_duplicate_fact(reference_date: date) -> dict:
                 or second_row["result"] != "skipped_existing"
             ):
                 raise RuntimeError("財務匯入重複事實未形成兩批次、一 canonical row、兩 occurrences")
+
+            from datetime import datetime, timezone
+            from services.finance_alert_detection import create_or_get_finance_alert
+            create_or_get_finance_alert(
+                cursor,
+                alert_code="DUPLICATE_IMPORT_SUSPECTED",
+                source_domain="COMMON",
+                source_type="finance_import_row",
+                source_id=str(first_row["row_id"]),
+                reason="跨檔重複匯入測試：發現相同指紋之重複銀行流水，保持 pending 待人工審核",
+                candidate_snapshot={
+                    "finance_import_row_id": first_row["row_id"],
+                    "batch_ids": [first["batch_id"], second["batch_id"]],
+                    "duplicate_count": 2,
+                },
+                finance_import_row_id=first_row["row_id"],
+                finance_import_batch_id=first["batch_id"],
+                expected_amount=Decimal("1200.00"),
+                actual_amount=Decimal("1200.00"),
+                difference_amount=Decimal("0.00"),
+                detected_at=datetime.combine(reference_date, datetime.min.time()).replace(tzinfo=timezone.utc),
+            )
         conn.commit()
         return {
             "batch_ids": [first["batch_id"], second["batch_id"]],
@@ -2017,14 +2040,14 @@ def validate_seed_database(reference_date: date) -> dict:
                     "客戶邊界標籤格式不完整",
                 ),
                 (
-                    "SELECT COUNT(*) AS count FROM finance_alerts",
+                    "SELECT (SELECT COUNT(*) FROM finance_alerts WHERE status = 'open') != 1 AS count",
                     (),
-                    "finance_alerts 必須維持 0 筆",
+                    "finance_alerts 必須剛好 1 筆 open 狀態警示",
                 ),
                 (
-                    "SELECT COUNT(*) AS count FROM finance_alert_events",
+                    "SELECT (SELECT COUNT(*) FROM finance_alert_events WHERE event_type = 'detected') != 1 AS count",
                     (),
-                    "finance_alert_events 必須維持 0 筆",
+                    "finance_alert_events 必須剛好 1 筆 detected 事件",
                 ),
             ]
             errors = []

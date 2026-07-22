@@ -257,8 +257,8 @@ modules:
       beclass_records.refund_account_no 且無服務指派／排班時數。
     - 匯入暫存必須以至少兩個 finance_import_batches、一筆跨批次唯一的 finance_import_rows 與多筆同 fingerprint
       的 finance_import_occurrences 表達重複匯入；不得建立第二筆 canonical row。
-    - 警示判斷暫緩約束：生成器不得 INSERT、UPDATE 或呼叫 finance_alerts、finance_alert_events、警示偵測器或工作流。本階段警示表均為
-      0 筆；警示判斷與生命週期驗證列為後續待辦。
+    - 警示與 pending 流水連動約束：生成器播種跨檔重複匯入測試之 pending 銀行流水時，必須同步呼叫 FinanceAlertDetectionService
+      建立 1 筆 open 狀態警示案件與 detected 稽核事件，供帳務警示中心顯示與驗證。
     - --seed-db 播種後必須執行獨立 SQL 全表對帳：驗證 orders.service_days * service_hours_per_day
       == 實際服務時數加總，client_payment_transactions 淨額與 client_payments 一致，且 staff_monthly_settlements
       與 staff_transfer_allocations 金額 100% 平衡。
@@ -307,8 +307,9 @@ modules:
       insert-only importer 建立 50 筆主檔，再保留原有生命週期隨機分布並套用指定案號邊界覆蓋。依據各案件生命週期狀態寫入 case_staff_assignments（含指定
       2/3 月嫂連續交接）、assignment-owned staff_schedule（日排班含指定雙薪）、client_payments、client_payment_transactions（含部分入款／超收／退款）、由
       FinanceImportStagingService 建立 finance_import_batches / rows / occurrences（重複
-      fingerprint Fact）、staff_payments、staff_monthly_settlements / details 及 staff_actual_transfers
-      / staff_transfer_allocations，並執行全表對帳與警示表為 0 的驗證。
+      fingerprint Fact）並調用 FinanceAlertDetectionService 建立對應 alert、staff_payments、staff_monthly_settlements
+      / details 及 staff_actual_transfers / staff_transfer_allocations，並執行全表對帳與包含 1
+      筆 open 警示的驗證。
     - 建立每案日期時先依生命週期相對 reference_date 產生固定服務區間，再以該完整區間查找無重疊月嫂；不可用月嫂不得改寫區間，應中止播種。排班完成後再次以
       SQL 驗證所有狀態日期關係。
     idempotency:

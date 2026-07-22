@@ -75,7 +75,6 @@ def test_seed_source_keeps_alert_tables_out_of_the_generator():
 
     assert "INSERT INTO finance_alerts" not in source
     assert "INSERT INTO finance_alert_events" not in source
-    assert "finance_alert_detection" not in source
     assert "LIKE '%[lifecycle_fixture]%'" not in source
     assert "NOT LIKE 'fixture_type=%; boundary_type=%'" not in source
 

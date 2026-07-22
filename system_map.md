@@ -123,11 +123,11 @@
   - 指定邊界矩陣：115000003（服務中）兩段各 10 天 active 交接、115000004（完成）兩段 12/13 天 completed 交接、115000008/115000009 三段連續交接，且 115000009 的 actual_hours、補助快照與 floor_fee_allocated 依時數比例分配；同案不同 assignment_id 的日期不得重疊。
   - 115000018 必須至少有一筆服務日 staff_schedule.is_double_pay = TRUE；115000013 的第一期 2,500 應收對應三筆 1,000 成功入款，115000014 的第二期 2,500 應收對應單筆 3,000 成功入款，115000005 的已收訂金取消案必須退回 beclass_records.refund_account_no 且無服務指派／排班時數。
   - 匯入暫存必須以至少兩個 finance_import_batches、一筆跨批次唯一的 finance_import_rows 與多筆同 fingerprint 的 finance_import_occurrences 表達重複匯入；不得建立第二筆 canonical row。
-  - 警示判斷暫緩約束：生成器不得 INSERT、UPDATE 或呼叫 finance_alerts、finance_alert_events、警示偵測器或工作流。本階段警示表均為 0 筆；警示判斷與生命週期驗證列為後續待辦。
+  - 警示與 pending 流水連動約束：生成器播種跨檔重複匯入測試之 pending 銀行流水時，必須同步呼叫 FinanceAlertDetectionService 建立 1 筆 open 狀態警示案件與 detected 稽核事件，供帳務警示中心顯示與驗證。
   - --seed-db 播種後必須執行獨立 SQL 全表對帳：驗證 orders.service_days * service_hours_per_day == 實際服務時數加總，client_payment_transactions 淨額與 client_payments 一致，且 staff_monthly_settlements 與 staff_transfer_allocations 金額 100% 平衡。
 - Algorithm:
   - 未帶旗標時：走既有 50 筆個人資料池與名冊／帳務 Excel 檔導出邏輯。
-  - --seed-db 模式：先拒絕既有核心 case_no，或在 --replace-demo-db 時以 FK 安全順序清除僅限播種擁有的資料；接著以既有 insert-only importer 建立 50 筆主檔，再保留原有生命週期隨機分布並套用指定案號邊界覆蓋。依據各案件生命週期狀態寫入 case_staff_assignments（含指定 2/3 月嫂連續交接）、assignment-owned staff_schedule（日排班含指定雙薪）、client_payments、client_payment_transactions（含部分入款／超收／退款）、由 FinanceImportStagingService 建立 finance_import_batches / rows / occurrences（重複 fingerprint Fact）、staff_payments、staff_monthly_settlements / details 及 staff_actual_transfers / staff_transfer_allocations，並執行全表對帳與警示表為 0 的驗證。
+  - --seed-db 模式：先拒絕既有核心 case_no，或在 --replace-demo-db 時以 FK 安全順序清除僅限播種擁有的資料；接著以既有 insert-only importer 建立 50 筆主檔，再保留原有生命週期隨機分布並套用指定案號邊界覆蓋。依據各案件生命週期狀態寫入 case_staff_assignments（含指定 2/3 月嫂連續交接）、assignment-owned staff_schedule（日排班含指定雙薪）、client_payments、client_payment_transactions（含部分入款／超收／退款）、由 FinanceImportStagingService 建立 finance_import_batches / rows / occurrences（重複 fingerprint Fact）並調用 FinanceAlertDetectionService 建立對應 alert、staff_payments、staff_monthly_settlements / details 及 staff_actual_transfers / staff_transfer_allocations，並執行全表對帳與包含 1 筆 open 警示的驗證。
   - 建立每案日期時先依生命週期相對 reference_date 產生固定服務區間，再以該完整區間查找無重疊月嫂；不可用月嫂不得改寫區間，應中止播種。排班完成後再次以 SQL 驗證所有狀態日期關係。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_generate_fake_data.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
