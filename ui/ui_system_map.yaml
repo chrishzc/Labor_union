@@ -37,7 +37,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - load_pages
@@ -57,8 +57,21 @@ modules:
     exceptions: []
     invariants:
     - 'INV-UI-BROWSER-01: 原始資料表格欄位必須支援透過對照表轉換為中文名稱 (含英文原鍵名或純中文)，未記錄欄位自動安全回退原鍵名。'
+    - orders 的資料瀏覽不得顯示或編輯 clients.identity_status；資格資訊只顯示 clients.identity_status，且該欄位在
+      DataBrowserUI 必須唯讀。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - -q
+        - tests\test_data_browser_identity_status_ui.py
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
     decisions: []
     todo: []
     checkpoint: []
@@ -76,7 +89,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 1
   OrderUI:
     type: ui_page
@@ -114,6 +127,7 @@ modules:
         - -q
         - tests\test_order_ui_shell_ownership.py
         cwd: project
+        timeout: 60
         expect_exit: 0
     - command:
         argv:
@@ -122,6 +136,7 @@ modules:
         - py_compile
         - ui\pages\02_orders.py
         cwd: project
+        timeout: 60
         expect_exit: 0
     decisions: []
     todo: []
@@ -142,22 +157,41 @@ modules:
     - 不改動 Tab3、Tab4、Tab5 各自 renderer 的帳務或報表行為。
     - 不新增客戶收款或月嫂應付／轉帳操作。
     sub_map: ui_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 2
   OrderUI_Tab1_Overview:
     type: ui_component
-    description: Tab 1 總覽表格。完全對齊 36 個完整訂單欄位清單。
+    description: Tab 1 訂單資訊總覽。預設不限定訂單狀態，透過下拉式分頁一次呈現至多 10 筆訂單，並以 clients.identity_status
+      顯示身分資格。
     source: ui/pages/02_orders.py::_render_tab1_overview
     domain: null
     subsystem: null
     map_file: ui\ui_system_map.md
-    dependencies: []
+    dependencies:
+    - EditOrderUI
     input: {}
     output: {}
     exceptions: []
-    invariants: []
+    invariants:
+    - 顯示與篩選身分資格時只能讀取 clients.identity_status；不得讀取、顯示或重建 clients.identity_status。
+    - 每頁最多渲染 10 筆訂單；訂單總數與目前顯示範圍必須清楚標示。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_order_overview_ui.py
+        - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-order-overview-ui
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
     decisions: []
     todo: []
     checkpoint: []
@@ -165,7 +199,10 @@ modules:
       mode: not_required
       signals: []
     complexity: low
-    algorithm: []
+    algorithm:
+    - 狀態篩選的預設值為不限定；使用者未選任何狀態時顯示所有訂單狀態。
+    - 依篩選與搜尋結果建立下拉式頁碼選單，每頁至多 10 筆，切換頁碼不得遺失目前篩選條件。
+    - 展開單筆訂單時委派 EditOrderUI；不得自行寫入訂單、客戶或帳務資料。
     idempotency:
       level: unknown
       side_effects: []
@@ -175,7 +212,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 1
   OrderUI_Tab2_Assign:
     type: ui_component
@@ -193,8 +230,24 @@ modules:
     - 'INV-UI-ASSIGN-01: 媒合紀錄清單僅能顯示至少有一項發送紀錄 (sent_info_1_at/sent_info_2_at) 或意願已變更的有效紀錄。'
     - 'INV-UI-ASSIGN-02: 選取月嫂檢視時嚴禁 speculative 預先建立 DB 紀錄，必須在點擊發送/變更動作時按需 (On-Demand)
       建立。'
+    - 案件選單與摘要的身分資格只能顯示 clients.identity_status；不得讀取或顯示 clients.identity_status。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_order_assign_identity_status_ui.py
+        - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-order-assign-identity
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
     decisions: []
     todo: []
     checkpoint: []
@@ -212,7 +265,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 1
   OrderUI_Tab3_Finance:
     type: ui_component
@@ -249,13 +302,15 @@ modules:
     fan_in_snapshot: 0
   CalendarUI:
     type: ui_page
-    description: '服務人員行事曆與檔期調控獨立頁面。包含兩階段時間操作選單 (1. 執行操作: 單純看行事曆/訂單匹配/出勤天數精算; 2. 訂單選擇)、四色
-      HTML 月曆 (白/黃/紅/綠底)、7 天預留備用期動態渲染、國定假日單日獨立決策控制面板，以及持久化寫入 staff_schedule 檔期表。'
+    description: 服務人員行事曆與檔期調控獨立頁面。除既有月曆模式外，提供多月嫂案件→正式服務指派選擇、指派專屬日排班呈現與單日調整。
     source: ui/pages/03_calendar.py::show
     domain: null
     subsystem: null
     map_file: ui\ui_system_map.md
-    dependencies: []
+    dependencies:
+    - MultiCaregiverCaseAssignmentListRouter
+    - MultiCaregiverScheduleReadRouter
+    - MultiCaregiverScheduleRouter
     input: {}
     output: {}
     exceptions: []
@@ -269,8 +324,21 @@ modules:
       1 天，確保實際服務天數 100% 足額達 N 天。'
     - 'INV-CAL-05 (國定假日單日獨立決策): 支援連假期間針對每一個獨立國定假日進行單日個體勾選；選擇放假者在月曆標示為綠底 🟢 且完工日順延 1
       天，選擇上班者計為紅底 🔴 正常工作日 (預設雙倍薪資)。'
+    - 多月嫂模式必須先選 case_no、再從該案件 API 回傳的正式指派中選 assignment_id；不得由 orders.staff_id、日期或姓名推測指派。
+    - 多月嫂模式只透過 MultiCaregiverCaseAssignmentListRouter、MultiCaregiverScheduleReadRouter
+      與 MultiCaregiverScheduleRouter 讀寫；不得呼叫 legacy 排班 helper。
+    - 不提供同日分時段、planned_hours 或 actual_hours 手動輸入；單日請假不自動延伸、覆寫或移動下一位月嫂的服務區段。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - py_compile
+        - ui\pages\03_calendar.py
+        cwd: project
+        timeout: 60
+        expect_exit: 0
     decisions: []
     todo: []
     checkpoint: []
@@ -288,35 +356,71 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 1
   EditOrderUI:
     type: ui_page
     description: 單筆訂單動態試算與資料維護頁面。採用 st.columns 與帶邊框 Container 打造實體訂單單據視覺，具備 Formula
-      Lock Guardrail 防呆機制。
-    source: ui/pages/04_edit_order.py::show
+      Lock Guardrail，以及訂單變更→完整月嫂指派→帳務／排班預覽→明確套用的一致性工作流。
+    source: ui/pages/04_edit_order.py::render_editor,show
     domain: null
     subsystem: null
     map_file: ui\ui_system_map.md
-    dependencies: []
-    input: {}
-    output: {}
+    dependencies:
+    - OrderRouter
+    - MultiCaregiverCaseAssignmentListRouter
+    - StaffRouter
+    input:
+      editable_order_change: 非取消訂單的完整訂單目標值，含排班關鍵欄位與客戶／訂單主資料。
+      assignment_plan: 使用者明確建立或調整的完整正式月嫂服務區段；既有有效指派未列入時，UI 必須明示其為取消候選。
+      applied_by: 非空操作識別；不得從月嫂姓名、訂單欄位或預設值推測。
+    output:
+      synchronization_preview: target_hours、差額、required_schedule_removals、帳務鎖定或人工覆核原因。
+      synchronization_apply_result: 成功套用後的正式指派與排班摘要，並觸發訂單頁重新載入。
     exceptions: []
     invariants:
     - 'INV-EDIT-01: 修改輸入欄位時，費用與完工日必須即時連動試算，且金額統一無小數點 safe_int 呈現。'
     - 'INV-EDIT-03: 所有由公式自動衍生之金額與時數欄位，預設必須為唯讀鎖定狀態。'
     - 'INV-EDIT-04: 強制解鎖自動試算欄位時，必須顯性跳出警告告知公式連動失效風險。'
-    - 'INV-EDIT-05: 點擊儲存時必須調用 update_order_full_details 寫入訂單與客戶主資料；帳務由新帳務介面獨立處理。'
+    - 'INV-EDIT-05: 任何含 service_days、service_hours_per_day、start_date、end_date、actual_start_date
+      或 actual_end_date 的訂單變更，必須只經 OrderRouter 的 preview／apply 同步流程；不得先呼叫 db_service.update_order_full_details
+      或 `/full-details`。'
+    - 補助資格只能以 clients.identity_status 唯讀呈現；UI 不得提供修改控制項、不得傳送 identity_status 或 clients.identity_status，也不得讀取
+      clients.identity_status。
+    - 訂金應收日期可為空值，空值不得以今天或第一期應收日自動補值；送出同步請求時須保留 null。
+    - 多月嫂正式指派只能由 case_no 的正式指派 API 建立或選取；不得由 orders.staff_id、媒合紀錄、姓名、日期或列表第一筆推測。
+    - apply 前必須明確呈現並確認 required_schedule_removals；遇帳務鎖定、人工時數覆寫或時數差額時，不得繞過、靜默降級或顯示成功。
+    - 帳務仍由新帳務介面獨立處理；本頁不得建立、調整或取消 client／staff payments、月結或轉帳。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_edit_order_synchronization_ui.py
+        - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-edit-order-synchronization-ui
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
     decisions: []
     todo: []
     checkpoint: []
     observability:
       mode: not_required
       signals: []
-    complexity: low
-    algorithm: []
+    complexity: medium
+    algorithm:
+    - 讀取目前案件的 clients.identity_status 並以唯讀欄位顯示，要求使用者提交完整 assignment_plan；不得以 orders.staff_id、媒合紀錄或第一筆候選推測指派。
+    - 對 OrderRouter preview 送出完整訂單目標值與指派計畫，清楚呈現時數差額、鎖定原因及 required_schedule_removals。
+    - 「確定儲存」先要求有效且未過期的 preview；僅當 preview 可套用時，要求使用者逐筆明確確認全部 required_schedule_removals
+      與非空 applied_by，再呼叫 OrderRouter apply；HTTP 409／422 必須顯示原始原因而非呈現成功。
+    - apply 成功後清除本頁同步草稿並 rerun 重新讀取訂單；CalendarUI 下次顯示時由正式指派與日排班 API 重新讀取，不保留舊排班快取。
     idempotency:
       level: unknown
       side_effects: []
@@ -326,8 +430,8 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
-    fan_in_snapshot: 1
+    state: validated
+    fan_in_snapshot: 2
   FormManagementUI:
     type: ui_page
     description: '表單與履歷問卷管理專頁。支援動態新建自訂表單沙盒、線上編輯修改既有模板欄位名稱、拖拉平移排序、二次確認刪除防呆、5:5側邊雙視窗實時預覽/PDF導出、SQL原生資料表歸屬分類選擇器、獨立JSON模板目錄、Excel長文字溢出不撐高列高、顯式邊框與PDF乾淨去雜線、全量資料庫欄位100%開載、100%全寬滿版預覽切換器，以及
@@ -349,8 +453,25 @@ modules:
       clients, staff, beclass_records 100+ 個全量欄位填入 UI 二階選單。'
     - 'INV-UI-FORM-28: 100% 全寬滿版契約預覽切換公理 (Full-Width Contract Canvas Switcher Protocol):
       提供 5:5 左右對照維護模式與 100% 全寬滿版 A4 沉浸預覽模式無縫切換。'
+    - 訂單欄位字典、範本選項與統計只能使用 clients.identity_status；不得提供或統計 clients.identity_status，且
+      identity_status 為唯讀資料來源。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_form_management_identity_status_ui.py
+        - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-form-management-identity
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
     decisions: []
     todo: []
     checkpoint: []
@@ -368,7 +489,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 1
   LegacyPaymentUIFreeze:
     type: ui_page
@@ -425,8 +546,8 @@ modules:
     fan_in_snapshot: 1
   LegacyPaymentEditFreeze:
     type: ui_page
-    description: 停止訂單編輯頁讀寫舊 payments；訂單資料與狀態仍可儲存，新帳務改由新帳務介面處理。
-    source: ui/pages/04_edit_order.py::safe_float,safe_int,safe_date,safe_optional_date,render_editor
+    description: 停止訂單編輯頁的輔助資料處理讀寫舊 payments；實際編輯與同步提交由 EditOrderUI 擁有，新帳務改由新帳務介面處理。
+    source: ui/pages/04_edit_order.py::safe_float,safe_int,safe_date,safe_optional_date
     domain: null
     subsystem: null
     map_file: ui\ui_system_map.md
@@ -551,7 +672,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
   PaymentManagementUI:
     type: ui_page
@@ -769,7 +890,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
   StaffContractExcelMirror:
     type: ui_component

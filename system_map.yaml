@@ -88,7 +88,7 @@ modules:
     - 不核發 UILayer Task；此節點不具可提交的 implementation hash。
     - 不修改 ui/app.py、任何 UI 頁面或既有子節點功能。
     sub_map: root
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
   APILayer:
     type: sub_system_layer
@@ -167,25 +167,241 @@ modules:
     - 不核發 ServicesLayer Task；此節點不具可提交的 implementation hash。
     - 不直接修改 services/db_service.py、資料庫 schema、migration 或 UI。
     sub_map: root
-    state: deployed
+    state: dirty
     fan_in_snapshot: 1
   GenerateFakeData:
     type: script
-    description: 假資料統一生成器。採用「時間軸推進演算法 (Sequential Timeline Generator)」，為每位月嫂維護獨立時間軸游標，確保同月嫂的案件排班前後接續、絕對獨佔且零重疊
-      (Zero Overlap)。
+    description: 假資料統一生成器。預設流程必須保留既有名冊、Excel 財務與生命週期情境，並在同一次生成中整合正式多月嫂指派、assignment-owned
+      日排班及正規化帳務。
     source: scripts/generate_fake_data.py
     domain: null
     subsystem: null
     map_file: system_map.md
-    dependencies: []
-    input: {}
-    output: {}
+    dependencies:
+    - ClientHcmInsertOnlyImporter
+    - ClientBeClassInsertOnlyImporter
+    - StaffBeClassInsertOnlyImporter
+    - HistoricalOrderInsertOnlyImporter
+    - FinanceImportStagingContract
+    - PaymentSchema
+    - MultiCaregiverScheduleSchema
+    - FinanceImportRawStagingSchema
+    - StaffMonthlySettlementSchema
+    - StaffMonthlySettlementDetailSchema
+    - StaffActualTransferSchema
+    - StaffTransferAllocationSchema
+    input:
+      default_generation: 未帶旗標時的既有名冊（假資料_範例.xlsx）與 Excel 財務檔（帳務.xlsx）生成流程；必須 100%
+        保留原有 50 筆個人資料池與導出檔案結構。
+      seed_db: 可選的資料庫獨立播種與對帳模式；在保留 50 筆既有核心生命週期案件（115000001 至 115000050）的前提下，寫入資料庫並自動完成全表帳務與時數對帳。
+      replace_demo_db: 僅與 --seed-db 同時提供的明確假資料取代模式；清空目前設定資料庫的所有 base-table 資料列後，重新建立完整整合播種資料庫。
+      seed: 可重跑的亂數種子
+      reference_date: 情境相對日期基準
+    output:
+      generation_summary: 已建立的客戶、月嫂、案件、正式指派、日排班與帳務列計數及案件編號範圍。
+      reconciliation_report: 逐案與逐月嫂的時數、應付、收款、月結及轉帳分配重算結果。
     exceptions: []
     invariants:
+    - 預設未帶旗標執行時，必須 100% 保持既有名冊與 Excel 財務檔生成流程，不得改動產出檔名、工作表結構或破壞原始假資料。
+    - '`--seed-db` 必須透過既有 ClientHcm／ClientBeClass／StaffBeClass／HistoricalOrder insert-only
+      importer 建立主檔，並透過 FinanceImportStagingService 建立匯入暫存；不得在本生成器複製或繞過其主檔去重、完整性與跨批次去重規則。'
+    - 未帶 `--replace-demo-db` 時，任一核心 case_no 已存在即拒絕播種，不得覆寫既有主檔或人工資料；帶入該旗標時僅可依 FK 安全順序清除本生成器擁有的
+      clients、beclass_records、staff、orders 與其衍生子表資料，嚴禁讀取、寫入或清除 legacy payments、schema、migration
+      或非播種資料表。
+    - 指定案號只作為固定邊界覆蓋層；其餘案件必須保留既有七種生命週期混合、隨機服務天數／每日時數／樓層費／服務方式／固定休假與一般備註，不得將 50 案簡化為同一狀態、同一時數或同一排班模板。
     - 不得 INSERT、UPDATE 或查詢 legacy payments；假帳務必須寫入 client_payments 與 client_payment_transactions。
+    - 各生命週期狀態具備明確不可變金流與時數約束：
+    - 「洽談中」：零實際服務時間（actual_hours = 0）、無月嫂日排班指派、無第一期及尾款金流。
+    - 「訂單成立」：實收訂金（經由客戶虛擬帳號 99781699 + case_no 轉帳）、無實際服務時間（actual_hours = 0）。
+    - 「服務中」：實收訂金 + 第一期款（經由客戶虛擬帳號轉帳）、計算月嫂實際服務時數與排班指派。
+    - 「訂單完成」：實收訂金 + 第一期 + 第二期款（經由客戶虛擬帳號）+ 月嫂發薪撥款（經由 staff_bank_accounts 銀行代碼/分行/帳號）+
+      依身分與時數進行補助對帳。
+    - 「訂單取消」：實際服務時間為 0（actual_hours = 0），若已收訂金必須產生退款交易列（經由 beclass_records 之 refund_bank_code
+      與 refund_account_no 退回）。
+    - 生命週期日期必須相對於 reference_date 合法：洽談中／訂單成立的 actual_start_date、actual_end_date 為
+      NULL 且預計開始日不早於基準日；服務中滿足 actual_start_date <= reference_date <= actual_end_date；訂單完成滿足
+      actual_start_date <= actual_end_date <= reference_date；訂單取消的實際服務日期為 NULL。
+    - 月嫂衝突只能改選在既定服務區間內無重疊的其他月嫂；不得為了避開既有排班而把服務中或訂單完成案件推到 reference_date 之後。無可用月嫂時必須失敗並回滾。
+    - 多月嫂服務指派與日排班約束：
+    - 支援單案一至多位月嫂服務指派（case_staff_assignments），包含單一月嫂與多月嫂無縫連續交接（前一段 end_date + 1 天 =
+      後一段 start_date）。
+    - 依據服務指派產生 assignment-owned 日層級排班列（staff_schedule），考量月嫂固定休假偏好（weekly_rest_days）與國定假日決定工作日，同一訂單多月嫂在同一天不得重疊指派。
+    - 全案所有未取消指派的實際服務時數（actual_hours）加總必須精確等於 orders.service_days * orders.service_hours_per_day。
+    - 後續完整衍生帳務鏈 (Downstream Accounting Chain) 約束：
+    - 客戶帳務（client_payments 與 client_payment_transactions）：依服務階段產生應收摘要與虛擬帳號實收流水；取消案件產生退款交易列（退回至
+      beclass_records 之退款帳號）。client_payments 必須完整填入 6 大應收與實收日期欄位（deposit_due_date,
+      deposit_received_at, first_payment_due_date, first_payment_received_at, second_payment_due_date,
+      second_payment_received_at），且實收日期必須與 client_payment_transactions 之 occurred_at
+      100% 精確一致。
+    - 月嫂應付薪資（staff_payments）：每筆未取消指派恰好對應一筆 staff_payments 記錄，保存實際時數、單價、樓層費分配（floor_fee_allocated）與應付總額（total_payable）。
+    - 月嫂月結總表與明細（staff_monthly_settlements 與 staff_monthly_settlement_details）：依結算週期歸集該月嫂當期所有應付指派，產生月結總表與對應的細項紀錄。
+    - 銀行實際轉帳與金額分配（staff_actual_transfers 與 staff_transfer_allocations）：建立合作社銀行出款流水（帶入月嫂姓名與轉帳金額），並透過
+      staff_transfer_allocations 將轉帳金額精確分配至月結明細（settlement_detail_id），不得超額或重複分配。
+    - 帳務金流必須完整綁定 3 大帳號機制：
+    - 客戶繳款虛擬帳號：由 99781699 + case_no 演算法推導，作為客戶入款對帳依據。
+    - 客戶退款銀行帳號：寫入 beclass_records.refund_bank_code（如 8070014）與 refund_account_no，作為訂金退款對帳依據。
+    - 月嫂領薪銀行帳號：寫入 staff_bank_accounts 1:N 子表（代碼 807、分行 0014、帳號），作為月嫂發薪與轉帳對帳依據。
+    - 資料庫播種必須確保全表與全欄位完整性：
+    - staff 主表 19 欄位全數填滿，並播種 8 大選項子表（staff_bank_accounts, staff_regions, staff_time_slots,
+      staff_cooking_skills, staff_transportation, staff_holiday_availability, staff_weekly_rest,
+      staff_baby_types）。
+    - beclass_records 必須填滿並包含 refund_bank_code 與 refund_account_no。
+    - orders 必須正確填入主責月嫂 staff_id。
+    - 邊界案件的 clients.admin_notes 必須依 fixture_type、boundary_type、owner_module、expected
+      的固定鍵值格式標記；其餘正常案件統一標示 fixture_type=normal 與 boundary_type=none。
+    - 指定邊界矩陣：115000003（服務中）兩段各 10 天 active 交接、115000004（完成）兩段 12/13 天 completed 交接、115000008/115000009
+      三段連續交接，且 115000009 的 actual_hours、補助快照與 floor_fee_allocated 依時數比例分配；同案不同 assignment_id
+      的日期不得重疊。
+    - 115000018 必須至少有一筆服務日 staff_schedule.is_double_pay = TRUE；115000013 的第一期 2,500
+      應收對應三筆 1,000 成功入款，115000014 的第二期 2,500 應收對應單筆 3,000 成功入款，115000005 的已收訂金取消案必須退回
+      beclass_records.refund_account_no 且無服務指派／排班時數。
+    - 匯入暫存必須以至少兩個 finance_import_batches、一筆跨批次唯一的 finance_import_rows 與多筆同 fingerprint
+      的 finance_import_occurrences 表達重複匯入；不得建立第二筆 canonical row。
+    - 警示判斷暫緩約束：生成器不得 INSERT、UPDATE 或呼叫 finance_alerts、finance_alert_events、警示偵測器或工作流。本階段警示表均為
+      0 筆；警示判斷與生命週期驗證列為後續待辦。
+    - --seed-db 播種後必須執行獨立 SQL 全表對帳：驗證 orders.service_days * service_hours_per_day
+      == 實際服務時數加總，client_payment_transactions 淨額與 client_payments 一致，且 staff_monthly_settlements
+      與 staff_transfer_allocations 金額 100% 平衡。
     preferred_pattern: none
     verification:
-    - must_have_assertions
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_generate_fake_data.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 120
+        expect_exit: 0
+        expect_stdout_contains: passed
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_import_client_hcm_insert_only.py
+        - tests\test_import_client_beclass_insert_only.py
+        - tests\test_import_staff_beclass_insert_only.py
+        - tests\test_import_historical_orders_insert_only.py
+        - tests\test_finance_import_staging.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 120
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 未帶旗標時：走既有 50 筆個人資料池與名冊／帳務 Excel 檔導出邏輯。
+    - --seed-db 模式：先拒絕既有核心 case_no，或在 --replace-demo-db 時以 FK 安全順序清除僅限播種擁有的資料；接著以既有
+      insert-only importer 建立 50 筆主檔，再保留原有生命週期隨機分布並套用指定案號邊界覆蓋。依據各案件生命週期狀態寫入 case_staff_assignments（含指定
+      2/3 月嫂連續交接）、assignment-owned staff_schedule（日排班含指定雙薪）、client_payments、client_payment_transactions（含部分入款／超收／退款）、由
+      FinanceImportStagingService 建立 finance_import_batches / rows / occurrences（重複
+      fingerprint Fact）、staff_payments、staff_monthly_settlements / details 及 staff_actual_transfers
+      / staff_transfer_allocations，並執行全表對帳與警示表為 0 的驗證。
+    - 建立每案日期時先依生命週期相對 reference_date 產生固定服務區間，再以該完整區間查找無重疊月嫂；不可用月嫂不得改寫區間，應中止播種。排班完成後再次以
+      SQL 驗證所有狀態日期關係。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals:
+    - 不打亂或改變 50 筆既有客戶與 Excel 生成流程。
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 0
+    known_symbols:
+    - _assign_available_staff
+    - _clear_generator_owned_demo_data
+    - _core_case_nos
+    - _derive_payment_dates
+    - _finance_duplicate_normalized_result
+    - _import_seed_master_data
+    - _prepare_seed_database
+    - _prorate_amount
+    - _rest_weekdays_for_service_mode
+    - _scenario_counts
+    - _scenario_note
+    - _schedule_end_date
+    - _schedule_rows_for_segment
+    - _schedule_start_for_completed_service
+    - _segment_work_day_counts
+    - _upsert_payment
+    - _write_boundary_transaction
+    - _write_scenario_schedule
+    - build_lifecycle_fixture_plan
+    - fill_checkbox_group
+    - fixture_admin_note
+    - generate_fake_address
+    - generate_fake_due_date
+    - generate_fake_id_card
+    - generate_fake_ip
+    - generate_fake_line_id
+    - generate_fake_name
+    - generate_fake_phone
+    - generate_fake_service_start_date
+    - generate_fake_signup_time
+    - generate_finance_data
+    - generate_historical_order_fixture
+    - generate_lifecycle_scenarios
+    - generate_roster_data
+    - generate_schedule_data
+    - main
+    - parse_cli_args
+    - seed_assignment_payroll_facts
+    - seed_client_payment_boundary_facts
+    - seed_finance_import_duplicate_fact
+    - validate_lifecycle_data
+    - validate_seed_database
+  FinanceImportStagingContract:
+    type: dependency_contract
+    description: Master map 對 services_layer／FinanceImportStagingService 的跨子地圖依賴合約，供
+      GenerateFakeData 以正式 staging 介面建立匯入批次、canonical row 與 occurrence，而不複製下層服務實作。
+    source: document/資料庫、資料處理/帳務假數據生成與關聯測試規格.md
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies: []
+    input:
+      normalized_result: 已正規化且保留來源欄位、銀行參照與 raw payload 的匯入結果
+      identity_maps: 客戶退款與服務人員精確帳號 mapping
+    output:
+      staging_result: batch_id 與逐列 inserted／skipped_existing、canonical row、occurrence
+        結果
+    exceptions: []
+    invariants:
+    - 實作唯一落點仍為 services_layer 的 FinanceImportStagingService；本合約不持有 Source 或資料庫寫入邏輯。
+    - 同 fingerprint 只能有一筆 canonical row；重複匯入只新增 occurrence，不得覆寫或重新分類既有 canonical row。
+    - GenerateFakeData 必須呼叫正式 staging 介面，不得自行複製其去重 SQL 或略過 append-only 邊界。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_finance_import_staging.py
+        - tests\test_generate_fake_data.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 120
+        expect_exit: 0
+        expect_stdout_contains: passed
     decisions: []
     todo: []
     checkpoint: []
@@ -201,34 +417,11 @@ modules:
     required_context: []
     forbidden_context: []
     context_priority: {}
-    non_goals: []
+    non_goals:
+    - 不取代、不搬移或重複宣告 services_layer 的 FinanceImportStagingService 實作節點。
     sub_map: root
-    state: deployed
-    fan_in_snapshot: 0
-    known_symbols:
-    - _assign_available_staff
-    - _rest_weekdays_for_service_mode
-    - _scenario_counts
-    - _scenario_note
-    - _upsert_payment
-    - _write_scenario_schedule
-    - fill_checkbox_group
-    - generate_fake_address
-    - generate_fake_due_date
-    - generate_fake_id_card
-    - generate_fake_ip
-    - generate_fake_line_id
-    - generate_fake_name
-    - generate_fake_phone
-    - generate_fake_service_start_date
-    - generate_fake_signup_time
-    - generate_finance_data
-    - generate_lifecycle_scenarios
-    - generate_roster_data
-    - generate_schedule_data
-    - main
-    - parse_cli_args
-    - validate_lifecycle_data
+    state: planned
+    fan_in_snapshot: 1
   PaymentSchema:
     type: database_schema
     description: 建立客戶帳務、正式服務指派與訂單層服務人員應付核心表；服務人員月結、實際轉帳及分配由獨立 Schema 節點擴充。
@@ -250,6 +443,7 @@ modules:
       case_staff_assignments: many caregiver service segments per case_no
       staff_payments: one payable obligation per caregiver service assignment
       staff_payment_transactions: legacy-compatible per-payable transaction projection
+      actual_hours_adjustments: append-only manual actual-hours audit records
     exceptions: []
     invariants:
     - '`client_payments.case_no` 必須唯一且存在於 `orders.case_no`；`staff_payments.case_no`
@@ -264,10 +458,12 @@ modules:
     - 相同外部交易識別不得重複入帳；失敗或退匯交易不得計入實收或實付淨額。
     - '`orders` 不得存在 `other_addition`；`service_salary` 是純薪資，月嫂總應付以 `service_salary
       + floor_fee` 表示。'
+    - clients.identity_status 是身分資格的唯一儲存來源，訂單與帳務表不得保存或寫入 clients.identity_status 的副本。
     - 客戶帳務的 `subsidy_return_*` 只表示退還客戶預付補助款，不得用於一般退款或解約退款；legacy `subsidy_refund_*`
       只保留相容，不得成為新流程寫入目標。
     - '`orders.deposit_service_days` 為非負整數且不得超過 `orders.service_days`；不得由身分資格或舊檢視表推測其值。'
     - 新的跨案銀行事件不得拆成多筆偽造 external_reference 寫入 `staff_payment_transactions`。
+    - '`actual_hours` 的人工覆寫必須寫入 append-only 稽核紀錄，包含正式指派、調整前後值、非空原因、操作者與時間；不得覆寫或刪除既有稽核列。'
     preferred_pattern: none
     verification:
     - command:
@@ -275,11 +471,12 @@ modules:
         - .venv\Scripts\python.exe
         - -c
         - from pathlib import Path; s=Path('db/schema.sql').read_text(encoding='utf-8');
-          tables=('client_payments','client_payment_transactions','case_staff_assignments','staff_payments','staff_payment_transactions','payment_migration_reviews');
+          tables=('client_payments','client_payment_transactions','case_staff_assignments','staff_payments','staff_payment_transactions','payment_migration_reviews','actual_hours_adjustments');
           assert all(f'CREATE TABLE IF NOT EXISTS {n}' in s for n in tables); assert
           all(c in s for c in ('subsidy_return_receivable','subsidy_return_refunded','subsidy_return_due_date','subsidy_return_at'));
           print('CORE PAYMENT SCHEMA DECLARED')
         cwd: project
+        timeout: 60
         expect_exit: 0
         expect_stdout_contains: CORE PAYMENT SCHEMA DECLARED
     decisions: []
@@ -296,9 +493,217 @@ modules:
     - '`staff_payments` 以服務指派為應付單位，分列服務時數、服務薪資、分配樓層費、調整金額、應付總額與應付日期；同一月嫂可同時持有不同 `case_no`
       的多筆待付款。'
     - '`staff_payment_transactions` 保留既有逐應付交易相容結構；新的月結銀行事件不得為跨案件付款複製成多筆外部流水。'
+    - '`actual_hours_adjustments` 逐筆記錄人工覆寫前後時數、原因、操作者與時間；不取代指派或排班歷史。'
     - 樓層費由案件明確分配至各服務指派；結案時計算所有指派的薪資與樓層費，加總後才形成案件對月嫂的總應付。
     - '`orders.deposit_service_days` 保存訂單表單選定的訂金天數；可為 null 以保留未補齊的歷史案件，任何自動建帳流程遇到
       null 必須停止並回報人工補齊，不得套用舊 5／0 天預設。'
+    - 所有訂單計價與檢視 SQL 以 orders.client_id 關聯 clients.identity_status；移除 clients.identity_status
+      及所有以該欄位計算的來源。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: validated
+    fan_in_snapshot: 21
+  ClientIdentityStatusSourceMigration:
+    type: script
+    description: 以可稽核、可預演的方式，將身分資格唯一來源收斂至 clients.identity_status，並在所有消費端完成轉換後移除 clients.identity_status。
+    source: scripts/migrate_client_identity_status_source.py
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - PaymentSchema
+    input:
+      mode: 預設 dry-run；只有明確 --apply 才可執行 migration。
+      discard_fake_data: 僅與 --apply 同時提供時，表示現有資料庫為可拋棄假資料；只放寬空 identity_status 的資料前置檢查，絕不由舊欄位回填或推測身分。
+      database_config: 由 .env 或明確測試設定取得的資料庫連線。
+    output:
+      migration_manifest: 每個前置檢查、受影響 orders 數量、移除前 SHOW CREATE TABLE 備份、已移除欄位與失敗原因的
+        JSON 報告。
+    exceptions: []
+    invariants:
+    - 預設 dry-run 不得寫入資料庫；--apply 前所有 clients.identity_status 必須非空，缺值必須 fail-closed。
+    - 只有明確 --apply --discard-fake-data 可略過空 identity_status 的假資料前置檢查；manifest 必須記錄此危險模式、缺值筆數與每個重建前檢視定義。
+    - 資料庫 metadata 回傳欄位名稱必須以大小寫無關方式解析；information_schema 與 SHOW CREATE 的 DictCursor
+      實際回傳不得因 table_name／TABLE_NAME 等鍵名差異而跳過備份、重建或 DDL。
+    - 不得以字串取代任意重寫 live view SQL；僅可由受版控 schema 的精確 v_order_details 定義重建已知檢視，任何其他受影響檢視必須
+      fail-closed。
+    - 不得以既有 clients.identity_status 回填、推測或修改 clients.identity_status。
+    - 未完成所有消費端替換或任一非假資料前置驗證失敗時不得移除欄位；不得影響帳務、月結、交易或正式指派資料。
+    - MySQL DROP COLUMN 為 atomic DDL 且隱式提交；移除後的 post-check 只能記錄成功／失敗，不得宣稱可 transaction
+      rollback。apply 前必須把 SHOW CREATE TABLE 備份寫入 manifest 供人工復原。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_client_identity_status_source_migration.py
+        - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-client-identity-status-migration
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - dry-run 先檢查每筆 orders.client_id 均能關聯到非空 clients.identity_status，並確認應用程式與 SQL
+      來源均不再引用 clients.identity_status；任一失敗只輸出 manifest、零寫入。
+    - --apply 在執行 DDL 前重跑全部前置檢查、擷取 SHOW CREATE TABLE，移除 clients.identity_status，並以
+      clients.identity_status 重建依賴該欄位的資料庫檢視或計算來源。
+    - --apply --discard-fake-data 仍必須拒絕任何應用程式或 SQL 來源引用；僅可略過既有假客戶空 identity_status
+      的資料檢查，先備份每個受影響檢視定義；已知 v_order_details 必須由受版控 db/schema.sql 的 clients.identity_status
+      正式定義重建，未知檢視拒絕後才執行 DROP COLUMN。
+    - migration 完成後再次驗證資料庫 schema、計算查詢與 manifest；post-check 失敗只回報明確錯誤與移除前備份，不得臆測、改寫
+      clients.identity_status 或宣稱已 rollback。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: validated
+    fan_in_snapshot: 0
+    known_symbols:
+    - _affected_views
+    - _blocked_reasons
+    - _canonical_v_order_details_statement
+    - _column_exists
+    - _database_prechecks
+    - _metadata_value
+    - _rebuild_known_views_from_canonical
+    - _scalar
+    - _show_create_table
+    - _show_create_view
+    - database_config
+    - find_legacy_source_references
+    - main
+    - run_migration
+  MultiCaregiverScheduleSchema:
+    type: database_schema
+    description: 為日層級排班建立到正式服務指派的可空關聯，以及無法確定歸屬之歷史排班覆核佇列；不自動回填或推測任何既有排班資料。
+    source: db/schema_parts/95_multi_caregiver_schedule.sql
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - PaymentSchema
+    input:
+      staff_schedule: 既有月嫂日層級排班列
+      case_staff_assignments: 同一訂單的一至多筆正式月嫂服務區段
+    output:
+      staff_schedule_assignment_reviews: 歷史排班或遷移時需要人工確認的歸屬覆核紀錄
+    exceptions: []
+    invariants:
+    - '`staff_schedule.assignment_id` 為 NULL 時須保留既有排班相容性；非 NULL 時必須外鍵連回 `case_staff_assignments.id`。'
+    - migration 必須可重跑且不得刪除、重建、覆寫或自動回填既有 `staff_schedule`。
+    - 覆核表每個 `schedule_id` 最多一筆，且已解決列必須連回明確的 `resolved_assignment_id`；不得以候選推測取代人工決定。
+    - 不得放寬既有 `staff_schedule` 的月嫂單日唯一性約束。
+    - 日期區段不得重疊、月嫂請假隔離、排班生成與實際時數計算均由後續服務節點執行；本 Schema 不實作該等商業規則。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -c
+        - from pathlib import Path; s=Path('db/schema_parts/95_multi_caregiver_schedule.sql').read_text(encoding='utf-8');
+          assert 'staff_schedule_assignment_reviews' in s; assert 'assignment_id'
+          in s; assert 'FOREIGN KEY (assignment_id)' in s; assert 'UNIQUE KEY uq_schedule_review'
+          in s; print('MULTI CAREGIVER SCHEDULE SCHEMA DECLARED')
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: MULTI CAREGIVER SCHEDULE SCHEMA DECLARED
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 以可重跑的 additive migration 新增可空 `assignment_id` 欄位、索引與外鍵；不得刪除、重建或覆寫既有 `staff_schedule`
+      列。
+    - 建立每個排班列至多一筆的覆核表，保存待覆核原因、狀態、人工確認後的正式服務指派與稽核時間。
+    - 本節點只提供資料結構；不以日期、月嫂、訂單或時數相似性推測既有列的 `assignment_id`，也不寫入覆核紀錄。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 10
+  MultiCaregiverAssignmentRules:
+    type: service
+    description: 驗證同一訂單內月嫂服務區段的起訖日期必填、為連續且含端點的日期區間，並拒絕任兩有效區段重疊。
+    source: services/multi_caregiver_assignment_rules.py::validate_non_overlapping_assignment_interval
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies: []
+    input:
+      candidate_start_date: 新增或調整中的服務起日（ISO 日期字串或 date）
+      candidate_end_date: 新增或調整中的服務迄日（ISO 日期字串或 date）
+      existing_assignments: 同案既有指派的 id、status、assigned_start_date 與 assigned_end_date
+      candidate_assignment_id: 調整既有指派時可排除自身 id
+    output:
+      validated_interval: 正規化後、端點皆包含且與其他有效指派不重疊的日期區段
+    exceptions: []
+    invariants:
+    - 同一訂單不得有兩位月嫂在相同日期服務；本系統不支援同日分時段。
+    - 只有狀態為 cancelled 的既有指派可略過；未填日期的有效舊指派不得靜默繞過檢查。
+    - 此規則為純函式，不讀寫資料庫、排班列、行事曆或薪資資料。
+    - 實際服務時數必須由後續排班節點依各月嫂的工作日計算；此規則不得用連續日期直接覆寫 `actual_hours`。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_assignment_rules.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 將輸入正規化為日期，拒絕缺漏、非 ISO 日期或起日晚於迄日的候選區段。
+    - 略過已取消與正在調整的自身指派；其餘有效既有指派若缺少任一服務日期，停止並要求人工補齊，不以空值推測不重疊。
+    - 以 `candidate_start <= existing_end AND candidate_end >= existing_start` 判定含端點重疊；重疊即拒絕。
+    - 回傳正規化後起訖日；A 結束於 10 日而 B 從 11 日開始視為合法。
     idempotency:
       level: unknown
       side_effects: []
@@ -309,7 +714,1075 @@ modules:
     non_goals: []
     sub_map: root
     state: deployed
-    fan_in_snapshot: 14
+    fan_in_snapshot: 5
+  MultiCaregiverScheduleGenerationService:
+    type: service
+    description: 依一筆正式服務指派建立初始日層級排班，並以月嫂個別固定休假與國定假日計算初始 actual_hours。
+    source: services/multi_caregiver_schedule_generation.py::generate_assignment_schedule
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleSchema
+    - MultiCaregiverAssignmentRules
+    input:
+      assignment_id: 正式服務指派 id
+    output:
+      assignment_schedule: 僅屬於 assignment_id 的新增日層級排班列
+      actual_hours: 初始工作日數乘 orders.service_hours_per_day 的結果
+    exceptions: []
+    invariants:
+    - 同一訂單的不同月嫂不得有相同服務日期；同日分時段不支援。
+    - 不得以 case_no 刪除排班、更新訂單整體結束日，或覆寫其他指派與 legacy 排班列。
+    - 已存在同月嫂同日的其他案件、其他指派或 assignment_id 為 NULL 的 legacy 排班時必須拒絕，禁止 silent overwrite。
+    - 重新執行同一指派時僅補足缺列，不得覆寫既有 is_work_day、is_double_pay 或 notes。
+    - 已存在非 cancelled staff_payments 或有效月結明細的指派不得產生或重建排班，避免 actual_hours 與薪資快照不一致。
+    - 不得建立或調整 staff_payments、薪資手動調整或結算資料。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_generation.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 鎖定目標服務指派、訂單與同案有效指派，呼叫 MultiCaregiverAssignmentRules 驗證服務日期完整且不重疊。
+    - 讀取該月嫂 weekly_rest_days 與國定假日，為服務區段的每一天決定初始 is_work_day。
+    - 鎖定同月嫂同日既有排班；若已屬於其他指派或 legacy 列即拒絕，若已屬於本指派則保留既有人工調整、不覆寫。
+    - 僅新增缺少的 assignment_id 排班列，依本指派 is_work_day 列數乘訂單每日服務時數更新 actual_hours；planned_hours
+      不變。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 2
+  MultiCaregiverScheduleGenerationTransactionService:
+    type: service
+    description: 在呼叫端已開啟的單一資料庫交易中，為一筆正式月嫂指派補足其擁有的日排班，並依月嫂固定休假與國定假日重新計算 initial actual_hours；任何錯誤交給呼叫端統一
+      rollback。
+    source: services/multi_caregiver_schedule_generation.py::generate_assignment_schedule_in_transaction
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleSchema
+    - MultiCaregiverAssignmentRules
+    input:
+      cursor: 呼叫端擁有、已開啟交易的資料庫 cursor；本服務不得取得或關閉 connection
+      assignment_id: 正式服務指派 id
+    output:
+      assignment_schedule: 僅屬於 assignment_id 的新增日層級排班列
+      actual_hours: 初始工作日數乘 orders.service_hours_per_day 的結果
+    exceptions: []
+    invariants:
+    - 同一訂單的不同月嫂不得有相同服務日期；同日分時段不支援。
+    - 不得以 case_no 刪除排班、更新訂單整體結束日，或覆寫其他指派與 legacy 排班列。
+    - 已存在同月嫂同日的其他案件、其他指派或 assignment_id 為 NULL 的 legacy 排班時必須拒絕，禁止 silent overwrite。
+    - 重新執行同一指派時僅補足缺列，不得覆寫既有 is_work_day、is_double_pay 或 notes。
+    - 已存在非 cancelled staff_payments 或有效月結明細的指派不得產生或重建排班，避免 actual_hours 與薪資快照不一致。
+    - 不得建立或調整 staff_payments、薪資手動調整或結算資料；不得 commit、rollback、close 或建立新的資料庫 connection。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_generation.py
+        - -k
+        - transaction
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 以傳入 cursor 鎖定目標服務指派、訂單與同案有效指派，呼叫 MultiCaregiverAssignmentRules 驗證服務日期完整且不重疊。
+    - 讀取該月嫂 weekly_rest_days 與國定假日，鎖定同月嫂同日既有排班；其他指派或 legacy 列均拒絕，本指派既有列則保留。
+    - 僅新增缺少的 assignment_id 排班列，依本指派 is_work_day 列數乘訂單每日服務時數更新 actual_hours。
+    - 回傳新增列與 actual_hours，不得 commit、rollback、close 或重新取得 connection；任何例外必須原樣傳回呼叫端。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 2
+  MultiCaregiverScheduleAdjustmentService:
+    type: service
+    description: 調整既有正式服務指派內單日的請假、出勤與雙倍薪設定，並只重算該指派的 actual_hours。
+    source: services/multi_caregiver_schedule_adjustment_service.py::adjust_assignment_schedule_day
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleSchema
+    input:
+      assignment_id: 正式服務指派 id
+      work_date: 指派區段內要調整的日期
+      is_work_day: 該日是否計入服務時數
+      is_double_pay: 該日是否為雙倍薪服務日
+      notes: 行政調整備註
+    output:
+      adjusted_schedule_day: 調整後的目標 assignment_id 排班列
+      actual_hours: 目標指派重算後的實際服務時數
+    exceptions: []
+    invariants:
+    - 月嫂 A 的請假、出勤或雙倍薪調整只能影響 A 自己 assignment_id 的排班與 actual_hours，不得更動月嫂 B。
+    - 其他指派或 assignment_id 為 NULL 的 legacy 排班列一律拒絕覆寫；不執行 UPSERT、不刪除資料、不更新訂單整體結束日。
+    - work_date 位於指派區段外、指派已取消、日期缺漏或尚無目標日排班列時必須拒絕。
+    - actual_hours 為目標指派日層級 is_work_day 數量乘 orders.service_hours_per_day；此時不檢查多月嫂總和。
+    - 已存在非 cancelled staff_payments 或有效月結明細的指派不得調整排班，避免 actual_hours 與薪資快照不一致。
+    - 不得建立或調整 staff_payments、薪資手動調整或結算資料。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_adjustment_service.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 鎖定服務指派與訂單，驗證指派有效、日期完整且 work_date 位於指派的含端點區段內。
+    - 鎖定同月嫂同日排班；沒有目標列即拒絕，僅當 assignment_id 完全相同時更新 is_work_day、is_double_pay 與 notes。
+    - 讀取並鎖定目標指派所有排班列，以 is_work_day 計數乘訂單每日服務時數更新 actual_hours；planned_hours 不變。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 2
+  MultiCaregiverScheduleReadService:
+    type: service
+    description: 依明確的正式服務指派 id 唯讀取得月嫂、服務區段、目前 actual_hours 與該指派專屬的每日排班，供多月嫂行事曆與調整介面使用。
+    source: services/multi_caregiver_schedule_read.py::get_assignment_schedule
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleSchema
+    input:
+      assignment_id: 正式服務指派 id
+    output:
+      assignment: 指派、案件、月嫂姓名、服務區段與目前 actual_hours
+      schedule_days: 僅屬於 assignment_id 的每日排班列，依日期排序
+    exceptions: []
+    invariants:
+    - 必須由 UI 或 API 顯式提供 assignment_id；不得由 orders.staff_id、case_no、日期或月嫂名稱推測指派。
+    - 不得回傳 assignment_id 為 NULL 的 legacy 排班列，亦不得混入其他指派的排班列。
+    - 唯讀：不得建立、調整、刪除排班、訂單、薪資或結算資料。
+    - planned_hours 僅供相容資訊；行事曆呈現與後續調整的正式時數為 actual_hours。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_read.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm:
+    - 驗證 assignment_id 為正整數，讀取正式指派及其案件、月嫂識別資料；查無資料時拒絕。
+    - 只以 assignment_id 查詢 staff_schedule，依 work_date 排序並回傳日層級工作日、雙倍薪與備註。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 2
+  MultiCaregiverCaseAssignmentListService:
+    type: service
+    description: 依管理端已明確選擇的案件編號，唯讀列出可排班的未取消正式月嫂服務指派，供第二階段選擇月嫂與服務區段。
+    source: services/multi_caregiver_schedule_read.py::list_case_schedule_assignments
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleSchema
+    input:
+      case_no: 管理端明確選擇的案件編號
+    output:
+      assignments: 依 assigned_start_date 排序的未取消正式指派、月嫂姓名、服務區段與 actual_hours
+    exceptions: []
+    invariants:
+    - 必須由 UI 或 API 顯式提供 case_no；不得由 orders.staff_id、日期或月嫂名稱推測案件或指派。
+    - 只回傳未取消的正式服務指派；不得回傳 legacy 排班或以 orders.staff_id 合成指派。
+    - 唯讀：不得建立、調整、刪除排班、訂單、薪資或結算資料。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_case_assignment_list.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm:
+    - 驗證 case_no 為非空字串；只查詢該案件的 case_staff_assignments 與月嫂名稱。
+    - 排除 cancelled 指派，依服務開始日與 id 排序後回傳，不讀取 staff_schedule。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 2
+  ActualHoursAdjustmentConfirmationService:
+    type: service
+    description: 在薪資確認前，針對明確指定的正式服務指派以十進位數值覆寫 `actual_hours`、附加不可覆寫的稽核紀錄，並驗證同一訂單全部未取消指派的實際時數總和精確等於訂單總服務時數；此節點不建立應付款。
+    source: services/actual_hours_adjustment_confirmation_service.py::adjust_actual_hours_before_payment,validate_case_actual_hours_for_payment
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - PaymentSchema
+    - MultiCaregiverScheduleSchema
+    - StaffMonthlySettlementSchema
+    - StaffMonthlySettlementDetailSchema
+    input:
+      case_no: 管理端明確指定、用以鎖定單一訂單的 canonical case number
+      adjustments: 明確指定的 assignment_id、非負 adjusted_actual_hours 與非空 adjustment_reason
+        清單
+      adjusted_by: 非空的人工操作識別
+    output:
+      adjustment_records: 本次新增的 append-only actual-hours 稽核紀錄與調整後指派時數
+      confirmation: 訂單目標時數、未取消指派時數總和、差額、各指派明細與 can_confirm 結果
+    exceptions: []
+    invariants:
+    - 僅接受明確 case_no 與 assignment_id；不得以 orders.staff_id、月嫂姓名、日期或排班列推測正式指派。
+    - 已取消指派不得調整、不得計入總和，亦不得建立應付款；未取消指派的 actual_hours 缺失時不得視為零而通過確認。
+    - 已存在非 cancelled staff_payments 或有效月結明細的指派不得調整；已鎖定資料必須沿既有調整、沖正或重新結算流程處理。
+    - 每次實際人工覆寫必須新增一筆含調整前後值、非空原因、操作者與時間的 actual_hours_adjustments 列；不得 UPDATE 或 DELETE
+      既有稽核列。
+    - 總時數比較必須以 Decimal 精確進行；只有所有未取消指派的 actual_hours 總和恰等於訂單總時數時才回傳 can_confirm=true。
+    - 不得建立、修改或取消 staff_payments、staff_monthly_settlements、staff_schedule、訂單服務天數或其他指派的時數。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_actual_hours_adjustment_confirmation_service.py
+        - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-actual-hours-adjustment-confirmation
+        cwd: project
+        timeout: 120
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 驗證 case_no、adjusted_by、每筆 assignment_id、十進位時數與原因；拒絕重複 assignment_id、負值、空原因或非有限數值。
+    - 鎖定訂單及該訂單所有未取消服務指派；每筆調整必須屬於該訂單且未取消，並鎖定檢查是否已有非 cancelled staff_payment 或有效月結明細。
+    - 對每筆實際變更，在同一交易內先新增 actual_hours_adjustments 稽核列，再只更新該正式指派的 actual_hours；不修改排班、應付款或既有稽核列。
+    - 以 Decimal 計算 orders.service_days × orders.service_hours_per_day 與所有未取消指派 actual_hours
+      的總和；若任何未取消指派時數缺失、負值或總和不相等，回傳各指派時數、目標、加總與差額且 can_confirm 為 false。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals:
+    - 不新增薪資確認 API、管理端 UI、應付款或月結；後續付款建立節點必須自行呼叫本服務的確認驗證，方可將 can_confirm=true 視為薪資確認門檻。
+    - 不從每日排班重算或推測人工例外時數；後續排班重算節點必須偵測既有人工覆寫，且不得靜默覆寫。
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 3
+  ActualHoursAdjustmentConfirmationInternalHelpers:
+    type: internal_helper
+    description: ActualHoursAdjustmentConfirmationService 的檔案內部輸入正規化、鎖定查詢與 Decimal
+      確認輔助函式集合；不構成對外服務介面。
+    source: services/actual_hours_adjustment_confirmation_service.py::_case_number,_required_text,_decimal,_normalise_adjustments,_load_case_for_confirmation,_confirmation,_assert_assignments_unlocked
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - ActualHoursAdjustmentConfirmationService
+    input: {}
+    output: {}
+    exceptions: []
+    invariants:
+    - 僅能由同檔案已登記的公開服務呼叫，不得成為 API、UI 或其他模組的直接依賴。
+    - 不得在公開服務交易邊界之外自行 commit、rollback 或建立應付款。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_actual_hours_adjustment_confirmation_service.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 120
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: planned
+    fan_in_snapshot: 0
+  MultiCaregiverAssignmentRulesInternalHelpers:
+    type: internal_helper
+    description: MultiCaregiverAssignmentRules 的內部日期正規化輔助函式，不構成對外服務介面。
+    source: services/multi_caregiver_assignment_rules.py::_normalize_date
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverAssignmentRules
+    input: {}
+    output: {}
+    exceptions: []
+    invariants:
+    - 僅能支援同檔案公開驗證函式，不得讀寫資料庫或推測缺漏日期。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_assignment_rules.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: planned
+    fan_in_snapshot: 0
+  MultiCaregiverScheduleAdjustmentInternalHelpers:
+    type: internal_helper
+    description: MultiCaregiverScheduleAdjustmentService 的檔案內部日期與請求驗證輔助函式集合，不構成對外服務介面。
+    source: services/multi_caregiver_schedule_adjustment_service.py::_as_date,_validate_request
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleAdjustmentService
+    input: {}
+    output: {}
+    exceptions: []
+    invariants:
+    - 僅能支援同檔案公開調整服務，不得繞過 assignment_id、日期區段或薪資鎖定驗證。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_adjustment_service.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: planned
+    fan_in_snapshot: 0
+  MultiCaregiverScheduleGenerationInternalHelpers:
+    type: internal_helper
+    description: 多月嫂 assignment-owned 排班生成服務的檔案內部日期、鎖定、查詢與交易內生成輔助函式集合，不構成對外服務介面。
+    source: services/multi_caregiver_schedule_generation.py::_as_date,_weekly_rest_days,_days_inclusive,_assignment_row,_assert_assignment_is_unlocked,_validate_assignment_id,_generate_assignment_schedule_with_cursor,_load_case_assignments
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleGenerationService
+    - MultiCaregiverScheduleGenerationTransactionService
+    input: {}
+    output: {}
+    exceptions: []
+    invariants:
+    - 僅能由同檔案已登記的公開生成服務呼叫，不得自行建立新的交易邊界或覆寫其他指派排班。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_generation.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: planned
+    fan_in_snapshot: 0
+  MultiCaregiverScheduleReadInternalHelpers:
+    type: internal_helper
+    description: 多月嫂排班唯讀服務的檔案內部識別值驗證輔助函式集合，不構成對外服務介面。
+    source: services/multi_caregiver_schedule_read.py::_validate_assignment_id,_validate_case_no
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleReadService
+    - MultiCaregiverCaseAssignmentListService
+    input: {}
+    output: {}
+    exceptions: []
+    invariants:
+    - 僅驗證呼叫端明確提供的 assignment_id 或 case_no，不得推測、查找或寫入任何正式指派。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_read.py
+        - tests\test_multi_caregiver_case_assignment_list.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: planned
+    fan_in_snapshot: 0
+  OrderAssignmentChangeAuditSchema:
+    type: database_schema
+    description: 以 append-only 稽核列保存每次明確套用的訂單服務變更與月嫂指派配置快照；此表只記錄已成功套用的同步命令，不取代 actual_hours_adjustments、薪資、月結或排班歷史。
+    source: db/schema_parts/96_order_assignment_sync_audit.sql
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - PaymentSchema
+    - MultiCaregiverScheduleSchema
+    input:
+      case_no: 已套用同步命令的 canonical case number
+      order_before_snapshot: 變更前訂單服務天數、每日時數與起訖日期 JSON 快照
+      order_after_snapshot: 變更後訂單服務天數、每日時數與起訖日期 JSON 快照
+      assignment_plan_snapshot: 管理者明確提交且已通過驗證的正式指派配置 JSON 快照
+      applied_by: 非空操作識別
+      applied_at: 寫入時間
+    output:
+      order_assignment_change_audits: 可依 case_no 與時間還原每次已套用同步命令的 append-only 稽核列
+    exceptions: []
+    invariants:
+    - 不得 UPDATE 或 DELETE 既有稽核列；不得以此表取代 actual_hours_adjustments 的人工時數覆寫事實。
+    - 所有快照必須對應同一 case_no，且 applied_by 不可空白；稽核表不得保存或推測薪資、月結或銀行交易異動。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_order_assignment_sync_audit_schema.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 建立以自增 id 為主鍵、case_no 外鍵、before/after/plan JSON、applied_by 與 applied_at 組成的稽核表與
+      case_no、時間索引。
+    - 僅由成功完成的訂單指派同步套用服務在同一交易最後寫入；同步失敗、預覽與鎖定拒絕均不得建立稽核列。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 1
+  OrderAssignmentSynchronizationPreviewService:
+    type: service
+    description: 唯讀檢視訂單服務天數、每日時數與服務日期變更，以及管理者明確提交的完整目標正式月嫂指派計畫；回傳時數差額、assignment-owned
+      日排班影響、必須明確確認移除的排班列，以及所有帳務、月結、人工時數覆寫或日期衝突的阻擋原因。
+    source: services/order_assignment_synchronization.py::preview_order_assignment_sync
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - PaymentSchema
+    - MultiCaregiverScheduleSchema
+    - MultiCaregiverAssignmentRules
+    - ActualHoursAdjustmentConfirmationService
+    input:
+      case_no: 明確指定的 canonical case number
+      order_change: 非取消訂單的完整可編輯目標值；必含 service_days、service_hours_per_day、start_date、end_date、actual_start_date、actual_end_date、client_name
+        與 floor_fee；deposit_date 可為 null，身分資格由 case_no 關聯 clients.identity_status
+        唯讀取得
+      assignment_plan: 一筆以上明確指定 staff_id、服務起訖日期、既有 assignment_id（更新時）與指派順序的完整目標有效配置；未列出的既有有效指派視為明確取消候選，不得由系統猜測新增月嫂或日期
+    output:
+      preview: target_hours、目前與提議的指派時數、日排班影響、required_schedule_removals、sync_status
+        與逐項 blocking_reasons
+    exceptions: []
+    invariants:
+    - 未提供完整明確 assignment_plan 時只能回傳 requires_allocation，絕不得猜測哪位月嫂或哪個區段應增減；未列出的既有有效指派只能作為明確取消候選檢查，不得靜默忽略。
+    - preview 必須唯讀；不得新增、修改或取消訂單、正式指派、日排班、稽核、薪資、月結或人工時數覆寫。
+    - 已有非 cancelled staff_payments、有效月結明細或 actual_hours_adjustments 的受影響指派不得重排、取消、改日期或改算
+      actual_hours；必須回傳具體鎖定／人工覆寫原因。
+    - legacy assignment_id 為 NULL 排班只可作為衝突／人工覆核原因，不得被採用、修改或覆寫。
+    - 身分資格只能讀取 clients.identity_status；不得讀取 clients.identity_status 或接受客戶傳入的 identity_status。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_order_assignment_synchronization.py
+        - -k
+        - preview
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - preview 驗證訂單、日期、明確指派計畫與 MultiCaregiverAssignmentRules；計算訂單目標時數、目前未取消指派時數與提議區段可能產生的工作日時數，但不寫入資料。
+    - preview 依 case_no 讀取 clients.identity_status 供計價與驗證；不得接受、推測或覆寫任何身分資格值。
+    - 對所有會新增、變更、取消或重建的正式指派檢查非 cancelled staff_payments、有效月結明細與 actual_hours_adjustments；任何受影響指派鎖定或有人工時數覆寫時回傳
+      locked 或 requires_review，不得部分套用。
+    - 列出因取消指派、日期區段縮短或變更而必須移除的 assignment-owned staff_schedule id；legacy assignment_id
+      為 NULL 列只能回傳 requires_review，不得列入可移除清單。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals:
+    - 不提供 UI、HTTP router、訂單或指派寫入、薪資建立、月結重算、人工 actual_hours 覆寫或歷史鎖定資料的沖正流程。
+    - 不支援同日分時段；不將 orders.staff_id 或 matching_records 視為正式服務指派。
+    sub_map: root
+    state: validated
+    fan_in_snapshot: 3
+  OrderAssignmentSynchronizationApplyService:
+    type: service
+    description: 重新驗證管理者明確提交的訂單變更、完整目標正式月嫂指派計畫與明確排班移除計畫；僅在預覽等價驗證、帳務鎖定與時數總和均通過時，以單一交易更新訂單、正式指派與受影響
+      assignment-owned 日排班，確認總時數並寫入 append-only 稽核快照。
+    source: services/order_assignment_synchronization.py::apply_order_assignment_sync
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - PaymentSchema
+    - MultiCaregiverScheduleSchema
+    - OrderAssignmentChangeAuditSchema
+    - MultiCaregiverAssignmentRules
+    - MultiCaregiverScheduleGenerationTransactionService
+    - ActualHoursAdjustmentConfirmationService
+    - OrderAssignmentSynchronizationPreviewService
+    input:
+      case_no: 明確指定的 canonical case number
+      order_change: 非取消訂單的完整可編輯目標值；必含 service_days、service_hours_per_day、start_date、end_date、actual_start_date、actual_end_date、client_name
+        與 floor_fee；deposit_date 可為 null，身分資格由 case_no 關聯 clients.identity_status
+        唯讀取得
+      assignment_plan: 一筆以上明確指定 staff_id、服務起訖日期、既有 assignment_id（更新時）與指派順序的完整目標有效配置；未列出的既有有效指派視為明確取消候選，不得由系統猜測新增月嫂或日期
+      schedule_change_plan: 物件，含 required_schedule_removals 對應的完整 remove_schedule_ids
+        正整數清單；只允許移除受影響正式指派擁有的列
+      applied_by: 非空操作識別
+    output:
+      apply_result: 已套用訂單與客戶主資料快照、正式指派快照、受影響排班重建結果、付款確認結果與新稽核列 id
+    exceptions: []
+    invariants:
+    - 未提供完整明確 assignment_plan 或完整 schedule_change_plan 時只能回傳 requires_allocation，絕不得猜測哪位月嫂、哪個區段或哪一筆日排班應增減或移除。
+    - apply 必須全有或全無，不得在訂單已更新而指派、日排班、確認或稽核失敗時 commit。
+    - 不得呼叫或重用會自行 commit 的 db_service.update_order_full_details；同步所需訂單與客戶主資料更新必須由此交易持有的
+      cursor 完成。
+    - 已有非 cancelled staff_payments、有效月結明細或 actual_hours_adjustments 的受影響指派不得重排、取消、改日期或改算
+      actual_hours；必須回傳具體鎖定／人工覆寫原因。
+    - 所有未取消正式指派的 actual_hours 必須以 Decimal 精確等於訂單總服務時數；取消指派不得計入總和，legacy assignment_id
+      為 NULL 排班不得被採用、移除或覆寫。
+    - 只可刪除 schedule_change_plan 明確列出的、屬於受影響正式指派的排班列；必須拒絕遺漏、多列、其他案件、其他指派或 legacy 列。
+    - 不建立、修改或取消 staff_payments、staff_monthly_settlements、轉帳或其明細；既有財務資料只能作為鎖定依據。
+    - 身分資格只能讀取 clients.identity_status；不得讀寫 clients.identity_status 或修改 clients.identity_status。
+    - 每次成功 apply 必須新增一筆 OrderAssignmentChangeAuditSchema 稽核列；失敗或拒絕不得新增稽核列。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_order_assignment_synchronization.py
+        - -k
+        - apply
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 以 case_no 鎖定訂單、既有指派與受影響排班；再次執行與 OrderAssignmentSynchronizationPreviewService
+      等價的驗證，拒絕 stale plan、同月嫂日期衝突、legacy 排班衝突、未明確分配、未覆蓋目標時數或與當前 required_schedule_removals
+      不完全一致的 schedule_change_plan。
+    - 僅在所有驗證通過後，刪除明確列出的受影響 assignment-owned 排班列，在同一 transaction 更新訂單服務欄位與可編輯訂單主資料、同步該
+      case_no 的客戶姓名，建立或更新明確正式指派，取消完整目標計畫中未列出且未鎖定的指派，並以交易內生成器補足受影響有效指派的新日期排班；不得變更 clients.identity_status、其他案件或
+      legacy 排班。
+    - 以 ActualHoursAdjustmentConfirmationService 的同等 Decimal 確認邏輯驗證所有未取消指派 actual_hours
+      總和恰等於 orders.service_days × orders.service_hours_per_day；不相等即 rollback。
+    - 同一交易最後新增 OrderAssignmentChangeAuditSchema 稽核快照並 commit，回傳已套用結果；任何例外均 rollback。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals:
+    - 不提供 UI、HTTP router、薪資建立、月結重算、人工 actual_hours 覆寫、訂單取消或歷史鎖定資料的沖正流程。
+    - 不支援同日分時段；不將 orders.staff_id 或 matching_records 視為正式服務指派。
+    sub_map: root
+    state: validated
+    fan_in_snapshot: 2
+  OrderAssignmentSynchronizationInternalHelpers:
+    type: internal_helper
+    description: 訂單與正式指派同步服務的檔案內部正規化、查詢、鎖定判斷、狀態計算與快照輔助函式集合，不構成對外服務介面。
+    source: services/order_assignment_synchronization.py::_required_text,_decimal,_date,_weekly_rest_days,_normalise_order_change,_normalise_apply_order_change,_normalise_assignment_plan,_fetchall,_blocking_assignments,_working_days,_status_for,_current_actual_hours,_deduplicate_reasons,_normalise_schedule_change_plan,_snapshot
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - OrderAssignmentSynchronizationPreviewService
+    - OrderAssignmentSynchronizationApplyService
+    input: {}
+    output: {}
+    exceptions: []
+    invariants:
+    - 僅能由同檔案已登記的 preview/apply 服務呼叫，不得自行 commit、修改其他案件或繞過完整 assignment plan。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_order_assignment_synchronization.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 120
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: planned
+    fan_in_snapshot: 0
+  MultiCaregiverCaseAssignmentListRouter:
+    type: router
+    description: 提供案件→正式服務指派的唯讀選擇 API，讓管理端先選案件、再選月嫂服務區段。
+    source: api/routes/multi_caregiver_case_assignments.py
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverCaseAssignmentListService
+    input:
+      case_no: 路徑中的已選案件編號
+    output:
+      assignments: 該案件未取消正式服務指派的月嫂、服務區段與 actual_hours
+    exceptions: []
+    invariants:
+    - 不接受 client 提供的 staff_id、actual_hours 或 planned_hours；指派選擇僅由已選 case_no 的正式指派清單決定。
+    - 不呼叫 legacy db_service.get_staff_monthly_schedule、update_schedule_day、save_order_rest_dates
+      或 generate_default_schedule。
+    - 路由只編排輸入與錯誤回應，不直接執行 SQL、寫入排班或建立薪資資料。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_case_assignment_list_router.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm:
+    - GET `/api/v1/cases/{case_no}/assignment-schedules` 只呼叫 MultiCaregiverCaseAssignmentListService。
+    - 將服務層 ValueError 轉為 HTTP 400；未預期錯誤回傳 HTTP 500。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 3
+    known_symbols:
+    - list_case_schedule_assignments
+  MultiCaregiverScheduleRouter:
+    type: router
+    description: 提供以正式 assignment_id 生成排班與調整指派內單日排班的獨立 API，與 legacy `/api/v1/schedule/save`
+      並存且不互相呼叫。
+    source: api/routes/multi_caregiver_schedule.py
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleGenerationService
+    - MultiCaregiverScheduleAdjustmentService
+    input:
+      assignment_id: 路徑中的正式服務指派 id
+      adjustment_body: is_work_day、is_double_pay 與可選 notes
+      work_date: 路徑中的指派內排班日期
+    output:
+      generation_result: assignment-aware 排班生成結果與 actual_hours
+      adjustment_result: 指派內單日調整結果與 actual_hours
+    exceptions: []
+    invariants:
+    - 不接受 client 提供的 case_no、staff_id、actual_hours 或 planned_hours；身分與時數由正式指派服務層決定。
+    - 不呼叫 legacy db_service.update_schedule_day、save_order_rest_dates 或 generate_default_schedule。
+    - 不提供同日分時段、薪資手動時數覆寫、薪資確認或多月嫂時數總和確認端點。
+    - 路由只編排輸入與錯誤回應，不直接執行 SQL。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_router.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - POST `/api/v1/assignment-schedules/{assignment_id}/generate` 只呼叫 MultiCaregiverScheduleGenerationService。
+    - PUT `/api/v1/assignment-schedules/{assignment_id}/days/{work_date}` 驗證 body
+      後只呼叫 MultiCaregiverScheduleAdjustmentService。
+    - 將服務層 ValueError 轉為 HTTP 400；未預期錯誤維持 HTTP 500，不吞沒錯誤或回傳成功。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 2
+    known_symbols:
+    - adjust_assignment_schedule
+    - generate_assignment_schedule
+  MultiCaregiverScheduleReadRouter:
+    type: router
+    description: 提供正式服務指派的唯讀排班查詢 API，讓管理端以明確 assignment_id 呈現月嫂服務區段與其專屬日層級排班。
+    source: api/routes/multi_caregiver_schedule_read.py
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - MultiCaregiverScheduleReadService
+    input:
+      assignment_id: 路徑中的正式服務指派 id
+    output:
+      assignment_schedule: 指派摘要與僅屬於該指派的每日排班列
+    exceptions: []
+    invariants:
+    - 不接受 client 提供的 case_no、staff_id、actual_hours 或 planned_hours；查詢身分僅以路徑 assignment_id
+      決定。
+    - 不呼叫 legacy db_service.get_staff_monthly_schedule、update_schedule_day、save_order_rest_dates
+      或 generate_default_schedule。
+    - 路由只編排輸入與錯誤回應，不直接執行 SQL、寫入排班或建立薪資資料。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_multi_caregiver_schedule_read_router.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm:
+    - GET `/api/v1/assignment-schedules/{assignment_id}` 只呼叫 MultiCaregiverScheduleReadService。
+    - 將服務層 ValueError 轉為 HTTP 400；未預期錯誤回傳 HTTP 500。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: dirty
+    fan_in_snapshot: 2
+    known_symbols:
+    - get_assignment_schedule
   StaffMonthlySettlementSchema:
     type: database_schema
     description: 建立每位服務人員每個薪資歸屬月一張月結的摘要表；只保存月結總額與狀態，不保存銀行逐筆交易。
@@ -367,8 +1840,8 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
-    fan_in_snapshot: 6
+    state: dirty
+    fan_in_snapshot: 8
   StaffMonthlySettlementDetailSchema:
     type: database_schema
     description: 建立服務人員月結的逐訂單／逐服務指派應付快照，保留一般薪資、樓層費、調整額及舊制補助構成。
@@ -428,8 +1901,8 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
-    fan_in_snapshot: 4
+    state: dirty
+    fan_in_snapshot: 6
   StaffActualTransferSchema:
     type: database_schema
     description: 建立服務人員實際銀行轉帳事件表；新制單次薪資與舊制第一次薪資、第二次補助款均逐筆保存，不直接綁定案件。
@@ -487,8 +1960,8 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
-    fan_in_snapshot: 3
+    state: dirty
+    fan_in_snapshot: 4
   StaffTransferAllocationSchema:
     type: database_schema
     description: 建立實際服務人員轉帳與月結明細的多對多分配，使一筆轉帳可支付多筆訂單、同一訂單亦可由舊制兩次付款共同支付。
@@ -549,8 +2022,8 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
-    fan_in_snapshot: 1
+    state: dirty
+    fan_in_snapshot: 2
   FinanceImportRawStagingSchema:
     type: database_schema
     description: 保存每次 Excel 匯入批次、不可覆寫的正規化銀行流水及其跨檔案出現紀錄，讓分類與核銷分成兩階段執行。
@@ -616,7 +2089,7 @@ modules:
     non_goals: []
     sub_map: root
     state: deployed
-    fan_in_snapshot: 9
+    fan_in_snapshot: 10
   SubsidyClaimBatchSchema:
     type: database_schema
     description: 保存正式季度政府補助申請批次、版本及逐服務指派的申請與核准快照。
@@ -672,7 +2145,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: dirty
     fan_in_snapshot: 3
   GovernmentSubsidyTransactionSchema:
     type: database_schema
@@ -730,7 +2203,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: dirty
     fan_in_snapshot: 2
   FinanceAlertSchema:
     type: database_schema
@@ -897,7 +2370,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: dirty
     fan_in_snapshot: 1
   RemoveOtherAdditionMigration:
     type: migration
@@ -1089,8 +2562,11 @@ modules:
     map_file: system_map.md
     dependencies:
     - DatabaseSchemaLoader
-    input: {}
-    output: {}
+    input:
+      database_config: 由 .env 或預設值取得的 MySQL 連線設定
+      schema_path: db/schema.sql 與其同層 schema_parts 目錄
+    output:
+      result: 已提交的主 schema SQL 數量與依序載入的 schema parts；失敗時拋出例外且不提交
     exceptions: []
     invariants:
     - '? schema ??? schema_parts ?????????????????????????????????'
@@ -1104,7 +2580,12 @@ modules:
         - pytest
         - tests/test_init_db_schema_parts.py
         - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-initdb-adad-elevated
         cwd: project
+        timeout: 60
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
@@ -1114,7 +2595,11 @@ modules:
       mode: not_required
       signals: []
     complexity: medium
-    algorithm: []
+    algorithm:
+    - 解析可用的 schema.sql 路徑並讀取主 schema SQL；檔案缺失時輸出錯誤並結束，不建立資料庫連線。
+    - 連線 MySQL 後，於同一 transaction 逐一執行主 schema SQL。
+    - 以檔名字典序透過 DatabaseSchemaLoader 載入 schema_parts；任一片段失敗立即回滾並重新拋出例外。
+    - 全部成功才提交 transaction；最後一律關閉連線。
     idempotency:
       level: unknown
       side_effects: []
@@ -1124,7 +2609,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: planned
+    state: deployed
     fan_in_snapshot: 1
   ClientHcmInsertOnlyImporter:
     type: script
@@ -1145,6 +2630,8 @@ modules:
     - case_no 已存在時不得 UPDATE clients、不得 UPDATE orders，也不得以重新匯入覆寫人工調整。
     - 新增 clients 與其初始 orders 必須在同一資料庫 transaction；任一列新增失敗時 rollback 該次匯入。
     - 缺少 case_no 時必須 review_required；不得以姓名、電話或金額猜測既有客戶。
+    - 新增 client 的 `identity_status` 是資格唯一來源；初始 `orders` INSERT 只可寫入 case_no、client_id、status、service_days
+      與 service_hours_per_day，不得寫入已移除的 `orders.subsidy_eligibility` 或複製資格欄位。
     preferred_pattern: none
     verification:
     - command:
@@ -1159,6 +2646,7 @@ modules:
         - --basetemp
         - C:\tmp\pytest-client-hcm-insert-only
         cwd: project
+        timeout: 60
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
@@ -1171,7 +2659,7 @@ modules:
     algorithm:
     - 解析並清理 HCM 列，先驗證非空 case_no，缺值只累計 review_required。
     - 以 case_no 查詢 clients；既有者只累計 skipped_existing，不讀取或更新其 orders。
-    - 對全新 case_no 在同一 transaction 先新增 client，再新增唯一初始 order。
+    - 對全新 case_no 在同一 transaction 先新增 client，再以不含任何資格欄位的最小欄位集合新增唯一初始 order。
     - 回傳 inserted、skipped_existing、review_required 計數；任一寫入例外 rollback。
     idempotency:
       level: unknown
@@ -1182,8 +2670,8 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
-    fan_in_snapshot: 0
+    state: validated
+    fan_in_snapshot: 1
     known_symbols:
     - _result
     - clean_city_and_address
@@ -1246,7 +2734,7 @@ modules:
     non_goals: []
     sub_map: root
     state: deployed
-    fan_in_snapshot: 0
+    fan_in_snapshot: 1
     known_symbols:
     - _result
     - clean_birth_date
@@ -1311,7 +2799,7 @@ modules:
     non_goals: []
     sub_map: root
     state: deployed
-    fan_in_snapshot: 0
+    fan_in_snapshot: 1
     known_symbols:
     - _result
     - clean_birth_date
@@ -1376,7 +2864,7 @@ modules:
     non_goals: []
     sub_map: root
     state: deployed
-    fan_in_snapshot: 0
+    fan_in_snapshot: 1
     known_symbols:
     - _count_value
     - _result

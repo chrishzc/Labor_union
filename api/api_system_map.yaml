@@ -3,7 +3,7 @@ scope: api_layer
 modules:
   OrderRouter:
     type: api_router
-    description: 訂單與時程精算 API 路由。
+    description: 訂單、時程精算與明確多月嫂指派同步 API 路由；同步端點接收完整非取消訂單目標值，只委派已部署的 Preview／Apply 服務，不能直接寫入正式資料表。
     source: api/routes/orders.py
     domain: null
     subsystem: null
@@ -11,20 +11,61 @@ modules:
     dependencies:
     - DbService
     - OrderSchemas
-    input: {}
-    output: {}
+    - OrderAssignmentSynchronizationPreviewService
+    - OrderAssignmentSynchronizationApplyService
+    input:
+      case_no: path 中的 canonical order identifier。
+      preview_request: 包含排班關鍵欄位與可編輯訂單主資料完整目標值的 order_change，以及完整明確 assignment_plan。
+      apply_request: preview_request 加上完整 schedule_change_plan.remove_schedule_ids
+        與非空 applied_by。
+    output:
+      synchronization_preview: target hours、指派時數影響、required_schedule_removals、sync_status
+        與 blocking_reasons。
+      synchronization_apply_result: 已套用結果、排班生成摘要、時數確認與 audit_id。
     exceptions: []
-    invariants: []
+    invariants:
+    - 兩個同步端點不得直接呼叫 db_service 寫入 orders、case_staff_assignments、staff_schedule、付款、月結或稽核表；所有同步商業操作只能委派對應服務。
+    - Preview 必須是唯讀；Apply request 必須同時提供完整 assignment_plan、schedule_change_plan.remove_schedule_ids
+      與非空 applied_by，缺少時不得呼叫 Apply 服務。
+    - 同步端點不得自行寫入訂單或客戶主資料；更新必須由 Apply service 的單一 transaction 完成。EditOrderUI 不得以 `/full-details`
+      先寫入同一份同步變更。
+    - API 不得接受 clients.identity_status 或 identity_status；身分資格只能由服務層依 case_no 關聯 clients.identity_status
+      讀取。
+    - Router 不得建立第二個 FastAPI app 或重複註冊；必須沿用既有 `/api/v1/orders` router 與 BaseResponse
+      包裝。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_order_assignment_synchronization_router.py
+        - tests\test_order_assignment_synchronization_app_routes.py
+        - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-order-assignment-router
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
     decisions: []
     todo: []
     checkpoint: []
     observability:
       mode: not_required
       signals: []
-    complexity: low
-    algorithm: []
+    complexity: medium
+    algorithm:
+    - '`POST /{case_no}/assignment-synchronization/preview` 驗證完整非取消 order_change（不含
+      identity_status 或 clients.identity_status）與 HTTP payload 後，僅委派 OrderAssignmentSynchronizationPreviewService，並以
+      BaseResponse 回傳其完整結果。'
+    - '`POST /{case_no}/assignment-synchronization/apply` 驗證完整移除計畫及 applied_by 後，僅委派
+      OrderAssignmentSynchronizationApplyService；未套用的 locked、requires_review 或 requires_allocation
+      結果須回傳明確 HTTP 409 與原因。'
+    - 服務層的 ValueError 必須轉成明確 HTTP 422；不得由 router 吞掉後回傳成功。
     idempotency:
       level: unknown
       side_effects: []
@@ -34,12 +75,14 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
-    fan_in_snapshot: 0
+    state: validated
+    fan_in_snapshot: 1
     known_symbols:
+    - apply_order_assignment_synchronization
     - calculate_schedule
     - get_all_orders
     - get_order_by_case_no
+    - preview_order_assignment_synchronization
     - update_order_full_details
     - update_order_status
   MatchRouter:
@@ -75,7 +118,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - assign_staff_to_order
@@ -117,7 +160,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - save_schedule
@@ -188,7 +231,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
   ClientRouter:
     type: api_router
@@ -222,7 +265,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - get_all_clients
@@ -258,8 +301,8 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
-    fan_in_snapshot: 0
+    state: dirty
+    fan_in_snapshot: 1
     known_symbols:
     - get_all_staff
   HolidayRouter:
@@ -294,7 +337,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - add_or_update_holiday
@@ -361,6 +404,7 @@ modules:
         - tests\test_payment_routers.py
         - -q
         cwd: project
+        timeout: 60
         expect_exit: 0
     decisions: []
     todo: []
@@ -383,6 +427,7 @@ modules:
     fan_in_snapshot: 0
     known_symbols:
     - ClientTransactionCreate.notes_must_not_be_blank
+    - backfill_client_payment_due_dates
     - create_client_transaction
     - get_all_client_payments
     - get_client_payment_by_case_no
@@ -445,6 +490,8 @@ modules:
     - All reads use case_no and optional assignment_id; no orders.id or legacy payment
       view is used.
     - The endpoint is read-only and does not alter the original contract workbook.
+    - Contract eligibility is read only from clients.identity_status; order facts
+      must not select or return clients.identity_status.
     preferred_pattern: none
     verification:
     - command:
@@ -455,6 +502,7 @@ modules:
         - tests\test_contract_context_router.py
         - -q
         cwd: project
+        timeout: 60
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
@@ -480,7 +528,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - _load_assignments
@@ -515,6 +563,7 @@ modules:
         - tests\test_finance_report_router.py
         - -q
         cwd: project
+        timeout: 60
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
@@ -544,11 +593,13 @@ modules:
     fan_in_snapshot: 0
     known_symbols:
     - _payable_preview
+    - _payable_summary_preview
     - _xlsx_response
     - export_accounts_payable
     - export_annual_reconciliation
     - export_quarterly_reconciliation
     - preview_accounts_payable
+    - preview_accounts_payable_summary
     - preview_annual_reconciliation
     - preview_quarterly_reconciliation
   FinanceAlertRouter:
@@ -609,7 +660,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 1
     known_symbols:
     - ClaimFinanceAlertRequest.operator_must_not_be_blank
@@ -622,19 +673,28 @@ modules:
     - resolve_alert
   FinanceRouterRegistration:
     type: api_entrypoint
-    description: Register contract, finance-report and finance-alert routers with
-      the running FastAPI application.
+    description: Register contract, finance-report, finance-alert and multi-caregiver
+      schedule routers with the running FastAPI application.
     source: api/main.py
     domain: null
     subsystem: null
     map_file: api\api_system_map.md
-    dependencies: []
+    dependencies:
+    - MultiCaregiverScheduleRouter
+    - MultiCaregiverScheduleReadRouter
+    - MultiCaregiverCaseAssignmentListRouter
     input: {}
     output: {}
     exceptions: []
     invariants:
     - Register each new router exactly once without removing existing routers.
     - finance_alerts.router 必須只註冊一次；不得用另一個 FastAPI app 或重複 prefix 規避既有入口。
+    - multi_caregiver_schedule.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix 或呼叫 legacy
+      schedule router。
+    - multi_caregiver_schedule_read.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix 或改以
+      legacy schedule router 提供查詢。
+    - multi_caregiver_case_assignments.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix
+      或以 legacy 排班資料合成案件指派選單。
     - 'INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始啟動後端與監控服務防止連線逾時崩潰。'
     preferred_pattern: none
     verification:
@@ -644,11 +704,16 @@ modules:
         - -c
         - from pathlib import Path; s=Path('api/main.py').read_text(encoding='utf-8');
           assert 'contracts.router' in s and 'finance_reports.router' in s and 'finance_alerts.router'
-          in s; assert s.count('app.include_router(finance_alerts.router)') == 1;
-          print('FINANCE ROUTERS REGISTERED')
+          in s and 'multi_caregiver_schedule.router' in s and 'multi_caregiver_schedule_read.router'
+          in s and 'multi_caregiver_case_assignments.router' in s; assert s.count('app.include_router(finance_alerts.router)')
+          == 1; assert s.count('app.include_router(multi_caregiver_schedule.router)')
+          == 1; assert s.count('app.include_router(multi_caregiver_schedule_read.router)')
+          == 1; assert s.count('app.include_router(multi_caregiver_case_assignments.router)')
+          == 1; print('ADMIN ROUTERS REGISTERED')
         cwd: project
+        timeout: 60
         expect_exit: 0
-        expect_stdout_contains: FINANCE ROUTERS REGISTERED
+        expect_stdout_contains: ADMIN ROUTERS REGISTERED
     decisions: []
     todo: []
     checkpoint: []
@@ -666,14 +731,14 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - api_health_check
     - lifespan
   OrderSchemas:
     type: api_schema
-    description: 訂單完整更新、狀態更新與排班試算的 API 請求資料模型。
+    description: 訂單完整更新、狀態更新與排班試算的 API 請求資料模型；訂金應收日期可空，客戶身分資格不屬於可提交訂單欄位。
     source: api/schemas/orders.py
     domain: null
     subsystem: null
@@ -682,7 +747,9 @@ modules:
     input: {}
     output: {}
     exceptions: []
-    invariants: []
+    invariants:
+    - deposit_date 必須允許 null，且不得以今天或其他期款日期作為預設值。
+    - 不得定義 clients.identity_status 或 identity_status 為可寫入的訂單 API 欄位。
     preferred_pattern: none
     verification: []
     decisions: []
@@ -702,7 +769,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 1
     known_symbols: []
   MatchSchemas:

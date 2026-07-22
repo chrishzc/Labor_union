@@ -12,7 +12,7 @@
 - Complexity: low
 - Input:
   - case_no: 訂單唯一公開識別鍵。
-  - create_order_fields: service_days、service_hours_per_day、subsidy_eligibility、floor_fee、日期與 status。
+  - create_order_fields: service_days、service_hours_per_day、floor_fee、日期與 status；身分資格一律由關聯 clients.identity_status 讀取。
 - Output:
   - order_record: 以 case_no 識別的訂單資料；不得含 other_addition。
   - created_order: 保留 floor_fee 與既有 client_payments 初始化的新增訂單結果。
@@ -23,9 +23,10 @@
   - get_order_by_case_no() 的 SELECT、create_order() 的函式簽名與 INSERT 欄位／值均不得出現 other_addition。
   - floor_fee 必須維持獨立欄位；不得合併至 service_salary 或以 other_addition 替代。
   - create_order() 必須維持 case_no 正規化與 client_payments 初始化行為。
+  - 所有訂單讀取、建立與更新不得讀寫 clients.identity_status；身分資格只能 join clients.identity_status 取得，且不得由訂單 CRUD 修改 clients.identity_status。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_db_service_order_other_addition_removal.py"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\db_service.py"], "cwd": "project", "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_db_service_order_other_addition_removal.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\db_service.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Non Goals:
   - 不修改 db/schema.sql 或執行資料庫 migration。
   - 不修改 DataBrowserUI 的舊欄位標籤、PaymentSchema 或其他 DbService 函式。
@@ -88,7 +89,7 @@
 - Description: Pure source-of-truth calculation for proposed client receivables, staff payables, subsidy claims, and payment dates before any ledger snapshot is written.
 - Complexity: medium
 - Input:
-  - order_terms: case_no, claim total days/hours, service start date, subsidy eligibility, client floor-fee amount, and actual completion date
+  - order_terms: case_no, claim total days/hours, service start date, immutable client identity_status, client floor-fee amount, and actual completion date
   - assignments: optional staff service segments with their own hours, rate, and allocated floor fee
   - collection_schedule: contract-selected deposit day count and deposit due date; first/second stage days and dates are derived by rule
 - Output:
@@ -105,8 +106,9 @@
   - The calculator is pure and must not import database, UI, or transaction-writing modules.
   - Returned totals are proposals only; persisted payment rows remain immutable snapshots, and manual adjustments are stored separately by ledger writers.
   - A full-subsidy case with client rate zero must have zero client receivable and zero subsidy-return amount.
+  - Eligibility input is identity_status only; the calculator must not accept, return, or derive clients.identity_status.
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_amount_calculator.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_amount_calculator.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: AccountingSourceProjection
@@ -130,8 +132,9 @@
   - All source reads use case_no; no orders.id or order_id is selected or accepted.
   - Client data comes from clients and beclass_records; staff recipient data comes from staff and case_staff_assignments.
   - Missing money inputs are explicit errors/gaps, never replaced by legacy fixed values.
+  - Order eligibility must be read only as clients.identity_status; this projection must not select, return, or derive clients.identity_status from orders.
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_accounting_source_projection.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_accounting_source_projection.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: PaymentService
@@ -779,13 +782,14 @@
   - 入款依 deposit、first_payment、second_payment 的未收餘額順序分配；超收或缺必要訂單條件時保持 pending，不建立正式交易。
   - 每個階段 external_reference 固定為 `fp:<fingerprint>:<stage>`，finance_import_row_id 指向同一 canonical row；不得使用檔名、列號或 staging id。
   - 所有交易、摘要重算、訂單狀態推進及 staging reconciled 必須使用同一 cursor 且位於同一 transaction；只能呼叫 ClientPaymentWriteService 的 cursor-bound 核心，重試只允許完全相同既有交易集合。
+  - 鎖定訂單時身分資格只能 join clients.identity_status 取得；不得選取、傳遞或寫入 clients.identity_status，且不得修改 clients.identity_status。
 - Algorithm:
   - 鎖 staging row，驗證 fingerprint，將 bank_references 的銷帳編號交 resolver 取得唯一 case_no；鎖 orders 並以 actual_start_date 優先、否則 start_date 組成明確條件，取得或建立不覆寫的 client payment snapshot。
   - 計算各階段未收餘額並完整分配本次 credit，逐階段新增 receipt transaction。
   - 重算三階段摘要與完成日，必要時推進訂單狀態，再標記 staging reconciled。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_receipt_reconciliation.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_receipt_reconciliation.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: FinanceImport
@@ -810,6 +814,7 @@
   - 跨檔名、工作表或列號重匯相同 fingerprint 時，不得覆蓋 canonical row、人工調整或正式帳務；只允許新增 occurrence。
   - 同秒同備註但 fingerprint 不同的兩筆交易都必須保存；若兩筆命中同一已完成或已被前筆占用的客戶應收義務，後筆必須保持 pending、不得超收，並保留 suspected_duplicate_business_match 警示。
   - 客戶入款的虛擬帳號錯誤、案件不存在／不唯一、超收或殘缺重試皆須保留 canonical staging 與 occurrence，且不得建立或修改正式客戶交易、三期實收摘要及案件狀態。
+  - 建立客戶帳務快照時，訂單資格只能 join clients.identity_status；不得選取、傳遞或寫入 clients.identity_status。
 - Observability: not_required
 - Complexity: medium
 - Input:
@@ -823,15 +828,15 @@
 - Algorithm:
   - 呼叫 normalizer 取得唯一格式、工作表、表頭與完整 normalized rows；在同一 DB transaction 載入精確帳號 maps 並呼叫 append-only staging。
   - skipped_existing 只記錄 occurrence，不進入下游；inserted row 依 classification_type dispatch。
-  - client_receipt 呼叫 ClientReceiptReconciliationService；government_subsidy 呼叫 exact batch reconciliation；client_subsidy_return 呼叫 exact obligation reconciliation。
+  - client_receipt 以 clients.identity_status 建立快照後呼叫 ClientReceiptReconciliationService；government_subsidy 呼叫 exact batch reconciliation；client_subsidy_return 呼叫 exact obligation reconciliation。
   - staff_salary/staff_legacy_subsidy 只在帳號唯一且該 staff 恰有一個符合 phase 的 finalized/partially_paid 月結時，建立全部未付 component 的 explicit allocations；總額不等於 debit 或候選不唯一時保持 pending。
   - non_business_review 與任何下游 pending 結果只回報 pending_rows；全部 inserted rows處理完才將 batch 標記 completed 並 commit。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_finance_excel.py", "tests\\test_finance_import_orchestrator.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_statement_normalizer.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_boundary_safety.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_client_receipt_boundaries.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_finance_excel.py", "tests\\test_finance_import_orchestrator.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_statement_normalizer.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_boundary_safety.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_client_receipt_boundaries.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 
 ##### Module: FinanceImportClientSubsidyReturnIntegrationTest
 - Sub Map: services_layer
@@ -1160,7 +1165,7 @@
   - Staff case column joins the settlement's case_no list for audit only; it must not split the bank amount. Sort by outgoing bank, transfer date, and source id, then assign independent month-bank serials.
   - Create an XLSX workbook with the fixed headers, yellow header styling, rows, and both outgoing-bank totals.
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_accounts_payable_export.py", "-q"], "cwd": "project", "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_accounts_payable_export.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: SubsidyReconciliationRegister
@@ -1183,12 +1188,13 @@
   - subsidy_days equals subsidy_hours divided by service_hours_per_day, rounded to and displayed with exactly two decimal places in the preview and XLSX.
   - General citizens are the upper section; subsidized citizens are a lower independent section only when it has rows.
   - Quarterly XLSX signing cells must always be blank; the service must not write claim, payment, or order data.
+  - 身分資格只能以 clients.identity_status 讀取、分類與輸出；不得選取、接受或輸出 clients.identity_status。
 - Algorithm:
-  - Read eligible completed orders with client, primary staff, and BeClass data, then calculate the claim period from actual_end_date.
-  - Classify records by subsidy eligibility. Derive subsidy hours as min(40, total service hours) for general citizens and min(120, total service hours) for subsidized citizens; then derive days, amount, and register fields, and sort each section by case_no.
+  - Read eligible completed orders with immutable client identity_status, primary staff, and BeClass data, then calculate the claim period from actual_end_date.
+  - Classify records by client identity_status. Derive subsidy hours as min(40, total service hours) for general citizens and min(120, total service hours) for subsidized citizens; then derive days, amount, and register fields, and sort each section by case_no.
   - Build quarterly and annual workbooks with their approved column sets and optional lower subsidized-citizen section.
 - Verification:
-  - command: {"argv": [".venv\\\\Scripts\\\\python.exe", "-m", "pytest", "tests\\\\test_subsidy_reconciliation_register.py", "-q"], "cwd": "project", "expect_exit": 0}
+  - command: {"argv": [".venv\\\\Scripts\\\\python.exe", "-m", "pytest", "tests\\\\test_subsidy_reconciliation_register.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 <!-- SERVICES_MODULES_END -->
