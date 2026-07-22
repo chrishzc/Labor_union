@@ -195,11 +195,13 @@ def reconcile_client_receipt(cursor: Any, finance_import_row_id: int) -> dict[st
     case_no = str(resolved["case_no"])
 
     cursor.execute(
-        """SELECT case_no, status, service_days, service_hours_per_day,
-                  subsidy_eligibility, floor_fee, deposit_date,
-                  deposit_service_days, start_date, actual_start_date,
-                  actual_end_date
-           FROM orders WHERE case_no = %s FOR UPDATE""",
+        """SELECT o.case_no, o.status, o.service_days, o.service_hours_per_day,
+                  c.identity_status, o.floor_fee, o.deposit_date,
+                  o.deposit_service_days, o.start_date, o.actual_start_date,
+                  o.actual_end_date
+           FROM orders o
+           JOIN clients c ON c.id = o.client_id
+           WHERE o.case_no = %s FOR UPDATE""",
         (case_no,),
     )
     order = cursor.fetchone()
@@ -251,7 +253,7 @@ def reconcile_client_receipt(cursor: Any, finance_import_row_id: int) -> dict[st
         "case_no": case_no,
         "service_days": order.get("service_days"),
         "service_hours_per_day": order.get("service_hours_per_day"),
-        "subsidy_eligibility": order.get("subsidy_eligibility"),
+        "identity_status": order.get("identity_status"),
         "client_floor_fee": order.get("floor_fee", 0),
         "actual_start_date": order.get("actual_start_date"),
         "start_date": order.get("start_date"),

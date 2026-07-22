@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from scripts.imports.import_finance_excel import allocate_receipt, build_snapshot_plan
+from scripts.imports.import_finance_excel import _order_for_snapshot, allocate_receipt, build_snapshot_plan
 
 
 def _order(**overrides):
@@ -8,7 +8,7 @@ def _order(**overrides):
         "case_no": "115000001",
         "service_days": 20,
         "service_hours_per_day": 9,
-        "subsidy_eligibility": "一般市民",
+        "identity_status": "一般市民",
         "floor_fee": 600,
         "deposit_date": "2026-04-01",
         "deposit_service_days": 5,
@@ -41,3 +41,22 @@ def test_receipt_allocation_follows_three_collection_stages():
     )
 
     assert allocations == [("deposit", Decimal("200")), ("first_payment", Decimal("1300"))]
+
+
+def test_locked_snapshot_order_joins_client_identity_status_only():
+    class Cursor:
+        def __init__(self):
+            self.sql = ""
+
+        def execute(self, sql, _params):
+            self.sql = " ".join(sql.split())
+
+        def fetchone(self):
+            return {"case_no": "115000001", "identity_status": "一般市民"}
+
+    cursor = Cursor()
+
+    assert _order_for_snapshot(cursor, "115000001") == {"case_no": "115000001", "identity_status": "一般市民"}
+    assert "JOIN clients c ON c.id = o.client_id" in cursor.sql
+    assert "c.identity_status" in cursor.sql
+    assert "clients.identity_status" not in cursor.sql

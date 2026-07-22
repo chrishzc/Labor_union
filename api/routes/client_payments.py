@@ -4,6 +4,7 @@ from datetime import date
 from pydantic import BaseModel, Field, field_validator
 from api.schemas.base import BaseResponse
 from services.db_service import get_connection
+from services.db_service import backfill_client_payment_due_dates as run_backfill_client_payment_due_dates
 from services.client_payment_writer import record_client_payment_transaction
 
 router = APIRouter(prefix="/api/v1/client-payments", tags=["Client Payments 客戶帳務"])
@@ -67,6 +68,21 @@ def get_client_payment_by_case_no(case_no: str = Path(..., description="案件�
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+@router.post("/due-dates/backfill", response_model=BaseResponse[Dict[str, Any]])
+def backfill_client_payment_due_dates(case_no: Optional[str] = None):
+    """回補 client_payments 的應收日期欄位（從 v_order_details 補齊空值）。"""
+    try:
+        result = run_backfill_client_payment_due_dates(case_no=case_no)
+        return BaseResponse(
+            data=result,
+            message="客戶帳務應收日期回補完成",
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/transaction", response_model=BaseResponse[Dict[str, Any]])

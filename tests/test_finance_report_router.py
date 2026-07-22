@@ -36,7 +36,9 @@ def test_accounts_payable_preview_is_read_only_and_includes_subsidy_returns(monk
         },
     )
 
-    response = _client().get("/api/v1/finance-reports/accounts-payable?target_month=2026-07")
+    response = _client().get(
+        "/api/v1/finance-reports/accounts-payable?target_month=2026-07&view=export"
+    )
 
     assert response.status_code == 200
     payload = response.json()["data"]
