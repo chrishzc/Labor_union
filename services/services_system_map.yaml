@@ -2811,7 +2811,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - _as_decimal

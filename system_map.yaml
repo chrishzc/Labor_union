@@ -321,7 +321,7 @@ modules:
     non_goals:
     - 不打亂或改變 50 筆既有客戶與 Excel 生成流程。
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - _assign_available_staff
@@ -654,7 +654,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 10
   MultiCaregiverAssignmentRules:
     type: service
@@ -713,7 +713,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: validated
     fan_in_snapshot: 5
   MultiCaregiverScheduleGenerationService:
     type: service
@@ -775,7 +775,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 2
   MultiCaregiverScheduleGenerationTransactionService:
     type: service
@@ -903,7 +903,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 2
   MultiCaregiverScheduleReadService:
     type: service
@@ -959,7 +959,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 2
   MultiCaregiverCaseAssignmentListService:
     type: service
@@ -1085,7 +1085,7 @@ modules:
     - 不新增薪資確認 API、管理端 UI、應付款或月結；後續付款建立節點必須自行呼叫本服務的確認驗證，方可將 can_confirm=true 視為薪資確認門檻。
     - 不從每日排班重算或推測人工例外時數；後續排班重算節點必須偵測既有人工覆寫，且不得靜默覆寫。
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 3
   ActualHoursAdjustmentConfirmationInternalHelpers:
     type: internal_helper
@@ -1656,7 +1656,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 3
     known_symbols:
     - list_case_schedule_assignments
@@ -1720,7 +1720,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 2
     known_symbols:
     - adjust_assignment_schedule
@@ -1779,7 +1779,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 2
     known_symbols:
     - get_assignment_schedule

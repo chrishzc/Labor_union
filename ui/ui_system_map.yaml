@@ -157,7 +157,7 @@ modules:
     - 不改動 Tab3、Tab4、Tab5 各自 renderer 的帳務或報表行為。
     - 不新增客戶收款或月嫂應付／轉帳操作。
     sub_map: ui_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 2
   OrderUI_Tab1_Overview:
     type: ui_component
@@ -356,7 +356,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 1
   EditOrderUI:
     type: ui_page
