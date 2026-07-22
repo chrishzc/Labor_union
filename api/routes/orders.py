@@ -1,6 +1,13 @@
 from fastapi import APIRouter, HTTPException, Path
+from pydantic import BaseModel, ConfigDict, Field
 from typing import List, Dict, Any
+from datetime import date
+from decimal import Decimal
 from services import db_service
+from services.order_assignment_synchronization import (
+    apply_order_assignment_sync,
+    preview_order_assignment_sync,
+)
 from api.schemas.base import BaseResponse
 from api.schemas.orders import (
     OrderFullUpdateRequest, 
@@ -9,6 +16,32 @@ from api.schemas.orders import (
 )
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Orders 訂單管理"])
+
+
+class OrderAssignmentSynchronizationOrderChange(BaseModel):
+    """The complete non-cancellation order target owned by one sync transaction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_name: str = Field(..., min_length=1)
+    service_days: int = Field(..., ge=1)
+    service_hours_per_day: Decimal = Field(..., gt=0)
+    floor_fee: Decimal = Field(..., ge=0)
+    deposit_date: date | None = None
+    start_date: date
+    end_date: date
+    actual_start_date: date
+    actual_end_date: date
+
+
+class OrderAssignmentSynchronizationPreviewRequest(BaseModel):
+    order_change: OrderAssignmentSynchronizationOrderChange
+    assignment_plan: List[Dict[str, Any]] = Field(..., min_length=1)
+
+
+class OrderAssignmentSynchronizationApplyRequest(OrderAssignmentSynchronizationPreviewRequest):
+    schedule_change_plan: Dict[str, Any]
+    applied_by: str = Field(..., min_length=1)
 
 @router.get("", response_model=BaseResponse[List[Dict[str, Any]]])
 def get_all_orders():
@@ -37,7 +70,7 @@ def update_order_full_details(
     req: OrderFullUpdateRequest,
     case_no: str = Path(..., description="案件編號")
 ):
-    """更新單筆訂單 36 欄位主要資料 (天數、時數、資格、樓層費、起訖日與客戶姓名)"""
+    """更新單筆訂單主要資料（天數、時數、樓層費、起訖日與客戶姓名）。"""
     try:
         update_dict = req.model_dump()
         success = db_service.update_order_full_details(case_no=case_no, data=update_dict)
@@ -74,3 +107,59 @@ def calculate_schedule(req: ScheduleCalculationRequest):
         return BaseResponse(data=res, message="成功完成排班與順延完工日試算")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/{case_no}/assignment-synchronization/preview",
+    response_model=BaseResponse[Dict[str, Any]],
+)
+def preview_order_assignment_synchronization(
+    req: OrderAssignmentSynchronizationPreviewRequest,
+    case_no: str = Path(..., description="案件編號"),
+):
+    """Return a read-only preview for one explicit multi-caregiver plan."""
+    try:
+        result = preview_order_assignment_sync(
+            case_no=case_no,
+            order_change=req.order_change.model_dump(),
+            assignment_plan=req.assignment_plan,
+        )
+        return BaseResponse(data=result, message="成功取得訂單與月嫂指派同步預覽")
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="Failed to preview order assignment synchronization") from error
+
+
+@router.post(
+    "/{case_no}/assignment-synchronization/apply",
+    response_model=BaseResponse[Dict[str, Any]],
+)
+def apply_order_assignment_synchronization(
+    req: OrderAssignmentSynchronizationApplyRequest,
+    case_no: str = Path(..., description="案件編號"),
+):
+    """Apply only a complete, explicitly confirmed multi-caregiver plan."""
+    if not req.applied_by.strip():
+        raise HTTPException(status_code=422, detail="applied_by is required")
+    removal_ids = req.schedule_change_plan.get("remove_schedule_ids")
+    if not isinstance(removal_ids, list):
+        raise HTTPException(status_code=422, detail="remove_schedule_ids is required")
+
+    try:
+        result = apply_order_assignment_sync(
+            case_no=case_no,
+            order_change=req.order_change.model_dump(),
+            assignment_plan=req.assignment_plan,
+            schedule_change_plan=req.schedule_change_plan,
+            applied_by=req.applied_by,
+        )
+        if result.get("sync_status") in {"locked", "requires_review", "requires_allocation"}:
+            raise HTTPException(status_code=409, detail=result)
+        return BaseResponse(data=result, message="成功套用訂單與月嫂指派同步")
+    except HTTPException:
+        raise
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+    except Exception as error:
+        raise HTTPException(status_code=500, detail="Failed to apply order assignment synchronization") from error

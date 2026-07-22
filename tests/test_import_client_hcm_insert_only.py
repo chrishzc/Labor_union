@@ -83,6 +83,9 @@ def test_mixed_rows_only_insert_new_case_no(monkeypatch):
     assert not any(sql.startswith("UPDATE") for sql in statements)
     assert sum(sql.startswith("INSERT INTO clients") for sql in statements) == 1
     assert sum(sql.startswith("INSERT INTO orders") for sql in statements) == 1
+    order_call = next(call for call in cursor.calls if call[0].startswith("INSERT INTO orders"))
+    assert "subsidy_eligibility" not in order_call[0]
+    assert order_call[1] == ("new-001", 101, 20, 9)
     assert connection.rollbacks == 0
     assert connection.closed is True
 

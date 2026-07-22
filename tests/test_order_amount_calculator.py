@@ -6,12 +6,12 @@ from services.order_amount_calculator import calculate_order_amounts
 SCHEDULE = {"deposit_service_days": 5, "deposit_due_date": "2026-04-01"}
 
 
-def _terms(case_no, eligibility, service_days=20, hours_per_day=9, floor_fee=0):
+def _terms(case_no, identity_status, service_days=20, hours_per_day=9, floor_fee=0):
     return {
         "case_no": case_no,
         "service_days": service_days,
         "service_hours_per_day": hours_per_day,
-        "subsidy_eligibility": eligibility,
+        "identity_status": identity_status,
         "client_floor_fee": floor_fee,
         "service_start_date": "2026-05-01",
         "actual_completion_date": "2026-05-20",
@@ -102,8 +102,18 @@ def test_subsidy_hours_are_capped_by_total_service_hours():
     assert result["subsidy_plan"]["subsidy_claim_amount"] == 9450
 
 
-def test_rejects_unknown_eligibility_and_missing_deposit_date():
-    with pytest.raises(ValueError, match="unsupported subsidy_eligibility"):
+def test_rejects_unknown_identity_status_and_missing_deposit_date():
+    with pytest.raises(ValueError, match="unsupported identity_status"):
         calculate_order_amounts(_terms("115000006", "未知"), [], SCHEDULE)
     with pytest.raises(ValueError, match="deposit_due_date"):
         calculate_order_amounts(_terms("115000007", "一般市民"), [], {"deposit_service_days": 5})
+
+
+def test_identity_status_is_returned_with_the_calculation_plan():
+    result = calculate_order_amounts(
+        _terms("115000009", "一般市民"),
+        [{"assignment_id": 9, "staff_id": 11, "actual_hours": 180, "hourly_rate": 350}],
+        SCHEDULE,
+    )
+
+    assert result["identity_status"] == "一般市民"

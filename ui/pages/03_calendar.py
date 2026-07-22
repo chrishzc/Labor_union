@@ -28,10 +28,13 @@ from datetime import datetime, timedelta
 import math
 import importlib
 import calendar
+import os
+import requests
 from services import db_service
 importlib.reload(db_service)
 
 title = "📅 服務人員行事曆與休假安排"
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 def safe_float(val) -> float:
     if val is None:
@@ -68,6 +71,139 @@ def safe_date(val):
         except:
             return datetime.today().date()
     return val
+
+
+def _multi_caregiver_request(path, *, method="GET", payload=None):
+    """Use only the assignment-aware APIs for the multi-caregiver panel."""
+    response = requests.request(
+        method,
+        f"{API_BASE_URL}{path}",
+        json=payload,
+        timeout=15,
+    )
+    response.raise_for_status()
+    body = response.json()
+    if not body.get("success", False):
+        raise ValueError(body.get("error") or body.get("message") or "多月嫂排班 API 請求失敗")
+    return body.get("data") or {}
+
+
+def _multi_caregiver_error(error):
+    if isinstance(error, requests.HTTPError) and error.response is not None:
+        try:
+            detail = error.response.json().get("detail")
+        except ValueError:
+            detail = error.response.text
+        return f"HTTP {error.response.status_code}: {detail}"
+    return str(error)
+
+
+def _render_multi_caregiver_panel(all_orders):
+    """Render explicit case -> assignment selection and assignment-owned days."""
+    st.markdown("---")
+    st.markdown("### 👩‍🍼 多月嫂指派排班")
+    st.caption("先選案件，再選正式服務指派。此處不支援同日分時段，也不提供人工輸入 actual_hours。")
+
+    case_options = {
+        f"{order['case_no']}｜{order.get('client_name', '')}｜{order.get('order_status', '')}": order["case_no"]
+        for order in all_orders
+        if order.get("case_no")
+    }
+    if not case_options:
+        st.info("目前沒有可選案件。")
+        return
+
+    selected_case_label = st.selectbox(
+        "1. 選擇案件",
+        list(case_options),
+        key="multi_caregiver_case_no",
+    )
+    case_no = case_options[selected_case_label]
+    try:
+        assignments = _multi_caregiver_request(
+            f"/api/v1/cases/{case_no}/assignment-schedules"
+        ).get("assignments", [])
+    except (requests.RequestException, ValueError) as error:
+        st.error(f"無法讀取案件的正式服務指派：{_multi_caregiver_error(error)}")
+        return
+
+    if not assignments:
+        st.info("此案件目前沒有未取消的正式服務指派。")
+        return
+
+    assignment_options = {
+        f"#{item['id']}｜{item.get('staff_name', '')}｜{item.get('assigned_start_date')} ～ {item.get('assigned_end_date')}": item["id"]
+        for item in assignments
+    }
+    selected_assignment_label = st.selectbox(
+        "2. 選擇月嫂服務區段",
+        list(assignment_options),
+        key=f"multi_caregiver_assignment_{case_no}",
+    )
+    assignment_id = assignment_options[selected_assignment_label]
+    try:
+        schedule_data = _multi_caregiver_request(
+            f"/api/v1/assignment-schedules/{assignment_id}"
+        )
+    except (requests.RequestException, ValueError) as error:
+        st.error(f"無法讀取指派排班：{_multi_caregiver_error(error)}")
+        return
+
+    assignment = schedule_data.get("assignment", {})
+    schedule_days = schedule_data.get("schedule_days", [])
+    summary_left, summary_middle, summary_right = st.columns(3)
+    summary_left.metric("月嫂", assignment.get("staff_name", "-"))
+    summary_middle.metric("服務區段", f"{assignment.get('assigned_start_date', '-')} ～ {assignment.get('assigned_end_date', '-')}")
+    summary_right.metric("目前實際時數", assignment.get("actual_hours", 0))
+
+    if not schedule_days:
+        if st.button("產生此指派的日排班", key=f"generate_assignment_{assignment_id}"):
+            try:
+                _multi_caregiver_request(
+                    f"/api/v1/assignment-schedules/{assignment_id}/generate",
+                    method="POST",
+                )
+                st.success("已產生日排班。")
+                st.rerun()
+            except (requests.RequestException, ValueError) as error:
+                st.error(f"無法產生日排班：{_multi_caregiver_error(error)}")
+        return
+
+    display_rows = [
+        {
+            "日期": item.get("work_date"),
+            "狀態": "🔴 工作日" if item.get("is_work_day") else "🟢 休假",
+            "雙倍薪": "是" if item.get("is_double_pay") else "否",
+            "備註": item.get("notes") or "",
+        }
+        for item in schedule_days
+    ]
+    st.dataframe(display_rows, width="stretch", hide_index=True)
+    st.caption("請假只影響這一筆正式指派；如需延長服務區段，請明確調整指派日期，系統不會自動跨入下一位月嫂區段。")
+
+    day_options = {str(item["work_date"]): item for item in schedule_days}
+    with st.form(f"multi_caregiver_day_adjustment_{assignment_id}"):
+        selected_work_date = st.selectbox("調整日期", list(day_options))
+        selected_day = day_options[selected_work_date]
+        is_work_day = st.checkbox("計入服務時數", value=bool(selected_day.get("is_work_day")))
+        is_double_pay = st.checkbox("雙倍薪服務日", value=bool(selected_day.get("is_double_pay")))
+        notes = st.text_input("行政備註", value=selected_day.get("notes") or "", max_chars=255)
+        submitted = st.form_submit_button("儲存此日調整")
+    if submitted:
+        try:
+            _multi_caregiver_request(
+                f"/api/v1/assignment-schedules/{assignment_id}/days/{selected_work_date}",
+                method="PUT",
+                payload={
+                    "is_work_day": is_work_day,
+                    "is_double_pay": is_double_pay,
+                    "notes": notes or None,
+                },
+            )
+            st.success("已儲存指派內單日調整。")
+            st.rerun()
+        except (requests.RequestException, ValueError) as error:
+            st.error(f"無法儲存指派日調整：{_multi_caregiver_error(error)}")
 
 def show():
     """服務人員行事曆與檔期調控獨立頁面入口 (CalendarUI)"""
@@ -110,6 +246,7 @@ def show():
 
         # 3. 兩階段操作選單
         all_orders = db_service.get_order_details()
+        _render_multi_caregiver_panel(all_orders)
         
         calc_res = None
         target_order = None

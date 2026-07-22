@@ -22,10 +22,11 @@ def _load_case_facts(cursor: Any, case_no: str) -> dict[str, Any] | None:
     cursor.execute(
         """
         SELECT o.case_no, o.status, o.contract_id, o.service_days,
-               o.service_hours_per_day, o.subsidy_eligibility, o.floor_fee,
+               o.service_hours_per_day, o.floor_fee,
                o.start_date, o.end_date, o.actual_start_date, o.actual_end_date,
                c.id AS client_id, c.name AS client_name, c.phone AS client_phone,
                c.city AS client_city, c.address AS client_address,
+               c.identity_status AS client_identity_status,
                c.service_type, c.service_time, c.baby_info, c.notes AS client_notes,
                b.query_no AS beclass_query_no, b.survey_details, b.admin_notes AS beclass_admin_notes
         FROM orders o
@@ -95,7 +96,7 @@ def get_staff_contract_context(case_no: str, assignment_id: int | None = None) -
                 key: case_facts.get(key)
                 for key in (
                     "case_no", "status", "contract_id", "service_days",
-                    "service_hours_per_day", "subsidy_eligibility", "floor_fee",
+                    "service_hours_per_day", "floor_fee",
                     "start_date", "end_date", "actual_start_date", "actual_end_date",
                 )
             }
@@ -103,7 +104,7 @@ def get_staff_contract_context(case_no: str, assignment_id: int | None = None) -
                 key.removeprefix("client_"): case_facts.get(key)
                 for key in (
                     "client_id", "client_name", "client_phone", "client_city",
-                    "client_address", "service_type", "service_time", "baby_info",
+                    "client_address", "client_identity_status", "service_type", "service_time", "baby_info",
                     "client_notes",
                 )
             }

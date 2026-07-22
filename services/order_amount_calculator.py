@@ -12,12 +12,12 @@ from typing import Any
 
 
 MONEY_ZERO = Decimal("0")
-SUBSIDY_HOURS_BY_ELIGIBILITY = {
+SUBSIDY_HOURS_BY_IDENTITY_STATUS = {
     "一般市民": Decimal("40"),
     "補助市民": Decimal("120"),
     "非市民": MONEY_ZERO,
 }
-CLIENT_RATE_BY_ELIGIBILITY = {
+CLIENT_RATE_BY_IDENTITY_STATUS = {
     "一般市民": Decimal("300"),
     "補助市民": MONEY_ZERO,
     "非市民": Decimal("350"),
@@ -186,8 +186,8 @@ def calculate_order_amounts(
 ) -> dict[str, Any]:
     """Return a proposed ledger plan from explicit terms, without persistence.
 
-    Eligibility derives the approved subsidy hours and client rate.  Staff
-    rates remain assignment facts; contract-selected stage dates remain input.
+    Client identity status derives the approved subsidy hours and client rate.
+    Staff rates remain assignment facts; contract-selected stage dates remain input.
     """
     if not isinstance(order_terms, dict):
         raise ValueError("order_terms must be an object")
@@ -198,10 +198,10 @@ def calculate_order_amounts(
 
     service_days = _decimal(order_terms.get("service_days"), "service_days")
     hours_per_day = _decimal(order_terms.get("service_hours_per_day"), "service_hours_per_day")
-    eligibility = str(order_terms.get("subsidy_eligibility") or "").strip()
-    if eligibility not in SUBSIDY_HOURS_BY_ELIGIBILITY:
-        raise ValueError("unsupported subsidy_eligibility")
-    client_rate = CLIENT_RATE_BY_ELIGIBILITY[eligibility]
+    identity_status = str(order_terms.get("identity_status") or "").strip()
+    if identity_status not in SUBSIDY_HOURS_BY_IDENTITY_STATUS:
+        raise ValueError("unsupported identity_status")
+    client_rate = CLIENT_RATE_BY_IDENTITY_STATUS[identity_status]
     client_floor_fee = _decimal(order_terms.get("client_floor_fee", 0), "client_floor_fee")
     service_start_date = _parse_date(order_terms.get("service_start_date"), "service_start_date")
     completed_on = _parse_date(order_terms.get("actual_completion_date"), "actual_completion_date")
@@ -209,8 +209,8 @@ def calculate_order_amounts(
         raise ValueError("service_start_date is required")
 
     total_hours = service_days * hours_per_day
-    subsidy_hours = min(SUBSIDY_HOURS_BY_ELIGIBILITY[eligibility], total_hours)
-    if eligibility == "補助市民" and client_floor_fee > MONEY_ZERO:
+    subsidy_hours = min(SUBSIDY_HOURS_BY_IDENTITY_STATUS[identity_status], total_hours)
+    if identity_status == "補助市民" and client_floor_fee > MONEY_ZERO:
         raise ValueError("full subsidy cases cannot have a client floor fee")
 
     stages = _collection_stages(
@@ -239,7 +239,7 @@ def calculate_order_amounts(
 
     return {
         "case_no": str(order_terms["case_no"]),
-        "subsidy_eligibility": eligibility,
+        "identity_status": identity_status,
         "total_service_hours": _number(total_hours),
         "client_ledger_plan": {
             "stages": stages,

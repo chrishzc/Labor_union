@@ -100,10 +100,11 @@ def get_order_by_case_no(case_no: str) -> dict | None:
                 SELECT o.case_no, o.client_id, o.staff_id, o.status, o.cancel_reason,
                        o.line_group_id, o.actual_start_date, o.actual_end_date,
                        o.contract_id, o.service_days, o.service_hours_per_day,
-                       o.subsidy_eligibility, o.floor_fee, o.deposit_date,
+                       o.floor_fee, o.deposit_date,
                        o.start_date, o.end_date, o.custom_rest_dates,
                        o.created_at, o.updated_at,
-                       c.name AS client_name, s.name AS staff_name
+                       c.name AS client_name, c.identity_status AS identity_status,
+                       s.name AS staff_name
                 FROM orders o
                 JOIN clients c ON c.case_no = o.case_no
                 LEFT JOIN staff s ON s.id = o.staff_id
@@ -124,8 +125,14 @@ def get_table_data(table_name: str) -> list[dict]:
         with conn.cursor() as cursor:
             if table_name == 'orders':
                 cursor.execute("""
-                    SELECT o.*, s.name AS staff_name
+                    SELECT o.case_no, o.client_id, o.staff_id, o.status, o.cancel_reason,
+                           o.line_group_id, o.actual_start_date, o.actual_end_date,
+                           o.contract_id, o.service_days, o.service_hours_per_day,
+                           o.floor_fee, o.deposit_date, o.start_date, o.end_date,
+                           o.custom_rest_dates, o.created_at, o.updated_at,
+                           c.identity_status AS identity_status, s.name AS staff_name
                     FROM orders o
+                    JOIN clients c ON c.case_no = o.case_no
                     LEFT JOIN staff s ON o.staff_id = s.id
                 """)
             else:
@@ -296,7 +303,7 @@ def get_order_details() -> list[dict]:
                 days = safe_int(r.get('service_days', 20))
                 hrs = safe_int(r.get('service_hours_per_day', 9))
                 r['total_hours'] = r.get('total_hours') or (days * hrs)
-                r['subsidy_hours'] = r.get('subsidy_hours') or (40 if r.get('subsidy_eligibility') != '一般身分' else 0)
+                r['subsidy_hours'] = r.get('subsidy_hours') or (40 if r.get('identity_status') != '一般身分' else 0)
                 r['self_pay_hours'] = max(0, r['total_hours'] - r['subsidy_hours'])
                 r['claim_total_days'] = days
                 r['employer_hourly_rate'] = r.get('employer_hourly_rate') or 2000
@@ -338,8 +345,118 @@ def get_case_order_details() -> list[dict]:
     """Return order view rows identified by case_no."""
     return get_order_details()
 
+
+def _sync_client_payment_due_dates_with_cursor(cursor, case_no: str | None = None) -> int:
+    if case_no is not None:
+        case_no = _resolve_case_no(case_no)
+        cursor.execute(
+            """
+            UPDATE client_payments cp
+            JOIN v_order_details od ON od.case_no = cp.case_no
+            SET cp.deposit_due_date = COALESCE(cp.deposit_due_date, od.deposit_date),
+                cp.first_payment_due_date = COALESCE(cp.first_payment_due_date, od.first_payment_date),
+                cp.second_payment_due_date = COALESCE(cp.second_payment_due_date, od.second_payment_date)
+            WHERE cp.case_no = %s
+              AND (
+                cp.deposit_due_date IS NULL
+                OR cp.first_payment_due_date IS NULL
+                OR cp.second_payment_due_date IS NULL
+              )
+            """,
+            (case_no,),
+        )
+        return int(cursor.rowcount or 0)
+
+    cursor.execute(
+        """
+        UPDATE client_payments cp
+        JOIN v_order_details od ON od.case_no = cp.case_no
+        SET cp.deposit_due_date = COALESCE(cp.deposit_due_date, od.deposit_date),
+            cp.first_payment_due_date = COALESCE(cp.first_payment_due_date, od.first_payment_date),
+            cp.second_payment_due_date = COALESCE(cp.second_payment_due_date, od.second_payment_date)
+        WHERE (
+            cp.deposit_due_date IS NULL
+            OR cp.first_payment_due_date IS NULL
+            OR cp.second_payment_due_date IS NULL
+        )
+        """,
+    )
+    return int(cursor.rowcount or 0)
+
+
+def sync_client_payment_due_dates_for_case_no(case_no: str, cursor=None) -> int:
+    case_no = _resolve_case_no(case_no)
+    if cursor is not None:
+        return _sync_client_payment_due_dates_with_cursor(cursor, case_no)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as internal_cursor:
+            updated = _sync_client_payment_due_dates_with_cursor(internal_cursor, case_no)
+            conn.commit()
+            return updated
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _count_missing_client_payment_due_dates(cursor, case_no: str | None = None) -> int:
+    if case_no is not None:
+        case_no = _resolve_case_no(case_no)
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM client_payments cp
+            JOIN v_order_details od ON od.case_no = cp.case_no
+            WHERE cp.case_no = %s
+              AND (
+                cp.deposit_due_date IS NULL
+                OR cp.first_payment_due_date IS NULL
+                OR cp.second_payment_due_date IS NULL
+              )
+            """,
+            (case_no,),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM client_payments cp
+            JOIN v_order_details od ON od.case_no = cp.case_no
+            WHERE cp.deposit_due_date IS NULL
+               OR cp.first_payment_due_date IS NULL
+               OR cp.second_payment_due_date IS NULL
+            """,
+        )
+    result = cursor.fetchone()
+    return int(result[0] if isinstance(result, tuple) else result["COUNT(*)"] if result else 0)
+
+
+def backfill_client_payment_due_dates(case_no: str | None = None) -> dict:
+    conn = get_connection()
+    try:
+        target_case_no = _resolve_case_no(case_no) if case_no else None
+        with conn.cursor() as cursor:
+            before = _count_missing_client_payment_due_dates(cursor, target_case_no)
+            updated = _sync_client_payment_due_dates_with_cursor(cursor, target_case_no)
+            after = _count_missing_client_payment_due_dates(cursor, target_case_no)
+            conn.commit()
+            return {
+                "target_case_no": target_case_no,
+                "updated_rows": updated,
+                "remaining_missing_rows": after,
+                "updated_before": before,
+            }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
 def create_order(case_no: str, service_days: int, service_hours_per_day: int,
-                 subsidy_eligibility: str, floor_fee: float = 0.0, 
+                 floor_fee: float = 0.0,
                  deposit_date = None, start_date = None, end_date = None, 
                  status: str = '洽談中') -> str:
     """依正式 case_no 建立或取得唯一訂單，並同步建立帳務記錄。"""
@@ -355,19 +472,21 @@ def create_order(case_no: str, service_days: int, service_hours_per_day: int,
             cursor.execute("""
                 INSERT INTO orders (
                     case_no, client_id, status, service_days, service_hours_per_day,
-                    subsidy_eligibility, floor_fee, deposit_date, start_date, end_date
+                    floor_fee, deposit_date, start_date, end_date
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                 ON DUPLICATE KEY UPDATE case_no = VALUES(case_no)
             """, (
                 case_no, client['id'], status, service_days, service_hours_per_day,
-                subsidy_eligibility, floor_fee, deposit_date, start_date, end_date
+                floor_fee, deposit_date, start_date, end_date
             ))
 
             cursor.execute("""
                 INSERT IGNORE INTO client_payments (case_no, payment_status)
                 VALUES (%s, '待收訂金')
             """, (case_no,))
+
+            sync_client_payment_due_dates_for_case_no(case_no, cursor=cursor)
             
             conn.commit()
             return case_no
@@ -427,7 +546,7 @@ def update_order_status(case_no: str, status: str, cancel_reason: str = None) ->
         conn.close()
 
 def update_order_full_details(case_no: str, data: dict) -> bool:
-    """更新 orders 主資料表全量欄位 (含天數、時數、資格、樓層費、起訖日與客戶姓名)"""
+    """更新 orders 主資料表全量欄位（天數、時數、樓層費與日期）。"""
     case_no = _resolve_case_no(case_no)
     conn = get_connection()
     try:
@@ -436,7 +555,6 @@ def update_order_full_details(case_no: str, data: dict) -> bool:
                 UPDATE orders 
                 SET service_days = %s,
                     service_hours_per_day = %s,
-                    subsidy_eligibility = %s,
                     floor_fee = %s,
                     start_date = %s,
                     actual_start_date = %s,
@@ -447,7 +565,6 @@ def update_order_full_details(case_no: str, data: dict) -> bool:
             """, (
                 data.get('service_days'),
                 data.get('service_hours_per_day'),
-                data.get('subsidy_eligibility'),
                 data.get('floor_fee'),
                 data.get('start_date'),
                 data.get('actual_start_date'),
@@ -464,6 +581,8 @@ def update_order_full_details(case_no: str, data: dict) -> bool:
                     SET c.name = %s
                     WHERE c.case_no = %s
                 """, (data.get('client_name'), case_no))
+
+            sync_client_payment_due_dates_for_case_no(case_no, cursor=cursor)
                 
             conn.commit()
             return True
@@ -1217,6 +1336,4 @@ def get_recommended_staff_for_order(
             return recommendations
     finally:
         conn.close()
-
-
 

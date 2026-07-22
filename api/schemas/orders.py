@@ -6,7 +6,6 @@ class OrderFullUpdateRequest(BaseModel):
     client_name: Optional[str] = Field(None, description="客戶姓名")
     service_days: int = Field(20, ge=1, description="服務天數")
     service_hours_per_day: int = Field(9, ge=1, le=24, description="每日服務時數")
-    subsidy_eligibility: str = Field("一般身分", description="補助資格")
     floor_fee: float = Field(0.0, description="樓層費用")
     start_date: Optional[date] = Field(None, description="預計服務開始日")
     actual_start_date: Optional[date] = Field(None, description="實際服務開始日")

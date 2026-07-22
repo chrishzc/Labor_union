@@ -63,3 +63,12 @@ def test_create_order_insert_placeholders_match_parameter_tuple():
     parameters = insert_call.args[1]
     assert isinstance(parameters, ast.Tuple)
     assert query.count("%s") == len(parameters.elts)
+
+
+def test_order_crud_uses_client_identity_status_not_legacy_eligibility_field():
+    source = DB_SERVICE.read_text(encoding="utf-8")
+
+    assert "clients.identity_status" not in source
+    assert "c.identity_status AS identity_status" in _function_source("get_order_by_case_no")
+    assert "c.identity_status AS identity_status" in _function_source("get_table_data")
+    assert "identity_status" not in [argument.arg for argument in _function_node("create_order").args.args]

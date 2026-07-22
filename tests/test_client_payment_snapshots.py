@@ -44,7 +44,7 @@ def order(**changes):
         "case_no": "CASE-001",
         "service_days": 36,
         "service_hours_per_day": 9,
-        "subsidy_eligibility": "一般市民",
+        "identity_status": "一般市民",
         "client_floor_fee": 0,
         "start_date": "2026-07-15",
     }

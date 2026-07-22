@@ -186,17 +186,10 @@ def process_import(excel_path):
             hrs_match = re.search(r'\d+', str(s_time_raw))
             s_hours = int(hrs_match.group(0)) if hrs_match else 9
 
-            sub_elig = "一般市民"
-            raw_sub = str(record.get('identity_status') or '')
-            if "補助" in raw_sub or "低收" in raw_sub:
-                sub_elig = "補助市民"
-            elif "非" in raw_sub:
-                sub_elig = "非市民"
-
             cursor.execute("""
-                INSERT INTO orders (case_no, client_id, status, service_days, service_hours_per_day, subsidy_eligibility)
-                VALUES (%s, %s, '洽談中', %s, %s, %s)
-            """, (case_no, client_id, s_days, s_hours, sub_elig))
+                INSERT INTO orders (case_no, client_id, status, service_days, service_hours_per_day)
+                VALUES (%s, %s, '洽談中', %s, %s)
+            """, (case_no, client_id, s_days, s_hours))
                 
         conn.commit()
         print(f"匯入成功：新增 {inserted} 筆，略過既有 {skipped_existing} 筆，待確認 {review_required} 筆。")
