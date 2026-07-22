@@ -137,7 +137,7 @@
 
 <div class="container" id="mainContainer">
     <div class="header" id="formHeader">
-        <div class="logo">新竹市月子工會</div>
+        <div class="logo" id="pageLogo">新竹市月子工會</div>
         <div class="title">產婦服務登記表單</div>
         <div class="subtitle">請詳細填寫以下資料，送出後將為您建立專屬服務檔案並進行媒合。</div>
     </div>
@@ -355,6 +355,11 @@
             </div>
         </div>
 
+        <div id="customFieldsSection" style="display: none;">
+            <div class="section-title" id="customFieldsTitle">其他服務需求</div>
+            <div id="customFieldsContainer"></div>
+        </div>
+
         <button type="submit" class="btn-submit">送出完整服務登記表單</button>
     </form>
 
@@ -363,47 +368,32 @@
         <div class="success-icon">✓</div>
         <div class="success-title">送出成功！</div>
         <div class="success-desc">您的服務資料已經完整登錄至系統。<br>案件編號完成行政核發後，LINE 將主動通知您，請關閉此頁面回到 LINE 聊天室查看。</div>
-        <button class="btn-submit" onclick="liff.closeWindow()">關閉視窗</button>
+        <button class="btn-submit" id="closeButton" onclick="liff.closeWindow()">關閉視窗</button>
     </div>
 
     <!-- 載入中遮罩 -->
     <div class="loader-overlay" id="loaderOverlay">
         <div class="spinner"></div>
-        <div style="font-size: 15px; font-weight:500; color:var(--text-dark);">資料傳送中，請稍候...</div>
+        <div id="loaderText" style="font-size: 15px; font-weight:500; color:var(--text-dark);">資料傳送中，請稍候...</div>
     </div>
 </div>
 
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
     let currentLineUserId = "mock_line_user_id";
+    let currentIdToken = "";
+    let liffConfigRevision = "";
+    let runtimePage = null;
 
     async function initializeLiff() {
         try {
             // 1. 動態載入 LIFF 與外觀設定
-            const configRes = await fetch('/api/config/liff');
+            const configRes = await fetch('/api/config/liff/runtime?page=registration');
+            if (!configRes.ok) throw new Error('無法取得 LIFF 頁面設定');
             const appConfig = await configRes.json();
-            
-            // 套用顏色主題
-            if (appConfig.theme_colors) {
-                document.documentElement.style.setProperty('--primary', appConfig.theme_colors.primary);
-                document.documentElement.style.setProperty('--primary-hover', appConfig.theme_colors.primary_hover);
-                document.documentElement.style.setProperty('--bg-gradient', appConfig.theme_colors.background_gradient);
-                document.documentElement.style.setProperty('--text-dark', appConfig.theme_colors.text_dark);
-                document.documentElement.style.setProperty('--text-muted', appConfig.theme_colors.text_muted);
-            }
-            // 套用文字設定
-            if (appConfig.texts) {
-                const titleEl = document.querySelector('.title');
-                if (titleEl) titleEl.textContent = appConfig.texts.form_title;
-                const subtitleEl = document.querySelector('.subtitle');
-                if (subtitleEl) subtitleEl.textContent = appConfig.texts.form_subtitle;
-                const btnEl = document.querySelector('.btn-submit');
-                if (btnEl) btnEl.textContent = appConfig.texts.submit_button;
-                const sucTitle = document.querySelector('.success-title');
-                if (sucTitle) sucTitle.innerHTML = appConfig.texts.success_title;
-                const sucDesc = document.querySelector('.success-desc');
-                if (sucDesc) sucDesc.innerHTML = appConfig.texts.success_desc;
-            }
+            liffConfigRevision = appConfig.revision || '';
+            runtimePage = appConfig.page;
+            applyRuntime(appConfig);
 
             // 2. 初始化 LIFF
             const response = await fetch('/api/line/config');
@@ -414,6 +404,7 @@
                 if (liff.isLoggedIn()) {
                     const profile = await liff.getProfile();
                     currentLineUserId = profile.userId;
+                    currentIdToken = liff.getIDToken() || '';
                 } else {
                     liff.login();
                 }
@@ -433,8 +424,156 @@
         initializeLiff();
     });
 
+    function applyRuntime(runtime) {
+        const theme = runtime.theme;
+        const page = runtime.page;
+        const root = document.documentElement.style;
+        root.setProperty('--primary', theme.primary_color);
+        root.setProperty('--primary-hover', theme.primary_hover_color);
+        root.setProperty('--bg-gradient', theme.background);
+        root.setProperty('--text-dark', theme.text_color);
+        root.setProperty('--text-muted', theme.muted_text_color);
+        document.body.style.fontFamily = theme.font_family;
+        document.getElementById('pageLogo').textContent = page.content.logo || '';
+        document.querySelector('.title').textContent = page.title;
+        document.querySelector('.subtitle').textContent = page.subtitle;
+        document.querySelector('#registerForm > .btn-submit').textContent = page.submit_button;
+        document.querySelector('.success-title').textContent = page.success_title;
+        const successDescription = document.querySelector('.success-desc');
+        successDescription.style.whiteSpace = 'pre-line';
+        successDescription.textContent = page.success_description;
+        document.getElementById('closeButton').textContent = page.content.close_button || '關閉視窗';
+        document.getElementById('loaderText').textContent = page.loading_text;
+        const fields = Object.fromEntries(page.fields.map(field => [field.id, field]));
+        ['name', 'phone', 'expected_date', 'service_days', 'address'].forEach(id => {
+            applySystemField(fields[id], id);
+        });
+        renderCustomFields(page.fields.filter(field => !field.system_field));
+    }
+
+    function applySystemField(field, inputId) {
+        if (!field) return;
+        const input = document.getElementById(inputId);
+        const group = input.closest('.form-group');
+        const label = group ? group.querySelector('.form-label') : null;
+        if (label) label.textContent = field.label;
+        input.placeholder = field.placeholder || '';
+        input.required = Boolean(field.required);
+    }
+
+    function renderCustomFields(fields) {
+        const section = document.getElementById('customFieldsSection');
+        const container = document.getElementById('customFieldsContainer');
+        container.replaceChildren();
+        section.style.display = fields.length ? 'block' : 'none';
+        document.getElementById('customFieldsTitle').textContent = runtimePage?.content?.custom_section_title || '其他服務需求';
+        fields.sort((a, b) => a.order - b.order).forEach(field => {
+            const group = document.createElement('div');
+            group.className = 'form-group';
+            const label = document.createElement('label');
+            label.className = `form-label${field.required ? ' required' : ''}`;
+            label.textContent = field.label;
+            group.appendChild(label);
+            let control;
+            if (field.type === 'textarea') {
+                control = document.createElement('textarea');
+                control.className = 'form-input';
+            } else if (field.type === 'single_choice') {
+                control = document.createElement('select');
+                control.className = 'form-select';
+                const empty = document.createElement('option');
+                empty.value = '';
+                empty.textContent = '請選擇';
+                control.appendChild(empty);
+                field.options.forEach(option => {
+                    const item = document.createElement('option');
+                    item.value = option.value;
+                    item.textContent = option.label;
+                    control.appendChild(item);
+                });
+            } else if (field.type === 'multiple_choice') {
+                control = document.createElement('div');
+                control.className = 'checkbox-group';
+                field.options.forEach((option, index) => {
+                    const item = document.createElement('div');
+                    item.className = 'checkbox-item';
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = option.value;
+                    checkbox.dataset.liffField = field.id;
+                    checkbox.id = `liff_${field.id}_${index}`;
+                    const optionLabel = document.createElement('label');
+                    optionLabel.htmlFor = checkbox.id;
+                    optionLabel.textContent = option.label;
+                    item.append(checkbox, optionLabel);
+                    control.appendChild(item);
+                });
+            } else if (field.type === 'boolean') {
+                control = document.createElement('input');
+                control.type = 'checkbox';
+                control.className = 'liff-boolean';
+            } else {
+                control = document.createElement('input');
+                control.className = 'form-input';
+                control.type = { phone: 'tel', email: 'email', date: 'date', number: 'number' }[field.type] || 'text';
+            }
+            if (field.type !== 'multiple_choice') {
+                control.dataset.liffField = field.id;
+                control.required = Boolean(field.required);
+                if ('placeholder' in control) control.placeholder = field.placeholder || '';
+            }
+            group.appendChild(control);
+            if (field.help_text) {
+                const help = document.createElement('small');
+                help.textContent = field.help_text;
+                group.appendChild(help);
+            }
+            container.appendChild(group);
+        });
+    }
+
+    function collectCustomFields() {
+        const values = {};
+        document.querySelectorAll('[data-liff-field]').forEach(control => {
+            const key = control.dataset.liffField;
+            if (control.type === 'checkbox') {
+                if (control.classList.contains('liff-boolean')) {
+                    values[key] = control.checked;
+                } else if (control.checked) {
+                    if (!Array.isArray(values[key])) values[key] = [];
+                    values[key].push(control.value);
+                }
+            } else if (control.value !== '') {
+                values[key] = control.value;
+            }
+        });
+        return values;
+    }
+
+    function validateCustomFields() {
+        if (!runtimePage) return true;
+        for (const field of runtimePage.fields.filter(item => !item.system_field && item.required)) {
+            const controls = [...document.querySelectorAll(`[data-liff-field="${field.id}"]`)];
+            if (field.type === 'multiple_choice') {
+                if (!controls.some(control => control.checked)) return false;
+            } else if (field.type === 'boolean') {
+                if (!controls[0]?.checked) return false;
+            } else if (!controls[0]?.value?.trim()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     document.getElementById("registerForm").addEventListener("submit", async function(e) {
         e.preventDefault();
+        if (!validateCustomFields()) {
+            const requiredMessage = document.getElementById("statusMessage");
+            requiredMessage.textContent = "請完成所有必填的服務需求欄位。";
+            requiredMessage.className = "status-message error";
+            requiredMessage.style.display = "block";
+            return;
+        }
         
         const loader = document.getElementById("loaderOverlay");
         const statusMsg = document.getElementById("statusMessage");
@@ -485,6 +624,7 @@
             surveyDetails['※已確實詳閱退費原則：'] = document.getElementById('agree1').checked ? 'Y' : '';
             surveyDetails['我確實了解並願意遵照辦理以上相關規定，說明及退費原則(勾選後等同簽名確認)'] = document.getElementById('agree2').checked ? 'Y' : '';
             surveyDetails['需自行負擔銀行轉帳手續費'] = document.getElementById('agree3').checked ? 'Y' : '';
+            Object.assign(surveyDetails, collectCustomFields());
 
             const payload = {
                 name: document.getElementById("name").value,
@@ -500,6 +640,8 @@
                 city: document.getElementById("city").value || "",
                 zip_code: document.getElementById("zip_code").value || "",
                 line_user_id: currentLineUserId,
+                line_id_token: currentIdToken,
+                liff_config_revision: liffConfigRevision,
                 survey_details: surveyDetails
             };
 
@@ -518,7 +660,7 @@
                 document.getElementById("registerForm").style.display = "none";
                 document.getElementById("successCard").style.display = "block";
             } else {
-                statusMsg.textContent = result.message || "發生未知錯誤，請重試。";
+                statusMsg.textContent = result.message || result.detail || "發生未知錯誤，請重試。";
                 statusMsg.className = "status-message error";
             }
         } catch (error) {

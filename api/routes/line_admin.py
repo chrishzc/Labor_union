@@ -71,7 +71,7 @@ def line_admin_health():
 def line_admin_capabilities():
     return BaseResponse(
         data={
-            "stage": "5.4",
+            "stage": "5.5",
             "available": {
                 "health_overview": True,
                 "message_template_api": True,
@@ -83,6 +83,9 @@ def line_admin_capabilities():
                 "rich_menu_editor": True,
                 "rich_menu_publication_history": True,
                 "liff_config_api": True,
+                "liff_config_editor": True,
+                "liff_runtime_config": True,
+                "liff_revision_history": True,
                 "customer_service_config_api": True,
                 "staff_review_api": True,
                 "admin_session": True,
@@ -91,7 +94,6 @@ def line_admin_capabilities():
             },
             "planned_pages": [
                 "LINE 設定中心",
-                "LIFF 管理",
                 "人工審查",
                 "客服入口",
                 "操作紀錄",

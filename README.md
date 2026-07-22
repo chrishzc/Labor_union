@@ -230,6 +230,34 @@ GET  /api/v1/line/rich-menus/publications
 POST /api/v1/line/rich-menus/publications/{publication_id}/retry
 ```
 
+#### 5.5 LIFF 設定中心
+
+LINE 管理中心的「LIFF 設定」已接上入口選擇、舊客戶綁定及新客戶登記三個頁面。工會人員
+可修改共用主題、頁面文字、入口卡片、欄位順序及自訂問題，並先做手機版預覽。儲存後，
+使用者下次載入頁面即套用，不需要像 Rich Menu 一樣另外發布。
+
+後端以 revision／`If-Match` 防止多人覆蓋，並保存最多 20 個修改前快照供人工還原。姓名、
+電話、預產期、服務天數及地址等系統欄位不能刪除、停用或改變必要類型；新增問題答案會
+寫入既有 `beclass_records.survey_details`。
+
+正式環境必須設定 LIFF 所屬的 LINE Login Channel ID。頁面會送出 `liff.getIDToken()`，
+FastAPI 向 LINE 驗證後從 token 取得使用者 ID，不採信瀏覽器自行填入的 ID。開發環境可保留
+明確的模擬 ID 降級模式。
+
+```env
+LINE_LOGIN_CHANNEL_ID=your_line_login_channel_id_here
+LIFF_REQUIRE_ID_TOKEN=true
+```
+
+```text
+GET  /api/config/liff/runtime?page=registration
+GET  /api/config/liff/state
+POST /api/config/liff/validate
+PUT  /api/config/liff
+GET  /api/config/liff/history
+POST /api/config/liff/rollback/{revision}
+```
+
 #### 手動啟動個別服務
 若需單獨除錯，可在啟動 Docker 後手動執行以下指令：
 ```powershell

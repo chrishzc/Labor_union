@@ -70,17 +70,26 @@ MIME、大小、尺寸與 SHA-256；不將圖片 BLOB 存入 MySQL，也不提�
 
 ### `liff_settings.json`
 
-管理 LIFF 主題、頁面文字及動態問題。
+管理 LIFF 共用主題、入口選擇頁、舊客戶綁定頁、新客戶登記頁及動態問題。
 
-- `system_field: true` 是後端必要欄位，API 禁止刪除。
+- `gateway` 使用 `actions` 管理入口卡片文字、圖示與相對路徑／HTTPS 連結。
+- `bind` 與 `registration` 使用 `fields` 管理表單欄位。
+- `system_field: true` 是後端必要欄位，API 禁止刪除、停用或改變必要型別。
 - 自訂問題使用 `system_field: false`，可由前端新增、修改、排序與刪除。
 - 選擇題必須提供 `options`。
-- 自訂答案後續可保存至既有 `survey_details` JSON，不必每次修改 DB schema。
+- 自訂答案保存至既有 `beclass_records.survey_details` JSON，不必每次修改 DB schema。
+- `liff_settings_history.json` 最多保存 20 個修改前快照，供管理介面人工還原。
+- Runtime API 只輸出啟用中的頁面、欄位與入口，並以 ETag／revision 防止載入舊設定。
 
 API：
 
 ```text
 GET    /api/config/liff
+GET    /api/config/liff/runtime?page={page_id}
+GET    /api/config/liff/state
+POST   /api/config/liff/validate
+GET    /api/config/liff/history
+POST   /api/config/liff/rollback/{revision}
 PUT    /api/config/liff
 PUT    /api/config/liff/theme
 PUT    /api/config/liff/pages/{page_id}
@@ -88,6 +97,9 @@ POST   /api/config/liff/pages/{page_id}/fields
 PUT    /api/config/liff/pages/{page_id}/fields/{field_id}
 DELETE /api/config/liff/pages/{page_id}/fields/{field_id}
 ```
+
+除公開讀取與 Runtime API 外，管理接口均需管理員權限及內部服務金鑰。修改與還原必須帶
+`If-Match` revision；其他管理員先儲存時會回 409，不會靜默覆蓋。
 
 ### `customer_service.json`
 
@@ -177,7 +189,8 @@ LINE 用戶照片應在 Webhook 收到 message ID 後下載至受控儲存區，
 
 - 第五階段 5.1 已加入資料庫管理員登入、短時效 Session、角色權限與操作稽核。
 - `/api/config` 的管理讀取至少需要 `line_viewer`；新增、修改、刪除與發布需要 `line_manager`。
-- 公開 LIFF 註冊頁使用的 `GET /api/config/liff` 維持公開，其餘 LIFF 修改接口受保護。
+- 公開 LIFF 頁使用 `GET /api/config/liff/runtime`；`GET /api/config/liff` 維持舊版相容，其餘 LIFF 管理接口受保護。
+- 正式環境由 LIFF 傳送 ID Token，FastAPI 使用 `LINE_LOGIN_CHANNEL_ID` 向 LINE 驗證後才採用 token 中的使用者 ID；不信任瀏覽器自行提交的 `line_user_id`。
 - API 只操作固定白名單檔案，不能由前端傳入任意檔案路徑。
 - Rich Menu 發布會呼叫 LINE API，應限制為管理員操作。
 - 月嫂驗證查詢及角色管理底層接口仍需使用 `X-Internal-API-Key`；Web/UI 經由後端 Client 呼叫，不把金鑰交給瀏覽器。
@@ -192,6 +205,8 @@ ENABLE_ADMIN_AUTH=true
 ALLOWED_ORIGINS=http://localhost:8501,http://127.0.0.1:8501
 MEDIA_STORAGE_ROOT=.local_media
 MEDIA_STORAGE_PROVIDER=local
+LINE_LOGIN_CHANNEL_ID=<LIFF 所屬的 LINE Login Channel ID>
+LIFF_REQUIRE_ID_TOKEN=true
 ```
 
 `ENABLE_ADMIN_AUTH=false` 僅能在 `APP_ENV=development/dev/local/test` 略過帳號登入；正式環境

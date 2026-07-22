@@ -351,3 +351,52 @@ class LineAdminApiClient:
             token=token,
             json={"reason": reason},
         )
+
+    def liff_config_state(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/config/liff/state", token=token)
+
+    def validate_liff_config(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            "/api/config/liff/validate",
+            token=token,
+            json=payload,
+        )
+
+    def update_liff_config(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+        *,
+        revision: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "PUT",
+            "/api/config/liff",
+            token=token,
+            json=payload,
+            extra_headers={"If-Match": revision},
+        )
+
+    def liff_config_history(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/config/liff/history", token=token)
+
+    def rollback_liff_config(
+        self,
+        token: str | None,
+        revision_to_restore: str,
+        *,
+        current_revision: str,
+        reason: str,
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/config/liff/rollback/{revision_to_restore}",
+            token=token,
+            json={"reason": reason},
+            extra_headers={"If-Match": current_revision},
+        )

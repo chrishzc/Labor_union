@@ -385,3 +385,33 @@ ENABLE_SERVER_FAILURE_POPUP=false
 - OpenAPI 共 102 條路由，5.4 必要路由完整。
 - 測試資料庫紀錄及媒體檔案殘留均為 0。
 - 未建立一次性 Python 檔案。
+
+## feat: 新增 LIFF 設定中心、動態表單與伺服器端身分驗證
+
+### 新增
+
+- `ui/components/line_liff_manager.py`：LIFF 主題、三頁文字、入口卡片、動態欄位、預覽與版本還原介面。
+- `services/line_liff_config_service.py`、`config/liff_settings_history.json`：最多 20 版設定快照與還原資料。
+- `services/line_liff_identity_service.py`：向 LINE 驗證 LIFF ID Token 並取得可信任使用者 ID。
+- `tests/test_line_liff_management.py`：設定契約、revision、Runtime、正式環境防偽與三頁串接測試。
+
+### 修改
+
+- `config/liff_settings.json`：升級 version 2，加入 gateway、bind、registration 與動態 Action／欄位。
+- `api/schemas/line_config.py`、`api/routes/line_system_config.py`：安全驗證、公開 Runtime、state、If-Match、歷史、rollback 與稽核。
+- `line/static/gateway.html`、`bind.html`、`register.html`：套用統一設定，動態產生入口／欄位並安全顯示文字。
+- `line/line_bot.py`：綁定與登記以經驗證 ID Token 決定 LINE User ID，自訂答案保存設定 revision。
+- `ui/services/line_api_client.py`、`ui/pages/07_line_management.py`：接入 LIFF 設定中心。
+- `.env.example`、`README.md`、`config/README_CONFIG.md`、`api/routes/line_admin.py`：新增正式環境設定與 5.5 能力說明。
+- `pyproject.toml`、`uv.lock`：補上 pytest 開發依賴，使團隊與 CI 可重現執行既有測試。
+
+### 刪除
+
+- 無。
+
+### 驗證
+
+- Python 編譯、LIFF version 2 Schema、必要欄位保護、正式環境拒絕偽造 User ID 及 108 條 OpenAPI 路由直接驗證通過。
+- 5.1～5.5 完整 LINE 管理回歸共 35 項 pytest 測試通過。
+- 公開 Runtime、管理權限與舊 revision HTTP 整合驗證通過；gateway／bind／register 離線 Playwright JavaScript smoke test 全部通過。
+- 未建立一次性 Python 檔案。

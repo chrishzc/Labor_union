@@ -12,6 +12,7 @@ import asyncio
 import sys
 import secrets
 import requests
+from typing import Any, Dict, Optional
 from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
@@ -21,6 +22,11 @@ from line.security import verify_line_signature
 from services.line_task_service import enqueue_line_task
 from services.line_rich_menu_service import get_current_rich_menu_id
 from services.webhook_event_service import register_event
+from services.line_liff_identity_service import (
+    LiffIdentityError,
+    liff_token_required,
+    resolve_line_user_id,
+)
 
 # 載入環境變數
 load_dotenv()
@@ -177,17 +183,31 @@ async def get_line_config():
     liff_id = os.getenv("LINE_LIFF_ID", "")
     if not liff_id or liff_id == "your_liff_id_here":
         liff_id = get_setting("line_liff_id", "")
-    return {"liff_id": liff_id}
+    return {
+        "liff_id": liff_id,
+        "identity_verification_required": liff_token_required(),
+        "line_login_channel_id_configured": bool(
+            os.getenv("LINE_LOGIN_CHANNEL_ID", "").strip()
+        ),
+    }
 
-@router.get("/api/line/client-info")
-async def get_client_info(userId: str):
+
+async def _trusted_line_user_id(id_token: str | None, fallback_user_id: str | None) -> str:
+    try:
+        return await asyncio.to_thread(
+            resolve_line_user_id,
+            id_token=id_token,
+            development_user_id=fallback_user_id,
+        )
+    except LiffIdentityError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+async def _find_client_info(trusted_user_id: str):
     """查詢使用者的 LINE ID 是否已有綁定紀錄，有的話回傳最近一筆姓名電話以利自動帶入"""
-    if not userId:
-        return {"status": "not_found"}
     conn = get_db_connection()
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute("SELECT name, phone FROM clients WHERE line_user_id = %s ORDER BY id DESC LIMIT 1", (userId,))
+            cursor.execute("SELECT name, phone FROM clients WHERE line_user_id = %s ORDER BY id DESC LIMIT 1", (trusted_user_id,))
             client = cursor.fetchone()
             if client:
                 return {"status": "success", "client": client}
@@ -202,14 +222,18 @@ async def get_client_info(userId: str):
 class LineBindPayload(BaseModel):
     name: str
     phone: str
-    line_user_id: str
+    line_user_id: str = ""
+    line_id_token: str = ""
     force_rebind: bool = False
 
 @router.post("/api/line/bind")
 async def line_bind(payload: LineBindPayload):
     name = payload.name.strip()
     phone = payload.phone.strip()
-    line_user_id = payload.line_user_id.strip()
+    line_user_id = await _trusted_line_user_id(
+        payload.line_id_token,
+        payload.line_user_id,
+    )
     
     print(f"[API Bind] Attempting to bind name={name}, phone={phone} to line_user_id={line_user_id}")
     
@@ -327,8 +351,6 @@ async def line_bind(payload: LineBindPayload):
     finally:
         conn.close()
 
-from typing import Optional, Dict, Any
-
 class RebindActionPayload(BaseModel):
     request_id: str
 
@@ -354,6 +376,27 @@ def get_rebind_requests(x_internal_api_key: str | None = Header(default=None)):
             return {"status": "success", "data": cursor.fetchall()}
     finally:
         conn.close()
+
+
+class LineIdentityPayload(BaseModel):
+    line_user_id: str = ""
+    line_id_token: str = ""
+
+
+@router.post("/api/line/client-info")
+async def post_client_info(payload: LineIdentityPayload):
+    trusted_user_id = await _trusted_line_user_id(
+        payload.line_id_token,
+        payload.line_user_id,
+    )
+    return await _find_client_info(trusted_user_id)
+
+
+@router.get("/api/line/client-info")
+async def get_client_info(userId: str = ""):
+    """Development-compatible legacy endpoint; production requires POST with an ID token."""
+    trusted_user_id = await _trusted_line_user_id(None, userId)
+    return await _find_client_info(trusted_user_id)
 
 @router.post("/api/line/rebind_requests/approve")
 def approve_rebind_request(
@@ -478,7 +521,9 @@ class LineRegisterPayload(BaseModel):
     expected_date: str
     service_days: int
     address: str
-    line_user_id: str
+    line_user_id: str = ""
+    line_id_token: str = ""
+    liff_config_revision: Optional[str] = ""
     id_number: Optional[str] = ""
     birth_date: Optional[str] = ""
     gender: Optional[str] = ""
@@ -494,7 +539,10 @@ class LineRegisterPayload(BaseModel):
 async def line_register(payload: LineRegisterPayload):
     name = payload.name.strip()
     phone = payload.phone.strip()
-    line_user_id = payload.line_user_id.strip()
+    line_user_id = await _trusted_line_user_id(
+        payload.line_id_token,
+        payload.line_user_id,
+    )
     
     normalized_phone = phone.replace(" ", "").replace("-", "")
     
@@ -516,6 +564,11 @@ async def line_register(payload: LineRegisterPayload):
             final_survey["身分證字號"] = payload.id_number
             final_survey["性別"] = payload.gender
             final_survey["資料來源"] = "LINE 原生表單"
+            final_survey["_liff_meta"] = {
+                "page": "registration",
+                "config_revision": (payload.liff_config_revision or "").strip(),
+                "submitted_at": datetime.now(timezone.utc).isoformat(),
+            }
             
             survey_details_json = json.dumps(final_survey, ensure_ascii=False)
             
