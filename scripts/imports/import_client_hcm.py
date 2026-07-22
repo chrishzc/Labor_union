@@ -206,5 +206,5 @@ def process_import(excel_path):
 
 if __name__ == "__main__":
     # 提供預設本機路徑或接收命令列參數
-    excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/資料庫、資料處理/假資料_範例.xlsx"
+    excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/資料庫、資料處理/假資料_模板.xlsx"
     process_import(excel_arg)

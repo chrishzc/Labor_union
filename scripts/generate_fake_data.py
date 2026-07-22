@@ -4,8 +4,11 @@
 檔案名稱: scripts/generate_fake_data.py
 作者: Antigravity
 描述: 統一生成系統測試所需的各類 Excel 假資料。
-      此腳本合併並取代了舊有的 generate_fake_excel.py 與 generate_fake_finance.py，
-      同時為名冊（HCM、BeClass、服務人員）與財務流水帳生成一致、對齊且無隱私問題的測試數據。
+
+🛑 WARNING: 50 核心案件基準生成器 (FROZEN BASE SEEDER)
+本檔案為系統 50 筆核心正常案件與金流測試的凍結基準腳本。
+嚴禁隨意修改本檔案或變更其生成的 50 筆案件格式。
+若需擴充任何欄位型態、格式錯誤或業務異常測試資料，請新建並使用 scripts/seed_boundary_anomalies.py。
 """
 import sys
 import os
@@ -2173,7 +2176,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     input_file = os.path.join(output_dir, '資料庫來源表.xlsx')
-    roster_output_file = os.path.join(output_dir, '假資料_範例.xlsx')
+    roster_output_file = os.path.join(output_dir, '假資料_模板.xlsx')
     historical_output_file = os.path.join(output_dir, '假資料_歷史訂單.xlsx')
     finance_output_file = os.path.join(output_dir, '帳務.xlsx')
     

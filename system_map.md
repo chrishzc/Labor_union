@@ -80,7 +80,7 @@
 - Dependencies: [ClientHcmInsertOnlyImporter, ClientBeClassInsertOnlyImporter, StaffBeClassInsertOnlyImporter, HistoricalOrderInsertOnlyImporter, FinanceImportStagingContract, PaymentSchema, MultiCaregiverScheduleSchema, FinanceImportRawStagingSchema, StaffMonthlySettlementSchema, StaffMonthlySettlementDetailSchema, StaffActualTransferSchema, StaffTransferAllocationSchema]
 - Complexity: medium
 - Input:
-  - default_generation: 未帶旗標時的既有名冊（假資料_範例.xlsx）與 Excel 財務檔（帳務.xlsx）生成流程；必須 100% 保留原有 50 筆個人資料池與導出檔案結構。
+  - default_generation: 未帶旗標時的既有名冊（假資料_模板.xlsx）與 Excel 財務檔（帳務.xlsx）生成流程；必須 100% 保留原有 50 筆個人資料池與導出檔案結構。
   - seed_db: 可選的資料庫獨立播種與對帳模式；在保留 50 筆既有核心生命週期案件（115000001 至 115000050）的前提下，寫入資料庫並自動完成全表帳務與時數對帳。
   - replace_demo_db: 僅與 --seed-db 同時提供的明確假資料取代模式；清空目前設定資料庫的所有 base-table 資料列後，重新建立完整整合播種資料庫。
   - seed: 可重跑的亂數種子
