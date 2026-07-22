@@ -133,7 +133,7 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_generate_fake_data.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_client_hcm_insert_only.py", "tests\\test_import_client_beclass_insert_only.py", "tests\\test_import_staff_beclass_insert_only.py", "tests\\test_import_historical_orders_insert_only.py", "tests\\test_finance_import_staging.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - TODO:
-  - (目前尚無此腳本，需新建) 在 scripts/ 下新建 seed_boundary_anomalies.py 腳本，以專用案號 115900001 起增量寫入 A~G 類別型態、格式與業務異常數據，並執行該腳本以完成後台 UI 全功能驗收。
+  - (獨立異常資料產生器，目前尚無此腳本需新建) 在 scripts/ 下新建 seed_boundary_anomalies.py 腳本，作用為專門增量寫入 A~G 類別欄位型態、格式與業務異常數據（案號 115900001 起），供後台 UI（Page 6 警示中心等）驗收防護功能。
 - Non Goals:
   - 不打亂或改變 50 筆既有客戶與 Excel 生成流程。
 - Observability: not_required
