@@ -158,105 +158,43 @@ def _render_tab1_overview(orders_data):
         st.info("沒有符合篩選/搜尋條件的訂單。")
         return
 
-    page_size = 10
-    page_count = math.ceil(total_orders / page_size)
-    page_number = st.selectbox(
-        "訂單頁碼（每頁最多 10 筆）",
-        options=list(range(page_count)),
-        format_func=lambda page: f"第 {page + 1} 頁",
-        key="tab1_overview_page_number",
-    )
-    selected_view = st.selectbox("選擇要瀏覽的資料表", ["訂單清單（含展開編輯）", "服務人員付款日/補助退款日"], key="tab1_table_view")
-    page_start = page_number * page_size
-    page_end = min(page_start + page_size, total_orders)
-    st.write(
-        f"共 {total_orders} 筆訂單，目前顯示第 {page_start + 1}–{page_end} 筆（每頁最多 10 筆）。"
-    )
-    st.caption("💡 點選任一筆訂單標題列即可原地展開，進行 36 欄位編輯 (手風琴模式：同時只會展開一筆，點開其他筆會自動收合前一筆)；欄位內容與「📄 訂單動態試算與維護」頁面完全共用同一套邏輯，修改後請記得點擊「💾 確定儲存」按鈕。")
-
-    # 依篩選/搜尋後的結果排序，逐筆訂單以 expander 呈現 (取代原本 st.dataframe 的完整表格)
-    filtered_case_nos = df_filtered.iloc[page_start:page_end]['case_no'].tolist() if 'case_no' in df_filtered.columns else []
-    ordered_rows = [o for case_no in filtered_case_nos for o in orders_data if o['case_no'] == case_no]
-
+    st.write(f"共 {total_orders} 筆訂單，請直接在下拉式選單中選擇要編輯的訂單。")
+    ordered_rows = df_filtered.to_dict("records")
     if not ordered_rows:
         st.info("沒有符合篩選/搜尋條件的訂單。")
         return
 
-    if selected_view == "服務人員付款日/補助退款日":
-        payment_rows = []
-        for o in ordered_rows:
-            case_no = str(o["case_no"]).strip()
-            payment_rows.append({
-                "案件編號": case_no,
-                "客戶姓名": o.get("client_name") or "",
-                "服務人員": o.get("staff_name") or "尚未指派",
-                "服務人員付款日": _derive_staff_payment_date(o),
-                "補助退款日": _derive_subsidy_refund_date(o),
-            })
-        st.dataframe(pd.DataFrame(payment_rows), width="stretch", hide_index=True)
-        return
-
-    # 手風琴核心邏輯說明 (重要限制)：
-    # 1. st.expander 純粹是「畫面端」元件，使用者點開/收合它時瀏覽器不會通知 Python 端、
-    #    也不會觸發 rerun，因此無法用它偵測「使用者剛剛點了哪一個」。
-    # 2. st.radio 雖然能觸發 rerun，但它是「單一整塊」元件——所有選項畫在同一個 widget 裡，
-    #    Streamlit 無法在某個選項中間插入其他內容，導致展開內容永遠只能出現在整份清單的最後面，
-    #    無法緊接在被點選的那一列下方 (這正是前一版被使用者指出的問題)。
-    # 為了做到「點哪一列，內容就緊接在那一列正下方展開」，改成逐列各自使用一個 st.button 作為
-    # 該列的可點擊標題列 (按鈕點擊事件 Streamlit 能正確偵測並觸發 rerun)，
-    # 並在該按鈕的下一行程式碼立刻判斷是否要渲染展開內容，
-    # 如此展開內容自然會被畫在該列按鈕與下一列按鈕之間，而不是集中在清單最後。
-    # 搭配 session_state 記錄「目前展開中」的唯一案件編號，點別筆時前一筆會自動收合。
-    ACCORDION_STATE_KEY = "tab1_accordion_open_case_no"
-    if ACCORDION_STATE_KEY not in st.session_state:
-        st.session_state[ACCORDION_STATE_KEY] = None
-
-    currently_open_case_no = st.session_state[ACCORDION_STATE_KEY]
-
-    # 用 CSS 把按鈕外觀改造成一般清單列的橫條卡片樣式 (置左對齊、滿版寬度)，
-    # 視覺上更接近可點擊的表格列，而不是預設置中的小按鈕。
-    st.markdown(
-        """
-        <style>
-        div[data-testid="stButton"] > button {
-            width: 100%;
-            text-align: left;
-            justify-content: flex-start;
-            border-radius: 6px;
-            padding: 0.5rem 0.75rem;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-    for o in ordered_rows:
-        case_no = o['case_no']
-        is_open = (currently_open_case_no == case_no)
-
-        row_label = (
-            f"{'🔻' if is_open else '▶️'} 案件 #{case_no} ｜ {o['client_name']} ｜ "
-            f"[{o['order_status']}] ｜ 月嫂: {o.get('staff_name') or '尚未指派'} ｜ "
+    order_options = {
+        (
+            f"案件 #{o.get('case_no')} ｜ {o.get('client_name', '')} ｜ "
+            f"[{o.get('order_status')}] ｜ 月嫂: {o.get('staff_name') or '尚未指派'} ｜ "
             f"身分資格: {o.get('identity_status') or '未設定'} ｜ "
             f"預期開始: {o.get('start_date') or '未定'} ｜ "
             f"天數: {safe_int(o.get('service_days'))} ｜ "
             f"雇主自費合計: {safe_int(o.get('total_employer_self_pay_payable')):,} 元"
+        ): str(o.get("case_no"))
+        for o in ordered_rows
+    }
+
+    selected_label = st.selectbox(
+        "選擇要編輯的訂單",
+        options=list(order_options.keys()),
+        key="tab1_order_select",
+    )
+    selected_case_no = order_options[selected_label]
+
+    selected_order = next((o for o in ordered_rows if str(o.get("case_no")) == selected_case_no), None)
+    if not selected_order:
+        st.warning("目前無法定位到該筆訂單資料，請重新整理頁面。")
+        return
+
+    with st.container(border=True):
+        _edit_order_mod.render_editor(
+            target_case_no=selected_case_no,
+            orders_data=orders_data,
+            payments_raw=payments_raw,
+            key_prefix=f"tab1_acc_{selected_case_no}"
         )
-
-        if st.button(row_label, key=f"tab1_row_btn_{case_no}"):
-            st.session_state[ACCORDION_STATE_KEY] = None if is_open else case_no
-            st.rerun()
-
-        # 展開內容緊接在這一列的按鈕之後渲染，下一輪 for 迴圈才會畫下一列的按鈕，
-        # 因此視覺上內容會直接出現在被點選的那一列正下方，而不是整份清單的最後面。
-        if is_open:
-            with st.container(border=True):
-                _edit_order_mod.render_editor(
-                    target_case_no=case_no,
-                    orders_data=orders_data,
-                    payments_raw=payments_raw,
-                    key_prefix=f"tab1_acc_{case_no}"
-                )
 
 
 def _render_tab2_assign(orders_data, clients, staff_list):
@@ -626,6 +564,7 @@ def _render_tab3_finance(orders_data):
         for order in orders_data
         if order.get("case_no")
     }
+    order_by_case = {str(order.get("case_no")): order for order in orders_data if order.get("case_no")}
     order_payment_dates_by_case = {
         str(order.get("case_no")): {
             "deposit_due_date": order.get("deposit_date"),
@@ -662,6 +601,7 @@ def _render_tab3_finance(orders_data):
         deposit_due_date = payment.get("deposit_due_date") or payment_dates.get("deposit_due_date")
         first_payment_due_date = payment.get("first_payment_due_date") or payment_dates.get("first_payment_due_date")
         second_payment_due_date = payment.get("second_payment_due_date") or payment_dates.get("second_payment_due_date")
+        related_order = order_by_case.get(case_no, {})
         client_rows.append({
             "案件編號": case_no,
             "訂單狀態": order_status_by_case.get(case_no, "—"),
@@ -677,6 +617,8 @@ def _render_tab3_finance(orders_data):
             "第二期實收": safe_float(payment.get("second_payment_received")),
             "第二期應收日": second_payment_due_date,
             "第二期實收日": payment.get("second_payment_received_at"),
+            "服務人員付款日（衍生公式）": _derive_staff_payment_date(related_order),
+            "補助退款日（衍生公式）": _derive_subsidy_refund_date(related_order),
             "應收總額": receivable,
             "實收總額": received,
             "未收餘額": receivable - received,

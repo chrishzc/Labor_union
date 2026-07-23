@@ -27,14 +27,16 @@ def test_overview_has_unrestricted_status_filter_by_default():
     assert "if status_filter else df_orders" in overview
 
 
-def test_overview_paginates_to_at_most_ten_orders_per_page():
+def test_overview_displays_all_filtered_orders_in_one_selectbox():
     overview = _overview_source()
 
-    assert "page_size = 10" in overview
-    assert "math.ceil(total_orders / page_size)" in overview
-    assert "df_filtered.iloc[page_start:page_end]" in overview
-    assert "訂單頁碼（每頁最多 10 筆）" in overview
-    assert "共 {total_orders} 筆訂單，目前顯示第 {page_start + 1}–{page_end} 筆" in overview
+    assert "page_size = 10" not in overview
+    assert "math.ceil(total_orders / page_size)" not in overview
+    assert "df_filtered.iloc[page_start:page_end]" not in overview
+    assert "訂單頁碼（每頁最多 10 筆）" not in overview
+    assert "tab1_overview_page_number" not in overview
+    assert "共 {total_orders} 筆訂單，請直接在下拉式選單中選擇要編輯的訂單。" in overview
+    assert "選擇要編輯的訂單" in overview
 
 
 def test_overview_reads_only_client_identity_status_for_eligibility_display():
@@ -42,3 +44,11 @@ def test_overview_reads_only_client_identity_status_for_eligibility_display():
 
     assert "o.get('identity_status')" in overview
     assert "clients.identity_status" not in overview
+
+
+def test_overview_only_has_single_order_list_view():
+    overview = _overview_source()
+
+    assert "selected_view = st.selectbox" not in overview
+    assert "服務人員付款日/補助退款日" not in overview
+    assert "選擇要編輯的訂單" in overview

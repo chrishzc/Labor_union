@@ -53,16 +53,33 @@
 - State: `planned`
 - Source: ui/pages/02_orders.py::_render_tab1_overview
 - Dependencies: [EditOrderUI]
-- Description: Tab 1 訂單資訊總覽。預設不限定訂單狀態，透過下拉式分頁一次呈現至多 10 筆訂單，並以 clients.identity_status 顯示身分資格。
+- Description: Tab 1 訂單資訊總覽。預設不限定訂單狀態，將所有篩選結果以單一下拉式選單呈現，並以 clients.identity_status 顯示身分資格。
 - Algorithm:
   - 狀態篩選的預設值為不限定；使用者未選任何狀態時顯示所有訂單狀態。
-  - 依篩選與搜尋結果建立下拉式頁碼選單，每頁至多 10 筆，切換頁碼不得遺失目前篩選條件。
-  - 展開單筆訂單時委派 EditOrderUI；不得自行寫入訂單、客戶或帳務資料。
+  - 依篩選與搜尋結果建立包含全部符合訂單的單一下拉式選單；不得分頁或限制每頁筆數。
+  - 使用者選擇單筆訂單後委派 EditOrderUI；不得自行寫入訂單、客戶或帳務資料。
 - Invariants:
   - 顯示與篩選身分資格時只能讀取 clients.identity_status；不得讀取、顯示或重建 clients.identity_status。
-  - 每頁最多渲染 10 筆訂單；訂單總數與目前顯示範圍必須清楚標示。
+  - 下拉式選單必須包含全部篩選結果，且訂單總數必須清楚標示。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_overview_ui.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-order-overview-ui"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: OrderUIDerivedDateHelpers
+- Sub Map: ui_layer
+- Type: function
+- State: `planned`
+- Source: ui/pages/02_orders.py::safe_int,safe_float,safe_date,_parse_date,_month_index,_derive_service_end_date,_derive_staff_payment_date,_derive_subsidy_refund_date,_finance_report_request
+- Description: Page 2 訂單與帳務總覽共用的安全數值／日期正規化、服務結束日、服務人員付款日與補助退款日推導 helper；不寫入訂單或帳務資料。
+- Input:
+  - order: 含服務起訖、服務天數與唯讀身分資格的訂單資料。
+- Output:
+  - derived_dates: 服務結束日、服務人員付款日與補助退款日的顯示值。
+- Invariants:
+  - helper 只能讀取傳入訂單與帳務資料；不得寫入訂單、客戶、付款或交易資料。
+  - 服務人員付款日與補助退款日必須由服務結束日及身分資格推導；缺少必要資料時回傳空值，不得使用今天或其他預設日期補值。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\02_orders.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: OrderUI_Tab2_Assign
@@ -112,7 +129,7 @@
 - State: `planned`
 - Source: ui/pages/04_edit_order.py::render_editor,show
 - Dependencies: [OrderRouter, MultiCaregiverCaseAssignmentListRouter, StaffRouter]
-- Description: 單筆訂單動態試算與資料維護頁面。採用 st.columns 與帶邊框 Container 打造實體訂單單據視覺，具備 Formula Lock Guardrail，以及訂單變更→完整月嫂指派→帳務／排班預覽→明確套用的一致性工作流。
+- Description: 單筆訂單 38 欄位動態試算與資料維護頁面。採用 st.columns 與帶邊框 Container 打造實體訂單單據視覺，具備 Formula Lock Guardrail，以及訂單變更→完整月嫂指派→帳務／排班預覽→明確套用的一致性工作流。
 - Complexity: medium
 - Input:
   - editable_order_change: 非取消訂單的完整訂單目標值，含排班關鍵欄位與客戶／訂單主資料。
@@ -130,6 +147,7 @@
   - INV-EDIT-01: 修改輸入欄位時，費用與完工日必須即時連動試算，且金額統一無小數點 safe_int 呈現。
   - INV-EDIT-03: 所有由公式自動衍生之金額與時數欄位，預設必須為唯讀鎖定狀態。
   - INV-EDIT-04: 強制解鎖自動試算欄位時，必須顯性跳出警告告知公式連動失效風險。
+  - 服務人員付款日與補助退款日必須依服務結束日及身分資格推導，並在「五、實收對帳、狀態與備註登錄區」以唯讀鎖定欄位顯示；不得寫入訂單或帳務資料。
   - INV-EDIT-05: 任何含 service_days、service_hours_per_day、start_date、end_date、actual_start_date 或 actual_end_date 的訂單變更，必須只經 OrderRouter 的 preview／apply 同步流程；不得先呼叫 db_service.update_order_full_details 或 `/full-details`。
   - 補助資格只能以 clients.identity_status 唯讀呈現；UI 不得提供修改控制項、不得傳送 identity_status 或 clients.identity_status，也不得讀取 clients.identity_status。
   - 訂金應收日期可為空值，空值不得以今天或第一期應收日自動補值；送出同步請求時須保留 null。
@@ -138,6 +156,23 @@
   - 帳務仍由新帳務介面獨立處理；本頁不得建立、調整或取消 client／staff payments、月結或轉帳。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_edit_order_synchronization_ui.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-edit-order-synchronization-ui"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: EditOrderDerivedDateHelpers
+- Sub Map: ui_layer
+- Type: function
+- State: `planned`
+- Source: ui/pages/04_edit_order.py::_parse_date,_month_index,_derive_service_end_date,_derive_staff_payment_date,_derive_subsidy_refund_date
+- Description: 訂單編輯頁顯示用的服務結束日、服務人員付款日與補助退款日推導 helper；結果僅供唯讀欄位呈現。
+- Input:
+  - order: 含實際服務日期、服務天數與唯讀身分資格的訂單資料。
+- Output:
+  - derived_dates: 顯示於實收對帳區的衍生日期。
+- Invariants:
+  - helper 不得寫入訂單、客戶、付款、月結或交易資料。
+  - 服務人員付款日與補助退款日必須由服務結束日及身分資格推導，且僅供「五、實收對帳、狀態與備註登錄區」的唯讀欄位使用。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\04_edit_order.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: FormManagementUI
@@ -171,13 +206,14 @@
 - Invariants:
   - 不得查詢或寫入 legacy payments。
   - 預設必須以客戶收款總覽與月嫂應付總覽兩張獨立表格顯示全部已有帳務的案件，並提供案件編號、訂單狀態與各自付款狀態篩選；兩張表不得交錯欄位。
+  - 客戶收款總覽必須唯讀顯示依案件服務結束日及身分資格推導的服務人員付款日與補助退款日；不得將其寫入付款或訂單資料。
   - 客戶表必須顯示訂金、第一期、第二期各自的應收、實收、應收日與實收日，以及合計；有退還補助款時一併顯示。
   - 月嫂表必須逐筆顯示服務時數、單價、服務薪資、樓層費、調整額、應付／實付／餘額與付款日期，並使用 staff_payments 的 amount_paid 與 due_date 欄位。
   - 使用者選擇特定案件後，自動取得並在展開區顯示客戶／月嫂交易明細；不得預先讀取其他案件明細。
   - 實收／實付與日期只能來自交易明細；人工補登交易時必填原因，不得直接覆寫摘要欄位。
   - 不得在此分頁重複實作待匯清單或匯出功能。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\02_orders.py"], "cwd": "project", "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\02_orders.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: LegacyPaymentEditFreeze

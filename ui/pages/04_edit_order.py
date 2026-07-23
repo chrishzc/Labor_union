@@ -1,7 +1,7 @@
 """
 ================================================================================
 檔案名稱: ui/pages/04_edit_order.py
-功能說明: 單筆訂單 36 全欄位動態試算與資料維護專頁 (EditOrderUI - 響應式試算與持久化修復版)
+功能說明: 單筆訂單 38 全欄位動態試算與資料維護專頁 (EditOrderUI - 響應式試算與持久化修復版)
 專案名稱: Lobar Union - 服務人員與訂單管理系統
 建立日期: 2026-07-03
 修改日期: 2026-07-06 (修復即時連動與 full_details 資料庫持久化儲存)
@@ -11,6 +11,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+from calendar import monthrange
 import math
 import importlib
 import os
@@ -63,6 +64,60 @@ def safe_optional_date(val):
     if not val:
         return None
     return safe_date(val)
+
+
+def _parse_date(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if hasattr(value, "date"):
+        return value.date()
+    if isinstance(value, (str, bytes)):
+        try:
+            return datetime.strptime(str(value).split(" ")[0].strip(), "%Y-%m-%d").date()
+        except:
+            return None
+    return None
+
+
+def _month_index(date_value: datetime.date, offset: int) -> datetime.date:
+    month_index = date_value.year * 12 + (date_value.month - 1) + offset
+    year = month_index // 12
+    month = month_index % 12 + 1
+    return datetime(year=year, month=month, day=15).date()
+
+
+def _derive_service_end_date(order: dict) -> datetime.date | None:
+    actual_end = _parse_date(order.get("actual_end_date"))
+    if actual_end:
+        return actual_end
+
+    actual_start = _parse_date(order.get("actual_start_date"))
+    service_days = safe_int(order.get("service_days"))
+    if not actual_start or not service_days:
+        return None
+    return actual_start + timedelta(days=max(service_days - 1, 0))
+
+
+def _derive_staff_payment_date(order: dict) -> str:
+    end_date = _derive_service_end_date(order)
+    if not end_date:
+        return ""
+
+    identity_status = str(order.get("identity_status") or "").strip()
+    month_delta = 2 if identity_status == "補助市民" else 1
+    return _month_index(end_date, month_delta).isoformat()
+
+
+def _derive_subsidy_refund_date(order: dict) -> str:
+    end_date = _derive_service_end_date(order)
+    identity_status = str(order.get("identity_status") or "").strip()
+    if not end_date or identity_status == "非市民":
+        return ""
+
+    month_end_day = monthrange(end_date.year, end_date.month)[1]
+    return (datetime(end_date.year, end_date.month, month_end_day).date() + timedelta(days=5)).isoformat()
 
 
 def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
@@ -146,7 +201,6 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
                 w_act_end = calc_act_end
             else:
                 w_act_end = st.date_input("服務結束 (🔓 自訂)", value=safe_optional_date(target_order.get('actual_end_date')) or calc_act_end, key=f"{key_prefix}_act_end_custom_{target_case_no}")
-
     # =========================================================================
     # 區塊二：⏱️ 服務時數與請款天數統計區
     # =========================================================================
@@ -247,6 +301,20 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
 
         rc1, rc2 = st.columns(2)
         with rc1:
+            st.text_input(
+                "服務人員付款日（衍生公式）",
+                value=_derive_staff_payment_date(target_order),
+                disabled=True,
+                key=f"{key_prefix}_staff_payment_date_{target_case_no}",
+                help="依服務結束日與身分資格自動推估，僅供參考，不可編輯。",
+            )
+            st.text_input(
+                "補助退款日（衍生公式）",
+                value=_derive_subsidy_refund_date(target_order),
+                disabled=True,
+                key=f"{key_prefix}_subsidy_refund_date_{target_case_no}",
+                help="依服務結束日與身分資格自動推估，僅供參考，不可編輯。",
+            )
             w_dep_rec = st.number_input("已收訂金 (元)", value=safe_int(curr_p.get('deposit_received')), step=100, key=f"{key_prefix}_dep_rec_{target_case_no}")
             w_dep_rec_date = st.date_input("訂金實收日期", value=safe_date(curr_p.get('deposit_received_at')), key=f"{key_prefix}_dep_rec_date_{target_case_no}")
             w_p1_rec = st.number_input("已收第一期款 (元)", value=safe_int(curr_p.get('first_payment_received')), step=100, key=f"{key_prefix}_p1_rec_{target_case_no}")
@@ -451,7 +519,7 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
 
 def show():
     """EditOrderUI 獨立頁面進入點 (自行下拉選單挑選訂單，再呼叫共用的 render_editor)"""
-    st.title("📄 單筆訂單 36 欄位動態試算與維護單據")
+    st.title("📄 單筆訂單 38 欄位動態試算與維護單據")
 
     try:
         orders_data = db_service.get_order_details()
