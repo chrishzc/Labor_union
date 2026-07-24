@@ -121,7 +121,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: planned
+    state: validated
     fan_in_snapshot: 0
   ServicesLayer:
     type: sub_system_layer

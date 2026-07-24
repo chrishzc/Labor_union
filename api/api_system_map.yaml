@@ -701,7 +701,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - api_health_check
