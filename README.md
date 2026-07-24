@@ -1,13 +1,20 @@
 # 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
 
-> 目前版本：**v0.2.0**（2026-07-22）｜ADAD Master System Map：**56.0**
+> 目前版本：**v0.2.0**（2026-07-24）｜ADAD Master System Map：**56.0**
 
-## 2026-07-22 待推送更新
+## 2026-07-24 更新
 
-- 應付帳款匯出改依預定付款／退款日期月份取數；月嫂款按 `staff_id` 彙總，補助退款保留原始應退金額，固定九欄與分銀行流水號契約不變。
-- `GenerateFakeData` 已正式凍結：`scripts/generate_fake_data.py` 僅供人工參考，直接執行或匯入都會立即停止。新增假資料條件必須另建用途明確的腳本與測試；ADAD 登記由專案維護者在審查時處理，一般開發者不需操作 ADAD 工具。
-- 客戶 BeClass 匯入未指定路徑時，固定讀取 `document/資料庫、資料處理/假資料_模板.xlsx`。
-- 已移除會重設資料庫並執行假資料產生器的 `start.bat`；開發環境請依下方手動啟動步驟操作。
+本次整合範圍為 `8067706` 至 `35d48be`，主要包含以下變更：
+
+- **管理介面模組化**：`02_orders.py` 與 `05_form_management.py` 保留為輕量頁面殼層，實際 Tab 功能分別移至 `ui/pages/order/` 與 `ui/pages/form_management/`，降低單檔規模並保留原有頁面操作流程。
+- **訂單編輯入口統一**：原獨立 Page 4 已移至 `ui/pages/order/editor.py`，並由 Page 2 Tab 1 委派進入；側邊欄不再提供重複的 Page 4。
+- **訂單總覽與日期處理**：簡化案件選項建立方式，集中共用格式化與安全日期／數值 helper；HCM 新增案件會依服務起日、服務天數、服務類型及假日初始化訂單起訖日。
+- **固定資料庫測試快照**：新增 `fixtures/db_snapshot_v2/v3/` 的 27 表固定資料集，以及序列化、驗證、匯出、匯入、日期校正和安全重設工具；開發者可用 `reset_DB.bat` 重建本機 `union_db`。
+- **資料瀏覽與行事曆防呆**：資料瀏覽器支援目前使用中的案件、排班與財務資料表，複合鍵及財務表維持唯讀；行事曆可安全處理沒有服務人員選項的情況。
+- **退役 legacy payments**：FastAPI 不再掛載舊 `payments` Router，舊 Payment schema 與 `payments` 建表定義已移除；帳務功能改由 `client_payments`、`staff_payments` 及其交易／結算資料流負責。
+- **架構與驗證同步**：同步 API、Service、UI 與 Master System Map 的 Source binding、節點契約及 YAML IR，並補齊 UI runtime、shell ownership、fixture reset 與 importer 測試。
+
+既有應付帳款匯出契約維持不變：依預定付款／退款日期月份取數，月嫂款按 `staff_id` 彙總，補助退款保留原始應退金額，輸出仍採固定九欄與分銀行流水號。
 
 ## v0.2.0 版本重點
 
@@ -61,7 +68,7 @@ Lobar_union/
 ├── .venv/                      # Python 虛擬環境 (Git 已忽略)
 ├── .agents/                    # ADAD 工作流 / 代理自定義配置目錄
 ├── db/                         # 資料庫 Schema
-│   └── schema.sql              # MySQL 資料庫建表語句 (含 5 階段狀態機、對帳 payments 表與防編碼截斷重置設定)
+│   └── schema.sql              # MySQL 資料庫建表語句（帳務使用 client/staff payments 正規化資料表）
 ├── document/                   # 專案設計與規格說明文件
 │   ├── API/                    # API 整合設計文件
 │   ├── line/                   # LINE 平台整合相關說明
@@ -76,7 +83,7 @@ Lobar_union/
 │   └── staff_beclass/          # 存放月嫂 BeClass Excel 來源檔
 ├── api/                        # 後端 FastAPI RESTful API 服務
 │   ├── main.py                 # FastAPI 入口程式
-│   ├── routes/                 # API 路由模組 (orders, matches, schedule, payments, clients, staff, holidays)
+│   ├── routes/                 # API 路由模組（orders、matches、schedule、clients、staff、holidays、finance 等）
 │   └── schemas/                # Pydantic 資料驗證 Schema 模型
 ├── services/                   # 業務邏輯與資料庫存取服務層
 │   └── db_service.py           # 核心 DB 服務 (含訂單 CRUD、出勤天數動態精算引擎與 36 欄位 safe_int 防護)
@@ -84,10 +91,11 @@ Lobar_union/
 │   ├── app.py                  # 側邊欄動態導覽殼層 (AppShellUI)
 │   └── pages/                  # 獨立頁面模組專區
 │       ├── 01_data_browser.py  # 🗄️ 原始資料庫瀏覽與國定假日管理 (DataBrowserUI)
-│       ├── 02_orders.py        # 📊 訂單與帳務管理系統 (OrderUI - Tab 1 總覽/Tab 2 配對/Tab 3 財務)
+│       ├── 02_orders.py        # 📊 訂單與帳務管理頁面殼層（五個 Tab 委派至 order/）
+│       ├── order/              # 訂單總覽、配對、財務、應付帳款、補助核銷與 editor 子模組
 │       ├── 03_calendar.py      # 📅 服務人員行事曆與檔期調控 (CalendarUI - 四色 HTML 月曆與天數精算)
-│       ├── 04_edit_order.py    # 📄 單筆訂單動態試算與維護 (EditOrderUI - 36欄位單據與 Formula Lock)
-│       └── 05_form_management.py # 📝 表單與履歷問卷管理專頁 (FormManagementUI - EPPP 契約引擎)
+│       ├── 05_form_management.py # 📝 表單管理頁面殼層
+│       └── form_management/    # 表單建置、範本庫、契約管理與共用 helper 子模組
 ├── scripts/                    # 核心 Python 運作與 Pipeline 腳本
 │   ├── imports/                # 微匯入 Pipeline 專屬目錄 (Micro-Pipelines)
 │   │   ├── import_client_beclass.py # 處理 BeClass 客戶匯入
@@ -96,16 +104,20 @@ Lobar_union/
 │   │   └── import_staff_beclass.py  # 處理 BeClass 月嫂匯入
 │   ├── file_watcher.py         # 地端檔案自動監控服務
 │   ├── generate_fake_data.py   # 已凍結的歷史假資料腳本（僅供人工參考，不可執行或匯入）
+│   ├── reset_fake_database.py  # 以固定 v3 fixture 安全重建本機 union_db
+│   ├── export_db_snapshot_fixture_v2.py # 匯出固定格式資料庫快照
+│   ├── import_db_snapshot_fixture_v2.py # 驗證後匯入資料庫快照
 │   ├── fix_schedule_conflicts.py # 月嫂檔期衝突檢測與自動修復工具
 │   ├── init_db.py              # 資料庫初始化與 Schema 導入
 │   └── wait_for_db.py          # 輪詢檢測 MySQL 連線就緒腳本
 ├── docker-compose.yml          # Docker Compose 配置文件，一鍵啟動 MySQL 8.0 持久化容器
 ├── main.py                     # 專案主程式入口 (FastAPI 與 Streamlit 同時啟動或導向)
 ├── online.bat                  # 一鍵啟動生產上線服務 (啟動 Docker, wait_for_db, 啟動 services / watcher)
+├── reset_DB.bat                # 僅供開發環境：確認資料庫名稱後套用固定 v3 fixture
 ├── pyproject.toml              # uv 專案管理配置文件
 ├── requirements.txt            # 從 pyproject.toml 自動編譯導出的相容性依賴清單
-├── system_map.yaml             # ADAD 系統架構 SSOT 記憶與狀態事實來源 (Version 54)
-├── system_map.md               # ADAD 系統架構 SSOT 說明文件 (Version 54)
+├── system_map.yaml             # ADAD 系統架構 SSOT 記憶與狀態事實來源 (Version 56)
+├── system_map.md               # ADAD 系統架構 SSOT 說明文件 (Version 56)
 └── uv.lock                     # uv 依賴鎖定檔
 ```
 
@@ -160,7 +172,21 @@ streamlit run ui/app.py
 python scripts/file_watcher.py
 ```
 
-`scripts/init_db.py` 會初始化資料庫，僅能在明確確認目標資料庫後個別執行。請勿執行或匯入 `scripts/generate_fake_data.py`；需要新增測試資料時，應建立用途明確的獨立播種腳本及對應測試。一般開發者不需安裝或操作 ADAD，依標準 Git、Python 與 pytest 流程開發即可。
+`scripts/init_db.py` 會初始化資料庫，僅能在明確確認目標資料庫後個別執行。請勿執行或匯入 `scripts/generate_fake_data.py`；需要新增測試資料時，優先更新有版本且可驗證的 fixture，或建立用途明確的獨立播種腳本及對應測試。一般開發者不需安裝或操作 ADAD，依標準 Git、Python 與 pytest 流程開發即可。
+
+### 3. 重設本機測試資料庫
+
+固定 v3 fixture 只供本機開發／測試使用，會重建 `union_db`，不可對正式資料庫執行。
+
+```powershell
+# 顯示檢查結果，不寫入資料庫
+.\.venv\Scripts\python.exe -m scripts.reset_fake_database
+
+# 重建本機 union_db；批次檔會傳入明確的資料庫名稱確認
+.\reset_DB.bat
+```
+
+重設流程會先驗證 manifest、27 表 allowlist、檔案雜湊與資料內容，再套用 schema 及匯入固定快照；任一步失敗都會停止，不會改用歷史 `generate_fake_data.py`。
 
 ---
 
