@@ -19,6 +19,7 @@ def _render_tab1_overview(orders_data):
         return
 
     df_orders = pd.DataFrame(orders_data)
+
     status_filter = st.multiselect(
         "篩選訂單狀態",
         options=["洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"],
@@ -35,30 +36,30 @@ def _render_tab1_overview(orders_data):
         ]
 
     df_filtered = df_filtered.copy()
-    if df_filtered.empty:
+    payments_raw = []
+
+    total_orders = len(df_filtered)
+    if not total_orders:
         st.info("沒有符合篩選/搜尋條件的訂單。")
         return
 
+    st.write(f"共 {total_orders} 筆訂單，請直接在下拉式選單中選擇要編輯的訂單。")
     ordered_rows = df_filtered.to_dict("records")
     if not ordered_rows:
         st.info("沒有符合篩選/搜尋條件的訂單。")
         return
 
-    total_orders = len(ordered_rows)
-    st.write(f"共 {total_orders} 筆訂單，請直接在下拉式選單中選擇要編輯的訂單。")
-
-    payments_raw = []
-    def _build_option(o):
-        return (
+    order_options = {
+        (
             f"案件 #{o.get('case_no')} ｜ {o.get('client_name', '')} ｜ "
             f"[{o.get('order_status')}] ｜ 月嫂: {o.get('staff_name') or '尚未指派'} ｜ "
             f"身分資格: {o.get('identity_status') or '未設定'} ｜ "
             f"預期開始: {o.get('start_date') or '未定'} ｜ "
             f"天數: {safe_int(o.get('service_days'))} ｜ "
             f"雇主自費合計: {safe_int(o.get('total_employer_self_pay_payable')):,} 元"
-        )
-
-    order_options = {_build_option(o): str(o.get("case_no")) for o in ordered_rows}
+        ): str(o.get("case_no"))
+        for o in ordered_rows
+    }
 
     selected_label = st.selectbox(
         "選擇要編輯的訂單",

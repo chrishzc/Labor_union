@@ -73,19 +73,19 @@ def generate_field_id() -> str:
 def get_html_hex_color(color_obj, default=None):
     """將 openpyxl Color 物件轉為標準 HTML HEX 色碼 (#RRGGBB)"""
     if not color_obj:
-        return default
+        return defaul
     rgb = getattr(color_obj, 'rgb', None)
     if not rgb:
-        return default
+        return defaul
     rgb_str = str(rgb).upper()
     if len(rgb_str) == 8: # AARRGGBB
         hex_val = rgb_str[2:]
         if hex_val == "000000" or hex_val == "FFFFFF":
-            return default
+            return defaul
         return f"#{hex_val}"
     elif len(rgb_str) == 6:
         return f"#{rgb_str}"
-    return default
+    return defaul
 
 
 def get_border_style(cell_border):
