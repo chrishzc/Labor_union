@@ -1,14 +1,14 @@
 # Services System Map
 
-- Version: 37
+- Version: 39
 
 ##### Module: DbService
 - Sub Map: services_layer
 - Type: service
 - State: `validated`
-- Source: services/db_service.py::safe_float,safe_int,safe_date,generate_virtual_account,get_connection,_resolve_case_no,get_order_by_case_no,get_table_data,update_table_row,parse_beclass_survey_details,get_order_details,get_case_order_details,create_order,assign_staff_to_order,update_order_status,update_order_full_details,add_or_update_holiday,delete_holiday,get_staff_monthly_schedule,save_order_rest_dates,generate_default_schedule,update_schedule_day,get_order_matches,create_or_get_match_record,update_matching_info_sent,reply_matching_inquiry,parse_client_district
+- Source: services/db_service.py::safe_float,safe_int,safe_date,generate_virtual_account,get_connection,_resolve_case_no,get_order_by_case_no,get_table_data,get_table_columns,update_table_row,parse_beclass_survey_details,get_order_details,get_case_order_details,create_order,assign_staff_to_order,update_order_status,update_order_full_details,add_or_update_holiday,delete_holiday,get_staff_monthly_schedule,save_order_rest_dates,generate_default_schedule,update_schedule_day,get_order_matches,create_or_get_match_record,update_matching_info_sent,reply_matching_inquiry,parse_client_district,backfill_client_payment_due_dates,sync_client_payment_due_dates_for_case_no,_sync_client_payment_due_dates_with_cursor,_count_missing_client_payment_due_dates
 - Dependencies: [InitDB]
-- Description: 主資料庫與 CRUD 操作服務；訂單公開識別一律使用唯一 case_no，並以同一案件編號載入 BeClass 服務細項。
+- Description: 主資料庫與 CRUD 操作服務；訂單公開識別一律使用唯一 case_no，並以同一案件編號載入 BeClass 服務細項；通用資料表瀏覽與更新不得再暴露 legacy payments。
 - Complexity: low
 - Input:
   - case_no: 訂單唯一公開識別鍵。
@@ -24,12 +24,13 @@
   - floor_fee 必須維持獨立欄位；不得合併至 service_salary 或以 other_addition 替代。
   - create_order() 必須維持 case_no 正規化與 client_payments 初始化行為。
   - 所有訂單讀取、建立與更新不得讀寫 clients.identity_status；身分資格只能 join clients.identity_status 取得，且不得由訂單 CRUD 修改 clients.identity_status。
+  - get_table_data()、get_table_columns() 與 update_table_row() 的允許清單、主鍵映射及任何可寫入分支均不得包含 legacy payments；三個入口都必須在建立資料庫連線前 fail-closed。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_db_service_order_other_addition_removal.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\db_service.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Non Goals:
   - 不修改 db/schema.sql 或執行資料庫 migration。
-  - 不修改 DataBrowserUI 的舊欄位標籤、PaymentSchema 或其他 DbService 函式。
+  - 不修改 API router、DataBrowserUI、PaymentSchema 或其他 DbService 函式。
 - Observability: not_required
 
 ##### Module: RecommendService

@@ -104,6 +104,265 @@
   - 不把 GenerateFakeData 當作未來新腳本的共用函式庫，也不在本節點新增任何條件、schema 相容或業務規則。
 - Observability: not_required
 
+##### Module: DatabaseSnapshotFixtureV2Serializer
+- Sub Map: root
+- Type: module
+- State: `planned`
+- Source: scripts/db_snapshot_fixture_v2_serializer.py
+- Description: 將 DB snapshot 的日期、datetime、Decimal、NULL、boolean、JSON、Unicode 與前導零字串轉為 deterministic tagged JSON，產生固定欄位順序、row order、JSONL bytes、逐檔 SHA-256 與 canonical manifest checksum。
+- Dependencies: []
+- Complexity: medium
+- Input:
+  - table_spec: 固定欄位順序、row sort key、business key 與 source-id metadata 規格。
+  - rows: 已由 exporter 查得且待 canonicalize 的 table rows。
+  - table_file_metadata: table 名稱、row count 與輸出相對路徑。
+- Output:
+  - jsonl_bytes: UTF-8、LF 換行、固定 key order 的 canonical JSONL bytes。
+  - file_sha256: canonical JSONL 的小寫 SHA-256。
+  - manifest_bytes: 不含執行時間或環境資訊的 canonical manifest bytes。
+  - snapshot_checksum: 依固定 table order 與逐檔 checksum 計算的整體 checksum。
+- Invariants:
+  - 相同輸入必須產生 byte-for-byte 相同輸出；不得讀取時鐘、亂數、環境變數、DB 或 filesystem metadata。
+  - 必須明確區分 NULL、空字串、boolean、integer、Decimal、date、datetime、JSON object/list 與一般字串；不得讓 Excel／float coercion 改變值。
+  - Decimal 必須以不使用科學記號的固定字串保存；date 使用 YYYY-MM-DD，datetime 使用固定秒精度 ISO-8601。
+  - JSON object 必須遞迴排序 key；table row 依 table_spec.sort_key 穩定排序，欄位依 table_spec.columns 固定排序。
+  - 每列必須包含 __row_key、__row_sha256 與可空 __source_id metadata；source id 不得成為 canonical business identity。
+  - JSONL 使用 ensure_ascii=false、UTF-8、緊湊 separators 與 LF；空 table 產生零 byte table file但仍必須有 checksum。
+  - manifest 不得包含 exported_at、來源 DB、帳密、路徑絕對值或其他每次執行漂移資訊。
+  - serializer 不得 import 或呼叫 GenerateFakeData，不得建立 DB connection，不得寫入正式 fixture 目錄。
+- Algorithm:
+  - 以 tagged value encoder 遞迴 canonicalize scalar、date/time、Decimal、JSON container 與 NULL。
+  - 依 table spec 建立 business row key，排除 raw auto-increment identity 後計算 row SHA-256，並保留 source id metadata供同批 FK 映射。
+  - 依固定 sort key 排序 rows，按固定 columns 與 metadata 順序輸出 canonical JSONL bytes。
+  - 對 JSONL bytes 計算逐檔 SHA-256；依固定 table order 組成 canonical manifest，再計算 snapshot checksum。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_db_snapshot_fixture_v2_serializer.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-db-snapshot-v2-serializer"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\db_snapshot_fixture_v2_serializer.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+- Non Goals:
+  - 不讀 DB、不驗證業務 invariants、不寫檔、不發布 bundle。
+
+##### Module: DatabaseSnapshotFixtureV2Validator
+- Sub Map: root
+- Type: module
+- State: `planned`
+- Source: scripts/db_snapshot_fixture_v2_validator.py
+- Description: 對 exporter 讀取的固定 50 案 snapshot 執行純資料驗證，確認 case coverage、日期血緣、bundle 內 FK、生命週期與指定 boundary facts、finance staging cardinality，不修正來源資料。
+- Dependencies: [ClientHcmInsertOnlyImporter, PaymentSchema, MultiCaregiverScheduleSchema, StaffMonthlySettlementSchema, StaffMonthlySettlementDetailSchema, StaffActualTransferSchema, StaffTransferAllocationSchema, FinanceImportRawStagingSchema]
+- Complexity: medium
+- Input:
+  - tables: 依固定 allowlist 取得的 table name 至 rows 映射。
+  - reference_case_range: 固定為 115000001 至 115000050。
+- Output:
+  - validation_report: case coverage、staff count、日期血緣、FK、boundary facts、finance staging 與 table counts。
+- Invariants:
+  - 必須完整且只接受 clients/orders 案號 115000001 至 115000050；缺號、重複或額外案件一律失敗。
+  - staff 必須固定 50 筆；所有 exported FK 與 business reference 必須能在 tables 內解析，不得接受孤兒資料。
+  - 每筆 orders.start_date 必須等於對應 clients.service_start_date 的正規化日期；不得修正或 fallback。
+  - 每筆 orders.end_date 必須使用 ClientHcmInsertOnlyImporter 相同規則，由 start_date、orders.service_days、clients.service_type 與固定 holidays 計算；不得只驗起日而保留過期迄日。
+  - 必須驗證 115000003、115000004、115000008、115000009 的多月嫂交接，115000005 的取消退款且無 assignment/schedule，以及 115000018 至少一個雙薪日。
+  - 115000013 的超收必須以 first_payment 階段判定：應收 2500、摘要實收 3000，且恰有 3 筆 succeeded receipt、每筆 1000；成功交易合計必須等於階段摘要實收。
+  - 115000014 的超收必須以 second_payment 階段判定：應收 2500、摘要實收 3000，且恰有 1 筆 succeeded receipt 3000；成功交易合計必須等於階段摘要實收。
+  - 不得以全案 amount_received 大於 amount_receivable 判定階段超收；其他階段尚未到期或尚未收款時，全案實收可合理小於全案應收。
+  - finance staging 必須為 2 batches、1 canonical row、2 occurrences，且 canonical fingerprint 非空並由 occurrences 共同引用。
+  - 必須驗證 assignment、schedule、staff payment、settlement detail、transfer allocation 的 bundle 內 FK 與基本 ownership 一致性。
+  - validator 是純函式資料檢查；不得開 DB、寫檔、修改輸入 rows、建立 alert/event 或呼叫 GenerateFakeData。
+- Algorithm:
+  - 建立 clients、orders、staff、assignment、payment、settlement 與 staging 的 key indexes，先偵測重複鍵。
+  - 驗證固定 case coverage、staff count、orders-client 日期血緣及每張 exported 子表的 FK。
+  - 驗證取消、交接、超收、雙薪與 finance staging 固定 facts，收集 table counts 與具體失敗原因。
+  - 全部通過才回傳 canonical validation report；任一違規立即以可辨識錯誤 fail-closed。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_db_snapshot_fixture_v2_validator.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-db-snapshot-v2-validator"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\db_snapshot_fixture_v2_validator.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+- Non Goals:
+  - 不讀 DB、不序列化 JSONL、不寫檔、不匯入或修正資料。
+
+##### Module: FixtureOrderDateReconciliationV2
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: scripts/reconcile_fixture_order_dates_v2.py
+- Description: 在匯出固定 snapshot 前，將測試 DB 中固定 50 案 orders 的預計起訖日對齊 clients.service_start_date 與既有服務規則；預設只做 check，只有明確 apply 才在單一 transaction 更新 planned dates。
+- Dependencies: [ClientHcmInsertOnlyImporter, DatabaseSnapshotFixtureV2Validator]
+- Complexity: medium
+- Input:
+  - mode: 預設 check；只有明確 --apply 才允許 UPDATE。
+  - database_config: 來源測試 DB 連線設定。
+  - reference_case_range: 固定為 115000001 至 115000050。
+- Output:
+  - reconciliation_report: scanned、unchanged、would_update／updated、invalid、conflicts、每案 before/after planned dates 與 status。
+- Invariants:
+  - 只能處理 clients/orders 皆存在且案號完整等於 115000001 至 115000050 的測試 fixture；缺號、重複、額外案件或孤兒資料一律 fail-closed。
+  - 預設 check 模式不得執行 UPDATE、INSERT、DELETE、REPLACE、TRUNCATE 或 DDL，最後必須 rollback 並關閉 connection。
+  - apply 模式只可更新 orders.start_date 與 orders.end_date；不得修改 clients、orders 其他欄位、actual dates、status、service_days、assignments、schedule、付款、帳務或 staging facts。
+  - start_date 必須直接使用 clients.service_start_date 的正規化日期；缺少或無法解析時整批失敗，不得猜測。
+  - end_date 必須使用 ClientHcmInsertOnlyImporter 相同規則，以 start_date、現有 orders.service_days、clients.service_type 與 holidays 計算；開始日可出勤即算第 1 日。
+  - 週休1日排除週日、週休2日排除週六與週日、連續服務不排固定週休，holidays 表日期一律順延。
+  - apply 必須先鎖定 50 筆 orders 並保存 before values；UPDATE 使用 optimistic before-value guard，任一 rowcount 不等於 1 或資料競態即 rollback 全批。
+  - apply 更新後必須在 commit 前重新查詢並確認 50 筆日期全部符合預期；任一不符整批 rollback。
+  - 腳本不得 import、呼叫或解除 frozen GenerateFakeData，不得建立或修改 schema。
+- Algorithm:
+  - 解析 CLI，預設 check；建立 DB connection 後啟動 transaction，apply 使用 SELECT FOR UPDATE 鎖定固定 50 案。
+  - 查詢 clients JOIN orders 與 holidays，驗證完整 case coverage、唯一性、可解析 service_start_date 及正整數 orders.service_days。
+  - 重用 ClientHcmInsertOnlyImporter 的日期解析與服務結束日規則，逐案計算 expected start/end 並分類 unchanged 或 mismatch。
+  - check 模式輸出 deterministic report 後 rollback；apply 模式以 before-value optimistic guard 只更新 mismatch rows。
+  - apply 在 commit 前重查 50 案並逐案比對 expected dates；全部一致才 commit，否則 rollback 並回傳 conflict。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_reconcile_fixture_order_dates_v2.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-reconcile-fixture-order-dates-v2"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\reconcile_fixture_order_dates_v2.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+- Non Goals:
+  - 不修正 actual dates、assignments、schedule、付款、帳務或生命週期狀態。
+  - 不作為 production 歷史資料批次更新工具，不接受任意 case range 或任意 UPDATE 欄位。
+
+##### Module: DatabaseSnapshotFixtureV2Exporter
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: scripts/export_db_snapshot_fixture_v2.py
+- Description: 從已驗證的 50 案測試 DB 以一致性唯讀 snapshot 匯出版本化、byte-stable 的 JSONL fixture bundle；保存生命週期、指派、排班、付款、月結、匯款及 finance staging 業務 facts，供後續獨立 importer 重播，不再執行日期或亂數生成。
+- Dependencies: [DatabaseSnapshotFixtureV2Serializer, DatabaseSnapshotFixtureV2Validator]
+- Complexity: medium
+- Input:
+  - database_config: 僅用於讀取來源測試 DB；不得寫入 bundle 或 manifest。
+  - output_directory: 預設 fixtures/db_snapshot_v2/v3。
+  - fixture_version: 固定版本 v3；同版本內容不得靜默覆寫。
+  - reference_case_range: 固定為 115000001 至 115000050。
+- Output:
+  - manifest: 固定格式版本、schema 相容資訊、table allowlist、匯入順序、business key、row count、逐檔 SHA-256、整體 snapshot checksum 與明確排除 tables。
+  - table_files: 每張 allowlist table 一個 UTF-8 JSONL，固定欄位順序與穩定 row order。
+  - export_report: 匯出 table counts、checksum、fixture case coverage 與 validation 結果。
+- Invariants:
+  - exporter 全程唯讀；不得執行 INSERT、UPDATE、DELETE、REPLACE、TRUNCATE、DDL 或任何資料異動 commit。
+  - 只能讀取固定 allowlist：clients、beclass_records、staff、staff_bank_accounts、staff_regions、staff_time_slots、staff_cooking_skills、staff_transportation、staff_holiday_availability、staff_weekly_rest、staff_baby_types、holidays、orders、matching_records、client_payments、client_payment_transactions、case_staff_assignments、staff_schedule、staff_payments、staff_payment_transactions、staff_monthly_settlements、staff_monthly_settlement_details、staff_actual_transfers、staff_transfer_allocations、finance_import_batches、finance_import_rows、finance_import_occurrences。
+  - 必須明確排除 finance_alerts、finance_alert_events、LINE、crawler、system alerts、FAQ、legacy payments、migration review、人工稽核與其他非 allowlist tables；不得以 SHOW TABLES 後全庫傾倒。
+  - 必須在單一 repeatable-read consistent snapshot 中讀取所有 allowlist tables，完成後 rollback 唯讀 transaction 並關閉連線。
+  - 必須將完整 tables 交由 DatabaseSnapshotFixtureV2Validator 驗證；不得在 exporter 中略過、放寬或自行修正失敗資料。
+  - v3 必須包含固定 15 筆 2026 國定假日，日期、名稱與 is_double_pay_default 必須符合正式模板。
+  - 必須將已驗證 rows 交由 DatabaseSnapshotFixtureV2Serializer 產生 JSONL、manifest 與 checksum；不得在 exporter 複製另一套 canonicalization。
+  - manifest 與正式 table files 不得包含 exported_at=now、來源 DB 名稱、DB 帳密、.env 值、連線資訊或其他每次執行會漂移的 metadata。
+  - exporter 不得 import、呼叫、解除或繞過 frozen GenerateFakeData；其歷史原始碼僅作人工規格參考。
+  - 所有資料檔、manifest、row count、FK、boundary facts 與 checksum 驗證成功後才能從暫存目錄原子發布；失敗不得留下半套正式 bundle。
+  - 目標版本不存在時可發布；已存在且 checksum 相同時回報 identical 且不得重寫，checksum 不同時拒絕覆蓋。
+- Algorithm:
+  - 建立固定 table spec，逐表宣告 SELECT 欄位、穩定排序鍵、business key、FK／source-id reference 與匯入拓撲，不接受 CLI 或 DB 動態提供 table 名稱。
+  - 以 repeatable-read read-only transaction 讀取全部 allowlist tables，將完整 rows 交由 DatabaseSnapshotFixtureV2Validator fail-closed 驗證。
+  - 將已驗證 rows 與固定 table spec 交由 DatabaseSnapshotFixtureV2Serializer，取得 JSONL bytes、逐檔 SHA-256、manifest 與 snapshot checksum。
+  - 將 serializer bytes 寫入同層暫存目錄並核對 checksum，不在 exporter 內重新序列化。
+  - 若同版本正式 bundle 不存在，以原子 rename 發布；若存在則比對 checksum，相同只回報 identical，不同 fail-closed。
+  - 無論成功或失敗都 rollback 唯讀 transaction、關閉 DB connection 並清除未發布暫存目錄。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_db_snapshot_fixture_v2_exporter.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-db-snapshot-v2-exporter"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\export_db_snapshot_fixture_v2.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+- Non Goals:
+  - 不匯入資料、不建立或修改 schema、不刪除或清空 DB。
+  - 不輸出 SQL dump 或 Excel workbook；JSONL bundle 才是正式 portable fixture。
+  - 不支援任意 case range、任意 table、自訂 query 或 production DB 全庫備份。
+  - 不建立、保存或驗證 finance_alerts／finance_alert_events 衍生生命週期。
+
+##### Module: DatabaseSnapshotFixtureV2Importer
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: scripts/import_db_snapshot_fixture_v2.py
+- Description: 將固定 v3 JSONL snapshot fixture 以 insert-only transaction 重建至已完成 schema migration 的測試 DB；可安全重跑相同 bundle，但絕不覆蓋既有或歷史資料。
+- Dependencies: [DatabaseSnapshotFixtureV2Exporter, DatabaseSnapshotFixtureV2Serializer, DatabaseSnapshotFixtureV2Validator]
+- Complexity: medium
+- Input:
+  - fixture_directory: 固定預設 fixtures/db_snapshot_v2/v3。
+  - database_config: 已完成 schema migration 的目標測試 DB。
+  - mode: 預設 dry-run；只有明確 --apply 才可 INSERT。
+- Output:
+  - import_report: fixture checksum、各表 inserted／skipped_identical、總筆數、validation 與 mode。
+- Invariants:
+  - 只接受 fixture_name=labor_union_db_snapshot、fixture_version=v3、schema_version=db-snapshot-fixture-v2，且 manifest table 名稱、順序、相對路徑必須完整等於固定 27 表 allowlist。
+  - 匯入前必須驗證 manifest snapshot checksum、每個 JSONL 檔案 checksum、row count、每列 __row_key／__row_sha256 與 tagged value 結構；任一不符不得開啟寫入 transaction。
+  - 必須解碼 NULL、boolean、integer、Decimal、date、datetime、JSON object/list 與 string；MySQL TIME 固定字串保持 HH:MM:SS，JSON 欄位以 canonical JSON text 寫入。
+  - 必須以固定 FK 拓撲匯入；含 id 的表使用 bundle __source_id 明確還原原 id，使 bundle 內 FK 不需猜測或重新配對。
+  - 預設 dry-run 不得 INSERT、UPDATE、DELETE、REPLACE、TRUNCATE、DDL 或 commit，最後必須 rollback 並關閉 connection。
+  - apply 只允許參數化 INSERT 與 identity/business-key SELECT；不得執行 UPDATE、DELETE、REPLACE、TRUNCATE、DDL，不得呼叫 GenerateFakeData。
+  - business key 不存在且 source id 未被占用時才 INSERT；business key 已存在且 canonical row hash 完全相同時 skipped_identical；business key 或 source id 任一衝突時整批 rollback。
+  - 所有表完成後必須從 transaction 內重新讀取固定 27 表並交由 DatabaseSnapshotFixtureV2Validator 驗證；驗證通過才可 commit。
+  - finance_alerts、finance_alert_events、LINE、crawler、system alerts、FAQ、legacy payments、migration review 與其他非 allowlist tables 一律不得讀寫。
+  - 匯入器不建立 schema、不執行 migration、不清空 DB；缺表、缺欄位或 FK/schema 不相容時 fail-closed。
+- Algorithm:
+  - 讀取固定 manifest 與 27 個 JSONL，驗證所有 checksum、row metadata、tagged values，並解碼為 table rows。
+  - 以 clients／staff 基礎資料、staff 子表、holidays、orders、finance staging parent、付款 parent/transaction、assignment/schedule/payroll/settlement/transfer、occurrence 的固定拓撲處理。
+  - 每列先以 business key 查詢；不存在時檢查 source id collision 後參數化 INSERT，存在時以 serializer 相同 canonical hash 比較是否 identical。
+  - dry-run 記錄 would_insert／skipped_identical 後 rollback；apply 寫入後重讀完整 allowlist 並執行 validator，成功才 commit。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_db_snapshot_fixture_v2_importer.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-db-snapshot-v3-importer"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\import_db_snapshot_fixture_v2.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+- Non Goals:
+  - 不支援 production merge、upsert、歷史資料覆寫、任意 fixture 版本或任意 table。
+  - 不自動建立或刪除 DB，不執行 schema migration。
+  - 不重建 finance_alerts／finance_alert_events；衍生告警由正式流程另行產生。
+
+##### Module: FakeDatabaseTemplateReset
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: scripts/reset_fake_database.py
+- Description: 提供所有開發者單一指令將本機 union_db 重建為固定 v3 DB 模板；先驗 fixture，再重建正式 schema/schema_parts，最後以 DatabaseSnapshotFixtureV2Importer insert-only 套用並驗證。
+- Dependencies: [InitDB, DatabaseSnapshotFixtureV2Importer]
+- Complexity: medium
+- Input:
+  - mode: 預設 preview；只有 --apply 才執行破壞性重建。
+  - confirm_database: apply 時必須明確等於 union_db。
+  - fixture_directory: 固定預設 fixtures/db_snapshot_v2/v3。
+- Output:
+  - reset_report: target、fixture checksum、schema statements/parts、import report 與完成狀態。
+  - developer_entrypoint: 專案根目錄 reset_DB.bat。
+- Invariants:
+  - 只允許 DB_HOST 為 localhost、127.0.0.1 或 ::1，且 DB_DATABASE 必須精確為 union_db；APP_ENV／ENV／FLASK_ENV 任一包含 prod 時拒絕執行。
+  - 預設 preview 只能驗 fixture、顯示目標與步驟，不得連線、DROP、CREATE、INSERT、commit 或修改檔案。
+  - apply 必須同時提供 --confirm-database union_db；缺少、拼錯或環境目標不一致一律 fail-closed。
+  - 任何 DROP 前必須先以 DatabaseSnapshotFixtureV2Importer 完整驗證固定 v3 bundle checksum、27 表、rows 與業務 invariants。
+  - schema 來源只能是版本控制內 db/schema.sql；schema parts 只能由 scripts.init_db.load_schema_parts 依檔名排序載入，不接受任意 SQL 路徑。
+  - 不得呼叫 GenerateFakeData，不得匯入 Excel，不得執行 init_db.py 的額外 holiday seed；重建結果必須完全以 fixture bundle 為資料來源。
+  - schema/schema_parts 任一失敗時 rollback 可回滾部分並停止，不得繼續 importer；DB 已 DROP 的事實必須在錯誤中明確回報，不可宣稱已恢復。
+  - schema 成功後必須呼叫 DatabaseSnapshotFixtureV2Importer apply；其 insert-only、final validator 與衝突規則不得繞過。
+  - 完成後必須回報 fixture checksum 與 importer committed；finance_alerts、finance_alert_events 等衍生表保持 schema 存在但零 fixture rows。
+- Algorithm:
+  - 驗證本機 union_db 環境與固定確認字串，先載入並驗證完整 fixture bundle。
+  - preview 回報即將執行的固定 schema、schema_parts 與 fixture checksum後結束。
+  - apply 使用 server-level connection 執行 db/schema.sql 固定 statements，再呼叫 load_schema_parts，成功 commit 並關閉 schema connection。
+  - 呼叫 DatabaseSnapshotFixtureV2Importer --apply 邏輯匯入固定 bundle；只有 committed 且 validation pass 才回報 reset completed。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_reset_fake_database.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-reset-fake-database"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\reset_fake_database.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+- Non Goals:
+  - 不支援遠端 DB、production DB、自訂 database name、自訂 schema 或局部 reset。
+  - 不備份現有 DB；使用者必須以明確確認表示接受完整重建。
+
+##### Module: FakeDatabaseTemplateResetEntrypoint
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: reset_DB.bat
+- Description: Windows 開發者的一鍵 DB 模板重置入口，固定使用專案 .venv Python 執行 FakeDatabaseTemplateReset，不自行實作 SQL 或資料匯入。
+- Dependencies: [FakeDatabaseTemplateReset]
+- Complexity: low
+- Input:
+  - arguments: 無參數時執行固定完整重建；有參數時原樣轉交 reset_fake_database。
+- Output:
+  - exit_code: 完整保留 Python reset orchestration 的成功或失敗 exit code。
+- Invariants:
+  - 必須從 batch 所在專案根目錄解析 .venv\Scripts\python.exe，不得依賴全域 python。
+  - 缺少 .venv Python 時明確失敗；不得 fallback 到其他 interpreter。
+  - 雙擊或無參數執行時必須固定呼叫 `-m scripts.reset_fake_database --apply --confirm-database union_db`，直接完整重建。
+  - 有參數時只能呼叫 `-m scripts.reset_fake_database` 並原樣轉交 `%*`；不得直接呼叫 init_db、GenerateFakeData、mysql、DROP 或 importer apply。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_reset_fake_database_entrypoint.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-reset-fake-database-entrypoint"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+- Non Goals:
+  - 不支援 Linux/macOS shell；跨平台核心由 Python module 提供。
+
 ##### Module: FinanceImportStagingContract
 - Sub Map: root
 - Type: dependency_contract
@@ -130,7 +389,7 @@
 - Type: database_schema
 - State: `planned`
 - Source: db/schema.sql
-- Description: 建立客戶帳務、正式服務指派與訂單層服務人員應付核心表；服務人員月結、實際轉帳及分配由獨立 Schema 節點擴充。
+- Description: 建立客戶帳務、正式服務指派與訂單層服務人員應付核心表；服務人員月結、實際轉帳及分配由獨立 Schema 節點擴充，且不得再宣告 legacy payments 表。
 - Complexity: medium
 - Input:
   - case_no: canonical order identifier
@@ -171,8 +430,10 @@
   - `orders.deposit_service_days` 為非負整數且不得超過 `orders.service_days`；不得由身分資格或舊檢視表推測其值。
   - 新的跨案銀行事件不得拆成多筆偽造 external_reference 寫入 `staff_payment_transactions`。
   - `actual_hours` 的人工覆寫必須寫入 append-only 稽核紀錄，包含正式指派、調整前後值、非空原因、操作者與時間；不得覆寫或刪除既有稽核列。
+  - 初始化 schema 不得建立 legacy payments；正式客戶與月嫂帳務只能使用 client_payments、client_payment_transactions、staff_payments 與 staff_payment_transactions。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema.sql').read_text(encoding='utf-8'); tables=('client_payments','client_payment_transactions','case_staff_assignments','staff_payments','staff_payment_transactions','payment_migration_reviews','actual_hours_adjustments'); assert all(f'CREATE TABLE IF NOT EXISTS {n}' in s for n in tables); assert all(c in s for c in ('subsidy_return_receivable','subsidy_return_refunded','subsidy_return_due_date','subsidy_return_at','subsidy_return_review_status','subsidy_return_review_reason')); print('CORE PAYMENT SCHEMA DECLARED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "CORE PAYMENT SCHEMA DECLARED"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema.sql').read_text(encoding='utf-8'); assert 'CREATE TABLE IF NOT EXISTS payments (' not in s; print('LEGACY PAYMENTS SCHEMA RETIRED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "LEGACY PAYMENTS SCHEMA RETIRED"}
 - Observability: not_required
 
 ##### Module: ClientIdentityStatusSourceMigration
@@ -1059,22 +1320,30 @@
 - Type: script
 - State: `planned`
 - Source: scripts/imports/import_client_hcm.py
-- Description: 匯入 HCM 客戶資料時以 case_no 去重；既有客戶與訂單只回報 skipped_existing，僅新增全新 client 與同交易中的初始 order。
+- Description: 匯入 HCM 客戶資料時以 case_no 去重；既有客戶與訂單只回報 skipped_existing，僅新增全新 client 與同交易中的初始 order，並由 client 的預計服務日期與服務規則初始化 order 預計起訖日。
 - Complexity: medium
 - Input:
   - excel_path: HCM 客戶名冊
   - case_no: 客戶穩定案件識別鍵
+  - service_start_date: client 預計服務日期；可解析時作為新 order 的 start_date
+  - service_days: 預計實際服務日數，開始日可出勤時算第 1 日
+  - service_type: 週休1日、週休2日或連續服務，決定固定休息日
 - Output:
   - result: inserted、skipped_existing 或 review_required 的逐筆結果與計數
 - Invariants:
   - case_no 已存在時不得 UPDATE clients、不得 UPDATE orders，也不得以重新匯入覆寫人工調整。
   - 新增 clients 與其初始 orders 必須在同一資料庫 transaction；任一列新增失敗時 rollback 該次匯入。
   - 缺少 case_no 時必須 review_required；不得以姓名、電話或金額猜測既有客戶。
-  - 新增 client 的 `identity_status` 是資格唯一來源；初始 `orders` INSERT 只可寫入 case_no、client_id、status、service_days 與 service_hours_per_day，不得寫入已移除的 `orders.subsidy_eligibility` 或複製資格欄位。
+  - 新增 client 的 `identity_status` 是資格唯一來源；初始 `orders` INSERT 可寫入 case_no、client_id、status、service_days、service_hours_per_day、start_date 與 end_date，不得寫入已移除的 `orders.subsidy_eligibility` 或複製資格欄位。
+  - 新 order 的 start_date 必須直接來自同列 client 的 service_start_date；end_date 必須由 start_date、service_days、service_type 與 holidays 表計算，不得建立獨立時間軸。
+  - service_days 計算包含可出勤的開始日；週休1日排除週日、週休2日排除週六與週日、連續服務不排固定週休，holidays 表中的國定假日一律順延。
+  - service_start_date 缺少或無法解析時 start_date 與 end_date 必須同為 NULL，不得猜測日期；仍可建立初始 client 與 order。
 - Algorithm:
   - 解析並清理 HCM 列，先驗證非空 case_no，缺值只累計 review_required。
   - 以 case_no 查詢 clients；既有者只累計 skipped_existing，不讀取或更新其 orders。
-  - 對全新 case_no 在同一 transaction 先新增 client，再以不含任何資格欄位的最小欄位集合新增唯一初始 order。
+  - 對全新 case_no 在同一 transaction 先新增 client；解析同列 service_start_date，並讀取 holidays 表。
+  - 依 service_type 的固定週休與國定假日逐日累積 service_days 個可出勤日，將來源日期與計算結果寫入唯一初始 order 的 start_date 與 end_date。
+  - service_start_date 不可用時以 NULL 起訖日建立初始 order；既有 case_no 必須在日期查詢與計算前跳過。
   - 回傳 inserted、skipped_existing、review_required 計數；任一寫入例外 rollback。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_client_hcm_insert_only.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-client-hcm-insert-only"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}

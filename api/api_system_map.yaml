@@ -200,18 +200,20 @@ modules:
     known_symbols: []
   PaymentRouter:
     type: api_router
-    description: 舊 payments API 相容路由；所有端點回傳 HTTP 410。
-    source: api/routes/payments.py::get_all_payments,update_payment
+    description: legacy payments API source 退役模組；檔案不得再宣告 APIRouter、endpoint、HTTP 410
+      handler 或匯入舊 PaymentSchemas。
+    source: api/routes/payments.py
     domain: null
     subsystem: null
     map_file: api\api_system_map.md
-    dependencies:
-    - DbService
-    - PaymentSchemas
+    dependencies: []
     input: {}
     output: {}
     exceptions: []
-    invariants: []
+    invariants:
+    - api/routes/payments.py 不得包含 APIRouter、router、get_all_payments、update_payment、_legacy_payments_removed
+      或 api.schemas.payments。
+    - '`/api/v1/payments` 不得出現在執行中 FastAPI OpenAPI。'
     preferred_pattern: none
     verification: []
     decisions: []
@@ -231,8 +233,9 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
+    known_symbols: []
   ClientRouter:
     type: api_router
     description: 客戶名冊 API 路由。
@@ -343,42 +346,6 @@ modules:
     - add_or_update_holiday
     - delete_holiday
     - get_all_holidays
-  LegacyPaymentAPIFreeze:
-    type: api_router
-    description: 停用舊 /api/v1/payments 路由，避免讀寫已淘汰的 payments 表。
-    source: api/routes/payments.py::_legacy_payments_removed
-    domain: null
-    subsystem: null
-    map_file: api\api_system_map.md
-    dependencies: []
-    input: {}
-    output: {}
-    exceptions: []
-    invariants:
-    - 不得呼叫 legacy payments 的資料服務。
-    - 所有端點必須回傳明確的 HTTP 410 停用訊息。
-    preferred_pattern: none
-    verification:
-    - must_have_assertions
-    decisions: []
-    todo: []
-    checkpoint: []
-    observability:
-      mode: not_required
-      signals: []
-    complexity: low
-    algorithm: []
-    idempotency:
-      level: unknown
-      side_effects: []
-    retry_budget: 0
-    required_context: []
-    forbidden_context: []
-    context_priority: {}
-    non_goals: []
-    sub_map: api_layer
-    state: deployed
-    fan_in_snapshot: 0
   ClientPaymentRouter:
     type: api_router
     description: 提供 `/api/v1/client-payments` 的客戶收款與帳務摘要 API；退還補助款可查閱，解約退款功能不啟用。
@@ -674,7 +641,8 @@ modules:
   FinanceRouterRegistration:
     type: api_entrypoint
     description: Register contract, finance-report, finance-alert and multi-caregiver
-      schedule routers with the running FastAPI application.
+      schedule routers with the running FastAPI application；legacy payments router
+      不得再掛載。
     source: api/main.py
     domain: null
     subsystem: null
@@ -695,6 +663,8 @@ modules:
       legacy schedule router 提供查詢。
     - multi_caregiver_case_assignments.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix
       或以 legacy 排班資料合成案件指派選單。
+    - api.main 不得 import 或 include legacy payments.router；`/api/v1/payments` 必須從 OpenAPI
+      與執行中路由消失。
     - 'INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始啟動後端與監控服務防止連線逾時崩潰。'
     preferred_pattern: none
     verification:
@@ -808,7 +778,8 @@ modules:
     known_symbols: []
   PaymentSchemas:
     type: api_schema
-    description: 舊付款更新相容路由的 API 請求資料模型。
+    description: legacy payments request schema 退役模組；不得再宣告 PaymentUpdateRequest、Pydantic
+      model 或舊客戶/月嫂混合帳務欄位。
     source: api/schemas/payments.py
     domain: null
     subsystem: null
@@ -817,7 +788,9 @@ modules:
     input: {}
     output: {}
     exceptions: []
-    invariants: []
+    invariants:
+    - api/schemas/payments.py 不得包含 BaseModel、PaymentUpdateRequest、caregiver_fee、caregiver_paid_at
+      或三階段舊更新 payload。
     preferred_pattern: none
     verification: []
     decisions: []
@@ -837,6 +810,6 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
-    fan_in_snapshot: 1
+    state: validated
+    fan_in_snapshot: 0
     known_symbols: []

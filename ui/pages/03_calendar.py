@@ -221,16 +221,23 @@ def show():
         return
 
     try:
-        # 1. 選擇月嫂與年月
+        # 1. 選擇月嫂與年月（同一列）
         staff_options = {f"{s['name']} ({s['phone']})": s['id'] for s in staff_list if s.get('name')}
+        if not staff_options:
+            st.warning("目前無可用的服務人員姓名資料，無法載入日曆。")
+            return
         
-        selected_staff_label = st.selectbox("選擇要查看的服務人員/月嫂", list(staff_options.keys()), key="cal_staff_main")
-        cal_staff_id = staff_options[selected_staff_label]
-        
-        col_y, col_m = st.columns(2)
-        with col_y:
+        staff_col, year_col, month_col = st.columns(3)
+        with staff_col:
+            selected_staff_label = st.selectbox(
+                "選擇要查看的服務人員/月嫂",
+                list(staff_options.keys()),
+                key="cal_staff_main",
+            )
+            cal_staff_id = staff_options[selected_staff_label]
+        with year_col:
             cal_year = st.selectbox("選擇年份", [2025, 2026, 2027], index=1)
-        with col_m:
+        with month_col:
             curr_month = datetime.today().month
             cal_month = st.selectbox("選擇月份", list(range(1, 13)), index=curr_month - 1)
             

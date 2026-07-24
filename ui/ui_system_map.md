@@ -12,12 +12,13 @@
 - Sub Map: ui_layer
 - Type: ui_page
 - State: `validated`
-- Source: ui/pages/01_data_browser.py::show
-- Description: 原始資料庫表格瀏覽頁面。提供 clients, staff, orders, beclass_records, matching_records, holidays 與 staff_bank_accounts 檢視，以及國定假日管理面板。
+- Source: ui/pages/01_data_browser.py
+- Description: 原始資料庫表格瀏覽頁面。只提供 DbService 仍支援的資料表檢視；legacy payments 選項與相關唯讀／編輯設定必須完全移除。
 - Dependencies: [DbService]
 - Invariants:
   - INV-UI-BROWSER-01: 原始資料表格欄位必須支援透過對照表轉換為中文名稱 (含英文原鍵名或純中文)，未記錄欄位自動安全回退原鍵名。
   - orders 的資料瀏覽不得顯示或編輯 clients.identity_status；資格資訊只顯示 clients.identity_status，且該欄位在 DataBrowserUI 必須唯讀。
+  - table_options、EDITABLE_COLUMNS 與 READ_ONLY_TABLES 均不得包含精確 legacy 表名 payments；必須保留 client_payments、client_payment_transactions、staff_payments 與 staff_payment_transactions。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_data_browser_identity_status_ui.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
@@ -107,7 +108,7 @@
 - Sub Map: ui_layer
 - Type: ui_page
 - State: `validated`
-- Source: ui/pages/03_calendar.py::show
+- Source: ui/pages/03_calendar.py::show,safe_float,safe_int,safe_date,_multi_caregiver_request,_multi_caregiver_error,_render_multi_caregiver_panel
 - Dependencies: [MultiCaregiverCaseAssignmentListRouter, MultiCaregiverScheduleReadRouter, MultiCaregiverScheduleRouter]
 - Description: 服務人員行事曆與檔期調控獨立頁面。除既有月曆模式外，提供多月嫂案件→正式服務指派選擇、指派專屬日排班呈現與單日調整。
 - Invariants:
@@ -225,21 +226,6 @@
 - Invariants:
   - 不得呼叫 get_table_data('payments') 或 update_payment_details。
   - 訂單主資料與狀態更新不得因停用舊帳務同步而中斷。
-- Verification:
-  - must_have_assertions
-- Observability: not_required
-
-##### Module: LegacyPaymentBrowserFreeze
-- Sub Map: ui_layer
-- Type: ui_page
-- State: `planned`
-- Source: ui/pages/01_data_browser.py::format_col_header
-- Description: 移除資料瀏覽頁所有 legacy payments 選項、欄位標籤與不可達的虛擬帳號／唯讀分支，避免 Contract 後留下過時程式碼。
-- Invariants:
-  - 原始碼不得包含 legacy payments 表名、caregiver_fee、caregiver_paid_at 或舊帳務虛擬帳號分支。
-  - table_options 僅能瀏覽目前仍由 db_service 支援的資料表。
-- Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; text=Path('ui/pages/01_data_browser.py').read_text(encoding='utf-8'); forbidden=('payments', 'caregiver_fee', 'caregiver_paid_at'); assert not any(value in text for value in forbidden); print('LEGACY PAYMENT BROWSER PRUNED')"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "LEGACY PAYMENT BROWSER PRUNED"}
 - Observability: not_required
 
 ##### Module: Page2TabNavigation

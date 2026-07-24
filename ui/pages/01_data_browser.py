@@ -31,6 +31,15 @@ EDITABLE_COLUMNS = {
     'matching_records': set(),
     # 全表建議唯讀：已有專屬「國定假日管理面板」處理新增/更新/刪除
     'holidays': set(),
+    'line_confirmation_requests': set(),
+    'staff_bookings': set(),
+    'staff_regions': set(),
+    'staff_cooking_skills': set(),
+    'staff_weekly_rest': set(),
+    'staff_time_slots': set(),
+    'staff_transportation': set(),
+    'staff_holiday_availability': set(),
+    'staff_baby_types': set(),
     'staff_bank_accounts': {
         'bank_code', 'branch_code', 'account_no', 'is_primary',
     },
@@ -51,6 +60,26 @@ _EMAIL_FORMAT = (re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$'), '請輸入正確的 
 COLUMN_FORMAT_VALIDATORS = {
     'clients': {'phone': _PHONE_FORMAT},
     'staff': {'email': _EMAIL_FORMAT},
+}
+
+READ_ONLY_TABLES = {
+    "staff_regions",
+    "staff_cooking_skills",
+    "staff_weekly_rest",
+    "staff_time_slots",
+    "staff_transportation",
+    "staff_holiday_availability",
+    "staff_baby_types",
+    "line_confirmation_requests",
+    "staff_bookings",
+    "case_staff_assignments",
+    "client_payments",
+    "client_payment_transactions",
+    "actual_hours_adjustments",
+    "staff_payments",
+    "staff_payment_transactions",
+    "payment_migration_reviews",
+    "staff_schedule",
 }
 
 # ADAD INV-UI-BROWSER-01: 資料庫全量欄位中文對照映射表
@@ -79,7 +108,7 @@ DB_COLUMN_LABEL_MAP = {
     "zip_code": "郵遞區號",
     "identity_status": "身分資格",
     "service_time": "服務時間",
-    "due_month": "預計服務月份",
+    "due_month": "預產期月份",
     "service_start_date": "預計服務日期",
     "service_days": "希望服務天數",
     "residence_type": "居住型態",
@@ -101,12 +130,33 @@ DB_COLUMN_LABEL_MAP = {
     "care_babies": "最大照顧寶寶數",
     "service_regions": "服務區域偏好",
     "special_skills": "特殊技能與標籤",
+    "service_time_slots": "服務時段偏好",
+    "transportation_preferences": "交通工具偏好",
+    "holiday_preferences": "節日偏好",
+    "baby_type_preferences": "可承接胎數",
+    "bank_accounts": "服務人員銀行帳戶",
     
     # 服務人員銀行帳戶 (staff_bank_accounts)
     "bank_code": "銀行代碼(3碼)",
     "branch_code": "分行代碼(4碼)",
     "account_no": "銀行帳號",
     "is_primary": "是否為主要帳戶",
+
+    # 服務人員關聯資料表
+    "staff_id": "服務人員ID",
+    "region_name": "服務區域",
+    "custom_region_detail": "區域其他說明",
+    "skill_name": "特殊技能/料理",
+    "custom_skill_detail": "特殊技能其他說明",
+    "rest_type": "固定休假類型",
+    "custom_rest_detail": "固定休假其他說明",
+    "slot_name": "服務時段",
+    "custom_slot_detail": "時段其他說明",
+    "vehicle_type": "交通工具",
+    "holiday_name": "節日偏好",
+    "custom_holiday_detail": "節日其他說明",
+    "baby_type": "可承接胎數",
+    "custom_baby_detail": "胎數其他說明",
     
     # 訂單 (orders)
     "client_id": "客戶ID",
@@ -124,6 +174,80 @@ DB_COLUMN_LABEL_MAP = {
     "custom_rest_dates": "自訂休假日期",
     "other_addition": "其他加價",
     "staff_name": "服務人員姓名",
+
+    # 客戶帳務主檔與交易
+    "legacy_payment_id": "舊系統付款ID",
+    "client_payment_id": "客戶帳務主檔ID",
+    "deposit_receivable": "訂金應收",
+    "deposit_received": "訂金已收",
+    "deposit_due_date": "訂金到期日",
+    "deposit_received_at": "訂金全額核銷日",
+    "first_payment_receivable": "第一期應收",
+    "first_payment_received": "第一期已收",
+    "first_payment_due_date": "第一期到期日",
+    "first_payment_received_at": "第一期全額核銷日",
+    "second_payment_receivable": "第二期應收",
+    "second_payment_received": "第二期已收",
+    "second_payment_due_date": "第二期到期日",
+    "second_payment_received_at": "第二期全額核銷日",
+    "amount_receivable": "應收總額",
+    "amount_received": "實收總額",
+    "subsidy_refund_receivable": "補助退還應收",
+    "subsidy_refund_refunded": "補助退還已收",
+    "subsidy_refund_due_date": "補助退還到期日",
+    "subsidy_refund_at": "補助退還完成日",
+    "subsidy_return_receivable": "補助返還應收",
+    "subsidy_return_refunded": "補助返還已退",
+    "subsidy_return_due_date": "補助返還到期日",
+    "subsidy_return_at": "補助返還完成日",
+    "subsidy_return_review_status": "補助返還人工覆核狀態",
+    "subsidy_return_review_reason": "補助返還覆核原因",
+    "stage": "款項階段",
+    "transaction_type": "交易類型",
+    "transaction_status": "交易狀態",
+    "amount": "金額",
+    "occurred_at": "發生日",
+    "external_reference": "外部參考編號",
+    "reversal_of_transaction_id": "沖正來源交易ID",
+
+    # 案件月嫂服務指派
+    "assignment_sequence": "指派順序",
+    "assigned_start_date": "指派開始日",
+    "assigned_end_date": "指派結束日",
+    "planned_hours": "預計服務時數",
+    "actual_hours": "實際服務時數",
+    "floor_fee_allocated": "分攤樓層費",
+    "replacement_reason": "更換原因",
+    "replaced_assignment_id": "原指派ID",
+
+    # 實際工時調整
+    "previous_actual_hours": "異動前實際時數",
+    "adjusted_actual_hours": "異動後實際時數",
+    "adjustment_reason": "調整原因",
+    "adjusted_by": "異動人員",
+    "adjusted_at": "異動時間",
+
+    # 月嫂付款主檔與交易
+    "assignment_id": "服務指派ID",
+    "service_hours": "服務時數",
+    "service_salary": "服務總薪",
+    "floor_fee_amount": "樓層費",
+    "adjustment_amount": "人工調整金額",
+    "total_payable": "應付總額",
+    "due_date": "應付日期",
+    "staff_payment_id": "月嫂付款ID",
+
+    # 補助款待覆核
+    "legacy_caregiver_fee": "歷史月嫂應付金額",
+    "legacy_caregiver_paid_at": "歷史付款完成日",
+    "review_status": "補助款覆核狀態",
+    "resolved_at": "覆核完成時間",
+    "resolution_notes": "覆核結果備註",
+
+    # 排班明細
+    "work_date": "服務日期",
+    "is_work_day": "是否工作日",
+    "is_double_pay": "是否雙倍薪資",
     
 
     
@@ -165,8 +289,18 @@ def show():
     
     # 選擇要瀏覽的資料表
     table_options = {
-        "客戶名冊 (clients)": "clients",
         "服務人員/月嫂名冊 (staff)": "staff",
+        "客戶名冊 (clients)": "clients",
+        "LINE 確認請求紀錄 (line_confirmation_requests)": "line_confirmation_requests",
+        "服務人員預約 (staff_bookings)": "staff_bookings",
+        "個案服務人員指派 (case_staff_assignments)": "case_staff_assignments",
+        "客戶帳務主檔 (client_payments)": "client_payments",
+        "客戶帳務交易明細 (client_payment_transactions)": "client_payment_transactions",
+        "實際工時調整 (actual_hours_adjustments)": "actual_hours_adjustments",
+        "月嫂付款主檔 (staff_payments)": "staff_payments",
+        "月嫂付款交易明細 (staff_payment_transactions)": "staff_payment_transactions",
+        "補助款審核紀錄 (payment_migration_reviews)": "payment_migration_reviews",
+        "服務排班明細 (staff_schedule)": "staff_schedule",
         "訂單資料 (orders)": "orders",
         "客戶BeClass表單 (beclass_records)": "beclass_records",
         "媒合意願記錄 (matching_records)": "matching_records",
@@ -176,7 +310,12 @@ def show():
     
     col_sel1, col_sel2 = st.columns([2, 1])
     with col_sel1:
-        selected_label = st.selectbox("選擇要瀏覽的資料表", list(table_options.keys()))
+        default_table_label = "服務人員/月嫂名冊 (staff)"
+        selected_label = st.selectbox(
+            "選擇要瀏覽的資料表",
+            list(table_options.keys()),
+            index=list(table_options.keys()).index(default_table_label)
+        )
         table_name = table_options[selected_label]
     with col_sel2:
         header_mode = st.selectbox(
@@ -230,14 +369,52 @@ def show():
     try:
         # 從服務層獲取資料，不包含任何 SQL 或資料庫連線代碼
         raw_data = db_service.get_table_data(table_name)
+        table_columns = db_service.get_table_columns(table_name)
 
         if not raw_data:
-            st.info(f"資料表 `{table_name}` 目前沒有任何數據。")
+            st.info(f"資料表 `{table_name}` 目前沒有任何數據，已為你顯示欄位清單。")
+            if not table_columns:
+                st.info("目前無法取得欄位資訊。")
+                return
+            df = pd.DataFrame(columns=table_columns)
+        else:
+            df = pd.DataFrame(raw_data)
+
+        if df.empty:
+            # 空表仍需保持欄位顯示，並保留欄位名稱對照
+            filtered_df = df.copy()
+
+            rename_map = {col: format_col_header(col, header_mode) for col in filtered_df.columns}
+            display_df = filtered_df.rename(columns=rename_map)
+
+            editable_cols = EDITABLE_COLUMNS.get(table_name, set())
+            valid_options = COLUMN_VALID_OPTIONS.get(table_name, {})
+
+            column_config = {}
+            for original_col, display_col in rename_map.items():
+                if original_col in valid_options:
+                    column_config[display_col] = st.column_config.SelectboxColumn(
+                        options=valid_options[original_col],
+                        required=False,
+                    )
+                elif original_col not in editable_cols:
+                    column_config[display_col] = st.column_config.Column(disabled=True)
+
+            st.write(f"共 0 筆資料 (總共 0 筆)")
+            st.caption("💡 該表格目前為空，為避免混淆仍展示欄位名稱。")
+            st.data_editor(
+                display_df,
+                width='stretch',
+                num_rows="fixed",
+                column_config=column_config,
+                disabled=[rename_map[db_service.TABLE_PRIMARY_KEYS.get(table_name, "id")]]
+                if db_service.TABLE_PRIMARY_KEYS.get(table_name, "id") in rename_map else False,
+                key=f"editor_empty_{table_name}",
+            )
+
+            if table_name in READ_ONLY_TABLES:
+                st.info("此資料表目前為複合主鍵子表（服務人員關聯表），僅供瀏覽，暫不開放即時儲存。")
             return
-
-        df = pd.DataFrame(raw_data)
-
-
 
         # 主鍵欄位 (用於即時編輯後回寫資料庫的比對依據)
         pk_col = db_service.TABLE_PRIMARY_KEYS.get(table_name, "id")
@@ -286,7 +463,9 @@ def show():
             key=f"editor_{table_name}",
         )
 
-        if st.button("💾 儲存變更", type="primary"):
+        if table_name in READ_ONLY_TABLES:
+            st.info("此資料表目前為複合主鍵子表（服務人員關聯表），僅供瀏覽，暫不開放即時儲存。")
+        elif st.button("💾 儲存變更", type="primary"):
             # 還原欄位名稱回原始英文鍵名，逐列比對差異並只送出真正改動過的欄位
             edited_df = edited_display_df.rename(columns=reverse_rename_map)
             original_df = filtered_df.set_index(pk_col, drop=False)

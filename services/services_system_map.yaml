@@ -3,8 +3,9 @@ scope: services_layer
 modules:
   DbService:
     type: service
-    description: 主資料庫與 CRUD 操作服務；訂單公開識別一律使用唯一 case_no，並以同一案件編號載入 BeClass 服務細項。
-    source: services/db_service.py::safe_float,safe_int,safe_date,generate_virtual_account,get_connection,_resolve_case_no,get_order_by_case_no,get_table_data,update_table_row,parse_beclass_survey_details,get_order_details,get_case_order_details,create_order,assign_staff_to_order,update_order_status,update_order_full_details,add_or_update_holiday,delete_holiday,get_staff_monthly_schedule,save_order_rest_dates,generate_default_schedule,update_schedule_day,get_order_matches,create_or_get_match_record,update_matching_info_sent,reply_matching_inquiry,parse_client_district
+    description: 主資料庫與 CRUD 操作服務；訂單公開識別一律使用唯一 case_no，並以同一案件編號載入 BeClass 服務細項；通用資料表瀏覽與更新不得再暴露
+      legacy payments。
+    source: services/db_service.py::safe_float,safe_int,safe_date,generate_virtual_account,get_connection,_resolve_case_no,get_order_by_case_no,get_table_data,get_table_columns,update_table_row,parse_beclass_survey_details,get_order_details,get_case_order_details,create_order,assign_staff_to_order,update_order_status,update_order_full_details,add_or_update_holiday,delete_holiday,get_staff_monthly_schedule,save_order_rest_dates,generate_default_schedule,update_schedule_day,get_order_matches,create_or_get_match_record,update_matching_info_sent,reply_matching_inquiry,parse_client_district,backfill_client_payment_due_dates,sync_client_payment_due_dates_for_case_no,_sync_client_payment_due_dates_with_cursor,_count_missing_client_payment_due_dates
     domain: null
     subsystem: null
     map_file: services\services_system_map.md
@@ -27,6 +28,8 @@ modules:
     - create_order() 必須維持 case_no 正規化與 client_payments 初始化行為。
     - 所有訂單讀取、建立與更新不得讀寫 clients.identity_status；身分資格只能 join clients.identity_status
       取得，且不得由訂單 CRUD 修改 clients.identity_status。
+    - get_table_data()、get_table_columns() 與 update_table_row() 的允許清單、主鍵映射及任何可寫入分支均不得包含
+      legacy payments；三個入口都必須在建立資料庫連線前 fail-closed。
     preferred_pattern: none
     verification:
     - command:
@@ -66,10 +69,10 @@ modules:
     context_priority: {}
     non_goals:
     - 不修改 db/schema.sql 或執行資料庫 migration。
-    - 不修改 DataBrowserUI 的舊欄位標籤、PaymentSchema 或其他 DbService 函式。
+    - 不修改 API router、DataBrowserUI、PaymentSchema 或其他 DbService 函式。
     sub_map: services_layer
     state: validated
-    fan_in_snapshot: 8
+    fan_in_snapshot: 7
   RecommendService:
     type: service
     description: 月嫂與客戶條件智慧粗篩比對引擎。比對 clients.city/address 與 staff.service_regions，掃描檔期重疊
@@ -396,7 +399,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: validated
+    state: dirty
     fan_in_snapshot: 4
     known_symbols:
     - _case_no
@@ -643,7 +646,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: validated
+    state: dirty
     fan_in_snapshot: 1
     known_symbols:
     - _activate_subsidy_return_obligation_after_full_receipt
@@ -1432,7 +1435,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: validated
+    state: dirty
     fan_in_snapshot: 5
   ClientSubsidyReturnTransactionService:
     type: service
@@ -1507,7 +1510,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: validated
+    state: dirty
     fan_in_snapshot: 3
   GovernmentSubsidyReconciliationService:
     type: service
@@ -1704,7 +1707,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: validated
+    state: dirty
     fan_in_snapshot: 1
   ClientVirtualAccountResolver:
     type: service
@@ -2852,7 +2855,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - _as_decimal

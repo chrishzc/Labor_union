@@ -65,11 +65,15 @@
 
 ##### Module: PaymentRouter
 - Sub Map: api_layer
-- Source: api/routes/payments.py::get_all_payments,update_payment
+- Source: api/routes/payments.py
 - Type: api_router
 - State: `validated`
-- Description: 舊 payments API 相容路由；所有端點回傳 HTTP 410。
-- Dependencies: [DbService, PaymentSchemas]
+- Description: legacy payments API source 退役模組；檔案不得再宣告 APIRouter、endpoint、HTTP 410 handler 或匯入舊 PaymentSchemas。
+- Dependencies: []
+- Invariants:
+  - api/routes/payments.py 不得包含 APIRouter、router、get_all_payments、update_payment、_legacy_payments_removed 或 api.schemas.payments。
+  - `/api/v1/payments` 不得出現在執行中 FastAPI OpenAPI。
+- Verification: []
 - Observability: not_required
 
 ##### Module: ClientRouter
@@ -97,19 +101,6 @@
 - State: `validated`
 - Description: 國定假日管理 API 路由。
 - Dependencies: [DbService]
-- Observability: not_required
-
-##### Module: LegacyPaymentAPIFreeze
-- Sub Map: api_layer
-- Type: api_router
-- State: `planned`
-- Source: api/routes/payments.py::_legacy_payments_removed
-- Description: 停用舊 /api/v1/payments 路由，避免讀寫已淘汰的 payments 表。
-- Invariants:
-  - 不得呼叫 legacy payments 的資料服務。
-  - 所有端點必須回傳明確的 HTTP 410 停用訊息。
-- Verification:
-  - must_have_assertions
 - Observability: not_required
 
 ##### Module: ClientPaymentRouter
@@ -216,7 +207,7 @@
 - Type: api_entrypoint
 - State: `planned`
 - Source: api/main.py
-- Description: Register contract, finance-report, finance-alert and multi-caregiver schedule routers with the running FastAPI application.
+- Description: Register contract, finance-report, finance-alert and multi-caregiver schedule routers with the running FastAPI application；legacy payments router 不得再掛載。
 - Dependencies: [MultiCaregiverScheduleRouter, MultiCaregiverScheduleReadRouter, MultiCaregiverCaseAssignmentListRouter]
 - Complexity: low
 - Invariants:
@@ -225,6 +216,7 @@
   - multi_caregiver_schedule.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix 或呼叫 legacy schedule router。
   - multi_caregiver_schedule_read.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix 或改以 legacy schedule router 提供查詢。
   - multi_caregiver_case_assignments.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix 或以 legacy 排班資料合成案件指派選單。
+  - api.main 不得 import 或 include legacy payments.router；`/api/v1/payments` 必須從 OpenAPI 與執行中路由消失。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('api/main.py').read_text(encoding='utf-8'); assert 'contracts.router' in s and 'finance_reports.router' in s and 'finance_alerts.router' in s and 'multi_caregiver_schedule.router' in s and 'multi_caregiver_schedule_read.router' in s and 'multi_caregiver_case_assignments.router' in s; assert s.count('app.include_router(finance_alerts.router)') == 1; assert s.count('app.include_router(multi_caregiver_schedule.router)') == 1; assert s.count('app.include_router(multi_caregiver_schedule_read.router)') == 1; assert s.count('app.include_router(multi_caregiver_case_assignments.router)') == 1; print('ADMIN ROUTERS REGISTERED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "ADMIN ROUTERS REGISTERED"}
 - Observability: not_required
@@ -257,6 +249,9 @@
 - Type: api_schema
 - State: `planned`
 - Source: api/schemas/payments.py
-- Description: 舊付款更新相容路由的 API 請求資料模型。
+- Description: legacy payments request schema 退役模組；不得再宣告 PaymentUpdateRequest、Pydantic model 或舊客戶/月嫂混合帳務欄位。
 - Dependencies: []
+- Invariants:
+  - api/schemas/payments.py 不得包含 BaseModel、PaymentUpdateRequest、caregiver_fee、caregiver_paid_at 或三階段舊更新 payload。
+- Verification: []
 - Observability: not_required
