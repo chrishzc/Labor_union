@@ -88,7 +88,7 @@ modules:
     - 不核發 UILayer Task；此節點不具可提交的 implementation hash。
     - 不修改 ui/app.py、任何 UI 頁面或既有子節點功能。
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
   APILayer:
     type: sub_system_layer
@@ -167,7 +167,7 @@ modules:
     - 不核發 ServicesLayer Task；此節點不具可提交的 implementation hash。
     - 不直接修改 services/db_service.py、資料庫 schema、migration 或 UI。
     sub_map: root
-    state: dirty
+    state: validated
     fan_in_snapshot: 1
   GenerateFakeData:
     type: script
@@ -240,8 +240,51 @@ modules:
     - 不再產生、更新、重播、修復或對帳既有 50 筆客戶、月嫂、案件、排班、Excel 或帳務假資料。
     - 不把 GenerateFakeData 當作未來新腳本的共用函式庫，也不在本節點新增任何條件、schema 相容或業務規則。
     sub_map: root
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
+    known_symbols:
+    - _assign_available_staff
+    - _clear_generator_owned_demo_data
+    - _core_case_nos
+    - _derive_payment_dates
+    - _finance_duplicate_normalized_result
+    - _import_seed_master_data
+    - _prepare_seed_database
+    - _prorate_amount
+    - _rest_weekdays_for_service_mode
+    - _scenario_counts
+    - _scenario_note
+    - _schedule_end_date
+    - _schedule_rows_for_segment
+    - _schedule_start_for_completed_service
+    - _segment_work_day_counts
+    - _upsert_payment
+    - _write_boundary_transaction
+    - _write_scenario_schedule
+    - build_lifecycle_fixture_plan
+    - fill_checkbox_group
+    - fixture_admin_note
+    - generate_fake_address
+    - generate_fake_due_date
+    - generate_fake_id_card
+    - generate_fake_ip
+    - generate_fake_line_id
+    - generate_fake_name
+    - generate_fake_phone
+    - generate_fake_service_start_date
+    - generate_fake_signup_time
+    - generate_finance_data
+    - generate_historical_order_fixture
+    - generate_lifecycle_scenarios
+    - generate_roster_data
+    - generate_schedule_data
+    - main
+    - parse_cli_args
+    - seed_assignment_payroll_facts
+    - seed_client_payment_boundary_facts
+    - seed_finance_import_duplicate_fact
+    - validate_lifecycle_data
+    - validate_seed_database
   DatabaseSnapshotFixtureV2Serializer:
     type: module
     description: 將 DB snapshot 的日期、datetime、Decimal、NULL、boolean、JSON、Unicode 與前導零字串轉為
@@ -327,7 +370,7 @@ modules:
     non_goals:
     - 不讀 DB、不驗證業務 invariants、不寫檔、不發布 bundle。
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 2
     known_symbols:
     - _json
@@ -424,7 +467,7 @@ modules:
     non_goals:
     - 不讀 DB、不序列化 JSONL、不寫檔、不匯入或修正資料。
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 3
     known_symbols:
     - _date
@@ -518,7 +561,7 @@ modules:
     - 不修正 actual dates、assignments、schedule、付款、帳務或生命週期狀態。
     - 不作為 production 歷史資料批次更新工具，不接受任意 case range 或任意 UPDATE 欄位。
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - _d
@@ -619,7 +662,7 @@ modules:
     - 不支援任意 case range、任意 table、自訂 query 或 production DB 全庫備份。
     - 不建立、保存或驗證 finance_alerts／finance_alert_events 衍生生命週期。
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - _normalize
@@ -720,7 +763,7 @@ modules:
     - 不自動建立或刪除 DB，不執行 schema migration。
     - 不重建 finance_alerts／finance_alert_events；衍生告警由正式流程另行產生。
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - _dbvalue
@@ -816,7 +859,7 @@ modules:
     - 不支援遠端 DB、production DB、自訂 database name、自訂 schema 或局部 reset。
     - 不備份現有 DB；使用者必須以明確確認表示接受完整重建。
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - main
@@ -880,7 +923,7 @@ modules:
     non_goals:
     - 不支援 Linux/macOS shell；跨平台核心由 Python module 提供。
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 0
   FinanceImportStagingContract:
     type: dependency_contract
@@ -1044,7 +1087,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 26
   ClientIdentityStatusSourceMigration:
     type: script
@@ -1117,7 +1160,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - _affected_views
@@ -1190,7 +1233,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 10
   MultiCaregiverAssignmentRules:
     type: service
@@ -1249,7 +1292,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: planned
     fan_in_snapshot: 5
   MultiCaregiverScheduleGenerationService:
     type: service
@@ -1311,7 +1354,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   MultiCaregiverScheduleGenerationTransactionService:
     type: service
@@ -1376,7 +1419,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   MultiCaregiverScheduleAdjustmentService:
     type: service
@@ -1439,7 +1482,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   MultiCaregiverScheduleReadService:
     type: service
@@ -1495,7 +1538,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   MultiCaregiverCaseAssignmentListService:
     type: service
@@ -1549,7 +1592,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   ActualHoursAdjustmentConfirmationService:
     type: service
@@ -1621,7 +1664,7 @@ modules:
     - 不新增薪資確認 API、管理端 UI、應付款或月結；後續付款建立節點必須自行呼叫本服務的確認驗證，方可將 can_confirm=true 視為薪資確認門檻。
     - 不從每日排班重算或推測人工例外時數；後續排班重算節點必須偵測既有人工覆寫，且不得靜默覆寫。
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
   ActualHoursAdjustmentConfirmationInternalHelpers:
     type: internal_helper
@@ -1671,7 +1714,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
   MultiCaregiverAssignmentRulesInternalHelpers:
     type: internal_helper
@@ -1767,7 +1810,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
   MultiCaregiverScheduleGenerationInternalHelpers:
     type: internal_helper
@@ -1816,7 +1859,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
   MultiCaregiverScheduleReadInternalHelpers:
     type: internal_helper
@@ -1866,7 +1909,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
   OrderAssignmentChangeAuditSchema:
     type: database_schema
@@ -1926,7 +1969,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
   OrderAssignmentSynchronizationPreviewService:
     type: service
@@ -2000,7 +2043,7 @@ modules:
     - 不提供 UI、HTTP router、訂單或指派寫入、薪資建立、月結重算、人工 actual_hours 覆寫或歷史鎖定資料的沖正流程。
     - 不支援同日分時段；不將 orders.staff_id 或 matching_records 視為正式服務指派。
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
   OrderAssignmentSynchronizationApplyService:
     type: service
@@ -2099,7 +2142,7 @@ modules:
     - 不提供 UI、HTTP router、薪資建立、月結重算、人工 actual_hours 覆寫、訂單取消或歷史鎖定資料的沖正流程。
     - 不支援同日分時段；不將 orders.staff_id 或 matching_records 視為正式服務指派。
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   OrderAssignmentSynchronizationInternalHelpers:
     type: internal_helper
@@ -2148,7 +2191,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
   MultiCaregiverCaseAssignmentListRouter:
     type: router
@@ -2203,7 +2246,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
     known_symbols:
     - list_case_schedule_assignments
@@ -2267,7 +2310,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
     known_symbols:
     - adjust_assignment_schedule
@@ -2326,7 +2369,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
     known_symbols:
     - get_assignment_schedule
@@ -2388,7 +2431,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 8
   StaffMonthlySettlementDetailSchema:
     type: database_schema
@@ -2450,7 +2493,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 6
   StaffActualTransferSchema:
     type: database_schema
@@ -2509,7 +2552,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 4
   StaffTransferAllocationSchema:
     type: database_schema
@@ -2571,7 +2614,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   FinanceImportRawStagingSchema:
     type: database_schema
@@ -2637,7 +2680,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: planned
     fan_in_snapshot: 10
   SubsidyClaimBatchSchema:
     type: database_schema
@@ -2694,7 +2737,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
   GovernmentSubsidyTransactionSchema:
     type: database_schema
@@ -2752,7 +2795,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   FinanceAlertSchema:
     type: database_schema
@@ -2815,7 +2858,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: planned
     fan_in_snapshot: 5
   DatabaseSchemaLoader:
     type: script
@@ -2867,7 +2910,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: planned
     fan_in_snapshot: 2
   ClientPaymentFinanceLinkMigration:
     type: database_schema
@@ -2919,7 +2962,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
   ClientPaymentSubsidyReturnReviewMigration:
     type: database_schema
@@ -2974,7 +3017,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
   RemoveOtherAdditionMigration:
     type: migration
@@ -3180,7 +3223,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: planned
     fan_in_snapshot: 2
   ClientHcmInsertOnlyImporter:
     type: script
@@ -3253,7 +3296,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 2
     known_symbols:
     - _calculate_service_end_date
@@ -3323,7 +3366,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: dirty
     fan_in_snapshot: 0
     known_symbols:
     - _result
@@ -3388,8 +3431,16 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
+    known_symbols:
+    - _result
+    - clean_birth_date
+    - clean_city_and_address
+    - clean_data
+    - clean_phone
+    - import_checkbox_options
+    - process_import
   HistoricalOrderInsertOnlyImporter:
     type: script
     description: 匯入歷史訂單時以 case_no 去重；既有案件一律跳過，缺少 case_no 或無法唯一關聯時回報 review_required，不得以姓名更新。
@@ -3445,7 +3496,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - _count_value
@@ -3507,7 +3558,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
   AdadTaskSnapshotV2ToV3MigrationSpecification:
     type: documentation
@@ -3569,7 +3620,7 @@ modules:
     type: function
     description: 純記憶體內將單一 schema v2 Task JSON 轉為 v3 candidate，保留稽核資料並以 ADAD 1.6.2
       validator 驗證；不讀寫 Task 檔案、archive 或 source lock。
-    source: scripts/migrate_adad_task_snapshots.py::_adad_validator,build_v3_candidate,validate_v3_candidate
+    source: scripts/migrate_adad_task_snapshots.py::_adad_validator,_require_task_spec,build_v3_candidate,validate_v3_candidate
     domain: null
     subsystem: null
     map_file: system_map.md
@@ -3599,10 +3650,11 @@ modules:
         - -p
         - no:cacheprovider
         - --basetemp
-        - C:\tmp\pytest-adad-task-snapshot-transformer
+        - .tmp\pytest-adad-task-snapshot-transformer
         cwd: project
         expect_exit: 0
         expect_stdout_contains: passed
+        timeout: 60
     decisions: []
     todo: []
     checkpoint: []
@@ -3623,13 +3675,13 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: validated
     fan_in_snapshot: 1
   TaskSnapshotV2ToV3Runner:
     type: script
     description: 預設 dry-run 掃描 Task 快照並產生 manifest；apply 時以 archive、逐筆驗證與原子替換執行已驗證的
       v2→v3 遷移。
-    source: scripts/migrate_adad_task_snapshots.py::migrate_tasks,main
+    source: scripts/migrate_adad_task_snapshots.py::_iter_task_paths,_parse_args,_read_task,_write_task,migrate_tasks,main
     domain: null
     subsystem: null
     map_file: system_map.md
@@ -3662,10 +3714,11 @@ modules:
         - -p
         - no:cacheprovider
         - --basetemp
-        - C:\tmp\pytest-adad-task-snapshot-runner
+        - .tmp\pytest-adad-task-snapshot-runner
         cwd: project
         expect_exit: 0
         expect_stdout_contains: passed
+        timeout: 60
     decisions: []
     todo: []
     checkpoint: []
@@ -3689,7 +3742,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: deployed
+    state: validated
     fan_in_snapshot: 0
   BackfillSubsidyReturnObligations:
     type: script
@@ -3761,6 +3814,6 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
 domains: {}

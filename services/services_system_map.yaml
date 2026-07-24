@@ -106,7 +106,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 0
   CalendarService:
     type: service
@@ -142,7 +142,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 0
   PaymentRules:
     type: service
@@ -238,7 +238,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
   OrderAmountCalculator:
     type: service
@@ -326,7 +326,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 5
     known_symbols:
     - _add_months
@@ -399,7 +399,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 4
     known_symbols:
     - _case_no
@@ -458,7 +458,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - calculate_staff_payable
@@ -516,7 +516,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - calculate_staff_payment_state
@@ -572,7 +572,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - calculate_client_payment_state
@@ -646,7 +646,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - _activate_subsidy_return_obligation_after_full_receipt
@@ -716,7 +716,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 6
   FinanceStatementFormatDetector:
     type: import_adapter
@@ -769,7 +769,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 1
   FinanceTransactionFingerprint:
     type: service
@@ -821,7 +821,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 5
   LegacyFinanceStatementAdapter:
     type: import_adapter
@@ -875,7 +875,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 1
   TaishinFinanceStatementAdapter:
     type: import_adapter
@@ -929,7 +929,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 1
   SinopacFinanceStatementAdapter:
     type: import_adapter
@@ -989,7 +989,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 1
   FinanceStatementNormalizationPipeline:
     type: import_pipeline
@@ -1048,7 +1048,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 5
   FinanceTransactionClassifier:
     type: service
@@ -1113,7 +1113,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 4
   FinanceImportStagingService:
     type: service
@@ -1181,7 +1181,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 5
   SubsidyClaimWorkflowService:
     type: service
@@ -1242,7 +1242,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
   StaffMonthlySettlementService:
     type: service
@@ -1305,7 +1305,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
   ClientPaymentSnapshotService:
     type: service
@@ -1368,7 +1368,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   ClientSubsidyReturnObligationService:
     type: service
@@ -1435,7 +1435,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 5
   ClientSubsidyReturnTransactionService:
     type: service
@@ -1510,7 +1510,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
   GovernmentSubsidyReconciliationService:
     type: service
@@ -1576,7 +1576,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
   StaffActualTransferService:
     type: service
@@ -1648,7 +1648,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
   FinanceIdentityMapLoader:
     type: service
@@ -1707,7 +1707,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
   ClientVirtualAccountResolver:
     type: service
@@ -1763,7 +1763,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
   ClientReceiptReconciliationService:
     type: service
@@ -1835,7 +1835,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
   FinanceImport:
     type: import_pipeline
@@ -1954,7 +1954,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
     known_symbols:
     - _dispatch_inserted_row
@@ -2049,7 +2049,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - StatefulConnection.__init__
@@ -2150,7 +2150,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - StatefulConnection.__init__
@@ -2259,7 +2259,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - Connection.__init__
@@ -2344,7 +2344,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 2
   FinanceAlertEventService:
     type: service
@@ -2416,7 +2416,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 3
   FinanceAlertWorkflowService:
     type: service
@@ -2486,7 +2486,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 2
   FinanceAlertWorkflowLifecycleIntegrationTest:
     type: integration_test
@@ -2557,7 +2557,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - AlertStoreCursor.__init__
@@ -2640,7 +2640,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - FormalEventCursor.__init__
@@ -2708,7 +2708,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - _money
@@ -2772,7 +2772,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - get_claim_due_info
@@ -2855,7 +2855,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - _as_decimal
@@ -2940,7 +2940,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - _as_date

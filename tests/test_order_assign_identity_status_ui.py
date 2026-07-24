@@ -5,12 +5,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
-ORDERS_PAGE = Path(__file__).resolve().parents[1] / "ui" / "pages" / "02_orders.py"
+TAB2_MODULE = Path(__file__).resolve().parents[1] / "ui" / "pages" / "order" / "tab2_assign.py"
 
 
 def _assign_source() -> str:
-    text = ORDERS_PAGE.read_text(encoding="utf-8")
+    text = TAB2_MODULE.read_text(encoding="utf-8")
     module = ast.parse(text)
     renderer = next(
         node for node in module.body

@@ -65,3 +65,13 @@ def test_order_ui_shell_owns_fixed_five_tab_layout_and_dispatch():
         assert renderer in shell
     assert "db_service." not in shell
     assert "_payment_api_request(" not in shell
+
+
+def test_app_shell_page_discovery_does_not_include_page_4():
+    import sys
+    from ui.app import load_pages
+    pages = load_pages()
+    assert "📄 訂單動態試算與維護" not in pages
+    assert "ui.pages.04_edit_order" not in sys.modules
+    page_files = [p.name for p in ORDERS_PAGE.parent.glob("*.py")]
+    assert "04_edit_order.py" not in page_files

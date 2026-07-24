@@ -5,7 +5,7 @@
 - Type: ui_shell
 - Source: ui/app.py
 - Description: Streamlit 側邊欄導覽殼層，動態載入 ui/pages/ 頁面。
-- Dependencies: [DataBrowserUI, OrderUI, CalendarUI, EditOrderUI, FormManagementUI]
+- Dependencies: [DataBrowserUI, OrderUI, CalendarUI, FormManagementUI]
 - Observability: not_required
 
 ##### Module: DataBrowserUI
@@ -28,7 +28,7 @@
 - Type: ui_page
 - Source: ui/pages/02_orders.py::_render_order_page_shell
 - Description: Page 2 訂單與帳務管理頁的殼層；建立固定順序的五個 Tab，並將已載入資料分派至各自的 renderer。
-- Dependencies: [OrderUI_Tab1_Overview, OrderUI_Tab2_Assign, LegacyPaymentUIFreeze, AccountsPayableExportUI, SubsidyReconciliationRegisterUI]
+- Dependencies: [OrderUI_Tab1_Overview, OrderUI_Tab2_Assign, OrderUI_Tab3_Finance, AccountsPayableExportUI, SubsidyReconciliationRegisterUI]
 - Input:
   - orders_data: 已載入的訂單資料。
   - clients: 已載入的客戶資料。
@@ -38,7 +38,7 @@
 - Invariants:
   - INV-UI-01: 所有費用與金額數字統一無條件四捨五入整數化呈現 (帶千分位)，無小數點。
   - INV-UI-02: 必須透過 safe_int() 轉換數值，防範 NaN, None, Inf 及空字串導致的 ValueError 崩潰。
-  - 必須固定建立五個 Tab，且依序分派 Tab1、Tab2、LegacyPaymentUIFreeze、AccountsPayableExportUI 與 SubsidyReconciliationRegisterUI。
+  - 必須固定建立五個 Tab，且依序分派 OrderUI_Tab1_Overview, OrderUI_Tab2_Assign, OrderUI_Tab3_Finance, AccountsPayableExportUI 與 SubsidyReconciliationRegisterUI。
   - 不得直接讀取資料庫或帳務 API；資料載入只屬於 Page2TabNavigation，帳務寫入只屬於 PaymentManagementUI。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_order_ui_shell_ownership.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
@@ -52,7 +52,7 @@
 - Sub Map: ui_layer
 - Type: ui_component
 - State: `planned`
-- Source: ui/pages/02_orders.py::_render_tab1_overview
+- Source: ui/pages/order/tab1_overview.py::_render_tab1_overview
 - Dependencies: [EditOrderUI]
 - Description: Tab 1 訂單資訊總覽。預設不限定訂單狀態，將所有篩選結果以單一下拉式選單呈現，並以 clients.identity_status 顯示身分資格。
 - Algorithm:
@@ -70,7 +70,7 @@
 - Sub Map: ui_layer
 - Type: function
 - State: `planned`
-- Source: ui/pages/02_orders.py::safe_int,safe_float,safe_date,_parse_date,_month_index,_derive_service_end_date,_derive_staff_payment_date,_derive_subsidy_refund_date,_finance_report_request
+- Source: ui/pages/order/shared.py::safe_int,safe_float,safe_date,_parse_date,_month_index,_derive_service_end_date,_derive_staff_payment_date,_derive_subsidy_refund_date,_payment_api_request,_finance_report_request
 - Description: Page 2 訂單與帳務總覽共用的安全數值／日期正規化、服務結束日、服務人員付款日與補助退款日推導 helper；不寫入訂單或帳務資料。
 - Input:
   - order: 含服務起訖、服務天數與唯讀身分資格的訂單資料。
@@ -80,14 +80,14 @@
   - helper 只能讀取傳入訂單與帳務資料；不得寫入訂單、客戶、付款或交易資料。
   - 服務人員付款日與補助退款日必須由服務結束日及身分資格推導；缺少必要資料時回傳空值，不得使用今天或其他預設日期補值。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\02_orders.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\order\\shared.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: OrderUI_Tab2_Assign
 - Sub Map: ui_layer
 - Type: ui_component
 - State: `validated`
-- Source: ui/pages/02_orders.py::_render_tab2_assign
+- Source: ui/pages/order/tab2_assign.py::_render_tab2_assign
 - Description: Tab 2 渲染函數 (案件與配對中心)。僅列出「洽談中」待配對案件，提供單筆案件控制面板、4 大智慧粗篩可選條件 (含香山區等 city/address 比對與 7 天預留備用期) 與 4 步智慧配對流程。
 - Invariants:
   - INV-UI-ASSIGN-01: 媒合紀錄清單僅能顯示至少有一項發送紀錄 (sent_info_1_at/sent_info_2_at) 或意願已變更的有效紀錄。
@@ -100,8 +100,11 @@
 ##### Module: OrderUI_Tab3_Finance
 - Sub Map: ui_layer
 - Type: ui_component
-- Source: ui/pages/02_orders.py::_render_legacy_mixed_payment_overview
-- Description: Tab 3 渲染函數。舊財務介面已停用，僅顯示新帳務介面建置中提示。
+- State: `planned`
+- Source: ui/pages/order/tab3_finance.py::_render_tab3_finance
+- Description: Tab 3 渲染函數 (訂單帳務總覽)。獨立顯示客戶收款與月嫂應付總覽兩張表格，按案件懶加載交易明細，所有帳務寫入僅經由 FastAPI。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_payment_management_ui.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-payment-management-ui"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: CalendarUI
@@ -126,9 +129,9 @@
 
 ##### Module: EditOrderUI
 - Sub Map: ui_layer
-- Type: ui_page
+- Type: ui_component
 - State: `planned`
-- Source: ui/pages/04_edit_order.py::render_editor,show
+- Source: ui/pages/order/editor.py::render_editor
 - Dependencies: [OrderRouter, MultiCaregiverCaseAssignmentListRouter, StaffRouter]
 - Description: 單筆訂單 38 欄位動態試算與資料維護頁面。採用 st.columns 與帶邊框 Container 打造實體訂單單據視覺，具備 Formula Lock Guardrail，以及訂單變更→完整月嫂指派→帳務／排班預覽→明確套用的一致性工作流。
 - Complexity: medium
@@ -163,7 +166,7 @@
 - Sub Map: ui_layer
 - Type: function
 - State: `planned`
-- Source: ui/pages/04_edit_order.py::_parse_date,_month_index,_derive_service_end_date,_derive_staff_payment_date,_derive_subsidy_refund_date
+- Source: ui/pages/order/editor.py::_parse_date,_month_index,_derive_service_end_date,_derive_staff_payment_date,_derive_subsidy_refund_date
 - Description: 訂單編輯頁顯示用的服務結束日、服務人員付款日與補助退款日推導 helper；結果僅供唯讀欄位呈現。
 - Input:
   - order: 含實際服務日期、服務天數與唯讀身分資格的訂單資料。
@@ -173,14 +176,15 @@
   - helper 不得寫入訂單、客戶、付款、月結或交易資料。
   - 服務人員付款日與補助退款日必須由服務結束日及身分資格推導，且僅供「五、實收對帳、狀態與備註登錄區」的唯讀欄位使用。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\04_edit_order.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\order\\editor.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: FormManagementUI
 - Sub Map: ui_layer
 - Type: ui_page
 - State: `validated`
-- Source: ui/pages/05_form_management.py::show
+- Source: ui/pages/05_form_management.py::show,_render_form_management_page_shell
+- Dependencies: [FormManagementUI_Shared, FormManagementUI_Tab1_FormBuilder, FormManagementUI_Tab2_TemplateLibrary, FormManagementUI_Tab3_ContractManagement]
 - Description: 表單與履歷問卷管理專頁。支援動態新建自訂表單沙盒、線上編輯修改既有模板欄位名稱、拖拉平移排序、二次確認刪除防呆、5:5側邊雙視窗實時預覽/PDF導出、SQL原生資料表歸屬分類選擇器、獨立JSON模板目錄、Excel長文字溢出不撐高列高、顯式邊框與PDF乾淨去雜線、全量資料庫欄位100%開載、100%全寬滿版預覽切換器，以及 Tab 3: Excel 變數代理制式定型化契約引擎 (EPPP Engine)。
 - Invariants:
   - INV-UI-FORM-01: 支援手動新增自訂欄位，並提供單行文字、多行文字、數字、日期與綁定 DB 欄位 5 大資料型態。
@@ -194,11 +198,51 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_form_management_identity_status_ui.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-form-management-identity"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
+##### Module: FormManagementUI_Shared
+- Sub Map: ui_layer
+- Type: function
+- State: `planned`
+- Source: ui/pages/form_management/shared.py::fetch_staff_contract_context,flatten_staff_contract_context,generate_field_id,get_html_hex_color,get_border_style,load_contract_templates,save_contract_template,load_json_templates,save_single_template,delete_single_template,save_json_templates,safe_int,format_db_value,get_table_for_key,render_html_document
+- Description: 表單與履歷問卷管理共用的模板 JSON/Excel 讀寫、樣式渲染與格式化 helper。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\form_management\\shared.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: FormManagementUI_Tab1_FormBuilder
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/pages/form_management/tab1_form_builder.py::_render_tab1_form_builder
+- Description: Tab 1 手動創建與設計新表單 (UX 實驗室) 渲染組件。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\form_management\\tab1_form_builder.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: FormManagementUI_Tab2_TemplateLibrary
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/pages/form_management/tab2_template_library.py::_render_tab2_template_library
+- Description: Tab 2 自訂表單模板庫與 5:5 雙視窗線上編輯預覽渲染組件。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\form_management\\tab2_template_library.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: FormManagementUI_Tab3_ContractManagement
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/pages/form_management/tab3_contract_management.py::_render_tab3_contract_management
+- Description: Tab 3 制式定型化契約管理 (EPPP 變數代理引擎) 渲染組件。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\form_management\\tab3_contract_management.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
 ##### Module: LegacyPaymentUIFreeze
 - Sub Map: ui_layer
 - Type: ui_page
 - State: `planned`
-- Source: ui/pages/02_orders.py::_render_tab3_finance
+- Source: ui/pages/order/tab3_finance.py::_render_legacy_mixed_payment_overview
 - Description: Page 2 第三分頁的帳務明細總覽；先呈現全部案件的可篩選帳務摘要，僅在展開案件時才讀取客戶與月嫂交易明細，取代已移除的 legacy payments 編輯器。
 - Input:
   - orders_data: current order list
@@ -214,14 +258,14 @@
   - 實收／實付與日期只能來自交易明細；人工補登交易時必填原因，不得直接覆寫摘要欄位。
   - 不得在此分頁重複實作待匯清單或匯出功能。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\02_orders.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\order\\tab3_finance.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: LegacyPaymentEditFreeze
 - Sub Map: ui_layer
-- Type: ui_page
+- Type: function
 - State: `planned`
-- Source: ui/pages/04_edit_order.py::safe_float,safe_int,safe_date,safe_optional_date
+- Source: ui/pages/order/editor.py::safe_float,safe_int,safe_date,safe_optional_date
 - Description: 停止訂單編輯頁的輔助資料處理讀寫舊 payments；實際編輯與同步提交由 EditOrderUI 擁有，新帳務改由新帳務介面處理。
 - Invariants:
   - 不得呼叫 get_table_data('payments') 或 update_payment_details。
@@ -249,7 +293,7 @@
 - Sub Map: ui_layer
 - Type: ui_page
 - State: `planned`
-- Source: ui/pages/02_orders.py::_payment_api_request,_render_client_payment_ledger,_render_staff_payment_ledger
+- Source: ui/pages/order/tab3_finance.py::_render_client_payment_ledger,_render_staff_payment_ledger
 - Description: 提供客戶收款與月嫂應付／轉帳兩個獨立操作區；所有帳務讀寫只經 FastAPI，退還補助金額暫不提供 UI 操作。
 - Input:
   - api_request: path、method 與 JSON payload。
@@ -265,8 +309,8 @@
   - external_reference 與 notes 為兩區提交交易的必填追溯資料；不得直接覆寫帳務摘要欄位。
   - 不得改動 LegacyPaymentUIFreeze 的 _render_tab3_finance；不得影響既有 Tab4 AccountsPayableExportUI 與 Tab5 SubsidyReconciliationRegisterUI。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_payment_management_ui.py"], "cwd": "project", "expect_exit": 0}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\02_orders.py"], "cwd": "project", "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_payment_management_ui.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\order\\tab3_finance.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Non Goals:
   - 不新增退還補助款操作 UI。
   - 不清理或改寫 _render_legacy_mixed_payment_overview。
@@ -277,7 +321,7 @@
 - Sub Map: ui_layer
 - Type: ui_page
 - State: `planned`
-- Source: ui/pages/02_orders.py::_render_tab4_accounts_payable
+- Source: ui/pages/order/tab4_accounts_payable.py::_render_tab4_accounts_payable
 - Description: Reconnect Page 2's fourth accounts-payable tab and fifth subsidy-reconciliation tab to their read-only FastAPI endpoints.
 - Complexity: low
 - Invariants:
@@ -288,14 +332,14 @@
   - Read monthly preview and XLSX only through FinanceReportRouter; do not import AccountsPayableExport or db_service directly.
   - Read quarterly and annual reconciliation previews and downloads only through FinanceReportRouter; do not import the reconciliation service directly.
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\02_orders.py"], "cwd": "project", "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\order\\tab4_accounts_payable.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: SubsidyReconciliationRegisterUI
 - Sub Map: ui_layer
 - Type: ui_page
 - State: `planned`
-- Source: ui/pages/02_orders.py::_render_tab5_subsidy_reconciliation
+- Source: ui/pages/order/tab5_subsidy_reconciliation.py::_render_tab5_subsidy_reconciliation
 - Description: Add Page 2's fifth tab, 核銷補助清冊, with quarterly and annual read-only previews and XLSX downloads.
 - Complexity: low
 - Invariants:
@@ -305,7 +349,7 @@
 - Algorithm:
   - Read quarterly and annual previews and downloads only through FinanceReportRouter; do not import the reconciliation service directly.
 - Verification:
-  - command: {"argv": [".venv\\\\Scripts\\\\python.exe", "-m", "py_compile", "ui\\\\pages\\\\02_orders.py"], "cwd": "project", "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\order\\tab5_subsidy_reconciliation.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: FinanceAlertCenterUI
@@ -337,7 +381,7 @@
 - Sub Map: ui_layer
 - Type: ui_component
 - State: `planned`
-- Source: ui/pages/05_form_management.py::render_excel_contract_mirror
+- Source: ui/pages/form_management/shared.py::render_excel_contract_mirror
 - Description: Register and render the copied staff-service contract workbook through the existing read-only Excel mirror.
 - Complexity: low
 - Invariants:
@@ -347,5 +391,5 @@
 - Algorithm:
   - Fetch selected staff-contract context from ContractContextRouter by case_no and assignment_id; do not assemble contract facts from db_service directly.
 - Verification:
-  - command: {"argv": [".venv\\\\Scripts\\\\python.exe", "-m", "py_compile", "ui\\\\pages\\\\05_form_management.py"], "cwd": "project", "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\form_management\\shared.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required

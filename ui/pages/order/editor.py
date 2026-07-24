@@ -1,10 +1,7 @@
 """
 ================================================================================
-檔案名稱: ui/pages/04_edit_order.py
-功能說明: 單筆訂單 38 全欄位動態試算與資料維護專頁 (EditOrderUI - 響應式試算與持久化修復版)
-專案名稱: Lobar Union - 服務人員與訂單管理系統
-建立日期: 2026-07-03
-修改日期: 2026-07-06 (修復即時連動與 full_details 資料庫持久化儲存)
+檔案名稱: ui/pages/order/editor.py
+功能說明: 單筆訂單 38 全欄位動態試算與資料維護組件 (EditOrderUI Core)
 ================================================================================
 """
 
@@ -19,7 +16,6 @@ import requests
 from services import db_service
 importlib.reload(db_service)
 
-title = "📄 訂單動態試算與維護"
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 def safe_float(val) -> float:
@@ -123,8 +119,7 @@ def _derive_subsidy_refund_date(order: dict) -> str:
 def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
     """
     可重用的單筆訂單編輯器渲染函式 (EditOrderUI Core)。
-    抽出此函式是為了讓 02_orders.py 分頁一的手風琴展開面板可以直接
-    內嵌呼叫同一套試算/編輯邏輯，不需要再跳轉頁面或重複維護程式碼。
+    分頁一的手風琴展開面板可以直接內嵌呼叫同一套試算/編輯邏輯。
 
     參數:
       target_case_no: 欲編輯案件的正式案件編號 (必須已由呼叫端選定，此函式不再提供下拉選單)
@@ -515,28 +510,3 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
                 st.rerun()
             except (requests.RequestException, ValueError) as error:
                 st.error(f"同步套用失敗：{error}")
-
-
-def show():
-    """EditOrderUI 獨立頁面進入點 (自行下拉選單挑選訂單，再呼叫共用的 render_editor)"""
-    st.title("📄 單筆訂單 38 欄位動態試算與維護單據")
-
-    try:
-        orders_data = db_service.get_order_details()
-        payments_raw = []
-    except Exception as e:
-        st.error(f"讀取資料庫失敗: {e}")
-        return
-
-    if not orders_data:
-        st.info("目前系統尚無任何訂單資料可供試算。")
-        return
-
-    order_opts = {
-        f"案件 #{o['case_no']} - 客戶: {o['client_name']} [{o['order_status']}] (月嫂: {o.get('staff_name') or '尚未指派'})": o['case_no']
-        for o in orders_data
-    }
-    selected_label = st.selectbox("🎯 選擇欲查看或試算的訂單", list(order_opts.keys()), key="guardrail_order_picker")
-    target_case_no = order_opts[selected_label]
-
-    render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25")

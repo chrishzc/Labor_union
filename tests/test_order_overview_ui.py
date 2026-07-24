@@ -5,12 +5,12 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
+TAB1_MODULE = Path(__file__).resolve().parents[1] / "ui" / "pages" / "order" / "tab1_overview.py"
 ORDERS_PAGE = Path(__file__).resolve().parents[1] / "ui" / "pages" / "02_orders.py"
 
 
 def _overview_source() -> str:
-    text = ORDERS_PAGE.read_text(encoding="utf-8")
+    text = TAB1_MODULE.read_text(encoding="utf-8")
     module = ast.parse(text)
     overview = next(
         node for node in module.body
@@ -52,3 +52,13 @@ def test_overview_only_has_single_order_list_view():
     assert "selected_view = st.selectbox" not in overview
     assert "服務人員付款日/補助退款日" not in overview
     assert "選擇要編輯的訂單" in overview
+
+
+def test_overview_imports_and_delegates_to_new_editor_module():
+    tab1_text = TAB1_MODULE.read_text(encoding="utf-8")
+    assert "from ui.pages.order.editor import render_editor" in tab1_text
+    assert "ui.pages.04_edit_order" not in tab1_text
+
+    overview = _overview_source()
+    assert "render_editor(" in overview
+    assert "_edit_order_mod" not in overview

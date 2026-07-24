@@ -75,7 +75,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - apply_order_assignment_synchronization
@@ -118,7 +118,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - assign_staff_to_order
@@ -160,7 +160,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - save_schedule
@@ -195,7 +195,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: validated
     fan_in_snapshot: 1
     known_symbols: []
   PaymentRouter:
@@ -268,7 +268,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - get_all_clients
@@ -304,7 +304,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 1
     known_symbols:
     - get_all_staff
@@ -340,7 +340,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - add_or_update_holiday
@@ -390,7 +390,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - ClientTransactionCreate.notes_must_not_be_blank
@@ -431,7 +431,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - StaffTransactionCreate.require_non_blank_notes
@@ -495,7 +495,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - _load_assignments
@@ -556,7 +556,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - _payable_preview
@@ -627,7 +627,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - ClaimFinanceAlertRequest.operator_must_not_be_blank
@@ -701,7 +701,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 0
     known_symbols:
     - api_health_check
@@ -739,7 +739,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 1
     known_symbols: []
   MatchSchemas:
@@ -773,7 +773,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: deployed
+    state: planned
     fan_in_snapshot: 1
     known_symbols: []
   PaymentSchemas:
@@ -810,6 +810,6 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 0
     known_symbols: []

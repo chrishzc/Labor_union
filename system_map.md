@@ -1478,7 +1478,7 @@
 - Sub Map: root
 - Type: function
 - State: `planned`
-  - Source: scripts/migrate_adad_task_snapshots.py::_adad_validator,build_v3_candidate,validate_v3_candidate
+  - Source: scripts/migrate_adad_task_snapshots.py::_adad_validator,_require_task_spec,build_v3_candidate,validate_v3_candidate
 - Dependencies: [AdadTaskSnapshotV2ToV3MigrationSpecification]
 - Description: 純記憶體內將單一 schema v2 Task JSON 轉為 v3 candidate，保留稽核資料並以 ADAD 1.6.2 validator 驗證；不讀寫 Task 檔案、archive 或 source lock。
 - Complexity: medium
@@ -1497,14 +1497,14 @@
   - 將 schema_version 改為 3，附加可追溯 migration history event，保留原本 status 與 hash。
   - 呼叫 ADAD 1.6.2 snapshot validator；成功回傳 candidate，失敗回傳結構化錯誤。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_migrate_adad_task_snapshots.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-adad-task-snapshot-transformer"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_migrate_adad_task_snapshots.py", "-q", "-p", "no:cacheprovider", "--basetemp", ".tmp\\pytest-adad-task-snapshot-transformer"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed", "timeout": 60}
 - Observability: not_required
 
 ##### Module: TaskSnapshotV2ToV3Runner
 - Sub Map: root
 - Type: script
 - State: `planned`
-- Source: scripts/migrate_adad_task_snapshots.py::migrate_tasks,main
+- Source: scripts/migrate_adad_task_snapshots.py::_iter_task_paths,_parse_args,_read_task,_write_task,migrate_tasks,main
 - Dependencies: [AdadTaskSnapshotV2ToV3MigrationSpecification, TaskSnapshotV2ToV3Transformer]
 - Description: 預設 dry-run 掃描 Task 快照並產生 manifest；apply 時以 archive、逐筆驗證與原子替換執行已驗證的 v2→v3 遷移。
 - Complexity: medium
@@ -1526,7 +1526,7 @@
   - apply 時先建立 byte-exact archive，再寫入同目錄暫存檔並驗證，最後以原子 replace 更新單筆 Task。
   - 單筆錯誤記錄於 manifest 後繼續其餘快照；結束時以非零 exit 表示有 blocked 或 failed，並保留完整 manifest。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_migrate_adad_task_snapshots.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-adad-task-snapshot-runner"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_migrate_adad_task_snapshots.py", "-q", "-p", "no:cacheprovider", "--basetemp", ".tmp\\pytest-adad-task-snapshot-runner"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed", "timeout": 60}
 - Observability:
   - log: migration_manifest.json
 
