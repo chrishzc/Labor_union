@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 import streamlit as st
 
-from ui.services.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 
 
 SELECTED_KEY = "line_message_template_selected"

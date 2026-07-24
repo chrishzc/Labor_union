@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import streamlit as st
 
-from ui.services.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 
 
 FLASH_KEY = "line_schedule_flash"

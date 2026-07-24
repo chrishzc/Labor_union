@@ -40,7 +40,7 @@ def test_line_config_keeps_public_liff_read_but_protects_management_routes():
 
 
 def test_streamlit_line_client_keeps_internal_key_server_side():
-    source = (ROOT / "ui/services/line_api_client.py").read_text(encoding="utf-8")
+    source = (ROOT / "ui/api_clients/line_api_client.py").read_text(encoding="utf-8")
     page = (ROOT / "ui/pages/07_line_management.py").read_text(encoding="utf-8")
 
     assert 'headers = {"X-Internal-API-Key": self.internal_api_key}' in source

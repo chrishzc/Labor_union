@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
-from ui.services.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 
 
 EDIT_ROLES = {"line_manager", "system_admin"}

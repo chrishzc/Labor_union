@@ -27,9 +27,10 @@ if not exist .venv\Scripts\python.exe (
 set "PY=%CD%\.venv\Scripts\python.exe"
 
 :: Production/online mode must use the persistent key configured in .env.
-if not defined INTERNAL_API_KEY (
-    for /f "usebackq delims=" %%K in (`"%PY%" -c "import os; from dotenv import load_dotenv; load_dotenv(); print(os.getenv('INTERNAL_API_KEY',''))"`) do set "INTERNAL_API_KEY=%%K"
-)
+if defined INTERNAL_API_KEY goto internal_api_key_ready
+for /f "delims=" %%K in ('call "%PY%" -c "import os; from dotenv import load_dotenv; load_dotenv(); print(os.getenv('INTERNAL_API_KEY',''))"') do set "INTERNAL_API_KEY=%%K"
+
+:internal_api_key_ready
 if not defined INTERNAL_API_KEY (
     echo [Error] INTERNAL_API_KEY is missing. Configure it in .env before online startup.
     pause

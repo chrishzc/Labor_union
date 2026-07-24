@@ -446,3 +446,41 @@ ENABLE_SERVER_FAILURE_POPUP=false
 - Python 語法、訊息範本 Schema 與 112 條 FastAPI 路由驗證通過。
 - 5.1～5.6 LINE 管理回歸共 43 項測試通過。
 - 測試資料已清除，未建立任何一次性 Python 檔案。
+
+## fix: 修復 Windows 啟動器無法載入 INTERNAL_API_KEY
+
+### 修改
+
+- `start.bat`：修正 Windows `cmd` 的 Python 命令解析，讓開發環境可正確沿用環境變數、讀取 `.env`，或在缺少設定時產生本次臨時金鑰。
+- `online.bat`：同步修正第五階段加入的固定金鑰載入流程；正式環境仍禁止在缺少固定金鑰時啟動。
+- `history/work_log.md`、`history/git_push.md`：補充本次修復與驗證紀錄。
+
+### 新增
+
+- 無。
+
+### 刪除
+
+- 無。
+
+### 驗證
+
+- 已以不啟動 FastAPI、ngrok、Streamlit 或 Docker 的批次測試確認 `.env` 金鑰能成功載入。
+- 測試過程未輸出實際金鑰，未修改 `.env`，未留下任何一次性測試檔案。
+
+## fix: 修復 Streamlit 後端 services 套件載入衝突
+
+### 修改
+
+- `ui/services` 更名為 `ui/api_clients`，明確區分 Streamlit API Client 與根目錄後端 `services`。
+- LINE 訊息、排程、任務、Rich Menu、LIFF、人工審查元件及 LINE 管理頁同步更新匯入路徑。
+- `tests/test_admin_auth_security.py` 更新 API Client 原始碼檢查路徑。
+- 工作紀錄與 PR 摘要同步更新。
+
+### 修復
+
+- 修復 `01_data_browser.py` 至 `05_form_management.py` 在 Streamlit 啟動時錯誤載入 `ui/services`，導致無法匯入根目錄 `services/db_service.py` 的問題。
+
+### 新增／刪除
+
+- 無功能檔案新增或刪除；僅重新命名 UI API Client 套件。

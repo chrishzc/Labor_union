@@ -10,7 +10,7 @@ from ui.components.line_review_manager import render_review_manager
 from ui.components.line_rich_menu_manager import render_rich_menu_manager
 from ui.components.line_schedule_manager import render_schedule_manager
 from ui.components.line_task_manager import render_task_manager
-from ui.services.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 
 
 title = "💬 LINE 管理中心"

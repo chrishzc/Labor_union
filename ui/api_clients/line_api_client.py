@@ -1,4 +1,4 @@
-"""Server-side client for authenticated LINE administration APIs."""
+"""Server-side API client for authenticated LINE administration APIs."""
 
 from __future__ import annotations
 
