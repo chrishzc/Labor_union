@@ -215,7 +215,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: planned
+    state: validated
     fan_in_snapshot: 1
   OrderUIDerivedDateHelpers:
     type: function
