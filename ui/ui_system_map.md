@@ -101,8 +101,10 @@
 - Sub Map: ui_layer
 - Type: ui_component
 - State: `planned`
-- Source: ui/pages/order/tab3_finance.py::_render_tab3_finance
-- Description: Tab 3 渲染函數 (訂單帳務總覽)。獨立顯示客戶收款與月嫂應付總覽兩張表格，按案件懶加載交易明細，所有帳務寫入僅經由 FastAPI。
+- Source: ui/pages/order/tab3_finance.py::_render_tab3_finance,_to_arrow_scalar,_normalize_arrow_compatible_df
+- Description: Tab 3 渲染函數 (訂單帳務總覽)，以及將日期型別正規化為 Streamlit Arrow 相容標量的私有 helper。獨立顯示客戶收款與月嫂應付總覽兩張表格，按案件懶加載交易明細，所有帳務寫入僅經由 FastAPI。
+- Invariants:
+  - Arrow 正規化 helper 僅轉換 DataFrame 顯示用的 null 與日期值；不得修改 API 回應、訂單或帳務資料。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_payment_management_ui.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-payment-management-ui"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required

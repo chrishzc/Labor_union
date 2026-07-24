@@ -3753,7 +3753,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 1
   TaskSnapshotV2ToV3Runner:
     type: script
@@ -3820,7 +3820,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: root
-    state: validated
+    state: planned
     fan_in_snapshot: 0
   BackfillSubsidyReturnObligations:
     type: script

@@ -17,9 +17,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-JSON_TPL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "form_templates.json")
-TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "templates")
-CONTRACTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "templates", "contracts")
+_FORM_MGMT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ui/pages
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_FORM_MGMT_DIR))  # 專案根目錄
+_LEGACY_TEMPLATES_DIR = os.path.join(_FORM_MGMT_DIR, "db", "templates")
+_PRIMARY_TEMPLATES_DIR = os.path.join(_PROJECT_ROOT, "db", "templates")
+
+JSON_TPL_PATH = os.path.join(_PROJECT_ROOT, "db", "form_templates.json")
+TEMPLATES_DIR = _PRIMARY_TEMPLATES_DIR if os.path.isdir(_PRIMARY_TEMPLATES_DIR) else _LEGACY_TEMPLATES_DIR
+CONTRACTS_DIR = os.path.join(_PRIMARY_TEMPLATES_DIR, "contracts") if os.path.isdir(_PRIMARY_TEMPLATES_DIR) else os.path.join(_LEGACY_TEMPLATES_DIR, "contracts")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 
@@ -73,19 +78,19 @@ def generate_field_id() -> str:
 def get_html_hex_color(color_obj, default=None):
     """將 openpyxl Color 物件轉為標準 HTML HEX 色碼 (#RRGGBB)"""
     if not color_obj:
-        return defaul
+        return default
     rgb = getattr(color_obj, 'rgb', None)
     if not rgb:
-        return defaul
+        return default
     rgb_str = str(rgb).upper()
     if len(rgb_str) == 8: # AARRGGBB
         hex_val = rgb_str[2:]
         if hex_val == "000000" or hex_val == "FFFFFF":
-            return defaul
+            return default
         return f"#{hex_val}"
     elif len(rgb_str) == 6:
         return f"#{rgb_str}"
-    return defaul
+    return default
 
 
 def get_border_style(cell_border):

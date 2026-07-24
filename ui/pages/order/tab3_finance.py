@@ -9,7 +9,7 @@ import os
 import requests
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import date, datetime
 from ui.pages.order.shared import (
     safe_float,
     safe_int,
@@ -17,6 +17,22 @@ from ui.pages.order.shared import (
     _derive_subsidy_refund_date,
     _payment_api_request,
 )
+
+
+def _to_arrow_scalar(value):
+    """Convert display values unsupported by Arrow to nullable scalars."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, (datetime, date, pd.Timestamp)):
+        return value.isoformat()
+    return value
+
+
+def _normalize_arrow_compatible_df(dataframe):
+    """Return a display DataFrame whose date values Streamlit can serialize."""
+    if dataframe.empty:
+        return dataframe
+    return dataframe.apply(lambda column: column.map(_to_arrow_scalar))
 
 
 def _render_tab3_finance(orders_data):
@@ -124,6 +140,7 @@ def _render_tab3_finance(orders_data):
     client_tab, staff_tab = st.tabs(["客戶收款總覽", "月嫂應付總覽"])
     with client_tab:
         client_df = pd.DataFrame(client_rows)
+        client_df = _normalize_arrow_compatible_df(client_df)
         client_states = sorted(client_df["付款狀態"].dropna().unique()) if not client_df.empty else []
         selected_client_states = st.multiselect("客戶付款狀態", client_states, key="client_payment_state_filter")
         if selected_client_states:
@@ -132,6 +149,7 @@ def _render_tab3_finance(orders_data):
         st.dataframe(client_df, width="stretch", hide_index=True)
     with staff_tab:
         staff_df = pd.DataFrame(staff_rows)
+        staff_df = _normalize_arrow_compatible_df(staff_df)
         staff_states = sorted(staff_df["付款狀態"].dropna().unique()) if not staff_df.empty else []
         selected_staff_states = st.multiselect("月嫂付款狀態", staff_states, key="staff_payment_state_filter")
         if selected_staff_states:
@@ -164,10 +182,10 @@ def _render_tab3_finance(orders_data):
             return
         client_detail, staff_detail = detail
         detail_client_tab, detail_staff_tab = st.tabs(["客戶帳務與交易", "月嫂帳務與交易"])
-        with detail_client_tab:
-            _render_client_payment_ledger(selected_case_no, client_detail)
-        with detail_staff_tab:
-            _render_staff_payment_ledger(selected_case_no, staff_detail)
+    with detail_client_tab:
+        _render_client_payment_ledger(selected_case_no, client_detail)
+    with detail_staff_tab:
+        _render_staff_payment_ledger(selected_case_no, staff_detail)
 
 
 def _render_legacy_mixed_payment_overview(orders_data):
@@ -200,17 +218,21 @@ def _render_client_payment_ledger(case_no, payment):
             "實收日期": payment.get(f"{key}_received_at"),
         })
     rows.append({"階段": "合計", "應收金額": total_receivable, "實收金額": total_received, "應收日期": None, "實收日期": None})
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    client_rows_df = pd.DataFrame(rows)
+    client_rows_df = _normalize_arrow_compatible_df(client_rows_df)
+    st.dataframe(client_rows_df, width="stretch", hide_index=True)
 
     subsidy_return = safe_float(payment.get("subsidy_return_receivable"))
     if subsidy_return:
         st.markdown("#### 退還補助款")
-        st.dataframe(pd.DataFrame([{
+        subsidy_df = pd.DataFrame([{
             "應退金額": subsidy_return,
             "已退金額": safe_float(payment.get("subsidy_return_refunded")),
             "應退日期": payment.get("subsidy_return_due_date"),
             "退還日期": payment.get("subsidy_return_at"),
-        }]), width="stretch", hide_index=True)
+        }])
+        subsidy_df = _normalize_arrow_compatible_df(subsidy_df)
+        st.dataframe(subsidy_df, width="stretch", hide_index=True)
 
     transactions = payment.get("transactions") or []
     with st.expander("客戶交易明細", expanded=False):
@@ -257,7 +279,9 @@ def _render_staff_payment_ledger(case_no, payments):
             "實付金額": paid, "未付餘額": payable - paid, "應付日期": payment.get("due_date"),
             "實付日期": payment.get("paid_at"), "狀態": payment.get("payment_status"),
         })
-    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
+    staff_rows_df = pd.DataFrame(rows)
+    staff_rows_df = _normalize_arrow_compatible_df(staff_rows_df)
+    st.dataframe(staff_rows_df, width="stretch", hide_index=True)
 
     for payment in payments:
         payment_id = payment.get("id")
