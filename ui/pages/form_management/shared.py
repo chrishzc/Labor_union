@@ -17,9 +17,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-JSON_TPL_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "form_templates.json")
-TEMPLATES_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "templates")
-CONTRACTS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "db", "templates", "contracts")
+_FORM_MGMT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # ui/pages
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(_FORM_MGMT_DIR))  # 專案根目錄
+_LEGACY_TEMPLATES_DIR = os.path.join(_FORM_MGMT_DIR, "db", "templates")
+_PRIMARY_TEMPLATES_DIR = os.path.join(_PROJECT_ROOT, "db", "templates")
+
+JSON_TPL_PATH = os.path.join(_PROJECT_ROOT, "db", "form_templates.json")
+TEMPLATES_DIR = _PRIMARY_TEMPLATES_DIR if os.path.isdir(_PRIMARY_TEMPLATES_DIR) else _LEGACY_TEMPLATES_DIR
+CONTRACTS_DIR = os.path.join(_PRIMARY_TEMPLATES_DIR, "contracts") if os.path.isdir(_PRIMARY_TEMPLATES_DIR) else os.path.join(_LEGACY_TEMPLATES_DIR, "contracts")
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 

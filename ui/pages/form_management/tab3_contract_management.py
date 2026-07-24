@@ -6,7 +6,6 @@
 """
 
 import os
-import json
 import streamlit as st
 from ui.pages.form_management.shared import (
     CONTRACTS_DIR,
@@ -28,7 +27,7 @@ def _render_tab3_contract_management(form_db_table_fields, form_table_for_key, g
     contracts = load_contract_templates()
     if not contracts:
         st.warning("目前尚無任何定型化契約範本。已自動為您建立預設標準契約！")
-        st.rerun()
+        return
 
     c_names = {c['name']: c['id'] for c in contracts}
 
@@ -44,6 +43,7 @@ def _render_tab3_contract_management(form_db_table_fields, form_table_for_key, g
             contract_target_order = None
             st.info("請先選擇案件，再載入服務人員契約資料。")
         else:
+            cache_key = f"contract_ctx_{target_order['case_no']}"
             assignment_text = st.text_input(
                 "服務人員指派 ID（同案有多位月嫂時必填）",
                 key=f"staff_contract_assignment_{target_order['case_no']}",
@@ -52,9 +52,21 @@ def _render_tab3_contract_management(form_db_table_fields, form_table_for_key, g
                 assignment_id = int(assignment_text) if assignment_text else None
                 if assignment_id is not None and assignment_id < 1:
                     raise ValueError("指派 ID 必須為正整數")
-                contract_target_order = flatten_staff_contract_context(
-                    fetch_staff_contract_context(target_order["case_no"], assignment_id)
-                )
+
+                cached = st.session_state.get(cache_key)
+                cached_case_no = cached.get("case_no") if isinstance(cached, dict) else None
+                cached_assignment_id = cached.get("assignment_id") if isinstance(cached, dict) else None
+                if cached is None or cached_case_no != target_order["case_no"] or cached_assignment_id != assignment_id:
+                    contract_target_order = flatten_staff_contract_context(
+                        fetch_staff_contract_context(target_order["case_no"], assignment_id)
+                    )
+                    st.session_state[cache_key] = {
+                        "case_no": target_order["case_no"],
+                        "assignment_id": assignment_id,
+                        "data": contract_target_order,
+                    }
+                else:
+                    contract_target_order = cached.get("data") if isinstance(cached, dict) else None
             except ValueError as error:
                 contract_target_order = None
                 st.warning(f"服務人員契約資料未載入：{error}")
