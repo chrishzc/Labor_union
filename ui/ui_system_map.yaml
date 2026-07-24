@@ -318,8 +318,9 @@ modules:
     fan_in_snapshot: 1
   OrderUI_Tab3_Finance:
     type: ui_component
-    description: Tab 3 渲染函數 (訂單帳務總覽)。獨立顯示客戶收款與月嫂應付總覽兩張表格，按案件懶加載交易明細，所有帳務寫入僅經由 FastAPI。
-    source: ui/pages/order/tab3_finance.py::_render_tab3_finance
+    description: Tab 3 渲染函數 (訂單帳務總覽)，以及將日期型別正規化為 Streamlit Arrow 相容標量的私有 helper。獨立顯示客戶收款與月嫂應付總覽兩張表格，按案件懶加載交易明細，所有帳務寫入僅經由
+      FastAPI。
+    source: ui/pages/order/tab3_finance.py::_render_tab3_finance,_to_arrow_scalar,_normalize_arrow_compatible_df
     domain: null
     subsystem: null
     map_file: ui\ui_system_map.md
@@ -327,7 +328,8 @@ modules:
     input: {}
     output: {}
     exceptions: []
-    invariants: []
+    invariants:
+    - Arrow 正規化 helper 僅轉換 DataFrame 顯示用的 null 與日期值；不得修改 API 回應、訂單或帳務資料。
     preferred_pattern: none
     verification:
     - command:
