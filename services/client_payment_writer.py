@@ -1,10 +1,77 @@
-"""Persist client transactions and recalculate the client payment summary."""
-
 from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
+from services.accounting_source_projection import load_case_accounting_source_with_cursor
 from services.client_payment_transactions import calculate_client_payment_state
+from services.client_subsidy_return_obligations import (
+    activate_subsidy_return_obligation,
+    calculate_subsidy_return_due_date,
+)
 from services.db_service import get_connection
+from services.order_amount_calculator import calculate_order_amounts
+
+
+def _activate_subsidy_return_obligation_after_full_receipt(cursor, payment):
+    """Calculate and activate the obligation using canonical projected facts."""
+    accounting_source = load_case_accounting_source_with_cursor(
+        cursor, payment["case_no"]
+    )
+    order_info = accounting_source["order"]
+    client_info = accounting_source["client"]
+    actual_end_date = order_info.get("actual_end_date")
+    if not actual_end_date:
+        return None
+
+    due_date = calculate_subsidy_return_due_date(actual_end_date)
+    order_terms = {
+        "case_no": payment["case_no"],
+        "service_days": order_info.get("service_days"),
+        "service_hours_per_day": order_info.get("service_hours_per_day"),
+        "identity_status": client_info.get("identity_status"),
+        "client_floor_fee": order_info.get("floor_fee") or 0,
+        "service_start_date": (
+            order_info.get("actual_start_date") or order_info.get("start_date")
+        ),
+        "actual_completion_date": actual_end_date,
+    }
+    calculated_plan = calculate_order_amounts(
+        order_terms,
+        [],
+        accounting_source["collection_schedule"],
+    )
+
+    subsidy_return_amount = Decimal(
+        str(calculated_plan["client_ledger_plan"]["subsidy_return_amount"])
+    )
+    if subsidy_return_amount <= 0:
+        return None
+
+    return activate_subsidy_return_obligation(
+        cursor,
+        payment["id"],
+        subsidy_return_amount,
+        due_date,
+    )
+
+
+def _persist_subsidy_return_review(cursor, client_payment_id, reason):
+    cursor.execute(
+        """UPDATE client_payments
+           SET subsidy_return_review_status=%s,
+               subsidy_return_review_reason=%s
+           WHERE id=%s""",
+        ("review_required", reason, client_payment_id),
+    )
+
+
+def _clear_subsidy_return_review(cursor, client_payment_id):
+    cursor.execute(
+        """UPDATE client_payments
+           SET subsidy_return_review_status=NULL,
+               subsidy_return_review_reason=NULL
+           WHERE id=%s""",
+        (client_payment_id,),
+    )
 
 
 _ACTIVE_STAGES = frozenset({"deposit", "first_payment", "second_payment"})
@@ -239,6 +306,44 @@ def record_client_payment_transaction_with_cursor(cursor, client_payment_id, tra
                WHERE case_no = %s AND status = '洽談中'""",
             (payment["case_no"],),
         )
+
+    total_receivable_val = payment.get("amount_receivable")
+    if total_receivable_val is None:
+        total_receivable_val = receivables["deposit"] + receivables["first_payment"] + receivables["second_payment"]
+    amount_receivable = Decimal(str(total_receivable_val))
+    amount_received = Decimal(str(update["amount_received"]))
+
+    existing_return_receivable = payment.get("subsidy_return_receivable")
+    if (
+        candidate["transaction_type"] == "reversal"
+        and existing_return_receivable is not None
+        and Decimal(str(existing_return_receivable)) > 0
+        and amount_received < amount_receivable
+    ):
+        reason = "client_receipt_reversal_below_receivable"
+        _persist_subsidy_return_review(cursor, client_payment_id, reason)
+        update["subsidy_return_review_status"] = "review_required"
+        update["subsidy_return_review_reason"] = reason
+
+    if (
+        candidate["transaction_type"] == "receipt"
+        and amount_received == amount_receivable
+    ):
+        activation_res = _activate_subsidy_return_obligation_after_full_receipt(
+            cursor, payment
+        )
+        if activation_res:
+            update["subsidy_return_activation"] = activation_res
+            if activation_res["result"] in {"activated", "existing"}:
+                _clear_subsidy_return_review(cursor, client_payment_id)
+                update["subsidy_return_review_status"] = None
+                update["subsidy_return_review_reason"] = None
+            elif activation_res["result"] == "review_required":
+                reason = "subsidy_return_obligation_requires_review"
+                _persist_subsidy_return_review(cursor, client_payment_id, reason)
+                update["subsidy_return_review_status"] = "review_required"
+                update["subsidy_return_review_reason"] = reason
+
     return {"transaction_id": transaction_id, **update}
 
 

@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 def _render_editor_source() -> str:
-    source_path = Path("ui/pages/04_edit_order.py")
+    source_path = Path("ui/pages/order/editor.py")
     source = source_path.read_text(encoding="utf-8")
     module = ast.parse(source)
     render_editor = next(

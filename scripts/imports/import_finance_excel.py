@@ -544,7 +544,10 @@ def import_finance_workbook(excel_path: str) -> dict[str, Any]:
 def main():
     parser = argparse.ArgumentParser(description="Import finance Excel data")
     parser.add_argument("--check", action="store_true", help="Only verify readiness")
-    parser.add_argument("--excel-path", default="document/帳務.xlsx")
+    parser.add_argument(
+        "--excel-path",
+        default="document/資料庫、資料處理/帳務.xlsx",
+    )
     args = parser.parse_args()
     if args.check:
         print("READY TO IMPORT")

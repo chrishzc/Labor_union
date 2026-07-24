@@ -2,9 +2,40 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+import calendar
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Mapping
+
+from services.accounting_source_projection import (
+    load_case_accounting_source_with_cursor,
+)
+
+
+SUPPORTED_IDENTITY_STATUSES = frozenset({"一般市民", "補助市民", "非市民"})
+
+
+def calculate_subsidy_return_due_date(
+    actual_completion_date: date | datetime | str | None,
+) -> str | None:
+    """Calculate due date as the month-end of actual completion date plus 5 days."""
+    if actual_completion_date in (None, ""):
+        return None
+    if isinstance(actual_completion_date, datetime):
+        dt = actual_completion_date.date()
+    elif isinstance(actual_completion_date, date):
+        dt = actual_completion_date
+    elif isinstance(actual_completion_date, str):
+        try:
+            dt = date.fromisoformat(actual_completion_date.strip()[:10])
+        except ValueError as exc:
+            raise ValueError("actual_completion_date must be an ISO date") from exc
+    else:
+        raise ValueError("actual_completion_date must be a date or ISO date string")
+
+    last_day = calendar.monthrange(dt.year, dt.month)[1]
+    month_end = date(dt.year, dt.month, last_day)
+    return (month_end + timedelta(days=5)).isoformat()
 
 
 def _is_sqlite_cursor(cursor: Any) -> bool:
@@ -87,6 +118,7 @@ def activate_subsidy_return_obligation(
     explicit_due_date = _due_date_value(due_date)
     placeholder = _placeholder(cursor)
     columns = (
+        "case_no",
         "amount_receivable",
         "amount_received",
         "subsidy_return_receivable",
@@ -105,11 +137,31 @@ def activate_subsidy_return_obligation(
         return {"obligation": None, "result": result}
 
     payment = _row_mapping(row, columns)
+    accounting_source = load_case_accounting_source_with_cursor(
+        cursor, payment["case_no"]
+    )
+    if not isinstance(accounting_source, Mapping):
+        raise ValueError("accounting source projection must be a mapping")
+    client = accounting_source.get("client")
+    if not isinstance(client, Mapping):
+        raise ValueError("accounting source projection must include client facts")
+    identity_status = str(client.get("identity_status") or "").strip()
+
     amount_receivable = _decimal(payment["amount_receivable"], "amount_receivable")
     amount_received = _decimal(payment["amount_received"], "amount_received")
     current_receivable = payment["subsidy_return_receivable"]
     current_refunded = payment["subsidy_return_refunded"]
     current_due_date = payment["subsidy_return_due_date"]
+
+    if identity_status not in SUPPORTED_IDENTITY_STATUSES:
+        existing_obligation = None
+        if current_receivable is not None and current_refunded is not None:
+            existing_obligation = _obligation(
+                current_receivable, current_refunded, current_due_date
+            )
+        result = "review_required"
+        assert result == "review_required"
+        return {"obligation": existing_obligation, "result": result}
 
     active = current_receivable is not None and _decimal(
         current_receivable, "subsidy_return_receivable"
@@ -125,9 +177,7 @@ def activate_subsidy_return_obligation(
         assert result in {"existing", "review_required"}
         return {"obligation": obligation, "result": result}
 
-    fully_received = (
-        amount_receivable > 0 and amount_received == amount_receivable
-    )
+    fully_received = amount_received == amount_receivable
     inactive_clean = (
         current_receivable is None or _decimal(current_receivable, "subsidy_return_receivable") == 0
     ) and (

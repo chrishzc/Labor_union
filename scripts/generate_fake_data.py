@@ -4,9 +4,16 @@
 檔案名稱: scripts/generate_fake_data.py
 作者: Antigravity
 描述: 統一生成系統測試所需的各類 Excel 假資料。
-      此腳本合併並取代了舊有的 generate_fake_excel.py 與 generate_fake_finance.py，
-      同時為名冊（HCM、BeClass、服務人員）與財務流水帳生成一致、對齊且無隱私問題的測試數據。
+
+🛑 WARNING: 50 核心案件基準生成器 (FROZEN BASE SEEDER)
+本檔案為系統 50 筆核心正常案件與金流測試的凍結基準腳本。
+嚴禁隨意修改本檔案或變更其生成的 50 筆案件格式。
+若需擴充任何欄位型態、格式錯誤或業務異常測試資料，請新建並使用 scripts/seed_boundary_anomalies.py。
 """
+raise SystemExit(
+    "GenerateFakeData 已凍結，僅供人工參考；新增假資料需求請建立獨立腳本與 ADAD 節點。"
+)
+
 import sys
 import os
 import argparse
@@ -1328,6 +1335,7 @@ def _clear_generator_owned_demo_data(cursor) -> None:
     generator's ownership and must never be read or mutated by seed mode.
     """
     tables = (
+        "finance_alert_events", "finance_alerts",
         "finance_import_occurrences", "finance_import_rows", "finance_import_batches",
         "staff_transfer_allocations", "staff_actual_transfers",
         "staff_monthly_settlement_details", "staff_monthly_settlements",
@@ -1579,6 +1587,28 @@ def seed_finance_import_duplicate_fact(reference_date: date) -> dict:
                 or second_row["result"] != "skipped_existing"
             ):
                 raise RuntimeError("財務匯入重複事實未形成兩批次、一 canonical row、兩 occurrences")
+
+            from datetime import datetime, timezone
+            from services.finance_alert_detection import create_or_get_finance_alert
+            create_or_get_finance_alert(
+                cursor,
+                alert_code="DUPLICATE_IMPORT_SUSPECTED",
+                source_domain="COMMON",
+                source_type="finance_import_row",
+                source_id=str(first_row["row_id"]),
+                reason="跨檔重複匯入測試：發現相同指紋之重複銀行流水，保持 pending 待人工審核",
+                candidate_snapshot={
+                    "finance_import_row_id": first_row["row_id"],
+                    "batch_ids": [first["batch_id"], second["batch_id"]],
+                    "duplicate_count": 2,
+                },
+                finance_import_row_id=first_row["row_id"],
+                finance_import_batch_id=first["batch_id"],
+                expected_amount=Decimal("1200.00"),
+                actual_amount=Decimal("1200.00"),
+                difference_amount=Decimal("0.00"),
+                detected_at=datetime.combine(reference_date, datetime.min.time()).replace(tzinfo=timezone.utc),
+            )
         conn.commit()
         return {
             "batch_ids": [first["batch_id"], second["batch_id"]],
@@ -2017,14 +2047,14 @@ def validate_seed_database(reference_date: date) -> dict:
                     "客戶邊界標籤格式不完整",
                 ),
                 (
-                    "SELECT COUNT(*) AS count FROM finance_alerts",
+                    "SELECT (SELECT COUNT(*) FROM finance_alerts WHERE status = 'open') != 1 AS count",
                     (),
-                    "finance_alerts 必須維持 0 筆",
+                    "finance_alerts 必須剛好 1 筆 open 狀態警示",
                 ),
                 (
-                    "SELECT COUNT(*) AS count FROM finance_alert_events",
+                    "SELECT (SELECT COUNT(*) FROM finance_alert_events WHERE event_type = 'detected') != 1 AS count",
                     (),
-                    "finance_alert_events 必須維持 0 筆",
+                    "finance_alert_events 必須剛好 1 筆 detected 事件",
                 ),
             ]
             errors = []
@@ -2150,7 +2180,7 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     
     input_file = os.path.join(output_dir, '資料庫來源表.xlsx')
-    roster_output_file = os.path.join(output_dir, '假資料_範例.xlsx')
+    roster_output_file = os.path.join(output_dir, '假資料_模板.xlsx')
     historical_output_file = os.path.join(output_dir, '假資料_歷史訂單.xlsx')
     finance_output_file = os.path.join(output_dir, '帳務.xlsx')
     

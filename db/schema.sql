@@ -256,37 +256,6 @@ CREATE TABLE IF NOT EXISTS matching_records (
     UNIQUE KEY uq_matching_case_staff (case_no, staff_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 18. 案件財務收支與轉帳紀錄表 (對照 帳務.xlsx)
-CREATE TABLE IF NOT EXISTS payments (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    case_no VARCHAR(50) NOT NULL COMMENT '對應 clients.case_no / 查詢序號；帳務唯一案件識別碼',
-    client_name VARCHAR(100) NULL COMMENT '客戶姓名備份',
-    deposit_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '訂金應收金額',
-    deposit_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '訂金實收金額',
-    deposit_due_date DATE NULL COMMENT '訂金應收日期',
-    deposit_received_at DATE NULL COMMENT '訂金實收日期',
-    first_payment_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '第一期應收金額',
-    first_payment_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '第一期實收金額',
-    first_payment_due_date DATE NULL COMMENT '第一期應收日期',
-    first_payment_received_at DATE NULL COMMENT '第一期實收日期',
-    second_payment_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '第二期應收金額',
-    second_payment_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '第二期實收金額',
-    second_payment_due_date DATE NULL COMMENT '第二期應收日期',
-    second_payment_received_at DATE NULL COMMENT '第二期實收日期',
-    amount_receivable DECIMAL(10, 2) DEFAULT 0.00 COMMENT '應收總額',
-    amount_received DECIMAL(10, 2) DEFAULT 0.00 COMMENT '實收總額',
-    caregiver_fee DECIMAL(10, 2) DEFAULT 0.00 COMMENT '應轉帳給服務人員的費用',
-    caregiver_paid_at DATE NULL COMMENT '服務人員費用轉帳日期',
-    payment_status VARCHAR(50) DEFAULT '待收訂金' COMMENT '帳務狀態 (待收訂金/已收訂金/已收一期款/已收二期款/已結案)',
-    notes TEXT NULL COMMENT '帳務備註',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_payment_status (payment_status),
-    UNIQUE KEY uq_payments_case_no (case_no),
-    CONSTRAINT fk_payments_case_no FOREIGN KEY (case_no) REFERENCES clients(case_no) ON UPDATE CASCADE ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-
 -- 19. 客戶帳務摘要（一案一筆；實際金流保存在 client_payment_transactions）
 CREATE TABLE IF NOT EXISTS client_payments (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -313,6 +282,8 @@ CREATE TABLE IF NOT EXISTS client_payments (
     subsidy_return_refunded DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
     subsidy_return_due_date DATE NULL,
     subsidy_return_at DATE NULL,
+    subsidy_return_review_status ENUM('review_required') NULL COMMENT '補助退還人工覆核狀態；NULL 表示未暫停自動核銷',
+    subsidy_return_review_reason TEXT NULL COMMENT '補助退還需人工覆核的原因',
     payment_status VARCHAR(50) NOT NULL DEFAULT '待收訂金',
     notes TEXT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

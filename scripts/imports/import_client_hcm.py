@@ -7,6 +7,8 @@ ponytail: 去重與更新時排除 line_user_id 欄位，自動為新案件在 o
 import sys
 import os
 import re
+from datetime import date, datetime, timedelta
+
 import pymysql
 import pandas as pd
 from dotenv import load_dotenv
@@ -99,6 +101,51 @@ def clean_data(val, col_name):
             return None
     return str(val).strip()
 
+
+def _parse_date(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.date()
+
+
+def _load_holiday_dates(cursor):
+    cursor.execute("SELECT holiday_date FROM holidays")
+    return {
+        parsed
+        for row in cursor.fetchall()
+        if (parsed := _parse_date(row[0])) is not None
+    }
+
+
+def _calculate_service_end_date(start_date, service_days, service_type, holiday_dates):
+    if start_date is None or not service_days or service_days < 1:
+        return None
+
+    rest_weekdays = {
+        "週休1日": {6},
+        "週休2日": {5, 6},
+        "連續服務": set(),
+    }.get(service_type, set())
+
+    current_date = start_date
+    completed_days = 0
+    while completed_days < service_days:
+        if current_date.weekday() not in rest_weekdays and current_date not in holiday_dates:
+            completed_days += 1
+            if completed_days == service_days:
+                return current_date
+        current_date += timedelta(days=1)
+
+    return None
+
+
 def _result(inserted=0, skipped_existing=0, review_required=0, failed=0):
     return {
         "inserted": inserted,
@@ -185,11 +232,22 @@ def process_import(excel_path):
             s_time_raw = record.get('service_time') or "9"
             hrs_match = re.search(r'\d+', str(s_time_raw))
             s_hours = int(hrs_match.group(0)) if hrs_match else 9
+            start_date = _parse_date(record.get('service_start_date'))
+            holiday_dates = _load_holiday_dates(cursor) if start_date else set()
+            end_date = _calculate_service_end_date(
+                start_date,
+                s_days,
+                record.get('service_type') or "週休1日",
+                holiday_dates,
+            )
 
             cursor.execute("""
-                INSERT INTO orders (case_no, client_id, status, service_days, service_hours_per_day)
-                VALUES (%s, %s, '洽談中', %s, %s)
-            """, (case_no, client_id, s_days, s_hours))
+                INSERT INTO orders (
+                    case_no, client_id, status, service_days,
+                    service_hours_per_day, start_date, end_date
+                )
+                VALUES (%s, %s, '洽談中', %s, %s, %s, %s)
+            """, (case_no, client_id, s_days, s_hours, start_date, end_date))
                 
         conn.commit()
         print(f"匯入成功：新增 {inserted} 筆，略過既有 {skipped_existing} 筆，待確認 {review_required} 筆。")
@@ -206,5 +264,5 @@ def process_import(excel_path):
 
 if __name__ == "__main__":
     # 提供預設本機路徑或接收命令列參數
-    excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/資料庫、資料處理/假資料_範例.xlsx"
+    excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/資料庫、資料處理/假資料_模板.xlsx"
     process_import(excel_arg)

@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import importlib
 import json
+from pathlib import Path
 
 import pandas as pd
 
 
 beclass = importlib.import_module("scripts.imports.import_client_beclass")
+
+
+def test_cli_defaults_to_the_frozen_template_and_keeps_explicit_path_support():
+    source = Path(beclass.__file__).read_text(encoding="utf-8")
+
+    assert "document/資料庫、資料處理/假資料_模板.xlsx" in source
+    assert "假資料_範例.xlsx" not in source
+    assert "sys.argv[1] if len(sys.argv) > 1 else" in source
 
 
 class Cursor:

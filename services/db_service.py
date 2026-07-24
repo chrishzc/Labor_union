@@ -1,4 +1,5 @@
 import os
+import json
 import pymysql
 import math
 from datetime import datetime, date, timedelta
@@ -116,7 +117,32 @@ def get_order_by_case_no(case_no: str) -> dict | None:
 
 def get_table_data(table_name: str) -> list[dict]:
     """讀取指定原始資料表的內容"""
-    allowed_tables = ['clients', 'staff', 'orders', 'beclass_records', 'matching_records', 'holidays', 'staff_bank_accounts']
+    allowed_tables = [
+        'clients',
+        'orders',
+        'beclass_records',
+        'matching_records',
+        'holidays',
+        'staff',
+        'staff_bank_accounts',
+        'case_staff_assignments',
+        'client_payments',
+        'client_payment_transactions',
+        'actual_hours_adjustments',
+        'staff_payments',
+        'staff_payment_transactions',
+        'payment_migration_reviews',
+        'staff_schedule',
+        'staff_regions',
+        'staff_cooking_skills',
+        'staff_weekly_rest',
+        'staff_time_slots',
+        'staff_transportation',
+        'staff_holiday_availability',
+        'staff_baby_types',
+        'line_confirmation_requests',
+        'staff_bookings',
+    ]
     if table_name not in allowed_tables:
         raise ValueError(f"不允許查詢此資料表: {table_name}")
 
@@ -135,9 +161,236 @@ def get_table_data(table_name: str) -> list[dict]:
                     JOIN clients c ON c.case_no = o.case_no
                     LEFT JOIN staff s ON o.staff_id = s.id
                 """)
+            elif table_name == 'staff':
+                cursor.execute("SELECT * FROM `staff`")
+                rows = cursor.fetchall()
+
+                cursor.execute("SELECT staff_id, region_name, custom_region_detail FROM staff_regions")
+                region_rows = cursor.fetchall()
+                region_map = {}
+                for row in region_rows:
+                    sid = row.get('staff_id')
+                    if sid is None:
+                        continue
+                    region_map.setdefault(sid, [])
+                    if row.get('region_name'):
+                        region_map[sid].append(row.get('region_name'))
+                    if row.get('custom_region_detail'):
+                        region_map[sid].append(f"其他：{row['custom_region_detail']}")
+
+                cursor.execute("SELECT staff_id, skill_name, custom_skill_detail FROM staff_cooking_skills")
+                skill_rows = cursor.fetchall()
+                skill_map = {}
+                for row in skill_rows:
+                    sid = row.get('staff_id')
+                    if sid is None:
+                        continue
+                    skill_map.setdefault(sid, [])
+                    if row.get('skill_name'):
+                        skill_map[sid].append(row.get('skill_name'))
+                    if row.get('custom_skill_detail'):
+                        skill_map[sid].append(f"其他：{row['custom_skill_detail']}")
+
+                cursor.execute("SELECT staff_id, rest_type FROM staff_weekly_rest")
+                rest_rows = cursor.fetchall()
+                rest_map = {}
+                for row in rest_rows:
+                    sid = row.get('staff_id')
+                    if sid is None:
+                        continue
+                    rest_map.setdefault(sid, [])
+                    rest_map[sid].append(row.get('rest_type'))
+
+                cursor.execute("SELECT staff_id, slot_name, custom_slot_detail FROM staff_time_slots")
+                slot_rows = cursor.fetchall()
+                slot_map = {}
+                for row in slot_rows:
+                    sid = row.get('staff_id')
+                    if sid is None:
+                        continue
+                    slot_map.setdefault(sid, [])
+                    if row.get('slot_name'):
+                        slot_map[sid].append(row.get('slot_name'))
+                    if row.get('custom_slot_detail'):
+                        slot_map[sid].append(f"其他：{row['custom_slot_detail']}")
+
+                cursor.execute("SELECT staff_id, vehicle_type FROM staff_transportation")
+                transport_rows = cursor.fetchall()
+                transport_map = {}
+                for row in transport_rows:
+                    sid = row.get('staff_id')
+                    if sid is None:
+                        continue
+                    transport_map.setdefault(sid, [])
+                    if row.get('vehicle_type'):
+                        transport_map[sid].append(row.get('vehicle_type'))
+
+                cursor.execute("SELECT staff_id, holiday_name, custom_holiday_detail FROM staff_holiday_availability")
+                holiday_rows = cursor.fetchall()
+                holiday_map = {}
+                for row in holiday_rows:
+                    sid = row.get('staff_id')
+                    if sid is None:
+                        continue
+                    holiday_map.setdefault(sid, [])
+                    if row.get('holiday_name'):
+                        holiday_map[sid].append(row.get('holiday_name'))
+                    if row.get('custom_holiday_detail'):
+                        holiday_map[sid].append(f"其他：{row['custom_holiday_detail']}")
+
+                cursor.execute("SELECT staff_id, baby_type, custom_baby_detail FROM staff_baby_types")
+                baby_rows = cursor.fetchall()
+                baby_map = {}
+                for row in baby_rows:
+                    sid = row.get('staff_id')
+                    if sid is None:
+                        continue
+                    baby_map.setdefault(sid, [])
+                    if row.get('baby_type'):
+                        baby_map[sid].append(row.get('baby_type'))
+                    if row.get('custom_baby_detail'):
+                        baby_map[sid].append(f"其他：{row['custom_baby_detail']}")
+
+                cursor.execute("SELECT staff_id, bank_code, branch_code, account_no, is_primary FROM staff_bank_accounts")
+                bank_rows = cursor.fetchall()
+                bank_map = {}
+                for row in bank_rows:
+                    sid = row.get('staff_id')
+                    if sid is None:
+                        continue
+                    bank_map.setdefault(sid, [])
+                    bank_parts = []
+                    if row.get('bank_code'):
+                        bank_parts.append(row.get('bank_code'))
+                    if row.get('branch_code'):
+                        bank_parts.append(row.get('branch_code'))
+                    if row.get('account_no'):
+                        bank_parts.append(row.get('account_no'))
+                    suffix = "/".join(bank_parts) if bank_parts else str(row.get('account_no') or "")
+                    bank_label = f"{'主帳戶' if row.get('is_primary') else '次要帳戶'}: {suffix}" if suffix else ('主帳戶' if row.get('is_primary') else '次要帳戶')
+                    bank_map[sid].append(bank_label)
+
+                for row in rows:
+                    sid = row.get('id')
+                    if sid is None:
+                        continue
+
+                    regions = [item for item in region_map.get(sid, []) if item]
+                    if regions:
+                        row['service_regions'] = json.dumps(list(dict.fromkeys(regions)), ensure_ascii=False)
+                    else:
+                        row['service_regions'] = json.dumps([], ensure_ascii=False)
+
+                    skills = [item for item in skill_map.get(sid, []) if item]
+                    if skills:
+                        row['special_skills'] = json.dumps(list(dict.fromkeys(skills)), ensure_ascii=False)
+                    else:
+                        row['special_skills'] = json.dumps([], ensure_ascii=False)
+
+                    rest_days = []
+                    rest_items = rest_map.get(sid, [])
+                    for rest_type in rest_items:
+                        if rest_type in ('週休一日', '週休1日'):
+                            if 'Sunday' not in rest_days:
+                                rest_days.append('Sunday')
+                        elif rest_type in ('週休二日', '週休2日'):
+                            for day in ('Saturday', 'Sunday'):
+                                if day not in rest_days:
+                                    rest_days.append(day)
+                    row['weekly_rest_days'] = json.dumps(rest_days, ensure_ascii=False)
+
+                    time_slots = [item for item in slot_map.get(sid, []) if item]
+                    if time_slots:
+                        row['service_time_slots'] = json.dumps(list(dict.fromkeys(time_slots)), ensure_ascii=False)
+                    else:
+                        row['service_time_slots'] = json.dumps([], ensure_ascii=False)
+
+                    transports = [item for item in transport_map.get(sid, []) if item]
+                    if transports:
+                        row['transportation_preferences'] = json.dumps(list(dict.fromkeys(transports)), ensure_ascii=False)
+                    else:
+                        row['transportation_preferences'] = json.dumps([], ensure_ascii=False)
+
+                    holiday_preferences = [item for item in holiday_map.get(sid, []) if item]
+                    if holiday_preferences:
+                        row['holiday_preferences'] = json.dumps(list(dict.fromkeys(holiday_preferences)), ensure_ascii=False)
+                    else:
+                        row['holiday_preferences'] = json.dumps([], ensure_ascii=False)
+
+                    baby_preferences = [item for item in baby_map.get(sid, []) if item]
+                    if baby_preferences:
+                        row['baby_type_preferences'] = json.dumps(list(dict.fromkeys(baby_preferences)), ensure_ascii=False)
+                    else:
+                        row['baby_type_preferences'] = json.dumps([], ensure_ascii=False)
+
+                    bank_accounts = [item for item in bank_map.get(sid, []) if item]
+                    if bank_accounts:
+                        row['bank_accounts'] = json.dumps(list(dict.fromkeys(bank_accounts)), ensure_ascii=False)
+                    else:
+                        row['bank_accounts'] = json.dumps([], ensure_ascii=False)
+
+                return rows
             else:
                 cursor.execute(f"SELECT * FROM `{table_name}`")
             return cursor.fetchall()
+    finally:
+        conn.close()
+
+
+def get_table_columns(table_name: str) -> list[str]:
+    """取得指定資料表欄位名稱（用於無資料時仍可顯示欄位資訊）"""
+    allowed_tables = [
+        'clients',
+        'orders',
+        'beclass_records',
+        'matching_records',
+        'holidays',
+        'staff',
+        'staff_bank_accounts',
+        'case_staff_assignments',
+        'client_payments',
+        'client_payment_transactions',
+        'actual_hours_adjustments',
+        'staff_payments',
+        'staff_payment_transactions',
+        'payment_migration_reviews',
+        'staff_schedule',
+        'staff_regions',
+        'staff_cooking_skills',
+        'staff_weekly_rest',
+        'staff_time_slots',
+        'staff_transportation',
+        'staff_holiday_availability',
+        'staff_baby_types',
+        'line_confirmation_requests',
+        'staff_bookings',
+    ]
+    if table_name not in allowed_tables:
+        raise ValueError(f"不允許查詢此資料表: {table_name}")
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            if table_name == 'staff':
+                # staff 畫面會額外聚合顯示下列欄位，保留可視欄位一致性
+                cursor.execute("SHOW COLUMNS FROM `staff`")
+                rows = cursor.fetchall()
+                base_cols = [row.get('Field') for row in rows if row.get('Field')]
+                extra_cols = [
+                    'service_regions',
+                    'special_skills',
+                    'weekly_rest_days',
+                    'service_time_slots',
+                    'transportation_preferences',
+                    'holiday_preferences',
+                    'baby_type_preferences',
+                    'bank_accounts',
+                ]
+                return base_cols + [col for col in extra_cols if col not in base_cols]
+
+            cursor.execute(f"SHOW COLUMNS FROM `{table_name}`")
+            rows = cursor.fetchall()
+            return [row.get('Field') for row in rows if row.get('Field')]
     finally:
         conn.close()
 
@@ -151,6 +404,33 @@ TABLE_PRIMARY_KEYS = {
     'matching_records': 'id',
     'holidays': 'holiday_date',
     'staff_bank_accounts': 'id',
+    'staff_regions': 'staff_id',
+    'staff_cooking_skills': 'staff_id',
+    'staff_weekly_rest': 'staff_id',
+    'staff_time_slots': 'staff_id',
+    'staff_transportation': 'staff_id',
+    'staff_holiday_availability': 'staff_id',
+    'staff_baby_types': 'staff_id',
+    'line_confirmation_requests': 'id',
+    'staff_bookings': 'id',
+    'case_staff_assignments': 'id',
+    'client_payments': 'id',
+    'client_payment_transactions': 'id',
+    'actual_hours_adjustments': 'id',
+    'staff_payments': 'id',
+    'staff_payment_transactions': 'id',
+    'payment_migration_reviews': 'id',
+    'staff_schedule': 'id',
+}
+
+_READONLY_SUBTABLES = {
+    'staff_regions',
+    'staff_cooking_skills',
+    'staff_weekly_rest',
+    'staff_time_slots',
+    'staff_transportation',
+    'staff_holiday_availability',
+    'staff_baby_types',
 }
 
 # 系統自動管理欄位，一律唯讀，不允許透過即時編輯表格寫入，避免破壞主鍵/去重與時間戳記追蹤
@@ -167,6 +447,8 @@ def update_table_row(table_name: str, row_id, updates: dict) -> bool:
     """
     if table_name not in TABLE_PRIMARY_KEYS:
         raise ValueError(f"不允許編輯此資料表: {table_name}")
+    if table_name in _READONLY_SUBTABLES:
+        raise ValueError("此資料表為複合主鍵關聯表，目前僅支援瀏覽，不支援即時編輯。")
 
     pk_col = TABLE_PRIMARY_KEYS[table_name]
 
@@ -1336,4 +1618,3 @@ def get_recommended_staff_for_order(
             return recommendations
     finally:
         conn.close()
-

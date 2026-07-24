@@ -8,6 +8,13 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from services.accounting_source_projection import (
+    load_case_accounting_source_with_cursor,
+)
+from services.client_subsidy_return_obligations import (
+    activate_subsidy_return_obligation,
+    calculate_subsidy_return_due_date,
+)
 from services.db_service import (
     get_connection,
     sync_client_payment_due_dates_for_case_no,
@@ -17,6 +24,10 @@ from services.multi_caregiver_assignment_rules import (
 )
 from services.multi_caregiver_schedule_generation import (
     generate_assignment_schedule_in_transaction,
+)
+from services.order_amount_calculator import (
+    SUBSIDY_HOURS_BY_IDENTITY_STATUS,
+    calculate_order_amounts,
 )
 
 
@@ -814,6 +825,108 @@ def apply_order_assignment_sync(
                 "assignments": confirmation_assignments,
                 "can_confirm": True,
             }
+
+            subsidy_return_obligation_result = None
+            if change["actual_end_date"] is not None:
+                cursor.execute(
+                    """SELECT id, amount_receivable, amount_received,
+                              subsidy_return_receivable
+                         FROM client_payments
+                        WHERE case_no = %s FOR UPDATE""",
+                    (normalised_case_no,),
+                )
+                payment_row = cursor.fetchone()
+                if payment_row is not None:
+                    payment_columns = (
+                        "id", "amount_receivable", "amount_received",
+                        "subsidy_return_receivable",
+                    )
+                    payment = (
+                        dict(payment_row)
+                        if isinstance(payment_row, Mapping)
+                        else dict(zip(payment_columns, payment_row, strict=True))
+                    )
+                    amount_receivable = _decimal(
+                        payment["amount_receivable"], "amount_receivable"
+                    )
+                    amount_received = _decimal(
+                        payment["amount_received"], "amount_received"
+                    )
+                    current_return = payment.get("subsidy_return_receivable")
+                    obligation_is_inactive = current_return is None or _decimal(
+                        current_return, "subsidy_return_receivable"
+                    ) == Decimal("0")
+
+                    if amount_received == amount_receivable and obligation_is_inactive:
+                        accounting_source = load_case_accounting_source_with_cursor(
+                            cursor, normalised_case_no
+                        )
+                        missing_terms = list(accounting_source.get("missing_terms") or [])
+                        if missing_terms:
+                            raise ValueError(
+                                "accounting source is incomplete: " + ", ".join(missing_terms)
+                            )
+
+                        projected_order = accounting_source["order"]
+                        projected_client = accounting_source["client"]
+                        projected_identity_status = str(
+                            projected_client.get("identity_status") or ""
+                        ).strip()
+                        if projected_identity_status in SUBSIDY_HOURS_BY_IDENTITY_STATUS:
+                            calculator_assignments = [
+                                {
+                                    "assignment_id": assignment.get("assignment_id"),
+                                    "staff_id": assignment.get("staff_id"),
+                                    "actual_hours": assignment.get("actual_hours"),
+                                    "hourly_rate": assignment.get("hourly_rate"),
+                                    "floor_fee_amount": assignment.get("floor_fee_allocated"),
+                                }
+                                for assignment in accounting_source["staff_assignments"]
+                                if assignment.get("status") != "cancelled"
+                            ]
+                            calculated_plan = calculate_order_amounts(
+                                {
+                                    "case_no": normalised_case_no,
+                                    "service_days": projected_order.get("service_days"),
+                                    "service_hours_per_day": projected_order.get(
+                                        "service_hours_per_day"
+                                    ),
+                                    "identity_status": projected_identity_status,
+                                    "client_floor_fee": projected_order.get("floor_fee"),
+                                    "service_start_date": projected_order.get(
+                                        "actual_start_date"
+                                    ),
+                                    "actual_completion_date": projected_order.get(
+                                        "actual_end_date"
+                                    ),
+                                },
+                                calculator_assignments,
+                                accounting_source["collection_schedule"],
+                            )
+                            calculated_return_amount = _decimal(
+                                calculated_plan["client_ledger_plan"][
+                                    "subsidy_return_amount"
+                                ],
+                                "subsidy_return_amount",
+                            )
+                            if calculated_return_amount > 0:
+                                due_date = calculate_subsidy_return_due_date(
+                                    projected_order.get("actual_end_date")
+                                )
+                                subsidy_return_obligation_result = (
+                                    activate_subsidy_return_obligation(
+                                        cursor,
+                                        payment["id"],
+                                        calculated_return_amount,
+                                        due_date,
+                                    )
+                                )
+                                if subsidy_return_obligation_result.get("result") not in {
+                                    "activated", "existing", "review_required"
+                                }:
+                                    raise ValueError(
+                                        "unexpected subsidy-return obligation result"
+                                    )
             order_after = {
                 "case_no": normalised_case_no,
                 "service_days": change["service_days"],
@@ -845,6 +958,7 @@ def apply_order_assignment_sync(
             "assignments": resolved_plan,
             "generated_schedules": generated_schedules,
             "confirmation": confirmation,
+            "subsidy_return_obligation": subsidy_return_obligation_result,
             "audit_id": audit_id,
         }
     except Exception:
