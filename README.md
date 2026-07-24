@@ -258,6 +258,26 @@ GET  /api/config/liff/history
 POST /api/config/liff/rollback/{revision}
 ```
 
+#### 5.6 人工審查中心
+
+LINE 管理中心的「人工審查」已接上月嫂身分申請與客戶重新綁定。清單支援類型、狀態、
+日期及關鍵字篩選，LINE User ID 在清單中會遮蔽，進入具權限的詳細資料後才顯示完整值。
+
+查看審查資料需要 `line_agent` 以上權限；核准或拒絕需要 `line_manager` 以上權限。拒絕必須
+填寫原因。所有決定均保存處理管理員、原因與時間，並寫入 `admin_audit_logs`。核准前會以
+資料列鎖重新確認狀態；重新綁定還會檢查舊綁定是否已變更及新 LINE 是否與其他客戶衝突。
+
+```text
+GET  /api/v1/line/review-requests/summary
+GET  /api/v1/line/review-requests
+GET  /api/v1/line/review-requests/{request_id}
+POST /api/v1/line/review-requests/{request_id}/approve
+POST /api/v1/line/review-requests/{request_id}/reject
+```
+
+開發終端的一次性 `y/n` 審查仍保留；舊內部接口改為呼叫同一個交易服務，不會固定輪詢。
+管理中心也只在頁面操作或人工重新整理時讀取資料。
+
 #### 手動啟動個別服務
 若需單獨除錯，可在啟動 Docker 後手動執行以下指令：
 ```powershell

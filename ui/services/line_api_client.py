@@ -400,3 +400,47 @@ class LineAdminApiClient:
             json={"reason": reason},
             extra_headers={"If-Match": current_revision},
         )
+
+    def line_review_summary(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/v1/line/review-requests/summary", token=token)
+
+    def line_reviews(
+        self,
+        token: str | None,
+        *,
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/line/review-requests",
+            token=token,
+            params={key: value for key, value in filters.items() if value not in {None, ""}},
+        )
+
+    def line_review_detail(
+        self,
+        token: str | None,
+        request_id: int,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/api/v1/line/review-requests/{request_id}",
+            token=token,
+        )
+
+    def line_review_action(
+        self,
+        token: str | None,
+        request_id: int,
+        action: str,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        if action not in {"approve", "reject"}:
+            raise ValueError("不支援的人工審查操作")
+        return self._request(
+            "POST",
+            f"/api/v1/line/review-requests/{request_id}/{action}",
+            token=token,
+            json={"reason": reason},
+        )

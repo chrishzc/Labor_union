@@ -20,6 +20,15 @@ from fastapi.responses import FileResponse
 from line.worker import wake_worker
 from line.security import verify_line_signature
 from services.line_task_service import enqueue_line_task
+from services.line_review_service import (
+    LineReviewDataConflictError,
+    LineReviewNotFoundError,
+    LineReviewStateConflictError,
+    approve_line_review,
+    get_line_review,
+    list_line_reviews,
+    reject_line_review,
+)
 from services.line_rich_menu_service import get_current_rich_menu_id
 from services.webhook_event_service import register_event
 from services.line_liff_identity_service import (
@@ -352,7 +361,7 @@ async def line_bind(payload: LineBindPayload):
         conn.close()
 
 class RebindActionPayload(BaseModel):
-    request_id: str
+    request_id: int
 
 @router.get("/api/line/rebind_requests")
 def get_rebind_requests(x_internal_api_key: str | None = Header(default=None)):
@@ -360,22 +369,27 @@ def get_rebind_requests(x_internal_api_key: str | None = Header(default=None)):
     [前端管理 API] 取得所有待確認的重新綁定申請
     """
     _require_internal_api_key(x_internal_api_key)
-    conn = get_db_connection()
     try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT id AS request_id, client_id, client_name,
-                       old_line_user_id, new_line_user_id,
-                       created_at AS request_time
-                FROM line_confirmation_requests
-                WHERE request_type='client_rebind' AND status='pending'
-                ORDER BY created_at
-                """
-            )
-            return {"status": "success", "data": cursor.fetchall()}
-    finally:
-        conn.close()
+        result = list_line_reviews(
+            request_type="client_rebind", status="pending", page_size=100
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "status": "success",
+        "data": [
+            {
+                "request_id": detail["id"],
+                "client_id": detail.get("client_id"),
+                "client_name": detail.get("client_name"),
+                "old_line_user_id": detail.get("old_line_user_id"),
+                "new_line_user_id": detail.get("new_line_user_id"),
+                "request_time": detail.get("created_at"),
+            }
+            for item in result["items"]
+            for detail in [get_line_review(int(item["id"]))]
+        ],
+    }
 
 
 class LineIdentityPayload(BaseModel):
@@ -407,66 +421,19 @@ def approve_rebind_request(
     [前端管理 API] 確認並執行重新綁定申請
     """
     _require_internal_api_key(x_internal_api_key)
-    conn = get_db_connection()
     try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    """
-                    SELECT * FROM line_confirmation_requests
-                    WHERE id=%s AND request_type='client_rebind'
-                      AND status='pending' FOR UPDATE
-                    """,
-                    (payload.request_id,),
-                )
-                target_request = cursor.fetchone()
-                if not target_request:
-                    return {"status": "error", "message": "找不到待審核的重新綁定申請"}
-                cursor.execute("""
-                    UPDATE clients 
-                    SET line_user_id = %s 
-                    WHERE id = %s
-                """, (target_request["new_line_user_id"], target_request["client_id"]))
-
-                cursor.execute(
-                    "SELECT case_no FROM clients WHERE id = %s",
-                    (target_request["client_id"],),
-                )
-                client_row = cursor.fetchone()
-                client_case_no = (
-                    client_row.get("case_no")
-                    if isinstance(client_row, dict)
-                    else client_row[0]
-                    if client_row
-                    else None
-                )
-                ensure_order_for_case_no(
-                    cursor,
-                    target_request["client_id"],
-                    client_case_no,
-                )
-                
-                # 推播成功訊息給客戶
-                success_msg = f"【系統通知】\n服務綁定與查詢成功！您的帳號重新綁定申請已審核通過，成功連結至客戶「{target_request['client_name']}」的登記資料。\n"
-                cursor.execute("""
-                    INSERT INTO line_tasks (to_user_id, message_content, status)
-                    VALUES (%s, %s, 'pending')
-                """, (target_request["new_line_user_id"], success_msg))
-                cursor.execute(
-                    """
-                    UPDATE line_confirmation_requests
-                    SET status='approved', reviewed_at=NOW(), resolved_at=NOW()
-                    WHERE id=%s
-                    """,
-                    (payload.request_id,),
-                )
-        conn.commit()
+        detail = get_line_review(int(payload.request_id))
+        if detail["request_type"] != "client_rebind":
+            raise HTTPException(status_code=409, detail="Review request type does not match")
+        result = approve_line_review(
+            int(payload.request_id), admin_user_id=None, reason="開發終端核准"
+        )
         wake_worker()
-        return {"status": "success", "message": "已確認並完成重新綁定"}
-    except Exception as e:
-        conn.rollback()
-        return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
-    finally:
-        conn.close()
+        return {"status": "success", "message": result["message"], "data": result}
+    except LineReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (LineReviewStateConflictError, LineReviewDataConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 @router.post("/api/line/rebind_requests/reject")
 def reject_rebind_request(
@@ -477,41 +444,21 @@ def reject_rebind_request(
     [前端管理 API] 拒絕重新綁定申請
     """
     _require_internal_api_key(x_internal_api_key)
-    conn = get_db_connection()
     try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    """
-                    SELECT * FROM line_confirmation_requests
-                    WHERE id=%s AND request_type='client_rebind'
-                      AND status='pending' FOR UPDATE
-                    """,
-                    (payload.request_id,),
-                )
-                target_request = cursor.fetchone()
-                if not target_request:
-                    return {"status": "error", "message": "找不到待審核的重新綁定申請"}
-                reject_msg = f"【系統通知】\n您的帳號重新綁定申請已被管理員拒絕。如有疑問請聯繫客服專員。"
-                cursor.execute("""
-                    INSERT INTO line_tasks (to_user_id, message_content, status)
-                    VALUES (%s, %s, 'pending')
-                """, (target_request["new_line_user_id"], reject_msg))
-                cursor.execute(
-                    """
-                    UPDATE line_confirmation_requests
-                    SET status='rejected', reviewed_at=NOW(), resolved_at=NOW()
-                    WHERE id=%s
-                    """,
-                    (payload.request_id,),
-                )
-        conn.commit()
+        detail = get_line_review(int(payload.request_id))
+        if detail["request_type"] != "client_rebind":
+            raise HTTPException(status_code=409, detail="Review request type does not match")
+        result = reject_line_review(
+            int(payload.request_id),
+            admin_user_id=None,
+            reason="開發終端拒絕",
+        )
         wake_worker()
-        return {"status": "success", "message": "已拒絕該筆重新綁定申請"}
-    except Exception as e:
-        conn.rollback()
-        return {"status": "error", "message": f"資料庫寫入失敗：{str(e)}"}
-    finally:
-        conn.close()
+        return {"status": "success", "message": result["message"], "data": result}
+    except LineReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (LineReviewStateConflictError, LineReviewDataConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 from typing import Optional, Dict, Any
 
@@ -658,48 +605,25 @@ def list_staff_review_requests(
     if request_type not in {None, "client_rebind", "staff_verification"}:
         raise HTTPException(status_code=422, detail="Unsupported review request type")
 
+    result = list_line_reviews(
+        request_type=request_type,
+        status="pending",
+        page_size=100,
+    )
     items = []
-    if request_type in {None, "client_rebind"}:
-        rebind_result = get_rebind_requests(x_internal_api_key)
-        if rebind_result.get("status") == "success":
-            for request_item in rebind_result.get("data", []):
-                items.append({
-                    "type": "client_rebind",
-                    "request_id": request_item.get("request_id"),
-                    "status": "pending",
-                    "created_at": request_item.get("request_time"),
-                    "display_name": request_item.get("client_name"),
-                    "details": request_item,
-                    "actions": ["approve", "reject"],
-                })
-
-    if request_type in {None, "staff_verification"}:
-        conn = get_db_connection()
-        try:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute(
-                    """
-                    SELECT id, line_user_id, created_at
-                    FROM line_confirmation_requests
-                    WHERE request_type='staff_verification'
-                      AND status='pending'
-                    ORDER BY created_at
-                    """
-                )
-                for request_item in cursor.fetchall():
-                    items.append({
-                        "type": "staff_verification",
-                        "request_id": str(request_item["id"]),
-                        "status": "pending",
-                        "created_at": request_item["created_at"],
-                        "display_name": request_item["line_user_id"],
-                        "details": request_item,
-                        "actions": ["approve", "reject"],
-                    })
-        finally:
-            conn.close()
-
-    items.sort(key=lambda item: str(item.get("created_at") or ""))
+    for summary in result["items"]:
+        details = get_line_review(int(summary["id"]))
+        items.append(
+            {
+                "type": details["request_type"],
+                "request_id": str(details["id"]),
+                "status": details["status"],
+                "created_at": details["created_at"],
+                "display_name": details.get("client_name") or details.get("line_user_id"),
+                "details": details,
+                "actions": ["approve", "reject"],
+            }
+        )
     return {"status": "success", "data": items}
 
 
@@ -711,61 +635,25 @@ def approve_staff_review_request(
 ):
     """Approve a rebind or directly approve a service-staff LINE role request."""
     _require_internal_api_key(x_internal_api_key)
-    if request_type == "client_rebind":
-        return approve_rebind_request(RebindActionPayload(request_id=request_id), x_internal_api_key)
-    if request_type != "staff_verification":
+    if request_type not in {"client_rebind", "staff_verification"}:
         raise HTTPException(status_code=422, detail="Unsupported review request type")
-
-    conn = get_db_connection()
     try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT id, line_user_id
-                FROM line_confirmation_requests
-                WHERE id=%s AND request_type='staff_verification'
-                  AND status='pending' FOR UPDATE
-                """,
-                (request_id,),
-            )
-            request_item = cursor.fetchone()
-            if not request_item:
-                raise HTTPException(status_code=404, detail="Staff verification request not found")
-            cursor.execute(
-                "UPDATE line_confirmation_requests SET status='approved', reviewed_at=NOW(), resolved_at=NOW() WHERE id=%s",
-                (request_id,),
-            )
-            cursor.execute(
-                """
-                INSERT INTO line_users (line_user_id, role, status, last_event_at)
-                VALUES (%s,'staff','active',NOW())
-                ON DUPLICATE KEY UPDATE role='staff', status='active', last_event_at=NOW()
-                """,
-                (request_item["line_user_id"],),
-            )
-            templates = load_message_templates()
-            enqueue_line_task(
-                cursor,
-                to_user_id=request_item["line_user_id"],
-                task_type="rich_menu_link",
-                payload={
-                    "rich_menu_id": _load_rich_menu_id("staff"),
-                    "success_message": templates.get("staff_switch_success", "月嫂身分已由工會確認通過。"),
-                },
-                idempotency_key=f"staff-review-approved:{request_id}",
-            )
-            conn.commit()
+        detail = get_line_review(int(request_id))
+        if detail["request_type"] != request_type:
+            raise HTTPException(status_code=409, detail="Review request type does not match")
+        result = approve_line_review(
+            int(request_id), admin_user_id=None, reason="開發終端核准"
+        )
         wake_worker()
         return {
             "status": "success",
-            "message": "已核准月嫂身分並切換專屬選單",
-            "data": request_item,
+            "message": result["message"],
+            "data": result,
         }
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+    except LineReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (LineReviewStateConflictError, LineReviewDataConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/api/line/staff/review-requests/{request_type}/{request_id}/reject")
@@ -776,47 +664,21 @@ def reject_staff_review_request(
 ):
     """Reject a rebind or a pending service-staff role request."""
     _require_internal_api_key(x_internal_api_key)
-    if request_type == "client_rebind":
-        return reject_rebind_request(RebindActionPayload(request_id=request_id), x_internal_api_key)
-    if request_type != "staff_verification":
+    if request_type not in {"client_rebind", "staff_verification"}:
         raise HTTPException(status_code=422, detail="Unsupported review request type")
-
-    conn = get_db_connection()
     try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT id, line_user_id FROM line_confirmation_requests
-                WHERE id=%s AND request_type='staff_verification'
-                  AND status='pending' FOR UPDATE
-                """,
-                (request_id,),
-            )
-            request_item = cursor.fetchone()
-            if not request_item:
-                raise HTTPException(status_code=404, detail="Staff verification request not found")
-            cursor.execute(
-                "UPDATE line_confirmation_requests SET status='cancelled', reviewed_at=NOW(), resolved_at=NOW() WHERE id=%s",
-                (request_id,),
-            )
-            templates = load_message_templates()
-            enqueue_line_task(
-                cursor,
-                to_user_id=request_item["line_user_id"],
-                message_content=templates.get(
-                    "staff_verification_rejected",
-                    "您的月嫂身分驗證申請未通過，請聯絡工會服務人員。",
-                ),
-                idempotency_key=f"staff-review-rejected:{request_id}",
-            )
-            conn.commit()
+        detail = get_line_review(int(request_id))
+        if detail["request_type"] != request_type:
+            raise HTTPException(status_code=409, detail="Review request type does not match")
+        result = reject_line_review(
+            int(request_id), admin_user_id=None, reason="開發終端拒絕"
+        )
         wake_worker()
-        return {"status": "success", "message": "已拒絕月嫂驗證申請"}
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()
+        return {"status": "success", "message": result["message"], "data": result}
+    except LineReviewNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except (LineReviewStateConflictError, LineReviewDataConflictError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.put("/api/line/users/{user_id}/role/{role}")

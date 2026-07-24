@@ -207,6 +207,7 @@ MEDIA_STORAGE_ROOT=.local_media
 MEDIA_STORAGE_PROVIDER=local
 LINE_LOGIN_CHANNEL_ID=<LIFF 所屬的 LINE Login Channel ID>
 LIFF_REQUIRE_ID_TOKEN=true
+LINE_REVIEW_STALE_HOURS=24
 ```
 
 `ENABLE_ADMIN_AUTH=false` 僅能在 `APP_ENV=development/dev/local/test` 略過帳號登入；正式環境
@@ -240,4 +241,16 @@ X-Internal-API-Key: <INTERNAL_API_KEY>
 ENABLE_REBIND_CONSOLE_REVIEW=true
 ```
 
-開發時，Webhook提交月嫂身分或重新綁定申請後，會向專案根目錄`start_fastapi_ngrok.py`在`127.0.0.1`建立的臨時入口推送一次通知，終端隨即接受`y`核准、`n`拒絕，不會固定輪詢待審API。啟動器只在啟動時補查一次既有待審資料。此功能由`ENABLE_LINE_REVIEW_CONSOLE`控制，正式環境`APP_ENV=production`時強制停用；正式Web/UI使用相同API。
+開發時，Webhook提交月嫂身分或重新綁定申請後，會向專案根目錄`start_fastapi_ngrok.py`在`127.0.0.1`建立的臨時入口推送一次通知，終端隨即接受`y`核准、`n`拒絕，不會固定輪詢待審API。啟動器只在啟動時補查一次既有待審資料。此功能由`ENABLE_LINE_REVIEW_CONSOLE`控制，正式環境`APP_ENV=production`時強制停用。
+
+正式 Web/UI 使用具管理員 Session 與角色權限的新接口：
+
+```text
+GET  /api/v1/line/review-requests/summary
+GET  /api/v1/line/review-requests
+GET  /api/v1/line/review-requests/{request_id}
+POST /api/v1/line/review-requests/{request_id}/approve
+POST /api/v1/line/review-requests/{request_id}/reject
+```
+
+清單與詳細資料至少需要 `line_agent`；核准／拒絕需要 `line_manager`。兩組接口最後都呼叫 `services/line_review_service.py`，因此交易鎖、資料衝突檢查、LINE 任務與狀態結果一致。`LINE_REVIEW_STALE_HOURS` 只控制管理頁逾時提醒門檻，不會自動拒絕或核准申請。

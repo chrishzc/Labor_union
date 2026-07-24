@@ -21,6 +21,7 @@ from api.routes import (
     line_system_config,
     line_admin,
     line_rich_menus,
+    line_reviews,
     line_tasks,
     matches,
     multi_caregiver_case_assignments,
@@ -81,6 +82,7 @@ app.include_router(admin_auth.router)
 app.include_router(line_admin.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
+app.include_router(line_reviews.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)

@@ -415,3 +415,34 @@ ENABLE_SERVER_FAILURE_POPUP=false
 - 5.1～5.5 完整 LINE 管理回歸共 35 項 pytest 測試通過。
 - 公開 Runtime、管理權限與舊 revision HTTP 整合驗證通過；gateway／bind／register 離線 Playwright JavaScript smoke test 全部通過。
 - 未建立一次性 Python 檔案。
+
+## feat: 新增 LINE 人工審查中心與安全確認流程
+
+### 新增
+
+- `api/routes/line_reviews.py`、`api/schemas/line_reviews.py`：人工審查統計、清單、明細、核准與拒絕 API。
+- `services/line_review_service.py`：月嫂身分與客戶重新綁定共用的交易、鎖定、衝突檢查與任務建立服務。
+- `ui/components/line_review_manager.py`：人工審查統計、篩選、分頁、詳細資料與二次確認操作介面。
+- `db/schema_parts/97_line_confirmation_review.sql`：可重複執行的既有資料庫欄位、索引與外鍵升級。
+- `tests/test_line_review_management.py`：狀態、原因、冪等、重新綁定競態、API 與無固定輪詢測試。
+
+### 修改
+
+- `db/schema.sql`：人工確認請求新增管理員處理者、決定原因及查詢索引。
+- `line/line_bot.py`：舊內部審查接口改用共用服務，保留開發終端相容性。
+- `api/main.py`、`api/routes/line_admin.py`：註冊 5.6 API 並更新管理能力版本。
+- `ui/pages/07_line_management.py`、`ui/services/line_api_client.py`：接入正式人工審查頁與 API Client。
+- `config/message_templates.json`：新增客戶重新綁定核准與拒絕通知範本。
+- `.env.example`：新增待審逾時提醒門檻 `LINE_REVIEW_STALE_HOURS`。
+- README、設定說明、階段報告、資料字典與工作紀錄同步更新。
+
+### 刪除
+
+- 無。
+
+### 驗證
+
+- `scripts/init_db.py` 成功執行 42 個主 Schema statement，並載入 `97_line_confirmation_review.sql`。
+- Python 語法、訊息範本 Schema 與 112 條 FastAPI 路由驗證通過。
+- 5.1～5.6 LINE 管理回歸共 43 項測試通過。
+- 測試資料已清除，未建立任何一次性 Python 檔案。

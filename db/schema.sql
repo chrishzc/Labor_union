@@ -740,12 +740,16 @@ CREATE TABLE IF NOT EXISTS line_confirmation_requests (
     old_line_user_id VARCHAR(100) NULL,
     new_line_user_id VARCHAR(100) NULL,
     status ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+    reviewed_by_admin_user_id BIGINT NULL COMMENT 'Web 管理中心處理者；開發終端處理時可為 NULL',
     reviewed_by_line_user_id VARCHAR(100) NULL,
+    decision_reason TEXT NULL COMMENT '核准備註或拒絕原因',
     reviewed_at DATETIME NULL,
     resolved_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_confirmation_pending (request_type, status, created_at),
+    INDEX idx_confirmation_status_time (status, created_at),
+    INDEX idx_confirmation_admin_reviewer (reviewed_by_admin_user_id, reviewed_at),
     INDEX idx_confirmation_requester (line_user_id, request_type, status),
     CONSTRAINT fk_confirmation_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

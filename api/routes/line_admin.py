@@ -71,7 +71,7 @@ def line_admin_health():
 def line_admin_capabilities():
     return BaseResponse(
         data={
-            "stage": "5.5",
+            "stage": "5.6",
             "available": {
                 "health_overview": True,
                 "message_template_api": True,
@@ -88,13 +88,13 @@ def line_admin_capabilities():
                 "liff_revision_history": True,
                 "customer_service_config_api": True,
                 "staff_review_api": True,
+                "staff_review_management": True,
                 "admin_session": True,
                 "role_permissions": True,
                 "audit_log": True,
             },
             "planned_pages": [
                 "LINE 設定中心",
-                "人工審查",
                 "客服入口",
                 "操作紀錄",
             ],

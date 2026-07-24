@@ -141,3 +141,15 @@ PUT /api/line/users/{user_id}/role/{role}
 月嫂身分確認與客戶重新綁定共用 MySQL `line_confirmation_requests`，並提供統一的 `/api/line/staff/review-requests` 介面，供未來工會客服前端顯示同一份待處理清單。月嫂申請由工會人員核准後直接切換身分，不產生驗證碼。所有工作人員接口均要求 `X-Internal-API-Key`。
 
 開發環境由專案根目錄的`start_fastapi_ngrok.py`建立只綁定`127.0.0.1`的一次性通知入口。Webhook成功提交月嫂身分或客戶重新綁定申請後，直接推送一筆通知，終端立即顯示`y/n`並呼叫同一組正式approve／reject API；不再每3秒查詢待審API。啟動時只掃描一次既有待審資料，避免服務重啟期間的申請被遺漏。
+
+## 第五階段 5.6：人工審查中心
+
+- 新增正式管理接口 `/api/v1/line/review-requests`，提供統計、分頁篩選、詳細資料、核准與拒絕。
+- `line_agent` 可查看，`line_manager` 才能做決定；拒絕原因必填，核准可留下稽核備註。
+- `line_confirmation_requests` 新增 Web 管理員 ID 與決定原因，並以可重跑 Schema part 升級既有資料庫。
+- 月嫂認證及客戶重新綁定集中到 `services/line_review_service.py`，正式 UI 與開發終端不再各自維護交易邏輯。
+- 處理前以 `SELECT ... FOR UPDATE` 鎖定申請；已處理申請回 409，不會重複建立 LINE 任務。
+- 重新綁定核准前重新檢查舊綁定快照、新 LINE 衝突及案件編號，資料在等待期間改變時拒絕覆蓋。
+- 核准／拒絕結果先與 LINE 任務一起提交，再喚醒 Worker；月嫂拒絕狀態統一為 `rejected`。
+- 管理清單遮蔽 LINE ID，詳細頁才顯示完整值；UI 不固定輪詢，只在操作或手動重新整理時查詢。
+- 開發終端維持啟動時一次補查及 Webhook／LIFF 即時推送的 `y/n` 操作，舊接口作為相容包裝保留。
