@@ -1,6 +1,29 @@
 # 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
 
-> 目前版本：**v0.2.0**（2026-07-24）｜ADAD Master System Map：**56.0**
+> 目前版本：**v0.2.1**（2026-07-25）｜ADAD Master System Map：**56.0**
+
+## 2026-07-25 更新（v0.2.1）
+
+本次版本完成管理介面 API 化的安全收尾，並統一沿用 LINE 管理中心既有的正式管理員身分與授權系統。
+
+- **正式管理員認證共用**：Data Browser 與國定假日 GET／POST／DELETE 全部改用 `AdminPrincipal` 與 `require_system_admin`，不再自行維護 `X-Auth-Context`、`ADMIN_AUTH_CONTEXT` 或 `admin_role` 字串判斷。
+- **雙層管理 API 防護**：Streamlit 管理頁統一送出伺服器端 `X-Internal-API-Key` 與登入後取得的 `Authorization: Bearer <session>`；缺少設定、Session 失效或角色不足時採 fail-closed。
+- **可信稽核身分**：Data Browser PATCH 的 audit actor 與 role 直接取自已驗證的 `AdminPrincipal.username`／`AdminPrincipal.role`，不接受 UI payload 指定，也不再由 username 推測角色。
+- **UI → API 串接**：Data Browser、訂單／媒合、訂單編輯與月嫂月曆持續改走 FastAPI；排休 ownership 僅使用 `assignment_id`，正式指派維持 preview → confirm → apply 流程。
+- **安全交易邊界**：Data Browser 更新、更新前後快照與 audit insert 共用同一 transaction；非法欄位整批拒絕，audit schema 不在 request runtime 動態建表。
+- **ADAD 規格同步**：新增 `AdminAuthService`、`AdminAuthorizationDependency`、`UIAdminApiContext` 節點，更新 Data Browser／Holiday 的 dependency、invariant、verification 與編譯後 YAML IR。
+
+部署或啟動管理介面前至少需要：
+
+```env
+INTERNAL_API_KEY=replace-with-a-long-random-secret
+APP_ENV=production
+ENABLE_ADMIN_AUTH=true
+```
+
+正式環境必須先由管理員登入取得 Session。只有 `APP_ENV` 為 `development`、`dev`、`local` 或 `test`，且 `ENABLE_ADMIN_AUTH=false` 時可以略過 Bearer Session；`X-Internal-API-Key` 永遠不能略過。
+
+本次安全整合的針對性驗證為 `22 passed`，涵蓋正式認證核心、Data Browser Router／Service、Holiday Router 與 Streamlit runtime AppTest。對應 commits：`8fa3910`、`bd09413`。
 
 ## 2026-07-24 更新
 
