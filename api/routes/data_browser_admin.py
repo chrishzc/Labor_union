@@ -5,30 +5,19 @@
 ================================================================================
 """
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, Path
+from api.dependencies.admin_auth import require_system_admin
 from api.schemas.base import BaseResponse
 from api.schemas.data_browser import DataBrowserPatchRequest, DataBrowserTableResponse
 from services import data_browser_admin_schema_service
+from services.admin_auth_service import AdminPrincipal
 
 router = APIRouter(prefix="/api/v1/admin/data-browser", tags=["Admin Data Browser"])
-
-
-def admin_auth_dependency(auth_context: Optional[str] = Header(default=None, alias="X-Auth-Context")) -> str:
-    """最小化的 admin 認證授權 dependency。"""
-    if not isinstance(auth_context, str):
-        auth_context = None
-
-    if not auth_context:
-        raise HTTPException(status_code=401, detail="unauthenticated")
-    if auth_context != "admin_role":
-        raise HTTPException(status_code=403, detail="forbidden")
-    return auth_context
 
 @router.get("/{table}", response_model=BaseResponse[DataBrowserTableResponse])
 def get_data_browser_table(
     table: str = Path(..., description="資料表名稱"),
-    auth_context: str = Depends(admin_auth_dependency),
+    principal: AdminPrincipal = Depends(require_system_admin),
 ):
     """取得資料表動態主鍵、資料列、欄位清單與權限 SSOT"""
     try:
@@ -51,7 +40,7 @@ def patch_data_browser_row(
     req: DataBrowserPatchRequest,
     table: str = Path(..., description="資料表名稱"),
     row_id_str: str = Path(..., description="列識別碼 (支援整數 ID 與字串主鍵 case_no)"),
-    auth_context: str = Depends(admin_auth_dependency),
+    principal: AdminPrincipal = Depends(require_system_admin),
 ):
     """更新單列微調資料，支援動態主鍵型別，並寫入異動稽核紀錄"""
     try:
@@ -59,7 +48,8 @@ def patch_data_browser_row(
             table_name=table,
             row_id=row_id_str,
             updates=req.updates,
-            operator_id=auth_context,
+            operator_id=principal.username,
+            operator_role=principal.role,
         )
         return BaseResponse(data=success, message=f"成功更新資料表 {table} 之資料列 {row_id_str}")
     except ValueError as ve:

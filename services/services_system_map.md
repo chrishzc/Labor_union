@@ -1423,6 +1423,8 @@
   - table_name: 資料表名稱 (str)。
   - row_id: 資料列識別碼 (str，支援整數與字串主鍵 case_no)。
   - updates: 待更新欄位字典 (Dict[str, Any])。
+  - operator_id: 經正式 AdminPrincipal 驗證的 username。
+  - operator_role: 經正式 AdminPrincipal 驗證的 role。
 - Output:
   - schema: 資料表之中繼權限字典 (含 primary_key, editable_columns, read_only, valid_options, rows, columns)。
   - patch_result: 成功標記與影響列數。
@@ -1432,6 +1434,7 @@
   - 必須回傳 read_only 與 valid_options 中繼資料作為單一事實來源 (SSOT)。
   - 對資料表、主鍵與 updates 之檢查必須採取 fail-closed 原則；若 updates payload 同時包含合法與非法欄位，必須整筆失敗並拋出 invalid_input，嚴禁自動過濾後僅套用部分欄位。
   - 資料庫更新影響列數 (affected rowcount) 為 0 時，視為更新失敗 (not_found)，不得回傳成功亦不得寫入成功 audit 紀錄。
+  - Audit actor 與 role 必須由 Router 傳入的正式 AdminPrincipal 欄位提供，不得由 username 推測 role 或固定寫成 admin。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_data_browser_admin_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 
@@ -1464,6 +1467,33 @@
   - 嚴禁記錄不必要的密碼、Token 或完整敏感個人資料 (PII)。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_data_browser_admin_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+
+##### Module: AdminAuthService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/admin_auth_service.py
+- Description: 資料庫管理員帳號、session token 驗證、角色階級與可信 AdminPrincipal 的正式認證服務。
+- Dependencies: [DbService]
+- Complexity: medium
+- Input:
+  - credentials_or_session_token: 管理員登入憑證或 Bearer session token。
+  - minimum_role: 需要比對時的最低管理員角色。
+- Output:
+  - admin_principal: 經資料庫驗證且包含 id、username、display_name、role 的 AdminPrincipal。
+- Algorithm:
+  - 登入時正規化 username、驗證 scrypt 密碼 Hash，並只為啟用帳號建立具到期時間的隨機 session token。
+  - 僅保存 session token 的 SHA-256 Hash；查詢 session 時同時檢查未撤銷、未過期及帳號仍啟用。
+  - 將資料庫身分轉成不可變 AdminPrincipal，角色比較只使用 ROLE_LEVELS。
+  - 撤銷、續期或 audit 寫入各自使用明確 transaction；任何資料庫錯誤不得偽造成功結果。
+- Invariants:
+  - Session token 只能以安全 Hash 儲存與查詢，不得將明文 token 寫入資料庫或 log。
+  - 角色只能使用既定 ROLE_LEVELS，授權比較不得信任 UI 傳入的 role 或 actor 字串。
+  - 停用、撤銷或過期 session 必須 fail-closed，不得產生 principal。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_admin_auth_security.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 

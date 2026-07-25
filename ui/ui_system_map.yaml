@@ -49,7 +49,9 @@ modules:
     subsystem: null
     map_file: ui\ui_system_map.md
     dependencies:
-    - DbService
+    - DataBrowserAdminRouter
+    - HolidayRouter
+    - UIAdminApiContext
     input: {}
     output: {}
     exceptions: []
@@ -59,6 +61,9 @@ modules:
       DataBrowserUI 必須唯讀。
     - table_options、EDITABLE_COLUMNS 與 READ_ONLY_TABLES 均不得包含精確 legacy 表名 payments；必須保留
       client_payments、client_payment_transactions、staff_payments 與 staff_payment_transactions。
+    - 所有 Data Browser metadata、PATCH 與 holidays 請求必須使用 UIAdminApiContext 產生的正式 headers；不得送出
+      X-Auth-Context。
+    - 正式模式缺少 internal service key 或管理員 session 時必須停止渲染資料操作且不得發出 HTTP 請求。
     preferred_pattern: none
     verification:
     - command:
@@ -68,6 +73,7 @@ modules:
         - pytest
         - -q
         - tests\test_data_browser_identity_status_ui.py
+        - tests\test_data_browser_runtime_acceptance_app_test.py
         cwd: project
         timeout: 60
         expect_exit: 0
@@ -96,6 +102,67 @@ modules:
     - _resolve_api_base_url
     - format_col_header
     - show
+  UIAdminApiContext:
+    type: ui_helper
+    description: Streamlit 管理員頁共用 runtime API base URL、internal service key 與 Bearer
+      session header 組裝。
+    source: ui/pages/shared.py
+    domain: null
+    subsystem: null
+    map_file: ui\ui_system_map.md
+    dependencies:
+    - AdminAuthorizationDependency
+    input:
+      environment: API_BASE_URL、INTERNAL_API_KEY、APP_ENV、ENABLE_ADMIN_AUTH。
+      session_state: line_admin_access_token。
+    output:
+      api_base_url: runtime 解析且去除尾端斜線的 API base URL。
+      admin_headers: X-Internal-API-Key 與正式模式 Authorization Bearer header。
+    exceptions: []
+    invariants:
+    - INTERNAL_API_KEY 永遠必須存在；不得提供 admin_role、operator、user_role 或 ADMIN_AUTH_CONTEXT
+      fallback。
+    - 正式模式必須從 line_admin_access_token 取得非空 token；不得接受 UI 文字欄位指定 principal 或 role。
+    - 只有與 backend 相同的明確 development bypass 條件下可省略 Authorization，且仍必須送 internal service
+      key。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_data_browser_runtime_acceptance_app_test.py
+        - -q
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: ui_layer
+    state: planned
+    fan_in_snapshot: 1
+    known_symbols:
+    - admin_auth_is_bypassed
+    - build_admin_headers
+    - resolve_admin_access_token
+    - resolve_api_base_url
+    - resolve_internal_api_key
   OrderUI:
     type: ui_page
     description: Page 2 訂單與帳務管理頁的殼層；建立固定順序的五個 Tab，並將已載入資料分派至各自的 renderer。
@@ -217,7 +284,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
   OrderUIDerivedDateHelpers:
     type: function
@@ -510,7 +577,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 1
   EditOrderDerivedDateHelpers:
     type: function
@@ -556,7 +623,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 0
   FormManagementUI:
     type: ui_page
@@ -946,7 +1013,7 @@ modules:
     - 不修改配對中心內部的 DbService 呼叫；該範圍屬後續 OrderUI_Tab2_Assign 節點。
     - 不新增或修改 API Router、Service、Tab 3、Tab 4 或 Tab 5。
     sub_map: ui_layer
-    state: dirty
+    state: planned
     fan_in_snapshot: 0
   PaymentManagementUI:
     type: ui_page

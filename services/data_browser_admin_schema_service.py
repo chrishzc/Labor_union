@@ -84,6 +84,7 @@ def patch_data_browser_table_row(
     row_id: str,
     updates: Dict[str, Any],
     operator_id: str = "admin_ui",
+    operator_role: str = "admin",
 ) -> bool:
     """
     更新特定資料表單列，支援字串主鍵 (如 case_no)，並自動寫入稽核紀錄。
@@ -135,7 +136,7 @@ def patch_data_browser_table_row(
                 changed_fields=updates,
                 operator_id=operator_id,
                 actor=operator_id,
-                role=operator_id if operator_id in {"admin_role", "admin"} else "admin",
+                role=operator_role,
                 before_snapshot=before_snapshot,
                 after_snapshot=after_snapshot,
                 cursor=cursor,

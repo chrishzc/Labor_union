@@ -1288,7 +1288,8 @@
   - 僅供開發環境使用；正式環境不得依賴ngrok。
   - FastAPI與ngrok任一程序異常停止時，另一程序必須一併安全關閉。
   - LINE人工審核通知入口只綁定127.0.0.1，不得透過ngrok公開。
-- Observability: terminal
+- Observability:
+  - log: terminal
 
 ##### Module: OnlineScript
 - Sub Map: root

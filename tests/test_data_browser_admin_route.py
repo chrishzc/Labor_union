@@ -1,109 +1,131 @@
-"""
-================================================================================
-檔案名稱: tests/test_data_browser_admin_route.py
-功能說明: 驗證 Data Browser Admin Router 的認證授權與 PATCH 觸發參數
-================================================================================
-"""
+"""Data Browser routes must reuse the formal administrator dependency."""
 
 import pytest
-from fastapi import HTTPException
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
-from api.schemas.data_browser import DataBrowserPatchRequest
+from api.dependencies import admin_auth
 from api.routes import data_browser_admin
+from api.schemas.data_browser import DataBrowserPatchRequest
 from services import data_browser_admin_schema_service
+from services.admin_auth_service import AdminPrincipal
 
 
-def test_admin_auth_dependency_rejects_unauthenticated():
-    with pytest.raises(HTTPException) as error:
-        data_browser_admin.admin_auth_dependency(None)
-
-    assert error.value.status_code == 401
-    assert error.value.detail == "unauthenticated"
+def _principal(role: str = "system_admin") -> AdminPrincipal:
+    return AdminPrincipal(7, "verified-admin", "Verified Admin", role)
 
 
-def test_admin_router_get_without_auth_context_returns_401():
-    admin_app = FastAPI()
-    admin_app.include_router(data_browser_admin.router)
-    client = TestClient(admin_app)
-    response = client.get("/api/v1/admin/data-browser/orders")
+def _client() -> TestClient:
+    app = FastAPI()
+    app.include_router(data_browser_admin.router)
+    return TestClient(app)
+
+
+def _headers() -> dict[str, str]:
+    return {
+        "X-Internal-API-Key": "internal-test-key",
+        "Authorization": "Bearer session-token",
+    }
+
+
+def test_admin_router_get_without_internal_key_returns_401(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
+    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
+
+    response = _client().get("/api/v1/admin/data-browser/orders")
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "unauthenticated"
+    assert response.json()["detail"] == "內部服務金鑰錯誤"
 
 
-def test_admin_auth_dependency_rejects_non_admin():
-    with pytest.raises(HTTPException) as error:
-        data_browser_admin.admin_auth_dependency("user_role")
+def test_admin_router_rejects_insufficient_formal_role(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
+    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
+    monkeypatch.setattr(admin_auth, "get_admin_session", lambda _token: _principal("line_manager"))
 
-    assert error.value.status_code == 403
-    assert error.value.detail == "forbidden"
+    response = _client().get(
+        "/api/v1/admin/data-browser/orders",
+        headers=_headers(),
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "需要 system_admin 或更高權限"
 
 
-def test_admin_auth_dependency_allows_admin_role():
-    assert data_browser_admin.admin_auth_dependency("admin_role") == "admin_role"
-
-
-def test_patch_data_browser_row_passes_authenticated_operator_to_service(monkeypatch):
+def test_patch_passes_verified_principal_username_to_service(monkeypatch):
     captured = {}
 
     def _fake_patch(
-        table_name: str,
-        row_id: str,
-        updates: dict,
-        operator_id: str = "admin_ui",
-    ) -> bool:
+        table_name,
+        row_id,
+        updates,
+        operator_id="admin_ui",
+        operator_role="admin",
+    ):
         captured.update(
             table=table_name,
             row_id=row_id,
             operator=operator_id,
+            role=operator_role,
             updates=updates,
         )
         return True
 
-    monkeypatch.setattr(data_browser_admin_schema_service, "patch_data_browser_table_row", _fake_patch)
+    monkeypatch.setattr(
+        data_browser_admin_schema_service,
+        "patch_data_browser_table_row",
+        _fake_patch,
+    )
 
     response = data_browser_admin.patch_data_browser_row(
         DataBrowserPatchRequest(updates={"service_days": 10}),
         table="orders",
         row_id_str="TEST_ROUTE_001",
-        auth_context="admin_role",
+        principal=_principal(),
     )
 
     assert response.data is True
-    assert captured["operator"] == "admin_role"
+    assert captured["operator"] == "verified-admin"
+    assert captured["role"] == "system_admin"
 
 
 def test_patch_data_browser_row_validation_error_maps_to_422(monkeypatch):
-    def _fake_patch(*_args, **_kwargs):
-        raise ValueError("欄位 [bad] 不在可編輯白名單中，更新已取消。")
-
-    monkeypatch.setattr(data_browser_admin_schema_service, "patch_data_browser_table_row", _fake_patch)
+    monkeypatch.setattr(
+        data_browser_admin_schema_service,
+        "patch_data_browser_table_row",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("欄位 [bad] 不在可編輯白名單中，更新已取消。")
+        ),
+    )
 
     with pytest.raises(HTTPException) as error:
         data_browser_admin.patch_data_browser_row(
             DataBrowserPatchRequest(updates={"bad": "x"}),
             table="orders",
             row_id_str="TEST_ROUTE_001",
-            auth_context="admin_role",
+            principal=_principal(),
         )
 
     assert error.value.status_code == 422
 
 
 def test_patch_data_browser_row_not_found_maps_to_404(monkeypatch):
-    def _fake_patch(*_args, **_kwargs):
-        raise ValueError("指定資料列不存在或欄位變更未生效，更新已取消。")
-
-    monkeypatch.setattr(data_browser_admin_schema_service, "patch_data_browser_table_row", _fake_patch)
+    monkeypatch.setattr(
+        data_browser_admin_schema_service,
+        "patch_data_browser_table_row",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("指定資料列不存在或欄位變更未生效，更新已取消。")
+        ),
+    )
 
     with pytest.raises(HTTPException) as error:
         data_browser_admin.patch_data_browser_row(
             DataBrowserPatchRequest(updates={"service_days": 99}),
             table="orders",
             row_id_str="TEST_ROUTE_MISS",
-            auth_context="admin_role",
+            principal=_principal(),
         )
 
     assert error.value.status_code == 404

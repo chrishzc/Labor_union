@@ -309,19 +309,34 @@ modules:
     - get_all_staff
   HolidayRouter:
     type: api_router
-    description: 國定假日管理 API 路由。
+    description: 僅供正式系統管理員操作的國定假日管理 API 路由。
     source: api/routes/holidays.py
     domain: null
     subsystem: null
     map_file: api\api_system_map.md
     dependencies:
     - DbService
-    input: {}
+    - AdminAuthorizationDependency
+    input:
+      admin_principal: 由 require_system_admin 產生的可信 AdminPrincipal。
     output: {}
     exceptions: []
-    invariants: []
+    invariants:
+    - GET、POST、DELETE 全部必須使用 require_system_admin；不得只保護寫入端點。
+    - 缺少或錯誤 internal service key、失效 session、角色不足時必須由正式 dependency fail-closed。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_holiday_admin_route.py
+        - -q
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
     decisions: []
     todo: []
     checkpoint: []
@@ -340,7 +355,7 @@ modules:
     non_goals: []
     sub_map: api_layer
     state: validated
-    fan_in_snapshot: 0
+    fan_in_snapshot: 1
     known_symbols:
     - add_or_update_holiday
     - delete_holiday
@@ -703,7 +718,9 @@ modules:
     state: planned
     fan_in_snapshot: 0
     known_symbols:
+    - _allowed_origins
     - api_health_check
+    - audit_authenticated_mutations
     - lifespan
   OrderSchemas:
     type: api_schema
@@ -863,7 +880,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - calculate_schedule
@@ -919,7 +936,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - _http_status_for_service_result
@@ -976,7 +993,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - _http_status_for_service_error
@@ -1031,7 +1048,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
+    state: planned
     fan_in_snapshot: 1
     known_symbols:
     - create_or_get_match_record
@@ -1046,22 +1063,22 @@ modules:
     dependencies:
     - DataBrowserAdminSchemaService
     - DataBrowserAdminAuditLogService
+    - AdminAuthorizationDependency
     input:
       http_method: GET / PATCH
       path: /api/v1/admin/data-browser/{table} 或 /api/v1/admin/data-browser/{table}/{row_id_str}
       table: 路徑參數 (str)。
       row_id_str: 路徑參數 (str，支援整數識別碼與字串主鍵 case_no)。
       body: DataBrowserPatchRequest (含 updates 字典)。
-      auth_context: 管理員認證/授權依賴 (admin_auth_dependency)。
+      admin_principal: 由 require_system_admin 產生的可信 AdminPrincipal。
     output:
       response: BaseResponse[DataBrowserTableResponse] 或 BaseResponse[bool]。
     exceptions: []
     invariants:
-    - 必須包含可信的管理員認證/授權 Dependency (admin_auth_dependency)，不得僅依賴 URL prefix `/admin`
-      進行防護。
-    - 操作者身分 (actor) 必須完全來自經認證之 auth_context，嚴禁允許 UI body 任意指定操作者身分。
-    - 未經認證或無權限時必須精準回傳 401 unauthenticated 或 403 forbidden。
-    - 在完成認證授權與 Checkpoint 1 規格審核前，不得在 api/main.py 公開掛載本 Router。
+    - GET 與 PATCH 必須使用正式 require_system_admin，不得自行定義 Header 比對或僅依賴 URL prefix `/admin`。
+    - 操作者 username 與 role 必須完全來自經驗證之 AdminPrincipal，嚴禁接受 UI body 或 X-Auth-Context
+      指定操作者。
+    - 缺少或錯誤 internal service key、失效 session、角色不足時必須由正式 dependency 精準 fail-closed。
     preferred_pattern: none
     verification:
     - command:
@@ -1069,6 +1086,7 @@ modules:
         - .venv\Scripts\python.exe
         - -m
         - pytest
+        - tests/test_data_browser_admin_route.py
         - tests/test_data_browser_admin_service.py
         - -q
         cwd: project
@@ -1092,10 +1110,74 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: api_layer
-    state: validated
-    fan_in_snapshot: 0
+    state: planned
+    fan_in_snapshot: 1
     known_symbols:
     - _http_status_for_data_browser_admin_error
-    - admin_auth_dependency
     - get_data_browser_table
     - patch_data_browser_row
+  AdminAuthorizationDependency:
+    type: api_dependency
+    description: FastAPI 正式管理員授權依賴，統一驗證 internal service key、Bearer session 與最低角色。
+    source: api/dependencies/admin_auth.py
+    domain: null
+    subsystem: null
+    map_file: api\api_system_map.md
+    dependencies:
+    - AdminAuthService
+    input:
+      internal_api_key: X-Internal-API-Key header。
+      authorization: Authorization Bearer session token。
+      minimum_role: endpoint 所需最低角色。
+    output:
+      admin_principal: 經認證與角色授權的 AdminPrincipal。
+    exceptions: []
+    invariants:
+    - INTERNAL_API_KEY 未設定回 503；缺少或錯誤 internal key 回 401。
+    - 正式模式缺少、失效或過期 Bearer session 必須回 401；角色不足必須回 403。
+    - 只有 development、dev、local、test 且 ENABLE_ADMIN_AUTH 明確為 false 時才允許 session bypass；internal
+      service key 永遠不可 bypass。
+    - 成功後必須把 principal 寫入 request.state，供統一 audit middleware 使用。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_admin_auth_security.py
+        - -q
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 先要求 X-Internal-API-Key，設定缺失回 503，請求缺失或不符回 401。
+    - 僅在明確 development bypass 條件成立時建立 development system_admin principal；其餘情況解析 Bearer
+      token。
+    - 將 token 委派 AdminAuthService 查詢有效 session，無有效 principal 回 401。
+    - 依 endpoint 最低角色比對 principal.role，權限不足回 403；成功後把 principal 寫入 request.state 並回傳。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: api_layer
+    state: planned
+    fan_in_snapshot: 3
+    known_symbols:
+    - admin_auth_is_enabled
+    - get_bearer_token
+    - require_admin
+    - require_internal_service
+    - require_role

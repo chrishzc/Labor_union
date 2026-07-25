@@ -14,13 +14,36 @@
 - State: `validated`
 - Source: ui/pages/01_data_browser.py
 - Description: 原始資料庫表格瀏覽頁面。只提供 DbService 仍支援的資料表檢視；legacy payments 選項與相關唯讀／編輯設定必須完全移除。
-- Dependencies: [DbService]
+- Dependencies: [DataBrowserAdminRouter, HolidayRouter, UIAdminApiContext]
 - Invariants:
   - INV-UI-BROWSER-01: 原始資料表格欄位必須支援透過對照表轉換為中文名稱 (含英文原鍵名或純中文)，未記錄欄位自動安全回退原鍵名。
   - orders 的資料瀏覽不得顯示或編輯 clients.identity_status；資格資訊只顯示 clients.identity_status，且該欄位在 DataBrowserUI 必須唯讀。
   - table_options、EDITABLE_COLUMNS 與 READ_ONLY_TABLES 均不得包含精確 legacy 表名 payments；必須保留 client_payments、client_payment_transactions、staff_payments 與 staff_payment_transactions。
+  - 所有 Data Browser metadata、PATCH 與 holidays 請求必須使用 UIAdminApiContext 產生的正式 headers；不得送出 X-Auth-Context。
+  - 正式模式缺少 internal service key 或管理員 session 時必須停止渲染資料操作且不得發出 HTTP 請求。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_data_browser_identity_status_ui.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_data_browser_identity_status_ui.py", "tests\\test_data_browser_runtime_acceptance_app_test.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: UIAdminApiContext
+- Sub Map: ui_layer
+- Type: ui_helper
+- State: `planned`
+- Source: ui/pages/shared.py
+- Description: Streamlit 管理員頁共用 runtime API base URL、internal service key 與 Bearer session header 組裝。
+- Dependencies: [AdminAuthorizationDependency]
+- Input:
+  - environment: API_BASE_URL、INTERNAL_API_KEY、APP_ENV、ENABLE_ADMIN_AUTH。
+  - session_state: line_admin_access_token。
+- Output:
+  - api_base_url: runtime 解析且去除尾端斜線的 API base URL。
+  - admin_headers: X-Internal-API-Key 與正式模式 Authorization Bearer header。
+- Invariants:
+  - INTERNAL_API_KEY 永遠必須存在；不得提供 admin_role、operator、user_role 或 ADMIN_AUTH_CONTEXT fallback。
+  - 正式模式必須從 line_admin_access_token 取得非空 token；不得接受 UI 文字欄位指定 principal 或 role。
+  - 只有與 backend 相同的明確 development bypass 條件下可省略 Authorization，且仍必須送 internal service key。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_data_browser_runtime_acceptance_app_test.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: OrderUI

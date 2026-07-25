@@ -99,8 +99,15 @@
 - Source: api/routes/holidays.py
 - Type: api_router
 - State: `validated`
-- Description: 國定假日管理 API 路由。
-- Dependencies: [DbService]
+- Description: 僅供正式系統管理員操作的國定假日管理 API 路由。
+- Dependencies: [DbService, AdminAuthorizationDependency]
+- Input:
+  - admin_principal: 由 require_system_admin 產生的可信 AdminPrincipal。
+- Invariants:
+  - GET、POST、DELETE 全部必須使用 require_system_admin；不得只保護寫入端點。
+  - 缺少或錯誤 internal service key、失效 session、角色不足時必須由正式 dependency fail-closed。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_holiday_admin_route.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: ClientPaymentRouter
@@ -362,7 +369,7 @@
 - State: `planned`
 - Source: api/routes/data_browser_admin.py
 - Description: 資料庫原始資料中繼權限查詢與單列微調稽核 API 路由 (須經認證/授權與 CP-1 批准始可掛載)。
-- Dependencies: [DataBrowserAdminSchemaService, DataBrowserAdminAuditLogService]
+- Dependencies: [DataBrowserAdminSchemaService, DataBrowserAdminAuditLogService, AdminAuthorizationDependency]
 - Complexity: low
 - Input:
   - http_method: GET / PATCH
@@ -370,16 +377,44 @@
   - table: 路徑參數 (str)。
   - row_id_str: 路徑參數 (str，支援整數識別碼與字串主鍵 case_no)。
   - body: DataBrowserPatchRequest (含 updates 字典)。
-  - auth_context: 管理員認證/授權依賴 (admin_auth_dependency)。
+  - admin_principal: 由 require_system_admin 產生的可信 AdminPrincipal。
 - Output:
   - response: BaseResponse[DataBrowserTableResponse] 或 BaseResponse[bool]。
 - Idempotency:
   - 相同的 PATCH updates 請求重複送出具備等冪性。
 - Invariants:
-  - 必須包含可信的管理員認證/授權 Dependency (admin_auth_dependency)，不得僅依賴 URL prefix `/admin` 進行防護。
-  - 操作者身分 (actor) 必須完全來自經認證之 auth_context，嚴禁允許 UI body 任意指定操作者身分。
-  - 未經認證或無權限時必須精準回傳 401 unauthenticated 或 403 forbidden。
-  - 在完成認證授權與 Checkpoint 1 規格審核前，不得在 api/main.py 公開掛載本 Router。
+  - GET 與 PATCH 必須使用正式 require_system_admin，不得自行定義 Header 比對或僅依賴 URL prefix `/admin`。
+  - 操作者 username 與 role 必須完全來自經驗證之 AdminPrincipal，嚴禁接受 UI body 或 X-Auth-Context 指定操作者。
+  - 缺少或錯誤 internal service key、失效 session、角色不足時必須由正式 dependency 精準 fail-closed。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_data_browser_admin_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_data_browser_admin_route.py", "tests/test_data_browser_admin_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+
+##### Module: AdminAuthorizationDependency
+- Sub Map: api_layer
+- Type: api_dependency
+- State: `planned`
+- Source: api/dependencies/admin_auth.py
+- Description: FastAPI 正式管理員授權依賴，統一驗證 internal service key、Bearer session 與最低角色。
+- Dependencies: [AdminAuthService]
+- Complexity: medium
+- Input:
+  - internal_api_key: X-Internal-API-Key header。
+  - authorization: Authorization Bearer session token。
+  - minimum_role: endpoint 所需最低角色。
+- Output:
+  - admin_principal: 經認證與角色授權的 AdminPrincipal。
+- Algorithm:
+  - 先要求 X-Internal-API-Key，設定缺失回 503，請求缺失或不符回 401。
+  - 僅在明確 development bypass 條件成立時建立 development system_admin principal；其餘情況解析 Bearer token。
+  - 將 token 委派 AdminAuthService 查詢有效 session，無有效 principal 回 401。
+  - 依 endpoint 最低角色比對 principal.role，權限不足回 403；成功後把 principal 寫入 request.state 並回傳。
+- Invariants:
+  - INTERNAL_API_KEY 未設定回 503；缺少或錯誤 internal key 回 401。
+  - 正式模式缺少、失效或過期 Bearer session 必須回 401；角色不足必須回 403。
+  - 只有 development、dev、local、test 且 ENABLE_ADMIN_AUTH 明確為 false 時才允許 session bypass；internal service key 永遠不可 bypass。
+  - 成功後必須把 principal 寫入 request.state，供統一 audit middleware 使用。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_admin_auth_security.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required

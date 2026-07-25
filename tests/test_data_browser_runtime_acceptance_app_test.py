@@ -5,7 +5,11 @@ from __future__ import annotations
 from streamlit.testing.v1 import AppTest
 
 
-def _run_data_browser_page(requests_calls: list[tuple[str, dict]]) -> AppTest:
+def _run_data_browser_page(
+    requests_calls: list[tuple[str, dict]],
+    *,
+    token: str | None,
+) -> AppTest:
     def _app():
         import importlib
         import builtins
@@ -66,22 +70,28 @@ def _run_data_browser_page(requests_calls: list[tuple[str, dict]]) -> AppTest:
                 return _FakeResponse({"rows": []})
             raise AssertionError(f"Unexpected GET call: {url}")
 
-        page.requests.get = _fake_get
-        page.show()
+        from unittest import mock
+
+        with mock.patch.object(page.requests, "get", _fake_get):
+            page.show()
 
     app = AppTest.from_function(_app)
+    if token is not None:
+        app.session_state["line_admin_access_token"] = token
     app.run()
     return app
 
 
 def test_data_browser_show_calls_admin_metadata_with_auth_header(monkeypatch):
-    monkeypatch.setenv("ADMIN_AUTH_CONTEXT", "admin_role")
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
+    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setenv("API_BASE_URL", "http://localhost:8000")
 
     requests_calls: list[tuple[str, dict]] = []
     import builtins
-    builtins._DATA_BROWSER_TEST_CALLS = requests_calls
-    app = _run_data_browser_page(requests_calls)
+    monkeypatch.setattr(builtins, "_DATA_BROWSER_TEST_CALLS", requests_calls, raising=False)
+    app = _run_data_browser_page(requests_calls, token="session-token")
 
     import builtins
     observed_calls = builtins._DATA_BROWSER_TEST_CALLS
@@ -89,19 +99,23 @@ def test_data_browser_show_calls_admin_metadata_with_auth_header(monkeypatch):
     assert not app.exception
     assert any(
         "/api/v1/admin/data-browser/" in url
-        and headers.get("X-Auth-Context") == "admin_role"
+        and headers.get("X-Internal-API-Key") == "internal-test-key"
+        and headers.get("Authorization") == "Bearer session-token"
+        and "X-Auth-Context" not in headers
         for url, headers in observed_calls
     )
 
 
-def test_data_browser_show_fails_fast_when_admin_context_missing(monkeypatch):
-    monkeypatch.delenv("ADMIN_AUTH_CONTEXT", raising=False)
+def test_data_browser_show_fails_fast_when_admin_session_missing(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
+    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setenv("API_BASE_URL", "http://localhost:8000")
 
     requests_calls: list[tuple[str, dict]] = []
     import builtins
-    builtins._DATA_BROWSER_TEST_CALLS = requests_calls
-    app = _run_data_browser_page(requests_calls)
+    monkeypatch.setattr(builtins, "_DATA_BROWSER_TEST_CALLS", requests_calls, raising=False)
+    app = _run_data_browser_page(requests_calls, token=None)
     observed_calls = builtins._DATA_BROWSER_TEST_CALLS
 
     assert not app.exception
