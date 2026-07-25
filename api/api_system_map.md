@@ -255,3 +255,131 @@
   - api/schemas/payments.py 不得包含 BaseModel、PaymentUpdateRequest、caregiver_fee、caregiver_paid_at 或三階段舊更新 payload。
 - Verification: []
 - Observability: not_required
+
+##### Module: OrderScheduleCalculationRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/order_schedule_calculation.py
+- Description: 出勤排班試算與順延完工日精算 API 路由。
+- Dependencies: [OrderScheduleCalculationService, OrderSchemas]
+- Complexity: low
+- Input:
+  - http_method: POST
+  - path: /api/v1/orders/schedule-calculation
+  - body: OrderScheduleCalculationRequest (含 start_date, service_days, custom_holiday_rest_dates, custom_leave_dates, custom_rest_weekdays 等)。
+- Output:
+  - response: BaseResponse[OrderScheduleCalculationResponse]。
+- Idempotency:
+  - 相同請求 body 試算回應一致結果，具備完全等冪性。
+- Invariants:
+  - Router 只能進行輸入驗證與 Service 委派，禁止直接執行 SQL 或修改排班。
+  - 將 Service 領域錯誤精準映射至 HTTP 狀態碼 (404, 422, 500)。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_order_schedule_calculation_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+
+##### Module: AssignmentScheduleRestDateRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/assignment_schedule_rest_dates.py
+- Description: 以 assignment_id 為專屬單元之月嫂排休與順延完工日更新 API 路由。
+- Dependencies: [AssignmentScheduleRestDateService, OrderSchemas]
+- Complexity: low
+- Input:
+  - http_method: PUT
+  - path: /api/v1/assignment-schedules/{assignment_id}/rest-dates
+  - assignment_id: 路徑參數 (int)。
+  - body: AssignmentRestDatesUpdateRequest (含 rest_dates: list[str])。
+  - auth_context: 認證權限依賴 (security dependency)。
+- Output:
+  - response: BaseResponse[Dict[str, Any]]。
+- Idempotency:
+  - 重複送出相同 assignment_id 與 rest_dates 具備等冪性，回應一致結果。
+- Invariants:
+  - Router 只能進行輸入驗證、認證/授權檢查與委派，禁止直接執行 SQL 或商業邏輯。
+  - 必須將 Service 領域錯誤精準映射至 HTTP 狀態碼 (404, 409, 422, 500)。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_assignment_rest_date_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+
+##### Module: StaffMonthlyCalendarScheduleRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/staff_monthly_schedule.py
+- Description: 月嫂月度檔期視圖 API 路由。
+- Dependencies: [StaffMonthlyCalendarScheduleService]
+- Complexity: low
+- Input:
+  - http_method: GET
+  - path: /api/v1/staff/{staff_id}/monthly-schedule
+  - staff_id: 路徑參數 (int)。
+  - year: 查詢參數 (int)。
+  - month: 查詢參數 (int, 1-12)。
+- Output:
+  - response: BaseResponse[Dict[str, Any]] (含 days 陣列與 schedule_map)。
+- Idempotency:
+  - 重複查詢結果一致，具備完全等冪性。
+- Invariants:
+  - 只能進行參數驗證與委派，不得直接寫 SQL 或商業邏輯。
+  - 將 Service 領域錯誤精準映射為對應 HTTP 狀態碼 (404, 422, 500)。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_staff_monthly_calendar_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+
+##### Module: MatchRecordRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/match_records.py
+- Description: 案件與月嫂媒合紀錄查詢與建立 API 路由。
+- Dependencies: [MatchRecordIdempotentService, MatchSchemas]
+- Complexity: low
+- Input:
+  - http_method: POST
+  - path: /api/v1/match-records
+  - body: MatchRecordCreateRequest (含 case_no, staff_id, response_type, notes)。
+- Output:
+  - response: BaseResponse[MatchRecordResponse]。
+- Idempotency:
+  - 相同 (case_no, staff_id) 重複發送具備等冪性，不拋出 500。
+- Invariants:
+  - Router 只能進行輸入驗證與 Service 委派，禁止直接執行 SQL 或商業邏輯。
+  - 將 Service 領域錯誤精準映射至 HTTP 狀態碼 (404, 422, 500)。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_match_record_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+
+##### Module: DataBrowserAdminRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/data_browser_admin.py
+- Description: 資料庫原始資料中繼權限查詢與單列微調稽核 API 路由 (須經認證/授權與 CP-1 批准始可掛載)。
+- Dependencies: [DataBrowserAdminSchemaService, DataBrowserAdminAuditLogService]
+- Complexity: low
+- Input:
+  - http_method: GET / PATCH
+  - path: /api/v1/admin/data-browser/{table} 或 /api/v1/admin/data-browser/{table}/{row_id_str}
+  - table: 路徑參數 (str)。
+  - row_id_str: 路徑參數 (str，支援整數識別碼與字串主鍵 case_no)。
+  - body: DataBrowserPatchRequest (含 updates 字典)。
+  - auth_context: 管理員認證/授權依賴 (admin_auth_dependency)。
+- Output:
+  - response: BaseResponse[DataBrowserTableResponse] 或 BaseResponse[bool]。
+- Idempotency:
+  - 相同的 PATCH updates 請求重複送出具備等冪性。
+- Invariants:
+  - 必須包含可信的管理員認證/授權 Dependency (admin_auth_dependency)，不得僅依賴 URL prefix `/admin` 進行防護。
+  - 操作者身分 (actor) 必須完全來自經認證之 auth_context，嚴禁允許 UI body 任意指定操作者身分。
+  - 未經認證或無權限時必須精準回傳 401 unauthenticated 或 403 forbidden。
+  - 在完成認證授權與 Checkpoint 1 規格審核前，不得在 api/main.py 公開掛載本 Router。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_data_browser_admin_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required

@@ -17,26 +17,37 @@ from fastapi.staticfiles import StaticFiles
 
 from api.routes import (
     admin_auth,
+    assignment_schedule_rest_dates,
     client_payments,
     clients,
     contracts,
+    data_browser_admin,
     finance_alerts,
     finance_reports,
     holidays,
-    line_system_config,
     line_admin,
     line_rich_menus,
     line_reviews,
+    line_system_config,
     line_tasks,
+    match_records,
     matches,
     multi_caregiver_case_assignments,
     multi_caregiver_schedule,
     multi_caregiver_schedule_read,
+    order_schedule_calculation,
     orders,
     schedule,
     staff,
+    staff_monthly_schedule,
     staff_payments,
 )
+
+
+
+
+
+
 from api.schemas.base import BaseResponse
 from line.line_bot import router as line_router
 from line.worker import start_worker, stop_worker
@@ -90,13 +101,21 @@ app.include_router(line_reviews.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)
+app.include_router(order_schedule_calculation.router)
+app.include_router(assignment_schedule_rest_dates.router)
+
+
 app.include_router(matches.router)
+app.include_router(match_records.router)
+
 app.include_router(schedule.router)
 app.include_router(multi_caregiver_case_assignments.router)
 app.include_router(multi_caregiver_schedule.router)
 app.include_router(multi_caregiver_schedule_read.router)
 app.include_router(clients.router)
 app.include_router(staff.router)
+app.include_router(staff_monthly_schedule.router)
+
 app.include_router(holidays.router)
 app.include_router(line_system_config.router)
 app.include_router(line_system_config.public_router)
@@ -105,6 +124,10 @@ app.include_router(staff_payments.router)
 app.include_router(contracts.router)
 app.include_router(finance_reports.router)
 app.include_router(finance_alerts.router)
+app.include_router(data_browser_admin.router)
+
+
+
 
 
 @app.middleware("http")

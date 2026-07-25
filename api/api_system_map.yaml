@@ -76,10 +76,9 @@ modules:
     non_goals: []
     sub_map: api_layer
     state: planned
-    fan_in_snapshot: 1
+    fan_in_snapshot: 2
     known_symbols:
     - apply_order_assignment_synchronization
-    - calculate_schedule
     - get_all_orders
     - get_order_by_case_no
     - preview_order_assignment_synchronization
@@ -305,7 +304,7 @@ modules:
     non_goals: []
     sub_map: api_layer
     state: validated
-    fan_in_snapshot: 1
+    fan_in_snapshot: 2
     known_symbols:
     - get_all_staff
   HolidayRouter:
@@ -740,7 +739,7 @@ modules:
     non_goals: []
     sub_map: api_layer
     state: planned
-    fan_in_snapshot: 1
+    fan_in_snapshot: 3
     known_symbols: []
   MatchSchemas:
     type: api_schema
@@ -774,7 +773,7 @@ modules:
     non_goals: []
     sub_map: api_layer
     state: planned
-    fan_in_snapshot: 1
+    fan_in_snapshot: 2
     known_symbols: []
   PaymentSchemas:
     type: api_schema
@@ -813,3 +812,290 @@ modules:
     state: planned
     fan_in_snapshot: 0
     known_symbols: []
+  OrderScheduleCalculationRouter:
+    type: api_router
+    description: 出勤排班試算與順延完工日精算 API 路由。
+    source: api/routes/order_schedule_calculation.py
+    domain: null
+    subsystem: null
+    map_file: api\api_system_map.md
+    dependencies:
+    - OrderScheduleCalculationService
+    - OrderSchemas
+    input:
+      http_method: POST
+      path: /api/v1/orders/schedule-calculation
+      body: OrderScheduleCalculationRequest (含 start_date, service_days, custom_holiday_rest_dates,
+        custom_leave_dates, custom_rest_weekdays 等)。
+    output:
+      response: BaseResponse[OrderScheduleCalculationResponse]。
+    exceptions: []
+    invariants:
+    - Router 只能進行輸入驗證與 Service 委派，禁止直接執行 SQL 或修改排班。
+    - 將 Service 領域錯誤精準映射至 HTTP 狀態碼 (404, 422, 500)。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests/test_order_schedule_calculation_service.py
+        - -q
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: api_layer
+    state: validated
+    fan_in_snapshot: 1
+    known_symbols:
+    - calculate_schedule
+  AssignmentScheduleRestDateRouter:
+    type: api_router
+    description: 以 assignment_id 為專屬單元之月嫂排休與順延完工日更新 API 路由。
+    source: api/routes/assignment_schedule_rest_dates.py
+    domain: null
+    subsystem: null
+    map_file: api\api_system_map.md
+    dependencies:
+    - AssignmentScheduleRestDateService
+    - OrderSchemas
+    input:
+      http_method: PUT
+      path: /api/v1/assignment-schedules/{assignment_id}/rest-dates
+      assignment_id: 路徑參數 (int)。
+      body: 'AssignmentRestDatesUpdateRequest (含 rest_dates: list[str])。'
+      auth_context: 認證權限依賴 (security dependency)。
+    output:
+      response: BaseResponse[Dict[str, Any]]。
+    exceptions: []
+    invariants:
+    - Router 只能進行輸入驗證、認證/授權檢查與委派，禁止直接執行 SQL 或商業邏輯。
+    - 必須將 Service 領域錯誤精準映射至 HTTP 狀態碼 (404, 409, 422, 500)。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests/test_assignment_rest_date_service.py
+        - -q
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: api_layer
+    state: validated
+    fan_in_snapshot: 1
+    known_symbols:
+    - _http_status_for_service_result
+    - _is_successful
+    - save_assignment_rest_dates
+  StaffMonthlyCalendarScheduleRouter:
+    type: api_router
+    description: 月嫂月度檔期視圖 API 路由。
+    source: api/routes/staff_monthly_schedule.py
+    domain: null
+    subsystem: null
+    map_file: api\api_system_map.md
+    dependencies:
+    - StaffMonthlyCalendarScheduleService
+    input:
+      http_method: GET
+      path: /api/v1/staff/{staff_id}/monthly-schedule
+      staff_id: 路徑參數 (int)。
+      year: 查詢參數 (int)。
+      month: 查詢參數 (int, 1-12)。
+    output:
+      response: BaseResponse[Dict[str, Any]] (含 days 陣列與 schedule_map)。
+    exceptions: []
+    invariants:
+    - 只能進行參數驗證與委派，不得直接寫 SQL 或商業邏輯。
+    - 將 Service 領域錯誤精準映射為對應 HTTP 狀態碼 (404, 422, 500)。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests/test_staff_monthly_calendar_service.py
+        - -q
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: api_layer
+    state: validated
+    fan_in_snapshot: 1
+    known_symbols:
+    - _http_status_for_service_error
+    - get_staff_monthly_schedule
+  MatchRecordRouter:
+    type: api_router
+    description: 案件與月嫂媒合紀錄查詢與建立 API 路由。
+    source: api/routes/match_records.py
+    domain: null
+    subsystem: null
+    map_file: api\api_system_map.md
+    dependencies:
+    - MatchRecordIdempotentService
+    - MatchSchemas
+    input:
+      http_method: POST
+      path: /api/v1/match-records
+      body: MatchRecordCreateRequest (含 case_no, staff_id, response_type, notes)。
+    output:
+      response: BaseResponse[MatchRecordResponse]。
+    exceptions: []
+    invariants:
+    - Router 只能進行輸入驗證與 Service 委派，禁止直接執行 SQL 或商業邏輯。
+    - 將 Service 領域錯誤精準映射至 HTTP 狀態碼 (404, 422, 500)。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests/test_match_record_service.py
+        - -q
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: api_layer
+    state: validated
+    fan_in_snapshot: 1
+    known_symbols:
+    - create_or_get_match_record
+    - get_order_matches
+  DataBrowserAdminRouter:
+    type: api_router
+    description: 資料庫原始資料中繼權限查詢與單列微調稽核 API 路由 (須經認證/授權與 CP-1 批准始可掛載)。
+    source: api/routes/data_browser_admin.py
+    domain: null
+    subsystem: null
+    map_file: api\api_system_map.md
+    dependencies:
+    - DataBrowserAdminSchemaService
+    - DataBrowserAdminAuditLogService
+    input:
+      http_method: GET / PATCH
+      path: /api/v1/admin/data-browser/{table} 或 /api/v1/admin/data-browser/{table}/{row_id_str}
+      table: 路徑參數 (str)。
+      row_id_str: 路徑參數 (str，支援整數識別碼與字串主鍵 case_no)。
+      body: DataBrowserPatchRequest (含 updates 字典)。
+      auth_context: 管理員認證/授權依賴 (admin_auth_dependency)。
+    output:
+      response: BaseResponse[DataBrowserTableResponse] 或 BaseResponse[bool]。
+    exceptions: []
+    invariants:
+    - 必須包含可信的管理員認證/授權 Dependency (admin_auth_dependency)，不得僅依賴 URL prefix `/admin`
+      進行防護。
+    - 操作者身分 (actor) 必須完全來自經認證之 auth_context，嚴禁允許 UI body 任意指定操作者身分。
+    - 未經認證或無權限時必須精準回傳 401 unauthenticated 或 403 forbidden。
+    - 在完成認證授權與 Checkpoint 1 規格審核前，不得在 api/main.py 公開掛載本 Router。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests/test_data_browser_admin_service.py
+        - -q
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: api_layer
+    state: validated
+    fan_in_snapshot: 0
+    known_symbols:
+    - _http_status_for_data_browser_admin_error
+    - admin_auth_dependency
+    - get_data_browser_table
+    - patch_data_browser_row
