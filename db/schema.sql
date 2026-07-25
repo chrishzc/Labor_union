@@ -711,17 +711,73 @@ CREATE TABLE IF NOT EXISTS line_confirmation_requests (
     old_line_user_id VARCHAR(100) NULL,
     new_line_user_id VARCHAR(100) NULL,
     status ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+    reviewed_by_admin_user_id BIGINT NULL COMMENT 'Web 管理中心處理者；開發終端處理時可為 NULL',
     reviewed_by_line_user_id VARCHAR(100) NULL,
+    decision_reason TEXT NULL COMMENT '核准備註或拒絕原因',
     reviewed_at DATETIME NULL,
     resolved_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_confirmation_pending (request_type, status, created_at),
+    INDEX idx_confirmation_status_time (status, created_at),
+    INDEX idx_confirmation_admin_reviewer (reviewed_by_admin_user_id, reviewed_at),
     INDEX idx_confirmation_requester (line_user_id, request_type, status),
     CONSTRAINT fk_confirmation_client FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 32. 系統異常事件紀錄表
+-- 32. 管理後台帳號（LINE 管理中心與其他內部管理功能共用）
+CREATE TABLE IF NOT EXISTS admin_users (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(100) NOT NULL,
+    password_hash VARCHAR(512) NOT NULL COMMENT 'scrypt 雜湊；不得保存明碼密碼',
+    display_name VARCHAR(100) NOT NULL,
+    linked_line_user_id VARCHAR(100) NULL COMMENT '選填：對應 line_users.line_user_id',
+    role ENUM('line_viewer','line_agent','line_manager','system_admin') NOT NULL DEFAULT 'line_viewer',
+    enabled BOOLEAN NOT NULL DEFAULT TRUE,
+    last_login_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_admin_username (username),
+    UNIQUE KEY uk_admin_linked_line_user (linked_line_user_id),
+    CONSTRAINT fk_admin_linked_line_user FOREIGN KEY (linked_line_user_id)
+        REFERENCES line_users(line_user_id) ON UPDATE CASCADE ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 33. 管理後台短時效登入 Session
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    admin_user_id BIGINT NOT NULL,
+    session_token_hash CHAR(64) NOT NULL COMMENT 'SHA-256；原始 Session Token 只回傳一次',
+    expires_at DATETIME NOT NULL,
+    last_seen_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_admin_session_token_hash (session_token_hash),
+    INDEX idx_admin_session_active (admin_user_id, revoked_at, expires_at),
+    CONSTRAINT fk_admin_session_user FOREIGN KEY (admin_user_id)
+        REFERENCES admin_users(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 34. 管理後台操作稽核紀錄
+CREATE TABLE IF NOT EXISTS admin_audit_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    admin_user_id BIGINT NULL,
+    action VARCHAR(100) NOT NULL,
+    resource_type VARCHAR(100) NULL,
+    resource_id VARCHAR(255) NULL,
+    request_path VARCHAR(500) NULL,
+    http_method VARCHAR(10) NULL,
+    result_status INT NULL,
+    ip_address VARCHAR(64) NULL,
+    details_json JSON NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_admin_audit_actor_time (admin_user_id, created_at),
+    INDEX idx_admin_audit_resource (resource_type, resource_id, created_at),
+    CONSTRAINT fk_admin_audit_user FOREIGN KEY (admin_user_id)
+        REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 35. 系統異常事件紀錄表
 CREATE TABLE IF NOT EXISTS system_alerts (
     id INT AUTO_INCREMENT PRIMARY KEY,
     event_type VARCHAR(50) NOT NULL COMMENT '異常事件類型',
@@ -731,4 +787,79 @@ CREATE TABLE IF NOT EXISTS system_alerts (
     resolved_at TIMESTAMP NULL COMMENT '排除時間',
     resolved_by VARCHAR(50) NULL COMMENT '處理人員',
     INDEX idx_alert_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 36. LINE 任務每次執行嘗試紀錄
+CREATE TABLE IF NOT EXISTS line_task_attempts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT NOT NULL,
+    attempt_no INT NOT NULL,
+    outcome ENUM('running','sent','retry_scheduled','failed') NOT NULL DEFAULT 'running',
+    retryable BOOLEAN NULL,
+    error_code VARCHAR(100) NULL,
+    error_message TEXT NULL,
+    line_request_id VARCHAR(100) NULL,
+    started_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at DATETIME NULL,
+    UNIQUE KEY uk_line_task_attempt_no (task_id, attempt_no),
+    INDEX idx_line_task_attempt_outcome_time (outcome, started_at),
+    CONSTRAINT fk_line_task_attempt_task FOREIGN KEY (task_id)
+        REFERENCES line_tasks(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 37. 共用媒體資產中繼資料（圖片本體存於受控檔案系統／NAS／物件儲存）
+CREATE TABLE IF NOT EXISTS media_assets (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    category ENUM('rich_menu','line_user_upload','contract','other') NOT NULL,
+    owner_type VARCHAR(50) NULL,
+    owner_id VARCHAR(100) NULL,
+    storage_provider ENUM('local','nas','s3') NOT NULL DEFAULT 'local',
+    storage_key VARCHAR(500) NOT NULL,
+    original_filename VARCHAR(255) NULL,
+    mime_type VARCHAR(100) NOT NULL,
+    file_size BIGINT NOT NULL,
+    sha256 CHAR(64) NOT NULL,
+    width INT NULL,
+    height INT NULL,
+    created_by_admin_user_id BIGINT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted_at DATETIME NULL,
+    UNIQUE KEY uk_media_storage_key (storage_key),
+    INDEX idx_media_owner (category, owner_type, owner_id, deleted_at),
+    INDEX idx_media_sha256 (sha256),
+    CONSTRAINT fk_media_created_by FOREIGN KEY (created_by_admin_user_id)
+        REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 38. LINE Rich Menu 發布工作與版本歷史
+CREATE TABLE IF NOT EXISTS line_rich_menu_publications (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    menu_config_id VARCHAR(100) NOT NULL,
+    audience_role ENUM('customer','staff','union_staff') NOT NULL,
+    config_revision CHAR(64) NOT NULL,
+    config_snapshot JSON NOT NULL,
+    status ENUM('pending','processing','published','failed') NOT NULL DEFAULT 'pending',
+    line_rich_menu_id VARCHAR(100) NULL,
+    previous_line_rich_menu_id VARCHAR(100) NULL,
+    image_asset_id BIGINT NULL,
+    requested_by_admin_user_id BIGINT NULL,
+    retry_count INT NOT NULL DEFAULT 0,
+    max_retries INT NOT NULL DEFAULT 3,
+    next_retry_at DATETIME NULL,
+    processing_started_at DATETIME NULL,
+    is_current BOOLEAN NOT NULL DEFAULT FALSE,
+    error_code VARCHAR(100) NULL,
+    error_message TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    started_at DATETIME NULL,
+    published_at DATETIME NULL,
+    failed_at DATETIME NULL,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_rich_menu_publish_due (status, next_retry_at, id),
+    INDEX idx_rich_menu_current (menu_config_id, is_current, published_at),
+    INDEX idx_rich_menu_role (audience_role, status, published_at),
+    CONSTRAINT fk_rich_menu_publish_asset FOREIGN KEY (image_asset_id)
+        REFERENCES media_assets(id) ON DELETE SET NULL,
+    CONSTRAINT fk_rich_menu_publish_admin FOREIGN KEY (requested_by_admin_user_id)
+        REFERENCES admin_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -82,8 +82,74 @@ PUT /api/line/users/{user_id}/role/{role}
 - 正式部署前替所有 `/api/config` 管理接口加入管理員驗證；Rich Menu 發布權限不可公開。
 - 若 FastAPI 改成多程序或多主機，`asyncio.Event` 要改成 Redis／RabbitMQ 等跨程序通知。
 
+## 第五階段 5.1：LINE 管理中心安全入口
+
+5.1 已將既有 Streamlit UI 接到 FastAPI 的 LINE 管理入口骨架：
+
+```text
+管理員瀏覽器
+  -> Streamlit（伺服器端保存內部金鑰）
+  -> X-Internal-API-Key + Bearer Session
+  -> FastAPI 管理員驗證與角色權限
+  -> LINE 設定／Worker 狀態／後續人工審查 API
+```
+
+- 新增 `admin_users`、`admin_sessions`、`admin_audit_logs`。
+- Session 預設 30 分鐘，可由 `ADMIN_SESSION_MINUTES` 調整；登出後立即撤銷。
+- 角色依序為 `line_viewer`、`line_agent`、`line_manager`、`system_admin`。
+- LINE 管理中心 5.1 先提供登入、系統健康、Worker／DB／LINE 金鑰設定狀態與後續分頁骨架。
+- 訊息管理、排程、Rich Menu、LIFF、人工審查、客服與稽核頁會在後續 5.x 逐頁接上現有 API。
+- 第六階段換用 LINE 官方 SDK 時只替換 LINE 邊界實作；管理員驗證、CORS、Session、RBAC 與稽核不由 SDK 提供，會繼續保留。
+
+## 第五階段 5.2：訊息管理中心
+
+- Streamlit 訊息管理頁已接上 FastAPI 與 `message_templates.json`。
+- 支援範本搜尋、篩選、新增、修改、複製、文字／Flex JSON 預覽、啟停與二次確認刪除。
+- 以 SHA-256 內容 revision 與 `If-Match` 防止舊畫面覆蓋其他管理員的新修改。
+- 啟用中的 D+1～D+3 排程引用範本時，後端拒絕停用或刪除並回傳引用排程與天數。
+- 訊息異動寫入 `admin_audit_logs`，保存動作、範本 ID 與非敏感摘要；單純預覽不記為異動。
+- 範本修改只影響之後的 Webhook 與新建立任務；已存在 `line_tasks` 的訊息快照不回溯修改。
+
+## 第五階段 5.3：排程與 Worker 任務管理
+
+- 「排程任務」頁已接上 D+N onboarding 排程編輯器，可設定 IANA 時區、D+天數、發送時間、
+  範本、啟停與重新加入好友是否重跑。
+- 排程設定使用 revision／`If-Match` 與同程序寫入鎖，舊畫面修改會回 409；只允許引用啟用中的範本。
+- 排程變更只影響後續 follow 建立的新任務；既有 `line_tasks` 保存原時間與訊息快照。
+- 任務管理提供統計、篩選、分頁、內容明細與人工取消、立即執行、失敗重試；每個操作均受 RBAC、
+  資料列狀態鎖及 `admin_audit_logs` 保護。
+- 新增 `line_task_attempts`，逐次保存 Worker 執行序號、結果、是否可重試、錯誤、LINE request ID
+  與起訖時間，便於客服判斷任務為何失敗。
+- UI 日期以 `Asia/Taipei` 顯示，資料庫仍保存 UTC；「今日成功」亦依台北日界統計。
+- 管理頁只在載入、操作或手動重新整理時查詢，不使用 3 秒固定輪詢。Webhook、人工立即執行與
+  重試會喚醒 Worker，既有低頻掃描僅作通知遺失的容錯。
+
+## 第五階段 5.4：Rich Menu 管理中心
+
+- 三種選單加入 `audience_role`，固定對應 `customer`、`staff`、`union_staff`；預設選單只能屬於 customer。
+- 管理 UI 可編輯名稱、尺寸、顏色、按鈕範圍與 Action，支援自動產圖、安全圖片上傳及預覽。
+- Rich Menu JSON 使用 revision／`If-Match` 防止舊畫面覆蓋新版；按鈕越界、重疊與非 HTTP(S) 網址會被拒絕。
+- 新增 `media_assets`，圖片本體存受控檔案系統／NAS，DB 僅存路徑、尺寸、MIME、SHA-256 等中繼資料。
+- 新增 `line_rich_menu_publications`，保存發布快照、狀態、LINE Menu ID、圖片、重試與錯誤；發布失敗不替換舊版。
+- Worker 一次只發布指定 Menu；發布成功後，staff／union_staff 使用者會收到具冪等鍵的重新綁定任務。
+- `line_bot.py` 優先從 MySQL 讀取目前發布 ID，`rich_menu_ids.json` 暫時保留過渡相容。
+- Worker 首次啟動會把 JSON 內既有 ID 登記為目前版本，不會重新發布或呼叫 LINE。
+- 管理頁只在操作或按下重新整理時讀取發布紀錄，不使用固定輪詢。
+
 ## 工作人員統一待審接口補充
 
 月嫂身分確認與客戶重新綁定共用 MySQL `line_confirmation_requests`，並提供統一的 `/api/line/staff/review-requests` 介面，供未來工會客服前端顯示同一份待處理清單。月嫂申請由工會人員核准後直接切換身分，不產生驗證碼。所有工作人員接口均要求 `X-Internal-API-Key`。
 
-開發環境由 `start_line_bot.py` 建立只綁定 `127.0.0.1` 的一次性通知入口。Webhook成功提交月嫂身分或客戶重新綁定申請後，直接推送一筆通知，終端立即顯示`y/n`並呼叫同一組正式approve／reject API；不再每3秒查詢待審API。啟動時只掃描一次既有待審資料，避免服務重啟期間的申請被遺漏。
+開發環境由專案根目錄的`start_fastapi_ngrok.py`建立只綁定`127.0.0.1`的一次性通知入口。Webhook成功提交月嫂身分或客戶重新綁定申請後，直接推送一筆通知，終端立即顯示`y/n`並呼叫同一組正式approve／reject API；不再每3秒查詢待審API。啟動時只掃描一次既有待審資料，避免服務重啟期間的申請被遺漏。
+
+## 第五階段 5.6：人工審查中心
+
+- 新增正式管理接口 `/api/v1/line/review-requests`，提供統計、分頁篩選、詳細資料、核准與拒絕。
+- `line_agent` 可查看，`line_manager` 才能做決定；拒絕原因必填，核准可留下稽核備註。
+- `line_confirmation_requests` 新增 Web 管理員 ID 與決定原因，並以可重跑 Schema part 升級既有資料庫。
+- 月嫂認證及客戶重新綁定集中到 `services/line_review_service.py`，正式 UI 與開發終端不再各自維護交易邏輯。
+- 處理前以 `SELECT ... FOR UPDATE` 鎖定申請；已處理申請回 409，不會重複建立 LINE 任務。
+- 重新綁定核准前重新檢查舊綁定快照、新 LINE 衝突及案件編號，資料在等待期間改變時拒絕覆蓋。
+- 核准／拒絕結果先與 LINE 任務一起提交，再喚醒 Worker；月嫂拒絕狀態統一為 `rejected`。
+- 管理清單遮蔽 LINE ID，詳細頁才顯示完整值；UI 不固定輪詢，只在操作或手動重新整理時查詢。
+- 開發終端維持啟動時一次補查及 Webhook／LIFF 即時推送的 `y/n` 操作，舊接口作為相容包裝保留。

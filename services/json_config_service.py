@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import tempfile
 from pathlib import Path
@@ -44,6 +45,11 @@ def read_raw_config(config_name: str) -> dict[str, Any]:
 
 def read_config(config_name: str, model: type[T]) -> T:
     return model.model_validate(read_raw_config(config_name))
+
+
+def config_revision(config_name: str) -> str:
+    """Return a stable content revision used for optimistic UI updates."""
+    return hashlib.sha256(config_path(config_name).read_bytes()).hexdigest()
 
 
 def write_config(config_name: str, value: BaseModel | dict[str, Any]) -> None:

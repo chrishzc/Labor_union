@@ -1,9 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "menus": [
     {
       "id": "default_menu",
       "name": "一般用戶選單",
+      "audience_role": "customer",
       "enabled": true,
       "selected": true,
       "set_as_default": true,
@@ -36,6 +37,7 @@
     {
       "id": "staff_menu",
       "name": "月嫂專屬選單",
+      "audience_role": "staff",
       "enabled": true,
       "selected": true,
       "set_as_default": false,
@@ -68,6 +70,7 @@
     {
       "id": "union_staff_menu",
       "name": "工會人員客服選單",
+      "audience_role": "union_staff",
       "enabled": true,
       "selected": true,
       "set_as_default": false,

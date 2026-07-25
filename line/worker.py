@@ -1,4 +1,9 @@
-"""Reliable LINE task worker with scheduling, locking and retries."""
+"""
+================================================================================
+檔案名稱: line/worker.py
+功能說明: LINE 背景任務 Worker，負責排程喚醒、任務鎖定、訊息發送、失敗重試與執行紀錄
+================================================================================
+"""
 
 from __future__ import annotations
 
@@ -13,9 +18,16 @@ import pymysql
 import requests
 
 from services.db_service import get_connection as get_db_connection
+from services.line_rich_menu_service import (
+    import_legacy_rich_menu_ids,
+    next_publication_run_at,
+    process_due_publications,
+    recover_stale_publications,
+)
 
 
 _wakeup_event = asyncio.Event()
+_worker_task: asyncio.Task[None] | None = None
 RETRYABLE_HTTP = {408, 425, 429, 500, 502, 503, 504}
 
 
@@ -187,7 +199,66 @@ def _execute_task(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
     return False, False, "unknown_task_type", task_type
 
 
-def _finish_task(task: dict[str, Any], result: tuple[bool, bool, str, str]) -> None:
+def _start_task_attempt(task: dict[str, Any]) -> int:
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT COALESCE(MAX(attempt_no),0)+1 AS attempt_no FROM line_task_attempts WHERE task_id=%s",
+                (task["id"],),
+            )
+            row = cursor.fetchone()
+            attempt_no = int(row.get("attempt_no", 1) if isinstance(row, dict) else row[0])
+            cursor.execute(
+                """
+                INSERT INTO line_task_attempts (
+                    task_id, attempt_no, outcome, line_request_id
+                ) VALUES (%s,%s,'running',%s)
+                """,
+                (task["id"], attempt_no, task.get("line_request_id")),
+            )
+            attempt_id = int(cursor.lastrowid)
+        conn.commit()
+        return attempt_id
+    finally:
+        conn.close()
+
+
+def _finish_task_attempt(
+    attempt_id: int,
+    result: tuple[bool, bool, str, str],
+    final_status: str,
+) -> None:
+    _, retryable, code, message = result
+    outcome = {
+        "sent": "sent",
+        "pending": "retry_scheduled",
+        "failed": "failed",
+    }[final_status]
+    conn = get_db_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                UPDATE line_task_attempts
+                SET outcome=%s, retryable=%s, error_code=%s,
+                    error_message=%s, finished_at=UTC_TIMESTAMP()
+                WHERE id=%s
+                """,
+                (
+                    outcome,
+                    retryable,
+                    code or None,
+                    message[:4000] if message else None,
+                    attempt_id,
+                ),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _finish_task(task: dict[str, Any], result: tuple[bool, bool, str, str]) -> str:
     success, retryable, code, message = result
     conn = get_db_connection()
     try:
@@ -197,6 +268,7 @@ def _finish_task(task: dict[str, Any], result: tuple[bool, bool, str, str]) -> N
                     "UPDATE line_tasks SET status='sent', sent_at=UTC_TIMESTAMP(), processing_started_at=NULL, error_code=NULL, error_message=NULL WHERE id=%s",
                     (task["id"],),
                 )
+                final_status = "sent"
             elif retryable and task["retry_count"] < task["max_retries"]:
                 retry_count = task["retry_count"] + 1
                 delay_seconds = min(60 * (2 ** (retry_count - 1)), 3600)
@@ -209,6 +281,7 @@ def _finish_task(task: dict[str, Any], result: tuple[bool, bool, str, str]) -> N
                     """,
                     (retry_count, delay_seconds, code, message[:4000], task["id"]),
                 )
+                final_status = "pending"
             else:
                 cursor.execute(
                     """
@@ -218,7 +291,9 @@ def _finish_task(task: dict[str, Any], result: tuple[bool, bool, str, str]) -> N
                     """,
                     (code, message[:4000], task["id"]),
                 )
+                final_status = "failed"
             conn.commit()
+            return final_status
     finally:
         conn.close()
 
@@ -229,18 +304,35 @@ async def process_due_tasks() -> None:
         if not tasks:
             return
         for task in tasks:
-            result = await asyncio.to_thread(_execute_task, task)
-            await asyncio.to_thread(_finish_task, task, result)
+            attempt_id = await asyncio.to_thread(_start_task_attempt, task)
+            try:
+                result = await asyncio.to_thread(_execute_task, task)
+            except Exception as exc:
+                result = (False, True, "worker_exception", str(exc))
+            final_status = await asyncio.to_thread(_finish_task, task, result)
+            await asyncio.to_thread(
+                _finish_task_attempt, attempt_id, result, final_status
+            )
 
 
 async def worker_loop() -> None:
     print("[LINE Worker] Reliable worker started")
+    imported = await asyncio.to_thread(import_legacy_rich_menu_ids)
+    if imported:
+        print(f"[LINE Worker] Imported {imported} legacy Rich Menu ID(s)")
     await asyncio.to_thread(_recover_stale_tasks)
+    await asyncio.to_thread(recover_stale_publications)
     while True:
         try:
             await process_due_tasks()
+            await asyncio.to_thread(process_due_publications)
             _wakeup_event.clear()
             next_at = await asyncio.to_thread(_next_run_at)
+            next_publication_at = await asyncio.to_thread(next_publication_run_at)
+            if next_at is None or (
+                next_publication_at is not None and next_publication_at < next_at
+            ):
+                next_at = next_publication_at
             if _wakeup_event.is_set():
                 continue
             # Notification is primary; a low-frequency scan recovers a task if
@@ -261,12 +353,22 @@ async def worker_loop() -> None:
 
 
 def start_worker() -> asyncio.Task[None]:
-    return asyncio.create_task(worker_loop(), name="line-task-worker")
+    global _worker_task
+    _worker_task = asyncio.create_task(worker_loop(), name="line-task-worker")
+    return _worker_task
+
+
+def worker_is_running() -> bool:
+    return _worker_task is not None and not _worker_task.done()
 
 
 async def stop_worker(task: asyncio.Task[None]) -> None:
+    global _worker_task
     task.cancel()
     try:
         await task
     except asyncio.CancelledError:
         pass
+    finally:
+        if _worker_task is task:
+            _worker_task = None

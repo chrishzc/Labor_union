@@ -1,4 +1,9 @@
-"""Durable LINE webhook inbox and duplicate detection."""
+"""
+================================================================================
+檔案名稱: services/webhook_event_service.py
+功能說明: LINE Webhook 事件收件與去重服務，保存事件並阻擋同一事件重複處理
+================================================================================
+"""
 
 import json
 import pymysql

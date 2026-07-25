@@ -149,12 +149,145 @@ Lobar_union/
 
 ### 2. 啟動方式
 
-#### 正式環境批次啟動
+#### 批次啟動方式
 直接在 Windows 終端機（PowerShell）中執行：
 ```powershell
+# 開發/測試環境啟動
+.\start.bat
+
+# 只啟動並監控FastAPI與ngrok（不初始化DB、不啟動UI）
+.\.venv\Scripts\python.exe .\start_fastapi_ngrok.py
+
 # 生產/上線環境啟動
 .\online.bat
 ```
+
+`online.bat`不啟動開發用ngrok。正式環境的公開入口已移至第七階段，預定改用 Tailscale Funnel。
+
+### LINE 管理中心（第五階段 5.1）
+
+Streamlit 現在提供「LINE 管理中心」入口。FastAPI 使用兩層驗證：由後端服務持有的
+`X-Internal-API-Key`，以及登入後取得的短時效管理員 Session。瀏覽器不會直接取得內部金鑰。
+
+第一次使用前先初始化開發資料庫，再建立一個管理員：
+
+```powershell
+.\.venv\Scripts\python.exe scripts\init_db.py
+.\.venv\Scripts\python.exe scripts\create_admin.py --role system_admin
+```
+
+`scripts/create_admin.py` 是可重複使用的管理工具，不會建立預設密碼。管理員密碼以 scrypt
+雜湊保存，Session 原始值只回傳一次，資料庫僅保存 SHA-256 雜湊。正式啟動前必須在 `.env`
+設定固定且足夠長的 `INTERNAL_API_KEY`；`online.bat` 缺少此值會拒絕啟動。
+
+開發期間若不想重複登入，可設定：
+
+```env
+APP_ENV=development
+ENABLE_ADMIN_AUTH=false
+```
+
+此模式只略過帳號 Session，`X-Internal-API-Key` 仍會驗證。`APP_ENV=production` 永遠強制
+啟用登入，不受此開關影響。
+
+#### 5.2 訊息管理中心
+
+LINE 管理中心的「訊息管理」已接上 `config/message_templates.json`，支援搜尋、分類／狀態
+篩選、新增、修改、複製、文字與 Flex JSON 預覽、啟停及二次確認刪除。管理介面會帶入
+設定檔內容 revision，若其他管理員已先修改，後端回傳 409 並要求重新載入，避免覆蓋新版。
+
+啟用中的 D+1～D+3 排程所引用的範本不能停用或刪除；必須先在後續排程管理頁解除引用。
+已經建立於 `line_tasks` 的待發送任務保存建立當時的訊息快照，不會因範本文字更新而被改寫。
+
+#### 5.3 排程與 Worker 任務管理
+
+LINE 管理中心的「排程任務」已接上 D+N 排程編輯器及 Worker 任務佇列。排程可設定時區、
+D+天數、發送時間、訊息範本、啟停及重新加入好友是否重跑；儲存時使用 revision／`If-Match`
+避免多人同時修改互相覆蓋。排程變更只影響之後建立的新任務，既有 `line_tasks` 不回溯更新。
+
+任務管理提供狀態統計、條件篩選、分頁、詳細內容與每次執行歷史。依角色可取消待執行任務、
+將待執行任務改成立即執行，或把失敗任務重新排入。所有人工操作均經資料庫狀態鎖與管理稽核；
+Worker 仍採 Webhook／管理操作喚醒加低頻容錯掃描，前端不會固定每數秒輪詢。
+
+```text
+GET  /api/config/message-schedules/state
+PUT  /api/config/message-schedules
+GET  /api/v1/line/tasks/summary
+GET  /api/v1/line/tasks
+GET  /api/v1/line/tasks/{task_id}
+POST /api/v1/line/tasks/{task_id}/cancel
+POST /api/v1/line/tasks/{task_id}/run-now
+POST /api/v1/line/tasks/{task_id}/retry
+```
+
+#### 5.4 Rich Menu 管理中心
+
+Rich Menu 分頁已接上三種角色選單，可修改名稱、角色、尺寸、顏色、按鈕範圍及
+Message／URI／LIFF／Postback Action，並可產生預覽、上傳圖片、保存草稿及建立發布工作。
+草稿使用 revision／`If-Match` 防止多人互相覆蓋；發布與儲存分離，不會因修改設定就直接
+更動 LINE 官方帳號。
+
+發布工作保存在 `line_rich_menu_publications`，由既有 Worker 喚醒後執行單一 Menu 建立、
+圖片上傳及預設選單設定。成功後，`staff`／`union_staff` 角色會分批建立 `rich_menu_link`
+任務切換至新版；失敗保留舊版並提供錯誤與人工重試。圖片本體放在 `MEDIA_STORAGE_ROOT`，
+MySQL `media_assets` 只保存中繼資料與 SHA-256，不保存 BLOB。
+
+```text
+GET  /api/config/line-menus/state
+POST /api/v1/line/rich-menus/preview
+POST /api/v1/line/rich-menus/{menu_id}/images
+POST /api/v1/line/rich-menus/{menu_id}/publish
+GET  /api/v1/line/rich-menus/publications
+POST /api/v1/line/rich-menus/publications/{publication_id}/retry
+```
+
+#### 5.5 LIFF 設定中心
+
+LINE 管理中心的「LIFF 設定」已接上入口選擇、舊客戶綁定及新客戶登記三個頁面。工會人員
+可修改共用主題、頁面文字、入口卡片、欄位順序及自訂問題，並先做手機版預覽。儲存後，
+使用者下次載入頁面即套用，不需要像 Rich Menu 一樣另外發布。
+
+後端以 revision／`If-Match` 防止多人覆蓋，並保存最多 20 個修改前快照供人工還原。姓名、
+電話、預產期、服務天數及地址等系統欄位不能刪除、停用或改變必要類型；新增問題答案會
+寫入既有 `beclass_records.survey_details`。
+
+正式環境必須設定 LIFF 所屬的 LINE Login Channel ID。頁面會送出 `liff.getIDToken()`，
+FastAPI 向 LINE 驗證後從 token 取得使用者 ID，不採信瀏覽器自行填入的 ID。開發環境可保留
+明確的模擬 ID 降級模式。
+
+```env
+LINE_LOGIN_CHANNEL_ID=your_line_login_channel_id_here
+LIFF_REQUIRE_ID_TOKEN=true
+```
+
+```text
+GET  /api/config/liff/runtime?page=registration
+GET  /api/config/liff/state
+POST /api/config/liff/validate
+PUT  /api/config/liff
+GET  /api/config/liff/history
+POST /api/config/liff/rollback/{revision}
+```
+
+#### 5.6 人工審查中心
+
+LINE 管理中心的「人工審查」已接上月嫂身分申請與客戶重新綁定。清單支援類型、狀態、
+日期及關鍵字篩選，LINE User ID 在清單中會遮蔽，進入具權限的詳細資料後才顯示完整值。
+
+查看審查資料需要 `line_agent` 以上權限；核准或拒絕需要 `line_manager` 以上權限。拒絕必須
+填寫原因。所有決定均保存處理管理員、原因與時間，並寫入 `admin_audit_logs`。核准前會以
+資料列鎖重新確認狀態；重新綁定還會檢查舊綁定是否已變更及新 LINE 是否與其他客戶衝突。
+
+```text
+GET  /api/v1/line/review-requests/summary
+GET  /api/v1/line/review-requests
+GET  /api/v1/line/review-requests/{request_id}
+POST /api/v1/line/review-requests/{request_id}/approve
+POST /api/v1/line/review-requests/{request_id}/reject
+```
+
+開發終端的一次性 `y/n` 審查仍保留；舊內部接口改為呼叫同一個交易服務，不會固定輪詢。
+管理中心也只在頁面操作或人工重新整理時讀取資料。
 
 #### 手動啟動個別服務
 若需單獨除錯，可在啟動 Docker 後手動執行以下指令：

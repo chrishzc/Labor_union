@@ -3112,6 +3112,84 @@ modules:
     known_symbols:
     - detect_schedule_conflicts
     - repair_schedule_conflicts
+  StartScript:
+    type: script
+    description: 一鍵開發環境初始化腳本。固定切換至專案根目錄，啟動Docker、初始化MySQL、產生並匯入假資料，再委派根目錄開發啟動器監控FastAPI與ngrok，並啟動Streamlit。
+    source: start.bat
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - DevFastApiNgrokLauncher
+    input: {}
+    output: {}
+    exceptions: []
+    invariants:
+    - 'INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始執行 init_db.py 防止連線逾時崩潰。'
+    preferred_pattern: none
+    verification: []
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: root
+    state: deployed
+    fan_in_snapshot: 0
+  DevFastApiNgrokLauncher:
+    type: script
+    description: 開發用FastAPI與ngrok一鍵啟動器，負責雙程序生命週期監控、異常重啟，以及LINE人工待審的一次性本機通知。
+    source: start_fastapi_ngrok.py
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies: []
+    input:
+      project_root: 啟動器所在的專案根目錄。
+      fastapi_entrypoint: api.main:app。
+      tunnel_target: 127.0.0.1:8000。
+    output:
+      development_services: FastAPI與ngrok受監控程序。
+      line_webhook_url: ngrok公開網址加上/webhook/line。
+    exceptions: []
+    invariants:
+    - 僅供開發環境使用；正式環境不得依賴ngrok。
+    - FastAPI與ngrok任一程序異常停止時，另一程序必須一併安全關閉。
+    - LINE人工審核通知入口只綁定127.0.0.1，不得透過ngrok公開。
+    preferred_pattern: supervisor
+    verification: []
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: terminal
+      signals: []
+    complexity: medium
+    algorithm: []
+    idempotency:
+      level: session
+      side_effects:
+      - starts FastAPI and ngrok child processes
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals:
+    - production tunnel hosting
+    sub_map: root
+    state: deployed
+    fan_in_snapshot: 1
   OnlineScript:
     type: script
     description: 一鍵啟動上線服務腳本。啟動 Docker、等待 MySQL 連線就緒，但不執行資料庫初始化與假資料生成，最後以並行方式啟動 FastAPI、Streamlit

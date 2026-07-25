@@ -306,7 +306,7 @@
     <!-- 一般表單卡片 -->
     <div id="formContent">
         <div class="header">
-            <div class="logo">Labor Union</div>
+            <div class="logo" id="pageLogo">Labor Union</div>
             <div class="title" id="formTitle">服務綁定與訂單查詢</div>
             <div class="subtitle" id="formSubtitle">請填寫您的基本資料，以完成 LINE 帳號與最新訂單的綁定與查詢。</div>
         </div>
@@ -322,12 +322,12 @@
             </div>
 
             <div class="form-group">
-                <label class="form-label" for="userName">您的真實姓名</label>
+                <label class="form-label" for="userName" id="userNameLabel">您的真實姓名</label>
                 <input class="form-input" type="text" id="userName" placeholder="請輸入姓名" required autocomplete="name">
             </div>
 
             <div class="form-group">
-                <label class="form-label" for="userPhone">您的聯絡電話</label>
+                <label class="form-label" for="userPhone" id="userPhoneLabel">您的聯絡電話</label>
                 <input class="form-input" type="tel" id="userPhone" placeholder="請輸入聯絡電話（例 0912345678）" required autocomplete="tel">
             </div>
 
@@ -338,25 +338,25 @@
     <!-- 重新綁定確認卡片 -->
     <div class="success-card" id="rebindContent" style="display: none;">
         <div class="success-icon" style="color: var(--primary); background: rgba(74, 144, 226, 0.1); border-color: rgba(74, 144, 226, 0.2);">?</div>
-        <div class="success-title" style="color: var(--primary);">確認重新綁定</div>
+        <div class="success-title" id="rebindTitle" style="color: var(--primary);">確認重新綁定</div>
         <div class="success-text" id="rebindDesc">
             本筆訂單已有綁定另一個帳戶，請問是否確認要覆蓋舊有紀錄，並重新綁定為當前這個 LINE 帳戶？
         </div>
         <div style="display: flex; gap: 10px; margin-top: 10px;">
-            <button class="btn-close" style="flex: 1;" onclick="cancelRebind()">取消綁定</button>
-            <button class="btn-submit" style="flex: 1; margin-top: 0;" onclick="confirmRebind()">確認綁定</button>
+            <button class="btn-close" id="rebindCancelButton" style="flex: 1;" onclick="cancelRebind()">取消綁定</button>
+            <button class="btn-submit" id="rebindConfirmButton" style="flex: 1; margin-top: 0;" onclick="confirmRebind()">確認綁定</button>
         </div>
     </div>
 
     <!-- 成功卡片 -->
     <div class="success-card" id="successContent">
         <div class="success-icon">✓</div>
-        <div class="success-title">綁定與查詢成功</div>
+        <div class="success-title" id="successTitle">綁定與查詢成功</div>
         <div class="success-text" id="successDesc">
             您的服務綁定與最新案件查詢已成功！<br>
             系統已自動發送案件編號通知至您的 LINE 視窗。
         </div>
-        <button class="btn-close" onclick="closeLiffWindow()">關閉視窗</button>
+        <button class="btn-close" id="closeButton" onclick="closeLiffWindow()">關閉視窗</button>
     </div>
 </div>
 
@@ -365,6 +365,8 @@
 <script>
     // 預設配置與狀態
     let isTestMode = false;
+    let currentIdToken = '';
+    let runtimePage = null;
 
     // 取得 DOM 元素
     const loader = document.getElementById('loader');
@@ -407,13 +409,18 @@
     // 初始化頁面
     window.addEventListener('DOMContentLoaded', async () => {
         try {
-            // 1. 先向後端請求 LINE 設定檔 (包含 LIFF ID)
-            const configRes = await fetch('/api/line/config');
-            if (!configRes.ok) {
+            // 1. 先向後端請求 LINE 與 LIFF Runtime 設定
+            const [configRes, runtimeRes] = await Promise.all([
+                fetch('/api/line/config'),
+                fetch('/api/config/liff/runtime?page=bind')
+            ]);
+            if (!configRes.ok || !runtimeRes.ok) {
                 throw new Error('無法取得後端 API 配置');
             }
-            
             const config = await configRes.json();
+            const runtime = await runtimeRes.json();
+            runtimePage = runtime.page;
+            applyRuntime(runtime);
             const liffId = config.liff_id;
 
             // 檢查是否配置了 LIFF ID
@@ -438,9 +445,10 @@
             // 4. 已登入，取得 User Profile
             const profile = await liff.getProfile();
             if (profile && profile.userId) {
+                currentIdToken = liff.getIDToken() || '';
                 lineUserIdInput.value = profile.userId;
                 lineUserIdInput.readOnly = true;
-                await fetchAndFillClientInfo(profile.userId);
+                await fetchAndFillClientInfo(profile.userId, currentIdToken);
                 hideLoader();
             } else {
                 throw new Error('無法取得 LINE 用戶識別碼 (userId)');
@@ -453,21 +461,63 @@
             enableTestMode(`初始化 LIFF 失敗：${error.message}`);
             if (queryUserId) {
                 lineUserIdInput.value = queryUserId;
-                await fetchAndFillClientInfo(queryUserId);
+                await fetchAndFillClientInfo(queryUserId, '');
             }
         }
     });
 
+    function applyRuntime(runtime) {
+        const theme = runtime.theme;
+        const page = runtime.page;
+        const root = document.documentElement.style;
+        root.setProperty('--primary', theme.primary_color);
+        root.setProperty('--primary-hover', theme.primary_hover_color);
+        root.setProperty('--bg-gradient', theme.background);
+        root.setProperty('--text-dark', theme.text_color);
+        root.setProperty('--text-muted', theme.muted_text_color);
+        document.body.style.fontFamily = theme.font_family;
+        document.getElementById('pageLogo').textContent = page.content.logo || '';
+        document.getElementById('formTitle').textContent = page.title;
+        document.getElementById('formSubtitle').textContent = page.subtitle;
+        document.getElementById('btnSubmit').textContent = page.submit_button;
+        document.getElementById('successTitle').textContent = page.success_title;
+        successDesc.textContent = page.success_description;
+        document.getElementById('rebindTitle').textContent = page.content.rebind_title || '確認重新綁定';
+        document.getElementById('rebindDesc').textContent = page.content.rebind_description || '';
+        document.getElementById('rebindCancelButton').textContent = page.content.rebind_cancel_button || '取消綁定';
+        document.getElementById('rebindConfirmButton').textContent = page.content.rebind_confirm_button || '送出申請';
+        document.getElementById('closeButton').textContent = page.content.close_button || '關閉視窗';
+        loaderText.textContent = page.loading_text;
+        const fields = Object.fromEntries(page.fields.map(field => [field.id, field]));
+        applyFieldConfig(fields.name, 'userName', 'userNameLabel');
+        applyFieldConfig(fields.phone, 'userPhone', 'userPhoneLabel');
+    }
+
+    function applyFieldConfig(field, inputId, labelId) {
+        if (!field) return;
+        document.getElementById(labelId).textContent = field.label;
+        const input = document.getElementById(inputId);
+        input.placeholder = field.placeholder || '';
+        input.required = Boolean(field.required);
+    }
+
     // 查詢並帶入既有客戶資料
-    async function fetchAndFillClientInfo(userId) {
+    async function fetchAndFillClientInfo(userId, idToken) {
         try {
-            const res = await fetch(`/api/line/client-info?userId=${userId}`);
+            const res = await fetch('/api/line/client-info', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    line_user_id: userId || '',
+                    line_id_token: idToken || ''
+                })
+            });
             if (res.ok) {
                 const data = await res.json();
                 if (data.status === 'success' && data.client) {
                     document.getElementById('userName').value = data.client.name || '';
                     document.getElementById('userPhone').value = data.client.phone || '';
-                    showMessage('已自動帶入您先前綁定之姓名與電話。若您本次訂單使用的是不同的資料，請直接修改後再按確認綁定。', 'info');
+                    showMessage(runtimePage?.content?.client_prefill_message || '已自動帶入您先前綁定之姓名與電話。', 'info');
                 }
             }
         } catch (e) {
@@ -495,11 +545,11 @@
         const lineUserId = lineUserIdInput.value.trim();
 
         if (!name || !phone || !lineUserId) {
-            showMessage('請填寫所有必要欄位。', 'error');
+            showMessage(runtimePage?.content?.validation_error || '請填寫所有必要欄位。', 'error');
             return;
         }
 
-        showLoader('正在核對並綁定帳號...');
+        showLoader(runtimePage?.content?.submit_loading_text || '正在核對並綁定帳號...');
         showMessage('', 'info'); // 清空提示
 
         try {
@@ -511,7 +561,8 @@
                 body: JSON.stringify({
                     name: name,
                     phone: phone,
-                    line_user_id: lineUserId
+                    line_user_id: lineUserId,
+                    line_id_token: currentIdToken
                 })
             });
 
@@ -522,14 +573,15 @@
                 formContent.style.display = 'none';
                 successContent.style.display = 'block';
                 
-                let desc = `您的 LINE 帳號已成功連結姓名為 <strong>${result.client_name}</strong> 的客戶資料！`;
+                let desc = `您的 LINE 帳號已成功連結姓名為「${result.client_name}」的客戶資料！`;
                 if (result.case_no) {
-                    desc += `<br><br>您的案件編號為：<strong>${result.case_no}</strong>。`;
+                    desc += `\n\n您的案件編號為：${result.case_no}。`;
                 } else {
-                    desc += `<br><br>您的案件編號尚待行政核發；完成核對後將主動通知您。`;
+                    desc += `\n\n您的案件編號尚待行政核發；完成核對後將主動通知您。`;
                 }
-                desc += `<br><br>我們已將最新確認與案件編號訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
-                successDesc.innerHTML = desc;
+                desc += `\n\n我們已將最新確認訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
+                successDesc.style.whiteSpace = 'pre-line';
+                successDesc.textContent = desc;
                 
                 hideLoader();
             } else if (response.ok && result.status === 'confirm_rebind') {
@@ -539,7 +591,7 @@
                 hideLoader();
             } else {
                 // 綁定失敗
-                showMessage(result.message || '綁定失敗，請確認資料是否正確。', 'error');
+                showMessage(result.message || result.detail || '綁定失敗，請確認資料是否正確。', 'error');
                 hideLoader();
             }
 
@@ -556,7 +608,7 @@
         const phone = document.getElementById('userPhone').value.trim();
         const lineUserId = lineUserIdInput.value.trim();
 
-        showLoader('正在覆蓋綁定資料...');
+        showLoader(runtimePage?.content?.rebind_loading_text || '正在送出重新綁定申請...');
         try {
             const response = await fetch('/api/line/bind', {
                 method: 'POST',
@@ -565,24 +617,21 @@
                     name: name,
                     phone: phone,
                     line_user_id: lineUserId,
+                    line_id_token: currentIdToken,
                     force_rebind: true
                 })
             });
             const result = await response.json();
-            if (response.ok && result.status === 'success') {
+            if (response.ok && ['success', 'pending_approval'].includes(result.status)) {
                 rebindContent.style.display = 'none';
                 successContent.style.display = 'block';
-                
-                let desc = `您的 LINE 帳號已成功連結姓名為 <strong>${result.client_name}</strong> 的客戶資料！`;
-                if (result.case_no) {
-                    desc += `<br><br>您的案件編號為：<strong>${result.case_no}</strong>。`;
-                } else {
-                    desc += `<br><br>您的案件編號尚待行政核發；完成核對後將主動通知您。`;
-                }
-                desc += `<br><br>我們已將最新確認與案件編號訊息傳送至您的 LINE 聊天室，請關閉此頁面。`;
-                successDesc.innerHTML = desc;
+                document.getElementById('successTitle').textContent = result.status === 'pending_approval'
+                    ? '申請已送出'
+                    : (runtimePage?.success_title || '綁定與查詢成功');
+                successDesc.style.whiteSpace = 'pre-line';
+                successDesc.textContent = result.message || runtimePage?.success_description || '申請已送出。';
             } else {
-                showMessage(result.message || '綁定失敗', 'error');
+                showMessage(result.message || result.detail || '綁定失敗', 'error');
             }
         } catch (err) {
             showMessage('與伺服器連線失敗。', 'error');

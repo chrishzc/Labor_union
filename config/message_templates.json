@@ -224,6 +224,32 @@
       "usage": ["schedule"]
     },
     {
+      "id": "client_rebind_approved",
+      "name": "客戶重新綁定核准",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "【系統通知】\n您的帳號重新綁定申請已審核通過，成功連結至客戶「{client_name}」的登記資料。",
+      "variables": [
+        {
+          "name": "client_name",
+          "required": true,
+          "description": "重新綁定的客戶姓名"
+        }
+      ],
+      "usage": ["push", "customer_service"]
+    },
+    {
+      "id": "client_rebind_rejected",
+      "name": "客戶重新綁定拒絕",
+      "category": "webhook_reply",
+      "message_type": "text",
+      "enabled": true,
+      "content": "【系統通知】\n您的帳號重新綁定申請未通過。如有疑問，請聯絡工會服務人員。",
+      "variables": [],
+      "usage": ["push", "customer_service"]
+    },
+    {
       "id": "staff_verification_requested",
       "name": "月嫂身分等待確認",
       "category": "webhook_reply",

@@ -1,4 +1,9 @@
-"""Security helpers for LINE Messaging API webhooks."""
+"""
+================================================================================
+檔案名稱: line/security.py
+功能說明: LINE Webhook 安全工具，使用 Channel Secret 驗證請求簽章並阻擋偽造事件
+================================================================================
+"""
 
 import base64
 import hashlib
