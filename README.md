@@ -213,6 +213,30 @@ ENABLE_ADMIN_AUTH=false
 此模式只略過帳號 Session，`X-Internal-API-Key` 仍會驗證。`APP_ENV=production` 永遠強制
 啟用登入，不受此開關影響。
 
+#### 5.1.1 一鍵本機開發初始化（含金鑰）
+
+不同開發者可各自維護本機 `.env`。若要快速補齊最少三個參數，直接執行：
+
+```powershell
+.\bootstrap_admin_dev_env.bat
+```
+
+腳本會自動寫入（或更新）：
+
+```env
+APP_ENV=development
+ENABLE_ADMIN_AUTH=false
+INTERNAL_API_KEY=<隨機且本機專用金鑰>
+```
+
+完成後再啟動本機服務（例如 `.\start.bat` 或其他本機啟動流程）即可進行不需登入的管理端開發測試。
+
+若要一鍵完成「補齊環境變數 + 啟動 API/UI + watcher」，可直接執行：
+
+```powershell
+.\dev_API.bat
+```
+
 #### 5.2 訊息管理中心
 
 LINE 管理中心的「訊息管理」已接上 `config/message_templates.json`，支援搜尋、分類／狀態

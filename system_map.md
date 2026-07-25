@@ -1267,10 +1267,18 @@
 - Sub Map: root
 - Source: start.bat
 - Type: script
-- Description: 一鍵開發環境初始化腳本。固定切換至專案根目錄，啟動Docker、初始化MySQL、產生並匯入假資料，再委派根目錄開發啟動器監控FastAPI與ngrok，並啟動Streamlit。
+- Description: 一鍵開發環境初始化腳本。固定切換至專案根目錄，準備共用 INTERNAL_API_KEY，啟動Docker、初始化MySQL、產生並匯入假資料，再啟動開發服務。
+- Input:
+  - env_file: 可選的專案根目錄 .env；若含 INTERNAL_API_KEY 則沿用。
+  - virtualenv_python: .venv\Scripts\python.exe。
+- Output:
+  - shared_internal_api_key: FastAPI 與 Streamlit 共用的既有或單次隨機開發金鑰。
 - Observability: not_required
 - Invariants:
   - INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始執行 init_db.py 防止連線逾時崩潰。
+  - 讀取 .env 時只接受行首 INTERNAL_API_KEY；若不存在才建立單次隨機金鑰，不得輸出金鑰值。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_admin_dev_startup_scripts.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 
 ##### Module: DevFastApiNgrokLauncher
 - Sub Map: root
@@ -1300,6 +1308,7 @@
   - working_directory: 腳本所在目錄；必須先切換至 %~dp0。
   - docker_compose: 可執行的 Docker Compose 與可用 Docker Desktop。
   - virtualenv_python: .venv\Scripts\python.exe。
+  - internal_api_key: 必須已存在於程序環境或專案根目錄 .env。
 - Output:
   - running_services: FastAPI、Streamlit 與 File Watcher 的平行啟動程序。
   - failure_exit: Docker、Python 環境或資料庫就緒檢查失敗時的非零結束碼。
@@ -1310,10 +1319,57 @@
   - FastAPI 必須以實際 ASGI 入口 `api.main:app` 啟動，不得指向已改名的 `line.main:app`。
   - FastAPI、Streamlit 與 File Watcher 必須以同一個虛擬環境 Python 平行啟動。
   - 不得執行 init_db、假資料生成或其他資料初始化命令。
+  - 正式啟動不得自行產生 INTERNAL_API_KEY；只能沿用程序環境或 .env 的非空值，否則以非零狀態停止。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_online_script.py"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_online_script.py", "tests\\test_admin_dev_startup_scripts.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Non Goals:
   - 不改動 Docker Compose、API／UI 程式碼、資料庫 schema 或服務 port 策略。
+
+##### Module: AdminDevEnvironmentBootstrapService
+- Sub Map: root
+- Source: scripts/bootstrap_admin_dev_env.ps1
+- Type: script
+- State: `planned`
+- Description: 安全產生本機開發用 internal API key，並更新 Git ignored .env 中的管理員開發環境設定。
+- Input:
+  - env_file: 專案根目錄 .env。
+- Output:
+  - development_admin_environment: APP_ENV=development、ENABLE_ADMIN_AUTH=false 與隨機 INTERNAL_API_KEY。
+- Invariants:
+  - 只能修改 .env 中三個明確管理員開發設定，不得刪除或輸出其他既有環境變數。
+  - INTERNAL_API_KEY 必須使用密碼學安全亂數產生，不得硬編碼在版本控制檔案。
+  - .env 寫入失敗必須回傳非零狀態；不得修改 .env.example。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_admin_dev_startup_scripts.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: AdminDevEnvironmentBootstrapEntrypoint
+- Sub Map: root
+- Source: bootstrap_admin_dev_env.bat
+- Type: script
+- State: `planned`
+- Description: Windows batch wrapper，從專案根目錄委派 PowerShell 管理員開發環境 bootstrap。
+- Dependencies: [AdminDevEnvironmentBootstrapService]
+- Invariants:
+  - 必須以 %~dp0 解析專案根目錄與 PowerShell 腳本，不得依賴呼叫者目前工作目錄。
+  - PowerShell 失敗時必須保留非零 exit code，不得顯示成功。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_admin_dev_startup_scripts.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: DevApiLauncher
+- Sub Map: root
+- Source: dev_API.bat
+- Type: script
+- State: `planned`
+- Description: 先補齊本機管理員開發環境，再委派既有 online 啟動流程的 Windows batch。
+- Dependencies: [AdminDevEnvironmentBootstrapService, OnlineScript]
+- Invariants:
+  - 必須先成功完成 bootstrap 才能呼叫 online.bat；bootstrap 失敗必須立即停止且回傳非零狀態。
+  - 不得將 INTERNAL_API_KEY 寫入此 batch 或命令列參數。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "-q", "tests\\test_admin_dev_startup_scripts.py"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
 
 ##### Module: InitDB
 - Sub Map: root
