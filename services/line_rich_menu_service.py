@@ -1,4 +1,9 @@
-"""Durable, single-menu LINE Rich Menu publication and release history."""
+"""
+================================================================================
+檔案名稱: services/line_rich_menu_service.py
+功能說明: LINE 下方選單可靠發布服務，管理圖片、版本、發布狀態、重試與使用者綁定
+================================================================================
+"""
 
 from __future__ import annotations
 

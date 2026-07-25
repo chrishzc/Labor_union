@@ -280,3 +280,11 @@ def test_rich_menu_ui_has_no_fixed_polling():
     assert "time.sleep" not in source
     assert "autorefresh" not in source.lower()
     assert "render_rich_menu_manager(client, token, profile)" in page
+
+
+def test_rich_menu_manager_hides_line_engineering_fields():
+    source = (ROOT / "ui/components/line_rich_menu_manager.py").read_text(encoding="utf-8")
+
+    assert "LINE Menu ID" not in source
+    assert "Postback Data" not in source
+    assert "儲存草稿" not in source

@@ -1,4 +1,9 @@
-"""Authenticated task monitoring and safe queue operations."""
+"""
+================================================================================
+檔案名稱: api/routes/line_tasks.py
+功能說明: LINE 發送任務管理 API，提供查詢、立即執行、取消及失敗重送等安全操作
+================================================================================
+"""
 
 from __future__ import annotations
 

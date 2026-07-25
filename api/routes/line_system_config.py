@@ -1,4 +1,9 @@
-"""Validated configuration APIs for LINE, LIFF and customer service clients."""
+"""
+================================================================================
+檔案名稱: api/routes/line_system_config.py
+功能說明: LINE 系統設定 API，管理訊息內容、自動通知、下方選單與 LIFF 頁面設定
+================================================================================
+"""
 
 from __future__ import annotations
 

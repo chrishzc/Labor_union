@@ -385,3 +385,9 @@ def test_schema_contains_reviewer_metadata_and_replayable_migration():
     assert "decision_reason" in schema
     assert "INFORMATION_SCHEMA.COLUMNS" in migration
     assert "fk_confirmation_admin_reviewer" in migration
+
+
+def test_review_manager_hides_raw_line_identifier_labels():
+    source = (ROOT / "ui/components/line_review_manager.py").read_text(encoding="utf-8")
+
+    assert "LINE User ID" not in source

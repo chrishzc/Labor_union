@@ -1,4 +1,9 @@
-"""Authenticated LINE identity and rebind review management APIs."""
+"""
+================================================================================
+檔案名稱: api/routes/line_reviews.py
+功能說明: LINE 人工確認 API，處理月嫂身分申請與客戶 LINE 帳號重新綁定
+================================================================================
+"""
 
 from __future__ import annotations
 

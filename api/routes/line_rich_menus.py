@@ -1,4 +1,9 @@
-"""Authenticated image, preview and durable publication APIs for Rich Menu."""
+"""
+================================================================================
+檔案名稱: api/routes/line_rich_menus.py
+功能說明: LINE 下方選單 API，提供圖片上傳、預覽、發布、發布紀錄與失敗重試
+================================================================================
+"""
 
 from __future__ import annotations
 

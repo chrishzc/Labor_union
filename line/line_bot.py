@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-File: api/main.py
-Description: LINE 與 好好簽 Webhook 接收後端服務 (API Server)
+================================================================================
+檔案名稱: line/line_bot.py
+功能說明: LINE Bot 子路由，負責 Webhook、LIFF、使用者事件、身分切換與 LINE 訊息任務建立
+================================================================================
 """
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel

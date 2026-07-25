@@ -1,4 +1,9 @@
-"""Stage 5.1 entry shell for the authenticated LINE management center."""
+"""
+================================================================================
+檔案名稱: ui/pages/07_line_management.py
+功能說明: Streamlit LINE 管理中心主頁，整合訊息、自動通知、選單、表單、人工確認與發送紀錄
+================================================================================
+"""
 
 from __future__ import annotations
 
@@ -41,7 +46,18 @@ def _login(client: LineAdminApiClient) -> None:
         st.rerun()
 
 
-def _overview(client: LineAdminApiClient, token: str | None) -> None:
+ROLE_LABELS = {
+    "line_agent": "服務人員",
+    "line_manager": "LINE 主管",
+    "system_admin": "系統管理員",
+}
+
+
+def _overview(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
+) -> None:
     try:
         health = client.health(token)
         capabilities = client.capabilities(token)
@@ -57,17 +73,23 @@ def _overview(client: LineAdminApiClient, token: str | None) -> None:
     worker_running = health.get("worker", {}).get("running", False)
     database_ok = health.get("database", {}).get("ok", False)
     col1, col2, col3 = st.columns(3)
-    col1.metric("LINE 系統", status_value)
-    col2.metric("背景 Worker", "執行中" if worker_running else "未執行")
-    col3.metric("資料庫", "正常" if database_ok else "異常")
+    system_ok = status_value in {"ok", "healthy"} and database_ok
+    col1.metric("整體狀態", "可正常使用" if system_ok else "需要檢查")
+    col2.metric("自動發送", "正常運作" if worker_running else "目前暫停")
+    col3.metric("資料連線", "正常" if database_ok else "異常")
 
-    st.subheader("目前已提供的後端能力")
-    available = capabilities.get("available", {})
-    for name, enabled in available.items():
-        st.write(("✅" if enabled else "⬜") + f" {name}")
+    if system_ok and worker_running:
+        st.success("LINE 管理功能與自動發送服務目前運作正常。")
+    else:
+        st.warning("部分服務未正常運作，請通知系統管理員協助處理。")
 
-    with st.expander("LINE 金鑰設定狀態"):
-        st.json(health.get("line_credentials", {}))
+    if profile.get("role") == "system_admin":
+        with st.expander("系統管理資訊"):
+            available = capabilities.get("available", {})
+            for name, enabled in available.items():
+                st.write(("✅" if enabled else "⬜") + f" {name}")
+            st.caption("下列設定僅供系統管理員檢查，不會顯示實際金鑰內容。")
+            st.json(health.get("line_credentials", {}))
 
 
 def _planned_panel(name: str, description: str) -> None:
@@ -104,7 +126,7 @@ def show() -> None:
 
     header_left, header_right = st.columns([4, 1])
     header_left.caption(
-        f"登入者：{profile['display_name']}（{profile['role']}）｜Session 僅保存在目前 Streamlit 執行階段"
+        f"登入者：{profile['display_name']}（{ROLE_LABELS.get(profile['role'], '服務人員')}）"
     )
     if not bypassed and header_right.button("登出", use_container_width=True):
         try:
@@ -116,23 +138,23 @@ def show() -> None:
 
     tabs = st.tabs(
         [
-            "系統總覽",
-            "訊息管理",
-            "排程任務",
-            "Rich Menu",
-            "LIFF 設定",
-            "人工審查",
+            "使用狀態",
+            "訊息內容",
+            "自動通知",
+            "LINE 下方選單",
+            "LINE 表單",
+            "待確認申請",
             "客服入口",
             "操作紀錄",
         ]
     )
     with tabs[0]:
-        _overview(client, token)
+        _overview(client, token, profile)
     with tabs[1]:
         render_message_manager(client, token, profile)
 
     with tabs[2]:
-        schedule_tab, task_tab = st.tabs(["D+排程設定", "Worker 任務監控"])
+        schedule_tab, task_tab = st.tabs(["新好友通知設定", "發送紀錄"])
         with schedule_tab:
             render_schedule_manager(client, token, profile)
         with task_tab:

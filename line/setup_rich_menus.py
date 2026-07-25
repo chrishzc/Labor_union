@@ -1,4 +1,9 @@
-"""CLI compatibility wrapper for the durable Rich Menu publisher."""
+"""
+================================================================================
+檔案名稱: line/setup_rich_menus.py
+功能說明: LINE 下方選單發布命令入口，沿用可靠發布服務建立、上傳及套用 Rich Menu
+================================================================================
+"""
 
 from __future__ import annotations
 

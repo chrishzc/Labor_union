@@ -1,4 +1,9 @@
-"""Editable D+N onboarding schedule management for LINE follow events."""
+"""
+================================================================================
+檔案名稱: ui/components/line_schedule_manager.py
+功能說明: LINE 新好友自動通知設定元件，管理加入好友後各天的訊息與發送時間
+================================================================================
+"""
 
 from __future__ import annotations
 
@@ -41,10 +46,10 @@ def _build_schedule_payload(
             }
         )
     if not steps:
-        raise ValueError("排程至少需要一個發送步驟")
+        raise ValueError("自動通知至少需要設定一則訊息")
     steps.sort(key=lambda item: (item["day"], item["send_time"]))
     if len({item["day"] for item in steps}) != len(steps):
-        raise ValueError("同一個排程不能設定重複的 D+天數")
+        raise ValueError("加入後的同一天不能重複設定")
 
     payload = deepcopy(config)
     payload["timezone"] = timezone_name
@@ -63,7 +68,11 @@ def _build_schedule_payload(
     return payload
 
 
-def _preview_rows(payload: dict[str, Any], schedule_id: str) -> list[dict[str, Any]]:
+def _preview_rows(
+    payload: dict[str, Any],
+    schedule_id: str,
+    template_names: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
     timezone_name = payload["timezone"]
     zone = ZoneInfo(timezone_name)
     now = datetime.now(zone)
@@ -78,8 +87,10 @@ def _preview_rows(payload: dict[str, Any], schedule_id: str) -> list[dict[str, A
             {
                 "階段": f"D+{step['day']}",
                 "台灣／設定時區時間": target.strftime("%Y-%m-%d %H:%M %Z"),
-                "訊息範本": step["template_id"],
-                "若時間已過": "到期後由 Worker 立即處理" if target <= now else "等待排程時間",
+                "發送內容": (template_names or {}).get(
+                    step["template_id"], step["template_id"]
+                ),
+                "執行狀態": "時間已到，將儘快發送" if target <= now else "等待發送時間",
             }
         )
     return result
@@ -90,9 +101,9 @@ def render_schedule_manager(
     token: str | None,
     profile: dict[str, Any],
 ) -> None:
-    st.subheader("D+1～D+3 排程設定")
-    st.caption("此頁不會固定輪詢；儲存只影響之後新建立的 onboarding 任務。")
-    st.info("既有 line_tasks 保存建立當時的時間與訊息，不會因修改此設定而被回溯改寫。")
+    st.subheader("新好友自動通知")
+    st.caption("設定使用者加入好友後，第幾天、幾點收到哪一則訊息。")
+    st.info("修改後只套用到之後新加入的好友；已經排定的通知不會改變。")
 
     flash = st.session_state.pop(FLASH_KEY, None)
     if flash:
@@ -102,23 +113,33 @@ def render_schedule_manager(
         state = client.message_schedule_state(token)
         template_state = client.message_template_state(token)
     except LineAdminApiError as exc:
-        st.error(f"無法載入排程設定：{exc}")
+        st.error(f"無法載入自動通知設定：{exc}")
         return
 
     config = state["config"]
     schedules = config.get("schedules", [])
     if not schedules:
-        st.warning("目前沒有 follow onboarding 排程。")
+        st.warning("目前沒有新好友通知設定。")
         return
-    enabled_template_ids = [
-        item["id"]
+    template_items = [
+        item
         for item in template_state["config"].get("templates", [])
         if item.get("enabled") and "schedule" in item.get("usage", [])
     ]
+    template_names: dict[str, str] = {}
+    name_to_id: dict[str, str] = {}
+    for item in template_items:
+        display_name = item["name"]
+        suffix = 2
+        while display_name in name_to_id:
+            display_name = f"{item['name']}（{suffix}）"
+            suffix += 1
+        template_names[item["id"]] = display_name
+        name_to_id[display_name] = item["id"]
     can_edit = profile.get("role") in EDIT_ROLES
     schedule_ids = [item["id"] for item in schedules]
     selected_id = st.selectbox(
-        "排程",
+        "設定名稱",
         schedule_ids,
         format_func=lambda value: next(
             item["name"] for item in schedules if item["id"] == value
@@ -127,40 +148,50 @@ def render_schedule_manager(
     selected = next(item for item in schedules if item["id"] == selected_id)
 
     if not can_edit:
-        st.info("目前帳號為唯讀權限。")
+        st.info("目前帳號只有查看權限；如需修改，請聯絡 LINE 主管。")
 
     with st.form(f"line_schedule_{selected_id}"):
-        col1, col2 = st.columns(2)
-        name = col1.text_input("排程名稱", value=selected["name"], disabled=not can_edit)
-        timezone_name = col2.text_input(
-            "時區", value=config.get("timezone", "Asia/Taipei"), disabled=not can_edit
-        )
+        name = selected["name"]
+        timezone_name = config.get("timezone", "Asia/Taipei")
         enabled_col, restart_col = st.columns(2)
-        enabled = enabled_col.checkbox("啟用排程", value=selected["enabled"], disabled=not can_edit)
+        enabled = enabled_col.checkbox("啟用自動通知", value=selected["enabled"], disabled=not can_edit)
         restart_on_refollow = restart_col.checkbox(
             "解除封鎖／重新加入時重新開始",
             value=selected.get("restart_on_refollow", False),
             disabled=not can_edit,
         )
 
+        editor_rows = pd.DataFrame(
+            [
+                {
+                    "day": step["day"],
+                    "send_time": step["send_time"],
+                    "message_name": template_names.get(
+                        step["template_id"], "目前使用中的訊息"
+                    ),
+                }
+                for step in selected["steps"]
+            ],
+            columns=["day", "send_time", "message_name"],
+        )
         rows = st.data_editor(
-            pd.DataFrame(selected["steps"], columns=["day", "send_time", "template_id"]),
+            editor_rows,
             num_rows="dynamic" if can_edit else "fixed",
             disabled=not can_edit,
             use_container_width=True,
             column_config={
-                "day": st.column_config.NumberColumn("D+天數", min_value=0, max_value=365, step=1),
-                "send_time": st.column_config.TextColumn("發送時間 HH:MM"),
-                "template_id": st.column_config.SelectboxColumn(
-                    "訊息範本", options=enabled_template_ids, required=True
+                "day": st.column_config.NumberColumn("加入後第幾天", min_value=0, max_value=365, step=1),
+                "send_time": st.column_config.TextColumn("發送時間（例如 10:00）"),
+                "message_name": st.column_config.SelectboxColumn(
+                    "發送哪一則訊息", options=list(name_to_id), required=True
                 ),
             },
             key=f"line_schedule_steps_{selected_id}",
         )
         button1, button2 = st.columns(2)
-        preview_clicked = button1.form_submit_button("預覽日期", use_container_width=True)
+        preview_clicked = button1.form_submit_button("查看預計時間", use_container_width=True)
         save_clicked = button2.form_submit_button(
-            "儲存排程",
+            "儲存自動通知",
             type="primary",
             disabled=not can_edit,
             use_container_width=True,
@@ -168,6 +199,8 @@ def render_schedule_manager(
 
     if preview_clicked or save_clicked:
         try:
+            payload_rows = rows.rename(columns={"message_name": "template_id"}).copy()
+            payload_rows["template_id"] = payload_rows["template_id"].map(name_to_id)
             payload = _build_schedule_payload(
                 config=config,
                 schedule_id=selected_id,
@@ -175,11 +208,11 @@ def render_schedule_manager(
                 name=name,
                 enabled=enabled,
                 restart_on_refollow=restart_on_refollow,
-                rows=rows,
+                rows=payload_rows,
             )
-            preview = _preview_rows(payload, selected_id)
+            preview = _preview_rows(payload, selected_id, template_names)
         except Exception as exc:
-            st.error(f"排程格式錯誤：{exc}")
+            st.error(f"通知設定有誤：{exc}")
         else:
             st.session_state[PREVIEW_KEY] = preview
             if save_clicked:
@@ -190,10 +223,10 @@ def render_schedule_manager(
                 except LineAdminApiError as exc:
                     st.error(f"儲存失敗：{exc}")
                 else:
-                    st.session_state[FLASH_KEY] = "排程設定已儲存；只影響之後建立的新任務。"
+                    st.session_state[FLASH_KEY] = "新好友通知已儲存；只影響之後加入的好友。"
                     st.rerun()
 
     preview = st.session_state.get(PREVIEW_KEY)
     if preview:
-        st.markdown("#### 排程日期預覽")
+        st.markdown("#### 預計發送時間")
         st.dataframe(preview, use_container_width=True, hide_index=True)

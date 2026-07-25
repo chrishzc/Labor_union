@@ -1,4 +1,9 @@
-"""Server-side API client for authenticated LINE administration APIs."""
+"""
+================================================================================
+檔案名稱: ui/api_clients/line_api_client.py
+功能說明: Streamlit 專用 LINE API Client，統一帶入內部金鑰與管理員 Session 呼叫 FastAPI
+================================================================================
+"""
 
 from __future__ import annotations
 

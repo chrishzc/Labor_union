@@ -1,4 +1,9 @@
-"""Authenticated LINE administration overview endpoints."""
+"""
+================================================================================
+檔案名稱: api/routes/line_admin.py
+功能說明: LINE 管理中心總覽 API，提供系統健康狀態、Worker 狀態與管理功能清單
+================================================================================
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,9 @@
-"""On-demand LINE identity and client rebind review center."""
+"""
+================================================================================
+檔案名稱: ui/components/line_review_manager.py
+功能說明: LINE 待確認申請元件，處理月嫂身分認證與客戶帳號重新綁定
+================================================================================
+"""
 
 from __future__ import annotations
 
@@ -27,6 +32,20 @@ STATUS_LABELS = {
     "rejected": "已拒絕",
     "cancelled": "已取消",
 }
+ROLE_LABELS = {
+    "customer": "一般客戶",
+    "staff": "月嫂",
+    "union_staff": "工會人員",
+}
+
+
+def _mask_line_id(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return "-"
+    if len(text) <= 8:
+        return text[:2] + "***"
+    return text[:4] + "…" + text[-4:]
 
 
 def _format_utc_as_taipei(value: Any) -> str:
@@ -75,8 +94,8 @@ def render_review_manager(
     token: str | None,
     profile: dict[str, Any],
 ) -> None:
-    st.subheader("人工審查中心")
-    st.caption("只在進入頁面、操作或按下重新整理時讀取，不使用固定輪詢。")
+    st.subheader("待確認申請")
+    st.caption("確認月嫂身分，或處理客戶提出的 LINE 帳號重新綁定申請。")
     flash = st.session_state.pop(FLASH_KEY, None)
     if flash:
         st.success(flash)
@@ -100,7 +119,7 @@ def render_review_manager(
     filter1, filter2, filter3 = st.columns([1, 1, 2])
     type_label = filter1.selectbox("申請類型", ["全部", *TYPE_LABELS.values()])
     status_label = filter2.selectbox("處理狀態", list(STATUS_LABELS.values()))
-    search = filter3.text_input("搜尋申請編號、姓名或 LINE ID")
+    search = filter3.text_input("搜尋申請編號或姓名")
 
     date_enabled = st.checkbox("依申請日期篩選", value=False)
     created_from = created_to = None
@@ -114,7 +133,7 @@ def render_review_manager(
         created_from = _date_boundary(start_date, end=False)
         created_to = _date_boundary(end_date, end=True)
 
-    if st.button("重新整理審查資料"):
+    if st.button("重新整理", key="line_review_refresh"):
         st.rerun()
 
     request_type = next(
@@ -158,7 +177,7 @@ def render_review_manager(
         if result["page"] > 1:
             st.session_state[PAGE_KEY] = 1
             st.rerun()
-        st.info("目前篩選條件沒有人工審查申請。")
+        st.info("目前沒有符合條件的待確認申請。")
         return
 
     rows = [
@@ -167,7 +186,7 @@ def render_review_manager(
             "類型": TYPE_LABELS.get(item["request_type"], item["request_type"]),
             "狀態": STATUS_LABELS.get(item["status"], item["status"]),
             "申請者": item.get("display_name") or "-",
-            "LINE User": item.get("line_user_id_masked") or "-",
+            "申請帳號": item.get("line_user_id_masked") or "-",
             "申請時間（台北）": _format_utc_as_taipei(item.get("created_at")),
             "處理者": item.get("reviewer_display_name") or "-",
         }
@@ -211,24 +230,26 @@ def render_review_manager(
         "申請類型": TYPE_LABELS.get(detail["request_type"], detail["request_type"]),
         "狀態": STATUS_LABELS.get(detail["status"], detail["status"]),
         "申請時間（台北）": _format_utc_as_taipei(detail.get("created_at")),
-        "LINE User ID": detail.get("line_user_id") or "-",
+        "申請帳號": _mask_line_id(detail.get("line_user_id")),
     }
     if detail["request_type"] == "staff_verification":
         detail_rows.update(
             {
-                "目前 LINE 角色": detail.get("current_line_role") or "尚未建立",
-                "好友狀態": detail.get("current_line_status") or "-",
+                "目前身分": ROLE_LABELS.get(
+                    detail.get("current_line_role"), "尚未設定"
+                ),
+                "LINE 好友狀態": "正常" if detail.get("current_line_status") == "active" else "需要確認",
             }
         )
     else:
         detail_rows.update(
             {
-                "客戶編號": detail.get("client_id") or "-",
                 "客戶姓名": detail.get("client_name") or "-",
                 "案件編號": detail.get("case_no") or "尚未核發",
-                "資料庫目前 LINE ID": detail.get("current_client_line_user_id") or "-",
-                "申請快照舊 LINE ID": detail.get("old_line_user_id") or "-",
-                "申請的新 LINE ID": detail.get("new_line_user_id") or "-",
+                "目前綁定帳號": _mask_line_id(
+                    detail.get("current_client_line_user_id")
+                ),
+                "申請改綁帳號": _mask_line_id(detail.get("new_line_user_id")),
             }
         )
     st.dataframe(
@@ -246,7 +267,7 @@ def render_review_manager(
         return
 
     if profile.get("role") not in MANAGER_ROLES:
-        st.info("目前帳號可以查看待審資料；核准或拒絕需要 line_manager 以上權限。")
+        st.info("目前帳號可以查看申請；核准或拒絕需要主管權限。")
         return
 
     with st.form(f"line_review_decision_{request_id}"):

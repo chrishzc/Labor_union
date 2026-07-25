@@ -1,4 +1,9 @@
-"""Rich Menu configuration, preview, image upload and publication UI."""
+"""
+================================================================================
+檔案名稱: ui/components/line_rich_menu_manager.py
+功能說明: LINE 聊天下方選單管理元件，編輯按鈕、預覽圖片、上傳及套用選單
+================================================================================
+"""
 
 from __future__ import annotations
 
@@ -17,6 +22,24 @@ EDIT_ROLES = {"line_manager", "system_admin"}
 FLASH_KEY = "line_rich_menu_flash"
 PREVIEW_KEY = "line_rich_menu_preview"
 TAIPEI = ZoneInfo("Asia/Taipei")
+ROLE_LABELS = {
+    "customer": "一般客戶／媽媽",
+    "staff": "月嫂",
+    "union_staff": "工會人員",
+}
+ACTION_LABELS = {
+    "message": "傳送一段文字",
+    "url": "開啟指定網頁",
+    "liff": "開啟 LINE 內的服務頁面",
+    "postback": "執行系統功能",
+}
+PUBLICATION_STATUS_LABELS = {
+    "pending": "等待發布",
+    "processing": "發布中",
+    "published": "已發布",
+    "failed": "發布失敗",
+    "cancelled": "已取消",
+}
 
 
 def _button_rows(menu: dict[str, Any]) -> pd.DataFrame:
@@ -24,6 +47,9 @@ def _button_rows(menu: dict[str, Any]) -> pd.DataFrame:
     for button in menu["buttons"]:
         action = button["action"]
         value = action.get("text") or action.get("data") or action.get("uri") or ""
+        action_kind = action["type"]
+        if action["type"] == "uri":
+            action_kind = "liff" if action.get("uri_source") == "liff" else "url"
         rows.append(
             {
                 "id": button["id"],
@@ -36,6 +62,7 @@ def _button_rows(menu: dict[str, Any]) -> pd.DataFrame:
                 "height": button["bounds"]["height"],
                 "action_type": action["type"],
                 "uri_source": action.get("uri_source", "literal"),
+                "action_kind": ACTION_LABELS[action_kind],
                 "action_value": value,
             }
         )
@@ -79,8 +106,13 @@ def _build_menu_from_editor(
     for record in rows.to_dict("records"):
         if pd.isna(record.get("id")) or not str(record.get("id") or "").strip():
             continue
-        action_type = str(record.get("action_type") or "message")
-        uri_source = str(record.get("uri_source") or "literal")
+        action_label = str(record.get("action_kind") or ACTION_LABELS["message"])
+        action_kind = next(
+            (key for key, label in ACTION_LABELS.items() if label == action_label),
+            "message",
+        )
+        action_type = "uri" if action_kind in {"url", "liff"} else action_kind
+        uri_source = "liff" if action_kind == "liff" else "literal"
         value = str(record.get("action_value") or "").strip()
         action = {
             "type": action_type,
@@ -132,8 +164,8 @@ def render_rich_menu_manager(
     token: str | None,
     profile: dict[str, Any],
 ) -> None:
-    st.subheader("Rich Menu 管理")
-    st.caption("草稿儲存與發布分開；此頁不會固定輪詢發布狀態。")
+    st.subheader("LINE 聊天室下方選單")
+    st.caption("選擇使用者身分後，可修改選單文字、點擊後的動作與圖片。")
     flash = st.session_state.pop(FLASH_KEY, None)
     if flash:
         st.success(flash)
@@ -142,19 +174,19 @@ def render_rich_menu_manager(
     try:
         state = client.line_menu_state(token)
     except LineAdminApiError as exc:
-        st.error(f"無法載入 Rich Menu：{exc}")
+        st.error(f"無法載入 LINE 下方選單：{exc}")
         return
     config = state["config"]
     menus = config.get("menus", [])
     if not menus:
-        st.warning("目前沒有 Rich Menu 設定。")
+        st.warning("目前沒有 LINE 下方選單設定。")
         return
 
     selected_id = st.selectbox(
-        "角色選單",
+        "選擇要修改的選單",
         [item["id"] for item in menus],
         format_func=lambda value: next(
-            f"{item['name']}（{item['audience_role']}）"
+            f"{item['name']}（{ROLE_LABELS.get(item['audience_role'], '使用者')}）"
             for item in menus
             if item["id"] == value
         ),
@@ -167,11 +199,12 @@ def render_rich_menu_manager(
         left, right = st.columns(2)
         name = left.text_input("選單名稱", value=selected_menu["name"], disabled=not can_edit)
         audience_role = right.selectbox(
-            "對應角色",
+            "顯示給誰看",
             ["customer", "staff", "union_staff"],
             index=["customer", "staff", "union_staff"].index(
                 selected_menu["audience_role"]
             ),
+            format_func=lambda value: ROLE_LABELS[value],
             disabled=not can_edit,
         )
         col1, col2, col3 = st.columns(3)
@@ -180,7 +213,7 @@ def render_rich_menu_manager(
             "開啟聊天室時展開", value=selected_menu["selected"], disabled=not can_edit
         )
         set_as_default = col3.checkbox(
-            "設為官方帳號預設選單",
+            "設為新好友預設選單",
             value=selected_menu["set_as_default"],
             disabled=not can_edit,
         )
@@ -193,9 +226,10 @@ def render_rich_menu_manager(
         )
         heights = [843, 1686]
         height = col5.selectbox(
-            "選單高度",
+            "選單大小",
             heights,
             index=heights.index(selected_menu["size"]["height"]),
+            format_func=lambda value: "標準" if value == 843 else "大型",
             disabled=not can_edit,
         )
         appearance = selected_menu.get("appearance", {})
@@ -207,37 +241,40 @@ def render_rich_menu_manager(
         )
         modes = ["generated", "uploaded"]
         image_mode = mode_col.radio(
-            "圖片模式",
+            "選單外觀",
             modes,
             index=modes.index(appearance.get("image_mode", "generated")),
+            format_func=lambda value: "使用系統配色" if value == "generated" else "使用自訂圖片",
             horizontal=True,
             disabled=not can_edit,
         )
-        st.markdown("#### 按鈕與 Action")
+        st.markdown("#### 選單按鈕")
+        st.caption("可修改按鈕名稱，以及使用者點下後要傳送文字、開啟網頁或執行功能。")
         rows = st.data_editor(
             _button_rows(selected_menu),
-            num_rows="dynamic" if can_edit else "fixed",
+            num_rows="fixed",
             disabled=not can_edit,
             use_container_width=True,
+            column_order=["label", "action_kind", "action_value"],
             column_config={
-                "action_type": st.column_config.SelectboxColumn(
-                    "Action", options=["message", "uri", "postback"], required=True
-                ),
-                "uri_source": st.column_config.SelectboxColumn(
-                    "網址來源", options=["literal", "liff"], required=True
+                "label": st.column_config.TextColumn("按鈕名稱", required=True),
+                "action_kind": st.column_config.SelectboxColumn(
+                    "點擊後要做什麼",
+                    options=list(ACTION_LABELS.values()),
+                    required=True,
                 ),
                 "action_value": st.column_config.TextColumn(
-                    "文字／網址／Postback Data"
+                    "傳送文字或網址"
                 ),
             },
             key=f"rich_menu_buttons_{selected_id}",
         )
         preview_col, save_col = st.columns(2)
         preview_clicked = preview_col.form_submit_button(
-            "產生預覽", use_container_width=True
+            "查看預覽", use_container_width=True
         )
         save_clicked = save_col.form_submit_button(
-            "儲存草稿", type="primary", disabled=not can_edit, use_container_width=True
+            "儲存修改", type="primary", disabled=not can_edit, use_container_width=True
         )
 
     if preview_clicked or save_clicked:
@@ -257,7 +294,7 @@ def render_rich_menu_manager(
             )
             preview = client.preview_line_menu(token, draft)
         except (ValueError, LineAdminApiError) as exc:
-            st.error(f"Rich Menu 格式錯誤：{exc}")
+            st.error(f"選單內容有問題：{exc}")
         else:
             st.session_state[PREVIEW_KEY] = preview
             if save_clicked:
@@ -270,26 +307,23 @@ def render_rich_menu_manager(
                 except LineAdminApiError as exc:
                     st.error(f"儲存失敗：{exc}")
                 else:
-                    st.session_state[FLASH_KEY] = "Rich Menu 草稿已儲存，尚未發布至 LINE。"
+                    st.session_state[FLASH_KEY] = "選單修改已儲存，尚未套用到 LINE。"
                     st.rerun()
 
     preview = st.session_state.get(PREVIEW_KEY)
     if preview:
-        st.markdown("#### 圖片預覽")
+        st.markdown("#### 選單預覽")
         st.image(preview, use_container_width=True)
 
-    st.markdown("#### 自訂圖片")
-    st.caption(
-        f"目前圖片資產：{appearance.get('image_asset_id') or '未指定'}。"
-        "上傳成功後會把草稿切換為 uploaded 模式。"
-    )
+    st.markdown("#### 自訂選單圖片")
+    st.caption("若不上傳圖片，系統會依上方顏色自動產生選單。")
     uploaded = st.file_uploader(
         "上傳 JPEG／PNG",
         type=["jpg", "jpeg", "png"],
         disabled=not can_edit,
         key=f"rich_menu_upload_{selected_id}",
     )
-    if st.button("上傳並套用至草稿", disabled=not can_edit or uploaded is None):
+    if st.button("上傳並套用至選單", disabled=not can_edit or uploaded is None):
         try:
             asset = client.upload_line_menu_image(
                 token,
@@ -309,18 +343,18 @@ def render_rich_menu_manager(
         except LineAdminApiError as exc:
             st.error(f"圖片上傳失敗：{exc}")
         else:
-            st.session_state[FLASH_KEY] = f"圖片資產 #{asset['id']} 已套用至草稿。"
+            st.session_state[FLASH_KEY] = "自訂圖片已套用至選單。"
             st.rerun()
 
-    st.markdown("#### 發布至 LINE")
-    st.warning("發布會建立新的 LINE Rich Menu；草稿必須先儲存。")
-    reason = st.text_input("發布原因（選填，會記錄於稽核）", key=f"publish_reason_{selected_id}")
+    st.markdown("#### 套用到 LINE")
+    st.warning("請先儲存修改並確認預覽，再套用到使用者的 LINE。")
+    reason = st.text_input("本次修改備註（選填）", key=f"publish_reason_{selected_id}")
     confirmed = st.checkbox(
-        "我確認要發布目前已儲存的版本",
+        "我已確認選單內容，要套用到 LINE",
         key=f"publish_confirm_{selected_id}",
     )
     if st.button(
-        "建立發布工作",
+        "套用到 LINE",
         type="primary",
         disabled=not can_edit or not confirmed,
     ):
@@ -329,11 +363,11 @@ def render_rich_menu_manager(
         except LineAdminApiError as exc:
             st.error(f"無法建立發布工作：{exc}")
         else:
-            st.session_state[FLASH_KEY] = f"發布工作 #{publication['id']} 已建立。"
+            st.session_state[FLASH_KEY] = "選單已排入套用流程，請稍後重新整理查看結果。"
             st.rerun()
 
-    st.markdown("#### 發布紀錄")
-    if st.button("重新整理發布紀錄"):
+    st.markdown("#### 套用紀錄")
+    if st.button("重新整理紀錄"):
         st.rerun()
     try:
         history = client.line_menu_publications(token, menu_id=selected_id)
@@ -345,13 +379,11 @@ def render_rich_menu_manager(
         return
     table = [
         {
-            "ID": item["id"],
-            "狀態": item["status"],
+            "狀態": PUBLICATION_STATUS_LABELS.get(item["status"], item["status"]),
             "目前版本": "是" if item["is_current"] else "否",
-            "LINE Menu ID": item.get("line_rich_menu_id") or "",
-            "錯誤": item.get("error_code") or "",
-            "建立時間（台北）": _taipei_time(item.get("created_at")),
-            "發布時間（台北）": _taipei_time(item.get("published_at")),
+            "開始時間": _taipei_time(item.get("created_at")),
+            "完成時間": _taipei_time(item.get("published_at")),
+            "說明": "請重新套用" if item.get("error_code") else "",
         }
         for item in history["items"]
     ]
@@ -359,13 +391,17 @@ def render_rich_menu_manager(
     failed = [item for item in history["items"] if item["status"] == "failed"]
     if failed and can_edit:
         retry_id = st.selectbox(
-            "選擇失敗工作",
+            "選擇要重新套用的紀錄",
             [item["id"] for item in failed],
-            format_func=lambda value: f"#{value}",
+            format_func=lambda value: next(
+                _taipei_time(item.get("created_at"))
+                for item in failed
+                if item["id"] == value
+            ),
         )
-        retry_reason = st.text_input("重試原因", key=f"retry_reason_{retry_id}")
-        retry_confirmed = st.checkbox("我確認重新執行此發布工作")
-        if st.button("重新排入發布", disabled=not retry_confirmed):
+        retry_reason = st.text_input("處理備註", key=f"retry_reason_{retry_id}")
+        retry_confirmed = st.checkbox("我確認要重新套用這個選單")
+        if st.button("重新套用", disabled=not retry_confirmed):
             try:
                 client.retry_line_menu_publication(
                     token, retry_id, reason=retry_reason
@@ -373,5 +409,5 @@ def render_rich_menu_manager(
             except LineAdminApiError as exc:
                 st.error(f"重新排入失敗：{exc}")
             else:
-                st.session_state[FLASH_KEY] = f"發布工作 #{retry_id} 已重新排入。"
+                st.session_state[FLASH_KEY] = "選單已重新排入套用流程。"
                 st.rerun()

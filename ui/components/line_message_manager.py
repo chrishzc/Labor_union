@@ -1,4 +1,9 @@
-"""LINE message-template CRUD, validation and preview component."""
+"""
+================================================================================
+檔案名稱: ui/components/line_message_manager.py
+功能說明: LINE 訊息內容管理元件，提供常用訊息與自動通知文字的新增、修改、預覽及刪除
+================================================================================
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,7 @@ import json
 import math
 from copy import deepcopy
 from typing import Any
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -22,18 +28,68 @@ FLASH_KEY = "line_message_template_flash"
 CATEGORIES = ["webhook_reply", "push", "scheduled_push", "customer_service"]
 USAGES = ["webhook", "push", "schedule", "customer_service"]
 EDIT_ROLES = {"line_manager", "system_admin"}
+USE_CASES = {
+    "auto_reply": {
+        "label": "收到訊息時自動回覆",
+        "category": "webhook_reply",
+        "usage": ["webhook"],
+    },
+    "manual_reply": {
+        "label": "服務人員常用回覆",
+        "category": "customer_service",
+        "usage": ["customer_service"],
+    },
+    "push": {
+        "label": "主動通知使用者",
+        "category": "push",
+        "usage": ["push"],
+    },
+    "schedule": {
+        "label": "新好友加入後定時通知",
+        "category": "scheduled_push",
+        "usage": ["schedule"],
+    },
+}
 
 
 def _empty_template() -> dict[str, Any]:
     return {
-        "id": "new_template",
-        "name": "新訊息範本",
-        "category": "webhook_reply",
+        "id": f"message_{uuid4().hex[:12]}",
+        "name": "新訊息",
+        "category": "customer_service",
         "message_type": "text",
         "enabled": True,
         "content": "",
         "variables": [],
-        "usage": ["webhook"],
+        "usage": ["customer_service"],
+    }
+
+
+def _use_case_key(item: dict[str, Any]) -> str:
+    usage = set(item.get("usage", []))
+    if "schedule" in usage:
+        return "schedule"
+    if "customer_service" in usage:
+        return "manual_reply"
+    if "push" in usage:
+        return "push"
+    return "auto_reply"
+
+
+def _preview_values(item: dict[str, Any]) -> dict[str, str]:
+    examples = {
+        "name": "王小明",
+        "client_name": "王小明",
+        "case_no": "115000001",
+        "status_code": "200",
+        "bind_url": "https://example.com/bind",
+    }
+    return {
+        variable["name"]: examples.get(
+            variable["name"], variable.get("description") or "範例資料"
+        )
+        for variable in item.get("variables", [])
+        if variable.get("name")
     }
 
 
@@ -99,10 +155,9 @@ def _payload_from_form(
 def _render_preview(preview: dict[str, Any] | None) -> None:
     if not preview:
         return
-    st.markdown("#### 預覽結果")
+    st.markdown("#### 使用者看到的內容")
     if preview.get("message_type") == "flex":
-        st.json(preview.get("content", {}))
-        st.caption("5.2 提供結構預覽；LINE 手機版視覺模擬器將於後續優化加入。")
+        st.info("這是一則卡片訊息，內容結構已通過檢查。卡片版面由系統統一管理。")
     else:
         st.code(str(preview.get("content", "")), language=None, wrap_lines=True)
 
@@ -112,8 +167,8 @@ def render_message_manager(
     token: str | None,
     profile: dict[str, Any],
 ) -> None:
-    st.subheader("訊息管理中心")
-    st.caption("管理 Webhook 回覆、主動推播、D+1～D+3 內容與客服常用文字。")
+    st.subheader("常用訊息與自動通知")
+    st.caption("選擇一則訊息後，即可修改名稱、用途及使用者會看到的文字。")
 
     flash = st.session_state.pop(FLASH_KEY, None)
     if flash:
@@ -132,18 +187,24 @@ def render_message_manager(
     can_edit = profile.get("role") in EDIT_ROLES
 
     if not can_edit:
-        st.info("目前帳號為唯讀權限，可以查詢與預覽，但不能修改範本。")
+        st.info("目前帳號只有查看權限；如需修改，請聯絡 LINE 主管。")
 
     filter_col1, filter_col2, filter_col3 = st.columns([2, 1, 1])
-    search = filter_col1.text_input("搜尋", placeholder="名稱或範本 ID")
-    category_filter = filter_col2.selectbox("分類", ["全部", *CATEGORIES])
+    search = filter_col1.text_input("搜尋訊息", placeholder="輸入訊息名稱")
+    category_filter = filter_col2.selectbox(
+        "用途",
+        ["全部", *[item["label"] for item in USE_CASES.values()]],
+    )
     enabled_filter = filter_col3.selectbox("狀態", ["全部", "啟用", "停用"])
 
     filtered = []
     for item in templates:
-        if search and search.lower() not in f"{item['id']} {item['name']}".lower():
+        if search and search.lower() not in item["name"].lower():
             continue
-        if category_filter != "全部" and item["category"] != category_filter:
+        if (
+            category_filter != "全部"
+            and USE_CASES[_use_case_key(item)]["label"] != category_filter
+        ):
             continue
         if enabled_filter == "啟用" and not item["enabled"]:
             continue
@@ -162,28 +223,28 @@ def render_message_manager(
 
     if option_ids:
         selected = list_col.selectbox(
-            "選擇範本",
+            "選擇訊息",
             option_ids,
             index=option_ids.index(current) if current in option_ids else 0,
             format_func=lambda item_id: (
-                "➕ 新範本（尚未儲存）"
+                "➕ 新訊息（尚未儲存）"
                 if item_id == "__new__"
-                else f"{'🟢' if by_id[item_id]['enabled'] else '⚪'} {by_id[item_id]['name']} · {item_id}"
+                else f"{'🟢' if by_id[item_id]['enabled'] else '⚪'} {by_id[item_id]['name']}"
             ),
         )
         st.session_state[SELECTED_KEY] = selected
     else:
         selected = None
-        list_col.info("目前篩選條件沒有符合的範本。")
+        list_col.info("目前篩選條件沒有符合的訊息。")
 
-    if action_col.button("新增範本", disabled=not can_edit, use_container_width=True):
+    if action_col.button("新增訊息", disabled=not can_edit, use_container_width=True):
         st.session_state[NEW_SEED_KEY] = _empty_template()
         st.session_state[SELECTED_KEY] = "__new__"
         st.session_state.pop(PREVIEW_KEY, None)
         st.rerun()
 
     if selected and selected != "__new__" and action_col.button(
-        "複製範本", disabled=not can_edit, use_container_width=True
+        "複製訊息", disabled=not can_edit, use_container_width=True
     ):
         seed = deepcopy(by_id[selected])
         seed["id"] = _copy_id(seed["id"], set(by_id))
@@ -202,72 +263,53 @@ def render_message_manager(
 
     st.divider()
     with st.form(f"line_message_template_form_{selected}"):
-        identity_col, name_col = st.columns([2, 3])
-        template_id = identity_col.text_input(
-            "範本 ID",
-            value=item["id"],
-            disabled=not can_edit or not is_new,
-            help="建立後不可更改；只允許小寫英文、數字、底線與連字號。",
+        template_id = item["id"]
+        name_col, enabled_col = st.columns([3, 1])
+        name = name_col.text_input("訊息名稱", value=item["name"], disabled=not can_edit)
+        enabled = enabled_col.checkbox(
+            "允許使用", value=item["enabled"], disabled=not can_edit
         )
-        name = name_col.text_input("顯示名稱", value=item["name"], disabled=not can_edit)
-
-        setting_col1, setting_col2, setting_col3 = st.columns(3)
-        category = setting_col1.selectbox(
-            "分類",
-            CATEGORIES,
-            index=CATEGORIES.index(item["category"]),
+        original_use_case = _use_case_key(item)
+        use_case = st.selectbox(
+            "這則訊息用在哪裡？",
+            list(USE_CASES),
+            index=list(USE_CASES).index(original_use_case),
+            format_func=lambda value: USE_CASES[value]["label"],
             disabled=not can_edit,
         )
-        message_type = setting_col2.selectbox(
-            "訊息類型",
-            ["text", "flex"],
-            index=["text", "flex"].index(item["message_type"]),
-            disabled=not can_edit,
-        )
-        enabled = setting_col3.checkbox("啟用", value=item["enabled"], disabled=not can_edit)
-
-        usage = st.multiselect(
-            "使用位置",
-            USAGES,
-            default=item.get("usage", []),
-            disabled=not can_edit,
-        )
+        if use_case == original_use_case:
+            category = item["category"]
+            usage = list(item.get("usage", []))
+        else:
+            category = USE_CASES[use_case]["category"]
+            usage = list(USE_CASES[use_case]["usage"])
+        message_type = item["message_type"]
         content_value = (
             json.dumps(item["content"], ensure_ascii=False, indent=2)
             if isinstance(item["content"], dict)
             else str(item["content"])
         )
-        content_source = st.text_area(
-            "訊息內容" if message_type == "text" else "Flex Message JSON",
-            value=content_value,
-            height=220,
-            disabled=not can_edit,
-        )
+        if message_type == "text":
+            content_source = st.text_area(
+                "使用者會看到的文字",
+                value=content_value,
+                height=220,
+                disabled=not can_edit,
+            )
+            if item.get("variables"):
+                st.caption("姓名、案件編號等個人資料會由系統在發送時自動帶入。")
+        else:
+            content_source = content_value
+            st.info("這是一則卡片訊息。為避免版面損壞，此頁只能修改名稱、用途與啟用狀態。")
 
-        st.markdown("##### 範本變數")
-        variable_rows = st.data_editor(
-            pd.DataFrame(item.get("variables", []), columns=["name", "required", "description"]),
-            num_rows="dynamic" if can_edit else "fixed",
-            disabled=not can_edit,
-            use_container_width=True,
-            key=f"line_template_variables_{selected}",
-        )
-        default_preview_values = {
-            variable.get("name", ""): ""
-            for variable in item.get("variables", [])
-            if variable.get("name")
-        }
-        preview_values_source = st.text_area(
-            "預覽變數（JSON）",
-            value=json.dumps(default_preview_values, ensure_ascii=False, indent=2),
-            height=100,
-            help='例如：{"name": "王小明", "case_no": "115000001"}',
+        variable_rows = pd.DataFrame(
+            item.get("variables", []), columns=["name", "required", "description"]
         )
 
         button_col1, button_col2 = st.columns(2)
-        preview_clicked = button_col1.form_submit_button("預覽", use_container_width=True)
+        preview_clicked = button_col1.form_submit_button("查看預覽", use_container_width=True)
         save_clicked = button_col2.form_submit_button(
-            "儲存範本",
+            "儲存訊息",
             type="primary",
             disabled=not can_edit,
             use_container_width=True,
@@ -285,12 +327,9 @@ def render_message_manager(
                 usage=usage,
                 variable_rows=variable_rows,
             )
-            preview_values = json.loads(preview_values_source or "{}")
-            if not isinstance(preview_values, dict):
-                raise ValueError("預覽變數必須是 JSON object")
-            preview_values = {str(key): str(value) for key, value in preview_values.items()}
+            preview_values = _preview_values(item)
         except (ValueError, json.JSONDecodeError) as exc:
-            st.error(f"格式錯誤：{exc}")
+            st.error(f"訊息內容格式有誤：{exc}")
         else:
             if preview_clicked:
                 try:
@@ -321,7 +360,7 @@ def render_message_manager(
     if not is_new and can_edit:
         st.divider()
         if st.session_state.get(DELETE_KEY) != selected:
-            if st.button("刪除這個範本", type="secondary"):
+            if st.button("刪除這則訊息", type="secondary"):
                 st.session_state[DELETE_KEY] = selected
                 st.rerun()
         else:

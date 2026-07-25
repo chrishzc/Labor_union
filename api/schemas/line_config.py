@@ -1,4 +1,9 @@
-"""Validated schemas for editable LINE/LIFF JSON configuration."""
+"""
+================================================================================
+檔案名稱: api/schemas/line_config.py
+功能說明: LINE 訊息、排程、下方選單與 LIFF 設定的資料格式及安全驗證規則
+================================================================================
+"""
 
 from __future__ import annotations
 

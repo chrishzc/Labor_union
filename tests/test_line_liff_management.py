@@ -130,3 +130,11 @@ def test_bind_and_registration_send_id_token_to_backend():
     assert "fetch('/api/line/client-info'," in bind
     assert "liff.getIDToken()" in register
     assert "line_id_token: currentIdToken" in register
+
+
+def test_liff_manager_uses_service_staff_friendly_labels():
+    source = (ROOT / "ui/components/line_liff_manager.py").read_text(encoding="utf-8")
+
+    assert "選項 JSON" not in source
+    assert "版本紀錄與還原" not in source
+    assert "LIFF 頁面" not in source

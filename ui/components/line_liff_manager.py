@@ -1,4 +1,9 @@
-"""LIFF theme, page text, navigation and dynamic-field management UI."""
+"""
+================================================================================
+檔案名稱: ui/components/line_liff_manager.py
+功能說明: LINE LIFF 服務頁面管理元件，編輯頁面文字、顏色、入口與動態表單問題
+================================================================================
+"""
 
 from __future__ import annotations
 
@@ -6,6 +11,7 @@ import html
 import json
 from copy import deepcopy
 from typing import Any
+from uuid import uuid4
 
 import pandas as pd
 import streamlit as st
@@ -32,6 +38,24 @@ FIELD_TYPES = [
     "multiple_choice",
     "boolean",
 ]
+FIELD_TYPE_LABELS = {
+    "text": "單行文字",
+    "textarea": "多行文字",
+    "phone": "電話號碼",
+    "email": "電子信箱",
+    "date": "日期",
+    "number": "數字",
+    "single_choice": "單選題",
+    "multiple_choice": "複選題",
+    "boolean": "是／否",
+}
+CONTENT_LABELS = {
+    "existing_customer": "舊客戶入口文字",
+    "new_customer": "新客戶入口文字",
+    "warning": "提醒文字",
+    "privacy_notice": "個資說明",
+    "help": "協助說明",
+}
 
 
 def _field_rows(page: dict[str, Any]) -> pd.DataFrame:
@@ -40,16 +64,14 @@ def _field_rows(page: dict[str, Any]) -> pd.DataFrame:
             {
                 "id": field["id"],
                 "label": field["label"],
-                "type": field["type"],
+                "type": FIELD_TYPE_LABELS.get(field["type"], field["type"]),
                 "required": field.get("required", False),
                 "enabled": field.get("enabled", True),
                 "order": field.get("order", 0),
                 "placeholder": field.get("placeholder", ""),
                 "help_text": field.get("help_text", ""),
                 "system_field": field.get("system_field", False),
-                "options_json": json.dumps(
-                    field.get("options", []), ensure_ascii=False
-                ),
+                "options_text": "、".join(field.get("options", [])),
             }
             for field in page.get("fields", [])
         ]
@@ -62,7 +84,14 @@ def _action_rows(page: dict[str, Any]) -> pd.DataFrame:
 
 def _content_rows(page: dict[str, Any]) -> pd.DataFrame:
     return pd.DataFrame(
-        [{"key": key, "text": value} for key, value in page.get("content", {}).items()]
+        [
+            {
+                "key": key,
+                "label": CONTENT_LABELS.get(key, "補充文字"),
+                "text": value,
+            }
+            for key, value in page.get("content", {}).items()
+        ]
     )
 
 
@@ -96,11 +125,11 @@ def _build_page(
             "loading_text": loading_text.strip(),
         }
     )
-    page["content"] = {
-        _clean(row.get("key")): _clean(row.get("text"))
-        for row in content_rows.to_dict("records")
-        if _clean(row.get("key"))
-    }
+    page["content"] = {}
+    for row in content_rows.to_dict("records"):
+        key = _clean(row.get("key")) or f"custom_text_{uuid4().hex[:8]}"
+        if _clean(row.get("text")):
+            page["content"][key] = _clean(row.get("text"))
     if action_rows is not None:
         page["actions"] = [
             {
@@ -122,19 +151,26 @@ def _build_page(
         fields = []
         seen: set[str] = set()
         for row in field_rows.to_dict("records"):
-            field_id = _clean(row.get("id"))
-            if not field_id or field_id in seen:
+            field_id = _clean(row.get("id")) or f"custom_{uuid4().hex[:8]}"
+            if field_id in seen:
                 continue
             seen.add(field_id)
             protected = original_system.get(field_id)
-            options_text = _clean(row.get("options_json")) or "[]"
-            options = json.loads(options_text)
-            if not isinstance(options, list):
-                raise ValueError(f"{field_id} 的 options_json 必須是 JSON 陣列")
+            options_text = _clean(row.get("options_text"))
+            options = [
+                value.strip()
+                for value in options_text.replace("，", "、").replace(",", "、").split("、")
+                if value.strip()
+            ]
+            selected_type = _clean(row.get("type")) or FIELD_TYPE_LABELS["text"]
+            field_type = next(
+                (key for key, label in FIELD_TYPE_LABELS.items() if label == selected_type),
+                selected_type if selected_type in FIELD_TYPES else "text",
+            )
             field = {
                 "id": field_id,
                 "label": _clean(row.get("label")),
-                "type": _clean(row.get("type")) or "text",
+                "type": field_type,
                 "required": bool(row.get("required", False)),
                 "enabled": bool(row.get("enabled", True)),
                 "order": int(row.get("order") or 0),
@@ -204,8 +240,8 @@ def render_liff_manager(
     token: str | None,
     profile: dict[str, Any],
 ) -> None:
-    st.subheader("LIFF 設定")
-    st.caption("儲存後，使用者下次開啟或重新整理 LIFF 頁面即套用；不需要另外發布到 LINE。")
+    st.subheader("LINE 服務頁面設定")
+    st.caption("修改使用者在 LINE 內開啟的綁定、登記頁面文字與表單問題。")
     flash = st.session_state.pop(FLASH_KEY, None)
     if flash:
         st.success(flash)
@@ -213,7 +249,7 @@ def render_liff_manager(
     try:
         state = client.liff_config_state(token)
     except LineAdminApiError as exc:
-        st.error(f"無法載入 LIFF 設定：{exc}")
+        st.error(f"無法載入 LINE 服務頁面：{exc}")
         return
     config = state["config"]
     revision = state["revision"]
@@ -227,28 +263,32 @@ def render_liff_manager(
         st.info("目前帳號只有查看權限。")
 
     with st.form(f"liff_editor_{page_id}"):
-        st.markdown("#### 共用主題")
+        st.markdown("#### 頁面顏色")
         theme = config["theme"]
-        color1, color2, color3, color4 = st.columns(4)
+        color1, color2 = st.columns(2)
         primary = color1.color_picker("主要顏色", theme["primary_color"], disabled=not can_edit)
-        hover = color2.color_picker("按鈕滑過", theme["primary_hover_color"], disabled=not can_edit)
-        text_color = color3.color_picker("文字顏色", theme["text_color"], disabled=not can_edit)
-        muted = color4.color_picker("次要文字", theme["muted_text_color"], disabled=not can_edit)
-        background = st.text_input("背景（色碼或 linear-gradient）", theme["background"], disabled=not can_edit)
-        font_family = st.selectbox(
-            "字型",
-            ["'Outfit', 'Noto Sans TC', sans-serif", "'Noto Sans TC', sans-serif", "sans-serif"],
-            index=["'Outfit', 'Noto Sans TC', sans-serif", "'Noto Sans TC', sans-serif", "sans-serif"].index(theme["font_family"])
-            if theme["font_family"] in ["'Outfit', 'Noto Sans TC', sans-serif", "'Noto Sans TC', sans-serif", "sans-serif"] else 0,
-            disabled=not can_edit,
+        current_background = theme["background"]
+        simple_background = (
+            current_background
+            if isinstance(current_background, str)
+            and current_background.startswith("#")
+            and len(current_background) in {4, 7}
+            else "#F7FAFC"
         )
+        background = color2.color_picker("背景顏色", simple_background, disabled=not can_edit)
+        hover = theme["primary_hover_color"]
+        text_color = theme["text_color"]
+        muted = theme["muted_text_color"]
+        font_family = theme["font_family"]
 
         st.markdown(f"#### {PAGE_LABELS[page_id]}")
         title = st.text_input("標題", page["title"], disabled=not can_edit)
         subtitle = st.text_area("說明", page.get("subtitle", ""), disabled=not can_edit)
         col1, col2 = st.columns(2)
         submit_button = col1.text_input("送出按鈕", page.get("submit_button", "送出"), disabled=not can_edit)
-        loading_text = col2.text_input("載入文字", page.get("loading_text", ""), disabled=not can_edit)
+        loading_text = col2.text_input(
+            "資料讀取中顯示文字", page.get("loading_text", ""), disabled=not can_edit
+        )
         success_title = col1.text_input("成功標題", page.get("success_title", ""), disabled=not can_edit)
         success_description = col2.text_area("成功說明", page.get("success_description", ""), disabled=not can_edit)
         st.markdown("##### 其他固定文字")
@@ -257,6 +297,11 @@ def render_liff_manager(
             num_rows="dynamic" if can_edit else "fixed",
             disabled=not can_edit,
             use_container_width=True,
+            column_order=["label", "text"],
+            column_config={
+                "label": st.column_config.TextColumn("用途說明", disabled=True),
+                "text": st.column_config.TextColumn("顯示文字"),
+            },
             key=f"liff_content_{page_id}",
         )
         action_rows = None
@@ -265,26 +310,51 @@ def render_liff_manager(
             st.markdown("##### 入口卡片")
             action_rows = st.data_editor(
                 _action_rows(page),
-                num_rows="dynamic" if can_edit else "fixed",
+                num_rows="fixed",
                 disabled=not can_edit,
                 use_container_width=True,
+                column_order=["label", "description", "enabled", "order"],
+                column_config={
+                    "label": st.column_config.TextColumn("入口名稱"),
+                    "description": st.column_config.TextColumn("入口說明"),
+                    "enabled": st.column_config.CheckboxColumn("顯示"),
+                    "order": st.column_config.NumberColumn("順序", min_value=0, step=1),
+                },
                 key=f"liff_actions_{page_id}",
             )
         else:
             st.markdown("##### 表單欄位")
-            st.caption("系統欄位可改顯示文字與順序，但儲存時會保留必要 ID、類型、必填及啟用狀態。")
+            st.caption("可修改問題文字、是否必填與顯示順序；姓名、電話等必要欄位會由系統保護。")
             field_rows = st.data_editor(
                 _field_rows(page),
                 num_rows="dynamic" if can_edit else "fixed",
                 disabled=not can_edit,
                 use_container_width=True,
+                column_order=[
+                    "label",
+                    "type",
+                    "required",
+                    "enabled",
+                    "order",
+                    "placeholder",
+                    "help_text",
+                    "options_text",
+                ],
                 column_config={
-                    "type": st.column_config.SelectboxColumn("類型", options=FIELD_TYPES, required=True),
-                    "options_json": st.column_config.TextColumn("選項 JSON"),
+                    "label": st.column_config.TextColumn("問題文字", required=True),
+                    "type": st.column_config.SelectboxColumn(
+                        "回答方式", options=list(FIELD_TYPE_LABELS.values()), required=True
+                    ),
+                    "required": st.column_config.CheckboxColumn("必填"),
+                    "enabled": st.column_config.CheckboxColumn("顯示"),
+                    "order": st.column_config.NumberColumn("順序", min_value=0, step=1),
+                    "placeholder": st.column_config.TextColumn("輸入提示"),
+                    "help_text": st.column_config.TextColumn("補充說明"),
+                    "options_text": st.column_config.TextColumn("選項（用、分隔）"),
                 },
                 key=f"liff_fields_{page_id}",
             )
-        preview_clicked = st.form_submit_button("驗證並預覽")
+        preview_clicked = st.form_submit_button("查看手機預覽")
         save_clicked = st.form_submit_button("儲存並啟用", type="primary", disabled=not can_edit)
 
     try:
@@ -311,7 +381,7 @@ def render_liff_manager(
         )
         updated["pages"][page_id] = updated_page
     except (ValueError, json.JSONDecodeError) as exc:
-        st.error(f"設定格式錯誤：{exc}")
+        st.error(f"頁面設定有誤：{exc}")
         return
 
     if preview_clicked:
@@ -320,7 +390,7 @@ def render_liff_manager(
         except LineAdminApiError as exc:
             st.error(f"驗證失敗：{exc}")
         else:
-            st.success("設定驗證通過，以下為手機版示意預覽。")
+            st.success("設定內容正確，以下為手機版示意預覽。")
             _preview(updated["theme"], updated_page)
 
     if save_clicked:
@@ -335,7 +405,7 @@ def render_liff_manager(
             st.session_state[FLASH_KEY] = f"{PAGE_LABELS[page_id]}已儲存並啟用。"
             st.rerun()
 
-    with st.expander("版本紀錄與還原"):
+    with st.expander("查看修改紀錄或還原"):
         try:
             history = client.liff_config_history(token).get("items", [])
         except LineAdminApiError as exc:
@@ -344,18 +414,26 @@ def render_liff_manager(
         if not history:
             st.caption("尚無歷史版本；第一次修改後會保存修改前快照。")
         else:
-            st.dataframe(
-                pd.DataFrame(history)[["revision", "created_at", "actor", "reason"]],
-                use_container_width=True,
-                hide_index=True,
-            )
+            history_rows = [
+                {
+                    "修改時間": item.get("created_at") or "-",
+                    "修改者": item.get("actor") or "-",
+                    "備註": item.get("reason") or "-",
+                }
+                for item in history
+            ]
+            st.dataframe(history_rows, use_container_width=True, hide_index=True)
             restore_revision = st.selectbox(
                 "選擇要還原的版本",
                 [item["revision"] for item in history],
-                format_func=lambda value: value[:12],
+                format_func=lambda value: next(
+                    str(item.get("created_at") or "先前版本")
+                    for item in history
+                    if item["revision"] == value
+                ),
             )
-            restore_reason = st.text_input("還原原因")
-            confirmed = st.checkbox("我確認還原會立即影響使用者重新載入的 LIFF 頁面")
+            restore_reason = st.text_input("還原備註")
+            confirmed = st.checkbox("我確認還原後，使用者重新開啟頁面就會看到舊設定")
             if st.button("還原此版本", disabled=not (can_edit and confirmed)):
                 try:
                     client.rollback_liff_config(
@@ -367,5 +445,5 @@ def render_liff_manager(
                 except LineAdminApiError as exc:
                     st.error(f"還原失敗：{exc}")
                 else:
-                    st.session_state[FLASH_KEY] = "LIFF 設定已還原。"
+                    st.session_state[FLASH_KEY] = "LINE 服務頁面設定已還原。"
                     st.rerun()

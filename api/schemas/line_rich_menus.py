@@ -1,4 +1,9 @@
-"""Requests used by the authenticated Rich Menu operations API."""
+"""
+================================================================================
+檔案名稱: api/schemas/line_rich_menus.py
+功能說明: LINE 下方選單發布與重試 API 的輸入資料格式
+================================================================================
+"""
 
 from pydantic import BaseModel, Field
 

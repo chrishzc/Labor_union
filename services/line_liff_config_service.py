@@ -1,4 +1,9 @@
-"""Revision snapshots for the editable LIFF runtime configuration."""
+"""
+================================================================================
+檔案名稱: services/line_liff_config_service.py
+功能說明: LIFF 頁面設定版本服務，保存修改紀錄並提供安全還原功能
+================================================================================
+"""
 
 from __future__ import annotations
 

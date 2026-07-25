@@ -1,4 +1,9 @@
-"""Schemas for LINE artificial review decisions."""
+"""
+================================================================================
+檔案名稱: api/schemas/line_reviews.py
+功能說明: LINE 人工確認核准與拒絕操作的輸入資料格式
+================================================================================
+"""
 
 from pydantic import BaseModel, Field
 

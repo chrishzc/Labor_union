@@ -78,3 +78,11 @@ def test_line_management_page_uses_real_message_component():
     source = (ROOT / "ui/pages/07_line_management.py").read_text(encoding="utf-8")
 
     assert "render_message_manager(client, token, profile)" in source
+
+
+def test_message_manager_hides_engineering_fields_from_service_staff():
+    source = (ROOT / "ui/components/line_message_manager.py").read_text(encoding="utf-8")
+
+    assert "範本 ID" not in source
+    assert "預覽變數（JSON）" not in source
+    assert "範本變數" not in source

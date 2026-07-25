@@ -1,4 +1,9 @@
-"""Resolve a trusted LINE user ID from a LIFF ID token."""
+"""
+================================================================================
+檔案名稱: services/line_liff_identity_service.py
+功能說明: LIFF 使用者身分驗證服務，驗證 ID Token 並取得可信任的 LINE User ID
+================================================================================
+"""
 
 from __future__ import annotations
 

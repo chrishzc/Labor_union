@@ -1,4 +1,9 @@
-"""Read and safely operate the reliable LINE task queue for administrators."""
+"""
+================================================================================
+檔案名稱: services/line_task_admin_service.py
+功能說明: LINE 任務管理服務，提供統計、清單、明細及人工執行、取消與重送操作
+================================================================================
+"""
 
 from __future__ import annotations
 

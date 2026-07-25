@@ -199,3 +199,11 @@ def test_schedule_api_rejects_stale_revision_without_writing():
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = value
+
+
+def test_task_manager_hides_internal_identifiers_from_service_staff():
+    source = (ROOT / "ui/components/line_task_manager.py").read_text(encoding="utf-8")
+
+    assert "LINE User ID 包含" not in source
+    assert "st.json(task)" not in source
+    assert "重新整理任務" not in source

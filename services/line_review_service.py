@@ -1,4 +1,9 @@
-"""Shared, transactional workflow for LINE staff review requests."""
+"""
+================================================================================
+檔案名稱: services/line_review_service.py
+功能說明: LINE 人工確認交易服務，安全處理月嫂身分與客戶重新綁定申請
+================================================================================
+"""
 
 from __future__ import annotations
 
