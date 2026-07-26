@@ -1,11 +1,15 @@
 # UI System Map
 
+### Domain: UI
+- Description: Streamlit user interface, page composition, and HTTP client contracts.
+- Allowed Dependencies: [API]
+
 ##### Module: AppShellUI
 - Sub Map: ui_layer
 - Type: ui_shell
 - Source: ui/app.py
 - Description: Streamlit 側邊欄導覽殼層，動態載入 ui/pages/ 頁面。
-- Dependencies: [DataBrowserUI, OrderUI, CalendarUI, FormManagementUI]
+- Dependencies: [DataBrowserUI, OrderUI, CalendarUI, FormManagementUI, FinanceAlertCenterUI, LineManagementUI]
 - Observability: not_required
 
 ##### Module: DataBrowserUI
@@ -142,7 +146,7 @@
 - State: `validated`
 - Source: ui/pages/03_calendar.py::show,safe_float,safe_int,safe_date,_multi_caregiver_request,_multi_caregiver_error,_render_multi_caregiver_panel,_coerce_iso_date_strict,_coerce_staff_id,_extract_case_assignments_for_staff,_parse_stored_rest_dates
 - Description: 服務人員行事曆與檔期調控獨立頁面。由 StaffMonthlyCalendarScheduleRouter 載入月度檔期視圖，提供多月嫂案件→正式服務指派選擇、指派專屬日排班呈現與單日調整。
-- Dependencies: [StaffMonthlyCalendarScheduleRouter, MultiCaregiverCaseAssignmentListRouter, MultiCaregiverScheduleReadRouter, MultiCaregiverScheduleRouter]
+- Dependencies: [StaffMonthlyCalendarScheduleRouter, HolidayRouter, UIAdminApiContext, MultiCaregiverCaseAssignmentListRouter, MultiCaregiverScheduleReadRouter, MultiCaregiverScheduleRouter]
 - Invariants:
   - INV-CAL-01: 必須在 HTML 月曆表格繪製前優先執行精算引擎，確保休假天數即時 100% 連動呈現。
   - INV-CAL-02 (兩階段選單隔離): 「訂單匹配」模式僅於行事曆展示黃底預排與 7 天預留備用期，不顯示單日排假與出勤精算面板；「出勤天數精算」模式僅適用於確定實際開工日 (actual_start_date) 案件，解鎖紅底工作日與綠底休假排假控制。
@@ -150,11 +154,13 @@
   - INV-CAL-04 (綠底休假與動態順延): 每增加 1 天綠底 🟢 休假，後續紅底 🔴 工作日與服務結束日 (actual_end_date) 自動向後動態順延 1 天，確保實際服務天數 100% 足額達 N 天。
   - INV-CAL-05 (國定假日單日獨立決策): 支援連假期間針對每一個獨立國定假日進行單日個體勾選；選擇放假者在月曆標示為綠底 🟢 且完工日順延 1 天，選擇上班者計為紅底 🔴 正常工作日 (預設雙倍薪資)。
   - 月嫂月度檔期視圖必須經由 REST API (`StaffMonthlyCalendarScheduleRouter`: GET /api/v1/staff/{staff_id}/monthly-schedule) 讀取，嚴禁在 UI 層直接執行 Python SQL 語法進行查詢。
+  - 國定假日必須經由 `HolidayRouter` 的 GET `/api/v1/holidays` 讀取，並使用 `UIAdminApiContext` 產生的正式 headers；缺少 internal service key 或正式模式管理員 session 時必須停止該請求，不得裸送或偽造權限。
   - 多月嫂模式必須先選 case_no、再從該案件 API 回傳的正式指派中選 assignment_id；不得由 orders.staff_id、日期或姓名推測指派。
   - 多月嫂模式只透過 MultiCaregiverCaseAssignmentListRouter、MultiCaregiverScheduleReadRouter 與 MultiCaregiverScheduleRouter 讀寫；不得呼叫 legacy 排班 helper。
   - 不提供同日分時段、planned_hours 或 actual_hours 手動輸入；單日請假不自動延伸、覆寫或移動下一位月嫂的服務區段。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\03_calendar.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_calendar_ui_explicit_errors.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 
@@ -415,6 +421,79 @@
   - 對選定警示呼叫 claim 或 resolve API，顯示 conflict 與 invalid transition，不在 UI 本地假設成功。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "ui\\pages\\06_finance_alerts.py"], "cwd": "project", "expect_exit": 0}
+- Observability: not_required
+
+##### Module: LineManagementUI
+- Sub Map: ui_layer
+- Type: ui_page
+- State: `planned`
+- Source: ui/pages/07_line_management.py::show
+- Dependencies: [LineAdminApiClient, LineMessageManagementUI, LineScheduleManagementUI, LineTaskManagementUI, LineRichMenuManagementUI, LineLiffManagementUI, LineReviewManagementUI]
+- Description: LINE 管理中心入口，組合登入狀態、管理分頁與各專責 LINE 管理元件。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineAdminApiClient
+- Sub Map: ui_layer
+- Type: ui_client
+- State: `planned`
+- Source: ui/api_clients/line_api_client.py
+- Description: LINE 管理頁的 HTTP client，封裝管理員登入、管理 API 呼叫與錯誤回應處理。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineMessageManagementUI
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/components/line_message_manager.py::render_message_manager
+- Description: LINE 訊息內容管理分頁的渲染元件。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineScheduleManagementUI
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/components/line_schedule_manager.py::render_schedule_manager
+- Description: LINE 自動通知排程管理分頁的渲染元件。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineTaskManagementUI
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/components/line_task_manager.py::render_task_manager
+- Description: LINE 發送任務與執行紀錄管理分頁的渲染元件。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineRichMenuManagementUI
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/components/line_rich_menu_manager.py::render_rich_menu_manager
+- Description: LINE Rich Menu 管理分頁的渲染元件。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineLiffManagementUI
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/components/line_liff_manager.py::render_liff_manager
+- Description: LINE LIFF 表單管理分頁的渲染元件。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineReviewManagementUI
+- Sub Map: ui_layer
+- Type: ui_component
+- State: `planned`
+- Source: ui/components/line_review_manager.py::render_review_manager
+- Description: LINE 待確認申請管理分頁的渲染元件。
+- Complexity: low
 - Observability: not_required
 
 ##### Module: StaffContractExcelMirror

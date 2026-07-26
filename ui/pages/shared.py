@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 import os
-import streamlit as st
+from pathlib import Path
 
+import streamlit as st
+from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+load_dotenv(PROJECT_ROOT / ".env")
 
 API_BASE_URL_ENV = "API_BASE_URL"
 API_BASE_URL_DEFAULT = "http://localhost:8000"

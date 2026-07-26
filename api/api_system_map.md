@@ -7,6 +7,10 @@
 
 ### API 功能層模組全覽表
 
+### Domain: API
+- Description: FastAPI routers, request and response schemas, and authorization dependencies.
+- Allowed Dependencies: [Services]
+
 ##### Module: OrderRouter
 - Sub Map: api_layer
 - Source: api/routes/orders.py
@@ -417,4 +421,114 @@
   - 成功後必須把 principal 寫入 request.state，供統一 audit middleware 使用。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_admin_auth_security.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: AdminAuthRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/admin_auth.py
+- Description: 管理後台登入、目前身分、session 續期與登出 API 路由。
+- Dependencies: [AdminAuthorizationDependency, AdminAuthSchemas, AdminAuthService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineAdminRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/line_admin.py
+- Description: LINE 管理中心健康狀態、Worker 狀態與管理功能清單 API 路由。
+- Dependencies: [AdminAuthorizationDependency, DbService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineTaskAdminRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/line_tasks.py
+- Description: LINE 發送任務的查詢、立即執行、取消與失敗重送 API 路由。
+- Dependencies: [AdminAuthorizationDependency, LineTaskSchemas, LineTaskAdminService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineRichMenuRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/line_rich_menus.py
+- Description: LINE 下方選單圖片上傳、預覽、發布、發布紀錄與失敗重試 API 路由。
+- Dependencies: [AdminAuthorizationDependency, LineConfigSchemas, LineRichMenuSchemas, JsonConfigService, LineRichMenuService, MediaStorageService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineReviewRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/line_reviews.py
+- Description: LINE 月嫂身分申請與客戶帳號重新綁定的人工確認 API 路由。
+- Dependencies: [AdminAuthorizationDependency, LineReviewSchemas, AdminAuthService, LineReviewService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineSystemConfigRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/line_system_config.py
+- Description: LINE 訊息範本、排程、下方選單、LIFF 與客服設定的管理及公開讀取 API 路由。
+- Dependencies: [AdminAuthorizationDependency, LineConfigSchemas, JsonConfigService, LineRichMenuService, LineLiffConfigService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: AdminAuthSchemas
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/admin_auth.py
+- Description: 管理後台登入、公開身分與 session 回應資料模型。
+- Dependencies: []
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineConfigSchemas
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/line_config.py
+- Description: LINE 訊息範本、排程、下方選單、LIFF 與客服設定的資料模型及欄位驗證。
+- Dependencies: []
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineReviewSchemas
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/line_reviews.py
+- Description: LINE 人工確認核准與拒絕操作的輸入資料模型。
+- Dependencies: []
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineRichMenuSchemas
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/line_rich_menus.py
+- Description: LINE 下方選單發布與重試操作的輸入資料模型。
+- Dependencies: []
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineTaskSchemas
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/line_tasks.py
+- Description: LINE 發送任務取消、立即執行與重送操作的輸入資料模型。
+- Dependencies: []
+- Complexity: low
 - Observability: not_required

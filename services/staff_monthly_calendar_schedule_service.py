@@ -53,7 +53,7 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
         month_end = date(year, month, num_days)
 
         with conn.cursor() as cursor:
-            cursor.execute("SELECT 1 AS exists FROM staff WHERE id = %s", (staff_id,))
+            cursor.execute("SELECT 1 AS staff_exists FROM staff WHERE id = %s", (staff_id,))
             if cursor.fetchone() is None:
                 raise ValueError(f"服務人員不存在：{staff_id}")
 

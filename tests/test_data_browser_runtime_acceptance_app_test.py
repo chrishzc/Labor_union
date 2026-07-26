@@ -5,6 +5,14 @@ from __future__ import annotations
 from streamlit.testing.v1 import AppTest
 
 
+def test_shared_admin_context_loads_project_dotenv():
+    from pathlib import Path
+
+    source = Path("ui/pages/shared.py").read_text(encoding="utf-8")
+
+    assert 'load_dotenv(PROJECT_ROOT / ".env")' in source
+
+
 def _run_data_browser_page(
     requests_calls: list[tuple[str, dict]],
     *,

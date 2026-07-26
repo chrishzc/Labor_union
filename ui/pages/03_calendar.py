@@ -29,11 +29,11 @@ from datetime import datetime, timedelta
 import math
 import re
 import calendar
-import os
 import requests
 
+from ui.pages.shared import build_admin_headers, resolve_api_base_url
+
 title = "📅 服務人員行事曆與休假安排"
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
 def safe_float(val) -> float:
     if val is None:
@@ -76,7 +76,8 @@ def _multi_caregiver_request(path, *, method="GET", payload=None):
     """Use only the assignment-aware APIs for the multi-caregiver panel."""
     response = requests.request(
         method,
-        f"{API_BASE_URL}{path}",
+        f"{resolve_api_base_url()}{path}",
+        headers=build_admin_headers(),
         json=payload,
         timeout=15,
     )
@@ -280,7 +281,13 @@ def show():
     st.write("本系統提供月嫂動態檔期月曆、訂單匹配檔期預估以及確定開始日案件之出勤天數與完工日精算。")
 
     try:
-        resp_staff = requests.get(f"{API_BASE_URL}/api/v1/staff", timeout=10)
+        admin_headers = build_admin_headers()
+
+        resp_staff = requests.get(
+            f"{resolve_api_base_url()}/api/v1/staff",
+            headers=admin_headers,
+            timeout=10,
+        )
         resp_staff.raise_for_status()
         staff_payload = resp_staff.json()
         staff_list = staff_payload.get("data") if isinstance(staff_payload, dict) and staff_payload.get("success") else []
@@ -318,7 +325,8 @@ def show():
         # 2. 獲取該月嫂當月的排班狀態與國定假日
         try:
             resp_sched = requests.get(
-                f"{API_BASE_URL}/api/v1/staff/{cal_staff_id}/monthly-schedule",
+                f"{resolve_api_base_url()}/api/v1/staff/{cal_staff_id}/monthly-schedule",
+                headers=admin_headers,
                 params={"year": cal_year, "month": cal_month},
                 timeout=10,
             )
@@ -331,7 +339,11 @@ def show():
             monthly_schedules = {}
 
         try:
-            resp_h = requests.get(f"{API_BASE_URL}/api/v1/holidays", timeout=10)
+            resp_h = requests.get(
+                f"{resolve_api_base_url()}/api/v1/holidays",
+                headers=admin_headers,
+                timeout=10,
+            )
             resp_h.raise_for_status()
             h_payload = resp_h.json()
             holidays_raw = h_payload.get("data") if isinstance(h_payload, dict) and h_payload.get("success") else []
@@ -349,7 +361,11 @@ def show():
 
         # 3. 兩階段操作選單
         try:
-            resp_o = requests.get(f"{API_BASE_URL}/api/v1/orders", timeout=10)
+            resp_o = requests.get(
+                f"{resolve_api_base_url()}/api/v1/orders",
+                headers=admin_headers,
+                timeout=10,
+            )
             resp_o.raise_for_status()
             o_payload = resp_o.json()
             all_orders = o_payload.get("data") if isinstance(o_payload, dict) and o_payload.get("success") else []
@@ -529,7 +545,8 @@ def show():
             with col_m2:
                 try:
                     resp_calc1 = requests.post(
-                        f"{API_BASE_URL}/api/v1/orders/calculate-schedule",
+                        f"{resolve_api_base_url()}/api/v1/orders/calculate-schedule",
+                        headers=admin_headers,
                         json={
                             "actual_start_date": str(st_d),
                             "target_service_days": calc_days,
@@ -577,7 +594,8 @@ def show():
                         return
                     try:
                         resp_save = requests.put(
-                            f"{API_BASE_URL}/api/v1/assignment-schedules/{calc_assignment_id}/rest-dates",
+                            f"{resolve_api_base_url()}/api/v1/assignment-schedules/{calc_assignment_id}/rest-dates",
+                            headers=admin_headers,
                             json={"rest_dates": all_rest_dt_list},
                             timeout=10,
                         )
@@ -597,7 +615,8 @@ def show():
             
             try:
                 resp_calc2 = requests.post(
-                    f"{API_BASE_URL}/api/v1/orders/calculate-schedule",
+                    f"{resolve_api_base_url()}/api/v1/orders/calculate-schedule",
+                    headers=admin_headers,
                     json={
                         "actual_start_date": str(st_d),
                         "target_service_days": calc_days,

@@ -10,7 +10,25 @@ from services import db_service
 from services.data_browser_admin_audit_log_service import record_data_browser_patch_audit
 
 # 白名單資料表
-ALLOWED_TABLES = {"clients", "staff", "orders", "holidays", "matching_records", "client_payments", "staff_payments"}
+ALLOWED_TABLES = {
+    "clients",
+    "staff",
+    "orders",
+    "beclass_records",
+    "holidays",
+    "matching_records",
+    "staff_bank_accounts",
+    "line_confirmation_requests",
+    "staff_bookings",
+    "case_staff_assignments",
+    "client_payments",
+    "client_payment_transactions",
+    "actual_hours_adjustments",
+    "staff_payments",
+    "staff_payment_transactions",
+    "payment_migration_reviews",
+    "staff_schedule",
+}
 
 # 可編輯欄位白名單
 EDITABLE_COLUMNS = {
@@ -37,7 +55,22 @@ EDITABLE_COLUMNS = {
 }
 
 # 唯讀表清單 (client_payments 與 staff_payments 財務關聯表強制鎖定唯讀)
-READ_ONLY_TABLES = {"client_payments", "staff_payments"}
+READ_ONLY_TABLES = {
+    "beclass_records",
+    "holidays",
+    "matching_records",
+    "staff_bank_accounts",
+    "line_confirmation_requests",
+    "staff_bookings",
+    "case_staff_assignments",
+    "client_payments",
+    "client_payment_transactions",
+    "actual_hours_adjustments",
+    "staff_payments",
+    "staff_payment_transactions",
+    "payment_migration_reviews",
+    "staff_schedule",
+}
 
 
 # 下拉選單中繼資料 (SSOT)
@@ -52,7 +85,7 @@ COLUMN_VALID_OPTIONS = {
         'has_massage_cert': ['有', '無'],
     },
     'matching_records': {
-        'caregiver_accepted': [0, 1],
+        'caregiver_accepted': ['0', '1'],
     },
 }
 
@@ -67,8 +100,8 @@ def get_data_browser_table_schema(table_name: str) -> Dict[str, Any]:
     rows = db_service.get_table_data(table_name)
     cols = db_service.get_table_columns(table_name)
     pk_col = db_service.TABLE_PRIMARY_KEYS.get(table_name, "id")
-    editable = EDITABLE_COLUMNS.get(table_name, [])
     is_read_only = table_name in READ_ONLY_TABLES
+    editable = [] if is_read_only else EDITABLE_COLUMNS.get(table_name, [])
 
     return {
         "rows": rows,

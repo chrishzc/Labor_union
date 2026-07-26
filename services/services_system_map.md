@@ -2,6 +2,9 @@
 
 - Version: 39
 
+### Domain: Services
+- Description: Application services and persistence-facing business operations.
+
 ##### Module: DbService
 - Sub Map: services_layer
 - Type: service
@@ -1496,5 +1499,91 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_admin_auth_security.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
+
+##### Module: JsonConfigService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/json_config_service.py
+- Description: 既有 JSON 設定檔的路徑、讀取、revision、寫入與項目查找 helper 服務。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineLiffConfigService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/line_liff_config_service.py
+- Description: 既有 LIFF 設定快照、歷史版本列舉與指定 revision 讀取服務。
+- Dependencies: [JsonConfigService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineLiffIdentityService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/line_liff_identity_service.py
+- Description: 既有 LIFF token 必填判斷與 LINE 使用者身分解析服務。
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineReviewService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/line_review_service.py
+- Description: 既有 LINE 審核摘要、查詢與核准／駁回決策服務。
+- Dependencies: [DbService, LineRichMenuService, LineTaskService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineRichMenuService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/line_rich_menu_service.py
+- Description: 既有 LINE Rich Menu 發布工作、查詢、重試與排程處理服務。
+- Dependencies: [DbService, JsonConfigService, LineTaskService, MediaStorageService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineTaskAdminService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/line_task_admin_service.py
+- Description: 既有 LINE 工作摘要、查詢、取消、立即執行與重試管理服務。
+- Dependencies: [DbService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: LineTaskService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/line_task_service.py
+- Description: 既有 LINE 背景工作入列服務。
+- Complexity: low
+- Observability: not_required
+
+##### Module: MediaStorageService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/media_storage_service.py
+- Description: 既有 Rich Menu 圖像生成、上傳正規化、資產儲存與讀取服務。
+- Dependencies: [DbService]
+- Complexity: low
+- Observability: not_required
+
+##### Module: WebhookEventService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/webhook_event_service.py
+- Description: 既有 webhook event 註冊與處理狀態標記服務。
+- Complexity: low
+- Observability: not_required
 
 <!-- SERVICES_MODULES_END -->

@@ -99,7 +99,7 @@ def test_get_staff_monthly_calendar_schedule_keeps_per_day_rows_and_base_shape(m
             assert item["assignment_id"] != "115000001"
 
     query, params = connection.cursor_obj.executed[0]
-    assert query == "SELECT 1 AS exists FROM staff WHERE id = %s"
+    assert query == "SELECT 1 AS staff_exists FROM staff WHERE id = %s"
     assert params == (7,)
 
     query, params = connection.cursor_obj.executed[1]

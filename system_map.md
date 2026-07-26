@@ -1642,6 +1642,118 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_backfill_subsidy_return_obligations.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
+##### Module: LineWebhookApplication
+- Sub Map: root
+- Type: api_runtime
+- State: `planned`
+- Source: line/line_bot.py
+- Dependencies: [LineWebhookSignatureVerifier, WebhookEventService]
+- Description: LINE webhook、LIFF 綁定與審核回呼的 FastAPI runtime；路由行為仍須由後續逐節點 Task 驗證。
+- Complexity: medium
+- Observability: not_required
+
+##### Module: LineTaskWorker
+- Sub Map: root
+- Type: background_worker
+- State: `planned`
+- Source: line/worker.py
+- Description: 處理已排程 LINE 任務與 rich-menu publication 的背景 worker runtime；不在本節點重複宣告管理 API 或 UI 行為。
+- Complexity: medium
+- Observability: not_required
+
+##### Module: LineWebhookSignatureVerifier
+- Sub Map: root
+- Type: security_helper
+- State: `planned`
+- Source: line/security.py::verify_line_signature
+- Description: 驗證 LINE webhook 原始 body 與簽章，不建立額外 webhook route。
+- Observability: not_required
+
+##### Module: LineRichMenuAssetSetup
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: line/setup_rich_menus.py
+- Description: 建立 LINE rich-menu 圖像資產的維運腳本；發布與佇列邏輯仍屬 LineRichMenuService 與 LineTaskWorker。
+- Observability: not_required
+
+##### Module: LineGatewayPage
+- Sub Map: root
+- Type: static_web_asset
+- State: `planned`
+- Source: line/static/gateway.html
+- Description: LINE gateway 靜態頁面資產。
+- Observability: not_required
+
+##### Module: LineBindPage
+- Sub Map: root
+- Type: static_web_asset
+- State: `planned`
+- Source: line/static/bind.html
+- Description: LINE 帳號綁定靜態頁面資產。
+- Observability: not_required
+
+##### Module: LineRegistrationPage
+- Sub Map: root
+- Type: static_web_asset
+- State: `planned`
+- Source: line/static/register.html
+- Description: LINE 註冊靜態頁面資產。
+- Observability: not_required
+
+##### Module: LineConfirmationReviewSchema
+- Sub Map: root
+- Type: database_schema
+- State: `planned`
+- Source: db/schema_parts/97_line_confirmation_review.sql
+- Description: LINE 身分確認與人工審核所需資料表 schema；資料存取行為由 API 與 Service 節點各自承擔。
+- Observability: not_required
+
+##### Module: AdminProvisioningScript
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: scripts/create_admin.py
+- Description: 建立管理員帳號的維運 CLI；授權與 session 行為不在此節點定義。
+- Observability: not_required
+
+##### Module: ApiContractSmokeRunner
+- Sub Map: root
+- Type: script
+- State: `planned`
+- Source: scripts/api_contract_smoke.py
+- Description: 唯讀、可重複執行的 OpenAPI API smoke 與 response contract 驗證工具；接受 runtime URL、正式 auth headers 與參數 fixture，預設只執行 GET 並展開集合型路徑，輸出可機讀報告以快速定位 401、403、404、422、500、BaseResponse 及 OpenAPI response schema 錯誤。
+- Dependencies: [APILayer]
+- Complexity: medium
+- Input:
+  - base_url: 目標 API base URL；預設 http://127.0.0.1:8000。
+  - internal_api_key: 可由 CLI 或環境變數提供的 internal service key；不得寫入報告。
+  - bearer_token: 可由 CLI 或環境變數提供的管理員 session token；不得寫入報告。
+  - fixtures_file: 可選 JSON，提供 path/query 參數與集合型端點展開值。
+  - include_pattern: 可選 endpoint path 篩選。
+  - allow_writes: 預設 false；只有明確指定時才允許非 GET/HEAD/OPTIONS。
+- Output:
+  - report: JSON 報告，逐請求保存 method、resolved path、status、契約結果與去敏感化 detail。
+  - summary: 依 pass、auth、client、server、schema、transport 分類的統計。
+  - exit_code: 所有已測端點符合預期為 0；任何非預期 HTTP 或 response contract 錯誤為非零。
+- Invariants:
+  - 預設只能執行 GET、HEAD、OPTIONS；不得因 OpenAPI 存在寫入 method 就自動送出 POST、PUT、PATCH 或 DELETE。
+  - internal key、Bearer token、Authorization header、Cookie 與其他憑證不得出現在 stdout、JSON report、exception 或 URL。
+  - 401 必須分類為 internal key 缺失/錯誤、Bearer 缺失/失效，403 必須分類為角色不足；無法由 response detail 判定時標記 auth_unknown，不得猜測。
+  - 必須驗證 JSON 形狀、BaseResponse success/data/error 契約與 OpenAPI 宣告的成功 response schema；HTTP 200 不得直接視為通過。
+  - Data Browser 集合型路徑必須展開正式可讀表清單逐一測試，不得只用 sample 取代 table path 參數。
+  - 任一必要 path/query 參數缺少 fixture 時必須標記 skipped_missing_fixture，不得送出猜測可能造成誤判的請求。
+- Algorithm:
+  - 讀取 CLI 與環境設定，建立不記錄敏感 header 的 requests Session。
+  - 下載並解析 openapi.json，只選擇 /api/v1 下符合 method 與 include filter 的 operation。
+  - 以內建安全 fixture 與外部 fixtures_file 展開 path/query；Data Browser table 以明確清單展開。
+  - 發送有限 timeout 的唯讀請求，解析 JSON 或文字錯誤並分類 HTTP/auth/transport 結果。
+  - 對成功 response 驗證 BaseResponse 與 OpenAPI schema；彙整 console table 與 JSON report，依失敗數決定 exit code。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_api_contract_smoke.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\api_contract_smoke.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
 
 ---
 
