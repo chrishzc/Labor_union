@@ -1457,6 +1457,53 @@ def update_matching_info_sent(match_id: int, form_type: int) -> bool:
     finally:
         conn.close()
 
+def mark_resume_sent(match_id: int) -> bool:
+    """記錄履歷已發送給客戶的時間。"""
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE matching_records
+                SET sent_resume_at = NOW()
+                WHERE id = %s
+            """, (match_id,))
+            conn.commit()
+            return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+def mark_resume_sent_for_case(case_no: str) -> int | None:
+    """找出該案件中「已被接受但履歷尚未發送」的候選人紀錄並標記發送，回傳該紀錄 id；找不到則回傳 None。"""
+    case_no = _resolve_case_no(case_no)
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT id FROM matching_records
+                WHERE case_no = %s AND caregiver_accepted = 1 AND sent_resume_at IS NULL
+                ORDER BY id
+                LIMIT 1
+            """, (case_no,))
+            row = cursor.fetchone()
+            if row is None:
+                return None
+            match_id = row['id']
+            cursor.execute("""
+                UPDATE matching_records
+                SET sent_resume_at = NOW()
+                WHERE id = %s
+            """, (match_id,))
+            conn.commit()
+            return match_id
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
 def reply_matching_inquiry(match_id: int, accepted) -> bool:
     """更新月嫂意願回覆狀態 (支援 True=願意, False=拒絕, None=待回覆)"""
     conn = get_connection()

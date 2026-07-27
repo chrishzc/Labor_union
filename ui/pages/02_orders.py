@@ -9,6 +9,7 @@ import os
 import requests
 import streamlit as st
 
+from ui import nav_helper
 from ui.pages.order.tab1_overview import _render_tab1_overview
 from ui.pages.order.tab2_assign import _render_tab2_assign
 from ui.pages.order.tab3_finance import _render_tab3_finance
@@ -19,7 +20,29 @@ title = "📦 訂單與帳務管理系統"
 
 
 def _render_order_page_shell(orders_data, clients, staff_list):
-    """Render Page 2's fixed tab layout from data loaded by ``show``."""
+    """Render Page 2's fixed tab layout from data loaded by ``show``.
+
+    Streamlit's st.tabs has no way to be switched to a given tab
+    programmatically, so a deep link from the alert center can't just land
+    on the normal tab bar and expect "月嫂配對中心" to already be open --
+    the user would still have to click it themselves. Instead, while a
+    processing queue targets this page, skip the tab bar entirely and
+    render only the matching-center content, so the deep link truly lands
+    the user on the right screen with zero extra clicks.
+    """
+    queue_item = nav_helper.current_queue_item("tab2_case_picker")
+    if queue_item is not None:
+        queue = nav_helper.current_queue("tab2_case_picker")
+        st.warning(
+            f"🔔 來自異常警示中心的處理佇列：第 {queue['index'] + 1} / {len(queue['items'])} 筆　"
+            f"案件 `{queue_item['case_no']}`"
+        )
+        if st.button("🔙 返回完整頁面（結束佇列）", key="order_queue_exit_shell"):
+            nav_helper.end_queue()
+            st.rerun()
+        _render_tab2_assign(orders_data, clients, staff_list)
+        return
+
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 訂單資訊總覽",
         "🤝 月嫂配對中心",
