@@ -56,3 +56,6 @@ system_map.schema.json
 !**/system_map.md
 !**/*system_map.yaml
 !**/*system_map.md
+
+# Local seed-script run reports (auto-increment IDs are environment-specific)
+scripts/seed_boundary_anomalies_report.json
