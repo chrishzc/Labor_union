@@ -285,6 +285,74 @@ modules:
     - seed_finance_import_duplicate_fact
     - validate_lifecycle_data
     - validate_seed_database
+  SeedBoundaryAnomalies:
+    type: script
+    description: 獨立、增量的邊界／異常測試資料產生器，涵蓋 document/資料庫、資料處理/尚未涵蓋、無法測試的所有型態與業務異常狀況.md
+      A~G 七大類共 32 個異常子情境；使用案號區段 115900001-115900099，與 GenerateFakeData 的 50
+      筆正常基準案件（115000001-115000050）完全隔開，不匯入、不呼叫、不修改該凍結節點。
+    source: scripts/seed_boundary_anomalies.py
+    domain: null
+    subsystem: null
+    map_file: system_map.md
+    dependencies:
+    - GenerateFakeData
+    input:
+      mode: 預設 preview，只列出 32 個情境與案號區段；只有 --apply 才連線寫入。
+      confirm_database: apply 時必須明確等於 union_db。
+      only: 可選逗號分隔類別代碼（A-G），限定只執行指定類別。
+      reset_range: 可選旗標，先依 FK 安全順序清除 115900001-115900099 區段內既有資料再重建。
+      report_file: 結果報表輸出路徑，預設 scripts/seed_boundary_anomalies_report.json（已列入
+        .gitignore，內含環境相關的 auto-increment id，不進版控）。
+    output:
+      seed_report: 32 個情境各自的 status（ok/failed）、使用的 case_no／staff_id／alert_id 等關鍵欄位，同時印出並寫入
+        report_file。
+    exceptions: []
+    invariants:
+    - 案號固定使用 115900001-115900099 區段；執行前若該區段已有 clients 資料且未帶 --reset-range 必須拒絕執行。
+    - 只允許 DB_HOST 為 localhost、127.0.0.1 或 ::1，且 DB_DATABASE 必須精確為 union_db；APP_ENV／ENV／FLASK_ENV
+      任一包含 prod 時拒絕執行。
+    - 不得 import、呼叫或修改已凍結的 scripts/generate_fake_data.py；不得動到 115000001-115000050
+      區段的任何資料。
+    - --reset-range 只能刪除 115900001-115900099 區段（以及對應 staff/finance_import/finance_alerts
+      關聯資料）內的資料，不得影響其他案號或資料表。
+    - 涉及 finance_alerts、finance_alert_events、subsidy_claim_batches 的情境必須透過既有服務函式（create_or_get_finance_alert、claim_finance_alert、resolve_finance_alert、create_subsidy_claim_batch）寫入，不得手刻
+      INSERT 繞過其狀態機與 CHECK 約束。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_boundary_anomaly_regressions.py
+        - -q
+        - -p
+        - no:cacheprovider
+        cwd: project
+        timeout: 120
+        expect_exit: 0
+        expect_stdout_contains: passed
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - py_compile
+        - scripts\seed_boundary_anomalies.py
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+    decisions: []
+    todo:
+    - 目前多數 D/E 類異常情境的「自動建立警示」行為在真實對帳服務中尚未串接（僅本腳本與單元測試呼叫
+      create_or_get_finance_alert），詳見 document/資料庫、資料處理/邊界異常資料_UI驗收落差清單.md；待對帳服務補上警示建立後，本節點的
+      invariants 需同步檢查是否有新的自動化路徑可驗證。
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    sub_map: root
+    state: validated
+    fan_in_snapshot: 1
   DatabaseSnapshotFixtureV2Serializer:
     type: module
     description: 將 DB snapshot 的日期、datetime、Decimal、NULL、boolean、JSON、Unicode 與前導零字串轉為
