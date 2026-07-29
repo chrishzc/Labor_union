@@ -239,12 +239,13 @@ def process_import(excel_path):
             if not case_no:
                 review_required += 1
                 if errors:
+                    error_keys_joined = "、".join(errors.keys())
                     upsert_system_alert(
                         cursor,
                         alert_code="IMPORT-001",
                         source_domain="IMPORT",
                         case_key=fallback_case_key(name_for_alert, phone_for_alert),
-                        reason=f"HCM 匯入資料異常（查無案號）：{'、'.join(errors.keys())}",
+                        reason=f"HCM 匯入資料異常（查無案號）：{error_keys_joined}",
                         details=errors,
                     )
                 continue
@@ -293,12 +294,13 @@ def process_import(excel_path):
 
             if errors:
                 review_required += 1
+                error_keys_joined = "、".join(errors.keys())
                 upsert_system_alert(
                     cursor,
                     alert_code="IMPORT-001",
                     source_domain="IMPORT",
                     case_key=case_no,
-                    reason=f"案件 {case_no} 匯入資料異常：{'、'.join(errors.keys())}",
+                    reason=f"案件 {case_no} 匯入資料異常：{error_keys_joined}",
                     details=errors,
                 )
             else:

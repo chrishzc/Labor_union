@@ -189,12 +189,13 @@ def process_import(excel_path):
             if not identity_card:
                 review_required += 1
                 if errors:
+                    error_keys_joined = "、".join(errors.keys())
                     upsert_system_alert(
                         cursor,
                         alert_code="IMPORT-004",
                         source_domain="IMPORT",
                         case_key=fallback_case_key(name_for_alert, phone_for_alert),
-                        reason=f"服務人員匯入資料異常（查無身分證字號）：{'、'.join(errors.keys())}",
+                        reason=f"服務人員匯入資料異常（查無身分證字號）：{error_keys_joined}",
                         details=errors,
                     )
                 continue
@@ -382,12 +383,13 @@ def process_import(excel_path):
 
                 if errors:
                     review_required += 1
+                    error_keys_joined = "、".join(errors.keys())
                     upsert_system_alert(
                         cursor,
                         alert_code="IMPORT-004",
                         source_domain="IMPORT",
                         case_key=identity_card,
-                        reason=f"服務人員 {identity_card} 匯入資料異常：{'、'.join(errors.keys())}",
+                        reason=f"服務人員 {identity_card} 匯入資料異常：{error_keys_joined}",
                         details=errors,
                     )
                 else:
