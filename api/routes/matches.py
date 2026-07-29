@@ -122,12 +122,51 @@ def reply_matching_inquiry(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.post("/matches/{match_id}/send-resume", response_model=BaseResponse[bool])
+@router.post("/matches/{match_id}/send-resume", response_model=BaseResponse[Dict[str, Any]])
 def send_resume_to_client(match_id: int = Path(..., description="配對紀錄 ID")):
-    """傳送去識別化月嫂履歷圖卡給客戶 LINE 帳號"""
+    """傳送去識別化月嫂履歷圖卡給客戶 LINE 帳號，並記錄發送時間"""
     try:
-        # 模擬傳送去識別化履歷
-        return BaseResponse(data=True, message="已成功將去識別化月嫂履歷傳送給客戶 LINE 帳號")
+        db_service.mark_resume_sent(match_id)
+
+        conn = db_service.get_connection()
+        info = None
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT s.name AS staff_name, c.name AS client_name, c.line_user_id
+                    FROM matching_records m
+                    JOIN staff s ON m.staff_id = s.id
+                    JOIN orders o ON m.case_no = o.case_no
+                    JOIN clients c ON o.client_id = c.id
+                    WHERE m.id = %s
+                """, (match_id,))
+                info = cursor.fetchone()
+        finally:
+            conn.close()
+
+        line_pushed = bool(info and info.get('line_user_id'))
+        if line_pushed:
+            line_msg = f"已成功將月嫂 {info['staff_name']} 的去識別化履歷傳送給客戶 {info['client_name']} 的 LINE 帳號"
+        else:
+            line_msg = f"發送時間已記錄。提示：客戶 {info['client_name'] if info else ''} 尚未綁定 LINE 帳號 (line_user_id 為空)"
+
+        return BaseResponse(
+            data={"match_id": match_id, "line_pushed": line_pushed},
+            message=line_msg,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/orders/{case_no}/send-resume", response_model=BaseResponse[Dict[str, Any]])
+def send_resume_for_case(case_no: str = Path(..., description="案件編號")):
+    """找出該案件中已被接受但履歷尚未發送的候選人，發送履歷並記錄時間 (供異常警示中心一鍵使用)。"""
+    try:
+        match_id = db_service.mark_resume_sent_for_case(case_no)
+        if match_id is None:
+            raise HTTPException(status_code=404, detail="找不到已接受媒合且履歷尚未發送的候選人")
+        return BaseResponse(data={"match_id": match_id}, message="履歷已發送並記錄")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

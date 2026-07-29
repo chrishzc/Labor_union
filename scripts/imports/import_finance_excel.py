@@ -28,6 +28,7 @@ from services.db_service import get_connection
 from services.client_receipt_reconciliation import reconcile_client_receipt
 from services.client_subsidy_return_transactions import record_client_subsidy_return
 from services.finance_identity_maps import load_finance_identity_maps
+from services.finance_alert_wiring import maybe_alert_pending
 from services.finance_import_staging import stage_finance_rows
 from services.government_subsidy_reconciliation import reconcile_government_subsidy
 from services.order_amount_calculator import calculate_order_amounts
@@ -510,13 +511,20 @@ def import_finance_workbook(excel_path: str) -> dict[str, Any]:
                 inserted_rows += 1
                 result = _dispatch_inserted_row(cursor, staged_row)
                 row_id = int(staged_row["row_id"])
+                classification_type = str(staged_row.get("classification_type"))
                 if result.get("result") in {"reconciled", "existing"}:
-                    classification_type = str(staged_row.get("classification_type"))
                     reconciled_counts[classification_type] = (
                         reconciled_counts.get(classification_type, 0) + 1
                     )
                 else:
                     pending_rows.append(row_id)
+                    maybe_alert_pending(
+                        cursor,
+                        classification_type=classification_type,
+                        row_id=row_id,
+                        batch_id=staging["batch_id"],
+                        result=result,
+                    )
             cursor.execute(
                 """UPDATE finance_import_batches
                    SET status='completed', completed_at=CURRENT_TIMESTAMP,

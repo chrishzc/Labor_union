@@ -41,6 +41,7 @@ from api.routes import (
     staff,
     staff_monthly_schedule,
     staff_payments,
+    system_alerts,
 )
 
 
@@ -125,8 +126,7 @@ app.include_router(contracts.router)
 app.include_router(finance_reports.router)
 app.include_router(finance_alerts.router)
 app.include_router(data_browser_admin.router)
-
-
+app.include_router(system_alerts.router)
 
 
 
