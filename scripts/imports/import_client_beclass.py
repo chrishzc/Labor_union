@@ -219,12 +219,13 @@ def process_import(excel_path):
             if not query_no:
                 review_required += 1
                 if errors:
+                    error_keys_joined = "\u3001".join(errors.keys())
                     upsert_system_alert(
                         cursor,
                         alert_code="IMPORT-005",
                         source_domain="IMPORT",
                         case_key=fallback_case_key(name_for_alert, phone_for_alert),
-                        reason=f"\u5ba2\u6236 BeClass \u532f\u5165\u8cc7\u6599\u7570\u5e38\uff08\u67e5\u7121\u67e5\u8a62\u5e8f\u865f\uff09\uff1a{'\u3001'.join(errors.keys())}",
+                        reason=f"\u5ba2\u6236 BeClass \u532f\u5165\u8cc7\u6599\u7570\u5e38\uff08\u67e5\u7121\u67e5\u8a62\u5e8f\u865f\uff09\uff1a{error_keys_joined}",
                         details=errors,
                     )
                 continue
