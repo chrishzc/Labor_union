@@ -32,11 +32,13 @@ import uuid
 import json
 import requests
 
+from ui import nav_helper
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 from ui.pages.scheduling.case_staffing import render_case_staffing
 from ui.pages.scheduling.matching_center import render_matching_center
 
 title = "多月嫂排班"
+_MATCHING_QUEUE_KEY = "multi_caregiver_matching_case_picker"
 
 def safe_float(val) -> float:
     if val is None:
@@ -1065,9 +1067,51 @@ def _render_staff_calendar():
             return
 
 
+def _load_matching_center_data():
+    headers = build_admin_headers()
+    base_url = resolve_api_base_url()
+    orders_response = requests.get(
+        f"{base_url}/api/v1/orders", headers=headers, timeout=10
+    )
+    staff_response = requests.get(
+        f"{base_url}/api/v1/staff", headers=headers, timeout=10
+    )
+    orders_response.raise_for_status()
+    staff_response.raise_for_status()
+    return (
+        orders_response.json().get("data") or [],
+        staff_response.json().get("data") or [],
+    )
+
+
 def show():
     """多月嫂排班集中入口。"""
     st.title("多月嫂排班")
+    queue_item = nav_helper.current_queue_item(_MATCHING_QUEUE_KEY)
+    if queue_item is not None:
+        queue = nav_helper.current_queue(_MATCHING_QUEUE_KEY)
+        st.warning(
+            f"來自異常警示中心的配對佇列：第 {queue['index'] + 1} / "
+            f"{len(queue['items'])} 筆｜案件 {queue_item['case_no']}"
+        )
+        next_col, exit_col = st.columns(2)
+        if next_col.button("下一筆案件", key="matching_queue_next"):
+            nav_helper.advance_queue(_MATCHING_QUEUE_KEY)
+            st.rerun()
+        if exit_col.button("結束配對佇列", key="matching_queue_exit"):
+            nav_helper.end_queue()
+            st.rerun()
+        try:
+            orders, staff = _load_matching_center_data()
+            render_matching_center(
+                orders,
+                staff,
+                preferred_case_no=str(queue_item["case_no"]),
+            )
+        except Exception as error:
+            st.error(f"月嫂配對中心載入失敗：{error}")
+        return
+
     calendar_tab, matching_tab, staffing_tab = st.tabs(
         ["服務人員月曆", "月嫂配對中心", "案件人力配置"]
     )
@@ -1077,18 +1121,7 @@ def show():
 
     with matching_tab:
         try:
-            headers = build_admin_headers()
-            base_url = resolve_api_base_url()
-            orders_response = requests.get(
-                f"{base_url}/api/v1/orders", headers=headers, timeout=10
-            )
-            staff_response = requests.get(
-                f"{base_url}/api/v1/staff", headers=headers, timeout=10
-            )
-            orders_response.raise_for_status()
-            staff_response.raise_for_status()
-            orders = orders_response.json().get("data") or []
-            staff = staff_response.json().get("data") or []
+            orders, staff = _load_matching_center_data()
             render_matching_center(orders, staff)
         except Exception as error:
             st.error(f"月嫂配對中心載入失敗：{error}")

@@ -70,3 +70,23 @@ def test_match_router_no_longer_performs_direct_db_access():
     assert "db_service" not in source
     assert "get_connection" not in source
     assert "cursor.execute" not in source
+
+
+def test_legacy_resume_actions_record_delivery_state(monkeypatch):
+    match_calls = []
+    case_calls = []
+    monkeypatch.setattr(
+        service.db_service,
+        "mark_resume_sent",
+        lambda match_id: match_calls.append(match_id) or True,
+    )
+    monkeypatch.setattr(
+        service.db_service,
+        "mark_resume_sent_for_case",
+        lambda case_no: case_calls.append(case_no) or 17,
+    )
+
+    assert service.send_legacy_resume_to_client(9) is True
+    assert service.send_legacy_resume_for_case(" CASE-9 ") == 17
+    assert match_calls == [9]
+    assert case_calls == ["CASE-9"]

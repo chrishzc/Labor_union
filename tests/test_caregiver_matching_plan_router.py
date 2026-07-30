@@ -266,3 +266,17 @@ def test_matching_resume_route_rejects_spoofed_actor(monkeypatch):
 
     assert getattr(captured.value, "status_code", None) == 403
     assert called is False
+
+
+def test_anomaly_center_resume_route_uses_legacy_service(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        matches,
+        "send_legacy_resume_for_case",
+        lambda case_no: calls.append(case_no) or 19,
+    )
+
+    response = matches.send_resume_for_case("CASE-7", _principal())
+
+    assert response.data == {"match_id": 19}
+    assert calls == ["CASE-7"]

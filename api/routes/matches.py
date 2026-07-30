@@ -26,6 +26,7 @@ from services.legacy_caregiver_matching_service import (
     recommend_legacy_staff,
     record_legacy_matching_reply,
     send_legacy_matching_information,
+    send_legacy_resume_for_case,
     send_legacy_resume_to_client,
 )
 
@@ -307,6 +308,24 @@ def send_resume_to_client(
             data=send_legacy_resume_to_client(match_id),
             message="已成功將去識別化月嫂履歷傳送給客戶 LINE 帳號",
         )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/orders/{case_no}/send-resume", response_model=BaseResponse[Dict[str, Any]])
+def send_resume_for_case(
+    case_no: str = Path(..., description="案件編號"),
+    principal: AdminPrincipal = Depends(require_system_admin),
+):
+    """找出該案件中已被接受但履歷尚未發送的候選人，發送履歷並記錄時間 (供異常警示中心一鍵使用)。"""
+    del principal
+    try:
+        match_id = send_legacy_resume_for_case(case_no)
+        if match_id is None:
+            raise HTTPException(status_code=404, detail="找不到已接受媒合且履歷尚未發送的候選人")
+        return BaseResponse(data={"match_id": match_id}, message="履歷已發送並記錄")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

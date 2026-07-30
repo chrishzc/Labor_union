@@ -26,6 +26,18 @@ def test_scheduling_page_owns_exact_three_product_tabs():
     assert "render_case_staffing" in show
 
 
+def test_alert_center_deep_links_to_the_central_matching_tab():
+    alerts = (ROOT / "ui/pages/06_finance_alerts.py").read_text(encoding="utf-8")
+    calendar = (ROOT / "ui/pages/03_calendar.py").read_text(encoding="utf-8")
+    order_shell = (ROOT / "ui/pages/02_orders.py").read_text(encoding="utf-8")
+
+    assert '"多月嫂排班"' in alerts
+    assert 'queue_target_key="multi_caregiver_matching_case_picker"' in alerts
+    assert "current_queue_item(_MATCHING_QUEUE_KEY)" in calendar
+    assert "preferred_case_no=str(queue_item" in calendar
+    assert "月嫂配對中心" not in order_shell
+
+
 def test_case_staffing_uses_one_to_four_rows_and_preview_apply():
     render = _function_source(
         "ui/pages/scheduling/case_staffing.py", "render_case_staffing"

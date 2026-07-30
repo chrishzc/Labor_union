@@ -9,6 +9,7 @@ import pandas as pd
 
 from scripts.imports import import_finance_excel as importer
 from scripts.imports.finance_formats.taishin import TAISHIN_HEADERS
+from tests._finance_alert_mock_support import AutocommitOff, handle_finance_alert_sql
 
 
 class StatefulCursor:
@@ -20,6 +21,7 @@ class StatefulCursor:
         self.state = state
         self.current = None
         self.lastrowid = None
+        self.connection = AutocommitOff()
 
     def __enter__(self):
         return self
@@ -96,6 +98,8 @@ class StatefulCursor:
             row.update({"reconciliation_status": "reconciled", "reconciliation_reference": params[0]})
         elif compact.startswith("UPDATE finance_import_batches SET status='completed'"):
             self.state["batches"][params[0] - 1]["status"] = "completed"
+        elif handle_finance_alert_sql(self.state, compact, params, self):
+            pass
         else:
             raise AssertionError(f"unexpected SQL: {compact}")
 

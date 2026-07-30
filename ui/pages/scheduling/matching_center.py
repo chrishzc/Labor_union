@@ -572,6 +572,8 @@ def _render_multi_segment_matching(
 def render_matching_center(
     orders: list[dict[str, Any]],
     staff: list[dict[str, Any]],
+    *,
+    preferred_case_no: str | None = None,
 ) -> None:
     """Render the original matching workflow with a multi-segment fallback."""
     _render_tab2_assign(
@@ -586,4 +588,5 @@ def render_matching_center(
                 preview_only=True,
             )
         ),
+        preferred_case_no=preferred_case_no,
     )

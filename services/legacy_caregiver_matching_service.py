@@ -85,7 +85,14 @@ def send_legacy_resume_to_client(match_id: int) -> bool:
     """Preserve the original single-caregiver resume action contract."""
     if isinstance(match_id, bool) or not isinstance(match_id, int) or match_id <= 0:
         raise ValueError("match_id must be a positive integer")
-    return True
+    return db_service.mark_resume_sent(match_id)
+
+
+def send_legacy_resume_for_case(case_no: str) -> int | None:
+    """Record one accepted candidate resume from the anomaly center."""
+    if not isinstance(case_no, str) or not case_no.strip():
+        raise ValueError("case_no must be a non-empty string")
+    return db_service.mark_resume_sent_for_case(case_no.strip())
 
 
 def assign_legacy_staff_to_order(case_no: str, staff_id: int) -> bool:

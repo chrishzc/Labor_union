@@ -389,6 +389,7 @@ def _batch_authorization_preview(status="ready", fingerprint="a" * 64):
     return {
         "contract_version": "assignment-leave-substitution-batch-preview/v1",
         "canonical_intent": {"case_ref": "case:CASE-1", "items": [{"item_ref": 0}]},
+        "double_pay_preferences": [{"item_ref": 0, "is_double_pay": False}],
         "service_plan_transition": {"before": {"locked": True}, "intent": {"locked": True}, "after": {"locked": True}, "impacts": {"total": 1}},
         "canonical_eligibility": {
             "transition_valid": status != "blocked",
@@ -451,7 +452,7 @@ def test_batch_leave_resolution_apply_authorization_decision_applies_only_ready_
 
     assert set(result) == {"status", "apply_authorization", "business_conflicts"}
     assert result["status"] == "apply" and result["business_conflicts"] is None
-    assert set(result["apply_authorization"]) == {"canonical_intent", "service_plan_transition", "canonical_eligibility", "preview_fingerprint", "canonical_apply_identity"}
+    assert set(result["apply_authorization"]) == {"canonical_intent", "double_pay_preferences", "service_plan_transition", "canonical_eligibility", "preview_fingerprint", "canonical_apply_identity"}
     assert result["apply_authorization"]["canonical_apply_identity"] == metadata
     preview["service_plan_transition"]["impacts"]["total"] = 2
     metadata["actor"] = "changed"
@@ -3604,507 +3605,71 @@ def test_batch_leave_resolution_pure_domain_transition_is_deterministic_and_capa
         assert forbidden not in source
 
 
-@pytest.mark.parametrize(
-    ("historical_facts", "expected_state", "expected_blocking", "expected_review"),
-    [
-        (
-            {"schedule": False, "event": None, "locked": False},
-            "bootstrap",
-            [],
-            [],
-        ),
-        (
-            {"schedule": True, "event": None, "locked": False},
-            "unlocked",
-            [],
-            ["historical_audit_required"],
-        ),
-        (
-            {"schedule": False, "event": {"case_no": "CASE-1"}, "locked": False},
-            "unlocked",
-            [],
-            ["historical_audit_required"],
-        ),
-        (
-            {"schedule": False, "event": None, "locked": True},
-            "locked",
-            ["historical_facts_locked"],
-            [],
-        ),
-    ],
-    ids=["empty", "schedule_only", "event_only", "locked_priority"],
-)
-def test_batch_leave_resolution_transition_calculation_classifies_historical_facts(
-    historical_facts, expected_state, expected_blocking, expected_review
-):
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            }
-        ]
-    )
-    snapshot["database_current_date"] = date(2026, 8, 10)
-    if not historical_facts["schedule"]:
-        snapshot["assignment_schedule_days"] = []
-    if historical_facts["event"] is not None:
-        snapshot["historical_facts"]["leave_substitution_events"] = [
-            historical_facts["event"]
-        ]
-    if historical_facts["locked"]:
-        snapshot["historical_facts"]["actual_hours_adjustments"] = [
-            {"assignment_id": 11}
-        ]
-
-    result = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-
-    assert result["historical_fact_state"] == expected_state
-    assert result["blocking_reasons"] == expected_blocking
-    assert result["review_reasons"] == expected_review
-
-
-def test_batch_leave_resolution_transition_calculation_ignores_cross_case_historical_facts():
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            }
-        ]
-    )
-    snapshot["database_current_date"] = date(2026, 8, 10)
-    snapshot["assignment_schedule_days"] = [
-        {"case_no": "CASE-OTHER", "assignment_id": 99, "staff_id": 202, "work_date": date(2026, 8, 1)}
-    ]
-    snapshot["historical_facts"]["leave_substitution_events"] = [{"case_no": "CASE-OTHER"}]
-
-    result = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-
-    assert result["historical_fact_state"] == "bootstrap"
-    assert result["review_reasons"] == []
-
-
-@pytest.mark.parametrize(
-    ("historical_fact_field", "target", "resolution_shape", "expected_locked"),
-    [
-        (field, "following", shape, expected_locked)
-        for field in (
-            "non_cancelled_payments",
-            "active_settlements",
-            "actual_hours_adjustments",
-        )
-        for shape, expected_locked in (
-            ("substitute", False),
-            ("defer", True),
-            ("mixed", True),
-        )
-    ]
-    + [
-        (field, "original", "substitute", True)
-        for field in (
-            "non_cancelled_payments",
-            "active_settlements",
-            "actual_hours_adjustments",
-        )
-    ],
-)
-def test_batch_leave_resolution_transition_calculation_scopes_immutable_facts_to_shifted_assignments(
-    historical_fact_field, target, resolution_shape, expected_locked
-):
-    items_by_shape = {
-        "substitute": [
-            {
-                "original_schedule_id": 22,
-                "work_date": "2026-08-02",
-                "resolution_type": "substitute",
-                "substitute_staff_id": 202,
-            }
-        ],
-        "defer": [
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            }
-        ],
-        "mixed": [
-            {
-                "original_schedule_id": 22,
-                "work_date": "2026-08-02",
-                "resolution_type": "substitute",
-                "substitute_staff_id": 202,
-            },
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            },
-        ],
-    }
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        items_by_shape[resolution_shape]
-    )
-    following = {
-        **snapshot["assignments"][0],
-        "id": 12,
-        "staff_id": 102,
-        "assigned_start_date": date(2026, 8, 6),
-        "assigned_end_date": date(2026, 8, 10),
-    }
-    snapshot["assignments"].append(following)
-    snapshot["historical_facts"][historical_fact_field] = [
-        {"assignment_id": 11 if target == "original" else 12}
-    ]
-
-    result = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-
-    assert (result["historical_fact_state"] == "locked") is expected_locked
-    assert result["blocking_reasons"] == (
-        ["historical_facts_locked"] if expected_locked else []
-    )
-
-
-def test_batch_leave_resolution_transition_calculation_aggregates_mixed_initial_snapshot():
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 22,
-                "work_date": "2026-08-02",
-                "resolution_type": "substitute",
-                "substitute_staff_id": 202,
-            },
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            },
-        ]
-    )
-
-    result = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-
-    assert result["blocking_reasons"] == []
-    assert result["required_hours"] == result["provisional_actual_hours"] == 40
-    assert result["assignment_transition_plan"]["effective_date"] == date(2026, 8, 1)
-    after = result["assignment_transition_plan"]["after_assignments"]
-    substitute = next(row for row in after if row["kind"] == "single_day_substitute")
-    assert substitute["staff_id"] == 202
-    assert substitute["assigned_start_date"] == substitute["assigned_end_date"] == date(2026, 8, 2)
-    assert all(
-        not (
-            row["staff_id"] == 101
-            and row["status"] != "cancelled"
-            and row["assigned_start_date"] <= date(2026, 8, 2) <= row["assigned_end_date"]
-        )
-        for row in after
-    )
-    assert result["schedule_change_plan"][-1]["work_date"] == "2026-08-06"
-
-
-def test_batch_leave_resolution_transition_calculation_uses_batch_earliest_effective_date():
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "substitute",
-                "substitute_staff_id": 202,
-            },
-            {
-                "original_schedule_id": 23,
-                "work_date": "2026-08-03",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            },
-        ]
-    )
-
-    result = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-
-    assert result["blocking_reasons"] == []
-    assert result["assignment_transition_plan"]["effective_date"] == date(2026, 8, 1)
-
-
-@pytest.mark.parametrize("defer_days", [2, 3])
-def test_batch_leave_resolution_transition_calculation_uses_exact_defer_count(defer_days):
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 20 + day,
-                "work_date": f"2026-08-0{day}",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            }
-            for day in range(1, defer_days + 1)
-        ]
-    )
-
-    result = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-
-    after = result["assignment_transition_plan"]["after_assignments"]
-    assert next(row for row in after if row["id"] == 11)["assigned_end_date"] == date(
-        2026, 8, 5 + defer_days
-    )
-    assert len(
-        [row for row in result["schedule_change_plan"] if row["action"] == "defer_makeup_extension"]
-    ) == defer_days
-    assert result["required_hours"] == result["provisional_actual_hours"] == 40
-
-
-def test_batch_leave_resolution_transition_calculation_is_order_independent_and_pure():
-    import copy
-
-    items = [
-        {
-            "original_schedule_id": 23,
-            "work_date": "2026-08-03",
-            "resolution_type": "substitute",
-            "substitute_staff_id": 202,
-        },
-        {
-            "original_schedule_id": 21,
-            "work_date": "2026-08-01",
-            "resolution_type": "defer_following_assignments",
-            "substitute_staff_id": None,
-        },
-    ]
-    first, original, snapshot = _batch_leave_resolution_transition_input(items)
-    second, _, _ = _batch_leave_resolution_transition_input(list(reversed(items)))
-    before = copy.deepcopy((first, original, snapshot))
-
-    first_result = calculate_assignment_leave_resolution_batch_transition(
-        first["canonical_batch_intent"], first["item_lineage"], original, snapshot
-    )
-    second_result = calculate_assignment_leave_resolution_batch_transition(
-        second["canonical_batch_intent"], second["item_lineage"], original, snapshot
-    )
-
-    assert first_result == second_result
-    assert (first, original, snapshot) == before
-
-
-def test_batch_leave_resolution_transition_calculation_fails_closed_for_lineage_and_blocks_row_limit():
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "substitute",
-                "substitute_staff_id": 202,
-            },
-            {
-                "original_schedule_id": 23,
-                "work_date": "2026-08-03",
-                "resolution_type": "substitute",
-                "substitute_staff_id": 203,
-            },
-            {
-                "original_schedule_id": 25,
-                "work_date": "2026-08-05",
-                "resolution_type": "substitute",
-                "substitute_staff_id": 204,
-            },
-        ]
-    )
-    blocked = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-    assert blocked["blocking_reasons"] == ["assignment_transition_conflict"]
-    assert blocked["assignment_transition_conflicts"][0]["code"] == "assignment_row_limit_exceeded"
-    assert blocked["assignment_transition_conflicts"][0]["details"] == {
-        "maximum_active_rows": 4,
-        "actual_active_rows": 5,
-    }
-
-    canonical["item_lineage"]["items"][0]["original_schedule_id"] = 99
-    with pytest.raises(ValueError, match="item lineage does not exactly match"):
-        calculate_assignment_leave_resolution_batch_transition(
-            canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-        )
-
-
-@pytest.mark.parametrize(
-    ("occupancy", "expected_reason_code", "expected_review"),
-    [
-        (
-            {"assignment_id": 12, "staff_id": 101, "work_date": date(2026, 8, 6)},
-            "schedule",
-            [],
-        ),
-        (
-            {"assignment_id": None, "staff_id": 101, "work_date": date(2026, 8, 6)},
-            "requires_review",
-            ["legacy_schedule_ownership_review"],
-        ),
-    ],
-)
-def test_batch_leave_resolution_transition_calculation_retains_external_and_legacy_occupancy(
-    occupancy, expected_reason_code, expected_review
-):
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            }
-        ]
-    )
-    snapshot["assignment_schedule_days"].append(occupancy)
-
-    result = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-
-    assert result["blocking_reasons"] == ["availability_conflict"]
-    assert result["availability_conflicts"] == [
-        {
-            "assignment_id": 11,
-            "staff_id": 101,
-            "work_date": "2026-08-06",
-            "reason_code": expected_reason_code,
-        }
-    ]
-    assert result["review_reasons"] == expected_review
-
-
-def test_batch_leave_resolution_transition_calculation_validates_self_occupancy_before_exclusion():
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            }
-        ]
-    )
-    snapshot["assignment_schedule_days"].append(
-        {"assignment_id": 11, "staff_id": True, "work_date": date(2026, 8, 6)}
-    )
-
-    with pytest.raises(ValueError, match="assignment_schedule_days.staff_id must be a positive integer"):
-        calculate_assignment_leave_resolution_batch_transition(
-            canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-        )
-
-
-def test_batch_leave_resolution_transition_calculation_reports_active_lock_conflict():
-    canonical, original, snapshot = _batch_leave_resolution_transition_input(
-        [
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            }
-        ]
-    )
-    snapshot["active_lock_days"] = [
-        {"active_marker": 1, "staff_id": 101, "lock_date": date(2026, 8, 6)}
-    ]
-
-    result = calculate_assignment_leave_resolution_batch_transition(
-        canonical["canonical_batch_intent"], canonical["item_lineage"], original, snapshot
-    )
-
-    assert result["blocking_reasons"] == ["availability_conflict"]
-    assert result["availability_conflicts"] == [
-        {
-            "assignment_id": 11,
-            "staff_id": 101,
-            "work_date": "2026-08-06",
-            "reason_code": "active_lock",
-        }
-    ]
-
-
 def _batch_preview_dependency_results(*, blocking_reasons=(), review_reasons=()):
-    canonical_intent = {
+    original, snapshot = _batch_leave_resolution_transition_facts()
+    snapshot["assignments"] = [
+        {
+            key: value
+            for key, value in snapshot["assignments"][0].items()
+            if key != "service_hours_per_day"
+        }
+    ]
+    snapshot["assignment_schedule_days"] = [
+        {
+            **row,
+            "is_double_pay": False,
+            "notes": None,
+            "requires_review": False,
+        }
+        for row in snapshot["assignment_schedule_days"]
+    ]
+    request = {
         "contract_version": "assignment-leave-substitution-batch-preview/v1",
         "case_no": "CASE-1",
         "original_assignment_id": 11,
         "items": [
             {
-                "batch_item_index": 0,
                 "original_schedule_id": 21,
                 "work_date": "2026-08-01",
                 "resolution_type": "substitute",
                 "substitute_staff_id": 202,
+                "is_double_pay": False,
             }
         ],
     }
-    lineage = {
-        "items": [
-            {
-                "batch_item_index": 0,
-                "original_assignment_id": 11,
-                "original_schedule_id": 21,
-                "original_staff_id": 101,
-                "work_date": "2026-08-01",
-            }
-        ]
-    }
-    transition = {
-        "canonical_items": [dict(canonical_intent["items"][0])],
-        "item_lineage": [dict(lineage["items"][0])],
-        "item_resolutions": [
-            {
-                "batch_item_index": 0,
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "substitute",
-                "resulting_staff_id": 202,
-            }
-        ],
-        "historical_fact_state": "bootstrap",
-        "assignment_transition_plan": {
-            "effective_date": date(2026, 8, 1),
-            "created": [{"id": "database-generated-1", "staff_id": 202}],
-        },
-        "schedule_change_plan": [
-            {
-                "batch_item_index": 0,
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "action": "substitute",
-            }
-        ],
-        "availability_conflicts": [],
-        "assignment_transition_conflicts": [],
-        "assignment_service_impacts": [
-            {"assignment_id": 11, "staff_id": 101, "actual_hours": Decimal("8")}
-        ],
-        "required_hours": Decimal("8"),
-        "provisional_actual_hours": Decimal("8"),
-        "blocking_reasons": list(blocking_reasons),
-        "review_reasons": list(review_reasons),
-    }
-    return {
-        "canonical_batch_intent": canonical_intent,
-        "item_lineage": lineage,
-    }, transition
+    blocking_diagnostics = [
+        {"code": code, "scope_ref": "transition", "facts": {}}
+        for code in blocking_reasons
+    ]
+    review_diagnostics = [
+        {"code": code, "scope_ref": "transition", "facts": {}}
+        for code in review_reasons
+    ]
+
+    def transition(**kwargs):
+        return {
+            "canonical_intent": deepcopy(kwargs["canonical_intent"]),
+            "service_plan_transition": {
+                "before": deepcopy(kwargs["before_service_plan"]),
+                "intent": deepcopy(kwargs["canonical_intent"]),
+                "after": deepcopy(kwargs["before_service_plan"]),
+                "impacts": {
+                    "per_caregiver": [],
+                    "total": {
+                        "before_service_hours": Decimal("40"),
+                        "after_service_hours": Decimal("40"),
+                    },
+                },
+            },
+            "canonical_eligibility": {
+                "transition_valid": True,
+                "applicable": not blocking_diagnostics,
+                "blocking_diagnostics": deepcopy(blocking_diagnostics),
+                "review_diagnostics": deepcopy(review_diagnostics),
+            },
+        }
+
+    return request, original, snapshot, transition
 
 
 def test_batch_leave_resolution_preview_from_pure_transition_projects_opaque_facts_and_retains_blocked_after(
@@ -4217,27 +3782,28 @@ def test_batch_leave_resolution_preview_from_pure_transition_rejects_invalid_aft
 @pytest.mark.parametrize(
     ("blocking_reasons", "review_reasons", "expected_status", "confirmation"),
     [
-        (["availability_conflict"], ["historical_audit_required"], "blocked", False),
-        ([], ["historical_audit_required"], "requires_review", True),
+        (["formal_service_conflict"], ["historical_change_requires_review"], "blocked", False),
+        ([], ["historical_change_requires_review"], "requires_review", True),
         ([], [], "ready", True),
     ],
 )
 def test_batch_leave_resolution_preview_from_snapshot_aggregates_status_and_delegates_once(
     monkeypatch, blocking_reasons, review_reasons, expected_status, confirmation
 ):
-    canonicalized, transition = _batch_preview_dependency_results(
+    request, original, snapshot, transition = _batch_preview_dependency_results(
         blocking_reasons=blocking_reasons,
         review_reasons=review_reasons,
     )
     calls = []
+    real_canonicalize = leave_preview.canonicalize_assignment_leave_resolution_batch_request
 
     def canonicalize(request, original_assignment_schedule, conflict_snapshot):
         calls.append(("canonicalize", request, original_assignment_schedule, conflict_snapshot))
-        return canonicalized
+        return real_canonicalize(request, original_assignment_schedule, conflict_snapshot)
 
-    def calculate(canonical_intent, item_lineage, original_assignment_schedule, conflict_snapshot):
-        calls.append(("calculate", canonical_intent, item_lineage, original_assignment_schedule, conflict_snapshot))
-        return transition
+    def calculate(**kwargs):
+        calls.append(("calculate", deepcopy(kwargs)))
+        return transition(**kwargs)
 
     monkeypatch.setattr(
         leave_preview,
@@ -4249,123 +3815,116 @@ def test_batch_leave_resolution_preview_from_snapshot_aggregates_status_and_dele
         "calculate_assignment_leave_resolution_batch_transition",
         calculate,
     )
-    request, original, snapshot = object(), object(), object()
-
     result = compute_assignment_leave_resolution_batch_preview_from_snapshot(
         request, original, snapshot
     )
 
     assert result["status"] == expected_status
     assert result["requires_confirmation"] is confirmation
-    assert result["items"] == transition["canonical_items"]
-    assert result["item_lineage"] == transition["item_lineage"]
-    assert result["item_resolutions"] == transition["item_resolutions"]
-    assert result["blocking_reasons"] == blocking_reasons
-    assert result["review_reasons"] == review_reasons
+    assert set(result) == {
+        "contract_version",
+        "canonical_intent",
+        "double_pay_preferences",
+        "service_plan_transition",
+        "canonical_eligibility",
+        "status",
+        "requires_confirmation",
+        "preview_fingerprint",
+    }
+    assert [item["code"] for item in result["canonical_eligibility"]["blocking_diagnostics"]] == blocking_reasons
+    assert [item["code"] for item in result["canonical_eligibility"]["review_diagnostics"]] == review_reasons
+    assert result["double_pay_preferences"] == [{"item_ref": 0, "is_double_pay": False}]
     assert [call[0] for call in calls] == ["canonicalize", "calculate"]
-    assert calls[1][1:3] == (
-        canonicalized["canonical_batch_intent"],
-        canonicalized["item_lineage"],
-    )
+    assert set(calls[1][1]) == {
+        "canonical_intent",
+        "item_lineage",
+        "before_service_plan",
+        "eligibility_facts",
+    }
 
 
-def test_batch_leave_resolution_preview_from_snapshot_fingerprint_is_complete_and_excludes_generated_values(
+def test_batch_leave_resolution_preview_from_snapshot_fingerprint_is_complete_and_rejects_contract_extras(
     monkeypatch,
 ):
-    canonicalized, transition = _batch_preview_dependency_results()
-    monkeypatch.setattr(
-        leave_preview,
-        "canonicalize_assignment_leave_resolution_batch_request",
-        lambda *_args: canonicalized,
-    )
+    request, original, snapshot, transition = _batch_preview_dependency_results()
+    variation = {"case_ref": None, "after_hours": Decimal("40"), "review": False, "extra": False}
+
+    def calculate(**kwargs):
+        result = transition(**kwargs)
+        if variation["case_ref"] is not None:
+            result["canonical_intent"]["case_ref"] = variation["case_ref"]
+        result["service_plan_transition"]["impacts"]["total"]["after_service_hours"] = variation["after_hours"]
+        if variation["review"]:
+            result["canonical_eligibility"]["review_diagnostics"] = [
+                {
+                    "code": "historical_change_requires_review",
+                    "scope_ref": "transition",
+                    "facts": {},
+                }
+            ]
+        if variation["extra"]:
+            result["display_text"] = "代班預覽"
+        return result
+
     monkeypatch.setattr(
         leave_preview,
         "calculate_assignment_leave_resolution_batch_transition",
-        lambda *_args: transition,
+        calculate,
     )
 
     baseline = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        {}, {}, {}
+        request, original, snapshot
     )
-    canonicalized["canonical_batch_intent"]["case_no"] = "CASE-2"
-    changed_request = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        {}, {}, {}
-    )
-    assert changed_request["preview_fingerprint"] != baseline["preview_fingerprint"]
 
-    canonicalized["canonical_batch_intent"]["case_no"] = "CASE-1"
-    transition["assignment_service_impacts"][0]["actual_hours"] = Decimal("9")
-    changed_result = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        {}, {}, {}
+    changed_double_pay_request = deepcopy(request)
+    changed_double_pay_request["items"][0]["is_double_pay"] = True
+    changed_double_pay = compute_assignment_leave_resolution_batch_preview_from_snapshot(
+        changed_double_pay_request, original, snapshot
     )
-    assert changed_result["preview_fingerprint"] != baseline["preview_fingerprint"]
+    assert changed_double_pay["preview_fingerprint"] != baseline["preview_fingerprint"]
 
-    transition["assignment_service_impacts"][0]["actual_hours"] = Decimal("8")
-    transition["assignment_transition_plan"]["created"][0].update(
-        {"id": "database-generated-2", "event_key": "event-2", "reason": "display"}
+    variation["case_ref"] = "case:CASE-1-v2"
+    changed_intent = compute_assignment_leave_resolution_batch_preview_from_snapshot(
+        request, original, snapshot
     )
-    excluded_change = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        {}, {}, {}
-    )
-    assert excluded_change["preview_fingerprint"] == baseline["preview_fingerprint"]
-    del transition["assignment_transition_plan"]["created"][0]["reason"]
-    del transition["assignment_transition_plan"]["created"][0]["event_key"]
-    del transition["assignment_transition_plan"]["created"][0]["id"]
+    assert changed_intent["preview_fingerprint"] != baseline["preview_fingerprint"]
 
-    transition["actor"] = "supervisor"
-    actor_change = compute_assignment_leave_resolution_batch_preview_from_snapshot({}, {}, {})
-    assert actor_change["preview_fingerprint"] == baseline["preview_fingerprint"]
-    del transition["actor"]
-
-    transition["current_time"] = "2026-08-01T07:00:00"
-    current_time_change = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        {}, {}, {}
+    variation["case_ref"] = None
+    variation["after_hours"] = Decimal("39")
+    changed_transition = compute_assignment_leave_resolution_batch_preview_from_snapshot(
+        request, original, snapshot
     )
-    assert current_time_change["preview_fingerprint"] == baseline["preview_fingerprint"]
-    del transition["current_time"]
+    assert changed_transition["preview_fingerprint"] != baseline["preview_fingerprint"]
 
-    transition["display_text"] = "代班預覽"
-    display_field_change = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        {}, {}, {}
+    variation["after_hours"] = Decimal("40")
+    variation["review"] = True
+    changed_eligibility = compute_assignment_leave_resolution_batch_preview_from_snapshot(
+        request, original, snapshot
     )
-    assert (
-        display_field_change["preview_fingerprint"] == baseline["preview_fingerprint"]
-    )
-    del transition["display_text"]
+    assert changed_eligibility["preview_fingerprint"] != baseline["preview_fingerprint"]
+    assert changed_eligibility["status"] == "requires_review"
 
-    transition["assignment_transition_plan"]["created"][0][
-        "preview_fingerprint"
-    ] = "child-preview-fingerprint"
-    nested_preview_change = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        {}, {}, {}
-    )
-    assert nested_preview_change["preview_fingerprint"] == baseline["preview_fingerprint"]
-    del transition["assignment_transition_plan"]["created"][0]["preview_fingerprint"]
+    variation["review"] = False
+    variation["extra"] = True
+    with pytest.raises(ValueError, match="transition returned an invalid contract"):
+        compute_assignment_leave_resolution_batch_preview_from_snapshot(
+            request, original, snapshot
+        )
 
-    assert excluded_change["preview_fingerprint"] == excluded_change["preview_fingerprint"].lower()
-    assert len(excluded_change["preview_fingerprint"]) == 64
+    assert baseline["preview_fingerprint"] == baseline["preview_fingerprint"].lower()
+    assert len(baseline["preview_fingerprint"]) == 64
 
 
 def test_batch_leave_resolution_preview_from_snapshot_propagates_transition_dependency_exception(
     monkeypatch,
 ):
-    canonicalized, _transition = _batch_preview_dependency_results()
+    request, original, snapshot, _transition = _batch_preview_dependency_results()
     calls = []
     expected_error = RuntimeError("dependency failure")
 
-    def canonicalize(request, original_assignment_schedule, conflict_snapshot):
-        calls.append("canonicalize")
-        return canonicalized
-
-    def calculate(canonical_intent, item_lineage, original_assignment_schedule, conflict_snapshot):
-        calls.append("calculate")
+    def calculate(**kwargs):
+        calls.append(deepcopy(kwargs))
         raise expected_error
-
-    monkeypatch.setattr(
-        leave_preview,
-        "canonicalize_assignment_leave_resolution_batch_request",
-        canonicalize,
-    )
     monkeypatch.setattr(
         leave_preview,
         "calculate_assignment_leave_resolution_batch_transition",
@@ -4373,71 +3932,17 @@ def test_batch_leave_resolution_preview_from_snapshot_propagates_transition_depe
     )
 
     with pytest.raises(RuntimeError) as exc_info:
-        compute_assignment_leave_resolution_batch_preview_from_snapshot({}, {}, {})
-    assert exc_info.value is expected_error
-    assert calls == ["canonicalize", "calculate"]
-
-
-def test_batch_leave_resolution_preview_from_snapshot_is_order_independent_pure_and_propagates_errors(
-    monkeypatch,
-):
-    import copy
-
-    original, snapshot = _batch_leave_resolution_transition_facts()
-    request = {
-        "contract_version": "assignment-leave-substitution-batch-preview/v1",
-        "case_no": "CASE-1",
-        "original_assignment_id": 11,
-        "items": [
-            {
-                "original_schedule_id": 22,
-                "work_date": "2026-08-02",
-                "resolution_type": "substitute",
-                "substitute_staff_id": 202,
-            },
-            {
-                "original_schedule_id": 21,
-                "work_date": "2026-08-01",
-                "resolution_type": "defer_following_assignments",
-                "substitute_staff_id": None,
-            },
-        ],
-    }
-    before = copy.deepcopy((request, original, snapshot))
-    first = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        request, original, snapshot
-    )
-    reordered_request = dict(reversed(list(request.items())))
-    reordered_request["items"] = [
-        dict(reversed(list(item.items()))) for item in reversed(request["items"])
-    ]
-    reordered_original = dict(reversed(list(original.items())))
-    reordered_original["assignment"] = dict(reversed(list(original["assignment"].items())))
-    reordered_original["schedule_days"] = list(reversed(original["schedule_days"]))
-    reordered_snapshot = dict(reversed(list(snapshot.items())))
-    reordered_snapshot["assignments"] = list(reversed(snapshot["assignments"]))
-    reordered_snapshot["assignment_schedule_days"] = list(
-        reversed(snapshot["assignment_schedule_days"])
-    )
-    second = compute_assignment_leave_resolution_batch_preview_from_snapshot(
-        reordered_request, reordered_original, reordered_snapshot
-    )
-
-    assert first == second
-    assert (request, original, snapshot) == before
-
-    def raised(*_args):
-        raise RuntimeError("dependency failure")
-
-    monkeypatch.setattr(
-        leave_preview,
-        "canonicalize_assignment_leave_resolution_batch_request",
-        raised,
-    )
-    with pytest.raises(RuntimeError, match="dependency failure"):
         compute_assignment_leave_resolution_batch_preview_from_snapshot(
             request, original, snapshot
         )
+    assert exc_info.value is expected_error
+    assert len(calls) == 1
+    assert set(calls[0]) == {
+        "canonical_intent",
+        "item_lineage",
+        "before_service_plan",
+        "eligibility_facts",
+    }
 
 
 def test_leave_resolution_preview_from_snapshot_is_pure_deterministic_substitute():

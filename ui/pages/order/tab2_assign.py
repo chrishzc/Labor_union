@@ -143,6 +143,7 @@ def _render_tab2_assign(
     *,
     multi_segment_renderer=None,
     multi_segment_preview_renderer=None,
+    preferred_case_no=None,
 ):
     """Tab 2: 月嫂配對中心 (OrderUI_Tab2_MatchingCenter) - 僅處理「洽談中」待配對案件"""
     st.subheader("🤝 月嫂配對中心 (Clients, Orders & Matching)")
@@ -163,6 +164,17 @@ def _render_tab2_assign(
     }
 
     st.markdown("### ⚙️ 單筆待配對案件控制面板")
+    preferred_label = next(
+        (
+            label
+            for label, case_no in target_case_options.items()
+            if preferred_case_no is not None
+            and str(case_no) == str(preferred_case_no)
+        ),
+        None,
+    )
+    if preferred_label is not None:
+        st.session_state["tab2_case_picker"] = preferred_label
     selected_case_label = st.selectbox("🎯 選擇待配對與指派之案件", list(target_case_options.keys()), key="tab2_case_picker")
     target_case_no = target_case_options[selected_case_label]
     target_order = next((o for o in pending_orders if o['case_no'] == target_case_no), None)
