@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 import requests
 import streamlit as st
+from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 
 title = "⚠️ 帳務警示中心"
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 _STATUSES = ("", "open", "claimed", "resolved")
 
 
@@ -21,11 +20,15 @@ def _api_request(
     method: str = "GET",
     params: dict[str, Any] | None = None,
     payload: dict[str, Any] | None = None,
+    headers: dict[str, Any] | None = None,
 ) -> Any:
     """Call only the finance-alert router; no workflow or database access exists here."""
+    base_url = resolve_api_base_url()
+    request_headers = headers if headers is not None else build_admin_headers()
     response = requests.request(
         method,
-        f"{API_BASE_URL}/api/v1/finance-alerts{path}",
+        f"{base_url}/api/v1/finance-alerts{path}",
+        headers=request_headers,
         params=params,
         json=payload,
         timeout=15,
@@ -86,7 +89,7 @@ def _render_alert_detail(alert: dict[str, Any]) -> None:
         st.info("尚無事件歷程。")
 
 
-def _render_actions(alert: dict[str, Any]) -> None:
+def _render_actions(alert: dict[str, Any], *, headers: dict[str, Any] | None = None) -> None:
     alert_id = alert["id"]
     st.markdown("#### 人工處理")
     st.warning("解除警示不等於完成核銷，也不會建立或修改正式帳務。")
@@ -103,6 +106,7 @@ def _render_actions(alert: dict[str, Any]) -> None:
                     result = _api_request(
                         f"/{alert_id}/claim",
                         method="POST",
+                        headers=headers,
                         payload={"operator": operator.strip()},
                     )
                 except (requests.RequestException, ValueError) as error:
@@ -123,6 +127,7 @@ def _render_actions(alert: dict[str, Any]) -> None:
                     result = _api_request(
                         f"/{alert_id}/resolve",
                         method="POST",
+                        headers=headers,
                         payload={"operator": operator.strip(), "reason": reason.strip()},
                     )
                 except (requests.RequestException, ValueError) as error:
@@ -135,6 +140,13 @@ def _render_actions(alert: dict[str, Any]) -> None:
 def show() -> None:
     st.title(title)
     st.caption("CLIENT、RETURN、SUBSIDY、STAFF 與 COMMON 警示的人工檢視入口。")
+
+    try:
+        admin_headers = build_admin_headers()
+    except Exception as err:
+        st.error(f"未完成管理員授權設定：{err}")
+        return
+
     filter_left, filter_right, filter_domain = st.columns(3)
     with filter_left:
         status = st.selectbox("狀態", _STATUSES, format_func=lambda value: value or "全部")
@@ -153,7 +165,7 @@ def show() -> None:
         params["source_domain"] = source_domain.strip()
 
     try:
-        alerts = _api_request("", params=params)
+        alerts = _api_request("", params=params, headers=admin_headers)
     except (requests.RequestException, ValueError) as error:
         st.error(f"無法讀取帳務警示：{_error_text(error)}")
         return
@@ -173,9 +185,9 @@ def show() -> None:
         return
 
     try:
-        alert = _api_request(f"/{selected_id}")
+        alert = _api_request(f"/{selected_id}", headers=admin_headers)
     except (requests.RequestException, ValueError) as error:
         st.error(f"無法讀取警示詳情：{_error_text(error)}")
         return
     _render_alert_detail(alert)
-    _render_actions(alert)
+    _render_actions(alert, headers=admin_headers)
