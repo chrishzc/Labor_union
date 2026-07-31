@@ -543,7 +543,9 @@
   - Router 只能進行輸入驗證與 Service 委派，禁止直接執行 SQL 或商業邏輯。
   - 將 Service 領域錯誤精準映射至 HTTP 狀態碼 (404, 422, 500)。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_match_record_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "api/routes/match_records.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Todo:
+  - 新增以 fake service 驗證路由委派與錯誤映射的可重複 pytest；已移除 configured DB 整合測試。
 - Observability: not_required
 
 

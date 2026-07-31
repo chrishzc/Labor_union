@@ -1929,7 +1929,9 @@
   - 嚴禁於本 Service 內覆寫或將 `orders.staff_id` 寫死。
   - 不得產生無正式 ownership 綁定之無效 assignment 資料。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests/test_match_record_service.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services/match_record_idempotent_service.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Todo:
+  - 新增注入 fake DB service 的可重複 idempotency pytest；已移除直接寫入 configured DB 的測試。
 - Observability: not_required
 
 

@@ -204,7 +204,7 @@
   - 驗證取消、交接、超收、雙薪與 finance staging 固定 facts，收集 table counts 與具體失敗原因。
   - 全部通過才回傳 canonical validation report；任一違規立即以可辨識錯誤 fail-closed。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_db_snapshot_fixture_v2_validator.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-db-snapshot-v2-validator"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_reset_fake_database.py::test_preview_validates_v3_without_reset", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-db-snapshot-v3-validator"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\db_snapshot_fixture_v2_validator.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
 - Non Goals:
@@ -241,8 +241,9 @@
   - check 模式輸出 deterministic report 後 rollback；apply 模式以 before-value optimistic guard 只更新 mismatch rows。
   - apply 在 commit 前重查 50 案並逐案比對 expected dates；全部一致才 commit，否則 rollback 並回傳 conflict。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_reconcile_fixture_order_dates_v2.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-reconcile-fixture-order-dates-v2"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\reconcile_fixture_order_dates_v2.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Todo:
+  - 新增使用 fake connection 的可重複 reconciliation pytest；已移除依賴目前固定 50 案資料庫狀態的一次性驗收。
 - Observability: not_required
 - Non Goals:
   - 不修正 actual dates、assignments、schedule、付款、帳務或生命週期狀態。
@@ -285,8 +286,9 @@
   - 若同版本正式 bundle 不存在，以原子 rename 發布；若存在則比對 checksum，相同只回報 identical，不同 fail-closed。
   - 無論成功或失敗都 rollback 唯讀 transaction、關閉 DB connection 並清除未發布暫存目錄。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_db_snapshot_fixture_v2_exporter.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-db-snapshot-v2-exporter"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\export_db_snapshot_fixture_v2.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Todo:
+  - 新增注入 fake snapshot reader 的可重複 exporter pytest；已移除直接讀取 configured DB 的測試。
 - Observability: not_required
 - Non Goals:
   - 不匯入資料、不建立或修改 schema、不刪除或清空 DB。
@@ -325,8 +327,9 @@
   - 每列先以 business key 查詢；不存在時檢查 source id collision 後參數化 INSERT，存在時以 serializer 相同 canonical hash 比較是否 identical。
   - dry-run 記錄 would_insert／skipped_identical 後 rollback；apply 寫入後重讀完整 allowlist 並執行 validator，成功才 commit。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_db_snapshot_fixture_v2_importer.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-db-snapshot-v3-importer"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\import_db_snapshot_fixture_v2.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Todo:
+  - 新增注入 fake target DB 的可重複 importer pytest；已移除只在 configured DB 等同 v3 fixture 時成立的測試。
 - Observability: not_required
 - Non Goals:
   - 不支援 production merge、upsert、歷史資料覆寫、任意 fixture 版本或任意 table。

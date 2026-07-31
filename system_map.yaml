@@ -491,12 +491,12 @@ modules:
         - .venv\Scripts\python.exe
         - -m
         - pytest
-        - tests\test_db_snapshot_fixture_v2_validator.py
+        - tests\test_reset_fake_database.py::test_preview_validates_v3_without_reset
         - -q
         - -p
         - no:cacheprovider
         - --basetemp
-        - C:\tmp\pytest-db-snapshot-v2-validator
+        - C:\tmp\pytest-db-snapshot-v3-validator
         cwd: project
         timeout: 60
         expect_exit: 0
@@ -578,28 +578,14 @@ modules:
         argv:
         - .venv\Scripts\python.exe
         - -m
-        - pytest
-        - tests\test_reconcile_fixture_order_dates_v2.py
-        - -q
-        - -p
-        - no:cacheprovider
-        - --basetemp
-        - C:\tmp\pytest-reconcile-fixture-order-dates-v2
-        cwd: project
-        timeout: 60
-        expect_exit: 0
-        expect_stdout_contains: passed
-    - command:
-        argv:
-        - .venv\Scripts\python.exe
-        - -m
         - py_compile
         - scripts\reconcile_fixture_order_dates_v2.py
         cwd: project
         timeout: 60
         expect_exit: 0
     decisions: []
-    todo: []
+    todo:
+    - 新增使用 fake connection 的可重複 reconciliation pytest；已移除依賴目前固定 50 案資料庫狀態的一次性驗收。
     checkpoint: []
     observability:
       mode: not_required
@@ -678,28 +664,14 @@ modules:
         argv:
         - .venv\Scripts\python.exe
         - -m
-        - pytest
-        - tests\test_db_snapshot_fixture_v2_exporter.py
-        - -q
-        - -p
-        - no:cacheprovider
-        - --basetemp
-        - C:\tmp\pytest-db-snapshot-v2-exporter
-        cwd: project
-        timeout: 120
-        expect_exit: 0
-        expect_stdout_contains: passed
-    - command:
-        argv:
-        - .venv\Scripts\python.exe
-        - -m
         - py_compile
         - scripts\export_db_snapshot_fixture_v2.py
         cwd: project
         timeout: 60
         expect_exit: 0
     decisions: []
-    todo: []
+    todo:
+    - 新增注入 fake snapshot reader 的可重複 exporter pytest；已移除直接讀取 configured DB 的測試。
     checkpoint: []
     observability:
       mode: not_required
@@ -781,28 +753,14 @@ modules:
         argv:
         - .venv\Scripts\python.exe
         - -m
-        - pytest
-        - tests\test_db_snapshot_fixture_v2_importer.py
-        - -q
-        - -p
-        - no:cacheprovider
-        - --basetemp
-        - C:\tmp\pytest-db-snapshot-v3-importer
-        cwd: project
-        timeout: 120
-        expect_exit: 0
-        expect_stdout_contains: passed
-    - command:
-        argv:
-        - .venv\Scripts\python.exe
-        - -m
         - py_compile
         - scripts\import_db_snapshot_fixture_v2.py
         cwd: project
         timeout: 60
         expect_exit: 0
     decisions: []
-    todo: []
+    todo:
+    - 新增注入 fake target DB 的可重複 importer pytest；已移除只在 configured DB 等同 v3 fixture 時成立的測試。
     checkpoint: []
     observability:
       mode: not_required
