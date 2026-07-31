@@ -30,6 +30,9 @@ REQUIRED_HEADERS = {
 COMPARISON_FIELD_INDEX = 11
 TRANSACTION_REFERENCE_INDEX = 10
 CORRECTION_MARKER_INDEX = 12
+PASSBOOK_MEMO_INDEX = 13
+COUNTERPARTY_NAME_INDEX = 14
+MAX_CONTRACT_COLUMNS = 15
 
 
 def _clean_header(value: Any) -> str:
@@ -105,7 +108,10 @@ def normalize_legacy_rows(
 
     assert header_row >= 1
     raw = pd.read_excel(excel_path, sheet_name=sheet_name, header=None, dtype=object)
-    headers = [_clean_header(value) for value in raw.iloc[header_row - 1].tolist()]
+    headers = [
+        _clean_header(value)
+        for value in raw.iloc[header_row - 1].tolist()[:MAX_CONTRACT_COLUMNS]
+    ]
     nonblank_headers = [header for header in headers if header]
     if len(nonblank_headers) != len(set(nonblank_headers)):
         raise ValueError("歷史對帳單包含重複表頭")
@@ -117,14 +123,21 @@ def normalize_legacy_rows(
         or headers[TRANSACTION_REFERENCE_INDEX] != "交易參考編號"
         or headers[COMPARISON_FIELD_INDEX] != ""
         or headers[CORRECTION_MARKER_INDEX] != "更正註記"
+        or len(headers) <= PASSBOOK_MEMO_INDEX
+        or headers[PASSBOOK_MEMO_INDEX] != "存摺備註"
     ):
         raise ValueError(
             "歷史對帳單第 12 欄必須是交易參考編號與更正註記之間的空白比對欄位"
         )
+    if (
+        len(headers) > COUNTERPARTY_NAME_INDEX
+        and headers[COUNTERPARTY_NAME_INDEX] not in {"", "姓名-貼值"}
+    ):
+        raise ValueError("歷史對帳單第 15 欄只允許空白或「姓名-貼值」")
 
     normalized: list[dict[str, Any]] = []
     for row_index in range(header_row, len(raw)):
-        values = raw.iloc[row_index].tolist()
+        values = raw.iloc[row_index].tolist()[:MAX_CONTRACT_COLUMNS]
         source = dict(zip(headers, values))
         account_text = "" if pd.isna(source.get("帳號")) else str(source.get("帳號")).strip()
         if not account_text.isdigit() or len(account_text) < 8:
@@ -143,6 +156,12 @@ def normalize_legacy_rows(
         comparison_field = _identifier(values[COMPARISON_FIELD_INDEX], warnings)
         correction_marker = _identifier(source.get("更正註記"), warnings)
         passbook_memo = _identifier(source.get("存摺備註"), warnings)
+        counterparty_name = (
+            _identifier(values[COUNTERPARTY_NAME_INDEX], warnings)
+            if len(headers) > COUNTERPARTY_NAME_INDEX
+            and headers[COUNTERPARTY_NAME_INDEX] == "姓名-貼值"
+            else None
+        )
 
         raw_payload = {
             header: _json_scalar(value)
@@ -166,7 +185,7 @@ def normalize_legacy_rows(
             "currency": None if pd.isna(source.get("幣別")) else str(source.get("幣別")).strip() or None,
             "summary": None if pd.isna(source.get("摘要")) else str(source.get("摘要")),
             "memo": comparison_field,
-            "counterparty_name": None,
+            "counterparty_name": counterparty_name,
             "counterparty_account": None,
             "cancellation_code": cancellation_code,
             "bank_references": {

@@ -91,3 +91,45 @@ def test_missing_required_header_fails(tmp_path):
         assert "缺少必要欄位" in str(error)
     else:
         raise AssertionError("missing headers must fail")
+
+
+def test_reads_optional_name_and_ignores_columns_after_fifteen(tmp_path):
+    path = tmp_path / "extra-columns.xlsx"
+    headers = [
+        "帳號", "交易日", "計息日", "入帳日", "摘要", "幣別", "支出",
+        "存入", "餘額", "銷帳編號", "交易參考編號", "", "更正註記", "存摺備註",
+        "姓名-貼值", "存摺備註", "姓名-貼值",
+    ]
+    values = [
+        "000012345678", "2026/07/15", "2026/07/15", "2026/07/15", "轉帳",
+        "TWD", None, "1200", "5000", "000099", "000077", "001234567890",
+        None, "核心備註", "王小明", "應忽略的重複備註", "應忽略的重複姓名",
+    ]
+    pd.DataFrame([headers, values]).to_excel(path, index=False, header=False)
+
+    result = normalize_legacy_rows(path, "Sheet1", 1)
+
+    assert len(result) == 1
+    assert result[0]["counterparty_name"] == "王小明"
+    assert result[0]["memo"] == "001234567890"
+    assert result[0]["bank_references"]["存摺備註"] == "核心備註"
+    assert result[0]["raw_payload"]["姓名-貼值"] == "王小明"
+    assert "應忽略的重複備註" not in result[0]["raw_payload"].values()
+    assert "應忽略的重複姓名" not in result[0]["raw_payload"].values()
+
+
+def test_rejects_unknown_fifteenth_column(tmp_path):
+    path = tmp_path / "unknown-fifteenth.xlsx"
+    headers = [
+        "帳號", "交易日", "計息日", "入帳日", "摘要", "幣別", "支出",
+        "存入", "餘額", "銷帳編號", "交易參考編號", "", "更正註記", "存摺備註",
+        "未知欄位",
+    ]
+    pd.DataFrame([headers]).to_excel(path, index=False, header=False)
+
+    try:
+        normalize_legacy_rows(path, "Sheet1", 1)
+    except ValueError as error:
+        assert "第 15 欄" in str(error)
+    else:
+        raise AssertionError("unknown fifteenth column must fail")
