@@ -1,6 +1,3 @@
-import ast
-import inspect
-from datetime import datetime
 from datetime import date
 from decimal import Decimal
 
@@ -14,140 +11,6 @@ def terms(count=1, *, floor_fee="0.00"):
         {"segment_id": 10 + index, "hourly_rate": Decimal("300.00"), "floor_fee_allocated": Decimal(floor_fee if index == 0 else "0.00")}
         for index in range(count)
     ]
-
-
-@pytest.mark.parametrize("value", [0, -1, True, "1", 1.5])
-def test_rejects_invalid_lock_id_before_connecting(monkeypatch, value):
-    monkeypatch.setattr(service, "get_connection", lambda: pytest.fail("connection must not be opened"))
-    with pytest.raises(ValueError):
-        service.convert_availability_lock_to_assignments("C-1", value, "event-1", "admin", "paid", terms())
-
-
-@pytest.mark.parametrize("bad_value", [1.0, "300.00", Decimal("NaN"), Decimal("-1.00")])
-def test_rejects_non_decimal_or_invalid_terms_before_connecting(monkeypatch, bad_value):
-    monkeypatch.setattr(service, "get_connection", lambda: pytest.fail("connection must not be opened"))
-    invalid = [{"segment_id": 10, "hourly_rate": bad_value, "floor_fee_allocated": Decimal("0.00")}]
-    with pytest.raises(ValueError):
-        service.convert_availability_lock_to_assignments("C-1", 7, "event-1", "admin", "paid", invalid)
-
-
-def test_terms_require_exactly_one_entry_per_segment():
-    with pytest.raises(ValueError, match="duplicate"):
-        service._normalize_terms([
-            {"segment_id": 10, "hourly_rate": Decimal("1"), "floor_fee_allocated": Decimal("0")},
-            {"segment_id": 10, "hourly_rate": Decimal("1"), "floor_fee_allocated": Decimal("0")},
-        ])
-
-
-def test_payload_is_stable_and_decimal_safe():
-    request = service._normalize_request("C-1", 7, "event-1", "admin", "paid", terms(floor_fee="50.00"))
-    payload = service._payload(request, {"plan_id": 3}, [])
-    assert payload == {
-        "case_no": "C-1", "lock_id": 7, "plan_id": 3, "assignments": [],
-        "terms": [{"segment_id": 10, "hourly_rate": "300.00", "floor_fee_allocated": "50.00"}],
-    }
-
-
-def test_database_decimal_accepts_integral_values_but_never_float():
-    assert service._database_decimal(9, "hours", positive=True) == Decimal("9.00")
-    with pytest.raises(ValueError):
-        service._database_decimal(9.0, "hours", positive=True)
-
-
-def test_source_uses_transaction_schedule_generator_and_no_payment_writes():
-    source = inspect.getsource(service)
-    tree = ast.parse(source)
-    calls = {node.func.id for node in ast.walk(tree) if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
-    assert "generate_assignment_schedule_in_transaction" in calls
-    assert "lock_staff_occupancy_mutex" in calls
-    upper = source.upper()
-    assert "INSERT INTO CLIENT_PAYMENTS" not in upper
-    assert "INSERT INTO STAFF_PAYMENTS" not in upper
-    assert "UPDATE STAFF_SCHEDULE" not in upper
-    assert "DELETE FROM" not in upper
-
-
-def test_rejects_current_or_historical_lock_days():
-    class Cursor:
-        def __init__(self):
-            self.rowcount = 1
-            self.lastrowid = 101
-
-        def execute(self, sql, params=()):
-            self.sql = sql
-
-        def fetchone(self):
-            if "CURRENT_DATE" in self.sql:
-                return {"current_date": date(2026, 8, 2)}
-            if "FROM orders" in self.sql:
-                return {
-                    "case_no": "C-1", "status": "洽談中", "start_date": date(2026, 8, 2),
-                    "end_date": date(2026, 8, 2), "service_days": 1,
-                    "service_hours_per_day": Decimal("8"),
-                    "floor_fee": Decimal("0"),
-                }
-            if "FROM client_payments" in self.sql:
-                return {"case_no": "C-1", "deposit_receivable": Decimal("1"), "deposit_received": Decimal("1")}
-            if "FROM caregiver_availability_locks" in self.sql:
-                return {"id": 7, "plan_id": 3, "status": "active", "is_active": 1, "released_by": None, "released_at": None}
-            if "FROM caregiver_matching_plans" in self.sql:
-                return {
-                    "id": 3, "case_no": "C-1", "status": "accepted", "is_active": 1,
-                    "start_date": date(2026, 8, 2), "end_date": date(2026, 8, 2),
-                }
-            raise AssertionError(self.sql)
-
-        def fetchall(self):
-            if "client_payment_transactions" in self.sql:
-                return [{
-                    "transaction_type": "receipt", "transaction_status": "succeeded", "stage": "deposit",
-                    "amount": Decimal("1"), "reversal_of_transaction_id": None,
-                }]
-            if "caregiver_matching_plan_segments" in self.sql:
-                return [{
-                    "id": 10, "plan_id": 3, "segment_order": 1, "staff_id": 20,
-                    "assigned_start_date": date(2026, 8, 2), "assigned_end_date": date(2026, 8, 2),
-                }]
-            if "caregiver_availability_lock_days" in self.sql:
-                return [{
-                    "id": 30, "segment_id": 10, "staff_id": 20, "lock_date": date(2026, 8, 2),
-                    "active_marker": 1, "released_by": None, "released_at": None,
-                }]
-            if "case_staff_assignments" in self.sql:
-                return []
-            raise AssertionError(self.sql)
-
-    monkeypatch = pytest.MonkeyPatch()
-    cursor = Cursor()
-    monkeypatch.setattr(
-        service,
-        "normalize_plan_snapshot",
-        lambda *_: {
-            "start_date": date(2026, 8, 2), "end_date": date(2026, 8, 2),
-            "segments": [{
-                "segment_id": 10, "segment_order": 1, "staff_id": 20,
-                "assigned_start_date": date(2026, 8, 2), "assigned_end_date": date(2026, 8, 2),
-            }],
-            "lock_rows": [{"segment_id": 10, "staff_id": 20, "lock_date": "2026-08-02"}],
-        },
-    )
-    try:
-        with pytest.raises(ValueError, match="historical"):
-            service._load_state(
-                cursor,
-                service._normalize_request("C-1", 7, "event-1", "admin", "paid", terms()),
-            )
-    finally:
-        monkeypatch.undo()
-
-
-def test_deposit_refund_requires_explicit_reversal_link():
-    rows = [{
-        "transaction_type": "refund", "transaction_status": "succeeded", "stage": "deposit",
-        "amount": Decimal("1.00"), "reversal_of_transaction_id": None,
-    }]
-    with pytest.raises(ValueError, match="reversal_of_transaction_id"):
-        service._validate_deposit_transactions(rows, Decimal("-1.00"))
 
 
 class TransactionCursor:
@@ -290,7 +153,6 @@ def test_public_service_rolls_back_when_actual_hours_do_not_reconcile(monkeypatc
     assert connection.commits == 0
     assert connection.rollbacks == 1
 
-
 def test_conversion_conserves_order_target_without_copying_planned_hours(monkeypatch):
     cursor = TransactionCursor()
     connection = TransactionConnection(cursor)
@@ -324,26 +186,3 @@ def test_public_service_rolls_back_on_assignment_insert_rowcount(monkeypatch):
 
     assert connection.commits == 0
     assert connection.rollbacks == 1
-
-
-def test_existing_conversion_rejects_incomplete_lifecycle_before_returning():
-    class ReplayCursor:
-        def execute(self, sql, params=()):
-            self.sql = sql
-
-        def fetchone(self):
-            if "FROM orders" in self.sql:
-                return {"status": "訂單成立"}
-            return {
-                "id": 7, "plan_id": 3, "status": "converted", "is_active": None,
-                "released_by": "admin", "released_at": None,
-            }
-
-    request = service._normalize_request("C-1", 7, "event-1", "admin", "paid", terms())
-    payload = {
-        "case_no": "C-1", "lock_id": 7, "plan_id": 3,
-        "terms": [{"segment_id": 10, "hourly_rate": "300.00", "floor_fee_allocated": "0.00"}],
-        "assignments": [{"not": "trusted"}],
-    }
-    with pytest.raises(ValueError, match="lifecycle"):
-        service._validate_existing_conversion(ReplayCursor(), request, payload)

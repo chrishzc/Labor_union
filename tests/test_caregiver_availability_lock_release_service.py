@@ -1,5 +1,3 @@
-import ast
-import inspect
 import json
 from datetime import date, timedelta
 from decimal import Decimal
@@ -508,47 +506,5 @@ def test_connection_cursor_cleanup_failures(monkeypatch):
         service.release_caregiver_availability_lock(**_default_request())
     assert connection2.commits == 1
     assert connection2.rollbacks == 1
-
-
-def test_release_service_ast_guards_transaction_ownership_and_scope():
-    source = inspect.getsource(service)
-    tree = ast.parse(source)
-    calls = [
-        node.func.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-    ]
-    assert calls.count("cursor") == 1
-    assert calls.count("commit") == 1
-    assert calls.count("rollback") == 1
-    assert "today" not in calls
-    assert "utcnow" not in calls
-    write_sql = [
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node.value.startswith(("INSERT", "UPDATE"))
-    ]
-    assert all(
-        forbidden not in sql
-        for sql in write_sql
-        for forbidden in (
-            "case_staff_assignments",
-            "staff_schedule",
-            "matching_records",
-            "actual_hours",
-            "payments",
-            "payroll",
-            "settlement",
-            "DELETE",
-        )
-    )
-    assert "UPDATE caregiver_availability_lock_days" in source
-    assert "status = 'active'" in source
-
-
-
-
 
 

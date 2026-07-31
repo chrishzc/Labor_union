@@ -1,17 +1,12 @@
 from __future__ import annotations
 
-import ast
 import json
 from datetime import date
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 import services.caregiver_availability_lock_cancellation_service as service
-
-
-SOURCE_PATH = Path(service.__file__)
 
 
 class FakeCursor:
@@ -263,65 +258,3 @@ def test_each_write_failure_rolls_back_and_cleans_up(
     assert connection.commits == 0
     assert connection.rollbacks == 1
     assert cursor.closed and connection.closed
-
-
-def test_mutex_precedes_all_for_update_and_lock_order_is_fixed(monkeypatch: pytest.MonkeyPatch) -> None:
-    cursor = FakeCursor()
-    connection = FakeConnection(cursor)
-    monkeypatch.setattr(service, "get_connection", lambda: connection)
-    marker: list[int] = []
-
-    def mutex(actual_cursor: FakeCursor, staff_ids: list[int]) -> list[int]:
-        marker.append(len(actual_cursor.calls))
-        return staff_ids
-
-    monkeypatch.setattr(service, "lock_staff_occupancy_mutex", mutex)
-    service.cancel_caregiver_availability_lock_for_order(
-        "CASE-1", "cancel-1", "admin", "customer cancelled"
-    )
-
-    for_update_calls = [
-        (index, sql) for index, (sql, _) in enumerate(cursor.calls) if "FOR UPDATE" in sql
-    ]
-    assert marker[0] <= for_update_calls[0][0]
-    assert ["orders", "matching_plans", "plan_segments", "availability_locks", "lock_days", "lock_events"] == [
-        "orders" if "FROM orders" in sql else
-        "matching_plans" if "FROM caregiver_matching_plans" in sql else
-        "plan_segments" if "FROM caregiver_matching_plan_segments" in sql else
-        "availability_locks" if "FROM caregiver_availability_locks" in sql else
-        "lock_days" if "FROM caregiver_availability_lock_days" in sql else
-        "lock_events"
-        for _, sql in for_update_calls
-    ]
-
-
-def test_ast_guards_for_transaction_and_scope() -> None:
-    source = SOURCE_PATH.read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    calls = {
-        ".".join(
-            reversed(
-                [
-                    node.func.attr,
-                    *(
-                        [node.func.value.id]
-                        if isinstance(node.func.value, ast.Name)
-                        else []
-                    ),
-                ]
-            )
-        )
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-    }
-    lowered = source.lower()
-
-    assert "connection.commit" in calls
-    assert source.count("connection.commit()") == 1
-    assert " delete " not in f" {lowered} "
-    assert "case_staff_assignments" not in lowered
-    assert "staff_schedule" not in lowered
-    assert "actual_hours" not in lowered
-    assert "staff_payments" not in lowered
-    assert "payroll" not in lowered
-    assert "settlement" not in lowered

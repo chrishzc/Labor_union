@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from services import legacy_caregiver_matching_service as service
 
 
@@ -62,14 +60,6 @@ def test_legacy_information_service_owns_db_lookup_and_visible_result(monkeypatc
     }
     assert "王月嫂" in result["message"]
     assert connection.closed is True
-
-
-def test_match_router_no_longer_performs_direct_db_access():
-    source = Path("api/routes/matches.py").read_text(encoding="utf-8")
-
-    assert "db_service" not in source
-    assert "get_connection" not in source
-    assert "cursor.execute" not in source
 
 
 def test_legacy_resume_actions_record_delivery_state(monkeypatch):

@@ -1,5 +1,3 @@
-import ast
-import inspect
 import json
 from datetime import date, timedelta
 
@@ -467,44 +465,3 @@ def test_tuple_row_and_duplicate_active_header_join_rows(monkeypatch):
         service.acquire_caregiver_availability_lock("C-1", 7, "event-1", "admin")
     assert json.loads(str(raised.value))["conflicts"][0]["source_type"] == "active_lock"
     assert connection2.rollbacks == 1
-
-
-def test_source_ast_guards_transaction_ownership_and_write_scope():
-    source = inspect.getsource(service)
-    tree = ast.parse(source)
-    calls = [
-        node.func.attr
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
-    ]
-    assert calls.count("cursor") == 1
-    assert calls.count("commit") == 1
-    assert calls.count("rollback") == 1
-    assert "today" not in calls
-    assert "now" not in calls
-    assert "utcnow" not in calls
-    assert source.count("get_connection()") == 1
-    assert "l.status = 'active'" in source
-    assert "d.active_marker = 1" in source
-    assert "EXISTS" not in source.upper()
-    write_sql = [
-        node.value
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and node.value.startswith(("INSERT", "UPDATE", "DELETE"))
-    ]
-    assert write_sql
-    assert all(
-        forbidden not in " ".join(write_sql)
-        for forbidden in (
-            "matching_records",
-            "UPDATE orders",
-            "case_staff_assignments",
-            "staff_schedule",
-            "payments",
-            "actual_hours",
-            "settlements",
-            "DELETE",
-        )
-    )

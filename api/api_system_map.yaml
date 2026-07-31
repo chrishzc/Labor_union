@@ -193,6 +193,7 @@ modules:
     - send_info_2
     - send_matching_plan_information_route
     - send_matching_plan_resumes_route
+    - send_resume_for_case
     - send_resume_to_client
   CaregiverAvailabilityLockRouter:
     type: api_router
