@@ -829,15 +829,17 @@
 - Output:
   - normalized_rows: 共用銀行流水列序列
 - Invariants:
-  - 必須以表頭名稱取欄，不得以固定欄號、分頁索引或檔名取值。
+  - 除歷史格式特有的第 12 欄比對欄位外，必須以表頭名稱取欄，不得以固定欄號、分頁索引或檔名取值。
+  - Excel 一基底第 12 欄位於「交易參考編號」與「更正註記」之間，雖然表頭為空白，仍是正式帳號比對欄位；不得視為無效空欄或只留在 raw_payload。
+  - 第 12 欄原值必須保存至 bank_references.comparison_field，並映射為 canonical memo 供下游優先精確比對完整帳號；只有第 12 欄無法命中時才使用「存摺備註」備援，不得以姓名猜測身分。
   - 帳號、銷帳編號及銀行參考號必須以字串保留前導零；原始列須完整保存在 raw_payload。
   - 每列只判斷支出或存入方向，不得判斷業務交易類型或寫資料庫。
 - Algorithm:
-  - 讀取偵測到的工作表與表頭，略過空白及合計列，正規化日期、金額、摘要、備註、帳號、銷帳編號與來源參考號。
+  - 讀取偵測到的工作表與表頭，驗證第 12 欄表頭為空白且相鄰第 11、13 欄分別為交易參考編號與更正註記；略過空白及合計列，正規化日期、金額、摘要、第 12 欄比對值、存摺備註、帳號、銷帳編號與來源參考號。
   - 無法安全轉換的列保留列號及警示，不得用姓名或金額猜測缺少欄位。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_legacy_finance_adapter.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_legacy_finance_adapter.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: TaishinFinanceStatementAdapter
@@ -1301,7 +1303,7 @@
 - State: `planned`
 - Source: scripts/imports/import_finance_excel.py
 - Dependencies: [FinanceStatementNormalizationPipeline, FinanceIdentityMapLoader, FinanceImportStagingService, ClientReceiptReconciliationService, ClientSubsidyReturnTransactionService, GovernmentSubsidyReconciliationService, StaffActualTransferService]
-- Description: 由任意檔名的歷史、台新或永豐 Excel 建立匯入批次；先 append-only 保存與分類所有流水，再只對唯一且完全符合 P0 正常規則的新流水執行正式核銷。
+- Description: 由人工 CLI 對任意檔名的歷史、台新或永豐 Excel 執行正式匯入或完整 dry run；兩種模式共用 normalization、append-only staging、分類與正式核銷判斷，dry run 最後強制 rollback 並輸出可重現 manifest。
 - Invariants:
   - 不得以客戶姓名或月嫂姓名作為唯一帳務關聯鍵。
   - 三種格式只能由內容 detector 選擇 adapter，不依檔名；每列先寫 canonical staging/occurrence，分類與核銷不得覆寫原始流水。
@@ -1318,28 +1320,39 @@
   - 同秒同備註但 fingerprint 不同的兩筆交易都必須保存；若兩筆命中同一已完成或已被前筆占用的客戶應收義務，後筆必須保持 pending、不得超收，並保留 suspected_duplicate_business_match 警示。
   - 客戶入款的虛擬帳號錯誤、案件不存在／不唯一、超收或殘缺重試皆須保留 canonical staging 與 occurrence，且不得建立或修改正式客戶交易、三期實收摘要及案件狀態。
   - 建立客戶帳務快照時，訂單資格只能 join clients.identity_status；不得選取、傳遞或寫入 clients.identity_status。
+  - dry_run=true 必須執行與正式匯入相同的 normalization、identity map、staging、classification、dispatch 與 batch completion 路徑，成功或失敗皆不得 commit；成功完成後必須明確 rollback。
+  - dry run manifest 必須包含來源絕對路徑、格式、工作表、表頭列、normalized row 數、每列 fingerprint／分類／dispatch result 與 reason、彙總計數及 transaction_outcome=rolled_back；不得把暫存 row id 或 batch id 宣稱為可持久查詢識別。
+  - `document/資料庫、資料處理/歷史對帳單.xlsx` 是固定驗收檔；目前唯一流水必須判定為 non_business_review、reason=sinopac_staff_account_no_match，不得以姓名「張淑婷」猜測月嫂身分或建立正式帳務交易。
 - Observability: not_required
 - Complexity: medium
 - Input:
   - excel_path: 任意檔名的歷史、台新或永豐 Excel 路徑
+  - dry_run: boolean；true 時完整執行後強制 rollback，false 時維持正式匯入 commit
 - Output:
+  - mode: dry_run 或 apply
+  - source_path: 已解析的來源絕對路徑
+  - format_manifest: format_id、sheet_name、header_row、normalized_row_count
   - batch_id: finance import batch id
   - inserted_rows: 新 canonical 流水數
   - skipped_existing: 已存在 fingerprint、只新增 occurrence 的流水數
   - reconciled_counts: 四類正式核銷成功數
   - pending_rows: 尚待人工確認或不屬 P0 正常流程的 canonical row ids
+  - row_results: 每列 fingerprint、classification_type、staging result、dispatch result 與 reason
+  - transaction_outcome: committed 或 rolled_back
 - Algorithm:
   - 呼叫 normalizer 取得唯一格式、工作表、表頭與完整 normalized rows；在同一 DB transaction 載入精確帳號 maps 並呼叫 append-only staging。
   - skipped_existing 只記錄 occurrence，不進入下游；inserted row 依 classification_type dispatch。
   - client_receipt 以 clients.identity_status 建立快照後呼叫 ClientReceiptReconciliationService；government_subsidy 呼叫 exact batch reconciliation；client_subsidy_return 呼叫 exact obligation reconciliation。
   - staff_salary/staff_legacy_subsidy 只在帳號唯一且該 staff 恰有一個符合 phase 的 finalized/partially_paid 月結時，建立全部未付 component 的 explicit allocations；總額不等於 debit 或候選不唯一時保持 pending。
-  - non_business_review 與任何下游 pending 結果只回報 pending_rows；全部 inserted rows處理完才將 batch 標記 completed 並 commit。
+  - non_business_review 與任何下游 pending 結果回報 pending_rows 與逐列 reason；全部 inserted rows處理完才將 batch 標記 completed。
+  - apply 模式 commit 一次；dry run 模式在建立完整 manifest 後 rollback 一次。任一例外均 rollback，且不得回傳成功 manifest。
 - Verification:
   - must_have_assertions
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_finance_excel.py", "tests\\test_finance_import_orchestrator.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_statement_normalizer.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_boundary_safety.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_client_receipt_boundaries.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_dry_run.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 
 ##### Module: FinanceImportClientSubsidyReturnIntegrationTest
 - Sub Map: services_layer

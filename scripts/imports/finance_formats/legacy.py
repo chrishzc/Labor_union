@@ -27,6 +27,9 @@ REQUIRED_HEADERS = {
     "更正註記",
     "存摺備註",
 }
+COMPARISON_FIELD_INDEX = 11
+TRANSACTION_REFERENCE_INDEX = 10
+CORRECTION_MARKER_INDEX = 12
 
 
 def _clean_header(value: Any) -> str:
@@ -109,6 +112,15 @@ def normalize_legacy_rows(
     missing = REQUIRED_HEADERS - set(headers)
     if missing:
         raise ValueError(f"歷史對帳單缺少必要欄位: {', '.join(sorted(missing))}")
+    if (
+        len(headers) <= CORRECTION_MARKER_INDEX
+        or headers[TRANSACTION_REFERENCE_INDEX] != "交易參考編號"
+        or headers[COMPARISON_FIELD_INDEX] != ""
+        or headers[CORRECTION_MARKER_INDEX] != "更正註記"
+    ):
+        raise ValueError(
+            "歷史對帳單第 12 欄必須是交易參考編號與更正註記之間的空白比對欄位"
+        )
 
     normalized: list[dict[str, Any]] = []
     for row_index in range(header_row, len(raw)):
@@ -128,6 +140,7 @@ def normalize_legacy_rows(
         account = _identifier(source.get("帳號"), warnings)
         cancellation_code = _identifier(source.get("銷帳編號"), warnings)
         transaction_reference = _identifier(source.get("交易參考編號"), warnings)
+        comparison_field = _identifier(values[COMPARISON_FIELD_INDEX], warnings)
         correction_marker = _identifier(source.get("更正註記"), warnings)
         passbook_memo = _identifier(source.get("存摺備註"), warnings)
 
@@ -152,14 +165,16 @@ def normalize_legacy_rows(
             "balance": balance,
             "currency": None if pd.isna(source.get("幣別")) else str(source.get("幣別")).strip() or None,
             "summary": None if pd.isna(source.get("摘要")) else str(source.get("摘要")),
-            "memo": passbook_memo,
+            "memo": comparison_field,
             "counterparty_name": None,
             "counterparty_account": None,
             "cancellation_code": cancellation_code,
             "bank_references": {
                 "transaction_reference": transaction_reference,
+                "comparison_field": comparison_field,
                 "correction_marker": correction_marker,
                 "passbook_memo": passbook_memo,
+                "存摺備註": passbook_memo,
             },
             "warnings": list(dict.fromkeys(warnings)),
             "raw_payload": raw_payload,
