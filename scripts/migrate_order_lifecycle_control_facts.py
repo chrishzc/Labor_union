@@ -13,7 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from infrastructure.mysql.mysql_adapter import DB_CONFIG, get_connection
+from services.db_service import DB_CONFIG, get_connection
 
 
 MIGRATION_ID = "order_lifecycle_control_facts_v1"
