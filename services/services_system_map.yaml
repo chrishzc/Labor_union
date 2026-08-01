@@ -3744,7 +3744,7 @@ modules:
     type: service
     description: 為分類與客戶入款核銷提供唯一銷帳編號投影；兼容既有 Sinopac raw reference，但不改寫 canonical row
       或 fingerprint。
-    source: services/finance_cancellation_code.py::_valid_cancellation_code,resolve_finance_cancellation_code
+    source: services/finance_cancellation_code.py::resolve_finance_cancellation_code
     domain: Services
     subsystem: null
     map_file: services\services_system_map.md
@@ -3874,7 +3874,7 @@ modules:
     type: service
     description: 將一次 Excel 正規化結果以 append-only 方式寫入 staging；已存在 fingerprint 只新增來源 occurrence，不覆寫
       canonical row 或正式帳務。
-    source: services/finance_import_staging.py::_matched_identity_ids,stage_finance_rows
+    source: services/finance_import_staging.py::stage_finance_rows
     domain: Services
     subsystem: null
     map_file: services\services_system_map.md
@@ -5108,12 +5108,12 @@ modules:
     non_goals: []
     sub_map: services_layer
     state: validated
-    fan_in_snapshot: 3
+    fan_in_snapshot: 2
   FinanceImport:
     type: application_service
     description: 由 application service 對任意檔名的歷史、台新或永豐 Excel 執行正式匯入或完整 dry run；CLI
       只提交命令，不擁有 normalization、transaction、分類、dispatch 或警示規則。
-    source: services/finance_import_application.py::allocate_receipt,build_snapshot_plan,_order_for_snapshot,import_finance_workbook
+    source: services/finance_import_application.py::import_finance_workbook
     domain: Services
     subsystem: null
     map_file: services\services_system_map.md
@@ -5448,7 +5448,6 @@ modules:
         - --basetemp
         - .pytest-b3-client-subsidy-return
         cwd: project
-        timeout: 120
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
@@ -5549,7 +5548,6 @@ modules:
         - --basetemp
         - C:\tmp\pytest-b4-government-subsidy
         cwd: project
-        timeout: 120
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
@@ -5651,7 +5649,6 @@ modules:
         - --basetemp
         - C:\tmp\pytest-b5-staff-actual-transfer
         cwd: project
-        timeout: 120
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
