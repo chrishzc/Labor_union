@@ -2,276 +2,385 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import streamlit as st
 
-from ui.api_clients.anomaly_registry_api_client import AnomalyRegistryApiClient
-from ui.api_clients.beclass_import_review_api_client import (
-    BeClassImportReviewApiClient,
+from api.schemas.finance_alert_center import (
+    AlertFamily,
+    AlertQuery,
+    AlertStatus,
+    ClaimAlertCommand,
+    FinanceAlertDetailViewModel,
+    ImportReviewBatchViewModel,
+    ResolveAlertCommand,
+    ScanAlertsCommand,
+    SystemAlertDetailViewModel,
 )
-from ui.api_clients.finance_import_api_client import FinanceImportApiClient
-from ui.api_clients.government_subsidy_api_client import (
-    GovernmentSubsidyApiClient,
-)
-from ui.api_clients.anomaly_recovery_api_client import (
-    AnomalyRecoveryApiClient,
-)
-from ui.pages.anomalies.registry_panel import render_anomaly_registry_panel
-from ui.pages.anomalies.beclass_import_review_panel import (
-    render_beclass_import_review_panel,
-)
-from ui.pages.finance_import.panel import render_finance_import_panel
-from ui.pages.government_subsidy.ledger_panel import (
-    render_government_subsidy_ledger_panel,
-)
-from ui.pages.government_subsidy.claim_panel import (
-    render_government_subsidy_claim_panel,
+from ui.api_clients.finance_alert_center_client import (
+    FinanceAlertCenterApiClient,
+    FinanceAlertCenterApiError,
 )
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
-from ui.nav_helper import navigate_to
 
 
 title = "異常警示中心"
 
 
+def _client() -> FinanceAlertCenterApiClient:
+    return FinanceAlertCenterApiClient(
+        base_url=resolve_api_base_url(),
+        headers=build_admin_headers(),
+        timeout=20,
+    )
+
+
+def _operator_default() -> str:
+    profile = st.session_state.get("line_admin_profile") or {}
+    if not isinstance(profile, dict):
+        return ""
+    return str(profile.get("username") or "").strip()
+
+
 def _show_error(error: Exception) -> None:
+    if isinstance(error, FinanceAlertCenterApiError):
+        retry = "；可稍後重試" if error.error.retryable else ""
+        st.error(f"{error.error.code.value}: {error.error.message}{retry}")
+        if error.error.field_errors:
+            for item in error.error.field_errors:
+                st.caption(f"{item.field}: {item.message}")
+        return
     st.error(str(error))
+
+
+def _money(value: Decimal | None) -> str:
+    return "—" if value is None else f"{value:,.2f}"
+
+
+def _render_summary_table(items) -> None:
+    st.dataframe(
+        [
+            {
+                "ID": item.id,
+                "警示代碼": item.alert_code,
+                "名稱": item.label,
+                "來源": item.source_domain,
+                "來源識別": item.source_reference,
+                "狀態": item.status.value,
+                "原因": item.reason,
+                "更新時間": item.updated_at or item.created_at,
+            }
+            for item in items
+        ],
+        hide_index=True,
+        width="stretch",
+    )
+
+
+def _render_display_fields(fields) -> None:
+    if not fields:
+        st.caption("沒有可公開的補充欄位。")
+        return
+    st.dataframe(
+        [{"欄位": field.name, "內容": field.value} for field in fields],
+        hide_index=True,
+        width="stretch",
+    )
+
+
+def _render_import_review(detail: ImportReviewBatchViewModel) -> None:
+    st.warning(
+        "IMPORT-006 代表銀行流水仍未分類成業務事件；"
+        "這不等於已入帳，也不等於已完成核銷。"
+    )
+    left, middle, right = st.columns(3)
+    left.metric("來源列 occurrence", detail.occurrence_count)
+    middle.metric("去重流水 distinct", detail.distinct_count)
+    right.metric("仍待人工分類", detail.remaining_count)
+    st.caption(
+        f"批次 #{detail.batch_id}｜格式 {detail.format_id or '未提供'}｜"
+        f"批次狀態 {detail.batch_status or '未提供'}｜"
+        f"來源批次列數 {detail.row_count if detail.row_count is not None else '未提供'}"
+    )
+    count_rows = [
+        {"維度": "方向", "分類": item.key, "筆數": item.count}
+        for item in detail.direction_counts
+    ] + [
+        {"維度": "原因", "分類": item.key, "筆數": item.count}
+        for item in detail.reason_counts
+    ]
+    if count_rows:
+        st.dataframe(count_rows, hide_index=True, width="stretch")
+    if detail.sample_row_ids:
+        st.caption(
+            "抽樣 canonical row IDs（最多 20 筆）："
+            + "、".join(str(item) for item in detail.sample_row_ids)
+        )
+    if detail.last_reprocess is not None:
+        last = detail.last_reprocess
+        st.markdown("#### 最近一次人工 CLI 重處理")
+        st.write(
+            {
+                "run_id": last.run_id,
+                "status": last.status,
+                "selected": last.selected_count,
+                "changed": last.changed_count,
+                "dispatch": last.dispatch_count,
+                "reconciled": last.reconciled_count,
+                "pending": last.pending_count,
+                "completed_at": last.completed_at,
+            }
+        )
+    st.info(
+        "本頁不提供姓名自動匹配、刪除 staging、force reconcile 或 reprocess apply；"
+        "歷史重處理只由人工 CLI 執行。"
+    )
+
+
+def _render_detail(detail) -> None:
+    st.markdown(f"### {detail.alert.label}")
+    st.caption(
+        f"{detail.alert.family.value}｜{detail.alert.source_domain}｜"
+        f"{detail.alert.source_reference}｜{detail.alert.status.value}"
+    )
+    st.write(detail.alert.reason)
+    if isinstance(detail, ImportReviewBatchViewModel):
+        _render_import_review(detail)
+    elif isinstance(detail, FinanceAlertDetailViewModel):
+        amount_left, amount_middle, amount_right = st.columns(3)
+        amount_left.metric("預期金額", _money(detail.expected_amount))
+        amount_middle.metric("實際金額", _money(detail.actual_amount))
+        amount_right.metric("差額", _money(detail.difference_amount))
+        st.markdown("#### 候選快照（僅供人工判讀）")
+        _render_display_fields(detail.candidate)
+        st.caption("系統不會預選第一筆、同額或姓名相近候選，也不會從本頁建立正式交易。")
+        if detail.events:
+            st.markdown("#### 不可變事件歷程")
+            st.dataframe(
+                [
+                    {
+                        "事件": event.event_type,
+                        "操作者": event.actor,
+                        "原因": event.reason,
+                        "發生時間": event.occurred_at,
+                    }
+                    for event in detail.events
+                ],
+                hide_index=True,
+                width="stretch",
+            )
+    elif isinstance(detail, SystemAlertDetailViewModel):
+        st.markdown("#### 已物化警示摘要")
+        _render_display_fields(detail.details)
+
+
+def _render_actions(
+    *,
+    client: FinanceAlertCenterApiClient,
+    family: AlertFamily,
+    detail,
+    key_prefix: str,
+) -> None:
+    st.markdown("#### 人工處理")
+    operator = st.text_input(
+        "操作人員",
+        value=_operator_default(),
+        key=f"{key_prefix}_operator",
+    )
+    claim_col, resolve_col = st.columns(2)
+    with claim_col:
+        if st.button(
+            "認領警示",
+            key=f"{key_prefix}_claim",
+            disabled=not operator.strip(),
+        ):
+            try:
+                client.claim_alert(
+                    ClaimAlertCommand(
+                        alert_id=detail.alert.id,
+                        operator=operator,
+                    ),
+                    family=family,
+                )
+            except (FinanceAlertCenterApiError, ValueError) as error:
+                _show_error(error)
+            else:
+                st.success("警示已認領。")
+                st.rerun()
+    with resolve_col:
+        reason = st.text_area(
+            "解除原因",
+            key=f"{key_prefix}_resolve_reason",
+        )
+        acknowledged = st.checkbox(
+            "我了解解除警示不等於完成核銷或建立正式帳務",
+            key=f"{key_prefix}_resolve_ack",
+        )
+        if st.button(
+            "解除警示",
+            key=f"{key_prefix}_resolve",
+            disabled=(
+                not operator.strip()
+                or not reason.strip()
+                or not acknowledged
+            ),
+        ):
+            try:
+                client.resolve_alert(
+                    ResolveAlertCommand(
+                        alert_id=detail.alert.id,
+                        operator=operator,
+                        reason=reason,
+                    ),
+                    family=family,
+                )
+            except (FinanceAlertCenterApiError, ValueError) as error:
+                _show_error(error)
+            else:
+                st.success("警示已解除；正式核銷狀態未因此改變。")
+                st.rerun()
+
+
+def _render_alert_family(
+    *,
+    client: FinanceAlertCenterApiClient,
+    family: AlertFamily,
+    key_prefix: str,
+    fixed_alert_code: str | None = None,
+) -> None:
+    filter_columns = st.columns(4)
+    status_label = filter_columns[0].selectbox(
+        "狀態",
+        ["全部", "open", "claimed", "resolved"],
+        key=f"{key_prefix}_status",
+    )
+    alert_code = filter_columns[1].text_input(
+        "警示代碼",
+        value=fixed_alert_code or "",
+        disabled=fixed_alert_code is not None,
+        key=f"{key_prefix}_code",
+    )
+    source_domain = filter_columns[2].text_input(
+        "來源領域",
+        key=f"{key_prefix}_domain",
+    )
+    page = filter_columns[3].number_input(
+        "頁次",
+        min_value=1,
+        value=1,
+        step=1,
+        key=f"{key_prefix}_page",
+    )
+    limit = 50
+    query = AlertQuery(
+        family=family,
+        status=None if status_label == "全部" else AlertStatus(status_label),
+        alert_code=alert_code.strip() or None,
+        source_domain=source_domain.strip() or None,
+        limit=limit,
+        offset=(int(page) - 1) * limit,
+    )
+    try:
+        result = client.list_alerts(query)
+    except (FinanceAlertCenterApiError, ValueError) as error:
+        _show_error(error)
+        return
+    if not result.items:
+        st.info("目前沒有符合條件的警示。")
+        return
+    _render_summary_table(result.items)
+    selected_id = st.selectbox(
+        "選擇警示",
+        [item.id for item in result.items],
+        format_func=lambda value: next(
+            (
+                f"#{item.id}｜{item.label}｜{item.source_reference}"
+                for item in result.items
+                if item.id == value
+            ),
+            str(value),
+        ),
+        key=f"{key_prefix}_selected",
+    )
+    try:
+        detail = client.get_alert(family=family, alert_id=selected_id)
+    except (FinanceAlertCenterApiError, ValueError) as error:
+        _show_error(error)
+        return
+    _render_detail(detail)
+    _render_actions(
+        client=client,
+        family=family,
+        detail=detail,
+        key_prefix=f"{key_prefix}_{selected_id}",
+    )
+
+
+def _render_import_tab(client: FinanceAlertCenterApiClient) -> None:
+    st.subheader("資料匯入異常")
+    st.caption(
+        "本頁只讀取已物化警示，不會在每次 render 時掃描原始匯入流水。"
+    )
+    if st.button("明確重新掃描匯入異常", key="finance_alert_import_scan"):
+        try:
+            summary = client.scan_alerts(ScanAlertsCommand())
+        except (FinanceAlertCenterApiError, ValueError) as error:
+            _show_error(error)
+        else:
+            import_item = next(
+                (item for item in summary.items if item.alert_code == "IMPORT-006"),
+                None,
+            )
+            if import_item is None:
+                st.error("掃描結果缺少 IMPORT-006，請勿將本次掃描視為完成。")
+            else:
+                st.success(
+                    "IMPORT-006 掃描完成："
+                    f"新增 {import_item.created}、更新 {import_item.updated}、"
+                    f"重開 {import_item.reopened}、解除 {import_item.resolved}。"
+                )
+                st.rerun()
+    _render_alert_family(
+        client=client,
+        family=AlertFamily.SYSTEM,
+        key_prefix="finance_alert_import",
+        fixed_alert_code="IMPORT-006",
+    )
 
 
 def show() -> None:
     st.title(title)
     st.caption(
-        "異常由根事實投影；正式匯入與人工修正一律先 Preview 再 Apply。"
+        "人工檢視、認領與解除警示；本頁不建立、修改或強制對平正式帳務。"
     )
     try:
-        base_url = resolve_api_base_url()
-        headers = build_admin_headers()
+        client = _client()
     except (RuntimeError, ValueError) as error:
         _show_error(error)
         return
-    _render_finance_operation_center(base_url, headers)
-
-
-def _render_finance_operation_center(base_url, headers) -> None:
-    _apply_pending_center_mode()
-    center_mode = st.radio(
-        "工作區",
-        ("異常處理中心", "銀行流水匯入與修正", "BeClass 匯入修正"),
-        horizontal=True,
-        key="finance_operation_center_mode",
+    import_tab, process_tab, finance_tab = st.tabs(
+        ["資料匯入異常", "流程與系統警示", "帳務異常"]
     )
-    if center_mode == "異常處理中心":
-        _render_canonical_anomaly_center(base_url, headers)
-        return
-    if center_mode == "銀行流水匯入與修正":
-        _render_canonical_finance_import(base_url, headers)
-        return
-    _render_beclass_import_review(base_url, headers)
-
-
-def _render_shared_anomaly_registry(base_url, headers) -> None:
-    render_anomaly_registry_panel(
-        AnomalyRegistryApiClient(
-            base_url=base_url,
-            headers=headers,
-            timeout=20,
-        ),
-        AnomalyRecoveryApiClient(
-            base_url=base_url,
-            headers=headers,
-            timeout=20,
-        ),
-        on_recovery_action_selected=_queue_recovery_navigation,
-        on_domain_action_selected=_queue_domain_navigation,
-    )
-
-
-def _render_canonical_anomaly_center(base_url, headers) -> None:
-    _render_shared_anomaly_registry(base_url, headers)
-
-
-def _render_canonical_finance_import(base_url, headers) -> None:
-    _render_shared_anomaly_registry(base_url, headers)
-    render_finance_import_panel(
-        FinanceImportApiClient(
-            base_url=base_url,
-            headers=headers,
-            timeout=20,
+    with import_tab:
+        _render_import_tab(client)
+    with process_tab:
+        st.subheader("流程與系統警示")
+        _render_alert_family(
+            client=client,
+            family=AlertFamily.SYSTEM,
+            key_prefix="finance_alert_system",
         )
-    )
-    subsidy_client = GovernmentSubsidyApiClient(
-        base_url=base_url,
-        headers=headers,
-        timeout=20,
-    )
-    render_government_subsidy_claim_panel(subsidy_client)
-    render_government_subsidy_ledger_panel(subsidy_client)
-
-
-def _render_beclass_import_review(base_url, headers) -> None:
-    _render_shared_anomaly_registry(base_url, headers)
-    render_beclass_import_review_panel(
-        BeClassImportReviewApiClient(
-            base_url=base_url,
-            headers=headers,
-            timeout=20,
+    with finance_tab:
+        st.subheader("帳務異常")
+        st.caption(
+            "CLIENT、RETURN、SUBSIDY、STAFF、COMMON 的業務分類下游異常；"
+            "與尚未分類的 IMPORT-006 分開顯示。"
         )
-    )
-
-
-def _apply_pending_center_mode() -> None:
-    pending = st.session_state.pop("pending_finance_operation_center_mode", None)
-    if pending in {
-        "異常處理中心",
-        "銀行流水匯入與修正",
-        "BeClass 匯入修正",
-    }:
-        st.session_state["finance_operation_center_mode"] = pending
-
-
-def _queue_domain_navigation(summary, action) -> None:
-    handlers = {
-        "case_import": _queue_case_import_navigation,
-        "government_subsidy": _queue_government_subsidy_navigation,
-        "staff_payables": _queue_staff_payables_navigation,
-        "scheduling": _queue_scheduling_navigation,
-    }
-    handler = handlers.get(action.owning_domain)
-    if handler is None:
-        st.error("此修復入口尚未綁定可替換前端頁面。")
-        return
-    handler(summary, action)
-
-
-def _queue_case_import_navigation(summary, _action) -> None:
-    snapshot = _display_snapshot(summary)
-    review_identity = snapshot.get("review_item_id")
-    if not isinstance(review_identity, str) or not review_identity.strip():
-        st.error("beclass_import_review_identity_missing：異常缺少修正資料識別。")
-        return
-    st.session_state["beclass_import_review_identity"] = review_identity
-    _rerun_finance_workspace("BeClass 匯入修正")
-
-
-def _queue_government_subsidy_navigation(summary, action) -> None:
-    snapshot = _display_snapshot(summary)
-    batch_id = _positive_integer(snapshot.get("batch_id"))
-    bank_row_id = _identity_integer(
-        snapshot.get("bank_fact_identity")
-        or snapshot.get("reversal_bank_fact_identity"),
-        "finance-import-row:",
-    )
-    _seed_government_subsidy_widgets(action, snapshot, batch_id, bank_row_id)
-    _rerun_finance_workspace("銀行流水匯入與修正")
-
-
-def _seed_government_subsidy_widgets(
-    action,
-    snapshot,
-    batch_id,
-    bank_row_id,
-) -> None:
-    if batch_id is not None:
-        st.session_state["government_subsidy_batch_id"] = batch_id
-        st.session_state["government_subsidy_pending_query_batch_id"] = batch_id
-    if bank_row_id is not None:
-        st.session_state["government_subsidy_bank_row"] = bank_row_id
-    source_receipt_id = _positive_integer(snapshot.get("source_receipt_id"))
-    if source_receipt_id is not None:
-        st.session_state["government_subsidy_source_receipt"] = source_receipt_id
-    st.session_state["government_subsidy_action"] = (
-        "政府沖正"
-        if action.command_name == "PreviewGovernmentSubsidyReversal"
-        else "政府入款"
-    )
-
-
-def _queue_staff_payables_navigation(summary, _action) -> None:
-    snapshot = _display_snapshot(summary)
-    staff_id = _positive_integer(snapshot.get("staff_id"))
-    if staff_id is None:
-        staff_id = _identity_integer(summary.source_identity, "staff:")
-    if staff_id is None:
-        st.error("staff_payables_staff_identity_missing：異常缺少月嫂識別。")
-        return
-    st.session_state["orders_workspace"] = "🏦 月嫂付款核銷"
-    st.session_state["load_staff_payout"] = True
-    st.session_state["pending_staff_payout_staff_id"] = staff_id
-    navigate_to("📦 訂單與帳務管理系統")
-
-
-def _queue_scheduling_navigation(summary, _action) -> None:
-    snapshot = _display_snapshot(summary)
-    case_no = _canonical_text(snapshot.get("case_no"))
-    if case_no is None:
-        case_no = _identity_text(summary.source_identity, "case:")
-    if case_no is None:
-        st.error("scheduling_case_identity_missing：異常缺少案件識別。")
-        return
-    st.session_state["scheduling_workspace"] = "案件人力配置"
-    st.session_state["pending_scheduling_case_no"] = case_no
-    navigate_to("多月嫂排班")
-
-
-def _rerun_finance_workspace(workspace: str) -> None:
-    st.session_state["pending_finance_operation_center_mode"] = workspace
-    st.rerun()
-
-
-def _display_snapshot(summary) -> dict:
-    return (
-        summary.display_snapshot
-        if isinstance(summary.display_snapshot, dict)
-        else {}
-    )
-
-
-def _positive_integer(value) -> int | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int) and value > 0:
-        return value
-    if isinstance(value, str) and value.isdigit() and int(value) > 0:
-        return int(value)
-    return None
-
-
-def _identity_integer(value, prefix: str) -> int | None:
-    suffix = _identity_text(value, prefix)
-    return _positive_integer(suffix)
-
-
-def _identity_text(value, prefix: str) -> str | None:
-    canonical = _canonical_text(value)
-    if canonical is None or not canonical.startswith(prefix):
-        return None
-    return _canonical_text(canonical[len(prefix) :])
-
-
-def _canonical_text(value) -> str | None:
-    if not isinstance(value, str) or not value.strip():
-        return None
-    return value.strip()
-
-
-def _queue_recovery_navigation(action) -> None:
-    if action.preview_endpoint != "/api/v1/finance-import/corrections/preview":
-        st.error("此修復入口尚未綁定可替換前端頁面。")
-        return
-    st.session_state["finance_import_correction_row"] = (
-        action.subject_identity
-    )
-    st.session_state["finance_import_recovery_context"] = {
-        "action_code": action.action_code,
-        "owning_domain": action.owning_domain,
-        "command_name": action.command_name,
-        "source_version": action.subject_version,
-        "required_inputs": list(action.required_inputs),
-    }
-    st.session_state["pending_finance_import_mode"] = "待確認帳務修正"
-    st.session_state["pending_finance_operation_center_mode"] = (
-        "銀行流水匯入與修正"
-    )
-    st.rerun()
+        _render_alert_family(
+            client=client,
+            family=AlertFamily.FINANCE,
+            key_prefix="finance_alert_finance",
+        )
 
 
 if __name__ == "__main__":

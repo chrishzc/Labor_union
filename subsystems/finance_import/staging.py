@@ -7,8 +7,8 @@ from decimal import Decimal
 import json
 from typing import Any, Mapping
 
-from domains.finance_import.transaction_classifier import classify_finance_transaction
-from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
+from services.finance_transaction_classifier import classify_finance_transaction
+from services.finance_transaction_fingerprint import build_dedup_fingerprint
 
 
 def _json_default(value: Any) -> str:
@@ -49,26 +49,14 @@ def _matched_identity_ids(value: Any) -> list[Any]:
     return value
 
 
-def _identity_maps(identity_maps: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any], Mapping[str, Any], tuple[Mapping[str, Any], ...]]:
+def _identity_maps(identity_maps: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
     if not isinstance(identity_maps, Mapping):
         raise ValueError("identity_maps must be a mapping")
     client_accounts = identity_maps.get("client_refund_accounts", {})
-    subsidy_return_accounts = identity_maps.get(
-        "client_subsidy_return_accounts",
-        {},
-    )
     staff_accounts = identity_maps.get("staff_accounts", {})
-    client_receipt_candidates = identity_maps.get("client_receipt_candidates", ())
-    if not all(
-        isinstance(item, Mapping)
-        for item in (client_accounts, subsidy_return_accounts, staff_accounts)
-    ):
+    if not isinstance(client_accounts, Mapping) or not isinstance(staff_accounts, Mapping):
         raise ValueError("identity account maps must be mappings")
-    if not isinstance(client_receipt_candidates, tuple) or not all(
-        isinstance(item, Mapping) for item in client_receipt_candidates
-    ):
-        raise ValueError("client receipt candidates must be a tuple of mappings")
-    return client_accounts, subsidy_return_accounts, staff_accounts, client_receipt_candidates
+    return client_accounts, staff_accounts
 
 
 def stage_finance_rows(
@@ -92,7 +80,7 @@ def stage_finance_rows(
         raise ValueError("normalized_result must include sheet_name")
     if not isinstance(header_row, int) or isinstance(header_row, bool) or header_row < 1:
         raise ValueError("normalized_result must include a positive header_row")
-    client_accounts, subsidy_return_accounts, staff_accounts, client_receipt_candidates = _identity_maps(identity_maps)
+    client_accounts, staff_accounts = _identity_maps(identity_maps)
 
     source_files = {row.get("source_file") for row in rows if isinstance(row, Mapping)}
     source_file = next(iter(source_files)) if len(source_files) == 1 else None
@@ -227,8 +215,6 @@ def stage_finance_rows(
             row,
             client_accounts,
             staff_accounts,
-            subsidy_return_accounts,
-            client_receipt_candidates,
         )
         classification_type = classification["classification_type"]
         matched_identity_ids = classification.get("matched_identity_ids", [])

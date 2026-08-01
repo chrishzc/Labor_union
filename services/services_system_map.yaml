@@ -5474,7 +5474,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - StatefulConnection.__init__
@@ -5496,6 +5496,50 @@ modules:
     - test_taishin_exact_return_runs_normalization_staging_classifier_and_reconciliation
     - test_taishin_return_amount_boundaries_remain_pending
     - test_taishin_return_uses_failed_and_reversal_history_when_matching_remaining
+    approved_snapshot:
+      dependencies:
+      - FinanceImport
+      - FinanceStatementNormalizationPipeline
+      - FinanceImportStagingService
+      - FinanceTransactionClassifier
+      - ClientSubsidyReturnTransactionService
+      invariants:
+      - 測試必須從實體台新 Excel fixture 呼叫 FinanceImport 公開入口，不得直接偽造已分類 staging row 取代 normalization、staging
+        或 classifier。
+      - 基準義務固定為應退 1500、已退 250、剩餘 1250；只有支出 1250 且退款帳號唯一命中時可建立一筆 succeeded subsidy_return
+        refund 並完成核銷。
+      - 支出 1249.99 或 1250.01 必須保持 pending，且不得新增正式退款交易、不得修改已退 250 或完成日。
+      - 同一退款帳號對應多個 client_payment_id 時必須保持 non_business_review 或 pending，且正式帳務寫入為零；不得依姓名或相同待退金額選擇候選。
+      - 既有 failed refund 不得增加已退摘要；return 或有效 reversal 必須從 succeeded refund 淨額扣回，重新匯入銀行列不得錯誤覆寫摘要。
+      - 每個案例都必須保留 import batch、canonical staging、occurrence、fingerprint、raw payload
+        與原始銀行日期；pending 不得造成任何正式帳務副作用。
+      - 完全相同 workbook 重跑只允許 skipped_existing 或 existing，不得新增第二筆正式退款交易或覆蓋人工／既有核銷結果。
+      algorithm:
+      - 以最小台新 Excel fixture 建立基準成功案例，準備唯一退款帳號及應退 1500、已退 250 的義務資料。
+      - 經 FinanceImport 公開入口執行 normalization、identity map、staging、classifier 與 ClientSubsidyReturnTransactionService，核對各層資料與正式交易結果。
+      - 逐一替換銀行支出為 1249.99、1250.01 及共享帳號資料，驗證維持 pending 且零正式寫入。
+      - 預載 failed、return 與 reversal 交易後重跑完整鏈路，驗證退款淨額、未退餘額與完成日只由有效交易投影。
+      - 對成功與 pending fixture 各執行 deterministic rerun，驗證 occurrence 增加但 canonical row
+        與正式帳務不重複。
+      domain: Services
+      type: integration_test
+      verification:
+      - must_have_assertions
+      - command:
+          argv:
+          - .venv\Scripts\python.exe
+          - -m
+          - pytest
+          - tests\test_finance_import_client_subsidy_return_integration.py
+          - -q
+          - -p
+          - no:cacheprovider
+          - --basetemp
+          - .pytest-b3-client-subsidy-return
+          cwd: project
+          timeout: 120
+          expect_exit: 0
+          expect_stdout_contains: passed
   FinanceImportGovernmentSubsidyIntegrationTest:
     type: integration_test
     description: 驗證 B4 政府補助撥入由台新 Excel 經 normalization、append-only staging、分類至政府補助核銷的完整鏈路，並確認差額、多候選、分次與跨批次款項不會被自動核銷。
@@ -5576,7 +5620,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: dirty
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - StatefulConnection.__init__
@@ -5598,6 +5642,56 @@ modules:
     - test_exact_unique_government_subsidy_reconciles_and_rerun_only_adds_occurrence
     - test_same_amount_multiple_batches_and_cross_batch_total_stay_pending
     - test_short_over_and_split_bank_receipts_stay_pending_without_formal_writes
+    approved_snapshot:
+      invariants:
+      - 測試必須從實體台新 Excel fixture 呼叫 FinanceImport 公開入口，不得直接偽造已分類 staging row 取代 normalization、staging
+        或 classifier。
+      - 基準批次固定為 status=approved、approved_amount=1000、paid_amount=0，且 item approved
+        合計為 1000；只有單筆存入 1000 且候選批次唯一時可建立正式政府補助 receipt 與逐 item allocation。
+      - 單筆存入 900 或 1100 必須保持 pending，且不得新增正式政府補助交易、allocation，亦不得更新批次或明細 paid_amount
+        與狀態。
+      - 分次存入 600 加 400 時，第一筆不得提前核銷整批，第二筆亦不得與先前 pending 流水自動合併；兩筆均須各自保留 canonical staging
+        與 occurrence。
+      - 存在兩個同額且皆符合條件的批次時必須保持 pending，不得依季度、建立順序、銀行日期或第一筆候選自行選擇。
+      - 單筆銀行款不得拆分至多個批次；跨批次候選或需要跨批次分配時維持 pending，正式帳務寫入為零。
+      - 成功核銷不得覆寫 requested_amount 或 approved_amount；transaction amount 與 allocation
+        合計必須等於銀行實收 1000，批次及明細只能更新 paid 投影。
+      - 每個案例都必須保留 import batch、canonical staging、occurrence、fingerprint、raw payload
+        與原始銀行日期；pending 不得造成任何正式帳務副作用。
+      - 完全相同 workbook 重跑只允許 skipped_existing 或 existing，不得新增第二筆正式交易、allocation 或覆蓋既有核銷結果。
+      type: integration_test
+      verification:
+      - must_have_assertions
+      - command:
+          argv:
+          - .venv\Scripts\python.exe
+          - -m
+          - pytest
+          - tests\test_finance_import_government_subsidy_integration.py
+          - -q
+          - -p
+          - no:cacheprovider
+          - --basetemp
+          - C:\tmp\pytest-b4-government-subsidy
+          cwd: project
+          timeout: 120
+          expect_exit: 0
+          expect_stdout_contains: passed
+      domain: Services
+      algorithm:
+      - 以最小台新 Excel fixture 建立唯一且精確 1000 的成功案例，準備一個 approved/未撥批次及其 400、600 明細。
+      - 經 FinanceImport 公開入口執行 normalization、staging、classifier 與 GovernmentSubsidyReconciliationService，核對各層資料與正式交易結果。
+      - 分別以 900、1100 及兩個同額批次執行完整鏈路，驗證 staging 保持 pending 且所有正式補助表零寫入。
+      - 依序匯入 600 與 400 的不同銀行流水，驗證不得跨流水累加或提前結清批次。
+      - 建立需要跨兩批次分配的候選，驗證單筆款項不得自動拆分。
+      - 對成功與 pending fixture 執行 deterministic rerun，驗證 occurrence 增加但 canonical row
+        與正式帳務不重複。
+      dependencies:
+      - FinanceImport
+      - FinanceStatementNormalizationPipeline
+      - FinanceImportStagingService
+      - FinanceTransactionClassifier
+      - GovernmentSubsidyReconciliationService
   FinanceImportStaffActualTransferIntegrationTest:
     type: integration_test
     description: 驗證 B5 服務人員實際轉帳由永豐或台新 Excel 經 normalization、append-only staging、分類、月結候選至
@@ -5681,7 +5775,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: services_layer
-    state: planned
+    state: validated
     fan_in_snapshot: 0
     known_symbols:
     - Connection.__init__
@@ -5706,6 +5800,56 @@ modules:
     - test_salary_ambiguity_and_month_candidates_stay_pending_and_rerun
     - test_sinopac_salary_two_registered_accounts_reconcile_once_and_rerun
     - test_taishin_legacy_exact_and_invalid_components_are_deterministic
+    approved_snapshot:
+      verification:
+      - must_have_assertions
+      - command:
+          argv:
+          - .venv\Scripts\python.exe
+          - -m
+          - pytest
+          - tests\test_finance_import_staff_actual_transfer_integration.py
+          - -q
+          - -p
+          - no:cacheprovider
+          - --basetemp
+          - C:\tmp\pytest-b5-staff-actual-transfer
+          cwd: project
+          timeout: 120
+          expect_exit: 0
+          expect_stdout_contains: passed
+      algorithm:
+      - 以永豐最小 Excel fixture 建立唯一服務人員、唯一 finalized 月結及同明細 regular_salary/floor_fee
+        的精確成功案例，經公開入口核對完整鏈路與正式 paid 投影。
+      - 對同一服務人員的另一有效帳號建立獨立 fixture，驗證兩個帳號皆以帳號而非姓名辨識同一 staff_id；再建立共享帳號與同列多帳號案例驗證零正式寫入。
+      - 建立零月結、同額雙月結及跨月份候選，驗證 importer 不使用銀行日期或候選排序猜測 settlement_month。
+      - 以台新 fixture 建立 confirmed legacy_subsidy 精確成功案例，再替換為金額不符、未確認或 review_required
+        component，驗證全部保持 pending。
+      - 建立同一 detail 不同 component 的合法配置與已付相同 component 的第二筆銀行列，驗證不同 component 可共存、相同
+        key 不得重複。
+      - 對所有成功與 pending fixture 執行 deterministic rerun，驗證 occurrence 增加但 canonical
+        row 與正式帳務不重複。
+      type: integration_test
+      dependencies: []
+      invariants:
+      - 測試必須從實體永豐或台新 Excel fixture 呼叫 FinanceImport 公開入口，不得直接偽造已分類 staging row、月結候選或
+        allocation plan 取代 normalization、staging、classifier 或 importer dispatch。
+      - 同一 staff_id 的多個已登記完整帳號必須能在各自獨立銀行流水中識別為同一服務人員；同一帳號對應多位服務人員、同列命中多個帳號或帳號無匹配時必須保持
+        non_business_review 或 pending，正式 transfer/allocation 寫入為零。
+      - 一般薪資只接受永豐 outgoing staff_salary；只有唯一 finalized/partially_paid 月結且全部未付 regular_salary、floor_fee、adjustment
+        component 合計精確等於銀行 debit 時，才可建立一筆實際 transfer 與 explicit allocations。
+      - 找不到月結、存在多個同額候選月結或候選跨不同 settlement_month 時必須保持 pending；不得依銀行交易日期、月份接近度、建立順序、最舊月份或第一筆候選猜測薪資歸屬月份。
+      - 舊制第二次補助款只接受台新 outgoing staff_legacy_subsidy，且只能核銷唯一月結內 status=confirmed、review_required=false
+        的完整 legacy_subsidy 未付 component；實際金額不符時保持 pending，不得修改應付金額強制對平。
+      - 同一 settlement detail 可依不同 component_type 建立多筆 allocation；相同 `(settlement_detail_id,
+        component_type)` 在同一 transfer、重跑或後續銀行列中不得重複配置，已付 component 不得再次核銷。
+      - 成功核銷只可更新月結 total_paid/status 與 staging reconciliation；不得覆寫 settlement_month、total_payable、明細
+        payable component、staff_payment 來源或銀行交易日期。
+      - 每個案例都必須保留 import batch、canonical staging、occurrence、fingerprint、raw payload、原始備註／存摺備註與銀行日期；pending
+        不得造成任何正式帳務副作用。
+      - 對成功與 pending fixture 的完全相同 workbook 重跑只允許 skipped_existing 或 existing，occurrence
+        增加但不得新增第二筆 transfer、重複 allocation 或覆蓋既有／人工核銷結果。
+      domain: Services
   FinanceAlertDetectionService:
     type: service
     description: 將 pending、review 與 warnings 以 deterministic identity 保存為警示；只負責偵測持久化與
