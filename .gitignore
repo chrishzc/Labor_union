@@ -41,6 +41,7 @@ task_index.json
 task_snapshots/
 checkpoints/
 adad_tmp/
+.adad_tmp/
 adad/
 
 # System generated agent logs & planning
