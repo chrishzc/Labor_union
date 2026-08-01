@@ -1551,7 +1551,7 @@
 - Sub Map: services_layer
 - Type: service
 - State: `planned`
-- Source: services/finance_cancellation_code.py::resolve_finance_cancellation_code
+- Source: services/finance_cancellation_code.py::_valid_cancellation_code,resolve_finance_cancellation_code
 - Dependencies: [FinanceNormalizedRowValidator, FinanceImportStateContract]
 - Description: 為分類與客戶入款核銷提供唯一銷帳編號投影；兼容既有 Sinopac raw reference，但不改寫 canonical row 或 fingerprint。
 - Complexity: low
@@ -1607,7 +1607,7 @@
 - Sub Map: services_layer
 - Type: service
 - State: `planned`
-- Source: services/finance_import_staging.py::stage_finance_rows
+- Source: services/finance_import_staging.py::_matched_identity_ids,stage_finance_rows
 - Dependencies: [FinanceStatementNormalizationPipeline, FinanceTransactionFingerprint, FinanceImportRawStagingSchema, FinanceTransactionClassifier, FinanceImportStateContract]
 - Description: 將一次 Excel 正規化結果以 append-only 方式寫入 staging；已存在 fingerprint 只新增來源 occurrence，不覆寫 canonical row 或正式帳務。
 - Complexity: medium
@@ -2151,7 +2151,7 @@
 - Sub Map: services_layer
 - Type: application_service
 - State: `planned`
-- Source: services/finance_import_application.py::import_finance_workbook
+- Source: services/finance_import_application.py::allocate_receipt,build_snapshot_plan,_order_for_snapshot,import_finance_workbook
 - Dependencies: [FinanceImportStateContract, FinanceStatementNormalizationPipeline, FinanceIdentityMapLoader, FinanceImportStagingService, FinanceImportDispatchService, FinanceImportReviewAlertProjectionService]
 - Description: 由 application service 對任意檔名的歷史、台新或永豐 Excel 執行正式匯入或完整 dry run；CLI 只提交命令，不擁有 normalization、transaction、分類、dispatch 或警示規則。
 - Invariants:
@@ -2299,7 +2299,7 @@
   - 對成功與 pending fixture 各執行 deterministic rerun，驗證 occurrence 增加但 canonical row 與正式帳務不重複。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_client_subsidy_return_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", ".pytest-b3-client-subsidy-return"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_client_subsidy_return_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", ".pytest-b3-client-subsidy-return"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: FinanceImportGovernmentSubsidyIntegrationTest
@@ -2336,7 +2336,7 @@
   - 對成功與 pending fixture 執行 deterministic rerun，驗證 occurrence 增加但 canonical row 與正式帳務不重複。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_government_subsidy_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b4-government-subsidy"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_government_subsidy_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b4-government-subsidy"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: FinanceImportStaffActualTransferIntegrationTest
@@ -2372,7 +2372,7 @@
   - 對所有成功與 pending fixture 執行 deterministic rerun，驗證 occurrence 增加但 canonical row 與正式帳務不重複。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_staff_actual_transfer_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b5-staff-actual-transfer"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_staff_actual_transfer_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b5-staff-actual-transfer"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: FinanceAlertDetectionService
