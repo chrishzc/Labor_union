@@ -417,32 +417,34 @@
 - Type: service
 - State: `planned`
 - Source: services/caregiver_availability_lock_cancellation_service.py::cancel_caregiver_availability_lock_for_order
-- Dependencies: [DbService, CaregiverMatchingPlanSchema, CaregiverAvailabilityLockSchema, CaregiverAvailabilityLockEventSchema, StaffOccupancyMutexService]
-- Description: 沿用訂單取消流程，專責將仍為洽談中且具有完整 active waiting-deposit lock 的案件，在單一交易內同步轉為訂單取消、取消全部 lock days/header 並追加 lock_cancelled 事件。
+- Dependencies: [CaregiverMatchingPlanSchema, CaregiverAvailabilityLockSchema, CaregiverAvailabilityLockEventSchema, StaffOccupancyMutexService, OrderLifecycleCommandEnvelopeService]
+- Description: 作為 OrderCancellationCommandService 的 caller-cursor component，只在已取得 lifecycle envelope 與 staff mutex 後取消完整 active waiting-deposit lock days/header並追加 lock_cancelled event；不再更新orders或擁有transaction。
 - Complexity: medium
 - Algorithm:
-  - 連線前嚴格驗 case_no、event_key、actor、cancel_reason；單一 connection/cursor 預讀 active lock/days 取得 canonical staff ids。
-  - mutex 恰一次後固定鎖 orders、plan、segments、lock header、lock days、event_key 實體 rows；重讀 snapshot 必須與預讀精確一致，禁止 aggregate lock。
-  - 新取消僅接受 order=洽談中、lock active 且全部 days active；exact replay 僅接受相同 request/payload 與完整 cancelled persistence，其他 event reuse 或 partial state fail-closed。
-  - 依序更新 order status/cancel_reason、全部 days、header cancelled，最後 append lock_cancelled event；order/header/day rowcount 精確且只 commit 一次，任何失敗 rollback。
+  - 驗證caller cursor/envelope/case identity，取得active lock/days的canonical staff ids並以共同mutex升冪鎖定。
+  - 在orders/control已先鎖的前提下固定鎖plan、segments、lock header、lock days、event_key實體rows；snapshot必須精確一致。
+  - active lock存在時只接受完整active header/days；不存在時回not_applicable，partial或event reuse conflict fail-closed。
+  - 依序更新全部days、header cancelled並append lock_cancelled event；不更新orders status/reason/version，不commit/rollback。
 - Input:
-  - case_no: 洽談中且持有 active waiting-deposit lock 的案件編號。
+  - cursor: OrderCancellationCommandService 持有的caller transaction DictCursor。
+  - command_envelope: 已鎖定且cursor identity相同的OrderLifecycleCommandEnvelope。
+  - case_no: 可能持有 active waiting-deposit lock 的案件編號。
   - event_key: 全域唯一 cancellation 冪等鍵。
   - actor: 管理員識別。
   - cancel_reason: 同時保存於 orders 與 event.reason 的非空取消原因。
 - Output:
-  - cancellation_result: `cancelled` 或 `existing`、case_no、plan_id、lock_id、order_status、cancel_reason 與穩定 lock-day snapshot。
+  - cancellation_result: `cancelled`、`existing` 或 `not_applicable`，以及case/plan/lock與穩定lock-day snapshot。
 - Invariants:
-  - orders status/reason、lock header/days 與 append-only cancelled event 必須 all-or-nothing；cancel_reason 必須完全一致。
-  - 只處理洽談中 active waiting-deposit lock；成立、服務中、完成或非 active lock 不得走本節點。
+  - lock header/days與append-only cancelled event必須all-or-nothing；orders status/reason/version與canonical cancellation control由上層服務唯一負責。
+  - active waiting-deposit lock存在時必須完整取消；沒有active lock可回not_applicable，不能阻止一般成立／服務中／完成案件走正式取消命令。
   - 不得修改 plan lifecycle、matching/history、assignments、schedules、actual hours、payment/payroll/settlement，不得 DELETE 或改寫歷史日期。
-  - mutex 恰一次、單一 connection/cursor、固定鎖序、參數化 SQL、stable JSON、單一 commit；exact replay 以全量 immutable snapshot 判定。
+  - mutex恰一次、只用caller cursor、固定鎖序、參數化SQL、stable JSON且不得commit/rollback/close；exact replay以全量immutable snapshot判定。
   - 驗收須覆蓋一至四位 staff、所有 order/plan/lock/day ownership 狀態、event adversarial replay、rowcount、逐步 failure injection、cleanup 與 AST guards。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_caregiver_availability_lock_cancellation_service.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-caregiver-availability-lock-cancellation-service"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\caregiver_availability_lock_cancellation_service.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Non Goals:
-  - 不提供普通 release、訂金 conversion、正式案件取消、assignment/schedule 變更或 API/UI。
+  - 不提供普通release、訂金conversion、canonical訂單取消決策、assignment/schedule變更或API/UI。
 - Observability: not_required
 
 ##### Module: CaregiverAvailabilityLockConversionService
@@ -686,24 +688,25 @@
 - Sub Map: services_layer
 - Type: service
 - State: `planned`
-- Source: services/client_payment_transactions.py
+- Source: services/client_payment_transactions.py::calculate_client_payment_state,_positive_id,_amount,_same_ledger_and_stage
 - Description: 重算客戶訂金、第一期、第二期實收；退還補助金額尚未啟用，不參與目前交易計算。
 - Complexity: medium
 - Input:
   - client_payment_id: case-linked client ledger identifier
-  - transaction: stage, type, status, amount, occurred_at and external_reference
+  - transaction: stage、type、status、amount、occurred_at、external_reference，以及 reversal 專用的 reversal_of_transaction_id
 - Output:
   - client_payment_state: recalculated stage totals and settlement dates
 - Algorithm:
   - 鎖定客戶帳務與既有交易，拒絕重複 external_reference。
-  - 訂金／第一期／第二期僅以 receipt 減 reversal 計入實收；不得接受 subsidy_refund、subsidy_return 或 refund 交易。
+  - receipt 的 reversal_of_transaction_id 必須 NULL；reversal 必須以非空 positive id 精確指向同 client_payment_id/case_no/stage 的 succeeded receipt，且所有 succeeded reversals 累計不得超過原 receipt 金額。
+  - 訂金／第一期／第二期僅以 receipt 減合法 reversal 計入實收；不得接受 subsidy_refund、subsidy_return 或 refund 交易。
   - 每一階段淨額不得為負或超過該階段應收；三階段實收加總為 amount_received。
 - Invariants:
   - 不得讀寫 staff_payments、staff_payment_transactions 或 legacy payments。
   - failed 交易不得改變摘要；重複 external_reference 必須拒絕。
   - 退還補助欄位不參與目前的計算或寫入。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_transactions.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_transactions.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: ClientPaymentWriteService
@@ -711,21 +714,23 @@
 - Type: service
 - State: `planned`
 - Source: services/client_payment_writer.py
-- Dependencies: [PaymentSchema, ClientSubsidyReturnObligationService, OrderAmountCalculator, AccountingSourceProjection]
+- Dependencies: [PaymentSchema, ClientSubsidyReturnObligationService, OrderAmountCalculator, AccountingSourceProjection, BusinessTimeProvider, OrderLifecycleCommandEnvelopeService, OrderLifecycleApplicationService]
 - Description: 將客戶金流交易實際寫入新表，並依所有交易重算客戶帳務摘要與各期結清日。
 - Complexity: medium
 - Input:
   - cursor: 由呼叫端持有 transaction 的 cursor；既有 API wrapper 可自行建立連線後呼叫同一核心
   - client_payment_id: case-linked client ledger identifier
-  - transaction: stage、type、status、amount、occurred_at、external_reference 與可空 finance_import_row_id
+  - transaction: stage、type、status、amount、occurred_at、external_reference、可空 finance_import_row_id，以及 reversal 專用 reversal_of_transaction_id
+  - lifecycle_context: deposit stage 必填的 exact mapping `command_envelope`、`evaluation_at`、`actor`、`idempotency_key`；first/second stage 必須為 None
 - Output:
   - transaction_id: 新增或完全相同既有交易的 id
   - client_payment_state: persisted stage receipts, subsidy refund and amount_received
+  - lifecycle_result: deposit stage 的 OrderLifecycleApplicationResult；非 deposit 為 None
 - Algorithm:
-  - 鎖定客戶帳務與既有交易，將候選交易先交 ClientPaymentTransactionService 計算，超額或重複識別一律回滾。
+  - 鎖定客戶帳務與既有交易；receipt 強制 reversal_of_transaction_id=NULL，reversal 強制指向同 payment/case/stage 的 succeeded receipt，並將 reversal link 納入 external_reference identical replay equality。exact existing replay 必須在累計沖正額加入 candidate 前返回；新 reversal 才計入 candidate。錯誤 ownership、鏈到 reversal/refund/failed row、累計超額或重複識別一律回滾。
   - 寫入交易，再重算訂金、第一期、第二期摘要；只有三個收款階段計入 amount_received，退款功能暫不啟用。
   - 階段淨額首度等於應收時記錄完成日；應收為零的階段不得產生完成日。第一期首度結清時，若第二期應收大於零，將第二期應收日設為第一期實收日加 15 天；第一期遭沖正而未結清時清空該日期。
-  - 訂金首次全額核銷時，僅將目前為洽談中的同一 case_no 案件自動更新為訂單成立；歷史資料仍可在單筆訂單頁以受稽核的人工流程建立。
+  - 訂金首次全額核銷或合法沖正時，在同一 outer transaction 將明確 payment event、case_no、business date、actor 與 idempotency key 交給 OrderLifecycleApplicationService；不得直接 UPDATE orders.status 或自行指定目標狀態。
   - 觸發點 1（完工後收清）：在成功寫入 succeeded 收款交易且更新後 amount_received 等於 amount_receivable 時，透過 AccountingSourceProjection 載入訂單條件與 clients.identity_status，由 OrderAmountCalculator 計算 subsidy_return_amount。若案件具實際完成日 (actual_end_date) 且應退金額大於零，在同一個資料庫 transaction 中呼叫 ClientSubsidyReturnObligationService (activate_subsidy_return_obligation) 啟用補助退還義務。
   - 沖正防護（Reversal Policy）：若案件已存在生效的補助退還義務 (subsidy_return_receivable > 0)，後續發生沖正交易致使 amount_received < amount_receivable 時，在同一 transaction 持久化 subsidy_return_review_status=review_required 與明確原因，暫停銀行流水自動核銷；不得清除原始義務或預定退款日。
   - 案件再次精確收清時，只有重新投影、計算並確認既有義務金額與到期日完全一致後，才可清除 review status/reason；投影、計算或啟用例外必須使整筆收款交易 rollback，不得靜默忽略。
@@ -734,8 +739,592 @@
   - 在成功寫入 succeeded 收款交易且 amount_received 等於 amount_receivable 時，若具備 actual_end_date 必須在同一 transaction 內呼叫 activate_subsidy_return_obligation；未全額、沖正、超收、缺少實際完成日或應退金額為零均不得建立正式義務。
   - 已經建立義務後遭遇沖正致未全額實付者，必須將狀態設為 review_required 並暫停未支付義務出帳，不得保留為可自動出帳狀態。
   - review_required 必須持久化於 PaymentSchema；只改函式回傳值不構成狀態變更。歷史應付清單仍依預定日期納入該筆並顯示覆核狀態。
+  - 收款造成的訂單狀態副作用只能委派 OrderLifecycleApplicationService；query、UI render、importer 或 payment writer 不得各自建立另一套狀態判斷。
+  - INSERT client_payment_transactions 必須明確寫入 reversal_of_transaction_id；不得只在 Python 聚合中扣款後把 DB link 留為 NULL。
+  - canonical client payment ledger 只接受 `transaction_status=succeeded`；failed／reversed attempt 不得寫入 immutable ledger，未來若需保存失敗嘗試必須使用獨立 attempt log，避免永久污染 OrderLifecycleAuthoritativeFactsLoader。
+  - deposit writer 在鎖 client_payments 前必須收到已由 caller 先鎖定、同 cursor／case 的 command_envelope；不得自行後取 envelope。receipt 使用 trigger `deposit_reconciled`，reversal 使用 `deposit_reversed`，完成 ledger transaction/summary 後以同 cursor 呼叫一次 OrderLifecycleApplicationService。
+  - API connection-owning wrapper 固定以 request case_no 與 lifecycle_expected_version 先取得 BusinessTime、建立 `client-payment:` 加 canonical JSON `{case_no,external_reference,reversal_of_transaction_id,stage,transaction_type}` 小寫 SHA-256 command key、鎖 lifecycle envelope，再查 client_payment_id 並呼叫 cursor-bound core；不得先以 FOR UPDATE 鎖 payment。
+  - deposit exact transaction replay 仍必須沿用同 lifecycle key 進入 Application exact replay；不得因 ledger row 已存在就跳過 lifecycle event/outbox identity 檢查。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_payment_writer.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: OrderLifecycleFactsValidator
+- Sub Map: services_layer
+- Type: domain_contract
+- State: `planned`
+- Source: services/order_lifecycle_facts.py::validate_order_lifecycle_facts
+- Dependencies: []
+- Description: 將 ORD-01 caller 提供的權威事實驗證並正規化為 immutable facts；不推導候選狀態或執行副作用。
+- Complexity: medium
+- Input:
+  - current_status: 洽談中、訂單成立、服務中、訂單完成或訂單取消
+  - trigger_event: canonical lifecycle trigger
+  - authoritative_facts: cancellation 與 canonical cancellation_reason、有效訂金核銷、actual dates、aware evaluation/completion instants、開始日重新確認、scoped blockers 與可空 canonical correction target
+- Output:
+  - validated_status: canonical current status
+  - validated_trigger: canonical trigger
+  - validated_facts: 型別穩定且 immutable 的完整事實
+- Invariants:
+  - current_status 只允許洽談中、訂單成立、服務中、訂單完成、訂單取消。
+  - trigger_event 只允許 case_created、deposit_reconciled、deposit_reversed、actual_start_updated、actual_start_reconfirmed、schedule_applied、evaluation_time_reached、cancelled、manual_correction、hold_activated、hold_released。
+  - evaluation_at 必須是含 offset 的 ISO datetime 且進入規則前正規化為 Asia/Taipei；本節點不得取得現在時間。completion_instant 可空，但非空時同樣必須含 offset。
+  - actual_start_date／actual_end_date 使用 ISO 日期或 None；cancellation、deposit_reconciled、actual_start_reconfirmed、completion_facts_consistent 等布林不得接受 truthy 字串或數字。
+  - cancellation=true 時 cancellation_reason 必須為 trim 後非空字串；cancellation=false 時必須為 None。reason 只能由 FactsLoader 的 post-control current projection提供。
+  - transition_blockers 必須是 exact mapping，key 固定 enter_service、auto_complete，各值為不重複、穩定排序的 machine codes；不得接收 Alert status、UI 文案或 generic blocking list。
+  - manual_correction_target 只可在 trigger_event=manual_correction 時為 canonical status；其他 trigger 必須為 None。它只能由 typed correction command 產生，不得直接採信 UI status payload。
+  - 本節點不得讀 DB、推導付款／排班事實、選擇 target status 或建立 alert。
+- Algorithm:
+  - 驗證 canonical status 與 trigger。
+  - 驗證日期、aware datetime、布林門禁、scoped blocker codes 與 correction target 的型別及交叉欄位。
+  - 回傳 deterministic immutable facts；任一缺漏或型別錯誤 fail-fast。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_lifecycle_facts.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: OrderLifecycleCandidateDecision
+- Sub Map: services_layer
+- Type: domain_service
+- State: `planned`
+- Source: services/order_lifecycle_candidate.py::decide_order_lifecycle_candidate
+- Dependencies: [OrderLifecycleFactsValidator]
+- Description: 只依已驗證 ORD-01 事實與固定優先序計算候選狀態，不判斷 trigger 合法性或建立副作用。
+- Complexity: medium
+- Input:
+  - validated_facts: OrderLifecycleFactsValidator 輸出的 immutable facts
+- Output:
+  - candidate_status: 五個 canonical order statuses 之一
+  - candidate_reasons: 穩定可機讀的決策原因
+  - domain_blocker_states: 固定 registry 中由候選規則擁有的 blocker code → active bool
+- Invariants:
+  - 優先順序固定為：有效取消；符合完整完工門禁；訂金有效且真正開始日已到的服務中；訂金有效但尚未開始的訂單成立；其餘洽談中。
+  - actual_end_date 非空不等於完成；必須有由正式 assignment/schedule 與 OrderServiceTimeTermsSchema 推導的 completion_instant、evaluation_at 已到該時刻且 completion_facts_consistent。
+  - scoped blockers 不參與候選狀態計算；候選先依 structural facts 產生，再由 TransitionGuard 只阻擋對應 scope，避免 auto_complete hold 錯誤阻擋 enter_service。
+  - actual_start_date 已到但訂金無效時候選不得為服務中，並回傳 enter_service.deposit_required_before_service intent。
+  - 延遲訂金且真正開始日尚未重新確認時候選不得為服務中，並回傳 enter_service.actual_start_reconfirmation_required intent。
+  - 退款、退匯、沖正或後續結算不得推測訂單取消；取消只由有效 cancellation control fact 決定。
+  - 本節點不得讀 DB、取得時間、參考 trigger 或 current status、建立 alert 或修改資料。
+- Algorithm:
+  - 先判斷有效取消。
+  - 再依完整完工門禁、有效服務中門禁、訂金成立門禁依序決定候選。
+  - 對未付款開始與延遲訂金產生穩定 scoped blocker intents。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_lifecycle_candidate.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: OrderLifecycleTransitionGuard
+- Sub Map: services_layer
+- Type: domain_service
+- State: `planned`
+- Source: services/order_lifecycle_transition.py::guard_order_lifecycle_transition
+- Dependencies: [OrderLifecycleFactsValidator, OrderLifecycleCandidateDecision]
+- Description: 比對 current status、trigger 與候選狀態，回傳 changed、unchanged 或 blocked 及穩定原因；不重新計算候選狀態。
+- Complexity: medium
+- Input:
+  - current_status: validated canonical status
+  - trigger_event: validated canonical trigger
+  - candidate_status: OrderLifecycleCandidateDecision 的候選狀態
+  - validated_facts: 已驗證事實
+  - domain_blocker_states: 候選決策產生的固定 scoped blocker desired states
+- Output:
+  - recommended_status: 合法目標或原狀態
+  - transition: changed、unchanged 或 blocked
+  - blocking_reasons: 穩定可機讀原因
+  - projection_states: 依公開常數 `LIFECYCLE_BLOCKER_PROJECTION_REGISTRY` 固定 13 筆、穩定排序的 immutable `LifecycleBlockerProjectionState(scope,alert_code,active,payload)` tuple；payload 固定為穩定排序的 `tuple[tuple[str,str],...]`，Application materialize 為 JSON object；不含 case、command key、outbox action 或 intent_key
+- Invariants:
+  - active cancellation control 永遠優先產生訂單取消；取消解除後只有 manual_correction 可離開取消，且目標由最新權威事實重新驗證，不得直接恢復取消前 status。
+  - 訂單完成只有 schedule_applied 或 manual_correction 可因正式事實改變回到服務中；不得因付款事件倒退。
+  - enter_service blockers 只阻擋進入服務中；auto_complete blockers 只阻擋進入訂單完成；取消不受 hold 阻擋，底層 domain command 不因 hold 被禁止。
+  - manual_correction_target 必須符合各目標狀態的硬性事實門禁且不得繞過 scoped blockers；不符時 blocked 並保留原狀態。
+  - identical current/candidate 且無阻擋時回 unchanged；不得偽造 changed event。
+  - raw UI target status 不得成為輸入；只有 typed correction command 寫入 facts snapshot 的 canonical target 可使用。退款事件不得作為取消 trigger。
+  - projection registry 至少覆蓋 deposit_required_before_service、deposit_ledger_inconsistent、actual_start_reconfirmation_required、human_hold、legacy_cancellation_requires_review、formal_assignment_missing、schedule_ownership_inconsistent、schedule_ownership_review_required、service_time_terms_missing、service_time_terms_inconsistent、actual_end_date_missing；每次必須同時輸出 active 與 inactive desired state，避免舊 Alert 永久殘留。
+  - 本節點不得讀 DB、重算候選、寫 status、event 或 alert。
+- Algorithm:
+  - 先依 trigger 決定採 structural candidate 或 validated manual correction target。
+  - 只套用目標 transition scope 對應的 control/domain blockers，再檢查取消與完成的合法轉移。
+  - 回傳 deterministic transition、reasons 與 outbox projection intents。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_lifecycle_transition.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: OrderLifecycleStateMachine
+- Sub Map: services_layer
+- Type: domain_service
+- State: `planned`
+- Source: services/order_lifecycle_state_machine.py::evaluate_order_lifecycle
+- Dependencies: [OrderLifecycleFactsValidator, OrderLifecycleCandidateDecision, OrderLifecycleTransitionGuard]
+- Description: 依序組合 ORD-01 facts validation、candidate decision 與 transition guard，提供唯一純函式 evaluator。
+- Complexity: medium
+- Input:
+  - current_status: canonical order status
+  - trigger_event: canonical lifecycle trigger
+  - authoritative_facts: FactsLoader 從 canonical sources 建立的完整 typed facts；含 scoped blockers 與可空 correction target
+- Output:
+  - recommended_status: 五個 canonical order statuses 之一
+  - transition: changed、unchanged 或 blocked
+  - blocking_reasons: 穩定可機讀原因
+  - projection_states: TransitionGuard 輸出的完整 blocker desired-state registry
+- Invariants:
+  - 必須依序且只呼叫三個已拆分 Domain 節點，不得另建第二套驗證、候選或 transition 規則。
+  - 對相同輸入必須回傳完全相同、可序列化且不含現在時間的結果。
+  - 本節點不得讀 DB、取得現在時間、改 status、建立 alert／event／payment；manual correction target 只能使用 FactsValidator 驗證後的 canonical command fact。
+- Algorithm:
+  - 呼叫 OrderLifecycleFactsValidator。
+  - 將 validated facts 交給 OrderLifecycleCandidateDecision。
+  - 將 current、trigger、candidate、facts 與 scoped blocker intents 交給 OrderLifecycleTransitionGuard。
+  - 回傳 guard 的 deterministic decision。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_lifecycle_state_machine.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: BusinessTimeProvider
+- Sub Map: services_layer
+- Type: shared_service
+- State: `planned`
+- Source: services/business_time.py::current_business_instant
+- Dependencies: []
+- Description: 提供唯一 timezone-aware 業務評估時刻，將 UTC clock 明確轉為 IANA Asia/Taipei；Domain evaluator 與 DB loader 不自行取得現在時間。
+- Complexity: low
+- Input:
+  - utc_now: 測試可注入的 aware UTC datetime；production 省略時讀一次 UTC clock
+- Output:
+  - evaluation_at: timezone-aware Asia/Taipei datetime
+- Invariants:
+  - 禁止 naive datetime、作業系統 local timezone、DB CURDATE/NOW 與瀏覽器時間。
+  - 同一 command 只取得一次 evaluation_at 並向下傳遞；不得在 loader、evaluator、persistence 各自重新取時。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\business_time.py", "tests\\test_business_time.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleCommandEnvelopeService
+- Sub Map: services_layer
+- Type: transaction_primitive
+- State: `planned`
+- Source: services/order_lifecycle_command_envelope.py::lock_order_lifecycle_command_envelope
+- Dependencies: [OrderLifecycleControlFactsSchema, OrderLifecycleStateHistorySchema]
+- Description: 在任何 lifecycle-relevant domain mutation 前先取得案件 aggregate mutex、control projection 與 idempotency rows，建立後續同 transaction 共用的 immutable command envelope。
+- Complexity: medium
+- Input:
+  - cursor: caller-owned transaction DictCursor
+  - case_no: canonical order identifier
+  - expected_version: caller 讀取的 lifecycle_version
+  - idempotency_key: 非空穩定 command key
+- Output:
+  - command_envelope: immutable `OrderLifecycleCommandEnvelope(cursor,case_no,current_status,lifecycle_version,cancel_reason,actual_start_date,actual_end_date,service_start_time,service_end_time,service_end_day_offset,idempotency_key,request_expected_version,control_states,existing_control_event,existing_lifecycle_event)`；control_states 每列固定含 type/key/scope/state/current_event_id/reason/changed_by 與 confirmation/hold 欄位，下游以 `envelope.cursor is cursor` 驗證同一 caller cursor
+- Invariants:
+  - 必須是 lifecycle-relevant writer 的第一個 case-scoped lock；固定順序為 orders row → control state rows → matching control/state idempotency rows，後續才可鎖 payment、assignment、schedule 或 domain event。
+  - 新 command 的 request_expected_version 必須等於 locked lifecycle_version；若同 key existing lifecycle event 存在，只有 request_expected_version 等於 existing.expected_version 且 locked lifecycle_version=expected_version+1 時可建立 replay envelope，完整 identity仍交 persistence 核對。
+  - 只能使用 caller cursor；不得建立 connection/cursor、commit、rollback、close、取得時間或修改任何資料。
+  - 所有付款、取消、排班、日期、hold、correction 與 background evaluation writer 都必須先取得 envelope；query/render 不得取得。
+- Algorithm:
+  - 以 case_no 鎖定 orders status/version，精確驗證 row shape 與 expected_version。
+  - 依 type/key 穩定順序鎖定同案 control projections及 matching idempotency events，再查同 key lifecycle event。
+  - 回傳 immutable envelope；缺 row、partial projection 或 identity conflict fail-closed。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_command_envelope.py", "tests\\test_order_lifecycle_command_envelope.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleControlCommandService
+- Sub Map: services_layer
+- Type: application_component
+- State: `planned`
+- Source: services/order_lifecycle_control_commands.py::apply_order_lifecycle_control_command
+- Dependencies: [OrderLifecycleControlFactsSchema, OrderLifecycleCommandEnvelopeService]
+- Description: 使用既有 command envelope 在 caller transaction 內 activate／clear cancellation、actual-start reconfirmation 或 human hold，原子追加 control event並更新 current projection；不更新 status/version或投影 Alert。
+- Complexity: medium
+- Input:
+  - cursor、command_envelope: 已鎖定的 transaction context
+  - control_command: strict type/key/scope/action、actor、reason、idempotency、expected_version 與 bounded payload
+- Output:
+  - control_result: created／existing、event id、active／cleared projection snapshot
+- Invariants:
+  - 不得建立 connection、commit、rollback、取得時間、更新 orders.status/lifecycle_version 或呼叫 evaluator。
+  - cancellation activate/clear、actual_start_reconfirmation require/confirm、human hold activate/release 使用各自 typed contract；不得接受任意 control type/scope/action。
+  - confirmation payload 必須保存 original/new actual_start_date 與有效 deposit settlement identity；confirmation 只對精確 new date 有效。
+  - actual-start confirmed payload另須保存canonical preview_request_hash與JSON-safe assignment_apply_receipt；exact replay先依existing event驗證完整payload，不得先要求persisted original date等於目前已更新的orders.actual_start_date。
+  - human hold scope 只允許 enter_service／auto_complete；release_policy=expires_at 的自動解除也必須由明確 background command追加 clear event。
+  - event與current projection必須同 transaction；exact replay回 existing，same key different payload conflict，partial state fail-closed。
+  - domain-derived deposit/time/schedule blocker 不建立 control row；Application 只為 required actual-start reconfirmation建立可持續 control。
+- Algorithm:
+  - 驗證 cursor/envelope identity、expected_version、typed control type/key/scope/action、actor、reason、idempotency key 與 bounded canonical payload。
+  - 以 envelope 鎖定的 existing control event 判斷 exact replay；完整 identity 相同回 existing，不同內容 conflict，projection 缺失或 event/projection 不一致 fail-closed。
+  - 新 command 依 action 建立 active 或 cleared immutable event，保存 confirmation／hold 專屬欄位及 canonical payload。
+  - 以 current_event_id CAS 新增或更新同 type/key/scope 的 current projection；rowcount 不符拋錯並交由 outer transaction rollback。
+  - 回傳 immutable control result，不更新 orders aggregate、不呼叫 evaluator且不自行結束 transaction。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_control_commands.py", "tests\\test_order_lifecycle_control_commands.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleAuthoritativeFactsLoader
+- Sub Map: services_layer
+- Type: application_component
+- State: `planned`
+- Source: services/order_lifecycle_facts_loader.py::load_order_lifecycle_authoritative_facts
+- Dependencies: [PaymentSchema, MultiCaregiverScheduleSchema, OrderServiceTimeTermsSchema, OrderLifecycleControlFactsSchema, OrderLifecycleCommandEnvelopeService]
+- Description: 在 aggregate mutex 已由 envelope 持有時，依固定順序載入 current control、付款、正式 assignment/schedule 與服務時間條款，建立 evaluator 唯一 typed authoritative facts；不掃 event history或system_alerts。
+- Complexity: medium
+- Input:
+  - cursor: caller-owned outer transaction cursor
+  - command_envelope: OrderLifecycleCommandEnvelopeService 的 locked context
+  - trigger_event: canonical lifecycle trigger
+  - evaluation_at: BusinessTimeProvider 提供的 aware Asia/Taipei instant
+  - manual_correction_target: 只由 typed correction command 提供的可空 canonical status
+- Output:
+  - locked_order: case_no、current status、lifecycle_version、actual dates 與 service window
+  - authoritative_facts: exact mapping `cancellation: bool`、`cancellation_reason: str|None`、`deposit_reconciled: bool`、`deposit_settlement_identity: str|None`、`actual_start_date: YYYY-MM-DD|None`、`actual_end_date: YYYY-MM-DD|None`、`evaluation_at: aware ISO datetime`、`completion_instant: aware ISO datetime|None`、`completion_facts_consistent: bool`、`actual_start_reconfirmed: bool`、`transition_blockers: {enter_service: tuple[str,...],auto_complete: tuple[str,...]}`、`manual_correction_target: canonical status|None`
+  - existing_event: envelope 內同 idempotency key lifecycle event 或 None
+- Invariants:
+  - 必須驗證 cursor/envelope identity；aggregate mutex 已持有後先以非 locking SELECT 重讀同案 orders current source columns，要求 status/lifecycle_version仍等於 envelope，再依 global lock order重讀 control → payment summary/immutable transactions → assignments → schedules；不得重新鎖另一案件或自行 commit/rollback。
+  - actual_start/end 與 service time terms 必須使用 post-source orders 重讀值，不得使用 command 開始前 envelope 快照；這使日期／排班 owner 在同 transaction 先更新來源後可被本次 evaluation 看見。
+  - cancellation 與 cancellation_reason 只由 post-control current projection：active cancellation 必須提供非空 reason；cleared/absent 必須輸出 reason=None。orders.status=取消但缺 active control 的 legacy row必須產生 legacy_cancellation_requires_review blocker，不得自行當成有效取消或自動離開取消。
+  - deposit_reconciled 必須由正額應收與 succeeded receipt 減合法 reversal 的 immutable ledger精確等於應收證明；零應收、summary/detail 不一致或缺資料不得視為已核銷。
+  - deposit settlement identity 固定為 canonical JSON 的小寫 SHA-256：包含 deposit_receivable、deposit_received，以及依 transaction id 排序的 succeeded deposit receipt/reversal rows；每列固定包含 id、transaction_type、amount(兩位小數字串)、occurred_at ISO date、external_reference、finance_import_row_id、reversal_of_transaction_id。deposit refund、failed/reversed row、無效 reversal link 或負淨額皆造成 `enter_service.deposit_ledger_inconsistent`。
+  - 延遲訂金一旦需要重新確認，只有精確綁定目前 actual_start_date 與 settlement identity 的 active confirmation/cleared-required facts才可解除；一般日期更新或 Alert resolve不得代替。
+  - completion_instant 由 actual_end_date、案件統一 service end time/day offset 及 Asia/Taipei 計算。completion consistency 固定要求：至少一筆 status in planned/active/completed 的正式 assignment；每筆 work-day schedule 都有 non-NULL assignment_id，且 assignment 同 case/staff、status in planned/active/completed、work_date 落在 assigned_start/end；同案不得有 review_required schedule ownership。cancelled/replaced assignment 不算有效 ownership。
+  - leave/substitution Apply 在同一 outer command 中必須先完成 canonical schedule mutation再呼叫 Loader；目前沒有可持久化的「較高優先 pending Apply」來源，Loader 不得自行發明 pending 判定。若 caller 尚未 Apply，不得觸發 schedule_applied reevaluation。
+  - human hold依scope映射至對應 blockers；enter_service hold不得阻擋auto_complete以外的底層修正命令，auto_complete hold不得阻擋進入服務中。
+  - 只能讀 canonical sources與 indexed current projection；不得讀 system_alerts、UI flags、任意 target status、clients.service_time自由文字或掃描完整control/history events。
+  - 本節點不呼叫 evaluator、不寫control/status/event/outbox/alert。
+- Algorithm:
+  - 驗證 envelope/version，按索引載入同案 active controls與正式 payment/schedule facts。
+  - 計算 deposit net、reconfirmation validity、completion instant/consistency與 scoped blockers，建立不含隱性現在時間的 immutable snapshot。
+  - 回傳 locked aggregate、typed facts與 existing lifecycle event。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_facts_loader.py", "tests\\test_order_lifecycle_facts_loader.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleDecisionPersistence
+- Sub Map: services_layer
+- Type: application_component
+- State: `planned`
+- Source: services/order_lifecycle_persistence.py::persist_order_lifecycle_decision
+- Dependencies: [OrderLifecycleStateHistorySchema, OrderLifecycleControlFactsSchema, OrderLifecycleCommandEnvelopeService]
+- Description: 使用 caller transaction 及 locked envelope，以 lifecycle_version CAS 持久化 status/cancel_reason projection、append-only decision event與 deterministic Alert outbox intents；不載入來源事實或直接寫system_alerts。
+- Complexity: medium
+- Input:
+  - cursor: 必須與 command_envelope.cursor 為同一物件的 caller-owned DictCursor
+  - command_envelope: exact immutable envelope；提供 case_no、before status、expected lifecycle_version、idempotency_key 與 existing event
+  - trigger_event: OrderLifecycleFactsValidator 允許的 canonical lifecycle trigger
+  - actor: 非空 command actor 字串
+  - business_date: evaluation_at 在 Asia/Taipei 的 ISO date；不得由 DB clock 重算
+  - idempotency_key: 非空 command key，且必須等於 envelope.idempotency_key
+  - decision: Application 將 frozen StateMachine result materialize 為 exact mapping `recommended_status`、`transition changed|unchanged|blocked`、`blocking_reasons tuple[str,...]`、`projection_states`
+  - facts_snapshot: FactsLoader exact authoritative_facts mapping；持久化前以 sorted keys、UTF-8、compact separators 產生 canonical JSON
+  - projection_states: 每筆 exact mapping `scope enter_service|auto_complete`、`alert_code`、`active bool`、`payload`；Persistence 將 active materialize 為 open、inactive 為 resolve，intent_key 固定為 `lifecycle:` 加上 canonical JSON `{command_idempotency_key,scope,alert_code,action}` 的小寫 SHA-256
+- Output:
+  - persistence_result: immutable `event_id:int`、`persisted_status:str`、`persisted_version:int`、`replayed:bool`、`outbox_ids:tuple[int,...]`
+- Invariants:
+  - expected_version 不符 fail-fast；相同 lifecycle key與完整 payload相同回existing，不同內容conflict。
+  - lifecycle replay 的 incoming identity固定比對 trigger_event、actor、business_date、request_expected_version、idempotency_key、after_status 與 canonical facts_snapshot；before_status 是首次接受時 server-observed aggregate fact，replay 從 existing event 取得並核對目前 status=after_status、version=expected+1、cancel_reason 與 outbox projection，不把 existing 欄位對自己作為 incoming 證據。
+  - 每個新接受的 changed、unchanged 或 blocked decision 都必須 append event並以 `WHERE case_no=? AND lifecycle_version=?` 將version恰加一；identical replay不得更新version或outbox。
+  - changed只把orders.status設為decision target；unchanged／blocked維持相同status但仍推進aggregate version。不得修改付款、排班、月結或日期來源。
+  - cancellation active 時 cancel_reason projection只來自 authoritative facts 的 post-control cancellation_reason；typed correction清除cancellation且成功離開取消時必須設NULL。Persistence 不得使用 command 開始前 envelope.control_states 推導新投影，舊原因只留append-only control history。
+  - replay 不論 transition 是否觸及 cancellation 都必須核對 locked cancel_reason 等於該 after_status 的 canonical projection；非取消 aggregate 若殘留非 NULL cancel_reason 必須 fail-fast，不得視為 identical replay。
+  - lifecycle event、aggregate CAS與由完整 desired-state registry materialize 的 outbox intents同transaction；任一步rowcount、identity或serialization失敗全部由outer transaction rollback。
+  - 不得自行commit/rollback、呼叫evaluator、SystemAlertWorkflowService或直接UPDATE system_alerts。
+- Algorithm:
+  - 先核對 existing event完整identity；replay則核對 projection/version/outbox完整一致後回existing。
+  - 新command以expected version CAS更新status projection與version，追加decision event。
+  - 依deterministic intent key寫入active/clear outbox rows，回傳event、version及outbox ids。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_persistence.py", "tests\\test_order_lifecycle_persistence.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleApplicationService
+- Sub Map: services_layer
+- Type: application_service
+- State: `planned`
+- Source: services/order_lifecycle_application.py::reevaluate_order_lifecycle
+- Dependencies: [OrderLifecycleControlCommandService, OrderLifecycleAuthoritativeFactsLoader, OrderLifecycleStateMachine, OrderLifecycleDecisionPersistence]
+- Description: ORD-LIFECYCLE-CORE-BATCH 最終 orchestrator；在 caller 已取得 envelope且來源command已寫入canonical facts後，依序載入事實、唯一evaluate、持久化aggregate/history/outbox。
+- Complexity: medium
+- Input:
+  - cursor: caller-owned outer transaction DictCursor，必須與 command_envelope.cursor 為同一物件
+  - command_envelope: 已由 OrderLifecycleCommandEnvelopeService 鎖定的 immutable aggregate context
+  - trigger_event: canonical lifecycle trigger
+  - evaluation_at: BusinessTimeProvider 本 command 唯一取得的 aware Asia/Taipei datetime
+  - actor: 非空 authenticated／system command actor
+  - idempotency_key: 必須精確等於 command_envelope.idempotency_key
+  - manual_correction_target: 只由typed correction service提供的可空canonical status
+- Output:
+  - application_result: immutable `OrderLifecycleApplicationResult(decision,persistence_result,control_actions)`；decision 為 exact materialized mapping，persistence_result 含 event/status/version/replay/outbox ids
+  - manual_correction_blocked: `OrderLifecycleManualCorrectionBlocked` typed exception，攜帶immutable decision且保證Application尚未呼叫Persistence
+- Invariants:
+  - lifecycle-relevant domain command必須先取得envelope，再依global lock order寫來源facts，最後以同cursor呼叫本節點；本節點不得commit/rollback。
+  - query/list/UI render/Alert claim或resolve不得呼叫；時間到達、hold expiry由可重試background command走同一入口。
+  - FactsLoader是唯一DB facts reader，StateMachine是唯一target decision owner，DecisionPersistence是唯一status/version/history/outbox writer。
+  - Application 是 StateMachine frozen decision 到 Persistence mapping 的唯一 materializer：必須驗證 projection_states 的 `(scope,alert_code)` 精確等於 `LIFECYCLE_BLOCKER_PROJECTION_REGISTRY` 的 13 筆、數量與排序，將每筆 dataclass 轉為 exact mapping，並將 payload tuple-pairs 轉為無重複 key 的 JSON object；缺列、重複、未知 code、亂序或不可序列化 payload 一律 fail-fast。
+  - 若 envelope 已有 identical lifecycle event，Application 必須從該 event 的 immutable facts_snapshot 還原首次 command 的 evaluation_at、before status/version 與authoritative facts，再交同一 StateMachine/materializer重建原決策並由Persistence驗證；不得用retry當下時間或已推進後的orders status重新評估，也不得由單一caller各自特判replay時間。
+  - 若StateMachine產生 active `enter_service.actual_start_reconfirmation_required`，須沿用 envelope 的 parent idempotency key 呼叫 ControlCommandService activate required control，再以更新後facts/decision持久化；control event 與 lifecycle event 位於不同資料表且各自唯一，禁止另造未被 envelope 鎖定的 derived key。
+  - required command 必須使用 `ActualStartReconfirmationRequiredCommand(actor,reason,expected_version,idempotency_key,actual_start_date,deposit_settlement_identity)`；idempotency_key 精確等於 envelope.idempotency_key，reason 固定 `lifecycle.actual_start_reconfirmation_required`，expected_version 使用 envelope.request_expected_version，日期與 settlement identity 來自本次 authoritative facts。每個 application command 最多自動建立一次 control 並重評估一次，第二次仍要求新建即視為 control projection 不一致。
+  - manual correction target只能來自typed correction service；raw UI status、Alert status、projection details不得傳入。
+  - typed manual correction若StateMachine為blocked或recommended_status不等於requested target，Application必須在任何自動required-control建立及Persistence之前立即拋`OrderLifecycleManualCorrectionBlocked`並攜帶frozen decision；caller捕捉後rollback同transaction內可能已clear的control，不得新增第二control、history/version/outbox或留下partial control。
+  - domain transaction不直接呼叫SystemAlertWorkflowService；Alert失敗不得回滾已提交domain command，outbox projector負責重試。
+  - 不得修改已實收、實付、核銷、月結、排班或日期來源；各owner command先寫來源事實再重評估。
+- Algorithm:
+  - 新command以envelope與evaluation_at呼叫FactsLoader，將typed facts交StateMachine；replay則strict解析existing event的immutable facts_snapshot並以原始evaluation_at、status/version交同一StateMachine。
+  - 非blocked manual correction及其他command需要持續reconfirmation control時才沿用parent idempotency key啟用並重新載入/驗證facts；manual blocked check必須先於此步驟，不允許derived key或無界重評估。
+  - 將decision、facts snapshot與projection intents交DecisionPersistence，回傳完整結果。
+  - manual correction在Persistence前驗證decision target；不符合時產生typed blocked exception，符合時才持久化。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_business_time.py", "tests\\test_order_lifecycle_command_envelope.py", "tests\\test_order_lifecycle_control_commands.py", "tests\\test_order_lifecycle_facts_loader.py", "tests\\test_order_lifecycle_persistence.py", "tests\\test_order_lifecycle_application.py", "-q", "-p", "no:cacheprovider", "--basetemp", "adad_tmp\\pytest-order-lifecycle-core-batch"], "cwd": "project", "timeout": 240, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability:
+  - metric: order_lifecycle_transition_total
+  - alert: order_lifecycle_outbox_failed
+
+##### Module: OrderLifecycleAlertProjector
+- Sub Map: services_layer
+- Type: projector
+- State: `planned`
+- Source: services/order_lifecycle_alert_projector.py::project_order_lifecycle_alert_outbox
+- Dependencies: [DbService, OrderLifecycleControlFactsSchema, OrderLifecycleTransitionGuard, SystemAlertWorkflowService]
+- Description: 在獨立可重試transaction中消費lifecycle projection outbox，將active／cleared blocker intent投影到system_alerts；不參與domain decision或control ownership。
+- Complexity: medium
+- Input:
+  - batch_limit: 每批最多claim筆數
+  - worker_id: projector worker identity
+  - retry_at: 本輪判斷due failed outbox的時間
+- Output:
+  - projection_summary: projected／existing／retry_scheduled／failed counts與outbox ids
+- Invariants:
+  - 只能按索引claim pending/due failed rows，使用deterministic alert_code/case_key呼叫SystemAlertWorkflowService upsert/resolve。
+  - 投影成功才標projected；暫時失敗以有限backoff記retry metadata，永久payload錯誤標failed並告警，不修改domain facts。
+  - duplicate worker/exact retry不得建立第二alert或重複副作用；不得讀寫orders status/version、control state、付款、排班或lifecycle events。
+  - Alert claimed/resolved狀態不得回寫control或觸發LifecycleApplication。
+  - Projector擁有每筆outbox的獨立connection/transaction/commit/rollback/close；claim與project結果必須以row id、status、locked_at_utc及processing期間寫入last_error的`claim:<sha256(worker_id|retry_at|row_id)>` token作CAS，projected時清空token、failed時改存錯誤，不能把外部Alert呼叫包進domain command transaction。
+  - alert_code必須對照OrderLifecycleTransitionGuard公開的`LIFECYCLE_BLOCKER_PROJECTION_REGISTRY`，不得在projector複製第二份code清單；未知code為permanent payload error。
+  - attempt_count包含本次嘗試，最多5次；第1至4次transient失敗依序延後60、300、1800、7200秒，第5次轉永久failed。payload JSON/shape/hash、未知scope/action/code屬permanent；PyMySQL連線／鎖／deadlock與SystemAlertWorkflowService RuntimeError屬transient直到上限，錯誤文字截斷1000字。
+- Algorithm:
+  - 以bounded batch及worker identity在短transaction中claim pending或已到期failed outbox，驗證payload、blocker key與desired state。
+  - active intent使用deterministic alert identity執行upsert，inactive intent執行resolve；成功後以CAS標記projected。
+  - 對可重試錯誤計算有限backoff並更新retry metadata；永久資料錯誤標failed及建立投影器自身告警，最後回傳分類計數。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_alert_projector.py", "tests\\test_order_lifecycle_alert_projector.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability:
+  - metric: order_lifecycle_projection_outbox_pending
+  - alert: order_lifecycle_projection_outbox_failed
+
+##### Module: OrderCancellationCommandService
+- Sub Map: services_layer
+- Type: application_service
+- State: `planned`
+- Source: services/order_cancellation_command.py::cancel_order
+- Dependencies: [DbService, BusinessTimeProvider, OrderLifecycleCommandEnvelopeService, OrderLifecycleControlCommandService, CaregiverAvailabilityLockCancellationService, OrderLifecycleApplicationService]
+- Description: 所有訂單階段共用的唯一取消命令；在單一transaction建立canonical cancellation control、同步取消可能存在的waiting-deposit lock，並由LifecycleApplication唯一決定status/version/history/outbox。
+- Complexity: medium
+- Input:
+  - case_no: canonical order identifier
+  - expected_version: caller observed aggregate version
+  - idempotency_key: cancellation command identity
+  - actor: authenticated principal
+  - reason: 非空canonical取消原因
+- Output:
+  - cancellation_result: created／existing、control event、lock side effects、lifecycle decision/version與outbox ids
+- Invariants:
+  - 可接受洽談中、訂單成立、服務中或訂單完成；已取消只允許完全相同replay。取消不得自動建立客戶退款、退補助款、沖正付款或刪除排班／帳務歷史。
+  - transaction順序固定為取得BusinessTime一次、開connection/cursor、lock lifecycle envelope、處理active waiting-deposit lock component、activate cancellation control、呼叫LifecycleApplication、commit恰一次。
+  - active waiting lock存在時必須同transaction完整取消；沒有active lock不影響一般取消。partial lock、settlement ownership矛盾或任一rowcount錯誤全部rollback。
+  - canonical cancellation control是退款資格門禁；orders.status或cancel_reason投影單獨存在不足以允許建立客戶退款。
+  - cancel_reason只作current顯示projection；取消解除後設NULL，歷史原因由control events查詢。
+  - 不得直接UPDATE orders.status/lifecycle_version或呼叫DbService.update_order_status。
+- Algorithm:
+  - 驗證命令欄位並取得單一BusinessTime，在caller-owned transaction中先鎖lifecycle envelope。
+  - 以同一cursor取消完整active waiting-deposit lock component，接著寫入或重播canonical cancellation control。
+  - 呼叫LifecycleApplication重載authoritative facts並持久化status/version/history/outbox；所有步驟成功才commit，任何例外rollback。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_cancellation_command.py", "tests\\test_order_cancellation_command.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderActualStartReconfirmationCommandService
+- Sub Map: services_layer
+- Type: application_service
+- State: `planned`
+- Source: services/order_actual_start_reconfirmation.py::reconfirm_order_actual_start
+- Dependencies: [DbService, BusinessTimeProvider, OrderLifecycleCommandEnvelopeService, OrderLifecycleControlCommandService, OrderLifecycleAuthoritativeFactsLoader, OrderAssignmentSynchronizationApplyService, OrderLifecycleApplicationService]
+- Description: 由具權限工會人員明確重新確認延遲訂金案件的真正開始日；同transaction更新日期／正式排班投影、clear required control並重評估狀態。
+- Complexity: medium
+- Input:
+  - case_no: canonical order identifier
+  - expected_version: caller observed aggregate version
+  - idempotency_key: reconfirmation command identity
+  - actor: authenticated union principal
+  - reason: 非空重確認原因
+  - new_actual_start_date: 明確新真正開始日
+  - order_change: Calendar Preview確認的完整訂單目標值，actual_start_date必須等於new_actual_start_date
+  - assignment_plan: Calendar Preview確認的一筆以上完整正式月嫂配置
+  - schedule_change_plan: Calendar Preview回傳required removals的完整remove_schedule_ids
+- Output:
+  - reconfirmation_result: immutable `ActualStartReconfirmationResult(outcome,case_no,original_actual_start_date,new_actual_start_date,deposit_settlement_identity,preview_request_hash,assignment_apply_receipt,control_result,lifecycle_result)`；outcome只允許created/existing，receipt保存JSON-safe Apply完整結果
+- Invariants:
+  - 必須先鎖envelope，再證明訂金目前有效且存在active actual_start_reconfirmation required control；一般日期更新或Alert resolve不得呼叫本命令的clear分支。
+  - event保存原/新日期、有效deposit settlement identity、actor/reason/version/key；相同key完整相同才replay。
+  - preview_request_hash以canonical JSON `{case_no,order_change,assignment_plan,schedule_change_plan}` 計算小寫SHA-256；首次Apply結果轉為JSON-safe immutable receipt並連同hash寫入confirmation control event。replay必須由existing event還原receipt並驗證hash與全部command identity，跳過Apply，不得新增第二audit或schedule。
+  - 使用正式assignment/schedule同步元件更新actual_start/end與排班，不得把原過期日至新日期間補記為實際服務。
+  - 不得只以new_actual_start_date猜測順延方式；order_change、assignment_plan與schedule_change_plan必須完整且彼此一致，缺少或stale時fail-closed。
+  - clear confirmation control、日期／schedule mutation、LifecycleApplication與outbox同transaction；任一失敗全部rollback。
+  - 本服務擁有唯一connection/cursor/commit/rollback/close；所有下游元件只使用同一cursor。
+  - 新command在Apply前以公開FactsLoader讀取deposit_reconciled、deposit_settlement_identity及active actual_start_reconfirmation control；不得呼叫私有payment helper或複製ledger演算法。replay只信任並驗證immutable control/lifecycle events，不要求已clear control仍active。
+  - 若新日期已到且無enter_service blocker可進服務中；未來日期回正常訂單成立等待路徑。不得由命令直接指定status。
+- Algorithm:
+  - 取得單一BusinessTime並鎖lifecycle envelope，驗證active reconfirmation-required control、有效訂金及settlement identity。
+  - 若envelope已有matching control/lifecycle events，解析persisted preview hash與Apply receipt，驗證本次完整Preview request後跳過Apply，重送typed control與Application exact replay。
+  - 新command由公開FactsLoader驗證訂金與active required control，再將完整order change、assignment plan、schedule removal plan與BusinessTime日期交caller-cursor同步元件；把JSON-safe Apply結果與request hash放入typed confirmation clear payload。
+  - 呼叫LifecycleApplication重評估並回傳frozen result；成功才commit，失敗完整rollback。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_actual_start_reconfirmation.py", "tests\\test_order_actual_start_reconfirmation.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleControlReadLoader
+- Sub Map: services_layer
+- Type: query_service
+- State: `planned`
+- Source: services/order_lifecycle_control_read_loader.py::load_order_lifecycle_control_read_facts
+- Dependencies: [DbService, BusinessTimeProvider]
+- Description: 以不加鎖的單一 bounded query pipeline 載入 Calendar control read 所需 canonical facts；與 command 專用、必須持有 aggregate mutex 的 OrderLifecycleAuthoritativeFactsLoader 明確分離。
+- Complexity: medium
+- Input:
+  - cursor: query-owned DictCursor；不得由 command envelope 提供。
+  - case_no: canonical order identifier。
+  - as_of: 同一 request 唯一 BusinessTime instant/date。
+- Output:
+  - read_facts: immutable order version/status/date、actual-start current control/event identity、有效訂金 settlement identity 與 stable canonical blocker inputs。
+- Algorithm:
+  - 以 case_no 讀 orders lifecycle_version/status/actual_start_date；不存在回 typed not-found。
+  - 以 current projection 的固定 `(case_no,actual_start_reconfirmation,actual_start_reconfirmation)` key 讀 active/cleared control與目前event；不得掃描完整 event history。
+  - 以既有 immutable client payment transaction及link canonical keys聚合有效訂金 settlement identity；輸出 typed facts，不計算 UI 文案或 mutation decision。
+- Invariants:
+  - 所有 SELECT 都不得使用 FOR UPDATE、LOCK IN SHARE MODE、GET_LOCK 或 advisory lock；不得 INSERT/UPDATE/DELETE、commit、rollback或修改 isolation level。
+  - 本 loader 只供 read projection，不得被 lifecycle command 用來取代 OrderLifecycleAuthoritativeFactsLoader；command 路徑仍須 aggregate mutex與caller-owned cursor。
+  - 訂金有效性與 settlement identity 必須使用與 lifecycle command FactsLoader 相同的 immutable payment transaction/link canonical來源及 reversal語意；不得以 client_payments summary、amount欄位、Alert或status猜測。
+  - actual-start control 只讀 current projection及其 current_event_id；不得以日期相等、alert resolved或event count推測active/cleared。
+  - query 數量與 rows 必須 bounded by case_no/index；不得掃描全部 orders、control event history或finance rows。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_control_read_loader.py", "tests\\test_order_lifecycle_control_read_loader.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleControlReadProjection
+- Sub Map: services_layer
+- Type: query_service
+- State: `planned`
+- Source: services/order_lifecycle_control_read_projection.py::get_order_lifecycle_control_state
+- Dependencies: [DbService, BusinessTimeProvider, OrderLifecycleControlReadLoader]
+- Description: 為管理端 Calendar 提供單一案件 authoritative lifecycle/control read snapshot；只讀 canonical order version、狀態、actual-start reconfirmation control 與 server-derived blockers，不以 Alert 或 UI 草稿取代義務狀態。
+- Complexity: medium
+- Input:
+  - case_no: canonical order identifier。
+  - as_of: 由 BusinessTimeProvider 每次 query 取得一次的明確 business instant/date，不接受 client 自報。
+- Output:
+  - control_state: immutable `OrderLifecycleControlState(case_no,lifecycle_version,canonical_status,actual_start_reconfirmation)`。
+  - actual_start_reconfirmation: immutable `ActualStartReconfirmationControlState(state,required_date,current_actual_start_date,blockers,can_reconfirm)`；state只允許not_required、active、cleared。
+- Algorithm:
+  - 開啟唯讀 connection/cursor，以 case_no 讀取 orders canonical status/lifecycle_version；不存在回 typed not-found。
+  - 使用 OrderLifecycleControlReadLoader 與 control projection/event identity 取得 current actual_start_date、有效訂金 settlement、active/cleared actual-start control及server-derived blockers。
+  - 依 canonical facts 組合 frozen snapshot並關閉 cursor/connection；不得建立 transaction side effect或修改任何 projection。
+- Invariants:
+  - lifecycle_version 必須直接來自 orders aggregate version；不得以 history count、event id、Alert updated_at 或預設0代替。
+  - actual-start state 以 canonical control projection/event 為準：無義務為not_required、active required control為active、已明確clear且無新required control為cleared；不得只以日期相等、Alert resolved或status推測。
+  - blockers 至少精確涵蓋 required control inactive、有效訂金不存在/identity不一致、案件已取消、缺少目前 actual_start_date，以及其他 FactsLoader canonical domain blockers；輸出使用穩定 machine codes與排序。
+  - can_reconfirm 只在state=active、有效訂金存在、案件未取消且沒有blocking code時為true；Query不得推進狀態、clear control、建立Alert或更新lifecycle_version。
+  - Query不得使用 `SELECT ... FOR UPDATE`、INSERT/UPDATE/DELETE、commit或rollback；不得 import UI/API、讀取 Streamlit session或接受client-derived facts。
+  - BusinessTime 每次呼叫只取得一次；同一 response 的日期判斷必須共用該值，避免跨午夜不一致。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_control_read_projection.py", "tests\\test_order_lifecycle_control_read_projection.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleHoldCommandService
+- Sub Map: services_layer
+- Type: application_service
+- State: `planned`
+- Source: services/order_lifecycle_hold_commands.py::apply_order_lifecycle_hold_command
+- Dependencies: [DbService, BusinessTimeProvider, OrderLifecycleCommandEnvelopeService, OrderLifecycleControlCommandService, OrderLifecycleApplicationService]
+- Description: 建立或解除具範圍human hold；hold只暫停enter_service或auto_complete transition，不取代domain blocker、Alert或訂單status。
+- Complexity: medium
+- Input:
+  - case_no: canonical order identifier
+  - hold_key: 同案內具語意的hold identity
+  - scope: enter_service或auto_complete
+  - action: activate或release
+  - reason: 非空hold或release原因
+  - actor: authenticated principal或background worker identity
+  - expected_version: caller observed aggregate version
+  - idempotency_key: hold command identity
+  - release_policy: manual或expires_at
+  - expires_at: 明確到期時間；manual時為None
+- Output:
+  - hold_result: active／cleared projection、event、lifecycle decision/version與outbox ids
+- Invariants:
+  - scope只允許enter_service／auto_complete；不得建立全案萬用hold或用hold讓不合法transition變合法。
+  - hold不得阻止付款、日期、請假、順延、代班等修正底層facts的domain command；只由TransitionGuard在目標scope套用。
+  - release必須是具權限、具reason/version/key的明確command；到期不得由GET/loader自動忽略，必須由可重試background command追加clear event。
+  - activate/release control、LifecycleApplication、history/version/outbox同transaction；Alert claim/resolve不得呼叫本服務。
+  - 本服務擁有唯一connection/cursor/commit/rollback/close；exact replay沿用同一transaction pipeline。
+- Algorithm:
+  - 驗證scope/action/release policy及必要reason、actor、version、key，取得BusinessTime並先鎖lifecycle envelope。
+  - 將activate、manual release或到期background release正規化為typed control command，執行exact replay/conflict檢查並更新control event/projection。
+  - 呼叫LifecycleApplication套用scope blocker並持久化version/history/outbox；成功commit，任一失敗rollback。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_hold_commands.py", "tests\\test_order_lifecycle_hold_commands.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleManualCorrectionService
+- Sub Map: services_layer
+- Type: application_service
+- State: `planned`
+- Source: services/order_lifecycle_manual_correction.py::correct_order_lifecycle
+- Dependencies: [DbService, BusinessTimeProvider, OrderLifecycleCommandEnvelopeService, OrderLifecycleControlCommandService, OrderLifecycleApplicationService]
+- Description: 取代任意status PUT的一次性typed correction；驗證canonical target與hard facts，必要時clear cancellation control，再由唯一StateMachine決定是否接受。
+- Complexity: medium
+- Input:
+  - case_no: canonical order identifier
+  - requested_status: 五個canonical狀態之一
+  - reason: 非空人工校正原因
+  - actor: authenticated principal
+  - expected_version: caller observed aggregate version
+  - idempotency_key: correction command identity
+- Output:
+  - correction_result: accepted／blocked、before/after status、cleared controls、history/version與outbox ids
+- Invariants:
+  - requested_status只允許五個canonical值，但target=訂單取消必須走OrderCancellationCommandService；本服務不得用correction偽造取消。
+  - 離開訂單取消時先以同transaction clear cancellation control並將cancel_reason投影設NULL，之後依最新付款、日期、排班與controls重新評估；不得直接恢復取消前status。
+  - target硬性門禁：洽談中不得有有效訂金或服務事實；訂單成立需有效訂金且未到有效開始；服務中需訂金、日期、重確認與無enter blocker；訂單完成需合法completion instant與無auto-complete blocker。
+  - correction不得解除domain blocker或human hold、改付款／排班／日期、覆寫歷史或持續禁止後續自動狀態機。
+  - raw generic PUT、DbService.update_order_status與UI直接status writer必須退役；所有correction要求authenticated actor、reason、version及key。
+  - 本服務擁有唯一connection/cursor；成功恰commit一次，typed blocked或任何失敗rollback並close，不能由下游元件管理transaction。
+- Algorithm:
+  - 驗證canonical requested status及authenticated command identity，取得BusinessTime並先鎖lifecycle envelope。
+  - 若從取消狀態離開，以typed control command清除cancellation並使cancel_reason projection成為NULL；其餘domain facts與hold保持不變。
+  - 以最新authoritative facts呼叫LifecycleApplication；只有StateMachine自然決策符合requested status才接受並commit，否則rollback並回傳blocked。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\order_lifecycle_manual_correction.py", "tests\\test_order_lifecycle_manual_correction.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleCommandIntegrationTest
+- Sub Map: services_layer
+- Type: integration_test
+- State: `planned`
+- Source: tests/test_order_lifecycle_commands_integration.py
+- Dependencies: [OrderCancellationCommandService, OrderActualStartReconfirmationCommandService, OrderLifecycleHoldCommandService, OrderLifecycleManualCorrectionService, OrderLifecycleAlertProjector]
+- Description: ORD-LIFECYCLE-COMMANDS-BATCH的集中驗證節點，一次覆蓋typed commands、transaction rollback、version/idempotency、scoped hold、outbox eventual projection及既有direct-status路徑退役。
+- Complexity: medium
+- Input:
+  - scenarios: cancel/replay/reopen、delayed deposit reconfirm、hold activate/release/expiry、manual correction、outbox retry
+- Output:
+  - verification_receipt: single pytest batch result
+- Invariants:
+  - 必須驗證每個非replay aggregate command version恰加一、replay不加、same key different payload conflict。
+  - 必須以failure injection證明control/source/status/history/outbox all-or-nothing，Alert projector failure不回滾已提交domain command。
+  - 必須證明generic status PUT、DbService.update_order_status與legacy importer direct status helper無法成為production mutation path。
+  - 必須使用真實 StateMachine frozen decision 經 Application materializer 送入 Persistence，證明 13 筆 registry 的 active／inactive desired state、payload JSON object、outbox replay與非取消 cancel_reason=NULL 邊界可串接；不得以手寫 mapping 代替跨層資料形狀。
+- Algorithm:
+  - 建立可重複的 caller-owned transaction fixtures，依 command lock order 準備 order、control、payment、assignment、schedule、history 與 outbox 狀態。
+  - 逐一執行 cancel/replay/reopen、延遲訂金重確認、hold activate/release/expiry、manual correction 與 payment reversal 情境，核對 aggregate version、status、cancel_reason、control/history/outbox。
+  - 以真實 StateMachine decision 經 Application materializer 進入 Persistence，驗證 exact 13-state registry、payload shape、identical replay 與 conflict。
+  - 注入 control、aggregate CAS、history、outbox 與 projector 失敗，證明 transaction rollback 邊界及 domain commit 後 projector retry。
+  - 掃描並呼叫公開 mutation 入口，證明 generic direct-status 路徑退役；所有情境完成後輸出單一 batch verification receipt。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_cancellation_command.py", "tests\\test_order_actual_start_reconfirmation.py", "tests\\test_order_lifecycle_hold_commands.py", "tests\\test_order_lifecycle_manual_correction.py", "tests\\test_order_lifecycle_alert_projector.py", "tests\\test_order_lifecycle_commands_integration.py", "-q", "-p", "no:cacheprovider", "--basetemp", "adad_tmp\\pytest-order-lifecycle-commands-batch"], "cwd": "project", "timeout": 300, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: FinanceNormalizedRowValidator
@@ -928,12 +1517,65 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_statement_normalizer.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
+##### Module: FinanceImportStateContract
+- Sub Map: services_layer
+- Type: domain_contract
+- State: `planned`
+- Source: services/finance_import_states.py
+- Dependencies: []
+- Description: 定義 IMP-01 的 batch、occurrence outcome、classification、reconciliation 與 alert 五個正交狀態軸及合法轉移，避免把 skipped_existing／review／pending 混成單一狀態。
+- Complexity: medium
+- Input:
+  - current_axes: batch_status、classification_type、reconciliation_status 與 alert_status
+  - transition_event: stage、classify、reclassify、reconcile、duplicate_occurrence、claim、resolve 或 reopen
+- Output:
+  - validated_axes: canonical vocabularies
+  - transition_decision: allowed 或穩定拒絕原因
+- Invariants:
+  - batch_status 只允許 staged、completed、failed，合法轉移為 staged→completed|failed。
+  - occurrence_outcome 只允許 inserted、skipped_existing；只描述本次 occurrence，不得寫入 canonical classification/reconciliation 欄位。
+  - classification_type 只允許 pending、client_receipt、government_subsidy、client_subsidy_return、staff_salary、staff_legacy_subsidy、non_business_review。
+  - 正常 classification 為 pending→一個完成類型；自動 reclassification 只允許 eligible non_business_review→business classification 或 unchanged，business classification 不得自動倒退。
+  - reconciliation_status 只允許 pending、reconciled，正常只可 pending→reconciled；正式退匯／沖正用 append-only domain event，不將 staging 倒退。
+  - alert_status 只允許 open、claimed、resolved，問題重現時 resolved 可 reopen；不得以 alert status 取代 classification/reconciliation。
+  - dry_run／apply、committed／rolled_back／existing 是 command mode/outcome，不是 canonical row state。
+- Algorithm:
+  - 分別驗證每個正交 vocabulary，拒絕跨軸值。
+  - 依 transition event 檢查單一軸合法轉移，不隱含修改其他軸。
+  - 回傳 deterministic decision；不讀寫資料庫或執行 side effect。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_states.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceCancellationCodeProjection
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_cancellation_code.py::resolve_finance_cancellation_code
+- Dependencies: [FinanceNormalizedRowValidator, FinanceImportStateContract]
+- Description: 為分類與客戶入款核銷提供唯一銷帳編號投影；兼容既有 Sinopac raw reference，但不改寫 canonical row 或 fingerprint。
+- Complexity: low
+- Input:
+  - row: 含 format_id、cancellation_code 與 bank_references 的 normalized 或 canonical finance row
+- Output:
+  - cancellation_code: 完整合法 14 碼虛擬帳號或 None
+  - source: canonical、sinopac_raw_fallback 或 none
+- Invariants:
+  - 合法值只接受完整 `99781699` 加六碼數字；不得截斷、補零或從其他文字擷取。
+  - legacy 只可讀 canonical cancellation_code；不得 fallback 至 bank_references、姓名、備註、更正註記或第 12 欄比對欄位。
+  - sinopac 先讀 canonical cancellation_code；只有 canonical 缺失或格式無效時，才可精確讀取 bank_references 的「銷帳編號」。
+  - 相容 fallback 只回傳投影，不得寫回 canonical raw fields、adapter output 或 dedup_fingerprint。
+  - 本節點為純函式，不得連線資料庫、選案件、分類事件或建立正式交易。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_cancellation_code.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
 ##### Module: FinanceTransactionClassifier
 - Sub Map: services_layer
 - Type: service
 - State: `planned`
 - Source: services/finance_transaction_classifier.py::classify_finance_transaction
-- Dependencies: [FinanceNormalizedRowValidator]
+- Dependencies: [FinanceNormalizedRowValidator, FinanceCancellationCodeProjection, FinanceImportStateContract]
 - Description: 依已確認銀行、方向、銷帳編號、備註與精確帳號候選分類銀行事件；分類不等於核銷。
 - Complexity: medium
 - Input:
@@ -946,19 +1588,19 @@
   - resolved_counterparty_account: 精確唯一命中的完整帳號；無唯一帳號時為 None
   - reason: 分類依據或待確認原因
 - Invariants:
-  - 永豐存入只有有效 `99781699` 加六碼銷帳編號才可分類 client_receipt。
+  - legacy／sinopac 存入只有 FinanceCancellationCodeProjection 回傳有效 `99781699` 加六碼銷帳編號才可分類 client_receipt。
   - 台新存入只有 memo 包含「新竹市政府」才可分類 government_subsidy；其他台新存入一律 non_business_review。
   - 台新支出只以 counterparty_account 精確匹配唯一客戶退款帳戶或唯一服務人員帳戶；同時命中、零個或多個命中一律 non_business_review。
   - 永豐支出以 staff_accounts 的完整帳號逐一比對 memo 原文；memo 零命中時才比對 bank_references 的「存摺備註」。只有完整帳號唯一命中同一 staff 時分類 staff_salary；零命中、命中多位 staff 或同一欄命中多個不同帳號時一律 non_business_review。
   - 台新或永豐只有精確帳號唯一命中時才回傳 resolved_counterparty_account，且必須等於實際命中的 mapping key；incoming、零命中、多帳號或身分歧義時必須為 None。
   - 姓名不得取代帳號匹配；本節點不得寫資料庫或依金額選案件、批次或月結。
 - Algorithm:
-  - 先驗證 normalized row，再依 format_id 與 direction 套用固定分類矩陣。
+  - 先驗證 normalized row，再依 format_id 與 direction 套用固定分類矩陣；legacy／sinopac incoming 的銷帳編號一律委派 FinanceCancellationCodeProjection。
   - 台新出帳使用 adapter 已解析的 counterparty_account；永豐出帳使用完整 staff account 對備註原文做主欄、備用欄兩階段比對。只有單一身分類別、單一 id 與單一完整帳號時成功並回傳 resolved_counterparty_account。
   - 其餘回傳 non_business_review 與可機讀 reason。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_transaction_classifier.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_transaction_classifier.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: FinanceImportStagingService
@@ -966,7 +1608,7 @@
 - Type: service
 - State: `planned`
 - Source: services/finance_import_staging.py::stage_finance_rows
-- Dependencies: [FinanceStatementNormalizationPipeline, FinanceTransactionFingerprint, FinanceImportRawStagingSchema, FinanceTransactionClassifier]
+- Dependencies: [FinanceStatementNormalizationPipeline, FinanceTransactionFingerprint, FinanceImportRawStagingSchema, FinanceTransactionClassifier, FinanceImportStateContract]
 - Description: 將一次 Excel 正規化結果以 append-only 方式寫入 staging；已存在 fingerprint 只新增來源 occurrence，不覆寫 canonical row 或正式帳務。
 - Complexity: medium
 - Input:
@@ -989,7 +1631,7 @@
   - 回傳 batch id 與每列 inserted/skipped_existing 結果；正式核銷交由下游服務。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_staging.py", "-q"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_staging.py", "-q"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: SubsidyClaimWorkflowService
@@ -1274,8 +1916,8 @@
 - Type: service
 - State: `planned`
 - Source: services/client_receipt_reconciliation.py::reconcile_client_receipt
-- Dependencies: [PaymentSchema, ClientPaymentFinanceLinkMigration, FinanceImportRawStagingSchema, FinanceTransactionFingerprint, ClientVirtualAccountResolver, ClientPaymentSnapshotService, ClientPaymentWriteService]
-- Description: 將已分類且虛擬帳號唯一命中案件的永豐入款，依訂金、第一期、第二期順序核銷至客戶帳務。
+- Dependencies: [PaymentSchema, ClientPaymentFinanceLinkMigration, FinanceImportRawStagingSchema, FinanceTransactionFingerprint, FinanceCancellationCodeProjection, ClientVirtualAccountResolver, ClientPaymentSnapshotService, BusinessTimeProvider, OrderLifecycleCommandEnvelopeService, ClientPaymentWriteService]
+- Description: 將已分類且虛擬帳號唯一命中案件的 legacy／sinopac 入款，依訂金、第一期、第二期順序核銷至客戶帳務。
 - Complexity: medium
 - Input:
   - cursor: transaction cursor
@@ -1285,14 +1927,16 @@
   - transaction_ids: 本次跨階段建立的客戶交易 ids
   - client_payment_id: 唯一客戶帳務摘要
 - Invariants:
-  - staging row 必須是永豐 incoming、credit 大於零且仍 pending；虛擬帳號只可取自 bank_references 中原樣保存的「銷帳編號」，並交 ClientVirtualAccountResolver 精確解出唯一存在的 case_no，不得使用更正註記或備註替代。
+  - staging row 的 format_id 必須為 legacy 或 sinopac、direction=incoming、credit 大於零、classification_type=client_receipt 且仍 pending；其他格式或狀態保持 pending，不建立正式交易。
+  - SELECT 必須載入 canonical cancellation_code 與 bank_references，並委派 FinanceCancellationCodeProjection；不得在核銷服務自行建立另一套 fallback，也不得使用姓名、備註、更正註記或第 12 欄比對欄位替代。
   - 客戶應收快照只由訂單條件與 OrderAmountCalculator 建立；不得用銀行金額反推應收。
   - 入款依 deposit、first_payment、second_payment 的未收餘額順序分配；超收或缺必要訂單條件時保持 pending，不建立正式交易。
   - 每個階段 external_reference 固定為 `fp:<fingerprint>:<stage>`，finance_import_row_id 指向同一 canonical row；不得使用檔名、列號或 staging id。
   - 所有交易、摘要重算、訂單狀態推進及 staging reconciled 必須使用同一 cursor 且位於同一 transaction；只能呼叫 ClientPaymentWriteService 的 cursor-bound 核心，重試只允許完全相同既有交易集合。
+  - staging row 可在解析 case_no 前先鎖；解析唯一 case_no 後，orders lifecycle envelope 必須是第一個 case-scoped lock。以 fingerprint 作 parent command identity、讀取當下 lifecycle_version 後立即由 Envelope CAS 鎖定，再取得 payment snapshot／ledger lock。
   - 鎖定訂單時身分資格只能 join clients.identity_status 取得；不得選取、傳遞或寫入 clients.identity_status，且不得修改 clients.identity_status。
 - Algorithm:
-  - 鎖 staging row，驗證 fingerprint，將 bank_references 的銷帳編號交 resolver 取得唯一 case_no；鎖 orders 並以 actual_start_date 優先、否則 start_date 組成明確條件，取得或建立不覆寫的 client payment snapshot。
+  - 鎖 staging row，驗證 fingerprint，以 FinanceCancellationCodeProjection 取得唯一銷帳編號，再交 resolver 取得唯一 case_no；取得 BusinessTime 一次，以 `finance-receipt:<fingerprint>` 作 lifecycle key，讀取 lifecycle_version 後立即鎖 envelope，再以 actual_start_date 優先、否則 start_date 組成明確條件，取得或建立不覆寫的 client payment snapshot。
   - 計算各階段未收餘額並完整分配本次 credit，逐階段新增 receipt transaction。
   - 重算三階段摘要與完成日，必要時推進訂單狀態，再標記 staging reconciled。
 - Verification:
@@ -1300,13 +1944,216 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_client_receipt_reconciliation.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
+##### Module: SystemAlertWorkflowService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/system_alert_service.py
+- Dependencies: [PaymentSchema]
+- Description: 管理 system_alerts 的可變目前狀態投影與人工 claim／resolve；不保存不可變帳務稽核，也不修改正式業務資料。
+- Complexity: medium
+- Input:
+  - alert_identity: alert_code、source_domain 與 deterministic case_key
+  - current_projection: reason 與 bounded details JSON
+  - workflow_action: claim／resolve 的 operator 與原因
+- Output:
+  - alert: open、claimed 或 resolved 的目前投影
+  - action_result: created、updated、reopened、claimed、resolved、existing 或 conflict
+- Invariants:
+  - 同一 alert_code 與 case_key 最多一筆；upsert 更新目前 reason/details，不建立第二筆。
+  - 問題重現時 resolved 必須 reopen；claimed 的問題仍存在時保留 claimed_by／claimed_at 並刷新目前 details。
+  - 對「current-state anomaly 已消失」的明確 projection，可自動解除 open 或 claimed；claimed 自動解除時保留認領資訊並另記 resolved_by／resolved_at／resolution_reason。
+  - 自動解除 claimed 的能力只能由明確 current-state projector 呼叫，不得靜默改變其他既有 alert code 的 generic resolve_absent_alerts 語意。
+  - system_alerts 是可變提醒投影；不得用它取代 finance reclassification append-only audit、finance_alerts event history 或正式 transaction。
+  - details 必須是 bounded JSON，不得保存密碼、完整銀行帳號、整列 raw_payload 或數千個 row ids。
+- Algorithm:
+  - 以 alert_code/case_key 鎖定既有列；依目前問題是否存在進行 create、refresh、reopen 或 current-state resolve。
+  - claim／manual resolve 執行明確狀態衝突檢查；不同 operator 不得覆蓋他人 claim。
+  - list/detail 只讀已物化投影並解碼 JSON，不在 API request path 掃描業務大表。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_system_alert_service.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: FinanceImportReviewAlertProjectionService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_import_review_alerts.py
+- Dependencies: [FinanceImportRawStagingSchema, FinanceImportReprocessingSchema, FinanceImportStateContract, SystemAlertWorkflowService]
+- Description: 將 completed finance import batch 中仍無法分類成業務事件的 canonical rows 物化為一筆 IMPORT-006 匯入異常，供 UI 快速讀取。
+- Complexity: medium
+- Input:
+  - cursor: 與 import／reprocess 共用的 transaction cursor
+  - batch_id: 明確 completed finance import batch
+- Output:
+  - alert_action: created、updated、reopened、resolved 或 existing
+  - summary: occurrence、distinct、remaining、direction、reason 與 integrity counts
+- Invariants:
+  - alert_code 固定 IMPORT-006，label 為「銀行對帳匯入待人工分類」，source_domain 固定 IMPORT，case_key 固定 `finance-import-batch:<batch_id>`。
+  - batch membership 以 finance_import_occurrences.batch_id 為準；同 canonical row 多次出現只計一次 distinct row。
+  - 每 batch 最多一筆 alert；不得為每列建立 system alert。
+  - details 只可保存 batch metadata、occurrence/distinct counts、non_business_review 與 pending/inconsistent counts、direction/reason counts、最多 20 個 sample row ids、最近 run id/time；不得保存姓名、完整帳號或 raw_payload。
+  - remaining count 大於零時 create/update/reopen；為零時 open 或 claimed 都自動 resolved。人工 resolve 但問題仍存在時，下次 projection 必須 reopen。
+  - non_business_review 且 reconciliation_status 非 pending 的列不得消失，必須列入 integrity inconsistency；reprocessing service 不得處理該列。
+  - ASUS 歷史 batch 1 的契約基線為 occurrence_count=2659、distinct_count=2655；重處理後 remaining_count=2376 時，IMPORT-006 必須只有一筆，direction_counts 固定 incoming=1779、outgoing=597。這是目標主機驗收基線，不得套用至 repository 固定 1 列 fixture。
+  - 本節點只投影目前狀態，不重分類、不 dispatch、不建立正式交易或 append-only audit。
+- Algorithm:
+  - 以 aggregate SQL 一次取得 batch 與 distinct canonical row 統計，另取 bounded sample ids 與最近 completed reprocess run。
+  - 將 bounded summary 交 SystemAlertWorkflowService 執行 create/update/reopen/resolve。
+  - 提供 completed batches historical scan；scan 只 materialize alert，不重分類或 dispatch。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\finance_import_review_alerts.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
+- Observability:
+  - metric: finance_import_review_remaining_rows
+  - alert: IMPORT-006
+
+##### Module: FinanceImportDispatchService
+- Sub Map: services_layer
+- Type: service
+- State: `planned`
+- Source: services/finance_import_dispatch.py
+- Dependencies: [FinanceImportStateContract, ClientReceiptReconciliationService, ClientSubsidyReturnTransactionService, GovernmentSubsidyReconciliationService, StaffActualTransferService, FinanceAlertDetectionService]
+- Description: 以單一共用入口 dispatch 一筆已分類 finance_import_row 至既有正式核銷服務，並將 genuine business pending 結果投影至 finance_alerts。
+- Complexity: medium
+- Input:
+  - cursor: outer transaction cursor
+  - finance_import_row_id: 已鎖定或剛建立的 canonical row
+  - originating_batch_id: 本次 import/reprocess 的來源 batch
+- Output:
+  - classification_type: 實際 dispatch 類別
+  - result: reconciled、existing 或 pending
+  - reason: 下游明確原因
+  - formal_references: bounded transaction／batch／settlement references
+  - finance_alert_action: genuine business anomaly 的 alert action 或 None
+- Invariants:
+  - import 與 reprocess 必須共同使用本節點；不得在兩個 CLI 複製 identity decode、staff plan selection 或 classification dispatch。
+  - FinanceImport 對每筆 inserted business row 與 FinanceImportReprocessingService 對每筆 changed-to-business row，必須呼叫同一個公開 dispatch entrypoint 並消費同一 output shape；CLI、application service 或 reprocess service 不得保留私有分類分支或 staff plan helper。
+  - non_business_review 不得呼叫任何正式核銷服務，只回 pending 與 classification reason。
+  - client_receipt、client_subsidy_return、government_subsidy、staff_salary／staff_legacy_subsidy 只可委派既有 domain service；不得自行複製其 SQL 或放寬候選唯一／金額完整條件。
+  - pending 中只有既有 finance-alert mapping 定義的 genuine business anomaly 可建立 finance_alerts；IMPORT-006 由 batch aggregate projector 負責，兩者不得混用。
+  - 所有正式 transaction、staging reconciliation 與 finance alert 必須共用 caller 的 cursor／transaction；本節點不得 commit 或 rollback。
+- Algorithm:
+  - 鎖定並 strict decode dispatch 所需 row，依 classification_type 選唯一 domain service。
+  - staff transfer 只在 matched identity、完整帳號與唯一完整 allocation plan 同時成立時 dispatch。
+  - 將下游結果正規化為固定 output，必要時呼叫既有 finance pending alert wiring。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\finance_import_dispatch.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: FinanceImportReprocessingService
+- Sub Map: services_layer
+- Type: application_service
+- State: `planned`
+- Source: services/finance_import_reprocessing.py
+- Dependencies: [FinanceImportRawStagingSchema, FinanceImportReprocessingSchema, FinanceImportStateContract, FinanceIdentityMapLoader, FinanceNormalizedRowValidator, FinanceTransactionClassifier, FinanceImportDispatchService, FinanceImportReviewAlertProjectionService]
+- Description: 對一個 completed finance import batch 的 eligible non_business_review canonical rows 執行可先 dry-run、具計畫指紋與 append-only audit 的原子重分類及正式 dispatch。
+- Complexity: medium
+- Input:
+  - batch_id: 明確 completed finance import batch
+  - actor: apply 必填的非空操作者
+  - dry_run: 預設 true
+  - expected_plan_fingerprint: apply 必填且必須等於同 DB／batch 最新計算結果
+  - safety_limit: 預設 5000 distinct canonical rows
+- Output:
+  - db_identity: server 與 database，不含密碼
+  - batch_manifest: batch metadata 與 distinct selection
+  - classification_summary: before/after reason counts、selected/unchanged/changed
+  - dispatch_summary: attempted/reconciled/pending 與 bounded references
+  - alert_action: IMPORT-006 projection result
+  - plan_fingerprint: deterministic 64 碼 hash
+  - transaction_outcome: rolled_back、committed 或 existing
+- Invariants:
+  - batch 必須存在且 status=completed；membership 只以 finance_import_occurrences.batch_id 取得 distinct canonical row，不得只讀 finance_import_rows.batch_id。
+  - eligibility 固定為 classification_type=non_business_review 且 reconciliation_status=pending；其他 classification、reconciled 或非 pending row 不得倒退、重分類或 dispatch。
+  - candidate ids 必須升冪鎖定並於鎖後重查 eligibility；發現 eligible row 已有正式 transaction、非法 fingerprint、strict JSON decode 失敗或 canonical row 無法重建時 fail-fast。
+  - identity maps 每 run 只載入一次；canonical row 重建後必須通過 FinanceNormalizedRowValidator。
+  - before/after classification tuple 完全相同時不 UPDATE、不寫 event、不 dispatch；只有 tuple 改變才更新 classification-derived columns、classified_at 並寫 append-only event。
+  - 只有 non_business_review 轉成 business classification 才呼叫 FinanceImportDispatchService；姓名、部分帳號、金額或 Excel 列號永遠不得參與身分解析。
+  - dry-run 必須走相同 UPDATE、audit、dispatch、batch alert projection 後明確 rollback；不得留下 run/event、正式交易、staging 更新或 system alert。
+  - dry-run plan_fingerprint 必須由 DB identity、batch id、classifier version、升冪 row ids 與每列 before/after tuple 的 deterministic canonical JSON 計算；dry-run 回傳 fingerprint 但因 rollback 不得留下 run/event id，也不得把暫存 id 當作 apply 證據。
+  - apply 必須提供 dry-run 的 expected_plan_fingerprint 與非空 actor；鎖後以同一算法重新計算，不符時必須在更新 classification、建立 run/event 或 dispatch 前停止。
+  - apply 全批單一 commit，任一例外全批 rollback；成功後同一 batch_id/plan_fingerprint 重送必須讀取 completed run 並回 transaction_outcome=existing，不得再次分類、dispatch、投影第二份 audit 或建立正式交易。
+  - ASUS batch 1 只有在目標 DB 鎖後仍符合 occurrence_count=2659、distinct_count=2655、eligible=2655、incoming invalid/missing VA=2058、outgoing staff no-match=597 且其中有效 `99781699` 加六碼 canonical cancellation_code=279 時，才可接受契約預期 selected=2655、changed=279、unchanged=2376；任一基線不符都視為 stale/conflict，不得以固定數字強行 apply。
+  - 對 ASUS batch 1，changed=279 只表示最多 279 筆轉成 business classification 並嘗試 dispatch；reconciled 可小於 279。案件不存在／不唯一、應收不完整、超收或其他 genuine business failure 必須保持 business classification 加 reconciliation pending／finance alert，不得倒退為 non_business_review 或計入 IMPORT-006。
+  - canonical raw fields、dedup_fingerprint、occurrences 與已存在正式交易不得修改或刪除；錯誤回復只能使用既有 domain reversal。
+  - selected distinct rows 超過 safety_limit 時停止；不得提供無界 `--all` 或繞過限制的預設值。
+- Algorithm:
+  - 驗證 DB identity、batch、safety limit，從 occurrence 取得排序 distinct ids並鎖定、重驗 eligibility。
+  - 一次載入 identity maps；strict decode canonical JSON/date/time 後重建 normalized row並呼叫 classifier。
+  - 建立 deterministic plan fingerprint；dry-run 繼續完整模擬，apply 先比對 expected fingerprint。
+  - apply 建立 run；逐列比較 tuple，changed row 更新 derived fields、建立 event並對新業務類別 dispatch；unchanged 只累計。
+  - 全部 row 完成後重算 IMPORT-006，完成 run與 summary；dry-run rollback，apply commit，任一例外 rollback。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\finance_import_reprocessing.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
+- Observability:
+  - metric: finance_import_reprocess_elapsed_seconds
+  - metric: finance_import_reprocess_rows_per_second
+  - alert: finance_import_reprocess_failed
+
+##### Module: FinanceImportReprocessCLI
+- Sub Map: services_layer
+- Type: script
+- State: `planned`
+- Source: scripts/imports/reprocess_finance_import_batch.py
+- Dependencies: [FinanceImportReprocessingService]
+- Description: 提供預設 dry-run、apply 必須綁定 plan fingerprint 的單一歷史 finance import batch 重處理入口，stdout 僅輸出短摘要。
+- Complexity: medium
+- Input:
+  - batch_id: 必填正整數
+  - mode: 預設 dry-run；apply 必須明確傳入
+  - actor: apply 必填
+  - plan_fingerprint: apply 必填
+  - report_path: 可選完整 UTF-8 JSON 報告路徑
+- Output:
+  - console_summary: DB identity、batch、selected/unchanged/changed、before/after reason counts、dispatch/reconciled/pending、alert action、elapsed/rows-per-second、plan fingerprint、transaction outcome
+  - report: 只有指定 report_path 時才寫入、最多 safety_limit 筆逐列結果的 bounded manifest
+- Invariants:
+  - 不得提供 --all、delete、truncate、force-reconcile、姓名匹配或跳過 plan fingerprint 的參數。
+  - 未傳 --apply 時一律 dry-run；apply 缺 actor 或 plan fingerprint 必須在取得 DB write transaction 前失敗。
+  - stdout 不得輸出數千筆 row_results；完整逐列結果只能寫至使用者明確指定的 report_path。
+  - report 必須 strict UTF-8、無 BOM；逐列結果不得超過 service safety_limit，且不得包含 DB 密碼、完整帳號、姓名、未遮罩 raw_payload 或未限制的 formal references。
+  - console_summary 只能輸出固定欄位與 bounded reason counts，不得因未指定 report_path 而 fallback 印出完整 service manifest。
+  - dry-run 的 run/event ids 不得宣稱為持久識別。
+- Algorithm:
+  - 解析 bounded CLI 參數並先驗證 batch_id、mode、actor、plan_fingerprint 與 report_path；非法 apply 在建立 write transaction 前停止。
+  - dry-run 呼叫 FinanceImportReprocessingService 取得 immutable plan 與 fingerprint；apply 將使用者提供 fingerprint 原值交給 Service 做 stale-plan 驗證。
+  - stdout 只序列化固定 console_summary；只有明確 report_path 才以 strict UTF-8 寫 bounded、遮罩後的 report。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\imports\\reprocess_finance_import_batch.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: SystemAlertScanOrchestrator
+- Sub Map: services_layer
+- Type: application_service
+- State: `planned`
+- Source: services/anomaly_alert_detection.py::run_process_alert_scan
+- Dependencies: [SystemAlertWorkflowService, FinanceImportReviewAlertProjectionService]
+- Description: 統一執行已接線的 system alert current-state scanners，包含 completed finance import batches 的 IMPORT-006 historical materialization。
+- Complexity: medium
+- Input:
+  - cursor: API scan transaction cursor
+- Output:
+  - scan_summary: 每個 alert code 的 created、updated、reopened、resolved 與 unchanged counts
+- Invariants:
+  - IMPORT-006 scanner 只可呼叫 FinanceImportReviewAlertProjectionService 掃描 completed batches；不得重分類、dispatch 或建立正式帳務。
+  - 單一 alert code 掃描失敗必須使 outer scan transaction rollback；不得回傳部分成功摘要。
+  - 一般 GET/list/detail 不得隱含觸發 scanner；只有明確 POST scan、import completion 或 reprocess completion 可刷新 IMPORT-006。
+  - summary 必須包含 IMPORT-006，供 UI 顯示建立／更新／重開／自動解除結果。
+- Algorithm:
+  - 依固定順序呼叫既有 scanners 與 completed finance batch projector。
+  - 累計各 code lifecycle counts，不在本節點 commit；由 API outer transaction 決定 commit/rollback。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\anomaly_alert_detection.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
+- Observability: not_required
+
 ##### Module: FinanceImport
 - Sub Map: services_layer
-- Type: import_pipeline
+- Type: application_service
 - State: `planned`
-- Source: scripts/imports/import_finance_excel.py
-- Dependencies: [FinanceStatementNormalizationPipeline, FinanceIdentityMapLoader, FinanceImportStagingService, ClientReceiptReconciliationService, ClientSubsidyReturnTransactionService, GovernmentSubsidyReconciliationService, StaffActualTransferService]
-- Description: 由人工 CLI 對任意檔名的歷史、台新或永豐 Excel 執行正式匯入或完整 dry run；兩種模式共用 normalization、append-only staging、分類與正式核銷判斷，dry run 最後強制 rollback 並輸出可重現 manifest。
+- Source: services/finance_import_application.py::import_finance_workbook
+- Dependencies: [FinanceImportStateContract, FinanceStatementNormalizationPipeline, FinanceIdentityMapLoader, FinanceImportStagingService, FinanceImportDispatchService, FinanceImportReviewAlertProjectionService]
+- Description: 由 application service 對任意檔名的歷史、台新或永豐 Excel 執行正式匯入或完整 dry run；CLI 只提交命令，不擁有 normalization、transaction、分類、dispatch 或警示規則。
 - Invariants:
   - 不得以客戶姓名或月嫂姓名作為唯一帳務關聯鍵。
   - 三種格式只能由內容 detector 選擇 adapter，不依檔名；每列先寫 canonical staging/occurrence，分類與核銷不得覆寫原始流水。
@@ -1326,6 +2173,11 @@
   - dry_run=true 必須執行與正式匯入相同的 normalization、identity map、staging、classification、dispatch 與 batch completion 路徑，成功或失敗皆不得 commit；成功完成後必須明確 rollback。
   - dry run manifest 必須包含來源絕對路徑、格式、工作表、表頭列、normalized row 數、每列 fingerprint／分類／dispatch result 與 reason、彙總計數及 transaction_outcome=rolled_back；不得把暫存 row id 或 batch id 宣稱為可持久查詢識別。
   - `document/資料庫、資料處理/歷史對帳單.xlsx` 是固定驗收檔；目前唯一流水必須判定為 non_business_review、reason=sinopac_staff_account_no_match，不得以姓名「張淑婷」猜測月嫂身分或建立正式帳務交易。
+  - repository 固定驗收檔目前只有 1 筆流水，只驗證 legacy 格式、欄位位置與禁止姓名猜測；它不是 ASUS 目標主機 batch 1 的替身，不得由此宣稱 2659/2655 歷史資料或 279 筆重分類已驗收。
+  - inserted business rows 必須透過 FinanceImportDispatchService；不得保留或新增第二套私有 dispatch。
+  - completed batch 在 commit 前必須呼叫 FinanceImportReviewAlertProjectionService；skipped_existing 雖不得重分類，但仍須依本批 occurrence 納入 IMPORT-006 aggregate。
+  - 本節點擁有 import transaction 與 manifest；不得依賴 argparse、print、Streamlit 或 UI session state，也不得由 CLI 自行拼接 classification／dispatch 結果。
+  - manifest 必須依 FinanceImportStateContract 分欄回傳 batch status、occurrence outcome、classification、reconciliation 與 alert action；不得以單一 status 混合語意。
 - Observability: not_required
 - Complexity: medium
 - Input:
@@ -1344,18 +2196,77 @@
   - transaction_outcome: committed 或 rolled_back
 - Algorithm:
   - 呼叫 normalizer 取得唯一格式、工作表、表頭與完整 normalized rows；在同一 DB transaction 載入精確帳號 maps 並呼叫 append-only staging。
-  - skipped_existing 只記錄 occurrence，不進入下游；inserted row 依 classification_type dispatch。
-  - client_receipt 以 clients.identity_status 建立快照後呼叫 ClientReceiptReconciliationService；government_subsidy 呼叫 exact batch reconciliation；client_subsidy_return 呼叫 exact obligation reconciliation。
-  - staff_salary/staff_legacy_subsidy 只在帳號唯一且該 staff 恰有一個符合 phase 的 finalized/partially_paid 月結時，建立全部未付 component 的 explicit allocations；總額不等於 debit 或候選不唯一時保持 pending。
-  - non_business_review 與任何下游 pending 結果回報 pending_rows 與逐列 reason；全部 inserted rows處理完才將 batch 標記 completed。
+  - skipped_existing 只記錄 occurrence，不進入下游；inserted row 一律交 FinanceImportDispatchService。
+  - non_business_review 與任何下游 pending 結果回報 pending_rows 與逐列 reason；全部 inserted rows處理完才將 batch 標記 completed，並依本批 occurrences 聚合 IMPORT-006。
   - apply 模式 commit 一次；dry run 模式在建立完整 manifest 後 rollback 一次。任一例外均 rollback，且不得回傳成功 manifest。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_import_finance_excel.py", "tests\\test_finance_import_orchestrator.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\imports\\test_finance_statement_normalizer.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_boundary_safety.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_client_receipt_boundaries.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_dry_run.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "services\\finance_import_application.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
+
+##### Module: FinanceImportCLI
+- Sub Map: services_layer
+- Type: script
+- State: `planned`
+- Source: scripts/imports/import_finance_excel.py
+- Dependencies: [FinanceImport]
+- Description: 人工匯入銀行 Excel 的薄 application adapter；只處理參數、檔案存在性、短摘要、可選 report 與 exit code。
+- Complexity: low
+- Input:
+  - excel_path: 明確 Excel 路徑
+  - mode: dry-run 或 apply
+  - report_path: 可選完整 manifest 路徑
+- Output:
+  - console_summary: 不含數千筆逐列結果的 bounded 摘要
+  - report: 使用者指定時輸出的 UTF-8 JSON manifest
+  - exit_code: 成功 0，validation／conflict／infrastructure failure 非 0
+- Invariants:
+  - CLI 不得包含 normalization、DB transaction、classification、dispatch、order status、alert lifecycle 或正式帳務 SQL；全部委派 FinanceImport。
+  - stdout 預設只顯示 bounded summary；完整 row_results 只能寫至明確 report_path，不要求使用者複製整份 JSON。
+  - report 逐列結果上限不得超過 FinanceImport 本次 normalized row count，且不得包含完整帳號、姓名、raw_payload 或 DB secret；未指定 report_path 時不得把 manifest fallback 至 stdout。
+  - 不得把 HTTP/UI、Streamlit session 或本機 DB fallback 混入 application service。
+  - dry-run／apply 的交易結果與錯誤必須原樣反映 service output；不得將失敗轉為成功訊息。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\imports\\import_finance_excel.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: FinanceImportRecoverySubsystemIntegrationTest
+- Sub Map: services_layer
+- Type: integration_test
+- State: `planned`
+- Source: tests/test_finance_import_recovery_subsystem.py
+- Dependencies: [FinanceImport, FinanceImportCLI, FinanceImportDispatchService, FinanceImportReprocessingService, FinanceImportReprocessCLI, FinanceImportReviewAlertProjectionService, SystemAlertScanOrchestrator, FinanceImportReprocessingSchema]
+- Description: 以單一 Subsystem final gate 驗證新匯入、歷史 batch 重分類、共用 dispatch、append-only audit、IMPORT-006 與兩個 bounded CLI 的實際資料形狀；固定 1 列 fixture 與 ASUS 目標主機 batch 1 分開取證。
+- Complexity: medium
+- Input:
+  - repository_fixture: `document/資料庫、資料處理/歷史對帳單.xlsx`，目前固定 1 筆 legacy 流水
+  - deterministic_recovery_fixture: 可重建 2659 occurrences／2655 distinct rows、2058 incoming invalid-or-missing-VA、597 outgoing staff-no-match，且 incoming 中 279 筆具有有效 canonical virtual account 的隔離 DB fixture
+  - target_host_evidence: ASUS 目標 DB identity、completed batch_id 與重處理前唯讀基線；不在本機 DB 時必須明確標示 not_executed，不得以 repository fixture 代替
+- Output:
+  - component_results: import、dispatch、reprocess、audit、IMPORT-006、scan 與 CLI assertions
+  - deterministic_counts: occurrence、distinct、eligible、changed、unchanged、dispatch attempted/reconciled/pending 與 remaining direction/reason counts
+  - target_host_acceptance: passed、failed 或 not_executed，以及不含敏感資料的 DB/batch evidence
+- Invariants:
+  - repository fixture 必須維持 1 筆 non_business_review、reason=sinopac_staff_account_no_match，不建立正式帳務；測試不得以姓名「張淑婷」建立 identity。
+  - deterministic recovery fixture 的 dry-run 必須得到 occurrence=2659、distinct=2655、selected=2655、changed=279、unchanged=2376、IMPORT-006 remaining=2376、incoming=1779、outgoing=597；dry-run 結束後所有 classification、run/event、正式交易、finance/system alerts 必須與執行前完全相同。
+  - dry-run 產生的 plan fingerprint 必須可由同 DB/batch 未漂移狀態用於 apply；任一 DB identity、classifier version、row membership 或 before/after tuple 漂移必須在副作用前 fail-closed。
+  - apply 必須只為 279 個 changed rows 寫 append-only events 並透過 FinanceImportDispatchService 嘗試 dispatch；reconciled 可小於 279，remaining 2376 才屬 IMPORT-006，business pending 只能進既有 finance alert 流程。
+  - apply 後相同 plan replay 必須回 existing，run/event、正式交易與 alert 數量不增加；不同 plan 或部分殘留必須 conflict/rollback，不得補成表面成功。
+  - IMPORT-006 每 batch 最多一筆，details 需符合 bounded/privacy 契約；historical scan 只 materialize current-state alert，不得重分類或 dispatch；remaining=0 時 open/claimed 可自動 resolved，問題重現時 resolved 必須 reopen。
+  - import 與 reprocess 的正式帳務路徑必須能以 spy/contract assertion 證明呼叫同一 FinanceImportDispatchService；不得只比較最終資料而容許兩套私有 dispatch。
+  - 兩個 CLI stdout 必須為 bounded summary；只有明確 report_path 才可寫 strict UTF-8、無 BOM、最多 safety_limit 筆且無姓名／完整帳號／raw_payload／secret 的 JSON report。
+  - 本機 deterministic gate 通過只代表 Subsystem integration 通過；ASUS target_host_acceptance 未執行時，Domain 歷史資料修復不得宣稱完成。目標主機必須先唯讀確認原始基線完全相符，再依 dry-run fingerprint apply 並查核 audit、正式交易與 IMPORT-006。
+  - 集中 pytest 的內層 timeout 固定 300 秒，外層初始等待至少 310 秒；若工具先 yield，必須先檢查新增輸出與程序 CPU／I/O 狀態，確認持續進展且無重複 traceback、deadlock 或無限迴圈跡象後才以有限增量延長。連續兩次無新輸出或可證明進度時必須終止並回報未驗證，不得以無界 timeout 掩蓋 hang。
+- Algorithm:
+  - 先跑 repository 1 列 fixture，證明格式與禁止猜測邊界。
+  - 在隔離真實 MySQL schema 建立 deterministic recovery fixture，依序執行 reprocess dry-run、rollback snapshot comparison、apply、exact replay、stale/conflict 與 IMPORT-006 lifecycle。
+  - 以同一 pytest invocation 覆蓋 component contracts、failure injection 與 CLI privacy/bounds；失敗先重跑 selector，收斂後才重跑整個 Subsystem gate。
+  - ASUS 目標主機另以明確 DB identity/batch id 執行唯讀 baseline、dry-run、apply/replay 及持久結果查核；不得在缺少該 DB 時自動 fallback 至本機。
+- Verification:
+  - must_have_assertions
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_recovery_subsystem.py", "-q", "-p", "no:cacheprovider", "--basetemp", "adad_tmp\\pytest-finance-import-recovery-subsystem"], "cwd": "project", "timeout": 300, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability:
+  - metric: finance_import_recovery_subsystem_elapsed_seconds
+  - metric: finance_import_recovery_subsystem_target_host_acceptance
 
 ##### Module: FinanceImportClientSubsidyReturnIntegrationTest
 - Sub Map: services_layer
