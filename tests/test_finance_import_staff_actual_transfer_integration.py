@@ -7,7 +7,7 @@ import json
 
 import pandas as pd
 
-from scripts.imports import import_finance_excel as importer
+from services import finance_import_application as importer
 from scripts.imports.finance_formats.sinopac import SINOPAC_HEADERS
 from scripts.imports.finance_formats.taishin import TAISHIN_HEADERS
 from tests._finance_alert_mock_support import AutocommitOff, handle_finance_alert_sql
@@ -43,9 +43,19 @@ class Cursor:
         elif q.startswith("INSERT INTO finance_import_batches"):
             self.lastrowid = len(self.state["batches"]) + 1
             self.state["batches"].append({"id": self.lastrowid, "status": "staged"})
-        elif q.startswith("SELECT id, classification_type, reconciliation_status FROM finance_import_rows"):
+        elif q.startswith(
+            "SELECT id, classification_type, matched_identity_ids, "
+            "resolved_counterparty_account, reconciliation_status "
+            "FROM finance_import_rows"
+        ):
             row = self.state["by_fp"].get(params[0])
-            self.current = None if row is None else {key: row.get(key) for key in ("id", "classification_type", "reconciliation_status")}
+            self.current = None if row is None else {
+                key: row.get(key)
+                for key in (
+                    "id", "classification_type", "matched_identity_ids",
+                    "resolved_counterparty_account", "reconciliation_status",
+                )
+            }
         elif q.startswith("INSERT INTO finance_import_rows"):
             keys = ("dedup_fingerprint", "batch_id", "format_id", "source_file", "source_bank_account", "sheet_name", "source_row", "source_reference", "transaction_date", "transaction_time", "posting_date", "value_date", "debit", "credit", "direction", "balance", "currency", "summary", "memo", "counterparty_name", "counterparty_account", "cancellation_code", "bank_references", "warnings", "raw_payload")
             row = dict(zip(keys, params, strict=True))
@@ -124,7 +134,14 @@ def _taishin(tmp_path, account, amount, name="legacy.xlsx"):
 
 
 def _import(monkeypatch, path, state):
-    conn = Connection(state); monkeypatch.setattr(importer, "get_connection", lambda: conn); return importer.import_finance_workbook(str(path)), conn
+    conn = Connection(state)
+    monkeypatch.setattr(importer, "get_connection", lambda: conn)
+    monkeypatch.setattr(
+        importer,
+        "project_finance_import_review_alert",
+        lambda cursor, batch_id: None,
+    )
+    return importer.import_finance_workbook(str(path)), conn
 
 
 def _immutable_snapshot(state):

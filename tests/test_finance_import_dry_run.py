@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts.imports import import_finance_excel as importer
+from services import finance_import_application as importer
 from services.finance_transaction_classifier import classify_finance_transaction
 from services.finance_transaction_fingerprint import build_dedup_fingerprint
 
@@ -81,13 +81,20 @@ def test_exact_historical_statement_runs_full_dry_run_and_rolls_back(monkeypatch
     monkeypatch.setattr(importer, "stage_finance_rows", stage_rows)
     monkeypatch.setattr(
         importer,
-        "_dispatch_inserted_row",
-        lambda cursor, row: {
+        "dispatch_finance_import_row",
+        lambda cursor, row_id, batch_id: {
+            "classification_type": "non_business_review",
             "result": "pending",
             "reason": "sinopac_staff_account_no_match",
+            "formal_references": {},
+            "finance_alert_action": None,
         },
     )
-    monkeypatch.setattr(importer, "maybe_alert_pending", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        importer,
+        "project_finance_import_review_alert",
+        lambda *args, **kwargs: None,
+    )
 
     result = importer.import_finance_workbook(str(SAMPLE), dry_run=True)
 
@@ -109,10 +116,11 @@ def test_exact_historical_statement_runs_full_dry_run_and_rolls_back(monkeypatch
             "dedup_fingerprint": "1295ac604d12e08b1ef03e79a8ebbcaabda47b70aa2fe9be15ce99f5253c5bde",
             "classification_type": "non_business_review",
             "staging_result": "inserted",
-            "dispatch_result": "pending",
-            "reason": "sinopac_staff_account_no_match",
-        }
-    ]
+                "dispatch_result": "pending",
+                "reason": "sinopac_staff_account_no_match",
+                "finance_alert_action": None,
+            }
+        ]
     assert result["transaction_outcome"] == "rolled_back"
     assert connection.commits == 0
     assert connection.rollbacks == 1

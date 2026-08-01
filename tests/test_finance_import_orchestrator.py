@@ -2,7 +2,8 @@ from decimal import Decimal
 
 import pytest
 
-from scripts.imports import import_finance_excel as importer
+from services import finance_import_application as importer
+from services import finance_import_dispatch as dispatcher
 
 
 class Cursor:
@@ -70,11 +71,25 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
     monkeypatch.setattr(importer, "load_finance_identity_maps", lambda cursor: {"staff_accounts": {}})
     monkeypatch.setattr(importer, "stage_finance_rows", lambda cursor, result, maps: staged)
 
-    def dispatch(cursor, row):
-        dispatched.append(row["row_id"])
-        return {"result": "reconciled" if row["row_id"] == 10 else "pending"}
+    def dispatch(cursor, row_id, batch_id):
+        assert batch_id == 41
+        dispatched.append(row_id)
+        return {
+            "classification_type": (
+                "client_receipt" if row_id == 10 else "non_business_review"
+            ),
+            "result": "reconciled" if row_id == 10 else "pending",
+            "reason": None,
+            "formal_references": {},
+            "finance_alert_action": None,
+        }
 
-    monkeypatch.setattr(importer, "_dispatch_inserted_row", dispatch)
+    monkeypatch.setattr(importer, "dispatch_finance_import_row", dispatch)
+    monkeypatch.setattr(
+        importer,
+        "project_finance_import_review_alert",
+        lambda cursor, batch_id: None,
+    )
 
     result = importer.import_finance_workbook("renamed.xlsx")
 
@@ -100,6 +115,7 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
                 "staging_result": "inserted",
                 "dispatch_result": "reconciled",
                 "reason": None,
+                "finance_alert_action": None,
             },
             {
                 "dedup_fingerprint": None,
@@ -107,6 +123,7 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
                 "staging_result": "skipped_existing",
                 "dispatch_result": None,
                 "reason": None,
+                "finance_alert_action": None,
             },
             {
                 "dedup_fingerprint": None,
@@ -114,8 +131,10 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
                 "staging_result": "inserted",
                 "dispatch_result": "pending",
                 "reason": None,
+                "finance_alert_action": None,
             },
         ],
+        "alert_action": None,
         "transaction_outcome": "committed",
     }
     assert connection.commits == 1
@@ -141,8 +160,10 @@ def test_downstream_error_rolls_back_entire_batch(monkeypatch):
     )
     monkeypatch.setattr(
         importer,
-        "_dispatch_inserted_row",
-        lambda cursor, row: (_ for _ in ()).throw(RuntimeError("downstream failed")),
+        "dispatch_finance_import_row",
+        lambda cursor, row_id, batch_id: (_ for _ in ()).throw(
+            RuntimeError("downstream failed")
+        ),
     )
 
     with pytest.raises(RuntimeError, match="downstream failed"):
@@ -193,7 +214,7 @@ def test_staff_plan_requires_one_complete_exact_settlement():
         ]
     )
 
-    plans = importer._staff_transfer_candidates(
+    plans = dispatcher._staff_transfer_candidates(
         cursor,
         {
             "classification_type": "staff_salary",
@@ -228,41 +249,46 @@ def test_staff_plan_keeps_ambiguous_same_amount_settlements_pending(monkeypatch)
         "matched_identity_ids": [3],
         "debit": Decimal("1000"),
     }
-    monkeypatch.setattr(importer, "_load_dispatch_row", lambda cursor, row_id: row)
+    monkeypatch.setattr(dispatcher, "_dispatch_row", lambda cursor, row_id: row)
     called = []
-    monkeypatch.setattr(importer, "reconcile_staff_actual_transfer", lambda *args: called.append(args))
-
-    result = importer._dispatch_inserted_row(
-        cursor,
-        {"row_id": 30, "classification_type": "staff_salary", "result": "inserted"},
+    monkeypatch.setattr(
+        dispatcher,
+        "reconcile_staff_actual_transfer",
+        lambda *args: called.append(args),
     )
+    monkeypatch.setattr(dispatcher, "maybe_alert_pending", lambda *args, **kwargs: None)
 
-    assert result == {"result": "pending", "reason": "staff_transfer_plan_not_unique"}
+    result = dispatcher.dispatch_finance_import_row(cursor, 30, 41)
+
+    assert result == {
+        "classification_type": "staff_salary",
+        "result": "pending",
+        "reason": "staff_transfer_plan_not_unique",
+        "formal_references": {},
+        "finance_alert_action": None,
+    }
     assert called == []
 
 
 def test_non_business_dispatch_preserves_classifier_reason(monkeypatch):
     monkeypatch.setattr(
-        importer,
-        "_load_dispatch_row",
+        dispatcher,
+        "_dispatch_row",
         lambda cursor, row_id: {
             "id": row_id,
+            "classification_type": "non_business_review",
             "classification_reason": "sinopac_staff_account_no_match",
         },
     )
 
-    result = importer._dispatch_inserted_row(
-        Cursor(),
-        {
-            "row_id": 31,
-            "classification_type": "non_business_review",
-            "result": "inserted",
-        },
-    )
+    result = dispatcher.dispatch_finance_import_row(Cursor(), 31, 41)
 
     assert result == {
+        "classification_type": "non_business_review",
         "result": "pending",
         "reason": "sinopac_staff_account_no_match",
+        "formal_references": {},
+        "finance_alert_action": None,
     }
 
 
@@ -283,7 +309,7 @@ def test_second_subsidy_requires_confirmed_full_legacy_component():
         ]
     )
 
-    plans = importer._staff_transfer_candidates(
+    plans = dispatcher._staff_transfer_candidates(
         cursor,
         {
             "classification_type": "staff_legacy_subsidy",

@@ -32,6 +32,9 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
+from services.finance_import_review_alerts import (
+    scan_completed_finance_import_review_alerts,
+)
 from services.system_alert_service import resolve_absent_alerts, upsert_system_alert
 
 
@@ -733,7 +736,7 @@ def scan_service_days_mismatch(cursor: Any) -> dict[str, int]:
 
 
 def run_process_alert_scan(cursor: Any) -> dict[str, dict[str, int]]:
-    """Run every wired non-finance detector. Called by the UI's 重新掃描 action."""
+    """Run every wired current-state detector in the caller transaction."""
     summary: dict[str, dict[str, int]] = dict(scan_order_matching_pipeline(cursor))
     summary["BECLASS-001"] = scan_missing_beclass(cursor)
     summary["LINE-001"] = scan_client_missing_line(cursor)
@@ -750,4 +753,5 @@ def run_process_alert_scan(cursor: Any) -> dict[str, dict[str, int]]:
     summary["SCHEDULE-003"] = scan_staff_schedule_overlap(cursor)
     summary["SCHEDULE-005"] = scan_staff_holiday_preference_conflict(cursor)
     summary["SCHEDULE-006"] = scan_service_days_mismatch(cursor)
+    summary["IMPORT-006"] = scan_completed_finance_import_review_alerts(cursor)
     return summary

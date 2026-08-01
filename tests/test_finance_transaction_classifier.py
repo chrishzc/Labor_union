@@ -35,9 +35,36 @@ def _row(**overrides):
     return row
 
 
-@pytest.mark.parametrize("format_id", ["sinopac", "legacy"])
-def test_sinopac_incoming_requires_exact_client_virtual_account(format_id):
-    result = classify_finance_transaction(_row(format_id=format_id), {}, {})
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"transaction_date": "not-a-date"},
+        {"debit": "NOT_DECIMAL"},
+        {"unexpected": "not-canonical"},
+    ],
+)
+def test_malformed_normalized_row_is_rejected_by_canonical_validator(overrides):
+    with pytest.raises(ValueError, match="normalized row validation failed"):
+        classify_finance_transaction(_row(**overrides), {}, {})
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {
+            "format_id": "sinopac",
+            "cancellation_code": None,
+            "bank_references": {"銷帳編號": "99781699115001"},
+        },
+        {
+            "format_id": "legacy",
+            "cancellation_code": "99781699115001",
+            "bank_references": {},
+        },
+    ],
+)
+def test_incoming_uses_projected_client_virtual_account(overrides):
+    result = classify_finance_transaction(_row(**overrides), {}, {})
 
     assert result == {
         "classification_type": "client_receipt",
@@ -45,6 +72,39 @@ def test_sinopac_incoming_requires_exact_client_virtual_account(format_id):
         "resolved_counterparty_account": None,
         "reason": "sinopac_valid_virtual_account",
     }
+
+
+def test_legacy_incoming_does_not_use_raw_bank_reference_fallback():
+    result = classify_finance_transaction(
+        _row(
+            format_id="legacy",
+            cancellation_code=None,
+            bank_references={"銷帳編號": "99781699115001"},
+        ),
+        {},
+        {},
+    )
+
+    assert result == {
+        "classification_type": "non_business_review",
+        "matched_identity_ids": [],
+        "resolved_counterparty_account": None,
+        "reason": "sinopac_invalid_or_missing_virtual_account",
+    }
+
+
+def test_sinopac_incoming_prefers_valid_canonical_projection():
+    result = classify_finance_transaction(
+        _row(
+            cancellation_code="99781699115002",
+            bank_references={"銷帳編號": "invalid"},
+        ),
+        {},
+        {},
+    )
+
+    assert result["classification_type"] == "client_receipt"
+    assert result["resolved_counterparty_account"] is None
 
 
 @pytest.mark.parametrize(
@@ -116,6 +176,7 @@ def test_taishin_outgoing_exactly_one_staff_match_is_legacy_subsidy():
     [
         ({}, {}, "counterparty_account_no_match"),
         ({"A": [1, 2]}, {}, "counterparty_account_multiple_matches"),
+        ({}, {"A": [1, 2]}, "counterparty_account_multiple_matches"),
         ({"A": [1]}, {"A": [2]}, "counterparty_identity_type_conflict"),
     ],
 )
@@ -136,6 +197,28 @@ def test_taishin_outgoing_zero_multiple_or_cross_type_matches_require_review(
 
     assert result["classification_type"] == "non_business_review"
     assert result["reason"] == reason
+
+
+def test_taishin_outgoing_never_matches_identity_by_name():
+    result = classify_finance_transaction(
+        _row(
+            format_id="taishin",
+            direction="outgoing",
+            debit=Decimal("100"),
+            credit=None,
+            counterparty_name="服務人員甲",
+            counterparty_account=None,
+        ),
+        {"服務人員甲": [7]},
+        {"服務人員甲": [9]},
+    )
+
+    assert result == {
+        "classification_type": "non_business_review",
+        "matched_identity_ids": [],
+        "resolved_counterparty_account": None,
+        "reason": "counterparty_account_missing",
+    }
 
 
 def test_sinopac_outgoing_without_confirmed_account_never_guesses_from_name():
@@ -324,7 +407,14 @@ def test_sinopac_outgoing_ambiguous_or_missing_matches_require_review(
 
 def test_unknown_direction_requires_review():
     result = classify_finance_transaction(
-        _row(direction="unknown", debit=None, credit=None), {}, {}
+        _row(
+            direction="unknown",
+            debit=None,
+            credit=None,
+            warnings=["direction_missing"],
+        ),
+        {},
+        {},
     )
 
     assert result["classification_type"] == "non_business_review"

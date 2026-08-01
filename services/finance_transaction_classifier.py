@@ -6,34 +6,9 @@ import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from scripts.imports.finance_normalized_row import validate_normalized_row
+from services.finance_cancellation_code import resolve_finance_cancellation_code
 
-REQUIRED_ROW_FIELDS = frozenset(
-    {
-        "format_id",
-        "source_file",
-        "source_bank_account",
-        "sheet_name",
-        "source_row",
-        "source_reference",
-        "transaction_date",
-        "transaction_time",
-        "posting_date",
-        "value_date",
-        "debit",
-        "credit",
-        "direction",
-        "balance",
-        "currency",
-        "summary",
-        "memo",
-        "counterparty_name",
-        "counterparty_account",
-        "cancellation_code",
-        "bank_references",
-        "warnings",
-        "raw_payload",
-    }
-)
 
 CLASSIFICATION_TYPES = frozenset(
     {
@@ -45,26 +20,6 @@ CLASSIFICATION_TYPES = frozenset(
         "non_business_review",
     }
 )
-
-
-def _validate_normalized_row(row: Mapping[str, Any]) -> None:
-    missing = sorted(REQUIRED_ROW_FIELDS - set(row))
-    if missing:
-        raise ValueError(f"normalized finance row 缺少欄位：{', '.join(missing)}")
-    if row["format_id"] not in {"legacy", "taishin", "sinopac"}:
-        raise ValueError("normalized finance row 的 format_id 無效")
-    if row["direction"] not in {"incoming", "outgoing", "unknown"}:
-        raise ValueError("normalized finance row 的 direction 無效")
-    if not isinstance(row["source_row"], int) or row["source_row"] < 1:
-        raise ValueError("normalized finance row 的 source_row 必須是一基底正整數")
-    if not isinstance(row["bank_references"], Mapping):
-        raise ValueError("normalized finance row 的 bank_references 必須是 mapping")
-    if not isinstance(row["warnings"], list) or len(row["warnings"]) != len(set(row["warnings"])):
-        raise ValueError("normalized finance row 的 warnings 必須是不重複字串陣列")
-    if not all(isinstance(item, str) for item in row["warnings"]):
-        raise ValueError("normalized finance row 的 warnings 必須是不重複字串陣列")
-    if not isinstance(row["raw_payload"], Mapping):
-        raise ValueError("normalized finance row 的 raw_payload 必須是 mapping")
 
 
 def _ids_for_account(accounts: Mapping[str, Any], account: str | None) -> list[Any]:
@@ -102,8 +57,8 @@ def _review(reason: str) -> dict[str, Any]:
 
 
 def _valid_client_virtual_account(row: Mapping[str, Any]) -> bool:
-    value = row["bank_references"].get("銷帳編號")
-    return isinstance(value, str) and re.fullmatch(r"99781699[0-9]{6}", value) is not None
+    projection = resolve_finance_cancellation_code(row)
+    return projection["cancellation_code"] is not None
 
 
 def _classify_taishin_outgoing(
@@ -206,7 +161,7 @@ def classify_finance_transaction(
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
 
-    _validate_normalized_row(row)
+    validate_normalized_row(row)
     format_id = row["format_id"]
     direction = row["direction"]
 
