@@ -1596,7 +1596,7 @@ modules:
   FinanceAlertCenterUI:
     type: ui_page
     description: 提供跨 CLIENT、RETURN、SUBSIDY、STAFF、COMMON 的財務警示與資料匯入異常中心，供人工檢視、認領與解除，不直接操作正式帳務。
-    source: ui/pages/06_finance_alerts.py::show
+    source: ui/pages/06_finance_alerts.py::_client,_operator_default,_show_error,_money,_render_summary_table,_render_display_fields,_render_import_review,_render_detail,_render_actions,_render_alert_family,_render_import_tab,show
     domain: UI
     subsystem: null
     map_file: ui\ui_system_map.md
