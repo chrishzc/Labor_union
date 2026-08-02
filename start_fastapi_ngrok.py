@@ -13,6 +13,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import urlparse
 
 import requests
 from dotenv import load_dotenv
@@ -25,7 +26,7 @@ if hasattr(sys.stderr, "reconfigure"):
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 os.chdir(PROJECT_ROOT)
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 
 def _prepare_development_review_auth() -> None:
@@ -52,8 +53,15 @@ def _resolve_ngrok() -> str:
 
 
 def run_ngrok() -> subprocess.Popen[str]:
+    command = [_resolve_ngrok(), "http", "8000", "--log=stdout"]
+    base_url = os.getenv("BASE_URL", "").strip()
+    if base_url:
+        hostname = urlparse(base_url).hostname
+        if hostname and hostname.endswith((".ngrok-free.app", ".ngrok-free.dev")):
+            command.insert(3, f"--domain={hostname}")
+
     return subprocess.Popen(
-        [_resolve_ngrok(), "http", "8000", "--log=stdout"],
+        command,
         cwd=PROJECT_ROOT,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

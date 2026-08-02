@@ -1,10 +1,7 @@
-version: '3.8'
-
 services:
   # 1. MySQL 資料庫服務
   db:
     image: mysql:8.0
-    container_name: mysql_db
     restart: always
     environment:
       MYSQL_DATABASE: ${DB_DATABASE:-union_db}

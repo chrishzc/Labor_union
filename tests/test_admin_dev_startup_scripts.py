@@ -43,6 +43,26 @@ def test_dev_api_bootstraps_before_online_and_stops_on_failure():
     assert "exit /b 1" in script
 
 
+def test_dev_api_shell_bootstraps_before_online():
+    script = _read("dev_API.sh")
+
+    bootstrap = script.index("./bootstrap_admin_dev_env.sh")
+    online = script.index("exec ./online.sh")
+
+    assert bootstrap < online
+    assert "set -euo pipefail" in script
+
+
+def test_bootstrap_shell_writes_local_env_with_random_key():
+    script = _read("bootstrap_admin_dev_env.sh")
+
+    assert 'ENV_FILE=".env"' in script
+    assert "secrets.token_urlsafe(32)" in script
+    assert "APP_ENV=development" in script
+    assert "ENABLE_ADMIN_AUTH=false" in script
+    assert "INTERNAL_API_KEY=已更新（值不顯示）" in script
+
+
 def test_online_requires_persistent_internal_key_without_generating_one():
     script = _read("online.bat")
 
@@ -60,3 +80,16 @@ def test_start_reuses_env_key_or_generates_ephemeral_key():
 
     assert env_lookup < generated_key < ready_gate
     assert "echo [Security] FastAPI and Streamlit share one internal API key" in script
+
+
+def test_start_shell_reuses_env_key_or_generates_ephemeral_key():
+    script = _read("start.sh")
+
+    env_lookup = script.index("load_env")
+    generated_key = script.index("secrets.token_urlsafe(32)")
+    init_db = script.index('scripts/init_db.py')
+
+    assert env_lookup < generated_key < init_db
+    assert "choose_db_port" in script
+    assert "Port 3306 is busy" in script
+    assert "[Security] FastAPI and Streamlit share one internal API key" in script

@@ -41,6 +41,13 @@ def media_storage_root() -> Path:
 
 def _font(size: int = 86):
     for name in (
+        "/Library/Fonts/Microsoft JhengHei.ttf",
+        "/Library/Fonts/Microsoft JhengHei Bold.ttf",
+        "/Library/Fonts/msjh.ttc",
+        "/Library/Fonts/msjhbd.ttc",
+        "/System/Library/Fonts/STHeiti Medium.ttc",
+        "/System/Library/Fonts/STHeiti Light.ttc",
+        "/System/Library/Fonts/PingFang.ttc",
         "msjh.ttc",
         "Microsoft JhengHei.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
@@ -55,6 +62,18 @@ def _font(size: int = 86):
     return ImageFont.load_default()
 
 
+def _button_font_for_label(draw: ImageDraw.ImageDraw, label: str, width: int, height: int):
+    for size in range(min(300, int(height * 0.38)), 119, -8):
+        font = _font(size)
+        text_box = draw.textbbox((0, 0), label, font=font)
+        text_width = text_box[2] - text_box[0]
+        text_height = text_box[3] - text_box[1]
+        if text_width <= width * 0.82 and text_height <= height * 0.58:
+            return font, text_box
+    font = _font(120)
+    return font, draw.textbbox((0, 0), label, font=font)
+
+
 def render_rich_menu_image(menu: dict[str, Any]) -> bytes:
     width = int(menu["size"]["width"])
     height = int(menu["size"]["height"])
@@ -66,10 +85,11 @@ def render_rich_menu_image(menu: dict[str, Any]) -> bytes:
         color=menu.get("appearance", {}).get("background_color", "#F5F5F5"),
     )
     draw = ImageDraw.Draw(image)
-    font = _font()
     for button in menu.get("buttons", []):
         bounds = button["bounds"]
         left, top = int(bounds["x"]), int(bounds["y"])
+        button_width = int(bounds["width"])
+        button_height = int(bounds["height"])
         right = left + int(bounds["width"])
         bottom = top + int(bounds["height"])
         draw.rectangle(
@@ -79,14 +99,13 @@ def render_rich_menu_image(menu: dict[str, Any]) -> bytes:
             width=4,
         )
         label = button["label"]
-        text_box = draw.textbbox((0, 0), label, font=font)
+        font, text_box = _button_font_for_label(draw, label, button_width, button_height)
         text_width = text_box[2] - text_box[0]
         text_height = text_box[3] - text_box[1]
+        text_x = left + (int(bounds["width"]) - text_width) / 2 - text_box[0]
+        text_y = top + (int(bounds["height"]) - text_height) / 2 - text_box[1]
         draw.text(
-            (
-                left + (int(bounds["width"]) - text_width) / 2,
-                top + (int(bounds["height"]) - text_height) / 2,
-            ),
+            (text_x, text_y),
             label,
             fill=button.get("text_color", "#FFFFFF"),
             font=font,

@@ -55,7 +55,7 @@ from services.admin_auth_service import record_admin_audit
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 
 def _allowed_origins() -> list[str]:

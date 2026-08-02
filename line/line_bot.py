@@ -46,6 +46,33 @@ load_dotenv()
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 from services.db_service import get_connection as get_db_connection, calculate_attendance_schedule
 
+
+def _next_case_no(cursor) -> str:
+    roc_year = datetime.now(ZoneInfo("Asia/Taipei")).year - 1911
+    prefix = f"{roc_year:03d}"
+    cursor.execute(
+        """
+        SELECT MAX(CAST(case_no AS UNSIGNED)) AS max_case_no
+        FROM orders
+        WHERE case_no REGEXP '^[0-9]{9}$'
+        FOR UPDATE
+        """
+    )
+    row = cursor.fetchone() or {}
+    max_case_no = row.get("max_case_no")
+    if max_case_no:
+        return f"{int(max_case_no) + 1:09d}"
+    return f"{prefix}000001"
+
+
+def _parse_registration_date(value: str | None):
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).split("T")[0]).date()
+    except ValueError:
+        return None
+
 def get_setting(key: str, default: str = "") -> str:
     """從環境變數讀取設定，取代舊版 admin.settings_manager"""
     env_key = key.upper()
@@ -498,15 +525,33 @@ async def line_register(payload: LineRegisterPayload):
     conn = get_db_connection()
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            case_no = _next_case_no(cursor)
+            start_date = _parse_registration_date(payload.expected_date)
+            end_date = None
+            if start_date and payload.service_days:
+                end_date = start_date + timedelta(days=max(int(payload.service_days) - 1, 0))
+
             # 1. 寫入 clients
             cursor.execute("""
-                INSERT INTO clients (name, phone, address, service_days, due_month, line_user_id, gender, city)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            """, (name, normalized_phone, payload.address, payload.service_days, payload.expected_date, line_user_id, payload.gender, payload.city))
+                INSERT INTO clients (case_no, name, phone, address, service_days, due_month, service_start_date, line_user_id, gender, city)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (case_no, name, normalized_phone, payload.address, payload.service_days, payload.expected_date, start_date, line_user_id, payload.gender, payload.city))
             client_id = conn.insert_id()
+
+            cursor.execute("""
+                INSERT INTO orders (
+                    case_no, client_id, status, service_days,
+                    service_hours_per_day, start_date, end_date
+                )
+                VALUES (%s, %s, '洽談中', %s, %s, %s, %s)
+            """, (case_no, client_id, payload.service_days, 9, start_date, end_date))
+
+            cursor.execute("""
+                INSERT IGNORE INTO client_payments (case_no, payment_status)
+                VALUES (%s, '待收訂金')
+            """, (case_no,))
             
             # 2. 寫入 beclass_records 確保後台查詢一致性。
-            # LINE 原生登記尚未取得正式 case_no，此時不得建立 orders。
             final_survey = payload.survey_details.copy()
             final_survey["預產期"] = payload.expected_date
             final_survey["預計服務天數"] = payload.service_days
@@ -523,13 +568,13 @@ async def line_register(payload: LineRegisterPayload):
             
             now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cursor.execute("""
-                INSERT INTO beclass_records (name, email, birth_date, phone, tel, ext, city, zip_code, address, created_at, survey_details)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            """, (name, payload.email, payload.birth_date if payload.birth_date else None, normalized_phone, payload.tel, payload.ext, payload.city, payload.zip_code, payload.address, now_str, survey_details_json))
+                INSERT INTO beclass_records (query_no, name, email, birth_date, phone, tel, ext, city, zip_code, address, created_at, survey_details)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (case_no, name, payload.email, payload.birth_date if payload.birth_date else None, normalized_phone, payload.tel, payload.ext, payload.city, payload.zip_code, payload.address, now_str, survey_details_json))
             
-            # 3. 寫入推播任務。尚未取得正式案件編號時只保留登記資料。
+            # 3. 寫入推播任務。
             success_msg = f"【系統通知】\n服務登記與綁定成功！\n您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n"
-            success_msg += "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
+            success_msg += f"案件編號：{case_no}\n"
             success_msg += "工會行政專員將於上班時間透過 LINE 與您聯繫確認服務細節，請您耐心等候！"
             
             cursor.execute("""
@@ -543,7 +588,7 @@ async def line_register(payload: LineRegisterPayload):
                 "status": "success",
                 "client_id": client_id,
                 "client_name": name,
-                "case_no": None
+                "case_no": case_no
             }
     except Exception as e:
         conn.rollback()
@@ -942,6 +987,81 @@ async def line_webhook(request: Request):
                             )
                             continue
 
+                        normalized_text = user_text.strip()
+                        if normalized_text in {"同意接案", "願意接案", "同意", "拒絕接案", "不接案", "拒絕"}:
+                            accepted = normalized_text in {"同意接案", "願意接案", "同意"}
+                            cursor.execute(
+                                """
+                                SELECT m.id, m.case_no, m.staff_id
+                                FROM matching_records m
+                                JOIN staff s ON s.id=m.staff_id
+                                WHERE s.line_user_id=%s
+                                  AND m.sent_info_1_at IS NOT NULL
+                                  AND m.caregiver_accepted IS NULL
+                                ORDER BY m.sent_info_1_at DESC, m.id DESC
+                                LIMIT 1
+                                """,
+                                (user_id,),
+                            )
+                            pending_match = cursor.fetchone()
+                            if pending_match:
+                                cursor.execute(
+                                    """
+                                    UPDATE matching_records
+                                    SET caregiver_accepted=%s, replied_at=CURRENT_TIMESTAMP
+                                    WHERE id=%s
+                                    """,
+                                    (1 if accepted else 0, pending_match["id"]),
+                                )
+                                ack = (
+                                    "已收到您的接案同意，工會將通知客戶查看您的履歷摘要。"
+                                    if accepted else
+                                    "已收到您的回覆，本次案件將不列入您的接案意願。"
+                                )
+                                enqueue_line_task(
+                                    cursor, to_user_id=user_id, message_content=ack,
+                                    source_event_id=event.get("webhookEventId"),
+                                    idempotency_key=f"match-reply-ack:{pending_match['id']}:{event.get('webhookEventId')}",
+                                )
+                                print(
+                                    f"[LINE Webhook] Staff text reply accepted={accepted} "
+                                    f"match_id={pending_match['id']}"
+                                )
+                                continue
+
+                        if normalized_text in {"同意媒合", "確認媒合", "重新媒合", "換一位", "不同意媒合"}:
+                            approved = normalized_text in {"同意媒合", "確認媒合"}
+                            cursor.execute(
+                                """
+                                SELECT m.id, m.case_no, m.staff_id
+                                FROM matching_records m
+                                JOIN orders o ON o.case_no=m.case_no
+                                JOIN clients c ON c.id=o.client_id
+                                WHERE c.line_user_id=%s
+                                  AND m.caregiver_accepted=1
+                                ORDER BY m.replied_at DESC, m.id DESC
+                                LIMIT 1
+                                """,
+                                (user_id,),
+                            )
+                            resume_match = cursor.fetchone()
+                            if resume_match:
+                                ack = (
+                                    "已收到您的同意，工會將安排後續確認與契約流程。"
+                                    if approved else
+                                    "已收到您的回覆，工會將為您重新媒合其他合適月嫂。"
+                                )
+                                enqueue_line_task(
+                                    cursor, to_user_id=user_id, message_content=ack,
+                                    source_event_id=event.get("webhookEventId"),
+                                    idempotency_key=f"client-resume-reply:{resume_match['id']}:{event.get('webhookEventId')}",
+                                )
+                                print(
+                                    f"[LINE Webhook] Client text resume reply approved={approved} "
+                                    f"match_id={resume_match['id']}"
+                                )
+                                continue
+
                         # 攔截「查詢訂單」或「綁定」關鍵字對話流
                         if "查詢訂單" in user_text or "綁定" in user_text:
                             liff_id = os.getenv("LINE_LIFF_ID", "")
@@ -1099,5 +1219,3 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
             conn.close()
             
     return {"status": "success"}
-
-

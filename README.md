@@ -157,11 +157,11 @@ Lobar_union/
 
 ## 🛠️ 開發環境與部署架設指南
 
-本專案保留 `online.bat` 作為正式服務啟動腳本。會重設資料庫並產生假資料的 `start.bat` 已移除；開發與測試環境請改用手動啟動流程。
+本專案保留 `online.bat` / `online.sh` 作為正式服務啟動腳本。`start.bat` / `start.sh` 會重設資料庫並產生假資料，僅適合本機開發初始化使用。
 
 ### 1. 批次檔說明
 
-#### 🌐 `online.bat` (生產上線環境一鍵啟動)
+#### 🌐 `online.bat` / `online.sh` (生產上線環境一鍵啟動)
 此腳本適合生產環境正式上線使用。執行流程如下：
 * 啟動 Docker 中的 MySQL 8.0 容器。
 * 等待 MySQL 資料庫連線就緒。
@@ -185,7 +185,25 @@ Lobar_union/
 .\online.bat
 ```
 
-`online.bat`不啟動開發用ngrok。正式環境的公開入口已移至第七階段，預定改用 Tailscale Funnel。
+macOS / Linux 終端機請執行：
+```bash
+# 第一次使用先建立虛擬環境並安裝依賴
+python3 -m venv .venv
+.venv/bin/python -m pip install -r requirements.txt
+
+# 開發/測試環境啟動
+./start.sh
+
+# 只啟動並監控 FastAPI 與 ngrok（不初始化 DB、不啟動 UI）
+.venv/bin/python start_fastapi_ngrok.py
+
+# 生產/上線環境啟動
+./online.sh
+```
+
+若 macOS 本機已有 MySQL 佔用 `3306`，`start.sh` / `online.sh` 會在未設定 `DB_PORT` 時自動改用 `3307`、`3308` 或 `3309`，並把同一個 port 傳給 Docker Compose 與 Python 程式。
+
+`online.bat` / `online.sh` 不啟動開發用 ngrok。正式環境的公開入口已移至第七階段，預定改用 Tailscale Funnel。
 
 ### LINE 管理中心（第五階段 5.1）
 
@@ -197,6 +215,12 @@ Streamlit 現在提供「LINE 管理中心」入口。FastAPI 使用兩層驗證
 ```powershell
 .\.venv\Scripts\python.exe scripts\init_db.py
 .\.venv\Scripts\python.exe scripts\create_admin.py --role system_admin
+```
+
+macOS / Linux：
+```bash
+.venv/bin/python scripts/init_db.py
+.venv/bin/python scripts/create_admin.py --role system_admin
 ```
 
 `scripts/create_admin.py` 是可重複使用的管理工具，不會建立預設密碼。管理員密碼以 scrypt
@@ -221,6 +245,11 @@ ENABLE_ADMIN_AUTH=false
 .\bootstrap_admin_dev_env.bat
 ```
 
+macOS / Linux：
+```bash
+./bootstrap_admin_dev_env.sh
+```
+
 腳本會自動寫入（或更新）：
 
 ```env
@@ -229,12 +258,17 @@ ENABLE_ADMIN_AUTH=false
 INTERNAL_API_KEY=<隨機且本機專用金鑰>
 ```
 
-完成後再啟動本機服務（例如 `.\start.bat` 或其他本機啟動流程）即可進行不需登入的管理端開發測試。
+完成後再啟動本機服務（例如 `.\start.bat`、`./start.sh` 或其他本機啟動流程）即可進行不需登入的管理端開發測試。
 
 若要一鍵完成「補齊環境變數 + 啟動 API/UI + watcher」，可直接執行：
 
 ```powershell
 .\dev_API.bat
+```
+
+macOS / Linux：
+```bash
+./dev_API.sh
 ```
 
 #### 5.2 訊息管理中心
@@ -352,6 +386,14 @@ streamlit run ui/app.py
 python scripts/file_watcher.py
 ```
 
+macOS / Linux 可使用相同服務入口，但建議透過專案虛擬環境執行：
+```bash
+docker compose up -d
+.venv/bin/python -m uvicorn api.main:app --reload
+.venv/bin/python -m streamlit run ui/app.py
+.venv/bin/python scripts/file_watcher.py
+```
+
 `scripts/init_db.py` 會初始化資料庫，僅能在明確確認目標資料庫後個別執行。請勿執行或匯入 `scripts/generate_fake_data.py`；需要新增測試資料時，優先更新有版本且可驗證的 fixture，或建立用途明確的獨立播種腳本及對應測試。一般開發者不需安裝或操作 ADAD，依標準 Git、Python 與 pytest 流程開發即可。
 
 ### 3. 重設本機測試資料庫
@@ -364,6 +406,15 @@ python scripts/file_watcher.py
 
 # 重建本機 union_db；批次檔會傳入明確的資料庫名稱確認
 .\reset_DB.bat
+```
+
+macOS / Linux：
+```bash
+# 顯示檢查結果，不寫入資料庫
+.venv/bin/python -m scripts.reset_fake_database
+
+# 重建本機 union_db；shell 腳本會傳入明確的資料庫名稱確認
+./reset_DB.sh
 ```
 
 重設流程會先驗證 manifest、27 表 allowlist、檔案雜湊與資料內容，再套用 schema 及匯入固定快照；任一步失敗都會停止，不會改用歷史 `generate_fake_data.py`。

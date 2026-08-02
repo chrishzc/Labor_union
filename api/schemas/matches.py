@@ -16,3 +16,9 @@ class MatchAssignRequest(BaseModel):
 
 class MatchCreateRequest(BaseModel):
     staff_id: int = Field(..., description="月嫂 staff_id")
+
+
+class MatchLineTestBindingRequest(BaseModel):
+    client_line_user_id: str = Field(..., min_length=1, description="測試客戶 LINE userId")
+    staff_id: int = Field(..., description="要測試的月嫂 staff_id")
+    staff_line_user_id: str = Field(..., min_length=1, description="測試月嫂 LINE userId")

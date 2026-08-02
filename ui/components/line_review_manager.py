@@ -117,16 +117,24 @@ def render_review_manager(
     )
 
     filter1, filter2, filter3 = st.columns([1, 1, 2])
-    type_label = filter1.selectbox("申請類型", ["全部", *TYPE_LABELS.values()])
-    status_label = filter2.selectbox("處理狀態", list(STATUS_LABELS.values()))
-    search = filter3.text_input("搜尋申請編號或姓名")
+    type_label = filter1.selectbox(
+        "申請類型",
+        ["全部", *TYPE_LABELS.values()],
+        key="line_review_type_filter",
+    )
+    status_label = filter2.selectbox(
+        "處理狀態",
+        list(STATUS_LABELS.values()),
+        key="line_review_status_filter",
+    )
+    search = filter3.text_input("搜尋申請編號或姓名", key="line_review_search")
 
-    date_enabled = st.checkbox("依申請日期篩選", value=False)
+    date_enabled = st.checkbox("依申請日期篩選", value=False, key="line_review_date_enabled")
     created_from = created_to = None
     if date_enabled:
         date1, date2 = st.columns(2)
-        start_date = date1.date_input("開始日期", value=date.today())
-        end_date = date2.date_input("結束日期", value=date.today())
+        start_date = date1.date_input("開始日期", value=date.today(), key="line_review_created_from")
+        end_date = date2.date_input("結束日期", value=date.today(), key="line_review_created_to")
         if start_date > end_date:
             st.error("開始日期不能晚於結束日期。")
             return
@@ -195,7 +203,12 @@ def render_review_manager(
     st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
     nav1, nav2, nav3 = st.columns([1, 2, 1])
-    if nav1.button("上一頁", disabled=result["page"] <= 1, use_container_width=True):
+    if nav1.button(
+        "上一頁",
+        disabled=result["page"] <= 1,
+        use_container_width=True,
+        key="line_review_prev_page",
+    ):
         st.session_state[PAGE_KEY] = result["page"] - 1
         st.rerun()
     nav2.markdown(
@@ -206,6 +219,7 @@ def render_review_manager(
         "下一頁",
         disabled=result["page"] >= result["total_pages"],
         use_container_width=True,
+        key="line_review_next_page",
     ):
         st.session_state[PAGE_KEY] = result["page"] + 1
         st.rerun()
@@ -217,6 +231,7 @@ def render_review_manager(
             f"#{value} · "
             f"{TYPE_LABELS.get(next(item['request_type'] for item in items if int(item['id']) == value), '')}"
         ),
+        key="line_review_request_detail",
     )
     try:
         detail = client.line_review_detail(token, request_id)
@@ -271,14 +286,26 @@ def render_review_manager(
         return
 
     with st.form(f"line_review_decision_{request_id}"):
-        decision_label = st.radio("處理決定", ["核准", "拒絕"], horizontal=True)
+        decision_label = st.radio(
+            "處理決定",
+            ["核准", "拒絕"],
+            horizontal=True,
+            key=f"line_review_decision_choice_{request_id}",
+        )
         reason = st.text_area(
             "處理原因",
             help="拒絕時必填；核准時可填寫供稽核使用的備註。",
             max_chars=1000,
+            key=f"line_review_decision_reason_{request_id}",
         )
-        confirmed = st.checkbox("我已核對上述資料，確認執行此操作")
-        submitted = st.form_submit_button("送出審查結果", type="primary")
+        confirmed = st.checkbox(
+            "我已核對上述資料，確認執行此操作",
+            key=f"line_review_decision_confirm_{request_id}",
+        )
+        submitted = st.form_submit_button(
+            "送出審查結果",
+            type="primary",
+        )
     if submitted:
         if not confirmed:
             st.error("請先勾選確認。")
