@@ -2,8 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Path
 from typing import List, Dict, Any
 from datetime import date
 from api.dependencies.admin_auth import require_system_admin
-from services import db_service
-from services.admin_auth_service import AdminPrincipal
+from api.error_contracts import internal_query_error
+from infrastructure.mysql import mysql_adapter as db_service
+from subsystems.scheduling.holiday_query_cache import (
+    invalidate_holiday_query_cache,
+    query_holidays,
+)
+from subsystems.access.authentication_session import AdminPrincipal
 from api.schemas.base import BaseResponse
 from api.schemas.holidays import HolidayCreateRequest
 
@@ -15,10 +20,14 @@ def get_all_holidays(
 ):
     """取得中華民國國定假日設定列表"""
     try:
-        data = db_service.get_table_data("holidays")
+        data = query_holidays()
         return BaseResponse(data=data, message="成功取得國定假日列表")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "holiday_query_internal_error",
+            "國定假日查詢失敗。",
+            "holiday-query",
+        ) from error
 
 @router.post("", response_model=BaseResponse[bool])
 def add_or_update_holiday(
@@ -32,9 +41,14 @@ def add_or_update_holiday(
             holiday_name=req.holiday_name,
             is_double_pay_default=req.is_double_pay_default
         )
+        invalidate_holiday_query_cache()
         return BaseResponse(data=success, message="成功儲存國定假日")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "holiday_save_internal_error",
+            "國定假日儲存失敗。",
+            "holiday-save",
+        ) from error
 
 @router.delete("/{holiday_date}", response_model=BaseResponse[bool])
 def delete_holiday(
@@ -44,6 +58,11 @@ def delete_holiday(
     """刪除指定國定假日"""
     try:
         success = db_service.delete_holiday(holiday_date)
+        invalidate_holiday_query_cache()
         return BaseResponse(data=success, message="成功刪除國定假日")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "holiday_delete_internal_error",
+            "國定假日刪除失敗。",
+            "holiday-delete",
+        ) from error

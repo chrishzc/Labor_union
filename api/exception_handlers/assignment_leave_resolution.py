@@ -5,14 +5,14 @@ from __future__ import annotations
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
 
-from services.assignment_schedule_rest_date_service import (
+from subsystems.scheduling.leave_resolution_workflow import (
     AssignmentLeaveResolutionDomainError,
 )
 
 
 _STATUS_BY_CATEGORY = {
     "not_found": status.HTTP_404_NOT_FOUND,
-    "validation_error": status.HTTP_422_UNPROCESSABLE_ENTITY,
+    "validation_error": status.HTTP_422_UNPROCESSABLE_CONTENT,
     "conflict": status.HTTP_409_CONFLICT,
     "locked": status.HTTP_409_CONFLICT,
 }
@@ -26,7 +26,7 @@ async def assignment_leave_resolution_exception_handler(
     payload = exc.as_dict()
     status_code = _STATUS_BY_CATEGORY.get(
         payload.get("category"),
-        status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status.HTTP_422_UNPROCESSABLE_CONTENT,
     )
     return JSONResponse(
         status_code=status_code,

@@ -158,7 +158,7 @@ modules:
     non_goals: []
     sub_map: ui_layer
     state: validated
-    fan_in_snapshot: 3
+    fan_in_snapshot: 4
     known_symbols:
     - admin_auth_is_bypassed
     - build_admin_headers
@@ -398,7 +398,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: planned
+    state: dirty
     fan_in_snapshot: 2
   OrderUI_Tab3_Finance:
     type: ui_component
@@ -408,12 +408,20 @@ modules:
     domain: UI
     subsystem: null
     map_file: ui\ui_system_map.md
-    dependencies: []
+    dependencies:
+    - ClientPaymentRouter
     input: {}
     output: {}
     exceptions: []
     invariants:
     - Arrow 正規化 helper 僅轉換 DataFrame 顯示用的 null 與日期值；不得修改 API 回應、訂單或帳務資料。
+    - 選擇客戶 `reversal` 時必須顯示原收款 selector，只列出同案件、同階段、`transaction_type=receipt`、`transaction_status=succeeded`
+      且尚有可沖正餘額的交易；提交 payload 必須帶 positive `reversal_of_transaction_id`，不得用金額、日期或 external_reference
+      猜測。
+    - 選擇 `receipt` 時不得傳 reversal_of_transaction_id；UI 只建立 succeeded canonical ledger
+      transaction，不提供 failed／reversed attempt 狀態。
+    - deposit POST 必須使用本頁 orders_data 對應案件的 non-negative lifecycle_version 作 `lifecycle_expected_version`；缺值時阻止提交並要求重新整理，不得以
+      0 或目前畫面狀態猜測。first/second stage 不傳該欄位；409/400 conflict 顯示重新整理提示。
     preferred_pattern: none
     verification:
     - command:
@@ -447,14 +455,97 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
+    state: dirty
+    fan_in_snapshot: 1
+  OrderLifecycleAdminApiClient:
+    type: api_client
+    description: 為 Calendar 封裝 lifecycle-control-state 查詢與 actual-start reconfirm
+      command；集中處理管理員認證、timeout、BaseResponse、typed 409 與 transport error，不包含 Streamlit
+      或商業推導。
+    source: ui/api_clients/order_lifecycle_api_client.py
+    domain: UI
+    subsystem: null
+    map_file: ui\ui_system_map.md
+    dependencies:
+    - OrderRouter
+    - OrderSchemas
+    - UIAdminApiContext
+    input:
+      control_state_query: canonical case_no。
+      actual_start_reconfirmation_command: expected_version、idempotency_key、actor、reason、new_actual_start_date，以及同一
+        Calendar Preview 的完整 order_change、assignment_plan、schedule_change_plan。
+    output:
+      lifecycle_control_state: authoritative lifecycle_version、canonical status、actual-start
+        control active/cleared、required/current date、blockers、can_reconfirm。
+      lifecycle_command_result: persisted_version、decision 與 control/history/outbox
+        identities。
+      typed_error: 保留 HTTP status、stable machine code、message 與 retryable。
+    exceptions: []
+    invariants:
+    - 不得 import streamlit、services 或 db_service，不得執行 SQL；不得接受或合成 derived blockers、control
+      state、status after value或outbox action。
+    - POST payload 的 actor 必須是 UIAdminApiContext 的 canonical username；expected_version
+      必須直接取自同案件最近一次 control-state response，不得預設為0或由 orders.status 推算。
+    - 409 必須保留 `order_lifecycle_version_conflict`、`order_lifecycle_idempotency_conflict`、`order_lifecycle_state_conflict`或`order_lifecycle_blocked`，不得轉成一般成功或空資料。
+    - idempotency_key 由呼叫端對同一未變更草稿穩定提供；client 不得每次 rerender 任意換 key。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - pytest
+        - tests\test_order_lifecycle_admin_api_client.py
+        - -q
+        - -p
+        - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-order-lifecycle-admin-api-client
+        cwd: project
+        timeout: 90
+        expect_exit: 0
+        expect_stdout_contains: passed
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - GET `/api/v1/orders/{case_no}/lifecycle-control-state` 取得 authoritative snapshot；POST
+      `/api/v1/orders/{case_no}/actual-start/reconfirm` 提交完整 command。
+    - 使用 UIAdminApiContext 建立正式 headers 與 canonical actor；集中套用 timeout、解析 BaseResponse
+      與 `{code,message}` conflict detail。
+    - transport、invalid response 與未知 server error 轉為穩定 typed error；不得 fallback 到 services、DB
+      或 UI 推導。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: ui_layer
     state: planned
     fan_in_snapshot: 1
+    known_symbols:
+    - OrderLifecycleAdminApiClient.__init__
+    - OrderLifecycleAdminApiClient._request
+    - OrderLifecycleAdminApiClient.get_control_state
+    - OrderLifecycleAdminApiClient.reconfirm_actual_start
+    - OrderLifecycleAdminApiError.__str__
+    - _canonical_case_no
+    - _canonical_text
+    - _response_data
   CalendarUI:
     type: ui_page
-    description: 服務人員月曆分頁。由 StaffMonthlyCalendarScheduleRouter 載入單月 assignment／等待訂金鎖占用；出勤精算時沿用上方已選案件與該月嫂的正式
-      assignment，提供多日期休假逐筆順延／代班 Preview、調整前後與阻擋原因、確認後 atomic Apply。原「多月嫂指派排班」案件→指派功能模塊已從
-      live code 移除。
-    source: ui/pages/03_calendar.py::_render_staff_calendar,_render_assignment_leave_resolution,safe_float,safe_int,safe_date,_normalise_calendar_schedule_map,_multi_caregiver_request,_current_admin_actor,_calendar_has_unsaved_leave_changes,_discard_calendar_leave_drafts,_multi_caregiver_error,_coerce_iso_date_strict,_coerce_staff_id,_extract_case_assignments_for_staff
+    description: 服務人員月曆分頁。由 StaffMonthlyCalendarScheduleRouter 載入單月 assignment／等待訂金鎖占用；出勤精算先讀
+      authoritative lifecycle control，若真正開始日需重確認則以完整同步 Preview 加單一 reconfirm command
+      原子套用，之後才提供多日期休假逐筆順延／代班 Preview 與 atomic Apply。原「多月嫂指派排班」案件→指派功能模塊已從 live code
+      移除。
+    source: ui/pages/03_calendar.py::_render_staff_calendar,_render_actual_start_reconfirmation,_render_assignment_leave_resolution,safe_float,safe_int,safe_date,_normalise_calendar_schedule_map,_multi_caregiver_request,_current_admin_actor,_calendar_has_unsaved_leave_changes,_discard_calendar_leave_drafts,_multi_caregiver_error,_coerce_iso_date_strict,_coerce_staff_id,_extract_case_assignments_for_staff
     domain: UI
     subsystem: null
     map_file: ui\ui_system_map.md
@@ -465,12 +556,19 @@ modules:
     - OrderRouter
     - OrderScheduleCalculationRouter
     - UIAdminApiContext
+    - OrderLifecycleAdminApiClient
     - MultiCaregiverCaseAssignmentListRouter
     - MultiCaregiverScheduleReadRouter
     - MultiCaregiverScheduleRouter
     - AssignmentScheduleRestDateRouter
-    input: {}
-    output: {}
+    input:
+      calendar_selection: 已選 staff、case_no、年月與正式 assignment snapshot。
+      actual_start_draft: new_actual_start_date、完整 assignment synchronization target、管理員
+        reason 與確認意圖。
+    output:
+      actual_start_preview: 同步 Preview 的 before/after、required_schedule_removals、blocking_reasons
+        與 authoritative lifecycle control state。
+      actual_start_result: 單一 reconfirm command 結果；成功後刷新 control state、order/assignment/calendar，衝突則保留草稿。
     exceptions: []
     invariants:
     - 'INV-CAL-01: 必須在 HTML 月曆表格繪製前優先執行精算引擎，確保休假天數即時 100% 連動呈現。'
@@ -500,6 +598,15 @@ modules:
     - 不提供同日分時段、planned_hours 或 actual_hours 手動輸入；不得在未經 Preview／Apply 時直接改寫下一位月嫂區段。
     - Preview 必須顯示同案所有有效 assignment 的 actual_hours 加總、訂單計畫時數與差額；不足或超額時 Apply 不可操作。成功
       Apply 後薪資依正式排班自動計算，UI 不另提供薪資確認時間或按鈕。
+    - UI 不得由 orders.status、actual_start_date、alert 或畫面暫存推測重確認義務；是否顯示、required/current
+      date、blockers、can_reconfirm 與 expected_version 一律取 authoritative control-state
+      response。
+    - 重確認 reason 必填；同一未變更草稿跨 Streamlit rerun 必須重用同一 idempotency_key，任一日期、assignment、schedule
+      removal、actor 或 reason 改變時舊 Preview 與 key 都失效。
+    - actual-start/reconfirm 已在同一 Service transaction 擁有 assignment synchronization
+      Apply；Calendar 不得先送普通 Apply、不得雙寫 orders/assignments/schedule，也不得在 command 成功前把草稿顯示為正式資料。
+    - 409 時不得丟棄管理員草稿或靜默重送；必須刷新 control state、標示 stable conflict code，要求重新 Preview。transport/500
+      亦不得假定成功。
     preferred_pattern: none
     verification:
     - command:
@@ -517,12 +624,15 @@ modules:
         - -m
         - pytest
         - tests\test_calendar_ui_explicit_errors.py
+        - tests\test_calendar_actual_start_reconfirmation_ui.py
         - tests\test_multi_caregiver_scheduling_ui_shell.py
         - -q
         - -p
         - no:cacheprovider
+        - --basetemp
+        - C:\tmp\pytest-calendar-lifecycle-batch
         cwd: project
-        timeout: 60
+        timeout: 180
         expect_exit: 0
         expect_stdout_contains: passed
     decisions: []
@@ -531,8 +641,17 @@ modules:
     observability:
       mode: not_required
       signals: []
-    complexity: low
-    algorithm: []
+    complexity: medium
+    algorithm:
+    - 選定出勤精算案件後，先以 OrderLifecycleAdminApiClient 讀 lifecycle-control-state；只有 actual-start
+      control active 且 can_reconfirm 才顯示可編輯重確認流程，cleared/不適用則不建立 mutation 草稿。
+    - 日期或 assignment target 變更時呼叫既有 assignment-synchronization Preview，完整顯示 before/after、移除清單與
+      blockers；任何 blocker 或非 in_sync 都禁止確認。
+    - 對未變更草稿建立穩定 idempotency_key，使用 control response 的 lifecycle_version、canonical
+      actor、非空 reason 與完整 Preview payload，只呼叫 actual-start/reconfirm；不得先呼叫普通 assignment
+      Apply。
+    - 成功後清除草稿並刷新 order、assignments、control state 與月曆；409 保留草稿、刷新 authoritative state並顯示
+      machine code，讓管理員重新 Preview。
     idempotency:
       level: unknown
       side_effects: []
@@ -598,7 +717,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: planned
+    state: dirty
     fan_in_snapshot: 1
   MultiCaregiverMatchingCenterUI:
     type: ui_component
@@ -840,7 +959,7 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: planned
+    state: validated
     fan_in_snapshot: 0
   FormManagementUI:
     type: ui_page
@@ -1402,27 +1521,31 @@ modules:
     sub_map: ui_layer
     state: planned
     fan_in_snapshot: 1
-  FinanceAlertCenterUI:
-    type: ui_page
-    description: 提供跨 CLIENT、RETURN、SUBSIDY、STAFF、COMMON 的財務警示中心，供人工檢視、認領與解除，不直接操作正式帳務。
-    source: ui/pages/06_finance_alerts.py::show
+  FinanceAlertCenterApiClient:
+    type: api_client
+    description: 為 Streamlit 警示中心集中封裝 FastAPI base URL、認證、timeout、Query／Command serialization、response
+      envelope 與 typed error parsing；不含 Streamlit 或商業判斷。
+    source: ui/api_clients/finance_alert_center_client.py
     domain: UI
     subsystem: null
     map_file: ui\ui_system_map.md
     dependencies:
-    - FinanceAlertRouter
+    - FinanceAlertCenterContracts
     input:
-      filters: status、alert_code、source domain 與分頁
-      operator_action: operator reference、claim 或 resolve reason
+      contract_request: FinanceAlertCenterContracts 的 list/detail/claim/resolve/scan
+        Query 或 Command
     output:
-      alert_center: 警示清單、row/batch 或正式來源、候選、expected/actual/difference 與事件歷程
+      contract_view_model: 已驗證的 list/detail/import-review/action ViewModel
+      typed_error: 原樣保留 code、message、field errors 與 retryable
     exceptions: []
     invariants:
-    - UI 只可透過 FinanceAlertRouter 讀取、claim、resolve；不得 import FinanceAlertWorkflowService、FinanceAlertDetectionService、FinanceAlertEventService、db_service
-      或直接執行 SQL。
-    - 不提供建立 transaction、allocation、retransfer、reversal、修改應收／應付或強制對平的操作。
-    - resolve 畫面必須明示「解除警示不等於完成核銷」，並要求非空原因。
-    - candidate snapshot 只供人工判讀；不得用預設選項、列表第一筆或同額候選自動提交正式對象。
+    - 不得 import streamlit、services、db_service 或讀取本機正式檔案；不得在 HTTP 失敗時 fallback 直連 DB／Service。
+    - URL、headers、認證、timeout、response envelope 與 JSON parsing 只能集中在本節點；FinanceAlertCenterUI
+      不得散落 requests.*。
+    - 只驗證與解析 FinanceAlertCenterContracts；不得從 raw details 推導 classification、reconciliation、金額、候選或
+      alert lifecycle。
+    - HTTP validation、authorization、not found、conflict、unavailable 與 internal error
+      必須保留 typed semantics，不得轉成空清單或成功。
     preferred_pattern: none
     verification:
     - command:
@@ -1430,8 +1553,9 @@ modules:
         - .venv\Scripts\python.exe
         - -m
         - py_compile
-        - ui\pages\06_finance_alerts.py
+        - ui\api_clients\finance_alert_center_client.py
         cwd: project
+        timeout: 30
         expect_exit: 0
     decisions: []
     todo: []
@@ -1441,8 +1565,9 @@ modules:
       signals: []
     complexity: medium
     algorithm:
-    - 以獨立 Streamlit 頁面載入警示清單及詳細事件歷程，依狀態與警示編號篩選。
-    - 對選定警示呼叫 claim 或 resolve API，顯示 conflict 與 invalid transition，不在 UI 本地假設成功。
+    - 將 framework-neutral request 序列化為固定 endpoint/query/body，套用共用認證與 timeout。
+    - 驗證 HTTP status 與 response envelope，成功解析 ViewModel，失敗解析 Typed Error。
+    - transport/invalid-response 轉為 stable unavailable/internal typed error，不執行 fallback。
     idempotency:
       level: unknown
       side_effects: []
@@ -1452,7 +1577,85 @@ modules:
     context_priority: {}
     non_goals: []
     sub_map: ui_layer
-    state: planned
+    state: validated
+    fan_in_snapshot: 1
+    known_symbols:
+    - FinanceAlertCenterApiClient.__init__
+    - FinanceAlertCenterApiClient._family_path
+    - FinanceAlertCenterApiClient._parse_http_error
+    - FinanceAlertCenterApiClient._request
+    - FinanceAlertCenterApiClient._status_error_code
+    - FinanceAlertCenterApiClient.claim
+    - FinanceAlertCenterApiClient.claim_alert
+    - FinanceAlertCenterApiClient.get_alert
+    - FinanceAlertCenterApiClient.list_alerts
+    - FinanceAlertCenterApiClient.resolve_alert
+    - FinanceAlertCenterApiClient.scan
+    - FinanceAlertCenterApiClient.scan_alerts
+    - FinanceAlertCenterApiError.__init__
+  FinanceAlertCenterUI:
+    type: ui_page
+    description: 提供跨 CLIENT、RETURN、SUBSIDY、STAFF、COMMON 的財務警示與資料匯入異常中心，供人工檢視、認領與解除，不直接操作正式帳務。
+    source: ui/pages/06_finance_alerts.py::_client,_operator_default,_show_error,_money,_render_summary_table,_render_display_fields,_render_import_review,_render_detail,_render_actions,_render_alert_family,_render_import_tab,show
+    domain: UI
+    subsystem: null
+    map_file: ui\ui_system_map.md
+    dependencies:
+    - FinanceAlertCenterContracts
+    - FinanceAlertCenterApiClient
+    input:
+      filters: status、alert_code、source domain 與分頁
+      operator_action: operator reference、claim 或 resolve reason
+    output:
+      alert_center: 警示清單、row/batch 或正式來源、候選、expected/actual/difference 與事件歷程
+    exceptions: []
+    invariants:
+    - UI 只可透過 FinanceAlertCenterApiClient 提交 FinanceAlertCenterContracts Query／Command；不得直接使用
+      requests、Router、services、db_service 或 SQL。
+    - 不提供建立 transaction、allocation、retransfer、reversal、修改應收／應付或強制對平的操作。
+    - resolve 畫面必須明示「解除警示不等於完成核銷」，並要求非空原因。
+    - candidate snapshot 只供人工判讀；不得用預設選項、列表第一筆或同額候選自動提交正式對象。
+    - 「資料匯入異常」必須接上 IMPORT-006「銀行對帳匯入待人工分類」，並以 batch-level details 顯示 occurrence/distinct/remaining、direction/reason
+      counts、最多 20 個 sample row ids 與最近 reprocess 摘要。
+    - UI 文案必須區分：IMPORT-006 表示尚未分類成業務事件；已成為業務分類但下游核銷 pending 則顯示於 finance alerts。不得把兩者合併成已入帳或已核銷。
+    - 不提供姓名自動匹配、刪除 staging、force reconcile 或直接執行 reprocess apply 的按鈕；歷史重處理保持人工 CLI。
+    - 頁面載入只讀已物化 system_alerts，不得每次 render 掃描數千筆 finance_import_rows；重新掃描只能由使用者明確按鈕呼叫
+      POST scan。
+    - UI 只渲染 ViewModel 與 Typed Error；不得解析 system_alerts.details、finance_alerts candidate
+      JSON 或依 DB 欄位推導業務狀態。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -m
+        - py_compile
+        - ui\pages\06_finance_alerts.py
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm:
+    - 以獨立 Streamlit 頁面透過 FinanceAlertCenterApiClient 載入財務稽核警示及匯入／流程目前狀態 ViewModel。
+    - 資料匯入分頁列入 IMPORT-006；選取後以 bounded batch summary 顯示原因分布，不載入 raw payload 或完整帳號。
+    - 對選定警示呼叫 claim 或 resolve API，顯示 conflict 與 invalid transition；明確重新掃描時才呼叫 system
+      alert scan。
+    idempotency:
+      level: unknown
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: ui_layer
+    state: validated
     fan_in_snapshot: 1
   LineManagementUI:
     type: ui_page

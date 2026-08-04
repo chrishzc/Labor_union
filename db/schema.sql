@@ -430,6 +430,7 @@ CREATE OR REPLACE VIEW v_order_details AS
 SELECT 
     o.case_no AS case_no,
     o.status AS order_status,
+    o.lifecycle_version,
     o.cancel_reason,
     o.line_group_id,
     o.actual_start_date,

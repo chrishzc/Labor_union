@@ -296,7 +296,7 @@ def render_liff_manager(
             _content_rows(page),
             num_rows="dynamic" if can_edit else "fixed",
             disabled=not can_edit,
-            use_container_width=True,
+            width="stretch",
             column_order=["label", "text"],
             column_config={
                 "label": st.column_config.TextColumn("用途說明", disabled=True),
@@ -312,7 +312,7 @@ def render_liff_manager(
                 _action_rows(page),
                 num_rows="fixed",
                 disabled=not can_edit,
-                use_container_width=True,
+                width="stretch",
                 column_order=["label", "description", "enabled", "order"],
                 column_config={
                     "label": st.column_config.TextColumn("入口名稱"),
@@ -329,7 +329,7 @@ def render_liff_manager(
                 _field_rows(page),
                 num_rows="dynamic" if can_edit else "fixed",
                 disabled=not can_edit,
-                use_container_width=True,
+                width="stretch",
                 column_order=[
                     "label",
                     "type",
@@ -422,7 +422,7 @@ def render_liff_manager(
                 }
                 for item in history
             ]
-            st.dataframe(history_rows, use_container_width=True, hide_index=True)
+            st.dataframe(history_rows, width="stretch", hide_index=True)
             restore_revision = st.selectbox(
                 "選擇要還原的版本",
                 [item["revision"] for item in history],

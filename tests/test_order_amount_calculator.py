@@ -1,6 +1,6 @@
 import pytest
 
-from services.order_amount_calculator import calculate_order_amounts
+from domains.client_finance.order_amount_calculation import calculate_order_amounts
 
 
 SCHEDULE = {"deposit_service_days": 5, "deposit_due_date": "2026-04-01"}
@@ -43,14 +43,14 @@ def test_general_citizen_claim_uses_40_hours_times_staff_service_price():
 
     assert result["client_ledger_plan"]["amount_receivable"] == 54000
     assert result["client_ledger_plan"]["subsidy_return_amount"] == 12000
-    assert result["subsidy_plan"]["subsidy_claim_amount"] == 14000
+    assert result["subsidy_plan"]["subsidy_claim_amount"] == 12000
     assert result["subsidy_plan"]["staff_allocations"] == [{
         "assignment_id": 2, "staff_id": 8, "subsidy_hours": 40,
-        "service_unit_price": 350, "subsidy_claim_amount": 14000,
+        "service_unit_price": 300, "subsidy_claim_amount": 12000,
     }]
 
 
-def test_full_subsidy_has_zero_client_receivable_and_second_payment_date_is_empty():
+def test_full_subsidy_has_zero_client_receivable_and_second_month_staff_due_date():
     result = calculate_order_amounts(
         _terms("115000003", "補助市民", hours_per_day=6),
         [{"assignment_id": 3, "staff_id": 9, "actual_hours": 120, "hourly_rate": 350, "floor_fee_amount": 0}],
@@ -65,7 +65,55 @@ def test_full_subsidy_has_zero_client_receivable_and_second_payment_date_is_empt
     assert result["subsidy_plan"]["subsidy_claim_amount"] == 42000
 
 
-def test_claim_amount_is_weighted_by_each_staff_actual_hours_and_rate():
+def test_subsidized_order_with_floor_fee_is_not_a_full_subsidy_order():
+    result = calculate_order_amounts(
+        _terms("115000003a", "補助市民", hours_per_day=6, floor_fee=900),
+        [{"assignment_id": 30, "staff_id": 9, "actual_hours": 120, "hourly_rate": 350, "floor_fee_amount": 900}],
+        SCHEDULE,
+    )
+
+    assert result["subsidy_coverage"] == {
+        "subsidy_hours": 120,
+        "self_pay_service_hours": 0,
+        "subsidy_claim_hourly_rate": 350,
+        "is_full_subsidy_order": False,
+    }
+    assert result["client_ledger_plan"]["amount_receivable"] == 900
+    assert result["staff_payment_plans"][0]["due_date"] == "2026-06-15"
+
+
+def test_subsidized_excess_is_charged_at_the_fixed_350_client_rate():
+    result = calculate_order_amounts(
+        _terms("115000003c", "補助市民", service_days=21, hours_per_day=6),
+        [],
+        SCHEDULE,
+    )
+
+    assert result["subsidy_coverage"]["self_pay_service_hours"] == 6
+    assert result["client_ledger_plan"]["amount_receivable"] == 2100
+
+
+def test_subsidized_126_hour_case_balances_350_government_and_client_funding():
+    result = calculate_order_amounts(
+        _terms("115000003e", "補助市民", service_days=21, hours_per_day=6),
+        [{"assignment_id": 31, "staff_id": 9, "actual_hours": 126, "hourly_rate": 350}],
+        SCHEDULE,
+    )
+
+    assert result["subsidy_plan"]["subsidy_claim_amount"] == 42000
+    assert result["client_ledger_plan"]["amount_receivable"] == 2100
+    assert result["staff_payment_plans"][0]["total_payable"] == 44100
+
+
+def test_low_income_identity_maps_to_the_subsidized_120_hour_policy():
+    terms = _terms("115000003d", "低收入戶", hours_per_day=6)
+    result = calculate_order_amounts(terms, [], SCHEDULE)
+
+    assert result["subsidy_coverage"]["subsidy_hours"] == 120
+    assert result["subsidy_coverage"]["is_full_subsidy_order"] is True
+
+
+def test_claim_amount_is_weighted_by_actual_hours_at_the_identity_policy_rate():
     result = calculate_order_amounts(
         _terms("115000004", "一般市民", floor_fee=900),
         [
@@ -79,9 +127,9 @@ def test_claim_amount_is_weighted_by_each_staff_actual_hours_and_rate():
     assert result["staff_payment_plans"][1]["total_payable"] == 54600
     assert result["subsidy_plan"]["staff_allocations"] == [
         {"assignment_id": 4, "staff_id": 7, "subsidy_hours": 10, "service_unit_price": 300, "subsidy_claim_amount": 3000},
-        {"assignment_id": 5, "staff_id": 9, "subsidy_hours": 30, "service_unit_price": 400, "subsidy_claim_amount": 12000},
+        {"assignment_id": 5, "staff_id": 9, "subsidy_hours": 30, "service_unit_price": 300, "subsidy_claim_amount": 9000},
     ]
-    assert result["subsidy_plan"]["subsidy_claim_amount"] == 15000
+    assert result["subsidy_plan"]["subsidy_claim_amount"] == 12000
 
 
 def test_claim_stays_unready_until_staff_actual_hours_and_rates_exist():
@@ -99,7 +147,7 @@ def test_subsidy_hours_are_capped_by_total_service_hours():
     )
 
     assert result["subsidy_plan"]["subsidy_hours"] == 27
-    assert result["subsidy_plan"]["subsidy_claim_amount"] == 9450
+    assert result["subsidy_plan"]["subsidy_claim_amount"] == 8100
 
 
 def test_rejects_unknown_identity_status_and_missing_deposit_date():

@@ -16,8 +16,8 @@ from api.dependencies.admin_auth import require_line_agent, require_line_manager
 from api.schemas.base import BaseResponse
 from api.schemas.line_reviews import LineReviewDecisionRequest
 from line.worker import wake_worker
-from services.admin_auth_service import AdminPrincipal
-from services.line_review_service import (
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.line.identity_review_workflow import (
     LineReviewDataConflictError,
     LineReviewNotFoundError,
     LineReviewStateConflictError,

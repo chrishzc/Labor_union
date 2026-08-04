@@ -463,11 +463,311 @@
   - subsidy_return_review_status=review_required 時不得進入銀行流水自動核銷，但不得清除 subsidy_return_receivable、subsidy_return_due_date 或使該筆離開預定月份歷史清單。
   - `orders.deposit_service_days` 為非負整數且不得超過 `orders.service_days`；不得由身分資格或舊檢視表推測其值。
   - 新的跨案銀行事件不得拆成多筆偽造 external_reference 寫入 `staff_payment_transactions`。
+  - `v_order_details` 必須投影 `orders.lifecycle_version`，供管理端付款mutation使用server canonical expected version；不得由UI以0、status或其他欄位猜測。
   - `actual_hours` 的人工覆寫必須寫入 append-only 稽核紀錄，包含正式指派、調整前後值、非空原因、操作者與時間；不得覆寫或刪除既有稽核列。
   - 初始化 schema 不得建立 legacy payments；正式客戶與月嫂帳務只能使用 client_payments、client_payment_transactions、staff_payments 與 staff_payment_transactions。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema.sql').read_text(encoding='utf-8'); tables=('client_payments','client_payment_transactions','case_staff_assignments','staff_payments','staff_payment_transactions','payment_migration_reviews','actual_hours_adjustments'); assert all(f'CREATE TABLE IF NOT EXISTS {n}' in s for n in tables); assert all(c in s for c in ('subsidy_return_receivable','subsidy_return_refunded','subsidy_return_due_date','subsidy_return_at','subsidy_return_review_status','subsidy_return_review_reason')); print('CORE PAYMENT SCHEMA DECLARED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "CORE PAYMENT SCHEMA DECLARED"}
   - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema.sql').read_text(encoding='utf-8'); assert 'CREATE TABLE IF NOT EXISTS payments (' not in s; print('LEGACY PAYMENTS SCHEMA RETIRED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "LEGACY PAYMENTS SCHEMA RETIRED"}
+- Observability: not_required
+
+##### Module: OrderDetailsLifecycleVersionViewMigration
+- Sub Map: root
+- Type: migration
+- State: `planned`
+- Source: scripts/migrate_order_details_lifecycle_version_view.py
+- Dependencies: [PaymentSchema, DbService]
+- Description: 對既有保留資料資料庫只重建v_order_details，使其投影orders.lifecycle_version；不重建資料庫或修改任何table資料。
+- Complexity: medium
+- Input:
+  - mode: 預設dry-run；只有明確--apply才執行CREATE OR REPLACE VIEW
+  - database_config: 由.env取得的目標MySQL連線
+- Output:
+  - migration_manifest: server/database identity、原view定義與hash、canonical新定義hash、before/after列數與欄位檢查、apply狀態
+- Algorithm:
+  - 從受版控db/schema.sql擷取唯一canonical v_order_details CREATE OR REPLACE VIEW statement，strict驗證只新增o.lifecycle_version projection且不包含其他DDL。
+  - 連線後記錄SELECT DATABASE/hostname、SHOW CREATE VIEW、information_schema欄位與COUNT(*)；dry-run只輸出manifest及READY狀態。
+  - --apply在同一目標重新核對原fingerprint後執行canonical CREATE OR REPLACE VIEW，再驗證lifecycle_version欄存在、列數不變且每列值等於orders同案值；失敗輸出原CREATE VIEW供人工回復，不宣稱DDL rollback。
+- Invariants:
+  - 禁止DROP/CREATE DATABASE、DROP TABLE、TRUNCATE、DELETE、UPDATE或INSERT；不得修改orders、付款、排班、歷史或control/outbox資料。
+  - apply前必須保存完整SHOW CREATE VIEW及SHA-256；目標server/database或原view fingerprint在dry-run後改變時fail-closed。
+  - canonical view必須來自db/schema.sql，不得以字串局部replace live definition；解析不到唯一statement或statement缺o.lifecycle_version時拒絕。
+  - before/after v_order_details列數必須一致，且所有case_no的lifecycle_version必須與orders精確相同；任何檢查失敗均回傳非零。
+  - migration可重跑；已是canonical hash且驗證通過時回existing，不重做DDL。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\migrate_order_details_lifecycle_version_view.py", "tests\\test_migrate_order_details_lifecycle_version_view.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability: not_required
+
+##### Module: OrderLifecycleStateHistorySchema
+- Sub Map: root
+- Type: database_schema
+- State: `planned`
+- Source: db/schema_parts/104_order_lifecycle_state_history.sql
+- Dependencies: [PaymentSchema, DatabaseSchemaLoader]
+- Description: 以 additive、append-only schema 保存訂單生命週期每次自動或人工轉移的來源事件、權威事實摘要與 before／after 狀態；不以覆寫 orders.status 取代歷史。
+- Complexity: medium
+- Input:
+  - transition: case_no、trigger_event、before_status、after_status、actor、business_date、expected_version、idempotency_key 與 facts snapshot
+- Output:
+  - order_lifecycle_state_events: 每次合法狀態轉移或明確維持／阻擋決策的不可覆寫事件
+- Invariants:
+  - event 必須 FK 連回 orders.case_no，保存非空 trigger_event、actor、idempotency_key、before/after status、business_date、facts snapshot 與建立時間。
+  - 同一 case_no 與 idempotency_key 最多一筆；完全相同重送回 existing，不同內容衝突必須 fail-fast。
+  - expected_version 固定保存本次 command 接受前的 orders.lifecycle_version；每一筆非 replay event 的結果版本固定為 expected_version + 1，不得由 event id、筆數或 created_at 推測版本。
+  - before/after status 只允許洽談中、訂單成立、服務中、訂單完成、訂單取消；不得保存任意字串。
+  - 事件建立後不得 UPDATE 或 DELETE；DB trigger 必須機械拒絕。
+  - schema 只新增歷史表、索引、FK 與 trigger；不得回填、推測或修改既有 orders.status、付款、排班、月結或交易。
+- Algorithm:
+  - 建立 event table、case/time index、idempotency unique key 與單 statement append-only triggers。
+  - OrderLifecycleDecisionPersistence 在同一 outer transaction 以 expected_version CAS 寫入 aggregate projection/version 與 event；任一失敗全部 rollback。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_lifecycle_state_history_schema.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: OrderServiceTimeTermsSchema
+- Sub Map: root
+- Type: database_schema
+- State: `planned`
+- Source: db/schema_parts/105_order_service_time_terms.sql
+- Dependencies: [PaymentSchema, DatabaseSchemaLoader]
+- Description: 以 additive、可重跑 migration 為每案保存 canonical 統一服務開始／結束時間與明確跨日 offset，供排班、完成時刻與 Asia/Taipei 狀態評估共用；legacy clients.service_time 自由文字不得作為替代。
+- Complexity: medium
+- Input:
+  - orders: 既有案件與服務日期
+  - service_window: service_start_time、service_end_time、service_end_day_offset
+- Output:
+  - service_start_time: 可空 TIME；案件統一每日服務開始時間
+  - service_end_time: 可空 TIME；案件統一每日服務結束時間
+  - service_end_day_offset: 可空 0／1；結束時間屬服務日當日或次日
+- Invariants:
+  - 三欄必須全為 NULL 或全為非 NULL；offset 只允許 0 或 1，跨午夜不得由 end_time 小於 start_time 猜測。
+  - canonical completion instant 固定由 actual_end_date、service_end_time、service_end_day_offset 以 IANA Asia/Taipei 組合；不得使用伺服器、DB session 或瀏覽器時區，也不得退化為午夜。
+  - migration 不得解析或回填 clients.service_time；既有案件維持 NULL，任何自動完成評估遇到缺值必須 fail-closed 為 service_time_terms_missing。
+  - assignment、leave、substitution 與 schedule Apply 只能繼承案件統一時段，不得建立逐日時間覆寫。
+  - migration 只新增 nullable 欄位與 CHECK；不得更新、刪除、重建或推測既有 orders、assignments、schedules 及付款資料。
+- Algorithm:
+  - 透過 INFORMATION_SCHEMA 逐欄檢查後 additive ALTER orders，建立三欄與 all-null-or-complete、offset range CHECK。
+  - 重跑時驗證既有欄位型別與約束 identity；不相容 metadata 必須 fail-closed，不得宣告成功。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_service_time_terms_schema.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-order-service-time-terms-schema"], "cwd": "project", "timeout": 90, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: OrderLifecycleControlFactsSchema
+- Sub Map: root
+- Type: database_schema
+- State: `planned`
+- Source: db/schema_parts/106_order_lifecycle_control_facts.sql
+- Dependencies: [PaymentSchema, OrderLifecycleStateHistorySchema, OrderServiceTimeTermsSchema, DatabaseSchemaLoader]
+- Description: 建立 ORD-01 aggregate version、append-only cancellation／真正開始日重新確認／人工 hold control events、高效 current projection，以及可重試 Alert projection outbox；system_alerts 不屬 canonical facts。
+- Complexity: medium
+- Input:
+  - order_aggregate: case_no、status 與 lifecycle_version
+  - control_command: control_type、control_key、scope、action、actor、reason、expected_version、idempotency_key 與 bounded payload
+  - projection_intent: deterministic alert identity、action 與 bounded payload
+- Output:
+  - lifecycle_version: orders 上非負 BIGINT UNSIGNED aggregate revision
+  - order_lifecycle_control_events: `id BIGINT UNSIGNED`、`case_no VARCHAR(50)`、`control_type ENUM(cancellation,actual_start_reconfirmation,human_hold)`、`control_key VARCHAR(100)`、`scope ENUM(order,enter_service,auto_complete)`、`action ENUM(activate,clear)`、`actor VARCHAR(100)`、`reason VARCHAR(500)`、`expected_version BIGINT UNSIGNED`、`idempotency_key VARCHAR(191)`、`payload_hash CHAR(64) ASCII BINARY`、`payload_snapshot JSON`、`created_at TIMESTAMP(6)` 的 append-only command facts
+  - order_lifecycle_control_state: 以 `(case_no,control_type,control_key)` 為 PK，另含 `scope`、`state ENUM(active,cleared)`、`current_event_id`、`release_policy ENUM(manual,expires_at) NULL`、`expires_at_utc DATETIME(6) NULL`、`confirmed_start_date DATE NULL`、`deposit_settlement_identity_hash CHAR(64) ASCII BINARY NULL`、`reason`、`changed_by`、`changed_at TIMESTAMP(6)` 的 current projection
+  - order_lifecycle_projection_outbox: `id`、`case_no`、`lifecycle_event_id`、`intent_key VARCHAR(191)`、`scope ENUM(enter_service,auto_complete)`、`alert_code VARCHAR(191)`、`action ENUM(open,resolve)`、`payload_hash CHAR(64) ASCII BINARY`、`payload_snapshot JSON`、`status ENUM(pending,processing,projected,failed)`、`attempt_count`、`next_attempt_at_utc`、`locked_at_utc`、`projected_at_utc`、`last_error VARCHAR(1000)`、`created_at/updated_at TIMESTAMP(6)` 的可重試 intents
+- Invariants:
+  - orders.lifecycle_version 必須 NOT NULL DEFAULT 0；每個成功接受且非 identical replay 的 aggregate command，不論 decision 為 changed、unchanged 或 blocked，恰遞增一次。identical replay 不得遞增。
+  - control_type 只允許 cancellation、actual_start_reconfirmation、human_hold；domain-derived deposit、schedule consistency 或 time blockers 由 authoritative facts 即時計算，不得偽造成 control row。
+  - cancellation 固定 control_key=order_cancelled、scope=order；actual_start_reconfirmation 固定 control_key=actual_start_reconfirmation、scope=enter_service；human_hold 使用穩定非空 control_key，scope 只允許 enter_service 或 auto_complete。
+  - human_hold 的 release_policy 只允許 manual 或 expires_at；expires_at policy 必須有明確 Asia/Taipei-aware expiry。時間到達只允許背景 command 追加 release event 並重評估，不得由 query／loader 靜默忽略 active row。
+  - event 必須保存 case_no、type/key/scope、activate／clear action、actor、reason、expected_version、idempotency_key、payload hash／snapshot 與建立時間；同 case_no/idempotency_key 唯一，完全相同才 replay，不同 payload conflict。
+  - event 必須另有 `UNIQUE(id,case_no,control_type,control_key)`；current state 的 `(current_event_id,case_no,control_type,control_key)` 以 composite FK 精確指回該 event。control event 建立後不得 UPDATE／DELETE；current state 可更新但不得 DELETE。
+  - actual_start_reconfirmation 的 `state=active` 唯一表示仍需重新確認；成功確認以 clear event 將 projection 設為 `cleared`，並強制保存與 orders.actual_start_date 相同的 confirmed_start_date 及當下 deposit settlement SHA-256。其他 control 不得寫入兩個 confirmation 欄位。
+  - 只有 human_hold 可保存 release_policy；manual policy 的 expires_at_utc 必須 NULL，expires_at policy 必須保存 UTC DATETIME(6)。非 human_hold 的 release_policy/expires_at_utc 必須 NULL。
+  - cancellation clear 只可由 typed manual correction command；清除後 orders.cancel_reason 必須設 NULL，舊原因只從 append-only event 查詢。狀態不得直接恢復取消前 projection，而要依最新權威事實重新評估。
+  - actual-start confirmation 只在 active confirmation 的 confirmed_start_date 精確等於 orders.actual_start_date 且沒有較新的 required control 時有效；一般日期更新不得代替明確重新確認命令。
+  - Alert claim／resolve、system_alerts row、UI flags 或任意 JSON details 均不得建立、清除或取代 control fact。
+  - outbox 以 `(case_no,intent_key)` 唯一；identical replay 必須同時比對 lifecycle_event_id、scope、alert_code、action、payload_hash 與 canonical JSON payload，任何差異皆 conflict。pending/failed 才可依 next_attempt_at_utc 重試；processing 必須有 locked_at_utc；projected 必須有 projected_at_utc 且 last_error=NULL。
+  - outbox 與 lifecycle decision/control event 同 transaction 寫入；domain transaction 不直接呼叫 system_alerts writer。投影失敗只影響重試狀態，不回滾已提交 domain command。
+  - current-state Loader 必須使用 case/status/type 索引讀 projection，不得每次掃描完整 event history；event history 僅供 idempotency、audit 與人工查詢。
+  - migration 必須 additive、可重跑且不修改既有 status、cancel_reason、日期、付款、排班或歷史；不相容既有 metadata 必須 fail-closed。
+- Algorithm:
+  - 以 INFORMATION_SCHEMA 安全新增 orders.lifecycle_version，再建立 control event、current projection、projection outbox、唯一鍵、查詢索引、FK、CHECK 與 loader-compatible append-only triggers。
+  - 既有同名 table 只有在逐欄型別/nullability/default、PK/UQ/index、FK update/delete rule、CHECK 與 append-only trigger identity 全部相符時才視為 replay；partial 或 drifted metadata 必須 SIGNAL fail-closed。
+  - 新資料庫初始化不推測 control facts；既有資料 canonicalization 交由獨立 Backfill Migration。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_lifecycle_control_facts_schema.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-order-lifecycle-control-facts-schema"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: OrderLifecycleControlFactsBackfillMigration
+- Sub Map: root
+- Type: migration
+- State: `planned`
+- Source: scripts/migrate_order_lifecycle_control_facts.py::run_migration,classify_legacy_rows,validate_backup,validate_plan,_control_counts,_schema_fingerprint,main
+- Dependencies: [OrderLifecycleControlFactsSchema, OrderLifecycleStateHistorySchema]
+- Description: 在保留既有資料的前提下，對 live DB 執行 check／dry-run／apply／verify，將 lifecycle_version 安全初始化並只把具非空原因的 legacy cancelled order 建立為帶 migration provenance 的 canonical cancellation control。
+- Complexity: medium
+- Input:
+  - mode: check、dry-run、apply 或 verify
+  - target_database: 明確資料庫名稱
+  - backup_receipt: apply 前已完成且非空的 mysqldump 證據
+  - plan_receipt: apply 必須引用同 server/database 上一次 dry-run 產生的 receipt，精確綁定 schema/data fingerprint 與 counts
+  - receipt_path: apply 必填；commit 前先原子寫 prepared receipt，commit 後覆寫為 committed，finalize 失敗仍保留 prepared recovery evidence
+- Output:
+  - migration_receipt: before/after schema、row counts、bootstrapped／review-required case counts、hash 與可逆切換資訊
+- Invariants:
+  - apply 前必須驗證非空 backup、target database identity、orders row count 與必要來源欄；不得對未知或未備份資料庫執行。
+  - backup 必須是含 MySQL dump header 及 target database marker 的 SQL artifact；任意非空檔、其他 database dump 或無法雜湊的檔案不得通過。
+  - apply 當下的 target server/database、orders/cancelled/bootstrappable/review counts、schema fingerprint 與 dataset fingerprint 必須與 plan receipt 完全相同；任何 dry-run 後漂移均停止。
+  - lifecycle_version 只初始化為 0，不依 updated_at、event count 或 status 推算。
+  - 只有 status=訂單取消且 cancel_reason trim 後非空的 legacy row可建立 deterministic legacy_status_bootstrap cancellation event/state；取消日期未知必須明記，不建立虛構 state transition history。
+  - 缺取消原因的 cancelled row 只能列為 review_required，不得自動建立有效 cancellation；非取消案件不得建立 cancellation、reconfirmation 或 hold control。
+  - 不得由 actual_start_date、actual_end_date、schedule、assignment、system_alerts 或付款資料推測 reconfirmation、completion、domain blocker 或 human hold。
+  - 重跑 apply 必須 identical replay；相同 deterministic key 不同 payload、schema drift、row count drift 或 partial prior state皆 fail-closed。
+  - cancellation reason 最長 500 字元，canonical payload UTF-8 最多 16384 bytes；超限列只能 review_required，禁止依賴 MySQL 截斷。
+  - migration 不得內嵌於 API startup、init_db 或一般 importer；失敗 rollback 並保留 receipt，不得重建或刪除 DB。receipt 必須含 before/after schema fingerprint、event/state counts、plan hash、backup hash，以及以新 DB restore + DB_DATABASE 明確切換的回復說明。
+- Algorithm:
+  - check 驗證 schema、live metadata、backup receipt 與來源資料品質；dry-run 輸出逐類摘要與穩定 fingerprint，不寫 DB。
+  - apply 在單一 transaction 建立允許的 legacy cancellation facts，verify 重新讀取 schema／counts／fingerprints 並輸出 receipt。
+  - 任一不一致停止並保留原 DB；正式切換由明確環境設定完成。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_migrate_order_lifecycle_control_facts.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-order-lifecycle-control-backfill"], "cwd": "project", "timeout": 180, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: SystemAlertCurrentProjectionMigration
+- Sub Map: root
+- Type: database_schema
+- State: `planned`
+- Source: db/schema_parts/107_system_alert_current_projection.sql
+- Dependencies: [SystemAlertWorkflowService]
+- Description: 在保留 legacy system_alerts 資料的前提下，將舊 event_type／description／pending 狀態原地轉換為目前 Alert Center 所需的 mutable current projection，讓 IMPORT-006 等資料匯入異常可安全 upsert、認領與排除。
+- Complexity: medium
+- Input:
+  - legacy_table: id、event_type、description、status ENUM(pending,resolved)、created_at、resolved_at、resolved_by
+  - current_contract: alert_code、source_domain、case_key、reason、details、status ENUM(open,claimed,resolved)、claim／resolution metadata、created_at、updated_at
+- Output:
+  - system_alerts: 保留原 id 與既有紀錄，新增並回填 current projection 欄位、唯一 identity 及 status index；legacy event_type／description 改為 nullable compatibility columns
+- Algorithm:
+  - 先以 INFORMATION_SCHEMA 驗證 system_alerts 只可能是完整 legacy 形狀或完整 current 形狀；partial、未知型別、重複 identity 或不相容 index 一律 fail-closed。
+  - legacy 形狀先 additive 新增 nullable current 欄位，將每筆 row deterministic 回填為 alert_code=event_type、source_domain=LEGACY、case_key=legacy-alert:{id}、reason=description、bounded JSON details，並將 pending 映射為 open、resolved 保持 resolved。
+  - 回填與唯一性驗證完成後才收緊 current 欄位 NOT NULL、建立 uq_alert_case 與 idx_system_alert_status，並把 legacy event_type／description 改為 nullable，使新 writer 無需寫 legacy 欄位。
+  - current exact 形狀重跑只能 no-op；不得覆寫目前 alerts、改變 id、刪除 legacy row 或建立第二張平行警示表。
+- Invariants:
+  - migration 只允許在 preserved candidate DB 執行；原 source DB 永不 mutation。
+  - legacy row count、id 集合、created_at、resolved_at、resolved_by、event_type 與 description 必須保持；只有 status pending→open 是明確語意映射。
+  - legacy details 不得放入帳號、銷帳編號或其他敏感原始資料；只保存 legacy_event_type 與 migration provenance。
+  - `(alert_code,case_key)` 必須唯一且 stable；legacy case_key 固定由 row id 產生，不以 description 或姓名推測案件。
+  - 新 writer INSERT 可省略 event_type／description；current alert status 只允許 open、claimed、resolved。
+  - 任一 DDL 中斷後若 metadata 呈 partial，runner 必須停止並保留 candidate/receipt，不得自動 DROP 或宣稱成功。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_system_alert_current_projection_schema.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-system-alert-current-projection"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: MatchingRecordsResumeDeliveryMigration
+- Sub Map: root
+- Type: database_schema
+- State: `planned`
+- Source: db/schema_parts/108_matching_records_resume_delivery.sql
+- Dependencies: [DatabaseSchemaLoader]
+- Description: 在保留 legacy matching_records 全部資料的前提下，補齊已由履歷發送 command 與 DOC-SEND-001 scanner 使用、但舊資料庫尚未具備的 sent_resume_at nullable delivery fact。
+- Complexity: medium
+- Input:
+  - legacy_table: matching_records 必須存在 id、case_no、staff_id、caregiver_accepted、sent_at、replied_at、sent_info_1_at、sent_info_2_at，且 sent_resume_at absent 或為 DATETIME NULL
+  - candidate_database: 由 PreservedDatabaseAdditiveUpgradeRunner 建立且與 live source 不同的 verified candidate identity
+- Output:
+  - resume_delivery_column: matching_records.sent_resume_at DATETIME NULL；既有 rows 保持 NULL，不從 sent_at、replied_at、LINE task、事件或 UI 狀態推測回填
+- Algorithm:
+  - 先以 INFORMATION_SCHEMA 將欄位分類為 absent、exact、partial 或 drift；只有 absent 可執行 ALTER TABLE ADD COLUMN，exact replay 為 no-op。
+  - ALTER 只能在 preserved candidate DB 執行；完成後重新讀取 column type、nullability、default 與 extra，必須精確為 DATETIME NULL、無 default、無 generated expression。
+  - runner verify 重新比對 migration 前後 matching_records row count、id 集合與所有既有欄位 fingerprint；只允許新增空的 sent_resume_at 欄位。
+- Invariants:
+  - 原 source DB 永不 mutation；不得使用 db/schema.sql、init_db 或 reset_fake_database 補欄位。
+  - 不回填 sent_resume_at；NULL 代表尚無明確履歷發送事實，不得用 sent_at、replied_at、caregiver_accepted、姓名、UI 操作紀錄或時間推測。
+  - 不新增、刪除或重排 matching_records rows，不修改既有 PK、FK、unique key、index 或欄位型別。
+  - partial/drift metadata 與 DDL 中斷一律 fail-closed 並保留 candidate/receipt，不得 DROP COLUMN 後重試。
+  - schema 完成後 DOC-SEND-001 scanner、mark_resume_sent 與 mark_resume_sent_for_case 必須共用此欄位；全域 scan 任一 scanner 失敗仍由 outer transaction rollback。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_matching_records_resume_delivery_schema.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-matching-records-resume-delivery"], "cwd": "project", "timeout": 120, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: PreservedDatabaseAdditiveUpgradeRunner
+- Sub Map: root
+- Type: migration
+- State: `planned`
+- Source: scripts/migrate_preserved_database_additive_schema.py::_normalized_row,DatabaseConfig.connect,_now,_sha256_bytes,_sha256_file,_canonical_json,_timedelta_microseconds,_atomic_write,write_receipt,read_receipt,_read_env_bytes,config_from_env,validate_database_names,server_identity,database_exists,_schema_snapshot,_table_evidence,_read_table_evidence,_read_table_columns,_read_primary_columns,_read_full_rows,_read_table_checksum,_primary_key_fingerprint,_normalize_database_qualifiers,_restored_schema_program_evidence,_system_alert_projection_state,_matching_records_resume_delivery_state,_owned_classification,schema_artifacts,_release_artifact_reference,build_plan,_validate_plan_integrity,validate_dump,_client_environment,_mysql_base,create_source_dump,restore_candidate,split_sql,_split_top_level,_sql_without_unsafe_rendering_differences,_strip_outer_sql_parentheses,_split_top_level_boolean,_compact_sql_atom,_boolean_contract_tree,_negate_boolean_contract_tree,_render_boolean_contract_tree,_canonical_boolean_contract,_normalize_sql_contract,_extract_parenthesized,_parse_column_definition,_normalize_column_type_contract,_parse_index_columns,_canonical_artifact_descriptor,_show_create_check_clauses,_canonical_artifact_metadata_state,apply_schema,_validate_candidate_resume_state,_journal_part_state,_resumed_step,_migration_operation_id,_ddl_journal_path,_run_project_python,_candidate_preddl_dump,run_candidate_post_schema,_run_manifest_backfills,_run_manifest_backfill,_run_backfill_phase,_backfill_receipt_paths,_backfill_argument_variables,_existing_backfill_artifact_hashes,_replace_database_setting,switch_environment,_validate_pre_switch_verification_receipts,recover_interrupted_switch,complete_cutover_after_restart,_post_restart_verification_receipt,_switch_journal_path,rollback_environment,_verify_legacy_system_alert_rows,_table_projection_evidence,_verify_matching_records_preservation,_verify_orders_preservation,_verify_source_full_rows,_verify_append_only_table,_table_projection_rows,_rows_are_preserved,_source_columns_by_table,_verification_receipt_payload,_run_candidate_verification_contracts,verify_candidate,_parser,main
+- Dependencies: [FinanceImportReprocessingSchema, OrderLifecycleStateHistorySchema, OrderServiceTimeTermsSchema, OrderLifecycleControlFactsSchema, SystemAlertCurrentProjectionMigration, MatchingRecordsResumeDeliveryMigration, OrderLifecycleControlFactsBackfillMigration, OrderDetailsLifecycleVersionViewMigration, DbService]
+- Description: 以保留原資料庫且可回切的 candidate cutover，將既有 MySQL 備份還原到全新資料庫後，依固定順序安裝 finance reprocess、order lifecycle、system alert current projection 與 legacy matching resume delivery additive schema、執行 canonical backfill／view migration、驗證真實 metadata 與資料不變量，最後才允許明確切換 DB_DATABASE；本 runner 永不在原 live DB 執行 DDL 或資料 mutation，且任何 receipt/stdout 不得保存或顯示 credential。
+- Complexity: medium
+- Input:
+  - mode: check、dry-run、restore、apply、verify、switch 或 rollback-switch；未明確指定 mutation mode 時只能讀取與產生計畫
+  - source_database: 目前 DB_DATABASE 指向的原資料庫；全流程只能讀取 identity、metadata、counts、fingerprints 與製作備份
+  - candidate_database: 明確提供且與 source_database 不同的全新候選資料庫名稱
+  - source_backup_artifact: mysqldump 產物，必須包含 schema、data、triggers、routines 與 events
+  - source_backup_receipt: 綁定 server identity、source database、dump SHA-256、命令 exit code及 restore 驗證的不可變 receipt
+  - plan_receipt: dry-run 產生並綁定 source/candidate identity、SQL source hashes、before metadata/data fingerprints、statement plan 與預期 after fingerprint
+  - operation_receipt_path: restore/apply/verify/switch 必填的 durable receipt 路徑
+  - environment_file: switch/rollback-switch 明確指定的 UTF-8 .env；只允許原子修改唯一 DB_DATABASE 設定
+- Output:
+  - upgrade_plan: Schema 61、104、105、106、107、108 每個 statement 的 absent/exact/blocked 判定、固定執行順序與預期 metadata
+  - operation_receipt: prepared、restored、partial、schema_applied、backfilled、verified、switched 或 rolled_back 狀態，以及每個不可回滾 statement 的 before/after fingerprint
+  - candidate_verification: source/candidate row-count與資料 fingerprint 比對、61/104/105/106/107/108 exact metadata、matching_records既有欄位保存、backfill/view驗證及可切換判定
+  - switch_receipt: .env before/after SHA-256、原/candidate DB_DATABASE、切換時間與精確回切前置條件；不得含完整 .env bytes、hex、credential 或其他環境變數值
+- Algorithm:
+  - check 只讀 source identity、MySQL version、必要 parent tables/columns/indexes、orders、finance staging、system_alerts與matching_records counts/fingerprints，並 strict 解析受版控 61、104、105、106、107、108 SQL；任一 artifact 缺失、hash不符或 target metadata 無法分類時停止。
+  - dry-run 將每個 table、column、index、FK、CHECK、trigger及view分類為 absent、exact、partial或drift；只允許 absent建立或exact replay，partial/drift一律產生blocked plan且不得進入restore/apply。
+  - restore 前驗證 source dump 非空、MySQL marker與source_database吻合、SHA-256與receipt一致；candidate_database 必須不存在，runner才可建立並以mysql client還原。還原後重新比對source/candidate canonical table row counts、主鍵集合、資料fingerprint、triggers及views，原source全程不可寫。
+  - restore驗證通過後，另對candidate建立pre-DDL mysqldump與candidate backup receipt，供既有OrderLifecycleControlFactsBackfillMigration以candidate identity驗證；不得用source名稱的dump冒充candidate backup。
+  - apply 僅連線candidate，在重核plan與live fingerprint無漂移後，嚴格依61_finance_import_reprocessing.sql、104_order_lifecycle_state_history.sql、105_order_service_time_terms.sql、106_order_lifecycle_control_facts.sql、107_system_alert_current_projection.sql、108_matching_records_resume_delivery.sql順序逐statement執行；不得掃描或套用其他schema_parts。
+  - 每個MySQL DDL statement視為可能implicit commit；執行前先durable寫prepared step，成功後立即以INFORMATION_SCHEMA與SHOW CREATE重新驗證並原子更新receipt。中斷後只可由exact metadata續跑，partial/drift不得自動DROP、ALTER修補或重建。
+  - schema exact後，以子程序環境覆寫DB_DATABASE=candidate執行OrderLifecycleControlFactsBackfillMigration的dry-run/apply/verify，再執行OrderDetailsLifecycleVersionViewMigration的dry-run/apply/verify；不得修改repo .env來讓中間步驟指向candidate。
+  - verify 比對source/candidate所有非本次新增資料的row counts與stable fingerprints，確認legacy取消單canonicalization、lifecycle_version、finance reprocess tables/triggers、matching_records既有資料與v_order_details projection；任何差異使candidate不可切換。
+  - switch只有在verified receipt與目前source/candidate/server/config fingerprints完全一致時，才以同目錄temporary file、flush/fsync及atomic replace將唯一DB_DATABASE由source改為candidate；receipt只保存source/candidate值及整檔before/after SHA-256，不保存可還原完整.env的bytes或hex，不得啟停服務、修改其他環境變數或刪除任一DB。
+  - rollback-switch只在目前.env仍精確等於switch receipt after hash且DB_DATABASE仍為candidate時，以同一受限替換函式將candidate改回source，再驗證結果等於before hash後原子寫入；若設定已被其他人修改或無法重建before hash則fail-closed。回切不刪除candidate，資料回復或雙寫合併不屬本runner。
+- Invariants:
+  - deny_imports: [scripts.init_db, scripts.reset_fake_database]
+  - source_database及目前DB_DATABASE指向的live原DB在所有mode都不得執行CREATE、ALTER、DROP、TRUNCATE、INSERT、UPDATE、DELETE、trigger/view重建或backfill；任何mutation connection的SELECT DATABASE()必須精確等於candidate_database。
+  - 禁止呼叫init_db、DatabaseSchemaLoader destructive entrypoint、reset_fake_database或db/schema.sql重建流程；只允許六個明列且hash綁定的additive schema part。
+  - candidate_database必須與source不同且在restore前不存在；不得以既有、非空、名稱模糊匹配或未綁定server identity的資料庫作candidate，也不得使用DROP DATABASE清場後冒充全新candidate。
+  - restore必須由已驗證source mysqldump建立candidate；不得用CREATE TABLE AS、部分copy、測試fixture或application-level逐表搬移代替正式restore。
+  - source dump、candidate pre-DDL dump、plan及operation receipt均須保存SHA-256；receipt寫入必須atomic且每個statement可恢復辨識，不能因final receipt失敗把partial DDL宣稱為rollback。
+  - 61→104→105→106→107→108順序固定；Schema 61、104、107及108既有同名table/column/index也必須完整metadata exact才可replay，CREATE TABLE IF NOT EXISTS或ADD COLUMN不得遮蔽drift。
+  - apply期間不得允許finance import/reprocess、API writer、background lifecycle projector或其他writer連到candidate；解除maintenance與啟動服務不屬runner，必須在switch後由外部部署程序完成。
+  - backfill只允許既有OrderLifecycleControlFactsBackfillMigration契約認可的legacy cancellation facts；runner不得自行推測actual-start reconfirmation、hold、completion或其他domain facts。
+  - DB_DATABASE切換及回切必須可稽核、原子且綁定.env fingerprint；不得自動覆寫DB_HOST、DB_PORT、DB_USER、DB_PASSWORD或其他設定，不得把credential、完整.env bytes、hex或可逆編碼寫入receipt、stdout或command argv。
+  - runner成功只代表candidate DB cutover備妥；未完成真實MySQL integration驗收、人工maintenance協調及服務重啟後smoke，不得宣稱production完成。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "scripts\\migrate_preserved_database_additive_schema.py"], "cwd": "project", "timeout": 60, "expect_exit": 0}
+- Observability:
+  - log: preserved_database_upgrade_phase_receipt
+  - alert: preserved_database_upgrade_blocked_or_partial
+
+##### Module: PreservedDatabaseAdditiveUpgradeCutoverIntegrationTest
+- Sub Map: root
+- Type: integration_test
+- State: `planned`
+- Source: tests/test_preserved_database_additive_upgrade_cutover.py::test_database_identity_guards_fail_closed,test_append_only_backfill_preservation_allows_new_rows_only,test_migration_canonical_json_supports_mysql_time_values,test_unextended_legacy_scheduling_tables_are_not_schema_drift,test_partially_extended_legacy_scheduling_table_remains_drift,test_sql_splitter_preserves_quoted_semicolons,_FakeApplyCursor.__init__,_FakeApplyCursor.__enter__,_FakeApplyCursor.__exit__,_FakeApplyCursor.execute,_FakeApplyCursor.fetchone,_FakeApplyConnection.__init__,_FakeApplyConnection.cursor,_FakeApplyConnection.close,_FakeApplyConfig.__init__,_FakeApplyConfig.connect,_configure_fake_apply,_write_fake_apply_receipts,test_statement_interruption_receipt_never_claims_partial_schema_exact,test_partial_or_drift_candidate_fails_closed_before_replay,test_exact_part_replay_is_idempotently_skipped,test_partial_statement_receipt_continues_until_part_is_exact,test_statement_crash_reconciles_journal_and_resumes_next_boundary,_snapshot_from_descriptor,test_105_owned_column_subset_is_partial_then_exact,_system_alert_transition_snapshot,test_107_only_canonical_statement_boundaries_are_partial,test_107_exact_projection_requires_both_exact_indexes,test_107_transitional_metadata_drift_is_not_resumable,test_107_arbitrary_new_column_subset_is_drift,test_build_plan_blocks_source_with_107_transitional_shape,test_descriptor_preserves_parameterized_types_and_mysql_default_extra,test_column_type_normalization_removes_only_structural_whitespace,test_sql_contract_normalization_preserves_grouping_precedence,test_captured_mysql_check_clauses_match_canonical_contract,test_captured_mysql_de_morgan_rewrite_matches_canonical_contract,test_de_morgan_normalization_preserves_non_equivalent_forms,test_show_create_check_parser_preserves_chinese_and_nested_literals,test_show_create_clause_overrides_information_schema_mojibake,test_current_metadata_descriptor_rejects_wrong_owned_shape,test_plan_artifact_and_fingerprint_staleness_fail_closed,test_backup_receipt_mismatch_fails_before_restore,test_restore_program_evidence_normalizes_only_database_qualifier,test_restore_data_mismatch_is_retained_and_fails_closed,test_orders_legacy_projection_mismatch_fails_closed,test_switch_identity_config_staleness_and_quoted_round_trip,_drop_created_test_databases,test_real_mysql_preserved_source_candidate_cutover
+- Dependencies: [PreservedDatabaseAdditiveUpgradeRunner, FinanceImportReprocessingSchema, OrderLifecycleStateHistorySchema, OrderServiceTimeTermsSchema, OrderLifecycleControlFactsSchema, SystemAlertCurrentProjectionMigration, MatchingRecordsResumeDeliveryMigration, OrderLifecycleControlFactsBackfillMigration, OrderDetailsLifecycleVersionViewMigration, SystemAlertScanOrchestrator]
+- Description: 以真實MySQL disposable source/candidate資料庫集中驗收preserved-data cutover；證明原資料庫全程不變、candidate restore與61→104→105→106→107→108可重跑、partial/drift fail-closed、backfill/view正確、switch receipt無credential，且全部已接線 system alert scanners 能在 candidate transaction 內完成。
+- Complexity: medium
+- Input:
+  - mysql_admin_test_config: 明確提供且只允許建立/刪除測試前綴資料庫的真實MySQL管理連線
+  - disposable_source_fixture: 涵蓋finance staging、全部order statuses、可backfill及review-required取消單、既有view與代表性付款/assignment/schedule資料
+  - temporary_environment_file: 不得使用或修改repo正式.env的隔離UTF-8設定檔
+- Output:
+  - cutover_receipt: restore、schema statements、backfill、view、switch、rollback-switch與idempotent replay的完整驗收證據，且不含完整environment bytes、hex或credential
+  - preservation_evidence: source before/after metadata、row counts、PK集合及stable data fingerprints完全一致
+  - scanner_compatibility: ORDER、BECLASS、LINE、DOC-SEND、IMPORT、RECEIVABLE、PAYOUT、RETURN、SCHEDULE全部scanner在candidate共用transaction內成功，測試後rollback
+- Algorithm:
+  - 在真實MySQL建立唯一測試前綴source DB並載入代表性保留資料，建立source dump；確認測試名稱與目前正式DB_DATABASE不同後，才由runner restore全新candidate。
+  - 驗證candidate與source初始一致，再跑完整61→104→105→106→107→108、backfill及view流程；驗證新增objects exact、legacy system_alerts 原資料保留且可接受 current writer、matching_records sent_resume_at 為nullable且不回填、取消單分類正確且view lifecycle_version逐案一致。
+  - 對每個schema phase模擬完成後中斷並重跑，證明exact step安全跳過、receipt可續接且不重複event/state；另建立同名drift/partial metadata，證明apply在任何後續statement前停止。
+  - 驗證錯source dump、錯server/database receipt、hash漂移、candidate已存在、source/candidate data drift、prepared receipt與DB狀態不一致均fail-closed。
+  - 使用含代表性其他設定與credential marker的temporary environment file驗證source→candidate原子switch、設定fingerprint衝突拒絕及candidate→source rollback-switch；receipt/stdout不得含marker、完整bytes或hex，整個測試不得修改repo .env。
+  - schema完成後以candidate connection執行run_process_alert_scan，驗證summary包含IMPORT-006及所有wired codes，再rollback並證明沒有system_alerts或正式帳務副作用殘留。
+  - 完成後只刪除本測試建立且精確符合本次隨機前綴的disposable DB；任何安全guard失敗時保留DB並回報名稱，不得廣泛DROP或清理未知schema。
+- Invariants:
+  - 必須連接真實MySQL 8並實際執行mysqldump/mysql restore、DDL、constraints、FK、CHECK、triggers、backfill及CREATE OR REPLACE VIEW；SQLite、mock cursor、SQL字串包含檢查或跳過測試不得作為通過證據。
+  - 測試開始前必須機械拒絕目前DB_DATABASE、union_db、union_db_upgraded及任何不具本次隨機測試前綴的source/candidate名稱。
+  - 每個restore/apply/backfill/view/switch/rollback階段後都必須重新證明source fingerprint完全不變；只驗candidate成功不足以通過。
+  - 必須覆蓋success、identical replay、statement interruption、partial metadata、drift、stale plan、backup/restore mismatch、config stale、credential non-disclosure、scanner schema compatibility與rollback-switch。
+  - 測試不得啟動正式API/UI、finance importer/reprocess或background projector；writer quiescence由隔離資料庫保證，正式maintenance流程另由部署者執行。
+  - 此節點是61、order lifecycle與system alert schema cutover的final integration gate；component py_compile或schema-focused pytest不得取代本驗收。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_preserved_database_additive_upgrade_cutover.py", "-q", "-p", "no:cacheprovider", "--basetemp", "adad_tmp\\pytest-preserved-database-cutover", "--maxfail=1"], "cwd": "project", "timeout": 300, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: CaregiverMatchingPlanSchema
@@ -2151,6 +2451,8 @@
   - assignment_plan: 一筆以上明確指定 staff_id、服務起訖日期、既有 assignment_id（更新時）與指派順序的完整目標有效配置；未列出的既有有效指派視為明確取消候選，不得由系統猜測新增月嫂或日期
   - schedule_change_plan: 物件，含 required_schedule_removals 對應的完整 remove_schedule_ids 正整數清單；只允許移除受影響正式指派擁有的列
   - applied_by: 非空操作識別
+  - cursor: 可空caller-owned DictCursor；lifecycle command模式必填，一般API模式為None
+  - business_date: caller cursor模式必填的單一BusinessTime日期；一般API模式由本服務既有database current date讀取一次
 - Output:
   - apply_result: 已套用訂單與客戶主資料快照、正式指派快照、受影響排班重建結果、付款確認結果與新稽核列 id
 - Algorithm:
@@ -2160,6 +2462,7 @@
   - 投影、計算或義務啟用發生非業務預期錯誤時必須拋出並由外層 rollback；不得吞掉例外後提交已完工但未建立義務的部分結果。
   - 以 Decimal 驗證所有未取消指派 actual_hours 總和恰等於訂單計畫時數（orders.service_days × orders.service_hours_per_day）；不相等即 rollback。此處是 Apply 寫入防線，不是人工薪資確認階段。
   - 同一交易最後新增 OrderAssignmentChangeAuditSchema 稽核快照並 commit，回傳已套用結果；任何例外均 rollback。
+  - cursor=None時本服務建立connection並管理commit/rollback/close；cursor存在時不得建立connection或管理transaction，所有相同驗證與寫入均使用caller cursor，成功只回傳結果。
   - [目前代碼規格：event-only lineage] segment reconfigure 只處理 formal assignment，送入 Rules 時投影 kind=formal 且 lineage 為 null；代班建立與 lineage 只由 append-only leave/substitution batch/event 流程處理。
 - Invariants:
   - 未提供完整明確 assignment_plan 或完整 schedule_change_plan 時只能回傳 requires_allocation，絕不得猜測哪位月嫂、哪個區段或哪一筆日排班應增減或移除。
@@ -2174,6 +2477,7 @@
   - 身分資格只能由 case_no join clients.identity_status 讀取；不得寫入或修改 clients.identity_status，也不得接受客戶傳入的 identity_status。
   - 每次成功 apply 必須新增一筆 OrderAssignmentChangeAuditSchema 稽核列；失敗或拒絕不得新增稽核列。
   - 既有 actual dates 為 NULL 時，重算 before transition 使用 planned dates；Apply 成功後依完整 order_change 寫回 actual_start_date／actual_end_date。
+  - caller cursor與business_date必須同時提供或同時省略；不得在caller cursor模式再次讀DB/OS/browser時間。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_assignment_synchronization.py", "-k", "apply", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Non Goals:
@@ -2221,7 +2525,7 @@
 - Sub Map: root
 - Type: router
 - State: `planned`
-- Source: api/routes/multi_caregiver_schedule.py
+- Source: api/routes/multi_caregiver_schedule.py::generate_assignment_schedule,adjust_assignment_schedule,_raise_retired
 - Dependencies: [MultiCaregiverScheduleGenerationService, MultiCaregiverScheduleAdjustmentService]
 - Description: 提供以正式 assignment_id 生成排班與調整指派內單日排班的獨立 API，與 legacy `/api/v1/schedule/save` 並存且不互相呼叫。
 - Complexity: medium
@@ -2397,12 +2701,43 @@
   - source_reference 未確認時允許為 NULL；不得使用檔名或 Excel 列號冒充銀行唯一流水號。
   - occurrence 以 batch_id、sheet_name、source_row 唯一並連回 canonical row。
   - 正式帳務 FK 不得成為保存未知流水的必要條件；同一來源檔內完全相同 fingerprint 的多列須保留 occurrence 並可標記警示。
+  - 原始 canonical 欄位、dedup_fingerprint 與 occurrence 永遠不得由重分類流程修改；只有 classification_type、classification_reason、matched_identity_ids、resolved_counterparty_account 與 classified_at 可由明確且具 append-only audit 的重處理流程更新。
 - Algorithm:
   - 建立或升級 schema 時將 dedup_fingerprint 設為 NOT NULL，並以可重跑的 additive migration 新增可空 resolved_counterparty_account；新增欄位不回填既有列。既有表若含 NULL fingerprint 必須明確失敗並要求處理，不得偽造值後強制升級。
   - 建立 import batch header；首次 fingerprint 建立 canonical row及 occurrence，再次出現只新增 occurrence。
   - 由 dedup_fingerprint 提供技術去重；可空 source_reference 僅保存銀行原始值，不承擔唯一性。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('db/schema_parts/60_finance_import_staging.sql').read_text(encoding='utf-8'); assert all(x in s for x in ('finance_import_batches','finance_import_rows','finance_import_occurrences','dedup_fingerprint','matched_identity_ids','resolved_counterparty_account','classification_type','reconciliation_status')); assert 'UNIQUE' in s; print('FINANCE IMPORT STAGING SCHEMA DECLARED')"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "FINANCE IMPORT STAGING SCHEMA DECLARED"}
+- Observability: not_required
+
+##### Module: FinanceImportReprocessingSchema
+- Sub Map: root
+- Type: database_schema
+- State: `planned`
+- Source: db/schema_parts/61_finance_import_reprocessing.sql
+- Dependencies: [FinanceImportRawStagingSchema, DatabaseSchemaLoader]
+- Description: 以 additive schema 保存歷史銀行流水重分類 run 與逐列 before／after／dispatch 的不可覆寫稽核，不取代 canonical staging、正式交易或 system alert 投影。
+- Complexity: medium
+- Input:
+  - reprocess_run: 明確 batch_id、非空 actor、classifier_version、plan_fingerprint 與 request summary
+  - reclassification_event: canonical row、before／after classification tuple 及 dispatch result
+- Output:
+  - finance_import_reprocess_runs: 每次正式 apply 的批次、計畫指紋、統計與完成狀態
+  - finance_import_reclassification_events: 每個 changed canonical row 的 before／after 與正式 dispatch 證據
+- Invariants:
+  - migration 必須 additive、可重跑；不得回填、更新或刪除 finance_import_batches、finance_import_rows、finance_import_occurrences 或任何正式帳務資料。
+  - run 必須 FK 連回 completed finance import batch，保存非空 actor、classifier_version、64 碼 plan_fingerprint、selected／changed／dispatch／reconciled／pending counts、request/result summary 與建立／完成時間。
+  - 同一 batch_id 與 plan_fingerprint 最多一個 run；相同已完成 plan 重送不得建立第二個 run。
+  - event 必須 FK 連回 run 與 canonical finance_import_row，保存 actor、before／after classification_type、reason、matched_identity_ids、resolved_counterparty_account、dispatch result/reason/references 與建立時間。
+  - 同一 run 與 canonical row 最多一個 event；unchanged row 不得建立 event。
+  - run 與 event 的稽核內容建立後不得 UPDATE 或 DELETE；必須由 DB trigger 機械拒絕，不得只依賴服務層自律。
+  - dry-run 必須 rollback，因此不得留下可持久 run/event id。
+- Algorithm:
+  - 以 lexically ordered schema part 建立兩張表、索引、FK、唯一鍵及單 statement append-only triggers。
+  - 先建立 run，再於同一 outer transaction 逐一建立 changed-row event；所有重分類與正式 dispatch 成功後才完成 run。
+  - 任一錯誤由 outer transaction 全部 rollback；禁止用刪除 audit 或正式交易作為資料回復手段。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_import_reprocessing_schema.py", "-q", "-p", "no:cacheprovider"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: SubsidyClaimBatchSchema
@@ -2576,7 +2911,7 @@
 
 ##### Module: FixScheduleConflicts
 - Sub Map: root
-- Source: scripts/fix_schedule_conflicts.py
+- Source: scripts/fix_schedule_conflicts.py::detect_schedule_conflicts,repair_schedule_conflicts,_print_conflict_report
 - Type: script
 - Description: 月嫂檔期衝突檢測與自動修復工具。
 - Observability: not_required
@@ -2718,7 +3053,7 @@
 - Sub Map: root
 - Type: script
 - State: `planned`
-- Source: scripts/imports/import_client_hcm.py
+- Source: scripts/imports/import_client_hcm.py::clean_phone,clean_city_and_address,clean_data,_parse_date,_parse_datetime,_load_holiday_dates,_calculate_service_end_date,_result,process_import,_load_hcm_frame,_is_hcm_sheet_name,_connect_database,_process_import_rows,_import_row,_workflow_error_outcome,_report_import_failure,_report_import_success,_normalized_record,_case_import_intent,_apply_command
 - Description: 匯入 HCM 客戶資料時以 case_no 去重；既有客戶與訂單只回報 skipped_existing，僅新增全新 client 與同交易中的初始 order，並由 client 的預計服務日期與服務規則初始化 order 預計起訖日。
 - Complexity: medium
 - Input:

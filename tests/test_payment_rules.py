@@ -1,4 +1,4 @@
-from services.payment_rules import evaluate_payment_boundary
+from domains.payroll.payment_rules import evaluate_payment_boundary
 
 
 def test_finalized_assignments_reject_overallocated_floor_fee():

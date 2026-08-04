@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Path
 
 from api.schemas.base import BaseResponse
-from services.multi_caregiver_schedule_read import (
+from subsystems.scheduling.assignment_schedule_query import (
     get_assignment_schedule as get_assignment_schedule_service,
 )
 

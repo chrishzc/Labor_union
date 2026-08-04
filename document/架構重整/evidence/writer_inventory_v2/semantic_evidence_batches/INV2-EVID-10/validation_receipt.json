@@ -1,0 +1,10 @@
+{
+  "input_sha256": "6ff3bd96be9bc284beb81bbedc196ce467d74791bb40a261bfca4edc3d1efb86",
+  "output_sha256": "4e03eb47d059b0afa1bf6131f38edf070c063150d95ae86183f54f45add7f179",
+  "row_count": 50,
+  "identity_unique_count": 50,
+  "missing_field_count": 0,
+  "effective_disposition_blocked_count": 50,
+  "approved_to_remove_true_count": 0,
+  "production_files_changed": 0
+}

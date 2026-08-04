@@ -1,0 +1,2402 @@
+﻿[
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "9c8b3236f12b02b8",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  13,
+                                                    "end_line":  152,
+                                                    "line":  143
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/finance_import_repository.py",
+                                 "symbol":  "MySqlFinanceImportRepository.save_receipt",
+                                 "table":  "finance_import_apply_receipts"
+                             },
+        "finding_identity_digest":  "e2311c6f549e7e2a5ad3af6c2baa9d247d30cde0bafb8458b60aedbafb91cd68",
+        "inventory_row_number":  101,
+        "live_source_sha256":  "b462bf87328e5d9a184274314331e6dabb94e382e17c1bb7592ba335832a797e",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "3a7694a80e3845446488ccfb22979911148374a380a58c2b7a491bc1a81f26ee",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "finance_import",
+                                      "rule_id":  "v1-owner-rule-010",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-finance-import-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "9ea0bac962ef1e7e",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  455,
+                                                    "line":  444
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/finance_import_repository.py",
+                                 "symbol":  "_insert_alert_resolved_event",
+                                 "table":  "anomaly_workflow_events"
+                             },
+        "finding_identity_digest":  "a9be5e933927291bfbd09c3868855bc7aacfca87916f50c86dc8c8f37739cd34",
+        "inventory_row_number":  102,
+        "live_source_sha256":  "b462bf87328e5d9a184274314331e6dabb94e382e17c1bb7592ba335832a797e",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "57ce74690bf31fc8cc55e478bf5d98adef63b867f124fadb61c537bf665a6174",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "finance_import",
+                                      "rule_id":  "v1-owner-rule-010",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-finance-import-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "06ac41262c84bedd",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  360,
+                                                    "line":  357
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/finance_import_repository.py",
+                                 "symbol":  "_load_active_alert",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "a14335745de75dd9e50b1bbe850061e6d426a39b56b9f7a84fd491a8f8bc71b3",
+        "inventory_row_number":  103,
+        "live_source_sha256":  "b462bf87328e5d9a184274314331e6dabb94e382e17c1bb7592ba335832a797e",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "d7ec53ef4bf5ac770e42b120d5e0a3d04c60ce24f47d283b2bc56c9afa77b171",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "finance_import",
+                                      "rule_id":  "v1-owner-rule-010",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-finance-import-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "900b16fbf5c4ae52",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  256,
+                                                    "line":  253
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/finance_import_repository.py",
+                                 "symbol":  "_load_batch_facts",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "d572f4d9376988005122cfad72529a430fe54cb0434188efd9151dcda8a09457",
+        "inventory_row_number":  104,
+        "live_source_sha256":  "b462bf87328e5d9a184274314331e6dabb94e382e17c1bb7592ba335832a797e",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "6099f1da3703d8e1727bb02a45acbc30797e60fd7c45c9725d20267d3338acb1",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "finance_import",
+                                      "rule_id":  "v1-owner-rule-010",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-finance-import-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "0e447855ce750160",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  401,
+                                                    "line":  398
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/finance_import_repository.py",
+                                 "symbol":  "_load_client_and_staff_obligations",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "f7f4c51d56044f77694ebc8c3d758f97efa4efa2e042e174700fbbff31021393",
+        "inventory_row_number":  105,
+        "live_source_sha256":  "b462bf87328e5d9a184274314331e6dabb94e382e17c1bb7592ba335832a797e",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "ca6a3fce6fd0d4988de23825b123a36d1c756a5c1ca64d056d9a336a29f28bf3",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "finance_import",
+                                      "rule_id":  "v1-owner-rule-010",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-finance-import-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "69b1e1026f15195b",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  406,
+                                                    "line":  403
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/finance_import_repository.py",
+                                 "symbol":  "_load_client_and_staff_obligations",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "5b55fae0cd6ef1e43da2e49294c67f6c3a5048b718a6b95454f6a9c0c72e520d",
+        "inventory_row_number":  106,
+        "live_source_sha256":  "b462bf87328e5d9a184274314331e6dabb94e382e17c1bb7592ba335832a797e",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "adea14f5c89dd9830e533052d87121ef4681a131fff13feae6816c51804fd980",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "finance_import",
+                                      "rule_id":  "v1-owner-rule-010",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-finance-import-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "06a13d3f7c336aa6",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  330,
+                                                    "line":  327
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/finance_import_repository.py",
+                                 "symbol":  "_load_correction_facts",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "c7245c7df3a533a9d0f47c75afb122fd704ac5e43deaddda4baf20c40137509e",
+        "inventory_row_number":  107,
+        "live_source_sha256":  "b462bf87328e5d9a184274314331e6dabb94e382e17c1bb7592ba335832a797e",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "4779fc361a89326820ed77a0968e014f067ae50f95990a6aba4a0c91d168e12a",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "finance_import",
+                                      "rule_id":  "v1-owner-rule-010",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-finance-import-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "45c7aca08412bf59",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  51,
+                                                    "end_line":  389,
+                                                    "line":  389
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/finance_import_repository.py",
+                                 "symbol":  "_load_government_subsidy_obligations",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "312063de18d972c08cbc07f9708c811273f4a5d2f570ef630b1be452cbba355e",
+        "inventory_row_number":  108,
+        "live_source_sha256":  "b462bf87328e5d9a184274314331e6dabb94e382e17c1bb7592ba335832a797e",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "acaca44a8b1d4fadf3179983d5e124887d9f1410524dbde3e9d733bf19d2cf00",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "finance_import",
+                                      "rule_id":  "v1-owner-rule-010",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-finance-import-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "21df39bb816c00dd",
+                                 "method":  "commit",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  28,
+                                                    "end_line":  41,
+                                                    "line":  41
+                                                },
+                                 "operation":  "COMMIT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "FinancialAdjustmentMySqlUnitOfWork.commit",
+                                 "table":  "-"
+                             },
+        "finding_identity_digest":  "136f3c3dae6f7cf7198200f222b225aef7dbc0b053ab582fce254837ce342f51",
+        "inventory_row_number":  109,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "403bc9f6ea4df21dbb114944898d6b0cd933879cc5085f7e7b6df70947c69000",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "transaction_boundary"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "2c6404e7103b1be8",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  417,
+                                                    "line":  409
+                                                },
+                                 "operation":  "UPDATE",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_advance_versions",
+                                 "table":  "client_finance_accounts"
+                             },
+        "finding_identity_digest":  "d66e959240efec7a1b7b1399af29651d901b9fe306b2217bb3d26ef95f70c1c5",
+        "inventory_row_number":  110,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "c7da8d4189e4dc8d6b1eb60fdce1b15f78ab9262b586fa93c9e5a54f54281f59",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "9552aba45da753c0",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  430,
+                                                    "line":  422
+                                                },
+                                 "operation":  "UPDATE",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_advance_versions",
+                                 "table":  "payroll_case_accounts"
+                             },
+        "finding_identity_digest":  "c90f4025af52c0aa96f0e9c33dfd5759b9f6fc04713402ec1591b5c9af36d279",
+        "inventory_row_number":  111,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "aa2e1b617e6ab7657ae20578a5c6e8a83c0d5188217e894d692c04aed89e85ca",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "7af774bdeb99b3bf",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  131,
+                                                    "line":  128
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_ensure_accounts",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "ce27931fe51a3e9f5c614c928c17f7b1d67ee40e10af41fb7288db9ce270d3fd",
+        "inventory_row_number":  112,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "ae1836f52a924e2c19624d816ef708f14a9ff8e3493463420c8f6224ca1c216c",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "c57fc79a5779266f",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  137,
+                                                    "line":  134
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_ensure_accounts",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "bb506d390da0c1453cd50e6ff571f49e4c83e00296e5ba63c706c5b9bed3b94a",
+        "inventory_row_number":  113,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "e7c6e4b7b4a4e31d95237bded6239e40702b127b915f4404359456699b80f71f",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "26625c1ddf3f8405",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  238,
+                                                    "line":  225
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_adjustment",
+                                 "table":  "financial_adjustments"
+                             },
+        "finding_identity_digest":  "02823a5bb619c110ec02e042c3c0e688e74f859df83cd6048c01577121162fc0",
+        "inventory_row_number":  114,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "f95f0700576ef7274068472e96c1006948610d21db8d011ca08a870bbea1682b",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "7eaa1c609879e41f",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  283,
+                                                    "line":  270
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_client_obligation",
+                                 "table":  "client_obligation_events"
+                             },
+        "finding_identity_digest":  "0b2ebc258f83a3ae20d628423b4799106131261b8cf07d5878858edb524439e0",
+        "inventory_row_number":  115,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "4e4ac27b53a84b060d245ba32ed7bf2d6022e97d95f978dc51a22f662263e7a8",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "6d78bce0dcf86127",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  295,
+                                                    "line":  285
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_client_obligation",
+                                 "table":  "client_obligations"
+                             },
+        "finding_identity_digest":  "402c22d396e706f92f4cc22d9898d84fb8d162f67b7197e7e645325c6a7a6dab",
+        "inventory_row_number":  116,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "81ceaa71692f84f83c20dd9461c71b7be740969f3b53fb58b7a7107c68222e08",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "0246499d91b3b395",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  444,
+                                                    "line":  437
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_outboxes",
+                                 "table":  "client_finance_outbox"
+                             },
+        "finding_identity_digest":  "cf415684c60e0d581a66fe9e4b664a34e19388f6006124223557961d60843d48",
+        "inventory_row_number":  117,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "e518e2164e6c4e7d5a4e570aca679c0797f74622ca2b56335327b31d86175b8f",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "b7983afd6a207159",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  454,
+                                                    "line":  447
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_outboxes",
+                                 "table":  "payroll_outbox"
+                             },
+        "finding_identity_digest":  "473310e99c7b9ad7baf8431ca5543d45cb7671431ba262b6b11683f11d1a7d22",
+        "inventory_row_number":  118,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "7a64299b374d558ef4d974bcf601d873a5fd3e3ef552eb451b32bb6b1e9223d4",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "ea18775e49227c72",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  311,
+                                                    "line":  300
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_payroll_adjustment",
+                                 "table":  "payroll_adjustment_events"
+                             },
+        "finding_identity_digest":  "853370cd0965a3809e00d5042440cfc233d4adf28df2a9f06e1b9f976c65b672",
+        "inventory_row_number":  119,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "51e570adfc2d1acbf9fd215b949bdd52979bc607e884037d112190ec9e23dd65",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "385213b00dc86443",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  351,
+                                                    "line":  343
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_payroll_allocation",
+                                 "table":  "payroll_adjustment_allocations"
+                             },
+        "finding_identity_digest":  "9d512b23730e91fe341e19992430028d9fae2937a4a718f309e6e82e654848ea",
+        "inventory_row_number":  120,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "be281c39bacd6322bf37a2a0f4f4cbaecba8d64caaf28c1c858c675f34f8bb54",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "ef06e5a0b660e142",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  469,
+                                                    "line":  458
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_receipt",
+                                 "table":  "financial_adjustment_apply_receipts"
+                             },
+        "finding_identity_digest":  "47c236f8fb94f7866aee84d04df220884cf127b39163e7912323f93ffee41d89",
+        "inventory_row_number":  121,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "bdf5283ccc3ce50b29ec696adbcaf59d9991e76e6dd631a268911975da34950f",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "221e13714ad498e0",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  8,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  9,
+                                                    "end_line":  251,
+                                                    "line":  244
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_staff_allocations",
+                                 "table":  "financial_adjustment_staff_allocations"
+                             },
+        "finding_identity_digest":  "69fc89ef562de621ec472a178193888ae8f594c1972b0f681896ab0e05c973ff",
+        "inventory_row_number":  122,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "0b872bcad5f67118d4d1c6c2f93153eadf7dba9687b8f6cfdcecd24ace0c9093",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "bb1b58afa4ff4d06",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  404,
+                                                    "line":  390
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_staff_obligation",
+                                 "table":  "staff_obligations"
+                             },
+        "finding_identity_digest":  "5c434c5dd1e3982af2dc556e2d002ac656ec26670d9d2a43d1dfb60113577d29",
+        "inventory_row_number":  123,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "8407b5744ff519898773b94da47999ec6ad5b712db9a8ff8411715455ca7ad85",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "a9d0ae2578832d16",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  383,
+                                                    "line":  364
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_insert_staff_obligation_event",
+                                 "table":  "staff_obligation_events"
+                             },
+        "finding_identity_digest":  "c5ef77e90f3e43b4ce1d94c910984f3f961354ac067eb9603e8e1bed2c2e395d",
+        "inventory_row_number":  124,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "8e7dfdaa39de166802f419a7b8aa206212e1d2cfef575f6f40f62d0807b64e28",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "27e0ced1a7ec058e",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  150,
+                                                    "line":  142
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_load_account_row",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "8d52634e8f8d481cdc55c9bce9e316e80fda278418d77ecf1bdd41b7cc91e58e",
+        "inventory_row_number":  125,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "d7c1052ce66d8802354f0d3c786342a37d62e80c0004e69fe4de3a4e85786616",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "df4932a2136ded04",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  196,
+                                                    "line":  183
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/financial_adjustment_repository.py",
+                                 "symbol":  "_load_reversal_target",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "27868efe78c482b9a1b4ba4f33567bb25dd3c8ea9b13cb882abbe3e99519ea27",
+        "inventory_row_number":  126,
+        "live_source_sha256":  "ffaa280cf0edfe0b483bdbca9261090fdf24ede063779d8e03adccd283a1f6f4",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "a18aedaa351830570fe0291ac845aab4d6a931f2d4de14b9c7edcd5fa0517e9e",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-2",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "financial_adjustments",
+                                      "rule_id":  "v1-owner-rule-003",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-cross-domain-adjustment-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "300e7a9f4c16abfb",
+                                 "method":  "commit",
+                                 "occurrence":  {
+                                                    "column":  8,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  27,
+                                                    "end_line":  75,
+                                                    "line":  75
+                                                },
+                                 "operation":  "COMMIT",
+                                 "path":  "infrastructure/mysql/government_subsidy_anomaly_source.py",
+                                 "symbol":  "project_government_subsidy_anomaly_page",
+                                 "table":  "-"
+                             },
+        "finding_identity_digest":  "07bedc61dec42b2376b8982c9e476ab5aec2bb80831abf71376977e5ccd2b8b6",
+        "inventory_row_number":  127,
+        "live_source_sha256":  "7625843b4c15f66674a0c7bc83a233112702c8fea4f91ee0531f833cf1246762",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "497a65a7a7cad6e8af3bc9a81244064fe3abfbee838fecbcd57a8a89f13b2883",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "transaction_boundary"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "300e7a9f4c16abfb",
+                                 "method":  "commit",
+                                 "occurrence":  {
+                                                    "column":  8,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  27,
+                                                    "end_line":  67,
+                                                    "line":  67
+                                                },
+                                 "operation":  "COMMIT",
+                                 "path":  "infrastructure/mysql/government_subsidy_assignment_drift_anomaly_source.py",
+                                 "symbol":  "project_government_subsidy_assignment_drift_page",
+                                 "table":  "-"
+                             },
+        "finding_identity_digest":  "e9820fb4dd934a5d0f5ed5b00072220380d420056605758168e76fefaa2d8e55",
+        "inventory_row_number":  128,
+        "live_source_sha256":  "1eb196dd9e58cb8700d12e5bcdda26964df1562db698dba1f24586cde0cb6498",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "cb168e85b30faa0da5b7a4123021a99f5c0dc7c4a0f103e0d98bea77723c84f6",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "transaction_boundary"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "300e7a9f4c16abfb",
+                                 "method":  "commit",
+                                 "occurrence":  {
+                                                    "column":  8,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  27,
+                                                    "end_line":  64,
+                                                    "line":  64
+                                                },
+                                 "operation":  "COMMIT",
+                                 "path":  "infrastructure/mysql/government_subsidy_integrity_anomaly_source.py",
+                                 "symbol":  "project_government_subsidy_integrity_page",
+                                 "table":  "-"
+                             },
+        "finding_identity_digest":  "6c90a7397fb203c7452b63891809c4e91d36353dbe31db2e4a807b2a2ae85491",
+        "inventory_row_number":  129,
+        "live_source_sha256":  "2695ae9bfab657d9de9613a3e260cc58cfe273a940ccbe45ff53467829e7c1e0",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "c89027ffa37ee0d913d001b1808afbf6c067d375c4080b2beb47850b5fcb071e",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "transaction_boundary"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "6c4cadc27ffaf2e5",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  13,
+                                                    "end_line":  305,
+                                                    "line":  302
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.append_claim_outbox",
+                                 "table":  "government_subsidy_claim_outbox"
+                             },
+        "finding_identity_digest":  "eb5273da4df1577f1496d04d53b96e5fd54c8bbe080fe9617900bace214fe3ed",
+        "inventory_row_number":  130,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "066025bc05de7083b11cab0c4b716e6f9069b2cf4bca55725c87e09c66a98eea",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "1d3729afdfa29eb1",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  13,
+                                                    "end_line":  174,
+                                                    "line":  171
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.append_ledger_transaction",
+                                 "table":  "government_subsidy_transactions"
+                             },
+        "finding_identity_digest":  "09d896ad06a187b01a4b1fb2ed5c04362efbb86e6f63dbf4941e60e43d5da8c4",
+        "inventory_row_number":  131,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "be6baf0a38b95ab1e78507142879b3602021e22b5c5c16d0b8a1e48c4eae9c5c",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "219c06f9eb42f073",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  13,
+                                                    "end_line":  234,
+                                                    "line":  226
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.append_outbox",
+                                 "table":  "government_subsidy_outbox"
+                             },
+        "finding_identity_digest":  "47245f9bee49478e454ed96b6a44bc05ea95179806a9ff7338cf14ce3d200b53",
+        "inventory_row_number":  132,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "cfb68ee4d92ff91d7ec595ec76046f0225cc779a2eec27bc3702c7c113a4e2fe",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "86c45b21f16a310f",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  13,
+                                                    "end_line":  215,
+                                                    "line":  208
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.append_projection_event",
+                                 "table":  "government_subsidy_projection_events"
+                             },
+        "finding_identity_digest":  "f025cadb7c9020fc25e38c3ace1011afe17a63e36ab9c9ec08cc05e53f0e093c",
+        "inventory_row_number":  133,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "4ca79fce435a7cda5ed95bd31578b8037496e8d9fe43685ed1f3d01ce459d3ed",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "9b85f83ddbe08a78",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  13,
+                                                    "end_line":  254,
+                                                    "line":  251
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.find_claim_receipt",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "d0d5f707f46dde6e93fd096dd5f890a66cde719f54095c18d955ab6276524056",
+        "inventory_row_number":  134,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "10b4ae593974fae76ea7f9226d92230466e43d2ac76bfb9f41eb1583652c249b",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "47924eb0de8758e9",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  75,
+                                                    "end_line":  159,
+                                                    "line":  159
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.find_receipt",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "e3c8ce95c0f73e44d3aef3209cbf61b5773598569498f4a9ba6e190e5bc19a7d",
+        "inventory_row_number":  135,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "01db0f13f086190216b007eeef6704b25d254dce001f8de70d3657135b4b25f0",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "0b5b41b293a713ed",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  13,
+                                                    "end_line":  315,
+                                                    "line":  312
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.save_claim_receipt",
+                                 "table":  "government_subsidy_claim_apply_receipts"
+                             },
+        "finding_identity_digest":  "46edcc7634881ca1ef77ef95f6b2b05c3bc4d319d13a30a6071999767ed6467c",
+        "inventory_row_number":  136,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "6bce92f1531fc5bd05ca5508833c683d1c2f9b6d22c04381b25b8edb8c71ca72",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "1ca9c6ce19288631",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  73,
+                                                    "end_line":  241,
+                                                    "line":  241
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.save_receipt",
+                                 "table":  "government_subsidy_apply_receipts"
+                             },
+        "finding_identity_digest":  "4fd56867526fa41242517d776571a102252e03c9ce56ad51553a14f66d4ba7e1",
+        "inventory_row_number":  137,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "adb6f6abef146ecea8eb464ad49a548861547548ac8b6ee02fb2fce6bcffe81c",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "dce06dd4ebc888c9",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  12,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  13,
+                                                    "end_line":  197,
+                                                    "line":  194
+                                                },
+                                 "operation":  "UPDATE",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "MySqlGovernmentSubsidyRepository.update_batch_projection",
+                                 "table":  "government_subsidy_batch_accounts"
+                             },
+        "finding_identity_digest":  "b44f09a6a971ab50c3c37072401444d3be152eaa0f65388a95ea17aa86dae8ba",
+        "inventory_row_number":  138,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "154cf3d0f60cf39a070b6deb9d187bf429972690e675c871d4313b2a5c478ad9",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "d8bae7c1a2208d2d",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  931,
+                                                    "line":  921
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_insert_allocation",
+                                 "table":  "government_subsidy_allocations"
+                             },
+        "finding_identity_digest":  "9c4499c4e46935950b23b126b0d6e25d1d421da6f66e661207ab25db29fb123e",
+        "inventory_row_number":  139,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "70917370aaf97d87b27301ee1cdec15457cccbc593fef933bb40cfa42438e383",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "a6a7500aaf36f0a8",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  498,
+                                                    "line":  485
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_insert_approval_event",
+                                 "table":  "government_subsidy_claim_approval_events"
+                             },
+        "finding_identity_digest":  "e971831efd5ab11449b4949efc6576dd839058007e64c067316f518e0c2a9787",
+        "inventory_row_number":  140,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "300e690028593ffa668204f9bf37124eb1ad8dedd782b3197e744017bfe12d7e",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "b8cd5f9720e03483",
+                                 "method":  "executemany",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  514,
+                                                    "line":  503
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_insert_approval_items",
+                                 "table":  "government_subsidy_claim_approval_items"
+                             },
+        "finding_identity_digest":  "ce7d0fd0f90f8e059ede418ab8a5ce0e8f367ca6ca109758b5cba7ca1345d2ec",
+        "inventory_row_number":  141,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "045caa025b3962f22982c82ad09784b058c1101578ec8d707ea7ae59bbc92d49",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "34b8f32d61d1b6d5",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  8,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  9,
+                                                    "end_line":  844,
+                                                    "line":  835
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_insert_claim",
+                                 "table":  "application_command_claims"
+                             },
+        "finding_identity_digest":  "7dd8638aba8f0040c46825d6c3c43cd38c5a5f4f4df023724bc2bd2a144b1db8",
+        "inventory_row_number":  142,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "0db185a30fb3df508bf04768054db752e860be151572b2fc2eb127a976262931",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "85c1431360f1b157",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  445,
+                                                    "line":  438
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_insert_claim_account",
+                                 "table":  "government_subsidy_batch_accounts"
+                             },
+        "finding_identity_digest":  "b8c9056051049b023e161841590bd50d4508625819fe28ddd400784fd16881e4",
+        "inventory_row_number":  143,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "9bb6523436d7a1469b9caaccfcf9e6bb0dc5419e144bdc3b9fee6e5d113324b6",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "6ec93e22fa302bec",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  417,
+                                                    "line":  409
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_insert_claim_batch",
+                                 "table":  "subsidy_claim_batches"
+                             },
+        "finding_identity_digest":  "1eb5e9ff346f8db816578a217567de5fdac61a1b91467811f4016b85ea65a69e",
+        "inventory_row_number":  144,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "737e8e85804701582af5849402de2478c38b5d911c1d490f6bd4a6b110234b03",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "b5a912a40be51835",
+                                 "method":  "executemany",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  52,
+                                                    "end_line":  434,
+                                                    "line":  434
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_insert_claim_items",
+                                 "table":  "subsidy_claim_batch_items"
+                             },
+        "finding_identity_digest":  "678a5d649b98ea337937e8c3d99e0bca1f255288cdf09d0b2b2e0d354d99338d",
+        "inventory_row_number":  145,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "a0b099342e60079f1806da7126e350d75b34b5d6fa6cff1df9db2b1292ac7247",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "ec832574d722a2e0",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  5,
+                                                    "end_line":  461,
+                                                    "line":  449
+                                                },
+                                 "operation":  "INSERT",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_insert_submission_event",
+                                 "table":  "government_subsidy_claim_submission_events"
+                             },
+        "finding_identity_digest":  "197e65fbaca1192c0bbc39751919fc032dd130596f57699868021bc7af790cf2",
+        "inventory_row_number":  146,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "29f2d181d45cf7b63c9b6571a91ce88087c53d10a83178c04a2b445a3d708c1f",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "resolved_or_not_applicable",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "static_sql_mutation"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "217390696f15d0ab",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  66,
+                                                    "end_line":  657,
+                                                    "line":  657
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_load_bank_fact",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "bd431fb9d3729fb30dfaec7d9c04bdc9e4978dcfda7b86496ac33274ac129ed3",
+        "inventory_row_number":  147,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "3892b3ec492a5e81311cc6d68e34bb7e9fa34dc91af59bb3167e4efa3d46bd33",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "c78a9c0f533a29eb",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  4,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  64,
+                                                    "end_line":  706,
+                                                    "line":  706
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_load_batch",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "9e3f77f69d3ef812d8dab111e7f27463442626231e1048cba62e2b3ab062edd9",
+        "inventory_row_number":  148,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "9ce851e33fee437fadd131489932b4a56a03ca9213da01d68cc53b9bbe5a5dfc",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "485b8ea7abe27fc4",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  8,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  60,
+                                                    "end_line":  692,
+                                                    "line":  692
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_load_batches",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "b6d5717f1ba51fcbb3ebd7123477146b50a8b1c8e9eb851fc5078d9d47a14fda",
+        "inventory_row_number":  149,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "d1dde8798c2704a605d3a9c2341826ffe6ec820dfa2fd14c6647af83fc44ce3d",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    },
+    {
+        "approval_receipt":  null,
+        "approved_to_remove":  false,
+        "blockers":  [
+                         "semantic_disposition_missing",
+                         "caller_manifest_missing",
+                         "replacement_receipt_missing",
+                         "removal_approval_missing"
+                     ],
+        "call_fingerprint_provenance":  "live_ast",
+        "caller_manifest_digest":  null,
+        "contract":  "production-writer-inventory-final-finding/v2",
+        "decision_state":  "discovered_unadjudicated",
+        "effective_disposition":  "blocked",
+        "finding_identity":  {
+                                 "call_fingerprint":  "c78a9c0f533a29eb",
+                                 "method":  "execute",
+                                 "occurrence":  {
+                                                    "column":  8,
+                                                    "duplicate_ordinal":  1,
+                                                    "end_column":  9,
+                                                    "end_line":  697,
+                                                    "line":  694
+                                                },
+                                 "operation":  "DYNAMIC",
+                                 "path":  "infrastructure/mysql/government_subsidy_repository.py",
+                                 "symbol":  "_load_batches",
+                                 "table":  "unknown"
+                             },
+        "finding_identity_digest":  "fec53532a6ef97ab7c91701270281c167da0a243646bba19e972b738378e2d0c",
+        "inventory_row_number":  150,
+        "live_source_sha256":  "32ebdb1cead3319c4e776bcdc9225872066a8d116df0ede1e50fe717afda6292",
+        "post_change_receipt":  null,
+        "replacement_receipt":  null,
+        "row_digest":  "78abec60e4c1aa4d3c04264d40cccab4481c83918f7a880e6dde75fdd5598452",
+        "semantic_disposition":  null,
+        "sql_resolution_status":  "unresolved",
+        "v1_path_rule_metadata":  {
+                                      "exit_slice":  "slice-3",
+                                      "legacy_discovery_label":  "authoritative",
+                                      "match_count":  1,
+                                      "owner":  "government_subsidy",
+                                      "rule_id":  "v1-owner-rule-004",
+                                      "runtime_class":  "production",
+                                      "strategy":  "exclusive-government-subsidy-persistence-adapter"
+                                  },
+        "writer_kind":  "dynamic_sql_unresolved"
+    }
+]

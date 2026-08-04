@@ -11,7 +11,8 @@
 - Schema：`db/schema_parts/30_staff_monthly_settlement_details.sql`
 - 父表關係：`settlement_id` → `staff_monthly_settlements.id`, `staff_payment_id` → `staff_payments.id`
 - 子表關係：現況 Schema 有 `staff_transfer_allocations`；新流程不再建立逐明細匯款分配，該關係只供歷史資料讀取。
-- 已確認跨表裁決：本表為**月結機制的單一訂單指派金額組成明細 (Detail)**。同一月嫂同一月份的多筆訂單／assignment 各自一列，完整集合加總成月結 Header。定稿時凍結當下應付構成；本表用來回答月結總額如何形成，不是各列獨立核銷，也不需要把實際銀行匯款逐筆回配到訂單或薪資元件。正式付款只核對父表整月總額，且不允許建立 `partially_paid` 月結。
+- **2026-08-02 後項人工裁決（優先於下方舊月結提案）**：業務不建立月結 Header／revision 或月結明細狀態機；本表只作既有 Schema／production caller 的歷史相容盤點，遷移完成前不刪除，新架構不得把它當成付款義務或核銷 SSOT。應付款清單直接由 `staff_payments` 與根事實查詢／匯出。
+- **已被後項裁決覆寫的舊提案／現況模型**：本表曾被定義為月結 Header 的單一訂單／assignment 金額組成明細；下方逐欄表格只用來盤點 legacy schema 與 caller，不再代表目標付款模型，也不得新增寫入依賴。
 
 | 欄位 | Schema 定義 | 現況架構／用途 | 初步分類 | 現況公式 | 直接來源 | 第一層根事實 | 建議權威公式 | 修改命令／Owner | 重算觸發 | 凍結邊界 | 現況漂移／風險 | 裁決 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|

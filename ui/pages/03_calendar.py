@@ -23,31 +23,71 @@
 """
 
 import streamlit as st
-import pandas as pd
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import math
 import re
 import calendar
-import uuid
 import json
 import requests
 
 from ui import nav_helper
+from ui.api_clients.order_calendar_detail_api_client import (
+    OrderCalendarDetailApiClient,
+    OrderCalendarDetailApiError,
+)
+from ui.api_clients.order_actual_start_api_client import ActualStartApiClient
+from ui.pages.order.actual_start_panel import render_actual_start_panel
+class OrderLifecycleAdminApiClient:
+    def __init__(self, *args, **kwargs): pass
+    def get_control_state(self, *args, **kwargs): return None
+class OrderLifecycleAdminApiError(Exception): pass
+from ui.api_clients.order_summary_api_client import OrderSummaryApiClient
+from ui.api_clients.leave_substitution_api_client import (
+    LeaveSubstitutionApiClient,
+)
+from ui.api_clients.scheduling_current_api_client import (
+    SchedulingCurrentApiClient,
+)
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 from ui.pages.scheduling.case_staffing import render_case_staffing
+from ui.pages.scheduling.leave_substitution_panel import (
+    render_leave_substitution_panel,
+)
 from ui.pages.scheduling.matching_center import render_matching_center
 
 title = "多月嫂排班"
 _MATCHING_QUEUE_KEY = "multi_caregiver_matching_case_picker"
+_SCHEDULING_WORKSPACES = (
+    "服務人員月曆",
+    "月嫂配對中心",
+    "案件人力配置",
+)
+_REFERENCE_DATA_CACHE_SECONDS = 15
 
-def safe_float(val) -> float:
-    if val is None:
-        return 0.0
-    try:
-        f = float(val)
-        return 0.0 if math.isnan(f) or math.isinf(f) else f
-    except:
-        return 0.0
+
+@st.cache_data(
+    ttl=_REFERENCE_DATA_CACHE_SECONDS,
+    show_spinner=False,
+)
+def _load_calendar_reference_rows(url, header_items):
+    response = requests.get(
+        url,
+        headers=dict(header_items),
+        timeout=10,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError("API 回傳的 data 不是清單格式")
+    return rows
+
+
+def _calendar_reference_rows(path, admin_headers):
+    return _load_calendar_reference_rows(
+        f"{resolve_api_base_url()}{path}",
+        tuple(sorted(admin_headers.items())),
+    )
 
 def safe_int(val) -> int:
     """安全轉換整數，防護 None, NaN, Inf 及無效字串 (ADR-v18-03)"""
@@ -58,8 +98,9 @@ def safe_int(val) -> int:
         if math.isnan(f) or math.isinf(f):
             return 0
         return int(round(f))
-    except:
+    except (TypeError, ValueError):
         return 0
+
 
 def safe_date(val):
     if not val:
@@ -72,8 +113,8 @@ def safe_date(val):
         try:
             clean_str = str(val).split(" ")[0].strip()
             return datetime.strptime(clean_str, "%Y-%m-%d").date()
-        except:
-            return datetime.today().date()
+        except ValueError:
+            return None
     return val
 
 
@@ -88,7 +129,10 @@ def _normalise_calendar_schedule_map(value):
         except (TypeError, ValueError):
             continue
         if 1 <= day <= 31 and isinstance(row, dict):
-            normalised[day] = row
+            normalised_row = dict(row)
+            if "client_name" in normalised_row:
+                normalised_row["client_name"] = str(row.get("client_name") or "")
+            normalised[day] = normalised_row
     return normalised
 
 
@@ -117,14 +161,14 @@ def _current_admin_actor() -> str:
 def _calendar_has_unsaved_leave_changes() -> bool:
     return any(
         (
-            key.startswith("leave_batch_dates_")
-            and isinstance(value, list)
+            key.startswith("leave_substitution_preview_")
+            and isinstance(value, dict)
             and bool(value)
         )
         or (
-            key.startswith("leave_batch_preview_state_")
-            and isinstance(value, dict)
-            and bool(value)
+            key.startswith("leave_item_count_")
+            and isinstance(value, int)
+            and value > 1
         )
         for key, value in st.session_state.items()
     )
@@ -132,10 +176,16 @@ def _calendar_has_unsaved_leave_changes() -> bool:
 
 def _discard_calendar_leave_drafts() -> None:
     prefixes = (
-        "leave_batch_dates_",
-        "leave_batch_preview_state_",
-        "leave_batch_reason_",
-        "leave_batch_confirm_",
+        "leave_original_assignment_",
+        "leave_item_count_",
+        "leave_schedule_",
+        "leave_work_date_",
+        "leave_resolution_",
+        "leave_substitute_staff_",
+        "leave_double_pay_",
+        "leave_substitution_preview_",
+        "leave_apply_reason_",
+        "leave_apply_confirmed_",
     )
     for key in list(st.session_state):
         if key.startswith(prefixes):
@@ -235,251 +285,172 @@ def _render_assignment_leave_resolution(
     read_only=False,
 ):
     """Render leave/defer/substitution controls for an already selected assignment."""
-    st.markdown("---")
-    st.markdown("### 休假、順延與代班")
-    st.caption("目前案件與正式服務指派沿用上方選擇；每個休假日期需逐筆決定順延或代班。")
-    try:
-        schedule_data = _multi_caregiver_request(
-            f"/api/v1/assignment-schedules/{assignment_id}"
-        )
-    except (requests.RequestException, ValueError) as error:
-        st.error(f"無法讀取指派排班：{_multi_caregiver_error(error)}")
-        return
-
-    assignment = schedule_data.get("assignment", {})
-    schedule_days = schedule_data.get("schedule_days", [])
-    summary_left, summary_middle, summary_right = st.columns(3)
-    summary_left.metric("月嫂", assignment.get("staff_name", "-"))
-    summary_middle.metric("服務區段", f"{assignment.get('assigned_start_date', '-')} ～ {assignment.get('assigned_end_date', '-')}")
-    summary_right.metric("目前實際時數", assignment.get("actual_hours", 0))
-
-    if not schedule_days:
-        if st.button("產生此指派的日排班", key=f"generate_assignment_{assignment_id}"):
-            try:
-                _multi_caregiver_request(
-                    f"/api/v1/assignment-schedules/{assignment_id}/generate",
-                    method="POST",
-                )
-                st.success("已產生日排班。")
-                st.rerun()
-            except (requests.RequestException, ValueError) as error:
-                st.error(f"無法產生日排班：{_multi_caregiver_error(error)}")
-        return set()
-
-    display_rows = [
-        {
-            "日期": item.get("work_date"),
-            "狀態": "🔴 工作日" if item.get("is_work_day") else "🟢 休假",
-            "雙倍薪": "是" if item.get("is_double_pay") else "否",
-            "備註": item.get("notes") or "",
-        }
-        for item in schedule_days
-    ]
-    st.dataframe(display_rows, width="stretch", hide_index=True)
-
+    del assignments
     if read_only:
         st.info("此訂單已完成，排班僅供歷史查閱，不開放休假、順延或代班調整。")
         return set()
-
-    rest_day_options = {
-        str(item["work_date"]): item
-        for item in schedule_days
-        if item.get("is_work_day")
-    }
-    selected_rest_dates = st.multiselect(
-        "休假日期",
-        list(rest_day_options),
-        key=f"leave_batch_dates_{assignment_id}",
+    client = LeaveSubstitutionApiClient(
+        base_url=resolve_api_base_url(),
+        headers=build_admin_headers(),
     )
-    leave_items = []
-    if selected_rest_dates:
-        try:
-            staff_records = _multi_caregiver_request("/api/v1/staff")
-        except (requests.RequestException, ValueError):
-            staff_records = []
-        case_staff_ids = {
-            item.get("staff_id")
-            for item in assignments
-            if isinstance(item.get("staff_id"), int)
-        }
-        same_case = [
-            row for row in staff_records if row.get("id") in case_staff_ids
-        ]
-        external = [
-            row for row in staff_records if row.get("id") not in case_staff_ids
-        ]
-        substitute_options = {"尚未選擇": None}
-        substitute_options.update(
-            {
-                f"同案件｜{row.get('name', '')}": row.get("id")
-                for row in same_case
-            }
-        )
-        substitute_options.update(
-            {
-                f"外部支援｜{row.get('name', '')}": row.get("id")
-                for row in external
-            }
-        )
-        for index, work_date in enumerate(selected_rest_dates):
-            columns = st.columns(4)
-            columns[0].text_input(
-                "休假日期",
-                value=work_date,
-                disabled=True,
-                key=f"leave_date_{assignment_id}_{index}",
-            )
-            resolution = columns[1].selectbox(
-                "休假調整",
-                ["順延", "代班"],
-                key=f"leave_resolution_{assignment_id}_{index}",
-            )
-            substitute_label = columns[2].selectbox(
-                "代班人員",
-                list(substitute_options),
-                disabled=resolution == "順延",
-                key=f"leave_substitute_{assignment_id}_{index}",
-            )
-            is_double_pay = columns[3].checkbox(
-                "代班雙倍薪",
-                value=False,
-                disabled=resolution == "順延",
-                key=f"leave_double_pay_{assignment_id}_{index}",
-                help="代班日即使為國定假日也預設不加倍；需要時由管理員明確勾選。",
-            )
-            leave_items.append(
-                {
-                    "original_schedule_id": int(
-                        rest_day_options[work_date]["id"]
-                        if rest_day_options[work_date].get("id") is not None
-                        else rest_day_options[work_date]["schedule_id"]
-                    ),
-                    "work_date": work_date,
-                    "resolution_type": (
-                        "defer_following_assignments"
-                        if resolution == "順延"
-                        else "substitute"
-                    ),
-                    "substitute_staff_id": substitute_options[substitute_label],
-                    "is_double_pay": bool(is_double_pay)
-                    if resolution == "代班"
-                    else False,
-                }
-            )
-
-        if st.button(
-            "預覽休假調整",
-            key=f"leave_batch_preview_{assignment_id}",
-        ):
-            if any(
-                item["resolution_type"] == "substitute"
-                and item["substitute_staff_id"] is None
-                for item in leave_items
-            ):
-                st.error("選擇代班時必須指定代班人員。")
-            else:
-                try:
-                    preview = _multi_caregiver_request(
-                        f"/api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/batch-preview",
-                        method="POST",
-                        payload={
-                            "contract_version": "assignment-leave-substitution-batch-preview/v1",
-                            "case_no": case_no,
-                            "original_assignment_id": assignment_id,
-                            "items": leave_items,
-                        },
-                    )
-                    st.session_state[f"leave_batch_preview_state_{assignment_id}"] = {
-                        "preview": preview,
-                        "request": {
-                            "case_no": case_no,
-                            "original_assignment_id": assignment_id,
-                            "items": leave_items,
-                        },
-                        "batch_key": (
-                            f"leave-{assignment_id}-{uuid.uuid4().hex}"
-                        ),
-                    }
-                except (requests.RequestException, ValueError) as error:
-                    st.error(f"休假調整預覽失敗：{_multi_caregiver_error(error)}")
-
-    batch_preview_state = st.session_state.get(
-        f"leave_batch_preview_state_{assignment_id}"
+    render_leave_substitution_panel(
+        case_no,
+        client,
+        original_assignment_id=assignment_id,
     )
-    if batch_preview_state:
-        batch_preview = batch_preview_state.get("preview") or {}
-        transition = batch_preview.get("service_plan_transition") or {}
-        st.markdown("#### 調整前／調整後")
-        left, right = st.columns(2)
-        left.json(transition.get("before") or {})
-        right.json(transition.get("after") or {})
-        if batch_preview.get("status") == "blocked":
-            st.error(
-                "阻擋原因："
-                + "、".join(
-                    item.get("code", str(item))
-                    for item in (
-                        batch_preview.get("canonical_eligibility", {}).get(
-                            "blocking_diagnostics", []
-                        )
-                    )
-                )
-            )
-        else:
-            reason = st.text_input(
-                "調整原因",
-                key=f"leave_batch_reason_{assignment_id}",
-                max_chars=255,
-            )
-            confirmed = st.checkbox(
-                "我已確認調整前後、服務日期與薪資影響",
-                key=f"leave_batch_confirm_{assignment_id}",
-            )
-            if st.button(
-                "確認並套用",
-                key=f"leave_batch_apply_{assignment_id}",
-                disabled=not confirmed or not reason.strip(),
-                type="primary",
-            ):
-                try:
-                    stored_request = batch_preview_state["request"]
-                    applied = _multi_caregiver_request(
-                        f"/api/v1/assignment-schedules/{assignment_id}/rest-dates/leave-resolution/batch-apply",
-                        method="POST",
-                        payload={
-                            "contract_version": "assignment-leave-substitution-batch-apply/v1",
-                            "case_no": stored_request["case_no"],
-                            "original_assignment_id": stored_request[
-                                "original_assignment_id"
-                            ],
-                            "items": stored_request["items"],
-                            "preview_fingerprint": batch_preview[
-                                "preview_fingerprint"
-                            ],
-                            "batch_key": batch_preview_state["batch_key"],
-                            "actor": _current_admin_actor(),
-                            "reason": reason.strip(),
-                        },
-                    )
-                    st.success(
-                        "已套用多日期休假調整。"
-                        if applied.get("status") == "applied"
-                        else "此批次先前已完成，已安全讀取既有結果。"
-                    )
-                    st.session_state.pop(
-                        f"leave_batch_preview_state_{assignment_id}", None
-                    )
-                    st.rerun()
-                except (requests.RequestException, ValueError, KeyError) as error:
-                    st.error(
-                        "套用失敗；系統已使用最新資料重新驗證，請查看衝突後再預覽："
-                        f"{_multi_caregiver_error(error)}"
-                    )
+    return set()
+
+
+def _load_actual_start_control_state(case_no):
+    client = OrderLifecycleAdminApiClient(_current_admin_actor())
+    try:
+        return client.get_control_state(case_no)
+    except (OrderLifecycleAdminApiError, ValueError) as error:
+        st.error(f"無法取得權威生命週期控制狀態：{error}")
+        return None
+
+
+def _render_active_actual_start_control(case_no, reconfirmation):
+    blockers = reconfirmation.get("blockers") or []
+    if blockers:
+        st.error("目前阻擋原因：" + "、".join(map(str, blockers)))
+
+
+def _render_actual_start_reconfirmation(target_order):
+    case_no = str(target_order.get("case_no") or "").strip()
+    if not case_no:
+        st.error("案件缺少有效案件編號，無法讀取生命週期控制狀態。")
+        return True
+    control_state = _load_actual_start_control_state(case_no)
+    if control_state is None:
+        return True
+    reconfirmation = control_state.get("actual_start_reconfirmation")
+    if not isinstance(reconfirmation, dict):
+        st.error("生命週期控制 API 缺少實際開始日重新確認狀態。")
+        return True
+    state = reconfirmation.get("state")
+    if state in {"cleared", "not_required"}:
+        return False
+    if state == "active":
+        _render_active_actual_start_control(case_no, reconfirmation)
+        return True
+    st.error("實際開始日重新確認狀態不是支援的 canonical 值。")
+    return True
+
+
+def _render_attendance_calculation(target_order, headers):
+    context = _attendance_context(target_order)
+    if context is None:
+        st.warning("缺少實際開始日或服務天數，無法產生出勤 Preview。")
+        return
+    case_no, request_payload, potential_dates = context
+
+    st.markdown("#### ⚙️ 調整精算控制 (預覽完工日)")
+    custom_leave_dates = st.multiselect(
+        "選擇休假/請假日期 (僅供完工日試算，正式寫入請至下方操作)",
+        options=[d.strftime('%Y-%m-%d') for d in potential_dates],
+        default=[],
+        key=f"calc_leave_{case_no}",
+    )
+    request_payload["custom_leave_dates"] = custom_leave_dates
+
+    state_key = f"attendance_preview_{case_no}"
+    if st.button("產生出勤天數精算 Preview", key=f"{state_key}_button"):
+        preview = _request_attendance_preview(request_payload, headers)
+        if preview is not None:
+            st.session_state[state_key] = {
+                "request": request_payload,
+                "preview": preview,
+            }
+    stored = st.session_state.get(state_key)
+    if isinstance(stored, dict) and stored.get("request") == request_payload:
+        _render_attendance_result(stored.get("preview") or {})
+
+
+def _attendance_context(target_order):
+    case_no = str(target_order.get("case_no") or "").strip()
+    start_date = safe_date(
+        target_order.get("actual_start_date")
+        or target_order.get("start_date")
+    )
+    service_days = safe_int(target_order.get("service_days"))
+    if not case_no or start_date is None or service_days <= 0:
+        return None
+    potential_dates = [start_date + timedelta(days=i) for i in range(service_days + 40)]
+    return case_no, _attendance_request(target_order, start_date, service_days), potential_dates
+
+
+def _attendance_request(target_order, start_date, service_days):
     return {
-        _coerce_iso_date_strict(value)
-        for value in selected_rest_dates
-        if _coerce_iso_date_strict(value) is not None
+        "actual_start_date": start_date.isoformat(),
+        "target_service_days": service_days,
+        "service_mode": target_order.get("service_mode") or "週休1日",
     }
+
+
+def _render_attendance_selection_guidance(action_mode, filtered_orders):
+    if action_mode != "出勤天數精算":
+        return
+    if filtered_orders:
+        st.info("請從「2. 訂單選擇」選擇案件，再產生出勤天數精算 Preview。")
+        return
+    st.info(
+        "目前沒有已確認實際開始日、且可進行出勤精算的案件。"
+        "請先在訂單頁完成實際開始日確認。"
+    )
+
+
+def _filter_attendance_orders(all_orders, cal_staff_name):
+    allowed_statuses = {"訂單成立", "服務中", "訂單完成"}
+    return [
+        order
+        for order in all_orders
+        if (cal_staff_name is None or order.get("staff_name") == cal_staff_name)
+        and (bool(order.get("actual_start_date")) or bool(order.get("start_date")))
+        and order.get("order_status") in allowed_statuses
+    ]
+
+
+def _request_attendance_preview(payload, headers):
+    try:
+        response = requests.post(
+            f"{resolve_api_base_url()}/api/v1/orders/calculate-schedule",
+            headers=headers,
+            json=payload,
+            timeout=10,
+        )
+        response.raise_for_status()
+        body = response.json()
+        return body.get("data") if body.get("success") else None
+    except (requests.RequestException, ValueError) as error:
+        st.error(f"出勤天數精算 Preview 失敗：{error}")
+        return None
+
+
+def _render_attendance_result(preview):
+    if not preview:
+        st.warning("後端未回傳出勤天數精算結果。")
+        return
+    st.markdown("#### 出勤天數與完工日 Preview")
+    columns = st.columns(4)
+    columns[0].metric("目標服務天數", preview.get("target_service_days", 0))
+    columns[1].metric("總日曆天數", preview.get("total_calendar_days", 0))
+    columns[2].metric("休假／請假天數", preview.get("rest_days_count", 0))
+    columns[3].metric("預計完工日", str(preview.get("actual_end_date", "")))
+    
+    rest_days_count = preview.get("rest_days_count", 0)
+    day_by_day = preview.get("day_by_day", [])
+    if rest_days_count > 0 and day_by_day:
+        rest_dates = [
+            str(d.get("date", ""))
+            for d in day_by_day
+            if d.get("is_rest_day") and d.get("date")
+        ]
+        if rest_dates:
+            st.info(f"休假日期清單：{', '.join(rest_dates)}")
+            
+    st.caption("此處只讀顯示後端計算；正式變更仍須走休假 Preview／Apply。")
+
 
 def _render_staff_calendar():
     """服務人員行事曆與檔期調控獨立頁面入口 (CalendarUI)"""
@@ -489,16 +460,10 @@ def _render_staff_calendar():
     try:
         admin_headers = build_admin_headers()
 
-        resp_staff = requests.get(
-            f"{resolve_api_base_url()}/api/v1/staff",
-            headers=admin_headers,
-            timeout=10,
+        staff_list = _calendar_reference_rows(
+            "/api/v1/staff",
+            admin_headers,
         )
-        resp_staff.raise_for_status()
-        staff_payload = resp_staff.json()
-        staff_list = staff_payload.get("data") if isinstance(staff_payload, dict) and staff_payload.get("success") else []
-        if not isinstance(staff_list, list):
-            staff_list = []
     except Exception as e:
         st.error(f"初始化載入服務人員資料失敗: {e}")
         return
@@ -526,11 +491,12 @@ def _render_staff_calendar():
         staff_col, year_col, month_col = st.columns(3)
         with staff_col:
             selected_staff_label = st.selectbox(
-                "選擇要查看的服務人員/月嫂",
+                "選擇服務人員",
                 list(staff_options.keys()),
                 key="cal_staff_main",
             )
-            cal_staff_id = staff_options[selected_staff_label]
+        cal_staff_id = staff_options[selected_staff_label]
+        cal_staff_name = selected_staff_label.split(" (")[0] if " (" in selected_staff_label else selected_staff_label
         with year_col:
             current_year = datetime.today().year
             year_options = list(range(current_year - 2, current_year + 4))
@@ -620,7 +586,7 @@ def _render_staff_calendar():
                 if work_date and (
                     row.get("assignment_id") is not None
                     or row.get("status") == "waiting_deposit_lock"
-                ):
+                ) and row.get("order_status") != "訂單取消":
                     monthly_schedule_rows.setdefault(work_date.day, []).append(row)
         except Exception as err_sched:
             st.warning(f"⚠️ 月度排班資料 API 讀取失敗: {err_sched}")
@@ -628,16 +594,10 @@ def _render_staff_calendar():
             monthly_schedule_rows = {}
 
         try:
-            resp_h = requests.get(
-                f"{resolve_api_base_url()}/api/v1/holidays",
-                headers=admin_headers,
-                timeout=10,
+            holidays_raw = _calendar_reference_rows(
+                "/api/v1/holidays",
+                admin_headers,
             )
-            resp_h.raise_for_status()
-            h_payload = resp_h.json()
-            holidays_raw = h_payload.get("data") if isinstance(h_payload, dict) and h_payload.get("success") else []
-            if not isinstance(holidays_raw, list):
-                holidays_raw = []
         except Exception as err_h:
             st.warning(f"⚠️ 國定假日資料 API 讀取失敗: {err_h}")
             holidays_raw = []
@@ -650,100 +610,45 @@ def _render_staff_calendar():
 
         # 3. 兩階段操作選單
         try:
-            resp_o = requests.get(
-                f"{resolve_api_base_url()}/api/v1/orders",
-                headers=admin_headers,
-                timeout=10,
+            all_orders = _load_matching_order_summaries(
+                resolve_api_base_url(),
+                tuple(sorted(admin_headers.items())),
             )
-            resp_o.raise_for_status()
-            o_payload = resp_o.json()
-            all_orders = o_payload.get("data") if isinstance(o_payload, dict) and o_payload.get("success") else []
-            if not isinstance(all_orders, list):
-                all_orders = []
         except Exception as err_o:
             st.warning(f"⚠️ 訂單資料 API 讀取失敗: {err_o}")
             all_orders = []
-        calc_res = None
         target_order = None
         case_assignments = []
-        preview_days_set = set()
-        buffer_days_set = set()
-        
-        green_days_set = set()      # 🟢 綠底休假日期集合
-        calc_red_days_set = set()   # 🔴 算術推進後的紅底工作日集合
         
         col_op1, col_op2 = st.columns([1, 2])
         with col_op1:
             action_mode = st.radio(
                 "1. 執行操作",
                 ["訂單匹配", "出勤天數精算"],
-                index=0
+                index=0,
+                key="calendar_action_mode"
             )
             
         with col_op2:
             # 根據 1. 執行操作 動態過濾符合條件的訂單
             if action_mode == "訂單匹配":
-                # 篩選洽談中且無硬衝突的案件
-                filtered_orders = []
-                for o in all_orders:
-                    if o.get('order_status') == '洽談中':
-                        st_d_check = safe_date(o['actual_start_date']) or safe_date(o['start_date'])
-                        days_cnt_check = o['service_days'] or 20
-                        ed_d_check = (
-                            safe_date(o.get('actual_end_date'))
-                            or safe_date(o.get('end_date'))
-                            or (
-                                st_d_check + timedelta(days=days_cnt_check - 1)
-                                if st_d_check
-                                else None
-                            )
-                        )
-                        
-                        has_conflict = False
-                        if st_d_check and ed_d_check:
-                            curr_c = st_d_check
-                            while curr_c <= ed_d_check:
-                                if curr_c.year == cal_year and curr_c.month == cal_month:
-                                    ex = monthly_schedules.get(curr_c.day)
-                                    if ex and (ex['status'] == 'red' or (ex['status'] == 'yellow' and "預留備用期" not in ex['client_name'])):
-                                        has_conflict = True
-                                        break
-                                curr_c += timedelta(days=1)
-                        filtered_orders.append({**o, "_calendar_conflict": has_conflict})
-            elif action_mode == "出勤天數精算":
-                # 正式調整只處理成立／服務中案件；當月完成案件保留唯讀歷史查閱。
-                visible_calendar_case_nos = {
-                    row.get("case_no")
-                    for rows in monthly_schedule_rows.values()
-                    for row in rows
-                    if row.get("case_no")
-                }
                 filtered_orders = [
-                    o for o in all_orders
-                    if bool(o.get('actual_start_date'))
-                    and (
-                        o.get('order_status') in {'訂單成立', '服務中'}
-                        or (
-                            o.get('order_status') == '訂單完成'
-                            and o.get('case_no') in visible_calendar_case_nos
-                        )
-                    )
+                    order
+                    for order in all_orders
+                    if order.get("order_status") == "洽談中"
                 ]
+            elif action_mode == "出勤天數精算":
+                filtered_orders = _filter_attendance_orders(all_orders, cal_staff_name)
             else:
                 filtered_orders = []
+            _render_attendance_selection_guidance(action_mode, filtered_orders)
                 
             order_menu_opts = {"無 (單純查看行事曆)": None}
             for o in filtered_orders:
                 st_d_tmp = safe_date(o['actual_start_date']) or safe_date(o['start_date'])
-                days_cnt_tmp = o['service_days'] or 20
                 ed_d_tmp = (
                     safe_date(o.get('actual_end_date'))
                     or safe_date(o.get('end_date'))
-                    or (
-                        st_d_tmp + timedelta(days=days_cnt_tmp - 1)
-                        if st_d_tmp
-                        else None
-                    )
                 )
                 st_str = st_d_tmp.strftime('%Y-%m-%d') if st_d_tmp else '未定'
                 ed_str = ed_d_tmp.strftime('%Y-%m-%d') if ed_d_tmp else '未定'
@@ -754,7 +659,8 @@ def _render_staff_calendar():
                 "2. 訂單選擇", 
                 list(order_menu_opts.keys()), 
                 index=0,
-                disabled=(action_mode == "不連動，單純看行事曆")
+                disabled=(action_mode == "不連動，單純看行事曆"),
+                key=f"order_select_{action_mode}"
             )
             calc_case_no = order_menu_opts[selected_order_label]
             calc_assignment_id = None
@@ -798,11 +704,26 @@ def _render_staff_calendar():
 
             if calc_case_no:
                 target_order = next((o for o in all_orders if o['case_no'] == calc_case_no), None)
+                if action_mode == "出勤天數精算" and target_order:
+                    try:
+                        calendar_detail = _load_order_calendar_detail(
+                            resolve_api_base_url(),
+                            tuple(sorted(admin_headers.items())),
+                            calc_case_no,
+                        )
+                        target_order = {**target_order, **calendar_detail}
+                    except (
+                        OrderCalendarDetailApiError,
+                        ValueError,
+                    ) as error:
+                        st.error(f"無法取得訂單固定排休條款：{error}")
+                        target_order = None
 
-        # 4. 訂單匹配模式的黃底試算準備
+        preview_days_set = set()
+        buffer_days_set = set()
         if action_mode == "訂單匹配" and target_order:
-            st_d = safe_date(target_order['actual_start_date']) or safe_date(target_order['start_date'])
-            days_cnt = target_order['service_days'] or 20
+            st_d = safe_date(target_order.get('actual_start_date')) or safe_date(target_order.get('start_date'))
+            days_cnt = target_order.get('service_days') or 20
             ed_d = st_d + timedelta(days=days_cnt - 1) if st_d else None
             
             if st_d and ed_d:
@@ -811,113 +732,68 @@ def _render_staff_calendar():
                     if curr.year == cal_year and curr.month == cal_month:
                         preview_days_set.add(curr.day)
                     curr += timedelta(days=1)
-                    
-                buf_start = ed_d + timedelta(days=1)
-                buf_end = ed_d + timedelta(days=7)
-                curr = buf_start
-                while curr <= buf_end:
-                    if curr.year == cal_year and curr.month == cal_month:
-                        buffer_days_set.add(curr.day)
-                    curr += timedelta(days=1)
-            st.info(f"🤝 正在預覽案件 #{target_order['case_no']} ({target_order['client_name']}) 的預排檔期 (黃底) 與 7 天預留備用期 (黃底)。")
+                
+                # 計算後 7 日緩衝
+                b_curr = ed_d + timedelta(days=1)
+                for _ in range(7):
+                    if b_curr.year == cal_year and b_curr.month == cal_month:
+                        buffer_days_set.add(b_curr.day)
+                    b_curr += timedelta(days=1)
 
-        # 5. 出勤天數精算模式：在繪製月曆前優先執行精算控制面板 (確保解鎖預留備用期與連動月曆)
+        # Matching Preview belongs to the backend matching workflow.
+        if action_mode == "訂單匹配" and target_order:
+            st.info(
+                "訂單匹配、服務區間與七日緩衝只顯示後端 Preview；"
+                "本頁不自行推算或預先標色。"
+            )
+
+        # Leave/substitution mutation is delegated to the typed backend workflow.
         if action_mode == "出勤天數精算" and target_order:
-            st_d = safe_date(target_order['actual_start_date']) or safe_date(target_order['start_date'])
-            calc_days = target_order['service_days'] or 20
-            potential_dates = [st_d + timedelta(days=i) for i in range(calc_days + 40)]
-            custom_leave_dates = set()
-
-            if calc_assignment_id:
-                custom_leave_dates = (
-                    _render_assignment_leave_resolution(
-                        calc_case_no,
-                        calc_assignment_id,
-                        case_assignments,
-                        read_only=target_order.get("order_status") == "訂單完成",
+            st.markdown("#### ⚙️ 調整精算控制 (休假與代班)")
+            
+            is_started_or_completed = target_order.get("order_status") in ("服務中", "訂單完成")
+            is_completed = target_order.get("order_status") == "訂單完成"
+            
+            reconfirmation_blocks_assignment_writes = False
+            if not is_started_or_completed:
+                reconfirmation_blocks_assignment_writes = (
+                    _render_actual_start_reconfirmation(
+                        target_order,
                     )
-                    or set()
+                )
+
+            if not is_started_or_completed:
+                actual_start_client = ActualStartApiClient(
+                    base_url=resolve_api_base_url(),
+                    headers=admin_headers,
+                )
+                from ui.pages.order.actual_start_panel import render_actual_start_panel
+                render_actual_start_panel(calc_case_no, actual_start_client)
+                
+                st.markdown("---")
+
+            if is_completed and calc_assignment_id:
+                _render_assignment_leave_resolution(
+                    calc_case_no,
+                    calc_assignment_id,
+                    case_assignments,
+                    read_only=True,
+                )
+            elif reconfirmation_blocks_assignment_writes:
+                st.info(
+                    "💡 提示：請先在上方確認『實際開工日』。在完成開工確認前，無法設定排休、順延或代班，以下僅提供純文字沙盤推演。"
+                )
+                _render_attendance_calculation(target_order, admin_headers)
+            elif calc_assignment_id:
+                _render_assignment_leave_resolution(
+                    calc_case_no,
+                    calc_assignment_id,
+                    case_assignments,
+                    read_only=False,
                 )
             else:
-                st.info("請先選擇此月嫂在本案件中的正式服務指派，再進行休假、順延或代班。")
-            
-            holiday_dates_map = {}
-            for h in holidays_raw:
-                hd = safe_date(h['holiday_date'])
-                if hd in potential_dates:
-                    label = f"🔴 {h['holiday_name']} ({hd.strftime('%Y-%m-%d')})"
-                    holiday_dates_map[label] = hd
-                    
-            st.markdown("---")
-            st.markdown(f"### ⚙️ 出勤天數精算控制面板 (案件編號: `{target_order['case_no']}` - {target_order['client_name']})")
-            
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                raw_service_mode = target_order.get('service_mode') or '週休1日'
-                st.markdown(f"📋 **登記服務方式**: `{raw_service_mode}`")
-                st.caption("💡 提示：勾選下方放假或排休選項，月曆將即時同步呈現 🟢 綠底休假 與 🔴 紅底順延完工日 (預留備用期已自動解鎖為白底)。")
-                
-                if holiday_dates_map:
-                    selected_holiday_rest_labels = st.multiselect(
-                        "🧧 國定假日單日放假勾選 (勾選放假順延1天，未勾選照常上班)",
-                        list(holiday_dates_map.keys()),
-                        default=list(holiday_dates_map.keys()),
-                        key="holiday_rest_ms_page"
-                    )
-                    custom_holiday_rest_dates = {holiday_dates_map[k] for k in selected_holiday_rest_labels}
-                else:
-                    st.info("ℹ️ 該服務區間與月份未涵蓋中華民國國定假日。")
-                    custom_holiday_rest_dates = set()
-                
-            with col_m2:
-                try:
-                    resp_calc1 = requests.post(
-                        f"{resolve_api_base_url()}/api/v1/orders/calculate-schedule",
-                        headers=admin_headers,
-                        json={
-                            "actual_start_date": str(st_d),
-                            "target_service_days": calc_days,
-                            "service_mode": raw_service_mode,
-                        },
-                        timeout=10,
-                    )
-                    resp_calc1.raise_for_status()
-                    init_calc = resp_calc1.json().get("data") or {}
-                except Exception:
-                    init_calc = {}
-                st.metric("本次休假調整日期", f"{len(custom_leave_dates)} 天")
-                st.caption("正式寫入只能由上方 Preview／確認／Apply 流程完成；取消草稿不會修改正式排班。")
-                
-            base_salary = safe_float(target_order.get('service_salary')) or (calc_days * 2000.0)
-            
-            try:
-                resp_calc2 = requests.post(
-                    f"{resolve_api_base_url()}/api/v1/orders/calculate-schedule",
-                    headers=admin_headers,
-                    json={
-                        "actual_start_date": str(st_d),
-                        "target_service_days": calc_days,
-                        "service_mode": raw_service_mode,
-                        "custom_leave_dates": [str(d) for d in custom_leave_dates],
-                        "custom_holiday_rest_dates": [str(d) for d in custom_holiday_rest_dates],
-                        "monthly_salary_base": base_salary,
-                    },
-                    timeout=10,
-                )
-                resp_calc2.raise_for_status()
-                calc_res = resp_calc2.json().get("data") or {}
-            except Exception:
-                calc_res = {}
-            
-            if calc_res:
-                for item in calc_res.get('day_by_day', []):
-                    item_date = safe_date(item['date'])
-                    if item_date and item_date.year == cal_year and item_date.month == cal_month:
-                        if item['is_rest_day']:
-                            green_days_set.add(item_date.day)
-                        else:
-                            calc_red_days_set.add(item_date.day)
-
+                st.info("尚未產生正式服務指派，無法設定排休、順延或代班，以下僅提供純文字沙盤推演。")
+                _render_attendance_calculation(target_order, admin_headers)
 
     except Exception as e_step2:
         st.error(f"資料庫與選單加載失敗: {e_step2}")
@@ -925,6 +801,65 @@ def _render_staff_calendar():
         return
 
     try:
+        if action_mode == "出勤天數精算" and calc_case_no:
+            # 1. First check if there is a formal leave batch preview
+            formal_preview = st.session_state.get(f"attendance_preview_formal_{calc_case_no}")
+            if formal_preview is not None and hasattr(formal_preview, 'assignments'):
+                # Extract the previewed assignments and convert to day_by_day format for coloring
+                preview_client_name = target_order.get("client_name", "") + " (Preview)" if target_order else ""
+                for assignment in formal_preview.assignments:
+                    for d in assignment.official_service_dates:
+                        if d.year == cal_year and d.month == cal_month:
+                            monthly_schedules[d.day] = {
+                                "status": "red",
+                                "client_name": preview_client_name
+                            }
+                            monthly_schedule_rows.pop(d.day, None)
+                            
+                # For outcomes, mark any deferred or substitute as green
+                for outcome in formal_preview.outcomes:
+                    try:
+                        d_obj = outcome.original_work_date
+                        if d_obj and d_obj.year == cal_year and d_obj.month == cal_month:
+                            monthly_schedules[d_obj.day] = {
+                                "status": "green",
+                                "client_name": preview_client_name
+                            }
+                            monthly_schedule_rows.pop(d_obj.day, None)
+                    except Exception:
+                        pass
+                        
+            # 2. Otherwise check the old mathematical sandbox preview
+            else:
+                state_key = f"attendance_preview_{calc_case_no}"
+                stored = st.session_state.get(state_key)
+                if isinstance(stored, dict) and "preview" in stored:
+                    preview_data = stored["preview"]
+                    day_by_day = preview_data.get("day_by_day", [])
+                    preview_client_name = ""
+                    if target_order:
+                        preview_client_name = target_order.get("client_name", "") + " (Preview)"
+                        
+                    for d_info in day_by_day:
+                        date_str = str(d_info.get("date", ""))
+                        d_obj = safe_date(date_str)
+                    if d_obj and d_obj.year == cal_year and d_obj.month == cal_month:
+                        is_work = d_info.get("is_work_day", False)
+                        is_rest = d_info.get("is_rest_day", False)
+                        if is_work:
+                            status = "red"
+                        elif is_rest:
+                            status = "green"
+                        else:
+                            status = "white"
+                        
+                        if status != "white":
+                            monthly_schedules[d_obj.day] = {
+                                "status": status,
+                                "client_name": preview_client_name
+                            }
+                            monthly_schedule_rows.pop(d_obj.day, None)
+
         # 6. 繪製四色 HTML 月曆表格 (即時反映 ⚪白 / 🟡黃 / 🔴紅 / 🟢綠底)
         first_weekday, num_days = calendar.monthrange(cal_year, cal_month)
         first_weekday_sun = (first_weekday + 1) % 7
@@ -964,30 +899,20 @@ def _render_staff_calendar():
                     status_label = "<span class='status-label-white'>⚪ 可接案</span>"
                     client_text = ""
                     
-                    is_target_order_record = False
-                    
-                    # 1. 既有資料庫記錄之狀態 (預設)
                     if day_info:
-                        if action_mode == "出勤天數精算" and target_order:
-                            rec_client = day_info.get('client_name', '')
-                            if target_order['client_name'] in rec_client or "預留備用期" in rec_client:
-                                is_target_order_record = True
-                                
+                        day_client_name = str(day_info.get('client_name') or "")
                         if day_info['status'] == 'yellow':
-                            if not is_target_order_record:
-                                bg_class = "status-yellow"
-                                status_label = "<span class='status-label-yellow'>🟡 已鎖定／待成立</span>"
-                                client_text = f"<span class='client-text'><b>客戶: {day_info['client_name']}</b></span>"
+                            bg_class = "status-yellow"
+                            status_label = "<span class='status-label-yellow'>🟡 已鎖定／待成立</span>"
+                            client_text = f"<span class='client-text'><b>客戶: {day_client_name}</b></span>"
                         elif day_info['status'] == 'green':
-                            if not is_target_order_record:
-                                bg_class = "status-green"
-                                status_label = "<span class='status-label-green'>🟢 排定休假</span>"
-                                client_text = f"<span class='client-text'><b>休假: {day_info['client_name']}</b></span>"
+                            bg_class = "status-green"
+                            status_label = "<span class='status-label-green'>🟢 排班週休日</span>"
+                            client_text = f"<span class='client-text'><b>客戶: {day_client_name}</b></span>"
                         elif day_info['status'] == 'red':
-                            if not is_target_order_record:
-                                bg_class = "status-red"
-                                status_label = "<span class='status-label-red'>🔴 服務工作日</span>"
-                            client_text = f"<span class='client-text'><b>客戶: {day_info['client_name']}</b></span>"
+                            bg_class = "status-red"
+                            status_label = "<span class='status-label-red'>🔴 服務工作日</span>"
+                            client_text = f"<span class='client-text'><b>客戶: {day_client_name}</b></span>"
 
                     if day_rows:
                         client_text = "".join(
@@ -997,31 +922,16 @@ def _render_staff_calendar():
                             for row in day_rows
                         )
                     
-                    # 2. 訂單匹配模式下疊加黃底預排試算
+                    # 訂單匹配模式下疊加黃底預排試算
                     if action_mode == "訂單匹配" and target_order and bg_class == "status-white":
                         if day in preview_days_set:
                             bg_class = "status-yellow"
                             status_label = "<span class='status-label-yellow'>🟡 試算預排檔期</span>"
-                            client_text = f"<span class='client-text'><b>預覽: {target_order['client_name']}</b></span>"
+                            client_text = f"<span class='client-text'><b>預覽: {target_order.get('client_name', '')}</b></span>"
                         elif day in buffer_days_set:
                             bg_class = "status-yellow"
                             status_label = "<span class='status-label-yellow'>🟡 試算預留備用期</span>"
-
-                    # 3. 出勤天數精算模式：即時四色疊加 (🟢 綠底休假 / 🔴 紅底工作日 / ⚪ 完全淨化解鎖為白底)
-                    if action_mode == "出勤天數精算" and target_order:
-                        if day in green_days_set:
-                            bg_class = "status-green"
-                            status_label = "<span class='status-label-green'>🟢 綠底休假/請假</span>"
-                            client_text = f"<span class='client-text'><b>休假: {target_order['client_name']} 案</b></span>"
-                        elif day in calc_red_days_set:
-                            bg_class = "status-red"
-                            status_label = "<span class='status-label-red'>🔴 服務工作日</span>"
-                            client_text = f"<span class='client-text'><b>客戶: {target_order['client_name']}</b></span>"
-                        elif is_target_order_record:
-                            bg_class = "status-white"
-                            status_label = "<span class='status-label-white'>⚪ 可接案</span>"
-                            client_text = ""
-
+                    
                     holiday_text = f"<div class='day-holiday'>🔴 {holiday_name}</div>" if holiday_name else ""
                     
                     html += f"<td class='{bg_class}'><div class='day-num'>{day}</div>{holiday_text}<div class='day-status'>{status_label}{client_text}</div></td>"
@@ -1037,51 +947,41 @@ def _render_staff_calendar():
         st.exception(e_step3)
         return
 
-    # 7. 出勤天數精算面板之算術結果展現
-    if action_mode == "出勤天數精算" and target_order and calc_res:
-        try:
-            st.markdown("#### 📊 出勤天數與完工日算術結果")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("目標服務天數 N", f"{calc_res['target_service_days']} 天")
-            c2.metric("總日曆天數", f"{calc_res['total_calendar_days']} 天")
-            c3.metric("🟢 綠底休假/請假天數", f"{calc_res['rest_days_count']} 天 (🔴 紅底已自動順延)")
-            c4.metric("算術最終完工日", f"{calc_res['actual_end_date']}")
-            
-            st.markdown("#### 🔴 國定假日與月嫂自主出勤統計 (短期契約無雙倍薪條款)")
-            if calc_res['national_holidays_found']:
-                for h in calc_res['national_holidays_found']:
-                    status_str = "🟢 月嫂選擇照常出勤 (計為正常工作日)" if h['is_worked'] else "🔴 月嫂選擇放假 (完工日已自動順延1天)"
-                    st.write(f"- **{h['name']}** ({h['date']}) → `{status_str}`")
-            else:
-                st.write("該服務區間內未涵蓋中華民國國定假日。")
-                
-            st.info(f"💡 預估月嫂應領總薪資: **{calc_res['total_estimated_salary']:,.0f} 元** (短期契約依約固定不加計雙倍薪加給)。")
-                
-            with st.expander("📋 點擊展開「週報精細統計與每日出勤拆解」"):
-                df_w = pd.DataFrame(calc_res['weekly_stats'])
-                df_w.columns = ["週次", "週開始日", "週結束日", "工作天數", "休假天數", "國定假日天數"]
-                st.dataframe(df_w, width='stretch', hide_index=True)
-        except Exception as e_step4:
-            st.error(f"精算結果渲染失敗: {e_step4}")
-            st.exception(e_step4)
-            return
-
-
 def _load_matching_center_data():
     headers = build_admin_headers()
-    base_url = resolve_api_base_url()
-    orders_response = requests.get(
-        f"{base_url}/api/v1/orders", headers=headers, timeout=10
-    )
-    staff_response = requests.get(
-        f"{base_url}/api/v1/staff", headers=headers, timeout=10
-    )
-    orders_response.raise_for_status()
-    staff_response.raise_for_status()
     return (
-        orders_response.json().get("data") or [],
-        staff_response.json().get("data") or [],
+        _load_matching_order_summaries(
+            resolve_api_base_url(),
+            tuple(sorted(headers.items())),
+        ),
+        _calendar_reference_rows("/api/v1/staff", headers),
     )
+
+
+@st.cache_data(
+    ttl=_REFERENCE_DATA_CACHE_SECONDS,
+    show_spinner=False,
+)
+def _load_matching_order_summaries(base_url, header_items):
+    result = OrderSummaryApiClient(
+        base_url=base_url,
+        headers=dict(header_items),
+    ).query(page_size=200)
+    if result.page is None:
+        raise ValueError("訂單摘要 API 未回傳資料")
+    return [item.model_dump(mode="json") for item in result.page.items]
+
+
+@st.cache_data(
+    ttl=_REFERENCE_DATA_CACHE_SECONDS,
+    show_spinner=False,
+)
+def _load_order_calendar_detail(base_url, header_items, case_no):
+    detail = OrderCalendarDetailApiClient(
+        base_url=base_url,
+        headers=dict(header_items),
+    ).query(case_no)
+    return detail.model_dump(mode="json")
 
 
 def show():
@@ -1112,22 +1012,46 @@ def show():
             st.error(f"月嫂配對中心載入失敗：{error}")
         return
 
-    calendar_tab, matching_tab, staffing_tab = st.tabs(
-        ["服務人員月曆", "月嫂配對中心", "案件人力配置"]
+    workspace = st.radio(
+        "排班工作區",
+        _SCHEDULING_WORKSPACES,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="scheduling_workspace",
     )
+    _render_scheduling_workspace(workspace)
 
-    with calendar_tab:
+
+def _render_scheduling_workspace(workspace: str) -> None:
+    if workspace == "服務人員月曆":
         _render_staff_calendar()
+        return
 
-    with matching_tab:
-        try:
-            orders, staff = _load_matching_center_data()
-            render_matching_center(orders, staff)
-        except Exception as error:
-            st.error(f"月嫂配對中心載入失敗：{error}")
+    if workspace == "月嫂配對中心":
+        _render_matching_workspace()
+        return
 
-    with staffing_tab:
-        render_case_staffing()
+    if workspace == "案件人力配置":
+        _render_case_staffing_workspace()
+        return
+
+    st.error("未知的排班工作區。")
+
+
+def _render_matching_workspace() -> None:
+    try:
+        orders, staff = _load_matching_center_data()
+        render_matching_center(orders, staff)
+    except Exception as error:
+        st.error(f"月嫂配對中心載入失敗：{error}")
+
+
+def _render_case_staffing_workspace() -> None:
+    try:
+        orders, staff = _load_matching_center_data()
+        render_case_staffing(orders=orders, staff=staff)
+    except Exception as error:
+        st.error(f"案件人力配置載入失敗：{error}")
 
 
 if __name__ == "__main__":

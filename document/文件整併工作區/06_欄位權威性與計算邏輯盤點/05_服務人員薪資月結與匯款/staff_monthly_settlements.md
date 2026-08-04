@@ -11,8 +11,9 @@
 - Schema：`db/schema_parts/20_staff_monthly_settlements.sql`
 - 父表關係：`staff_id` → `staff.id`
 - 子表關係：`staff_monthly_settlement_details`, `staff_actual_transfers`
-- 已確認跨表裁決：本表為**一位月嫂、單一薪資月份、單一 revision 的唯一正式薪資核銷 Header**。同一月嫂當月可有多筆不同訂單／assignment，均各自成為 `staff_monthly_settlement_details`，`total_payable` 為全部明細加總。明細只保存金額組成，不是各自獨立的銀行核銷義務；正式匯款 Apply 只需驗證同次所選成功出款的方向淨額恰好等於整張月結 `total_payable`。不得新增部分正式核銷或 `partially_paid`。現況 Schema／Service 仍允許 `partially_paid`，屬已確認實作漂移。
-- 已確認跨月更正：已完整支付的月結永不重開。後續才核准的 adjustment 進入該月嫂下一個尚未 finalized 的月份月結，原 paid revision 保持不變。
+- **2026-08-02 後項人工裁決（優先於下方舊月結提案）**：實際業務維持應付款清單／Excel 匯出，不建立人工月結、draft／finalized／paid 狀態機，也不把下載定義成即時計算月結文件。此表與下方逐欄「正式薪資核銷 Header」敘述降為既有 Schema／caller 的歷史相容盤點；production caller 遷移完成前不得直接刪除，但新架構不得形成新的依賴。正式付款完成由根應付義務與不可變銀行出款精確核銷判定。
+- **已被後項裁決覆寫的舊提案／現況模型**：本表曾被設計為一位月嫂、單一薪資月份、單一 revision 的正式薪資核銷 Header；下方逐欄表格是在此舊模型內的權威性分析，不再代表目標架構。新流程不得建立或推進這套月結狀態。
+- **歷史相容規則**：既有 paid／finalized 月結資料與正式出款歷史不可覆寫。新調整直接形成可追溯的應付／反向義務並進應付款清單與異常流程，不再送入「下一個未 finalized 月結」。
 
 | 欄位 | Schema 定義 | 現況架構／用途 | 初步分類 | 現況公式 | 直接來源 | 第一層根事實 | 建議權威公式 | 修改命令／Owner | 重算觸發 | 凍結邊界 | 現況漂移／風險 | 裁決 |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|

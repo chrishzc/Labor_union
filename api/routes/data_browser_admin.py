@@ -7,10 +7,11 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Path
 from api.dependencies.admin_auth import require_system_admin
+from api.error_contracts import internal_query_error
 from api.schemas.base import BaseResponse
 from api.schemas.data_browser import DataBrowserPatchRequest, DataBrowserTableResponse
-from services import data_browser_admin_schema_service
-from services.admin_auth_service import AdminPrincipal
+from subsystems.access import data_browser_maintenance
+from subsystems.access.authentication_session import AdminPrincipal
 
 router = APIRouter(prefix="/api/v1/admin/data-browser", tags=["Admin Data Browser"])
 
@@ -21,12 +22,16 @@ def get_data_browser_table(
 ):
     """取得資料表動態主鍵、資料列、欄位清單與權限 SSOT"""
     try:
-        data = data_browser_admin_schema_service.get_data_browser_table_schema(table)
+        data = data_browser_maintenance.get_data_browser_table_schema(table)
         return BaseResponse(data=data, message=f"成功取得資料表 {table} 中繼資料與權限 SSOT")
     except ValueError as ve:
         raise HTTPException(status_code=422, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "data_browser_query_internal_error",
+            "資料表查詢失敗。",
+            "data-browser-query",
+        ) from error
 
 
 def _http_status_for_data_browser_admin_error(error_message: str) -> int:
@@ -44,7 +49,7 @@ def patch_data_browser_row(
 ):
     """更新單列微調資料，支援動態主鍵型別，並寫入異動稽核紀錄"""
     try:
-        success = data_browser_admin_schema_service.patch_data_browser_table_row(
+        success = data_browser_maintenance.patch_data_browser_table_row(
             table_name=table,
             row_id=row_id_str,
             updates=req.updates,
@@ -55,5 +60,9 @@ def patch_data_browser_row(
     except ValueError as ve:
         status_code = _http_status_for_data_browser_admin_error(str(ve))
         raise HTTPException(status_code=status_code, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "data_browser_patch_internal_error",
+            "資料列更新失敗。",
+            "data-browser-patch",
+        ) from error

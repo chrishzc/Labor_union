@@ -1,0 +1,1 @@
+CREATE TABLE never_table (id INT);

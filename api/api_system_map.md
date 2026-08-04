@@ -16,19 +16,29 @@
 - Source: api/routes/orders.py
 - Type: api_router
 - State: `planned`
-- Description: 訂單、時程精算與明確多月嫂指派同步 API 路由；同步 Preview／Apply 均要求 system-admin，Apply 的 applied_by 必須等於 authenticated principal。`/full-details` 只接受不影響 assignment／schedule 的基本資料。
-- Dependencies: [DbService, OrderSchemas, OrderAssignmentSynchronizationPreviewService, OrderAssignmentSynchronizationApplyService, AdminAuthorizationDependency]
+- Description: 訂單查詢、基本資料、時程精算、多月嫂指派同步與typed lifecycle commands API；通用status writer退役，取消、真正開始日重確認、hold與correction只委派各自Service。
+- Dependencies: [DbService, OrderSchemas, OrderAssignmentSynchronizationPreviewService, OrderAssignmentSynchronizationApplyService, OrderCancellationCommandService, OrderActualStartReconfirmationCommandService, OrderLifecycleHoldCommandService, OrderLifecycleManualCorrectionService, OrderLifecycleControlReadProjection, AdminAuthorizationDependency]
 - Complexity: medium
 - Input:
   - case_no: path 中的 canonical order identifier。
   - preview_request: 包含排班關鍵欄位與可編輯訂單主資料完整目標值的 order_change，以及完整明確 assignment_plan。
   - apply_request: preview_request 加上完整 schedule_change_plan.remove_schedule_ids 與非空 applied_by。
+  - lifecycle_commands: cancel、actual-start reconfirm、hold activate/release或manual correction的typed body，均含expected_version、idempotency key、actor與reason；actual-start reconfirm另含Calendar Preview確認的完整order_change、assignment_plan與schedule_change_plan。
+  - lifecycle_control_query: case_no path 與 authenticated system-admin principal；不得接受 client 自報的 control、blocker 或 lifecycle_version。
 - Output:
   - synchronization_preview: target hours、指派時數影響、required_schedule_removals、sync_status 與 blocking_reasons。
   - synchronization_apply_result: 已套用結果、排班生成摘要、時數確認與 audit_id。
+  - lifecycle_command_result: Router先將Service的dataclass、Mapping、tuple、date/datetime與Decimal遞迴轉為JSON-safe primitive，再以BaseResponse回傳decision、persisted_version、control/history/outbox identities；不得以str()壓平或遺失欄位。
+  - lifecycle_command_conflict: HTTP 409 detail固定為`{code,message}`；code只允許`order_lifecycle_version_conflict`、`order_lifecycle_idempotency_conflict`、`order_lifecycle_state_conflict`或`order_lifecycle_blocked`。
+  - lifecycle_control_state: authoritative lifecycle_version、目前 canonical status、actual-start reconfirmation control 的 active/cleared 狀態、required/current date、canonical blockers 與 can_reconfirm。
 - Algorithm:
   - `POST /{case_no}/assignment-synchronization/preview` 驗證完整非取消 order_change（不含 identity_status 或 clients.identity_status）與 HTTP payload 後，僅委派 OrderAssignmentSynchronizationPreviewService，並以 BaseResponse 回傳其完整結果。
   - `POST /{case_no}/assignment-synchronization/apply` 驗證完整移除計畫及 applied_by 後，僅委派 OrderAssignmentSynchronizationApplyService；未套用的 locked、requires_review 或 requires_allocation 結果須回傳明確 HTTP 409 與原因。
+  - `POST /{case_no}/cancel`、`POST /{case_no}/actual-start/reconfirm`、hold activate/release及`POST /{case_no}/lifecycle-corrections`分別只委派對應typed command service。
+  - `GET /{case_no}/lifecycle-control-state` 只委派 OrderLifecycleControlReadProjection，將其 typed snapshot 以 BaseResponse 原樣輸出；案件不存在回404、domain validation回422、未知錯誤回固定500。
+  - Router以typed Control/Persistence concurrency、conflict與state exceptions及Envelope/Command凍結的精確錯誤集合做409分類：expected-version類為`order_lifecycle_version_conflict`、idempotency payload/identity類為`order_lifecycle_idempotency_conflict`、既有projection/replay/hold狀態不允許類為`order_lifecycle_state_conflict`；其餘ValueError為422。Service結果明確outcome/result為blocked或同步結果為locked/requires_review/requires_allocation時使用`order_lifecycle_blocked`。
+  - JSON materializer只負責傳輸編碼：dataclass依宣告欄位、Mapping依原key、list/tuple依原順序、date/datetime用ISO 8601、Decimal用字串，其餘JSON primitive原樣；遇到未知型別或非字串Mapping key必須fail-fast，不得猜測。
+  - legacy `PUT /{case_no}/status` 不再呼叫DbService，固定回410及replacement command資訊；不得保留任意status mutation fallback。
   - 服務層的 ValueError 必須轉成明確 HTTP 422；不得由 router 吞掉後回傳成功。
 - Invariants:
   - 兩個同步端點不得直接呼叫 db_service 寫入 orders、case_staff_assignments、staff_schedule、付款、月結或稽核表；所有同步商業操作只能委派對應服務。
@@ -38,8 +48,15 @@
   - Router 不得建立第二個 FastAPI app 或重複註冊；必須沿用既有 `/api/v1/orders` router 與 BaseResponse 包裝。
   - Preview／Apply routes 都必須使用 `Depends(require_system_admin)`；Apply 只以 authenticated principal 的 canonical username 委派 Service，client applied_by 不一致回 403。
   - `/full-details` 不得接受或寫入 service_days、service_hours_per_day、floor_fee、start/end/actual dates 或 deposit_date；這些 staffing-sensitive 欄位只由 assignment-synchronization Preview／Apply transaction 更新。
+  - 所有lifecycle mutation必須使用Depends(require_system_admin)，body actor必須等於authenticated principal；expected_version mismatch、idempotency conflict或blocked command回409並保留machine code。
+  - actor比較使用trim後authenticated principal canonical username；body actor本身必須已是trim後canonical值，不得由Router靜默改寫冒用者輸入。
+  - 未知exception固定回generic 500，不得把資料庫SQL、連線資訊、event payload或內部str(error)洩漏至HTTP response。
+  - Router不得接受derived blockers、Alert status、cancellation fact、deposit state、completion flag或outbox action；這些一律由Server canonical sources推導。
+  - 取消endpoint不得直接呼叫CaregiverAvailabilityLockCancellationService；只呼叫OrderCancellationCommandService，讓有／無waiting lock皆走同一canonical cancellation。
+  - lifecycle-control-state 必須使用 Depends(require_system_admin)，只讀 canonical persistence/control facts；Router 不得以 alert、orders.status 字串、前端草稿或日期自行推導 can_reconfirm。
+  - lifecycle-control-state 是純查詢：Router 與 Projection 都不得取得寫鎖、寫入、commit、建立事件、更新 alert 或推進 lifecycle version。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_assignment_synchronization_router.py", "tests\\test_order_assignment_synchronization_app_routes.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-order-assignment-router"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_order_assignment_synchronization_router.py", "tests\\test_order_assignment_synchronization_app_routes.py", "tests\\test_order_lifecycle_command_router.py", "tests\\test_order_lifecycle_control_read_router.py", "-q", "-p", "no:cacheprovider", "--basetemp", "adad_tmp\\pytest-order-router-batch"], "cwd": "project", "timeout": 180, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: MatchRouter
@@ -166,7 +183,7 @@
 - Type: api_schema
 - State: `validated`
 - Description: 驗證案件排班日期、工作日與薪資日標記。
-- Dependencies: []
+- Dependencies: [ClientPaymentWriteService]
 - Observability: not_required
 
 ##### Module: PaymentRouter
@@ -220,12 +237,18 @@
 - Sub Map: api_layer
 - Type: api_router
 - State: `planned`
-- Source: api/routes/client_payments.py
+- Source: api/routes/client_payments.py::ClientTransactionCreate,ClientTransactionCreate.notes_must_not_be_blank,ClientTransactionCreate.validate_reversal_link,get_all_client_payments,get_client_payment_by_case_no,backfill_client_payment_due_dates,create_client_transaction
+- Dependencies: [ClientPaymentWriteService, AdminAuthorizationDependency]
 - Description: 提供 `/api/v1/client-payments` 的客戶收款與帳務摘要 API；退還補助款可查閱，解約退款功能不啟用。
 - Invariants:
   - Payload 不接受任何月嫂帳務欄位。
   - 新增交易僅接受 deposit、first_payment、second_payment 階段；不得接受解約 refund。
   - 新增交易僅接受 receipt 與必要的 reversal；人工補登必須有非空原因。
+  - receipt payload 的 reversal_of_transaction_id 必須為 NULL／省略；reversal payload 必須提供 positive reversal_of_transaction_id，route 必須原值傳入 ClientPaymentWriteService，不得以 external_reference 或金額猜測原交易。
+  - 正式交易 POST 只接受 `transaction_status=succeeded`；failed／reversed attempt 必須回 422 且不得傳入 canonical ledger writer。
+  - deposit payload 必須提供 non-negative `lifecycle_expected_version` 並原值傳入 connection-owning writer；first/second stage 不得提供。
+  - 所有mutation必須使用`Depends(require_system_admin)`，actor只能取authenticated principal的canonical username，不接受或硬編碼client actor。
+  - lifecycle expected-version、CAS、control或idempotency conflict必須回HTTP 409及machine-readable detail；request shape/value錯誤回422，不得將可恢復衝突泛化成500。
 - Verification:
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_payment_routers.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0}
 - Observability: not_required
@@ -288,12 +311,45 @@
   - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_report_router.py", "-q"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
+##### Module: FinanceAlertCenterContracts
+- Sub Map: api_layer
+- Type: api_schema
+- State: `planned`
+- Source: api/schemas/finance_alert_center.py
+- Dependencies: []
+- Description: 定義 Streamlit 與未來 React 共用的警示中心 Query、Command、ViewModel、response envelope 與 Typed Error；不暴露 DB row 或 mutable details JSON。
+- Complexity: medium
+- Input:
+  - alert_query: alert family、status、code、source domain、limit、offset
+  - claim_command: alert id 與非空 operator
+  - resolve_command: alert id、非空 operator 與 reason
+  - scan_command: 明確 current-state scan intent
+- Output:
+  - alert_list_view_model: 穩定列表欄位與分頁 metadata
+  - finance_alert_detail_view_model: immutable history、candidate、expected/actual/difference
+  - import_review_batch_view_model: batch metadata、occurrence/distinct/remaining、direction/reason counts、sample ids、last reprocess summary
+  - action_view_model: action、status、message 與 refreshed alert
+  - typed_error: validation_error、unauthorized、forbidden、not_found、conflict、unavailable 或 internal_error
+- Algorithm:
+  - 以 framework-neutral typed models 定義共同 query、command、ViewModel、pagination 與 error envelope，所有未知欄位 fail-closed。
+  - 將 finance alert detail 與 IMPORT-006 batch detail 分成互斥 discriminated view variants；分類、核銷、occurrence 與 alert lifecycle 各自保留欄位。
+  - 對外序列化只輸出 bounded、JSON-safe、已遮罩欄位；不得將 DB row、任意 details JSON 或 raw payload 穿透到 client。
+- Invariants:
+  - Contract 不得 import streamlit 或 React，也不得要求前端理解 system_alerts／finance_alerts 的 DB 欄名、JSON encoding、cursor 或 transaction。
+  - IMPORT-006 details 必須在 Router／Application boundary 映射為具型別 batch ViewModel；UI 不得自行解析任意 dict。
+  - classification、reconciliation、occurrence outcome 與 alert status 必須分欄，不得以單一 status 混合。
+  - typed errors 必須具有穩定 code、human message、可空 field errors／retryable；HTTP 失敗不得用空清單或 success ViewModel 代替。
+  - 同一 OpenAPI contract 必須可供 Streamlit API Client 與未來 React client 使用。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "api\\schemas\\finance_alert_center.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
+- Observability: not_required
+
 ##### Module: FinanceAlertRouter
 - Sub Map: api_layer
 - Type: api_router
 - State: `planned`
 - Source: api/routes/finance_alerts.py
-- Dependencies: [FinanceAlertWorkflowService]
+- Dependencies: [FinanceAlertCenterContracts, FinanceAlertWorkflowService]
 - Description: 提供財務警示清單、詳細資料、人工認領與解除端點；警示建立及正式交易修正不對 UI 開放。
 - Complexity: medium
 - Input:
@@ -310,9 +366,40 @@
 - Algorithm:
   - 驗證查詢與 action payload，將 list/detail/claim/resolve 委派給 FinanceAlertWorkflowService。
   - 回傳候選 snapshot、expected/actual/difference 與事件歷程；不推測候選或觸發正式核銷。
+  - 將 service output 映射為 FinanceAlertCenterContracts ViewModel，將 validation／not found／conflict／unavailable 映射為 typed error；不得直接回傳 DB row。
 - Verification:
   - must_have_assertions
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_alert_router.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b6-finance-alert-router"], "cwd": "project", "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_finance_alert_router.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-b6-finance-alert-router"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+- Observability: not_required
+
+##### Module: SystemAlertRouter
+- Sub Map: api_layer
+- Type: api_router
+- State: `planned`
+- Source: api/routes/system_alerts.py
+- Dependencies: [FinanceAlertCenterContracts, SystemAlertWorkflowService, SystemAlertScanOrchestrator]
+- Description: 提供 system_alerts 目前投影的清單、詳細、claim／resolve 與明確 scan 端點；IMPORT-006 沿用此 router，不另開重處理 HTTP API。
+- Complexity: medium
+- Input:
+  - filters: status、alert_code、source_domain、limit 與 offset
+  - workflow_action: alert_id、非空 operator 與 resolve reason
+  - scan_action: 無 payload 的明確 current-state scan
+- Output:
+  - alerts: 已物化 system alert 投影
+  - action_result: claimed、resolved、existing 或 conflict
+  - scan_summary: 包含 IMPORT-006 的 created／updated／reopened／resolved counts
+- Invariants:
+  - list/detail 只委派 SystemAlertWorkflowService 讀取已物化投影；不得在 GET request path 掃描 finance_import_rows。
+  - POST /scan 只委派 SystemAlertScanOrchestrator 並在同一 transaction commit/rollback；不得重分類、dispatch 或建立正式帳務。
+  - claim／resolve 必須委派 SystemAlertWorkflowService；不得直接 UPDATE system_alerts。
+  - 不得提供 finance import reprocess、apply、delete canonical row、force reconcile 或任意 PATCH endpoint；歷史金流重處理保持人工 CLI。
+  - not found、invalid input 與 workflow conflict 必須使用明確 HTTP 狀態，不得吞成成功。
+  - IMPORT-006 必須映射為 FinanceAlertCenterContracts 的 import review batch ViewModel；不得把 system_alerts DB row 或任意 details JSON 直接交給前端。
+- Algorithm:
+  - 驗證 filters/action payload，將讀取與 workflow 委派 SystemAlertWorkflowService。
+  - scan 建立單一 DB transaction，呼叫 SystemAlertScanOrchestrator，成功 commit、任一例外 rollback；所有結果與錯誤映射為 FinanceAlertCenterContracts。
+- Verification:
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "api\\routes\\system_alerts.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
 - Observability: not_required
 
 ##### Module: FinanceRouterRegistration
@@ -320,12 +407,13 @@
 - Type: api_entrypoint
 - State: `planned`
 - Source: api/main.py
-- Description: Register contract, finance-report, finance-alert, multi-caregiver schedule, caregiver segment availability and caregiver availability-lock routers with the running FastAPI application；legacy payments router 不得再掛載。
-- Dependencies: [MultiCaregiverScheduleRouter, MultiCaregiverScheduleReadRouter, MultiCaregiverCaseAssignmentListRouter, CaregiverSegmentAvailabilityRouter, CaregiverAvailabilityLockRouter]
+- Description: Register contract, finance-report, finance-alert, system-alert, multi-caregiver schedule, caregiver segment availability and caregiver availability-lock routers with the running FastAPI application；legacy payments router 不得再掛載。
+- Dependencies: [FinanceAlertRouter, SystemAlertRouter, MultiCaregiverScheduleRouter, MultiCaregiverScheduleReadRouter, MultiCaregiverCaseAssignmentListRouter, CaregiverSegmentAvailabilityRouter, CaregiverAvailabilityLockRouter]
 - Complexity: low
 - Invariants:
   - Register each new router exactly once without removing existing routers.
   - finance_alerts.router 必須只註冊一次；不得用另一個 FastAPI app 或重複 prefix 規避既有入口。
+  - system_alerts.router 必須只註冊一次；OpenAPI 必須包含 list/detail/claim/resolve/scan，且不得在 api.main 複製 workflow、scan 或 DB transaction。
   - multi_caregiver_schedule.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix 或呼叫 legacy schedule router。
   - multi_caregiver_schedule_read.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix 或改以 legacy schedule router 提供查詢。
   - multi_caregiver_case_assignments.router 必須只註冊一次；不得建立另一個 FastAPI app、重複 prefix 或以 legacy 排班資料合成案件指派選單。
@@ -337,9 +425,7 @@
   - 本節點只修改 api/main.py 的既有 imports 與 include_router 清單及必要測試；不得修改 CaregiverSegmentAvailabilityRouter、CaregiverAvailabilityLockRouter、Service、Helper、DB、其他既有 router prefix 或移除任何既有註冊。
   - api.main 不得 import 或 include legacy payments.router；`/api/v1/payments` 必須從 OpenAPI 與執行中路由消失。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_caregiver_availability_lock_router_registration.py", "tests\\test_caregiver_availability_lock_router.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-caregiver-availability-lock-registration"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_caregiver_segment_availability_router_registration.py", "tests\\test_caregiver_segment_availability_router.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-caregiver-segment-availability-registration"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-c", "from pathlib import Path; s=Path('api/main.py').read_text(encoding='utf-8'); assert 'contracts.router' in s and 'finance_reports.router' in s and 'finance_alerts.router' in s and 'multi_caregiver_schedule.router' in s and 'multi_caregiver_schedule_read.router' in s and 'multi_caregiver_case_assignments.router' in s and 'caregiver_segment_availability.router' in s; assert s.count('app.include_router(finance_alerts.router)') == 1; assert s.count('app.include_router(multi_caregiver_schedule.router)') == 1; assert s.count('app.include_router(multi_caregiver_schedule_read.router)') == 1; assert s.count('app.include_router(multi_caregiver_case_assignments.router)') == 1; assert s.count('app.include_router(caregiver_segment_availability.router)') == 1; print('ADMIN ROUTERS REGISTERED')"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "ADMIN ROUTERS REGISTERED"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "py_compile", "api\\main.py"], "cwd": "project", "timeout": 30, "expect_exit": 0}
 - Observability: not_required
 - Invariants:
   - INV-START-01: 腳本必須使用 Python 輪詢確認 MySQL 連線已可被接受，始可開始啟動後端與監控服務防止連線逾時崩潰。
@@ -349,7 +435,7 @@
 - Type: api_schema
 - State: `planned`
 - Source: api/schemas/orders.py
-- Description: 訂單完整更新、狀態更新、排班試算，以及單日與 atomic batch 休假／順延／代班 action 的強型別 API 請求資料模型；訂金應收日期可空，客戶身分資格不屬於可提交訂單欄位。
+- Description: 訂單基本更新、排班試算、typed lifecycle commands，以及單日與atomic batch休假／順延／代班action的強型別API models；任意status update model退役。
 - Dependencies: []
 - Complexity: medium
 - Input:
@@ -357,13 +443,27 @@
   - leave_resolution_apply: Preview 欄位加 preview_fingerprint、event_key、actor、reason
   - batch_leave_resolution_preview: contract_version=`assignment-leave-substitution-batch-preview/v1`、case_no、original_assignment_id、非空 items
   - batch_leave_resolution_apply: contract_version=`assignment-leave-substitution-batch-apply/v1`、Preview identity 欄位加 preview_fingerprint、batch_key、actor、reason
+  - lifecycle_commands: cancellation、actual-start reconfirmation、hold activate/release與manual correction；actual-start reconfirmation包含Calendar Preview確認的完整order_change、非空assignment_plan與schedule_change_plan.remove_schedule_ids。
 - Output:
-  - request_models: 既有 AssignmentLeaveResolutionPreviewRequest／AssignmentLeaveResolutionApplyRequest，以及 AssignmentLeaveResolutionBatchPreviewRequest／AssignmentLeaveResolutionBatchApplyRequest
+  - request_models: 既有schedule/leave models、共用`OrderAssignmentSynchronizationOrderChange`、`OrderAssignmentSynchronizationAssignment`、`OrderAssignmentSynchronizationScheduleChangePlan`，以及`OrderLifecycleCancellationRequest`、`OrderActualStartReconfirmationRequest`、`OrderLifecycleHoldRequest`、`OrderLifecycleManualCorrectionRequest`；legacy `OrderStatusUpdateRequest`僅供410相容解析，不得交給writer。
+- Algorithm:
+  - 定義共用bounded canonical text與StrictInt驗證；輸入若含前後空白、bool版本值、未知欄位或空reason/idempotency/actor必須由Pydantic拒絕，不得靜默正規化。
+  - `OrderAssignmentSynchronizationAssignment`只含可空正整數assignment_id、正整數staff_id/assignment_sequence及assigned_start/end_date且start<=end；`OrderAssignmentSynchronizationScheduleChangePlan`只含unique正整數remove_schedule_ids。兩者extra=forbid並由同步與actual-start request共用。
+  - `OrderActualStartReconfirmationRequest`組合共用完整order change、非空assignment plan及schedule change plan，並在model-level驗證order_change.actual_start_date等於new_actual_start_date。
+  - `OrderLifecycleHoldRequest`依release_policy交叉驗證expires_at：manual必須為null，expires_at policy必須提供timezone-aware datetime；`OrderLifecycleManualCorrectionRequest`只允許非取消canonical target。
+  - 保留既有leave/schedule與legacy 410 request model的import相容性；新增lifecycle models不得改寫或放寬既有模型欄位。
 - Invariants:
   - 規格出處：`多月嫂排班UX改善討論紀錄.md`「每個休假日期各自選擇順延／代班」「代班時管理員必須明確選擇代班月嫂」「預覽仍須在後端完成檔期、區段、日排班、服務總量及鎖定檢查」；滿足 API 僅接收操作意圖、Server 自行推導 facts。
   - 規格出處：2026-07-28 人工核准決策「歷史日期本身可修改，client 不得自報歷史可改狀態」；因此 schema 不提供 historical bypass 欄位。
   - deposit_date 必須允許 null，且不得以今天或其他期款日期作為預設值。
   - 不得定義 clients.identity_status 或 identity_status 為可寫入的訂單 API 欄位。
+  - 每個lifecycle command均要求StrictInt且非bool的expected_version>=0、trim後非空的idempotency_key/actor/reason，model extra=forbid。
+  - cancellation body不接受status、refund、payment或lock flags；actual-start reconfirm除common command欄位與new_actual_start_date外，只接受Calendar Preview的完整order_change、assignment_plan及schedule_change_plan，不接受derived end date、status、blocker、付款或control facts；order_change.actual_start_date必須精確等於new_actual_start_date。
+  - lifecycle request及其巢狀order/assignment/schedule plan model一律`extra=forbid`；actual-start assignment_plan至少一筆，schedule_change_plan必含remove_schedule_ids list，且沿用同步Preview/Apply的完整欄位形狀，不得另造縮水版或允許任意dict夾帶derived facts。
+  - hold scope只允許enter_service／auto_complete；release_policy只允許manual／expires_at且與aware expires_at交叉驗證。
+  - manual correction requested_status只允許canonical statuses，但target=訂單取消必須由cancellation model，correction model必須拒絕。
+  - API model不得接受blocking anomalies、domain facts、Alert state、lifecycle_version after value、control action result或outbox payload。
+  - legacy OrderStatusUpdateRequest若為相容import暫時保留，必須標示retired且Router不得將其交給任何writer。
 - 單日休假 request 必須使用明確 case_no、original_assignment_id、original_schedule_id 與精確 YYYY-MM-DD work_date；正整數 id 不得接受 bool。
 - resolution_type 只允許 defer_following_assignments 或 substitute；substitute_staff_id 僅在 substitute 必填，順延時必須為 null。
 - Apply 必須要求 64 字元小寫十六進位 preview_fingerprint，以及 trim 後非空的 event_key、actor、reason。
@@ -374,7 +474,7 @@
 - API client 不得提交 historical_fact_state、allow_historical_edit、bootstrap、assignment/schedule provisional rows、服務時數、付款／月結狀態、is_double_pay 或薪資計算結果。
 - 不得複製既有 order schema；新增 models 必須與現有 model 共存且不改變既有欄位語意。
 - Verification:
-  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_assignment_rest_date_service.py", "-k", "leave_resolution_schema", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-assignment-leave-schema"], "cwd": "project", "timeout": 60, "expect_exit": 0, "expect_stdout_contains": "passed"}
+  - command: {"argv": [".venv\\Scripts\\python.exe", "-m", "pytest", "tests\\test_assignment_rest_date_service.py", "-k", "leave_resolution_schema", "tests\\test_order_lifecycle_command_schemas.py", "-q", "-p", "no:cacheprovider", "--basetemp", "C:\\tmp\\pytest-order-schema-batch"], "cwd": "project", "timeout": 90, "expect_exit": 0, "expect_stdout_contains": "passed"}
 - Observability: not_required
 
 ##### Module: MatchSchemas

@@ -43,7 +43,7 @@ foreach ($key in $desired.Keys) {
 
 Set-Content -Path $envFile -Value $next -Encoding UTF8
 
-Write-Host "[OK] .env 已更新："
+Write-Host "[OK] .env updated:"
 Write-Host "APP_ENV=$($desired['APP_ENV'])"
 Write-Host "ENABLE_ADMIN_AUTH=$($desired['ENABLE_ADMIN_AUTH'])"
-Write-Host "INTERNAL_API_KEY=已更新（值不顯示）"
+Write-Host "INTERNAL_API_KEY=updated (value hidden)"

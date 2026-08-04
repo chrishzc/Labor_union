@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
-from services.admin_auth_service import (
+from subsystems.access.authentication_session import (
     AdminPrincipal,
     get_admin_session,
     has_required_role,

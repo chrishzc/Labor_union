@@ -1,0 +1,100 @@
+{
+  "contract": "legacy-retirement-anomalies-migration-matrix/v1",
+  "generated_at": "2026-08-03T15:31:52.8435533+08:00",
+  "typed_api_mapping": [
+    {
+      "legacy": "GET /api/v1/finance-alerts",
+      "canonical": "GET /api/v1/anomalies",
+      "identity_change": "numeric alert_id to deterministic fingerprint",
+      "status": "runtime_cutover_complete"
+    },
+    {
+      "legacy": "GET /api/v1/finance-alerts/{alert_id}",
+      "canonical": "GET /api/v1/anomalies/{fingerprint}",
+      "identity_change": "numeric alert_id to deterministic fingerprint",
+      "status": "runtime_cutover_complete"
+    },
+    {
+      "legacy": "POST /api/v1/finance-alerts/{alert_id}/claim",
+      "canonical": "POST /api/v1/anomalies/{fingerprint}/claim",
+      "contract_change": "server actor plus expected version plus idempotency and correlation headers",
+      "status": "runtime_cutover_complete"
+    },
+    {
+      "legacy": "POST /api/v1/finance-alerts/{alert_id}/resolve",
+      "canonical": "POST /api/v1/anomalies/{fingerprint}/resolve",
+      "contract_change": "server actor plus expected version plus reason plus idempotency and correlation headers",
+      "status": "runtime_cutover_complete"
+    }
+  ],
+  "caller_exit_order": [
+    "verify_canonical_anomalies_before_change",
+    "remove_unmounted_finance_alert_router_source_and_legacy_router_test",
+    "remove_unreachable_legacy_ui_helpers_without_touching_canonical_panels",
+    "remove_dead_finance_alert_wiring_after_fresh_caller_zero",
+    "replace_fake_data_legacy_seed_with_formal_root_fact_or_outbox_fixture",
+    "reclassify_or_remove_legacy_only_tests",
+    "fresh_verify_three_target_modules_have_no_source_or_test_callers",
+    "authorize_separate_module_removal"
+  ],
+  "semantic_coverage": [
+    {
+      "legacy_family": "finance_import_pending",
+      "canonical": "finance_import_manual_review",
+      "coverage": "formal_root_fact_and_outbox_present",
+      "equivalence": "not_field_for_field"
+    },
+    {
+      "legacy_family": "government_subsidy_ambiguity",
+      "canonical": "GOVSUB definitions and source projections",
+      "coverage": "formal_owning_domain_source_present",
+      "equivalence": "requires_scenario_comparison"
+    },
+    {
+      "legacy_family": "staff_payment_anomalies",
+      "canonical": "PAYOUT-001 through PAYOUT-003",
+      "coverage": "formal_owning_domain_source_present",
+      "equivalence": "not_one_to_one_for_all_legacy_reason_codes"
+    },
+    {
+      "legacy_family": "client_receipt_detail",
+      "canonical": "generic finance import manual review plus future owning-domain source if required",
+      "coverage": "partial",
+      "equivalence": "blocked_by_missing_formal_definition_or_display_mapping"
+    },
+    {
+      "legacy_family": "subsidy_return_underpaid_overpaid_shared_account",
+      "canonical": "none_proven_one_to_one_in_current_registry",
+      "coverage": "excluded_high_risk_scope",
+      "equivalence": "blocked"
+    }
+  ],
+  "inventory": {
+    "before_count": 662,
+    "before_fingerprint": "d0a0007df33120d761d82d60707b948b28ccadc9e2e31ecd394762027cae1ddb",
+    "caller_exit_expected_delta": 0,
+    "module_removal_expected_count": 657,
+    "module_removal_expected_fingerprint": "e939d90d079d55ddba4b3574a7140f3a2578bfe74e09ad77fec031c197f0440e",
+    "removed_identities": [
+      "services/finance_alert_detection.py:create_or_get_finance_alert:execute:INSERT:finance_alert_events:325756c3c492f44d",
+      "services/finance_alert_detection.py:create_or_get_finance_alert:execute:INSERT:finance_alerts:52a43e50ec89c579",
+      "services/finance_alert_events.py:append_finance_alert_event:execute:INSERT:finance_alert_events:21fcd942a7524b32",
+      "services/finance_alert_workflow.py:claim_finance_alert:execute:UPDATE:finance_alerts:fb2a599763d1714a",
+      "services/finance_alert_workflow.py:resolve_finance_alert:execute:UPDATE:finance_alerts:ea9e439a4342970e"
+    ]
+  },
+  "route_retirement": {
+    "current": "unmounted_and_absent_from_openapi",
+    "decision": "do_not_remount_only_to_return_410",
+    "future_410_requires_separate_expiry_and_deployment_authority": true
+  },
+  "data_boundary": {
+    "legacy_tables": [
+      "finance_alerts",
+      "finance_alert_events"
+    ],
+    "action": "leave_dormant",
+    "schema_or_data_migration_authorized": false,
+    "archive_or_migration_requires_separate_work_package": true
+  }
+}

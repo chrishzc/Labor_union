@@ -459,6 +459,11 @@ React View ─────┘
 
 - 頁面、Tab、表單、表格、對話框與導覽。
 - loading、empty、success、warning、error 等畫面狀態。
+- 效能與體感速度依
+  `document/架構重整/12_Global_效能與UX體感架構.md`：先 render shell／skeleton，
+  保留 stale view 並背景刷新，集中處理 single-flight、debounce／throttle 與 request
+  supersession。正式帳務、排班、狀態或異常工作流 Apply 只能先顯示 pending，不得使用
+  optimistic success；只有 server receipt 能顯示完成。
 - 使用者尚未送出的前端草稿。
 - 欄位標籤、日期顯示格式、千分位、顏色與排序等純顯示處理。
 - 將使用者明確輸入整理成不含衍生商業欄位的操作意圖。

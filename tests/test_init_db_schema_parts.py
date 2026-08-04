@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from scripts import init_db
-from scripts.init_db import load_schema_parts
+from scripts.init_db import _schema_part_sort_key, load_schema_parts
 
 
 class RecordingCursor:
@@ -34,6 +34,20 @@ def test_loads_schema_parts_in_filename_order(tmp_path):
         "CREATE TABLE first (id INT)",
         "ALTER TABLE first ADD value INT",
         "CREATE TABLE second (id INT)",
+    ]
+
+
+def test_schema_parts_sort_by_numeric_prefix_not_lexicographic_name(tmp_path):
+    paths = [
+        tmp_path / "109_scheduling_generations.sql",
+        tmp_path / "95_multi_caregiver_schedule.sql",
+        tmp_path / "104_order_lifecycle_state_history.sql",
+    ]
+
+    assert [path.name for path in sorted(paths, key=_schema_part_sort_key)] == [
+        "95_multi_caregiver_schedule.sql",
+        "104_order_lifecycle_state_history.sql",
+        "109_scheduling_generations.sql",
     ]
 
 

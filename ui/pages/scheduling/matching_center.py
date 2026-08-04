@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
 from typing import Any
 import uuid
 
 import requests
 import streamlit as st
 
-from ui.pages.order.tab2_assign import _render_tab2_assign
+from ui.api_clients.assignment_plan_api_client import AssignmentPlanApiClient
+from ui.api_clients.case_architecture_bootstrap_api_client import (
+    CaseArchitectureBootstrapApiClient,
+)
+from ui.api_clients.waiting_deposit_lock_api_client import (
+    WaitingDepositLockApiClient,
+    WaitingDepositLockApiError,
+)
+from ui.pages.order.case_architecture_bootstrap_panel import (
+    ensure_case_architecture_ready,
+)
+from ui.pages.scheduling.assignment_plan_panel import (
+    render_assignment_plan_panel,
+)
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 
@@ -39,6 +51,304 @@ def _actor() -> str:
     ).strip() or "development-bypass"
 
 
+def _assignment_plan_drafts(segments):
+    return [
+        {
+            "staff_id": int(segment["staff_id"]),
+            "assigned_start_date": str(segment["assigned_start_date"]),
+            "assigned_end_date": str(segment["assigned_end_date"]),
+            "official_service_dates": [],
+        }
+        for segment in segments
+    ]
+
+
+def _waiting_lock_client() -> WaitingDepositLockApiClient:
+    return WaitingDepositLockApiClient(
+        base_url=resolve_api_base_url(),
+        headers=build_admin_headers(),
+    )
+
+
+def _show_waiting_lock_error(action: str, error: Exception) -> None:
+    if not isinstance(error, WaitingDepositLockApiError):
+        st.error(f"{action}失敗：{error}")
+        return
+    st.error(f"{action}失敗 [{error.error.code}]：{error.error.message}")
+    if error.error.retryable:
+        st.caption("此錯誤可重試；請確認後端服務後再次操作。")
+
+
+def _new_command_identity(action: str, case_no: str) -> dict[str, str]:
+    identity = uuid.uuid4().hex
+    return {
+        "idempotency_key": f"{action}-{case_no}-{identity}",
+        "correlation_id": f"{action}-{case_no}-{identity}",
+    }
+
+
+def _clear_waiting_lock_state(case_no: str, action: str) -> None:
+    st.session_state.pop(f"waiting_lock_{action}_preview_{case_no}", None)
+    st.session_state.pop(f"waiting_lock_{action}_command_{case_no}", None)
+
+
+# This view stays cohesive so its widgets share one explicit Preview lifecycle.
+def _render_acquisition_preview(
+    case_no: str,
+    plan_id: int,
+    preview: dict[str, Any],
+    lock_state_key: str,
+) -> None:
+    st.caption(
+        f"預計鎖定 {preview['service_day_count']} 個服務日，"
+        f"另預留 {preview['buffer_day_count']} 個七日緩衝檔期。"
+    )
+    if preview.get("conflicts"):
+        st.error("Preview 發現檔期衝突，請先調整配對方案。")
+        st.dataframe(preview["conflicts"], hide_index=True, width="stretch")
+    with st.expander("查看本次鎖定日期", expanded=False):
+        st.dataframe(preview["occupancy"], hide_index=True, width="stretch")
+    _render_acquisition_apply_controls(
+        case_no,
+        plan_id,
+        preview,
+        lock_state_key,
+    )
+
+
+def _render_acquisition_apply_controls(
+    case_no: str,
+    plan_id: int,
+    preview: dict[str, Any],
+    lock_state_key: str,
+) -> None:
+    confirmed = st.checkbox(
+        "確認依此 Preview 鎖定服務日與七日緩衝",
+        key=f"waiting_lock_acquire_confirm_{case_no}",
+    )
+    if st.button(
+        "Apply 鎖定檔期",
+        key=f"waiting_lock_acquire_apply_{case_no}",
+        disabled=not confirmed or not preview["apply_allowed"],
+        type="primary",
+    ):
+        _apply_waiting_lock_acquisition(case_no, plan_id, preview, lock_state_key)
+
+
+# Apply stays cohesive so receipt persistence and rerun cannot be separated.
+def _apply_waiting_lock_acquisition(
+    case_no: str,
+    plan_id: int,
+    preview: dict[str, Any],
+    lock_state_key: str,
+) -> None:
+    command = st.session_state[f"waiting_lock_acquire_command_{case_no}"]
+    try:
+        receipt = _waiting_lock_client().apply_acquisition(
+            case_no,
+            plan_id,
+            preview["preview_fingerprint"],
+            **command,
+        )
+    except Exception as error:
+        _show_waiting_lock_error("鎖定", error)
+        return
+    st.session_state[lock_state_key] = receipt.model_dump()
+    _clear_waiting_lock_state(case_no, "acquire")
+    st.success("服務日期與結束後七日緩衝已鎖定，訂單維持洽談中等待訂金。")
+    st.rerun()
+
+
+def _render_waiting_lock_acquisition(
+    case_no: str,
+    plan_id: int,
+    lock_state_key: str,
+    *,
+    enabled: bool,
+) -> None:
+    preview_state_key = f"waiting_lock_acquire_preview_{case_no}"
+    if st.button(
+        "產生等待訂金鎖 Preview",
+        key=f"waiting_lock_acquire_preview_button_{case_no}",
+        disabled=not enabled,
+    ):
+        _load_acquisition_preview(case_no, plan_id, preview_state_key)
+    preview = st.session_state.get(preview_state_key)
+    if preview and preview.get("plan_id") == plan_id:
+        _render_acquisition_preview(case_no, plan_id, preview, lock_state_key)
+
+
+def _load_acquisition_preview(
+    case_no: str,
+    plan_id: int,
+    preview_state_key: str,
+) -> None:
+    try:
+        preview = _waiting_lock_client().preview_acquisition(case_no, plan_id)
+    except Exception as error:
+        _show_waiting_lock_error("產生鎖定 Preview", error)
+        return
+    st.session_state[preview_state_key] = preview.model_dump()
+    st.session_state[f"waiting_lock_acquire_command_{case_no}"] = (
+        _new_command_identity("waiting-lock-acquire", case_no)
+    )
+
+
+_RELEASE_BLOCKER_LABELS = {
+    "case_not_in_negotiation": "案件已不在洽談階段",
+    "deposit_not_zero": "訂金已有入帳、退款或沖銷紀錄，不能直接解除檔期",
+    "lock_not_active": "等待訂金鎖已不在有效狀態",
+    "plan_not_accepted": "配對方案已不在已接受狀態",
+}
+
+
+def _release_blocker_text(blocker: str) -> str:
+    return _RELEASE_BLOCKER_LABELS.get(blocker, blocker)
+
+
+# This view stays cohesive so its widgets share one explicit Preview lifecycle.
+def _render_release_preview(
+    case_no: str,
+    plan_id: int,
+    lock_id: int,
+    preview: dict[str, Any],
+    lock_state_key: str,
+    active_state_key: str,
+) -> None:
+    st.caption(
+        f"預計解除 {preview['service_day_count']} 個服務日檔期，"
+        f"涉及 {preview['staff_count']} 位月嫂；聯繫與意願歷史仍保留。"
+    )
+    if preview.get("blockers"):
+        st.error("目前不能解除：" + "、".join(
+            _release_blocker_text(item) for item in preview["blockers"]
+        ))
+    _render_release_apply_controls(
+        case_no,
+        plan_id,
+        lock_id,
+        preview,
+        lock_state_key,
+        active_state_key,
+    )
+
+
+# These widgets stay together because confirmation, reason, and Apply are one gate.
+def _render_release_apply_controls(
+    case_no: str,
+    plan_id: int,
+    lock_id: int,
+    preview: dict[str, Any],
+    lock_state_key: str,
+    active_state_key: str,
+) -> None:
+    reason = st.text_input(
+        "回復未綁定原因",
+        key=f"waiting_lock_release_reason_{case_no}",
+    )
+    confirmed = st.checkbox(
+        "確認依此 Preview 回復未綁定狀態",
+        key=f"waiting_lock_release_confirm_{case_no}",
+    )
+    if st.button(
+        "Apply 回復未綁定",
+        key=f"waiting_lock_release_apply_{case_no}",
+        disabled=(
+            not confirmed
+            or not reason.strip()
+            or not preview["apply_allowed"]
+        ),
+        type="primary",
+    ):
+        _apply_waiting_lock_release(
+            case_no,
+            plan_id,
+            lock_id,
+            preview,
+            reason.strip(),
+            lock_state_key,
+            active_state_key,
+        )
+
+
+# Apply stays cohesive so receipt cleanup and rerun cannot be separated.
+def _apply_waiting_lock_release(
+    case_no: str,
+    plan_id: int,
+    lock_id: int,
+    preview: dict[str, Any],
+    reason: str,
+    lock_state_key: str,
+    active_state_key: str,
+) -> None:
+    command = st.session_state[f"waiting_lock_release_command_{case_no}"]
+    try:
+        _waiting_lock_client().apply_release(
+            case_no,
+            plan_id,
+            lock_id,
+            preview["preview_fingerprint"],
+            reason=reason,
+            **command,
+        )
+    except Exception as error:
+        _show_waiting_lock_error("回復未綁定", error)
+        return
+    for state_key in (lock_state_key, active_state_key):
+        st.session_state.pop(state_key, None)
+    _clear_waiting_lock_state(case_no, "release")
+    st.success("已解除服務日與七日緩衝檔期；履歷與意願歷史保留。")
+    st.rerun()
+
+
+# Preview loading and rendering stay together to avoid stale lock session state.
+def _render_waiting_lock_release(
+    case_no: str,
+    plan_id: int,
+    lock_id: int,
+    lock_state_key: str,
+    active_state_key: str,
+) -> None:
+    preview_state_key = f"waiting_lock_release_preview_{case_no}"
+    if st.button(
+        "產生回復未綁定 Preview",
+        key=f"waiting_lock_release_preview_button_{case_no}",
+    ):
+        _load_release_preview(case_no, plan_id, lock_id, preview_state_key)
+    preview = st.session_state.get(preview_state_key)
+    if preview and preview.get("lock_id") == lock_id:
+        _render_release_preview(
+            case_no,
+            plan_id,
+            lock_id,
+            preview,
+            lock_state_key,
+            active_state_key,
+        )
+
+
+def _load_release_preview(
+    case_no: str,
+    plan_id: int,
+    lock_id: int,
+    preview_state_key: str,
+) -> None:
+    try:
+        preview = _waiting_lock_client().preview_release(
+            case_no,
+            plan_id,
+            lock_id,
+        )
+    except Exception as error:
+        _show_waiting_lock_error("產生解除 Preview", error)
+        return
+    st.session_state[preview_state_key] = preview.model_dump()
+    st.session_state[f"waiting_lock_release_command_{case_no}"] = (
+        _new_command_identity("waiting-lock-release", case_no)
+    )
+
+
+# The page workflow remains ordered because Streamlit renders and mutates state linearly.
 def _render_multi_segment_matching(
     order: dict[str, Any],
     staff: list[dict[str, Any]],
@@ -74,9 +384,9 @@ def _render_multi_segment_matching(
     if preview_only:
         st.markdown("#### 多月嫂配對測試預覽")
     else:
-        st.warning("目前沒有月嫂可獨自承接完整期間，請開始多月嫂配對。")
+        st.caption("單一與多月嫂皆使用同一份版本化配對方案與聯繫歷史。")
     count = st.selectbox(
-        "分段數", [2, 3, 4], key=f"matching_segment_count_{case_no}"
+        "服務分段數", [1, 2, 3, 4], key=f"matching_segment_count_{case_no}"
     )
     staff_labels = {
         f"#{row['id']}｜{row.get('name', '')}": row["id"]
@@ -268,16 +578,6 @@ def _render_multi_segment_matching(
         or {}
     )
     lock_id = lock.get("lock_id") or lock.get("id")
-    deposit = contact_state.get("deposit") or {}
-    try:
-        deposit_receivable = Decimal(str(deposit.get("deposit_receivable")))
-        deposit_received = Decimal(str(deposit.get("deposit_received")))
-    except (InvalidOperation, TypeError):
-        deposit_receivable = Decimal("-1")
-        deposit_received = Decimal("-2")
-    deposit_confirmed = (
-        deposit_receivable > 0 and deposit_received == deposit_receivable
-    )
     if plan_id:
         st.markdown("#### 發送紀錄與月嫂意願")
         willingness_labels = {
@@ -411,162 +711,89 @@ def _render_multi_segment_matching(
         key=f"matching_customer_confirmed_{case_no}",
         disabled=not all_resumes_sent or bool(lock_id),
     )
-    if plan_id and st.button(
-        "確認配對並鎖定服務日期",
-        key=f"matching_lock_button_{case_no}",
-        disabled=not all_resumes_sent or not customer_confirmed or bool(lock_id),
-    ):
-        try:
-            lock = _request(
-                f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/availability-lock/acquire",
-                method="POST",
-                payload={
-                    "event_key": f"lock-{case_no}-{uuid.uuid4().hex}",
-                    "actor": _actor(),
-                },
-            )
-            st.session_state[lock_state_key] = lock
-            st.success("服務日期已鎖定，訂單維持洽談中等待訂金。")
-            st.rerun()
-        except Exception as error:
-            st.error(f"鎖定失敗：{error}")
+    if plan_id:
+        _render_waiting_lock_acquisition(
+            case_no,
+            plan_id,
+            lock_state_key,
+            enabled=(
+                all_resumes_sent
+                and customer_confirmed
+                and not bool(lock_id)
+            ),
+        )
 
     if plan_id and lock_id:
-        if deposit_confirmed:
-            st.info("訂金已全額入帳；完成正式費率與樓層費分配後即可轉正式排班。")
-        confirmed = st.checkbox(
-            "確認回復未綁定狀態",
-            key=f"matching_release_confirm_{case_no}",
-            disabled=deposit_confirmed,
+        st.caption("解除 Preview 會由後端確認案件狀態、有效鎖與訂金淨額。")
+        _render_waiting_lock_release(
+            case_no,
+            plan_id,
+            lock_id,
+            lock_state_key,
+            active_state_key,
         )
-        if st.button(
-            "回復未綁定狀態",
-            disabled=not confirmed or deposit_confirmed,
-            key=f"matching_release_{case_no}",
-        ):
-            try:
-                _request(
-                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/availability-locks/{lock_id}/release",
-                    method="POST",
-                    payload={
-                        "event_key": f"release-{case_no}-{uuid.uuid4().hex}",
-                        "actor": _actor(),
-                        "reason": "管理員確認回復未綁定狀態",
-                    },
-                )
-                st.session_state.pop(lock_state_key, None)
-                st.success("已解除日期鎖定；履歷與意願歷史保留。")
-                st.rerun()
-            except Exception as error:
-                st.error(f"回復未綁定失敗：{error}")
 
-        if deposit_confirmed:
-            st.markdown("#### 訂金入帳後轉正式指派")
-            st.caption("每段費率必須明確輸入；樓層費分配合計必須等於本案樓層費。")
-            assignment_terms = []
-            floor_total = Decimal("0")
-            terms_valid = bool(contact_segments)
-            order_floor_fee = Decimal(str(order.get("floor_fee") or 0))
-            for index, segment in enumerate(contact_segments):
-                rate_col, floor_col = st.columns(2)
-                hourly_rate = rate_col.number_input(
-                    f"第 {index + 1} 段月嫂時薪",
-                    min_value=0.0,
-                    step=50.0,
-                    key=f"matching_conversion_rate_{case_no}_{segment['segment_id']}",
-                )
-                default_floor = float(order_floor_fee) if len(contact_segments) == 1 else 0.0
-                floor_fee = floor_col.number_input(
-                    f"第 {index + 1} 段樓層費分配",
-                    min_value=0.0,
-                    value=default_floor,
-                    step=100.0,
-                    key=f"matching_conversion_floor_{case_no}_{segment['segment_id']}",
-                )
-                rate_value = Decimal(str(hourly_rate))
-                floor_value = Decimal(str(floor_fee))
-                terms_valid = terms_valid and rate_value > 0
-                floor_total += floor_value
-                assignment_terms.append(
-                    {
-                        "segment_id": segment["segment_id"],
-                        "hourly_rate": str(rate_value),
-                        "floor_fee_allocated": str(floor_value),
-                    }
-                )
-            if floor_total != order_floor_fee:
-                terms_valid = False
-                st.error(
-                    f"樓層費分配合計 {floor_total} 元，必須等於本案 {order_floor_fee} 元。"
-                )
-            conversion_confirmed = st.checkbox(
-                "我已確認訂金、每段費率、樓層費分配與正式服務日期",
-                key=f"matching_conversion_confirm_{case_no}",
+        st.markdown("#### 建立正式 Assignment Plan")
+        st.caption(
+            "配對區段只作預填；正式服務日必須逐段勾選。"
+            "後端 Preview 會驗證訂金並重算排班、薪資、帳務與訂單影響。"
+        )
+        headers = build_admin_headers()
+        bootstrap_client = CaseArchitectureBootstrapApiClient(
+            base_url=resolve_api_base_url(),
+            headers=headers,
+        )
+        if ensure_case_architecture_ready(case_no, bootstrap_client):
+            assignment_client = AssignmentPlanApiClient(
+                base_url=resolve_api_base_url(),
+                headers=headers,
             )
-            if st.button(
-                "轉為正式指派並寫入行事曆",
-                type="primary",
-                disabled=not terms_valid or not conversion_confirmed,
-                key=f"matching_convert_{case_no}",
-            ):
+            render_assignment_plan_panel(
+                case_no,
+                assignment_client,
+                staff_choices=staff_labels,
+                draft_segments=_assignment_plan_drafts(contact_segments),
+            )
+        else:
+            st.info("案件根狀態完成後，才會開放 Assignment Plan。")
+
+    if plan_id:
+        st.markdown("#### 傳送履歷給客戶")
+        resume_note = st.text_area(
+            "備註",
+            placeholder="多月嫂案件請明確說明由多位月嫂共同完成。",
+            key=f"matching_resume_note_{case_no}",
+        )
+        if st.button("傳送履歷", key=f"matching_resume_{case_no}"):
+            if not contact_state.get("all_willing"):
+                pending = [
+                    str(segment.get("staff_name") or segment.get("staff_id"))
+                    for segment in contact_segments
+                    if segment.get("willingness") != "willing"
+                ]
+                st.error("尚未同意的月嫂：" + "、".join(pending))
+            elif not resume_note.strip():
+                st.error("請先填寫要與履歷一併傳送的備註。")
+            else:
                 try:
                     result = _request(
-                        f"/api/v1/orders/{case_no}/availability-locks/{lock_id}/convert",
+                        f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/resumes",
                         method="POST",
                         payload={
-                            "event_key": f"convert-{case_no}-{uuid.uuid4().hex}",
+                            "event_key": f"resume-{case_no}-{uuid.uuid4().hex}",
                             "actor": _actor(),
-                            "reason": "訂金全額入帳，確認轉正式指派",
-                            "assignment_terms": assignment_terms,
+                            "note": resume_note.strip(),
                         },
                     )
-                    for state_key in (
-                        f"matching_plan_{case_no}",
-                        contact_state_key,
-                        lock_state_key,
-                        active_state_key,
-                    ):
-                        st.session_state.pop(state_key, None)
                     st.success(
-                        f"已建立 {len(result.get('assignments') or [])} 筆正式指派與行事曆。"
+                        f"已逐位建立 {len(result.get('line_task_ids') or [])} 筆履歷發送任務。"
                     )
                     st.rerun()
                 except Exception as error:
-                    st.error(f"轉正式失敗，資料維持原狀：{error}")
+                    st.error(f"履歷未發送：{error}")
+    else:
+        st.info("請先建立配對方案並完成月嫂聯繫後，才可傳送履歷。")
 
-    st.markdown("#### 傳送履歷給客戶")
-    resume_note = st.text_area(
-        "備註",
-        placeholder="多月嫂案件請明確說明由多位月嫂共同完成。",
-        key=f"matching_resume_note_{case_no}",
-    )
-    if st.button("傳送履歷", key=f"matching_resume_{case_no}"):
-        if not contact_state.get("all_willing"):
-            pending = [
-                str(segment.get("staff_name") or segment.get("staff_id"))
-                for segment in contact_segments
-                if segment.get("willingness") != "willing"
-            ]
-            st.error("尚未同意的月嫂：" + "、".join(pending))
-        elif not resume_note.strip():
-            st.error("請先填寫要與履歷一併傳送的備註。")
-        else:
-            try:
-                result = _request(
-                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/resumes",
-                    method="POST",
-                    payload={
-                        "event_key": f"resume-{case_no}-{uuid.uuid4().hex}",
-                        "actor": _actor(),
-                        "note": resume_note.strip(),
-                    },
-                )
-                st.success(
-                    f"已逐位建立 {len(result.get('line_task_ids') or [])} 筆履歷發送任務。"
-                )
-                st.rerun()
-            except Exception as error:
-                st.error(f"履歷未發送：{error}")
 
 
 def render_matching_center(
@@ -575,18 +802,377 @@ def render_matching_center(
     *,
     preferred_case_no: str | None = None,
 ) -> None:
-    """Render the original matching workflow with a multi-segment fallback."""
-    _render_tab2_assign(
-        orders,
-        [],
-        staff,
-        multi_segment_renderer=_render_multi_segment_matching,
-        multi_segment_preview_renderer=lambda order, staff_list: (
-            _render_multi_segment_matching(
-                order,
-                staff_list,
-                preview_only=True,
+    st.subheader("🤝 月嫂配對中心 (Clients, Orders & Matching)")
+    pending_orders = _negotiation_orders(orders)
+    if not pending_orders:
+        st.info("目前沒有洽談中的待配對案件。")
+        return
+    selected_order = _select_negotiation_order(
+        pending_orders,
+        preferred_case_no,
+    )
+
+    from ui.pages.shared import resolve_api_base_url, build_admin_headers
+    bootstrap_client = CaseArchitectureBootstrapApiClient(
+        base_url=resolve_api_base_url(),
+        headers=build_admin_headers(),
+    )
+
+    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["👁️ 檢視案件詳情", "⚡ 智慧配對與指派", "🧩 多月嫂配對方案(備案)"])
+    with sub_tab1:
+        _render_matching_order_summary(selected_order)
+    with sub_tab2:
+        ensure_case_architecture_ready(selected_order["case_no"], bootstrap_client)
+        _render_single_caregiver_matching(selected_order, staff)
+    with sub_tab3:
+        ensure_case_architecture_ready(selected_order["case_no"], bootstrap_client)
+        _render_multi_segment_matching(selected_order, staff)
+
+def _iso_date_text(value, *, required=True, field_name="日期"):
+    parsed = _parse_iso_date(value)
+    if parsed is None:
+        if required:
+            raise ValueError(f"{field_name} 需提供 YYYY-MM-DD 日期")
+        return None
+    return parsed.isoformat()
+
+def _parse_iso_date(value):
+    from datetime import datetime, date
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        clean_value = value.split(" ")[0].strip()
+        if not clean_value:
+            return None
+        return datetime.strptime(clean_value, "%Y-%m-%d").date()
+    return None
+
+def _single_caregiver_covers_service_period(order):
+    from datetime import datetime, timedelta, date
+    start_date = _iso_date_text(
+        order.get("actual_start_date") or order.get("start_date"),
+        required=True,
+        field_name="服務開始日",
+    )
+    raw_end = order.get("actual_end_date") or order.get("end_date")
+    if raw_end:
+        end_date = _iso_date_text(raw_end, required=True, field_name="服務結束日")
+    else:
+        service_days = int(order.get("service_days") or 0)
+        if service_days <= 0:
+            raise ValueError("服務天數必須為正整數")
+        end_date = (
+            datetime.strptime(start_date, "%Y-%m-%d").date()
+            + timedelta(days=service_days - 1)
+        ).isoformat()
+    availability = _request(
+        f"/api/v1/orders/{order['case_no']}/caregiver-single-eligibility/check",
+        method="POST",
+        payload={
+            "start_date": start_date,
+            "end_date": end_date,
+            "as_of": date.today().isoformat(),
+        },
+    )
+    return bool(availability.get("complete_combinations"))
+
+def _render_single_caregiver_matching(target_order, staff_list):
+    target_case_no = target_order["case_no"]
+    st.markdown(f"#### ⚡ 智慧配對與指派 (案件 #{target_case_no})")
+    try:
+        match_records = _request(f"/api/v1/orders/{target_case_no}/matches")
+        if not match_records:
+            match_records = []
+    except Exception as e:
+        st.error(f"❌ 讀取媒合記錄 API 失敗: {e}")
+        match_records = []
+
+    valid_matches = [
+        m for m in match_records
+        if m.get('sent_info_1_at') or m.get('sent_info_2_at') or m.get('caregiver_accepted') is not None
+    ]
+    if valid_matches:
+        st.write("📋 當前月嫂意願詢問紀錄：")
+        for m in valid_matches:
+            acc = m.get('caregiver_accepted')
+            acc_lbl = "🟢 願意接案" if acc == 1 else ("🔴 拒絕" if acc == 0 else "🟡 待回覆")
+            s1_val = m.get('sent_info_1_at')
+            s2_val = m.get('sent_info_2_at')
+            s1 = f"已於 {s1_val}" if s1_val else "未發送"
+            s2 = f"已於 {s2_val}" if s2_val else "未發送"
+            st.markdown(f"**{m.get('staff_name', '月嫂')}** - 意願: `{acc_lbl}` (粗篩: {s1} | 精篩: {s2})")
+        st.markdown("---")
+
+    try:
+        single_caregiver_available = _single_caregiver_covers_service_period(target_order)
+    except Exception as err:
+        st.error(f"無法確認完整服務檔期：{err}")
+        single_caregiver_available = None
+
+    if single_caregiver_available is False:
+        st.warning("⚠️ 系統檢查發現：**沒有任何單一位月嫂可以涵蓋完整的服務檔期**。請切換至「🧩 多月嫂配對方案(備案)」進行分段配對。")
+
+    with st.expander("🎯 智慧粗篩條件控制面板 (可自訂開啟/關閉，預設全選)", expanded=True):
+        fc1, fc2 = st.columns(2)
+        with fc1:
+            f_region = st.checkbox("☑️ 比對服務區域 (city/address 區域)", value=True, key="f_reg_toggle")
+            f_schedule = st.checkbox("☑️ 排除檔期時間衝突 (含 7 天預留備用期)", value=True, key="f_sch_toggle")
+        with fc2:
+            f_babies = st.checkbox("☑️ 比對照顧胎數上限 (單/雙胞胎)", value=True, key="f_bab_toggle")
+            f_time = st.checkbox("☑️ 比對服務時段需求", value=True, key="f_time_toggle")
+
+    try:
+        import requests
+        from ui.pages.shared import resolve_api_base_url, build_admin_headers
+        resp_rec = requests.get(
+            f"{resolve_api_base_url()}/api/v1/matches/recommend-staff",
+            headers=build_admin_headers(),
+            params={
+                "case_no": target_case_no,
+                "filter_region": f_region,
+                "filter_schedule": f_schedule,
+                "filter_babies": f_babies,
+                "filter_time": f_time,
+            },
+            timeout=10,
+        )
+        resp_rec.raise_for_status()
+        rec_staff = resp_rec.json().get("data") or []
+    except Exception as err:
+        st.error(f"❌ 智慧粗篩比對計算 API 失敗: {err}")
+        rec_staff = []
+
+    if not rec_staff:
+        st.warning("⚠️ 依據當前勾選條件，暫無符合之月嫂。建議取消部分勾選以展開搜尋範圍。")
+        staff_options = {f"{s['name']} ({s.get('phone', '')})": s['id'] for s in staff_list if s.get('name')}
+    else:
+        staff_options = {r['display_label']: r['staff_id'] for r in rec_staff}
+
+    st.markdown("##### 步驟 1: 發送 訂單資訊-1 (粗篩，可複選多位月嫂)")
+    selected_staff_labels = st.multiselect(
+        "選擇服務人員/月嫂進行粗篩發送 (已自動依匹配度與檔期排序)",
+        list(staff_options.keys()),
+        key="match_staff_multipicker"
+    )
+    selected_staff_ids = [staff_options[label] for label in selected_staff_labels]
+
+    if st.button("1️⃣ 發送 訂單資訊-1 給已勾選月嫂 (粗篩)", key="btn_send_1_batch", disabled=not selected_staff_ids):
+        try:
+            for sid in selected_staff_ids:
+                m_data = _request(
+                    f"/api/v1/orders/{target_case_no}/matches",
+                    method="POST",
+                    payload={"staff_id": sid}
+                )
+                match_id = m_data.get("match_id") if isinstance(m_data, dict) else m_data
+                if match_id:
+                    _request(f"/api/v1/matches/{match_id}/send-info-1", method="POST")
+            st.success(f"已對 {len(selected_staff_ids)} 位月嫂發送 訂單資訊-1！")
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ 發送失敗: {e}")
+
+    st.markdown("---")
+    sent1_matches = [m for m in match_records if m.get('sent_info_1_at')]
+
+    st.markdown("##### 步驟 2: 更新月嫂意願 ＆ 發送 訂單資訊-2 (精篩，可複選多位月嫂)")
+    if not sent1_matches:
+        st.info("⚠️ 尚無月嫂收到 訂單資訊-1，請先完成步驟 1 的粗篩發送。")
+    else:
+        resp_opts = ["待回覆 (NULL)", "願意接案 (1)", "拒絕接案 (0)"]
+        staff_ids_for_step2 = []
+        for m in sent1_matches:
+            m_staff_id = m['staff_id']
+            acc_val = m.get('caregiver_accepted')
+            c_idx = 1 if acc_val == 1 else (2 if acc_val == 0 else 0)
+
+            col_name, col_resp, col_chk = st.columns([2, 2, 1.2])
+            with col_name:
+                s2_val = m.get('sent_info_2_at')
+                s2_lbl = f"已於 {s2_val}" if s2_val else "尚未發送-2"
+                st.write(f"**{m.get('staff_name', '月嫂')}**\n\n({s2_lbl})")
+            with col_resp:
+                m_id = m.get('match_id') or m.get('id')
+                new_resp = st.selectbox(
+                    "意願狀態", resp_opts, index=c_idx,
+                    key=f"resp_select_{m_id}", label_visibility="collapsed"
+                )
+                new_accepted_val = True if new_resp == "願意接案 (1)" else (False if new_resp == "拒絕接案 (0)" else None)
+                if new_accepted_val != (True if acc_val == 1 else (False if acc_val == 0 else None)):
+                    try:
+                        from ui.pages.shared import resolve_api_base_url, build_admin_headers
+                        import requests
+                        resp_rep = requests.put(
+                            f"{resolve_api_base_url()}/api/v1/matches/{m_id}/reply",
+                            headers=build_admin_headers(),
+                            json={"accepted": new_accepted_val},
+                            timeout=10,
+                        )
+                        resp_rep.raise_for_status()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"❌ 意願更新 API 失敗: {e}")
+            with col_chk:
+                if st.checkbox("發送-2", key=f"send2_chk_{m_id}"):
+                    staff_ids_for_step2.append(m_staff_id)
+
+        if st.button("2️⃣ 發送 訂單資訊-2 給已勾選月嫂 (精篩)", key="btn_send_2_batch", disabled=not staff_ids_for_step2):
+            try:
+                for sid in staff_ids_for_step2:
+                    m_data = _request(
+                        f"/api/v1/orders/{target_case_no}/matches",
+                        method="POST",
+                        payload={"staff_id": sid}
+                    )
+                    match_id = m_data.get("match_id") if isinstance(m_data, dict) else m_data
+                    if match_id:
+                        _request(f"/api/v1/matches/{match_id}/send-info-2", method="POST")
+                st.success(f"已對 {len(staff_ids_for_step2)} 位月嫂發送 訂單資訊-2！")
+                st.rerun()
+            except Exception as e:
+                st.error(f"❌ 發送失敗: {e}")
+
+    st.markdown("---")
+    st.markdown("##### 步驟 3：傳送履歷給客戶與正式指派同步")
+
+    accepted_matches = [m for m in match_records if m.get('caregiver_accepted') == 1]
+    if not accepted_matches:
+        st.info("⚠️ 提示：需待至少一位月嫂回覆「願意接案」後，方可進行傳送履歷與正式指派同步。")
+    else:
+        final_options = {}
+        for index, match in enumerate(accepted_matches):
+            staff_name = match.get('staff_name', '月嫂')
+            match_id = match.get('match_id') or match.get('id')
+            final_options[f"{index + 1}. {staff_name} (match #{match_id})"] = match
+
+        final_match_label = st.selectbox(
+            "選擇已願意接案者 (步驟 3)",
+            list(final_options.keys()),
+            key=f"final_match_picker_{target_case_no}",
+        )
+        final_match = final_options[final_match_label]
+        final_staff_id = final_match.get('staff_id')
+        final_match_id = final_match.get('match_id') or final_match.get('id')
+
+        if not isinstance(final_staff_id, int) or final_staff_id <= 0:
+            st.error("✅ 擷取到無效的月嫂識別，請重新整理後再試。")
+        elif final_match_id is None:
+            st.error("⚠️ 找不到對應配對紀錄 id，無法傳送履歷。")
+        else:
+            st.success(f"🎉 已選定月嫂：{final_match.get('staff_name', '月嫂')}")
+
+            if st.button("🤝 3️⃣ 傳送履歷給客戶", key=f"btn_send_resume_{target_case_no}"):
+                try:
+                    _request(f"/api/v1/matches/{final_match_id}/send-resume", method="POST")
+                    st.success("履歷已傳送到客戶 LINE，等待回饋。")
+                except Exception as err:
+                    st.error(f"❌ 傳送履歷失敗: {err}")
+            
+            # 整合 WaitingDepositLock
+            from datetime import timedelta, datetime
+            st_d = _iso_date_text(target_order.get("actual_start_date") or target_order.get("start_date"))
+            raw_ed = target_order.get("actual_end_date") or target_order.get("end_date")
+            if raw_ed:
+                ed_d = _iso_date_text(raw_ed)
+            else:
+                days_cnt = int(target_order.get("service_days") or 20)
+                ed_d = (datetime.strptime(st_d, "%Y-%m-%d").date() + timedelta(days=max(0, days_cnt - 1))).isoformat()
+            
+            _render_single_caregiver_assignment_plan(
+                target_order,
+                final_staff_id,
+                st_d,
+                ed_d
             )
+
+def _render_single_caregiver_assignment_plan(order, staff_id, start_date, end_date):
+    case_no = order["case_no"]
+    st.markdown("#### 4️⃣ 指派與等待訂金鎖定")
+    st.info("這將會建立配對方案並鎖定這名月嫂的檔期，直到收到訂金。")
+    
+    plan_key = f"single_caregiver_plan_{case_no}"
+    if st.button("產生單月嫂配對方案", key=f"single_caregiver_gen_{case_no}"):
+        try:
+            from ui.api_clients.assignment_plan_api_client import AssignmentPlanApiClient
+            from ui.pages.shared import resolve_api_base_url, build_admin_headers
+            client = AssignmentPlanApiClient(
+                base_url=resolve_api_base_url(),
+                headers=build_admin_headers(),
+            )
+            drafts = [{
+                "staff_id": int(staff_id),
+                "assigned_start_date": start_date,
+                "assigned_end_date": end_date,
+                "official_service_dates": [],
+            }]
+            plan = client.propose_plan(
+                case_no,
+                drafts,
+                idempotency_key=f"single-plan-{case_no}-{staff_id}",
+            )
+            st.session_state[plan_key] = plan.model_dump()
+            st.success("配對方案建立成功。")
+        except Exception as error:
+            st.error(f"建立失敗：{error}")
+            return
+            
+    plan_state = st.session_state.get(plan_key)
+    if not plan_state:
+        return
+        
+    plan_id = plan_state["plan_id"]
+    st.write(f"目前方案編號: `{plan_id}`")
+    lock_state_key = f"single_caregiver_lock_{case_no}"
+    _render_waiting_lock_acquisition(case_no, plan_id, lock_state_key, enabled=True)
+
+
+def _negotiation_orders(orders):
+    return [
+        order
+        for order in orders
+        if order.get("order_status") == "洽談中"
+    ]
+
+
+def _select_negotiation_order(orders, preferred_case_no):
+    labels = {_matching_order_label(order): order for order in orders}
+    preferred_label = next(
+        (
+            label
+            for label, order in labels.items()
+            if str(order.get("case_no")) == str(preferred_case_no)
         ),
-        preferred_case_no=preferred_case_no,
+        None,
+    )
+    if preferred_label:
+        st.session_state["matching_center_case"] = preferred_label
+    selected = st.selectbox(
+        "選擇待配對案件",
+        options=list(labels),
+        key="matching_center_case",
+    )
+    return labels[selected]
+
+
+def _matching_order_label(order):
+    return (
+        f"案件 #{order.get('case_no')}｜{order.get('client_name', '')}｜"
+        f"{order.get('service_days') or 0} 天"
+    )
+
+
+def _render_matching_order_summary(order):
+    service_start = order.get("actual_start_date") or order.get("start_date")
+    service_end = order.get("actual_end_date") or order.get("end_date")
+    st.write(
+        {
+            "案件編號": order.get("case_no"),
+            "客戶": order.get("client_name"),
+            "服務期間": f"{service_start} ～ {service_end}",
+            "身分資格": order.get("identity_status") or "未設定",
+        }
     )

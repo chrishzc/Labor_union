@@ -20,20 +20,25 @@ try:
 except Exception:
     pass
 
-# 讓 file_watcher.py 以子程序執行本檔時也能 import services 底下的模組
+# Let file_watcher.py run this script as a subprocess with project imports available.
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
     sys.path.append(ROOT)
 
-from services.client_import_validation import (
-    EXCEL_TO_DB_COLUMN,
-    fallback_case_key,
+from domains.case_import.client_import_validation import (
     validate_hcm_row,
 )
-from services.system_alert_service import (
-    delete_system_alert,
-    resolve_if_exists,
-    upsert_system_alert,
+from subsystems.case_import.application import build_case_import_application
+from subsystems.case_import.hcm_adapter import build_hcm_case_import_intent
+from shared_kernel.identities import (
+    ActorContext,
+    CorrelationId,
+    ExpectedVersion,
+    IdempotencyKey,
+)
+from subsystems.case_import.case_import_workflow import (
+    ApplyCaseImport,
+    CaseImportWorkflowError,
 )
 
 # 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
@@ -93,7 +98,7 @@ def clean_city_and_address(city_val, address_val):
     address = str(address_val).strip() if pd.notna(address_val) else ""
     city = city.replace("臺", "台")
     address = address.replace("臺", "台")
-    
+
     if not city and len(address) >= 3:
         for possible_city in ["台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市", "基隆市", "新竹市", "嘉義市", "新竹縣", "苗栗縣", "彰化縣", "南投縣", "雲林縣", "嘉義縣", "屏東縣", "宜蘭縣", "花蓮縣", "台東縣", "澎湖縣", "金門縣", "連江縣"]:
             if address.startswith(possible_city):
@@ -104,7 +109,7 @@ def clean_city_and_address(city_val, address_val):
         city = city + "市"
     elif city in ["新竹", "苗栗", "彰化", "南投", "雲林", "嘉義", "屏東", "宜蘭", "花蓮", "台東", "澎湖", "金門", "連江"]:
         city = city + "縣"
-        
+
     return city, address
 
 def clean_data(val, col_name):
@@ -129,6 +134,17 @@ def _parse_date(value):
     if pd.isna(parsed):
         return None
     return parsed.date()
+
+
+def _parse_datetime(value):
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, date):
+        return datetime.combine(value, datetime.min.time())
+    parsed = pd.to_datetime(value, errors="coerce")
+    if pd.isna(parsed):
+        return None
+    return parsed.to_pydatetime()
 
 
 def _load_holiday_dates(cursor):
@@ -175,154 +191,177 @@ def process_import(excel_path):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
         return _result(review_required=1)
-        
-    print(f"解析 Excel 檔案：{excel_path} ...")
-    xl = pd.ExcelFile(excel_path)
-    
-    # 尋找匹配的分頁 (不區分大小寫、去空白)
-    target_sheet = None
-    for name in xl.sheet_names:
-        clean_name = name.replace(" ", "").lower()
-        if "hcm" in clean_name or "市府" in clean_name:
-            target_sheet = name
-            break
-            
-    if not target_sheet:
-        print("未找到包含 'HCM' 或 '市府' 關鍵字的工作表。跳過此檔案。")
+
+    frame = _load_hcm_frame(excel_path)
+    if frame is None:
         return _result(review_required=1)
-        
-    df = xl.parse(target_sheet)
-    print(f"找到匹配工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
-    
-    try:
-        conn = pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
-        cursor = conn.cursor()
-        # 強制指定 utf8mb4 字元編碼以防止 ENUM 狀態機寫入中文時遭到截斷
-        cursor.execute("SET NAMES utf8mb4;")
-        conn.commit()
-    except Exception as e:
-        print(f"資料庫連線失敗：{e}")
+
+    connection = _connect_database()
+    if connection is None:
         return _result(failed=1)
-        
-    inserted = 0
-    skipped_existing = 0
-    review_required = 0
-    
     try:
-        for _, row in df.iterrows():
-            raw_row = row.to_dict()
-            errors = validate_hcm_row(raw_row)
-
-            record = {}
-            for excel_col, db_col in CLIENTS_FIELD_MAPPING.items():
-                if excel_col in row:
-                    record[db_col] = clean_data(row[excel_col], db_col)
-
-            # 欄位清理
-            if 'phone' in record:
-                record['phone'] = clean_phone(record['phone'])
-            if 'city' in record or 'address' in record:
-                clean_c, clean_a = clean_city_and_address(record.get('city'), record.get('address'))
-                record['city'] = clean_c
-                record['address'] = clean_a
-
-            # 驗證失敗的欄位一律存 NULL，避免髒資料進 DB，同時保留原因供異常警示使用
-            for excel_col in errors:
-                db_col = EXCEL_TO_DB_COLUMN.get(excel_col)
-                if db_col and db_col in record:
-                    record[db_col] = None
-
-            name_for_alert = raw_row.get('姓名')
-            phone_for_alert = raw_row.get('行動電話')
-
-            case_no = record.get('case_no')
-            if not case_no:
-                review_required += 1
-                if errors:
-                    error_keys_joined = "、".join(errors.keys())
-                    upsert_system_alert(
-                        cursor,
-                        alert_code="IMPORT-001",
-                        source_domain="IMPORT",
-                        case_key=fallback_case_key(name_for_alert, phone_for_alert),
-                        reason=f"HCM 匯入資料異常（查無案號）：{error_keys_joined}",
-                        details=errors,
-                    )
-                continue
-
-            # 比對去重
-            cursor.execute("SELECT id FROM clients WHERE case_no = %s", (case_no,))
-            existing = cursor.fetchone()
-
-            if existing:
-                skipped_existing += 1
-                continue
-
-            cols = ", ".join([f"`{k}`" for k in record.keys()])
-            places = ", ".join(["%s"] * len(record))
-            sql = f"INSERT INTO clients ({cols}) VALUES ({places})"
-            cursor.execute(sql, tuple(record.values()))
-            client_id = cursor.lastrowid
-            inserted += 1
-
-            # 關聯訂單與生命週期狀態機初始化
-            s_days = clean_data(record.get('service_days'), 'service_days') or 20
-            s_time_raw = record.get('service_time') or "9"
-            hrs_match = re.search(r'\d+', str(s_time_raw))
-            s_hours = int(hrs_match.group(0)) if hrs_match else 9
-            start_date = _parse_date(record.get('service_start_date'))
-            holiday_dates = _load_holiday_dates(cursor) if start_date else set()
-            end_date = _calculate_service_end_date(
-                start_date,
-                s_days,
-                record.get('service_type') or "週休1日",
-                holiday_dates,
-            )
-
-            cursor.execute("""
-                INSERT INTO orders (
-                    case_no, client_id, status, service_days,
-                    service_hours_per_day, start_date, end_date
-                )
-                VALUES (%s, %s, '洽談中', %s, %s, %s, %s)
-            """, (case_no, client_id, s_days, s_hours, start_date, end_date))
-
-            # 有案號了：若先前用 error_姓名_電話 這個替代鍵記錄過，就把舊的清掉
-            fallback_key = fallback_case_key(name_for_alert, phone_for_alert)
-            if not fallback_key.startswith("error_row_"):
-                delete_system_alert(cursor, alert_code="IMPORT-001", case_key=fallback_key)
-
-            if errors:
-                review_required += 1
-                error_keys_joined = "、".join(errors.keys())
-                upsert_system_alert(
-                    cursor,
-                    alert_code="IMPORT-001",
-                    source_domain="IMPORT",
-                    case_key=case_no,
-                    reason=f"案件 {case_no} 匯入資料異常：{error_keys_joined}",
-                    details=errors,
-                )
-            else:
-                resolve_if_exists(
-                    cursor,
-                    alert_code="IMPORT-001",
-                    case_key=case_no,
-                    reason="系統重新匯入：欄位驗證通過，自動解除",
-                )
-
-        conn.commit()
-        print(f"匯入成功：新增 {inserted} 筆，略過既有 {skipped_existing} 筆，待確認 {review_required} 筆。")
-    except Exception as err:
-        conn.rollback()
-        import traceback
-        traceback.print_exc()
-        print(f"執行出錯已 Rollback：{err}")
-        return _result(skipped_existing=skipped_existing, review_required=review_required, failed=1)
+        return _process_import_rows(frame, connection, excel_path)
     finally:
-        conn.close()
-        
-    return _result(inserted=inserted, skipped_existing=skipped_existing, review_required=review_required)
+        connection.close()
+
+
+def _load_hcm_frame(excel_path):
+    print(f"解析 Excel 檔案：{excel_path} ...")
+    workbook = pd.ExcelFile(excel_path)
+    target_sheet = next(
+        (
+            name
+            for name in workbook.sheet_names
+            if _is_hcm_sheet_name(name)
+        ),
+        None,
+    )
+    if target_sheet is None:
+        print("未找到包含 'HCM' 或 '市府' 關鍵字的工作表。跳過此檔案。")
+        return None
+    frame = workbook.parse(target_sheet)
+    print(f"找到匹配工作表：'{target_sheet}'，共有 {len(frame)} 筆資料，準備匯入...")
+    return frame
+
+
+def _is_hcm_sheet_name(name):
+    normalized_name = name.replace(" ", "").lower()
+    return "hcm" in normalized_name or "市府" in normalized_name
+
+
+def _connect_database():
+    try:
+        connection = pymysql.connect(
+            **DB_CONFIG,
+            cursorclass=pymysql.cursors.DictCursor,
+        )
+        cursor = connection.cursor()
+        cursor.execute("SET NAMES utf8mb4;")
+        connection.commit()
+        return connection
+    except Exception as error:
+        print(f"資料庫連線失敗：{error}")
+        return None
+
+
+# Kept cohesive because it owns the one batch-level rollback and result tally.
+def _process_import_rows(frame, connection, excel_path):
+    counts = _result()
+    application = build_case_import_application(connection)
+    cursor = connection.cursor()
+    try:
+        for ordinal, (_, row) in enumerate(frame.iterrows(), start=1):
+            outcome = _import_row(
+                row,
+                ordinal,
+                cursor,
+                application,
+                excel_path,
+            )
+            counts[outcome] += 1
+    except Exception as error:
+        connection.rollback()
+        _report_import_failure(error)
+        counts["failed"] = 1
+        return counts
+    _report_import_success(counts)
+    return counts
+
+
+# Kept cohesive because every row gate must resolve to one observable outcome.
+def _import_row(row, ordinal, cursor, application, excel_path):
+    raw_row = row.to_dict()
+    record = _normalized_record(row)
+    case_no = record.get("case_no")
+    if not case_no:
+        return "review_required"
+    if application.case_exists(str(case_no)):
+        return "skipped_existing"
+    if validate_hcm_row(raw_row):
+        return "review_required"
+    try:
+        intent = _case_import_intent(cursor, record)
+        correlation = CorrelationId(f"hcm-case-import:{case_no}:{ordinal}")
+        preview = application.preview(intent, correlation)
+        command = _apply_command(intent, preview, correlation, excel_path)
+        application.apply(command)
+        return "inserted"
+    except CaseImportWorkflowError as error:
+        return _workflow_error_outcome(error)
+    except (TypeError, ValueError):
+        return "review_required"
+
+
+def _workflow_error_outcome(error):
+    if error.error.code == "case_import_duplicate":
+        return "skipped_existing"
+    review_categories = {"validation", "domain_blocked", "conflict"}
+    if error.error.category.value in review_categories:
+        return "review_required"
+    raise error
+
+
+def _report_import_failure(error):
+    import traceback
+
+    traceback.print_exc()
+    print(f"執行出錯已 Rollback：{error}")
+
+
+def _report_import_success(counts):
+    print(
+        "匯入成功：新增 "
+        f"{counts['inserted']} 筆，略過既有 {counts['skipped_existing']} 筆，"
+        f"待確認 {counts['review_required']} 筆。"
+    )
+
+
+def _normalized_record(row):
+    record = {
+        db_column: clean_data(row[excel_column], db_column)
+        for excel_column, db_column in CLIENTS_FIELD_MAPPING.items()
+        if excel_column in row
+    }
+    if "phone" in record:
+        record["phone"] = clean_phone(record["phone"])
+    city, address = clean_city_and_address(
+        record.get("city"),
+        record.get("address"),
+    )
+    record["city"], record["address"] = city, address
+    record["created_at"] = _parse_datetime(row.get("報名時間(建檔)"))
+    record["due_month"] = _parse_date(row.get("預產期/預計服務開始月份"))
+    record["service_start_date"] = _parse_date(row.get("預計服務日期"))
+    return record
+
+
+def _case_import_intent(cursor, record):
+    start_date = record.get("service_start_date")
+    service_days = record.get("service_days")
+    if type(start_date) is not date or not isinstance(service_days, int):
+        raise ValueError("case_import_service_terms_required")
+    holidays = _load_holiday_dates(cursor)
+    end_date = _calculate_service_end_date(
+        start_date,
+        service_days,
+        record.get("service_type"),
+        holidays,
+    )
+    if end_date is None:
+        raise ValueError("case_import_planned_end_date_required")
+    return build_hcm_case_import_intent(record, end_date)
+
+
+def _apply_command(intent, preview, correlation, source_file):
+    return ApplyCaseImport(
+        intent,
+        ExpectedVersion(preview.import_version),
+        preview.fingerprint,
+        IdempotencyKey(f"case-import:{intent.case_no}"),
+        ActorContext("import-client-hcm"),
+        f"Import negotiated HCM case from {os.path.basename(source_file)}.",
+        correlation,
+    )
 
 if __name__ == "__main__":
     # 提供預設本機路徑或接收命令列參數

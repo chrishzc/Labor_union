@@ -18,20 +18,25 @@ try:
 except Exception:
     pass
 
-# 讓 file_watcher.py 以子程序執行本檔時也能 import services 底下的模組
+# Let file_watcher.py run this script as a subprocess with project imports available.
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
     sys.path.append(ROOT)
 
-from services.client_beclass_validation import (
-    EXCEL_TO_DB_COLUMN,
+from domains.case_import.client_beclass_validation import (
     fallback_case_key,
     validate_client_beclass_row,
 )
-from services.system_alert_service import (
+from subsystems.anomalies.system_alert_projection import (
     delete_system_alert,
     resolve_if_exists,
     upsert_system_alert,
+)
+from domains.case_import.beclass_import_review import BeClassImportSourceKind
+from subsystems.case_import.beclass_review_intake import (
+    fingerprint_workbook,
+    masked_review_identifier,
+    record_invalid_beclass_row,
 )
 
 # 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
@@ -159,6 +164,7 @@ def process_import(excel_path):
         return _result(review_required=1)
 
     df = xl.parse(target_sheet)
+    source_content_digest = fingerprint_workbook(excel_path)
     print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
 
     try:
@@ -175,7 +181,7 @@ def process_import(excel_path):
     review_required = 0
 
     try:
-        for _, row in df.iterrows():
+        for source_row, (_, row) in enumerate(df.iterrows(), start=2):
             raw_row = row.to_dict()
             errors = validate_client_beclass_row(raw_row)
             name_for_alert = raw_row.get('\u59d3\u540d')
@@ -207,73 +213,79 @@ def process_import(excel_path):
             birth_month = row.get('\u6708')
             birth_day = row.get('\u65e5')
             record['birth_date'] = clean_birth_date(birth_year, birth_month, birth_day)
-
-            # \u9a57\u8b49\u5931\u6557\u7684\u6b04\u4f4d\u4e00\u5f8b\u5b58 NULL\uff0c\u907f\u514d\u9ad2\u8cc7\u6599\u9032 DB\uff0c
-            # \u540c\u6642\u4fdd\u7559\u539f\u56e0\u4f9b\u7570\u5e38\u8b66\u793a\u4f7f\u7528
-            for excel_col in errors:
-                db_col = EXCEL_TO_DB_COLUMN.get(excel_col)
-                if db_col and db_col in record:
-                    record[db_col] = None
-
-            query_no = record.get('query_no')
-            if not query_no:
-                review_required += 1
-                if errors:
-                    error_keys_joined = "\u3001".join(errors.keys())
-                    upsert_system_alert(
-                        cursor,
-                        alert_code="IMPORT-005",
-                        source_domain="IMPORT",
-                        case_key=fallback_case_key(name_for_alert, phone_for_alert),
-                        reason=f"\u5ba2\u6236 BeClass \u532f\u5165\u8cc7\u6599\u7570\u5e38\uff08\u67e5\u7121\u67e5\u8a62\u5e8f\u865f\uff09\uff1a{error_keys_joined}",
-                        details=errors,
-                    )
-                continue
-            # \u5c07\u554f\u5377\u7d30\u9805 dict \u8f49\u70ba JSON
             record['survey_details'] = json.dumps(details, ensure_ascii=False)
 
-            # \u50c5\u4f7f\u7528 query_no \u67e5\u627e\u76f8\u95dc\u8cc7\u6599
-            cursor.execute(
-                "SELECT COUNT(*) AS existing_cnt FROM beclass_records WHERE query_no = %s",
-                (query_no,)
-            )
-            existing = cursor.fetchone()
-            existing_cnt = int(existing['existing_cnt']) if existing and existing['existing_cnt'] is not None else 0
-
-            if existing_cnt == 0:
-                cols = ", ".join([f"`{k}`" for k in record.keys()])
-                places = ", ".join(["%s"] * len(record))
-                sql = f"INSERT INTO beclass_records ({cols}) VALUES ({places})"
-                cursor.execute(sql, tuple(record.values()))
-                inserted += 1
-
-                # \u6709\u67e5\u8a62\u5e8f\u865f\u4e86\uff1a\u82e5\u5148\u524d\u7528 error_\u59d3\u540d_\u96fb\u8a71\u9019\u500b\u66ff\u4ee3\u9375\u8a18\u9304\u904e\uff0c\u5c31\u628a\u820a\u7684\u6e05\u6389
-                fallback_key = fallback_case_key(name_for_alert, phone_for_alert)
-                if not fallback_key.startswith("error_row_"):
-                    delete_system_alert(cursor, alert_code="IMPORT-005", case_key=fallback_key)
-
-                if errors:
-                    review_required += 1
-                    error_keys_joined = "\u3001".join(errors.keys())
-                    upsert_system_alert(
-                        cursor,
-                        alert_code="IMPORT-005",
-                        source_domain="IMPORT",
-                        case_key=query_no,
-                        reason=f"\u6848\u4ef6 {query_no} \u5ba2\u6236 BeClass \u532f\u5165\u8cc7\u6599\u7570\u5e38\uff1a{error_keys_joined}",
-                        details=errors,
-                    )
-                else:
-                    resolve_if_exists(
-                        cursor,
-                        alert_code="IMPORT-005",
-                        case_key=query_no,
-                        reason="\u7cfb\u7d71\u91cd\u65b0\u532f\u5165\uff1a\u6b04\u4f4d\u9a57\u8b49\u901a\u904e\uff0c\u81ea\u52d5\u89e3\u9664",
-                    )
-            elif existing_cnt == 1:
+            query_no = record.get('query_no')
+            existing_cnt = 0
+            if query_no:
+                cursor.execute(
+                    "SELECT COUNT(*) AS existing_cnt FROM beclass_records WHERE query_no = %s",
+                    (query_no,)
+                )
+                existing = cursor.fetchone()
+                existing_cnt = int(existing['existing_cnt']) if existing and existing['existing_cnt'] is not None else 0
+            if existing_cnt == 1:
                 skipped_existing += 1
-            else:
+                continue
+            if existing_cnt > 1:
                 review_required += 1
+                record_invalid_beclass_row(
+                    conn,
+                    source_kind=BeClassImportSourceKind.CLIENT,
+                    source_content_digest=source_content_digest,
+                    source_sheet=target_sheet,
+                    source_row=source_row,
+                    masked_identifier=masked_review_identifier(
+                        BeClassImportSourceKind.CLIENT,
+                        query_no,
+                        phone_for_alert,
+                    ),
+                    source_payload=record,
+                    issue_codes=("duplicate_query_no",),
+                )
+                continue
+            if errors:
+                review_required += 1
+                record_invalid_beclass_row(
+                    conn,
+                    source_kind=BeClassImportSourceKind.CLIENT,
+                    source_content_digest=source_content_digest,
+                    source_sheet=target_sheet,
+                    source_row=source_row,
+                    masked_identifier=masked_review_identifier(
+                        BeClassImportSourceKind.CLIENT,
+                        query_no,
+                        phone_for_alert,
+                    ),
+                    source_payload=record,
+                    issue_codes=tuple(errors),
+                )
+                error_keys_joined = "\u3001".join(errors.keys())
+                upsert_system_alert(
+                    cursor,
+                    alert_code="IMPORT-005",
+                    source_domain="IMPORT",
+                    case_key=query_no or fallback_case_key(name_for_alert, phone_for_alert),
+                    reason=f"\u5ba2\u6236 BeClass \u532f\u5165\u8cc7\u6599\u7570\u5e38\uff1a{error_keys_joined}",
+                    details=errors,
+                )
+                continue
+
+            cols = ", ".join([f"`{k}`" for k in record.keys()])
+            places = ", ".join(["%s"] * len(record))
+            sql = f"INSERT INTO beclass_records ({cols}) VALUES ({places})"
+            cursor.execute(sql, tuple(record.values()))
+            inserted += 1
+
+            fallback_key = fallback_case_key(name_for_alert, phone_for_alert)
+            if not fallback_key.startswith("error_row_"):
+                delete_system_alert(cursor, alert_code="IMPORT-005", case_key=fallback_key)
+            resolve_if_exists(
+                cursor,
+                alert_code="IMPORT-005",
+                case_key=query_no,
+                reason="\u7cfb\u7d71\u91cd\u65b0\u532f\u5165\uff1a\u6b04\u4f4d\u9a57\u8b49\u901a\u904e\uff0c\u81ea\u52d5\u89e3\u9664",
+            )
 
         conn.commit()
         print(

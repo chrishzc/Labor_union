@@ -8,8 +8,8 @@
 from __future__ import annotations
 
 from api.schemas.line_config import LineMenusConfig
-from services.json_config_service import read_config
-from services.line_rich_menu_service import (
+from subsystems.line.configuration_store import read_config
+from subsystems.line.rich_menu_publication_workflow import (
     RichMenuPublicationConflictError,
     build_line_action,
     build_line_menu,
@@ -17,7 +17,7 @@ from services.line_rich_menu_service import (
     get_publication,
     process_due_publications,
 )
-from services.media_storage_service import render_rich_menu_image
+from subsystems.line.media_archive import render_rich_menu_image
 
 
 def create_rich_menu_image(menu: dict, output_path) -> None:

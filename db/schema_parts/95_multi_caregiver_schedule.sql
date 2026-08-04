@@ -241,14 +241,21 @@ SET @reviews_fk_count = (
 
 SET @reviews_check_count = (
     SELECT COUNT(*)
-    FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS
-    WHERE CONSTRAINT_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'staff_schedule_assignment_reviews'
-      AND CONSTRAINT_NAME = 'chk_schedule_assignment_review_resolution'
-      AND UPPER(CHECK_CLAUSE) LIKE '%REVIEW_STATUS%'
-      AND UPPER(CHECK_CLAUSE) LIKE '%RESOLVED_ASSIGNMENT_ID%'
-      AND UPPER(CHECK_CLAUSE) LIKE '%RESOLVED_BY%'
-      AND UPPER(CHECK_CLAUSE) LIKE '%RESOLVED_AT%'
+    FROM INFORMATION_SCHEMA.CHECK_CONSTRAINTS cc
+    JOIN INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+      ON tc.CONSTRAINT_CATALOG = cc.CONSTRAINT_CATALOG
+     AND tc.CONSTRAINT_SCHEMA = cc.CONSTRAINT_SCHEMA
+     AND tc.CONSTRAINT_NAME = cc.CONSTRAINT_NAME
+    WHERE tc.CONSTRAINT_SCHEMA = DATABASE()
+      AND tc.TABLE_SCHEMA = DATABASE()
+      AND tc.TABLE_NAME = 'staff_schedule_assignment_reviews'
+      AND tc.CONSTRAINT_TYPE = 'CHECK'
+      AND tc.ENFORCED = 'YES'
+      AND cc.CONSTRAINT_NAME = 'chk_schedule_assignment_review_resolution'
+      AND UPPER(cc.CHECK_CLAUSE) LIKE '%REVIEW_STATUS%'
+      AND UPPER(cc.CHECK_CLAUSE) LIKE '%RESOLVED_ASSIGNMENT_ID%'
+      AND UPPER(cc.CHECK_CLAUSE) LIKE '%RESOLVED_BY%'
+      AND UPPER(cc.CHECK_CLAUSE) LIKE '%RESOLVED_AT%'
 );
 
 SET @reviews_valid = IF(
@@ -269,7 +276,7 @@ SET @reviews_action_sql = IF(
     'SELECT * FROM `FAIL_CLOSED_REVIEWS_TABLE_INVALID_SPEC_REVIEW_REQUIRED`',
     IF(
         @reviews_table_exists = 0,
-        'CREATE TABLE staff_schedule_assignment_reviews (id BIGINT AUTO_INCREMENT PRIMARY KEY, schedule_id INT NOT NULL, review_reason VARCHAR(100) NOT NULL, review_status ENUM(\'review_required\', \'resolved\') NOT NULL DEFAULT \'review_required\', resolved_assignment_id BIGINT NULL, resolved_by VARCHAR(100) NULL, resolved_at TIMESTAMP NULL, created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_schedule_review (schedule_id), INDEX idx_schedule_assignment_review_status (review_status, created_at), CONSTRAINT chk_schedule_assignment_review_resolution CHECK ((review_status = \'review_required\' AND resolved_assignment_id IS NULL AND resolved_by IS NULL AND resolved_at IS NULL) OR (review_status = \'resolved\' AND resolved_assignment_id IS NOT NULL AND resolved_by IS NOT NULL AND resolved_at IS NOT NULL)), CONSTRAINT fk_schedule_assignment_review_schedule FOREIGN KEY (schedule_id) REFERENCES staff_schedule(id) ON UPDATE RESTRICT ON DELETE RESTRICT, CONSTRAINT fk_schedule_assignment_review_assignment FOREIGN KEY (resolved_assignment_id) REFERENCES case_staff_assignments(id) ON UPDATE RESTRICT ON DELETE RESTRICT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci',
+        'CREATE TABLE staff_schedule_assignment_reviews (id BIGINT AUTO_INCREMENT PRIMARY KEY, schedule_id INT NOT NULL, review_reason VARCHAR(100) NOT NULL, review_status ENUM(\'review_required\', \'resolved\') NOT NULL DEFAULT \'review_required\', resolved_assignment_id BIGINT NULL, resolved_by VARCHAR(100) NULL, resolved_at TIMESTAMP NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_schedule_review (schedule_id), INDEX idx_schedule_assignment_review_status (review_status, created_at), CONSTRAINT chk_schedule_assignment_review_resolution CHECK ((review_status = \'review_required\' AND resolved_assignment_id IS NULL AND resolved_by IS NULL AND resolved_at IS NULL) OR (review_status = \'resolved\' AND resolved_assignment_id IS NOT NULL AND resolved_by IS NOT NULL AND resolved_at IS NOT NULL)), CONSTRAINT fk_schedule_assignment_review_schedule FOREIGN KEY (schedule_id) REFERENCES staff_schedule(id) ON UPDATE RESTRICT ON DELETE RESTRICT, CONSTRAINT fk_schedule_assignment_review_assignment FOREIGN KEY (resolved_assignment_id) REFERENCES case_staff_assignments(id) ON UPDATE RESTRICT ON DELETE RESTRICT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci',
         'SELECT 1'
     )
 );

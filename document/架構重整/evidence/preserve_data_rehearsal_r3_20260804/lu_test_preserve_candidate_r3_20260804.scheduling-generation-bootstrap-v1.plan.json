@@ -1,0 +1,9 @@
+{
+  "cases": [],
+  "database": "lu_test_preserve_candidate_r3_20260804",
+  "dataset_fingerprint": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "eligible_count": 0,
+  "migration": "scheduling_generation_bootstrap_v1",
+  "mode": "dry-run",
+  "review_count": 0
+}

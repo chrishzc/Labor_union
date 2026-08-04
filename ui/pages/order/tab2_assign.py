@@ -7,9 +7,18 @@
 
 from datetime import date, datetime, timedelta
 import os
-import uuid
 import requests
 import streamlit as st
+from ui.api_clients.assignment_plan_api_client import AssignmentPlanApiClient
+from ui.api_clients.case_architecture_bootstrap_api_client import (
+    CaseArchitectureBootstrapApiClient,
+)
+from ui.pages.order.case_architecture_bootstrap_panel import (
+    ensure_case_architecture_ready,
+)
+from ui.pages.scheduling.assignment_plan_panel import (
+    render_assignment_plan_panel,
+)
 from ui.pages.order.shared import safe_int
 from ui.pages.shared import (
     build_admin_headers,
@@ -64,46 +73,6 @@ def _iso_date_text(value, *, required=True, field_name="日期"):
             raise ValueError(f"{field_name} 需提供 YYYY-MM-DD 日期")
         return None
     return parsed.isoformat()
-
-
-def _build_sync_request(order):
-    service_days = int(safe_int(order.get("service_days")))
-    if service_days <= 0:
-        raise ValueError("服務天數必須為正整數")
-
-    service_hours_per_day = float(order.get("service_hours_per_day", 0) or 0)
-    if service_hours_per_day <= 0:
-        raise ValueError("每小時時數必須大於 0")
-
-    floor_fee = safe_int(order.get("floor_fee"))
-    if floor_fee < 0:
-        raise ValueError("樓層費不可為負")
-
-    start_date = _iso_date_text(order.get("actual_start_date"), required=False, field_name="實際開始日")
-    if start_date is None:
-        start_date = _iso_date_text(order.get("start_date"), required=True, field_name="開始日")
-    end_date = _iso_date_text(order.get("end_date"), required=False, field_name="結束日")
-    if end_date is None and service_days:
-        end_date = (datetime.strptime(start_date, "%Y-%m-%d").date() + timedelta(days=service_days - 1)).isoformat()
-
-    actual_start_date = _iso_date_text(order.get("actual_start_date"), required=False, field_name="實際開始日")
-    if actual_start_date is None:
-        actual_start_date = start_date
-    actual_end_date = _iso_date_text(order.get("actual_end_date"), required=False, field_name="實際結束日")
-    if actual_end_date is None:
-        actual_end_date = end_date
-
-    return {
-        "client_name": order.get("client_name") or "",
-        "service_days": service_days,
-        "service_hours_per_day": service_hours_per_day,
-        "floor_fee": floor_fee,
-        "deposit_date": _iso_date_text(order.get("deposit_date"), required=False, field_name="訂金日期"),
-        "start_date": start_date,
-        "end_date": end_date,
-        "actual_start_date": actual_start_date,
-        "actual_end_date": actual_end_date,
-    }
 
 
 def _single_caregiver_covers_service_period(order, *, headers):
@@ -189,7 +158,9 @@ def _render_tab2_assign(
         return
 
     # 單筆案件 3 大子選單標籤
-    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["👁️ 檢視案件詳情", "⚡ 4步智慧配對與指派", "❌ 取消訂單與紀錄原因"])
+    sub_tab1, sub_tab2 = st.tabs(
+        ["👁️ 檢視案件詳情", "⚡ 4步智慧配對與指派"]
+    )
 
     with sub_tab1:
         st.markdown(f"#### 案件基本資訊 (案件編號: `{target_case_no}`)")
@@ -464,145 +435,23 @@ def _render_tab2_assign(
                         except (requests.RequestException, ValueError) as err:
                             st.error(f"❌ 傳送履歷失敗: {err}")
 
-                    preview_state_key = f"tab2_assignment_sync_preview_{target_case_no}"
-                    if st.button(
-                        "🔍 4️⃣ 預覽訂單與指派同步",
-                        key=f"btn_sync_preview_{target_case_no}",
-                    ):
-                        try:
-                            order_change = _build_sync_request(target_order)
-                            assignment_plan = [{
-                                "assignment_id": None,
-                                "staff_id": final_staff_id,
-                                "assignment_sequence": 1,
-                                "assigned_start_date": order_change["actual_start_date"],
-                                "assigned_end_date": order_change["actual_end_date"],
-                            }]
-                            preview_request = {"order_change": order_change, "assignment_plan": assignment_plan}
-                            sync_preview = _api_request(
-                                f"/api/v1/orders/{target_case_no}/assignment-synchronization/preview",
-                                method="POST",
-                                payload=preview_request,
-                                headers=admin_headers,
-                            )
-                            st.session_state[preview_state_key] = {
-                                "request": preview_request,
-                                "preview": sync_preview,
-                                "match_id": final_match_id,
-                                "match_label": final_match_label,
-                            }
-                            st.rerun()
-                        except (requests.RequestException, ValueError) as err:
-                            st.error(f"❌ 同步預覽失敗: {err}")
-
-                    sync_state = st.session_state.get(preview_state_key)
-                    if not sync_state:
-                        st.info("請先點擊「4️⃣ 預覽訂單與指派同步」查看結果。")
-                    elif sync_state.get("match_label") != final_match_label:
-                        st.info("⚠️ 已切換候選月嫂，請重新進行步驟 4 預覽。")
-                    else:
-                        preview_request = sync_state["request"]
-                        sync_preview = sync_state["preview"]
-
-                        st.markdown("#### 🧾 同步預覽結果")
-                        c1, c2, c3 = st.columns(3)
-                        c1.metric("目標時數", sync_preview.get("target_hours", 0))
-                        c2.metric("提議時數", sync_preview.get("proposed_actual_hours", 0))
-                        c3.metric("差額", sync_preview.get("difference", 0))
-
-                        if sync_preview.get("blocking_reasons"):
-                            st.error(f"無法直接套用：{sync_preview['blocking_reasons']}")
-
-                        required_removals = sync_preview.get("required_schedule_removals", [])
-                        removal_options = {
-                            f"排班 #{item['schedule_id']}｜指派 #{item['assignment_id']}｜{item['work_date']}": item["schedule_id"]
-                            for item in required_removals
-                        }
-                        selected_removal_labels = st.multiselect(
-                            "逐筆確認要移除的原始日排班",
-                            list(removal_options.keys()),
-                            key=f"remove_schedule_{target_case_no}",
-                        )
-                        selected_removal_ids = [removal_options[label] for label in selected_removal_labels]
-                        applied_by = st.text_input(
-                            "操作識別（人員）",
-                            key=f"assignment_sync_applied_by_{target_case_no}",
-                            help="請輸入實際執行同步套用的識別。",
-                        )
-                        confirmed = st.checkbox(
-                            "我已確認同步預覽結果、差額與排班移除項目。",
-                            key=f"assignment_sync_confirm_{target_case_no}",
-                        )
-
-                        if st.button(
-                            "✍️ 4️⃣ 套用正式指派同步",
-                            key=f"btn_sync_apply_{target_case_no}",
-                            disabled=sync_preview.get("sync_status") != "in_sync",
-                        ):
-                            if set(selected_removal_ids) != {item["schedule_id"] for item in required_removals}:
-                                st.error("請完整勾選預覽要求移除的所有日排班。")
-                            elif not confirmed:
-                                st.error("請先勾選完整確認條件。")
-                            elif not applied_by.strip():
-                                st.error("請填寫操作識別。")
-                            else:
-                                try:
-                                    _api_request(
-                                        f"/api/v1/orders/{target_case_no}/assignment-synchronization/apply",
-                                        method="POST",
-                                        headers=admin_headers,
-                                        payload={
-                                            **preview_request,
-                                            "schedule_change_plan": {"remove_schedule_ids": selected_removal_ids},
-                                            "applied_by": applied_by.strip(),
-                                        },
-                                    )
-                                    st.session_state.pop(f"remove_schedule_{target_case_no}", None)
-                                    st.session_state.pop(f"assignment_sync_applied_by_{target_case_no}", None)
-                                    st.session_state.pop(f"assignment_sync_confirm_{target_case_no}", None)
-                                    st.session_state.pop(preview_state_key, None)
-                                    st.session_state["tab2_assignment_sync_success"] = "✅ 訂單成立並同步套用完成；正式指派與日排班已在同一交易更新。"
-                                    st.rerun()
-                                except (requests.RequestException, ValueError) as err:
-                                    st.error(f"❌ 指派同步套用失敗: {err}")
-
-    with sub_tab3:
-        st.markdown(f"#### ❌ 取消訂單與紀錄原因 (案件編號: `{target_case_no}`)")
-        if target_order['order_status'] == '訂單取消':
-            st.warning(f"此案件先前已標記為「訂單取消」。原因：{target_order.get('cancel_reason') or '未註明'}")
-
-        cancel_reason_input = st.text_area("請輸入取消訂單原因與說明 (強制紀錄)", value=target_order.get('cancel_reason') or "", key="cancel_reason_area")
-        cancel_actor = st.text_input("取消操作識別（人員）", key=f"cancel_actor_{target_case_no}")
-        cancel_event_key_key = f"cancel_event_key_{target_case_no}"
-        cancel_event_key = st.session_state.get(cancel_event_key_key)
-        if not isinstance(cancel_event_key, str) or not cancel_event_key.strip():
-            cancel_event_key = f"cancel-{target_case_no}-{uuid.uuid4().hex[:12]}"
-            st.session_state[cancel_event_key_key] = cancel_event_key
-        st.text_input("取消事件冪等鍵（自動產生）", value=cancel_event_key, disabled=True, key=f"{cancel_event_key_key}_display")
-
-        if st.button(
-            "🚨 確認取消此訂單",
-            key="btn_cancel_order_confirm",
-            disabled=target_order['order_status'] == '訂單取消',
-        ):
-            if not cancel_reason_input.strip():
-                st.error("請務必填寫取消原因後再提交！")
-            elif not cancel_actor.strip():
-                st.error("請務必填寫取消操作識別後再提交！")
-            else:
-                try:
-                    _api_request(
-                        f"/api/v1/orders/{target_case_no}/cancel",
-                        method="POST",
+                    st.markdown("#### 步驟 4：正式人力配置")
+                    bootstrap_client = CaseArchitectureBootstrapApiClient(
+                        base_url=resolve_api_base_url(),
                         headers=admin_headers,
-                        payload={
-                            "event_key": cancel_event_key,
-                            "actor": cancel_actor.strip(),
-                            "cancel_reason": cancel_reason_input.strip(),
-                        },
                     )
-                    st.success("訂單已標記為「訂單取消」，取消原因已儲存！")
-                    st.session_state.pop(cancel_event_key_key, None)
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"❌ 取消訂單 API 失敗: {e}")
+                    if not ensure_case_architecture_ready(
+                        target_case_no,
+                        bootstrap_client,
+                    ):
+                        st.info("案件根狀態完成後，才會開放 Assignment Plan。")
+                        return
+                    assignment_client = AssignmentPlanApiClient(
+                        base_url=resolve_api_base_url(),
+                        headers=admin_headers,
+                    )
+                    render_assignment_plan_panel(
+                        target_case_no,
+                        assignment_client,
+                        preferred_staff_id=final_staff_id,
+                    )

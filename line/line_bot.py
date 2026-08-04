@@ -21,8 +21,8 @@ from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from line.worker import wake_worker
 from line.security import verify_line_signature
-from services.line_task_service import enqueue_line_task
-from services.line_review_service import (
+from subsystems.line.delivery_task_workflow import enqueue_line_task
+from subsystems.line.identity_review_workflow import (
     LineReviewDataConflictError,
     LineReviewNotFoundError,
     LineReviewStateConflictError,
@@ -31,9 +31,9 @@ from services.line_review_service import (
     list_line_reviews,
     reject_line_review,
 )
-from services.line_rich_menu_service import get_current_rich_menu_id
-from services.webhook_event_service import register_event
-from services.line_liff_identity_service import (
+from subsystems.line.rich_menu_publication_workflow import get_current_rich_menu_id
+from subsystems.line.webhook_inbox import register_event
+from subsystems.line.liff_identity_verification import (
     LiffIdentityError,
     liff_token_required,
     resolve_line_user_id,
@@ -44,7 +44,7 @@ load_dotenv()
 
 # 確保 sys.path 能載入 services
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from services.db_service import get_connection as get_db_connection, calculate_attendance_schedule
+from infrastructure.mysql.mysql_adapter import get_connection as get_db_connection, calculate_attendance_schedule
 
 def get_setting(key: str, default: str = "") -> str:
     """從環境變數讀取設定，取代舊版 admin.settings_manager"""
@@ -1099,5 +1099,3 @@ async def breezysign_webhook(payload: BreezySignWebhookPayload):
             conn.close()
             
     return {"status": "success"}
-
-

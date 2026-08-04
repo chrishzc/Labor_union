@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "C:\Users\chris\Desktop\project\Labor_union\scripts\run_durable_job_worker.py", line 10, in <module>
+    from infrastructure.mysql.background_job_repository import BackgroundJobRepository
+ModuleNotFoundError: No module named 'infrastructure'

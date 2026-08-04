@@ -4,8 +4,8 @@ from decimal import Decimal
 
 import pytest
 
-from services import caregiver_availability_lock_release_service as service
-from services.caregiver_availability_lock_acquisition_helpers import normalize_plan_snapshot
+from subsystems.scheduling import availability_lock_release_workflow as service
+from subsystems.scheduling.availability_lock_helpers import normalize_plan_snapshot
 
 
 def _segments(count: int):
@@ -506,5 +506,3 @@ def test_connection_cursor_cleanup_failures(monkeypatch):
         service.release_caregiver_availability_lock(**_default_request())
     assert connection2.commits == 1
     assert connection2.rollbacks == 1
-
-

@@ -1,0 +1,333 @@
+"""Ingest a finance workbook into staging and initial canonical classification."""
+
+from __future__ import annotations
+
+from dataclasses import asdict
+import hashlib
+import json
+from pathlib import Path
+from typing import Any, Mapping
+
+from domains.finance_import.ingestion import (
+    FinanceWorkbookIngestionReceipt,
+    InitialClassificationFacts,
+    build_initial_classification,
+)
+from infrastructure.mysql.mysql_adapter import get_connection
+from scripts.imports.finance_statement_normalizer import normalize_workbook
+from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import ActorContext, IdempotencyKey
+from subsystems.finance_import.identity_maps import load_finance_identity_maps
+from subsystems.finance_import.staging import stage_finance_rows
+
+
+_CLASSIFIER_VERSION = "finance-transaction-classifier-v1"
+_FINGERPRINT_VERSION = "finance-transaction-fingerprint-v1"
+_INITIAL_CLASSIFICATION_REASON = "initial_bank_classification"
+
+
+def ingest_finance_workbook(
+    excel_path: str,
+    idempotency_key: IdempotencyKey,
+    actor: ActorContext,
+) -> FinanceWorkbookIngestionReceipt:
+    source_path = _validated_source_path(excel_path)
+    source_digest = _source_digest(source_path)
+    command_fingerprint = _command_fingerprint(source_digest, actor)
+    normalized_result = normalize_workbook(str(source_path))
+    connection = get_connection()
+    try:
+        receipt = _ingest_or_replay(
+            connection,
+            normalized_result,
+            source_digest,
+            command_fingerprint,
+            idempotency_key,
+            actor,
+        )
+        connection.commit()
+        _wake_anomaly_projector()
+        return receipt
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def _ingest_or_replay(
+    connection: Any,
+    normalized_result: Mapping[str, Any],
+    source_digest: str,
+    command_fingerprint: str,
+    idempotency_key: IdempotencyKey,
+    actor: ActorContext,
+) -> FinanceWorkbookIngestionReceipt:
+    with connection.cursor() as cursor:
+        replay = _find_replay(cursor, idempotency_key, command_fingerprint)
+        if replay is not None:
+            return replay
+        staged = stage_finance_rows(
+            cursor,
+            normalized_result,
+            load_finance_identity_maps(cursor),
+        )
+        receipt = _persist_ingestion(cursor, staged, source_digest, actor)
+        _save_receipt(cursor, idempotency_key, command_fingerprint, receipt)
+        return receipt
+
+
+def _persist_ingestion(
+    cursor: Any,
+    staged: Mapping[str, Any],
+    source_digest: str,
+    actor: ActorContext,
+) -> FinanceWorkbookIngestionReceipt:
+    batch_id = int(staged["batch_id"])
+    batch_identity = f"finance-import-batch:{batch_id}"
+    _insert_batch_contract(cursor, batch_id, batch_identity, source_digest)
+    canonical_created = _append_missing_classifications(
+        cursor, batch_id, staged["staged_rows"], actor
+    )
+    _complete_batch(cursor, batch_id)
+    source_rows = len(staged["staged_rows"])
+    return FinanceWorkbookIngestionReceipt(
+        batch_identity,
+        source_digest,
+        source_rows,
+        canonical_created,
+        source_rows - canonical_created,
+    )
+
+
+def _append_missing_classifications(
+    cursor: Any,
+    batch_id: int,
+    staged_rows: Any,
+    actor: ActorContext,
+) -> int:
+    canonical_created = 0
+    for row in _unique_rows(staged_rows):
+        if row["result"] == "inserted":
+            canonical_created += 1
+        if _classification_exists(cursor, int(row["row_id"])):
+            continue
+        facts = _load_initial_facts(cursor, int(row["row_id"]))
+        decision = build_initial_classification(facts)
+        _insert_initial_classification(
+            cursor,
+            batch_id,
+            facts.finance_import_row_id,
+            decision,
+            actor,
+        )
+        _append_classification_outbox(cursor, batch_id, facts, decision)
+    return canonical_created
+
+
+def _find_replay(cursor: Any, idempotency_key: IdempotencyKey, command_fingerprint: str):
+    cursor.execute(
+        "SELECT command_fingerprint,result_snapshot FROM "
+        "finance_import_ingestion_receipts WHERE idempotency_key=%s FOR UPDATE",
+        (idempotency_key.value,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    if str(row["command_fingerprint"]) != command_fingerprint:
+        raise ValueError("idempotency_conflict")
+    return FinanceWorkbookIngestionReceipt(**_json_object(row["result_snapshot"]))
+
+
+def _insert_batch_contract(
+    cursor: Any, batch_id: int, batch_identity: str, source_digest: str
+) -> None:
+    cursor.execute(
+        "INSERT INTO finance_import_batch_contracts("
+        "batch_id,batch_identity,source_content_digest,classifier_version,"
+        "fingerprint_version) VALUES (%s,%s,%s,%s,%s)",
+        (batch_id, batch_identity, source_digest, _CLASSIFIER_VERSION, _FINGERPRINT_VERSION),
+    )
+
+
+def _classification_exists(cursor: Any, row_id: int) -> bool:
+    cursor.execute(
+        "SELECT 1 AS present FROM finance_import_classification_events "
+        "WHERE finance_import_row_id=%s LIMIT 1",
+        (row_id,),
+    )
+    return cursor.fetchone() is not None
+
+
+def _load_initial_facts(cursor: Any, row_id: int) -> InitialClassificationFacts:
+    cursor.execute(
+        "SELECT id,classification_type,matched_identity_ids,classification_reason "
+        "FROM finance_import_rows WHERE id=%s",
+        (row_id,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        raise RuntimeError("staged_finance_import_row_missing")
+    return InitialClassificationFacts(
+        int(row["id"]),
+        str(row["classification_type"]),
+        _integer_tuple(row["matched_identity_ids"]),
+        str(row["classification_reason"] or "classification_reason_missing"),
+    )
+
+
+def _insert_initial_classification(
+    cursor: Any, batch_id: int, row_id: int, decision: Any, actor: ActorContext
+) -> None:
+    cursor.execute(
+        "INSERT INTO finance_import_classification_events("
+        "batch_id,finance_import_row_id,classification_version,canonical_fact_version,"
+        "classification_type,disposition,decision_facts_fingerprint,target_identities,"
+        "evidence,available_actions,actor,reason) "
+        "VALUES (%s,%s,0,0,%s,%s,%s,%s,%s,%s,%s,%s)",
+        (
+            batch_id,
+            row_id,
+            decision.classification_type.value,
+            decision.disposition.value,
+            decision.decision_facts_fingerprint.value,
+            _canonical_json(decision.target_identities),
+            _canonical_json(decision.evidence),
+            _canonical_json(decision.available_actions),
+            actor.actor_id,
+            _INITIAL_CLASSIFICATION_REASON,
+        ),
+    )
+
+
+def _append_classification_outbox(cursor: Any, batch_id: int, facts: Any, decision: Any) -> None:
+    event_identity = f"finance-import-classification:{facts.finance_import_row_id}:0"
+    payload = {
+        "source_event_identity": event_identity,
+        "source_version": 0,
+        "finance_import_row_id": facts.finance_import_row_id,
+        "finance_import_batch_id": batch_id,
+        "active": True,
+        "integrity_blocker_active": False,
+        "amount_delta_ntd": _bank_amount(cursor, facts.finance_import_row_id),
+        "affected_order_identities": [],
+        "affected_obligation_identities": [],
+        "domain_blockers": [_domain_blocker(decision)],
+        "reason_codes": list(decision.evidence),
+    }
+    cursor.execute(
+        "INSERT INTO finance_import_outbox(batch_id,intent_key,intent_type,payload_snapshot) "
+        "VALUES (%s,%s,'initial_classification_recorded',%s)",
+        (batch_id, event_identity, _canonical_json(payload)),
+    )
+
+
+def _bank_amount(cursor: Any, row_id: int) -> int:
+    cursor.execute("SELECT credit,debit FROM finance_import_rows WHERE id=%s", (row_id,))
+    row = cursor.fetchone()
+    amount = (row["credit"] or row["debit"]) if row is not None else 0
+    integer_amount = int(amount or 0)
+    if integer_amount <= 0 or integer_amount != amount:
+        raise ValueError("bank_amount_must_be_positive_integer_ntd")
+    return integer_amount
+
+
+def _domain_blocker(decision: Any) -> str:
+    if decision.disposition.value == "manual_review":
+        return "classification_requires_review"
+    return "classification_target_unresolved"
+
+
+def _complete_batch(cursor: Any, batch_id: int) -> None:
+    cursor.execute(
+        "UPDATE finance_import_batches SET status='completed',"
+        "completed_at=CURRENT_TIMESTAMP,failure_message=NULL "
+        "WHERE id=%s AND status='staged'",
+        (batch_id,),
+    )
+    if cursor.rowcount != 1:
+        raise RuntimeError("finance_import_batch_completion_failed")
+
+
+def _save_receipt(
+    cursor: Any,
+    idempotency_key: IdempotencyKey,
+    command_fingerprint: str,
+    receipt: FinanceWorkbookIngestionReceipt,
+) -> None:
+    cursor.execute(
+        "INSERT INTO finance_import_ingestion_receipts("
+        "idempotency_key,command_fingerprint,source_content_digest,batch_id,result_snapshot) "
+        "VALUES (%s,%s,%s,%s,%s)",
+        (
+            idempotency_key.value,
+            command_fingerprint,
+            receipt.source_content_digest,
+            int(receipt.batch_identity.removeprefix("finance-import-batch:")),
+            _canonical_json(asdict(receipt)),
+        ),
+    )
+
+
+def _unique_rows(staged_rows: Any) -> tuple[Mapping[str, Any], ...]:
+    by_id: dict[int, Mapping[str, Any]] = {}
+    for row in staged_rows:
+        row_id = int(row["row_id"])
+        existing = by_id.get(row_id)
+        if existing is not None and row["result"] != "inserted":
+            continue
+        by_id[row_id] = row
+    return tuple(by_id[row_id] for row_id in sorted(by_id))
+
+
+def _integer_tuple(value: Any) -> tuple[int, ...]:
+    payload = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(payload, list):
+        raise ValueError("matched_identity_ids_must_be_array")
+    integers = tuple(sorted(set(int(item) for item in payload)))
+    if any(item <= 0 for item in integers):
+        raise ValueError("matched_identity_ids_must_be_positive")
+    return integers
+
+
+def _validated_source_path(excel_path: Any) -> Path:
+    if not isinstance(excel_path, str) or not excel_path.strip():
+        raise ValueError("excel_path is required")
+    source_path = Path(excel_path).expanduser().resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(f"finance workbook not found: {source_path}")
+    return source_path
+
+
+def _source_digest(source_path: Path) -> str:
+    digest = hashlib.sha256()
+    with source_path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1048576), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _command_fingerprint(source_digest: str, actor: ActorContext) -> str:
+    return fingerprint_payload(
+        {"source_content_digest": source_digest, "actor_id": actor.actor_id}
+    ).value
+
+
+def _canonical_json(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _json_object(value: Any) -> dict[str, Any]:
+    payload = json.loads(value) if isinstance(value, str) else value
+    if not isinstance(payload, dict):
+        raise RuntimeError("finance_ingestion_receipt_must_be_object")
+    return payload
+
+
+def _wake_anomaly_projector() -> None:
+    from subsystems.anomalies.outbox_worker import wake_architecture_outbox_worker
+
+    wake_architecture_outbox_worker()
+
+
+__all__ = ["ingest_finance_workbook"]

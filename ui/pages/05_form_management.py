@@ -19,6 +19,43 @@ from ui.pages.form_management.tab2_template_library import _render_tab2_template
 from ui.pages.form_management.tab3_contract_management import _render_tab3_contract_management
 
 title = "📋 表單與履歷問卷管理"
+_CLIENT_CONTEXT_FIELDS = (
+    "service_time",
+    "service_type",
+    "delivery_type",
+    "residence_type",
+    "city",
+    "identity_status",
+)
+
+
+def _load_case_client(base_url, headers, case_no):
+    try:
+        response = requests.get(
+            f"{base_url}/api/v1/clients",
+            headers=headers,
+            timeout=10,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as error:
+        st.warning(f"讀取客戶 API 失敗，表單暫時只顯示訂單資料：{error}")
+        return None
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        st.warning("客戶 API 回傳格式不正確，表單暫時只顯示訂單資料。")
+        return None
+    return next((row for row in rows if row.get("case_no") == case_no), None)
+
+
+def _merge_client_context(target_order, client_row):
+    if not client_row:
+        return target_order
+    client_context = {
+        field: client_row.get(field, "")
+        for field in _CLIENT_CONTEXT_FIELDS
+    }
+    return {**target_order, **client_context}
 
 
 def _render_form_management_page_shell(form_db_table_fields, field_types, field_widths, global_stats, target_order, form_table_for_key):
@@ -103,27 +140,12 @@ def show():
             target_case_no = order_opts[sel_label]
             target_order = next((o for o in orders_data if o['case_no'] == target_case_no), None)
             if target_order:
-                try:
-                    resp_clients = requests.get(
-                        f"{base_url}/api/v1/clients",
-                        headers=admin_headers,
-                        timeout=10,
-                    )
-                    resp_clients.raise_for_status()
-                    clients_payload = resp_clients.json()
-                    client_rows = clients_payload.get("data") if isinstance(clients_payload, dict) and clients_payload.get("success") else []
-                    if isinstance(client_rows, list):
-                        client_row = next((row for row in client_rows if row.get('case_no') == target_case_no), None)
-                        if client_row:
-                            target_order = {
-                                **target_order,
-                                **{
-                                    key: client_row.get(key, '')
-                                    for key in ('service_time', 'service_type', 'delivery_type', 'residence_type', 'city', 'identity_status')
-                                },
-                            }
-                except Exception:
-                    pass
+                client_row = _load_case_client(
+                    base_url,
+                    admin_headers,
+                    target_case_no,
+                )
+                target_order = _merge_client_context(target_order, client_row)
 
         else:
             st.info("💡 目前切換為「全域/多案件統計模式」，無須鎖定單一訂單。")

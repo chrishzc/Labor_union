@@ -1,6 +1,6 @@
 import pytest
 
-from services.client_payment_transactions import calculate_client_payment_state
+from domains.client_finance.payment_transaction_state import calculate_client_payment_state
 
 
 @pytest.mark.parametrize("stage", ["subsidy_refund", "subsidy_return"])

@@ -124,7 +124,9 @@ def _count_value(row):
     return int(value or 0)
 
 
-def process_import(excel_path):
+def process_import(excel_path, *, fixture_write_authorized=False):
+    if fixture_write_authorized is not True:
+        raise RuntimeError("legacy_historical_order_writer_retired")
     if not os.path.exists(excel_path):
         print(f"錯誤: 找不到 Excel 檔案 {excel_path}")
         return _result(review_required=1)
@@ -225,9 +227,8 @@ def main():
     if len(sys.argv) < 2:
         print("使用方式: python scripts/import_historical_orders.py <excel_file_path>")
         sys.exit(1)
-    result = process_import(sys.argv[1])
-    if result["failed"]:
-        sys.exit(1)
+    print("legacy_historical_order_writer_retired", file=sys.stderr)
+    raise SystemExit(2)
 
 if __name__ == "__main__":
     main()
