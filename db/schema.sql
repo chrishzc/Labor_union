@@ -323,6 +323,8 @@ CREATE TABLE IF NOT EXISTS case_staff_assignments (
     assignment_sequence INT NOT NULL COMMENT '同案服務區段順序，從 1 起',
     assigned_start_date DATE NULL,
     assigned_end_date DATE NULL,
+    original_assigned_start_date DATE NULL,
+    original_assigned_end_date DATE NULL,
     planned_hours DECIMAL(10, 2) NULL,
     actual_hours DECIMAL(10, 2) NULL,
     hourly_rate DECIMAL(10, 2) NULL,
@@ -428,6 +430,7 @@ CREATE OR REPLACE VIEW v_order_details AS
 SELECT 
     o.case_no AS case_no,
     o.status AS order_status,
+    o.lifecycle_version,
     o.cancel_reason,
     o.line_group_id,
     o.actual_start_date,
@@ -618,7 +621,7 @@ LEFT JOIN staff s ON o.staff_id = s.id;
 CREATE TABLE IF NOT EXISTS holidays (
     holiday_date DATE PRIMARY KEY COMMENT '假日日期',
     holiday_name VARCHAR(100) NOT NULL COMMENT '假日名稱',
-    is_double_pay_default BOOLEAN DEFAULT TRUE COMMENT '是否預設為雙倍薪資日'
+    is_double_pay_default BOOLEAN DEFAULT FALSE COMMENT '相容欄位；排班不因國定假日自動套用雙倍薪資'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 

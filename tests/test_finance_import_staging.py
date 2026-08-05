@@ -21,7 +21,7 @@ class FakeCursor:
         self.executed.append((statement, params))
         if self.fail_on_execute == len(self.executed):
             raise RuntimeError("database write failed")
-        if statement.startswith("SELECT id, classification_type, reconciliation_status"):
+        if statement.startswith("SELECT id, classification_type, matched_identity_ids"):
             self._fetchone = self.rows_by_fingerprint.get(params[0])
             return
         if statement.startswith("INSERT INTO"):
@@ -31,6 +31,8 @@ class FakeCursor:
             self.rows_by_fingerprint[params[0]] = {
                 "id": self.lastrowid,
                 "classification_type": "pending",
+                "matched_identity_ids": [],
+                "resolved_counterparty_account": None,
                 "reconciliation_status": "pending",
             }
         elif statement.startswith("UPDATE finance_import_rows"):
@@ -113,6 +115,7 @@ def test_stages_raw_row_before_classification_and_keeps_reconciliation_pending(m
                 "row_id": 101,
                 "dedup_fingerprint": staging.build_dedup_fingerprint(_row()),
                 "classification_type": "client_subsidy_return",
+                "matched_identity_ids": [8],
                 "resolved_counterparty_account": "0012345678901234",
                 "reconciliation_status": "pending",
                 "result": "inserted",
@@ -121,13 +124,14 @@ def test_stages_raw_row_before_classification_and_keeps_reconciliation_pending(m
     }
     assert len(calls) == 1
     assert cursor.executed[0][0].startswith("INSERT INTO finance_import_batches")
-    assert cursor.executed[1][0].startswith("SELECT id, classification_type, reconciliation_status")
+    assert cursor.executed[1][0].startswith("SELECT id, classification_type, matched_identity_ids")
     assert cursor.executed[2][0].startswith("INSERT INTO finance_import_rows")
     assert "'pending'" in cursor.executed[2][0]
     assert cursor.executed[3][0].startswith("INSERT INTO finance_import_occurrences")
     assert cursor.executed[4][0].startswith("UPDATE finance_import_rows")
     assert "reconciliation_status" not in cursor.executed[4][0]
     assert "resolved_counterparty_account=%s" in cursor.executed[4][0]
+    assert "classified_at=CURRENT_TIMESTAMP" in cursor.executed[4][0]
     assert "SET counterparty_account=%s" not in cursor.executed[4][0]
     assert cursor.executed[2][1][20] == "0012345678901234"
     assert cursor.executed[4][1] == (
@@ -264,6 +268,8 @@ def test_existing_fingerprint_only_adds_occurrence_and_keeps_existing_state(monk
             fingerprint: {
                 "id": 77,
                 "classification_type": "manually_adjusted",
+                "matched_identity_ids": "[8]",
+                "resolved_counterparty_account": "0012345678901234",
                 "reconciliation_status": "reconciled",
             }
         }
@@ -284,6 +290,8 @@ def test_existing_fingerprint_only_adds_occurrence_and_keeps_existing_state(monk
         "row_id": 77,
         "dedup_fingerprint": fingerprint,
         "classification_type": "manually_adjusted",
+        "matched_identity_ids": [8],
+        "resolved_counterparty_account": "0012345678901234",
         "reconciliation_status": "reconciled",
         "result": "skipped_existing",
     }]

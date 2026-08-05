@@ -1,4 +1,4 @@
-from scripts.imports import import_finance_excel as importer
+from services import finance_import_application as importer
 
 
 class Cursor:
@@ -48,11 +48,30 @@ def _run(monkeypatch, staged_rows):
         lambda cursor, normalized, maps: {"batch_id": 51, "staged_rows": staged_rows},
     )
 
-    def dispatch(cursor, row):
-        dispatched.append(row["row_id"])
-        return row["dispatch_result"]
+    rows_by_id = {
+        row["row_id"]: row
+        for row in staged_rows
+        if row.get("result") == "inserted"
+    }
 
-    monkeypatch.setattr(importer, "_dispatch_inserted_row", dispatch)
+    def dispatch(cursor, row_id, batch_id):
+        assert batch_id == 51
+        dispatched.append(row_id)
+        domain = rows_by_id[row_id]["dispatch_result"]
+        return {
+            "classification_type": rows_by_id[row_id]["classification_type"],
+            "reason": domain.get("reason"),
+            "formal_references": {},
+            "finance_alert_action": None,
+            **domain,
+        }
+
+    monkeypatch.setattr(importer, "dispatch_finance_import_row", dispatch)
+    monkeypatch.setattr(
+        importer,
+        "project_finance_import_review_alert",
+        lambda cursor, batch_id: None,
+    )
     return importer.import_finance_workbook("renamed-and-overlapping.xlsx"), dispatched, connection
 
 

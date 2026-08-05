@@ -38,10 +38,29 @@ def _connection(monkeypatch):
     return connection
 
 
+def _alert(status="open"):
+    return {
+        "id": 41,
+        "alert_code": "staff_transfer_review",
+        "source_domain": "staff_actual_transfer",
+        "source_id": "transfer:41",
+        "reason": "需要人工確認",
+        "status": status,
+        "events": [
+            {
+                "id": 91,
+                "event_type": "detected",
+                "actor": "system",
+                "event_snapshot": {"transaction_id": 7},
+            }
+        ],
+    }
+
+
 def test_list_and_detail_delegate_to_workflow_service(monkeypatch):
     connection = _connection(monkeypatch)
     observed = {}
-    alert = {"id": 41, "status": "open", "events": [{"id": 91}]}
+    alert = _alert()
 
     def list_service(cursor, **kwargs):
         observed["list"] = (cursor, kwargs)
@@ -63,8 +82,11 @@ def test_list_and_detail_delegate_to_workflow_service(monkeypatch):
     )
     detailed = finance_alerts.get_alert(41)
 
-    assert listed.data == [alert]
-    assert detailed.data == alert
+    assert listed.data.items[0].id == 41
+    assert listed.data.pagination.returned_count == 1
+    assert detailed.data.kind == "finance_alert"
+    assert detailed.data.alert.id == 41
+    assert detailed.data.events[0].id == 91
     assert observed["list"][0] is connection.cursor_value
     assert observed["list"][1] == {
         "status": "open",
@@ -86,7 +108,7 @@ def test_detail_not_found_returns_404(monkeypatch):
         finance_alerts.get_alert(41)
 
     assert exc_info.value.status_code == 404
-    assert exc_info.value.detail == "alert_id does not exist"
+    assert exc_info.value.detail["code"] == "not_found"
 
 
 def test_claim_and_resolve_delegate_and_commit(monkeypatch):
@@ -95,11 +117,11 @@ def test_claim_and_resolve_delegate_and_commit(monkeypatch):
 
     def claim_service(cursor, **kwargs):
         calls.append(("claim", cursor, kwargs))
-        return {"result": "claimed", "alert": {"id": 41, "status": "claimed"}}
+        return {"result": "claimed", "alert": _alert("claimed")}
 
     def resolve_service(cursor, **kwargs):
         calls.append(("resolve", cursor, kwargs))
-        return {"result": "resolved", "alert": {"id": 41, "status": "resolved"}}
+        return {"result": "resolved", "alert": _alert("resolved")}
 
     monkeypatch.setattr(finance_alerts, "claim_finance_alert", claim_service)
     monkeypatch.setattr(finance_alerts, "resolve_finance_alert", resolve_service)
@@ -114,8 +136,8 @@ def test_claim_and_resolve_delegate_and_commit(monkeypatch):
         41,
     )
 
-    assert claimed.data["result"] == "claimed"
-    assert resolved.data["result"] == "resolved"
+    assert claimed.data.result == "claimed"
+    assert resolved.data.result == "resolved"
     assert calls == [
         ("claim", connection.cursor_value, {"alert_id": 41, "operator": "finance-owner"}),
         (
@@ -131,7 +153,7 @@ def test_claim_and_resolve_delegate_and_commit(monkeypatch):
 @pytest.mark.parametrize("action", ["claim", "resolve"])
 def test_workflow_conflict_returns_409_and_rolls_back(monkeypatch, action):
     connection = _connection(monkeypatch)
-    result = {"result": "conflict", "alert": {"id": 41, "status": "claimed"}}
+    result = {"result": "conflict", "alert": _alert("claimed")}
     monkeypatch.setattr(finance_alerts, "claim_finance_alert", lambda *_args, **_kwargs: result)
     monkeypatch.setattr(finance_alerts, "resolve_finance_alert", lambda *_args, **_kwargs: result)
 

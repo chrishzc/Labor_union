@@ -15,6 +15,9 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from api.exception_handlers.assignment_leave_resolution import (
+    assignment_leave_resolution_exception_handler,
+)
 from api.routes import (
     admin_auth,
     assignment_schedule_rest_dates,
@@ -35,6 +38,8 @@ from api.routes import (
     multi_caregiver_case_assignments,
     multi_caregiver_schedule,
     multi_caregiver_schedule_read,
+    caregiver_segment_availability,
+    caregiver_availability_locks,
     order_schedule_calculation,
     orders,
     schedule,
@@ -53,6 +58,9 @@ from api.schemas.base import BaseResponse
 from line.line_bot import router as line_router
 from line.worker import start_worker, stop_worker
 from services.admin_auth_service import record_admin_audit
+from services.assignment_schedule_rest_date_service import (
+    AssignmentLeaveResolutionDomainError,
+)
 from services.mcp_form_tools import mcp as form_tools_mcp
 from services.mcp_form_tools import build_protected_asgi_app as build_mcp_form_tools_app
 
@@ -88,6 +96,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.add_exception_handler(
+    AssignmentLeaveResolutionDomainError,
+    assignment_leave_resolution_exception_handler,
+)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
@@ -120,6 +133,8 @@ app.include_router(schedule.router)
 app.include_router(multi_caregiver_case_assignments.router)
 app.include_router(multi_caregiver_schedule.router)
 app.include_router(multi_caregiver_schedule_read.router)
+app.include_router(caregiver_segment_availability.router)
+app.include_router(caregiver_availability_locks.router)
 app.include_router(clients.router)
 app.include_router(staff.router)
 app.include_router(staff_monthly_schedule.router)

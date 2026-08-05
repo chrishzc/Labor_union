@@ -38,6 +38,17 @@ def _json(value: Any) -> str:
     )
 
 
+def _matched_identity_ids(value: Any) -> list[Any]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise ValueError("stored matched_identity_ids must be valid JSON") from exc
+    if not isinstance(value, list):
+        raise ValueError("matched_identity_ids must be a JSON array")
+    return value
+
+
 def _identity_maps(identity_maps: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
     if not isinstance(identity_maps, Mapping):
         raise ValueError("identity_maps must be a mapping")
@@ -93,7 +104,8 @@ def stage_finance_rows(
 
         dedup_fingerprint = build_dedup_fingerprint(row)
         cursor.execute(
-            """SELECT id, classification_type, reconciliation_status
+            """SELECT id, classification_type, matched_identity_ids,
+                      resolved_counterparty_account, reconciliation_status
                FROM finance_import_rows
                WHERE dedup_fingerprint=%s""",
             (dedup_fingerprint,),
@@ -127,6 +139,12 @@ def stage_finance_rows(
                     "row_id": existing["id"],
                     "dedup_fingerprint": dedup_fingerprint,
                     "classification_type": existing["classification_type"],
+                    "matched_identity_ids": _matched_identity_ids(
+                        existing["matched_identity_ids"]
+                    ),
+                    "resolved_counterparty_account": existing[
+                        "resolved_counterparty_account"
+                    ],
                     "reconciliation_status": existing["reconciliation_status"],
                     "result": "skipped_existing",
                 }
@@ -207,7 +225,8 @@ def stage_finance_rows(
                SET classification_type=%s,
                    matched_identity_ids=%s,
                    resolved_counterparty_account=%s,
-                   classification_reason=%s
+                   classification_reason=%s,
+                   classified_at=CURRENT_TIMESTAMP
                WHERE id=%s""",
             (
                 classification_type,
@@ -222,6 +241,7 @@ def stage_finance_rows(
                 "row_id": staged_row_id,
                 "dedup_fingerprint": dedup_fingerprint,
                 "classification_type": classification_type,
+                "matched_identity_ids": matched_identity_ids,
                 "resolved_counterparty_account": resolved_counterparty_account,
                 "reconciliation_status": "pending",
                 "result": "inserted",

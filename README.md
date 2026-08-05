@@ -1,80 +1,92 @@
 # 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
 
-> 目前版本：**v0.2.1**（2026-07-25）｜ADAD Master System Map：**56.0**
+> 目前版本：**v0.2.2**（2026-08-01）｜ADAD Master System Map：**56.0**
 
-## 2026-07-25 更新（v0.2.1）
+> 更新紀錄固定只保留最近三次版本／功能發布，包含目前版本；更早內容請查閱 Git 歷史與 `document/` 規格文件。
 
-本次版本完成管理介面 API 化的安全收尾，並統一沿用 LINE 管理中心既有的正式管理員身分與授權系統。
+## 2026-08-05 更新（AI 助理：RAG 問答 + 表單修改建議）
 
-- **正式管理員認證共用**：Data Browser 與國定假日 GET／POST／DELETE 全部改用 `AdminPrincipal` 與 `require_system_admin`，不再自行維護 `X-Auth-Context`、`ADMIN_AUTH_CONTEXT` 或 `admin_role` 字串判斷。
-- **雙層管理 API 防護**：Streamlit 管理頁統一送出伺服器端 `X-Internal-API-Key` 與登入後取得的 `Authorization: Bearer <session>`；缺少設定、Session 失效或角色不足時採 fail-closed。
-- **可信稽核身分**：Data Browser PATCH 的 audit actor 與 role 直接取自已驗證的 `AdminPrincipal.username`／`AdminPrincipal.role`，不接受 UI payload 指定，也不再由 username 推測角色。
-- **UI → API 串接**：Data Browser、訂單／媒合、訂單編輯與月嫂月曆持續改走 FastAPI；排休 ownership 僅使用 `assignment_id`，正式指派維持 preview → confirm → apply 流程。
-- **安全交易邊界**：Data Browser 更新、更新前後快照與 audit insert 共用同一 transaction；非法欄位整批拒絕，audit schema 不在 request runtime 動態建表。
-- **ADAD 規格同步**：新增 `AdminAuthService`、`AdminAuthorizationDependency`、`UIAdminApiContext` 節點，更新 Data Browser／Holiday 的 dependency、invariant、verification 與編譯後 YAML IR。
+本次新增全站 AI 助理，掛在管理後台右上角浮動圖示，`st.dialog` 彈窗內以模式切換提供兩種功能，皆透過地端 Ollama 模型運作，資料不會離開本機。
 
-部署或啟動管理介面前至少需要：
+- **💬 問答模式**：案件查詢（SQL LIKE 查詢 clients/orders，伺服器端會先剝除「案號」「電話」等中文描述詞再查，避免使用者連同描述詞一起輸入導致查無結果）＋ 網站操作問答（chromadb 向量檢索＋BM25 關鍵字混合檢索，索引來源是實際頁面原始碼的 docstring／說明文字，而非 `document/` 規格文件，避免文件與實際功能不同步）。支援近 3 輪對話歷史記憶，讓使用者能針對助理的追問簡短回覆而不必重講一次問題。
+- **✏️ 修改表單模式**：AI 只能針對「單一欄位」提出修改建議，並列出目前值與建議新值供比對；使用者必須在畫面上明確勾選確認後，才會透過既有的 `PATCH /api/v1/admin/data-browser/{table}/{row_id}` 端點寫入，AI 服務本身完全不觸碰資料庫寫入。
+- **深連結導覽**：回答中的頁面連結由程式碼驗證/組裝（比對白名單頁面路徑），不依賴模型自行輸出網址；針對頁面內還有多個分頁的情境（例如訂單頁的「應付帳款查詢/輸出」），支援直接跳轉到指定分頁，不會停在分頁列預設的第一個分頁。
+- **技術選型**：MCP（Model Context Protocol，Streamable HTTP）掛載於 FastAPI `/mcp-tools`，並套上既有的 `X-Internal-API-Key` 內部驗證；LLM 統一使用 `qwen2.5-coder:7b`（實測 3b 級模型在 tool-calling 準確度上不夠可靠），Embedding 使用 `bge-m3` 並強制以 CPU 推論（避免與主模型搶佔本機 4GB VRAM，實測反而比 GPU 更快）。
 
-```env
-INTERNAL_API_KEY=replace-with-a-long-random-secret
-APP_ENV=production
-ENABLE_ADMIN_AUTH=true
-```
+驗證方式：以固定的一組回歸測試題目（案件查詢、系統操作問答、表單修改建議、越權請求拒絕）人工驗證問答準確度與連結正確性，並在多顆候選模型（llama3.2:3b、llama3.1:8b、gemma 系列）之間實測比較準確度與延遲後，確認維持 `qwen2.5-coder:7b` 為現階段最佳選擇。本功能尚無自動化 pytest 覆蓋，屬已知限制。
 
-正式環境必須先由管理員登入取得 Session。只有 `APP_ENV` 為 `development`、`dev`、`local` 或 `test`，且 `ENABLE_ADMIN_AUTH=false` 時可以略過 Bearer Session；`X-Internal-API-Key` 永遠不能略過。
+## 2026-08-01 更新（v0.2.2）
 
-本次安全整合的針對性驗證為 `22 passed`，涵蓋正式認證核心、Data Browser Router／Service、Holiday Router 與 Streamlit runtime AppTest。對應 commits：`8fa3910`、`bd09413`。
+本次版本（`main@992a4dd`）完成歷史銀行流水重分類、匯入異常警示，以及保留既有資料的 additive Schema Update 收尾。
 
-## 2026-07-24 更新
+- **歷史銀行流水重處理**：正式匯入與既有 batch 重處理共用 canonical 分類、dispatch 與 transaction 邊界；支援先 dry-run、人工核對 `plan_fingerprint`，再決定是否 apply。
+- **匯入格式修正**：歷史對帳單限制在契約欄位範圍內解析，正確區分第 10 欄銷帳編號、第 12 欄比對欄位、空白欄與備用姓名欄；姓名只供人工參考，不作為自動入帳依據。
+- **可稽核且可重播**：保留 canonical row 與 occurrence cardinality，新增 append-only reclassification run／event；exact replay 不重複建立正式交易，任一步驟失敗全批 rollback。
+- **`IMPORT-006` 物化警示**：仍無法分類的流水按 batch 彙總顯示於「異常警示中心 → 資料匯入異常」；一般查詢只讀 current projection，不在每次 API render 重算全部流水。
+- **警示中心 UI 修復**：資料匯入、流程與系統、帳務三個頁籤均改走集中 API contract/client；已實際驗證不再顯示 `internal_error: 無法讀取系統警示`。
+- **保留資料 Schema Update**：新增 schema parts `104`～`108` 與 preserve-data migration runner，涵蓋訂單 lifecycle history／control facts、服務時間條款、system alert current projection 及 `matching_records.sent_resume_at`。
+- **安全切換與回復**：本機候選庫 `union_db_candidate_20260801_v4` 已完成真實 MySQL cutover；原始 `union_db` 保留，回復只能透過 switch receipt 明確切回，不得刪除或重建原始資料庫。
 
-本次整合範圍為 `8067706` 至 `35d48be`，主要包含以下變更：
+驗證結果：
 
-- **管理介面模組化**：`02_orders.py` 與 `05_form_management.py` 保留為輕量頁面殼層，實際 Tab 功能分別移至 `ui/pages/order/` 與 `ui/pages/form_management/`，降低單檔規模並保留原有頁面操作流程。
-- **訂單編輯入口統一**：原獨立 Page 4 已移至 `ui/pages/order/editor.py`，並由 Page 2 Tab 1 委派進入；側邊欄不再提供重複的 Page 4。
-- **訂單總覽與日期處理**：簡化案件選項建立方式，集中共用格式化與安全日期／數值 helper；HCM 新增案件會依服務起日、服務天數、服務類型及假日初始化訂單起訖日。
-- **固定資料庫測試快照**：新增 `fixtures/db_snapshot_v2/v3/` 的 27 表固定資料集，以及序列化、驗證、匯出、匯入、日期校正和安全重設工具；開發者可用 `reset_DB.bat` 重建本機 `union_db`。
-- **資料瀏覽與行事曆防呆**：資料瀏覽器支援目前使用中的案件、排班與財務資料表，複合鍵及財務表維持唯讀；行事曆可安全處理沒有服務人員選項的情況。
-- **退役 legacy payments**：FastAPI 不再掛載舊 `payments` Router，舊 Payment schema 與 `payments` 建表定義已移除；帳務功能改由 `client_payments`、`staff_payments` 及其交易／結算資料流負責。
-- **架構與驗證同步**：同步 API、Service、UI 與 Master System Map 的 Source binding、節點契約及 YAML IR，並補齊 UI runtime、shell ownership、fixture reset 與 importer 測試。
+- Schema／migration 集中測試：`82 passed`
+- 真實 MySQL preserve-data cutover：`1 passed`
+- FastAPI health、警示 API 與 Streamlit 三個警示頁籤：實際驗收通過
 
-既有應付帳款匯出契約維持不變：依預定付款／退款日期月份取數，月嫂款按 `staff_id` 彙總，補助退款保留原始應退金額，輸出仍採固定九欄與分銀行流水號。
+ASUS 目標主機仍須先執行歷史 batch dry-run、核對摘要與 fingerprint，再由人工決定是否 apply；程式已發布不代表目標主機資料已完成重處理。
 
-## v0.2.0 版本重點
+## 2026-07-31 更新（多月嫂排班 UX）
 
-- 正式導入 assignment-owned 多月嫂排班：支援兩位／三位月嫂連續交接、個別排班、雙薪日與實際時數隔離。
-- 訂單修改改採 preview／apply 同步流程，明確處理指派配置、排班移除、薪資鎖定與 append-only 稽核快照。
-- 客戶資格唯一來源統一為 `clients.identity_status`，移除訂單層重複資格來源並補上安全遷移與 UI／API 驗證。
-- 強化帳務匯入、客戶收款對帳、應付帳款摘要／固定九欄匯出，以及補助核銷資料流。
-- 擴充 50 筆既有生命週期假資料：加入多月嫂交接、雙薪、超收、退款與跨批次重複匯入，同時保留原有狀態與排班多樣性。
-- 完成案件日期防呆：服務中涵蓋基準日、已完成案件不得出現未來實際服務日期、取消案件維持零實際時數。
-- 財務警示判斷器與警示生命週期仍列為後續 post-seed 工作；本版假資料不建立 `finance_alerts`／`finance_alert_events`。
-- `file_watcher.py` 明確使用 UTF-8 開啟監控檔案，避免 Windows 預設編碼造成非 ASCII 路徑或內容處理差異。
+本次更新完成管理端多月嫂排班、配對與案件人力調整流程，正式 ownership 統一以 `case_staff_assignments` 與 assignment-owned `staff_schedule` 為準。
 
-驗證基準：本版 30 個變更測試檔共 `177 passed`；整合 commits 為 `aecca9b` 至 `3cabb4c`。
+- **三分頁操作入口**：集中為「服務人員月曆」、「月嫂配對中心」與「案件人力配置」；服務人員月曆不再提供案件指派功能。
+- **月曆資訊修正**：顯示目前瀏覽月份，支援上／下月與回到本月；同日多筆案件逐筆呈現，不再以「可接案」覆蓋正式訂單資訊。
+- **原配對流程與多人 fallback**：保留原本單月嫂四步配對；只有找不到可完整承接服務期間的單一月嫂時，才顯示 2～4 段多人配對。測試環境暫時保留無寫入的多人介面預覽。
+- **案件人力 Preview／Apply**：以 1～4 段編輯完整正式 assignment 計畫，先顯示調整前後、排班移除、時數差額與阻擋原因，再由管理員確認套用。
+- **多日期休假、順延與代班**：一次操作共用單一 Preview、fingerprint 與 atomic Apply；任一日期失敗即整批 rollback，不留下部分寫入。
+- **服務時數守恆**：每次 Preview 與 Apply 都以最新正式資料重算；所有未取消 assignment 的 `actual_hours` 總和必須精確等於訂單 `service_days × service_hours_per_day`，否則拒絕寫入。
+- **薪資與國定假日**：薪資依成功寫入的最新正式排班自動計算，不另設人工薪資確認時間；國定假日預設不產生雙倍薪，個案例外必須由工會人員針對明確排班日人工指定並留下備註。
+- **配對與檔期鎖定**：新增逐段檔期查詢、媒合方案與事件、逐位聯繫／意願、共用履歷，以及等待訂金鎖的取得、釋放、取消與轉正式流程。
 
----
+驗證結果：
 
-## 2026-07-20 最近更新
+- 嚴格 flake8（`E9`、`F63`、`F7`、`F82`）：`0`
+- 核心資料安全測試：`618 passed, 1 warning`
+- 完整 pytest：`1540 passed, 6 warnings`
 
-- 完成財務導入與核帳流程的第二階段：新增 Legacy / Sinopac / Taishin 匯入格式支援，並補齊帳務正規化驗證測試（`tests/imports/*`）。
-- 新增/修訂服務層與資料庫 schema：支援月嫂逐月薪酬、行政補助歸還、補助對帳流程、財務警報管道，並同步調整 `system_map`/`services_system_map`/`api_system_map`。
-- 新增「財務警報」後台頁面（`ui/pages/06_finance_alerts.py`）與對應 API/Service；並擴充測試覆蓋（帳務、補助、交易分類、交易指紋、匯入與移轉）。
-- 新增 ADAD 遷移腳本與資料清理腳本：`migrate_remove_other_addition.py`、`migrate_adad_task_snapshots.py`，確保欄位清理與快照遷移可受控執行。
-- 同步更新 `CHANGES_UI_CHANG.md`，並補齊新 schema 分拆 SQL（`db/schema_parts/*`）以便版本升級。
+既有資料庫升級提醒：
 
----
+- `online.bat` 不會自動套用資料庫 schema。
+- 正式啟動新版前必須先備份資料庫，在維護窗口依序套用 `db/schema_parts/95`、`98`～`103` 的相關更新。
+- 執行 `scripts/migrate_assignment_schedule_integrity.py` 時應先使用預設 check 模式，確認既有 assignment ownership、同日重複排班與索引狀態，再視結果使用 `--apply`。
 
-## 2026-07 帳務與管理介面更新
+## 2026-07-29 更新（系統異常警示中心）
 
-- 全系統訂單關聯鍵統一為 `case_no`，不再使用 `orders.id`／`order_id`。
-- 帳務拆分為 `client_payments` 與 `staff_payments`：客戶三期收款與月嫂逐指派應付分開管理。
-- 管理端「帳務明細總覽」分開顯示客戶收款、月嫂應付，可依案件編號、訂單狀態與付款狀態篩選；選擇案件後才載入交易明細。
-- 新增應付帳款 Excel：月嫂款使用永豐銀行代碼 31，退還補助款使用台新銀行代碼 633。
-- 新增分季核銷補助清冊與年度總表，補助天數固定顯示至小數點後 2 位。
-- 新增服務人員契約 Excel 鏡像輸出，以及對應的契約、帳務與財務報表 FastAPI。
-- FastAPI 的正式 ASGI 入口為 `api.main:app`；LINE、LIFF 與 Webhook 以子路由掛載。
+本次建置系統異常警示中心，新增可變動、滾動更新的 `system_alerts` 資料表
+（`services/system_alert_service.py`、`api/routes/system_alerts.py`），與既有不可竄改的
+`finance_alerts` 稽核軌跡並存分工；流程提醒類警示（不需要防竄改稽核）改用前者。
 
-上一個帳務整合版本：`0f9c11f`。
+- **9 個新增警示碼**：`RECEIVABLE-001`／`PAYOUT-001`／`RETURN-001`（沿用既有到期日欄位的
+  財務逾期提醒，無額外門檻設定）；`LINE-002`／`LINE-004`（LINE 身分衝突與任務未回覆）；
+  `SCHEDULE-001`／`002`／`003`／`005`／`006`（服務人員排假、代班、檔期衝突等流程提醒）。
+- **既有警示遷移**：把 `ORDER-001~004`、`BECLASS-001`、`LINE-001/005`、`DOC-SEND-001`
+  遷移到新的 `system_alerts` 架構；`DOC-SEND-001`（履歷發送提醒）從假的 stub 改為真正依
+  `matching_records.sent_resume_at` 判斷。
+- **Excel 匯入資料驗證**：`IMPORT-001~005` 涵蓋 HCM、月嫂 BeClass、客戶 BeClass 三個匯入
+  來源的欄位驗證，並修正 `import_staff_beclass.py` 欄位對應造成的 6 個實際資料遺失錯誤。
+- **財務對帳警示接軌**：透過新增的 `services/finance_alert_wiring.py`，把既有但原本靜默
+  無提示的財務對帳邏輯正式接上 `finance_alerts`，讓待處理的對帳狀態變成看得到的警示，而
+  不是悄悄消失。
+- **管理端 UI 重整**：異常警示中心新增「👤服務人員」（行事曆／帳務拆分確認／待回覆接案
+  意願）與「📱Line」兩個分頁；`ORDER-003/004`（待回覆）與 `LINE-001/005` 移至對應新分頁。
+
+驗證結果：
+
+- 針對性回歸測試：`41 passed`
+- 完整 pytest 套件中的其餘失敗，經逐一歸因均為既有環境限制（缺表、需即時伺服器等），
+  非本次改動導致的邏輯迴歸
+
+> ⚠️ 本筆時間早於上方 3 筆，超出「只保留最近三次」的原則，因組長要求明確補寫於此暫予保留。
 
 ---
 
@@ -109,9 +121,13 @@ Lobar_union/
 │   ├── routes/                 # API 路由模組（orders、matches、schedule、clients、staff、holidays、finance 等）
 │   └── schemas/                # Pydantic 資料驗證 Schema 模型
 ├── services/                   # 業務邏輯與資料庫存取服務層
-│   └── db_service.py           # 核心 DB 服務 (含訂單 CRUD、出勤天數動態精算引擎與 36 欄位 safe_int 防護)
+│   ├── db_service.py           # 核心 DB 服務 (含訂單 CRUD、出勤天數動態精算引擎與 36 欄位 safe_int 防護)
+│   ├── mcp_form_tools.py       # MCP Server：封裝案件查詢/操作問答/表單修改建議唯讀工具，掛載於 FastAPI /mcp-tools
+│   ├── qa_agent_service.py     # AI 助理問答模式：案件查詢 + 網站操作問答 (RAG，Ollama qwen2.5-coder:7b)
+│   ├── form_agent_service.py   # AI 助理修改表單模式：提出單一欄位修改建議，實際寫入仍走既有 PATCH 端點
+│   └── ollama_embedding.py     # 地端 Ollama bge-m3 Embedding Function (強制 CPU 推論)
 ├── ui/                         # Streamlit Web 管理前端專區
-│   ├── app.py                  # 側邊欄動態導覽殼層 (AppShellUI)
+│   ├── app.py                  # 側邊欄動態導覽殼層 (AppShellUI)，含全站 AI 助理浮動圖示與對話框
 │   └── pages/                  # 獨立頁面模組專區
 │       ├── 01_data_browser.py  # 🗄️ 原始資料庫瀏覽與國定假日管理 (DataBrowserUI)
 │       ├── 02_orders.py        # 📊 訂單與帳務管理頁面殼層（五個 Tab 委派至 order/）
@@ -131,6 +147,7 @@ Lobar_union/
 │   ├── export_db_snapshot_fixture_v2.py # 匯出固定格式資料庫快照
 │   ├── import_db_snapshot_fixture_v2.py # 驗證後匯入資料庫快照
 │   ├── fix_schedule_conflicts.py # 月嫂檔期衝突檢測與自動修復工具
+│   ├── build_help_index.py     # 建立 AI 助理「網站操作問答」用的 chromadb 向量索引 (來源為實際頁面原始碼)
 │   ├── init_db.py              # 資料庫初始化與 Schema 導入
 │   └── wait_for_db.py          # 輪詢檢測 MySQL 連線就緒腳本
 ├── docker-compose.yml          # Docker Compose 配置文件，一鍵啟動 MySQL 8.0 持久化容器
@@ -143,15 +160,6 @@ Lobar_union/
 ├── system_map.md               # ADAD 系統架構 SSOT 說明文件 (Version 56)
 └── uv.lock                     # uv 依賴鎖定檔
 ```
-
----
-
-## 📄 本次更新說明 (開發實作收尾)
-
-在本次更新中，我們主要進行了以下優化與擴展：
-* **API 服務層與 UI 前端整合**：全面導入 FastAPI RESTful API 後端與 Streamlit 前端分離架構，並擴展 UI 表單與履歷問卷管理頁面（Tab 3 變數代理 EPPP 契約引擎）。
-* **Data Pipeline 優化**：重構並優化微服務 Pipeline 導入流程，支援客戶、月嫂 BeClass 名冊及 HCM 系統的自動化去重與安全防護。
-* **ADAD 架構更新**：系統架構已升級至 Version 54.0，補齊跨子地圖帳務 staging 合約、多月嫂內部 helper 所有權及 Task v3 timeout，維持 SSOT 與 pre-commit 一致。
 
 ---
 
