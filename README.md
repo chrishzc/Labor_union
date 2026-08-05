@@ -1,4 +1,8 @@
-﻿# 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
+# 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
+
+> 目前版本：**v0.2.2**（2026-08-01）｜ADAD Master System Map：**56.0**
+
+> 更新紀錄固定只保留最近三次版本／功能發布，包含目前版本；更早內容請查閱 Git 歷史與 `document/` 規格文件。
 
 ## 2026-08-01 更新（v0.2.2）
 
@@ -45,6 +49,29 @@ ASUS 目標主機仍須先執行歷史 batch dry-run、核對摘要與 fingerpri
 - 正式啟動新版前必須先備份資料庫，在維護窗口依序套用 `db/schema_parts/95`、`98`～`103` 的相關更新。
 - 執行 `scripts/migrate_assignment_schedule_integrity.py` 時應先使用預設 check 模式，確認既有 assignment ownership、同日重複排班與索引狀態，再視結果使用 `--apply`。
 
+## 2026-07-25 更新（v0.2.1）
+
+本次版本完成管理介面 API 化的安全收尾，並統一沿用 LINE 管理中心既有的正式管理員身分與授權系統。
+
+- **正式管理員認證共用**：Data Browser 與國定假日 GET／POST／DELETE 全部改用 `AdminPrincipal` 與 `require_system_admin`，不再自行維護 `X-Auth-Context`、`ADMIN_AUTH_CONTEXT` 或 `admin_role` 字串判斷。
+- **雙層管理 API 防護**：Streamlit 管理頁統一送出伺服器端 `X-Internal-API-Key` 與登入後取得的 `Authorization: Bearer <session>`；缺少設定、Session 失效或角色不足時採 fail-closed。
+- **可信稽核身分**：Data Browser PATCH 的 audit actor 與 role 直接取自已驗證的 `AdminPrincipal.username`／`AdminPrincipal.role`，不接受 UI payload 指定，也不再由 username 推測角色。
+- **UI → API 串接**：Data Browser、訂單／媒合、訂單編輯與月嫂月曆持續改走 FastAPI；排休 ownership 僅使用 `assignment_id`，正式指派維持 preview → confirm → apply 流程。
+- **安全交易邊界**：Data Browser 更新、更新前後快照與 audit insert 共用同一 transaction；非法欄位整批拒絕，audit schema 不在 request runtime 動態建表。
+- **ADAD 規格同步**：新增 `AdminAuthService`、`AdminAuthorizationDependency`、`UIAdminApiContext` 節點，更新 Data Browser／Holiday 的 dependency、invariant、verification 與編譯後 YAML IR。
+
+部署或啟動管理介面前至少需要：
+
+```env
+INTERNAL_API_KEY=replace-with-a-long-random-secret
+APP_ENV=production
+ENABLE_ADMIN_AUTH=true
+```
+
+正式環境必須先由管理員登入取得 Session。只有 `APP_ENV` 為 `development`、`dev`、`local` 或 `test`，且 `ENABLE_ADMIN_AUTH=false` 時可以略過 Bearer Session；`X-Internal-API-Key` 永遠不能略過。
+
+本次安全整合的針對性驗證為 `22 passed`，涵蓋正式認證核心、Data Browser Router／Service、Holiday Router 與 Streamlit runtime AppTest。對應 commits：`8fa3910`、`bd09413`。
+
 ---
 
 本專案旨在為「新竹市月子照顧服務人員職業工會」開發地端運作的 **LINE 客服與行政流程自動化系統**。透過將行政人員手動下載的 Excel 名冊自動化匯入資料庫，並提供 Streamlit 管理後台，未來將延伸串接 LINE Messaging API 實現半自動化客戶配對、合約發送與 RAG 客服問答。
@@ -58,6 +85,7 @@ ASUS 目標主機仍須先執行歷史 batch dry-run、核對摘要與 fingerpri
 ```text
 Lobar_union/
 ├── .venv/                      # Python 虛擬環境 (Git 已忽略)
+├── .agents/                    # ADAD 工作流 / 代理自定義配置目錄
 ├── db/                         # 資料庫 Schema
 │   └── schema.sql              # MySQL 資料庫建表語句（帳務使用 client/staff payments 正規化資料表）
 ├── document/                   # 專案設計與規格說明文件
@@ -98,7 +126,7 @@ Lobar_union/
 │   ├── reset_fake_database.py  # 以固定 v3 fixture 安全重建本機 union_db
 │   ├── export_db_snapshot_fixture_v2.py # 匯出固定格式資料庫快照
 │   ├── import_db_snapshot_fixture_v2.py # 驗證後匯入資料庫快照
-│   ├── fix_schedule_conflicts.py # canonical 檔期唯讀報告；--repair 已停用
+│   ├── fix_schedule_conflicts.py # 月嫂檔期衝突檢測與自動修復工具
 │   ├── init_db.py              # 資料庫初始化與 Schema 導入
 │   └── wait_for_db.py          # 輪詢檢測 MySQL 連線就緒腳本
 ├── docker-compose.yml          # Docker Compose 配置文件，一鍵啟動 MySQL 8.0 持久化容器
@@ -107,9 +135,8 @@ Lobar_union/
 ├── reset_DB.bat                # 僅供開發環境：確認資料庫名稱後套用固定 v3 fixture
 ├── pyproject.toml              # uv 專案管理配置文件
 ├── requirements.txt            # 從 pyproject.toml 自動編譯導出的相容性依賴清單
-├── AGENTS.md                   # AI Agent 架構優先與 Clean Code 開發規範
-├── system_map.yaml             # Legacy 架構盤點資料（只供歷史參考）
-├── system_map.md               # Legacy 架構盤點說明（只供歷史參考）
+├── system_map.yaml             # ADAD 系統架構 SSOT 記憶與狀態事實來源 (Version 56)
+├── system_map.md               # ADAD 系統架構 SSOT 說明文件 (Version 56)
 └── uv.lock                     # uv 依賴鎖定檔
 ```
 
@@ -117,8 +144,7 @@ Lobar_union/
 
 ## 🛠️ 開發環境與部署架設指南
 
-本專案保留 `online.bat` 作為正式服務啟動腳本。`start.bat` 僅是安全轉接入口，
-不再重設資料庫、產生假資料或自動執行匯入；開發與測試資料請使用隔離環境及明確命令。
+本專案保留 `online.bat` 作為正式服務啟動腳本。會重設資料庫並產生假資料的 `start.bat` 已移除；開發與測試環境請改用手動啟動流程。
 
 ### 1. 批次檔說明
 
@@ -313,7 +339,7 @@ streamlit run ui/app.py
 python scripts/file_watcher.py
 ```
 
-`scripts/init_db.py` 會初始化資料庫，僅能在明確確認目標資料庫後個別執行。請勿執行或匯入 `scripts/generate_fake_data.py`；需要新增測試資料時，優先更新有版本且可驗證的 fixture，或建立用途明確的獨立播種腳本及對應測試。開發流程依 `AGENTS.md`、業務規格、標準 Git、Python 與 pytest 執行。
+`scripts/init_db.py` 會初始化資料庫，僅能在明確確認目標資料庫後個別執行。請勿執行或匯入 `scripts/generate_fake_data.py`；需要新增測試資料時，優先更新有版本且可驗證的 fixture，或建立用途明確的獨立播種腳本及對應測試。一般開發者不需安裝或操作 ADAD，依標準 Git、Python 與 pytest 流程開發即可。
 
 ### 3. 重設本機測試資料庫
 
