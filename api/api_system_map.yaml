@@ -2361,3 +2361,56 @@ modules:
     state: planned
     fan_in_snapshot: 1
     known_symbols: []
+  MCPFormToolsMount:
+    type: api_entrypoint
+    description: 把 MCPFormTools 的 Streamable HTTP ASGI app 掛載到既有 FastAPI app 的 /mcp-tools
+      路徑，供地端 FormAgentService 呼叫；掛載子 app 不會自動收到 lifespan 事件，session_manager 必須跟著父
+      app 的 lifespan 一起啟動/關閉。
+    source: api/main.py
+    domain: API
+    subsystem: null
+    map_file: api\api_system_map.md
+    dependencies:
+    - MCPFormTools
+    input: {}
+    output: {}
+    exceptions: []
+    invariants:
+    - app.mount("/mcp-tools", ...) 必須只掛載一次。
+    - form_tools_mcp.session_manager.run() 必須在 api/main.py 的 lifespan() 內與 LINE worker
+      一起啟動/關閉，否則掛載的 MCP 子 app 會因 task group 未初始化而對每個請求回傳 500。
+    - MCP 掛載點必須套上 InternalApiKeyMiddleware，未帶正確 X-Internal-API-Key 一律拒絕 (401)，find_row
+      會回傳客戶 PII 不可裸露。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -c
+        - "from pathlib import Path\ns = Path('api/main.py').read_text(encoding='utf-8')\n\
+          assert 'app.mount(\"/mcp-tools\"' in s\nassert s.count('app.mount(\"/mcp-tools\"'\
+          ) == 1\nassert 'form_tools_mcp.session_manager.run()' in s\nprint('MCP_MOUNT_REGISTERED')\n"
+        cwd: project
+        timeout: 30
+        expect_exit: 0
+        expect_stdout_contains: MCP_MOUNT_REGISTERED
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: idempotent
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: api_layer
+    state: implemented
+    fan_in_snapshot: 1
+    known_symbols: []

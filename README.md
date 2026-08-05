@@ -4,6 +4,17 @@
 
 > 更新紀錄固定只保留最近三次版本／功能發布，包含目前版本；更早內容請查閱 Git 歷史與 `document/` 規格文件。
 
+## 2026-08-05 更新（AI 助理：RAG 問答 + 表單修改建議）
+
+本次新增全站 AI 助理，掛在管理後台右上角浮動圖示，`st.dialog` 彈窗內以模式切換提供兩種功能，皆透過地端 Ollama 模型運作，資料不會離開本機。
+
+- **💬 問答模式**：案件查詢（SQL LIKE 查詢 clients/orders，伺服器端會先剝除「案號」「電話」等中文描述詞再查，避免使用者連同描述詞一起輸入導致查無結果）＋ 網站操作問答（chromadb 向量檢索＋BM25 關鍵字混合檢索，索引來源是實際頁面原始碼的 docstring／說明文字，而非 `document/` 規格文件，避免文件與實際功能不同步）。支援近 3 輪對話歷史記憶，讓使用者能針對助理的追問簡短回覆而不必重講一次問題。
+- **✏️ 修改表單模式**：AI 只能針對「單一欄位」提出修改建議，並列出目前值與建議新值供比對；使用者必須在畫面上明確勾選確認後，才會透過既有的 `PATCH /api/v1/admin/data-browser/{table}/{row_id}` 端點寫入，AI 服務本身完全不觸碰資料庫寫入。
+- **深連結導覽**：回答中的頁面連結由程式碼驗證/組裝（比對白名單頁面路徑），不依賴模型自行輸出網址；針對頁面內還有多個分頁的情境（例如訂單頁的「應付帳款查詢/輸出」），支援直接跳轉到指定分頁，不會停在分頁列預設的第一個分頁。
+- **技術選型**：MCP（Model Context Protocol，Streamable HTTP）掛載於 FastAPI `/mcp-tools`，並套上既有的 `X-Internal-API-Key` 內部驗證；LLM 統一使用 `qwen2.5-coder:7b`（實測 3b 級模型在 tool-calling 準確度上不夠可靠），Embedding 使用 `bge-m3` 並強制以 CPU 推論（避免與主模型搶佔本機 4GB VRAM，實測反而比 GPU 更快）。
+
+驗證方式：以固定的一組回歸測試題目（案件查詢、系統操作問答、表單修改建議、越權請求拒絕）人工驗證問答準確度與連結正確性，並在多顆候選模型（llama3.2:3b、llama3.1:8b、gemma 系列）之間實測比較準確度與延遲後，確認維持 `qwen2.5-coder:7b` 為現階段最佳選擇。本功能尚無自動化 pytest 覆蓋，屬已知限制。
+
 ## 2026-08-01 更新（v0.2.2）
 
 本次版本（`main@992a4dd`）完成歷史銀行流水重分類、匯入異常警示，以及保留既有資料的 additive Schema Update 收尾。
@@ -49,28 +60,33 @@ ASUS 目標主機仍須先執行歷史 batch dry-run、核對摘要與 fingerpri
 - 正式啟動新版前必須先備份資料庫，在維護窗口依序套用 `db/schema_parts/95`、`98`～`103` 的相關更新。
 - 執行 `scripts/migrate_assignment_schedule_integrity.py` 時應先使用預設 check 模式，確認既有 assignment ownership、同日重複排班與索引狀態，再視結果使用 `--apply`。
 
-## 2026-07-25 更新（v0.2.1）
+## 2026-07-29 更新（系統異常警示中心）
 
-本次版本完成管理介面 API 化的安全收尾，並統一沿用 LINE 管理中心既有的正式管理員身分與授權系統。
+本次建置系統異常警示中心，新增可變動、滾動更新的 `system_alerts` 資料表
+（`services/system_alert_service.py`、`api/routes/system_alerts.py`），與既有不可竄改的
+`finance_alerts` 稽核軌跡並存分工；流程提醒類警示（不需要防竄改稽核）改用前者。
 
-- **正式管理員認證共用**：Data Browser 與國定假日 GET／POST／DELETE 全部改用 `AdminPrincipal` 與 `require_system_admin`，不再自行維護 `X-Auth-Context`、`ADMIN_AUTH_CONTEXT` 或 `admin_role` 字串判斷。
-- **雙層管理 API 防護**：Streamlit 管理頁統一送出伺服器端 `X-Internal-API-Key` 與登入後取得的 `Authorization: Bearer <session>`；缺少設定、Session 失效或角色不足時採 fail-closed。
-- **可信稽核身分**：Data Browser PATCH 的 audit actor 與 role 直接取自已驗證的 `AdminPrincipal.username`／`AdminPrincipal.role`，不接受 UI payload 指定，也不再由 username 推測角色。
-- **UI → API 串接**：Data Browser、訂單／媒合、訂單編輯與月嫂月曆持續改走 FastAPI；排休 ownership 僅使用 `assignment_id`，正式指派維持 preview → confirm → apply 流程。
-- **安全交易邊界**：Data Browser 更新、更新前後快照與 audit insert 共用同一 transaction；非法欄位整批拒絕，audit schema 不在 request runtime 動態建表。
-- **ADAD 規格同步**：新增 `AdminAuthService`、`AdminAuthorizationDependency`、`UIAdminApiContext` 節點，更新 Data Browser／Holiday 的 dependency、invariant、verification 與編譯後 YAML IR。
+- **9 個新增警示碼**：`RECEIVABLE-001`／`PAYOUT-001`／`RETURN-001`（沿用既有到期日欄位的
+  財務逾期提醒，無額外門檻設定）；`LINE-002`／`LINE-004`（LINE 身分衝突與任務未回覆）；
+  `SCHEDULE-001`／`002`／`003`／`005`／`006`（服務人員排假、代班、檔期衝突等流程提醒）。
+- **既有警示遷移**：把 `ORDER-001~004`、`BECLASS-001`、`LINE-001/005`、`DOC-SEND-001`
+  遷移到新的 `system_alerts` 架構；`DOC-SEND-001`（履歷發送提醒）從假的 stub 改為真正依
+  `matching_records.sent_resume_at` 判斷。
+- **Excel 匯入資料驗證**：`IMPORT-001~005` 涵蓋 HCM、月嫂 BeClass、客戶 BeClass 三個匯入
+  來源的欄位驗證，並修正 `import_staff_beclass.py` 欄位對應造成的 6 個實際資料遺失錯誤。
+- **財務對帳警示接軌**：透過新增的 `services/finance_alert_wiring.py`，把既有但原本靜默
+  無提示的財務對帳邏輯正式接上 `finance_alerts`，讓待處理的對帳狀態變成看得到的警示，而
+  不是悄悄消失。
+- **管理端 UI 重整**：異常警示中心新增「👤服務人員」（行事曆／帳務拆分確認／待回覆接案
+  意願）與「📱Line」兩個分頁；`ORDER-003/004`（待回覆）與 `LINE-001/005` 移至對應新分頁。
 
-部署或啟動管理介面前至少需要：
+驗證結果：
 
-```env
-INTERNAL_API_KEY=replace-with-a-long-random-secret
-APP_ENV=production
-ENABLE_ADMIN_AUTH=true
-```
+- 針對性回歸測試：`41 passed`
+- 完整 pytest 套件中的其餘失敗，經逐一歸因均為既有環境限制（缺表、需即時伺服器等），
+  非本次改動導致的邏輯迴歸
 
-正式環境必須先由管理員登入取得 Session。只有 `APP_ENV` 為 `development`、`dev`、`local` 或 `test`，且 `ENABLE_ADMIN_AUTH=false` 時可以略過 Bearer Session；`X-Internal-API-Key` 永遠不能略過。
-
-本次安全整合的針對性驗證為 `22 passed`，涵蓋正式認證核心、Data Browser Router／Service、Holiday Router 與 Streamlit runtime AppTest。對應 commits：`8fa3910`、`bd09413`。
+> ⚠️ 本筆時間早於上方 3 筆，超出「只保留最近三次」的原則，因組長要求明確補寫於此暫予保留。
 
 ---
 
@@ -105,9 +121,13 @@ Lobar_union/
 │   ├── routes/                 # API 路由模組（orders、matches、schedule、clients、staff、holidays、finance 等）
 │   └── schemas/                # Pydantic 資料驗證 Schema 模型
 ├── services/                   # 業務邏輯與資料庫存取服務層
-│   └── db_service.py           # 核心 DB 服務 (含訂單 CRUD、出勤天數動態精算引擎與 36 欄位 safe_int 防護)
+│   ├── db_service.py           # 核心 DB 服務 (含訂單 CRUD、出勤天數動態精算引擎與 36 欄位 safe_int 防護)
+│   ├── mcp_form_tools.py       # MCP Server：封裝案件查詢/操作問答/表單修改建議唯讀工具，掛載於 FastAPI /mcp-tools
+│   ├── qa_agent_service.py     # AI 助理問答模式：案件查詢 + 網站操作問答 (RAG，Ollama qwen2.5-coder:7b)
+│   ├── form_agent_service.py   # AI 助理修改表單模式：提出單一欄位修改建議，實際寫入仍走既有 PATCH 端點
+│   └── ollama_embedding.py     # 地端 Ollama bge-m3 Embedding Function (強制 CPU 推論)
 ├── ui/                         # Streamlit Web 管理前端專區
-│   ├── app.py                  # 側邊欄動態導覽殼層 (AppShellUI)
+│   ├── app.py                  # 側邊欄動態導覽殼層 (AppShellUI)，含全站 AI 助理浮動圖示與對話框
 │   └── pages/                  # 獨立頁面模組專區
 │       ├── 01_data_browser.py  # 🗄️ 原始資料庫瀏覽與國定假日管理 (DataBrowserUI)
 │       ├── 02_orders.py        # 📊 訂單與帳務管理頁面殼層（五個 Tab 委派至 order/）
@@ -127,6 +147,7 @@ Lobar_union/
 │   ├── export_db_snapshot_fixture_v2.py # 匯出固定格式資料庫快照
 │   ├── import_db_snapshot_fixture_v2.py # 驗證後匯入資料庫快照
 │   ├── fix_schedule_conflicts.py # 月嫂檔期衝突檢測與自動修復工具
+│   ├── build_help_index.py     # 建立 AI 助理「網站操作問答」用的 chromadb 向量索引 (來源為實際頁面原始碼)
 │   ├── init_db.py              # 資料庫初始化與 Schema 導入
 │   └── wait_for_db.py          # 輪詢檢測 MySQL 連線就緒腳本
 ├── docker-compose.yml          # Docker Compose 配置文件，一鍵啟動 MySQL 8.0 持久化容器

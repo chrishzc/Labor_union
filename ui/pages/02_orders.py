@@ -8,6 +8,7 @@
 import requests
 import streamlit as st
 
+from ui import nav_helper
 from ui.pages.order.tab1_overview import _render_tab1_overview
 from ui.pages.order.tab3_finance import _render_tab3_finance
 from ui.pages.order.tab4_accounts_payable import _render_tab4_accounts_payable
@@ -18,7 +19,23 @@ title = "📦 訂單與帳務管理系統"
 
 
 def _render_order_page_shell(orders_data, clients, staff_list):
-    """Render Page 2's fixed tab layout from data loaded by ``show``."""
+    """Render Page 2's fixed tab layout from data loaded by ``show``.
+
+    Streamlit's st.tabs has no way to be switched to a given tab
+    programmatically, so a deep link (e.g. from the AI assistant) can't just
+    land on the normal tab bar and expect the target tab to already be open --
+    the user would still have to click it themselves. Instead, while a
+    pending tab target is set, skip the tab bar entirely and render only
+    that tab's content, so the deep link truly lands the user on the right
+    screen with zero extra clicks.
+    """
+    pending_tab = nav_helper.consume_pending_tab()
+    if pending_tab == "accounts_payable":
+        if st.button("🔙 返回完整頁面", key="order_tab_deep_link_exit"):
+            st.rerun()
+        _render_tab4_accounts_payable()
+        return
+
     tab1, tab3, tab4, tab5 = st.tabs([
         "📊 訂單資訊總覽",
         "💰 訂單帳務總覽",

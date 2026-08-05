@@ -3,7 +3,8 @@ scope: ui_layer
 modules:
   AppShellUI:
     type: ui_shell
-    description: Streamlit 側邊欄導覽殼層，動態載入 ui/pages/ 頁面。
+    description: Streamlit 側邊欄導覽殼層，動態載入 ui/pages/ 頁面；同時是全站唯一的進入點，右上角浮動 AI
+      助理圖示 (st.dialog) 在此注入一次，所有頁面共用，內含「問答」與「修改表單」兩種模式切換。
     source: ui/app.py
     domain: UI
     subsystem: null
@@ -15,12 +16,39 @@ modules:
     - FormManagementUI
     - FinanceAlertCenterUI
     - LineManagementUI
+    - FormAgentService
+    - QAAgentService
     input: {}
     output: {}
     exceptions: []
-    invariants: []
+    invariants:
+    - AI 助理對話框內部呼叫 st.rerun() 必須帶 scope="fragment"；st.dialog 本質是 fragment，用預設的
+      scope="app" 會觸發整頁重跑，導致對話框在互動後直接關閉。
+    - 使用者按下「套用變更」後，必須呼叫既有的 PATCH /api/v1/admin/data-browser/{table}/{row_id} 端點寫入，本檔案本身不得繞過該端點直接寫資料庫。
+    - 問答模式 (run_qa_agent) 與修改表單模式 (run_form_agent) 必須使用各自獨立的 session_state 對話歷史
+      key，不得混在同一份歷史紀錄裡，避免問答內容跟待確認的表單異動卡片互相干擾。
+    - _apply_page_query_param 必須在 apply_pending_navigation() 之後、st.sidebar.radio 元件
+      建立之前呼叫（元件建立後不能再改寫綁定的 session_state key）。這是為了讓 AI 助理問答模式回答裡的
+      頁面連結 (?page=xxx) 能正確導覽：Streamlit 會把 ui/pages/ 自動偵測成原生的 /xxx 路由，
+      但這些頁面檔案刻意不含頂層 show() 呼叫，直接連到原生路由會是空白頁；必須透過 ?page=xxx
+      查詢參數走這個 App 自訂的 st.sidebar.radio + NAV_KEY 機制才會真的渲染內容。
+      PAGE_SLUG_TO_TITLE 的 key 必須跟 services/qa_agent_service.py::VALID_PAGE_PATHS
+      (去掉開頭斜線後) 完全對應，兩邊新增頁面時要同步維護。
     preferred_pattern: none
-    verification: []
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -c
+        - "from pathlib import Path\ns = Path('ui/app.py').read_text(encoding='utf-8')\n\
+          assert 'st.rerun(scope=\"fragment\")' in s\nassert '_ai_assistant_dialog'\
+          \ in s\nassert 'run_form_agent' in s\nassert 'run_qa_agent' in s\nassert\
+          \ 'segmented_control' in s\nassert '_apply_page_query_param' in s\nassert\
+          \ 'PAGE_SLUG_TO_TITLE' in s\nprint('AI_ASSISTANT_FAB_WIRED')\n"
+        cwd: project
+        timeout: 30
+        expect_exit: 0
+        expect_stdout_contains: AI_ASSISTANT_FAB_WIRED
     decisions: []
     todo: []
     checkpoint: []
@@ -43,6 +71,11 @@ modules:
     known_symbols:
     - load_pages
     - main
+    - _render_ai_assistant_fab
+    - _ai_assistant_dialog
+    - _render_qa_mode
+    - _render_form_mode
+    - _apply_page_query_param
   DataBrowserUI:
     type: ui_page
     description: 原始資料庫表格瀏覽頁面。只提供 DbService 仍支援的資料表檢視；legacy payments 選項與相關唯讀／編輯設定必須完全移除。
@@ -192,6 +225,11 @@ modules:
     - 不得渲染 LegacySingleCaregiverMatchingRenderer、正式 assignment 配置或 assignment-synchronization
       Preview／Apply；這些入口只屬 MultiCaregiverSchedulingPageUI。
     - 不得直接讀取資料庫或帳務 API；資料載入只屬於 Page2TabNavigation，帳務寫入只屬於 PaymentManagementUI。
+    - 'INV-UI-03 (2026-08-02): st.tabs 無法用程式切換到指定分頁，任何「深連結落地時要直接顯示某個
+      分頁」的需求（例如 AI 助理答覆連結）都必須在建立 st.tabs 之前用 early-return 跳過整個分頁列、
+      只渲染目標分頁的 renderer。目前用 nav_helper.consume_pending_tab() == "accounts_payable" 觸發，由
+      ui/app.py::_apply_page_query_param 讀取 ?tab= 網址參數寫入；新增其他分頁的深連結時比照同一模式，
+      不要嘗試用 st.session_state 直接操控 st.tabs 本身（該元件不支援）。'
     preferred_pattern: none
     verification:
     - command:

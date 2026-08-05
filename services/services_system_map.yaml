@@ -7574,6 +7574,424 @@ modules:
     known_symbols:
     - mark_event
     - register_event
+  MCPFormTools:
+    type: service
+    description: 將表單欄位查詢/修改建議、案件搜尋與操作說明問答封裝為 MCP 工具，供地端 LLM Agent (Ollama) 呼叫；全數為唯讀/非寫入操作，不直接寫入資料庫。
+    source: services/mcp_form_tools.py
+    domain: Services
+    subsystem: null
+    map_file: services\services_system_map.md
+    dependencies:
+    - DataBrowserAdminSchemaService
+    - DbService
+    - OllamaEmbeddingUtil
+    input:
+      table: 資料表名稱，限定 clients/staff/orders (Literal FormTable)。
+      row_id: 主鍵值或案號 (case_no)。
+      field_name: 欲修改的欄位名稱。
+      new_value: 欲修改的新值。
+      keyword: search_case_records 用的案號/姓名/電話關鍵字。
+      question: search_help 用的操作問題。
+    output:
+      schema_result: get_editable_schema 回傳之可編輯欄位白名單與下拉選單選項。
+      row_result: find_row 回傳之單筆資料列現值。
+      proposal_result: propose_field_update 回傳之待確認異動物件 (status/table/row_id/field_name/old_value/new_value)，或錯誤訊息。
+      case_search_result: search_case_records 回傳之最多 5 筆案件摘要 (case_no/name/phone/status/start_date/end_date)。
+      help_search_result: search_help 回傳之最多 3 筆操作說明片段 (content/source/distance)。
+    exceptions: []
+    invariants:
+    - propose_field_update 只能驗證並回傳待確認的異動內容，絕對不得寫入資料庫；實際寫入僅能透過既有的 PATCH
+      /api/v1/admin/data-browser/{table}/{row_id} 端點、由使用者在網頁介面明確確認後觸發。
+    - 只暴露 clients/staff/orders 三張表 (FormTable Literal)，不得比照 DataBrowserAdminSchemaService.ALLOWED_TABLES
+      全開放財務、稽核等表。
+    - 欄位合法性必須透過 DataBrowserAdminSchemaService.get_data_browser_table_schema 動態取得之 editable_columns
+      驗證，不得自行維護第二份白名單。
+    - clients/staff 之技術主鍵為 id，但使用者慣以案號 (case_no) 指稱；查無 pk_col 相符列時必須再嘗試以 case_no
+      比對，並回傳解析後的技術主鍵值供後續 PATCH 使用。
+    - 此掛載點 (api/main.py 之 /mcp-tools) 必須套上 InternalApiKeyMiddleware 驗證 X-Internal-API-Key，因
+      find_row/search_case_records 會回傳客戶 PII，不可未經驗證即可存取。
+    - search_help 使用的 chromadb collection 名稱為 web_admin_help_index，必須與 line/worker.py
+      既有的 union_faq collection 分開，不得共用或互相覆蓋。
+    - search_help 查詢與 scripts/build_help_index.py 建立索引時必須使用同一個 embedding function
+      (OllamaEmbeddingUtil.OllamaEmbeddingFunction, 模型 bge-m3)；chromadb 內建預設 embedder (all-MiniLM-L6-v2)
+      實測對中文語意區分度不足，不得改回預設值。
+    - search_case_records 必須在伺服器端剝除常見中文描述詞 (案號/案件編號/電話/姓名等) 再做 LIKE 查詢，
+      不得完全依賴呼叫端 (LLM) 自律只傳乾淨的關鍵字；實測 LLM 常把描述詞跟數值黏在一起傳入 (例如「案號115000002」)，
+      若不剝除會查無結果。
+    - search_help 的答案品質完全取決於 scripts/build_help_index.py 的 SOURCE_FILES 白名單涵蓋範圍；
+      實測發現只抽 st.caption/st.info 不夠，st.subheader/st.header/st.title 這類「這個分頁叫什麼」的標題文字
+      對「要去哪裡找某功能」類導覽問題更關鍵 (例如 order/tab2_assign.py 的 st.subheader('🤝 月嫂配對中心')
+      才是「怎麼到月嫂配對」這類問題的正確答案來源，caption/info 大多是流程中途的狀態提示，答非所問)。
+      新增任何一個核心操作流程頁面時，要連同檢查是否需要加進白名單，不能只看 caption 密度。
+    - NAVIGATION_MAP 的網址故意不寫進描述文字本身 (不寫「（網址 /orders）」這種括號)，
+      只當獨立的 url 欄位存進 chromadb metadata，由 search_help 原樣回傳、
+      qa_agent_service.py::_extract_nav_url 直接讀取 (不再用正則表達式從文字裡硬抓)。
+      這是因為 LLM 回答時會照抄檢索到的文字，網址若混在句子裡，使用者會同時看到「文字裡的路徑」
+      跟「答案結尾自動補的可點擊連結」兩份重複資訊。新增 navigation_map 項目時，url 一定要放在
+      tuple 的第三個欄位，不要寫回文字裡。
+    - 【重要】曾經在 system prompt 額外加一句「回答裡不要提到任何網址或路徑...」試圖確保模型不提網址，
+      實測這句話會讓模型在完全無關的判斷上（該不該呼叫 search_help vs 反問案號）大幅變得更容易誤判、
+      反問案號的頻率明顯上升（同一批之前 100% 成功的問法變成 100% 失敗）。移除這句指示後，
+      模型單純因為「檢索內容本身已經不含網址文字了」就自然不會在回答裡提網址，不需要額外用
+      prompt 明講。這是 7b 這種小模型的典型「prompt 稀釋」現象：多加一句看似無關的指示，
+      會影響模型在其他判斷點上的表現。之後不要再為了控制輸出格式而加類似的額外指示，
+      優先透過調整「餵給模型的內容本身」解決，而不是加更多行為指示。
+    - search_help 對 chromadb 的向量檢索只能呼叫一次 collection.query()（n_results=8，
+      在 Python 端依 metadata.source 分組排序，navigation_map 最多取 2 筆排最前面、其餘一般內容取 4 筆），
+      不可以為了让 navigation_map 排名靠前而拆成兩次向量查詢 (一次一般查詢 + 一次 where 過濾 navigation_map)。
+      實測兩次查詢會各自觸發一次 bge-m3 embedding 呼叫，合計耗時逼近 7 秒以上；若 Ollama 剛好把
+      bge-m3 卸載掉 (閒置逾時)，單次呼叫本身就要 8~10 秒重新載入模型，兩次疊加會超過 MCP
+      Streamable HTTP 的請求時限，導致 SSE 串流中斷 (MCPError「SSE stream ended without a response」)，
+      使用者端看到的是 unhandled errors in a TaskGroup。
+    - search_help 除了向量檢索，還會用 _bm25_search（純 Python 的 rank_bm25 + jieba 中文斷詞）
+      對同一批索引內容做一次字面關鍵字檢索，兩邊依內容去重後取聯集，彌補純向量檢索「語意抽象、
+      精確詞彙/專有名詞找不到」的弱點。BM25 索引在每次呼叫時對 77 筆內容當場重建（成本極低，
+      不需要持久化/快取），不是取代向量檢索，是並行互補。刻意不用 sentence-transformers/PyTorch
+      跑正式 Reranker 模型：這台機器 4GB VRAM 已經被 qwen2.5-coder:7b + bge-m3 佔滿，
+      再加一個 reranker 模型會加劇模型互相卸載/重載的問題，讓已經偏慢的回應時間更糟；
+      rank_bm25+jieba 是純 Python、不吃 GPU/VRAM 的低成本替代方案。
+    - jieba 第一次呼叫 jieba.cut() 時會花約 2 秒建立/載入字典快取，但只會在同一個 process
+      生命週期內發生一次（FastAPI 是常駐程序，只有伺服器啟動後的第一次 search_help 呼叫會變慢，
+      之後都很快），不需要額外做預熱機制。
+    - services/ollama_embedding.py::OllamaEmbeddingFunction 呼叫 /api/embed 時必須帶
+      keep_alive="30m"，讓 bge-m3 常駐久一點，降低前述冷啟動 8~10 秒的發生頻率；
+      不可以拿掉這個參數改回 Ollama 預設的 5 分鐘閒置卸載。
+    - search_help 的 docstring 必須明確要求呼叫端把使用者的完整原始問題放進 question 參數，
+      不可以自行縮短成單一關鍵字。根因：7b 模型有時會把「月嫂配對要去哪裡操作」這種問題自行縮短成
+      「月嫂配對」才傳給 search_help，縮短後遺失「要去哪裡/怎麼操作」這個導覽意圖訊號，
+      導致 navigation_map 條目在向量相似度排名中連前 8 名都排不進去 (因為只剩下語意較窄的關鍵字比對)，
+      模型只好改用同一批結果裡其他片段 (例如頁面裡 st.subheader 的英文原文 "(Clients, Orders & Matching)")
+      自己拼湊出一個看起來像網址但實際不存在的連結。修法是在 mcp_form_tools.py::search_help 的
+      docstring 與 qa_agent_service.py 的 SYSTEM_PROMPT 都明確要求「放完整問題、不要縮短關鍵字」，
+      而不是持續調整 navigation_map 的排序權重（先前試過 boosting 排序、拆兩次查詢，
+      都只是治標，問題根源在傳進來的 question 參數本身就已經遺失資訊）。
+    - qa_agent_service.py::_fix_links 是最後一道防線：無論模型的措辭/縮短行為如何，回答裡任何
+      Markdown 連結的網址如果不在 VALID_PAGE_PATHS 白名單裡，一律用本次對話中 search_help
+      實際查到的 navigation_map 網址覆蓋；查不到就直接拿掉連結（只留文字），絕不放行任何模型自己
+      拼湊、未經驗證的網址。這一層不可以移除，即使上面的 question 完整傳遞修法已經大幅降低觸發機率。
+    - _fix_links 也要處理「模型查到正確網址、但忘記包成 Markdown 連結格式，只寫成純文字
+      『網址是 /orders』」這種情況：回答結尾完全沒有連到 correct_url 的連結時，自動補上
+      「👉 [前往頁面](correct_url)」。這屬於客觀格式保證（網址本身已經由 search_help 驗證過），
+      不是在猜測使用者意圖或幫模型做決策判斷，跟使用者要求拿掉的關鍵字繞過（[[feedback_no_keyword_patching]]）
+      性質不同，不需要比照移除。
+    - 回答裡所有頁面連結必須組成完整 http://... 網址（UI_BASE_URL 環境變數，預設
+      http://localhost:8501），不能只給 /orders 這種相對路徑；_fix_links::normalize()
+      負責把 UI_BASE_URL 前綴剝除後再比對 VALID_PAGE_PATHS 白名單，確保無論模型自己寫
+      相對路徑還是完整網址都能正確判斷合法性。UI_BASE_URL 是 Streamlit 本身的網址，
+      跟 API_BASE_URL（FastAPI 後端）是不同的服務/port，不可混用。
+    - _to_full_url 產生的連結格式必須是 http://localhost:8501/?page=orders（query
+      string），絕對不能是 http://localhost:8501/orders（path）。根因：這個 App 用
+      ui/nav_helper.py 的 st.sidebar.radio + session_state[NAV_KEY] 自訂機制切換頁面，
+      ui/pages/*.py 每個檔案刻意不含頂層 show() 呼叫（由 ui/app.py::load_pages() 動態
+      import 後才呼叫 show()）；但 Streamlit 同時會把 ui/pages/ 資料夾自動偵測成原生的
+      多頁面路由 (/orders、/calendar...)，這兩套路由系統並存但只有前者真的會渲染內容——
+      直接連到原生路由的頁面時，因為沒有經過 ui/app.py 的 show() 呼叫，畫面會是空白。
+      AppShellUI::_apply_page_query_param 負責讀取 ?page=xxx 參數、對應
+      PAGE_SLUG_TO_TITLE 後寫入 NAV_KEY 觸發自訂路由切換，這兩邊 (qa_agent_service.py
+      的 URL 產生端、ui/app.py 的接收端) 必須同步維護，不能只改一邊。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -c
+        - "from services.mcp_form_tools import mcp, build_protected_asgi_app\nimport\
+          \ asyncio\ntools = asyncio.run(mcp.list_tools())\nnames = {t.name for t\
+          \ in tools}\nassert names == {'get_editable_schema', 'find_row', 'propose_field_update',\
+          \ 'search_case_records', 'search_help'}\napp = build_protected_asgi_app()\n\
+          assert app is not None\nprint('MCP_FORM_TOOLS_OK')\n"
+        cwd: project
+        timeout: 30
+        expect_exit: 0
+        expect_stdout_contains: MCP_FORM_TOOLS_OK
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm: []
+    idempotency:
+      level: idempotent
+      side_effects: []
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals:
+    - 不負責實際寫入資料庫；寫入永遠透過既有的 data-browser-admin PATCH 端點完成。
+    sub_map: services_layer
+    state: implemented
+    fan_in_snapshot: 1
+    known_symbols:
+    - get_editable_schema
+    - find_row
+    - propose_field_update
+    - search_case_records
+    - search_help
+    - build_protected_asgi_app
+  OllamaEmbeddingUtil:
+    type: service
+    description: chromadb 相容的 embedding function，透過 Ollama 的 bge-m3 模型產生向量，取代預設對中文語意區分度不足的
+      all-MiniLM-L6-v2。
+    source: services/ollama_embedding.py
+    domain: Services
+    subsystem: null
+    map_file: services\services_system_map.md
+    dependencies: []
+    input:
+      input: 待向量化的字串列表 (chromadb Documents)。
+    output:
+      embeddings: 對應的向量列表。
+    exceptions: []
+    invariants:
+    - 必須呼叫 Ollama /api/embed 端點，模型固定為 bge-m3 (可用 OLLAMA_EMBEDDING_MODEL 環境變數覆蓋)。
+    - 建立索引 (scripts/build_help_index.py) 與查詢 (services/mcp_form_tools.py::search_help)
+      必須使用同一個 embedding function 實例設定，否則向量空間不一致會導致查詢結果失真。
+    - 預設用 num_gpu=0 強制 bge-m3 跑 CPU (OLLAMA_EMBEDDING_FORCE_CPU 環境變數可設為 "false"
+      改回讓 Ollama 自動決定)。這台機器只有 4GB VRAM，bge-m3 跟 qwen2.5-coder:7b 搶顯存會導致
+      兩邊互相卸載/重載，回應動輒 50 秒以上；機器有 24GB RAM，改用 CPU 後實測比原本的 GPU
+      版本還快（暖機後 embed 單次約 2.8 秒，原本 GPU 版本約 6.6 秒），且完整問答流程從
+      50~65 秒降到 16~37 秒。不要拿掉這個設定改回自動模式。
+    - 評估過兩種 Reranker，都實測放棄，不要重新加入任何通用 cross-encoder reranker：
+      (1) FlashRank（ms-marco-MultiBERT-L-12，純 Python/ONNX，無 PyTorch）；
+      (2) BAAI/bge-reranker-v2-m3（ONNX 轉換版，透過 onnxruntime + transformers tokenizer
+      跑，同樣不需要 PyTorch，這顆是 bge-m3 同團隊做的專用多語言 reranker，比 FlashRank 那顆
+      更強）。兩顆用同一組真實 navigation_map 文字測試（問題是「服務人員資料要去哪裡看呢?」），
+      **都把「服務人員行事曆」(錯誤答案) 排在「資料庫原始資料瀏覽」(正確答案) 前面**
+      (FlashRank 分數 0.9973 對 0.9886；bge-reranker-v2-m3 分數 3.5577 對 2.9895)。兩個不同等級的
+      reranker 得到同方向的錯誤結果，代表這不是「選錯模型」的問題，而是 cross-encoder reranker
+      的訓練目標普遍是「主題相關性評分」，不是「讀懂『這裡不是...是...』這種業務邏輯排除語意」；
+      我們現在讓 LLM 自己讀多筆候選內容做判斷反而更可靠 (LLM 真的能理解排除語意)。
+      不要再評估其他通用 reranker，除非該 reranker 明確有針對「排除性語意」做過訓練/驗證。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -c
+        - "from services.ollama_embedding import OllamaEmbeddingFunction\nfn = OllamaEmbeddingFunction()\n\
+          assert fn.name() == 'ollama_bge_m3'\nprint('OLLAMA_EMBEDDING_UTIL_OK')\n"
+        cwd: project
+        timeout: 30
+        expect_exit: 0
+        expect_stdout_contains: OLLAMA_EMBEDDING_UTIL_OK
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: low
+    algorithm: []
+    idempotency:
+      level: idempotent
+      side_effects:
+      - 呼叫外部 Ollama HTTP API (localhost:11434)
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals: []
+    sub_map: services_layer
+    state: implemented
+    fan_in_snapshot: 1
+    known_symbols:
+    - OllamaEmbeddingFunction
+  FormAgentService:
+    type: service
+    description: 地端 LLM (Ollama, qwen2.5-coder:7b) 驅動的表單修改助理；透過 MCP Client 呼叫 MCPFormTools，組成單一欄位的待確認修改建議。
+    source: services/form_agent_service.py
+    domain: Services
+    subsystem: null
+    map_file: services\services_system_map.md
+    dependencies:
+    - MCPFormTools
+    input:
+      user_text: 使用者自然語言指令。
+    output:
+      result: '{status: pending_confirmation/error/no_action, ...}，pending_confirmation
+        時附帶 table/row_id/primary_key/field_name/old_value/new_value。'
+    exceptions: []
+    invariants:
+    - 本服務完全不寫入資料庫；run_form_agent 的回傳值僅供 UI 顯示待確認卡片，實際寫入由 UI 呼叫既有 PATCH 端點完成。
+    - Ollama 對 qwen2.5-coder 系列不會把工具呼叫填入結構化 tool_calls，一律落於 content 裡的裸 JSON；必須以
+      _extract_tool_call 做 fallback 解析，不可只信任 message.tool_calls。
+    - 從 fallback 解析得到的工具名稱，必須比對 MCP session 實際回傳的 known_tool_names 白名單；不在白名單內一律拒絕執行，防止模型捏造清單外的函式名稱
+      (實測 3b 模型會捏造 delete_case 等不存在的函式)。
+    - 一次只處理一個欄位修改；MAX_TOOL_ITERATIONS 內未得出結論則回傳 error，不得無限重試。
+    - 呼叫 MCP endpoint 必須帶 X-Internal-API-Key (INTERNAL_API_KEY 環境變數)，且本檔案必須自行 load_dotenv，不可依賴呼叫方已載入環境變數。
+    - _call_ollama_chat 呼叫 Ollama /api/chat 時必須帶 keep_alive="30m"：Ollama 預設閒置 5
+      分鐘就卸載模型，7b 冷啟動重新載入實測要 20~60 秒以上 (視當時系統負載)，容易讓使用者以為
+      RAG/Agent 功能故障、或拖到 MCP session 逾時；OllamaEmbeddingUtil 的 bge-m3 呼叫也要有同樣設定，
+      兩邊都要顧到，只設其中一邊仍會在另一邊冷啟動時整體變慢。
+    - 必須用 FORM_TOOL_NAMES 過濾 MCP session 回傳的工具清單，只暴露 get_editable_schema/find_row/propose_field_update
+      給模型；MCP server 上還掛著 search_case_records/search_help (問答用途)，實測若不過濾、把全部工具都交給模型，
+      會稀釋模型對 propose_field_update 該用哪張表的判斷，導致選錯表 (例如把 clients 的電話誤判成要改 orders 表)。
+    - run_form_agent 對外的同步入口必須經由 run_with_retry 包裝 (最多重試一次)：MCP Streamable HTTP
+      session 偶爾會因為連線/session 生命週期競速丟出 TaskGroup 例外 (實測常見於 FastAPI --reload 剛好在請求進行中重啟)，
+      這類錯誤重試一次幾乎都會成功，不應該把技術性錯誤訊息直接曝露給使用者。services/qa_agent_service.py::run_qa_agent
+      共用同一個 run_with_retry，不得各自重複實作。run_with_retry 的簽名是 (async_fn, *args,
+      error_prefix, attempts=2, **kwargs)，用 *args/**kwargs 轉傳給 async_fn，才能同時支援
+      run_form_agent(user_text) 跟 run_qa_agent(user_text, history=...) 這種參數不同的呼叫端，
+      不要為了加新參數又拆一個新的重試函式。
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -c
+        - "from services.form_agent_service import run_form_agent\nresult = run_form_agent('今天天氣如何？')\n\
+          assert result.get('status') in ('no_action', 'error'), result\nprint('FORM_AGENT_SAFE_DECLINE_OK')\n"
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: FORM_AGENT_SAFE_DECLINE_OK
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: high
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects:
+      - 呼叫外部 Ollama HTTP API (localhost:11434)
+      - 透過 MCP Client 對 /mcp-tools 端點發送 HTTP 請求 (唯讀)
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals:
+    - 不做 RAG 問答；一般網站操作/導覽問題應一律拒絕，屬另一個獨立功能 (待規劃)。
+    - 不支援一次修改多個欄位。
+    sub_map: services_layer
+    state: implemented
+    fan_in_snapshot: 1
+    known_symbols:
+    - run_form_agent
+    - run_with_retry
+  QAAgentService:
+    type: service
+    description: 地端 LLM (Ollama, qwen2.5-coder:7b) 驅動的查詢問答助理；透過 MCP Client 呼叫
+      MCPFormTools 的 search_case_records/search_help 兩個唯讀工具，回答案件查詢與網站操作問題。
+    source: services/qa_agent_service.py
+    domain: Services
+    subsystem: null
+    map_file: services\services_system_map.md
+    dependencies:
+    - MCPFormTools
+    input:
+      user_text: 使用者自然語言問題。
+      history: 選填，這次提問*之前*的對話紀錄 [(role, content), ...]，role 為 "user"/"assistant"，
+        只取最近 MAX_HISTORY_TURNS (3) 輪。讓模型理解使用者對上一句反問的簡短回答在回答什麼，
+        不會把追問誤判成全新、無上下文的問題。
+    output:
+      result: '{status: answered/error, message: ...}。'
+    exceptions: []
+    invariants:
+    - 只能使用 search_case_records/search_help 兩個工具；即使 MCP server 上還掛著 propose_field_update
+      等寫入相關工具，本服務呼叫 list_tools() 後必須自行過濾，不得把完整工具清單交給模型。
+    - 完全不寫入資料庫；使用者要求修改/新增/刪除資料時，必須回覆引導使用者切換到「修改表單」模式，不得嘗試呼叫任何工具或假裝已處理。
+    - 沿用 services/form_agent_service.py::_extract_tool_call 的 fallback JSON 解析邏輯 (Ollama
+      對 qwen2.5-coder 系列不會把工具呼叫填入結構化 tool_calls)，不得重複實作第二份解析邏輯。
+    - 從 fallback 解析得到的工具名稱必須比對 MCP session 實際回傳、且已過濾為 QA_TOOL_NAMES 的白名單；不在白名單內一律拒絕執行。
+    - 模型固定用 7b、不用 3b：實測 3b 會把工具參數的 JSON schema 結構誤植進 arguments 內容裡
+      (原本應該是單純的字串值，卻被包成一個帶有 type/value 欄位的巢狀物件)，
+      且對「網站怎麼操作」類問題常常不呼叫 search_help、直接憑自身既有知識瞎編通用答案；7b 在這兩點上明顯更可靠，速度也沒有比較慢。
+    - system prompt 必須明確區分「詢問操作方式」(如「休假要怎麼安排」) 與「要求直接執行修改」(如「幫我把...改成...」)，
+      否則模型會把疑問句誤判為修改請求而直接拒絕，不呼叫 search_help。
+    - system prompt 必須明確規定「該用哪個工具」的判斷依據是問題裡有沒有具體的案號數字/姓名/電話，
+      不能靠字面關鍵字聯想；實測「我要怎麼配對月嫂」這種問題會因為「配對」聽起來像案件操作，
+      被模型誤判成需要案號而直接反問澄清、完全不呼叫任何工具，即使系統提示已經要求「不可以在搜尋前反問」也一樣。
+    - 【重要】曾經在程式碼裡加過一條規則：只要問題沒有數字、也沒有修改類關鍵字，就不管模型第一次
+      怎麼回應、強制呼叫 search_help（等於用關鍵字繞過模型的判斷）。使用者明確要求拿掉，理由是
+      這樣做不是「AI 在判斷」、是規則掩蓋模型能力不足（詳見 [[feedback_no_keyword_patching]]）。
+      現狀是完全交給模型自己判斷，因此「行事曆的休假怎麼安排」這類問法**偶爾**還是會被誤判成
+      需要案號而反問——這是已知、使用者接受的限制，不要再加類似的關鍵字繞過規則，
+      如果要改善只能從換更好的模型或改善 prompt 清晰度下手。
+    - system prompt 允許把散落在多筆 search_help 檢索結果裡的資訊組合拼接成一個完整回答
+      （例如一筆說某功能在哪個頁面、另一筆補充操作細節），但仍必須嚴格根據檢索結果本身，
+      不可以用模型既有知識編造檢索結果裡沒有的內容；只有整體查不到相關結果時才誠實回答查不到。
+      這跟允許「憑空推測」不同，是允許「跨片段整合已檢索到的事實」，不會重新引入之前發現的幻覺問題
+      （模型自己編一套通用請假流程）。
+    - 加了 history 參數（多輪對話記憶）後發現：如果對話紀錄裡已經有相關內容，模型有時會
+      直接從對話紀錄本身回答、跳過重新呼叫 search_case_records/search_help 查證，導致答案
+      不是真的查證過的（實測會照抄自己上一輪反問句裡的詞彙當成正確答案）。試過在 system prompt
+      加一句「對話紀錄只是用來理解問題、不能取代查證」，但這句話反而讓模型在完全無關的
+      「該不該呼叫 search_help vs 反問案號」判斷上大幅變得更容易誤判（同一批原本 100% 成功的
+      問法變成 100% 失敗）——這是 7b 這種小模型典型的 prompt 稀釋現象，多加一句看似無關的指示
+      會影響其他判斷點。目前該指示已經移除，接受「有歷史時模型偶爾會跳過重新查證」這個殘留風險，
+      不要為了修這個而再加類似的額外行為指示；如果要修，優先考慮縮短/簡化整個 system prompt，
+      而不是繼續疊加規則。
+    - _history_to_messages 只取最近 MAX_HISTORY_TURNS (3) 輪，不是全部歷史：這台機器生成本來就慢，
+      歷史無限累積會讓每次呼叫的 context 越來越長、越聊越慢。
+    - 'BUG-FIX (2026-08-02): _extract_nav_target（單一 url/tab、取第一筆片段）已改成
+      _extract_nav_candidates + _pick_nav_target。原本的邏輯只憑 search_help 回傳片段的排序
+      決定要附哪個連結，但同一次查詢常常撈到好幾筆合法的 navigation_map 候選（例如問「服務人員
+      資料要去哪裡看」時，「行事曆導覽」片段因為刻意寫了排除語意說明、內含「服務人員基本資料」
+      字樣，語意分數反而可能比真正該去的「資料庫瀏覽導覽」還高），導致回答文字明明講對了頁面、
+      連結卻附錯（實測發現：文字答「資料庫原始資料瀏覽」，連結卻是 /calendar）。改法是收集整個
+      對話所有候選，最後比對「回答文字裡實際出現了哪個頁面/分頁的專屬名稱」(_NAV_TARGET_KEYWORDS)
+      來選連結——這是比對客觀存在的文字內容，跟 _fix_links 驗證網址是否存在同一性質，不算是在猜
+      模型的判斷意圖，不違反 [[feedback_no_keyword_patching]] 的限制。'
+    - 'BUG-FIX 補丁 (2026-08-02): 用非生產模型（llama3-groq-tool-use:8b）測試時發現
+      _pick_nav_target 仍有殘留漏洞——如果回答文字「同時」複誦了「行事曆導覽」和「資料庫瀏覽導覽」
+      兩邊的頁面全名（這種措辭在生產用的 qwen2.5-coder:7b 上目前還沒出現過，但架構上任何模型都
+      可能寫出來），原本只能靠 _NAV_TARGET_KEYWORDS 清單裡寫死的順序硬選，選到「行事曆導覽」
+      （順序較前）。根本原因是「行事曆導覽」這筆 navigation_map 內容本身就內建了排除語意
+      （「這裡不是...服務人員基本資料要去...查」），只要它被撈進候選，回答文字很容易同時複誦
+      兩邊全名。修法是新增 _DEFER_TO = {"/calendar": "/data_browser"}，這是我們自己撰寫、完全
+      掌握的 navigation_map 內容裡已經寫死的排除關係，不是猜模型意圖：只要 /calendar 和
+      /data_browser 同時是候選，一律讓 /calendar 讓位給 /data_browser。之後如果其他 navigation_map
+      條目也寫了類似的排除語意、造成同樣的候選碰撞，比照這個模式在 _DEFER_TO 裡加一筆，
+      不要回頭改成單純的文字順序猜測。'
+    preferred_pattern: none
+    verification:
+    - command:
+        argv:
+        - .venv\Scripts\python.exe
+        - -c
+        - "from services.qa_agent_service import run_qa_agent\nresult = run_qa_agent('\
+          幫我把電話改成 0912345678')\nassert result.get('status')\
+          \ in ('answered', 'error'), result\nassert '修改表單' in\
+          \ result.get('message', '') or result.get('status') == 'error', result\n\
+          print('QA_AGENT_DECLINES_MUTATION_OK')\n"
+        cwd: project
+        timeout: 60
+        expect_exit: 0
+        expect_stdout_contains: QA_AGENT_DECLINES_MUTATION_OK
+    decisions: []
+    todo: []
+    checkpoint: []
+    observability:
+      mode: not_required
+      signals: []
+    complexity: medium
+    algorithm: []
+    idempotency:
+      level: unknown
+      side_effects:
+      - 呼叫外部 Ollama HTTP API (localhost:11434)
+      - 透過 MCP Client 對 /mcp-tools 端點發送 HTTP 請求 (唯讀)
+    retry_budget: 0
+    required_context: []
+    forbidden_context: []
+    context_priority: {}
+    non_goals:
+    - 不做表單修改；修改需求屬於 FormAgentService 的範圍。
+    - 不處理報表類問答。
+    sub_map: services_layer
+    state: implemented
+    fan_in_snapshot: 1
+    known_symbols:
+    - run_qa_agent
+    - _extract_nav_url
+    - _fix_links
+    - _history_to_messages
   AssignmentScheduleLeaveSubstitutionDomainTransitionRulesAdapter:
     type: internal_helper
     description: 將純 ServicePlanTransition 的 opaque segment refs、canonical daily ownership

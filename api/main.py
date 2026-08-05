@@ -61,6 +61,8 @@ from services.admin_auth_service import record_admin_audit
 from services.assignment_schedule_rest_date_service import (
     AssignmentLeaveResolutionDomainError,
 )
+from services.mcp_form_tools import mcp as form_tools_mcp
+from services.mcp_form_tools import build_protected_asgi_app as build_mcp_form_tools_app
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -77,10 +79,14 @@ def _allowed_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     worker_task = start_worker()
-    try:
-        yield
-    finally:
-        await stop_worker(worker_task)
+    # 掛載進來的 MCP Streamable HTTP 子 app 不會自動收到 lifespan 事件，
+    # 其 session_manager 必須跟著父 app 的 lifespan 一起啟動/關閉，否則會
+    # 出現 "Task group is not initialized" 錯誤。
+    async with form_tools_mcp.session_manager.run():
+        try:
+            yield
+        finally:
+            await stop_worker(worker_task)
 
 
 app = FastAPI(
@@ -104,6 +110,7 @@ app.add_middleware(
 )
 
 app.mount("/static", StaticFiles(directory="line/static"), name="static")
+app.mount("/mcp-tools", build_mcp_form_tools_app())
 
 # LINE/LIFF/webhook endpoints are a child router of this central application.
 app.include_router(line_router)
