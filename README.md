@@ -1,8 +1,17 @@
 # 新竹市月子照顧服務人員職業工會－LINE 應用與行政流程自動化系統
 
-> 目前版本：**v0.2.2**（2026-08-01）
+> 目前版本：**v0.2.3**（2026-08-05）
 
 > 更新紀錄固定只保留最近三次版本／功能發布，包含目前版本；更早內容請查閱 Git 歷史與 `document/` 規格文件。
+
+## 2026-08-05 更新（v0.2.3）
+
+本次版本以「配對與欄位綁定」為主軸的架構重整，將已退役的舊媒合流程導流至新版契約流程，並統一欄位來源與序列化邏輯，避免「訂單資訊-1/2」跑號問題。
+
+- **配對 UI 架構整併**：`tab2_assign.py` 的「智慧配對與指派」移除舊 `/send-info-1`、`/send-info-2` 逐步流程，改為共用 `matching_center` 的 `multi_segment_matching` renderer，所有配對與聯繫歷史都走 `matching-plan` 版型。
+- **欄位綁定穩定化**：`parse_beclass_survey_details` 改為正規化鍵名（去空白、統一半形標點、大小寫）後再做欄位映射，降低問卷 key 異體（含全形字元、空白、標點）造成的欄位錯位。
+- **兼容切換設計**：保留開發預覽開關與既有單位資料回填流程，確保重構期間可平行觀察新舊輸入面向並降低上線風險。
+- **欄位歸屬分離**：以「訂單資訊頁面只做展示、核心匹配邏輯放 backend/API」為原則，前端不再直接硬綁舊 API 回傳字段，改由新的統一輸出契約驅動。
 
 ## 2026-08-01 更新（v0.2.2）
 
@@ -48,29 +57,6 @@ ASUS 目標主機仍須先執行歷史 batch dry-run、核對摘要與 fingerpri
 - `online.bat` 不會自動套用資料庫 schema。
 - 正式啟動新版前必須先備份資料庫，在維護窗口依序套用 `db/schema_parts/95`、`98`～`103` 的相關更新。
 - 執行 `scripts/migrate_assignment_schedule_integrity.py` 時應先使用預設 check 模式，確認既有 assignment ownership、同日重複排班與索引狀態，再視結果使用 `--apply`。
-
-## 2026-07-25 更新（v0.2.1）
-
-本次版本完成管理介面 API 化的安全收尾，並統一沿用 LINE 管理中心既有的正式管理員身分與授權系統。
-
-- **正式管理員認證共用**：Data Browser 與國定假日 GET／POST／DELETE 全部改用 `AdminPrincipal` 與 `require_system_admin`，不再自行維護 `X-Auth-Context`、`ADMIN_AUTH_CONTEXT` 或 `admin_role` 字串判斷。
-- **雙層管理 API 防護**：Streamlit 管理頁統一送出伺服器端 `X-Internal-API-Key` 與登入後取得的 `Authorization: Bearer <session>`；缺少設定、Session 失效或角色不足時採 fail-closed。
-- **可信稽核身分**：Data Browser PATCH 的 audit actor 與 role 直接取自已驗證的 `AdminPrincipal.username`／`AdminPrincipal.role`，不接受 UI payload 指定，也不再由 username 推測角色。
-- **UI → API 串接**：Data Browser、訂單／媒合、訂單編輯與月嫂月曆持續改走 FastAPI；排休 ownership 僅使用 `assignment_id`，正式指派維持 preview → confirm → apply 流程。
-- **安全交易邊界**：Data Browser 更新、更新前後快照與 audit insert 共用同一 transaction；非法欄位整批拒絕，audit schema 不在 request runtime 動態建表。
-- **架構規格同步**：補齊管理員認證、Data Browser 與 Holiday 的 dependency、invariant 與 verification 規格。
-
-部署或啟動管理介面前至少需要：
-
-```env
-INTERNAL_API_KEY=replace-with-a-long-random-secret
-APP_ENV=production
-ENABLE_ADMIN_AUTH=true
-```
-
-正式環境必須先由管理員登入取得 Session。只有 `APP_ENV` 為 `development`、`dev`、`local` 或 `test`，且 `ENABLE_ADMIN_AUTH=false` 時可以略過 Bearer Session；`X-Internal-API-Key` 永遠不能略過。
-
-本次安全整合的針對性驗證為 `22 passed`，涵蓋正式認證核心、Data Browser Router／Service、Holiday Router 與 Streamlit runtime AppTest。對應 commits：`8fa3910`、`bd09413`。
 
 ---
 

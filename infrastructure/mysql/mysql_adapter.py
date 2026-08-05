@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import pymysql
 import math
 from datetime import datetime, date, timedelta
@@ -499,37 +500,92 @@ def parse_beclass_survey_details(raw_val) -> dict:
         except Exception:
             return res
 
-    # 精確對齊 SQL 實體 JSON 鍵值
-    if "月子餐點調理喜好/飲食習慣：" in data:
-        res["dietary_habits"] = str(data["月子餐點調理喜好/飲食習慣："])
-    if "呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？" in data:
-        res["vegetarian_preference"] = str(data["呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？"])
-    if "2．餐飲含酒比例：" in data:
-        res["alcohol_ratio"] = str(data["2．餐飲含酒比例："])
-    if "3．料理用油：(可接受種類)" in data:
-        res["cooking_oil_type"] = str(data["3．料理用油：(可接受種類)"])
-    if "5媽咪有無過敏體質：" in data:
-        res["maternal_allergy"] = str(data["5媽咪有無過敏體質："])
-    if "特殊照護時應注意事項：" in data:
-        res["special_care_notes"] = str(data["特殊照護時應注意事項："])
-    if "餐點喜忌備註：" in data:
-        res["meal_preferences"] = str(data["餐點喜忌備註："])
-    if "烹煮工具" in data:
-        res["cooking_tools"] = str(data["烹煮工具"])
-    if "洗澡水準備：" in data:
-        res["bath_water_prep"] = str(data["洗澡水準備："])
-    if "哺乳方式：" in data:
-        res["breastfeeding_method"] = str(data["哺乳方式："])
-    if "特殊計費:甲方同意需另支付當日薪資1倍予乙方。" in data:
-        res["holiday_pricing_terms"] = str(data["特殊計費:甲方同意需另支付當日薪資1倍予乙方。"])
-    if "特殊計費:胎數" in data:
-        res["multi_birth_count"] = str(data["特殊計費:胎數"])
-    if "透天服務樓層方式(會加收樓層費)" in data:
-        res["stair_floor_fee_mode"] = str(data["透天服務樓層方式(會加收樓層費)"])
-    if "提供服務人員轎車停車位" in data:
-        res["parking_space_provided"] = str(data["提供服務人員轎車停車位"])
-    if "服務時間內是否有其他寶寶" in data:
-        res["other_babies_present"] = str(data["服務時間內是否有其他寶寶"])
+    normalized_data = {}
+    for key, value in data.items():
+        if not isinstance(key, str):
+            continue
+        normal_key = re.sub(r"[\\s\\u00a0]+", "", key).replace("：", ":").replace("．", ".").lower()
+        if normal_key:
+            normalized_data[normal_key] = str(value)
+
+    def _pick(options: list[str], default_value: str) -> str:
+        for key in options:
+            normal_key = re.sub(r"[\\s\\u00a0]+", "", key).replace("：", ":").replace("．", ".").lower()
+            if normal_key in normalized_data:
+                value = normalized_data[normal_key]
+                if value is None:
+                    continue
+                return str(value)
+        return default_value
+
+    res["dietary_habits"] = _pick([
+        "月子餐點調理喜好/飲食習慣",
+        "月子餐點調理喜好/飲食習慣:",
+    ], res["dietary_habits"])
+
+    res["vegetarian_preference"] = _pick([
+        "呈上題，若遇無法媒合到葷食服務人員時，是否可以接受蛋奶素服務人員？",
+    ], res["vegetarian_preference"])
+
+    res["alcohol_ratio"] = _pick([
+        "2.餐飲含酒比例:",
+        "2．餐飲含酒比例:",
+    ], res["alcohol_ratio"])
+
+    res["cooking_oil_type"] = _pick([
+        "3.料理用油:(可接受種類)",
+        "3．料理用油:(可接受種類)",
+    ], res["cooking_oil_type"])
+
+    res["maternal_allergy"] = _pick([
+        "5媽咪有無過敏體質:",
+        "5.媽咪有無過敏體質:",
+        "5．媽咪有無過敏體質:",
+    ], res["maternal_allergy"])
+
+    res["special_care_notes"] = _pick([
+        "特殊照護時應注意事項:",
+        "特殊照護時應注意事項",
+    ], res["special_care_notes"])
+
+    res["meal_preferences"] = _pick([
+        "餐點喜忌備註:",
+        "餐點喜忌備註",
+    ], res["meal_preferences"])
+
+    res["cooking_tools"] = _pick([
+        "烹煮工具",
+    ], res["cooking_tools"])
+
+    res["bath_water_prep"] = _pick([
+        "洗澡水準備:",
+        "洗澡水準備",
+    ], res["bath_water_prep"])
+
+    res["breastfeeding_method"] = _pick([
+        "哺乳方式:",
+        "哺乳方式",
+    ], res["breastfeeding_method"])
+
+    res["holiday_pricing_terms"] = _pick([
+        "特殊計費:甲方同意需另支付當日薪資1倍予乙方。",
+    ], res["holiday_pricing_terms"])
+
+    res["multi_birth_count"] = _pick([
+        "特殊計費:胎數",
+    ], res["multi_birth_count"])
+
+    res["stair_floor_fee_mode"] = _pick([
+        "透天服務樓層方式(會加收樓層費)",
+    ], res["stair_floor_fee_mode"])
+
+    res["parking_space_provided"] = _pick([
+        "提供服務人員轎車停車位",
+    ], res["parking_space_provided"])
+
+    res["other_babies_present"] = _pick([
+        "服務時間內是否有其他寶寶",
+    ], res["other_babies_present"])
         
     return res
 

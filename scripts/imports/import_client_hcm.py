@@ -11,6 +11,12 @@ from datetime import date, datetime, timedelta
 
 import pymysql
 import pandas as pd
+from datetime import datetime, timezone
+import json
+from api.dependencies.anomaly_registry import get_anomaly_application
+from domains.anomalies.registry import DesiredAlertState
+from subsystems.anomalies.alert_workflow import ProjectAlertRequest
+from domains.case_import.client_import_validation import EXCEL_TO_DB_COLUMN
 from dotenv import load_dotenv
 
 # 確保中文輸出編碼正確
@@ -130,10 +136,52 @@ def _parse_date(value):
         return value.date()
     if isinstance(value, date):
         return value
+    roc_dt = _parse_roc_datetime(value)
+    if roc_dt:
+        return roc_dt.date()
     parsed = pd.to_datetime(value, errors="coerce")
     if pd.isna(parsed):
         return None
     return parsed.date()
+
+
+
+def _parse_roc_datetime(text):
+    text = str(text).strip()
+    pattern = r"^\s*(\d{2,4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?\s*$"
+    match = re.match(pattern, text)
+    if not match:
+        return None
+    year, month, day, hour, minute, second = match.groups()
+    year = int(year)
+    if year < 1911:
+        year += 1911
+
+    hour = int(hour) if hour else 0
+    minute = int(minute) if minute else 0
+    second = int(second) if second else 0
+    extra_days = 0
+    if hour == 24:
+        hour = 0
+        extra_days = 1
+    elif hour > 24:
+        return None
+
+    from datetime import datetime, timezone
+    try:
+        dt = datetime(
+            year,
+            int(month),
+            int(day),
+            hour,
+            minute,
+            second,
+        )
+        if extra_days:
+            dt += timedelta(days=1)
+        return dt.replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 def _parse_datetime(value):
@@ -141,9 +189,15 @@ def _parse_datetime(value):
         return value
     if isinstance(value, date):
         return datetime.combine(value, datetime.min.time())
+    roc_dt = _parse_roc_datetime(value)
+    if roc_dt:
+        return roc_dt
     parsed = pd.to_datetime(value, errors="coerce")
     if pd.isna(parsed):
         return None
+    if parsed.tzinfo is None:
+        from datetime import timezone
+        parsed = parsed.tz_localize(timezone.utc)
     return parsed.to_pydatetime()
 
 
@@ -152,7 +206,7 @@ def _load_holiday_dates(cursor):
     return {
         parsed
         for row in cursor.fetchall()
-        if (parsed := _parse_date(row[0])) is not None
+        if (parsed := _parse_date(row["holiday_date"])) is not None
     }
 
 
@@ -277,18 +331,30 @@ def _import_row(row, ordinal, cursor, application, excel_path):
         return "review_required"
     if application.case_exists(str(case_no)):
         return "skipped_existing"
-    if validate_hcm_row(raw_row):
-        return "review_required"
+    validation_errors = validate_hcm_row(raw_row)
+    if not isinstance(record.get("created_at"), datetime):
+        validation_errors["報名時間(建檔)"] = "報名時間(建檔) 格式無法轉成 datetime"
+    if validation_errors:
+        _sanitize_hcm_record(record, validation_errors)
     try:
         intent = _case_import_intent(cursor, record)
         correlation = CorrelationId(f"hcm-case-import:{case_no}:{ordinal}")
         preview = application.preview(intent, correlation)
         command = _apply_command(intent, preview, correlation, excel_path)
         application.apply(command)
+        if validation_errors:
+            _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors)
         return "inserted"
     except CaseImportWorkflowError as error:
         return _workflow_error_outcome(error)
-    except (TypeError, ValueError):
+    except Exception as e:
+        if not hasattr(_import_row, "exception_printed_count"):
+            _import_row.exception_printed_count = 0
+        if _import_row.exception_printed_count < 3:
+            import traceback
+            traceback.print_exc()
+            print(f"[除錯] 第 {ordinal} 列發生異常: {type(e).__name__}: {e}")
+            _import_row.exception_printed_count += 1
         return "review_required"
 
 
@@ -332,6 +398,13 @@ def _normalized_record(row):
     record["created_at"] = _parse_datetime(row.get("報名時間(建檔)"))
     record["due_month"] = _parse_date(row.get("預產期/預計服務開始月份"))
     record["service_start_date"] = _parse_date(row.get("預計服務日期"))
+    
+    svc_type = record.get("service_type")
+    if svc_type == "周休二日":
+        record["service_type"] = "週休2日"
+    elif svc_type in ["休周日", "休周六"]:
+        record["service_type"] = "週休1日"
+        
     return record
 
 
@@ -363,6 +436,55 @@ def _apply_command(intent, preview, correlation, source_file):
         correlation,
     )
 
+
+def _sanitize_hcm_record(record, validation_errors):
+    for excel_field in validation_errors:
+        db_field = EXCEL_TO_DB_COLUMN.get(excel_field)
+        if not db_field:
+            continue
+        if db_field == "identity_status":
+            record[db_field] = "一般市民"
+        elif db_field == "service_time":
+            record[db_field] = "9 小時 08:00 17:00"
+        elif db_field == "service_type":
+            record[db_field] = "連續服務"
+        elif db_field == "service_days":
+            record[db_field] = 1
+        elif db_field in ("service_start_date", "due_month"):
+            record[db_field] = datetime(2000, 1, 1).date()
+        elif db_field == "created_at":
+            record[db_field] = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        else:
+            record[db_field] = None
+
+
+# Keep compatibility with any external callers that use the non-prefixed name.
+def sanitize_hcm_record(record, validation_errors):
+    return _sanitize_hcm_record(record, validation_errors)
+
+def _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors):
+    app_gen = get_anomaly_application()
+    application = next(app_gen)
+    try:
+        request = ProjectAlertRequest(
+            desired=DesiredAlertState(
+                definition_code="IMPORT-004",
+                source_identity=str(case_no),
+                source_version=1,
+                active=True,
+                display_snapshot={"errors": validation_errors, "row": ordinal},
+            ),
+            source_event_identity=f"hcm-import-validation-{case_no}-{ordinal}",
+            consumer_identity="hcm-import-script-v1",
+            partition_identity="default",
+            occurred_at=datetime.now(timezone.utc),
+        )
+        application.project(request)
+    finally:
+        try:
+            next(app_gen)
+        except StopIteration:
+            pass
 if __name__ == "__main__":
     # 提供預設本機路徑或接收命令列參數
     excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/資料庫、資料處理/假資料_模板.xlsx"

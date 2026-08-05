@@ -49,6 +49,7 @@ task-*.md
 PROJECT_SPEC.md
 scratch/
 .pytest_tmp/
+.pytest_tmp_*
 
 # Preserve tracked legacy system maps
 !**/system_map.yaml

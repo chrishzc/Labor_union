@@ -11,6 +11,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import pymysql
@@ -23,14 +24,34 @@ except Exception:
     pass
 
 # Let file_watcher.py run this script as a subprocess with project imports available.
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if ROOT not in sys.path:
-    sys.path.append(ROOT)
+# Let file_watcher.py run this script as a subprocess with project imports available.
+def _resolve_project_root() -> Path:
+    return Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from domains.case_import.staff_import_validation import (
-    fallback_case_key,
-    validate_staff_row,
-)
+PROJECT_ROOT = _resolve_project_root()
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+cwd_str = os.getcwd()
+if cwd_str not in sys.path:
+    sys.path.insert(0, cwd_str)
+
+try:
+    from domains.case_import.staff_import_validation import (
+        fallback_case_key,
+        validate_staff_row,
+    )
+except ModuleNotFoundError as e:
+    print(f"\n[診斷資訊] 無法載入 domains 模組。")
+    print(f"1. 計算出的專案根目錄 (PROJECT_ROOT): {PROJECT_ROOT}")
+    print(f"2. 該目錄是否存在: {os.path.exists(PROJECT_ROOT)}")
+    try:
+        dirs = [d for d in os.listdir(PROJECT_ROOT) if os.path.isdir(os.path.join(PROJECT_ROOT, d))]
+        print(f"3. 該目錄下的資料夾有: {', '.join(dirs)}")
+    except Exception as ex:
+        print(f"3. 無法列出該目錄內容: {ex}")
+    raise e
 from subsystems.anomalies.system_alert_projection import (
     delete_system_alert,
     resolve_if_exists,
@@ -43,7 +64,7 @@ from subsystems.case_import.beclass_review_intake import (
     record_invalid_beclass_row,
 )
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+load_dotenv(str(PROJECT_ROOT / ".env"))
 
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', '127.0.0.1'),
@@ -154,18 +175,23 @@ def process_import(excel_path):
     print(f"解析 Excel 檔案：{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
 
-    target_sheet = None
-    for name in xl.sheet_names:
-        clean_name = name.replace(" ", "").lower()
-        if '服務人員' in name or 'staff' in clean_name:
-            target_sheet = name
-            break
-
-    if not target_sheet:
-        print("未找到包含『服務人員』關鍵字的工作表，跳過此檔案。")
+    target_sheet = xl.sheet_names[0] if xl.sheet_names else None
+    if target_sheet is None:
+        print("未找到任何工作表，跳過此檔案。")
         return _result(review_required=1)
 
     df = xl.parse(target_sheet)
+    if df.empty:
+        for sheet_name in xl.sheet_names[1:]:
+            candidate = xl.parse(sheet_name)
+            if not candidate.empty:
+                target_sheet = sheet_name
+                df = candidate
+                break
+
+    if df is None or df.empty:
+        print("未找到有資料的工作表，請確認檔案內容後重試。")
+        return _result(review_required=1)
     source_content_digest = fingerprint_workbook(excel_path)
     print(f"找到工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
 

@@ -14,7 +14,6 @@ from ui.pages.form_management.shared import (
     safe_int,
     load_json_templates,
 )
-from ui.pages.form_management.tab1_form_builder import _render_tab1_form_builder
 from ui.pages.form_management.tab2_template_library import _render_tab2_template_library
 from ui.pages.form_management.tab3_contract_management import _render_tab3_contract_management
 
@@ -59,15 +58,11 @@ def _merge_client_context(target_order, client_row):
 
 
 def _render_form_management_page_shell(form_db_table_fields, field_types, field_widths, global_stats, target_order, form_table_for_key):
-    """Render FormManagementUI's 3 fixed tabs."""
-    tab1, tab2, tab3 = st.tabs([
-        "➕ 1. 手動創建與設計新表單 (UX 實驗室)",
+    """Render FormManagementUI's 2 fixed tabs."""
+    tab2, tab3 = st.tabs([
         "🗄️ 2. 自訂表單模板庫與 5:5 雙視窗線上編輯預覽",
         "📜 3. 制式定型化契約管理 (EPPP 變數代理引擎)"
     ])
-
-    with tab1:
-        _render_tab1_form_builder(form_db_table_fields, field_types, field_widths, global_stats, target_order)
 
     with tab2:
         _render_tab2_template_library(form_db_table_fields, field_types, field_widths, global_stats, target_order)

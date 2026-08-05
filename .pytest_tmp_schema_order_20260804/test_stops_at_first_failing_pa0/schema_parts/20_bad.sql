@@ -1,1 +1,0 @@
-CREATE TABLE bad_table (id INT);

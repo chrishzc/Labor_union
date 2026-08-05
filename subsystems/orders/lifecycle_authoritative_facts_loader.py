@@ -54,6 +54,11 @@ def _optional_date(value: object, field: str) -> date | None:
 def _optional_time(value: object, field: str) -> time | None:
     if value is None:
         return None
+    if isinstance(value, timedelta):
+        seconds = int(value.total_seconds())
+        if seconds < 0 or seconds >= 86_400:
+            raise ValueError(f"{field} must be a same-day MySQL TIME")
+        return time(seconds // 3600, seconds % 3600 // 60, seconds % 60)
     if not isinstance(value, time):
         raise TypeError(f"{field} must be a time or None")
     return value

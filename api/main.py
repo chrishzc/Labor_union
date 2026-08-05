@@ -54,6 +54,7 @@ from api.routes import (
     caregiver_segment_availability,
     caregiver_availability_locks,
     order_actual_start,
+    order_auto_completion,
     order_cancellation,
     order_contract_completion,
     order_reopen,
@@ -161,6 +162,7 @@ app.include_router(case_architecture_bootstrap.router)
 app.include_router(order_terms.router)
 app.include_router(order_contract_completion.router)
 app.include_router(order_actual_start.router)
+app.include_router(order_auto_completion.router)
 app.include_router(order_cancellation.router)
 app.include_router(order_reopen.router)
 app.include_router(assignment_plan.router)

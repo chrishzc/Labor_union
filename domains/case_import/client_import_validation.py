@@ -14,10 +14,10 @@ from typing import Any
 import pandas as pd
 
 GENDER_VALUES = {"男", "女"}
-IDENTITY_STATUS_VALUES = {"低收入戶", "一般市民", "非市民", "中低收入戶"}
-RESIDENCE_TYPE_VALUES = {"公寓", "透天", "大樓"}
+IDENTITY_STATUS_VALUES = {"一般市民", "補助市民", "非市民"}
+RESIDENCE_TYPE_VALUES = {"公寓", "透天", "大樓", "公寓大廈"}
 DELIVERY_TYPE_VALUES = {"自然產", "剖腹產"}
-SERVICE_TYPE_VALUES = {"連續服務", "週休1日", "週休2日"}
+SERVICE_TYPE_VALUES = {"連續服務", "週休1日", "週休2日", "周休二日", "休周日"}
 PHONE_PATTERN = re.compile(r"^09\d{8}$")
 DATE_PATTERN = re.compile(r"^\d{4}/\d{2}/\d{2}$")
 
@@ -49,9 +49,7 @@ EXCEL_TO_DB_COLUMN = {
 
 
 def _is_blank(value: Any) -> bool:
-    if value is None:
-        return True
-    if isinstance(value, float) and pd.isna(value):
+    if pd.isna(value):
         return True
     return str(value).strip() == ""
 
@@ -69,9 +67,30 @@ def _normalize_phone_digits(value: Any) -> str:
     return digits
 
 
+
+def _is_valid_integer(value):
+    try:
+        return int(value) > 0
+    except:
+        return False
+
+def _is_valid_service_time(value):
+    text = str(value).strip()
+    hours_match = re.search(r"(?P<hours>\d{1,2})\s*小時", text)
+    clocks = tuple(re.finditer(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)", text))
+    return hours_match is not None and len(clocks) == 2
+
 def _is_valid_date(value: Any) -> bool:
+    if pd.isna(value):
+        return False
+    if isinstance(value, datetime) or hasattr(value, "date"):
+        return True
     text = str(value).strip()
     if not DATE_PATTERN.match(text):
+        # 允許民國年或各種分隔符的日期字串 (與 _parse_roc_datetime 邏輯一致)
+        pattern = r"^\s*(\d{2,4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})(?:\s+(\d{1,2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?\s*$"
+        if re.match(pattern, text):
+            return True
         return False
     try:
         datetime.strptime(text, "%Y/%m/%d")
@@ -93,8 +112,11 @@ def validate_hcm_row(row: dict[str, Any]) -> dict[str, str]:
     if _is_blank(row.get("查詢序號(案件編號)")):
         errors["查詢序號(案件編號)"] = "不可空值"
 
-    if _is_blank(row.get("報名時間(建檔)")):
+    created_at = row.get("報名時間(建檔)")
+    if _is_blank(created_at):
         errors["報名時間(建檔)"] = "不可空值"
+    elif not _is_valid_date(created_at):
+        errors["報名時間(建檔)"] = f"日期格式無法解析：{created_at}"
 
     if _is_blank(row.get("IP位址")):
         errors["IP位址"] = "不可空值"
@@ -128,8 +150,11 @@ def validate_hcm_row(row: dict[str, Any]) -> dict[str, str]:
             f"值不在允許範圍內（低收入戶,一般市民,非市民,中低收入戶）：{identity_status}"
         )
 
-    if _is_blank(row.get("服務時間")):
+    service_time = row.get("服務時間")
+    if _is_blank(service_time):
         errors["服務時間"] = "不可空值"
+    elif not _is_valid_service_time(service_time):
+        errors["服務時間"] = f"服務時間格式無法解析：{service_time}"
 
     due_month = row.get("預產期/預計服務開始月份")
     if _is_blank(due_month):
@@ -143,8 +168,11 @@ def validate_hcm_row(row: dict[str, Any]) -> dict[str, str]:
     elif not _is_valid_date(start_date):
         errors["預計服務日期"] = f"日期格式需為YYYY/MM/DD：{start_date}"
 
-    if _is_blank(row.get("希望服務天數")):
+    service_days = row.get("希望服務天數")
+    if _is_blank(service_days):
         errors["希望服務天數"] = "不可空值"
+    elif not _is_valid_integer(service_days):
+        errors["希望服務天數"] = f"必須為正整數：{service_days}"
 
     residence_type = row.get("居住型態")
     if _is_blank(residence_type):

@@ -14,8 +14,10 @@ from watchdog.observers import Observer
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 COOLDOWN_SECONDS = 5
-FILE_READY_RETRY_COUNT = 5
+FILE_READY_RETRY_COUNT = 8
 FILE_READY_RETRY_SECONDS = 0.5
+FILE_READY_STABLE_ITERATIONS = 2
+SUPPORTED_EXTENSIONS = (".xlsx", ".xls", ".xlsm")
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +37,8 @@ class WatchedImport:
 
 WATCHED_IMPORTS = (
     WatchedImport("downloads/hcm", "scripts/imports/import_client_hcm.py"),
+    WatchedImport("downloads/client_beclass", "scripts/imports/import_client_beclass.py"),
+    WatchedImport("downloads/staff_beclass", "scripts/imports/import_staff_beclass.py"),
     WatchedImport(
         "downloads/bank",
         "scripts/imports/import_finance_excel.py",
@@ -69,6 +73,12 @@ class XlsxHandler(FileSystemEventHandler):
     def _run_import(self, event_path: str) -> None:
         command = self._watched_import.command(event_path)
         print(f"[XLSX] {Path(event_path).name}")
+        environment = os.environ.copy()
+        existing_pythonpath = environment.get("PYTHONPATH", "")
+        pythonpath_parts = [str(PROJECT_ROOT), existing_pythonpath]
+        environment["PYTHONPATH"] = os.pathsep.join(
+            filter(None, pythonpath_parts)
+        )
         try:
             result = subprocess.run(
                 command,
@@ -76,6 +86,7 @@ class XlsxHandler(FileSystemEventHandler):
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
+                env=environment,
                 check=False,
             )
         except (OSError, UnicodeError) as error:
@@ -91,20 +102,47 @@ class XlsxHandler(FileSystemEventHandler):
         if not event.is_directory:
             self._trigger(event.src_path)
 
+    def on_moved(self, event) -> None:
+        if not event.is_directory:
+            self._trigger(event.dest_path)
+
 
 def _eligible_xlsx_path(event_path: str) -> bool:
     path = Path(event_path)
-    return path.suffix.lower() == ".xlsx" and not path.name.startswith("~$")
+    if path.name.startswith("~$"):
+        return False
+    return path.suffix.lower() in SUPPORTED_EXTENSIONS
+
+
+def _is_file_path_stable(event_path: str) -> bool:
+    path = Path(event_path)
+    previous_size = -1
+    consecutive_stable = 0
+    for _ in range(FILE_READY_RETRY_COUNT):
+        try:
+            current_size = path.stat().st_size
+        except OSError:
+            time.sleep(FILE_READY_RETRY_SECONDS)
+            continue
+        try:
+            with path.open("rb"):
+                pass
+        except OSError:
+            time.sleep(FILE_READY_RETRY_SECONDS)
+            continue
+        if current_size == previous_size and current_size >= 0:
+            consecutive_stable += 1
+            if consecutive_stable >= FILE_READY_STABLE_ITERATIONS:
+                return True
+        else:
+            consecutive_stable = 1
+            previous_size = current_size
+        time.sleep(FILE_READY_RETRY_SECONDS)
+    return False
 
 
 def _wait_until_file_is_readable(event_path: str) -> bool:
-    for _ in range(FILE_READY_RETRY_COUNT):
-        try:
-            with Path(event_path).open("rb"):
-                return True
-        except OSError:
-            time.sleep(FILE_READY_RETRY_SECONDS)
-    return False
+    return _is_file_path_stable(event_path)
 
 
 def _print_process_result(result: subprocess.CompletedProcess[str]) -> None:

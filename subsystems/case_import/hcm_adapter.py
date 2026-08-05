@@ -20,8 +20,8 @@ from shared_kernel.money import MoneyNTD
 
 CLIENT_PAYMENT_POLICY_VERSION = "client-approved-v1"
 PAYROLL_POLICY_VERSION = "approved-rates-v1"
-_CLIENT_RATE_BY_IDENTITY = {"一般市民": 300, "低收入戶": 350, "中低收入戶": 350, "非市民": 320}
-_SUBSIDIZED_IDENTITIES = frozenset({"中低收入戶", "低收入戶"})
+_CLIENT_RATE_BY_IDENTITY = {"一般市民": 300, "低收入戶": 350, "中低收入戶": 350, "非市民": 320, "補助市民": 350}
+_SUBSIDIZED_IDENTITIES = frozenset({"中低收入戶", "低收入戶", "補助市民"})
 _EXPLICIT_HOURS_PATTERN = re.compile(r"(?P<hours>\d{1,2})\s*小時")
 _CLOCK_PATTERN = re.compile(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)")
 

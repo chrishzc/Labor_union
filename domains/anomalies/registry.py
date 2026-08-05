@@ -176,6 +176,7 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
             _finance_manual_review_definition(),
             _client_refund_return_definition(),
             _finance_integrity_definition(),
+            _hcm_validation_definition(),
         )
     )
 
@@ -519,3 +520,14 @@ def _require_workflow_version(current, expected_version) -> None:
 
 def _validate_identity(value: str, field_name: str) -> None:
     require_canonical_text(value, field_name, _IDENTITY_MAXIMUM_LENGTH)
+
+
+def _hcm_validation_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="IMPORT-004",
+        source_domain="case_import",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+    )

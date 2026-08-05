@@ -68,7 +68,7 @@ def _render_finance_operation_center(base_url, headers) -> None:
     _render_beclass_import_review(base_url, headers)
 
 
-def _render_canonical_anomaly_center(base_url, headers) -> None:
+def _render_shared_anomaly_registry(base_url, headers) -> None:
     render_anomaly_registry_panel(
         AnomalyRegistryApiClient(
             base_url=base_url,
@@ -85,7 +85,12 @@ def _render_canonical_anomaly_center(base_url, headers) -> None:
     )
 
 
+def _render_canonical_anomaly_center(base_url, headers) -> None:
+    _render_shared_anomaly_registry(base_url, headers)
+
+
 def _render_canonical_finance_import(base_url, headers) -> None:
+    _render_shared_anomaly_registry(base_url, headers)
     render_finance_import_panel(
         FinanceImportApiClient(
             base_url=base_url,
@@ -103,6 +108,7 @@ def _render_canonical_finance_import(base_url, headers) -> None:
 
 
 def _render_beclass_import_review(base_url, headers) -> None:
+    _render_shared_anomaly_registry(base_url, headers)
     render_beclass_import_review_panel(
         BeClassImportReviewApiClient(
             base_url=base_url,
