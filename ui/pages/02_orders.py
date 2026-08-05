@@ -43,6 +43,17 @@ def _render_order_page_shell(orders_data, clients, staff_list):
         _render_tab2_assign(orders_data, clients, staff_list)
         return
 
+    # 跟上面的佇列同樣的道理：st.tabs 沒辦法用程式切到指定分頁，AI 助理答覆裡
+    # 附的深連結（例如「應付帳款查詢/輸出」）如果只是導到這一頁、還是會停在
+    # 分頁列預設的第一個分頁，使用者得自己再點一次分頁才看得到內容。這裡跳過
+    # 分頁列、只渲染目標分頁，讓深連結真的落地在對的畫面。
+    pending_tab = nav_helper.consume_pending_tab()
+    if pending_tab == "accounts_payable":
+        if st.button("🔙 返回完整頁面", key="order_tab_deep_link_exit"):
+            st.rerun()
+        _render_tab4_accounts_payable()
+        return
+
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
         "📊 訂單資訊總覽",
         "🤝 月嫂配對中心",
