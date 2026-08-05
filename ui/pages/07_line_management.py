@@ -15,6 +15,7 @@ from ui.components.line_review_manager import render_review_manager
 from ui.components.line_rich_menu_manager import render_rich_menu_manager
 from ui.components.line_schedule_manager import render_schedule_manager
 from ui.components.line_task_manager import render_task_manager
+from ui.components.customer_service_center import render_customer_service_center
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 
 
@@ -169,10 +170,8 @@ def show() -> None:
     with tabs[5]:
         render_review_manager(client, token, profile)
 
-    panels = [
-        ("客服入口", "工會人員客服系統"),
-        ("操作紀錄", "管理員異動稽核"),
-    ]
-    for tab, (name, description) in zip(tabs[6:], panels):
-        with tab:
-            _planned_panel(name, description)
+    with tabs[6]:
+        render_customer_service_center(client, token, profile)
+
+    with tabs[7]:
+        _planned_panel("操作紀錄", "管理員異動稽核")

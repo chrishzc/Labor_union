@@ -449,3 +449,65 @@ class LineAdminApiClient:
             token=token,
             json={"reason": reason},
         )
+
+    def customer_service_summary(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/v1/line/customer-service/tickets/summary", token=token)
+
+    def customer_service_tickets(
+        self,
+        token: str | None,
+        *,
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/line/customer-service/tickets",
+            token=token,
+            params={key: value for key, value in filters.items() if value not in {None, ""}},
+        )
+
+    def customer_service_ticket_detail(self, token: str | None, ticket_id: int) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/api/v1/line/customer-service/tickets/{ticket_id}",
+            token=token,
+        )
+
+    def update_customer_service_ticket(
+        self,
+        token: str | None,
+        ticket_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "PATCH",
+            f"/api/v1/line/customer-service/tickets/{ticket_id}",
+            token=token,
+            json=payload,
+        )
+
+    def reply_customer_service_ticket(
+        self,
+        token: str | None,
+        ticket_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/line/customer-service/tickets/{ticket_id}/reply",
+            token=token,
+            json=payload,
+        )
+
+    def update_customer_service_client_profile_field(
+        self,
+        token: str | None,
+        ticket_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/line/customer-service/tickets/{ticket_id}/client-profile-field",
+            token=token,
+            json=payload,
+        )

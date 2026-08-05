@@ -92,6 +92,8 @@ def line_admin_capabilities():
                 "liff_runtime_config": True,
                 "liff_revision_history": True,
                 "customer_service_config_api": True,
+                "customer_service_ticket_api": True,
+                "customer_service_center": True,
                 "staff_review_api": True,
                 "staff_review_management": True,
                 "admin_session": True,
@@ -100,7 +102,6 @@ def line_admin_capabilities():
             },
             "planned_pages": [
                 "LINE 設定中心",
-                "客服入口",
                 "操作紀錄",
             ],
             "config_files": {

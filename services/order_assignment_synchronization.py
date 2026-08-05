@@ -729,7 +729,14 @@ def apply_order_assignment_sync(
                 "UPDATE clients SET name = %s WHERE case_no = %s",
                 (change["client_name"], normalised_case_no),
             )
-            if cursor.rowcount != 1:
+            if cursor.rowcount == 0:
+                cursor.execute(
+                    "SELECT 1 FROM clients WHERE case_no = %s",
+                    (normalised_case_no,),
+                )
+                if cursor.fetchone() is None:
+                    raise ValueError("client could not be updated")
+            elif cursor.rowcount != 1:
                 raise ValueError("client could not be updated")
             sync_client_payment_due_dates_for_case_no(normalised_case_no, cursor=cursor)
 

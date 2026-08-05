@@ -17,7 +17,7 @@ from services.db_service import get_connection
 
 
 TASK_STATUSES = {"pending", "processing", "sent", "failed", "cancelled"}
-TASK_TYPES = {"line_push", "rag_reply", "rich_menu_link", "rich_menu_unlink"}
+TASK_TYPES = {"line_push", "line_push_message", "rag_reply", "rich_menu_link", "rich_menu_unlink"}
 TAIPEI_TIMEZONE = ZoneInfo("Asia/Taipei")
 
 

@@ -21,6 +21,7 @@ from api.routes import (
     client_payments,
     clients,
     contracts,
+    customer_service_tickets,
     data_browser_admin,
     finance_alerts,
     finance_reports,
@@ -98,6 +99,7 @@ app.include_router(line_admin.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
 app.include_router(line_reviews.router)
+app.include_router(customer_service_tickets.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)

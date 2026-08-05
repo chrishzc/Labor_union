@@ -17,6 +17,57 @@ import requests
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
+SYNC_STATUS_LABELS = {
+    "in_sync": "可以套用",
+    "requires_allocation": "時數尚未對齊",
+    "requires_review": "需要人工確認",
+    "locked": "已有帳務資料鎖定",
+}
+
+SYNC_REASON_LABELS = {
+    "assignment_plan_required": "尚未建立完整月嫂指派計畫。",
+    "schedule_change_plan_required": "尚未確認需要移除的排班。",
+    "assignment_not_in_case": "指派資料不屬於目前案件，請重新預覽。",
+    "assignment_staff_not_found": "選擇的月嫂不存在或資料已異動，請重新選擇。",
+    "assignment_interval_conflict": "月嫂指派期間彼此重疊，請調整日期。",
+    "schedule_conflict": "月嫂在同期間已有其他排班，請調整月嫂或日期。",
+    "schedule_case_mismatch": "既有排班與目前案件不一致，需要人工確認。",
+    "legacy_schedule_requires_review": "有舊排班資料需要人工確認後才能套用。",
+    "manual_actual_hours_adjustment": "此案件有人工調整時數紀錄，需要人工覆核。",
+    "active_staff_payment": "此案件已有月嫂付款資料，不能直接改指派。",
+    "active_monthly_settlement": "此案件已進入月結資料，不能直接改指派。",
+}
+
+
+def explain_assignment_sync_preview(preview):
+    status = preview.get("sync_status")
+    label = SYNC_STATUS_LABELS.get(status, status or "未知狀態")
+    if status == "in_sync":
+        st.success("同步預覽已通過，可以儲存並套用。")
+        return
+
+    messages = []
+    for reason in preview.get("blocking_reasons") or []:
+        code = reason.get("code")
+        text = SYNC_REASON_LABELS.get(code, code or "未知原因")
+        details = []
+        if reason.get("assignment_id") is not None:
+            details.append(f"指派 #{reason['assignment_id']}")
+        if reason.get("staff_id") is not None:
+            details.append(f"月嫂 #{reason['staff_id']}")
+        if reason.get("schedule_id") is not None:
+            details.append(f"排班 #{reason['schedule_id']}")
+        messages.append(f"{text}{'（' + '、'.join(details) + '）' if details else ''}")
+
+    difference = preview.get("difference")
+    if status == "requires_allocation" and not messages and str(difference) not in {"0", "0.0", "0.00"}:
+        messages.append("指派區段計算出的服務時數與訂單目標時數不同，請調整月嫂服務日期或訂單天數/時數後重新預覽。")
+
+    if messages:
+        st.warning(f"目前狀態：{label}。請先處理：" + "；".join(messages))
+    else:
+        st.warning(f"目前狀態：{label}，請調整資料後重新預覽。")
+
 def safe_float(val) -> float:
     if val is None:
         return 0.0
@@ -531,8 +582,7 @@ def render_editor(target_case_no, orders_data, payments_raw, key_prefix="v25"):
     preview_left.metric("目標時數", preview.get("target_hours", 0))
     preview_middle.metric("提議時數", preview.get("proposed_actual_hours", 0))
     preview_right.metric("差額", preview.get("difference", 0))
-    if preview.get("blocking_reasons"):
-        st.error(f"無法直接套用：{preview['blocking_reasons']}")
+    explain_assignment_sync_preview(preview)
     required_removals = preview.get("required_schedule_removals", [])
     removal_options = {
         f"排班 #{item['schedule_id']}｜指派 #{item['assignment_id']}｜{item['work_date']}": item["schedule_id"]

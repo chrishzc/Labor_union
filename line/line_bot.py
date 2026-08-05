@@ -38,6 +38,7 @@ from services.line_liff_identity_service import (
     liff_token_required,
     resolve_line_user_id,
 )
+from services.customer_service_ticket_service import create_or_reopen_ticket
 
 # 載入環境變數
 load_dotenv()
@@ -92,6 +93,172 @@ def load_message_templates():
     except Exception as e:
         print(f"[LINE Webhook] Failed to load message templates: {e}")
         return {}
+
+
+SERVICE_HELP_OPTIONS = [
+    ("服務流程", "服務流程"),
+    ("收費與補助", "收費與補助"),
+    ("查詢進度", "查詢服務進度"),
+    ("修改資料", "修改登記資料"),
+    ("聯絡工會", "聯絡工會人員"),
+    ("其他問題", "其他問題"),
+]
+
+
+SERVICE_HELP_CATEGORY_TEXTS = {
+    "服務流程": {
+        "1", "服務流程", "流程", "怎麼申請", "如何登記", "怎麼媒合",
+    },
+    "收費與補助": {
+        "2", "收費與補助", "收費", "費用", "價格", "補助", "政府補助", "要付多少",
+    },
+    "查詢服務進度": {
+        "3", "查詢服務進度", "查詢進度", "服務進度", "案件進度", "訂單進度", "目前狀態",
+    },
+    "修改登記資料": {
+        "4", "修改登記資料", "修改資料", "改資料", "電話錯誤", "地址錯誤", "日期要改",
+    },
+    "聯絡工會人員": {
+        "5", "聯絡工會人員", "聯絡工會", "找人", "找專員", "人工客服", "我要問人",
+    },
+    "其他問題": {
+        "6", "其他問題", "其他", "不是以上", "問題", "詢問",
+    },
+}
+
+
+def _service_help_quick_reply_message() -> dict[str, Any]:
+    return {
+        "type": "template",
+        "altText": "請選擇服務說明項目",
+        "template": {
+            "type": "carousel",
+            "columns": [
+                {
+                    "title": "服務說明",
+                    "text": "請選擇想了解的項目",
+                    "actions": [
+                        {"type": "message", "label": "服務流程", "text": "服務流程"},
+                        {"type": "message", "label": "收費與補助", "text": "收費與補助"},
+                        {"type": "message", "label": "查詢進度", "text": "查詢服務進度"},
+                    ],
+                },
+                {
+                    "title": "需要協助",
+                    "text": "請選擇需要工會協助的項目",
+                    "actions": [
+                        {"type": "message", "label": "修改資料", "text": "修改登記資料"},
+                        {"type": "message", "label": "聯絡工會", "text": "聯絡工會人員"},
+                        {"type": "message", "label": "其他問題", "text": "其他問題"},
+                    ],
+                },
+            ],
+        },
+    }
+
+
+def _service_help_category(user_text: str) -> str | None:
+    normalized = user_text.strip()
+    for category, aliases in SERVICE_HELP_CATEGORY_TEXTS.items():
+        if normalized in aliases:
+            return category
+    return None
+
+
+def _service_help_category_reply(
+    cursor,
+    user_id: str,
+    category: str,
+    *,
+    source_event_id: str | None = None,
+) -> str:
+    if category == "服務流程":
+        return (
+            "服務流程如下：\n\n"
+            "1. 先完成服務登記。\n"
+            "2. 工會確認您的資料與服務期程。\n"
+            "3. 系統篩選可配合的月嫂。\n"
+            "4. 月嫂同意接案後，工會提供月嫂資料給您確認。\n"
+            "5. 雙方確認後，進入後續媒合與簽約流程。\n\n"
+            "如您尚未登記，請點選下方「服務登記」。"
+        )
+    if category == "收費與補助":
+        create_or_reopen_ticket(
+            cursor,
+            line_user_id=user_id,
+            category="payment_subsidy",
+            message="用戶詢問：收費與補助",
+            source_event_id=source_event_id,
+        )
+        return (
+            "收費會依服務天數、每日時數、身分資格與樓層費計算。\n\n"
+            "補助資格需由工會依您的登記資料確認；在資料確認完成前，"
+            "系統僅能提供初步說明，實際金額以工會確認結果為準。\n\n"
+            "如您尚未登記，請先點選「服務登記」完成資料填寫。"
+        )
+    if category == "查詢服務進度":
+        cursor.execute(
+            """
+            SELECT c.name, c.case_no, o.status, o.start_date, o.end_date
+            FROM clients c
+            LEFT JOIN orders o ON o.client_id=c.id
+            WHERE c.line_user_id=%s
+            ORDER BY o.created_at DESC, o.case_no DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        )
+        row = cursor.fetchone()
+        if not row or not row.get("case_no"):
+            return (
+                "目前尚未找到您綁定的服務資料。\n\n"
+                "若您已填過資料，請點選「服務登記」後選擇「已填過資料，要綁定帳號」。\n"
+                "若您是新客戶，請選擇「我是新客戶，要填寫服務登記」。"
+            )
+        period = ""
+        if row.get("start_date") or row.get("end_date"):
+            period = f"\n服務期間：{row.get('start_date') or '-'} 至 {row.get('end_date') or '-'}"
+        return (
+            "以下是您目前的服務進度：\n\n"
+            f"案件編號：{row.get('case_no')}\n"
+            f"客戶姓名：{row.get('name') or '-'}\n"
+            f"案件狀態：{row.get('status') or '資料確認中'}"
+            f"{period}"
+        )
+    if category == "修改登記資料":
+        create_or_reopen_ticket(
+            cursor,
+            line_user_id=user_id,
+            category="profile_update",
+            message="用戶提出：修改登記資料",
+            source_event_id=source_event_id,
+        )
+        return (
+            "已收到您的修改資料需求。\n\n"
+            "請回覆您想修改的內容，例如：服務日期、服務地址、聯絡電話或其他資料。"
+            "工會人員確認後會協助處理。"
+        )
+    if category == "聯絡工會人員":
+        create_or_reopen_ticket(
+            cursor,
+            line_user_id=user_id,
+            category="contact_union",
+            message="用戶提出：聯絡工會人員",
+            source_event_id=source_event_id,
+        )
+        return (
+            "已收到您的聯絡需求，工會人員將盡快回覆。\n\n"
+            "服務時間：週一至週五 09:00-18:00。\n"
+            "若目前非服務時間，我們將於上班後回覆。"
+        )
+    create_or_reopen_ticket(
+        cursor,
+        line_user_id=user_id,
+        category="other",
+        message="用戶選擇：其他問題",
+        source_event_id=source_event_id,
+    )
+    return "請簡單描述您想詢問的問題，工會人員會依內容協助您。"
 
 
 def _load_rich_menu_id(role: str) -> str:
@@ -988,6 +1155,30 @@ async def line_webhook(request: Request):
                             continue
 
                         normalized_text = user_text.strip()
+                        if normalized_text == "服務說明":
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id, task_type="line_push_message",
+                                payload={"messages": [_service_help_quick_reply_message()]},
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"service-help-menu:{event.get('webhookEventId')}",
+                            )
+                            continue
+
+                        service_category = _service_help_category(normalized_text)
+                        if service_category:
+                            enqueue_line_task(
+                                cursor, to_user_id=user_id,
+                                message_content=_service_help_category_reply(
+                                    cursor,
+                                    user_id,
+                                    service_category,
+                                    source_event_id=event.get("webhookEventId"),
+                                ),
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"service-help-category:{event.get('webhookEventId')}",
+                            )
+                            continue
+
                         if normalized_text in {"同意接案", "願意接案", "同意", "拒絕接案", "不接案", "拒絕"}:
                             accepted = normalized_text in {"同意接案", "願意接案", "同意"}
                             cursor.execute(
@@ -1088,6 +1279,35 @@ async def line_webhook(request: Request):
                                 idempotency_key=f"bind-link:{event.get('webhookEventId')}",
                             )
                             print(f"[LINE Webhook] Intercepted keyword '{user_text}', queued query link for User: {user_id}")
+                            continue
+
+                        cursor.execute(
+                            """
+                            SELECT id, category
+                            FROM customer_service_tickets
+                            WHERE line_user_id=%s AND status IN ('waiting','handling')
+                              AND category IN ('profile_update','contact_union','other')
+                            ORDER BY updated_at DESC, id DESC
+                            LIMIT 1
+                            """,
+                            (user_id,),
+                        )
+                        active_ticket = cursor.fetchone()
+                        if active_ticket:
+                            create_or_reopen_ticket(
+                                cursor,
+                                line_user_id=user_id,
+                                category=active_ticket["category"],
+                                message=f"用戶補充：{normalized_text}",
+                                source_event_id=event.get("webhookEventId"),
+                            )
+                            enqueue_line_task(
+                                cursor,
+                                to_user_id=user_id,
+                                message_content="已收到您的補充內容，工會人員會一併查看並協助處理。",
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"service-help-followup:{event.get('webhookEventId')}",
+                            )
                             continue
                         
                         enqueue_line_task(

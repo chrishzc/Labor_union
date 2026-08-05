@@ -47,7 +47,7 @@ def _render_order_page_shell(orders_data, clients, staff_list):
 def show():
     """Load Page 2's initial data from FastAPI endpoints, then delegate all tab rendering to OrderUI."""
     st.title("📦 訂單與帳務管理系統")
-    st.write("本系統串接了 `v_order_details` 整合計算檢視表，提供訂單生命週期、指派配對以及帳務實收狀態的管理。")
+    st.write("集中管理訂單進度、月嫂媒合指派、客戶收款與應付帳款狀態。")
 
     base_url = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 

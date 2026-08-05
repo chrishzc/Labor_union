@@ -9,6 +9,7 @@ import os
 from datetime import date, datetime, timedelta
 import requests
 import streamlit as st
+from ui.pages.order.editor import explain_assignment_sync_preview
 from ui.pages.order.shared import safe_int
 
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
@@ -567,8 +568,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                         c2.metric("提議時數", sync_preview.get("proposed_actual_hours", 0))
                         c3.metric("差額", sync_preview.get("difference", 0))
 
-                        if sync_preview.get("blocking_reasons"):
-                            st.error(f"無法直接套用：{sync_preview['blocking_reasons']}")
+                        explain_assignment_sync_preview(sync_preview)
 
                         required_removals = sync_preview.get("required_schedule_removals", [])
                         removal_options = {

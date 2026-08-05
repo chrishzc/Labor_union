@@ -1,5 +1,6 @@
 import sys
 import os
+import argparse
 from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
@@ -54,6 +55,13 @@ def load_schema_parts(cursor, schema_parts_dir):
     return loaded_parts
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--allow-drop",
+        action="store_true",
+        help="允許執行 db/schema.sql 內的 DROP DATABASE；僅限明確重建本機資料庫時使用。",
+    )
+    args = parser.parse_args()
     schema_path = r'db/schema.sql'
     if not os.path.exists(schema_path):
         # 嘗試相對路徑
@@ -66,6 +74,12 @@ def main():
     print(f"正在讀取 {schema_path}...")
     with open(schema_path, 'r', encoding='utf-8') as f:
         sql_content = f.read()
+
+    if "DROP DATABASE" in sql_content.upper() and not args.allow_drop:
+        print("[安全停止] db/schema.sql 會重建整個 union_db。")
+        print("一般更新資料表請勿使用 scripts/init_db.py。")
+        print("若你確定要重建本機資料庫，請改用 ./reset_DB.sh，或明確加上 --allow-drop。")
+        return
 
     # 簡單用分號分割 SQL 語句 (排除空行)
     # ponytail: split by semicolon and filter out comments or empty statements
