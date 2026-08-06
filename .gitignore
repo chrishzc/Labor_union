@@ -51,6 +51,37 @@ scratch/
 .pytest_tmp/
 .pytest_tmp_*
 
+# Local agent workspaces and runtime state
+.agents/
+.codex/
+.monitor_state/
+
+# Local backups and generated database snapshots
+backups/
+
+# Local test, coverage, type-check and runtime artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+logs/
+*.log
+*.pid
+*.tmp
+*.bak
+*.backup
+*.orig
+*.rej
+*.sqlite
+*.sqlite3
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+desktop.ini
+
 # Preserve tracked legacy system maps
 !**/system_map.yaml
 !**/system_map.md
