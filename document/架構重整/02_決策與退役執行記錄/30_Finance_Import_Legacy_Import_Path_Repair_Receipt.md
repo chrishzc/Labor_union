@@ -1,3 +1,8 @@
+---
+doc_type: receipt
+date: 2026-08-07
+---
+
 # Finance Import Legacy Import-Path Repair Receipt
 
 日期：2026-08-07
@@ -95,7 +100,7 @@ NotImplementedError`，並在程式碼註解中標明原因與本文件出處。
 - `services/finance_import_states.py`、`finance_import_dispatch.py`、
   `finance_import_application.py`、`finance_import_reprocessing.py`、
   `finance_import_review_alerts.py` 五個 legacy service 本身**未退役**，依
-  [`09_Finance_Import_Domain.md:573-596`](09_Finance_Import_Domain.md:573)
+  [`09_Finance_Import_Domain.md:573-596`](../01_規格基線/09_Finance_Import_Domain.md:573)
   仍在「現況吸收」階段，尚未開始退役工作前置條件未滿足，本次僅修正其 import
   路徑使其可正常運作，不構成退役完成。
 

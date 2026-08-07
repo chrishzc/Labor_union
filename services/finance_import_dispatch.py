@@ -269,8 +269,8 @@ def dispatch_finance_import_row(
         # subsidy_advance dispatch replacement is authorized.
         raise NotImplementedError(
             "client_subsidy_return dispatch is unimplemented pending the "
-            "subsidy_advance redesign; see document/架構重整/25_Client_Refund_"
-            "Completion_Decision_Package.md"
+            "subsidy_advance redesign; see document/架構重整/"
+            "02_決策與退役執行記錄/25_Client_Refund_Completion_Decision_Package.md"
         )
     elif classification_type == "government_subsidy":
         domain_result = reconcile_government_subsidy(cursor, row_id)

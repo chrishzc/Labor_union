@@ -1,3 +1,7 @@
+---
+doc_type: decision-package
+---
+
 # Client Refund Completion Decision Package
 
 ## 2026-08-04 live gap evidence

@@ -1,3 +1,8 @@
+---
+doc_type: receipt
+date: 2026-08-03
+---
+
 # Legacy Retirement Wave 2B-2 Finance Alert Module Removal Receipt
 
 日期：2026-08-03

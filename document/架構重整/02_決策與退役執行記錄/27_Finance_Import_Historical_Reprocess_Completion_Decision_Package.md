@@ -1,3 +1,8 @@
+---
+doc_type: decision-package
+declared_status: partial
+---
+
 # Finance Import Historical Reprocess Completion Decision Package
 
 ## 1. 現況裁決
