@@ -29,7 +29,7 @@ from services.finance_import_review_alerts import (
 )
 from services.system_alert_service import resolve_system_alert
 from domains.finance_import.transaction_classifier import classify_finance_transaction
-from services.db_service import DB_CONFIG
+from infrastructure.mysql.mysql_adapter import DB_CONFIG
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
