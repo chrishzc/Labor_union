@@ -177,7 +177,193 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
             _client_refund_return_definition(),
             _finance_integrity_definition(),
             _hcm_validation_definition(),
+            _order_matching_stage_definition("ORDER-001"),
+            _order_matching_stage_definition("ORDER-002"),
+            _order_matching_stage_definition("ORDER-003"),
+            _order_matching_stage_definition("ORDER-004"),
+            _beclass_missing_definition(),
+            _resume_not_sent_definition(),
+            _client_receivable_overdue_definition(),
+            _subsidy_return_overdue_definition(),
+            _schedule_holiday_undecided_definition(),
+            _schedule_replaced_assignment_definition(),
+            _schedule_overlap_definition(),
+            _schedule_holiday_preference_conflict_definition(),
+            _client_missing_line_definition(),
+            _staff_missing_line_definition(),
+            _line_task_no_reply_definition(),
+            _line_identity_conflict_definition(),
         )
+    )
+
+
+def _order_matching_stage_definition(code: str) -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code=code,
+        source_domain="order_matching",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(
+            DomainActionLink(
+                "navigate_to_matching",
+                "order_matching",
+                "NavigateToMultiCaregiverMatching",
+                False,
+            ),
+        ),
+        display_fields=("case_no",),
+    )
+
+
+def _beclass_missing_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="BECLASS-001",
+        source_domain="beclass_completeness",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("case_no",),
+    )
+
+
+def _resume_not_sent_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="DOC-SEND-001",
+        source_domain="document_delivery",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(
+            DomainActionLink(
+                "send_resume",
+                "document_delivery",
+                "SendResumeToClient",
+                False,
+            ),
+        ),
+        display_fields=("case_no",),
+    )
+
+
+def _client_receivable_overdue_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="RECEIVABLE-001",
+        source_domain="client_receivable",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("case_no", "overdue_stages"),
+    )
+
+
+def _subsidy_return_overdue_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="RETURN-001",
+        source_domain="subsidy_return",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("case_no",),
+    )
+
+
+def _schedule_holiday_undecided_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="SCHEDULE-001",
+        source_domain="scheduling",
+        fingerprint_fields=("holiday_date", "staff_id"),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("case_no", "holiday_date", "staff_id"),
+    )
+
+
+def _schedule_replaced_assignment_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="SCHEDULE-002",
+        source_domain="scheduling",
+        fingerprint_fields=("assignment_id",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("assignment_id", "case_no", "staff_id"),
+    )
+
+
+def _schedule_overlap_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="SCHEDULE-003",
+        source_domain="scheduling",
+        fingerprint_fields=("assignment_id_a", "assignment_id_b"),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("assignment_id_a", "assignment_id_b", "staff_id"),
+    )
+
+
+def _schedule_holiday_preference_conflict_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="SCHEDULE-005",
+        source_domain="scheduling",
+        fingerprint_fields=("staff_id", "work_date"),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("case_no", "staff_id", "work_date"),
+    )
+
+
+def _client_missing_line_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="LINE-001",
+        source_domain="line_binding",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("case_no",),
+    )
+
+
+def _staff_missing_line_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="LINE-005",
+        source_domain="line_binding",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("case_no",),
+    )
+
+
+def _line_task_no_reply_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="LINE-002",
+        source_domain="line_binding",
+        fingerprint_fields=("task_id",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("task_id", "to_user_id"),
+    )
+
+
+def _line_identity_conflict_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="LINE-004",
+        source_domain="line_binding",
+        fingerprint_fields=("line_user_id",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("line_user_id",),
     )
 
 

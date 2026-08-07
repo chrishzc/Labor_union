@@ -214,6 +214,7 @@ CREATE TABLE IF NOT EXISTS orders (
     client_id INT NOT NULL COMMENT '對應 clients.id',
     staff_id INT NULL COMMENT '對應 staff.id (可為 NULL，代表尚未配對成功)',
     `status` ENUM('洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消') DEFAULT '洽談中' COMMENT '專案狀態 (生命週期: 洽談中→訂單成立→服務中→訂單完成, 任何階段可→訂單取消)',
+    lifecycle_version BIGINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'ORD-01 aggregate revision；每個非 replay command 恰遞增一次',
     cancel_reason TEXT NULL COMMENT '當狀態變更為 訂單取消 時的取消原因說明',
     line_group_id VARCHAR(100) NULL COMMENT '三方服務 LINE 群組 ID',
     actual_start_date DATE NULL COMMENT '實際生產服務開始日',

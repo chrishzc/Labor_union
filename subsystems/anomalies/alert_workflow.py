@@ -36,6 +36,14 @@ class AnomalyDetail:
 
 
 @dataclass(frozen=True, slots=True)
+class AnomalyWorkflowReceipt:
+    fingerprint: object
+    action: str
+    resulting_workflow_version: int
+    workflow_status: object
+
+
+@dataclass(frozen=True, slots=True)
 class AnomalyWorkflowRequest:
     fingerprint: object
     expected_workflow_version: int
@@ -119,4 +127,4 @@ class AnomalyApplication:
 
 
 def _receipt(projection, action):
-    return type("AnomalyWorkflowReceipt", (), {"fingerprint": projection.fingerprint, "action": action, "resulting_workflow_version": projection.workflow_version, "workflow_status": projection.workflow_status})()
+    return AnomalyWorkflowReceipt(projection.fingerprint, action, projection.workflow_version, projection.workflow_status)
