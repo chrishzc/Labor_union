@@ -7,14 +7,14 @@ from decimal import Decimal
 from typing import Any
 
 from scripts.imports.finance_statement_normalizer import normalize_workbook
-from services.db_service import get_connection
-from services.finance_identity_maps import load_finance_identity_maps
+from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.finance_import.identity_maps import load_finance_identity_maps
 from services.finance_import_dispatch import dispatch_finance_import_row
 from services.finance_import_review_alerts import (
     project_finance_import_review_alert,
 )
-from services.finance_import_staging import stage_finance_rows
-from services.order_amount_calculator import calculate_order_amounts
+from subsystems.finance_import.staging import stage_finance_rows
+from domains.client_finance.order_amount_calculation import calculate_order_amounts
 
 
 PAYMENT_STAGES = (

@@ -18,16 +18,29 @@ from fastapi.staticfiles import StaticFiles
 from api.exception_handlers.assignment_leave_resolution import (
     assignment_leave_resolution_exception_handler,
 )
+from api.middleware.compression import ResponseCompressionMiddleware
+from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
     admin_auth,
+    anomaly_recovery,
+    anomaly_registry,
+    assignment_plan,
     assignment_schedule_rest_dates,
+    beclass_import_review,
+    case_architecture_bootstrap,
+    client_deposit_reversal,
+    client_receipt_reconciliation,
+    client_refund_reversal,
     client_payments,
     clients,
     contracts,
     data_browser_admin,
-    finance_alerts,
+    finance_import,
     finance_reports,
+    financial_adjustment,
+    government_subsidy,
     holidays,
+    leave_substitution,
     line_admin,
     line_rich_menus,
     line_reviews,
@@ -40,13 +53,23 @@ from api.routes import (
     multi_caregiver_schedule_read,
     caregiver_segment_availability,
     caregiver_availability_locks,
+    order_actual_start,
+    order_auto_completion,
+    order_cancellation,
+    order_contract_completion,
+    order_reopen,
     order_schedule_calculation,
+    order_terms,
     orders,
+    payroll,
+    payroll_rebuild,
     schedule,
+    jobs,
+    scheduling_current,
     staff,
     staff_monthly_schedule,
+    staff_payout,
     staff_payments,
-    system_alerts,
 )
 
 
@@ -57,8 +80,12 @@ from api.routes import (
 from api.schemas.base import BaseResponse
 from line.line_bot import router as line_router
 from line.worker import start_worker, stop_worker
-from services.admin_auth_service import record_admin_audit
-from services.assignment_schedule_rest_date_service import (
+from subsystems.access.authentication_session import record_admin_audit
+from subsystems.anomalies.outbox_worker import (
+    start_architecture_outbox_worker,
+    stop_architecture_outbox_worker,
+)
+from subsystems.scheduling.leave_resolution_workflow import (
     AssignmentLeaveResolutionDomainError,
 )
 
@@ -74,13 +101,23 @@ def _allowed_origins() -> list[str]:
     return ["http://localhost:8501", "http://127.0.0.1:8501"]
 
 
+def _background_workers_enabled() -> bool:
+    read_only = os.getenv("PRESERVE_DATA_REHEARSAL_READ_ONLY", "false")
+    return read_only.strip().lower() != "true"
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    worker_task = start_worker()
+    if not _background_workers_enabled():
+        yield
+        return
+    line_worker_task = start_worker()
+    architecture_worker_task = start_architecture_outbox_worker()
     try:
         yield
     finally:
-        await stop_worker(worker_task)
+        await stop_architecture_outbox_worker(architecture_worker_task)
+        await stop_worker(line_worker_task)
 
 
 app = FastAPI(
@@ -102,6 +139,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(
+    ResponseCompressionMiddleware,
+    minimum_size=1024,
+    compresslevel=5,
+)
+app.add_middleware(ApiPerformanceMiddleware)
 
 app.mount("/static", StaticFiles(directory="line/static"), name="static")
 
@@ -115,6 +158,15 @@ app.include_router(line_reviews.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)
+app.include_router(case_architecture_bootstrap.router)
+app.include_router(order_terms.router)
+app.include_router(order_contract_completion.router)
+app.include_router(order_actual_start.router)
+app.include_router(order_auto_completion.router)
+app.include_router(order_cancellation.router)
+app.include_router(order_reopen.router)
+app.include_router(assignment_plan.router)
+app.include_router(leave_substitution.router)
 app.include_router(order_schedule_calculation.router)
 app.include_router(assignment_schedule_rest_dates.router)
 
@@ -123,6 +175,8 @@ app.include_router(matches.router)
 app.include_router(match_records.router)
 
 app.include_router(schedule.router)
+app.include_router(jobs.router)
+app.include_router(scheduling_current.router)
 app.include_router(multi_caregiver_case_assignments.router)
 app.include_router(multi_caregiver_schedule.router)
 app.include_router(multi_caregiver_schedule_read.router)
@@ -136,12 +190,22 @@ app.include_router(holidays.router)
 app.include_router(line_system_config.router)
 app.include_router(line_system_config.public_router)
 app.include_router(client_payments.router)
+app.include_router(client_deposit_reversal.router)
+app.include_router(client_receipt_reconciliation.router)
+app.include_router(client_refund_reversal.router)
+app.include_router(financial_adjustment.router)
+app.include_router(staff_payout.router)
+app.include_router(payroll.router)
+app.include_router(payroll_rebuild.router)
 app.include_router(staff_payments.router)
 app.include_router(contracts.router)
+app.include_router(finance_import.router)
+app.include_router(beclass_import_review.router)
 app.include_router(finance_reports.router)
-app.include_router(finance_alerts.router)
+app.include_router(government_subsidy.router)
+app.include_router(anomaly_registry.router)
+app.include_router(anomaly_recovery.router)
 app.include_router(data_browser_admin.router)
-app.include_router(system_alerts.router)
 
 
 

@@ -7,7 +7,7 @@
 
 import pytest
 from datetime import date
-from services.order_schedule_calculation_service import calculate_order_attendance_schedule
+from subsystems.scheduling.attendance_schedule_query import calculate_order_attendance_schedule
 
 def test_order_schedule_calculation_union_dates():
     """驗證 custom_holiday_rest_dates 與 custom_leave_dates 會取聯集，不互斥遺失"""
@@ -43,4 +43,3 @@ def test_order_schedule_calculation_custom_weekdays_and_salary():
 
     assert "actual_end_date" in res
     assert res.get("target_service_days") == 10
-

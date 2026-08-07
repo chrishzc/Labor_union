@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from services import multi_caregiver_schedule_read as service
+from subsystems.scheduling import assignment_schedule_query as service
 
 
 class FakeCursor:

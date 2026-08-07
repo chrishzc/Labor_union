@@ -7,8 +7,8 @@ from fastapi.testclient import TestClient
 from api.dependencies import admin_auth
 from api.routes import data_browser_admin
 from api.schemas.data_browser import DataBrowserPatchRequest
-from services import data_browser_admin_schema_service
-from services.admin_auth_service import AdminPrincipal
+from subsystems.access import data_browser_maintenance
+from subsystems.access.authentication_session import AdminPrincipal
 
 
 def _principal(role: str = "system_admin") -> AdminPrincipal:
@@ -74,7 +74,7 @@ def test_patch_passes_verified_principal_username_to_service(monkeypatch):
         return True
 
     monkeypatch.setattr(
-        data_browser_admin_schema_service,
+        data_browser_maintenance,
         "patch_data_browser_table_row",
         _fake_patch,
     )
@@ -93,7 +93,7 @@ def test_patch_passes_verified_principal_username_to_service(monkeypatch):
 
 def test_patch_data_browser_row_validation_error_maps_to_422(monkeypatch):
     monkeypatch.setattr(
-        data_browser_admin_schema_service,
+        data_browser_maintenance,
         "patch_data_browser_table_row",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             ValueError("欄位 [bad] 不在可編輯白名單中，更新已取消。")
@@ -113,7 +113,7 @@ def test_patch_data_browser_row_validation_error_maps_to_422(monkeypatch):
 
 def test_patch_data_browser_row_not_found_maps_to_404(monkeypatch):
     monkeypatch.setattr(
-        data_browser_admin_schema_service,
+        data_browser_maintenance,
         "patch_data_browser_table_row",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             ValueError("指定資料列不存在或欄位變更未生效，更新已取消。")

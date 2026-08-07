@@ -178,7 +178,7 @@ def render_schedule_manager(
             editor_rows,
             num_rows="dynamic" if can_edit else "fixed",
             disabled=not can_edit,
-            use_container_width=True,
+            width="stretch",
             column_config={
                 "day": st.column_config.NumberColumn("加入後第幾天", min_value=0, max_value=365, step=1),
                 "send_time": st.column_config.TextColumn("發送時間（例如 10:00）"),
@@ -189,12 +189,12 @@ def render_schedule_manager(
             key=f"line_schedule_steps_{selected_id}",
         )
         button1, button2 = st.columns(2)
-        preview_clicked = button1.form_submit_button("查看預計時間", use_container_width=True)
+        preview_clicked = button1.form_submit_button("查看預計時間", width="stretch")
         save_clicked = button2.form_submit_button(
             "儲存自動通知",
             type="primary",
             disabled=not can_edit,
-            use_container_width=True,
+            width="stretch",
         )
 
     if preview_clicked or save_clicked:
@@ -229,4 +229,4 @@ def render_schedule_manager(
     preview = st.session_state.get(PREVIEW_KEY)
     if preview:
         st.markdown("#### 預計發送時間")
-        st.dataframe(preview, use_container_width=True, hide_index=True)
+        st.dataframe(preview, width="stretch", hide_index=True)

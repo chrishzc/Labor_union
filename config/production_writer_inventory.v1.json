@@ -1,0 +1,448 @@
+{
+  "contract": "production-writer-inventory/v1",
+  "finding_count": 666,
+  "gone_route_rules": [
+    {
+      "forbidden_calls": [
+        "adjust_*",
+        "apply_*",
+        "cancel_*",
+        "create_*",
+        "db_service.*",
+        "generate_*",
+        "get_connection",
+        "record_*",
+        "reconfirm_*",
+        "save_*",
+        "update_*"
+      ],
+      "relative_path": "api/routes/assignment_schedule_rest_dates.py",
+      "symbols": [
+        "preview_assignment_leave_resolution_batch_route",
+        "apply_assignment_leave_resolution_batch_route",
+        "save_assignment_rest_dates",
+        "preview_assignment_leave_resolution_route",
+        "apply_assignment_leave_resolution_route"
+      ]
+    },
+    {
+      "forbidden_calls": [
+        "adjust_*",
+        "apply_*",
+        "cancel_*",
+        "create_*",
+        "db_service.*",
+        "generate_*",
+        "get_connection",
+        "record_*",
+        "reconfirm_*",
+        "save_*",
+        "update_*"
+      ],
+      "relative_path": "api/routes/multi_caregiver_schedule.py",
+      "symbols": [
+        "generate_assignment_schedule",
+        "adjust_assignment_schedule"
+      ]
+    },
+    {
+      "forbidden_calls": [
+        "adjust_*",
+        "apply_*",
+        "cancel_*",
+        "create_*",
+        "db_service.*",
+        "generate_*",
+        "get_connection",
+        "record_*",
+        "reconfirm_*",
+        "save_*",
+        "update_*"
+      ],
+      "relative_path": "api/routes/schedule.py",
+      "symbols": [
+        "save_schedule"
+      ]
+    },
+    {
+      "forbidden_calls": [
+        "adjust_*",
+        "apply_*",
+        "cancel_*",
+        "create_*",
+        "db_service.*",
+        "generate_*",
+        "get_connection",
+        "record_*",
+        "reconfirm_*",
+        "save_*",
+        "update_*"
+      ],
+      "relative_path": "api/routes/client_payments.py",
+      "symbols": [
+        "backfill_client_payment_due_dates",
+        "create_client_transaction"
+      ]
+    },
+    {
+      "forbidden_calls": [
+        "adjust_*",
+        "apply_*",
+        "cancel_*",
+        "create_*",
+        "db_service.*",
+        "generate_*",
+        "get_connection",
+        "record_*",
+        "reconfirm_*",
+        "save_*",
+        "update_*"
+      ],
+      "relative_path": "api/routes/staff_payments.py",
+      "symbols": [
+        "create_staff_transaction"
+      ]
+    },
+    {
+      "forbidden_calls": [
+        "adjust_*",
+        "apply_*",
+        "cancel_*",
+        "create_*",
+        "db_service.*",
+        "generate_*",
+        "get_connection",
+        "record_*",
+        "reconfirm_*",
+        "save_*",
+        "update_*"
+      ],
+      "relative_path": "api/routes/matches.py",
+      "symbols": [
+        "assign_staff_to_order",
+        "send_info_1",
+        "send_info_2",
+        "reply_matching_inquiry",
+        "send_resume_to_client",
+        "send_resume_for_case"
+      ]
+    },
+    {
+      "forbidden_calls": [
+        "adjust_*",
+        "apply_*",
+        "cancel_*",
+        "create_*",
+        "db_service.*",
+        "generate_*",
+        "get_connection",
+        "record_*",
+        "reconfirm_*",
+        "save_*",
+        "update_*"
+      ],
+      "relative_path": "api/routes/match_records.py",
+      "symbols": [
+        "create_or_get_match_record"
+      ]
+    },
+    {
+      "forbidden_calls": [
+        "adjust_*",
+        "apply_*",
+        "cancel_*",
+        "create_*",
+        "db_service.*",
+        "generate_*",
+        "get_connection",
+        "record_*",
+        "reconfirm_*",
+        "save_*",
+        "update_*"
+      ],
+      "relative_path": "api/routes/orders.py",
+      "symbols": [
+        "update_order_status",
+        "cancel_order_lock_for_case_no",
+        "reconfirm_order_actual_start_route",
+        "activate_order_lifecycle_hold",
+        "release_order_lifecycle_hold",
+        "correct_order_lifecycle_route",
+        "preview_order_assignment_synchronization",
+        "apply_order_assignment_synchronization"
+      ]
+    }
+  ],
+  "no_sql_zones": [
+    "shared_kernel",
+    "ui"
+  ],
+  "owner_rules": [
+    {
+      "exit_slice": "slice-6",
+      "legacy_status": "authoritative",
+      "owner": "global_infrastructure",
+      "patterns": [
+        "infrastructure/migration/*.py",
+        "infrastructure/mysql/unit_of_work.py"
+      ],
+      "runtime_class": "maintenance_or_shared_transaction",
+      "strategy": "preserve-versioned-global-adapter"
+    },
+    {
+      "exit_slice": "slice-1",
+      "legacy_status": "authoritative",
+      "owner": "case_onboarding",
+      "patterns": [
+        "infrastructure/mysql/case_architecture_bootstrap_repository.py",
+        "infrastructure/mysql/case_import_repository.py",
+        "infrastructure/mysql/beclass_import_review_repository.py",
+        "services/beclass_import_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-case-onboarding-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-2",
+      "legacy_status": "authoritative",
+      "owner": "financial_adjustments",
+      "patterns": [
+        "infrastructure/mysql/financial_adjustment_repository.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-cross-domain-adjustment-adapter"
+    },
+    {
+      "exit_slice": "slice-3",
+      "legacy_status": "authoritative",
+      "owner": "government_subsidy",
+      "patterns": [
+        "infrastructure/mysql/government_subsidy_repository.py",
+        "infrastructure/mysql/government_subsidy_anomaly_source.py",
+        "infrastructure/mysql/government_subsidy_*_anomaly_source.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-government-subsidy-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-1",
+      "legacy_status": "authoritative",
+      "owner": "orders",
+      "patterns": [
+        "infrastructure/mysql/order_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-orders-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-1",
+      "legacy_status": "authoritative",
+      "owner": "scheduling",
+      "patterns": [
+        "infrastructure/mysql/assignment_plan_*.py",
+        "infrastructure/mysql/leave_substitution_*.py",
+        "infrastructure/mysql/scheduling_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-scheduling-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-2",
+      "legacy_status": "authoritative",
+      "owner": "payroll",
+      "patterns": [
+        "infrastructure/mysql/payroll_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-payroll-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-2",
+      "legacy_status": "authoritative",
+      "owner": "client_finance",
+      "patterns": [
+        "infrastructure/mysql/client_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-client-finance-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-3",
+      "legacy_status": "authoritative",
+      "owner": "staff_payables",
+      "patterns": [
+        "infrastructure/archive/accounts_payable.py",
+        "infrastructure/mysql/accounts_payable_*.py",
+        "infrastructure/mysql/staff_payout_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-staff-payables-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-3",
+      "legacy_status": "authoritative",
+      "owner": "finance_import",
+      "patterns": [
+        "infrastructure/mysql/finance_import_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-finance-import-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-4",
+      "legacy_status": "authoritative",
+      "owner": "anomalies",
+      "patterns": [
+        "infrastructure/mysql/anomaly_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "exclusive-anomaly-persistence-adapter"
+    },
+    {
+      "exit_slice": "slice-5",
+      "legacy_status": "legacy_active",
+      "owner": "api_adapter",
+      "patterns": [
+        "api/*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "replace-with-typed-application-command"
+    },
+    {
+      "exit_slice": "deferred",
+      "legacy_status": "deferred",
+      "owner": "line",
+      "patterns": [
+        "line/*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "preserve-until-line-api-verification"
+    },
+    {
+      "exit_slice": "slice-6",
+      "legacy_status": "classified",
+      "owner": "global_infrastructure",
+      "patterns": [
+        "scripts/*.py"
+      ],
+      "runtime_class": "maintenance_or_migration",
+      "strategy": "typed-cli-or-explicit-gone"
+    },
+    {
+      "exit_slice": "slice-1",
+      "legacy_status": "legacy_active",
+      "owner": "orders",
+      "patterns": [
+        "services/order_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "replace-with-orders-ports"
+    },
+    {
+      "exit_slice": "slice-1",
+      "legacy_status": "legacy_active",
+      "owner": "scheduling",
+      "patterns": [
+        "services/assignment_schedule_rest_date_service.py",
+        "services/caregiver_*.py",
+        "services/multi_caregiver_*.py",
+        "services/staff_occupancy_mutex_service.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "replace-with-scheduling-generation-ports"
+    },
+    {
+      "exit_slice": "slice-2",
+      "legacy_status": "legacy_active",
+      "owner": "payroll",
+      "patterns": [
+        "services/actual_hours_*.py",
+        "services/assignment_payroll_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "replace-with-assignment-owned-payroll-ports"
+    },
+    {
+      "exit_slice": "slice-3",
+      "legacy_status": "legacy_active",
+      "owner": "client_finance",
+      "patterns": [
+        "services/client_*.py",
+        "services/government_*.py",
+        "services/subsidy_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "replace-with-client-finance-ledger-ports"
+    },
+    {
+      "exit_slice": "slice-4",
+      "legacy_status": "legacy_active",
+      "owner": "staff_payables",
+      "patterns": [
+        "services/payment_service.py",
+        "services/staff_actual_transfers.py",
+        "services/staff_monthly_settlements.py",
+        "services/staff_payment_transactions.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "replace-with-staff-payables-ledger-ports"
+    },
+    {
+      "exit_slice": "slice-3",
+      "legacy_status": "legacy_active",
+      "owner": "finance_import",
+      "patterns": [
+        "services/finance_import_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "restrict-to-bank-facts-and-classification"
+    },
+    {
+      "exit_slice": "slice-4",
+      "legacy_status": "legacy_active",
+      "owner": "anomalies",
+      "patterns": [
+        "services/architecture_outbox_worker.py",
+        "services/anomaly_*.py",
+        "services/finance_alert_*.py",
+        "services/staff_payables_anomaly_source.py",
+        "services/system_alert_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "replace-with-anomaly-projection-ports"
+    },
+    {
+      "exit_slice": "slice-6",
+      "legacy_status": "legacy_active",
+      "owner": "platform_admin",
+      "patterns": [
+        "services/admin_*.py",
+        "services/data_browser_*.py",
+        "services/db_service.py",
+        "services/match_record_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "typed-platform-adapter-or-gone"
+    },
+    {
+      "exit_slice": "deferred",
+      "legacy_status": "deferred",
+      "owner": "line",
+      "patterns": [
+        "services/line_*.py",
+        "services/media_*.py",
+        "services/webhook_*.py"
+      ],
+      "runtime_class": "production",
+      "strategy": "preserve-until-line-api-verification"
+    }
+  ],
+  "roots": [
+    "api",
+    "infrastructure",
+    "services",
+    "line",
+    "scripts"
+  ],
+  "scan_fingerprint": "d7ab5eb7f257037fd26407a78e4c82347b01c945120bd33df77a6c942e50f3d5"
+}

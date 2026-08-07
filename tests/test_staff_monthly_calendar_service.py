@@ -1,6 +1,6 @@
-from datetime import date
+from datetime import date, timedelta
 
-from services import staff_monthly_calendar_schedule_service as staff_monthly_calendar_schedule_service
+from subsystems.scheduling import staff_monthly_calendar_query as staff_monthly_calendar_schedule_service
 import pytest
 
 
@@ -73,7 +73,8 @@ def test_get_staff_monthly_calendar_schedule_keeps_per_day_rows_and_base_shape(m
             "staff_name": "月嫂甲",
         }
     ]
-    connection = FakeConnection([{"id": 7}, rows, lock_rows])
+    assignment_buffer_rows = []
+    connection = FakeConnection([{"id": 7}, rows, lock_rows, assignment_buffer_rows])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
@@ -134,11 +135,15 @@ def test_get_staff_monthly_calendar_schedule_keeps_per_day_rows_and_base_shape(m
     assert "o.status AS order_status" in query
     assert "o.order_status" not in query
     assert params == (7, date(2026, 7, 1), date(2026, 7, 31))
+    query, params = connection.cursor_obj.executed[3]
+    assert "COALESCE(o.actual_end_date, csa.assigned_end_date) AS calc_end_date" in query
+    assert "assignment_id" in query
+    assert params == (7,)
     assert connection.closed is True
 
 
 def test_get_staff_monthly_calendar_schedule_supports_30_day_month(monkeypatch):
-    connection = FakeConnection([{"id": 7}, [], []])
+    connection = FakeConnection([{"id": 7}, [], [], []])
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
@@ -159,3 +164,130 @@ def test_get_staff_monthly_calendar_schedule_staff_not_found(monkeypatch):
             year=2026,
             month=7,
         )
+
+
+def test_get_staff_monthly_calendar_schedule_supports_31_day_month(monkeypatch):
+    connection = FakeConnection([{"id": 7}, [], [], []])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
+        staff_id=7, year=2026, month=5
+    )
+
+    assert len(result["days"]) == 31
+    assert result["days"][0]["status"] == "available"
+    assert result["days"][-1]["status"] == "available"
+
+
+def test_get_staff_monthly_calendar_schedule_applies_7_day_buffer_when_end_near_next_month(monkeypatch):
+    buffer_rows = [
+        {
+            "assignment_id": 55,
+            "case_no": "115000200",
+            "staff_id": 7,
+            "calc_end_date": date(2026, 6, 30),
+            "client_name": "客戶 Buffer",
+            "order_status": "訂單完成",
+            "staff_name": "月嫂甲",
+        }
+    ]
+    connection = FakeConnection([{"id": 7}, [], [], buffer_rows])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
+        staff_id=7, year=2026, month=7
+    )
+
+    for day in range(1, 8):
+        item = result["days"][day - 1]
+        assert item["status"] == "waiting_deposit_lock"
+        assert item["assignment_id"] == 55
+        assert item["case_no"] == "115000200"
+        assert item["staff_id"] == 7
+        assert item["lock_id"] is None
+
+
+def test_get_staff_monthly_calendar_schedule_schedule_only_has_lock_rows(monkeypatch):
+    lock_rows = [
+        {
+            "work_date": date(2026, 7, 10),
+            "staff_id": 7,
+            "lock_id": 91,
+            "plan_id": 81,
+            "case_no": "115000003",
+            "client_name": "客戶 D",
+            "order_status": "洽談中",
+            "staff_name": "月嫂甲",
+        }
+    ]
+    connection = FakeConnection([{"id": 7}, [], lock_rows, []])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
+        staff_id=7, year=2026, month=7
+    )
+
+    waiting = result["days"][9]
+    assert waiting["status"] == "waiting_deposit_lock"
+    assert waiting["assignment_id"] is None
+    assert waiting["case_no"] == "115000003"
+    assert waiting["lock_id"] == 91
+    assert waiting["plan_id"] == 81
+    assert result["schedule_map"][10]["status"] == "yellow"
+
+
+def test_get_staff_monthly_calendar_schedule_cross_month_and_mix(monkeypatch):
+    rows = [
+        row(id=15, work_date=date(2026, 7, 31), assignment_id=20, is_work_day=True, client_name="客戶 E"),
+    ]
+    lock_rows = [
+        {
+            "work_date": date(2026, 7, 1),
+            "staff_id": 7,
+            "lock_id": 95,
+            "plan_id": 85,
+            "case_no": "115000004",
+            "client_name": "客戶 F",
+            "order_status": "洽談中",
+            "staff_name": "月嫂甲",
+        },
+        {
+            "work_date": date(2026, 7, 31),
+            "staff_id": 7,
+            "lock_id": 96,
+            "plan_id": 86,
+            "case_no": "115000005",
+            "client_name": "客戶 G",
+            "order_status": "洽談中",
+            "staff_name": "月嫂甲",
+        }
+    ]
+    buffer_rows = [
+        {
+            "assignment_id": 60,
+            "case_no": "115000201",
+            "staff_id": 7,
+            "calc_end_date": date(2026, 6, 28),
+            "client_name": "客戶 Buffer 2",
+            "order_status": "訂單完成",
+            "staff_name": "月嫂甲",
+        }
+    ]
+    connection = FakeConnection([{"id": 7}, rows, lock_rows, buffer_rows])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
+        staff_id=7, year=2026, month=7
+    )
+
+    day_1_items = [d for d in result["days"] if d["work_date"] == "2026-07-01"]
+    assert any(d["status"] == "waiting_deposit_lock" and d["lock_id"] == 95 for d in day_1_items)
+
+    for day_idx in range(1, 6):
+        date_str = f"2026-07-0{day_idx}"
+        items = [d for d in result["days"] if d["work_date"] == date_str]
+        assert any(d["status"] == "waiting_deposit_lock" and d["assignment_id"] == 60 for d in items)
+        
+    day_31_items = [d for d in result["days"] if d["work_date"] == "2026-07-31"]
+    assert any(d["status"] == "working" and d["assignment_id"] == 20 for d in day_31_items)
+    assert result["schedule_map"][31]["status"] == "red"

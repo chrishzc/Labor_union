@@ -4,7 +4,7 @@ from io import BytesIO
 
 from openpyxl import load_workbook
 
-from services import subsidy_reconciliation_register as register
+from subsystems.government_subsidy import reconciliation_register_query as register
 
 
 class FakeCursor:

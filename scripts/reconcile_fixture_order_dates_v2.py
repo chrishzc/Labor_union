@@ -2,7 +2,7 @@
 from __future__ import annotations
 import argparse,json
 from datetime import date,datetime
-from services.db_service import get_connection
+from infrastructure.mysql.mysql_adapter import get_connection
 from scripts.imports.import_client_hcm import _calculate_service_end_date,_parse_date
 EXPECTED={str(x) for x in range(115000001,115000051)}
 def _d(v):

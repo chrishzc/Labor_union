@@ -87,7 +87,7 @@ def test_import_is_rejected_before_runtime_dependencies_load():
             "except SystemExit as exc:\n"
             "    print(str(exc), file=sys.stderr)\n"
             "    print('pandas_loaded=' + str('pandas' in sys.modules), file=sys.stderr)\n"
-            "    print('db_service_loaded=' + str('services.db_service' in sys.modules), file=sys.stderr)\n"
+            "    print('db_service_loaded=' + str('infrastructure.mysql.mysql_adapter' in sys.modules), file=sys.stderr)\n"
             "    raise\n"
         ),
     )

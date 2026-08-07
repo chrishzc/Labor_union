@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 import pytest
 
-from services import caregiver_matching_communication_service as service
+from subsystems.scheduling import matching_communication_workflow as service
 
 
 class _Cursor:

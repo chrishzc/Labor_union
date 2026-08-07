@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 
 from api.schemas.base import BaseResponse
-from services.db_service import get_connection
+from infrastructure.mysql.mysql_adapter import get_connection
 
 
 router = APIRouter(prefix="/api/v1/contracts", tags=["Contracts"])

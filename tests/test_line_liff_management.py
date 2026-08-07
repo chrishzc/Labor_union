@@ -10,8 +10,8 @@ from pydantic import ValidationError
 
 from api.routes import line_system_config
 from api.schemas.line_config import LiffField, LiffSettingsConfig
-from services.json_config_service import read_config
-from services.line_liff_identity_service import (
+from subsystems.line.configuration_store import read_config
+from subsystems.line.liff_identity_verification import (
     LiffIdentityError,
     resolve_line_user_id,
 )
@@ -98,7 +98,7 @@ def test_liff_identity_uses_verified_subject(monkeypatch):
 
     monkeypatch.setenv("LINE_LOGIN_CHANNEL_ID", "123456")
     monkeypatch.setattr(
-        "services.line_liff_identity_service.requests.post",
+        "subsystems.line.liff_identity_verification.requests.post",
         lambda *args, **kwargs: FakeResponse(),
     )
     assert resolve_line_user_id(

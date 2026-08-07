@@ -11,6 +11,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import pymysql
@@ -22,23 +23,48 @@ try:
 except Exception:
     pass
 
-# 讓 file_watcher.py 以子程序執行本檔時也能 import services 底下的模組
-ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-if ROOT not in sys.path:
-    sys.path.append(ROOT)
+# Let file_watcher.py run this script as a subprocess with project imports available.
+# Let file_watcher.py run this script as a subprocess with project imports available.
+def _resolve_project_root() -> Path:
+    return Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from services.staff_import_validation import (
-    EXCEL_TO_DB_COLUMN,
-    fallback_case_key,
-    validate_staff_row,
-)
-from services.system_alert_service import (
+PROJECT_ROOT = _resolve_project_root()
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+if str(PROJECT_ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+cwd_str = os.getcwd()
+if cwd_str not in sys.path:
+    sys.path.insert(0, cwd_str)
+
+try:
+    from domains.case_import.staff_import_validation import (
+        fallback_case_key,
+        validate_staff_row,
+    )
+except ModuleNotFoundError as e:
+    print(f"\n[診斷資訊] 無法載入 domains 模組。")
+    print(f"1. 計算出的專案根目錄 (PROJECT_ROOT): {PROJECT_ROOT}")
+    print(f"2. 該目錄是否存在: {os.path.exists(PROJECT_ROOT)}")
+    try:
+        dirs = [d for d in os.listdir(PROJECT_ROOT) if os.path.isdir(os.path.join(PROJECT_ROOT, d))]
+        print(f"3. 該目錄下的資料夾有: {', '.join(dirs)}")
+    except Exception as ex:
+        print(f"3. 無法列出該目錄內容: {ex}")
+    raise e
+from subsystems.anomalies.system_alert_projection import (
     delete_system_alert,
     resolve_if_exists,
     upsert_system_alert,
 )
+from domains.case_import.beclass_import_review import BeClassImportSourceKind
+from subsystems.case_import.beclass_review_intake import (
+    fingerprint_workbook,
+    masked_review_identifier,
+    record_invalid_beclass_row,
+)
 
-load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+load_dotenv(str(PROJECT_ROOT / ".env"))
 
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', '127.0.0.1'),
@@ -149,18 +175,24 @@ def process_import(excel_path):
     print(f"解析 Excel 檔案：{excel_path} ...")
     xl = pd.ExcelFile(excel_path)
 
-    target_sheet = None
-    for name in xl.sheet_names:
-        clean_name = name.replace(" ", "").lower()
-        if '服務人員' in name or 'staff' in clean_name:
-            target_sheet = name
-            break
-
-    if not target_sheet:
-        print("未找到包含『服務人員』關鍵字的工作表，跳過此檔案。")
+    target_sheet = xl.sheet_names[0] if xl.sheet_names else None
+    if target_sheet is None:
+        print("未找到任何工作表，跳過此檔案。")
         return _result(review_required=1)
 
     df = xl.parse(target_sheet)
+    if df.empty:
+        for sheet_name in xl.sheet_names[1:]:
+            candidate = xl.parse(sheet_name)
+            if not candidate.empty:
+                target_sheet = sheet_name
+                df = candidate
+                break
+
+    if df is None or df.empty:
+        print("未找到有資料的工作表，請確認檔案內容後重試。")
+        return _result(review_required=1)
+    source_content_digest = fingerprint_workbook(excel_path)
     print(f"找到工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
 
     try:
@@ -177,7 +209,7 @@ def process_import(excel_path):
     review_required = 0
 
     try:
-        for _, row in df.iterrows():
+        for source_row, (_, row) in enumerate(df.iterrows(), start=2):
             raw_row = row.to_dict()
             errors = validate_staff_row(raw_row)
             name_for_alert = raw_row.get('姓名')
@@ -188,6 +220,24 @@ def process_import(excel_path):
 
             if not identity_card:
                 review_required += 1
+                record_invalid_beclass_row(
+                    conn,
+                    source_kind=BeClassImportSourceKind.STAFF,
+                    source_content_digest=source_content_digest,
+                    source_sheet=target_sheet,
+                    source_row=source_row,
+                    masked_identifier=masked_review_identifier(
+                        BeClassImportSourceKind.STAFF,
+                        identity_card,
+                        phone_for_alert,
+                    ),
+                    source_payload={
+                        "identity_card": None,
+                        "name": clean_data(name_for_alert, "name"),
+                        "phone": clean_phone(phone_for_alert),
+                    },
+                    issue_codes=tuple(errors),
+                )
                 if errors:
                     error_keys_joined = "、".join(errors.keys())
                     upsert_system_alert(
@@ -203,6 +253,24 @@ def process_import(excel_path):
             if not name:
                 # staff.name 是 NOT NULL，缺姓名時無法建立資料，只能開警示提醒補件
                 review_required += 1
+                record_invalid_beclass_row(
+                    conn,
+                    source_kind=BeClassImportSourceKind.STAFF,
+                    source_content_digest=source_content_digest,
+                    source_sheet=target_sheet,
+                    source_row=source_row,
+                    masked_identifier=masked_review_identifier(
+                        BeClassImportSourceKind.STAFF,
+                        identity_card,
+                        phone_for_alert,
+                    ),
+                    source_payload={
+                        "identity_card": identity_card,
+                        "name": None,
+                        "phone": clean_phone(phone_for_alert),
+                    },
+                    issue_codes=tuple(errors),
+                )
                 upsert_system_alert(
                     cursor,
                     alert_code="IMPORT-004",
@@ -271,18 +339,83 @@ def process_import(excel_path):
                 'status': 'active'
             }
 
-            # 驗證失敗的欄位一律存 NULL，避免髒資料進 DB，同時保留原因供異常警示使用
-            for excel_col in errors:
-                db_col = EXCEL_TO_DB_COLUMN.get(excel_col)
-                if db_col and db_col in record:
-                    record[db_col] = None
-
             cursor.execute(
                 "SELECT name FROM staff WHERE identity_card = %s",
                 (identity_card,)
             )
             existing_rows = cursor.fetchall()
             existing_cnt = len(existing_rows)
+            if existing_cnt == 1:
+                skipped_existing += 1
+                existing_name = existing_rows[0]['name']
+                if not existing_name or not name or existing_name == name:
+                    continue
+                review_required += 1
+                record_invalid_beclass_row(
+                    conn,
+                    source_kind=BeClassImportSourceKind.STAFF,
+                    source_content_digest=source_content_digest,
+                    source_sheet=target_sheet,
+                    source_row=source_row,
+                    masked_identifier=masked_review_identifier(
+                        BeClassImportSourceKind.STAFF,
+                        identity_card,
+                        phone_for_alert,
+                    ),
+                    source_payload=record,
+                    issue_codes=("identity_name_mismatch",),
+                )
+                upsert_system_alert(
+                    cursor,
+                    alert_code="IMPORT-003",
+                    source_domain="IMPORT",
+                    case_key=identity_card,
+                    reason=f"身分證字號 {identity_card} 重複，但姓名不一致：已存「{existing_name}」，本次匯入「{name}」",
+                    details={"身分證字號": identity_card, "已存姓名": existing_name, "本次匯入姓名": name},
+                )
+                continue
+            if existing_cnt > 1:
+                review_required += 1
+                record_invalid_beclass_row(
+                    conn,
+                    source_kind=BeClassImportSourceKind.STAFF,
+                    source_content_digest=source_content_digest,
+                    source_sheet=target_sheet,
+                    source_row=source_row,
+                    masked_identifier=masked_review_identifier(
+                        BeClassImportSourceKind.STAFF,
+                        identity_card,
+                        phone_for_alert,
+                    ),
+                    source_payload=record,
+                    issue_codes=("duplicate_identity_card",),
+                )
+                continue
+            if errors:
+                review_required += 1
+                record_invalid_beclass_row(
+                    conn,
+                    source_kind=BeClassImportSourceKind.STAFF,
+                    source_content_digest=source_content_digest,
+                    source_sheet=target_sheet,
+                    source_row=source_row,
+                    masked_identifier=masked_review_identifier(
+                        BeClassImportSourceKind.STAFF,
+                        identity_card,
+                        phone_for_alert,
+                    ),
+                    source_payload=record,
+                    issue_codes=tuple(errors),
+                )
+                upsert_system_alert(
+                    cursor,
+                    alert_code="IMPORT-004",
+                    source_domain="IMPORT",
+                    case_key=identity_card,
+                    reason=f"服務人員 {identity_card} 匯入資料異常：{'、'.join(errors)}",
+                    details=errors,
+                )
+                continue
 
             if existing_cnt == 0:
                 cols = ", ".join([f"`{k}`" for k in record.keys()])
@@ -381,39 +514,12 @@ def process_import(excel_path):
                 if not fallback_key.startswith("error_row_"):
                     delete_system_alert(cursor, alert_code="IMPORT-004", case_key=fallback_key)
 
-                if errors:
-                    review_required += 1
-                    error_keys_joined = "、".join(errors.keys())
-                    upsert_system_alert(
-                        cursor,
-                        alert_code="IMPORT-004",
-                        source_domain="IMPORT",
-                        case_key=identity_card,
-                        reason=f"服務人員 {identity_card} 匯入資料異常：{error_keys_joined}",
-                        details=errors,
-                    )
-                else:
-                    resolve_if_exists(
-                        cursor,
-                        alert_code="IMPORT-004",
-                        case_key=identity_card,
-                        reason="系統重新匯入：欄位驗證通過，自動解除",
-                    )
-            elif existing_cnt == 1:
-                skipped_existing += 1
-                existing_name = existing_rows[0]['name']
-                if existing_name and name and existing_name != name:
-                    # IMPORT-003(B)：同一身分證字號，這次匯入的姓名跟資料庫裡已存的姓名不一致
-                    upsert_system_alert(
-                        cursor,
-                        alert_code="IMPORT-003",
-                        source_domain="IMPORT",
-                        case_key=identity_card,
-                        reason=f"身分證字號 {identity_card} 重複，但姓名不一致：已存「{existing_name}」，本次匯入「{name}」",
-                        details={"身分證字號": identity_card, "已存姓名": existing_name, "本次匯入姓名": name},
-                    )
-            else:
-                review_required += 1
+                resolve_if_exists(
+                    cursor,
+                    alert_code="IMPORT-004",
+                    case_key=identity_card,
+                    reason="系統重新匯入：欄位驗證通過，自動解除",
+                )
 
         conn.commit()
         print(

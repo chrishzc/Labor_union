@@ -27,7 +27,7 @@ from api.schemas.line_config import (
     MessageSchedulesConfig,
     RichMenuDefinition,
 )
-from services.json_config_service import (
+from subsystems.line.configuration_store import (
     config_revision,
     find_by_id,
     read_config,
@@ -36,12 +36,12 @@ from services.json_config_service import (
 )
 from api.dependencies.admin_auth import require_line_manager, require_line_viewer
 from line.worker import wake_worker
-from services.line_rich_menu_service import (
+from subsystems.line.rich_menu_publication_workflow import (
     RichMenuPublicationConflictError,
     RichMenuPublicationNotFoundError,
     create_publication_job,
 )
-from services.line_liff_config_service import (
+from subsystems.line.liff_configuration_history import (
     get_liff_snapshot,
     list_liff_history,
     snapshot_liff_config,

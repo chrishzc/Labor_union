@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from api.dependencies.admin_auth import admin_auth_is_enabled
-from services.admin_auth_service import (
+from subsystems.access.authentication_session import (
     AdminPrincipal,
     hash_admin_password,
     has_required_role,

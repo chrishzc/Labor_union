@@ -7,7 +7,7 @@ import re
 
 import pytest
 
-from services import staff_occupancy_mutex_service as service
+from subsystems.scheduling import occupancy_mutex as service
 
 
 class StaffOccupancyCursor:

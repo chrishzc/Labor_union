@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from services.admin_auth_service import ROLE_LEVELS, create_admin_user
+from subsystems.access.authentication_session import ROLE_LEVELS, create_admin_user
 
 
 def main() -> int:

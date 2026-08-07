@@ -17,8 +17,8 @@ from typing import Any
 import pymysql
 import requests
 
-from services.db_service import get_connection as get_db_connection
-from services.line_rich_menu_service import (
+from infrastructure.mysql.mysql_adapter import get_connection as get_db_connection
+from subsystems.line.rich_menu_publication_workflow import (
     import_legacy_rich_menu_ids,
     next_publication_run_at,
     process_due_publications,

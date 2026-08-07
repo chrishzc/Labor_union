@@ -1,0 +1,1584 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "104_order_lifecycle_state_history.sql": {
+      "tables": {
+        "order_lifecycle_state_events": [
+          "actor",
+          "after_status",
+          "before_status",
+          "business_date",
+          "case_no",
+          "expected_version",
+          "facts_snapshot",
+          "id",
+          "idempotency_key",
+          "trigger_event"
+        ]
+      },
+      "triggers": [
+        "trg_order_lifecycle_state_events_before_delete",
+        "trg_order_lifecycle_state_events_before_update"
+      ]
+    },
+    "105_order_service_time_terms.sql": {
+      "tables": {
+        "orders": [
+          "service_end_day_offset",
+          "service_end_time",
+          "service_start_time"
+        ]
+      },
+      "triggers": []
+    },
+    "106_order_lifecycle_control_facts.sql": {
+      "tables": {
+        "order_lifecycle_control_events": [
+          "action",
+          "actor",
+          "case_no",
+          "control_key",
+          "control_type",
+          "expected_version",
+          "id",
+          "idempotency_key",
+          "payload_hash",
+          "payload_snapshot",
+          "reason",
+          "scope"
+        ],
+        "order_lifecycle_control_state": [
+          "case_no",
+          "confirmed_start_date",
+          "control_key",
+          "control_type",
+          "current_event_id",
+          "deposit_settlement_identity_hash",
+          "expires_at_utc",
+          "release_policy",
+          "scope",
+          "state"
+        ],
+        "order_lifecycle_projection_outbox": [
+          "action",
+          "alert_code",
+          "attempt_count",
+          "case_no",
+          "id",
+          "intent_key",
+          "lifecycle_event_id",
+          "payload_hash",
+          "payload_snapshot",
+          "scope",
+          "status"
+        ],
+        "orders": [
+          "lifecycle_version"
+        ]
+      },
+      "triggers": [
+        "trg_order_lifecycle_control_events_before_delete",
+        "trg_order_lifecycle_control_events_before_update",
+        "trg_order_lifecycle_control_state_before_delete"
+      ]
+    },
+    "107_system_alert_current_projection.sql": {
+      "tables": {
+        "system_alerts": [
+          "alert_code",
+          "case_key",
+          "claimed_at",
+          "claimed_by",
+          "created_at",
+          "details",
+          "id",
+          "reason",
+          "resolution_reason",
+          "resolved_at",
+          "resolved_by",
+          "source_domain",
+          "status",
+          "updated_at"
+        ]
+      },
+      "triggers": []
+    },
+    "108_matching_records_resume_delivery.sql": {
+      "tables": {
+        "matching_records": [
+          "sent_resume_at"
+        ]
+      },
+      "triggers": []
+    },
+    "109_scheduling_generations.sql": {
+      "tables": {
+        "case_staff_assignments": [
+          "candidate_key",
+          "generation_id"
+        ],
+        "scheduling_buffer_days": [
+          "active_marker",
+          "assignment_id",
+          "buffer_date",
+          "created_at",
+          "generation_id",
+          "id",
+          "released_at",
+          "released_by",
+          "staff_id",
+          "status"
+        ],
+        "scheduling_command_receipts": [
+          "case_no",
+          "command_family",
+          "command_fingerprint",
+          "correlation_id",
+          "created_at",
+          "expected_scheduling_version",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "rebuild_event_id",
+          "result_snapshot",
+          "resulting_generation_id",
+          "resulting_scheduling_version"
+        ],
+        "scheduling_effective_occupancy": [
+          "assignment_id",
+          "created_at",
+          "generation_id",
+          "occupancy_date",
+          "occupancy_type",
+          "staff_id"
+        ],
+        "scheduling_aggregates": [
+          "aggregate_version",
+          "case_no",
+          "created_at",
+          "effective_generation_id",
+          "generation_counter",
+          "updated_at"
+        ],
+        "scheduling_bootstrap_review_events": [
+          "case_no",
+          "created_at",
+          "evidence_snapshot",
+          "id",
+          "issue_code",
+          "migration_identity"
+        ],
+        "scheduling_generations": [
+          "cancelled_at",
+          "case_no",
+          "change_reason",
+          "created_at",
+          "created_by",
+          "effective_marker",
+          "generation_number",
+          "id",
+          "resulting_aggregate_version",
+          "status"
+        ],
+        "scheduling_rebuild_events": [
+          "actor",
+          "case_no",
+          "correlation_id",
+          "created_at",
+          "expected_order_version",
+          "expected_scheduling_version",
+          "id",
+          "idempotency_key",
+          "new_generation_id",
+          "preview_fingerprint",
+          "previous_generation_id",
+          "reason",
+          "resulting_scheduling_version"
+        ],
+        "scheduling_rebuild_lineage": [
+          "created_at",
+          "id",
+          "lineage_ordinal",
+          "new_assignment_id",
+          "new_generation_id",
+          "old_assignment_identity",
+          "rebuild_event_id"
+        ],
+        "staff_schedule": [
+          "effective_marker",
+          "generation_id"
+        ]
+      },
+      "triggers": [
+        "trg_scheduling_bootstrap_review_events_before_delete",
+        "trg_scheduling_bootstrap_review_events_before_update",
+        "trg_scheduling_command_receipts_before_delete",
+        "trg_scheduling_command_receipts_before_update",
+        "trg_scheduling_rebuild_events_before_delete",
+        "trg_scheduling_rebuild_events_before_update",
+        "trg_scheduling_rebuild_lineage_before_delete",
+        "trg_scheduling_rebuild_lineage_before_update"
+      ]
+    },
+    "110_order_terms_workflow.sql": {
+      "tables": {
+        "orders": [
+          "staff_payment_due_date"
+        ],
+        "order_contract_flow_events": [
+          "actor",
+          "case_no",
+          "contract_identity",
+          "created_at",
+          "event_type",
+          "id",
+          "idempotency_key",
+          "reason"
+        ],
+        "order_service_data_locks": [
+          "case_no",
+          "client_settlement_fingerprint",
+          "created_at",
+          "created_by",
+          "lifecycle_event_id"
+        ],
+        "orders_domain_outbox": [
+          "attempt_count",
+          "case_no",
+          "created_at",
+          "delivered_at",
+          "id",
+          "intent_key",
+          "intent_type",
+          "last_error",
+          "lifecycle_event_id",
+          "next_attempt_at",
+          "payload_snapshot",
+          "status",
+          "updated_at"
+        ],
+        "order_terms_apply_receipts": [
+          "case_no",
+          "client_finance_version",
+          "command_fingerprint",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "lifecycle_event_id",
+          "lifecycle_status",
+          "order_terms_event_id",
+          "order_version",
+          "payroll_version",
+          "preview_fingerprint",
+          "result_snapshot",
+          "scheduling_command_receipt_id",
+          "scheduling_generation",
+          "scheduling_version",
+          "service_data_lock_formed"
+        ],
+        "order_terms_change_events": [
+          "actor",
+          "after_terms",
+          "before_terms",
+          "case_no",
+          "correlation_id",
+          "created_at",
+          "expected_order_version",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "reason",
+          "resulting_order_version"
+        ]
+      },
+      "triggers": [
+        "trg_order_contract_flow_events_before_delete",
+        "trg_order_contract_flow_events_before_update",
+        "trg_order_service_data_locks_before_delete",
+        "trg_order_service_data_locks_before_update",
+        "trg_order_terms_apply_receipts_before_delete",
+        "trg_order_terms_apply_receipts_before_update",
+        "trg_order_terms_change_events_before_delete",
+        "trg_order_terms_change_events_before_update"
+      ]
+    },
+    "111_client_finance_ledger.sql": {
+      "tables": {
+        "client_finance_accounts": [
+          "aggregate_version",
+          "case_no",
+          "updated_at"
+        ],
+        "client_finance_apply_receipts": [
+          "case_no",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "result_snapshot",
+          "resulting_account_version"
+        ],
+        "client_finance_outbox": [
+          "attempt_count",
+          "case_no",
+          "created_at",
+          "delivered_at",
+          "id",
+          "intent_key",
+          "intent_type",
+          "last_error",
+          "next_attempt_at",
+          "payload_snapshot",
+          "status",
+          "updated_at"
+        ],
+        "client_payment_terms": [
+          "case_no",
+          "client_hourly_rate_ntd",
+          "current_event_id",
+          "deposit_due_date",
+          "deposit_service_days",
+          "first_payment_due_date",
+          "policy_version",
+          "second_payment_due_date",
+          "updated_at"
+        ],
+        "client_payment_terms_events": [
+          "actor",
+          "case_no",
+          "client_hourly_rate_ntd",
+          "created_at",
+          "deposit_due_date",
+          "deposit_service_days",
+          "expected_account_version",
+          "first_payment_due_date",
+          "id",
+          "idempotency_key",
+          "policy_version",
+          "reason",
+          "second_payment_due_date",
+          "source_event_identity"
+        ],
+        "client_ledger_entries": [
+          "actor",
+          "amount_ntd",
+          "case_no",
+          "created_at",
+          "entry_type",
+          "finance_import_row_id",
+          "id",
+          "idempotency_key",
+          "occurred_on",
+          "reason",
+          "reconciliation_reference",
+          "reversal_of_entry_id"
+        ],
+        "client_ledger_obligation_allocations": [
+          "allocation_ordinal",
+          "amount_ntd",
+          "created_at",
+          "id",
+          "ledger_entry_id",
+          "obligation_identity"
+        ],
+        "client_obligation_events": [
+          "actor",
+          "after_amount_ntd",
+          "after_due_date",
+          "before_amount_ntd",
+          "before_due_date",
+          "case_no",
+          "created_at",
+          "direction",
+          "event_type",
+          "expected_account_version",
+          "id",
+          "idempotency_key",
+          "obligation_identity",
+          "obligation_type",
+          "reason",
+          "source_obligation_identity",
+          "source_event_identity"
+        ],
+        "client_obligations": [
+          "amount_due_ntd",
+          "case_no",
+          "current_event_id",
+          "due_date",
+          "obligation_identity",
+          "obligation_type",
+          "projection_version",
+          "source_obligation_identity",
+          "status",
+          "updated_at"
+        ]
+      },
+      "triggers": [
+        "trg_client_finance_receipts_before_delete",
+        "trg_client_finance_receipts_before_update",
+        "trg_client_ledger_allocations_before_delete",
+        "trg_client_ledger_allocations_before_update",
+        "trg_client_ledger_entries_before_delete",
+        "trg_client_ledger_entries_before_update",
+        "trg_client_obligation_events_before_delete",
+        "trg_client_obligation_events_before_update",
+        "trg_client_payment_terms_events_before_delete",
+        "trg_client_payment_terms_events_before_update"
+      ]
+    },
+    "112_payroll_obligations.sql": {
+      "tables": {
+        "assignment_payroll_rate_snapshots": [
+          "assignment_id",
+          "created_at",
+          "hourly_rate_ntd",
+          "policy_kind",
+          "policy_version",
+          "source_identity_status"
+        ],
+        "payroll_adjustment_allocations": [
+          "adjustment_event_id",
+          "allocation_ordinal",
+          "amount_ntd",
+          "assignment_id",
+          "created_at",
+          "id"
+        ],
+        "payroll_adjustment_events": [
+          "actor",
+          "adjustment_identity",
+          "amount_ntd",
+          "case_no",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "reason",
+          "source_event_identity"
+        ],
+        "payroll_apply_receipts": [
+          "case_no",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "result_snapshot",
+          "resulting_payroll_version"
+        ],
+        "payroll_case_accounts": [
+          "aggregate_version",
+          "case_no",
+          "updated_at"
+        ],
+        "payroll_outbox": [
+          "attempt_count",
+          "case_no",
+          "created_at",
+          "delivered_at",
+          "id",
+          "intent_key",
+          "intent_type",
+          "last_error",
+          "next_attempt_at",
+          "payload_snapshot",
+          "status",
+          "updated_at"
+        ],
+        "payroll_rate_policies": [
+          "created_at",
+          "effective_from",
+          "effective_until",
+          "hourly_rate_ntd",
+          "policy_kind",
+          "policy_version"
+        ],
+        "payroll_special_pay_events": [
+          "actor",
+          "assignment_id",
+          "created_at",
+          "event_type",
+          "id",
+          "idempotency_key",
+          "reason",
+          "service_date",
+          "source_event_identity"
+        ],
+        "staff_obligation_events": [
+          "actor",
+          "after_amount_ntd",
+          "assignment_id",
+          "before_amount_ntd",
+          "case_no",
+          "created_at",
+          "due_date",
+          "event_type",
+          "expected_payroll_version",
+          "id",
+          "idempotency_key",
+          "obligation_identity",
+          "obligation_kind",
+          "payroll_fingerprint",
+          "reason",
+          "resulting_payroll_version",
+          "source_obligation_identity",
+          "staff_id"
+        ],
+        "staff_obligations": [
+          "amount_due_ntd",
+          "assignment_id",
+          "case_no",
+          "current_event_id",
+          "direction",
+          "due_date",
+          "obligation_identity",
+          "obligation_kind",
+          "payout_history_exists",
+          "payroll_version",
+          "source_obligation_identity",
+          "staff_id",
+          "status",
+          "updated_at"
+        ]
+      },
+      "triggers": [
+        "trg_payroll_adjustment_allocations_before_delete",
+        "trg_payroll_adjustment_allocations_before_update",
+        "trg_payroll_adjustment_events_before_delete",
+        "trg_payroll_adjustment_events_before_update",
+        "trg_payroll_apply_receipts_before_delete",
+        "trg_payroll_apply_receipts_before_update",
+        "trg_payroll_special_pay_events_before_delete",
+        "trg_payroll_special_pay_events_before_update",
+        "trg_staff_obligation_events_before_delete",
+        "trg_staff_obligation_events_before_update"
+      ]
+    },
+    "113_anomaly_registry_projection.sql": {
+      "tables": {
+        "anomaly_consumer_checkpoints": [
+          "consumer_identity",
+          "partition_identity",
+          "processed_at",
+          "source_event_identity",
+          "source_version"
+        ],
+        "anomaly_current_alerts": [
+          "claimed_at",
+          "claimed_by",
+          "created_at",
+          "definition_code",
+          "definition_version",
+          "display_snapshot",
+          "fingerprint",
+          "predicate_active",
+          "projection_version",
+          "resolved_at",
+          "resolved_by",
+          "source_domain",
+          "source_identity",
+          "source_version",
+          "updated_at",
+          "workflow_status",
+          "workflow_version"
+        ],
+        "anomaly_workflow_events": [
+          "action",
+          "actor",
+          "alert_fingerprint",
+          "correlation_id",
+          "created_at",
+          "expected_workflow_version",
+          "id",
+          "idempotency_key",
+          "reason",
+          "resulting_workflow_version"
+        ],
+        "finance_anomaly_occurrences": [
+          "bounded_snapshot",
+          "created_at",
+          "definition_code",
+          "finance_import_batch_id",
+          "finance_import_row_id",
+          "id",
+          "occurrence_fingerprint",
+          "source_event_identity",
+          "source_version"
+        ]
+      },
+      "triggers": [
+        "trg_anomaly_workflow_events_before_delete",
+        "trg_anomaly_workflow_events_before_update",
+        "trg_finance_anomaly_occurrences_before_delete",
+        "trg_finance_anomaly_occurrences_before_update"
+      ]
+    },
+    "114_staff_payout_ledger.sql": {
+      "tables": {
+        "staff_payable_accounts": [
+          "aggregate_version",
+          "staff_id",
+          "updated_at"
+        ],
+        "staff_payable_projections": [
+          "aggregate_version",
+          "balance_ntd",
+          "current_event_id",
+          "net_paid_ntd",
+          "obligation_amount_ntd",
+          "obligation_identity",
+          "staff_id",
+          "status",
+          "updated_at"
+        ],
+        "staff_payables_apply_receipts": [
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "result_snapshot",
+          "staff_id"
+        ],
+        "staff_payables_outbox": [
+          "attempt_count",
+          "created_at",
+          "delivered_at",
+          "id",
+          "intent_key",
+          "intent_type",
+          "last_error",
+          "next_attempt_at",
+          "payload_snapshot",
+          "staff_id",
+          "status",
+          "updated_at"
+        ],
+        "staff_payout_events": [
+          "actor",
+          "amount_ntd",
+          "bank_account_identity_hash",
+          "created_at",
+          "event_type",
+          "finance_import_row_id",
+          "id",
+          "idempotency_key",
+          "occurred_on",
+          "reason",
+          "reconciliation_reference",
+          "reversal_of_event_id",
+          "staff_id"
+        ],
+        "staff_payout_obligation_links": [
+          "allocated_amount_ntd",
+          "allocation_ordinal",
+          "created_at",
+          "id",
+          "obligation_identity",
+          "payout_event_id"
+        ]
+      },
+      "triggers": [
+        "trg_staff_payables_receipts_before_delete",
+        "trg_staff_payables_receipts_before_update",
+        "trg_staff_payout_events_before_delete",
+        "trg_staff_payout_events_before_update",
+        "trg_staff_payout_links_before_delete",
+        "trg_staff_payout_links_before_update"
+      ]
+    },
+    "115_global_command_claims.sql": {
+      "tables": {
+        "application_command_claims": [
+          "aggregate_identity",
+          "command_family",
+          "command_fingerprint",
+          "correlation_id",
+          "created_at",
+          "idempotency_key"
+        ]
+      },
+      "triggers": [
+        "trg_application_command_claims_before_delete",
+        "trg_application_command_claims_before_update"
+      ]
+    },
+    "116_order_actual_start_workflow.sql": {
+      "tables": {
+        "order_actual_start_apply_receipts": [
+          "actual_end_date",
+          "actual_start_date",
+          "actual_start_event_id",
+          "case_no",
+          "client_finance_version",
+          "command_fingerprint",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "lifecycle_event_id",
+          "lifecycle_status",
+          "order_version",
+          "payroll_version",
+          "preview_fingerprint",
+          "reconfirmation_control_event_id",
+          "result_snapshot",
+          "scheduling_command_receipt_id",
+          "scheduling_generation",
+          "scheduling_version",
+          "service_data_lock_formed"
+        ],
+        "order_actual_start_events": [
+          "actor",
+          "after_actual_start_date",
+          "before_actual_start_date",
+          "case_no",
+          "correlation_id",
+          "created_at",
+          "deposit_settlement_identity",
+          "event_type",
+          "expected_order_version",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "reason",
+          "resulting_order_version"
+        ]
+      },
+      "triggers": [
+        "trg_order_actual_start_events_before_delete",
+        "trg_order_actual_start_events_before_update",
+        "trg_order_actual_start_receipts_before_delete",
+        "trg_order_actual_start_receipts_before_update"
+      ]
+    },
+    "117_client_deposit_settlement_projection.sql": {
+      "tables": {
+        "client_deposit_settlement_projection": [
+          "allocated_net_amount_ntd",
+          "case_no",
+          "contracted_amount_ntd",
+          "deposit_obligation_identity",
+          "latest_ledger_entry_id",
+          "projection_version",
+          "settlement_identity",
+          "settlement_state",
+          "source_fingerprint",
+          "updated_at"
+        ]
+      },
+      "triggers": []
+    },
+    "118_order_cancellation_workflow.sql": {
+      "tables": {
+        "order_cancellation_apply_receipts": [
+          "actual_end_date",
+          "cancellation_control_event_id",
+          "cancellation_event_id",
+          "case_no",
+          "client_finance_version",
+          "command_fingerprint",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "lifecycle_event_id",
+          "lifecycle_status",
+          "official_service_day_count",
+          "official_service_hours",
+          "order_version",
+          "payroll_version",
+          "preview_fingerprint",
+          "result_snapshot",
+          "scheduling_command_receipt_id",
+          "scheduling_generation",
+          "scheduling_version"
+        ],
+        "order_cancellation_events": [
+          "actor",
+          "actual_end_date",
+          "cancellation_date",
+          "case_no",
+          "confirmed_service_days",
+          "correlation_id",
+          "created_at",
+          "expected_order_version",
+          "id",
+          "idempotency_key",
+          "official_service_day_count",
+          "official_service_hours",
+          "preview_fingerprint",
+          "reason",
+          "resulting_order_version"
+        ]
+      },
+      "triggers": [
+        "trg_order_cancellation_events_before_delete",
+        "trg_order_cancellation_events_before_update",
+        "trg_order_cancellation_receipts_before_delete",
+        "trg_order_cancellation_receipts_before_update"
+      ]
+    },
+    "119_assignment_plan_workflow.sql": {
+      "tables": {
+        "assignment_plan_apply_receipts": [
+          "cancelled_assignment_ids",
+          "case_no",
+          "command_fingerprint",
+          "correlation_id",
+          "created_assignment_keys",
+          "created_at",
+          "expected_client_finance_version",
+          "expected_order_version",
+          "expected_payroll_version",
+          "expected_scheduling_version",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "resulting_client_finance_version",
+          "resulting_generation_number",
+          "resulting_order_version",
+          "resulting_payroll_version",
+          "resulting_scheduling_version",
+          "scheduling_receipt_id"
+        ]
+      },
+      "triggers": [
+        "trg_assignment_plan_receipts_before_delete",
+        "trg_assignment_plan_receipts_before_update"
+      ]
+    },
+    "120_leave_substitution_workflow.sql": {
+      "tables": {
+        "scheduling_leave_occupancy_days": [
+          "active_marker",
+          "batch_key",
+          "cancelled_at",
+          "cancelled_by",
+          "created_at",
+          "generation_id",
+          "id",
+          "item_index",
+          "occupancy_date",
+          "outcome_id",
+          "staff_id",
+          "status"
+        ],
+        "scheduling_leave_substitution_batches": [
+          "actor",
+          "batch_key",
+          "case_no",
+          "command_fingerprint",
+          "correlation_id",
+          "created_at",
+          "item_count",
+          "original_assignment_id",
+          "preview_fingerprint",
+          "reason",
+          "request_fingerprint",
+          "request_snapshot"
+        ],
+        "scheduling_leave_substitution_outcomes": [
+          "batch_key",
+          "created_at",
+          "event_key",
+          "id",
+          "is_double_pay",
+          "item_index",
+          "leave_occupancy_date",
+          "original_assignment_id",
+          "original_schedule_id",
+          "original_staff_id",
+          "original_work_date",
+          "outcome_snapshot",
+          "resolution_type",
+          "result_fingerprint",
+          "resulting_assignment_id",
+          "resulting_service_date",
+          "resulting_staff_id"
+        ],
+        "scheduling_leave_substitution_receipts": [
+          "batch_key",
+          "case_no",
+          "command_fingerprint",
+          "correlation_id",
+          "created_at",
+          "expected_client_finance_version",
+          "expected_order_version",
+          "expected_payroll_version",
+          "expected_scheduling_version",
+          "outcome_event_ids",
+          "preview_fingerprint",
+          "result_snapshot",
+          "resulting_client_finance_version",
+          "resulting_generation_number",
+          "resulting_order_version",
+          "resulting_payroll_version",
+          "resulting_scheduling_version",
+          "scheduling_receipt_id"
+        ]
+      },
+      "triggers": [
+        "trg_scheduling_leave_batches_before_delete",
+        "trg_scheduling_leave_batches_before_update",
+        "trg_scheduling_leave_outcomes_before_delete",
+        "trg_scheduling_leave_outcomes_before_update",
+        "trg_scheduling_leave_receipts_before_delete",
+        "trg_scheduling_leave_receipts_before_update"
+      ]
+    },
+    "121_finance_import_preview_apply.sql": {
+      "tables": {
+        "finance_import_apply_receipts": [
+          "batch_id",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "result_snapshot"
+        ],
+        "finance_import_batch_contracts": [
+          "batch_id",
+          "batch_identity",
+          "batch_version",
+          "classifier_version",
+          "created_at",
+          "fingerprint_version",
+          "source_content_digest",
+          "updated_at"
+        ],
+        "finance_import_classification_events": [
+          "actor",
+          "available_actions",
+          "batch_id",
+          "canonical_fact_version",
+          "classification_type",
+          "classification_version",
+          "created_at",
+          "decision_facts_fingerprint",
+          "disposition",
+          "evidence",
+          "finance_import_row_id",
+          "id",
+          "reason",
+          "target_identities"
+        ],
+        "finance_import_correction_receipts": [
+          "command_fingerprint",
+          "created_at",
+          "finance_import_row_id",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "result_snapshot"
+        ],
+        "finance_import_dispatch_events": [
+          "batch_id",
+          "created_at",
+          "finance_import_row_id",
+          "id",
+          "outcome",
+          "plan_fingerprint",
+          "result_reference"
+        ],
+        "finance_import_integrity_events": [
+          "active",
+          "batch_id",
+          "created_at",
+          "evidence_snapshot",
+          "finance_import_row_id",
+          "id",
+          "issue_code",
+          "source_event_identity"
+        ],
+        "finance_import_outbox": [
+          "attempt_count",
+          "batch_id",
+          "created_at",
+          "delivered_at",
+          "id",
+          "intent_key",
+          "intent_type",
+          "last_error",
+          "next_attempt_at",
+          "payload_snapshot",
+          "status",
+          "updated_at"
+        ],
+        "finance_import_reconciliation_receipts": [
+          "allocation_count",
+          "amount_ntd",
+          "candidate_fingerprint",
+          "created_at",
+          "finance_import_row_id",
+          "id",
+          "owning_domain"
+        ]
+      },
+      "triggers": [
+        "trg_finance_import_apply_receipt_before_delete",
+        "trg_finance_import_apply_receipt_before_update",
+        "trg_finance_import_classification_before_delete",
+        "trg_finance_import_classification_before_update",
+        "trg_finance_import_correction_receipt_before_delete",
+        "trg_finance_import_correction_receipt_before_update",
+        "trg_finance_import_dispatch_before_delete",
+        "trg_finance_import_dispatch_before_update",
+        "trg_finance_import_integrity_before_delete",
+        "trg_finance_import_integrity_before_update",
+        "trg_finance_import_reconciliation_before_delete",
+        "trg_finance_import_reconciliation_before_update"
+      ]
+    },
+    "122_order_contract_completion_workflow.sql": {
+      "tables": {
+        "order_contract_completion_apply_receipts": [
+          "case_no",
+          "command_fingerprint",
+          "contract_event_id",
+          "contract_identity",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "lifecycle_event_id",
+          "lifecycle_status",
+          "order_version",
+          "preview_fingerprint",
+          "result_snapshot"
+        ]
+      },
+      "triggers": [
+        "trg_order_contract_completion_receipts_before_delete",
+        "trg_order_contract_completion_receipts_before_update"
+      ]
+    },
+    "123_order_reopen_workflow.sql": {
+      "tables": {
+        "order_reopen_apply_receipts": [
+          "cancellation_control_event_id",
+          "cancellation_event_id",
+          "case_no",
+          "command_fingerprint",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "lifecycle_event_id",
+          "lifecycle_status",
+          "order_version",
+          "preview_fingerprint",
+          "reopen_event_id",
+          "requires_fresh_scheduling_preview",
+          "result_snapshot"
+        ],
+        "order_reopen_events": [
+          "actor",
+          "after_status",
+          "before_status",
+          "cancellation_event_id",
+          "case_no",
+          "correlation_id",
+          "created_at",
+          "expected_order_version",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "reason",
+          "resulting_order_version"
+        ]
+      },
+      "triggers": [
+        "trg_order_reopen_events_before_delete",
+        "trg_order_reopen_events_before_update",
+        "trg_order_reopen_receipts_before_delete",
+        "trg_order_reopen_receipts_before_update"
+      ]
+    },
+    "124_case_architecture_bootstrap.sql": {
+      "tables": {
+        "case_architecture_bootstrap_events": [
+          "actor",
+          "candidate_fingerprint",
+          "case_no",
+          "client_hourly_rate_ntd",
+          "client_payment_terms_event_id",
+          "client_policy_version",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "order_version",
+          "payroll_hourly_rate_ntd",
+          "payroll_policy_kind",
+          "payroll_policy_version",
+          "reason",
+          "source_identity_status"
+        ],
+        "case_architecture_bootstrap_receipts": [
+          "bootstrap_created",
+          "bootstrap_event_id",
+          "case_no",
+          "client_finance_version",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "order_version",
+          "payroll_version",
+          "preview_fingerprint",
+          "result_snapshot",
+          "scheduling_generation",
+          "scheduling_version"
+        ],
+        "case_payroll_rate_policy_snapshots": [
+          "case_no",
+          "created_at",
+          "hourly_rate_ntd",
+          "policy_kind",
+          "policy_version",
+          "source_event_id",
+          "source_identity_status"
+        ]
+      },
+      "triggers": [
+        "trg_case_architecture_bootstrap_events_before_delete",
+        "trg_case_architecture_bootstrap_events_before_update",
+        "trg_case_architecture_bootstrap_receipts_before_delete",
+        "trg_case_architecture_bootstrap_receipts_before_update",
+        "trg_case_payroll_policy_snapshots_before_delete",
+        "trg_case_payroll_policy_snapshots_before_update"
+      ]
+    },
+    "125_government_subsidy_domain.sql": {
+      "tables": {
+        "government_subsidy_apply_receipts": [
+          "allocation_count",
+          "amount_ntd",
+          "bank_fact_identity",
+          "batch_id",
+          "batch_version",
+          "command_fingerprint",
+          "command_kind",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "outstanding_ntd",
+          "preview_fingerprint",
+          "result_snapshot",
+          "status",
+          "transaction_id"
+        ],
+        "government_subsidy_batch_accounts": [
+          "aggregate_version",
+          "approved_total_ntd",
+          "batch_id",
+          "net_allocated_ntd",
+          "outstanding_ntd",
+          "requested_total_ntd",
+          "status",
+          "updated_at"
+        ],
+        "government_subsidy_outbox": [
+          "attempt_count",
+          "batch_id",
+          "created_at",
+          "delivered_at",
+          "id",
+          "intent_key",
+          "intent_type",
+          "last_error",
+          "next_attempt_at",
+          "payload_snapshot",
+          "projection_event_id",
+          "status",
+          "transaction_id",
+          "updated_at"
+        ],
+        "government_subsidy_projection_events": [
+          "actor",
+          "after_net_allocated_ntd",
+          "after_status",
+          "batch_id",
+          "before_net_allocated_ntd",
+          "before_status",
+          "created_at",
+          "expected_batch_version",
+          "id",
+          "idempotency_key",
+          "outstanding_ntd",
+          "preview_fingerprint",
+          "reason",
+          "resulting_batch_version",
+          "transaction_id"
+        ],
+        "government_subsidy_transactions": [
+          "actor",
+          "correlation_id",
+          "expected_batch_version",
+          "idempotency_key",
+          "preview_fingerprint",
+          "reason",
+          "resulting_batch_version"
+        ]
+      },
+      "triggers": [
+        "trg_government_subsidy_allocations_before_delete",
+        "trg_government_subsidy_allocations_before_update",
+        "trg_government_subsidy_projection_events_before_delete",
+        "trg_government_subsidy_projection_events_before_update",
+        "trg_government_subsidy_receipts_before_delete",
+        "trg_government_subsidy_receipts_before_update",
+        "trg_government_subsidy_transactions_before_delete",
+        "trg_government_subsidy_transactions_before_update"
+      ]
+    },
+    "126_client_refund_reversal.sql": {
+      "tables": {
+        "client_refund_reversal_apply_receipts": [
+          "case_no",
+          "command_fingerprint",
+          "correction_type",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "result_snapshot",
+          "resulting_account_version"
+        ]
+      },
+      "triggers": [
+        "trg_client_refund_reversal_receipt_before_delete",
+        "trg_client_refund_reversal_receipt_before_update"
+      ]
+    },
+    "127_anomaly_root_fact_projector.sql": {
+      "tables": {
+        "anomaly_root_fact_projection_receipts": [
+          "alert_fingerprint",
+          "event_payload_fingerprint",
+          "occurrence_recorded",
+          "predicate_active",
+          "processed_at",
+          "source_event_identity",
+          "source_version",
+          "workflow_version"
+        ],
+        "anomaly_root_fact_snapshots": [
+          "affected_obligation_identities",
+          "affected_order_identities",
+          "alert_fingerprint",
+          "amount_delta_ntd",
+          "domain_blockers",
+          "finance_import_batch_id",
+          "finance_import_row_id",
+          "integrity_blocker_active",
+          "projection_freshness",
+          "reason_codes",
+          "root_condition_active",
+          "source_event_identity",
+          "source_occurred_at",
+          "source_version",
+          "updated_at"
+        ]
+      },
+      "triggers": [
+        "trg_anomaly_root_receipts_before_delete",
+        "trg_anomaly_root_receipts_before_update"
+      ]
+    },
+    "128_finance_import_ingestion.sql": {
+      "tables": {
+        "finance_import_ingestion_receipts": [
+          "batch_id",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "result_snapshot",
+          "source_content_digest"
+        ]
+      },
+      "triggers": [
+        "trg_finance_import_ingestion_receipt_before_delete",
+        "trg_finance_import_ingestion_receipt_before_update"
+      ]
+    },
+    "129_case_import.sql": {
+      "tables": {
+        "case_import_events": [
+          "actor",
+          "bootstrap_event_id",
+          "candidate_fingerprint",
+          "case_no",
+          "client_id",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "reason",
+          "source_fingerprint",
+          "source_snapshot"
+        ],
+        "case_import_receipts": [
+          "bootstrap_event_id",
+          "case_no",
+          "client_finance_version",
+          "client_id",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "import_event_id",
+          "order_version",
+          "payroll_version",
+          "preview_fingerprint",
+          "result_snapshot",
+          "scheduling_generation",
+          "scheduling_version",
+          "source_fingerprint"
+        ]
+      },
+      "triggers": [
+        "trg_case_import_events_before_delete",
+        "trg_case_import_events_before_update",
+        "trg_case_import_receipts_before_delete",
+        "trg_case_import_receipts_before_update"
+      ]
+    },
+    "133_financial_adjustments.sql": {
+      "tables": {
+        "financial_adjustment_apply_receipts": [
+          "case_no",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "result_snapshot",
+          "resulting_client_account_version",
+          "resulting_payroll_version"
+        ],
+        "financial_adjustment_staff_allocations": [
+          "amount_delta_ntd",
+          "assignment_id",
+          "created_at",
+          "financial_adjustment_id",
+          "id"
+        ],
+        "financial_adjustments": [
+          "adjustment_identity",
+          "adjustment_source_type",
+          "amount_delta_ntd",
+          "apply_idempotency_key",
+          "cancelled_at",
+          "case_no",
+          "created_at",
+          "id",
+          "reason",
+          "reversal_of_adjustment_id",
+          "source_event_identity"
+        ]
+      },
+      "triggers": [
+        "trg_financial_adjustment_receipt_before_delete",
+        "trg_financial_adjustment_receipt_before_update",
+        "trg_financial_adjustment_staff_before_delete",
+        "trg_financial_adjustment_staff_before_update",
+        "trg_financial_adjustments_before_delete",
+        "trg_financial_adjustments_before_update"
+      ]
+    },
+    "134_government_subsidy_claim_workflow.sql": {
+      "tables": {
+        "government_subsidy_claim_apply_receipts": [
+          "batch_id",
+          "batch_version",
+          "command_fingerprint",
+          "command_kind",
+          "correlation_id",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "item_count",
+          "preview_fingerprint",
+          "result_snapshot",
+          "status",
+          "total_ntd"
+        ],
+        "government_subsidy_claim_approval_events": [
+          "actor",
+          "approved_at",
+          "approved_total_ntd",
+          "batch_id",
+          "correlation_id",
+          "expected_batch_version",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "reason",
+          "resulting_batch_version"
+        ],
+        "government_subsidy_claim_approval_items": [
+          "approval_event_id",
+          "approved_amount_ntd",
+          "batch_id",
+          "claim_item_id",
+          "created_at",
+          "id"
+        ],
+        "government_subsidy_claim_outbox": [
+          "attempt_count",
+          "batch_id",
+          "created_at",
+          "delivered_at",
+          "id",
+          "intent_key",
+          "intent_type",
+          "last_error",
+          "next_attempt_at",
+          "payload_snapshot",
+          "status",
+          "updated_at"
+        ],
+        "government_subsidy_claim_submission_events": [
+          "actor",
+          "batch_id",
+          "correlation_id",
+          "expected_batch_version",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "reason",
+          "resulting_batch_version",
+          "submitted_at"
+        ]
+      },
+      "triggers": [
+        "trg_government_subsidy_approval_before_delete",
+        "trg_government_subsidy_approval_before_update",
+        "trg_government_subsidy_approval_item_before_delete",
+        "trg_government_subsidy_approval_item_before_update",
+        "trg_government_subsidy_claim_receipt_before_delete",
+        "trg_government_subsidy_claim_receipt_before_update",
+        "trg_government_subsidy_submission_before_delete",
+        "trg_government_subsidy_submission_before_update"
+      ]
+    },
+    "135_client_only_financial_adjustments.sql": {
+      "tables": {
+        "financial_adjustment_apply_receipts": [
+          "resulting_payroll_version"
+        ],
+        "financial_adjustments": [
+          "adjustment_scope"
+        ]
+      },
+      "triggers": []
+    },
+    "136_beclass_import_review.sql": {
+      "tables": {
+        "beclass_import_review_events": [
+          "actor",
+          "candidate_fingerprint",
+          "corrected_payload",
+          "correlation_id",
+          "created_at",
+          "event_type",
+          "expected_version",
+          "id",
+          "idempotency_key",
+          "owning_record_identity",
+          "reason",
+          "resolved_issue_codes",
+          "resulting_version",
+          "review_row_id"
+        ],
+        "beclass_import_review_outbox": [
+          "attempts",
+          "bounded_snapshot",
+          "created_at",
+          "id",
+          "intent_key",
+          "intent_type",
+          "last_error",
+          "published_at",
+          "review_event_id",
+          "review_row_id"
+        ],
+        "beclass_import_review_receipts": [
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "outbox_id",
+          "owning_record_identity",
+          "preview_fingerprint",
+          "result_snapshot",
+          "resulting_version",
+          "review_event_id",
+          "review_row_id"
+        ],
+        "beclass_import_review_rows": [
+          "created_at",
+          "id",
+          "issue_codes",
+          "masked_identifier",
+          "review_identity",
+          "source_event_identity",
+          "source_fingerprint",
+          "source_kind",
+          "source_payload",
+          "source_row",
+          "source_sheet"
+        ]
+      },
+      "triggers": [
+        "trg_beclass_review_events_before_delete",
+        "trg_beclass_review_events_before_update",
+        "trg_beclass_review_receipts_before_delete",
+        "trg_beclass_review_receipts_before_update",
+        "trg_beclass_review_rows_before_delete",
+        "trg_beclass_review_rows_before_update"
+      ]
+    },
+    "61_finance_import_reprocessing.sql": {
+      "tables": {
+        "finance_import_reclassification_events": [
+          "actor",
+          "after_classification_type",
+          "before_classification_type",
+          "dispatch_reason",
+          "dispatch_result",
+          "finance_import_row_id",
+          "id",
+          "run_id"
+        ],
+        "finance_import_reprocess_runs": [
+          "actor",
+          "batch_id",
+          "changed_count",
+          "classifier_version",
+          "dispatch_count",
+          "id",
+          "pending_count",
+          "plan_fingerprint",
+          "reconciled_count",
+          "request_summary",
+          "result_summary",
+          "selected_count",
+          "status"
+        ]
+      },
+      "triggers": [
+        "trg_finance_import_reclassification_events_before_delete",
+        "trg_finance_import_reclassification_events_before_update",
+        "trg_finance_import_reprocess_runs_before_delete",
+        "trg_finance_import_reprocess_runs_before_update"
+      ]
+    }
+  }
+}

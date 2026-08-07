@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from scripts.imports.finance_formats.detector import detect_statement_format
-from scripts.imports.finance_formats.legacy import normalize_legacy_rows
+from scripts.imports.finance_formats.historical_multisheet import (
+    normalize_historical_multisheet_rows,
+)
 from scripts.imports.finance_formats.sinopac import normalize_sinopac_rows
 from scripts.imports.finance_formats.taishin import normalize_taishin_rows
 from scripts.imports.finance_normalized_row import validate_normalized_row
@@ -15,7 +17,7 @@ from scripts.imports.finance_normalized_row import validate_normalized_row
 Adapter = Callable[[str | Path, str, int], list[dict[str, Any]]]
 
 FORMAT_ADAPTERS: dict[str, Adapter] = {
-    "legacy": normalize_legacy_rows,
+    "legacy": normalize_historical_multisheet_rows,
     "taishin": normalize_taishin_rows,
     "sinopac": normalize_sinopac_rows,
 }
