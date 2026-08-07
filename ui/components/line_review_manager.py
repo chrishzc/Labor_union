@@ -25,6 +25,7 @@ TAIPEI_TIMEZONE = ZoneInfo("Asia/Taipei")
 TYPE_LABELS = {
     "staff_verification": "月嫂身分認證",
     "client_rebind": "客戶重新綁定",
+    "staff_leave": "月嫂請假與代班申請",
 }
 STATUS_LABELS = {
     "pending": "待審核",
@@ -37,6 +38,10 @@ ROLE_LABELS = {
     "staff": "月嫂",
     "union_staff": "工會人員",
 }
+
+
+def _bool_label(value: Any) -> str:
+    return "是" if bool(value) else "否"
 
 
 def _mask_line_id(value: Any) -> str:
@@ -89,6 +94,150 @@ def _submit_decision(
     st.rerun()
 
 
+def _submit_staff_leave_decision(
+    client: LineAdminApiClient,
+    token: str | None,
+    request_id: int,
+    action: str,
+    reason: str,
+) -> None:
+    try:
+        result = client.staff_leave_review_action(
+            token,
+            request_id,
+            action,
+            reason=reason,
+        )
+    except LineAdminApiError as exc:
+        st.error(f"請假審核處理失敗：{exc}")
+        return
+    st.session_state[FLASH_KEY] = result.get("message") or f"請假申請 #{request_id} 已處理"
+    st.rerun()
+
+
+def _normalize_staff_leave_item(item: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(item)
+    normalized["request_type"] = "staff_leave"
+    normalized["display_name"] = item.get("staff_name") or "-"
+    normalized["line_user_id_masked"] = _mask_line_id(item.get("line_user_id"))
+    return normalized
+
+
+def _render_staff_leave_reviews(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict[str, Any],
+) -> None:
+    try:
+        summary = client.staff_leave_review_summary(token)
+        result = client.staff_leave_reviews(
+            token,
+            filters={"status": "pending", "page": 1, "page_size": 20},
+        )
+    except LineAdminApiError as exc:
+        st.error(f"無法載入月嫂請假與代班申請：{exc}")
+        return
+
+    with st.expander(
+        f"月嫂請假與代班申請（待審 {summary.get('pending_total', 0)}）",
+        expanded=bool(summary.get("pending_total")),
+    ):
+        m1, m2, m3 = st.columns(3)
+        m1.metric("待審請假", summary.get("pending_total", 0))
+        m2.metric("含代班資訊", summary.get("substitute_pending", 0))
+        m3.metric("今日已處理", summary.get("processed_today", 0))
+
+        items = result.get("items") or []
+        if not items:
+            st.info("目前沒有待審的月嫂請假與代班申請。")
+            return
+
+        rows = [
+            {
+                "申請編號": item["id"],
+                "月嫂": item.get("staff_name") or "-",
+                "請假期間": f"{item.get('leave_start_date')} 至 {item.get('leave_end_date')}",
+                "是否有代班": _bool_label(item.get("substitute_found")),
+                "代班人員": item.get("substitute_name") or "-",
+                "代班電話": item.get("substitute_phone") or "-",
+                "申請時間（台北）": _format_utc_as_taipei(item.get("created_at")),
+            }
+            for item in items
+        ]
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        request_id = st.selectbox(
+            "查看請假申請詳細資料",
+            [int(item["id"]) for item in items],
+            format_func=lambda value: (
+                f"#{value} · "
+                f"{next((item.get('staff_name') for item in items if int(item['id']) == value), '')}"
+            ),
+            key="staff_leave_review_request_detail",
+        )
+        try:
+            detail = client.staff_leave_review_detail(token, request_id)
+        except LineAdminApiError as exc:
+            st.error(f"無法載入請假申請內容：{exc}")
+            return
+
+        detail_rows = {
+            "申請編號": detail["id"],
+            "狀態": detail.get("status_label") or detail.get("status"),
+            "月嫂姓名": detail.get("staff_name") or "-",
+            "月嫂電話": detail.get("staff_phone") or "-",
+            "請假開始": detail.get("leave_start_date") or "-",
+            "請假結束": detail.get("leave_end_date") or "-",
+            "請假原因": detail.get("leave_reason") or "-",
+            "是否找到代班": _bool_label(detail.get("substitute_found")),
+            "代班人員姓名": detail.get("substitute_name") or "-",
+            "代班人員聯絡電話": detail.get("substitute_phone") or "-",
+            "代班補充資訊": detail.get("substitute_note") or "-",
+            "申請時間（台北）": _format_utc_as_taipei(detail.get("created_at")),
+        }
+        st.dataframe(
+            pd.DataFrame([{"欄位": key, "內容": value} for key, value in detail_rows.items()]),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        if profile.get("role") not in MANAGER_ROLES:
+            st.info("目前帳號可以查看申請；核准或拒絕需要主管權限。")
+            return
+
+        with st.form(f"staff_leave_review_decision_{request_id}"):
+            decision_label = st.radio(
+                "處理決定",
+                ["核准", "拒絕"],
+                horizontal=True,
+                key=f"staff_leave_review_choice_{request_id}",
+            )
+            reason = st.text_area(
+                "處理說明",
+                help="拒絕時必填；核准時可填寫給月嫂的補充說明。",
+                max_chars=1000,
+                key=f"staff_leave_review_reason_{request_id}",
+            )
+            confirmed = st.checkbox(
+                "我已核對請假日期與代班資訊，確認執行此操作",
+                key=f"staff_leave_review_confirm_{request_id}",
+            )
+            submitted = st.form_submit_button("送出請假審核結果", type="primary")
+        if submitted:
+            if not confirmed:
+                st.error("請先勾選確認。")
+            elif decision_label == "拒絕" and not reason.strip():
+                st.error("拒絕請假申請時必須填寫原因。")
+            else:
+                _submit_staff_leave_decision(
+                    client,
+                    token,
+                    request_id,
+                    "approve" if decision_label == "核准" else "reject",
+                    reason,
+                )
+
+
 def render_review_manager(
     client: LineAdminApiClient,
     token: str | None,
@@ -102,16 +251,20 @@ def render_review_manager(
 
     try:
         summary = client.line_review_summary(token)
+        leave_summary = client.staff_leave_review_summary(token)
     except LineAdminApiError as exc:
         st.error(f"無法載入審查統計：{exc}")
         return
 
-    metrics = st.columns(5)
-    metrics[0].metric("全部待審", summary["pending_total"])
+    pending_total = summary["pending_total"] + leave_summary.get("pending_total", 0)
+    processed_today = summary["processed_today"] + leave_summary.get("processed_today", 0)
+    metrics = st.columns(6)
+    metrics[0].metric("全部待審", pending_total)
     metrics[1].metric("月嫂認證", summary["staff_pending"])
     metrics[2].metric("重新綁定", summary["rebind_pending"])
-    metrics[3].metric("今日已處理", summary["processed_today"])
-    metrics[4].metric(
+    metrics[3].metric("請假代班", leave_summary.get("pending_total", 0))
+    metrics[4].metric("今日已處理", processed_today)
+    metrics[5].metric(
         f"逾 {summary['stale_hours']} 小時",
         summary["stale_pending"],
     )
@@ -164,18 +317,66 @@ def render_review_manager(
     page = st.session_state.get(PAGE_KEY, 1)
 
     try:
-        result = client.line_reviews(
-            token,
-            filters={
-                "request_type": request_type,
-                "status": status_value,
-                "search": search,
-                "created_from": created_from,
-                "created_to": created_to,
-                "page": page,
-                "page_size": 25,
-            },
-        )
+        if request_type == "staff_leave":
+            result = client.staff_leave_reviews(
+                token,
+                filters={
+                    "status": status_value,
+                    "search": search,
+                    "created_from": created_from,
+                    "created_to": created_to,
+                    "page": page,
+                    "page_size": 25,
+                },
+            )
+            result["items"] = [_normalize_staff_leave_item(item) for item in result.get("items", [])]
+        elif request_type is None:
+            line_result = client.line_reviews(
+                token,
+                filters={
+                    "status": status_value,
+                    "search": search,
+                    "created_from": created_from,
+                    "created_to": created_to,
+                    "page": 1,
+                    "page_size": 100,
+                },
+            )
+            leave_result = client.staff_leave_reviews(
+                token,
+                filters={
+                    "status": status_value,
+                    "search": search,
+                    "created_from": created_from,
+                    "created_to": created_to,
+                    "page": 1,
+                    "page_size": 100,
+                },
+            )
+            combined_items = [
+                *line_result.get("items", []),
+                *[_normalize_staff_leave_item(item) for item in leave_result.get("items", [])],
+            ]
+            combined_items.sort(key=lambda item: str(item.get("created_at") or ""), reverse=True)
+            result = {
+                "items": combined_items,
+                "page": 1,
+                "total_pages": 1,
+                "total": len(combined_items),
+            }
+        else:
+            result = client.line_reviews(
+                token,
+                filters={
+                    "request_type": request_type,
+                    "status": status_value,
+                    "search": search,
+                    "created_from": created_from,
+                    "created_to": created_to,
+                    "page": page,
+                    "page_size": 25,
+                },
+            )
     except LineAdminApiError as exc:
         st.error(f"無法載入審查清單：{exc}")
         return
@@ -233,8 +434,14 @@ def render_review_manager(
         ),
         key="line_review_request_detail",
     )
+    selected_item = next(item for item in items if int(item["id"]) == int(request_id))
+    selected_request_type = selected_item["request_type"]
     try:
-        detail = client.line_review_detail(token, request_id)
+        if selected_request_type == "staff_leave":
+            detail = client.staff_leave_review_detail(token, request_id)
+            detail["request_type"] = "staff_leave"
+        else:
+            detail = client.line_review_detail(token, request_id)
     except LineAdminApiError as exc:
         st.error(f"無法載入申請內容：{exc}")
         return
@@ -247,7 +454,21 @@ def render_review_manager(
         "申請時間（台北）": _format_utc_as_taipei(detail.get("created_at")),
         "申請帳號": _mask_line_id(detail.get("line_user_id")),
     }
-    if detail["request_type"] == "staff_verification":
+    if detail["request_type"] == "staff_leave":
+        detail_rows.update(
+            {
+                "月嫂姓名": detail.get("staff_name") or "-",
+                "月嫂電話": detail.get("staff_phone") or "-",
+                "請假開始": detail.get("leave_start_date") or "-",
+                "請假結束": detail.get("leave_end_date") or "-",
+                "請假原因": detail.get("leave_reason") or "-",
+                "是否找到代班": _bool_label(detail.get("substitute_found")),
+                "代班人員姓名": detail.get("substitute_name") or "-",
+                "代班人員聯絡電話": detail.get("substitute_phone") or "-",
+                "代班補充資訊": detail.get("substitute_note") or "-",
+            }
+        )
+    elif detail["request_type"] == "staff_verification":
         detail_rows.update(
             {
                 "目前身分": ROLE_LABELS.get(
@@ -311,6 +532,14 @@ def render_review_manager(
             st.error("請先勾選確認。")
         elif decision_label == "拒絕" and not reason.strip():
             st.error("拒絕申請時必須填寫原因。")
+        elif detail["request_type"] == "staff_leave":
+            _submit_staff_leave_decision(
+                client,
+                token,
+                request_id,
+                "approve" if decision_label == "核准" else "reject",
+                reason,
+            )
         else:
             _submit_decision(
                 client,

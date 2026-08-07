@@ -38,7 +38,10 @@ from services.line_liff_identity_service import (
     liff_token_required,
     resolve_line_user_id,
 )
-from services.customer_service_ticket_service import create_or_reopen_ticket
+from services.customer_service_ticket_service import (
+    create_or_reopen_ticket,
+    create_profile_change_request,
+)
 
 # 載入環境變數
 load_dotenv()
@@ -127,7 +130,33 @@ SERVICE_HELP_CATEGORY_TEXTS = {
 }
 
 
+def _configured_liff_id() -> str:
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if not liff_id or liff_id == "your_liff_id_here":
+        liff_id = get_setting("line_liff_id", "").strip()
+    return liff_id
+
+
+def _profile_update_liff_url() -> str:
+    liff_id = _configured_liff_id()
+    if liff_id:
+        return f"https://liff.line.me/{liff_id}/?target=profile_update"
+    base_url = os.getenv("BASE_URL", "").strip().rstrip("/")
+    return f"{base_url}/gateway?target=profile_update" if base_url else "/profile-update-page"
+
+
+def _staff_liff_url(target: str) -> str:
+    liff_id = _configured_liff_id()
+    if liff_id:
+        return f"https://liff.line.me/{liff_id}/?target={target}"
+    base_url = os.getenv("BASE_URL", "").strip().rstrip("/")
+    return f"{base_url}/gateway?target={target}" if base_url else f"/gateway?target={target}"
+
+
 def _service_help_quick_reply_message() -> dict[str, Any]:
+    profile_update_action = (
+        {"type": "uri", "label": "修改資料", "uri": _profile_update_liff_url()}
+    )
     return {
         "type": "template",
         "altText": "請選擇服務說明項目",
@@ -147,7 +176,7 @@ def _service_help_quick_reply_message() -> dict[str, Any]:
                     "title": "需要協助",
                     "text": "請選擇需要工會協助的項目",
                     "actions": [
-                        {"type": "message", "label": "修改資料", "text": "修改登記資料"},
+                        profile_update_action,
                         {"type": "message", "label": "聯絡工會", "text": "聯絡工會人員"},
                         {"type": "message", "label": "其他問題", "text": "其他問題"},
                     ],
@@ -226,17 +255,18 @@ def _service_help_category_reply(
             f"{period}"
         )
     if category == "修改登記資料":
+        profile_update_url = _profile_update_liff_url()
         create_or_reopen_ticket(
             cursor,
             line_user_id=user_id,
             category="profile_update",
-            message="用戶提出：修改登記資料",
+            message="用戶點選：修改登記資料 LIFF",
             source_event_id=source_event_id,
         )
         return (
-            "已收到您的修改資料需求。\n\n"
-            "請回覆您想修改的內容，例如：服務日期、服務地址、聯絡電話或其他資料。"
-            "工會人員確認後會協助處理。"
+            "請點選以下連結填寫要修改的登記資料：\n"
+            f"{profile_update_url}\n\n"
+            "送出後資料會先送交工會人員審核，審核通過後才會更新。"
         )
     if category == "聯絡工會人員":
         create_or_reopen_ticket(
@@ -608,6 +638,203 @@ async def get_client_info(userId: str = ""):
     trusted_user_id = await _trusted_line_user_id(None, userId)
     return await _find_client_info(trusted_user_id)
 
+
+class ProfileChangeItemPayload(BaseModel):
+    field_id: str
+    label: str
+    value: Any
+
+
+class ProfileChangeRequestPayload(BaseModel):
+    line_user_id: str = ""
+    line_id_token: str = ""
+    changes: list[ProfileChangeItemPayload]
+
+
+@router.post("/api/line/profile-change-requests")
+async def submit_profile_change_request(payload: ProfileChangeRequestPayload):
+    trusted_user_id = await _trusted_line_user_id(
+        payload.line_id_token,
+        payload.line_user_id,
+    )
+    try:
+        result = create_profile_change_request(
+            line_user_id=trusted_user_id,
+            requested_changes=[item.model_dump() for item in payload.changes],
+        )
+        return {
+            "status": "success",
+            "message": "您的資料修改申請已送出，請耐心等候工會人員審核。",
+            "request_id": result["id"],
+        }
+    except ValueError as exc:
+        return {"status": "error", "message": str(exc)}
+
+
+def _find_staff_by_line_user(cursor, line_user_id: str) -> dict[str, Any] | None:
+    cursor.execute(
+        """
+        SELECT id, name, phone, line_user_id
+        FROM staff
+        WHERE line_user_id=%s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (line_user_id,),
+    )
+    return cursor.fetchone()
+
+
+def _format_survey_details(value: Any) -> list[dict[str, Any]]:
+    if not value:
+        return []
+    try:
+        details = json.loads(value) if isinstance(value, str) else value
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(details, dict):
+        return []
+    hidden_prefixes = {"_", "內部"}
+    rows = []
+    for key, val in details.items():
+        if any(str(key).startswith(prefix) for prefix in hidden_prefixes):
+            continue
+        if isinstance(val, (dict, list)):
+            val = json.dumps(val, ensure_ascii=False)
+        rows.append({"label": str(key), "value": "" if val is None else str(val)})
+    return rows
+
+
+class StaffLiffIdentityPayload(BaseModel):
+    line_user_id: str = ""
+    line_id_token: str = ""
+
+
+class StaffOrderSearchPayload(StaffLiffIdentityPayload):
+    keyword: str
+
+
+class StaffLeaveRequestPayload(StaffLiffIdentityPayload):
+    leave_start_date: str
+    leave_end_date: str
+    leave_reason: str = ""
+    substitute_found: bool = False
+    substitute_name: str = ""
+    substitute_phone: str = ""
+    substitute_note: str = ""
+
+
+@router.post("/api/line/staff/order-search")
+async def staff_order_search(payload: StaffOrderSearchPayload):
+    trusted_user_id = await _trusted_line_user_id(payload.line_id_token, payload.line_user_id)
+    keyword = payload.keyword.strip()
+    if not keyword:
+        return {"status": "error", "message": "請輸入案件編號或客戶姓名"}
+    conn = get_db_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            staff = _find_staff_by_line_user(cursor, trusted_user_id)
+            if not staff:
+                return {"status": "error", "message": "尚未找到您的月嫂身分綁定，請先完成月嫂身分認證。"}
+            like_keyword = f"%{keyword}%"
+            cursor.execute(
+                """
+                SELECT o.case_no, o.status AS order_status, o.start_date, o.end_date,
+                       o.service_days, o.service_hours_per_day, o.floor_fee,
+                       c.name AS client_name, c.phone AS client_phone, c.city,
+                       c.address, c.service_time, c.due_month, c.service_start_date,
+                       c.residence_type, c.delivery_type, c.service_type, c.baby_info,
+                       c.notes, b.survey_details,
+                       csa.id AS assignment_id, csa.status AS assignment_status
+                FROM case_staff_assignments csa
+                JOIN orders o ON o.case_no=csa.case_no
+                JOIN clients c ON c.id=o.client_id
+                LEFT JOIN beclass_records b ON b.query_no=c.case_no
+                WHERE csa.staff_id=%s
+                  AND (o.case_no=%s OR c.name LIKE %s)
+                ORDER BY o.start_date DESC, o.case_no DESC
+                LIMIT 10
+                """,
+                (staff["id"], keyword, like_keyword),
+            )
+            rows = list(cursor.fetchall())
+        for row in rows:
+            row["survey_rows"] = _format_survey_details(row.get("survey_details"))
+            row.pop("survey_details", None)
+        return {"status": "success", "staff": staff, "items": rows}
+    finally:
+        conn.close()
+
+
+@router.post("/api/line/staff/monthly-schedule")
+async def staff_liff_monthly_schedule(payload: StaffLiffIdentityPayload, year: int, month: int):
+    trusted_user_id = await _trusted_line_user_id(payload.line_id_token, payload.line_user_id)
+    conn = get_db_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            staff = _find_staff_by_line_user(cursor, trusted_user_id)
+            if not staff:
+                return {"status": "error", "message": "尚未找到您的月嫂身分綁定，請先完成月嫂身分認證。"}
+        from services.staff_monthly_calendar_schedule_service import get_staff_monthly_calendar_schedule
+        schedule = get_staff_monthly_calendar_schedule(int(staff["id"]), year, month)
+        return {"status": "success", "staff": staff, "schedule": schedule}
+    finally:
+        conn.close()
+
+
+@router.post("/api/line/staff/leave-requests")
+async def submit_staff_leave_request(payload: StaffLeaveRequestPayload):
+    trusted_user_id = await _trusted_line_user_id(payload.line_id_token, payload.line_user_id)
+    try:
+        start_date = date.fromisoformat(payload.leave_start_date)
+        end_date = date.fromisoformat(payload.leave_end_date)
+    except ValueError:
+        return {"status": "error", "message": "請假日期格式不正確"}
+    if end_date < start_date:
+        return {"status": "error", "message": "請假結束日期不能早於開始日期"}
+    if payload.substitute_found and not payload.substitute_name.strip():
+        return {"status": "error", "message": "已找到代班人員時，請填寫代班人員姓名"}
+    if payload.substitute_found and not payload.substitute_phone.strip():
+        return {"status": "error", "message": "已找到代班人員時，請填寫代班人員聯絡電話"}
+    conn = get_db_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            staff = _find_staff_by_line_user(cursor, trusted_user_id)
+            if not staff:
+                return {"status": "error", "message": "尚未找到您的月嫂身分綁定，請先完成月嫂身分認證。"}
+            cursor.execute(
+                """
+                INSERT INTO staff_leave_requests (
+                    staff_id, line_user_id, leave_start_date, leave_end_date,
+                    leave_reason, substitute_found, substitute_name,
+                    substitute_phone, substitute_note
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    staff["id"],
+                    trusted_user_id,
+                    start_date,
+                    end_date,
+                    payload.leave_reason.strip() or None,
+                    bool(payload.substitute_found),
+                    payload.substitute_name.strip() or None,
+                    payload.substitute_phone.strip() or None,
+                    payload.substitute_note.strip() or None,
+                ),
+            )
+            request_id = int(cursor.lastrowid)
+            conn.commit()
+        return {
+            "status": "success",
+            "message": "請假申請已送出，請等待工會人員確認。",
+            "request_id": request_id,
+        }
+    except Exception as exc:
+        conn.rollback()
+        return {"status": "error", "message": f"請假申請送出失敗：{exc}"}
+    finally:
+        conn.close()
+
 @router.post("/api/line/rebind_requests/approve")
 def approve_rebind_request(
     payload: RebindActionPayload,
@@ -807,6 +1034,24 @@ async def serve_bind_page():
 async def serve_register_page():
     """全新客戶原生註冊頁面"""
     return FileResponse("line/static/register.html")
+
+
+@router.get("/profile-update-page")
+async def serve_profile_update_page():
+    """客戶修改登記資料申請頁面。"""
+    return FileResponse("line/static/profile_update.html")
+
+
+@router.get("/staff-order-search-page")
+async def serve_staff_order_search_page():
+    """月嫂訂單查詢頁面。"""
+    return FileResponse("line/static/staff_order_search.html")
+
+
+@router.get("/staff-schedule-page")
+async def serve_staff_schedule_page():
+    """月嫂排班資訊與請假申請頁面。"""
+    return FileResponse("line/static/staff_schedule.html")
 
 
 @router.get("/api/line/staff/review-requests")
@@ -1155,6 +1400,17 @@ async def line_webhook(request: Request):
                             continue
 
                         normalized_text = user_text.strip()
+                        if current_role == "staff" and normalized_text in {"訂單查詢", "排班資訊", "班表查詢"}:
+                            target = "staff_order_search" if normalized_text == "訂單查詢" else "staff_schedule"
+                            label = "訂單查詢" if target == "staff_order_search" else "排班資訊"
+                            enqueue_line_task(
+                                cursor,
+                                to_user_id=user_id,
+                                message_content=f"請點選以下連結開啟月嫂{label}：\n{_staff_liff_url(target)}",
+                                source_event_id=event.get("webhookEventId"),
+                                idempotency_key=f"staff-liff:{target}:{event.get('webhookEventId')}",
+                            )
+                            continue
                         if normalized_text == "服務說明":
                             enqueue_line_task(
                                 cursor, to_user_id=user_id, task_type="line_push_message",

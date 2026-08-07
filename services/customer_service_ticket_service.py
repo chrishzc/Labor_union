@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -40,6 +41,20 @@ CLIENT_PROFILE_FIELDS = {
     "line_id": "LINE ID",
     "admin_notes": "管理者註記",
     "reject_reason": "不符合原因",
+}
+LIFF_CHANGE_FIELD_TO_CLIENT_FIELD = {
+    "name": "name",
+    "phone": "phone",
+    "expected_date": "due_month",
+    "service_days": "service_days",
+    "address": "address",
+}
+PROFILE_CHANGE_STATUSES = {
+    "pending": "待審核",
+    "approved": "已核准",
+    "partially_approved": "部分核准",
+    "rejected": "已拒絕",
+    "reverted": "已回復",
 }
 CLIENT_PROFILE_SELECT_COLUMNS = ", ".join(
     f"c.`{field}` AS `{field}`" for field in CLIENT_PROFILE_FIELDS
@@ -318,12 +333,23 @@ def apply_client_profile_field_update(
     action: str,
     value: Any,
     note: str | None,
-    admin_user_id: int | None,
+    reviewer_name: str,
+    decision: str = "approve",
+    rejection_reason: str | None = None,
+    admin_user_id: int | None = None,
 ) -> dict[str, Any]:
+    reviewer_name = reviewer_name.strip()
+    if not reviewer_name:
+        raise ValueError("請選擇審核人員")
     if field not in CLIENT_PROFILE_FIELDS:
         raise ValueError("此欄位不開放在客服流程中修改")
     if action not in {"add", "update", "clear"}:
         raise ValueError("不支援的異動方式")
+    if decision not in {"approve", "reject"}:
+        raise ValueError("不支援的審核結果")
+    reject_reason = (rejection_reason or "").strip()
+    if decision == "reject" and not reject_reason:
+        raise ValueError("不同意修改時，請填寫退回原因")
 
     new_value = None if action == "clear" else str(value or "").strip()
     if action in {"add", "update"} and not new_value:
@@ -362,14 +388,64 @@ def apply_client_profile_field_update(
             if action == "add" and old_value not in {None, ""}:
                 raise ValueError("此欄位已有資料，如需變更請選擇「修改」")
 
-            cursor.execute(f"UPDATE clients SET `{field}`=%s WHERE id=%s", (new_value, client_id))
             action_label = {"add": "新增", "update": "修改", "clear": "清空"}[action]
             field_label = CLIENT_PROFILE_FIELDS[field]
-            note_lines = [
-                f"[客戶資料異動] {action_label}{field_label}",
-                f"異動前：{old_value if old_value not in {None, ''} else '空白'}",
-                f"異動後：{new_value if new_value not in {None, ''} else '空白'}",
+            requested_changes = [
+                {
+                    "field_id": field,
+                    "client_field": field,
+                    "label": field_label,
+                    "value": new_value,
+                    "source": "manual",
+                    "action": action,
+                }
             ]
+            old_values = {field: old_value}
+            applied_values = {field: new_value} if decision == "approve" else {}
+            if decision == "approve":
+                cursor.execute(f"UPDATE clients SET `{field}`=%s WHERE id=%s", (new_value, client_id))
+            cursor.execute(
+                """
+                INSERT INTO client_profile_change_requests (
+                    line_user_id, client_id, case_no, ticket_id, status,
+                    requested_changes_json, old_values_json, applied_values_json,
+                    rejection_reason, reviewed_by_name, reviewed_by_admin_user_id, reviewed_at
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP())
+                """,
+                (
+                    ticket["line_user_id"],
+                    client_id,
+                    ticket.get("case_no"),
+                    ticket_id,
+                    "approved" if decision == "approve" else "rejected",
+                    json.dumps(requested_changes, ensure_ascii=False, default=_json_default),
+                    json.dumps(old_values, ensure_ascii=False, default=_json_default),
+                    json.dumps(applied_values, ensure_ascii=False, default=_json_default),
+                    reject_reason or None,
+                    reviewer_name,
+                    admin_user_id,
+                ),
+            )
+            request_id = int(cursor.lastrowid)
+            if decision == "reject":
+                _enqueue_profile_change_rejection_message(
+                    cursor,
+                    to_user_id=ticket["line_user_id"],
+                    reason=reject_reason,
+                    request_id=request_id,
+                    rejected_labels=[field_label],
+                )
+            note_lines = [
+                (
+                    f"[手動-資料異動] 已由 {reviewer_name} {action_label}{field_label}，異動紀錄 #{request_id}"
+                    if decision == "approve"
+                    else f"[手動-資料異動] 已由 {reviewer_name} 退回{field_label}異動，異動紀錄 #{request_id}"
+                ),
+                f"原資料：{old_value if old_value not in {None, ''} else '空白'}",
+                f"申請內容：{new_value if new_value not in {None, ''} else '空白'}",
+            ]
+            if decision == "reject":
+                note_lines.append(f"退回原因：{reject_reason}")
             if note and note.strip():
                 note_lines.append(f"說明：{note.strip()}")
             change_note = "\n".join(note_lines)
@@ -386,6 +462,396 @@ def apply_client_profile_field_update(
             )
         conn.commit()
         return get_ticket(ticket_id)
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return str(value)
+
+
+def _json_loads(value: Any) -> Any:
+    if isinstance(value, (dict, list)):
+        return value
+    if not value:
+        return {}
+    return json.loads(value)
+
+
+def _latest_client_by_line_user(cursor, line_user_id: str) -> dict[str, Any] | None:
+    cursor.execute(
+        """
+        SELECT id, case_no, name, phone, due_month, service_days, address
+        FROM clients
+        WHERE line_user_id=%s
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (line_user_id,),
+    )
+    return cursor.fetchone()
+
+
+def create_profile_change_request(
+    *,
+    line_user_id: str,
+    requested_changes: list[dict[str, Any]],
+) -> dict[str, Any]:
+    line_user_id = line_user_id.strip()
+    if not line_user_id:
+        raise ValueError("缺少 LINE 使用者")
+    if not requested_changes:
+        raise ValueError("請至少選擇一個要修改的項目")
+
+    normalised_changes = []
+    for item in requested_changes:
+        field_id = str(item.get("field_id") or "").strip()
+        value = item.get("value")
+        if field_id not in LIFF_CHANGE_FIELD_TO_CLIENT_FIELD:
+            raise ValueError("包含不支援的修改項目")
+        text_value = "" if value is None else str(value).strip()
+        if not text_value:
+            raise ValueError("請填寫所有已選項目的新內容")
+        if field_id == "service_days":
+            try:
+                days = int(text_value)
+            except ValueError as exc:
+                raise ValueError("服務天數必須是數字") from exc
+            if days < 1:
+                raise ValueError("服務天數必須大於 0")
+            text_value = days
+        normalised_changes.append(
+            {
+                "field_id": field_id,
+                "client_field": LIFF_CHANGE_FIELD_TO_CLIENT_FIELD[field_id],
+                "label": str(item.get("label") or field_id).strip(),
+                "value": text_value,
+            }
+        )
+
+    conn = get_connection()
+    try:
+        conn.begin()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            client = _latest_client_by_line_user(cursor, line_user_id)
+            if not client:
+                raise ValueError("尚未找到您綁定的服務資料，請先完成服務登記或帳號綁定")
+            old_values = {
+                item["client_field"]: client.get(item["client_field"])
+                for item in normalised_changes
+            }
+            ticket_result = create_or_reopen_ticket(
+                cursor,
+                line_user_id=line_user_id,
+                category="profile_update",
+                message="用戶已送出 LIFF 修改登記資料申請",
+            )
+            cursor.execute(
+                """
+                INSERT INTO client_profile_change_requests (
+                    line_user_id, client_id, case_no, ticket_id,
+                    requested_changes_json, old_values_json
+                ) VALUES (%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    line_user_id,
+                    client["id"],
+                    client.get("case_no"),
+                    ticket_result.get("id"),
+                    json.dumps(normalised_changes, ensure_ascii=False, default=_json_default),
+                    json.dumps(old_values, ensure_ascii=False, default=_json_default),
+                ),
+            )
+            request_id = int(cursor.lastrowid)
+            cursor.execute(
+                """
+                UPDATE customer_service_tickets
+                SET message=CONCAT(message, '\n\n', %s), updated_at=CURRENT_TIMESTAMP
+                WHERE id=%s
+                """,
+                (f"異動申請編號：#{request_id}，請至客服中心審核。", ticket_result.get("id")),
+            )
+        conn.commit()
+        return {"id": request_id, "ticket_id": ticket_result.get("id"), "status": "pending"}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def list_profile_change_requests(*, status: str | None = "pending", ticket_id: int | None = None) -> list[dict[str, Any]]:
+    clauses = ["1=1"]
+    params: list[Any] = []
+    if status:
+        if status not in PROFILE_CHANGE_STATUSES:
+            raise ValueError("不支援的異動申請狀態")
+        clauses.append("r.status=%s")
+        params.append(status)
+    if ticket_id:
+        clauses.append("r.ticket_id=%s")
+        params.append(ticket_id)
+    conn = get_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                f"""
+                SELECT r.*, c.name AS client_name, c.phone AS client_phone,
+                       a.display_name AS reviewed_by_admin_name,
+                       rv.display_name AS reverted_by_admin_name
+                FROM client_profile_change_requests r
+                JOIN clients c ON c.id=r.client_id
+                LEFT JOIN admin_users a ON a.id=r.reviewed_by_admin_user_id
+                LEFT JOIN admin_users rv ON rv.id=r.reverted_by_admin_user_id
+                WHERE {' AND '.join(clauses)}
+                ORDER BY r.created_at DESC, r.id DESC
+                LIMIT 100
+                """,
+                params,
+            )
+            rows = list(cursor.fetchall())
+        for row in rows:
+            row["status_label"] = PROFILE_CHANGE_STATUSES.get(row.get("status"), row.get("status"))
+            row["requested_changes"] = _json_loads(row.get("requested_changes_json"))
+            row["old_values"] = _json_loads(row.get("old_values_json"))
+            row["applied_values"] = _json_loads(row.get("applied_values_json"))
+        return rows
+    finally:
+        conn.close()
+
+
+def _enqueue_profile_change_rejection_message(
+    cursor,
+    *,
+    to_user_id: str,
+    reason: str,
+    request_id: int,
+    rejected_labels: list[str] | None = None,
+) -> None:
+    rejected_text = ""
+    if rejected_labels:
+        rejected_text = "以下修改項目未通過：\n" + "\n".join(
+            f"- {label}" for label in rejected_labels
+        ) + "\n\n"
+    enqueue_line_task(
+        cursor,
+        to_user_id=to_user_id,
+        message_content=(
+            "【資料異動申請審核結果】\n"
+            f"{rejected_text}"
+            f"拒絕原因：{reason}\n\n"
+            "如需回覆拒絕修改內容，請重新申請資料異動。"
+        ),
+        idempotency_key=f"profile-change-rejected:{request_id}",
+    )
+
+
+def approve_profile_change_request(
+    request_id: int,
+    *,
+    reviewer_name: str,
+    approved_field_ids: list[str] | None = None,
+    rejection_reason: str | None = None,
+    admin_user_id: int | None = None,
+) -> dict[str, Any]:
+    reviewer_name = reviewer_name.strip()
+    if not reviewer_name:
+        raise ValueError("請選擇審核人員")
+    conn = get_connection()
+    try:
+        conn.begin()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute("SELECT * FROM client_profile_change_requests WHERE id=%s FOR UPDATE", (request_id,))
+            request = cursor.fetchone()
+            if not request:
+                raise CustomerServiceTicketNotFoundError(f"找不到異動申請 #{request_id}")
+            if request["status"] != "pending":
+                raise CustomerServiceTicketStateError("此異動申請已處理，不能重複核准")
+            changes = _json_loads(request["requested_changes_json"])
+            if not isinstance(changes, list) or not changes:
+                raise ValueError("異動申請沒有可審核資料")
+            approved_ids = (
+                {str(field_id) for field_id in approved_field_ids}
+                if approved_field_ids is not None
+                else {str(change.get("field_id")) for change in changes}
+            )
+            change_ids = {str(change.get("field_id")) for change in changes}
+            invalid_ids = approved_ids - change_ids
+            if invalid_ids:
+                raise ValueError("同意修改項目包含不存在的欄位")
+            approved_changes = [
+                change for change in changes if str(change.get("field_id")) in approved_ids
+            ]
+            rejected_changes = [
+                change for change in changes if str(change.get("field_id")) not in approved_ids
+            ]
+            reject_reason = (rejection_reason or "").strip()
+            if rejected_changes and not reject_reason:
+                raise ValueError("有不同意修改的項目時，請填寫退回原因")
+            applied_values = {}
+            assignments = []
+            params: list[Any] = []
+            for change in approved_changes:
+                client_field = change["client_field"]
+                if client_field not in CLIENT_PROFILE_FIELDS:
+                    raise ValueError("異動申請包含不可套用欄位")
+                assignments.append(f"`{client_field}`=%s")
+                params.append(change["value"])
+                applied_values[client_field] = change["value"]
+            if assignments:
+                cursor.execute(
+                    f"UPDATE clients SET {', '.join(assignments)} WHERE id=%s",
+                    [*params, request["client_id"]],
+                )
+            if approved_changes and rejected_changes:
+                next_status = "partially_approved"
+            elif approved_changes:
+                next_status = "approved"
+            else:
+                next_status = "rejected"
+            cursor.execute(
+                """
+                UPDATE client_profile_change_requests
+                SET status=%s, applied_values_json=%s, rejection_reason=%s,
+                    reviewed_by_name=%s, reviewed_by_admin_user_id=%s,
+                    reviewed_at=UTC_TIMESTAMP()
+                WHERE id=%s
+                """,
+                (
+                    next_status,
+                    json.dumps(applied_values, ensure_ascii=False, default=_json_default),
+                    reject_reason or None,
+                    reviewer_name,
+                    admin_user_id,
+                    request_id,
+                ),
+            )
+            if rejected_changes:
+                _enqueue_profile_change_rejection_message(
+                    cursor,
+                    to_user_id=request["line_user_id"],
+                    reason=reject_reason,
+                    request_id=request_id,
+                    rejected_labels=[
+                        str(change.get("label") or change.get("field_id"))
+                        for change in rejected_changes
+                    ],
+                )
+            if request.get("ticket_id"):
+                approved_labels = [
+                    str(change.get("label") or change.get("field_id"))
+                    for change in approved_changes
+                ]
+                rejected_labels = [
+                    str(change.get("label") or change.get("field_id"))
+                    for change in rejected_changes
+                ]
+                note_lines = [
+                    f"[LINE-申請資料異動] 已由 {reviewer_name} 審核申請 #{request_id}",
+                    f"同意修改：{', '.join(approved_labels) if approved_labels else '無'}",
+                    f"退回項目：{', '.join(rejected_labels) if rejected_labels else '無'}",
+                ]
+                if rejected_labels:
+                    note_lines.append(f"退回原因：{reject_reason}")
+                cursor.execute(
+                    """
+                    UPDATE customer_service_tickets
+                    SET status='handling',
+                        assigned_to_admin_user_id=COALESCE(%s,assigned_to_admin_user_id),
+                        internal_note=CONCAT(COALESCE(internal_note,''), CASE WHEN COALESCE(internal_note,'')='' THEN '' ELSE '\n\n' END, %s),
+                        updated_at=CURRENT_TIMESTAMP
+                    WHERE id=%s
+                    """,
+                    (
+                        admin_user_id,
+                        "\n".join(note_lines),
+                        request["ticket_id"],
+                    ),
+                )
+        conn.commit()
+        return {"id": request_id, "status": next_status}
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def reject_profile_change_request(
+    request_id: int,
+    *,
+    reason: str,
+    reviewer_name: str,
+    admin_user_id: int | None,
+) -> dict[str, Any]:
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("請填寫拒絕原因")
+    reviewer_name = reviewer_name.strip()
+    if not reviewer_name:
+        raise ValueError("請選擇審核人員")
+    return approve_profile_change_request(
+        request_id,
+        reviewer_name=reviewer_name,
+        approved_field_ids=[],
+        rejection_reason=reason,
+        admin_user_id=admin_user_id,
+    )
+
+
+def revert_profile_change_request(
+    request_id: int,
+    *,
+    reason: str,
+    reviewer_name: str,
+    admin_user_id: int | None,
+) -> dict[str, Any]:
+    reason = reason.strip()
+    if not reason:
+        raise ValueError("請填寫回復原因")
+    reviewer_name = reviewer_name.strip()
+    if not reviewer_name:
+        raise ValueError("請選擇回復人員")
+    conn = get_connection()
+    try:
+        conn.begin()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute("SELECT * FROM client_profile_change_requests WHERE id=%s FOR UPDATE", (request_id,))
+            request = cursor.fetchone()
+            if not request:
+                raise CustomerServiceTicketNotFoundError(f"找不到異動申請 #{request_id}")
+            if request["status"] != "approved":
+                raise CustomerServiceTicketStateError("只有已核准的異動申請可以回復上一版本")
+            old_values = _json_loads(request["old_values_json"])
+            assignments = []
+            params: list[Any] = []
+            for client_field, old_value in old_values.items():
+                if client_field not in CLIENT_PROFILE_FIELDS:
+                    raise ValueError("原始快照包含不可回復欄位")
+                assignments.append(f"`{client_field}`=%s")
+                params.append(old_value)
+            if not assignments:
+                raise ValueError("沒有可回復的欄位")
+            cursor.execute(
+                f"UPDATE clients SET {', '.join(assignments)} WHERE id=%s",
+                [*params, request["client_id"]],
+            )
+            cursor.execute(
+                """
+                UPDATE client_profile_change_requests
+                SET status='reverted', reverted_by_name=%s, reverted_by_admin_user_id=%s,
+                    reverted_at=UTC_TIMESTAMP(), revert_reason=%s
+                WHERE id=%s
+                """,
+                (reviewer_name, admin_user_id, reason, request_id),
+            )
+        conn.commit()
+        return {"id": request_id, "status": "reverted"}
     except Exception:
         conn.rollback()
         raise

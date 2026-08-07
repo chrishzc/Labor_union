@@ -11,6 +11,9 @@ from api.dependencies.admin_auth import require_line_agent
 from api.schemas.base import BaseResponse
 from api.schemas.customer_service_tickets import (
     ClientProfileFieldUpdateRequest,
+    ProfileChangeApproveRequest,
+    ProfileChangeRejectRequest,
+    ProfileChangeRevertRequest,
     TicketReplyRequest,
     TicketUpdateRequest,
 )
@@ -20,8 +23,12 @@ from services.customer_service_ticket_service import (
     CustomerServiceTicketNotFoundError,
     CustomerServiceTicketStateError,
     apply_client_profile_field_update,
+    approve_profile_change_request,
     get_ticket,
     get_ticket_summary,
+    list_profile_change_requests,
+    reject_profile_change_request,
+    revert_profile_change_request,
     list_tickets,
     reply_ticket,
     update_ticket,
@@ -74,6 +81,86 @@ def ticket_list(
         _raise_ticket_error(exc)
     return BaseResponse(data=result)
 
+
+@router.get("/profile-change-requests", response_model=BaseResponse[dict])
+def profile_change_request_list(
+    status: str | None = "pending",
+    ticket_id: int | None = None,
+):
+    try:
+        items = list_profile_change_requests(status=status, ticket_id=ticket_id)
+    except ValueError as exc:
+        _raise_ticket_error(exc)
+    return BaseResponse(data={"items": items})
+
+
+@router.post("/profile-change-requests/{request_id}/approve", response_model=BaseResponse[dict])
+def profile_change_request_approve(
+    request_id: int,
+    payload: ProfileChangeApproveRequest,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_line_agent),
+):
+    try:
+        result = approve_profile_change_request(
+            request_id,
+            reviewer_name=payload.reviewer_name,
+            approved_field_ids=payload.approved_field_ids,
+            rejection_reason=payload.rejection_reason,
+            admin_user_id=principal.id,
+        )
+    except (CustomerServiceTicketNotFoundError, CustomerServiceTicketStateError, ValueError) as exc:
+        _raise_ticket_error(exc)
+    request.state.audit_action = "line.customer_service.profile_change.approve"
+    request.state.audit_resource_type = "client_profile_change_request"
+    request.state.audit_resource_id = str(request_id)
+    wake_worker()
+    return BaseResponse(data=result, message="已完成客戶資料異動審核")
+
+
+@router.post("/profile-change-requests/{request_id}/reject", response_model=BaseResponse[dict])
+def profile_change_request_reject(
+    request_id: int,
+    payload: ProfileChangeRejectRequest,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_line_agent),
+):
+    try:
+        result = reject_profile_change_request(
+            request_id,
+            reason=payload.reason,
+            reviewer_name=payload.reviewer_name,
+            admin_user_id=principal.id,
+        )
+    except (CustomerServiceTicketNotFoundError, CustomerServiceTicketStateError, ValueError) as exc:
+        _raise_ticket_error(exc)
+    request.state.audit_action = "line.customer_service.profile_change.reject"
+    request.state.audit_resource_type = "client_profile_change_request"
+    request.state.audit_resource_id = str(request_id)
+    wake_worker()
+    return BaseResponse(data=result, message="已拒絕客戶資料異動")
+
+
+@router.post("/profile-change-requests/{request_id}/revert", response_model=BaseResponse[dict])
+def profile_change_request_revert(
+    request_id: int,
+    payload: ProfileChangeRevertRequest,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_line_agent),
+):
+    try:
+        result = revert_profile_change_request(
+            request_id,
+            reason=payload.reason,
+            reviewer_name=payload.reviewer_name,
+            admin_user_id=principal.id,
+        )
+    except (CustomerServiceTicketNotFoundError, CustomerServiceTicketStateError, ValueError) as exc:
+        _raise_ticket_error(exc)
+    request.state.audit_action = "line.customer_service.profile_change.revert"
+    request.state.audit_resource_type = "client_profile_change_request"
+    request.state.audit_resource_id = str(request_id)
+    return BaseResponse(data=result, message="已回復客戶資料上一版本")
 
 @router.get("/{ticket_id}", response_model=BaseResponse[dict])
 def ticket_detail(ticket_id: int):
@@ -146,6 +233,9 @@ def ticket_client_profile_field_update(
             action=payload.action,
             value=payload.value,
             note=payload.note,
+            reviewer_name=payload.reviewer_name,
+            decision=payload.decision,
+            rejection_reason=payload.rejection_reason,
             admin_user_id=principal.id,
         )
     except (CustomerServiceTicketNotFoundError, ValueError) as exc:
@@ -153,5 +243,8 @@ def ticket_client_profile_field_update(
     request.state.audit_action = "line.customer_service.client_profile_update"
     request.state.audit_resource_type = "customer_service_ticket"
     request.state.audit_resource_id = str(ticket_id)
-    request.state.audit_details = {"field": payload.field, "action": payload.action}
+    request.state.audit_details = {"field": payload.field, "action": payload.action, "decision": payload.decision}
+    if payload.decision == "reject":
+        wake_worker()
+        return BaseResponse(data=result, message="已退回客戶資料異動並通知用戶")
     return BaseResponse(data=result, message="客戶資料已更新")

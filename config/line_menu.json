@@ -55,15 +55,15 @@
           "text_color": "#FFFFFF",
           "background_color": "#BE123C",
           "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "message", "text": "訂單查詢", "uri": null, "uri_source": "literal", "data": null}
+          "action": {"type": "uri", "text": null, "uri": "?target=staff_order_search", "uri_source": "liff", "data": null}
         },
         {
           "id": "schedule_query",
-          "label": "班表查詢",
+          "label": "排班資訊",
           "text_color": "#FFFFFF",
           "background_color": "#F43F5E",
           "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "message", "text": "班表查詢", "uri": null, "uri_source": "literal", "data": null}
+          "action": {"type": "uri", "text": null, "uri": "?target=staff_schedule", "uri_source": "liff", "data": null}
         }
       ]
     },

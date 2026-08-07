@@ -27,6 +27,14 @@ from services.line_review_service import (
     list_line_reviews,
     reject_line_review,
 )
+from services.staff_leave_review_service import (
+    StaffLeaveRequestNotFoundError,
+    StaffLeaveRequestStateError,
+    decide_staff_leave_review,
+    get_staff_leave_review,
+    get_staff_leave_review_summary,
+    list_staff_leave_reviews,
+)
 
 
 router = APIRouter(
@@ -37,9 +45,9 @@ router = APIRouter(
 
 
 def _raise_review_error(exc: Exception) -> NoReturn:
-    if isinstance(exc, LineReviewNotFoundError):
+    if isinstance(exc, (LineReviewNotFoundError, StaffLeaveRequestNotFoundError)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, (LineReviewStateConflictError, LineReviewDataConflictError)):
+    if isinstance(exc, (LineReviewStateConflictError, LineReviewDataConflictError, StaffLeaveRequestStateError)):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, ValueError):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -60,6 +68,72 @@ def _set_review_audit(request: Request, *, result: dict, reason: str) -> None:
 @router.get("/summary", response_model=BaseResponse[dict])
 def review_summary():
     return BaseResponse(data=get_line_review_summary())
+
+
+@router.get("/staff-leave/summary", response_model=BaseResponse[dict])
+def staff_leave_summary():
+    return BaseResponse(data=get_staff_leave_review_summary())
+
+
+@router.get("/staff-leave", response_model=BaseResponse[dict])
+def staff_leave_list(
+    status: str | None = "pending",
+    search: str | None = None,
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=25, ge=1, le=100),
+):
+    try:
+        result = list_staff_leave_reviews(
+            status=status,
+            search=search,
+            created_from=created_from,
+            created_to=created_to,
+            page=page,
+            page_size=page_size,
+        )
+    except ValueError as exc:
+        _raise_review_error(exc)
+    return BaseResponse(data=result)
+
+
+@router.get("/staff-leave/{request_id}", response_model=BaseResponse[dict])
+def staff_leave_detail(request_id: int):
+    try:
+        result = get_staff_leave_review(request_id)
+    except StaffLeaveRequestNotFoundError as exc:
+        _raise_review_error(exc)
+    return BaseResponse(data=result)
+
+
+@router.post(
+    "/staff-leave/{request_id}/{action}",
+    response_model=BaseResponse[dict],
+    dependencies=[Depends(require_line_manager)],
+)
+def staff_leave_decision(
+    request_id: int,
+    action: str,
+    payload: LineReviewDecisionRequest,
+    request: Request,
+    principal: AdminPrincipal = Depends(require_line_manager),
+):
+    try:
+        result = decide_staff_leave_review(
+            request_id,
+            decision=action,
+            reason=payload.reason,
+            admin_user_id=principal.id,
+        )
+    except (StaffLeaveRequestNotFoundError, StaffLeaveRequestStateError, ValueError) as exc:
+        _raise_review_error(exc)
+    request.state.audit_action = f"line.staff_leave.{action}"
+    request.state.audit_resource_type = "staff_leave_request"
+    request.state.audit_resource_id = str(request_id)
+    request.state.audit_details = {"reason": payload.reason.strip()}
+    wake_worker()
+    return BaseResponse(data=result, message=result["message"])
 
 
 @router.get("", response_model=BaseResponse[dict])

@@ -450,6 +450,50 @@ class LineAdminApiClient:
             json={"reason": reason},
         )
 
+    def staff_leave_review_summary(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/v1/line/review-requests/staff-leave/summary", token=token)
+
+    def staff_leave_reviews(
+        self,
+        token: str | None,
+        *,
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/line/review-requests/staff-leave",
+            token=token,
+            params={key: value for key, value in filters.items() if value not in {None, ""}},
+        )
+
+    def staff_leave_review_detail(
+        self,
+        token: str | None,
+        request_id: int,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            f"/api/v1/line/review-requests/staff-leave/{request_id}",
+            token=token,
+        )
+
+    def staff_leave_review_action(
+        self,
+        token: str | None,
+        request_id: int,
+        action: str,
+        *,
+        reason: str,
+    ) -> dict[str, Any]:
+        if action not in {"approve", "reject"}:
+            raise ValueError("不支援的請假審核操作")
+        return self._request(
+            "POST",
+            f"/api/v1/line/review-requests/staff-leave/{request_id}/{action}",
+            token=token,
+            json={"reason": reason},
+        )
+
     def customer_service_summary(self, token: str | None) -> dict[str, Any]:
         return self._request("GET", "/api/v1/line/customer-service/tickets/summary", token=token)
 
@@ -508,6 +552,58 @@ class LineAdminApiClient:
         return self._request(
             "POST",
             f"/api/v1/line/customer-service/tickets/{ticket_id}/client-profile-field",
+            token=token,
+            json=payload,
+        )
+
+    def customer_profile_change_requests(
+        self,
+        token: str | None,
+        *,
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/line/customer-service/tickets/profile-change-requests",
+            token=token,
+            params={key: value for key, value in filters.items() if value not in {None, ""}},
+        )
+
+    def approve_customer_profile_change(
+        self,
+        token: str | None,
+        request_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/line/customer-service/tickets/profile-change-requests/{request_id}/approve",
+            token=token,
+            json=payload,
+        )
+
+    def reject_customer_profile_change(
+        self,
+        token: str | None,
+        request_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/line/customer-service/tickets/profile-change-requests/{request_id}/reject",
+            token=token,
+            json=payload,
+        )
+
+    def revert_customer_profile_change(
+        self,
+        token: str | None,
+        request_id: int,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/line/customer-service/tickets/profile-change-requests/{request_id}/revert",
             token=token,
             json=payload,
         )

@@ -163,7 +163,21 @@
 
     // 嘗試從 URL 獲取 fallback userId
     const urlParams = new URLSearchParams(window.location.search);
+    function parseLiffStateParams() {
+        const rawState = urlParams.get('liff.state') || '';
+        if (!rawState) return new URLSearchParams();
+        const queryStart = rawState.indexOf('?');
+        if (queryStart >= 0) return new URLSearchParams(rawState.slice(queryStart));
+        return new URLSearchParams(rawState);
+    }
+    const liffStateParams = parseLiffStateParams();
     const urlUserId = urlParams.get('userId');
+    const targetPage = urlParams.get('target') || liffStateParams.get('target');
+    const targetPaths = {
+        profile_update: '/profile-update-page',
+        staff_order_search: '/staff-order-search-page',
+        staff_schedule: '/staff-schedule-page'
+    };
     if (urlUserId) {
         currentUserId = urlUserId;
     }
@@ -181,7 +195,13 @@
             applyRuntime(runtime);
 
             if (!config.liff_id) {
-                if (currentUserId) return;
+                if (currentUserId) {
+                    if (targetPaths[targetPage]) {
+                        navigateTo(targetPaths[targetPage]);
+                        return;
+                    }
+                    return;
+                }
                 throw new Error('LIFF ID 尚未設定');
             }
             await liff.init({ liffId: config.liff_id });
@@ -193,12 +213,20 @@
 
             const profile = await liff.getProfile();
             currentUserId = profile.userId;
+            if (targetPaths[targetPage]) {
+                navigateTo(targetPaths[targetPage]);
+                return;
+            }
             
             document.getElementById('loaderOverlay').style.display = 'none';
         } catch (err) {
             console.error('LIFF Initialization failed', err);
             // 如果 LIFF 失敗但 URL 有 userId，我們也放行
             if (currentUserId) {
+                if (targetPaths[targetPage]) {
+                    navigateTo(targetPaths[targetPage]);
+                    return;
+                }
                 document.getElementById('loaderOverlay').style.display = 'none';
             } else {
                 document.getElementById('loaderText').textContent = runtimePage?.content?.load_error || '載入失敗，請嘗試重新整理。';

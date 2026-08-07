@@ -15,6 +15,7 @@ from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 FLASH_KEY = "customer_service_flash"
 PAGE_KEY = "customer_service_page"
 TAIPEI_TIMEZONE = ZoneInfo("Asia/Taipei")
+REVIEWER_OPTIONS = ["陳怡君", "林雅婷", "王志明", "張淑芬"]
 STATUSES = {
     "waiting": "等待客服",
     "handling": "處理中",
@@ -74,6 +75,239 @@ def _ticket_options(items: list[dict[str, Any]]) -> dict[str, int]:
     return options
 
 
+def _render_profile_change_requests(
+    client: LineAdminApiClient,
+    token: str | None,
+    ticket_id: int,
+) -> None:
+    try:
+        result = client.customer_profile_change_requests(
+            token,
+            filters={"status": None, "ticket_id": ticket_id},
+        )
+    except LineAdminApiError as exc:
+        st.error(f"讀取資料異動申請失敗：{exc}")
+        return
+    items = result.get("items") or []
+    if not items:
+        st.info("目前沒有 LINE 送出的資料異動申請。")
+        return
+    for item in items:
+        request_id = int(item["id"])
+        status = item.get("status")
+        with st.container(border=True):
+            st.markdown(f"**LINE-申請資料異動 #{request_id}｜{item.get('status_label', status)}**")
+            st.caption(f"送出時間：{_format_time(item.get('created_at'))}")
+            rows = []
+            old_values = item.get("old_values") or {}
+            applied_values = item.get("applied_values") or {}
+            for change in item.get("requested_changes") or []:
+                client_field = change.get("client_field")
+                rows.append(
+                    {
+                        "項目": change.get("label"),
+                        "原資料": old_values.get(client_field) or "空白",
+                        "申請修改為": change.get("value") or "空白",
+                        "已套用值": applied_values.get(client_field) or "-",
+                    }
+                )
+            if rows:
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            reviewed_name = item.get("reviewed_by_name") or item.get("reviewed_by_name_snapshot") or item.get("reviewed_by_name")
+            if reviewed_name or item.get("reviewed_at"):
+                st.caption(
+                    f"審核人員：{reviewed_name or '-'}｜"
+                    f"審核時間：{_format_time(item.get('reviewed_at'))}"
+                )
+            reverted_name = item.get("reverted_by_name") or item.get("reverted_by_name_snapshot") or item.get("reverted_by_name")
+            if reverted_name or item.get("reverted_at"):
+                st.caption(
+                    f"回復人員：{reverted_name or '-'}｜"
+                    f"回復時間：{_format_time(item.get('reverted_at'))}"
+                )
+            if item.get("rejection_reason"):
+                st.warning(f"拒絕原因：{item.get('rejection_reason')}")
+            if item.get("revert_reason"):
+                st.warning(f"回復原因：{item.get('revert_reason')}")
+
+            if status == "pending":
+                reviewer_name = st.selectbox(
+                    "審核人員",
+                    REVIEWER_OPTIONS,
+                    key=f"profile_change_reviewer_{request_id}",
+                )
+                changes = item.get("requested_changes") or []
+                label_to_field_id = {
+                    f"{change.get('label') or change.get('field_id')}｜修改為：{change.get('value') or '空白'}": str(change.get("field_id"))
+                    for change in changes
+                }
+                approved_labels = st.multiselect(
+                    "同意正式修改的項目",
+                    list(label_to_field_id.keys()),
+                    default=list(label_to_field_id.keys()),
+                    key=f"profile_change_approved_fields_{request_id}",
+                )
+                approved_field_ids = [label_to_field_id[label] for label in approved_labels]
+                rejected_count = len(label_to_field_id) - len(approved_field_ids)
+                reject_reason = ""
+                if rejected_count:
+                    st.info("未勾選的項目會退回，並將退回原因通知用戶。")
+                    reject_reason = st.text_input(
+                        "不同意修改的原因",
+                        key=f"profile_change_reject_reason_{request_id}",
+                        placeholder="例如：資料不完整，需請客戶重新申請資料異動",
+                    )
+                if st.button("送出審核結果", key=f"profile_change_approve_{request_id}", use_container_width=True):
+                    _call(
+                        lambda: client.approve_customer_profile_change(
+                            token,
+                            request_id,
+                            {
+                                "reviewer_name": reviewer_name,
+                                "approved_field_ids": approved_field_ids,
+                                "rejection_reason": reject_reason or None,
+                            },
+                        ),
+                        success_message="已完成資料異動審核；同意項目已套用，退回項目已通知用戶",
+                    )
+            elif status in {"approved", "partially_approved"}:
+                reviewer_name = st.selectbox(
+                    "回復人員",
+                    REVIEWER_OPTIONS,
+                    key=f"profile_change_reviewer_revert_{request_id}",
+                )
+                revert_reason = st.text_input(
+                    "回復原因",
+                    key=f"profile_change_revert_reason_{request_id}",
+                    placeholder="例如：客戶誤送，回復審核前資料",
+                )
+                if st.button("回復上一版本", key=f"profile_change_revert_{request_id}", use_container_width=True):
+                    _call(
+                        lambda: client.revert_customer_profile_change(
+                            token,
+                            request_id,
+                            {"reason": revert_reason, "reviewer_name": reviewer_name},
+                        ),
+                        success_message="已回復客戶資料上一版本",
+                    )
+
+
+def _render_manual_profile_change(
+    client: LineAdminApiClient,
+    token: str | None,
+    ticket_id: int,
+    detail: dict[str, Any],
+) -> None:
+    profile_data = detail.get("client_profile") or {}
+    if not profile_data:
+        st.info("此客服需求尚未綁定客戶資料，無法手動異動。")
+        return
+
+    fields = profile_data.get("fields") or {}
+    field_options = _field_options(profile_data)
+    selected_field_label = st.selectbox(
+        "選擇要處理的資料",
+        list(field_options.keys()),
+        key=f"manual_profile_field_{ticket_id}",
+    )
+    selected_field = field_options[selected_field_label]
+    action_label = st.radio(
+        "異動方式",
+        ["新增", "修改", "清空"],
+        horizontal=True,
+        key=f"manual_profile_action_{ticket_id}",
+    )
+    action = {"新增": "add", "修改": "update", "清空": "clear"}[action_label]
+    decision_label = st.radio(
+        "審核結果",
+        ["同意修改並套用", "不同意修改並回覆"],
+        horizontal=True,
+        key=f"manual_profile_decision_{ticket_id}",
+    )
+    decision = "approve" if decision_label == "同意修改並套用" else "reject"
+    reviewer_name = st.selectbox(
+        "審核人員",
+        REVIEWER_OPTIONS,
+        key=f"manual_profile_reviewer_{ticket_id}",
+    )
+    current_value = fields.get(selected_field)
+    st.caption(f"目前內容：{current_value or '空白'}")
+
+    new_value = ""
+    if action != "clear":
+        if selected_field == "gender":
+            new_value = st.selectbox(
+                "新內容",
+                ["男", "女"],
+                key=f"manual_profile_value_gender_{ticket_id}",
+            )
+        elif selected_field == "delivery_type":
+            new_value = st.selectbox(
+                "新內容",
+                ["自然產", "剖腹產"],
+                key=f"manual_profile_value_delivery_{ticket_id}",
+            )
+        elif selected_field == "service_type":
+            new_value = st.selectbox(
+                "新內容",
+                ["週休2日", "週休1日", "連續服務"],
+                key=f"manual_profile_value_service_type_{ticket_id}",
+            )
+        elif selected_field == "service_days":
+            new_value = st.number_input(
+                "新內容",
+                min_value=1,
+                step=1,
+                value=int(current_value or 1) if str(current_value or "").isdigit() else 1,
+                key=f"manual_profile_value_days_{ticket_id}",
+            )
+        else:
+            new_value = st.text_area(
+                "新內容",
+                value="",
+                height=90,
+                placeholder="依客戶訊息輸入要寫入的內容",
+                key=f"manual_profile_value_{ticket_id}",
+            )
+    change_note = st.text_input(
+        "異動說明",
+        placeholder="例如：工會人員依電話確認後修正",
+        key=f"manual_profile_note_{ticket_id}",
+    )
+    rejection_reason = ""
+    if decision == "reject":
+        rejection_reason = st.text_input(
+            "不同意修改的原因",
+            placeholder="例如：資料不完整，需請客戶重新申請資料異動",
+            key=f"manual_profile_rejection_reason_{ticket_id}",
+        )
+    if st.button(
+        "確認並套用手動異動" if decision == "approve" else "送出不同意結果",
+        key=f"manual_profile_apply_{ticket_id}",
+        use_container_width=True,
+    ):
+        _call(
+            lambda: client.update_customer_service_client_profile_field(
+                token,
+                ticket_id,
+                {
+                    "field": selected_field,
+                    "action": action,
+                    "value": None if action == "clear" else new_value,
+                    "note": change_note,
+                    "reviewer_name": reviewer_name,
+                    "decision": decision,
+                    "rejection_reason": rejection_reason or None,
+                },
+            ),
+            success_message=(
+                "已套用手動資料異動，並建立可回復的異動紀錄"
+                if decision == "approve"
+                else "已退回手動資料異動，並通知用戶退回原因"
+            ),
+        )
+
+
 def render_customer_service_center(
     client: LineAdminApiClient,
     token: str | None,
@@ -100,8 +334,8 @@ def render_customer_service_center(
     filter_cols = st.columns([1.1, 1.3, 2.4])
     status_label = filter_cols[0].selectbox(
         "處理狀態",
-        ["全部", *STATUSES.values()],
-        index=1,
+        list(STATUSES.values()),
+        index=0,
         key="customer_service_status_filter",
     )
     category_label = filter_cols[1].selectbox(
@@ -114,7 +348,7 @@ def render_customer_service_center(
         key="customer_service_search",
     )
 
-    status = None if status_label == "全部" else next(k for k, v in STATUSES.items() if v == status_label)
+    status = next(k for k, v in STATUSES.items() if v == status_label)
     category = None if category_label == "全部" else next(k for k, v in CATEGORIES.items() if v == category_label)
     page = int(st.session_state.get(PAGE_KEY, 1))
     try:
@@ -195,87 +429,11 @@ def render_customer_service_center(
         st.text_area("用戶訊息", value=detail.get("message") or "", height=180, disabled=True)
 
     with right:
-        profile_data = detail.get("client_profile") or {}
-        with st.expander("客戶資料異動", expanded=detail.get("category") == "profile_update"):
-            if not profile_data:
-                st.info("此客服需求尚未綁定客戶資料。請先請客戶完成服務登記或帳號綁定。")
-            else:
-                fields = profile_data.get("fields") or {}
-                field_options = _field_options(profile_data)
-                selected_field_label = st.selectbox(
-                    "選擇要處理的資料",
-                    list(field_options.keys()),
-                    key=f"customer_profile_field_{ticket_id}",
-                )
-                selected_field = field_options[selected_field_label]
-                action_label = st.radio(
-                    "異動方式",
-                    ["新增", "修改", "清空"],
-                    horizontal=True,
-                    key=f"customer_profile_action_{ticket_id}",
-                )
-                action = {"新增": "add", "修改": "update", "清空": "clear"}[action_label]
-                current_value = fields.get(selected_field)
-                st.caption(f"目前內容：{current_value or '空白'}")
-                new_value = ""
-                if action != "clear":
-                    if selected_field == "gender":
-                        new_value = st.selectbox(
-                            "新內容",
-                            ["男", "女"],
-                            key=f"customer_profile_value_gender_{ticket_id}",
-                        )
-                    elif selected_field == "delivery_type":
-                        new_value = st.selectbox(
-                            "新內容",
-                            ["自然產", "剖腹產"],
-                            key=f"customer_profile_value_delivery_{ticket_id}",
-                        )
-                    elif selected_field == "service_type":
-                        new_value = st.selectbox(
-                            "新內容",
-                            ["週休2日", "週休1日", "連續服務"],
-                            key=f"customer_profile_value_service_type_{ticket_id}",
-                        )
-                    elif selected_field == "service_days":
-                        new_value = st.number_input(
-                            "新內容",
-                            min_value=1,
-                            step=1,
-                            value=int(current_value or 1) if str(current_value or "").isdigit() else 1,
-                            key=f"customer_profile_value_days_{ticket_id}",
-                        )
-                    else:
-                        new_value = st.text_area(
-                            "新內容",
-                            value="",
-                            height=90,
-                            placeholder="依客戶訊息輸入要寫入的內容",
-                            key=f"customer_profile_value_{ticket_id}",
-                        )
-                change_note = st.text_input(
-                    "異動說明",
-                    placeholder="例如：依客戶 LINE 訊息補正",
-                    key=f"customer_profile_note_{ticket_id}",
-                )
-                if st.button(
-                    "套用到客戶資料",
-                    key=f"customer_profile_apply_{ticket_id}",
-                    use_container_width=True,
-                ):
-                    _call(
-                        lambda: client.update_customer_service_client_profile_field(
-                            token,
-                            ticket_id,
-                            {
-                                "field": selected_field,
-                                "action": action,
-                                "value": None if action == "clear" else new_value,
-                                "note": change_note,
-                            },
-                        ),
-                        success_message="客戶資料已更新，異動紀錄已寫入客服備註",
-                    )
+        with st.expander("LINE-申請資料異動", expanded=True):
+            _render_profile_change_requests(client, token, ticket_id)
+
+        with st.expander("手動-資料異動", expanded=False):
+            _render_manual_profile_change(client, token, ticket_id, detail)
 
         status_value = st.selectbox(
             "更新狀態",
