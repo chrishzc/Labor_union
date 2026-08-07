@@ -20,20 +20,19 @@ def calculate_order_attendance_schedule(
 ) -> Dict[str, Any]:
     """
     精算服務人員出勤日、扣除排休與國定假日順延完工日。
-    關鍵修復：
-    1. custom_holiday_rest_dates 與 custom_leave_dates 採用聯集合併，避免 or 運算子吞掉自訂排休。
-    2. 轉傳 custom_rest_weekdays 與 monthly_salary_base 給底層精算函式。
-    """
-    holiday_set = set(custom_holiday_rest_dates or [])
-    leave_set = set(custom_leave_dates or [])
-    combined_rest_dates = list(holiday_set | leave_set) if (holiday_set or leave_set) else None
 
+    custom_holiday_rest_dates 與 custom_leave_dates 是兩種不同語意，分開轉傳給
+    底層精算函式，不合併：
+    - custom_holiday_rest_dates：從國定假日中挑出當天算休假的子集合（其餘國定
+      假日視為當天正常出勤，完工日不順延）。省略時，底層預設所有國定假日皆休假。
+    - custom_leave_dates：與國定假日無關的個別排休/請假日，一律算休假。
+    """
     result = db_service.calculate_attendance_schedule(
         actual_start_date=actual_start_date,
         target_service_days=target_service_days,
         service_mode=service_mode,
-        custom_leave_dates=combined_rest_dates,
-        custom_holiday_rest_dates=None,
+        custom_leave_dates=custom_leave_dates,
+        custom_holiday_rest_dates=custom_holiday_rest_dates,
         custom_rest_weekdays=custom_rest_weekdays,
         monthly_salary_base=monthly_salary_base,
     )
