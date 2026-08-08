@@ -6,6 +6,10 @@ from shared_kernel.identities import ActorContext
 
 
 class LineCapability(StrEnum):
+    IDENTITY_READ = "line.identity.read"
+    IDENTITY_REVIEW = "line.identity.review"
+    TASK_CONTROL = "line.task.control"
+    MENU_PUBLISH = "line.menu.publish"
     REVIEW_READ = "line.review.read"
     REVIEW_DECIDE = "line.review.decide"
     TASK_READ = "line.task.read"
@@ -27,6 +31,26 @@ class LineCapabilityDeniedError(PermissionError):
     """Raised when an authenticated actor lacks a LINE capability."""
 
 
+_ROLE_CAPABILITIES = {
+    "line_viewer": {
+        LineCapability.IDENTITY_READ,
+        LineCapability.REVIEW_READ,
+    },
+    "line_agent": {
+        LineCapability.IDENTITY_READ,
+        LineCapability.REVIEW_READ,
+        LineCapability.TASK_READ,
+    },
+    "line_manager": set(LineCapability),
+    "system_admin": set(LineCapability),
+}
+
+
+def line_capabilities_for_role(role: str) -> tuple[str, ...]:
+    capabilities = _ROLE_CAPABILITIES.get(role, set())
+    return tuple(sorted(capability.value for capability in capabilities))
+
+
 def require_line_capability(
     actor: ActorContext,
     capability: LineCapability,
@@ -42,5 +66,6 @@ def require_line_capability(
 __all__ = [
     "LineCapability",
     "LineCapabilityDeniedError",
+    "line_capabilities_for_role",
     "require_line_capability",
 ]

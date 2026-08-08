@@ -23,8 +23,8 @@ from api.schemas.finance_alert_center import (
     alert_summary_from_record,
     finance_alert_detail_from_record,
 )
-from services.db_service import get_connection
-from services.finance_alert_workflow import (
+from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.anomalies.finance_alert_workflow import (
     claim_finance_alert,
     get_finance_alert,
     list_finance_alerts,

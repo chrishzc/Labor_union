@@ -8,6 +8,7 @@ import json
 import os
 import socket
 import threading
+from urllib.parse import urlencode
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,6 +27,7 @@ from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
+from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -111,7 +113,9 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
     now = lambda: datetime.now(timezone.utc)
     event_consumer = LineWebhookEventConsumer(
         open_line_unit_of_work,
-        LineEventDispatcher(),
+        LineEventDispatcher(
+            LineWebhookIdentityHandlers(now, _identity_flow_url).registry()
+        ),
         worker_identity,
         now,
     )
@@ -190,6 +194,32 @@ def _required_access_token() -> str:
     if not token or token in {"mock_token", "your_line_channel_access_token_here"}:
         raise RuntimeError("canonical LINE worker requires a real access token")
     return token
+
+
+def _identity_flow_url(purpose: str, flow_id: str) -> str:
+    query = urlencode({"purpose": purpose, "flow_id": flow_id})
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if liff_id and liff_id != "your_liff_id_here":
+        return f"https://liff.line.me/{liff_id}?{query}"
+    base_url = _configured_public_base_url()
+    if base_url:
+        return f"{base_url}/line-identity?{query}"
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    if app_env == "production":
+        raise RuntimeError("LINE identity flow requires LINE_LIFF_ID or LINE_PUBLIC_BASE_URL")
+    return f"http://127.0.0.1:8000/line-identity?{query}"
+
+
+def _configured_public_base_url() -> str:
+    base_url = (
+        os.getenv("LINE_PUBLIC_BASE_URL", "").strip()
+        or os.getenv("BASE_URL", "").strip()
+    ).rstrip("/")
+    placeholders = {
+        "https://your-public-domain.example",
+        "https://your-domain.example.com",
+    }
+    return "" if base_url in placeholders else base_url
 
 
 def _require_compatible_runtime_modes(worker_mode: LineRuntimeMode) -> None:

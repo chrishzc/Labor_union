@@ -110,6 +110,18 @@ class LineReviewRequestId:
 
 
 @dataclass(frozen=True, slots=True)
+class LineIdentityFlowId:
+    value: str
+
+    def __post_init__(self) -> None:
+        require_canonical_text(
+            self.value,
+            "LINE identity flow ID",
+            _REFERENCE_MAXIMUM_LENGTH,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class LineRichMenuPublicationId:
     value: int
 
@@ -154,6 +166,7 @@ __all__ = [
     "LineDeliveryTaskId",
     "LineDestinationId",
     "LineGroupId",
+    "LineIdentityFlowId",
     "LineProviderMessageId",
     "LineReviewRequestId",
     "LineRichMenuPublicationId",

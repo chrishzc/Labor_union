@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from services import finance_import_staging as staging
+from subsystems.finance_import import staging
 
 
 class FakeCursor:
@@ -251,7 +251,7 @@ def test_empty_normalized_result_still_creates_batch(monkeypatch):
 
 
 def test_service_does_not_import_or_write_formal_accounting_modules():
-    source = Path("services/finance_import_staging.py").read_text(encoding="utf-8")
+    source = Path("subsystems/finance_import/staging.py").read_text(encoding="utf-8")
 
     assert "get_connection" not in source
     assert "client_payment" not in source

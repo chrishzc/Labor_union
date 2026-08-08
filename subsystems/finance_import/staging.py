@@ -7,8 +7,8 @@ from decimal import Decimal
 import json
 from typing import Any, Mapping
 
-from services.finance_transaction_classifier import classify_finance_transaction
-from services.finance_transaction_fingerprint import build_dedup_fingerprint
+from domains.finance_import.transaction_classifier import classify_finance_transaction
+from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
 
 
 def _json_default(value: Any) -> str:

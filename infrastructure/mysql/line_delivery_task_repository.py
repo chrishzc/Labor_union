@@ -198,6 +198,11 @@ class MySqlLineDeliveryTaskRepository:
         due_at = None if row is None else row.get("next_due_at_utc")
         return aware_utc(due_at) if due_at is not None else None
 
+    def cancel_pending_for_recipient(self, line_user_id) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CANCEL_RECIPIENT_SQL, (line_user_id.value,))
+            return int(cursor.rowcount)
+
     def _insert(self, request: LineDeliveryRequest) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -411,6 +416,11 @@ _CANCEL_SQL = (
     "UPDATE line_delivery_tasks SET processing_status='cancelled',lease_owner=NULL,"
     "lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL WHERE id=%s "
     "AND processing_status=%s"
+)
+_CANCEL_RECIPIENT_SQL = (
+    "UPDATE line_delivery_tasks SET processing_status='cancelled',lease_owner=NULL,"
+    "lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL WHERE recipient_type='user' "
+    "AND recipient_identity=%s AND processing_status IN ('pending','retryable_failed')"
 )
 
 

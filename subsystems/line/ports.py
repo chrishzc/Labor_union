@@ -16,18 +16,25 @@ from domains.line.delivery import (
 )
 from domains.line.identities import (
     LineDeliveryTaskId,
+    LineIdentityFlowId,
     LineRichMenuPublicationId,
     LineReviewRequestId,
     LineUserId,
     LineWebhookEventId,
 )
 from domains.line.identity_binding import (
+    LineBindingSubjectType,
     LineIdentityBindingSnapshot,
     LineIdentityClaim,
+)
+from domains.line.identity_flow import (
+    LineIdentityFlowPurpose,
+    LineIdentityFlowSnapshot,
 )
 from domains.line.media import LineMediaMetadata
 from domains.line.order_group import LineOrderGroupBindingSnapshot
 from domains.line.review import LineReviewDecisionCandidate, LineReviewSnapshot
+from domains.line.platform_user import LineFriendEvent, LinePlatformUserSnapshot
 from domains.line.rich_menu import LineRichMenuPublicationSnapshot
 from domains.line.webhook import (
     CanonicalLineWebhookEvent,
@@ -50,7 +57,15 @@ from subsystems.line.delivery_contracts import (
     RecordLineDeliveryAttemptCommand,
     RecordLineDeliveryAttemptResult,
 )
-from subsystems.line.identity_contracts import LineIdentityCandidate
+from subsystems.line.identity_contracts import (
+    AdminCredentialProof,
+    CustomerIdentityProof,
+    LineIdentityCandidate,
+    OpenLineIdentityFlowCommand,
+    OpenLineIdentityFlowResult,
+    StaffIdentityProof,
+    VerifiedLiffIdentity,
+)
 from subsystems.line.media_contracts import (
     ArchiveLineMediaResult,
     LineMediaDownload,
@@ -61,6 +76,8 @@ from subsystems.line.order_group_contracts import (
     OrderLineAudience,
 )
 from subsystems.line.review_contracts import (
+    CreateLineReviewCommand,
+    CreateLineReviewResult,
     DecideLineReviewCommand,
     DecideLineReviewResult,
     LineReviewListQuery,
@@ -161,8 +178,60 @@ class LineIdentityRepositoryPort(Protocol):
         expected_version: ExpectedVersion,
     ) -> LineIdentityBindingSnapshot: ...
 
+    def bind(
+        self,
+        claim: LineIdentityClaim,
+        expected_version: ExpectedVersion,
+        actor_id: str,
+        idempotency_key: IdempotencyKey,
+        correlation_id: str,
+    ) -> LineIdentityBindingSnapshot: ...
+
+    def revoke(
+        self,
+        line_user_id: LineUserId,
+        expected_version: ExpectedVersion,
+        actor_id: str,
+        idempotency_key: IdempotencyKey,
+        correlation_id: str,
+    ) -> LineIdentityBindingSnapshot: ...
+
+    def get_by_subject(
+        self,
+        subject_type: LineBindingSubjectType,
+        subject_reference: str,
+    ) -> LineIdentityBindingSnapshot | None: ...
+
+
+class LinePlatformUserRepositoryPort(Protocol):
+    def get(self, line_user_id: LineUserId) -> LinePlatformUserSnapshot | None: ...
+
+    def apply_friend_event(self, event: LineFriendEvent) -> LinePlatformUserSnapshot: ...
+
+
+class LineIdentityFlowRepositoryPort(Protocol):
+    def open(self, command: OpenLineIdentityFlowCommand) -> OpenLineIdentityFlowResult: ...
+
+    def get(self, flow_id: LineIdentityFlowId) -> LineIdentityFlowSnapshot | None: ...
+
+    def consume(
+        self,
+        flow_id: LineIdentityFlowId,
+        purpose: LineIdentityFlowPurpose,
+        line_user_id: LineUserId,
+        now: datetime,
+    ) -> LineIdentityFlowSnapshot: ...
+
+    def record_failed_attempt(
+        self,
+        flow_id: LineIdentityFlowId,
+        maximum_attempts: int,
+    ) -> LineIdentityFlowSnapshot: ...
+
 
 class LineIdentityReviewRepositoryPort(Protocol):
+    def create(self, command: CreateLineReviewCommand) -> CreateLineReviewResult: ...
+
     def get(self, request_id: LineReviewRequestId) -> LineReviewSnapshot | None: ...
 
     def list(self, query: LineReviewListQuery) -> LineReviewPage: ...
@@ -195,6 +264,8 @@ class LineDeliveryTaskRepositoryPort(Protocol):
     ) -> LineDeliveryTaskSnapshot: ...
 
     def next_due_at(self) -> datetime | None: ...
+
+    def cancel_pending_for_recipient(self, line_user_id: LineUserId) -> int: ...
 
 
 class LineConfigurationRepositoryPort(Protocol):
@@ -258,6 +329,10 @@ class LineMessagingProviderPort(Protocol):
     def send(self, request: LineDeliveryRequest) -> LineProviderOutcome: ...
 
 
+class LiffTokenVerifierPort(Protocol):
+    def verify(self, id_token: str) -> VerifiedLiffIdentity: ...
+
+
 class LineRichMenuProviderPort(Protocol):
     def publish(
         self,
@@ -281,16 +356,40 @@ class LineMediaObjectStorePort(Protocol):
     def put(self, metadata: LineMediaMetadata, content: bytes) -> str: ...
 
 
-class CustomerIdentityLookupPort(Protocol):
-    def resolve(self, claim: LineIdentityClaim) -> LineIdentityCandidate | None: ...
+class CustomerIdentityOwnerPort(Protocol):
+    def resolve_customer(self, proof: CustomerIdentityProof) -> LineIdentityCandidate | None: ...
+
+    def bind_customer(
+        self,
+        subject_reference: str,
+        line_user_id: LineUserId,
+        expected_current_line_user_id: LineUserId | None,
+    ) -> None: ...
 
 
-class StaffIdentityLookupPort(Protocol):
-    def resolve(self, claim: LineIdentityClaim) -> LineIdentityCandidate | None: ...
+class StaffIdentityOwnerPort(Protocol):
+    def resolve_staff(self, proof: StaffIdentityProof) -> LineIdentityCandidate | None: ...
+
+    def bind_staff(
+        self,
+        subject_reference: str,
+        line_user_id: LineUserId,
+        expected_current_line_user_id: LineUserId | None,
+    ) -> None: ...
 
 
-class AdminIdentityLookupPort(Protocol):
-    def resolve(self, claim: LineIdentityClaim) -> LineIdentityCandidate | None: ...
+class AdminIdentityOwnerPort(Protocol):
+    def authenticate_admin(
+        self,
+        proof: AdminCredentialProof,
+    ) -> LineIdentityCandidate | None: ...
+
+    def bind_admin(
+        self,
+        subject_reference: str,
+        line_user_id: LineUserId,
+        expected_current_line_user_id: LineUserId | None,
+    ) -> None: ...
 
 
 class OrdersLineAudiencePort(Protocol):
@@ -299,8 +398,13 @@ class OrdersLineAudiencePort(Protocol):
 
 class LineUnitOfWorkPort(UnitOfWork, Protocol):
     webhook_inbox: LineWebhookInboxRepositoryPort
+    platform_users: LinePlatformUserRepositoryPort
+    identity_flows: LineIdentityFlowRepositoryPort
     identities: LineIdentityRepositoryPort
     reviews: LineIdentityReviewRepositoryPort
+    customers: CustomerIdentityOwnerPort
+    staff: StaffIdentityOwnerPort
+    admins: AdminIdentityOwnerPort
     delivery_tasks: LineDeliveryTaskRepositoryPort
     configurations: LineConfigurationRepositoryPort
     rich_menu_publications: LineRichMenuPublicationRepositoryPort
@@ -312,28 +416,31 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
 
 
 __all__ = [
-    "AdminIdentityLookupPort",
+    "AdminIdentityOwnerPort",
     "BusinessClock",
-    "CustomerIdentityLookupPort",
+    "CustomerIdentityOwnerPort",
     "LineAuditIntent",
     "LineAuditPort",
     "LineConfigurationRepositoryPort",
     "LineDeliveryTaskRepositoryPort",
     "LineIdentityRepositoryPort",
+    "LineIdentityFlowRepositoryPort",
     "LineIdentityReviewRepositoryPort",
     "LineIdempotencyReceiptPort",
     "LineMediaMetadataRepositoryPort",
     "LineMediaObjectStorePort",
     "LineMediaProviderPort",
+    "LiffTokenVerifierPort",
     "LineMessagingProviderPort",
     "LineOrderGroupBindingRepositoryPort",
     "LineRichMenuProviderPort",
     "LineRichMenuPublicationRepositoryPort",
     "LineUnitOfWorkPort",
     "LineRuntimeRepositoryPort",
+    "LinePlatformUserRepositoryPort",
     "LineWebhookInboxRepositoryPort",
     "LineWakeupPublisherPort",
     "LineWakeupSubscriberPort",
     "OrdersLineAudiencePort",
-    "StaffIdentityLookupPort",
+    "StaffIdentityOwnerPort",
 ]

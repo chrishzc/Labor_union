@@ -8,10 +8,15 @@ from collections.abc import Callable
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
+from shared_kernel.identities import ActorContext
 from subsystems.access.authentication_session import (
     AdminPrincipal,
     get_admin_session,
     has_required_role,
+)
+from subsystems.line.capabilities import (
+    LineCapability,
+    line_capabilities_for_role,
 )
 
 
@@ -92,7 +97,31 @@ def require_role(minimum_role: str) -> Callable[..., AdminPrincipal]:
     return dependency
 
 
+def admin_actor_context(principal: AdminPrincipal) -> ActorContext:
+    actor_id = f"admin:{principal.id}" if principal.id is not None else "admin:development"
+    return ActorContext(actor_id, line_capabilities_for_role(principal.role))
+
+
+def require_capability(capability: LineCapability) -> Callable[..., AdminPrincipal]:
+    def dependency(
+        request: Request,
+        principal: AdminPrincipal = Depends(require_admin),
+    ) -> AdminPrincipal:
+        scope = line_capabilities_for_role(principal.role)
+        if capability.value not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"缺少操作權限：{capability.value}",
+            )
+        request.state.admin_actor = admin_actor_context(principal)
+        return principal
+
+    return dependency
+
+
 require_line_viewer = require_role("line_viewer")
 require_line_agent = require_role("line_agent")
 require_line_manager = require_role("line_manager")
 require_system_admin = require_role("system_admin")
+require_line_identity_reader = require_capability(LineCapability.IDENTITY_READ)
+require_line_identity_reviewer = require_capability(LineCapability.IDENTITY_REVIEW)

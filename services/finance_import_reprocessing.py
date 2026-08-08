@@ -13,13 +13,13 @@ import time as clock
 from typing import Any
 
 from scripts.imports.finance_normalized_row import validate_normalized_row
-from services.db_service import get_connection
-from services.finance_identity_maps import load_finance_identity_maps
-from services.finance_import_dispatch import dispatch_finance_import_row
+from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.finance_import.identity_maps import load_finance_identity_maps
+from subsystems.finance_import.reconciliation_dispatch import dispatch_finance_import_row
 from services.finance_import_review_alerts import (
     project_finance_import_review_alert,
 )
-from services.finance_transaction_classifier import classify_finance_transaction
+from domains.finance_import.transaction_classifier import classify_finance_transaction
 
 
 CLASSIFIER_VERSION = "finance_transaction_classifier:v1"

@@ -5,7 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 
-from domains.line.identities import LineReviewRequestId
+from domains.line.identities import LineIdentityFlowId, LineReviewRequestId, LineUserId
+from domains.line.identity_binding import LineBindingSubjectType
 from domains.line.review import (
     LineReviewDecision,
     LineReviewDecisionCandidate,
@@ -19,6 +20,7 @@ from shared_kernel.identities import (
     ExpectedVersion,
     IdempotencyKey,
 )
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.validation import require_canonical_text, require_positive_integer
 
 _QUERY_CURSOR_MAXIMUM_LENGTH = 191
@@ -29,6 +31,33 @@ _MAXIMUM_REVIEW_PAGE_SIZE = 100
 class LineReviewCommandOutcome(StrEnum):
     CREATED = "created"
     EXISTING = "existing"
+
+
+@dataclass(frozen=True, slots=True)
+class CreateLineReviewCommand:
+    review_type: LineReviewType
+    line_user_id: LineUserId
+    subject_type: LineBindingSubjectType
+    subject_reference: str
+    request_fingerprint: PreviewFingerprint
+    evidence_json: str
+    flow_id: LineIdentityFlowId
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(
+            self.subject_reference,
+            "LINE review subject reference",
+            191,
+        )
+        require_canonical_text(self.evidence_json, "LINE review evidence", 4_000)
+
+
+@dataclass(frozen=True, slots=True)
+class CreateLineReviewResult:
+    outcome: LineReviewCommandOutcome
+    snapshot: LineReviewSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +106,12 @@ class DecideLineReviewResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ApplyLineReviewDecisionResult:
+    outcome: LineReviewCommandOutcome
+    snapshot: LineReviewSnapshot
+
+
+@dataclass(frozen=True, slots=True)
 class LineReviewPage:
     items: tuple[LineReviewSnapshot, ...]
     next_cursor: str | None
@@ -93,6 +128,9 @@ def _validate_enum_filter(values: tuple[object, ...], item_type: type, name: str
 
 
 __all__ = [
+    "CreateLineReviewCommand",
+    "CreateLineReviewResult",
+    "ApplyLineReviewDecisionResult",
     "DecideLineReviewCommand",
     "DecideLineReviewResult",
     "LineReviewCommandOutcome",

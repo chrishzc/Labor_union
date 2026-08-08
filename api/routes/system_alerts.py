@@ -26,7 +26,7 @@ from api.schemas.finance_alert_center import (
     system_alert_detail_from_record,
 )
 from services.anomaly_alert_detection import run_process_alert_scan
-from services.db_service import get_connection
+from infrastructure.mysql.mysql_adapter import get_connection
 from services.system_alert_service import (
     claim_system_alert,
     get_system_alert,

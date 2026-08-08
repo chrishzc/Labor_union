@@ -42,6 +42,7 @@ from api.routes import (
     holidays,
     leave_substitution,
     line_admin,
+    line_identity,
     line_rich_menus,
     line_reviews,
     line_system_config,
@@ -152,6 +153,9 @@ app.include_router(line_admin.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
 app.include_router(line_reviews.router)
+app.include_router(line_identity.public_router)
+app.include_router(line_identity.review_router)
+app.include_router(line_identity.page_router)
 
 # Existing administration API routers.
 app.include_router(orders.router)

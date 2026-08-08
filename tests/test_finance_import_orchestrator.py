@@ -3,7 +3,7 @@ from decimal import Decimal
 import pytest
 
 from services import finance_import_application as importer
-from services import finance_import_dispatch as dispatcher
+from subsystems.finance_import import reconciliation_dispatch as dispatcher
 
 
 class Cursor:

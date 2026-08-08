@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
-from domains.line.identities import LineReviewRequestId
+from domains.line.identities import LineReviewRequestId, LineUserId
+from domains.line.identity_binding import LineBindingSubjectType
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, ExpectedVersion
 from shared_kernel.validation import require_canonical_text
@@ -42,12 +44,25 @@ class LineReviewSnapshot:
     review_type: LineReviewType
     status: LineReviewStatus
     version: ExpectedVersion
+    line_user_id: LineUserId | None = None
+    subject_type: LineBindingSubjectType | None = None
+    subject_reference: str | None = None
+    request_fingerprint: PreviewFingerprint | None = None
+    evidence_json: str = "{}"
+    assigned_admin_id: int | None = None
+    assigned_at: datetime | None = None
+    due_at: datetime | None = None
+    reassignment_count: int = 0
 
     def __post_init__(self) -> None:
         if not isinstance(self.review_type, LineReviewType):
             raise TypeError("LINE review type is invalid")
         if not isinstance(self.status, LineReviewStatus):
             raise TypeError("LINE review status is invalid")
+        if self.subject_type is not None and not isinstance(
+            self.subject_type, LineBindingSubjectType
+        ):
+            raise TypeError("LINE review subject type is invalid")
 
 
 @dataclass(frozen=True, slots=True)

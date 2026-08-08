@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from scripts.imports.finance_normalized_row import validate_normalized_row
-from services.finance_cancellation_code import resolve_finance_cancellation_code
+from domains.finance_import.cancellation_code import resolve_finance_cancellation_code
 
 
 CLASSIFICATION_TYPES = frozenset(

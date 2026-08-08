@@ -15,6 +15,15 @@ from infrastructure.mysql.line_identity_review_repository import (
     MySqlLineIdentityRepository,
     MySqlLineIdentityReviewRepository,
 )
+from infrastructure.mysql.line_identity_owner_adapters import (
+    MySqlAdminIdentityOwnerAdapter,
+    MySqlCustomerIdentityOwnerAdapter,
+    MySqlStaffIdentityOwnerAdapter,
+)
+from infrastructure.mysql.line_platform_identity_repository import (
+    MySqlLineIdentityFlowRepository,
+    MySqlLinePlatformUserRepository,
+)
 from infrastructure.mysql.line_media_order_group_repository import (
     MySqlLineMediaMetadataRepository,
     MySqlLineOrderGroupBindingRepository,
@@ -35,8 +44,13 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
     def __init__(self, connection: Any) -> None:
         super().__init__(connection)
         self.webhook_inbox = MySqlLineWebhookInboxRepository(connection)
+        self.platform_users = MySqlLinePlatformUserRepository(connection)
+        self.identity_flows = MySqlLineIdentityFlowRepository(connection)
         self.identities = MySqlLineIdentityRepository(connection)
         self.reviews = MySqlLineIdentityReviewRepository(connection)
+        self.customers = MySqlCustomerIdentityOwnerAdapter(connection)
+        self.staff = MySqlStaffIdentityOwnerAdapter(connection)
+        self.admins = MySqlAdminIdentityOwnerAdapter(connection)
         self.delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
         self.configurations = MySqlLineConfigurationRepository(connection)
         self.rich_menu_publications = MySqlLineRichMenuPublicationRepository(connection)
