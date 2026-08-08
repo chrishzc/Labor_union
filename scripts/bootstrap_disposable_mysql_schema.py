@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -53,6 +54,25 @@ def _connect(arguments):
     )
 
 
+def _load_schema_parts_through(cursor, maximum_part: int) -> list[str]:
+    selected: list[tuple[int, Path]] = []
+    for path in SCHEMA_PARTS_PATH.glob("*.sql"):
+        match = re.match(r"^(\d+)", path.name)
+        if match and int(match.group(1)) <= maximum_part:
+            selected.append((int(match.group(1)), path))
+    loaded: list[str] = []
+    for _, path in sorted(selected, key=lambda item: (item[0], item[1].name)):
+        try:
+            for statement in split_sql(path.read_text(encoding="utf-8")):
+                cursor.execute(statement)
+        except Exception as exc:
+            raise RuntimeError(
+                f"載入 schema part 失敗：{path.name}: {exc}"
+            ) from exc
+        loaded.append(path.name)
+    return loaded
+
+
 def bootstrap(arguments) -> dict[str, object]:
     database = _require_disposable_database(
         arguments.database,
@@ -65,7 +85,13 @@ def bootstrap(arguments) -> dict[str, object]:
             for statement in statements:
                 cursor.execute(statement)
             cursor.execute(f"USE `{database}`")
-            parts = load_schema_parts(cursor, SCHEMA_PARTS_PATH)
+            maximum_part = getattr(arguments, "max_schema_part", None)
+            if getattr(arguments, "base_only", False):
+                parts = []
+            elif maximum_part is not None:
+                parts = _load_schema_parts_through(cursor, maximum_part)
+            else:
+                parts = load_schema_parts(cursor, SCHEMA_PARTS_PATH)
             for view in views:
                 cursor.execute(view)
         connection.commit()
@@ -82,9 +108,19 @@ def main() -> int:
     parser.add_argument("--host", required=True)
     parser.add_argument("--port", type=int, required=True)
     parser.add_argument("--user", required=True)
-    parser.add_argument("--password", required=True)
+    parser.add_argument("--password", default=os.getenv("DB_PASSWORD", ""))
     parser.add_argument("--database", required=True)
     parser.add_argument("--confirm-database", required=True)
+    parser.add_argument(
+        "--base-only",
+        action="store_true",
+        help="Create only db/schema.sql for a pre-migration rehearsal baseline",
+    )
+    parser.add_argument(
+        "--max-schema-part",
+        type=int,
+        help="Apply only schema parts whose leading number is at most this value",
+    )
     arguments = parser.parse_args()
     print(json.dumps(bootstrap(arguments), ensure_ascii=False, sort_keys=True))
     return 0
