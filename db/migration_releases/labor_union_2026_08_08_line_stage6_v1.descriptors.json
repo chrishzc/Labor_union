@@ -4,7 +4,7 @@
     "150_line_order_group_runtime.sql": {
       "tables": {
         "line_order_group_bindings": [
-          "binding_status", "last_invitation_at_utc", "activated_at_utc"
+          "last_invitation_at_utc", "activated_at_utc"
         ],
         "line_order_group_participants": [
           "id", "case_no", "participant_type", "line_user_id",
