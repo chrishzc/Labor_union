@@ -29,6 +29,9 @@ from subsystems.line.order_group_contracts import (
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
     LineOrderGroupCommandOutcome,
+    LineOrderGroupEventRecord,
+    LineOrderGroupPage,
+    OrderLineAudience,
 )
 
 
@@ -108,6 +111,41 @@ class MySqlLineOrderGroupBindingRepository:
             row = optional_row(cursor.fetchone())
         return None if row is None else _group_snapshot(row)
 
+    def get_by_group(self, group_id: str) -> LineOrderGroupBindingSnapshot | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GROUP_SELECT_BY_GROUP_SQL, (group_id,))
+            row = optional_row(cursor.fetchone())
+        return None if row is None else _group_snapshot(row)
+
+    def list(self, *, status: str | None, limit: int) -> LineOrderGroupPage:
+        clauses = " WHERE binding_status=%s" if status else ""
+        parameters: list[object] = [status] if status else []
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS total FROM line_order_group_bindings" + clauses,
+                parameters,
+            )
+            total = int((cursor.fetchone() or {}).get("total") or 0)
+            cursor.execute(
+                f"SELECT case_no,group_id,binding_status,aggregate_version "
+                f"FROM line_order_group_bindings{clauses} "
+                "ORDER BY updated_at_utc DESC,case_no LIMIT %s",
+                [*parameters, limit],
+            )
+            rows = tuple(cursor.fetchall() or ())
+        return LineOrderGroupPage(tuple(_group_snapshot(row) for row in rows), total)
+
+    def events(
+        self,
+        case_no: str,
+        *,
+        limit: int,
+    ) -> tuple[LineOrderGroupEventRecord, ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GROUP_EVENTS_SQL, (case_no, case_no, limit))
+            rows = tuple(cursor.fetchall() or ())
+        return tuple(_group_event_record(row) for row in rows)
+
     def bind(
         self,
         command: BindLineOrderGroupCommand,
@@ -143,6 +181,11 @@ class MySqlLineOrderGroupBindingRepository:
         return BindLineOrderGroupResult(LineOrderGroupCommandOutcome.CREATED, candidate)
 
     def _locked_snapshot(self, cursor, case_no):
+        cursor.execute(
+            "INSERT IGNORE INTO line_order_group_bindings (case_no) "
+            "SELECT case_no FROM orders WHERE case_no=%s",
+            (case_no,),
+        )
         cursor.execute(_GROUP_SELECT_SQL + " FOR UPDATE", (case_no,))
         row = optional_row(cursor.fetchone())
         if row is None:
@@ -193,6 +236,107 @@ class MySqlLineOrderGroupBindingRepository:
             ),
         )
 
+    def sync_participants(self, audience: OrderLineAudience) -> None:
+        participants = [
+            ("customer", audience.customer_line_user_id.value),
+            *(("staff", item.value) for item in audience.staff_line_user_ids),
+        ]
+        with self._connection.cursor() as cursor:
+            for participant_type, line_user_id in participants:
+                cursor.execute(
+                    _GROUP_PARTICIPANT_UPSERT_SQL,
+                    (
+                        audience.case_no,
+                        participant_type,
+                        line_user_id,
+                        line_user_id,
+                    ),
+                )
+
+    def record_invitation_relay(self, relay, idempotency_key) -> bool:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GROUP_RUNTIME_EVENT_BY_KEY_SQL, (idempotency_key.value,))
+            existing = optional_row(cursor.fetchone())
+            if existing is not None:
+                if (
+                    str(existing.get("invitation_fingerprint") or "")
+                    != relay.invitation_fingerprint.value
+                ):
+                    raise RuntimeError("line_group_invitation_idempotency_conflict")
+                return False
+            cursor.execute(
+                _GROUP_RUNTIME_EVENT_INSERT_SQL,
+                (
+                    relay.case_no,
+                    "invitation_relayed",
+                    None,
+                    relay.invitation_fingerprint.value,
+                    relay.actor.actor_id,
+                    idempotency_key.value,
+                    relay.correlation_id.value,
+                ),
+            )
+            cursor.execute(
+                "UPDATE line_order_group_bindings SET binding_status='inviting',"
+                "last_invitation_at_utc=UTC_TIMESTAMP(6) WHERE case_no=%s",
+                (relay.case_no,),
+            )
+        return True
+
+    def record_membership_event(
+        self,
+        *,
+        group_id,
+        line_user_id,
+        event_type,
+        idempotency_key,
+        occurred_at,
+    ) -> bool:
+        if event_type not in {"member_joined", "member_left"}:
+            raise ValueError("LINE group membership event type is invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GROUP_SELECT_BY_GROUP_SQL + " FOR UPDATE", (group_id,))
+            binding = optional_row(cursor.fetchone())
+            if binding is None:
+                return False
+            cursor.execute(_GROUP_RUNTIME_EVENT_BY_KEY_SQL, (idempotency_key.value,))
+            if cursor.fetchone():
+                return False
+            cursor.execute(
+                _GROUP_RUNTIME_EVENT_INSERT_SQL,
+                (
+                    binding["case_no"],
+                    event_type,
+                    line_user_id.value,
+                    None,
+                    f"line-user:{line_user_id.value}",
+                    idempotency_key.value,
+                    idempotency_key.value,
+                ),
+            )
+            participant_status = "joined" if event_type == "member_joined" else "left"
+            cursor.execute(
+                _GROUP_PARTICIPANT_MEMBERSHIP_SQL,
+                (
+                    participant_status,
+                    participant_status,
+                    database_utc(occurred_at),
+                    participant_status,
+                    database_utc(occurred_at),
+                    binding["case_no"],
+                    line_user_id.value,
+                ),
+            )
+            cursor.execute(
+                _GROUP_STATUS_FROM_MEMBERS_SQL,
+                (
+                    binding["case_no"],
+                    binding["case_no"],
+                    binding["case_no"],
+                ),
+            )
+        return True
+
 
 def _media_metadata(row):
     return LineMediaMetadata(
@@ -222,6 +366,17 @@ def _group_snapshot(row):
     )
 
 
+def _group_event_record(row):
+    return LineOrderGroupEventRecord(
+        int(row["event_id"]),
+        str(row["case_no"]),
+        str(row["event_type"]),
+        str(row["actor_id"]),
+        aware_utc(row["occurred_at_utc"]),
+        _optional_text(row.get("invitation_fingerprint")),
+    )
+
+
 def _optional_text(value):
     return None if value is None else str(value)
 
@@ -247,6 +402,10 @@ _GROUP_SELECT_SQL = (
     "SELECT case_no,group_id,binding_status,aggregate_version "
     "FROM line_order_group_bindings WHERE case_no=%s"
 )
+_GROUP_SELECT_BY_GROUP_SQL = (
+    "SELECT case_no,group_id,binding_status,aggregate_version "
+    "FROM line_order_group_bindings WHERE group_id=%s"
+)
 _GROUP_UPDATE_SQL = (
     "UPDATE line_order_group_bindings SET group_id=%s,binding_status='bound',"
     "aggregate_version=%s WHERE case_no=%s AND aggregate_version=%s"
@@ -261,6 +420,45 @@ _GROUP_EVENT_INSERT_SQL = (
     "resulting_group_id,expected_version,resulting_version,actor_id,"
     "binding_fingerprint,idempotency_key,correlation_id) "
     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+)
+_GROUP_PARTICIPANT_UPSERT_SQL = (
+    "INSERT INTO line_order_group_participants "
+    "(case_no,participant_type,line_user_id,invitation_status) "
+    "VALUES (%s,%s,%s,'pending') ON DUPLICATE KEY UPDATE "
+    "invitation_status=IF(line_user_id=%s,invitation_status,'pending'),"
+    "line_user_id=VALUES(line_user_id)"
+)
+_GROUP_RUNTIME_EVENT_BY_KEY_SQL = (
+    "SELECT invitation_fingerprint FROM line_order_group_runtime_events "
+    "WHERE idempotency_key=%s"
+)
+_GROUP_RUNTIME_EVENT_INSERT_SQL = (
+    "INSERT INTO line_order_group_runtime_events "
+    "(case_no,event_type,line_user_id,invitation_fingerprint,actor_id,"
+    "idempotency_key,correlation_id) VALUES (%s,%s,%s,%s,%s,%s,%s)"
+)
+_GROUP_PARTICIPANT_MEMBERSHIP_SQL = (
+    "UPDATE line_order_group_participants SET invitation_status=%s,"
+    "joined_at_utc=IF(%s='joined',%s,joined_at_utc),"
+    "left_at_utc=IF(%s='left',%s,left_at_utc) "
+    "WHERE case_no=%s AND line_user_id=%s"
+)
+_GROUP_STATUS_FROM_MEMBERS_SQL = (
+    "UPDATE line_order_group_bindings SET binding_status=IF("
+    "(SELECT COUNT(*) FROM line_order_group_participants "
+    "WHERE case_no=%s AND invitation_status<>'joined')=0,'active','attention'),"
+    "activated_at_utc=IF((SELECT COUNT(*) FROM line_order_group_participants "
+    "WHERE case_no=%s AND invitation_status<>'joined')=0,UTC_TIMESTAMP(6),"
+    "activated_at_utc) WHERE case_no=%s"
+)
+_GROUP_EVENTS_SQL = (
+    "SELECT event_id,case_no,event_type,actor_id,occurred_at_utc,"
+    "invitation_fingerprint FROM (SELECT id AS event_id,case_no,action AS "
+    "event_type,actor_id,occurred_at_utc,NULL AS invitation_fingerprint FROM "
+    "line_order_group_binding_events WHERE case_no=%s UNION ALL SELECT id AS "
+    "event_id,case_no,event_type,actor_id,occurred_at_utc,invitation_fingerprint "
+    "FROM line_order_group_runtime_events WHERE case_no=%s) events "
+    "ORDER BY occurred_at_utc DESC,event_id DESC LIMIT %s"
 )
 
 

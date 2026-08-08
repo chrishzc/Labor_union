@@ -65,7 +65,10 @@ start "LINE Worker" cmd /k ""%PY%" scripts/run_line_worker.py"
 echo [Step 6] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
 
-echo [Step 7] Launching File Watcher Service...
+echo [Step 7] Launching active runtime monitor...
+start "Runtime Monitor" cmd /k ""%PY%" scripts/run_service_monitor.py"
+
+echo [Step 8] Launching File Watcher Service...
 start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
 
 echo ==========================================
@@ -73,6 +76,7 @@ echo Lobar Union System online services are running!
 echo - API Docs: http://127.0.0.1:8000/docs
 echo - Streamlit UI: http://localhost:8501
 echo - LINE Worker: independent durable queue consumer
+echo - Runtime Monitor: active health probes and alert projection
 echo - File Watcher: Monitoring downloads/ folder
 echo ==========================================
 pause

@@ -35,11 +35,16 @@ _ROLE_CAPABILITIES = {
     "line_viewer": {
         LineCapability.IDENTITY_READ,
         LineCapability.REVIEW_READ,
+        LineCapability.ORDER_GROUP_READ,
+        LineCapability.MONITOR_READ,
     },
     "line_agent": {
         LineCapability.IDENTITY_READ,
         LineCapability.REVIEW_READ,
         LineCapability.TASK_READ,
+        LineCapability.ORDER_GROUP_READ,
+        LineCapability.ORDER_GROUP_BIND,
+        LineCapability.MONITOR_READ,
     },
     "line_manager": set(LineCapability),
     "system_admin": set(LineCapability),

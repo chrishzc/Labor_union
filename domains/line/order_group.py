@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
+import re
 from urllib.parse import urlparse
 
 from domains.line.identities import LineGroupId, LineUserId
@@ -19,6 +20,9 @@ _ALLOWED_INVITATION_HOSTS = {"line.me"}
 class LineOrderGroupBindingStatus(StrEnum):
     UNBOUND = "unbound"
     BOUND = "bound"
+    INVITING = "inviting"
+    ACTIVE = "active"
+    ATTENTION = "attention"
     REPLACED = "replaced"
     RELEASED = "released"
 
@@ -143,8 +147,10 @@ def _validate_invitation_url(invitation_url: str) -> None:
     parsed = urlparse(invitation_url)
     if parsed.scheme != "https" or parsed.hostname not in _ALLOWED_INVITATION_HOSTS:
         raise ValueError("LINE group invitation URL must use the approved LINE host")
-    if not parsed.path:
-        raise ValueError("LINE group invitation URL must include a path")
+    if not re.fullmatch(r"/(?:R/)?ti/g/[^/?#]+", parsed.path):
+        raise ValueError("LINE group invitation URL path is invalid")
+    if parsed.params or parsed.query or parsed.fragment:
+        raise ValueError("LINE group invitation URL cannot include extra parameters")
 
 
 def _validate_recipients(recipients: tuple[LineUserId, ...]) -> None:

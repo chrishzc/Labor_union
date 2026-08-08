@@ -1,0 +1,62 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "150_line_order_group_runtime.sql": {
+      "tables": {
+        "line_order_group_bindings": [
+          "binding_status", "last_invitation_at_utc", "activated_at_utc"
+        ],
+        "line_order_group_participants": [
+          "id", "case_no", "participant_type", "line_user_id",
+          "invitation_status", "joined_at_utc", "left_at_utc",
+          "created_at_utc", "updated_at_utc"
+        ],
+        "line_order_group_runtime_events": [
+          "id", "case_no", "event_type", "line_user_id",
+          "invitation_fingerprint", "actor_id", "idempotency_key",
+          "correlation_id", "occurred_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_line_order_group_runtime_events_before_update",
+        "trg_line_order_group_runtime_events_before_delete"
+      ]
+    },
+    "151_runtime_monitoring_line_alerts.sql": {
+      "tables": {
+        "runtime_service_heartbeats": [
+          "service_name", "instance_id", "process_id", "host_name",
+          "service_status", "details_snapshot", "started_at_utc",
+          "last_seen_at_utc", "stopped_at_utc"
+        ],
+        "runtime_health_status": [
+          "check_name", "component", "health_status", "raw_status",
+          "message", "details_snapshot", "response_ms",
+          "consecutive_failures", "consecutive_successes", "checked_at_utc",
+          "last_success_at_utc", "status_changed_at_utc"
+        ],
+        "runtime_health_events": [
+          "id", "check_name", "component", "transition_type",
+          "before_status", "resulting_status", "message", "details_snapshot",
+          "event_fingerprint", "occurred_at_utc"
+        ],
+        "line_alert_notification_targets": [
+          "id", "target_type", "admin_user_id", "group_id", "display_name",
+          "enabled", "minimum_status", "created_by_actor_id",
+          "created_at_utc", "updated_at_utc"
+        ],
+        "line_alert_delivery_intents": [
+          "id", "health_event_id", "target_id", "delivery_task_id",
+          "projection_status", "resolved_line_target_type",
+          "resolved_line_target_id", "error_code", "created_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_runtime_health_events_before_update",
+        "trg_runtime_health_events_before_delete",
+        "trg_line_alert_delivery_intents_before_update",
+        "trg_line_alert_delivery_intents_before_delete"
+      ]
+    }
+  }
+}

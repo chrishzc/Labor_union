@@ -92,6 +92,51 @@ def run_line_worker() -> subprocess.Popen[bytes]:
     )
 
 
+def run_monitor() -> subprocess.Popen[bytes]:
+    return subprocess.Popen(
+        [sys.executable, "scripts/run_service_monitor.py"],
+        cwd=PROJECT_ROOT,
+        shell=False,
+    )
+
+
+def run_streamlit() -> subprocess.Popen[bytes]:
+    return subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "streamlit",
+            "run",
+            "ui/app.py",
+            "--server.address",
+            "127.0.0.1",
+            "--server.port",
+            "8501",
+        ],
+        cwd=PROJECT_ROOT,
+        shell=False,
+    )
+
+
+def _write_supervisor_heartbeat(processes: dict[str, subprocess.Popen]) -> None:
+    state_dir = PROJECT_ROOT / ".monitor_state"
+    state_dir.mkdir(exist_ok=True)
+    target = state_dir / "supervisor-heartbeat.json"
+    temporary = state_dir / "supervisor-heartbeat.tmp"
+    payload = {
+        "written_at_utc": __import__("datetime").datetime.now(
+            __import__("datetime").timezone.utc
+        ).isoformat(),
+        "process_id": os.getpid(),
+        "children": {
+            name: {"pid": process.pid, "running": process.poll() is None}
+            for name, process in processes.items()
+        },
+    }
+    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    temporary.replace(target)
+
+
 def _relay_output(process: subprocess.Popen[str], prefix: str) -> None:
     if process.stdout is None:
         return
@@ -461,30 +506,31 @@ def _ask_restart(message: str) -> bool:
 
 def _run_supervised_session() -> None:
     print("=" * 60)
-    print("🚀 正在啟動 LINE Bot 開發環境（FastAPI + LINE Worker + ngrok）...")
+    print("🚀 正在啟動開發環境（FastAPI + LINE Worker + Monitor + Streamlit + ngrok）...")
     print("=" * 60)
-
-    ngrok_process: subprocess.Popen | None = None
-    fastapi_process: subprocess.Popen | None = None
-    line_worker_process: subprocess.Popen | None = None
     line_reviewer = DevLineConsoleReviewer()
     review_notifier = DevReviewNotificationServer(line_reviewer)
+    starters = {
+        "ngrok": run_ngrok,
+        "FastAPI": run_fastapi,
+        "LINE Worker": run_line_worker,
+        "Monitor": run_monitor,
+        "Streamlit": run_streamlit,
+    }
+    processes: dict[str, subprocess.Popen] = {}
+    restart_counts = {name: 0 for name in starters}
 
     try:
-        # Must start before FastAPI so the child process inherits the callback URL.
         review_notifier.start()
-        ngrok_process = run_ngrok()
-        print(f"▶ ngrok 已啟動（PID: {ngrok_process.pid}，對應 Port: 8000）")
+        for name, starter in starters.items():
+            processes[name] = starter()
+            print(f"▶ {name} 已啟動（PID: {processes[name].pid}）")
+        ngrok_process = processes["ngrok"]
         threading.Thread(
             target=_relay_output,
             args=(ngrok_process, "ngrok"),
             daemon=True,
         ).start()
-
-        fastapi_process = run_fastapi()
-        print(f"▶ FastAPI 已啟動（PID: {fastapi_process.pid}）")
-        line_worker_process = run_line_worker()
-        print(f"▶ LINE Worker 已啟動（PID: {line_worker_process.pid}）")
         print("⏳ 正在等待 ngrok Tunnel 就緒...")
 
         public_url = _wait_for_tunnel(ngrok_process)
@@ -500,37 +546,35 @@ def _run_supervised_session() -> None:
         line_reviewer.recover_pending_once()
 
         while True:
-            ngrok_code = ngrok_process.poll()
-            fastapi_code = fastapi_process.poll()
-            line_worker_code = line_worker_process.poll()
-            if ngrok_code is not None:
-                print(f"\n[ERROR] ngrok 已停止，Exit Code: {ngrok_code}")
-                print("[INFO] FastAPI 將一併關閉，避免留下無法接收 LINE Webhook 的服務。")
-                raise ServiceFailure(
-                    f"ngrok 已異常中斷。\nExit Code：{ngrok_code}\nFastAPI 已一併關閉。"
+            _write_supervisor_heartbeat(processes)
+            for name, process in tuple(processes.items()):
+                exit_code = process.poll()
+                if exit_code is None:
+                    continue
+                restart_counts[name] += 1
+                print(f"\n[ERROR] {name} 已停止，Exit Code: {exit_code}")
+                if restart_counts[name] > 3:
+                    raise ServiceFailure(
+                        f"{name} 連續 3 次自動重啟仍失敗，請人工檢查後重新啟動。"
+                    )
+                time.sleep(1)
+                processes[name] = starters[name]()
+                print(
+                    f"[RESTART] {name} 第 {restart_counts[name]}/3 次自動重啟完成"
+                    f"（PID: {processes[name].pid}）。"
                 )
-            if fastapi_code is not None:
-                print(f"\n[ERROR] FastAPI 已停止，Exit Code: {fastapi_code}")
-                print("[INFO] ngrok 將一併關閉，避免留下無後端的公開 Tunnel。")
-                raise ServiceFailure(
-                    f"FastAPI 已異常中斷。\nExit Code：{fastapi_code}\nngrok 已一併關閉。"
-                )
-            if line_worker_code is not None:
-                print(f"\n[ERROR] LINE Worker 已停止，Exit Code: {line_worker_code}")
-                raise ServiceFailure(
-                    f"LINE Worker 已異常中斷。\nExit Code：{line_worker_code}\n"
-                    "FastAPI 與 ngrok 已一併關閉。"
-                )
+                if name == "ngrok":
+                    threading.Thread(
+                        target=_relay_output,
+                        args=(processes[name], "ngrok"),
+                        daemon=True,
+                    ).start()
             line_reviewer.tick()
             time.sleep(0.5)
     finally:
         review_notifier.stop()
-        if line_worker_process is not None:
-            _terminate_process_tree(line_worker_process, "LINE Worker")
-        if fastapi_process is not None:
-            _terminate_process_tree(fastapi_process, "FastAPI")
-        if ngrok_process is not None:
-            _terminate_process_tree(ngrok_process, "ngrok")
+        for name, process in reversed(tuple(processes.items())):
+            _terminate_process_tree(process, name)
 
 
 def main() -> int:

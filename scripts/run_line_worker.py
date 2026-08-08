@@ -35,6 +35,8 @@ from subsystems.line.media_application import (
     LineMediaArchiveWorker,
     schedule_line_media_archive,
 )
+from subsystems.line.order_group_application import LineOrderGroupApplication
+from subsystems.line.runtime_alert_application import register_group_alert_target
 from domains.line.media import LineMediaPolicy
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
@@ -132,6 +134,10 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
                 _identity_flow_url,
                 follow_scheduler=enqueue_follow_schedule,
                 media_scheduler=schedule_line_media_archive,
+                group_application=LineOrderGroupApplication(
+                    now,
+                    alert_group_registrar=register_group_alert_target,
+                ),
             ).registry()
         ),
         worker_identity,

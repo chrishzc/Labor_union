@@ -32,18 +32,22 @@ class LineWebhookIdentityHandlers:
         flow_lifetime: timedelta = timedelta(minutes=15),
         follow_scheduler: Callable[[object, object, object], int] | None = None,
         media_scheduler: Callable[[object, object], bool] | None = None,
+        group_application: object | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
         self._flow_lifetime = flow_lifetime
         self._follow_scheduler = follow_scheduler
         self._media_scheduler = media_scheduler
+        self._group_application = group_application
 
     def registry(self):
         return {
             "follow": self.handle_follow,
             "unfollow": self.handle_unfollow,
             "message": self.handle_message,
+            "memberJoined": self.handle_group_membership,
+            "memberLeft": self.handle_group_membership,
         }
 
     def handle_follow(self, inbox, unit_of_work):
@@ -68,6 +72,10 @@ class LineWebhookIdentityHandlers:
         unit_of_work.delivery_tasks.cancel_pending_for_recipient(line_user_id)
 
     def handle_message(self, inbox, unit_of_work):
+        if self._group_application is not None and self._group_application.handle_message(
+            inbox, unit_of_work
+        ):
+            return
         line_user_id = _optional_user_id(inbox)
         if line_user_id is None:
             return
@@ -82,7 +90,14 @@ class LineWebhookIdentityHandlers:
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
             return
+        source_type = getattr(inbox.event.source, "source_type", None)
+        if source_type is not None and source_type.value != "user":
+            return
         self._open_and_notify(inbox, unit_of_work, line_user_id, purpose)
+
+    def handle_group_membership(self, inbox, unit_of_work):
+        if self._group_application is not None:
+            self._group_application.handle_membership(inbox, unit_of_work)
 
     # Kept cohesive so the flow and its delivery task use the same event identity.
     def _open_and_notify(self, inbox, unit_of_work, line_user_id, purpose):

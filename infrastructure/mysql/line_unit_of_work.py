@@ -28,6 +28,10 @@ from infrastructure.mysql.line_media_order_group_repository import (
     MySqlLineMediaMetadataRepository,
     MySqlLineOrderGroupBindingRepository,
 )
+from infrastructure.mysql.line_order_group_adapters import (
+    MySqlOrdersLineAudienceAdapter,
+)
+from infrastructure.mysql.runtime_monitor_repository import MySqlRuntimeMonitorRepository
 from infrastructure.mysql.line_receipt_outbox_audit import (
     MySqlLineAuditRepository,
     MySqlLineIdempotencyReceiptRepository,
@@ -56,6 +60,8 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.rich_menu_publications = MySqlLineRichMenuPublicationRepository(connection)
         self.media_metadata = MySqlLineMediaMetadataRepository(connection)
         self.order_groups = MySqlLineOrderGroupBindingRepository(connection)
+        self.order_audiences = MySqlOrdersLineAudienceAdapter(connection)
+        self.runtime_monitor = MySqlRuntimeMonitorRepository(connection)
         self.receipts = MySqlLineIdempotencyReceiptRepository(connection)
         self.audit = MySqlLineAuditRepository(connection)
         self.outbox = MySqlLineOutboxWriter(connection)

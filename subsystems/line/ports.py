@@ -84,6 +84,9 @@ from subsystems.line.outbox_contracts import (
 from subsystems.line.order_group_contracts import (
     BindLineOrderGroupCommand,
     BindLineOrderGroupResult,
+    LineOrderGroupEventRecord,
+    LineOrderGroupPage,
+    LinkedLineAdmin,
     OrderLineAudience,
 )
 from subsystems.line.review_contracts import (
@@ -364,10 +367,34 @@ class LineMediaMetadataRepositoryPort(Protocol):
 class LineOrderGroupBindingRepositoryPort(Protocol):
     def get(self, case_no: str) -> LineOrderGroupBindingSnapshot | None: ...
 
+    def get_by_group(self, group_id: str) -> LineOrderGroupBindingSnapshot | None: ...
+
+    def list(self, *, status: str | None, limit: int) -> LineOrderGroupPage: ...
+
+    def events(self, case_no: str, *, limit: int) -> tuple[LineOrderGroupEventRecord, ...]: ...
+
     def bind(
         self,
         command: BindLineOrderGroupCommand,
     ) -> BindLineOrderGroupResult: ...
+
+    def sync_participants(self, audience: OrderLineAudience) -> None: ...
+
+    def record_invitation_relay(
+        self,
+        relay,
+        idempotency_key: IdempotencyKey,
+    ) -> bool: ...
+
+    def record_membership_event(
+        self,
+        *,
+        group_id: str,
+        line_user_id: LineUserId,
+        event_type: str,
+        idempotency_key: IdempotencyKey,
+        occurred_at: datetime,
+    ) -> bool: ...
 
 
 class LineIdempotencyReceiptPort(Protocol):
@@ -454,9 +481,18 @@ class AdminIdentityOwnerPort(Protocol):
         expected_current_line_user_id: LineUserId | None,
     ) -> None: ...
 
+    def get_linked_admin(self, line_user_id: LineUserId) -> LinkedLineAdmin | None: ...
+
 
 class OrdersLineAudiencePort(Protocol):
     def get(self, case_no: str) -> OrderLineAudience | None: ...
+
+    def set_group_projection(
+        self,
+        case_no: str,
+        group_id: str,
+        expected_group_id: str | None,
+    ) -> None: ...
 
 
 class LineUnitOfWorkPort(UnitOfWork, Protocol):
@@ -473,6 +509,8 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     rich_menu_publications: LineRichMenuPublicationRepositoryPort
     media_metadata: LineMediaMetadataRepositoryPort
     order_groups: LineOrderGroupBindingRepositoryPort
+    order_audiences: OrdersLineAudiencePort
+    runtime_monitor: object
     receipts: LineIdempotencyReceiptPort
     audit: LineAuditPort
     outbox: LineOutboxRepositoryPort

@@ -44,8 +44,10 @@ from api.routes import (
     line_admin,
     line_configurations,
     line_identity,
+    line_order_groups,
     line_rich_menus,
     line_reviews,
+    runtime_health,
     line_system_config,
     line_tasks,
     match_records,
@@ -158,6 +160,7 @@ app.include_router(line_reviews.router)
 app.include_router(line_identity.public_router)
 app.include_router(line_identity.review_router)
 app.include_router(line_identity.page_router)
+app.include_router(line_order_groups.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)
@@ -209,6 +212,7 @@ app.include_router(government_subsidy.router)
 app.include_router(anomaly_registry.router)
 app.include_router(anomaly_recovery.router)
 app.include_router(data_browser_admin.router)
+app.include_router(runtime_health.router)
 
 
 

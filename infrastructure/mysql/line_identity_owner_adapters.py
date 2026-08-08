@@ -13,6 +13,7 @@ from subsystems.line.identity_contracts import (
     LineIdentityCandidate,
     StaffIdentityProof,
 )
+from subsystems.line.order_group_contracts import LinkedLineAdmin
 
 
 class MySqlCustomerIdentityOwnerAdapter:
@@ -127,6 +128,19 @@ class MySqlAdminIdentityOwnerAdapter:
             _upsert_legacy_role(cursor, line_user_id, "union_staff")
             cursor.execute(_ADMIN_BIND_SQL, (line_user_id.value, admin_id))
 
+    def get_linked_admin(self, line_user_id: LineUserId) -> LinkedLineAdmin | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_ADMIN_LINKED_SQL, (line_user_id.value,))
+            row = cursor.fetchone()
+        if not row:
+            return None
+        return LinkedLineAdmin(
+            int(row["id"]),
+            str(row["display_name"]),
+            str(row["role"]),
+            line_user_id,
+        )
+
 
 def _candidate(subject_type, row):
     raw_line_user_id = row.get("line_user_id")
@@ -191,6 +205,10 @@ _ADMIN_LINE_COLLISION_SQL = (
     "SELECT id FROM admin_users WHERE linked_line_user_id=%s AND id<>%s LIMIT 1 FOR UPDATE"
 )
 _ADMIN_BIND_SQL = "UPDATE admin_users SET linked_line_user_id=%s WHERE id=%s"
+_ADMIN_LINKED_SQL = (
+    "SELECT id,display_name,role FROM admin_users "
+    "WHERE linked_line_user_id=%s AND enabled=1 LIMIT 1"
+)
 _LEGACY_ROLE_UPSERT_SQL = (
     "INSERT INTO line_users (line_user_id,role,status,last_event_at) "
     "VALUES (%s,%s,'active',UTC_TIMESTAMP()) ON DUPLICATE KEY UPDATE "

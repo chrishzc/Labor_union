@@ -94,6 +94,11 @@ class MySqlLineDeliveryTaskRepository:
                 ),
             )
             rows = tuple(cursor.fetchall() or ())
+            cursor.execute(_EXPIRE_INVITATIONS_SQL, (database_utc(query.now),))
+            rows = tuple(
+                row for row in rows
+                if not _is_expired_invitation(row, query.now)
+            )
             task_ids = tuple(int(row["id"]) for row in rows)
             for task_id in task_ids:
                 cursor.execute(
@@ -133,6 +138,11 @@ class MySqlLineDeliveryTaskRepository:
             )
             self._insert_attempt(cursor, command, completed_attempts)
             self._finish_attempt(cursor, command, completed_attempts, plan)
+            if plan.resulting_status in {
+                LineDeliveryStatus.SENT,
+                LineDeliveryStatus.FAILED,
+            }:
+                self._redact_invitation(cursor, command.task.task_id)
         return RecordLineDeliveryAttemptResult(command.task.task_id, plan)
 
     def _existing_attempt(self, cursor, command):
@@ -193,6 +203,7 @@ class MySqlLineDeliveryTaskRepository:
             cursor.execute(_CANCEL_SQL, (command.task_id.value, current.value))
             if cursor.rowcount != 1:
                 raise RuntimeError("line_delivery_cancel_conflict")
+            self._redact_invitation(cursor, command.task_id)
             cursor.execute(_SELECT_SQL, (command.task_id.value,))
             updated = cursor.fetchone()
         return _snapshot(updated)
@@ -294,6 +305,8 @@ class MySqlLineDeliveryTaskRepository:
     def retry_failed(self, task_id: LineDeliveryTaskId, now) -> LineDeliveryTaskSnapshot:
         with self._connection.cursor() as cursor:
             row = self._locked_task(cursor, task_id)
+            if str(row["source_aggregate_type"]) == "line_order_group_invitation":
+                raise ValueError("line_group_invitation_requires_new_command")
             status = LineDeliveryStatus(str(row["processing_status"]))
             transition_delivery_status(status, LineDeliveryStatus.PENDING)
             cursor.execute(_RETRY_FAILED_SQL, (database_utc(now), task_id.value))
@@ -406,6 +419,9 @@ class MySqlLineDeliveryTaskRepository:
         if cursor.rowcount != 1:
             raise RuntimeError("line_delivery_lease_lost")
 
+    def _redact_invitation(self, cursor, task_id: LineDeliveryTaskId) -> None:
+        cursor.execute(_REDACT_INVITATION_SQL, (task_id.value,))
+
     def _load_rows(self, cursor, task_ids):
         for task_id in task_ids:
             cursor.execute(_SELECT_SQL, (task_id,))
@@ -454,15 +470,25 @@ def _optional_text(value: object) -> str | None:
     return None if value is None else str(value)
 
 
+def _is_expired_invitation(row: dict[str, object], now) -> bool:
+    return (
+        str(row.get("source_aggregate_type")) == "line_order_group_invitation"
+        and aware_utc(row["created_at_utc"]) + timedelta(hours=24) <= now
+    )
+
+
 def _admin_record(row: object) -> LineDeliveryAdminRecord:
     if not isinstance(row, dict):
         row = dict(row)
+    payload = canonical_json_value(row["payload_snapshot"])
+    if str(row["source_aggregate_type"]) == "line_order_group_invitation":
+        payload = _redact_invitation_payload(payload)
     return LineDeliveryAdminRecord(
         LineDeliveryTaskId(int(row["id"])),
         str(row["recipient_type"]),
         str(row["recipient_identity"]),
         str(row["message_kind"]),
-        canonical_json_value(row["payload_snapshot"]),
+        payload,
         LineDeliveryStatus(str(row["processing_status"])),
         aware_utc(row["scheduled_at_utc"]),
         str(row["source_aggregate_type"]),
@@ -501,6 +527,22 @@ def _optional_utc(value: object):
     return None if value is None else aware_utc(value)
 
 
+def _redact_invitation_payload(payload_json: str) -> str:
+    import json
+
+    payload = json.loads(payload_json)
+    try:
+        payload["contents"]["footer"]["contents"][0]["action"]["uri"] = "[REDACTED]"
+    except (KeyError, IndexError, TypeError):
+        pass
+    return json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
 _SELECT_COLUMNS = (
     "id,recipient_type,recipient_identity,message_kind,payload_snapshot,"
     "payload_fingerprint,scheduled_at_utc,source_aggregate_type,"
@@ -531,6 +573,16 @@ _CLAIM_CANDIDATES_SQL = (
     "(processing_status='processing' AND lease_expires_at_utc<=%s)) "
     "ORDER BY COALESCE(next_attempt_at_utc,scheduled_at_utc),id LIMIT %s "
     "FOR UPDATE SKIP LOCKED"
+)
+_EXPIRE_INVITATIONS_SQL = (
+    "UPDATE line_delivery_tasks SET processing_status='cancelled',"
+    "payload_snapshot=JSON_SET(payload_snapshot,"
+    "'$.contents.footer.contents[0].action.uri','[REDACTED]'),"
+    "error_code='invitation_expired',error_message='LINE group invitation expired',"
+    "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
+    "WHERE source_aggregate_type='line_order_group_invitation' "
+    "AND processing_status IN ('pending','retryable_failed') "
+    "AND DATE_ADD(created_at_utc,INTERVAL 24 HOUR)<=%s"
 )
 _NEXT_DUE_SQL = (
     "SELECT MIN(CASE "
@@ -613,6 +665,11 @@ _RETRY_FAILED_SQL = (
     "completed_attempts=0,next_attempt_at_utc=NULL,lease_owner=NULL,"
     "lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL,provider_message_id=NULL,"
     "error_code=NULL,error_message=NULL,sent_at_utc=NULL,failed_at_utc=NULL WHERE id=%s"
+)
+_REDACT_INVITATION_SQL = (
+    "UPDATE line_delivery_tasks SET payload_snapshot=JSON_SET(payload_snapshot,"
+    "'$.contents.footer.contents[0].action.uri','[REDACTED]') WHERE id=%s "
+    "AND source_aggregate_type='line_order_group_invitation'"
 )
 
 

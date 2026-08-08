@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from domains.line.identities import LineGroupId, LineUserId
@@ -85,12 +86,44 @@ class OrderLineAudience:
             raise ValueError("order staff LINE user IDs must be sorted and unique")
 
 
+@dataclass(frozen=True, slots=True)
+class LinkedLineAdmin:
+    admin_user_id: int
+    display_name: str
+    role: str
+    line_user_id: LineUserId
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.admin_user_id, "linked LINE admin user ID")
+        require_canonical_text(self.display_name, "linked LINE admin name", 100)
+        require_canonical_text(self.role, "linked LINE admin role", 50)
+
+
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupEventRecord:
+    event_id: int
+    case_no: str
+    event_type: str
+    actor_id: str
+    occurred_at: datetime
+    invitation_fingerprint: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LineOrderGroupPage:
+    items: tuple[LineOrderGroupBindingSnapshot, ...]
+    total: int
+
+
 __all__ = [
     "BindLineOrderGroupCommand",
     "BindLineOrderGroupResult",
     "GetLineOrderGroupQuery",
     "LineOrderGroupCommandOutcome",
+    "LineOrderGroupEventRecord",
+    "LineOrderGroupPage",
     "LineOrderGroupQueryResult",
+    "LinkedLineAdmin",
     "OrderLineAudience",
     "RelayLineGroupInvitationCommand",
     "RelayLineGroupInvitationResult",
