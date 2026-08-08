@@ -7,6 +7,10 @@ from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Mapping
 
+from domains.line.canonical_payload import (
+    canonical_line_payload_json,
+    validate_canonical_line_payload_json,
+)
 from domains.line.identities import (
     LineDestinationId,
     LineSourceIdentity,
@@ -54,6 +58,7 @@ class CanonicalLineWebhookEvent:
     payload_fingerprint: PreviewFingerprint
     is_redelivery: bool = False
     uses_provider_event_id: bool = True
+    payload_json: str = "{}"
 
     def __post_init__(self) -> None:
         require_canonical_text(
@@ -64,6 +69,7 @@ class CanonicalLineWebhookEvent:
         _require_aware_datetime(self.occurred_at, "webhook occurred_at")
         if not isinstance(self.is_redelivery, bool):
             raise TypeError("LINE webhook redelivery flag must be bool")
+        validate_canonical_line_payload_json(self.payload_json)
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +94,7 @@ def build_line_webhook_event(
     canonical_payload: Mapping[str, object],
     is_redelivery: bool = False,
 ) -> CanonicalLineWebhookEvent:
+    payload_json = canonical_line_payload_json(canonical_payload)
     payload_fingerprint = fingerprint_payload(canonical_payload)
     event_id, uses_provider_id = _event_identity(
         provider_event_id,
@@ -106,6 +113,7 @@ def build_line_webhook_event(
         payload_fingerprint,
         is_redelivery,
         uses_provider_id,
+        payload_json,
     )
 
 
