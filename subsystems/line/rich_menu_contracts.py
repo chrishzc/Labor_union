@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from domains.line.identities import (
@@ -73,9 +74,74 @@ class QueueLineRichMenuDeleteCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class RetryLineRichMenuPublicationCommand:
+    publication_id: LineRichMenuPublicationId
+    actor: ActorContext
+    reason: str
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.reason, "LINE Rich Menu retry reason", 500)
+
+
+@dataclass(frozen=True, slots=True)
 class QueueLineRichMenuPublicationResult:
     outcome: LineRichMenuCommandOutcome
     publication: LineRichMenuPublicationSnapshot
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimLineRichMenuPublicationsQuery:
+    lease_owner: str
+    now: datetime
+    batch_size: int = 5
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.lease_owner, "LINE Rich Menu lease owner", 191)
+        if self.now.tzinfo is None or self.now.utcoffset() is None:
+            raise ValueError("LINE Rich Menu claim time must be timezone-aware")
+        require_positive_integer(self.batch_size, "LINE Rich Menu claim batch size")
+        if self.batch_size > 25:
+            raise ValueError("LINE Rich Menu claim batch size exceeds maximum")
+
+
+@dataclass(frozen=True, slots=True)
+class LineRichMenuPublicationWorkItem:
+    publication: LineRichMenuPublicationSnapshot
+    definition_json: str
+    image_object_reference: str | None
+    attempt_count: int
+    maximum_attempts: int
+    lease_owner: str
+    lease_expires_at: datetime
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        validate_canonical_line_payload_json(self.definition_json)
+        require_positive_integer(self.maximum_attempts, "LINE Rich Menu maximum attempts")
+        if self.attempt_count < 0:
+            raise ValueError("LINE Rich Menu attempt count cannot be negative")
+        require_canonical_text(self.lease_owner, "LINE Rich Menu lease owner", 191)
+        if self.lease_expires_at.tzinfo is None or self.lease_expires_at.utcoffset() is None:
+            raise ValueError("LINE Rich Menu lease expiry must be timezone-aware")
+
+
+@dataclass(frozen=True, slots=True)
+class RecordLineRichMenuPublicationCommand:
+    work_item: LineRichMenuPublicationWorkItem
+    provider_outcome: LineRichMenuProviderOutcome
+    image_object_reference: str
+    completed_at: datetime
+
+    def __post_init__(self) -> None:
+        require_canonical_text(
+            self.image_object_reference,
+            "LINE Rich Menu image object reference",
+            500,
+        )
+        if self.completed_at.tzinfo is None or self.completed_at.utcoffset() is None:
+            raise ValueError("LINE Rich Menu completion time must be timezone-aware")
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,14 +211,18 @@ def _validate_menu_definition_id(value: str) -> None:
 
 
 __all__ = [
+    "ClaimLineRichMenuPublicationsQuery",
     "LineRichMenuCommandOutcome",
     "LineRichMenuProviderOutcome",
     "LineRichMenuProviderOutcomeType",
     "LineRichMenuProviderRequest",
     "LineRichMenuPublicationQuery",
+    "LineRichMenuPublicationWorkItem",
     "PreviewLineRichMenuCommand",
     "QueueLineRichMenuDeleteCommand",
     "QueueLineRichMenuPublicationCommand",
     "QueueLineRichMenuPublicationResult",
     "QueueLineRichMenuRollbackCommand",
+    "RecordLineRichMenuPublicationCommand",
+    "RetryLineRichMenuPublicationCommand",
 ]

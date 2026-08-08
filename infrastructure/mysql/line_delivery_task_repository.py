@@ -37,6 +37,12 @@ from subsystems.line.delivery_contracts import (
     RecordLineDeliveryAttemptResult,
     provider_attempt_outcome,
 )
+from subsystems.line.delivery_admin_contracts import (
+    LineDeliveryAdminPage,
+    LineDeliveryAdminQuery,
+    LineDeliveryAdminRecord,
+    LineDeliveryAttemptRecord,
+)
 
 
 class MySqlLineDeliveryTaskRepository:
@@ -203,6 +209,98 @@ class MySqlLineDeliveryTaskRepository:
             cursor.execute(_CANCEL_RECIPIENT_SQL, (line_user_id.value,))
             return int(cursor.rowcount)
 
+    def list_admin(self, query: LineDeliveryAdminQuery) -> LineDeliveryAdminPage:
+        clauses: list[str] = []
+        parameters: list[object] = []
+        if query.statuses:
+            clauses.append(
+                "processing_status IN ("
+                + ",".join("%s" for _ in query.statuses)
+                + ")"
+            )
+            parameters.extend(item.value for item in query.statuses)
+        if query.source_aggregate_type is not None:
+            clauses.append("source_aggregate_type=%s")
+            parameters.append(query.source_aggregate_type)
+        if query.recipient_identity is not None:
+            clauses.append("recipient_identity=%s")
+            parameters.append(query.recipient_identity)
+        if query.scheduled_from is not None:
+            clauses.append("scheduled_at_utc>=%s")
+            parameters.append(database_utc(query.scheduled_from))
+        if query.scheduled_to is not None:
+            clauses.append("scheduled_at_utc<=%s")
+            parameters.append(database_utc(query.scheduled_to))
+        where = " WHERE " + " AND ".join(clauses) if clauses else ""
+        offset = (query.page - 1) * query.page_size
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) AS total FROM line_delivery_tasks" + where, parameters)
+            total_row = optional_row(cursor.fetchone()) or {"total": 0}
+            cursor.execute(
+                f"SELECT {_ADMIN_COLUMNS} FROM line_delivery_tasks{where} "
+                "ORDER BY scheduled_at_utc DESC,id DESC LIMIT %s OFFSET %s",
+                [*parameters, query.page_size, offset],
+            )
+            rows = tuple(cursor.fetchall() or ())
+        return LineDeliveryAdminPage(
+            tuple(_admin_record(row) for row in rows),
+            int(total_row["total"]),
+            query.page,
+            query.page_size,
+        )
+
+    def get_admin(self, task_id: LineDeliveryTaskId) -> LineDeliveryAdminRecord | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT {_ADMIN_COLUMNS} FROM line_delivery_tasks WHERE id=%s",
+                (task_id.value,),
+            )
+            row = optional_row(cursor.fetchone())
+        return None if row is None else _admin_record(row)
+
+    def attempts(
+        self,
+        task_id: LineDeliveryTaskId,
+    ) -> tuple[LineDeliveryAttemptRecord, ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_ADMIN_ATTEMPTS_SQL, (task_id.value,))
+            rows = tuple(cursor.fetchall() or ())
+        return tuple(_attempt_record(row) for row in rows)
+
+    def summary(self, now) -> dict[str, object]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_ADMIN_SUMMARY_SQL, (database_utc(now),))
+            row = optional_row(cursor.fetchone()) or {}
+        result = {key: int(row.get(key) or 0) for key in _SUMMARY_COUNT_KEYS}
+        result["next_run_at"] = _optional_utc(row.get("next_run_at"))
+        return result
+
+    def run_now(self, task_id: LineDeliveryTaskId, now) -> LineDeliveryTaskSnapshot:
+        with self._connection.cursor() as cursor:
+            row = self._locked_task(cursor, task_id)
+            status = LineDeliveryStatus(str(row["processing_status"]))
+            if status not in {
+                LineDeliveryStatus.PENDING,
+                LineDeliveryStatus.RETRYABLE_FAILED,
+            }:
+                raise RuntimeError("line_delivery_run_now_state_conflict")
+            if status is LineDeliveryStatus.RETRYABLE_FAILED:
+                transition_delivery_status(status, LineDeliveryStatus.PENDING)
+            cursor.execute(_RUN_NOW_SQL, (database_utc(now), task_id.value))
+            cursor.execute(_SELECT_SQL, (task_id.value,))
+            updated = cursor.fetchone()
+        return _snapshot(updated)
+
+    def retry_failed(self, task_id: LineDeliveryTaskId, now) -> LineDeliveryTaskSnapshot:
+        with self._connection.cursor() as cursor:
+            row = self._locked_task(cursor, task_id)
+            status = LineDeliveryStatus(str(row["processing_status"]))
+            transition_delivery_status(status, LineDeliveryStatus.PENDING)
+            cursor.execute(_RETRY_FAILED_SQL, (database_utc(now), task_id.value))
+            cursor.execute(_SELECT_SQL, (task_id.value,))
+            updated = cursor.fetchone()
+        return _snapshot(updated)
+
     def _insert(self, request: LineDeliveryRequest) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -356,12 +454,64 @@ def _optional_text(value: object) -> str | None:
     return None if value is None else str(value)
 
 
+def _admin_record(row: object) -> LineDeliveryAdminRecord:
+    if not isinstance(row, dict):
+        row = dict(row)
+    return LineDeliveryAdminRecord(
+        LineDeliveryTaskId(int(row["id"])),
+        str(row["recipient_type"]),
+        str(row["recipient_identity"]),
+        str(row["message_kind"]),
+        canonical_json_value(row["payload_snapshot"]),
+        LineDeliveryStatus(str(row["processing_status"])),
+        aware_utc(row["scheduled_at_utc"]),
+        str(row["source_aggregate_type"]),
+        str(row["source_aggregate_identity"]),
+        int(row["completed_attempts"]),
+        int(row["max_attempts"]),
+        _optional_utc(row.get("next_attempt_at_utc")),
+        _optional_text(row.get("provider_message_id")),
+        _optional_text(row.get("error_code")),
+        _optional_text(row.get("error_message")),
+        _optional_utc(row.get("sent_at_utc")),
+        _optional_utc(row.get("failed_at_utc")),
+        aware_utc(row["created_at_utc"]),
+        aware_utc(row["updated_at_utc"]),
+    )
+
+
+def _attempt_record(row: object) -> LineDeliveryAttemptRecord:
+    if not isinstance(row, dict):
+        row = dict(row)
+    return LineDeliveryAttemptRecord(
+        int(row["attempt_number"]),
+        str(row["outcome"]),
+        str(row["provider_outcome_type"]),
+        _optional_text(row.get("provider_message_id")),
+        _optional_text(row.get("error_code")),
+        _optional_text(row.get("error_message")),
+        row.get("retry_after_seconds"),
+        aware_utc(row["started_at_utc"]),
+        aware_utc(row["completed_at_utc"]),
+        str(row["correlation_id"]),
+    )
+
+
+def _optional_utc(value: object):
+    return None if value is None else aware_utc(value)
+
+
 _SELECT_COLUMNS = (
     "id,recipient_type,recipient_identity,message_kind,payload_snapshot,"
     "payload_fingerprint,scheduled_at_utc,source_aggregate_type,"
     "source_aggregate_identity,idempotency_key,correlation_id,processing_status,"
     "completed_attempts,max_attempts,next_attempt_at_utc,lease_owner,"
     "lease_acquired_at_utc,lease_expires_at_utc"
+)
+_ADMIN_COLUMNS = (
+    _SELECT_COLUMNS
+    + ",provider_message_id,error_code,error_message,sent_at_utc,failed_at_utc,"
+    "created_at_utc,updated_at_utc"
 )
 _INSERT_SQL = (
     "INSERT INTO line_delivery_tasks (recipient_type,recipient_identity,"
@@ -421,6 +571,48 @@ _CANCEL_RECIPIENT_SQL = (
     "UPDATE line_delivery_tasks SET processing_status='cancelled',lease_owner=NULL,"
     "lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL WHERE recipient_type='user' "
     "AND recipient_identity=%s AND processing_status IN ('pending','retryable_failed')"
+)
+_ADMIN_ATTEMPTS_SQL = (
+    "SELECT attempt_number,outcome,provider_outcome_type,provider_message_id,"
+    "error_code,error_message,retry_after_seconds,started_at_utc,completed_at_utc,"
+    "correlation_id FROM line_delivery_attempt_events WHERE task_id=%s "
+    "ORDER BY attempt_number DESC"
+)
+_SUMMARY_COUNT_KEYS = (
+    "total",
+    "pending",
+    "processing",
+    "sent",
+    "retryable_failed",
+    "failed",
+    "cancelled",
+    "overdue",
+    "sent_today",
+)
+_ADMIN_SUMMARY_SQL = (
+    "SELECT COUNT(*) AS total,"
+    "SUM(processing_status='pending') AS pending,"
+    "SUM(processing_status='processing') AS processing,"
+    "SUM(processing_status='sent') AS sent,"
+    "SUM(processing_status='retryable_failed') AS retryable_failed,"
+    "SUM(processing_status='failed') AS failed,"
+    "SUM(processing_status='cancelled') AS cancelled,"
+    "SUM(processing_status='pending' AND scheduled_at_utc<%s) AS overdue "
+    ",SUM(processing_status='sent' AND sent_at_utc>=UTC_DATE()) AS sent_today "
+    ",MIN(CASE WHEN processing_status='pending' THEN scheduled_at_utc "
+    "WHEN processing_status='retryable_failed' THEN next_attempt_at_utc END) AS next_run_at "
+    "FROM line_delivery_tasks"
+)
+_RUN_NOW_SQL = (
+    "UPDATE line_delivery_tasks SET processing_status='pending',scheduled_at_utc=%s,"
+    "next_attempt_at_utc=NULL,lease_owner=NULL,lease_acquired_at_utc=NULL,"
+    "lease_expires_at_utc=NULL WHERE id=%s"
+)
+_RETRY_FAILED_SQL = (
+    "UPDATE line_delivery_tasks SET processing_status='pending',scheduled_at_utc=%s,"
+    "completed_attempts=0,next_attempt_at_utc=NULL,lease_owner=NULL,"
+    "lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL,provider_message_id=NULL,"
+    "error_code=NULL,error_message=NULL,sent_at_utc=NULL,failed_at_utc=NULL WHERE id=%s"
 )
 
 

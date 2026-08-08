@@ -42,6 +42,7 @@ from api.routes import (
     holidays,
     leave_substitution,
     line_admin,
+    line_configurations,
     line_identity,
     line_rich_menus,
     line_reviews,
@@ -150,6 +151,7 @@ app.mount("/static", StaticFiles(directory="line/static"), name="static")
 app.include_router(line_router)
 app.include_router(admin_auth.router)
 app.include_router(line_admin.router)
+app.include_router(line_configurations.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
 app.include_router(line_reviews.router)

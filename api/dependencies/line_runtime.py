@@ -19,6 +19,11 @@ from subsystems.line.runtime_contracts import (
     LineWebhookSecurityReceipt,
     LineWebhookVerificationOutcome,
 )
+from subsystems.line.configuration_application import LineConfigurationApplication
+from subsystems.line.delivery_admin_application import (
+    LineDeliveryTaskAdminApplication,
+)
+from subsystems.line.rich_menu_application import LineRichMenuApplication
 from subsystems.line.webhook_intake import LineWebhookIntake
 
 
@@ -42,6 +47,26 @@ def get_line_webhook_intake() -> LineWebhookIntake:
         open_line_unit_of_work,
         publisher,
     )
+
+
+@lru_cache(maxsize=1)
+def get_line_configuration_application() -> LineConfigurationApplication:
+    return LineConfigurationApplication(open_line_unit_of_work)
+
+
+@lru_cache(maxsize=1)
+def get_line_delivery_task_admin_application() -> LineDeliveryTaskAdminApplication:
+    return LineDeliveryTaskAdminApplication(open_line_unit_of_work)
+
+
+@lru_cache(maxsize=1)
+def get_line_rich_menu_application() -> LineRichMenuApplication:
+    return LineRichMenuApplication(open_line_unit_of_work)
+
+
+@lru_cache(maxsize=1)
+def get_line_wakeup_publisher():
+    return _wakeup_publisher()
 
 
 def _wakeup_publisher():
@@ -79,7 +104,11 @@ def record_line_webhook_security_receipt(
 
 
 __all__ = [
+    "get_line_configuration_application",
+    "get_line_delivery_task_admin_application",
+    "get_line_rich_menu_application",
     "get_line_webhook_intake",
+    "get_line_wakeup_publisher",
     "line_webhook_runtime_mode",
     "record_line_webhook_security_receipt",
 ]

@@ -30,10 +30,14 @@ class LineWebhookIdentityHandlers:
         identity_url: Callable[[str, str], str],
         *,
         flow_lifetime: timedelta = timedelta(minutes=15),
+        follow_scheduler: Callable[[object, object, object], int] | None = None,
+        media_scheduler: Callable[[object, object], bool] | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
         self._flow_lifetime = flow_lifetime
+        self._follow_scheduler = follow_scheduler
+        self._media_scheduler = media_scheduler
 
     def registry(self):
         return {
@@ -47,6 +51,8 @@ class LineWebhookIdentityHandlers:
         unit_of_work.platform_users.apply_friend_event(
             _friend_event(inbox, line_user_id, LineFriendEventType.FOLLOW)
         )
+        if self._follow_scheduler is not None:
+            self._follow_scheduler(inbox, unit_of_work, line_user_id)
         self._open_and_notify(
             inbox,
             unit_of_work,
@@ -63,12 +69,16 @@ class LineWebhookIdentityHandlers:
 
     def handle_message(self, inbox, unit_of_work):
         line_user_id = _optional_user_id(inbox)
-        text = _message_text(inbox)
-        if line_user_id is None or text is None:
+        if line_user_id is None:
             return
         unit_of_work.platform_users.apply_friend_event(
             _friend_event(inbox, line_user_id, LineFriendEventType.ACTIVITY)
         )
+        if self._media_scheduler is not None and self._media_scheduler(inbox, unit_of_work):
+            return
+        text = _message_text(inbox)
+        if text is None:
+            return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
             return

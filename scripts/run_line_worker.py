@@ -15,6 +15,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from infrastructure.line.messaging_api_adapter import LineMessagingApiAdapter
+from infrastructure.line.media_adapters import (
+    FileSystemLineMediaObjectStore,
+    LineMediaApiAdapter,
+)
+from infrastructure.line.rich_menu_api_adapter import LineRichMenuApiAdapter
+from infrastructure.line.rich_menu_image_store import FileSystemRichMenuImageStore
 from infrastructure.line.redis_wakeup import (
     RedisLineWakeupSubscriber,
     SleepingLineWakeupSubscriber,
@@ -24,8 +30,15 @@ from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from line.worker import process_due_tasks, wake_local_worker, worker_loop
 from subsystems.line.delivery_worker import LineDeliveryWorker
+from subsystems.line.follow_schedule_application import enqueue_follow_schedule
+from subsystems.line.media_application import (
+    LineMediaArchiveWorker,
+    schedule_line_media_archive,
+)
+from domains.line.media import LineMediaPolicy
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
+from subsystems.line.rich_menu_worker import LineRichMenuWorker
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
@@ -114,7 +127,12 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
     event_consumer = LineWebhookEventConsumer(
         open_line_unit_of_work,
         LineEventDispatcher(
-            LineWebhookIdentityHandlers(now, _identity_flow_url).registry()
+            LineWebhookIdentityHandlers(
+                now,
+                _identity_flow_url,
+                follow_scheduler=enqueue_follow_schedule,
+                media_scheduler=schedule_line_media_archive,
+            ).registry()
         ),
         worker_identity,
         now,
@@ -125,6 +143,34 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
         worker_identity,
         now,
     )
+    rich_menu_images = FileSystemRichMenuImageStore(_media_storage_root())
+    rich_menu_worker = LineRichMenuWorker(
+        open_line_unit_of_work,
+        LineRichMenuApiAdapter(_required_access_token(), rich_menu_images.load),
+        rich_menu_images.materialize,
+        worker_identity,
+        now,
+    )
+    media_worker = LineMediaArchiveWorker(
+        open_line_unit_of_work,
+        LineMediaApiAdapter(_required_access_token()),
+        FileSystemLineMediaObjectStore(_media_storage_root()),
+        worker_identity,
+        now,
+        policy=LineMediaPolicy(
+            (
+                "application/pdf",
+                "audio/m4a",
+                "audio/mp4",
+                "image/gif",
+                "image/jpeg",
+                "image/png",
+                "image/webp",
+                "video/mp4",
+            ),
+            int(os.getenv("LINE_MEDIA_MAX_BYTES", str(10 * 1024 * 1024))),
+        ),
+    )
     return CanonicalLineWorkerRuntime(
         event_consumer,
         delivery_worker,
@@ -133,6 +179,10 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
         lambda heartbeat: _write_heartbeat(heartbeat),
         worker_identity,
         poll_seconds,
+        {
+            "media_archives": media_worker,
+            "rich_menu_publications": rich_menu_worker,
+        },
     )
 
 
@@ -141,6 +191,8 @@ def _next_due_at():
         due_times = (
             unit_of_work.webhook_inbox.next_due_at(),
             unit_of_work.delivery_tasks.next_due_at(),
+            unit_of_work.rich_menu_publications.next_due_at(),
+            unit_of_work.outbox.next_due_at(),
         )
         unit_of_work.commit()
     available = tuple(due_at for due_at in due_times if due_at is not None)
@@ -220,6 +272,12 @@ def _configured_public_base_url() -> str:
         "https://your-domain.example.com",
     }
     return "" if base_url in placeholders else base_url
+
+
+def _media_storage_root() -> Path:
+    configured = os.getenv("MEDIA_STORAGE_ROOT", ".local_media").strip() or ".local_media"
+    path = Path(configured)
+    return path if path.is_absolute() else PROJECT_ROOT / path
 
 
 def _require_compatible_runtime_modes(worker_mode: LineRuntimeMode) -> None:

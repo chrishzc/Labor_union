@@ -57,6 +57,12 @@ from subsystems.line.delivery_contracts import (
     RecordLineDeliveryAttemptCommand,
     RecordLineDeliveryAttemptResult,
 )
+from subsystems.line.delivery_admin_contracts import (
+    LineDeliveryAdminPage,
+    LineDeliveryAdminQuery,
+    LineDeliveryAdminRecord,
+    LineDeliveryAttemptRecord,
+)
 from subsystems.line.identity_contracts import (
     AdminCredentialProof,
     CustomerIdentityProof,
@@ -69,6 +75,11 @@ from subsystems.line.identity_contracts import (
 from subsystems.line.media_contracts import (
     ArchiveLineMediaResult,
     LineMediaDownload,
+)
+from subsystems.line.outbox_contracts import (
+    ClaimLineOutboxQuery,
+    CompleteLineOutboxCommand,
+    LineOutboxWorkItem,
 )
 from subsystems.line.order_group_contracts import (
     BindLineOrderGroupCommand,
@@ -84,10 +95,15 @@ from subsystems.line.review_contracts import (
     LineReviewPage,
 )
 from subsystems.line.rich_menu_contracts import (
+    ClaimLineRichMenuPublicationsQuery,
     LineRichMenuProviderOutcome,
     LineRichMenuProviderRequest,
     LineRichMenuPublicationQuery,
+    LineRichMenuPublicationWorkItem,
+    QueueLineRichMenuPublicationCommand,
     QueueLineRichMenuPublicationResult,
+    RecordLineRichMenuPublicationCommand,
+    RetryLineRichMenuPublicationCommand,
 )
 from subsystems.line.runtime_contracts import (
     LineWebhookSecurityReceipt,
@@ -149,6 +165,11 @@ class LineWebhookInboxRepositoryPort(Protocol):
     ) -> LineWebhookInboxSnapshot: ...
 
     def next_due_at(self) -> datetime | None: ...
+
+    def retry(
+        self,
+        command: RetryLineRichMenuPublicationCommand,
+    ) -> LineRichMenuPublicationSnapshot: ...
 
 
 class LineWakeupPublisherPort(Protocol):
@@ -267,6 +288,32 @@ class LineDeliveryTaskRepositoryPort(Protocol):
 
     def cancel_pending_for_recipient(self, line_user_id: LineUserId) -> int: ...
 
+    def list_admin(self, query: LineDeliveryAdminQuery) -> LineDeliveryAdminPage: ...
+
+    def get_admin(
+        self,
+        task_id: LineDeliveryTaskId,
+    ) -> LineDeliveryAdminRecord | None: ...
+
+    def attempts(
+        self,
+        task_id: LineDeliveryTaskId,
+    ) -> tuple[LineDeliveryAttemptRecord, ...]: ...
+
+    def summary(self, now: datetime) -> dict[str, int]: ...
+
+    def run_now(
+        self,
+        task_id: LineDeliveryTaskId,
+        now: datetime,
+    ) -> LineDeliveryTaskSnapshot: ...
+
+    def retry_failed(
+        self,
+        task_id: LineDeliveryTaskId,
+        now: datetime,
+    ) -> LineDeliveryTaskSnapshot: ...
+
 
 class LineConfigurationRepositoryPort(Protocol):
     def get(self, kind: LineConfigurationKind) -> LineConfigurationSnapshot: ...
@@ -290,9 +337,17 @@ class LineRichMenuPublicationRepositoryPort(Protocol):
 
     def queue(
         self,
-        snapshot: LineRichMenuPublicationSnapshot,
-        idempotency_key: IdempotencyKey,
+        command: QueueLineRichMenuPublicationCommand,
     ) -> QueueLineRichMenuPublicationResult: ...
+
+    def claim(
+        self,
+        query: ClaimLineRichMenuPublicationsQuery,
+    ) -> tuple[LineRichMenuPublicationWorkItem, ...]: ...
+
+    def record(self, command: RecordLineRichMenuPublicationCommand): ...
+
+    def next_due_at(self) -> datetime | None: ...
 
 
 class LineMediaMetadataRepositoryPort(Protocol):
@@ -319,6 +374,14 @@ class LineIdempotencyReceiptPort(Protocol):
     def get(self, key: IdempotencyKey) -> IdempotencyReceipt | None: ...
 
     def append(self, receipt: IdempotencyReceipt) -> None: ...
+
+
+class LineOutboxRepositoryPort(OutboxWriter, Protocol):
+    def claim(self, query: ClaimLineOutboxQuery) -> tuple[LineOutboxWorkItem, ...]: ...
+
+    def complete(self, command: CompleteLineOutboxCommand) -> None: ...
+
+    def next_due_at(self) -> datetime | None: ...
 
 
 class LineAuditPort(Protocol):
@@ -412,7 +475,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     order_groups: LineOrderGroupBindingRepositoryPort
     receipts: LineIdempotencyReceiptPort
     audit: LineAuditPort
-    outbox: OutboxWriter
+    outbox: LineOutboxRepositoryPort
 
 
 __all__ = [
@@ -433,6 +496,7 @@ __all__ = [
     "LiffTokenVerifierPort",
     "LineMessagingProviderPort",
     "LineOrderGroupBindingRepositoryPort",
+    "LineOutboxRepositoryPort",
     "LineRichMenuProviderPort",
     "LineRichMenuPublicationRepositoryPort",
     "LineUnitOfWorkPort",

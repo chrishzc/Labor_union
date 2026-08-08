@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import timedelta
 from typing import Any
 
 from pymysql.err import IntegrityError
@@ -10,6 +12,7 @@ from domains.line.configuration import (
     LineConfigurationKind,
     LineConfigurationSnapshot,
 )
+from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.identities import (
     LineConfigurationRevision,
     LineRichMenuPublicationId,
@@ -19,19 +22,28 @@ from domains.line.rich_menu import (
     LineRichMenuPublicationStatus,
 )
 from infrastructure.mysql.line_repository_support import (
+    aware_utc,
     canonical_json_value,
+    database_utc,
     mysql_error_code,
     optional_row,
 )
+from shared_kernel.identities import CorrelationId
 from subsystems.line.configuration_contracts import (
     ApplyLineConfigurationCommand,
     ApplyLineConfigurationResult,
     LineConfigurationCommandOutcome,
 )
 from subsystems.line.rich_menu_contracts import (
+    ClaimLineRichMenuPublicationsQuery,
     LineRichMenuCommandOutcome,
     LineRichMenuPublicationQuery,
+    LineRichMenuPublicationWorkItem,
+    LineRichMenuProviderOutcomeType,
+    QueueLineRichMenuPublicationCommand,
     QueueLineRichMenuPublicationResult,
+    RecordLineRichMenuPublicationCommand,
+    RetryLineRichMenuPublicationCommand,
 )
 
 
@@ -147,60 +159,196 @@ class MySqlLineRichMenuPublicationRepository:
 
     def queue(
         self,
-        snapshot: LineRichMenuPublicationSnapshot,
-        idempotency_key,
+        command: QueueLineRichMenuPublicationCommand,
     ) -> QueueLineRichMenuPublicationResult:
         try:
-            publication_id = self._insert(snapshot, idempotency_key.value)
+            publication_id = self._insert(command)
         except IntegrityError as error:
             if mysql_error_code(error) != 1062:
                 raise
-            return self._existing_queue(snapshot, idempotency_key.value)
+            return self._existing_queue(command)
         created = LineRichMenuPublicationSnapshot(
             LineRichMenuPublicationId(publication_id),
-            snapshot.menu_definition_id,
-            snapshot.configuration_revision,
-            snapshot.status,
+            command.menu_definition_id,
+            command.configuration_revision,
+            LineRichMenuPublicationStatus.QUEUED,
         )
         return QueueLineRichMenuPublicationResult(LineRichMenuCommandOutcome.CREATED, created)
 
-    def _insert(self, snapshot, idempotency_key):
+    def claim(
+        self,
+        query: ClaimLineRichMenuPublicationsQuery,
+    ) -> tuple[LineRichMenuPublicationWorkItem, ...]:
+        lease_expires_at = query.now + timedelta(seconds=90)
         with self._connection.cursor() as cursor:
-            definition_snapshot = self._definition_snapshot(cursor, snapshot)
+            cursor.execute(
+                _MENU_CLAIM_SQL,
+                (
+                    database_utc(query.now),
+                    database_utc(query.now),
+                    database_utc(query.now),
+                    query.batch_size,
+                ),
+            )
+            rows = tuple(cursor.fetchall() or ())
+            identifiers = tuple(int(row["id"]) for row in rows)
+            for publication_id in identifiers:
+                cursor.execute(
+                    _MENU_CLAIM_UPDATE_SQL,
+                    (
+                        query.lease_owner,
+                        database_utc(lease_expires_at),
+                        publication_id,
+                    ),
+                )
+            claimed = []
+            for publication_id in identifiers:
+                cursor.execute(_MENU_WORK_SELECT_SQL, (publication_id,))
+                row = optional_row(cursor.fetchone())
+                if row is not None:
+                    claimed.append(_publication_work_item(row))
+        return tuple(claimed)
+
+    def record(self, command: RecordLineRichMenuPublicationCommand):
+        item = command.work_item
+        outcome = command.provider_outcome
+        attempts = item.attempt_count + 1
+        success = outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
+        retryable = outcome.outcome_type in {
+            LineRichMenuProviderOutcomeType.RATE_LIMITED,
+            LineRichMenuProviderOutcomeType.UNAVAILABLE,
+            LineRichMenuProviderOutcomeType.TIMEOUT,
+        }
+        if success:
+            status = LineRichMenuPublicationStatus.PUBLISHED
+            next_attempt_at = None
+        elif retryable and attempts < item.maximum_attempts:
+            status = LineRichMenuPublicationStatus.PUBLISH_RETRYABLE_FAILED
+            next_attempt_at = command.completed_at + timedelta(
+                seconds=min(30 * (2 ** (attempts - 1)), 300)
+            )
+        else:
+            status = LineRichMenuPublicationStatus.FAILED
+            next_attempt_at = None
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _MENU_RECORD_SQL,
+                (
+                    status.value,
+                    command.image_object_reference,
+                    outcome.provider_menu_id if success else None,
+                    attempts,
+                    database_utc(next_attempt_at) if next_attempt_at else None,
+                    outcome.error_code,
+                    outcome.error_message,
+                    item.publication.publication_id.value,
+                    item.lease_owner,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_rich_menu_publication_lease_lost")
+            if success:
+                self._append_success_steps(cursor, command)
+            cursor.execute(
+                _MENU_SELECT_SQL,
+                (item.publication.publication_id.value,),
+            )
+            row = cursor.fetchone()
+        return _publication_snapshot(row)
+
+    def _append_success_steps(self, cursor, command):
+        item = command.work_item
+        steps = ["create", "upload"]
+        if json.loads(item.definition_json).get("set_as_default") is True:
+            steps.append("switch")
+        for step in steps:
+            cursor.execute(
+                _MENU_STEP_INSERT_SQL,
+                (
+                    item.publication.publication_id.value,
+                    step,
+                    command.provider_outcome.provider_menu_id,
+                    f"rich-menu-step:{item.publication.publication_id.value}:{step}",
+                    database_utc(command.completed_at),
+                ),
+            )
+
+    def next_due_at(self):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_MENU_NEXT_DUE_SQL)
+            row = optional_row(cursor.fetchone())
+        value = None if row is None else row.get("next_due_at_utc")
+        return None if value is None else aware_utc(value)
+
+    def retry(
+        self,
+        command: RetryLineRichMenuPublicationCommand,
+    ) -> LineRichMenuPublicationSnapshot:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_MENU_WORK_SELECT_SQL + " FOR UPDATE", (command.publication_id.value,))
+            row = optional_row(cursor.fetchone())
+            if row is None:
+                raise LookupError("line_rich_menu_publication_not_found")
+            status = LineRichMenuPublicationStatus(str(row["publication_status"]))
+            if status not in {
+                LineRichMenuPublicationStatus.FAILED,
+                LineRichMenuPublicationStatus.PUBLISH_RETRYABLE_FAILED,
+            }:
+                raise RuntimeError("line_rich_menu_retry_state_conflict")
+            cursor.execute(_MENU_RETRY_SQL, (command.publication_id.value,))
+            cursor.execute(_MENU_SELECT_SQL, (command.publication_id.value,))
+            updated = cursor.fetchone()
+        return _publication_snapshot(updated)
+
+    def _insert(self, command):
+        with self._connection.cursor() as cursor:
+            definition_snapshot = self._definition_snapshot(cursor, command)
             cursor.execute(
                 _MENU_INSERT_SQL,
                 (
-                    snapshot.menu_definition_id,
-                    snapshot.configuration_revision.value,
-                    snapshot.status.value,
+                    command.menu_definition_id,
+                    command.configuration_revision.value,
+                    LineRichMenuPublicationStatus.QUEUED.value,
                     definition_snapshot,
-                    idempotency_key,
-                    f"line-rich-menu:{idempotency_key}",
+                    command.idempotency_key.value,
+                    command.correlation_id.value,
+                    command.actor.actor_id,
                 ),
             )
             return int(cursor.lastrowid)
 
-    def _definition_snapshot(self, cursor, snapshot):
+    def _definition_snapshot(self, cursor, command):
         cursor.execute(
             _MENU_CONFIGURATION_SELECT_SQL,
-            (snapshot.configuration_revision.value,),
+            (command.configuration_revision.value,),
         )
         row = optional_row(cursor.fetchone())
         if row is None:
             raise LookupError("line_rich_menu_configuration_revision_not_found")
-        return canonical_json_value(row["definition_snapshot"])
+        configuration = json.loads(canonical_json_value(row["definition_snapshot"]))
+        menu = next(
+            (
+                item
+                for item in configuration.get("menus", [])
+                if isinstance(item, dict) and item.get("id") == command.menu_definition_id
+            ),
+            None,
+        )
+        if menu is None:
+            raise LookupError("line_rich_menu_definition_not_found")
+        return canonical_line_payload_json(menu)
 
-    def _existing_queue(self, snapshot, idempotency_key):
+    def _existing_queue(self, command):
         with self._connection.cursor() as cursor:
-            cursor.execute(_MENU_SELECT_BY_KEY_SQL, (idempotency_key,))
+            cursor.execute(_MENU_SELECT_BY_KEY_SQL, (command.idempotency_key.value,))
             row = optional_row(cursor.fetchone())
         if row is None:
             raise RuntimeError("line_rich_menu_duplicate_missing")
         existing = _publication_snapshot(row)
         expected = (
-            snapshot.menu_definition_id,
-            snapshot.configuration_revision,
-            snapshot.status,
+            command.menu_definition_id,
+            command.configuration_revision,
+            LineRichMenuPublicationStatus.QUEUED,
         )
         actual = (
             existing.menu_definition_id,
@@ -226,6 +374,22 @@ def _publication_snapshot(row):
         str(row["menu_definition_id"]),
         LineConfigurationRevision(int(row["configuration_revision"])),
         LineRichMenuPublicationStatus(str(row["publication_status"])),
+    )
+
+
+def _publication_work_item(row):
+    snapshot = _publication_snapshot(row)
+    return LineRichMenuPublicationWorkItem(
+        snapshot,
+        canonical_json_value(row["definition_snapshot"]),
+        str(row["image_object_reference"])
+        if row.get("image_object_reference") is not None
+        else None,
+        int(row["attempt_count"]),
+        int(row["max_attempts"]),
+        str(row["lease_owner"]),
+        aware_utc(row["lease_expires_at_utc"]),
+        CorrelationId(str(row["correlation_id"])),
     )
 
 
@@ -270,6 +434,51 @@ _MENU_SELECT_SQL = (
 _MENU_SELECT_BY_KEY_SQL = (
     f"SELECT {_MENU_COLUMNS} FROM line_rich_menu_publication_tasks WHERE idempotency_key=%s"
 )
+_MENU_WORK_COLUMNS = (
+    _MENU_COLUMNS
+    + ",definition_snapshot,image_object_reference,attempt_count,max_attempts,"
+    "lease_owner,lease_expires_at_utc,correlation_id"
+)
+_MENU_WORK_SELECT_SQL = (
+    f"SELECT {_MENU_WORK_COLUMNS} FROM line_rich_menu_publication_tasks WHERE id=%s"
+)
+_MENU_CLAIM_SQL = (
+    f"SELECT {_MENU_WORK_COLUMNS} FROM line_rich_menu_publication_tasks WHERE "
+    "((publication_status='queued' AND (next_attempt_at_utc IS NULL OR next_attempt_at_utc<=%s)) "
+    "OR (publication_status='publish_retryable_failed' AND next_attempt_at_utc<=%s) "
+    "OR (publication_status='publishing' AND lease_expires_at_utc<=%s)) "
+    "ORDER BY COALESCE(next_attempt_at_utc,created_at_utc),id LIMIT %s "
+    "FOR UPDATE SKIP LOCKED"
+)
+_MENU_CLAIM_UPDATE_SQL = (
+    "UPDATE line_rich_menu_publication_tasks SET publication_status='publishing',"
+    "lease_owner=%s,lease_expires_at_utc=%s WHERE id=%s"
+)
+_MENU_RECORD_SQL = (
+    "UPDATE line_rich_menu_publication_tasks SET publication_status=%s,"
+    "image_object_reference=%s,provider_menu_id=%s,attempt_count=%s,"
+    "next_attempt_at_utc=%s,error_code=%s,error_message=%s,lease_owner=NULL,"
+    "lease_expires_at_utc=NULL WHERE id=%s AND lease_owner=%s "
+    "AND publication_status='publishing'"
+)
+_MENU_STEP_INSERT_SQL = (
+    "INSERT IGNORE INTO line_rich_menu_publication_step_receipts "
+    "(publication_id,step_name,provider_menu_id,idempotency_key,completed_at_utc) "
+    "VALUES (%s,%s,%s,%s,%s)"
+)
+_MENU_NEXT_DUE_SQL = (
+    "SELECT MIN(CASE WHEN publication_status='queued' THEN "
+    "COALESCE(next_attempt_at_utc,created_at_utc) "
+    "WHEN publication_status='publish_retryable_failed' THEN next_attempt_at_utc "
+    "WHEN publication_status='publishing' THEN lease_expires_at_utc END) AS next_due_at_utc "
+    "FROM line_rich_menu_publication_tasks WHERE publication_status IN "
+    "('queued','publish_retryable_failed','publishing')"
+)
+_MENU_RETRY_SQL = (
+    "UPDATE line_rich_menu_publication_tasks SET publication_status='queued',"
+    "attempt_count=0,next_attempt_at_utc=NULL,lease_owner=NULL,lease_expires_at_utc=NULL,"
+    "error_code=NULL,error_message=NULL WHERE id=%s"
+)
 _MENU_LIST_SQL = f"SELECT {_MENU_COLUMNS} FROM line_rich_menu_publication_tasks"
 _MENU_CONFIGURATION_SELECT_SQL = (
     "SELECT definition_snapshot FROM line_configuration_revisions "
@@ -279,7 +488,7 @@ _MENU_INSERT_SQL = (
     "INSERT INTO line_rich_menu_publication_tasks (menu_definition_id,"
     "configuration_revision,operation,publication_status,definition_snapshot,"
     "idempotency_key,correlation_id,requested_by_actor_id) "
-    "VALUES (%s,%s,'publish',%s,%s,%s,%s,'line-subsystem')"
+    "VALUES (%s,%s,'publish',%s,%s,%s,%s,%s)"
 )
 
 

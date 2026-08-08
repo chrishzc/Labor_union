@@ -7,7 +7,7 @@ import os
 import socket
 import threading
 from datetime import datetime, timezone
-from typing import Callable
+from typing import Callable, Mapping
 
 from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.ports import LineWakeupSubscriberPort
@@ -25,6 +25,7 @@ class CanonicalLineWorkerRuntime:
         heartbeat_writer: Callable[[LineWorkerHeartbeat], None],
         worker_identity: str,
         fallback_scan_seconds: float = 60.0,
+        additional_workers: Mapping[str, object] | None = None,
     ) -> None:
         self._event_consumer = event_consumer
         self._delivery_worker = delivery_worker
@@ -33,12 +34,15 @@ class CanonicalLineWorkerRuntime:
         self._heartbeat_writer = heartbeat_writer
         self._worker_identity = worker_identity
         self._fallback_scan_seconds = fallback_scan_seconds
+        self._additional_workers = dict(additional_workers or {})
 
     def run_once(self) -> dict[str, int]:
         counts = {
             "inbox_events": self._event_consumer.run_once(),
             "delivery_tasks": self._delivery_worker.run_once(),
         }
+        for name, worker in self._additional_workers.items():
+            counts[name] = worker.run_once()
         self._record_heartbeat(counts)
         return counts
 
@@ -79,7 +83,11 @@ class CanonicalLineWorkerRuntime:
         heartbeat = _heartbeat(
             self._worker_identity,
             now,
-            {"inbox_events": 0, "delivery_tasks": 0},
+            {
+                "inbox_events": 0,
+                "delivery_tasks": 0,
+                **{name: 0 for name in self._additional_workers},
+            },
             error,
         )
         self._heartbeat_writer(heartbeat)

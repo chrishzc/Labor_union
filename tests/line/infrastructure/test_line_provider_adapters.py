@@ -176,7 +176,20 @@ def test_rich_menu_publish_creates_then_uploads() -> None:
     )
     request = LineRichMenuProviderRequest(
         LineRichMenuPublicationId(1),
-        canonical_line_payload_json({"name": "menu"}),
+        canonical_line_payload_json(
+            {
+                "name": "menu",
+                "size": {"width": 2500, "height": 843},
+                "selected": True,
+                "chat_bar_text": "選單",
+                "buttons": [
+                    {
+                        "bounds": {"x": 0, "y": 0, "width": 2500, "height": 843},
+                        "action": {"type": "message", "text": "開始"},
+                    }
+                ],
+            }
+        ),
         "rich-menu/menu.png",
     )
 
@@ -185,4 +198,4 @@ def test_rich_menu_publish_creates_then_uploads() -> None:
     assert outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS
     assert outcome.provider_menu_id == "richmenu-1"
     assert [call[0] for call in session.calls] == ["post", "post"]
-    assert json.loads(session.calls[0][2]["data"]) == {"name": "menu"}
+    assert json.loads(session.calls[0][2]["data"])["chatBarText"] == "選單"

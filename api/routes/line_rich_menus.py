@@ -7,17 +7,35 @@
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
 
-from api.dependencies.admin_auth import require_line_manager, require_line_viewer
+from api.dependencies.admin_auth import (
+    admin_actor_context,
+    require_line_configuration_reader,
+    require_line_manager,
+    require_line_menu_publisher,
+    require_line_viewer,
+)
+from api.dependencies.line_runtime import (
+    get_line_configuration_application,
+    get_line_rich_menu_application,
+    get_line_wakeup_publisher,
+)
 from api.schemas.base import BaseResponse
 from api.schemas.line_config import LineMenusConfig, RichMenuDefinition
 from api.schemas.line_rich_menus import (
     RichMenuPublicationRetryRequest,
     RichMenuPublishRequest,
 )
-from line.worker import wake_worker
+from domains.line.configuration import LineConfigurationKind
+from domains.line.identities import (
+    LineRichMenuPublicationId,
+)
+from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.configuration_store import read_config
 from subsystems.line.rich_menu_publication_workflow import (
     RichMenuPublicationConflictError,
@@ -26,6 +44,12 @@ from subsystems.line.rich_menu_publication_workflow import (
     get_publication,
     list_publications,
     retry_publication,
+)
+from subsystems.line.rich_menu_application import LineRichMenuNotFoundError
+from subsystems.line.rich_menu_contracts import (
+    LineRichMenuPublicationQuery,
+    QueueLineRichMenuPublicationCommand,
+    RetryLineRichMenuPublicationCommand,
 )
 from subsystems.line.media_archive import (
     MAX_UPLOAD_BYTES,
@@ -48,7 +72,9 @@ router = APIRouter(
 def _publication_error(exc: Exception) -> None:
     if isinstance(exc, (RichMenuPublicationNotFoundError, MediaAssetNotFoundError)):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, RichMenuPublicationConflictError):
+    if isinstance(exc, LineRichMenuNotFoundError):
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if isinstance(exc, (RichMenuPublicationConflictError, RuntimeError)):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, (MediaValidationError, ValueError)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -144,72 +170,129 @@ def publication_list(
     publication_status: str | None = Query(default=None, alias="status"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    principal: AdminPrincipal = Depends(require_line_configuration_reader),
 ):
     try:
-        result = list_publications(
-            menu_id=menu_id,
-            status=publication_status,
-            page=page,
-            page_size=page_size,
+        statuses = ()
+        if publication_status:
+            from domains.line.rich_menu import LineRichMenuPublicationStatus
+
+            statuses = (LineRichMenuPublicationStatus(publication_status),)
+        items = get_line_rich_menu_application().list(
+            LineRichMenuPublicationQuery(statuses=tuple(sorted(statuses, key=lambda item: item.value)), page_size=100),
+            admin_actor_context(principal),
         )
     except ValueError as exc:
         _publication_error(exc)
-    return BaseResponse(data=result)
+    if menu_id:
+        items = tuple(item for item in items if item.menu_definition_id == menu_id)
+    offset = (page - 1) * page_size
+    selected = items[offset : offset + page_size]
+    return BaseResponse(
+        data={
+            "items": [_publication_snapshot(item) for item in selected],
+            "page": page,
+            "page_size": page_size,
+            "total": len(items),
+            "total_pages": max(1, (len(items) + page_size - 1) // page_size),
+        }
+    )
 
 
 @router.get("/publications/{publication_id}", response_model=BaseResponse[dict])
-def publication_detail(publication_id: int):
+def publication_detail(
+    publication_id: int,
+    principal: AdminPrincipal = Depends(require_line_configuration_reader),
+):
     try:
-        result = get_publication(publication_id)
-    except RichMenuPublicationNotFoundError as exc:
+        result = get_line_rich_menu_application().get(
+            LineRichMenuPublicationId(publication_id),
+            admin_actor_context(principal),
+        )
+    except LineRichMenuNotFoundError as exc:
         _publication_error(exc)
-    return BaseResponse(data=result)
+    return BaseResponse(data=_publication_snapshot(result))
 
 
 @router.post(
     "/publications/{publication_id}/retry",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_manager)],
 )
 def publication_retry(
     publication_id: int,
     payload: RichMenuPublicationRetryRequest,
     request: Request,
+    principal: AdminPrincipal = Depends(require_line_menu_publisher),
 ):
+    suffix = uuid4().hex
     try:
-        result = retry_publication(publication_id)
-    except (RichMenuPublicationNotFoundError, RichMenuPublicationConflictError) as exc:
+        result = get_line_rich_menu_application().retry(
+            RetryLineRichMenuPublicationCommand(
+                LineRichMenuPublicationId(publication_id),
+                admin_actor_context(principal),
+                payload.reason.strip() or "管理員重新發布 Rich Menu",
+                IdempotencyKey(payload.idempotency_key.strip() or f"rich-menu-retry:{suffix}"),
+                CorrelationId(payload.correlation_id.strip() or f"rich-menu-retry:{suffix}"),
+            )
+        )
+    except (LineRichMenuNotFoundError, RuntimeError, ValueError) as exc:
         _publication_error(exc)
     request.state.audit_action = "line.rich_menu.publication.retry"
     request.state.audit_resource_type = "line_rich_menu_publication"
     request.state.audit_resource_id = str(publication_id)
     request.state.audit_details = {"reason": payload.reason.strip()} if payload.reason.strip() else None
-    wake_worker()
-    return BaseResponse(data=result, message="發布工作已重新排入")
+    _publish_wakeup()
+    return BaseResponse(data=_publication_snapshot(result), message="發布工作已重新排入")
 
 
 @router.post(
     "/{menu_id}/publish",
     response_model=BaseResponse[dict],
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_line_manager)],
 )
 def publish_rich_menu(
     menu_id: str,
     payload: RichMenuPublishRequest,
     request: Request,
+    principal: AdminPrincipal = Depends(require_line_menu_publisher),
 ):
+    suffix = uuid4().hex
+    actor = admin_actor_context(principal)
     try:
-        result = create_publication_job(menu_id, request.state.admin_principal.id)
-    except (
-        RichMenuPublicationNotFoundError,
-        RichMenuPublicationConflictError,
-        MediaAssetNotFoundError,
-    ) as exc:
+        configuration = get_line_configuration_application().get(
+            LineConfigurationKind.RICH_MENUS,
+            actor,
+        )
+        result = get_line_rich_menu_application().queue(
+            QueueLineRichMenuPublicationCommand(
+                menu_id,
+                configuration.revision,
+                actor,
+                IdempotencyKey(payload.idempotency_key.strip() or f"rich-menu-publish:{suffix}"),
+                CorrelationId(payload.correlation_id.strip() or f"rich-menu-publish:{suffix}"),
+            )
+        )
+    except (LineRichMenuNotFoundError, RuntimeError, ValueError) as exc:
         _publication_error(exc)
     request.state.audit_action = "line.rich_menu.publish"
     request.state.audit_resource_type = "line_rich_menu_publication"
-    request.state.audit_resource_id = str(result["id"])
+    request.state.audit_resource_id = str(result.publication_id.value)
     request.state.audit_details = {"reason": payload.reason.strip()} if payload.reason.strip() else None
-    wake_worker()
-    return BaseResponse(data=result, message="Rich Menu 發布工作已建立")
+    _publish_wakeup()
+    return BaseResponse(data=_publication_snapshot(result), message="Rich Menu 發布工作已建立")
+
+
+def _publication_snapshot(item):
+    return {
+        "id": item.publication_id.value,
+        "menu_definition_id": item.menu_definition_id,
+        "configuration_revision": item.configuration_revision.value,
+        "status": item.status.value,
+    }
+
+
+def _publish_wakeup():
+    try:
+        get_line_wakeup_publisher().publish()
+    except Exception:
+        pass

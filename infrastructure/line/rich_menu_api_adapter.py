@@ -15,6 +15,10 @@ from subsystems.line.rich_menu_contracts import (
     LineRichMenuProviderOutcomeType,
     LineRichMenuProviderRequest,
 )
+from subsystems.line.rich_menu_definition import (
+    rich_menu_is_default,
+    rich_menu_provider_definition,
+)
 
 _API_ROOT = "https://api.line.me/v2/bot"
 _DATA_ROOT = "https://api-data.line.me/v2/bot"
@@ -41,7 +45,7 @@ class LineRichMenuApiAdapter:
         self,
         request: LineRichMenuProviderRequest,
     ) -> LineRichMenuProviderOutcome:
-        created = self._create(request.definition_json)
+        created = self._create(rich_menu_provider_definition(request.definition_json))
         if not isinstance(created, str):
             return created
         image_bytes, content_type = self._image_loader(request.image_object_reference)
@@ -49,6 +53,11 @@ class LineRichMenuApiAdapter:
         if uploaded is not None:
             self.delete(created)
             return uploaded
+        if rich_menu_is_default(request.definition_json):
+            selected = self.set_default(created)
+            if selected.outcome_type is not LineRichMenuProviderOutcomeType.SUCCESS:
+                self.delete(created)
+                return selected
         return LineRichMenuProviderOutcome(
             LineRichMenuProviderOutcomeType.SUCCESS,
             provider_menu_id=created,
@@ -69,6 +78,13 @@ class LineRichMenuApiAdapter:
         return self._empty_success_operation(
             "post",
             f"{_API_ROOT}/user/{line_user_id.value}/richmenu/{provider_menu_id}",
+            provider_menu_id,
+        )
+
+    def set_default(self, provider_menu_id: str) -> LineRichMenuProviderOutcome:
+        return self._empty_success_operation(
+            "post",
+            f"{_API_ROOT}/user/all/richmenu/{provider_menu_id}",
             provider_menu_id,
         )
 
