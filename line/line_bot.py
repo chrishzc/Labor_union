@@ -20,6 +20,9 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from line.worker import wake_worker
+from api.dependencies.line_runtime import line_webhook_runtime_mode
+from api.routes.line_webhook import canonical_line_webhook
+from subsystems.line.runtime_contracts import LineRuntimeMode
 from line.security import verify_line_signature
 from subsystems.line.delivery_task_workflow import enqueue_line_task
 from subsystems.line.identity_review_workflow import (
@@ -723,6 +726,8 @@ async def line_webhook_get():
 @router.post("/webhook")
 @router.post("/webhook/")
 async def line_webhook(request: Request):
+    if line_webhook_runtime_mode() is LineRuntimeMode.CANONICAL:
+        return await canonical_line_webhook(request)
     raw_body = await request.body()
     signature = request.headers.get("x-line-signature", "")
     channel_secret = os.getenv("LINE_CHANNEL_SECRET", "")

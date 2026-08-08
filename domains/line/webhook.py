@@ -18,7 +18,7 @@ from domains.line.identities import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ExpectedVersion
-from shared_kernel.validation import require_canonical_text
+from shared_kernel.validation import require_canonical_text, require_nonnegative_integer
 
 _EVENT_TYPE_MAXIMUM_LENGTH = 100
 
@@ -27,6 +27,7 @@ class LineWebhookProcessingStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
     PROCESSED = "processed"
+    IGNORED = "ignored"
     RETRYABLE_FAILED = "retryable_failed"
     TERMINAL_FAILED = "terminal_failed"
 
@@ -35,6 +36,7 @@ _ALLOWED_WEBHOOK_TRANSITIONS = {
     LineWebhookProcessingStatus.PENDING: {LineWebhookProcessingStatus.PROCESSING},
     LineWebhookProcessingStatus.PROCESSING: {
         LineWebhookProcessingStatus.PROCESSED,
+        LineWebhookProcessingStatus.IGNORED,
         LineWebhookProcessingStatus.RETRYABLE_FAILED,
         LineWebhookProcessingStatus.TERMINAL_FAILED,
     },
@@ -46,6 +48,21 @@ _ALLOWED_WEBHOOK_TRANSITIONS = {
 
 class LineWebhookTransitionError(ValueError):
     """Raised when a webhook inbox event attempts an invalid transition."""
+
+
+@dataclass(frozen=True, slots=True)
+class LineWebhookLease:
+    event_id: LineWebhookEventId
+    owner: str
+    acquired_at: datetime
+    expires_at: datetime
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.owner, "LINE webhook lease owner", 191)
+        _require_aware_datetime(self.acquired_at, "webhook lease acquired_at")
+        _require_aware_datetime(self.expires_at, "webhook lease expires_at")
+        if self.expires_at <= self.acquired_at:
+            raise ValueError("LINE webhook lease expiry must follow acquisition")
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +94,18 @@ class LineWebhookInboxSnapshot:
     event: CanonicalLineWebhookEvent
     status: LineWebhookProcessingStatus
     version: ExpectedVersion
+    attempt_count: int = 0
+    lease: LineWebhookLease | None = None
+    max_attempts: int = 5
 
     def __post_init__(self) -> None:
         if not isinstance(self.status, LineWebhookProcessingStatus):
             raise TypeError("LINE webhook inbox status is invalid")
+        require_nonnegative_integer(self.attempt_count, "LINE webhook attempt count")
+        if self.max_attempts < 1:
+            raise ValueError("LINE webhook max attempts must be positive")
+        if self.lease is not None and self.lease.event_id != self.event.event_id:
+            raise ValueError("LINE webhook lease does not belong to the event")
 
 
 # Kept cohesive so the payload fingerprint and canonical event ID cannot drift.
@@ -188,6 +213,7 @@ __all__ = [
     "CanonicalLineWebhookEvent",
     "LineWebhookProcessingStatus",
     "LineWebhookInboxSnapshot",
+    "LineWebhookLease",
     "LineWebhookTransitionError",
     "build_line_webhook_event",
     "transition_webhook_status",

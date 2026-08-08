@@ -27,6 +27,7 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from subsystems.line.delivery_contracts import ClaimLineDeliveryTasksQuery
+from subsystems.line.webhook_contracts import ClaimLineWebhookEventsQuery
 from subsystems.line.order_group_contracts import (
     BindLineOrderGroupCommand,
     LineOrderGroupCommandOutcome,
@@ -132,6 +133,20 @@ def test_delivery_claim_binds_all_three_clock_predicates() -> None:
     parameters = cursor.executed[0][1]
     assert parameters[0] == parameters[1] == parameters[2]
     assert parameters[3] == 10
+
+
+def test_webhook_claim_recovers_exhausted_leases_and_binds_due_clocks() -> None:
+    cursor = ScriptedCursor(all_rows=((),))
+    repository = MySqlLineWebhookInboxRepository(FakeConnection(cursor))
+
+    claimed = repository.claim(ClaimLineWebhookEventsQuery("worker-1", NOW, 10))
+
+    assert claimed == ()
+    exhausted_parameters = cursor.executed[0][1]
+    due_parameters = cursor.executed[1][1]
+    assert exhausted_parameters[0] == exhausted_parameters[1]
+    assert due_parameters[0] == due_parameters[1] == due_parameters[2]
+    assert due_parameters[3] == 10
 
 
 def test_existing_unbound_identity_is_updated_not_inserted() -> None:

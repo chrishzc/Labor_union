@@ -191,6 +191,13 @@ class MySqlLineDeliveryTaskRepository:
             updated = cursor.fetchone()
         return _snapshot(updated)
 
+    def next_due_at(self):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_NEXT_DUE_SQL)
+            row = optional_row(cursor.fetchone())
+        due_at = None if row is None else row.get("next_due_at_utc")
+        return aware_utc(due_at) if due_at is not None else None
+
     def _insert(self, request: LineDeliveryRequest) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute(
@@ -363,11 +370,20 @@ _SELECT_BY_KEY_SQL = (
 )
 _CLAIM_CANDIDATES_SQL = (
     f"SELECT {_SELECT_COLUMNS} FROM line_delivery_tasks WHERE "
+    "source_aggregate_type<>'legacy_line_task' AND "
     "((processing_status='pending' AND scheduled_at_utc<=%s) OR "
     "(processing_status='retryable_failed' AND next_attempt_at_utc<=%s) OR "
     "(processing_status='processing' AND lease_expires_at_utc<=%s)) "
     "ORDER BY COALESCE(next_attempt_at_utc,scheduled_at_utc),id LIMIT %s "
     "FOR UPDATE SKIP LOCKED"
+)
+_NEXT_DUE_SQL = (
+    "SELECT MIN(CASE "
+    "WHEN processing_status='pending' THEN scheduled_at_utc "
+    "WHEN processing_status='retryable_failed' THEN next_attempt_at_utc "
+    "WHEN processing_status='processing' THEN lease_expires_at_utc END) AS next_due_at_utc "
+    "FROM line_delivery_tasks WHERE source_aggregate_type<>'legacy_line_task' "
+    "AND processing_status IN ('pending','retryable_failed','processing')"
 )
 _CLAIM_UPDATE_SQL = (
     "UPDATE line_delivery_tasks SET processing_status='processing',lease_owner=%s,"

@@ -28,6 +28,7 @@ from infrastructure.mysql.line_webhook_inbox_repository import (
     MySqlLineWebhookInboxRepository,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.mysql_adapter import get_connection
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -46,4 +47,18 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.outbox = MySqlLineOutboxWriter(connection)
 
 
-__all__ = ["LineMySqlUnitOfWork"]
+class ManagedLineMySqlUnitOfWork(LineMySqlUnitOfWork):
+    """A process-bound LINE transaction that also owns its DB connection."""
+
+    def __exit__(self, exception_type, exception, traceback) -> bool:
+        try:
+            return super().__exit__(exception_type, exception, traceback)
+        finally:
+            self._connection.close()
+
+
+def open_line_unit_of_work() -> ManagedLineMySqlUnitOfWork:
+    return ManagedLineMySqlUnitOfWork(get_connection())
+
+
+__all__ = ["LineMySqlUnitOfWork", "ManagedLineMySqlUnitOfWork", "open_line_unit_of_work"]

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime
 from typing import NoReturn
 
@@ -19,7 +20,10 @@ from api.dependencies.admin_auth import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.line_tasks import LineTaskActionRequest
-from line.worker import wake_worker, worker_is_running
+from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
+from infrastructure.mysql.mysql_adapter import get_connection
+from line.worker import wake_worker
+from subsystems.line.runtime_health import classify_line_worker_health
 from subsystems.line.delivery_task_admin_query import (
     LineTaskNotFoundError,
     LineTaskStateConflictError,
@@ -65,8 +69,24 @@ def _set_task_audit(
 @router.get("/summary", response_model=BaseResponse[dict])
 def task_summary():
     summary = get_line_task_summary()
-    summary["worker_running"] = worker_is_running()
+    worker = _worker_health()
+    summary["worker_running"] = worker["running"]
+    summary["worker_status"] = worker["status"]
     return BaseResponse(data=summary)
+
+
+def _worker_health() -> dict[str, object]:
+    connection = get_connection()
+    try:
+        heartbeat = MySqlLineRuntimeRepository(connection).latest_heartbeat()
+    except Exception:
+        return {"status": "unknown", "running": False}
+    finally:
+        connection.close()
+    return classify_line_worker_health(
+        heartbeat,
+        stale_after_seconds=float(os.getenv("LINE_WORKER_STALE_SECONDS", "90")),
+    )
 
 
 @router.get("", response_model=BaseResponse[dict])

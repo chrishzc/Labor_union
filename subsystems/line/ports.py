@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from domains.line.configuration import (
@@ -71,7 +72,15 @@ from subsystems.line.rich_menu_contracts import (
     LineRichMenuPublicationQuery,
     QueueLineRichMenuPublicationResult,
 )
+from subsystems.line.runtime_contracts import (
+    LineWebhookSecurityReceipt,
+    LineWorkerHeartbeat,
+)
 from subsystems.line.webhook_contracts import AcceptLineWebhookEventResult
+from subsystems.line.webhook_contracts import (
+    ClaimLineWebhookEventsQuery,
+    CompleteLineWebhookEventCommand,
+)
 
 _AUDIT_IDENTITY_MAXIMUM_LENGTH = 191
 
@@ -111,6 +120,36 @@ class LineWebhookInboxRepositoryPort(Protocol):
         expected_version: ExpectedVersion,
         target_status: LineWebhookProcessingStatus,
     ) -> LineWebhookInboxSnapshot: ...
+
+    def claim(
+        self,
+        query: ClaimLineWebhookEventsQuery,
+    ) -> tuple[LineWebhookInboxSnapshot, ...]: ...
+
+    def complete(
+        self,
+        command: CompleteLineWebhookEventCommand,
+    ) -> LineWebhookInboxSnapshot: ...
+
+    def next_due_at(self) -> datetime | None: ...
+
+
+class LineWakeupPublisherPort(Protocol):
+    def publish(self) -> None: ...
+
+
+class LineWakeupSubscriberPort(Protocol):
+    def wait(self, timeout_seconds: float) -> bool: ...
+
+
+class LineRuntimeRepositoryPort(Protocol):
+    def record_heartbeat(self, heartbeat: LineWorkerHeartbeat) -> None: ...
+
+    def latest_heartbeat(self) -> LineWorkerHeartbeat | None: ...
+
+    def append_security_receipt(self, receipt: LineWebhookSecurityReceipt) -> None: ...
+
+    def queue_counts(self) -> dict[str, int]: ...
 
 
 class LineIdentityRepositoryPort(Protocol):
@@ -154,6 +193,8 @@ class LineDeliveryTaskRepositoryPort(Protocol):
         self,
         command: CancelLineDeliveryTaskCommand,
     ) -> LineDeliveryTaskSnapshot: ...
+
+    def next_due_at(self) -> datetime | None: ...
 
 
 class LineConfigurationRepositoryPort(Protocol):
@@ -289,7 +330,10 @@ __all__ = [
     "LineRichMenuProviderPort",
     "LineRichMenuPublicationRepositoryPort",
     "LineUnitOfWorkPort",
+    "LineRuntimeRepositoryPort",
     "LineWebhookInboxRepositoryPort",
+    "LineWakeupPublisherPort",
+    "LineWakeupSubscriberPort",
     "OrdersLineAudiencePort",
     "StaffIdentityLookupPort",
 ]

@@ -1,4 +1,4 @@
-"""Start and supervise the local FastAPI + ngrok development environment."""
+"""Start and supervise local FastAPI, LINE Worker, and ngrok processes."""
 
 from __future__ import annotations
 
@@ -84,6 +84,14 @@ def run_fastapi() -> subprocess.Popen[bytes]:
     )
 
 
+def run_line_worker() -> subprocess.Popen[bytes]:
+    return subprocess.Popen(
+        [sys.executable, "scripts/run_line_worker.py"],
+        cwd=PROJECT_ROOT,
+        shell=False,
+    )
+
+
 def _relay_output(process: subprocess.Popen[str], prefix: str) -> None:
     if process.stdout is None:
         return
@@ -136,7 +144,7 @@ def _print_urls(public_url: str) -> None:
     print("\n🎉 LIFF 測試表單網址：")
     print(f"👉 LIFF 網址: {public_url}/api/static/register.html")
     print("✨" * 25)
-    print("\n💡 FastAPI 或 ngrok 任一方停止時，另一方也會自動關閉。")
+    print("\n💡 FastAPI、LINE Worker 或 ngrok 任一方停止時，其餘服務也會自動關閉。")
     print("💡 按 Ctrl+C 可正常關閉兩個服務。")
 
 
@@ -350,7 +358,7 @@ def _ask_console_restart(message: str) -> bool:
     """Ask an interactive developer terminal whether both services should restart."""
     print("\n" + "=" * 60)
     print(f"[SERVER ERROR] {message}")
-    print("ngrok 與 FastAPI 已自動關閉。")
+    print("ngrok、FastAPI 與 LINE Worker 已自動關閉。")
     print("=" * 60)
 
     if not sys.stdin or not sys.stdin.isatty():
@@ -359,7 +367,7 @@ def _ask_console_restart(message: str) -> bool:
 
     while True:
         try:
-            answer = input("是否要重新啟動 ngrok & FastAPI？(y/n): ").strip().lower()
+            answer = input("是否要重新啟動 ngrok、FastAPI 與 LINE Worker？(y/n): ").strip().lower()
         except (EOFError, KeyboardInterrupt):
             print("\n[EXIT] 已取消重新啟動。")
             return False
@@ -453,11 +461,12 @@ def _ask_restart(message: str) -> bool:
 
 def _run_supervised_session() -> None:
     print("=" * 60)
-    print("🚀 正在啟動 LINE Bot 開發環境（FastAPI + ngrok）...")
+    print("🚀 正在啟動 LINE Bot 開發環境（FastAPI + LINE Worker + ngrok）...")
     print("=" * 60)
 
     ngrok_process: subprocess.Popen | None = None
     fastapi_process: subprocess.Popen | None = None
+    line_worker_process: subprocess.Popen | None = None
     line_reviewer = DevLineConsoleReviewer()
     review_notifier = DevReviewNotificationServer(line_reviewer)
 
@@ -474,6 +483,8 @@ def _run_supervised_session() -> None:
 
         fastapi_process = run_fastapi()
         print(f"▶ FastAPI 已啟動（PID: {fastapi_process.pid}）")
+        line_worker_process = run_line_worker()
+        print(f"▶ LINE Worker 已啟動（PID: {line_worker_process.pid}）")
         print("⏳ 正在等待 ngrok Tunnel 就緒...")
 
         public_url = _wait_for_tunnel(ngrok_process)
@@ -491,6 +502,7 @@ def _run_supervised_session() -> None:
         while True:
             ngrok_code = ngrok_process.poll()
             fastapi_code = fastapi_process.poll()
+            line_worker_code = line_worker_process.poll()
             if ngrok_code is not None:
                 print(f"\n[ERROR] ngrok 已停止，Exit Code: {ngrok_code}")
                 print("[INFO] FastAPI 將一併關閉，避免留下無法接收 LINE Webhook 的服務。")
@@ -503,10 +515,18 @@ def _run_supervised_session() -> None:
                 raise ServiceFailure(
                     f"FastAPI 已異常中斷。\nExit Code：{fastapi_code}\nngrok 已一併關閉。"
                 )
+            if line_worker_code is not None:
+                print(f"\n[ERROR] LINE Worker 已停止，Exit Code: {line_worker_code}")
+                raise ServiceFailure(
+                    f"LINE Worker 已異常中斷。\nExit Code：{line_worker_code}\n"
+                    "FastAPI 與 ngrok 已一併關閉。"
+                )
             line_reviewer.tick()
             time.sleep(0.5)
     finally:
         review_notifier.stop()
+        if line_worker_process is not None:
+            _terminate_process_tree(line_worker_process, "LINE Worker")
         if fastapi_process is not None:
             _terminate_process_tree(fastapi_process, "FastAPI")
         if ngrok_process is not None:
@@ -528,7 +548,7 @@ def main() -> int:
             print(f"[ERROR] {message}")
 
         if _ask_restart(message):
-            print("[RESTART] 使用者選擇重新啟動，1 秒後重新建立 FastAPI 與 ngrok...")
+            print("[RESTART] 1 秒後重新建立 FastAPI、LINE Worker 與 ngrok...")
             time.sleep(1)
             continue
 

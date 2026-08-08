@@ -15,8 +15,9 @@ from fastapi import APIRouter, Depends
 
 from api.dependencies.admin_auth import require_line_viewer
 from api.schemas.base import BaseResponse
-from line.worker import worker_is_running
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
+from subsystems.line.runtime_health import classify_line_worker_health
 
 
 router = APIRouter(
@@ -39,30 +40,40 @@ def _database_health() -> dict:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute("SELECT 1 AS ok")
                 database_ok = bool(cursor.fetchone()["ok"])
-                cursor.execute(
-                    """
-                    SELECT status, COUNT(*) AS total
-                    FROM line_tasks
-                    GROUP BY status
-                    """
-                )
-                task_counts = {row["status"]: int(row["total"]) for row in cursor.fetchall()}
+                task_counts = _legacy_task_counts(cursor)
+            runtime = MySqlLineRuntimeRepository(conn)
+            heartbeat = runtime.latest_heartbeat()
+            queue_counts = runtime.queue_counts()
         finally:
             conn.close()
-        return {"ok": database_ok, "line_task_counts": task_counts}
+        return {
+            "ok": database_ok,
+            "line_task_counts": task_counts,
+            "queue_counts": queue_counts,
+            "worker": classify_line_worker_health(
+                heartbeat,
+                stale_after_seconds=float(os.getenv("LINE_WORKER_STALE_SECONDS", "90")),
+            ),
+        }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _legacy_task_counts(cursor) -> dict[str, int]:
+    cursor.execute("SELECT status,COUNT(*) AS total FROM line_tasks GROUP BY status")
+    return {row["status"]: int(row["total"]) for row in cursor.fetchall()}
 
 
 @router.get("/health", response_model=BaseResponse[dict])
 def line_admin_health():
     database = _database_health()
-    status_text = "healthy" if database.get("ok") and worker_is_running() else "degraded"
+    worker = database.get("worker", {"status": "unknown", "running": False})
+    status_text = "healthy" if database.get("ok") and worker.get("running") else "degraded"
     return BaseResponse(
         data={
             "status": status_text,
             "database": database,
-            "worker": {"running": worker_is_running()},
+            "worker": worker,
             "line_credentials": {
                 "channel_secret": _configured("LINE_CHANNEL_SECRET"),
                 "channel_access_token": _configured("LINE_CHANNEL_ACCESS_TOKEN"),

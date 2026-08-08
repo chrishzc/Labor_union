@@ -1,7 +1,7 @@
 """
 ================================================================================
 檔案名稱: api/main.py
-功能說明: FastAPI 主程序，統一掛載 LINE、LIFF、管理介面與其他後端 API，並管理 LINE Worker 生命週期
+功能說明: FastAPI 主程序，掛載 LINE、LIFF、管理介面與其他後端 API；LINE Worker 由獨立程序管理
 ================================================================================
 """
 
@@ -79,7 +79,6 @@ from api.routes import (
 
 from api.schemas.base import BaseResponse
 from line.line_bot import router as line_router
-from line.worker import start_worker, stop_worker
 from subsystems.access.authentication_session import record_admin_audit
 from subsystems.anomalies.outbox_worker import (
     start_architecture_outbox_worker,
@@ -111,13 +110,11 @@ async def lifespan(_: FastAPI):
     if not _background_workers_enabled():
         yield
         return
-    line_worker_task = start_worker()
     architecture_worker_task = start_architecture_outbox_worker()
     try:
         yield
     finally:
         await stop_architecture_outbox_worker(architecture_worker_task)
-        await stop_worker(line_worker_task)
 
 
 app = FastAPI(

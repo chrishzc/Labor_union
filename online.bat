@@ -59,16 +59,20 @@ echo [Notice] LINE public webhook access requires the Cloudflare Tunnel planned 
 echo [Step 4] Launching FastAPI server...
 start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
 
-echo [Step 5] Launching Streamlit interface...
+echo [Step 5] Launching independent LINE Worker...
+start "LINE Worker" cmd /k ""%PY%" scripts/run_line_worker.py"
+
+echo [Step 6] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
 
-echo [Step 6] Launching File Watcher Service...
+echo [Step 7] Launching File Watcher Service...
 start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
 
 echo ==========================================
 echo Lobar Union System online services are running!
 echo - API Docs: http://127.0.0.1:8000/docs
 echo - Streamlit UI: http://localhost:8501
+echo - LINE Worker: independent durable queue consumer
 echo - File Watcher: Monitoring downloads/ folder
 echo ==========================================
 pause

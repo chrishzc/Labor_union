@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import uuid
+from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,6 +19,7 @@ import pymysql
 import requests
 
 from infrastructure.mysql.mysql_adapter import get_connection as get_db_connection
+from infrastructure.line.redis_wakeup import RedisLineWakeupPublisher
 from subsystems.line.rich_menu_publication_workflow import (
     import_legacy_rich_menu_ids,
     next_publication_run_at,
@@ -37,6 +39,24 @@ def _utc_now_naive() -> datetime:
 
 def wake_worker() -> None:
     _wakeup_event.set()
+    publisher = _redis_wakeup_publisher()
+    if publisher is None:
+        return
+    try:
+        publisher.publish()
+    except Exception as exc:
+        print(f"[LINE Worker] Redis wake signal failed; DB fallback remains active: {exc}")
+
+
+def wake_local_worker() -> None:
+    """Wake only the legacy loop in this process without republishing."""
+    _wakeup_event.set()
+
+
+@lru_cache(maxsize=1)
+def _redis_wakeup_publisher():
+    redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0").strip()
+    return RedisLineWakeupPublisher(redis_url) if redis_url else None
 
 
 def _recover_stale_tasks() -> None:
