@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Mapping
 from datetime import date, timedelta
@@ -160,7 +160,7 @@ class AssignmentIdentityResolution:
 
 @dataclass(frozen=True, slots=True)
 class EmptyAssignmentIdentityResolution:
-    assignment_id_by_candidate_key: Mapping[str, int] = MappingProxyType({})
+    assignment_id_by_candidate_key: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
 
     def __post_init__(self) -> None:
         if self.assignment_id_by_candidate_key:

@@ -19,7 +19,7 @@ from services.finance_import_dispatch import dispatch_finance_import_row
 from services.finance_import_review_alerts import (
     project_finance_import_review_alert,
 )
-from services.finance_transaction_classifier import classify_finance_transaction
+from domains.finance_import.transaction_classifier import classify_finance_transaction
 
 
 CLASSIFIER_VERSION = "finance_transaction_classifier:v1"
