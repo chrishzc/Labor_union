@@ -1,3 +1,8 @@
+---
+doc_type: decision-package
+declared_status: decision-complete-no-qualified-remove-candidate
+---
+
 # Legacy Retirement Wave 2 Decision Package
 
 ## 1. 狀態與授權邊界

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from services import finance_import_staging as staging
+from subsystems.finance_import import staging
 
 
 class FakeCursor:

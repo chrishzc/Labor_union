@@ -1,3 +1,8 @@
+---
+doc_type: decision-package
+declared_status: "decision-ready; no code removal in this package"
+---
+
 # MySQL Adapter Mutation Exit Decision Package
 
 ## Scope and evidence

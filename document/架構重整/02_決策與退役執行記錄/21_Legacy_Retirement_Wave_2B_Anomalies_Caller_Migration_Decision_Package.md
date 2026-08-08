@@ -1,3 +1,8 @@
+---
+doc_type: decision-package
+declared_status: decision-complete-caller-exit-not-authorized
+---
+
 # Legacy Retirement Wave 2B Anomalies Caller Migration Decision Package
 
 ## 1. 狀態與授權邊界

@@ -160,7 +160,9 @@ class AssignmentIdentityResolution:
 
 @dataclass(frozen=True, slots=True)
 class EmptyAssignmentIdentityResolution:
-    assignment_id_by_candidate_key: Mapping[str, int] = field(default_factory=lambda: MappingProxyType({}))
+    assignment_id_by_candidate_key: Mapping[str, int] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     def __post_init__(self) -> None:
         if self.assignment_id_by_candidate_key:

@@ -7,11 +7,10 @@ from decimal import Decimal, InvalidOperation
 import json
 from typing import Any
 
-from services.client_receipt_reconciliation import reconcile_client_receipt
-from services.client_subsidy_return_transactions import record_client_subsidy_return
-from services.finance_alert_wiring import maybe_alert_pending
-from services.government_subsidy_reconciliation import reconcile_government_subsidy
-from services.staff_actual_transfers import reconcile_staff_actual_transfer
+from subsystems.client_finance.receipt_reconciliation import reconcile_client_receipt
+from subsystems.finance_import.reconciliation_dispatch import maybe_alert_pending
+from subsystems.government_subsidy.receipt_reconciliation import reconcile_government_subsidy
+from subsystems.staff_payables.actual_transfer_reconciliation import reconcile_staff_actual_transfer
 
 
 _BUSINESS_CLASSIFICATIONS = frozenset(
@@ -263,18 +262,16 @@ def dispatch_finance_import_row(
     elif classification_type == "client_receipt":
         domain_result = reconcile_client_receipt(cursor, row_id)
     elif classification_type == "client_subsidy_return":
-        identities = _identity_ids(row.get("matched_identity_ids"))
-        if identities is None or len(identities) != 1:
-            domain_result = {
-                "result": "pending",
-                "reason": "matched_identity_not_unique",
-            }
-        else:
-            domain_result = record_client_subsidy_return(
-                cursor,
-                identities[0],
-                row_id,
-            )
+        # subsidy_return dispatch has no canonical implementation: the legacy
+        # writer (services/client_subsidy_return_transactions.py) was removed
+        # by the subsidy_advance redesign (see 架構重整/25) and must not be
+        # reintroduced as a compatibility path. Fail closed until a typed
+        # subsidy_advance dispatch replacement is authorized.
+        raise NotImplementedError(
+            "client_subsidy_return dispatch is unimplemented pending the "
+            "subsidy_advance redesign; see document/架構重整/"
+            "02_決策與退役執行記錄/25_Client_Refund_Completion_Decision_Package.md"
+        )
     elif classification_type == "government_subsidy":
         domain_result = reconcile_government_subsidy(cursor, row_id)
     elif classification_type in {"staff_salary", "staff_legacy_subsidy"}:

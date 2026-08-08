@@ -13,6 +13,7 @@ from infrastructure.mysql.government_subsidy_integrity_anomaly_source import pro
 from infrastructure.mysql.government_subsidy_reversal_anomaly_source import project_government_subsidy_reversal_anomaly_page
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
+from infrastructure.mysql.process_reminder_anomaly_source import consume_process_reminder_anomaly_sources
 from infrastructure.mysql.scheduling_coverage_anomaly_source import MySqlSchedulingCoverageAnomalySource
 from shared_kernel.business_time import current_business_instant
 from subsystems.anomalies.alert_workflow import AnomalyApplication
@@ -57,15 +58,16 @@ class ArchitectureSourceScanState:
     government_subsidy_reversal_exhausted: bool
     government_subsidy_assignment_drift_after_claim_item_id: int
     government_subsidy_assignment_drift_exhausted: bool
+    process_reminder_exhausted: bool
     next_cycle_at: float
 
     @classmethod
     def start(cls):
-        return cls(StaffPayablesAnomalyScanCursors.start(), None, False, 0, False, 0, False, 0, False, 0, False, 0.0)
+        return cls(StaffPayablesAnomalyScanCursors.start(), None, False, 0, False, 0, False, 0, False, 0, False, False, 0.0)
 
     def cycle_complete(self) -> bool:
         staff_exhausted = all(cursor is None for cursor in (self.staff_payables.overdue_after_obligation_identity, self.staff_payables.late_change_after_event_id, self.staff_payables.bank_master_after_staff_id))
-        return staff_exhausted and self.scheduling_exhausted and self.government_subsidy_exhausted and self.government_subsidy_integrity_exhausted and self.government_subsidy_reversal_exhausted and self.government_subsidy_assignment_drift_exhausted
+        return staff_exhausted and self.scheduling_exhausted and self.government_subsidy_exhausted and self.government_subsidy_integrity_exhausted and self.government_subsidy_reversal_exhausted and self.government_subsidy_assignment_drift_exhausted and self.process_reminder_exhausted
 
 
 class BorrowedAnomalyUnitOfWork:
@@ -110,13 +112,24 @@ def _consume_sources_if_due(connection, state):
 
 
 def _consume_source_pages(connection, state):
-    return (_consume_staff_source(connection, state), _consume_scheduling_source(connection, state), _consume_government_subsidy_source(connection, state), _consume_government_subsidy_integrity_source(connection, state), _consume_government_subsidy_reversal_source(connection, state), _consume_government_subsidy_assignment_drift_source(connection, state))
+    return (_consume_staff_source(connection, state), _consume_scheduling_source(connection, state), _consume_government_subsidy_source(connection, state), _consume_government_subsidy_integrity_source(connection, state), _consume_government_subsidy_reversal_source(connection, state), _consume_government_subsidy_assignment_drift_source(connection, state), _consume_process_reminder_source(connection, state))
 
 
 def _restart_source_cycle(state):
     state.staff_payables = StaffPayablesAnomalyScanCursors.start(); state.scheduling_after_source_identity = None; state.scheduling_exhausted = False
     state.government_subsidy_after_row_id = 0; state.government_subsidy_exhausted = False; state.government_subsidy_integrity_after_batch_id = 0; state.government_subsidy_integrity_exhausted = False
     state.government_subsidy_reversal_after_row_id = 0; state.government_subsidy_reversal_exhausted = False; state.government_subsidy_assignment_drift_after_claim_item_id = 0; state.government_subsidy_assignment_drift_exhausted = False
+    state.process_reminder_exhausted = False
+
+
+def _consume_process_reminder_source(connection, state):
+    if state.process_reminder_exhausted:
+        return 0, 0
+    result = consume_process_reminder_anomaly_sources(connection, as_of=current_business_instant().date())
+    state.process_reminder_exhausted = True
+    if result.succeeded:
+        return result.projected_count, 0
+    return 0, 1
 
 
 def _consume_staff_source(connection, state):

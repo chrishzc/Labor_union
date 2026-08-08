@@ -1,3 +1,7 @@
+---
+doc_type: decision-package
+---
+
 # Durable Job Completion Decision Package
 
 ## 1. Purpose and decision boundary

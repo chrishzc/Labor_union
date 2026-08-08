@@ -1,3 +1,7 @@
+---
+doc_type: gap-package
+---
+
 # Global E2E Acceptance Gap Package
 
 ## 1. Evidence rule

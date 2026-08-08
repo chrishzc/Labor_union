@@ -1,3 +1,7 @@
+---
+doc_type: decision-package
+---
+
 # Preserve-data Runner Completion Decision Package
 
 ## 1. Fresh live finding

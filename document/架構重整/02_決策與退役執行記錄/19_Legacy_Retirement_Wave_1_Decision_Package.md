@@ -1,3 +1,8 @@
+---
+doc_type: decision-package
+declared_status: decision-complete-removal-not-authorized
+---
+
 # Legacy Retirement Wave 1 Decision Package
 
 ## 1. 狀態與授權邊界
