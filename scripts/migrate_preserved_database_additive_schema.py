@@ -2569,6 +2569,37 @@ def _table_projection_evidence(
     }
 
 
+def _table_columns(
+    snapshot: Mapping[str, Any], table: str
+) -> list[str]:
+    """Return a table's columns in ordinal order from a schema snapshot."""
+    return [
+        row["column_name"]
+        for row in snapshot["columns"]
+        if row["table_name"] == table
+    ]
+
+
+def _verify_source_column_projection_preserved(
+    config: DatabaseConfig,
+    source: str,
+    candidate: str,
+    table: str,
+    source_snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Verify legacy values while allowing additive candidate columns."""
+    source_columns = _table_columns(source_snapshot, table)
+    before = _table_projection_evidence(
+        config, source, table, source_columns
+    )
+    after = _table_projection_evidence(
+        config, candidate, table, source_columns
+    )
+    if after != before:
+        raise UpgradeBlocked(f"preserved table projection changed: {table}")
+    return after
+
+
 def _verify_matching_records_preservation(
     config: DatabaseConfig,
     source: str,
@@ -2643,7 +2674,9 @@ def verify_candidate(
         source_snapshot
     )
     source_data = _table_evidence(config, source)
+    candidate_snapshot = _schema_snapshot(config, candidate)
     candidate_data = _table_evidence(config, candidate)
+    additive_projection_preservation: dict[str, Any] = {}
     for table, evidence in source_data.items():
         actual = candidate_data.get(table)
         if not actual:
@@ -2654,12 +2687,26 @@ def verify_candidate(
             != evidence.get("primary_key_sha256")
         ):
             raise UpgradeBlocked(f"preserved table changed: {table}")
+        source_columns = _table_columns(source_snapshot, table)
+        candidate_columns = _table_columns(candidate_snapshot, table)
+        has_additive_columns = source_columns != candidate_columns
+        if has_additive_columns:
+            additive_projection_preservation[table] = (
+                _verify_source_column_projection_preserved(
+                    config,
+                    source,
+                    candidate,
+                    table,
+                    source_snapshot,
+                )
+            )
         if (
             table not in {"orders", "matching_records"}
             and not (
                 table == "system_alerts"
                 and source_alert_state == "absent"
             )
+            and not has_additive_columns
             and actual.get("checksum") != evidence.get("checksum")
         ):
             raise UpgradeBlocked(f"preserved table checksum changed: {table}")
@@ -2680,7 +2727,7 @@ def verify_candidate(
     orders_preservation = _verify_orders_preservation(
         config, source, candidate, source_snapshot
     )
-    states = _owned_classification(_schema_snapshot(config, candidate))
+    states = _owned_classification(candidate_snapshot)
     if any(state != "exact" for state in states.values()):
         raise UpgradeBlocked(f"candidate owned schema not exact: {states}")
     connection = config.connect(candidate)
@@ -2704,6 +2751,7 @@ def verify_candidate(
         system_alert_preservation=system_alert_preservation,
         matching_records_preservation=matching_records_preservation,
         orders_preservation=orders_preservation,
+        additive_projection_preservation=additive_projection_preservation,
     )
     write_receipt(operation_receipt_path, receipt)
     return receipt
