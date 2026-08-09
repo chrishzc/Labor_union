@@ -832,6 +832,30 @@ def test_plan_artifact_and_fingerprint_staleness_fail_closed() -> None:
         migration._validate_plan_integrity(corrupt, dict(payload))
 
 
+def test_write_receipt_retries_a_transient_windows_file_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt_path = tmp_path / "receipt.json"
+    replace_attempts = 0
+    real_replace = migration.os.replace
+
+    def transiently_locked_replace(source: Path, target: Path) -> None:
+        nonlocal replace_attempts
+        replace_attempts += 1
+        if replace_attempts == 1:
+            raise PermissionError("temporary scanner lock")
+        real_replace(source, target)
+
+    monkeypatch.setattr(migration.os, "replace", transiently_locked_replace)
+    monkeypatch.setattr(migration.time_module, "sleep", lambda _seconds: None)
+
+    write_receipt(receipt_path, {"status": "ready"})
+
+    assert read_receipt(receipt_path) == {"status": "ready"}
+    assert replace_attempts == 2
+
+
 def test_backup_receipt_mismatch_fails_before_restore(tmp_path: Path) -> None:
     dump = tmp_path / "source.sql"
     dump.write_bytes(

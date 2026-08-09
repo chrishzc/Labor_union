@@ -103,6 +103,18 @@ def _lock_snapshot(cursor: Any, case_no: str, plan_id: int) -> tuple[dict[str, A
     return order_row, plan_row, _rows(cursor, "invalid matching plan segments")
 
 
+def _require_customer_matching_acceptance(cursor: Any, plan_id: int) -> None:
+    cursor.execute(
+        "SELECT response_value FROM matching_response_events "
+        "WHERE plan_id = %s AND response_type = 'customer_decision' "
+        "ORDER BY occurred_at_utc DESC, id DESC LIMIT 1",
+        (plan_id,),
+    )
+    row = cursor.fetchone()
+    if not isinstance(row, dict) or row.get("response_value") != "accepted":
+        raise ValueError("customer has not accepted the matching plan")
+
+
 def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     """Read every occupancy owner under the mutex; each result is row-level."""
     staff_ids = tuple(snapshot["staff_ids"])
@@ -438,6 +450,7 @@ def acquire_caregiver_availability_lock(
             raise ValueError("staff mutex result does not match matching plan")
         order_row, locked_plan, locked_segments = _lock_snapshot(cursor, request["case_no"], request["plan_id"])
         locked_snapshot = _canonical_snapshot(request["case_no"], request["plan_id"], order_row, locked_plan, locked_segments)
+        _require_customer_matching_acceptance(cursor, request["plan_id"])
         if locked_snapshot != preliminary_snapshot:
             raise ValueError("matching plan changed while acquiring lock")
         conflicts = _occupancy_conflicts(cursor, locked_snapshot)
@@ -549,6 +562,7 @@ def preview_caregiver_availability_lock(
         )
         if plan["status"] != "proposed" or plan["is_active"] != 1:
             raise ValueError("matching plan is not an active proposed plan")
+        _require_customer_matching_acceptance(cursor, request["plan_id"])
         conflicts = _occupancy_conflicts(cursor, snapshot)
         return _build_acquire_preview(snapshot, conflicts)
     finally:
@@ -596,4 +610,3 @@ def _optional_preview_fingerprint(value):
     if value is None:
         return None
     return PreviewFingerprint(value)
-

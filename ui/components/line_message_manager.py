@@ -17,6 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import has_capability
 
 
 SELECTED_KEY = "line_message_template_selected"
@@ -27,7 +28,6 @@ FLASH_KEY = "line_message_template_flash"
 
 CATEGORIES = ["webhook_reply", "push", "scheduled_push", "customer_service"]
 USAGES = ["webhook", "push", "schedule", "customer_service"]
-EDIT_ROLES = {"line_manager", "system_admin"}
 USE_CASES = {
     "auto_reply": {
         "label": "收到訊息時自動回覆",
@@ -184,7 +184,7 @@ def render_message_manager(
     config = state["config"]
     templates = list(config.get("templates", []))
     by_id = {item["id"]: item for item in templates}
-    can_edit = profile.get("role") in EDIT_ROLES
+    can_edit = has_capability(profile, "line.config.manage")
 
     if not can_edit:
         st.info("目前帳號只有查看權限；如需修改，請聯絡 LINE 主管。")

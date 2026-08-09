@@ -1,0 +1,96 @@
+{
+  "application_compatibility": {
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "line-integration-v1",
+      "line-runtime-v1",
+      "contract-integration-v1",
+      "knowledge-retrieval-v1"
+    ],
+    "minimum_api_contract": "typed-api-v1",
+    "post_cutover_smoke_ids": [
+      "contract-signature-fail-closed",
+      "contract-evidence-human-only",
+      "knowledge-publish-index-answer",
+      "knowledge-answer-line-delivery"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker",
+      "contract-integration-worker",
+      "knowledge-retrieval-worker",
+      "runtime-monitor"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "artifacts": [
+    {
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "name": "156_contract_integration.sql",
+      "relative_path": "db/schema_parts/156_contract_integration.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-contract-evidence",
+      "sha256": "5e9597717acf06402f5653edffbcb1ce60b6f6473bb893b8a3aa61083976d4db"
+    },
+    {
+      "dependencies": ["156_contract_integration.sql"],
+      "data_effect": "schema_only",
+      "name": "157_knowledge_retrieval.sql",
+      "relative_path": "db/schema_parts/157_knowledge_retrieval.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-knowledge-roots-and-receipts",
+      "sha256": "119e7c52377ed8025986c73e30d7cc60c33581bbe0630720c4a8ab28a8cc03a2"
+    }
+  ],
+  "backfills": [],
+  "contract": "migration-release-manifest/v1",
+  "descriptor_artifact": {
+    "dependencies": [],
+    "name": "labor_union_2026_08_09_line_stage8_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_09_line_stage8_v1.descriptors.json",
+    "sha256": "7246eb688525d151a5226a970462fd7b6a7f79310fa27772ffb7542ee9376b4b"
+  },
+  "release_id": "labor-union-line-stage8-2026-08-09-v1",
+  "release_metadata": {
+    "application_version": "contract-knowledge-integration-v1",
+    "description": "Verified contract evidence and reviewed cited knowledge answers",
+    "published_at": "2026-08-09",
+    "release_name": "Labor Union external integration stage 8 v1"
+  },
+  "source_baseline": {
+    "allowed_owned_object_states": ["absent", "exact"],
+    "baseline_id": "line-stage7-v1",
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "source_must_be_read_only": true
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {
+      "blocking": true,
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "verification_id": "line-stage8-owned-objects"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "invalid-provider-events-produce-no-domain-mutation",
+      "read_only": true,
+      "verification_id": "contract-knowledge-boundaries"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 import pytest
 
-from services import finance_import_dispatch as importer
+from subsystems.finance_import import reconciliation_dispatch as importer
 
 
 class Cursor:
