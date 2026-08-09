@@ -11,6 +11,10 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 
+from domains.anomalies.registry import DesiredAlertState, default_anomaly_registry
+from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
+from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
 from subsystems.anomalies.system_alert_projection import (
     _decode_row,
     _now,
@@ -18,6 +22,22 @@ from subsystems.anomalies.system_alert_projection import (
     get_system_alert,
     upsert_system_alert,
 )
+
+
+class _BorrowedAnomalyUnitOfWork:
+    """No-op unit of work: the caller's own transaction owns commit/rollback."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exception_type, exception, traceback) -> bool:
+        return False
+
+    def commit(self) -> None:
+        return None
+
+    def rollback(self) -> None:
+        return None
 
 
 ALERT_CODE = "IMPORT-006"
@@ -188,6 +208,7 @@ def _project_batch_integrity_alert(
     summary = _projection_summary(batch, membership_counts, remaining, inconsistent, latest_run)
     details = _projection_details(batch_id, batch, summary, remaining, inconsistent, latest_run)
     case_key = f"finance-import-batch:{batch_id}"
+    _project_canonical_import006_alert(cursor, batch_id, summary, details)
     if summary["integrity_inconsistent_count"] > 0:
         result = upsert_system_alert(
             cursor,
@@ -206,6 +227,44 @@ def _project_batch_integrity_alert(
             operator="system",
         )
     return {"alert_action": result["result"], "summary": summary, "alert": result.get("alert")}
+
+
+def _project_canonical_import006_alert(
+    cursor: Any,
+    batch_id: int,
+    summary: Mapping[str, Any],
+    details: Mapping[str, Any],
+) -> None:
+    """Mirror this batch's integrity state into the canonical anomaly registry.
+
+    IMPORT-006 is registered in domains.anomalies.registry, but nothing ever
+    called AnomalyApplication.project() for it -- the legacy system_alerts
+    write above is orphaned (no API reads that table), so the anomaly center
+    never showed IMPORT-006. Runs on the caller's own connection/transaction;
+    this repository never commits or rolls back on its own.
+    """
+    active = summary["integrity_inconsistent_count"] > 0
+    event_identity = fingerprint_payload({"batch_id": batch_id, "active": active, "summary": dict(summary)}).value
+    application = AnomalyApplication(
+        default_anomaly_registry(),
+        MySqlAnomalyRepository(cursor.connection),
+        _BorrowedAnomalyUnitOfWork,
+    )
+    application.project(
+        ProjectAlertRequest(
+            desired=DesiredAlertState(
+                definition_code=ALERT_CODE,
+                source_identity=f"finance-import-batch:{batch_id}",
+                source_version=1,
+                active=active,
+                fingerprint_values={"batch_id": str(batch_id)},
+            ),
+            source_event_identity=f"finance-import-integrity:{batch_id}:{event_identity}",
+            consumer_identity="finance-import-integrity-anomaly-source-v1",
+            partition_identity=f"finance-import-integrity:{batch_id}",
+            display_snapshot=dict(details),
+        )
+    )
 
 
 def _projection_summary(

@@ -472,12 +472,12 @@ def _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors):
                 source_identity=str(case_no),
                 source_version=1,
                 active=True,
-                display_snapshot={"errors": validation_errors, "row": ordinal},
+                fingerprint_values={"case_no": str(case_no)},
             ),
             source_event_identity=f"hcm-import-validation-{case_no}-{ordinal}",
             consumer_identity="hcm-import-script-v1",
-            partition_identity="default",
-            occurred_at=datetime.now(timezone.utc),
+            partition_identity=f"hcm-import-validation:{case_no}",
+            display_snapshot={"errors": validation_errors, "row": ordinal},
         )
         application.project(request)
     finally:

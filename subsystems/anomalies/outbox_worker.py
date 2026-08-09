@@ -19,6 +19,7 @@ from shared_kernel.business_time import current_business_instant
 from subsystems.anomalies.alert_workflow import AnomalyApplication
 from subsystems.anomalies.beclass_import_outbox_consumer import consume_beclass_import_review_events
 from subsystems.anomalies.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
+from subsystems.anomalies.finance_import_review_alert import scan_completed_finance_import_review_alerts
 from subsystems.anomalies.government_subsidy_anomaly_source import GovernmentSubsidyAnomalyScanRequest
 from subsystems.anomalies.government_subsidy_assignment_drift_anomaly_source import GovernmentSubsidyAssignmentDriftScanRequest
 from subsystems.anomalies.government_subsidy_integrity_anomaly_source import GovernmentSubsidyIntegrityScanRequest
@@ -59,15 +60,16 @@ class ArchitectureSourceScanState:
     government_subsidy_assignment_drift_after_claim_item_id: int
     government_subsidy_assignment_drift_exhausted: bool
     process_reminder_exhausted: bool
+    finance_import_integrity_exhausted: bool
     next_cycle_at: float
 
     @classmethod
     def start(cls):
-        return cls(StaffPayablesAnomalyScanCursors.start(), None, False, 0, False, 0, False, 0, False, 0, False, False, 0.0)
+        return cls(StaffPayablesAnomalyScanCursors.start(), None, False, 0, False, 0, False, 0, False, 0, False, False, False, 0.0)
 
     def cycle_complete(self) -> bool:
         staff_exhausted = all(cursor is None for cursor in (self.staff_payables.overdue_after_obligation_identity, self.staff_payables.late_change_after_event_id, self.staff_payables.bank_master_after_staff_id))
-        return staff_exhausted and self.scheduling_exhausted and self.government_subsidy_exhausted and self.government_subsidy_integrity_exhausted and self.government_subsidy_reversal_exhausted and self.government_subsidy_assignment_drift_exhausted and self.process_reminder_exhausted
+        return staff_exhausted and self.scheduling_exhausted and self.government_subsidy_exhausted and self.government_subsidy_integrity_exhausted and self.government_subsidy_reversal_exhausted and self.government_subsidy_assignment_drift_exhausted and self.process_reminder_exhausted and self.finance_import_integrity_exhausted
 
 
 class BorrowedAnomalyUnitOfWork:
@@ -112,7 +114,7 @@ def _consume_sources_if_due(connection, state):
 
 
 def _consume_source_pages(connection, state):
-    return (_consume_staff_source(connection, state), _consume_scheduling_source(connection, state), _consume_government_subsidy_source(connection, state), _consume_government_subsidy_integrity_source(connection, state), _consume_government_subsidy_reversal_source(connection, state), _consume_government_subsidy_assignment_drift_source(connection, state), _consume_process_reminder_source(connection, state))
+    return (_consume_staff_source(connection, state), _consume_scheduling_source(connection, state), _consume_government_subsidy_source(connection, state), _consume_government_subsidy_integrity_source(connection, state), _consume_government_subsidy_reversal_source(connection, state), _consume_government_subsidy_assignment_drift_source(connection, state), _consume_process_reminder_source(connection, state), _consume_finance_import_integrity_source(connection, state))
 
 
 def _restart_source_cycle(state):
@@ -120,6 +122,7 @@ def _restart_source_cycle(state):
     state.government_subsidy_after_row_id = 0; state.government_subsidy_exhausted = False; state.government_subsidy_integrity_after_batch_id = 0; state.government_subsidy_integrity_exhausted = False
     state.government_subsidy_reversal_after_row_id = 0; state.government_subsidy_reversal_exhausted = False; state.government_subsidy_assignment_drift_after_claim_item_id = 0; state.government_subsidy_assignment_drift_exhausted = False
     state.process_reminder_exhausted = False
+    state.finance_import_integrity_exhausted = False
 
 
 def _consume_process_reminder_source(connection, state):
@@ -130,6 +133,27 @@ def _consume_process_reminder_source(connection, state):
     if result.succeeded:
         return result.projected_count, 0
     return 0, 1
+
+
+def _consume_finance_import_integrity_source(connection, state):
+    """Full re-scan of every completed Finance Import batch for IMPORT-006.
+
+    Production ingestion (subsystems.finance_import.ingestion) never calls
+    the IMPORT-006 projector itself, so this periodic re-scan is currently
+    the only thing that keeps IMPORT-006 up to date against real batches.
+    """
+    if state.finance_import_integrity_exhausted:
+        return 0, 0
+    state.finance_import_integrity_exhausted = True
+    try:
+        connection.begin()
+        with connection.cursor() as cursor:
+            counts = scan_completed_finance_import_review_alerts(cursor)
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        return 0, 1
+    return sum(counts.values()), 0
 
 
 def _consume_staff_source(connection, state):

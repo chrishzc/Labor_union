@@ -796,11 +796,15 @@ def _render_multi_segment_matching(
 
 
 
+_MATCHING_SUB_NAV_OPTIONS = ("👁️ 檢視案件詳情", "⚡ 智慧配對與指派", "🧩 多月嫂配對方案(備案)")
+
+
 def render_matching_center(
     orders: list[dict[str, Any]],
     staff: list[dict[str, Any]],
     *,
     preferred_case_no: str | None = None,
+    default_to_plan: bool = False,
 ) -> None:
     st.subheader("🤝 月嫂配對中心 (Clients, Orders & Matching)")
     pending_orders = _negotiation_orders(orders)
@@ -817,15 +821,29 @@ def render_matching_center(
         base_url=resolve_api_base_url(),
         headers=build_admin_headers(),
     )
+    # 只呼叫一次：這個函式會用 case_no 當 widget key 畫初始化表單，
+    # 底下每個子頁籤都會在同一次 script run 裡渲染，兩處各叫一次
+    # 會建立兩個相同 key 的 widget，導致 Streamlit 直接報錯。
+    ensure_case_architecture_ready(selected_order["case_no"], bootstrap_client)
 
-    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["👁️ 檢視案件詳情", "⚡ 智慧配對與指派", "🧩 多月嫂配對方案(備案)"])
-    with sub_tab1:
+    # 用 st.radio 取代 st.tabs：st.tabs 無法用程式控制預設顯示哪一頁，
+    # 但從異常警示中心「訂單配對／補發送資訊」點「前往配對」過來時，
+    # 需要直接落在「多月嫂配對方案(備案)」，故改用可預先選定的 radio。
+    if default_to_plan:
+        st.session_state["matching_center_sub_nav"] = "🧩 多月嫂配對方案(備案)"
+    sub_nav = st.radio(
+        "配對子頁籤",
+        _MATCHING_SUB_NAV_OPTIONS,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="matching_center_sub_nav",
+    )
+    st.divider()
+    if sub_nav == "👁️ 檢視案件詳情":
         _render_matching_order_summary(selected_order)
-    with sub_tab2:
-        ensure_case_architecture_ready(selected_order["case_no"], bootstrap_client)
+    elif sub_nav == "⚡ 智慧配對與指派":
         _render_single_caregiver_matching(selected_order, staff)
-    with sub_tab3:
-        ensure_case_architecture_ready(selected_order["case_no"], bootstrap_client)
+    else:
         _render_multi_segment_matching(selected_order, staff)
 
 def _iso_date_text(value, *, required=True, field_name="日期"):
@@ -881,14 +899,12 @@ def _single_caregiver_covers_service_period(order):
     return bool(availability.get("complete_combinations"))
 
 def _render_single_caregiver_matching(target_order, staff_list):
-    target_case_no = target_order["case_no"]
-    st.markdown(f"#### ⚡ 智慧配對與指派 (案件 #{target_case_no})")
-    st.caption("此頁已切換為新的配對方案流程，採用方案版本＋區段對齊發送邏輯。")
-    st.markdown("請用下方流程補齊「訂單資訊-1/2」與意願狀態記錄。")
-    _render_multi_segment_matching(
-        target_order,
-        staff_list,
-    )
+    # 此頁已切換為新的配對方案流程（方案版本＋區段對齊發送邏輯），跟
+    # 「🧩 多月嫂配對方案(備案)」分頁是同一套 UI；不能在這裡重複呼叫
+    # _render_multi_segment_matching，否則同一個 case_no 的 widget key
+    # 會在同一次 script run 建立兩次，Streamlit 會直接報錯。
+    del target_order, staff_list
+    st.info("配對流程已整合至「🧩 多月嫂配對方案(備案)」分頁，請至該分頁操作。")
 
 def _render_single_caregiver_assignment_plan(order, staff_id, start_date, end_date):
     case_no = order["case_no"]
