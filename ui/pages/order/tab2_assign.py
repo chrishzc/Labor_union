@@ -5,20 +5,24 @@
 ================================================================================
 """
 
-import os
 from datetime import date, datetime, timedelta
+import os
+import uuid
 import requests
 import streamlit as st
-from ui.pages.order.editor import explain_assignment_sync_preview
 from ui.pages.order.shared import safe_int
+from ui.pages.shared import (
+    build_admin_headers,
+    resolve_api_base_url,
+)
 
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000").rstrip("/")
 
-
-def _api_request(path, *, method="GET", payload=None):
+def _api_request(path, *, method="GET", payload=None, headers=None):
+    request_headers = headers if headers is not None else build_admin_headers()
     response = requests.request(
         method,
-        f"{API_BASE_URL}{path}",
+        f"{resolve_api_base_url()}{path}",
+        headers=request_headers,
         json=payload,
         timeout=15,
     )
@@ -31,6 +35,11 @@ def _api_request(path, *, method="GET", payload=None):
     if not payload_body.get("success", False):
         raise ValueError(payload_body.get("error") or payload_body.get("message") or "API 回應失敗")
     return payload_body.get("data") or {}
+
+
+def _development_preview_is_enabled() -> bool:
+    app_env = (os.getenv("APP_ENV", "development") or "development").strip().lower()
+    return app_env in {"development", "dev", "local", "test"}
 
 
 def _parse_iso_date(value):
@@ -97,7 +106,37 @@ def _build_sync_request(order):
     }
 
 
-def _render_identity_status_guard(target_order):
+def _single_caregiver_covers_service_period(order, *, headers):
+    start_date = _iso_date_text(
+        order.get("actual_start_date") or order.get("start_date"),
+        required=True,
+        field_name="服務開始日",
+    )
+    raw_end = order.get("actual_end_date") or order.get("end_date")
+    if raw_end:
+        end_date = _iso_date_text(raw_end, required=True, field_name="服務結束日")
+    else:
+        service_days = int(safe_int(order.get("service_days")))
+        if service_days <= 0:
+            raise ValueError("服務天數必須為正整數")
+        end_date = (
+            datetime.strptime(start_date, "%Y-%m-%d").date()
+            + timedelta(days=service_days - 1)
+        ).isoformat()
+    availability = _api_request(
+        f"/api/v1/orders/{order['case_no']}/caregiver-single-eligibility/check",
+        method="POST",
+        headers=headers,
+        payload={
+            "start_date": start_date,
+            "end_date": end_date,
+            "as_of": date.today().isoformat(),
+        },
+    )
+    return bool(availability.get("complete_combinations"))
+
+
+def _render_identity_status_guard(target_order, *, headers):
     identity_status = str(target_order.get("identity_status") or "").strip()
     if identity_status in {"一般市民", "補助市民", "非市民"}:
         return True
@@ -121,6 +160,7 @@ def _render_identity_status_guard(target_order):
                     f"/api/v1/clients/{client_id}/identity-status",
                     method="PUT",
                     payload={"identity_status": selected_identity},
+                    headers=headers,
                 )
                 st.success("已更新客戶身分資格，請重新整理後再預覽指派同步。")
                 st.rerun()
@@ -129,150 +169,17 @@ def _render_identity_status_guard(target_order):
     return False
 
 
-def _render_line_matching_workflow(target_case_no, staff_list, match_records):
-    st.markdown("##### LINE 媒合作業")
-    if not staff_list:
-        st.info("目前沒有可選月嫂。")
-        return
-
-    staff_options = {
-        f"{s.get('name') or '未命名月嫂'}｜ID {s.get('id')}｜{s.get('phone') or '無電話'}": s
-        for s in staff_list
-        if s.get("id")
-    }
-    selected_staff_label = st.selectbox(
-        "選擇月嫂",
-        list(staff_options.keys()),
-        key=f"line_staff_{target_case_no}",
-    )
-    selected_staff = staff_options[selected_staff_label]
-    selected_staff_id = int(selected_staff["id"])
-
-    default_staff_uid = str(selected_staff.get("line_user_id") or "").strip()
-    existing_client_uid = ""
-    try:
-        order_detail = _api_request(f"/api/v1/orders/{target_case_no}")
-        existing_client_uid = str(order_detail.get("line_user_id") or "").strip()
-    except ValueError:
-        order_detail = {}
-
-    col_client, col_staff = st.columns(2)
-    with col_client:
-        client_uid = st.text_input(
-            "客戶 LINE userId",
-            value=existing_client_uid,
-            placeholder="U 開頭的 LINE userId",
-            key=f"line_client_uid_{target_case_no}",
-        ).strip()
-    with col_staff:
-        staff_uid = st.text_input(
-            "月嫂 LINE userId",
-            value=default_staff_uid,
-            placeholder="U 開頭的 LINE userId",
-            key=f"line_staff_uid_{target_case_no}",
-        ).strip()
-
-    existing_match = next(
-        (
-            m for m in match_records
-            if int(m.get("staff_id") or 0) == selected_staff_id
-        ),
-        None,
-    )
-    if existing_match:
-        match_id = existing_match.get("match_id") or existing_match.get("id")
-        acc = existing_match.get("caregiver_accepted")
-        status = "願意接案" if acc == 1 else ("拒絕接案" if acc == 0 else "待回覆")
-        st.info(f"媒合紀錄：#{match_id}，月嫂回覆：{status}")
-    else:
-        match_id = None
-        st.info("尚未建立此月嫂的媒合紀錄。")
-
-    bind_col, invite_col = st.columns(2)
-    if bind_col.button("儲存 LINE 身分綁定", key=f"line_bind_{target_case_no}", use_container_width=True):
-        if not client_uid or not staff_uid:
-            st.error("請填入客戶與月嫂的 LINE userId。")
-        else:
-            try:
-                _api_request(
-                    f"/api/v1/orders/{target_case_no}/line-bindings",
-                    method="POST",
-                    payload={
-                        "client_line_user_id": client_uid,
-                        "staff_id": selected_staff_id,
-                        "staff_line_user_id": staff_uid,
-                    },
-                )
-                st.success("已儲存 LINE 身分綁定。")
-                st.rerun()
-            except ValueError as err:
-                st.error(f"儲存失敗：{err}")
-
-    if invite_col.button("發送接案邀請給月嫂", key=f"send_order_{target_case_no}", use_container_width=True):
-        try:
-            if match_id is None:
-                created = _api_request(
-                    f"/api/v1/orders/{target_case_no}/matches",
-                    method="POST",
-                    payload={"staff_id": selected_staff_id},
-                )
-                match_id = created.get("match_id") if isinstance(created, dict) else created
-            _api_request(f"/api/v1/matches/{match_id}/send-info-1", method="POST")
-            st.success("已建立接案邀請，系統將發送 LINE 給月嫂。")
-            st.rerun()
-        except ValueError as err:
-            st.error(f"發送失敗：{err}")
-
-    st.markdown("###### 月嫂回覆登錄")
-    response_options = {"待回覆": None, "願意接案": True, "拒絕接案": False}
-    response_index = 0
-    if existing_match and existing_match.get("caregiver_accepted") == 1:
-        response_index = 1
-    elif existing_match and existing_match.get("caregiver_accepted") == 0:
-        response_index = 2
-    selected_response = st.radio(
-        "回覆狀態",
-        list(response_options.keys()),
-        index=response_index,
-        horizontal=True,
-        key=f"caregiver_response_{target_case_no}_{selected_staff_id}",
-    )
-    response_col, resume_col = st.columns(2)
-    if response_col.button(
-        "更新月嫂回覆",
-        key=f"update_response_{target_case_no}",
-        disabled=match_id is None,
-        use_container_width=True,
-    ):
-        try:
-            _api_request(
-                f"/api/v1/matches/{match_id}/reply",
-                method="PUT",
-                payload={"accepted": response_options[selected_response]},
-            )
-            st.success("已更新月嫂回覆。")
-            st.rerun()
-        except ValueError as err:
-            st.error(f"更新失敗：{err}")
-
-    can_send_resume = match_id is not None and existing_match and existing_match.get("caregiver_accepted") == 1
-    if resume_col.button(
-        "發送履歷給客戶",
-        key=f"send_resume_{target_case_no}",
-        disabled=not can_send_resume,
-        use_container_width=True,
-    ):
-        try:
-            _api_request(f"/api/v1/matches/{match_id}/send-resume", method="POST")
-            st.success("已建立履歷推薦，系統將發送 LINE 給客戶。")
-            st.rerun()
-        except ValueError as err:
-            st.error(f"發送失敗：{err}")
-
-
-def _render_tab2_assign(orders_data, clients, staff_list):
+def _render_tab2_assign(
+    orders_data,
+    clients,
+    staff_list,
+    *,
+    multi_segment_renderer=None,
+    multi_segment_preview_renderer=None,
+    preferred_case_no=None,
+):
     """Tab 2: 月嫂配對中心 (OrderUI_Tab2_MatchingCenter) - 僅處理「洽談中」待配對案件"""
-    st.subheader("月嫂媒合與指派")
+    st.subheader("🤝 月嫂配對中心 (Clients, Orders & Matching)")
     success_message = st.session_state.pop("tab2_assignment_sync_success", None)
     if success_message:
         st.success(success_message)
@@ -289,16 +196,33 @@ def _render_tab2_assign(orders_data, clients, staff_list):
         for o in pending_orders
     }
 
-    st.markdown("### 待媒合案件")
-    selected_case_label = st.selectbox("選擇案件", list(target_case_options.keys()), key="tab2_case_picker")
+    st.markdown("### ⚙️ 單筆待配對案件控制面板")
+    preferred_label = next(
+        (
+            label
+            for label, case_no in target_case_options.items()
+            if preferred_case_no is not None
+            and str(case_no) == str(preferred_case_no)
+        ),
+        None,
+    )
+    if preferred_label is not None:
+        st.session_state["tab2_case_picker"] = preferred_label
+    selected_case_label = st.selectbox("🎯 選擇待配對與指派之案件", list(target_case_options.keys()), key="tab2_case_picker")
     target_case_no = target_case_options[selected_case_label]
     target_order = next((o for o in pending_orders if o['case_no'] == target_case_no), None)
 
     if not target_order:
         return
 
+    try:
+        admin_headers = build_admin_headers()
+    except Exception as err:
+        st.error(f"未完成管理員授權設定：{err}")
+        return
+
     # 單筆案件 3 大子選單標籤
-    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["案件資訊", "媒合與通知", "取消訂單"])
+    sub_tab1, sub_tab2, sub_tab3 = st.tabs(["👁️ 檢視案件詳情", "⚡ 4步智慧配對與指派", "❌ 取消訂單與紀錄原因"])
 
     with sub_tab1:
         st.markdown(f"#### 案件基本資訊 (案件編號: `{target_case_no}`)")
@@ -318,17 +242,18 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                 st.error(f"- **取消原因**: {target_order.get('cancel_reason') or '未註明'}")
 
     with sub_tab2:
-        st.markdown(f"#### 媒合與通知 (案件 #{target_case_no})")
+        st.markdown(f"#### ⚡ 4步智慧配對與指派 (案件 #{target_case_no})")
         try:
-            resp_m = requests.get(f"{API_BASE_URL}/api/v1/orders/{target_case_no}/matches", timeout=10)
+            resp_m = requests.get(
+                f"{resolve_api_base_url()}/api/v1/orders/{target_case_no}/matches",
+                headers=admin_headers,
+                timeout=10,
+            )
             resp_m.raise_for_status()
             match_records = resp_m.json().get("data") or []
         except Exception as e:
             st.error(f"❌ 讀取媒合記錄 API 失敗: {e}")
             match_records = []
-
-        _render_line_matching_workflow(target_case_no, staff_list, match_records)
-        st.markdown("---")
 
         # 僅顯示至少有一項發送紀錄或意願已更新的媒合紀錄
         valid_matches = [
@@ -336,7 +261,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
             if m.get('sent_info_1_at') or m.get('sent_info_2_at') or m.get('caregiver_accepted') is not None
         ]
         if valid_matches:
-            st.write("目前媒合紀錄")
+            st.write("📋 當前月嫂意願詢問紀錄：")
             for m in valid_matches:
                 acc = m.get('caregiver_accepted')
                 acc_lbl = "🟢 願意接案" if acc == 1 else ("🔴 拒絕" if acc == 0 else "🟡 待回覆")
@@ -344,24 +269,64 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                 s2_val = m.get('sent_info_2_at')
                 s1 = f"已於 {s1_val}" if s1_val else "未發送"
                 s2 = f"已於 {s2_val}" if s2_val else "未發送"
-                st.markdown(f"**{m.get('staff_name', '月嫂')}** - 回覆：`{acc_lbl}`（接案邀請：{s1}｜補充通知：{s2}）")
+                st.markdown(f"**{m.get('staff_name', '月嫂')}** - 意願: `{acc_lbl}` (粗篩: {s1} | 精篩: {s2})")
             st.markdown("---")
 
-        if not staff_list:
+        single_caregiver_available = True
+        if multi_segment_renderer is not None:
+            try:
+                single_caregiver_available = _single_caregiver_covers_service_period(
+                    target_order,
+                    headers=admin_headers,
+                )
+            except (requests.RequestException, ValueError) as err:
+                st.error(f"無法確認完整服務檔期：{err}")
+                single_caregiver_available = None
+
+        if single_caregiver_available is False:
+            multi_segment_renderer(target_order, staff_list)
+        elif single_caregiver_available is None:
+            st.info("檔期資料恢復後才會顯示單一月嫂或多段配對流程。")
+        elif not staff_list:
             st.warning("請先在服務人員資料表中建立服務人員。")
         else:
-            with st.expander("月嫂篩選條件", expanded=False):
+            if (
+                multi_segment_preview_renderer is not None
+                and _development_preview_is_enabled()
+            ):
+                preview_key = f"matching_multi_preview_{target_case_no}"
+                preview_enabled = bool(st.session_state.get(preview_key))
+                button_label = (
+                    "關閉多月嫂測試預覽"
+                    if preview_enabled
+                    else "測試顯示多月嫂配對"
+                )
+                if st.button(
+                    button_label,
+                    key=f"matching_multi_preview_button_{target_case_no}",
+                ):
+                    st.session_state[preview_key] = not preview_enabled
+                    st.rerun()
+                if preview_enabled:
+                    st.info(
+                        "開發測試預覽：只查詢多人檔期並顯示介面，"
+                        "不建立配對方案、不聯繫月嫂。"
+                    )
+                    multi_segment_preview_renderer(target_order, staff_list)
+
+            with st.expander("🎯 智慧粗篩條件控制面板 (可自訂開啟/關閉，預設全選)", expanded=True):
                 fc1, fc2 = st.columns(2)
                 with fc1:
-                    f_region = st.checkbox("服務區域符合", value=True, key="f_reg_toggle")
-                    f_schedule = st.checkbox("檔期可配合", value=True, key="f_sch_toggle")
+                    f_region = st.checkbox("☑️ 比對服務區域 (city/address 區域如香山/東區)", value=True, key="f_reg_toggle")
+                    f_schedule = st.checkbox("☑️ 排除檔期時間衝突 (含 7 天預留備用期)", value=True, key="f_sch_toggle")
                 with fc2:
-                    f_babies = st.checkbox("照護胎數符合", value=True, key="f_bab_toggle")
-                    f_time = st.checkbox("服務時段符合", value=True, key="f_time_toggle")
+                    f_babies = st.checkbox("☑️ 比對照顧胎數上限 (單/雙胞胎)", value=True, key="f_bab_toggle")
+                    f_time = st.checkbox("☑️ 比對服務時段需求", value=True, key="f_time_toggle")
 
             try:
                 resp_rec = requests.get(
-                    f"{API_BASE_URL}/api/v1/matches/recommend-staff",
+                    f"{resolve_api_base_url()}/api/v1/matches/recommend-staff",
+                    headers=admin_headers,
                     params={
                         "case_no": target_case_no,
                         "filter_region": f_region,
@@ -374,11 +339,11 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                 resp_rec.raise_for_status()
                 rec_staff = resp_rec.json().get("data") or []
             except Exception as err:
-                st.error(f"讀取推薦月嫂失敗：{err}")
+                st.error(f"❌ 智慧粗篩比對計算 API 失敗: {err}")
                 rec_staff = []
 
             if not rec_staff:
-                st.warning("依據目前條件，暫無符合的月嫂。可放寬篩選條件後再確認。")
+                st.warning("⚠️ 依據當前勾選條件，暫無符合之月嫂。建議取消部分勾選以展開搜尋範圍。")
                 staff_options = {f"{s['name']} ({s['phone']})": s['id'] for s in staff_list if s.get('name')}
             else:
                 staff_options = {r['display_label']: r['staff_id'] for r in rec_staff}
@@ -386,19 +351,20 @@ def _render_tab2_assign(orders_data, clients, staff_list):
             # ---------------------------------------------------------------
             # 步驟 1：粗篩發送 (多選)
             # ---------------------------------------------------------------
-            st.markdown("##### 批次發送接案邀請")
+            st.markdown("##### 步驟 1: 發送 訂單資訊-1 (粗篩，可複選多位月嫂)")
             selected_staff_labels = st.multiselect(
-                "選擇月嫂",
+                "選擇服務人員/月嫂進行粗篩發送 (已自動依匹配度與檔期排序)",
                 list(staff_options.keys()),
                 key="match_staff_multipicker"
             )
             selected_staff_ids = [staff_options[label] for label in selected_staff_labels]
 
-            if st.button("發送接案邀請", key="btn_send_1_batch", disabled=not selected_staff_ids):
+            if st.button("1️⃣ 發送 訂單資訊-1 給已勾選月嫂 (粗篩)", key="btn_send_1_batch", disabled=not selected_staff_ids):
                 try:
                     for sid in selected_staff_ids:
                         resp_post = requests.post(
-                            f"{API_BASE_URL}/api/v1/orders/{target_case_no}/matches",
+                            f"{resolve_api_base_url()}/api/v1/orders/{target_case_no}/matches",
+                            headers=admin_headers,
                             json={"staff_id": sid},
                             timeout=10,
                         )
@@ -406,12 +372,16 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                         m_data = resp_post.json().get("data") or {}
                         match_id = m_data.get("match_id") if isinstance(m_data, dict) else m_data
                         if match_id:
-                            resp_s1 = requests.post(f"{API_BASE_URL}/api/v1/matches/{match_id}/send-info-1", timeout=10)
+                            resp_s1 = requests.post(
+                                f"{resolve_api_base_url()}/api/v1/matches/{match_id}/send-info-1",
+                                headers=admin_headers,
+                                timeout=10,
+                            )
                             resp_s1.raise_for_status()
-                    st.success(f"已對 {len(selected_staff_ids)} 位月嫂發送接案邀請。")
+                    st.success(f"已對 {len(selected_staff_ids)} 位月嫂發送 訂單資訊-1！")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"發送失敗：{e}")
+                    st.error(f"❌ 發送失敗: {e}")
 
             st.markdown("---")
 
@@ -420,12 +390,12 @@ def _render_tab2_assign(orders_data, clients, staff_list):
             # ---------------------------------------------------------------
             sent1_matches = [m for m in match_records if m.get('sent_info_1_at')]
 
-            st.markdown("##### 回覆管理與補充通知")
+            st.markdown("##### 步驟 2: 更新月嫂意願 ＆ 發送 訂單資訊-2 (精篩，可複選多位月嫂)")
 
             if not sent1_matches:
-                st.info("尚未發送接案邀請。")
+                st.info("⚠️ 尚無月嫂收到 訂單資訊-1，請先完成步驟 1 的粗篩發送。")
             else:
-                resp_opts = ["待回覆", "願意接案", "拒絕接案"]
+                resp_opts = ["待回覆 (NULL)", "願意接案 (1)", "拒絕接案 (0)"]
                 staff_ids_for_step2 = []
 
                 for m in sent1_matches:
@@ -436,37 +406,39 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                     col_name, col_resp, col_chk = st.columns([2, 2, 1.2])
                     with col_name:
                         s2_val = m.get('sent_info_2_at')
-                        s2_lbl = f"補充通知已於 {s2_val}" if s2_val else "尚未發送補充通知"
+                        s2_lbl = f"已於 {s2_val}" if s2_val else "尚未發送-2"
                         st.write(f"**{m.get('staff_name', '月嫂')}**\n\n({s2_lbl})")
                     with col_resp:
                         new_resp = st.selectbox(
                             "意願狀態", resp_opts, index=c_idx,
                             key=f"resp_select_{m['match_id'] if 'match_id' in m else m.get('id')}", label_visibility="collapsed"
                         )
-                        new_accepted_val = True if new_resp == "願意接案" else (False if new_resp == "拒絕接案" else None)
+                        new_accepted_val = True if new_resp == "願意接案 (1)" else (False if new_resp == "拒絕接案 (0)" else None)
                         if new_accepted_val != (True if acc_val == 1 else (False if acc_val == 0 else None)):
                             try:
                                 m_id = m.get('match_id') or m.get('id')
                                 resp_rep = requests.put(
-                                    f"{API_BASE_URL}/api/v1/matches/{m_id}/reply",
+                                    f"{resolve_api_base_url()}/api/v1/matches/{m_id}/reply",
+                                    headers=admin_headers,
                                     json={"accepted": new_accepted_val},
                                     timeout=10,
                                 )
                                 resp_rep.raise_for_status()
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"回覆更新失敗：{e}")
+                                st.error(f"❌ 意願更新 API 失敗: {e}")
                     with col_chk:
                         m_id = m.get('match_id') or m.get('id')
-                        checked = st.checkbox("補充通知", key=f"send2_chk_{m_id}")
+                        checked = st.checkbox("發送-2", key=f"send2_chk_{m_id}")
                         if checked:
                             staff_ids_for_step2.append(m_staff_id)
 
-                if st.button("發送補充通知", key="btn_send_2_batch", disabled=not staff_ids_for_step2):
+                if st.button("2️⃣ 發送 訂單資訊-2 給已勾選月嫂 (精篩)", key="btn_send_2_batch", disabled=not staff_ids_for_step2):
                     try:
                         for sid in staff_ids_for_step2:
                             resp_post = requests.post(
-                                f"{API_BASE_URL}/api/v1/orders/{target_case_no}/matches",
+                                f"{resolve_api_base_url()}/api/v1/orders/{target_case_no}/matches",
+                                headers=admin_headers,
                                 json={"staff_id": sid},
                                 timeout=10,
                             )
@@ -474,22 +446,26 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                             m_data = resp_post.json().get("data") or {}
                             match_id = m_data.get("match_id") if isinstance(m_data, dict) else m_data
                             if match_id:
-                                resp_s2 = requests.post(f"{API_BASE_URL}/api/v1/matches/{match_id}/send-info-2", timeout=10)
+                                resp_s2 = requests.post(
+                                    f"{resolve_api_base_url()}/api/v1/matches/{match_id}/send-info-2",
+                                    headers=admin_headers,
+                                    timeout=10,
+                                )
                                 resp_s2.raise_for_status()
-                        st.success(f"已對 {len(staff_ids_for_step2)} 位月嫂發送補充通知。")
+                        st.success(f"已對 {len(staff_ids_for_step2)} 位月嫂發送 訂單資訊-2！")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"發送失敗：{e}")
+                        st.error(f"❌ 發送失敗: {e}")
 
             st.markdown("---")
-            st.markdown("##### 客戶推薦與正式指派")
-            can_continue_assignment = _render_identity_status_guard(target_order)
+            st.markdown("##### 步驟 3：傳送履歷給客戶與正式指派同步")
 
+            can_continue_assignment = _render_identity_status_guard(target_order, headers=admin_headers)
             accepted_matches = [m for m in match_records if m.get('caregiver_accepted') == 1]
             if not can_continue_assignment:
                 st.info("補齊身分資格後即可繼續推薦履歷與正式指派。")
             elif not accepted_matches:
-                st.info("需至少一位月嫂回覆願意接案，才能推薦履歷給客戶。")
+                st.info("⚠️ 提示：需待至少一位月嫂回覆「願意接案」後，方可進行傳送履歷與正式指派同步。")
             else:
                 final_options = {}
                 for index, match in enumerate(accepted_matches):
@@ -498,7 +474,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                     final_options[f"{index + 1}. {staff_name} (match #{match_id})"] = match
 
                 final_match_label = st.selectbox(
-                    "選擇願意接案的月嫂",
+                    "選擇已願意接案者 (步驟 3)",
                     list(final_options.keys()),
                     key=f"final_match_picker_{target_case_no}",
                 )
@@ -511,21 +487,22 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                 elif final_match_id is None:
                     st.error("⚠️ 找不到對應配對紀錄 id，無法傳送履歷。")
                 else:
-                    st.success(f"已選定月嫂：{final_match.get('staff_name', '月嫂')}")
+                    st.success(f"🎉 已選定月嫂：{final_match.get('staff_name', '月嫂')}")
 
-                    if st.button("發送履歷給客戶", key=f"btn_send_resume_{target_case_no}"):
+                    if st.button("🤝 3️⃣ 傳送履歷給客戶", key=f"btn_send_resume_{target_case_no}"):
                         try:
                             _api_request(
                                 f"/api/v1/matches/{final_match_id}/send-resume",
                                 method="POST",
+                                headers=admin_headers,
                             )
                             st.success("履歷已傳送到客戶 LINE，等待回饋。")
                         except (requests.RequestException, ValueError) as err:
-                            st.error(f"傳送履歷失敗：{err}")
+                            st.error(f"❌ 傳送履歷失敗: {err}")
 
                     preview_state_key = f"tab2_assignment_sync_preview_{target_case_no}"
                     if st.button(
-                        "預覽指派同步",
+                        "🔍 4️⃣ 預覽訂單與指派同步",
                         key=f"btn_sync_preview_{target_case_no}",
                     ):
                         try:
@@ -542,6 +519,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                                 f"/api/v1/orders/{target_case_no}/assignment-synchronization/preview",
                                 method="POST",
                                 payload=preview_request,
+                                headers=admin_headers,
                             )
                             st.session_state[preview_state_key] = {
                                 "request": preview_request,
@@ -551,24 +529,25 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                             }
                             st.rerun()
                         except (requests.RequestException, ValueError) as err:
-                            st.error(f"同步預覽失敗：{err}")
+                            st.error(f"❌ 同步預覽失敗: {err}")
 
                     sync_state = st.session_state.get(preview_state_key)
                     if not sync_state:
-                        st.info("請先點擊「預覽指派同步」查看結果。")
+                        st.info("請先點擊「4️⃣ 預覽訂單與指派同步」查看結果。")
                     elif sync_state.get("match_label") != final_match_label:
                         st.info("⚠️ 已切換候選月嫂，請重新進行步驟 4 預覽。")
                     else:
                         preview_request = sync_state["request"]
                         sync_preview = sync_state["preview"]
 
-                        st.markdown("#### 同步預覽結果")
+                        st.markdown("#### 🧾 同步預覽結果")
                         c1, c2, c3 = st.columns(3)
                         c1.metric("目標時數", sync_preview.get("target_hours", 0))
                         c2.metric("提議時數", sync_preview.get("proposed_actual_hours", 0))
                         c3.metric("差額", sync_preview.get("difference", 0))
 
-                        explain_assignment_sync_preview(sync_preview)
+                        if sync_preview.get("blocking_reasons"):
+                            st.error(f"無法直接套用：{sync_preview['blocking_reasons']}")
 
                         required_removals = sync_preview.get("required_schedule_removals", [])
                         removal_options = {
@@ -592,7 +571,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                         )
 
                         if st.button(
-                            "套用正式指派",
+                            "✍️ 4️⃣ 套用正式指派同步",
                             key=f"btn_sync_apply_{target_case_no}",
                             disabled=sync_preview.get("sync_status") != "in_sync",
                         ):
@@ -607,6 +586,7 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                                     _api_request(
                                         f"/api/v1/orders/{target_case_no}/assignment-synchronization/apply",
                                         method="POST",
+                                        headers=admin_headers,
                                         payload={
                                             **preview_request,
                                             "schedule_change_plan": {"remove_schedule_ids": selected_removal_ids},
@@ -617,10 +597,10 @@ def _render_tab2_assign(orders_data, clients, staff_list):
                                     st.session_state.pop(f"assignment_sync_applied_by_{target_case_no}", None)
                                     st.session_state.pop(f"assignment_sync_confirm_{target_case_no}", None)
                                     st.session_state.pop(preview_state_key, None)
-                                    st.session_state["tab2_assignment_sync_success"] = "訂單成立並同步套用完成；正式指派與日排班已更新。"
+                                    st.session_state["tab2_assignment_sync_success"] = "✅ 訂單成立並同步套用完成；正式指派與日排班已在同一交易更新。"
                                     st.rerun()
                                 except (requests.RequestException, ValueError) as err:
-                                    st.error(f"指派同步套用失敗：{err}")
+                                    st.error(f"❌ 指派同步套用失敗: {err}")
 
     with sub_tab3:
         st.markdown(f"#### ❌ 取消訂單與紀錄原因 (案件編號: `{target_case_no}`)")
@@ -628,19 +608,37 @@ def _render_tab2_assign(orders_data, clients, staff_list):
             st.warning(f"此案件先前已標記為「訂單取消」。原因：{target_order.get('cancel_reason') or '未註明'}")
 
         cancel_reason_input = st.text_area("請輸入取消訂單原因與說明 (強制紀錄)", value=target_order.get('cancel_reason') or "", key="cancel_reason_area")
+        cancel_actor = st.text_input("取消操作識別（人員）", key=f"cancel_actor_{target_case_no}")
+        cancel_event_key_key = f"cancel_event_key_{target_case_no}"
+        cancel_event_key = st.session_state.get(cancel_event_key_key)
+        if not isinstance(cancel_event_key, str) or not cancel_event_key.strip():
+            cancel_event_key = f"cancel-{target_case_no}-{uuid.uuid4().hex[:12]}"
+            st.session_state[cancel_event_key_key] = cancel_event_key
+        st.text_input("取消事件冪等鍵（自動產生）", value=cancel_event_key, disabled=True, key=f"{cancel_event_key_key}_display")
 
-        if st.button("🚨 確認取消此訂單", key="btn_cancel_order_confirm"):
+        if st.button(
+            "🚨 確認取消此訂單",
+            key="btn_cancel_order_confirm",
+            disabled=target_order['order_status'] == '訂單取消',
+        ):
             if not cancel_reason_input.strip():
                 st.error("請務必填寫取消原因後再提交！")
+            elif not cancel_actor.strip():
+                st.error("請務必填寫取消操作識別後再提交！")
             else:
                 try:
-                    resp_cancel = requests.put(
-                        f"{API_BASE_URL}/api/v1/orders/{target_case_no}/status",
-                        json={"status": "訂單取消", "cancel_reason": cancel_reason_input.strip()},
-                        timeout=10,
+                    _api_request(
+                        f"/api/v1/orders/{target_case_no}/cancel",
+                        method="POST",
+                        headers=admin_headers,
+                        payload={
+                            "event_key": cancel_event_key,
+                            "actor": cancel_actor.strip(),
+                            "cancel_reason": cancel_reason_input.strip(),
+                        },
                     )
-                    resp_cancel.raise_for_status()
                     st.success("訂單已標記為「訂單取消」，取消原因已儲存！")
+                    st.session_state.pop(cancel_event_key_key, None)
                     st.rerun()
                 except Exception as e:
                     st.error(f"❌ 取消訂單 API 失敗: {e}")

@@ -251,6 +251,7 @@ CREATE TABLE IF NOT EXISTS matching_records (
     replied_at TIMESTAMP NULL COMMENT '回覆時間',
     sent_info_1_at DATETIME NULL COMMENT '給服務人員的訂單資訊-1 發送時間',
     sent_info_2_at DATETIME NULL COMMENT '給服務人員的訂單資訊-2 發送時間',
+    sent_resume_at DATETIME NULL COMMENT '履歷發送給客戶的時間',
     CONSTRAINT fk_matching_case_no FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE CASCADE,
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
     UNIQUE KEY uq_matching_case_staff (case_no, staff_id)
@@ -322,6 +323,8 @@ CREATE TABLE IF NOT EXISTS case_staff_assignments (
     assignment_sequence INT NOT NULL COMMENT '同案服務區段順序，從 1 起',
     assigned_start_date DATE NULL,
     assigned_end_date DATE NULL,
+    original_assigned_start_date DATE NULL,
+    original_assigned_end_date DATE NULL,
     planned_hours DECIMAL(10, 2) NULL,
     actual_hours DECIMAL(10, 2) NULL,
     hourly_rate DECIMAL(10, 2) NULL,
@@ -427,6 +430,7 @@ CREATE OR REPLACE VIEW v_order_details AS
 SELECT 
     o.case_no AS case_no,
     o.status AS order_status,
+    o.lifecycle_version,
     o.cancel_reason,
     o.line_group_id,
     o.actual_start_date,
@@ -617,7 +621,7 @@ LEFT JOIN staff s ON o.staff_id = s.id;
 CREATE TABLE IF NOT EXISTS holidays (
     holiday_date DATE PRIMARY KEY COMMENT '假日日期',
     holiday_name VARCHAR(100) NOT NULL COMMENT '假日名稱',
-    is_double_pay_default BOOLEAN DEFAULT TRUE COMMENT '是否預設為雙倍薪資日'
+    is_double_pay_default BOOLEAN DEFAULT FALSE COMMENT '相容欄位；排班不因國定假日自動套用雙倍薪資'
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
@@ -777,16 +781,25 @@ CREATE TABLE IF NOT EXISTS admin_audit_logs (
         REFERENCES admin_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 35. 系統異常事件紀錄表
+-- 35. 系統異常事件紀錄表 (非財務類「流程提醒」警示：滾動更新，非不可竄改稽核軌跡；
+--     財務類警示仍走 finance_alerts/finance_alert_events 的不可變事件溯源機制)
 CREATE TABLE IF NOT EXISTS system_alerts (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    event_type VARCHAR(50) NOT NULL COMMENT '異常事件類型',
-    description TEXT NOT NULL COMMENT '詳細異常描述',
-    status ENUM('pending', 'resolved') DEFAULT 'pending' COMMENT '處理狀態 (pending:待處理/resolved:已排除)',
+    alert_code VARCHAR(50) NOT NULL COMMENT '異常代碼，例如 IMPORT-001, ORDER-001',
+    source_domain VARCHAR(50) NOT NULL COMMENT '來源領域',
+    case_key VARCHAR(100) NOT NULL COMMENT '案件識別鍵：正常為 case_no，查無案號時用 error_姓名_行動電話',
+    reason VARCHAR(500) NOT NULL COMMENT '人類可讀的簡述',
+    details JSON NOT NULL COMMENT '目前偵測到的異常內容，每次掃描直接覆蓋更新',
+    status ENUM('open', 'claimed', 'resolved') NOT NULL DEFAULT 'open' COMMENT '處理狀態',
+    claimed_by VARCHAR(100) NULL COMMENT '認領人員',
+    claimed_at DATETIME NULL COMMENT '認領時間',
+    resolved_by VARCHAR(100) NULL COMMENT '處理人員',
+    resolved_at DATETIME NULL COMMENT '排除時間',
+    resolution_reason VARCHAR(500) NULL COMMENT '處理原因',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    resolved_at TIMESTAMP NULL COMMENT '排除時間',
-    resolved_by VARCHAR(50) NULL COMMENT '處理人員',
-    INDEX idx_alert_status (status)
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_alert_case (alert_code, case_key),
+    INDEX idx_system_alert_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 36. LINE 任務每次執行嘗試紀錄

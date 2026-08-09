@@ -22,6 +22,9 @@ dependencies = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: requires an explicitly configured disposable external service",
+]
 
 [dependency-groups]
 dev = [

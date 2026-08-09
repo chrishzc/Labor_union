@@ -7,8 +7,9 @@ import json
 
 import pandas as pd
 
-from scripts.imports import import_finance_excel as importer
+from services import finance_import_application as importer
 from scripts.imports.finance_formats.taishin import TAISHIN_HEADERS
+from tests._finance_alert_mock_support import AutocommitOff, handle_finance_alert_sql
 
 
 class StatefulCursor:
@@ -20,6 +21,7 @@ class StatefulCursor:
         self.state = state
         self.current = None
         self.lastrowid = None
+        self.connection = AutocommitOff()
 
     def __enter__(self):
         return self
@@ -37,10 +39,18 @@ class StatefulCursor:
         elif compact.startswith("INSERT INTO finance_import_batches"):
             self.lastrowid = len(self.state["batches"]) + 1
             self.state["batches"].append({"id": self.lastrowid, "status": "staged"})
-        elif compact.startswith("SELECT id, classification_type, reconciliation_status FROM finance_import_rows"):
+        elif compact.startswith(
+            "SELECT id, classification_type, matched_identity_ids, "
+            "resolved_counterparty_account, reconciliation_status "
+            "FROM finance_import_rows"
+        ):
             row = self.state["rows_by_fingerprint"].get(params[0])
             self.current = None if row is None else {
-                key: row[key] for key in ("id", "classification_type", "reconciliation_status")
+                key: row.get(key)
+                for key in (
+                    "id", "classification_type", "matched_identity_ids",
+                    "resolved_counterparty_account", "reconciliation_status",
+                )
             }
         elif compact.startswith("INSERT INTO finance_import_rows"):
             keys = (
@@ -61,6 +71,20 @@ class StatefulCursor:
             row = self._row(params[-1])
             row.update({"classification_type": params[0], "matched_identity_ids": params[1],
                         "resolved_counterparty_account": params[2], "classification_reason": params[3]})
+        elif compact.startswith(
+            "SELECT id, classification_type, matched_identity_ids, "
+            "resolved_counterparty_account, classification_reason, debit "
+            "FROM finance_import_rows"
+        ):
+            row = self._row(params[0])
+            self.current = {
+                key: row.get(key)
+                for key in (
+                    "id", "classification_type", "matched_identity_ids",
+                    "resolved_counterparty_account", "classification_reason",
+                    "debit",
+                )
+            }
         elif compact.startswith("SELECT id, dedup_fingerprint, format_id, transaction_date"):
             self.current = self._row(params[0])
         elif compact.startswith("SELECT id, claim_batch_id, finance_import_row_id, amount, external_reference FROM government_subsidy_transactions WHERE finance_import_row_id"):
@@ -96,6 +120,8 @@ class StatefulCursor:
             row.update({"reconciliation_status": "reconciled", "reconciliation_reference": params[0]})
         elif compact.startswith("UPDATE finance_import_batches SET status='completed'"):
             self.state["batches"][params[0] - 1]["status"] = "completed"
+        elif handle_finance_alert_sql(self.state, compact, params, self):
+            pass
         else:
             raise AssertionError(f"unexpected SQL: {compact}")
 
@@ -154,6 +180,11 @@ def _write_taishin_fixture(tmp_path, amounts, name="government-subsidy.xlsx"):
 def _import(monkeypatch, path, state):
     connection = StatefulConnection(state)
     monkeypatch.setattr(importer, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        importer,
+        "project_finance_import_review_alert",
+        lambda cursor, batch_id: None,
+    )
     return importer.import_finance_workbook(str(path)), connection
 
 
@@ -174,8 +205,12 @@ def test_exact_unique_government_subsidy_reconciles_and_rerun_only_adds_occurren
 
     result, connection = _import(monkeypatch, path, state)
 
-    assert result == {"batch_id": 1, "inserted_rows": 1, "skipped_existing": 0,
-                      "reconciled_counts": {"government_subsidy": 1}, "pending_rows": []}
+    assert result["batch_id"] == 1
+    assert result["inserted_rows"] == 1
+    assert result["skipped_existing"] == 0
+    assert result["reconciled_counts"] == {"government_subsidy": 1}
+    assert result["pending_rows"] == []
+    assert result["transaction_outcome"] == "committed"
     row, batch = state["rows"][0], state["claim_batches"][0]
     assert row["classification_type"] == "government_subsidy"
     assert row["reconciliation_status"] == "reconciled"
