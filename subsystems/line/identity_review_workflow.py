@@ -468,7 +468,6 @@ def approve_line_review(
                     "UPDATE clients SET line_user_id=%s WHERE id=%s",
                     (new_line_user_id, client_id),
                 )
-                _ensure_order_for_case_no(cursor, int(client_id), client.get("case_no"))
                 client_name = str(item.get("client_name") or client.get("name") or "")
                 enqueue_line_task(
                     cursor,
