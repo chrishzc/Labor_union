@@ -217,6 +217,8 @@ class MySqlKnowledgeRetrievalRepository:
         if not rows:
             return None
         result = rows[0]
+        if result.get("authoritative") is not None:
+            result["authoritative"] = bool(result["authoritative"])
         result["citations"] = self._rows(_GET_ANSWER_SOURCES, (request_id,))
         return result
 
