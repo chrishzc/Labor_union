@@ -1,0 +1,72 @@
+{
+  "contract": "production-writer-inventory/v3-candidate",
+  "roots": [
+    "api",
+    "domains",
+    "infrastructure",
+    "line",
+    "scripts",
+    "services",
+    "subsystems"
+  ],
+  "finding_count": 672,
+  "unique_identity_count": 663,
+  "scan_fingerprint": "fd3f7d68476d4f48597aee2e9559ec8bfba29f1b3416610a7209c6fde3899b85",
+  "evidence_sha256": "ee51568c12dc7af8f9f868805c7d82c6bfda6cb3fcb9469c0d7f6ddf31c1c1bc",
+  "owner_candidate_counts": {
+    "access_control": 17,
+    "anomalies": 46,
+    "case_import": 40,
+    "client_finance": 65,
+    "finance_import": 35,
+    "global_infrastructure": 124,
+    "government_subsidy": 42,
+    "line_integration": 60,
+    "orders": 78,
+    "payroll": 31,
+    "scheduling": 102,
+    "staff_payables": 13,
+    "unresolved": 19
+  },
+  "candidate_disposition_counts": {
+    "allowed_transaction_boundary_candidate": 140,
+    "canonical_writer_candidate": 532
+  },
+  "writer_type_candidate_counts": {
+    "canonical_persistence_writer_candidate": 411,
+    "dynamic_sql_writer_candidate": 103,
+    "migration_writer_candidate": 18,
+    "outer_transaction_boundary_candidate": 140
+  },
+  "recommendation_candidate_counts": {
+    "retain_canonical_candidate": 354,
+    "retain_restricted_maintenance_candidate": 111,
+    "strong_review_required_candidate": 207
+  },
+  "high_risk_count": 498,
+  "high_risk_tag_counts": {
+    "access_or_audit": 27,
+    "client_finance": 86,
+    "dynamic_sql": 103,
+    "government_subsidy": 49,
+    "line_integration": 60,
+    "order_lifecycle": 94,
+    "schema_or_data_migration": 19,
+    "staff_payables_or_month_close": 37,
+    "table_unresolved": 141,
+    "transaction_boundary": 140
+  },
+  "unresolved_count": 19,
+  "legacy_subsidy_projection_boundary": {
+    "table": "client_payments",
+    "fields": [
+      "subsidy_refund_receivable",
+      "subsidy_refund_refunded"
+    ],
+    "semantic_role": "legacy_projection_only_not_client_finance_ssot",
+    "runtime_field_callers": [],
+    "writer_disposition": "blocked_no_removal_authorization"
+  },
+  "effective_disposition": "blocked",
+  "approved_to_remove": false
+}

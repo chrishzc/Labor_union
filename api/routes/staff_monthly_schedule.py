@@ -8,7 +8,8 @@
 from fastapi import APIRouter, HTTPException, Path, Query
 from typing import Dict, Any
 from api.schemas.base import BaseResponse
-from services import staff_monthly_calendar_schedule_service
+from api.error_contracts import internal_query_error
+from subsystems.scheduling import staff_monthly_calendar_query
 
 router = APIRouter(prefix="/api/v1/staff", tags=["Staff 服務人員月度檔期排班"])
 
@@ -27,7 +28,7 @@ def get_staff_monthly_schedule(
 ):
     """取得月嫂月度檔期排班視圖 (含 days: [] 陣列與 schedule_map)"""
     try:
-        data = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
+        data = staff_monthly_calendar_query.get_staff_monthly_calendar_schedule(
             staff_id=staff_id,
             year=year,
             month=month,
@@ -35,5 +36,9 @@ def get_staff_monthly_schedule(
         return BaseResponse(data=data, message="成功取得月嫂月度檔期排班視圖")
     except ValueError as exc:
         raise HTTPException(status_code=_http_status_for_service_error(str(exc)), detail=str(exc))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "staff_monthly_schedule_internal_error",
+            "月嫂月度檔期查詢失敗。",
+            "staff-monthly-schedule-query",
+        ) from error

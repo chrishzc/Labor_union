@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse,json,os
 from pathlib import Path
 import pymysql
-from services.db_service import DB_CONFIG
+from infrastructure.mysql.mysql_adapter import DB_CONFIG
 from scripts.init_db import DB_CONFIG as SERVER_CONFIG,load_schema_parts
 from scripts.import_db_snapshot_fixture_v2 import DEFAULT_OUTPUT,load_fixture_bundle,import_fixture
 ROOT=Path(__file__).resolve().parents[1];SCHEMA=ROOT/"db/schema.sql";PARTS=ROOT/"db/schema_parts"

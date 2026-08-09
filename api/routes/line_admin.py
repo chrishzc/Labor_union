@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends
 from api.dependencies.admin_auth import require_line_viewer
 from api.schemas.base import BaseResponse
 from line.worker import worker_is_running
-from services.db_service import get_connection
+from infrastructure.mysql.mysql_adapter import get_connection
 
 
 router = APIRouter(

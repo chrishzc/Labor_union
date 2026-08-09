@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from services.assignment_payroll_reconciliation_service import reconcile_assignment_payroll_with_cursor
+from subsystems.payroll.assignment_reconciliation import reconcile_assignment_payroll_with_cursor
 
 
 class Cursor:

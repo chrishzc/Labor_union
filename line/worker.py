@@ -17,8 +17,8 @@ from typing import Any
 import pymysql
 import requests
 
-from services.db_service import get_connection as get_db_connection
-from services.line_rich_menu_service import (
+from infrastructure.mysql.mysql_adapter import get_connection as get_db_connection
+from subsystems.line.rich_menu_publication_workflow import (
     import_legacy_rich_menu_ids,
     next_publication_run_at,
     process_due_publications,
@@ -143,6 +143,59 @@ def _push_text(task: dict[str, Any], text: str) -> tuple[bool, bool, str, str]:
     return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
 
 
+def _push_matching_willingness_card(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
+    from urllib.parse import urlencode
+
+    payload = json.loads(task.get("payload_json") or "{}")
+    try:
+        case_no = str(payload["case_no"])
+        plan_id = int(payload["plan_id"])
+        segment_id = int(payload["segment_id"])
+    except (KeyError, TypeError, ValueError):
+        return False, False, "invalid_matching_payload", "Missing canonical matching identity"
+    if plan_id <= 0 or segment_id <= 0 or not case_no.strip():
+        return False, False, "invalid_matching_payload", "Invalid canonical matching identity"
+    actions = [
+        {
+            "type": "postback",
+            "label": label,
+            "data": urlencode({
+                "action": willingness,
+                "case_no": case_no,
+                "plan_id": plan_id,
+                "segment_id": segment_id,
+            }),
+        }
+        for willingness, label in (("willing", "願意接案"), ("unwilling", "暫不考慮"))
+    ]
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
+    if not token or token == "mock_token":
+        return True, False, "", ""
+    try:
+        response = requests.post(
+            "https://api.line.me/v2/bot/message/push",
+            json={
+                "to": task["to_user_id"],
+                "messages": [{
+                    "type": "template",
+                    "altText": "媒合意願確認",
+                    "template": {
+                        "type": "buttons",
+                        "text": task.get("message_content") or "請確認是否願意接案。",
+                        "actions": actions,
+                    },
+                }],
+            },
+            headers=_line_headers(task),
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        return False, True, "network_error", str(exc)
+    if response.status_code == 200:
+        return True, False, "", ""
+    return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
+
+
 def _rag_answer(user_text: str) -> str:
     fallback = "很抱歉，我不太懂您的意思，已經幫您轉交給行政專員為您人工處理。"
     try:
@@ -189,6 +242,8 @@ def _execute_task(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
     task_type = task["task_type"]
     if task_type == "line_push":
         return _push_text(task, task.get("message_content") or "")
+    if task_type == "matching_willingness_card":
+        return _push_matching_willingness_card(task)
     if task_type == "rag_reply":
         payload = json.loads(task.get("payload_json") or "{}")
         return _push_text(task, _rag_answer(payload.get("user_text", "")))

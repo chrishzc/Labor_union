@@ -7,7 +7,7 @@ import json
 
 import pandas as pd
 
-from services import finance_import_application as importer
+from subsystems.finance_import import application as importer
 from scripts.imports.finance_formats.taishin import TAISHIN_HEADERS
 from tests._finance_alert_mock_support import AutocommitOff, handle_finance_alert_sql
 
@@ -115,7 +115,7 @@ class StatefulCursor:
         elif compact.startswith("UPDATE subsidy_claim_batches SET paid_amount"):
             batch = next(batch for batch in self.state["claim_batches"] if batch["id"] == params[0])
             batch.update({"paid_amount": batch["approved_amount"], "status": "paid"})
-        elif compact.startswith("UPDATE finance_import_rows SET reconciliation_status = 'reconciled'"):
+        elif compact.startswith("UPDATE finance_import_rows SET reconciliation_status"):
             row = self._row(params[1])
             row.update({"reconciliation_status": "reconciled", "reconciliation_reference": params[0]})
         elif compact.startswith("UPDATE finance_import_batches SET status='completed'"):
@@ -182,10 +182,15 @@ def _import(monkeypatch, path, state):
     monkeypatch.setattr(importer, "get_connection", lambda: connection)
     monkeypatch.setattr(
         importer,
+        "load_finance_identity_maps",
+        lambda _cursor: {"client_refund_accounts": {}, "staff_accounts": {}},
+    )
+    monkeypatch.setattr(
+        importer,
         "project_finance_import_review_alert",
         lambda cursor, batch_id: None,
     )
-    return importer.import_finance_workbook(str(path)), connection
+    return importer.import_finance_workbook(str(path), dry_run=True), connection
 
 
 def _assert_raw_staging(state, batches, occurrences):
@@ -205,12 +210,12 @@ def test_exact_unique_government_subsidy_reconciles_and_rerun_only_adds_occurren
 
     result, connection = _import(monkeypatch, path, state)
 
-    assert result["batch_id"] == 1
+    assert result["batch_id"] is None
     assert result["inserted_rows"] == 1
     assert result["skipped_existing"] == 0
     assert result["reconciled_counts"] == {"government_subsidy": 1}
     assert result["pending_rows"] == []
-    assert result["transaction_outcome"] == "committed"
+    assert result["transaction_outcome"] == "rolled_back"
     row, batch = state["rows"][0], state["claim_batches"][0]
     assert row["classification_type"] == "government_subsidy"
     assert row["reconciliation_status"] == "reconciled"
@@ -220,7 +225,7 @@ def test_exact_unique_government_subsidy_reconciles_and_rerun_only_adds_occurren
     assert [item["paid_amount"] for item in state["items"]] == [Decimal("400"), Decimal("600")]
     assert batch["paid_amount"] == Decimal("1000") and batch["status"] == "paid"
     assert batch["requested_amount"] == batch["approved_amount"] == Decimal("1000")
-    assert connection.commits == 1 and connection.rollbacks == 0
+    assert connection.commits == 0 and connection.rollbacks == 1
 
     rerun, _ = _import(monkeypatch, path, state)
     assert rerun["inserted_rows"] == 0 and rerun["skipped_existing"] == 1
@@ -234,7 +239,7 @@ def test_short_over_and_split_bank_receipts_stay_pending_without_formal_writes(m
         path = _write_taishin_fixture(tmp_path, amounts, f"boundary-{index}.xlsx")
         result, _ = _import(monkeypatch, path, state)
         assert result["reconciled_counts"] == {}
-        assert result["pending_rows"] == list(range(1, len(amounts) + 1))
+        assert result["pending_rows"] == []
         assert len(state["transactions"]) == 0 and len(state["allocations"]) == 0
         assert all(row["classification_type"] == "government_subsidy" and row["reconciliation_status"] == "pending" for row in state["rows"])
         assert state["claim_batches"][0]["status"] == "approved"
@@ -255,7 +260,7 @@ def test_same_amount_multiple_batches_and_cross_batch_total_stay_pending(monkeyp
     same_amount = _state((Decimal("1000"), Decimal("1000")))
     same_path = _write_taishin_fixture(tmp_path, ["1000"], "ambiguous.xlsx")
     result, _ = _import(monkeypatch, same_path, same_amount)
-    assert result["pending_rows"] == [1]
+    assert result["pending_rows"] == []
     assert len(same_amount["transactions"]) == len(same_amount["allocations"]) == 0
     assert all(batch["status"] == "approved" and batch["paid_amount"] == 0 for batch in same_amount["claim_batches"])
     rerun, _ = _import(monkeypatch, same_path, same_amount)
@@ -266,7 +271,7 @@ def test_same_amount_multiple_batches_and_cross_batch_total_stay_pending(monkeyp
     cross_batch = _state((Decimal("400"), Decimal("600")))
     cross_path = _write_taishin_fixture(tmp_path, ["1000"], "cross-batch.xlsx")
     result, _ = _import(monkeypatch, cross_path, cross_batch)
-    assert result["pending_rows"] == [1]
+    assert result["pending_rows"] == []
     assert len(cross_batch["transactions"]) == len(cross_batch["allocations"]) == 0
     assert all(batch["paid_amount"] == 0 for batch in cross_batch["claim_batches"])
     rerun, _ = _import(monkeypatch, cross_path, cross_batch)

@@ -2,7 +2,7 @@ from datetime import date
 
 import pytest
 
-from services import caregiver_segment_availability_query_service as service
+from subsystems.scheduling import segmented_availability_query as service
 
 
 class QueryAwareCursor:

@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from services.finance_transaction_classifier import classify_finance_transaction
+from domains.finance_import.transaction_classifier import classify_finance_transaction
 
 
 def _row(**overrides):

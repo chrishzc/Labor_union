@@ -1,0 +1,119 @@
+"""MySQL read adapter for Scheduling availability facts."""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any, Callable, Protocol
+
+
+class SegmentedAvailabilityFactsPort(Protocol):
+    def load_case_facts(self, case_no: str) -> dict[str, Any]: ...
+
+
+class MySqlSegmentedAvailabilityFactsRepository:
+    def __init__(self, connection_factory: Callable[[], Any]):
+        self._connection_factory = connection_factory
+
+    def load_case_facts(self, case_no: str) -> dict[str, Any]:
+        connection = self._connection_factory()
+        cursor = None
+        try:
+            cursor = connection.cursor()
+            order = self._load_order(cursor, case_no)
+            if not order or order["status"] != "洽談中":
+                return {"order": order}
+            return self._load_negotiation_facts(cursor, order)
+        finally:
+            if cursor is not None:
+                cursor.close()
+            connection.close()
+
+    def _load_order(self, cursor: Any, case_no: str) -> dict[str, Any] | None:
+        cursor.execute(
+            "SELECT o.case_no, o.status, o.start_date, o.end_date FROM orders o WHERE o.case_no = %s",
+            (case_no,),
+        )
+        return cursor.fetchone()
+
+    def _load_negotiation_facts(self, cursor: Any, order: dict[str, Any]) -> dict[str, Any]:
+        window_start, window_end = _availability_window(order)
+        return {
+            "order": order,
+            "staff_rows": self._load_active_staff(cursor),
+            "assignments": self._load_assignments(cursor, window_start, window_end),
+            "schedule_rows": self._load_assignment_schedule_rows(cursor, window_start, window_end),
+            "legacy_schedule_rows": self._load_legacy_schedule_rows(cursor, window_start, window_end),
+            "buffer_rows": self._load_buffer_rows(cursor, window_start, window_end),
+            "active_lock_rows": self._load_active_lock_rows(cursor, window_start, window_end),
+            "waiting_buffer_rows": self._load_waiting_buffer_rows(cursor, window_start, window_end),
+        }
+
+    def _load_active_staff(self, cursor: Any) -> list[dict[str, Any]]:
+        cursor.execute("SELECT id FROM staff WHERE status = 'active' ORDER BY id")
+        return cursor.fetchall() or []
+
+    def _load_assignments(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
+        cursor.execute(
+            "SELECT id, staff_id, assigned_start_date, assigned_end_date FROM case_staff_assignments "
+            "WHERE (status IS NULL OR status <> 'cancelled') AND assigned_start_date <= %s AND assigned_end_date >= %s",
+            (window_end, window_start),
+        )
+        return cursor.fetchall() or []
+
+    def _load_assignment_schedule_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
+        cursor.execute(
+            "SELECT s.assignment_id, s.staff_id, s.work_date FROM staff_schedule s "
+            "INNER JOIN case_staff_assignments a ON a.id = s.assignment_id "
+            "WHERE s.assignment_id IS NOT NULL AND s.work_date BETWEEN %s AND %s "
+            "AND (a.status IS NULL OR a.status <> 'cancelled')",
+            (window_start, window_end),
+        )
+        return cursor.fetchall() or []
+
+    def _load_legacy_schedule_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
+        cursor.execute(
+            "SELECT staff_id, work_date FROM staff_schedule "
+            "WHERE assignment_id IS NULL AND work_date BETWEEN %s AND %s",
+            (window_start, window_end),
+        )
+        return cursor.fetchall() or []
+
+    def _load_buffer_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
+        cursor.execute(
+            "SELECT assignment_id, staff_id, buffer_date FROM scheduling_buffer_days "
+            "WHERE status = 'active' AND active_marker = 1 AND buffer_date BETWEEN %s AND %s",
+            (window_start, window_end),
+        )
+        return cursor.fetchall() or []
+
+    def _load_active_lock_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
+        cursor.execute(
+            "SELECT d.staff_id, d.lock_date, d.active_marker FROM caregiver_availability_lock_days d "
+            "INNER JOIN caregiver_availability_locks h ON h.id = d.lock_id "
+            "WHERE h.status = 'active' AND h.is_active = 1 AND d.lock_date BETWEEN %s AND %s",
+            (window_start, window_end),
+        )
+        return cursor.fetchall() or []
+
+    def _load_waiting_buffer_rows(self, cursor: Any, window_start: str, window_end: str) -> list[dict[str, Any]]:
+        cursor.execute(
+            "SELECT segment.id AS segment_id, segment.staff_id, segment.assigned_start_date, segment.assigned_end_date "
+            "FROM caregiver_matching_plan_segments segment "
+            "INNER JOIN caregiver_availability_locks header ON header.plan_id = segment.plan_id "
+            "WHERE header.status = 'active' AND header.is_active = 1 "
+            "AND segment.assigned_end_date < %s AND DATE_ADD(segment.assigned_end_date, INTERVAL 7 DAY) >= %s",
+            (window_end, window_start),
+        )
+        return cursor.fetchall() or []
+
+
+def _availability_window(order: dict[str, Any]) -> tuple[str, str]:
+    return _as_date(order["start_date"]).isoformat(), _as_date(order["end_date"]).isoformat()
+
+
+def _as_date(value: Any) -> date:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value), "%Y-%m-%d").date()

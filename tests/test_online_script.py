@@ -36,6 +36,7 @@ def test_online_script_uses_expected_service_entrypoints_without_initializing_da
     assert '"%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000' in script
     assert '"%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501' in script
     assert '"%PY%" scripts/file_watcher.py' in script
+    assert '"%PY%" scripts/run_durable_job_worker.py' in script
     assert "line.main:app" not in script
     assert "init_db" not in script.lower()
     assert "fake_data" not in script.lower()

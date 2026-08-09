@@ -192,10 +192,10 @@ def render_review_manager(
         }
         for item in items
     ]
-    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     nav1, nav2, nav3 = st.columns([1, 2, 1])
-    if nav1.button("上一頁", disabled=result["page"] <= 1, use_container_width=True):
+    if nav1.button("上一頁", disabled=result["page"] <= 1, width="stretch"):
         st.session_state[PAGE_KEY] = result["page"] - 1
         st.rerun()
     nav2.markdown(
@@ -205,7 +205,7 @@ def render_review_manager(
     if nav3.button(
         "下一頁",
         disabled=result["page"] >= result["total_pages"],
-        use_container_width=True,
+        width="stretch",
     ):
         st.session_state[PAGE_KEY] = result["page"] + 1
         st.rerun()
@@ -254,7 +254,7 @@ def render_review_manager(
         )
     st.dataframe(
         pd.DataFrame([{"欄位": key, "內容": value} for key, value in detail_rows.items()]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 

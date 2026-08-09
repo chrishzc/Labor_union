@@ -79,6 +79,16 @@
 | IMP-018 | 多月嫂轉正式時，個別 actual_hours 由 assignment-owned 工作日生成，不直接複製 planned_hours；全案 actual 合計須等於訂單目標時數 | conversion service 與差異案例測試 | 通過 |
 | IMP-019 | 薪資隨成功排班結果自動計算，不設人工薪資確認時間點；應付款／月結從最新正式 assignment-owned 排班重算並再次守恆 | payroll reconciliation、payment service、leave/substitution payroll snapshot tests | 通過 |
 
+## 2026-08-04 重掃後新增改善目標（聚焦月嫂行事曆）
+
+| 改善項 | 改善後契約 | Live 實作與測試證據 | 狀態 |
+|---|---|---|---|
+| IMP-020 | `ui/pages/03_calendar.py` 行事曆預覽著色邏輯與 `assignment` / `lock` 狀態描述一致，`action` 文字不再與實際入口脫節 | 行為導向的 UI/browser 驗收（偏重流程與可操作結果） | 待補 |
+| IMP-021 | 月曆日程 Query 在 service 端需穩定回報固定欄位（含 7 日緩衝）並對應 `schedule_map` 與 `days` | `subsystems/scheduling/staff_monthly_calendar_query.py` + `tests/test_staff_monthly_calendar_service.py` 同步覆蓋 | 待補 |
+| IMP-022 | `test_staff_monthly_calendar_service.py` 依目前查詢次數補齊 FakeConnection 回應，修復 `IndexError`，並補上 30/31 日邊界案例 | service unit tests（`supports_30_day_month`、base shape） | 待補 |
+| IMP-023 | 新增月曆 service 邊界測試：僅 lock、有 cross-month、空 assignment、`assignment`/`lock` 同日多筆交錯 | service tests；必要時 route 回歸檢核 | 待補 |
+| IMP-024 | `/calendar` UI 冒煙驗證新增三類異常場景（請假預覽、跨域代班、loading 與錯誤轉折） | 實際瀏覽器操作與 API timing 紀錄（非格式檢查） | 待補 |
+
 最終驗證證據（2026-07-30）：
 
 - 產品範圍 service／API／UI／schema／integration 測試：`795 passed`；國定假日雙倍薪新契約聚焦驗證 `2 passed`。

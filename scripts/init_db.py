@@ -26,7 +26,7 @@ def load_schema_parts(cursor, schema_parts_dir):
     parts_dir = Path(schema_parts_dir)
     assert parts_dir.name == "schema_parts" or parts_dir.exists()
     loaded_parts = []
-    for part_path in sorted(parts_dir.glob("*.sql"), key=lambda path: path.name):
+    for part_path in sorted(parts_dir.glob("*.sql"), key=_schema_part_sort_key):
         sql_content = part_path.read_text(encoding="utf-8")
         statements = []
         current_stmt = []
@@ -52,6 +52,13 @@ def load_schema_parts(cursor, schema_parts_dir):
             raise RuntimeError(f"載入 schema part 失敗：{part_path.name}: {exc}") from exc
         loaded_parts.append(part_path.name)
     return loaded_parts
+
+
+def _schema_part_sort_key(path: Path) -> tuple[int, str]:
+    prefix = path.name.partition("_")[0]
+    if prefix.isdigit():
+        return int(prefix), path.name
+    return 10**9, path.name
 
 def main():
     schema_path = r'db/schema.sql'

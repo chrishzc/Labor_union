@@ -254,7 +254,7 @@ def render_rich_menu_manager(
             _button_rows(selected_menu),
             num_rows="fixed",
             disabled=not can_edit,
-            use_container_width=True,
+            width="stretch",
             column_order=["label", "action_kind", "action_value"],
             column_config={
                 "label": st.column_config.TextColumn("按鈕名稱", required=True),
@@ -271,10 +271,10 @@ def render_rich_menu_manager(
         )
         preview_col, save_col = st.columns(2)
         preview_clicked = preview_col.form_submit_button(
-            "查看預覽", use_container_width=True
+            "查看預覽", width="stretch"
         )
         save_clicked = save_col.form_submit_button(
-            "儲存修改", type="primary", disabled=not can_edit, use_container_width=True
+            "儲存修改", type="primary", disabled=not can_edit, width="stretch"
         )
 
     if preview_clicked or save_clicked:
@@ -313,7 +313,7 @@ def render_rich_menu_manager(
     preview = st.session_state.get(PREVIEW_KEY)
     if preview:
         st.markdown("#### 選單預覽")
-        st.image(preview, use_container_width=True)
+        st.image(preview, width="stretch")
 
     st.markdown("#### 自訂選單圖片")
     st.caption("若不上傳圖片，系統會依上方顏色自動產生選單。")
@@ -387,7 +387,7 @@ def render_rich_menu_manager(
         }
         for item in history["items"]
     ]
-    st.dataframe(pd.DataFrame(table), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
     failed = [item for item in history["items"] if item["status"] == "failed"]
     if failed and can_edit:
         retry_id = st.selectbox(

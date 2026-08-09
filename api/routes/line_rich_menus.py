@@ -18,8 +18,8 @@ from api.schemas.line_rich_menus import (
     RichMenuPublishRequest,
 )
 from line.worker import wake_worker
-from services.json_config_service import read_config
-from services.line_rich_menu_service import (
+from subsystems.line.configuration_store import read_config
+from subsystems.line.rich_menu_publication_workflow import (
     RichMenuPublicationConflictError,
     RichMenuPublicationNotFoundError,
     create_publication_job,
@@ -27,7 +27,7 @@ from services.line_rich_menu_service import (
     list_publications,
     retry_publication,
 )
-from services.media_storage_service import (
+from subsystems.line.media_archive import (
     MAX_UPLOAD_BYTES,
     MediaAssetNotFoundError,
     MediaValidationError,

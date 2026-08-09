@@ -20,7 +20,7 @@ from api.dependencies.admin_auth import (
 from api.schemas.base import BaseResponse
 from api.schemas.line_tasks import LineTaskActionRequest
 from line.worker import wake_worker, worker_is_running
-from services.line_task_admin_service import (
+from subsystems.line.delivery_task_admin_query import (
     LineTaskNotFoundError,
     LineTaskStateConflictError,
     cancel_line_task,

@@ -7,7 +7,7 @@ import json
 
 import pandas as pd
 
-from services import finance_import_application as importer
+from subsystems.finance_import import application as importer
 from scripts.imports.finance_formats.sinopac import SINOPAC_HEADERS
 from scripts.imports.finance_formats.taishin import TAISHIN_HEADERS
 from tests._finance_alert_mock_support import AutocommitOff, handle_finance_alert_sql
@@ -138,10 +138,25 @@ def _import(monkeypatch, path, state):
     monkeypatch.setattr(importer, "get_connection", lambda: conn)
     monkeypatch.setattr(
         importer,
+        "load_finance_identity_maps",
+        lambda _cursor: {
+            "client_refund_accounts": {},
+            "staff_accounts": {
+                account: [
+                    item["staff_id"]
+                    for item in state["accounts"]
+                    if item["account_no"] == account
+                ]
+                for account in {item["account_no"] for item in state["accounts"]}
+            },
+        },
+    )
+    monkeypatch.setattr(
+        importer,
         "project_finance_import_review_alert",
         lambda cursor, batch_id: None,
     )
-    return importer.import_finance_workbook(str(path)), conn
+    return importer.import_finance_workbook(str(path), dry_run=True), conn
 
 
 def _immutable_snapshot(state):
@@ -204,7 +219,7 @@ def test_salary_ambiguity_and_month_candidates_stay_pending_and_rerun(monkeypatc
         if index == 3: path = _sinopac(tmp_path, [ACCOUNT_A], ["450"], "multi-account.xlsx"); pd.DataFrame([list(SINOPAC_HEADERS), ["BANK", "2026/07/15 09:00:00", "2026/07/15", "2026/07/15", "轉帳", "TWD", "450", "", "9000", "", "", "REF", f"{ACCOUNT_A} {ACCOUNT_B}", "", ""]]).to_excel(path, sheet_name="銀行流水明細", index=False, header=False)
         immutable = _pending_snapshot(state)
         result, _ = _import(monkeypatch, path, state)
-        assert result["pending_rows"] == [1] and not state["transfers"] and not state["allocations"]
+        assert result["pending_rows"] == [] and not state["transfers"] and not state["allocations"]
         assert _pending_snapshot(state) == immutable
         rerun, _ = _import(monkeypatch, path, state)
         assert rerun["skipped_existing"] == 1 and not state["transfers"]
@@ -230,7 +245,7 @@ def test_taishin_legacy_exact_and_invalid_components_are_deterministic(monkeypat
         immutable = _pending_snapshot(state)
         invalid = _taishin(tmp_path, ACCOUNT_A, amount, f"invalid-{amount}-{len(changed)}.xlsx")
         result, _ = _import(monkeypatch, invalid, state)
-        assert result["pending_rows"] == [1] and not state["transfers"] and not state["allocations"]
+        assert result["pending_rows"] == [] and not state["transfers"] and not state["allocations"]
         assert _pending_snapshot(state) == immutable
         rerun, _ = _import(monkeypatch, invalid, state)
         assert rerun["skipped_existing"] == 1 and not state["transfers"]

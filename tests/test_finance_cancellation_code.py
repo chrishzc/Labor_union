@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from services.finance_cancellation_code import resolve_finance_cancellation_code
+from domains.finance_import.cancellation_code import resolve_finance_cancellation_code
 
 
 VALID_CANONICAL = "99781699123456"

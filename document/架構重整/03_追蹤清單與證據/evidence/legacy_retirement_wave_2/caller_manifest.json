@@ -1,0 +1,190 @@
+{
+  "contract": "legacy-retirement-caller-manifest/v1",
+  "generated_at": "2026-08-03T14:20:47.5628043+08:00",
+  "repository": {
+    "branch": "codex/refactor-api-streamlit-architecture",
+    "head": "4081a9b40c91a030c64f1d488411287ec6c01bdc",
+    "dirty": true
+  },
+  "search": {
+    "production_roots": [
+      "api",
+      "infrastructure",
+      "line",
+      "scripts",
+      "services",
+      "subsystems",
+      "ui"
+    ],
+    "method": "exact module import plus exact public symbol review",
+    "dynamic_import_result": "no_target_dynamic_import_found"
+  },
+  "targets": [
+    {
+      "path": "services/multi_caregiver_schedule_generation.py",
+      "sha256": "97b9764001f262f08bf94ef03cac5d1aa6ec9dd46196d84cfed00729ae340867",
+      "git_state": "tracked_clean",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "services/order_assignment_synchronization.py",
+          "line": 26,
+          "kind": "direct_module_import",
+          "sha256": "5ec681c43d5f6d493a9073e4bf9788383422819fe389b837d66a99a4f52e17fc"
+        }
+      ]
+    },
+    {
+      "path": "services/order_assignment_synchronization.py",
+      "sha256": "5ec681c43d5f6d493a9073e4bf9788383422819fe389b837d66a99a4f52e17fc",
+      "git_state": "tracked_modified",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "services/order_actual_start_reconfirmation.py",
+          "line": 17,
+          "kind": "direct_module_import",
+          "git_state": "untracked_excluded",
+          "sha256": "4247461c39c3f438a99836254c0bf01db99995204f06b0aec9e56171d256c151"
+        }
+      ]
+    },
+    {
+      "path": "services/assignment_payroll_reconciliation_service.py",
+      "sha256": "c39d96db5f374ed8f6ce9d692765145439a9783bb6d0e3478ceb1fd341c206e3",
+      "git_state": "tracked_clean",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "services/assignment_schedule_rest_date_service.py",
+          "lines": [
+            2285,
+            3263
+          ],
+          "kind": "function_local_direct_import",
+          "sha256": "368bbbdfc3c465cf21890e42e11b0826bf22449f3bf9eab403973f16fe96d24d"
+        }
+      ]
+    },
+    {
+      "path": "services/staff_occupancy_mutex_service.py",
+      "sha256": "1f997c401bdf43b07f03122701d8602bcf43e0498dcb045b790dc89dec26d1c0",
+      "git_state": "tracked_clean",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "services/caregiver_availability_lock_release_service.py",
+          "line": 12,
+          "kind": "direct_module_import"
+        },
+        {
+          "path": "services/caregiver_availability_lock_cancellation_service.py",
+          "line": 10,
+          "kind": "direct_module_import"
+        },
+        {
+          "path": "services/assignment_schedule_rest_date_service.py",
+          "lines": [
+            31,
+            3015
+          ],
+          "kind": "direct_and_function_local_import"
+        },
+        {
+          "path": "services/caregiver_availability_lock_service.py",
+          "line": 21,
+          "kind": "direct_module_import"
+        }
+      ]
+    },
+    {
+      "path": "services/caregiver_matching_plan_service.py",
+      "sha256": "1b8220d9cd77ec6d455ef8e097b2ee0e93e612cf8b2ee24d6b804ebdd6c351ce",
+      "git_state": "tracked_clean",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "api/routes/matches.py",
+          "line": 11,
+          "kind": "direct_module_import",
+          "sha256": "c28cff34a321a64a53e4565cd161a6c47a3d94ee6ea899f526c22d94dca0bc2e"
+        }
+      ]
+    },
+    {
+      "path": "services/caregiver_matching_communication_service.py",
+      "sha256": "350fccead48655775c237a6e639bb37400843acd5424227a35ed2de3142b1540",
+      "git_state": "tracked_clean",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "api/routes/matches.py",
+          "line": 12,
+          "kind": "direct_module_import",
+          "sha256": "c28cff34a321a64a53e4565cd161a6c47a3d94ee6ea899f526c22d94dca0bc2e"
+        }
+      ]
+    },
+    {
+      "path": "services/finance_alert_workflow.py",
+      "sha256": "2470c112f9591b10b4f4f1c84fc11f2fab9f2399ddbd603b5f21bc3b6d6a3a1e",
+      "git_state": "tracked_clean",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "api/routes/finance_alerts.py",
+          "line": 27,
+          "kind": "direct_module_import",
+          "sha256": "9ad12720a0b9498d7ae592bf4b366b88808f276c74ff6b4301d2e7b3841ea313"
+        }
+      ]
+    },
+    {
+      "path": "services/finance_alert_events.py",
+      "sha256": "b86591954a69fa08f2eb02ff7dec2eab9521d0ac0d81fefcaafc0a65f8150a60",
+      "git_state": "tracked_clean",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "services/finance_alert_workflow.py",
+          "line": 7,
+          "kind": "direct_module_import",
+          "sha256": "2470c112f9591b10b4f4f1c84fc11f2fab9f2399ddbd603b5f21bc3b6d6a3a1e"
+        }
+      ]
+    },
+    {
+      "path": "services/finance_alert_detection.py",
+      "sha256": "ab74569ff80936906188dbcda0d01c43c0c99024c0d5f0f4879806b936335da4",
+      "git_state": "tracked_clean",
+      "public_410_proven": false,
+      "production_callers": [
+        {
+          "path": "services/finance_alert_wiring.py",
+          "line": 27,
+          "kind": "direct_module_import",
+          "sha256": "d4530af5467671a9c04de083ad64509b7ab653b08df19e13336550c1e499dc8a"
+        },
+        {
+          "path": "scripts/generate_fake_data.py",
+          "line": 1595,
+          "kind": "function_local_direct_import",
+          "sha256": "b6115e97172edbcce19e555eb01ec594d0365ce62b4e3195904fc5e549d09bcb"
+        }
+      ]
+    }
+  ],
+  "result": {
+    "qualified_remove_candidate_count": 0,
+    "all_reviewed_targets_have_live_callers": true,
+    "approved_to_remove": false,
+    "effective_disposition": "blocked",
+    "invalidated_by": [
+      "branch_or_head_change",
+      "target_or_caller_source_hash_change",
+      "caller_graph_change",
+      "replacement_path_change",
+      "git_state_change"
+    ]
+  }
+}

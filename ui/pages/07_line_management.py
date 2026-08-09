@@ -97,6 +97,95 @@ def _planned_panel(name: str, description: str) -> None:
     st.info(f"5.1 已完成安全入口與接口骨架。{description}將在後續 5.x 接上現有 API。")
 
 
+def _render_automatic_notifications(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
+) -> None:
+    workspace = st.radio(
+        "自動通知工作區",
+        ("新好友通知設定", "發送紀錄"),
+        horizontal=True,
+    )
+    if workspace == "新好友通知設定":
+        render_schedule_manager(client, token, profile)
+        return
+    render_task_manager(client, token, profile)
+
+
+def _render_messages(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
+) -> None:
+    render_message_manager(client, token, profile)
+
+
+def _render_rich_menu(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
+) -> None:
+    render_rich_menu_manager(client, token, profile)
+
+
+def _render_liff(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
+) -> None:
+    render_liff_manager(client, token, profile)
+
+
+def _render_reviews(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
+) -> None:
+    render_review_manager(client, token, profile)
+
+
+def _render_customer_service(
+    _client: LineAdminApiClient,
+    _token: str | None,
+    _profile: dict,
+) -> None:
+    _planned_panel("客服入口", "工會人員客服系統")
+
+
+def _render_audit_log(
+    _client: LineAdminApiClient,
+    _token: str | None,
+    _profile: dict,
+) -> None:
+    _planned_panel("操作紀錄", "管理員異動稽核")
+
+
+LINE_WORKSPACE_RENDERERS = {
+    "使用狀態": _overview,
+    "訊息內容": _render_messages,
+    "自動通知": _render_automatic_notifications,
+    "LINE 下方選單": _render_rich_menu,
+    "LINE 表單": _render_liff,
+    "待確認申請": _render_reviews,
+    "客服入口": _render_customer_service,
+    "操作紀錄": _render_audit_log,
+}
+
+
+def _render_selected_workspace(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
+) -> None:
+    workspace = st.radio(
+        "LINE 管理工作區",
+        tuple(LINE_WORKSPACE_RENDERERS),
+        horizontal=True,
+    )
+    LINE_WORKSPACE_RENDERERS[workspace](client, token, profile)
+
+
 def show() -> None:
     st.title(title)
     client = LineAdminApiClient()
@@ -128,7 +217,7 @@ def show() -> None:
     header_left.caption(
         f"登入者：{profile['display_name']}（{ROLE_LABELS.get(profile['role'], '服務人員')}）"
     )
-    if not bypassed and header_right.button("登出", use_container_width=True):
+    if not bypassed and header_right.button("登出", width="stretch"):
         try:
             client.logout(token)
         except LineAdminApiError:
@@ -136,43 +225,4 @@ def show() -> None:
         _clear_session()
         st.rerun()
 
-    tabs = st.tabs(
-        [
-            "使用狀態",
-            "訊息內容",
-            "自動通知",
-            "LINE 下方選單",
-            "LINE 表單",
-            "待確認申請",
-            "客服入口",
-            "操作紀錄",
-        ]
-    )
-    with tabs[0]:
-        _overview(client, token, profile)
-    with tabs[1]:
-        render_message_manager(client, token, profile)
-
-    with tabs[2]:
-        schedule_tab, task_tab = st.tabs(["新好友通知設定", "發送紀錄"])
-        with schedule_tab:
-            render_schedule_manager(client, token, profile)
-        with task_tab:
-            render_task_manager(client, token, profile)
-
-    with tabs[3]:
-        render_rich_menu_manager(client, token, profile)
-
-    with tabs[4]:
-        render_liff_manager(client, token, profile)
-
-    with tabs[5]:
-        render_review_manager(client, token, profile)
-
-    panels = [
-        ("客服入口", "工會人員客服系統"),
-        ("操作紀錄", "管理員異動稽核"),
-    ]
-    for tab, (name, description) in zip(tabs[6:], panels):
-        with tab:
-            _planned_panel(name, description)
+    _render_selected_workspace(client, token, profile)

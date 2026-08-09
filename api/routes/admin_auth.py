@@ -19,7 +19,7 @@ from api.schemas.admin_auth import (
     AdminSessionResponse,
 )
 from api.schemas.base import BaseResponse
-from services.admin_auth_service import (
+from subsystems.access.authentication_session import (
     AdminPrincipal,
     authenticate_admin,
     record_admin_audit,

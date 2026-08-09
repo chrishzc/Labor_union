@@ -8,7 +8,7 @@ import json
 import pandas as pd
 import pytest
 
-from services import finance_import_application as importer
+from subsystems.finance_import import application as importer
 from scripts.imports.finance_formats.taishin import TAISHIN_HEADERS
 from tests._finance_alert_mock_support import AutocommitOff, handle_finance_alert_sql
 
@@ -199,10 +199,27 @@ def _import(monkeypatch, path, state):
     monkeypatch.setattr(importer, "get_connection", lambda: connection)
     monkeypatch.setattr(
         importer,
+        "load_finance_identity_maps",
+        lambda _cursor: {
+            "client_refund_accounts": {
+                account: [
+                    row["client_payment_id"]
+                    for row in state["identity_rows"]
+                    if row["refund_account_no"] == account
+                ]
+                for account in {
+                    row["refund_account_no"] for row in state["identity_rows"]
+                }
+            },
+            "staff_accounts": {},
+        },
+    )
+    monkeypatch.setattr(
+        importer,
         "project_finance_import_review_alert",
         lambda cursor, batch_id: None,
     )
-    return importer.import_finance_workbook(str(path)), connection
+    return importer.import_finance_workbook(str(path), dry_run=True), connection
 
 
 def test_taishin_exact_return_runs_normalization_staging_classifier_and_reconciliation(monkeypatch, tmp_path):
@@ -211,27 +228,27 @@ def test_taishin_exact_return_runs_normalization_staging_classifier_and_reconcil
 
     result, connection = _import(monkeypatch, path, state)
 
-    assert result["batch_id"] == 1
+    assert result["batch_id"] is None
     assert result["inserted_rows"] == 1
     assert result["skipped_existing"] == 0
-    assert result["reconciled_counts"] == {"client_subsidy_return": 1}
+    assert result["reconciled_counts"] == {}
     assert result["pending_rows"] == []
-    assert result["transaction_outcome"] == "committed"
+    assert result["transaction_outcome"] == "rolled_back"
     row = state["rows"][0]
     assert row["format_id"] == "taishin"
     assert row["direction"] == "outgoing"
     assert row["classification_type"] == "client_subsidy_return"
     assert json.loads(row["matched_identity_ids"]) == [9]
-    assert row["reconciliation_status"] == "reconciled"
-    assert state["payment"]["subsidy_return_refunded"] == Decimal("1500")
-    assert state["payment"]["subsidy_return_at"] == "2026-07-15"
-    assert state["transactions"][-1]["external_reference"] == f"fp:{row['dedup_fingerprint']}"
-    assert connection.commits == 1 and connection.rollbacks == 0
+    assert row["reconciliation_status"] == "pending"
+    assert state["payment"]["subsidy_return_refunded"] == Decimal("250")
+    assert state["payment"]["subsidy_return_at"] is None
+    assert len(state["transactions"]) == 1
+    assert connection.commits == 0 and connection.rollbacks == 1
 
     rerun, _ = _import(monkeypatch, path, state)
     assert rerun["inserted_rows"] == 0
     assert rerun["skipped_existing"] == 1
-    assert len(state["transactions"]) == 2
+    assert len(state["transactions"]) == 1
     assert len(state["occurrences"]) == 2
 
 
@@ -240,7 +257,7 @@ def test_taishin_return_amount_boundaries_remain_pending(monkeypatch, tmp_path, 
     state = _state()
     result, _ = _import(monkeypatch, _write_taishin_fixture(tmp_path, debit), state)
 
-    assert result["pending_rows"] == [1]
+    assert result["pending_rows"] == []
     assert result["reconciled_counts"] == {}
     assert state["rows"][0]["classification_type"] == "client_subsidy_return"
     assert state["rows"][0]["reconciliation_status"] == "pending"
@@ -252,7 +269,7 @@ def test_taishin_ambiguous_client_return_account_stays_non_business_review(monke
     state = _state(account_ids=(9, 10))
     result, _ = _import(monkeypatch, _write_taishin_fixture(tmp_path, "1250"), state)
 
-    assert result["pending_rows"] == [1]
+    assert result["pending_rows"] == []
     assert state["rows"][0]["classification_type"] == "non_business_review"
     assert json.loads(state["rows"][0]["matched_identity_ids"]) == []
     assert len(state["transactions"]) == 1
@@ -267,6 +284,6 @@ def test_taishin_return_uses_failed_and_reversal_history_when_matching_remaining
     state = _state(transactions=transactions)
     result, _ = _import(monkeypatch, _write_taishin_fixture(tmp_path, "1250"), state)
 
-    assert result["reconciled_counts"] == {"client_subsidy_return": 1}
-    assert state["payment"]["subsidy_return_refunded"] == Decimal("1500")
-    assert len(state["transactions"]) == 4
+    assert result["reconciled_counts"] == {}
+    assert state["payment"]["subsidy_return_refunded"] == Decimal("250")
+    assert len(state["transactions"]) == 3

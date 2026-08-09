@@ -5,7 +5,7 @@ from datetime import datetime
 
 import pytest
 
-from services.system_alert_service import (
+from subsystems.anomalies.system_alert_projection import (
     claim_system_alert,
     get_system_alert,
     list_system_alerts,

@@ -4,7 +4,7 @@ import argparse, hashlib, json
 from datetime import date,datetime
 from decimal import Decimal
 from pathlib import Path
-from services.db_service import get_connection
+from infrastructure.mysql.mysql_adapter import get_connection
 from scripts.db_snapshot_fixture_v2_serializer import SerializedTable,build_manifest
 from scripts.db_snapshot_fixture_v2_validator import validate_snapshot_fixture_v2
 from scripts.export_db_snapshot_fixture_v2 import FIXTURE_NAME,FIXTURE_VERSION,SCHEMA_VERSION,DEFAULT_OUTPUT,TABLE_NAMES,JSON_COLUMNS,KEYS

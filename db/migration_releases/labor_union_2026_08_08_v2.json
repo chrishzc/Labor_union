@@ -1,0 +1,192 @@
+{
+  "application_compatibility": {
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "orders-lifecycle-v1",
+      "finance-import-reprocessing-v1"
+    ],
+    "minimum_api_contract": "typed-api-v1",
+    "post_cutover_smoke_ids": [
+      "orders-read",
+      "finance-import-read",
+      "scheduling-read",
+      "payroll-payables-read",
+      "anomalies-read"
+    ],
+    "required_restart_targets": [
+      "api",
+      "streamlit",
+      "file-watcher",
+      "background-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "artifacts": [
+    {
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "name": "137_background_jobs.sql",
+      "relative_path": "db/schema_parts/137_background_jobs.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "5d80d7026585cdda00772723f6dcccd53aa2cdd23ba8ee9b4c3db35addb77718"
+    },
+    {
+      "dependencies": [
+        "111_client_finance_ledger.sql",
+        "125_government_subsidy_domain.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "138_client_subsidy_advance_settlement.sql",
+      "relative_path": "db/schema_parts/138_client_subsidy_advance_settlement.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "9ab035801bc296042c304316bd1968818413f8409237a3060c55386d2e40743b"
+    },
+    {
+      "dependencies": [
+        "61_finance_import_reprocessing.sql",
+        "121_finance_import_preview_apply.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "139_finance_import_historical_reprocess.sql",
+      "relative_path": "db/schema_parts/139_finance_import_historical_reprocess.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "3cb45d0c60c81c33858f3cfcf0fb1165c7dc4a2cc89c050708da3427da45f835"
+    },
+    {
+      "dependencies": [
+        "111_client_finance_ledger.sql",
+        "121_finance_import_preview_apply.sql",
+        "126_client_refund_reversal.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "140_client_refund_return.sql",
+      "relative_path": "db/schema_parts/140_client_refund_return.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "495fb8f8f0693041879fcb2e51924b79ff12bf3be862494a1993a3932ac081f4"
+    },
+    {
+      "dependencies": [
+        "137_background_jobs.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "141_durable_background_job_queue.sql",
+      "relative_path": "db/schema_parts/141_durable_background_job_queue.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "bdf1dc88cbd21adee99fdd8318792ffe080763a17bcb24069af33738de98fd03"
+    },
+    {
+      "dependencies": [
+        "111_client_finance_ledger.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "142_client_deposit_reversal.sql",
+      "relative_path": "db/schema_parts/142_client_deposit_reversal.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "5a3e4434f981667c1449a07579dc92bf3c11d3044883eedcc331ac7fbc831917"
+    },
+    {
+      "dependencies": [
+        "111_client_finance_ledger.sql",
+        "121_finance_import_preview_apply.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "143_client_refund_return_review.sql",
+      "relative_path": "db/schema_parts/143_client_refund_return_review.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "f7173503d9f7b9af58aa0bea5fceb1ed620805809364c6c89cd00c4e2a2b2719"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "144_order_auto_completion_workflow.sql",
+      "relative_path": "db/schema_parts/144_order_auto_completion_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "cd972354905bf5a5a2e772aa020e70cf3f82f50f6f0cc1b0be310427e6682c45"
+    }
+  ],
+  "backfills": [],
+  "contract": "migration-release-manifest/v1",
+  "descriptor_artifact": {
+    "dependencies": [],
+    "name": "labor_union_2026_08_08_v2.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_08_v2.descriptors.json",
+    "sha256": "c219752f08bb6f7884b7f07c920dc4b7420cea552cd356b6ed048ba495342d8a"
+  },
+  "predecessor_release_id": "labor-union-2026-08-02-v1",
+  "release_id": "labor-union-2026-08-08-v2",
+  "release_metadata": {
+    "application_version": "global-architecture-v1",
+    "description": "Additive post-foundation finance, durable-job, and Orders auto-completion schema contracts",
+    "published_at": "2026-08-08",
+    "release_name": "Labor Union architecture additive release v2"
+  },
+  "source_baseline": {
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "baseline_id": "labor-union-2026-08-02-v1",
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "source_must_be_read_only": true
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {
+      "blocking": true,
+      "phase": "post-restore",
+      "policy": "restored-schema-programs-equivalent",
+      "read_only": true,
+      "verification_id": "restored-schema-programs"
+    },
+    {
+      "blocking": true,
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "verification_id": "owned-object-descriptors"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "orders-legacy-projection-unchanged",
+      "read_only": true,
+      "verification_id": "legacy-projection-compatibility"
+    },
+    {
+      "blocking": true,
+      "phase": "post-restart",
+      "policy": "all-application-smoke-ids-pass",
+      "read_only": true,
+      "verification_id": "application-read-smoke"
+    }
+  ]
+}

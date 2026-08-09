@@ -1,6 +1,6 @@
 import pytest
 
-from services.staff_payment_transactions import calculate_staff_payment_state
+from domains.payroll.staff_payment_state import calculate_staff_payment_state
 
 
 def test_failed_transfer_and_return_are_recalculated_as_net_paid_amount():

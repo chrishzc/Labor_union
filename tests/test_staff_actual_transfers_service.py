@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 
-from services.staff_actual_transfers import reconcile_staff_actual_transfer
+from subsystems.staff_payables.actual_transfer_reconciliation import reconcile_staff_actual_transfer
 
 
 FINGERPRINT = "a" * 64

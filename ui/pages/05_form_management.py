@@ -5,8 +5,9 @@
 ================================================================================
 """
 
-import requests
 import streamlit as st
+from ui.api_clients.form_management_api_client import FormManagementApiClient
+from ui.api_clients.order_summary_api_client import OrderSummaryApiClient
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 from ui.pages.form_management.shared import (
@@ -14,23 +15,64 @@ from ui.pages.form_management.shared import (
     safe_int,
     load_json_templates,
 )
-from ui.pages.form_management.tab1_form_builder import _render_tab1_form_builder
 from ui.pages.form_management.tab2_template_library import _render_tab2_template_library
 from ui.pages.form_management.tab3_contract_management import _render_tab3_contract_management
 
 title = "📋 表單與履歷問卷管理"
+_CLIENT_CONTEXT_FIELDS = (
+    "service_time",
+    "service_type",
+    "delivery_type",
+    "residence_type",
+    "city",
+    "identity_status",
+)
+
+
+def _load_form_management_facts(base_url, headers):
+    cursor = st.session_state.get("form_management_summary_after_case_no")
+    page = OrderSummaryApiClient(base_url=base_url, headers=headers).query(
+        page_size=50,
+        after_case_no=cursor,
+    ).page
+    if page is None:
+        raise ValueError("訂單摘要 API 未回傳資料頁")
+    orders = [item.model_dump(mode="json") for item in page.items]
+    statistics = FormManagementApiClient(
+        base_url=base_url,
+        headers=headers,
+    ).statistics().model_dump()
+    return orders, page.next_cursor, statistics
+
+
+def _merge_client_context(target_order, context):
+    client_context = {
+        field: getattr(context, field)
+        for field in _CLIENT_CONTEXT_FIELDS
+    }
+    return {**target_order, **client_context}
+
+
+def _render_order_summary_pagination(next_cursor):
+    cursor = st.session_state.get("form_management_summary_after_case_no")
+    history = st.session_state.setdefault("form_management_summary_cursor_history", [])
+    previous_column, page_column, next_column = st.columns([1, 2, 1])
+    if previous_column.button("上一頁案件", disabled=not history, key="form_management_previous_page"):
+        st.session_state["form_management_summary_after_case_no"] = history.pop()
+        st.rerun()
+    page_column.caption(f"案件摘要第 {len(history) + 1} 頁，每頁最多 50 筆")
+    if next_column.button("下一頁案件", disabled=not next_cursor, key="form_management_next_page"):
+        history.append(cursor)
+        st.session_state["form_management_summary_after_case_no"] = next_cursor
+        st.rerun()
 
 
 def _render_form_management_page_shell(form_db_table_fields, field_types, field_widths, global_stats, target_order, form_table_for_key):
-    """Render FormManagementUI's 3 fixed tabs."""
-    tab1, tab2, tab3 = st.tabs([
-        "➕ 1. 手動創建與設計新表單 (UX 實驗室)",
+    """Render FormManagementUI's 2 fixed tabs."""
+    tab2, tab3 = st.tabs([
         "🗄️ 2. 自訂表單模板庫與 5:5 雙視窗線上編輯預覽",
         "📜 3. 制式定型化契約管理 (EPPP 變數代理引擎)"
     ])
-
-    with tab1:
-        _render_tab1_form_builder(form_db_table_fields, field_types, field_widths, global_stats, target_order)
 
     with tab2:
         _render_tab2_template_library(form_db_table_fields, field_types, field_widths, global_stats, target_order)
@@ -62,31 +104,17 @@ def show():
 
     try:
         admin_headers = build_admin_headers()
-
-        resp_orders = requests.get(
-            f"{base_url}/api/v1/orders",
-            headers=admin_headers,
-            timeout=10,
+        orders_data, next_cursor, global_stats = _load_form_management_facts(
+            base_url,
+            admin_headers,
         )
-        resp_orders.raise_for_status()
-        orders_payload = resp_orders.json()
-        orders_data = orders_payload.get("data") if isinstance(orders_payload, dict) and orders_payload.get("success") else []
-        if not isinstance(orders_data, list):
-            orders_data = []
-    except Exception as e:
-        st.error(f"讀取訂單 API 失敗: {e}")
+    except Exception as error:
+        st.error(f"讀取表單資料 API 失敗: {error}")
         orders_data = []
+        next_cursor = None
+        global_stats = {}
 
-    global_stats = {
-        "global_active_orders_count": len([o for o in orders_data if o.get('order_status') in ['服務中', '訂單成立']]),
-        "global_active_staff_count": len(set([o['staff_name'] for o in orders_data if o.get('staff_name')])),
-        "global_subsidy_orders_count": len([
-            o for o in orders_data
-            if o.get('identity_status') not in {None, '', '一般身分', '一般市民'}
-        ]),
-        "global_total_receivable_sum": sum([safe_int(o.get('total_employer_self_pay_payable')) for o in orders_data]),
-        "global_govt_claim_count": len([o for o in orders_data if o.get('govt_claim_date')])
-    }
+    _render_order_summary_pagination(next_cursor)
 
     col_scope, col_order = st.columns([1.5, 2.5])
     with col_scope:
@@ -103,27 +131,11 @@ def show():
             target_case_no = order_opts[sel_label]
             target_order = next((o for o in orders_data if o['case_no'] == target_case_no), None)
             if target_order:
-                try:
-                    resp_clients = requests.get(
-                        f"{base_url}/api/v1/clients",
-                        headers=admin_headers,
-                        timeout=10,
-                    )
-                    resp_clients.raise_for_status()
-                    clients_payload = resp_clients.json()
-                    client_rows = clients_payload.get("data") if isinstance(clients_payload, dict) and clients_payload.get("success") else []
-                    if isinstance(client_rows, list):
-                        client_row = next((row for row in client_rows if row.get('case_no') == target_case_no), None)
-                        if client_row:
-                            target_order = {
-                                **target_order,
-                                **{
-                                    key: client_row.get(key, '')
-                                    for key in ('service_time', 'service_type', 'delivery_type', 'residence_type', 'city', 'identity_status')
-                                },
-                            }
-                except Exception:
-                    pass
+                context = FormManagementApiClient(
+                    base_url=base_url,
+                    headers=admin_headers,
+                ).case_context(target_case_no)
+                target_order = _merge_client_context(target_order, context)
 
         else:
             st.info("💡 目前切換為「全域/多案件統計模式」，無須鎖定單一訂單。")

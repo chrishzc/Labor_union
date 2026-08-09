@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse, hashlib, json, os, shutil, tempfile
 from datetime import timedelta
 from pathlib import Path
-from services.db_service import get_connection
+from infrastructure.mysql.mysql_adapter import get_connection
 from scripts.db_snapshot_fixture_v2_serializer import serialize_table, build_manifest
 from scripts.db_snapshot_fixture_v2_validator import validate_snapshot_fixture_v2
 

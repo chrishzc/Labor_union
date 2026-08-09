@@ -8,8 +8,8 @@
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal
-from services.caregiver_matching_plan_service import create_matching_plan_version
-from services.caregiver_matching_communication_service import (
+from subsystems.scheduling.matching_plan_workflow import create_matching_plan_version
+from subsystems.scheduling.matching_communication_workflow import (
     cancel_matching_plan,
     get_active_matching_plan_state,
     get_matching_plan_contact_state,
@@ -19,15 +19,11 @@ from services.caregiver_matching_communication_service import (
 )
 from api.dependencies.admin_auth import require_system_admin
 from api.schemas.base import BaseResponse
-from api.schemas.matches import MatchReplyRequest, MatchAssignRequest, MatchCreateRequest
-from services.admin_auth_service import AdminPrincipal
-from services.legacy_caregiver_matching_service import (
-    assign_legacy_staff_to_order,
-    recommend_legacy_staff,
-    record_legacy_matching_reply,
-    send_legacy_matching_information,
-    send_legacy_resume_for_case,
-    send_legacy_resume_to_client,
+from api.error_contracts import internal_query_error
+from api.schemas.matches import MatchReplyRequest, MatchAssignRequest
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.scheduling.matching_recommendation_application import (
+    query_matching_recommendations,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["Matches 案件配對與 LINE 訊息推播"])
@@ -245,7 +241,7 @@ def recommend_staff(
     """智慧粗篩比對月嫂推薦引擎 API (比對 clients.city/address 與檔期 7 天預留備用期)"""
     del principal
     try:
-        data = recommend_legacy_staff(
+        data = query_matching_recommendations(
             case_no=case_no,
             filter_region=filter_region,
             filter_schedule=filter_schedule,
@@ -253,34 +249,30 @@ def recommend_staff(
             filter_time=filter_time
         )
         return BaseResponse(data=data, message="成功計算月嫂智慧粗篩推薦名單")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "matching_recommendation_query_internal_error",
+            "月嫂推薦名單查詢失敗。",
+            "matching-recommendation-query",
+        ) from error
 
 @router.post("/matches/{match_id}/send-info-1", response_model=BaseResponse[Dict[str, Any]])
 def send_info_1(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """發送訂單資訊-1 (粗篩卡片)。若月嫂綁定 staff.line_user_id，同步進行 LINE 實體推播"""
+    """Retired writer; reliable information delivery is matching-plan owned."""
     del principal
-    try:
-        result = send_legacy_matching_information(match_id, 1)
-        return BaseResponse(data=result["data"], message=result["message"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    _raise_legacy_matching_gone(match_id)
 
 @router.post("/matches/{match_id}/send-info-2", response_model=BaseResponse[Dict[str, Any]])
 def send_info_2(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """發送訂單資訊-2 (精篩照護圖譜)。若月嫂綁定 staff.line_user_id，同步進行 LINE 實體推播"""
+    """Retired writer; reliable information delivery is matching-plan owned."""
     del principal
-    try:
-        result = send_legacy_matching_information(match_id, 2)
-        return BaseResponse(data=result["data"], message=result["message"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    _raise_legacy_matching_gone(match_id)
 
 @router.put("/matches/{match_id}/reply", response_model=BaseResponse[bool])
 def reply_matching_inquiry(
@@ -288,28 +280,18 @@ def reply_matching_inquiry(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """更新月嫂意願回覆狀態 (1: 願意, 0: 拒絕, NULL: 待回覆)"""
-    del principal
-    try:
-        success = record_legacy_matching_reply(match_id, req.accepted)
-        return BaseResponse(data=success, message="成功更新月嫂接案意願狀態")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Retired writer; willingness is matching-plan-segment owned."""
+    del req, principal
+    _raise_legacy_matching_gone(match_id)
 
 @router.post("/matches/{match_id}/send-resume", response_model=BaseResponse[bool])
 def send_resume_to_client(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """傳送去識別化月嫂履歷圖卡給客戶 LINE 帳號"""
+    """Retired writer; reliable resume delivery is matching-plan owned."""
     del principal
-    try:
-        return BaseResponse(
-            data=send_legacy_resume_to_client(match_id),
-            message="已成功將去識別化月嫂履歷傳送給客戶 LINE 帳號",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    _raise_legacy_matching_gone(match_id)
 
 
 @router.post("/orders/{case_no}/send-resume", response_model=BaseResponse[Dict[str, Any]])
@@ -317,17 +299,27 @@ def send_resume_for_case(
     case_no: str = Path(..., description="案件編號"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """找出該案件中已被接受但履歷尚未發送的候選人，發送履歷並記錄時間 (供異常警示中心一鍵使用)。"""
+    """Retired writer; anomaly recovery must navigate to the matching plan."""
     del principal
-    try:
-        match_id = send_legacy_resume_for_case(case_no)
-        if match_id is None:
-            raise HTTPException(status_code=404, detail="找不到已接受媒合且履歷尚未發送的候選人")
-        return BaseResponse(data={"match_id": match_id}, message="履歷已發送並記錄")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_case_resume_writer_retired",
+            "case_no": case_no,
+            "replacement": "Matching Plan resumes endpoint",
+        },
+    )
+
+
+def _raise_legacy_matching_gone(match_id):
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_matching_writer_retired",
+            "match_id": match_id,
+            "replacement": "Matching Plan communication endpoints",
+        },
+    )
 
 @router.post("/orders/{case_no}/assign-staff", response_model=BaseResponse[bool])
 def assign_staff_to_order(
@@ -335,10 +327,13 @@ def assign_staff_to_order(
     case_no: str = Path(..., description="案件編號"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """成立訂單並定案指派服務人員/月嫂"""
-    del principal
-    try:
-        success = assign_legacy_staff_to_order(case_no=case_no, staff_id=req.staff_id)
-        return BaseResponse(data=success, message="成功定案指派月嫂，訂單狀態升級為訂單成立！")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Retired writer; formal staffing requires Assignment Plan Preview and Apply."""
+    del req, principal
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_single_staff_assignment_endpoint_retired",
+            "case_no": case_no,
+            "replacement": "Assignment Plan Query/Preview/Apply",
+        },
+    )

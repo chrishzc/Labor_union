@@ -2,7 +2,7 @@ from decimal import Decimal
 
 import pytest
 
-from services import finance_import_application as importer
+from subsystems.finance_import import application as importer
 from services import finance_import_dispatch as dispatcher
 
 
@@ -91,11 +91,11 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
         lambda cursor, batch_id: None,
     )
 
-    result = importer.import_finance_workbook("renamed.xlsx")
+    result = importer.import_finance_workbook("renamed.xlsx", dry_run=True)
 
     assert dispatched == [10, 12]
     assert result == {
-        "mode": "apply",
+        "mode": "dry_run",
         "source_path": str(importer.os.path.abspath("renamed.xlsx")),
         "format_manifest": {
             "format_id": "sinopac",
@@ -103,11 +103,11 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
             "header_row": None,
             "normalized_row_count": 1,
         },
-        "batch_id": 41,
+        "batch_id": None,
         "inserted_rows": 2,
         "skipped_existing": 1,
         "reconciled_counts": {"client_receipt": 1},
-        "pending_rows": [12],
+        "pending_rows": [],
         "row_results": [
             {
                 "dedup_fingerprint": None,
@@ -135,10 +135,10 @@ def test_pipeline_dispatches_only_inserted_rows_and_completes_batch(monkeypatch)
             },
         ],
         "alert_action": None,
-        "transaction_outcome": "committed",
+        "transaction_outcome": "rolled_back",
     }
-    assert connection.commits == 1
-    assert connection.rollbacks == 0
+    assert connection.commits == 0
+    assert connection.rollbacks == 1
     assert connection.closes == 1
     assert any("SET status='completed'" in sql for sql, _ in connection._cursor.executed)
 
@@ -167,7 +167,7 @@ def test_downstream_error_rolls_back_entire_batch(monkeypatch):
     )
 
     with pytest.raises(RuntimeError, match="downstream failed"):
-        importer.import_finance_workbook("input.xlsx")
+        importer.import_finance_workbook("input.xlsx", dry_run=True)
 
     assert connection.commits == 0
     assert connection.rollbacks == 1

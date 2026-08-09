@@ -2,6 +2,7 @@ import re
 import requests
 import streamlit as st
 import pandas as pd
+from uuid import uuid4
 from ui.pages import shared
 
 title = "🔍 資料庫原始資料瀏覽"
@@ -194,10 +195,6 @@ DB_COLUMN_LABEL_MAP = {
     "second_payment_received_at": "第二期全額核銷日",
     "amount_receivable": "應收總額",
     "amount_received": "實收總額",
-    "subsidy_refund_receivable": "補助退還應收",
-    "subsidy_refund_refunded": "補助退還已收",
-    "subsidy_refund_due_date": "補助退還到期日",
-    "subsidy_refund_at": "補助退還完成日",
     "subsidy_return_receivable": "補助返還應收",
     "subsidy_return_refunded": "補助返還已退",
     "subsidy_return_due_date": "補助返還到期日",
@@ -339,8 +336,8 @@ def show():
             index=0
         )
     
-    # 方案 C：如果選擇國定假日，提供新增/更新/刪除的互動管理功能
-    if table_name == "holidays":
+    # Historical holiday editor has moved to Calendar's Scheduling-owned panel.
+    if False and table_name == "holidays":
         st.markdown("### 📅 國定假日管理面板 (方案 A+C)")
         col_add, col_del = st.columns(2)
         
@@ -478,72 +475,99 @@ def show():
                 column_config[display_col] = st.column_config.Column(disabled=True)
 
         st.write(f"共 {len(filtered_df)} 筆資料 (總共 {len(df)} 筆)")
-        st.caption("💡 可直接在表格中點選儲存格修改內容（灰色欄位為系統/關聯欄位，唯讀鎖定；下拉選單欄位僅能從清單中選擇），修改完成後請務必點擊下方「💾 儲存變更」按鈕才會寫入資料庫。")
+        st.caption("此頁僅供查閱原始投影；任何異動必須由所屬業務頁面的 Preview/Apply 命令處理。")
 
+        editable_display_columns = [
+            rename_map[column]
+            for column in filtered_df.columns
+            if column not in editable_cols or column == pk_col
+        ]
         edited_display_df = st.data_editor(
             display_df,
             width='stretch',
             num_rows="fixed",
             column_config=column_config,
-            disabled=[rename_map[pk_col]] if pk_col in rename_map else False,
+            disabled=editable_display_columns,
             key=f"editor_{table_name}",
         )
 
+        preview_key = f"source_correction_preview_{table_name}"
         if is_read_only:
-            st.info("此資料表目前為唯讀保護模式，僅供瀏覽，不開放即時寫入。")
-        elif st.button("💾 儲存變更", type="primary"):
-            edited_df = edited_display_df.rename(columns=reverse_rename_map)
+            st.info("此資料表目前為唯讀保護模式，僅供瀏覽，不開放來源資料更正。")
+        elif st.button("預覽變更", type="primary"):
+            edited_df = edited_display_df.rename(columns=reverse_rename_map).set_index(pk_col, drop=False)
             original_df = filtered_df.set_index(pk_col, drop=False)
-            edited_df = edited_df.set_index(pk_col, drop=False)
-
-            updated_rows = 0
-            errors = []
+            previews, errors = [], []
             for row_id, edited_row in edited_df.iterrows():
                 if row_id not in original_df.index:
                     continue
-                original_row = original_df.loc[row_id]
-                changed_fields = {}
-                for col in edited_df.columns:
-                    if col == pk_col or col not in editable_cols:
-                        continue
-                    old_val = original_row.get(col)
-                    new_val = edited_row.get(col)
-                    old_str = "" if pd.isna(old_val) else str(old_val)
-                    new_str = "" if pd.isna(new_val) else str(new_val)
-                    if old_str != new_str:
-                        changed_fields[col] = None if pd.isna(new_val) else new_val
-
-                format_err = None
-                for col, val in changed_fields.items():
-                    if col in format_validators and val:
-                        pattern, err_msg = format_validators[col]
-                        if not pattern.match(str(val)):
-                            format_err = f"第 {row_id} 筆欄位 {col} 格式錯誤: {err_msg}"
-                            break
-
-                if format_err:
-                    errors.append(format_err)
-                elif changed_fields:
-                    try:
-                        patch_resp = requests.patch(
-                            f"{_resolve_api_base_url()}/api/v1/admin/data-browser/{table_name}/{row_id}",
-                            headers=admin_headers,
-                            json={"updates": changed_fields},
-                            timeout=15,
-                        )
-                        patch_resp.raise_for_status()
-                        updated_rows += 1
-                    except Exception as row_err:
-                        errors.append(f"第 {row_id} 筆更新失敗: {row_err}")
-
+                changed_fields = {
+                    column: None if pd.isna(edited_row.get(column)) else edited_row.get(column)
+                    for column in editable_cols
+                    if column in edited_df.columns
+                    and ("" if pd.isna(original_df.loc[row_id].get(column)) else str(original_df.loc[row_id].get(column)))
+                    != ("" if pd.isna(edited_row.get(column)) else str(edited_row.get(column)))
+                }
+                for column, value in changed_fields.items():
+                    if column in format_validators and value and not format_validators[column][0].match(str(value)):
+                        errors.append(f"第 {row_id} 筆欄位 {column} 格式錯誤: {format_validators[column][1]}")
+                if errors or not changed_fields:
+                    continue
+                try:
+                    response = requests.post(
+                        f"{_resolve_api_base_url()}/api/v1/admin/data-browser/{table_name}/{row_id}/source-correction/preview",
+                        headers=admin_headers,
+                        json={"updates": changed_fields},
+                        timeout=15,
+                    )
+                    response.raise_for_status()
+                    previews.append({"row_id": row_id, "updates": changed_fields, "preview": response.json()["data"]})
+                except Exception as error:
+                    errors.append(f"第 {row_id} 筆預覽失敗: {error}")
             if errors:
-                for err_msg in errors:
-                    st.error(err_msg)
-            if updated_rows > 0:
-                st.success(f"✅ 已成功經由 Admin API 儲存 {updated_rows} 筆變更資料並寫入稽核日誌！")
-                st.rerun()
-            elif not errors:
-                st.info("目前沒有偵測到任何欄位變動。")
+                for error in errors:
+                    st.error(error)
+            elif previews:
+                st.session_state[preview_key] = previews
+            else:
+                st.info("目前沒有偵測到任何允許欄位的變動。")
 
+        previews = st.session_state.get(preview_key, [])
+        if previews:
+            st.subheader("來源資料更正預覽")
+            for item in previews:
+                st.json({"row_id": item["row_id"], "changes": item["preview"].get("changes", {})})
+            reason = st.text_input("更正原因", key=f"source_correction_reason_{table_name}")
+            if st.button("取消預覽變更"):
+                st.session_state.pop(preview_key, None)
+                st.session_state.pop(f"source_correction_reason_{table_name}", None)
+                st.rerun()
+            if st.button("確認套用預覽變更", type="primary"):
+                if not reason.strip():
+                    st.error("請填寫更正原因。")
+                else:
+                    errors = []
+                    for item in previews:
+                        try:
+                            response = requests.post(
+                                f"{_resolve_api_base_url()}/api/v1/admin/data-browser/{table_name}/{item['row_id']}/source-correction/apply",
+                                headers={**admin_headers, "Idempotency-Key": str(uuid4())},
+                                json={
+                                    "updates": item["updates"],
+                                    "preview_fingerprint": item["preview"]["preview_fingerprint"],
+                                    "reason": reason.strip(),
+                                },
+                                timeout=15,
+                            )
+                            response.raise_for_status()
+                        except Exception as error:
+                            errors.append(f"第 {item['row_id']} 筆套用失敗: {error}")
+                    if errors:
+                        for error in errors:
+                            st.error(error)
+                    else:
+                        st.session_state.pop(preview_key, None)
+                        st.success(f"已套用 {len(previews)} 筆來源資料更正並寫入 receipt。")
+                        st.rerun()
     except Exception as e:
         st.error(f"❌ 讀取資料庫中繼資料 API 出錯: {e}")

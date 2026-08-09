@@ -1,4 +1,4 @@
-from services import accounting_source_projection as projection
+from subsystems.client_finance import accounting_source_query as projection
 
 
 class FakeCursor:

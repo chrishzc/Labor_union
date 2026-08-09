@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from services import multi_caregiver_schedule_read as service
+from subsystems.scheduling import assignment_schedule_query as service
 
 FIXED_DB_DATE = date(2026, 7, 10)
 
@@ -69,7 +69,7 @@ class QueryAwareCursor:
     def execute(self, sql, params=None):
         self.executed.append((" ".join(sql.split()), tuple(params) if params is not None else None))
         sql_upper = sql.upper()
-        if "SELECT CURRENT_DATE AS CURRENT_DATE" in sql_upper:
+        if "SELECT CURRENT_DATE" in sql_upper:
             self.current = self.fixture.get("current_date")
         elif "FROM CASE_STAFF_ASSIGNMENTS A" in sql_upper and "WHERE A.ID = %S" in sql_upper:
             self.current = self.fixture["assignments"].get(params[0]) if params else None

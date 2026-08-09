@@ -6,12 +6,12 @@ from datetime import date, datetime, timedelta
 
 import pytest
 
-from services.multi_caregiver_assignment_rules import (
+from subsystems.scheduling.assignment_rules import (
     AssignmentPlanTransitionConflict,
     validate_assignment_plan_transition,
     validate_non_overlapping_assignment_interval,
 )
-import services.multi_caregiver_assignment_rules as rules
+import subsystems.scheduling.assignment_rules as rules
 
 
 def _assignment(assignment_id, start, end, status="active"):

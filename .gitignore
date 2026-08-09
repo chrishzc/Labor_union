@@ -27,8 +27,8 @@ start.bat
 # Private environment variables / secrets
 .env
 
-# ADAD (Architecture-Driven Agentic Development)
-.agents/
+# Legacy local architecture records
+history/adad/
 system_map.md
 system_map.yaml
 *scripts_map.md
@@ -36,22 +36,22 @@ system_map.yaml
 implementation_plan.md
 walkthrough.md
 task.md
-TASK_INDEX_FILE
-task_index.json
 task_snapshots/
 checkpoints/
 adad_tmp/
-adad/
+.adad_tmp/
+TASK_INDEX_FILE
+task_index.json
 
 # System generated agent logs & planning
 history/
 task-*.md
 PROJECT_SPEC.md
-AGENTS.md
 scratch/
-system_map.schema.json
+.pytest_tmp/
+.pytest_tmp_*
 
-# Preserve system_map files
+# Preserve tracked legacy system maps
 !**/system_map.yaml
 !**/system_map.md
 !**/*system_map.yaml

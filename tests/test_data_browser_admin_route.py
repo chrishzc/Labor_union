@@ -6,9 +6,8 @@ from fastapi.testclient import TestClient
 
 from api.dependencies import admin_auth
 from api.routes import data_browser_admin
-from api.schemas.data_browser import DataBrowserPatchRequest
-from services import data_browser_admin_schema_service
-from services.admin_auth_service import AdminPrincipal
+from api.schemas.data_browser import DataBrowserSourceCorrectionPreviewRequest
+from subsystems.access.authentication_session import AdminPrincipal
 
 
 def _principal(role: str = "system_admin") -> AdminPrincipal:
@@ -54,78 +53,38 @@ def test_admin_router_rejects_insufficient_formal_role(monkeypatch):
     assert response.json()["detail"] == "需要 system_admin 或更高權限"
 
 
-def test_patch_passes_verified_principal_username_to_service(monkeypatch):
-    captured = {}
-
-    def _fake_patch(
-        table_name,
-        row_id,
-        updates,
-        operator_id="admin_ui",
-        operator_role="admin",
-    ):
-        captured.update(
-            table=table_name,
-            row_id=row_id,
-            operator=operator_id,
-            role=operator_role,
-            updates=updates,
-        )
-        return True
-
-    monkeypatch.setattr(
-        data_browser_admin_schema_service,
-        "patch_data_browser_table_row",
-        _fake_patch,
-    )
-
-    response = data_browser_admin.patch_data_browser_row(
-        DataBrowserPatchRequest(updates={"service_days": 10}),
-        table="orders",
-        row_id_str="TEST_ROUTE_001",
-        principal=_principal(),
-    )
-
-    assert response.data is True
-    assert captured["operator"] == "verified-admin"
-    assert captured["role"] == "system_admin"
-
-
-def test_patch_data_browser_row_validation_error_maps_to_422(monkeypatch):
-    monkeypatch.setattr(
-        data_browser_admin_schema_service,
-        "patch_data_browser_table_row",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            ValueError("欄位 [bad] 不在可編輯白名單中，更新已取消。")
-        ),
-    )
-
+def test_patch_is_retired_and_redirects_to_owning_domain():
     with pytest.raises(HTTPException) as error:
         data_browser_admin.patch_data_browser_row(
-            DataBrowserPatchRequest(updates={"bad": "x"}),
             table="orders",
             row_id_str="TEST_ROUTE_001",
             principal=_principal(),
         )
 
-    assert error.value.status_code == 422
+    assert error.value.status_code == 410
+    assert error.value.detail["code"] == "data_browser_write_retired"
+    assert "Preview/Apply" in error.value.detail["replacement"]
 
 
-def test_patch_data_browser_row_not_found_maps_to_404(monkeypatch):
+def test_source_correction_preview_delegates_to_typed_workflow(monkeypatch):
+    class _Connection:
+        def close(self):
+            return None
+
+    monkeypatch.setattr(data_browser_admin, "get_connection", lambda: _Connection())
     monkeypatch.setattr(
-        data_browser_admin_schema_service,
-        "patch_data_browser_table_row",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            ValueError("指定資料列不存在或欄位變更未生效，更新已取消。")
-        ),
+        data_browser_admin.source_data_correction,
+        "preview",
+        lambda _repository, table, row_id, updates: {
+            "table": table, "row_id": row_id, "changes": updates
+        },
     )
 
-    with pytest.raises(HTTPException) as error:
-        data_browser_admin.patch_data_browser_row(
-            DataBrowserPatchRequest(updates={"service_days": 99}),
-            table="orders",
-            row_id_str="TEST_ROUTE_MISS",
-            principal=_principal(),
-        )
+    response = data_browser_admin.preview_source_correction(
+        "clients",
+        1,
+        DataBrowserSourceCorrectionPreviewRequest(updates={"phone": "0988"}),
+        _principal(),
+    )
 
-    assert error.value.status_code == 404
+    assert response.data == {"table": "clients", "row_id": 1, "changes": {"phone": "0988"}}
