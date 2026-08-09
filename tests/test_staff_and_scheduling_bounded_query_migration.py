@@ -2,6 +2,11 @@
 
 from pathlib import Path
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from api.routes import staff as staff_router
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -32,6 +37,32 @@ def test_scheduling_page_uses_order_summary_cursor_pagination():
     assert "_render_scheduling_order_pagination" in source
     assert "scheduling_{workspace}_order_after_case_no" in source
     assert 'page_size=50' in source
+    assert "StaffSummaryApiClient" in source
+    assert "_render_staff_summary_pagination" in source
+    assert '"/api/v1/staff"' not in source
+
+
+def test_leave_substitution_uses_bounded_staff_summary_pagination():
+    source = (ROOT / "ui/pages/scheduling/leave_substitution_panel.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "StaffSummaryApiClient" in source
+    assert "page_size=200" in source
+    assert "_render_staff_option_pagination" in source
+    assert '"/api/v1/staff"' not in source
+
+
+def test_legacy_staff_list_endpoint_is_retired():
+    source = (ROOT / "api/routes/staff.py").read_text(encoding="utf-8")
+
+    assert "status_code=410" in source
+    assert 'get_table_data("staff")' not in source
+
+    app = FastAPI()
+    app.include_router(staff_router.router)
+    response = TestClient(app).get("/api/v1/staff")
+    assert response.status_code == 410
 
 
 def test_holiday_management_is_a_separate_scheduling_workspace():

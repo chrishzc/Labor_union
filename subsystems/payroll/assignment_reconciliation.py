@@ -254,16 +254,6 @@ def reconcile_assignment_payroll_with_cursor(
              FROM staff_payments WHERE case_no = %s FOR UPDATE""",
         (case_no,), "staff payments",
     )
-    settlements = _q(
-        cursor,
-        """SELECT d.assignment_id, p.case_no, p.staff_id, p.service_hours, p.hourly_rate,
-                  p.service_salary, p.floor_fee_amount
-             FROM staff_monthly_settlement_details d
-             JOIN staff_payments p ON p.id = d.staff_payment_id
-            WHERE p.case_no = %s FOR UPDATE""",
-        (case_no,), "settlement details",
-    )
-
     errors: list[dict[str, Any]] = []
     active: dict[int, Mapping[str, Any]] = {}
     cancelled: dict[int, Mapping[str, Any]] = {}
@@ -501,7 +491,7 @@ def reconcile_assignment_payroll_with_cursor(
             errors.append(_error("payment_assignment_invalid", assignment_id if isinstance(assignment_id, int) else None))
             continue
         payment_by_assignment[assignment_id] = payment
-    for payment in [*payments, *settlements]:
+    for payment in payments:
         assignment_id = payment.get("assignment_id")
         if assignment_id not in details:
             continue
@@ -542,5 +532,4 @@ def reconcile_assignment_payroll_with_cursor(
         "floor_fee_total": floor_fee_total, "assignments": assignment_details,
         "errors": _sort_errors(errors), "can_create_staff_payments": not errors,
     }
-
 

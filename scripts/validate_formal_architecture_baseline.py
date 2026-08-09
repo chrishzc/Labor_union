@@ -11,7 +11,14 @@ import sys
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 GENERATOR = PROJECT_ROOT / "scripts" / "generate_formal_architecture_baseline.py"
-EVIDENCE_PATH = PROJECT_ROOT / "document" / "架構重整" / "evidence" / "formal_baseline_v1.json"
+EVIDENCE_PATH = (
+    PROJECT_ROOT
+    / "document"
+    / "架構重整"
+    / "03_追蹤清單與證據"
+    / "evidence"
+    / "formal_baseline_v1.json"
+)
 
 
 def _payload() -> dict[str, object]:

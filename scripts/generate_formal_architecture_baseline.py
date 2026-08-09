@@ -15,7 +15,14 @@ if str(PROJECT_ROOT) not in sys.path:
 from shared_kernel.writer_inventory import scan_production_writers, writer_scan_fingerprint
 
 
-EVIDENCE_PATH = PROJECT_ROOT / "document" / "架構重整" / "evidence" / "formal_baseline_v1.json"
+EVIDENCE_PATH = (
+    PROJECT_ROOT
+    / "document"
+    / "架構重整"
+    / "03_追蹤清單與證據"
+    / "evidence"
+    / "formal_baseline_v1.json"
+)
 WRITER_ROOTS = ("api", "domains", "infrastructure", "line", "scripts", "subsystems")
 RUNTIME_ROOTS = ("api", "domains", "infrastructure", "line", "scripts", "subsystems", "ui")
 LEGACY_FIELDS = ("subsidy_refund_receivable", "subsidy_refund_refunded")

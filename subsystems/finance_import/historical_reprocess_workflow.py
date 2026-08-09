@@ -129,7 +129,12 @@ class HistoricalReprocessRepository(Protocol):
     def find_historical_reprocess_receipt(self, key: IdempotencyKey) -> StoredHistoricalReprocessReceipt | None: ...
     def append_reprocess_classification_events(self, plan: HistoricalReprocessPlan, actor: ActorContext) -> None: ...
     def append_owner_selection_events(self, plan: HistoricalReprocessPlan, request: HistoricalReprocessApplyRequest) -> None: ...
-    def append_reprocess_run(self, plan: HistoricalReprocessPlan, dispatched_count: int) -> int: ...
+    def append_reprocess_run(
+        self,
+        plan: HistoricalReprocessPlan,
+        dispatched_count: int,
+        actor: ActorContext,
+    ) -> int: ...
     def append_reprocess_outbox(self, plan: HistoricalReprocessPlan) -> None: ...
     def advance_batch_version(self, batch_identity: str, expected_version: int, resulting_version: int) -> None: ...
     def save_historical_reprocess_receipt(self, key: IdempotencyKey, stored: StoredHistoricalReprocessReceipt) -> None: ...
@@ -230,7 +235,11 @@ class HistoricalReprocessWorkflow:
             _require_final_dispatch(row, result)
 
     def _persist(self, request, plan, command):
-        run_id = self._repository.append_reprocess_run(plan, len(plan.rows))
+        run_id = self._repository.append_reprocess_run(
+            plan,
+            len(plan.rows),
+            request.actor,
+        )
         receipt = HistoricalReprocessReceipt(plan.batch_identity, plan.batch_version + 1, run_id, len(plan.rows), len(plan.rows), plan.fingerprint)
         self._repository.append_reprocess_outbox(plan)
         self._repository.advance_batch_version(plan.batch_identity, plan.batch_version, receipt.resulting_batch_version)

@@ -1,6 +1,5 @@
 """Final subsystem contract for finance import recovery.
 
-The ASUS target-host acceptance is deliberately opt-in and read-only here.
 Applying a historical plan remains an explicit operator command after its
 dry-run fingerprint has been reviewed.
 """
@@ -45,14 +44,14 @@ IMPORT_CLI_SOURCE = (
 REPROCESS_CLI_SOURCE = (
     PROJECT_ROOT / "scripts" / "imports" / "reprocess_finance_import_batch.py"
 )
-DISPOSABLE_SCHEMA_PREFIX = "adad_finance_recovery_"
+DISPOSABLE_SCHEMA_PREFIX = "finance_recovery_"
 ASUS_OCCURRENCE_COUNT = 2659
 ASUS_DISTINCT_COUNT = 2655
 ASUS_INCOMING_COUNT = 2058
 ASUS_OUTGOING_COUNT = 597
 ASUS_VALID_VIRTUAL_ACCOUNT_COUNT = 279
 ASUS_REMAINING_REVIEW_COUNT = 2376
-_DISPOSABLE_SCHEMA = re.compile(r"^adad_finance_recovery_[0-9a-f]{12}$")
+_DISPOSABLE_SCHEMA = re.compile(r"^finance_recovery_[0-9a-f]{12}$")
 _REQUIRED_SOURCE_TABLES = frozenset(
     {
         "beclass_records",
@@ -62,7 +61,6 @@ _REQUIRED_SOURCE_TABLES = frozenset(
         "finance_alerts",
         "finance_import_batches",
         "finance_import_occurrences",
-        "finance_import_reclassification_events",
         "finance_import_reprocess_runs",
         "finance_import_rows",
         "government_subsidy_transactions",
@@ -582,14 +580,6 @@ def _batch_snapshot(connect: object, batch_id: int) -> dict[str, object]:
                 (batch_id,),
             )
             runs = cursor.fetchall()
-            event_count = _fetch_scalar(
-                cursor,
-                """SELECT COUNT(*) AS count
-                   FROM finance_import_reclassification_events event
-                   JOIN finance_import_reprocess_runs run ON run.id=event.run_id
-                   WHERE run.batch_id=%s""",
-                (batch_id,),
-            )
             formal_counts = {
                 "client": _fetch_scalar(
                     cursor,
@@ -645,7 +635,6 @@ def _batch_snapshot(connect: object, batch_id: int) -> dict[str, object]:
             return {
                 "rows": rows,
                 "runs": runs,
-                "event_count": event_count,
                 "formal_counts": formal_counts,
                 "finance_alerts": finance_alerts,
                 "system_alerts": system_alerts,
@@ -759,22 +748,6 @@ def test_recovery_sources_preserve_plan_replay_and_bounded_output_contracts() ->
     assert "raw_payload" not in import_cli
 
 
-def test_target_host_acceptance_is_not_silently_replaced_by_local_data(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv(
-        "FINANCE_IMPORT_RECOVERY_TARGET_BATCH_ID",
-        raising=False,
-    )
-    target_batch_id = None
-    target_host_acceptance = (
-        "passed" if target_batch_id is not None else "not_executed"
-    )
-
-    assert target_host_acceptance == "not_executed"
-    assert len(normalize_workbook(str(REPOSITORY_FIXTURE))["normalized_rows"]) == 1
-
-
 def _captured_summary(
     capsys: pytest.CaptureFixture[str],
 ) -> dict[str, object]:
@@ -860,7 +833,7 @@ def test_bounded_cli_stdout_reports_and_apply_prevalidation(
     reprocess_report = tmp_path / "reprocess-report.json"
     reprocess_result = {
         "db_identity": {
-            "database": "adad_finance_recovery_simulation",
+            "database": "finance_recovery_simulation",
             "server": "mysql-test",
         },
         "batch_manifest": {"batch_id": 1},
@@ -1089,7 +1062,6 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
     )
     after_apply = _batch_snapshot(connect, batch_id)
     assert len(after_apply["runs"]) == 1
-    assert after_apply["event_count"] == ASUS_VALID_VIRTUAL_ACCOUNT_COUNT
     assert after_apply["formal_counts"] == {
         "client": 0,
         "government": 0,
@@ -1179,7 +1151,7 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
     finally:
         connection.close()
     after_scan = _batch_snapshot(connect, batch_id)
-    for key in ("rows", "runs", "event_count", "formal_counts"):
+    for key in ("rows", "runs", "formal_counts"):
         assert after_scan[key] == before_scan[key]
     assert after_scan["system_alerts"][0]["status"] == "open"
 

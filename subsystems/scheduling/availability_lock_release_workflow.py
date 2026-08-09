@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import date
-from decimal import Decimal
 from typing import Any
 
 from subsystems.scheduling.availability_lock_helpers import normalize_plan_snapshot
@@ -44,18 +43,6 @@ def _as_date(value: Any, field_name: str) -> date:
     if value.__class__ is not date:
         raise ValueError(f"{field_name} must be a date")
     return value
-
-
-def _as_decimal(value: Any, field_name: str) -> Decimal:
-    if value is None or isinstance(value, bool):
-        raise ValueError(f"{field_name} must be a decimal amount")
-    try:
-        amount = Decimal(str(value))
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field_name} must be a decimal amount") from exc
-    if amount < 0:
-        raise ValueError(f"{field_name} must not be negative")
-    return amount
 
 
 def _exact_row(value: Any, expected_keys: frozenset[str], field_name: str) -> dict[str, Any]:
@@ -391,93 +378,83 @@ def _load_lock_rows_for_update(cursor: Any, lock_id: int) -> tuple[dict[str, Any
     return lock_row, normalized
 
 
-def _normalize_client_payment_summary(row: Any) -> dict[str, Any]:
-    row = _exact_row(row, frozenset({"case_no", "deposit_receivable", "deposit_received"}), "client_payment_summary")
-    _strict_str(row["case_no"], "client_payment_summary.case_no")
-    deposit_receivable = _as_decimal(row["deposit_receivable"], "client_payment_summary.deposit_receivable")
-    deposit_received = _as_decimal(row["deposit_received"], "client_payment_summary.deposit_received")
-    if deposit_receivable < 0 or deposit_received < 0:
-        raise ValueError("deposit summary values cannot be negative")
-    if deposit_received % Decimal("0.01") != Decimal("0.00"):
-        raise ValueError("deposit_received precision invalid")
+def _normalize_deposit_settlement_projection(row: Any) -> dict[str, Any]:
+    fields = frozenset({
+        "case_no", "deposit_obligation_identity", "settlement_state",
+        "contracted_amount_ntd", "allocated_net_amount_ntd", "settlement_identity",
+        "source_fingerprint", "projection_version", "latest_ledger_entry_id",
+    })
+    row = _exact_row(row, fields, "client_deposit_settlement_projection")
+    case_no = _strict_str(row["case_no"], "client_deposit_settlement_projection.case_no")
+    obligation_identity = _strict_str(
+        row["deposit_obligation_identity"],
+        "client_deposit_settlement_projection.deposit_obligation_identity",
+    )
+    settlement_state = row["settlement_state"]
+    if settlement_state not in {"unsettled", "settled"}:
+        raise ValueError("client_deposit_settlement_projection.settlement_state invalid")
+    contracted_amount = _positive_int(
+        row["contracted_amount_ntd"],
+        "client_deposit_settlement_projection.contracted_amount_ntd",
+    )
+    allocated_amount = row["allocated_net_amount_ntd"]
+    if isinstance(allocated_amount, bool) or not isinstance(allocated_amount, int):
+        raise ValueError("client_deposit_settlement_projection.allocated_net_amount_ntd must be an integer")
+    settlement_identity = row["settlement_identity"]
+    if settlement_identity is not None:
+        settlement_identity = _strict_str(
+            settlement_identity,
+            "client_deposit_settlement_projection.settlement_identity",
+        )
+    source_fingerprint = _strict_str(
+        row["source_fingerprint"],
+        "client_deposit_settlement_projection.source_fingerprint",
+    )
+    if len(source_fingerprint) != 64 or any(char not in "0123456789abcdef" for char in source_fingerprint):
+        raise ValueError("client_deposit_settlement_projection.source_fingerprint invalid")
+    projection_version = _positive_int(
+        row["projection_version"],
+        "client_deposit_settlement_projection.projection_version",
+    )
+    latest_ledger_entry_id = row["latest_ledger_entry_id"]
+    if latest_ledger_entry_id is not None:
+        latest_ledger_entry_id = _positive_int(
+            latest_ledger_entry_id,
+            "client_deposit_settlement_projection.latest_ledger_entry_id",
+        )
+    if settlement_state == "settled":
+        if allocated_amount != contracted_amount or settlement_identity is None or latest_ledger_entry_id is None:
+            raise ValueError("client_deposit_settlement_projection settled state invalid")
+    elif allocated_amount == contracted_amount or settlement_identity is not None:
+        raise ValueError("client_deposit_settlement_projection unsettled state invalid")
     return {
-        "case_no": row["case_no"],
-        "deposit_receivable": deposit_receivable,
-        "deposit_received": deposit_received,
+        "case_no": case_no,
+        "deposit_obligation_identity": obligation_identity,
+        "settlement_state": settlement_state,
+        "contracted_amount_ntd": contracted_amount,
+        "allocated_net_amount_ntd": allocated_amount,
+        "settlement_identity": settlement_identity,
+        "source_fingerprint": source_fingerprint,
+        "projection_version": projection_version,
+        "latest_ledger_entry_id": latest_ledger_entry_id,
     }
 
 
-def _normalize_deposit_transactions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    normalized: list[dict[str, Any]] = []
-    for index, row in enumerate(rows):
-        row = _exact_row(
-            row,
-            frozenset({"id", "transaction_type", "transaction_status", "stage", "amount", "occurred_at", "external_reference", "reversal_of_transaction_id"}),
-            f"deposit_transactions[{index}]",
-        )
-        tx_id = _positive_int(row["id"], f"deposit_transactions[{index}].id")
-        transaction_type = row["transaction_type"]
-        transaction_status = row["transaction_status"]
-        stage = row["stage"]
-        if stage != "deposit":
-            raise ValueError(f"deposit_transactions[{index}].stage must be deposit")
-        if transaction_type not in {"receipt", "refund", "reversal"}:
-            raise ValueError(f"deposit_transactions[{index}].transaction_type invalid")
-        if transaction_status not in {"succeeded", "failed", "reversed"}:
-            raise ValueError(f"deposit_transactions[{index}].transaction_status invalid")
-        normalized.append(
-            {
-                "id": tx_id,
-                "transaction_type": transaction_type,
-                "transaction_status": transaction_status,
-                "stage": stage,
-                "amount": _as_decimal(row["amount"], f"deposit_transactions[{index}].amount"),
-                "occurred_at": row["occurred_at"],
-                "external_reference": row["external_reference"],
-                "reversal_of_transaction_id": row["reversal_of_transaction_id"],
-            }
-        )
-    return normalized
-
-
-def _deposit_net(
-    summary: dict[str, Any],
-    transactions: list[dict[str, Any]],
-) -> Decimal:
-    net = Decimal("0.00")
-    for row in transactions:
-        if row["transaction_status"] != "succeeded":
-            continue
-        amount = row["amount"]
-        if row["transaction_type"] == "receipt":
-            net += amount
-        elif row["transaction_type"] == "refund":
-            net -= amount
-        else:
-            raise ValueError("deposit transaction reversal rows invalidate zero-deposit proof")
-
-    if net != summary["deposit_received"]:
-        raise ValueError("deposit summary is inconsistent with deposit transactions")
-    return net
-
-
-def _assert_zero_deposit(summary: dict[str, Any], transactions: list[dict[str, Any]]) -> None:
-    net = _deposit_net(summary, transactions)
-    if net != Decimal("0.00"):
+def _assert_zero_deposit(deposit_projection: dict[str, Any]) -> None:
+    if deposit_projection["allocated_net_amount_ntd"] != 0:
         raise ValueError("existing deposit net amount must be zero")
 
 
 def _release_blockers(
     order_row: dict[str, Any],
-    summary: dict[str, Any],
-    transactions: list[dict[str, Any]],
+    deposit_projection: dict[str, Any],
     plan_row: dict[str, Any],
     lock_row: dict[str, Any],
 ) -> list[str]:
     blockers: list[str] = []
     if order_row["status"] != "洽談中":
         blockers.append("case_not_in_negotiation")
-    if _deposit_net(summary, transactions) != Decimal("0.00"):
+    if deposit_projection["allocated_net_amount_ntd"] != 0:
         blockers.append("deposit_not_zero")
     if lock_row["status"] != "active" or lock_row["is_active"] != 1:
         blockers.append("lock_not_active")
@@ -486,29 +463,11 @@ def _release_blockers(
     return blockers
 
 
-def _canonical_deposit_transactions(
-    transactions: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    canonical = [
-        {
-            "id": row["id"],
-            "transaction_type": row["transaction_type"],
-            "transaction_status": row["transaction_status"],
-            "stage": row["stage"],
-            "amount": str(row["amount"]),
-            "reversal_of_transaction_id": row["reversal_of_transaction_id"],
-        }
-        for row in transactions
-    ]
-    return sorted(canonical, key=lambda row: row["id"])
-
-
 # Kept cohesive so the response and its fingerprint use the same blocker snapshot.
 def _build_release_preview(
     request: dict[str, Any],
     order_row: dict[str, Any],
-    summary: dict[str, Any],
-    transactions: list[dict[str, Any]],
+    deposit_projection: dict[str, Any],
     plan_row: dict[str, Any],
     snapshot: dict[str, Any],
     lock_row: dict[str, Any],
@@ -516,16 +475,14 @@ def _build_release_preview(
 ) -> dict[str, Any]:
     blockers = _release_blockers(
         order_row,
-        summary,
-        transactions,
+        deposit_projection,
         plan_row,
         lock_row,
     )
     fingerprint_facts = _release_fingerprint_facts(
         request,
         order_row,
-        summary,
-        transactions,
+        deposit_projection,
         plan_row,
         snapshot,
         lock_row,
@@ -557,8 +514,7 @@ def _raise_release_blocker(blockers: list[str]) -> None:
 def _release_fingerprint_facts(
     request: dict[str, Any],
     order_row: dict[str, Any],
-    summary: dict[str, Any],
-    transactions: list[dict[str, Any]],
+    deposit_projection: dict[str, Any],
     plan_row: dict[str, Any],
     snapshot: dict[str, Any],
     lock_row: dict[str, Any],
@@ -567,9 +523,7 @@ def _release_fingerprint_facts(
     return {
         **request,
         "order_status": order_row["status"],
-        "deposit_receivable": str(summary["deposit_receivable"]),
-        "deposit_received": str(summary["deposit_received"]),
-        "deposit_transactions": _canonical_deposit_transactions(transactions),
+        "deposit_settlement": deposit_projection,
         "plan_status": plan_row["status"],
         "plan_is_active": plan_row["is_active"],
         "plan_snapshot": snapshot,
@@ -598,29 +552,25 @@ def _load_order_snapshot(cursor: Any, case_no: str) -> dict[str, Any]:
     return _normalize_order_row(cursor.fetchone(), case_no)
 
 
-# Kept cohesive so the summary and transaction proof share one locked DB view.
-def _load_payment_snapshot(
+# Kept cohesive so the release decision reads one locked Client Finance projection.
+def _load_deposit_settlement_projection(
     cursor: Any,
     case_no: str,
-) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+) -> dict[str, Any]:
     cursor.execute(
-        "SELECT case_no, deposit_receivable, deposit_received "
-        "FROM client_payments WHERE case_no = %s FOR UPDATE",
+        "SELECT case_no, deposit_obligation_identity, settlement_state, "
+        "contracted_amount_ntd, allocated_net_amount_ntd, settlement_identity, "
+        "source_fingerprint, projection_version, latest_ledger_entry_id "
+        "FROM client_deposit_settlement_projection WHERE case_no = %s FOR UPDATE",
         (case_no,),
     )
-    summary = _normalize_client_payment_summary(cursor.fetchone())
-    if summary["case_no"] != case_no:
-        raise ValueError("client payment summary case_no mismatch")
-    cursor.execute(
-        "SELECT id, transaction_type, transaction_status, stage, amount, occurred_at, "
-        "external_reference, reversal_of_transaction_id "
-        "FROM client_payment_transactions "
-        "WHERE case_no = %s AND stage = 'deposit' FOR UPDATE",
-        (case_no,),
-    )
-    transactions = _normalize_deposit_transactions(cursor.fetchall())
-    _deposit_net(summary, transactions)
-    return summary, transactions
+    row = cursor.fetchone()
+    if row is None:
+        raise ValueError("client finance deposit settlement projection missing")
+    deposit_projection = _normalize_deposit_settlement_projection(row)
+    if deposit_projection["case_no"] != case_no:
+        raise ValueError("client finance deposit settlement case_no mismatch")
+    return deposit_projection
 
 
 # Kept cohesive so every Preview fact comes from one read transaction.
@@ -641,7 +591,7 @@ def preview_caregiver_availability_lock_release(
             request["lock_id"],
         )
         order_row = _load_order_snapshot(cursor, request["case_no"])
-        summary, transactions = _load_payment_snapshot(
+        deposit_projection = _load_deposit_settlement_projection(
             cursor,
             request["case_no"],
         )
@@ -656,8 +606,7 @@ def preview_caregiver_availability_lock_release(
         return _build_release_preview(
             request,
             order_row,
-            summary,
-            transactions,
+            deposit_projection,
             plan_row,
             snapshot,
             lock_row,
@@ -788,7 +737,7 @@ def release_caregiver_availability_lock(
             raise ValueError("mutex result does not match lock staff")
 
         order_row = _load_order_snapshot(cursor, request["case_no"])
-        summary, transactions = _load_payment_snapshot(
+        deposit_projection = _load_deposit_settlement_projection(
             cursor,
             request["case_no"],
         )
@@ -810,7 +759,7 @@ def release_caregiver_availability_lock(
         existing_event = _load_existing_event(cursor, request["event_key"], request["lock_id"])
         if existing_event is not None:
             _assert_order_row(order_row, request["case_no"])
-            _assert_zero_deposit(summary, transactions)
+            _assert_zero_deposit(deposit_projection)
             return _existing_result(
                 request=request,
                 event_row=existing_event,
@@ -828,8 +777,7 @@ def release_caregiver_availability_lock(
                 request["lock_id"],
             ),
             order_row,
-            summary,
-            transactions,
+            deposit_projection,
             plan_row,
             snapshot,
             lock_row,
@@ -914,4 +862,3 @@ def release_caregiver_availability_lock(
             _close_once(cursor, cursor_closed)
         if connection is not None:
             _close_once(connection, connection_closed)
-

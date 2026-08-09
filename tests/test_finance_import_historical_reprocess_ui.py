@@ -4,7 +4,11 @@ from types import SimpleNamespace
 from api.schemas.finance_import import FinanceImportTypedErrorView
 from ui.api_clients.finance_import_api_client import FinanceImportApiClient
 from ui.api_clients.finance_import_api_client import FinanceImportApiError
-from ui.pages.finance_import.panel import _BATCH_APPLY_STATE_KEY, _submit_batch_apply_request
+from ui.pages.finance_import.panel import (
+    _BATCH_APPLY_STATE_KEY,
+    _historical_owner_selection_input,
+    _submit_batch_apply_request,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +68,24 @@ def test_historical_reprocess_client_uses_the_typed_preview_endpoint():
         "batch_identity": "batch:1",
         "owner_selections": selection,
     }
+
+
+def test_historical_reprocess_client_allows_an_empty_manual_selection_list():
+    session = _Session()
+    client = FinanceImportApiClient(
+        base_url="http://api.test",
+        headers={"Authorization": "Bearer test"},
+        session=session,
+    )
+
+    client.preview_historical_reprocess("batch:1", "correlation-1")
+
+    assert session.calls[0][1]["json"]["owner_selections"] == []
+
+
+def test_historical_reprocess_panel_treats_empty_selection_input_as_optional():
+    assert _historical_owner_selection_input("") == []
+    assert _historical_owner_selection_input("[]") == []
 
 
 def test_finance_import_panel_is_not_a_stub_and_exposes_preview_apply_flow():

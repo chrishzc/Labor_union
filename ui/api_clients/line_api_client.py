@@ -139,6 +139,13 @@ class LineAdminApiClient:
     def capabilities(self, token: str | None) -> dict[str, Any]:
         return self._request("GET", "/api/v1/line/admin/capabilities", token=token)
 
+    def performance_snapshot(self, token: str | None) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/system/status/performance-snapshot",
+            token=token,
+        )
+
     def message_template_state(self, token: str | None) -> dict[str, Any]:
         return self._request("GET", "/api/config/message-templates/state", token=token)
 
@@ -313,13 +320,23 @@ class LineAdminApiClient:
         token: str | None,
         menu_id: str,
         *,
+        preview_id: int,
         reason: str = "",
     ) -> dict[str, Any]:
         return self._request(
             "POST",
             f"/api/v1/line/rich-menus/{menu_id}/publish",
             token=token,
-            json={"reason": reason},
+            json={"preview_id": preview_id, "reason": reason},
+        )
+
+    def create_line_menu_publish_preview(
+        self, token: str | None, menu_id: str
+    ) -> dict[str, Any]:
+        return self._request(
+            "POST",
+            f"/api/v1/line/rich-menus/{menu_id}/publish-preview",
+            token=token,
         )
 
     def line_menu_publications(
@@ -344,6 +361,19 @@ class LineAdminApiClient:
                 }.items()
                 if value not in {None, ""}
             },
+        )
+
+    def admin_audits(
+        self, token: str | None, *, page: int = 1, actor_query: str = ""
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET", "/api/v1/admin/audits", token=token,
+            params={"page": page, "actor_query": actor_query or None},
+        )
+
+    def admin_audit_detail(self, token: str | None, audit_id: int) -> dict[str, Any]:
+        return self._request(
+            "GET", f"/api/v1/admin/audits/{audit_id}", token=token,
         )
 
     def retry_line_menu_publication(

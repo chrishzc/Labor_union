@@ -4,34 +4,68 @@ from __future__ import annotations
 
 import uuid
 
-import requests
 import streamlit as st
 
 from ui.api_clients.leave_substitution_api_client import (
     LeaveSubstitutionApiClient,
     LeaveSubstitutionApiError,
 )
+from ui.api_clients.staff_summary_api_client import StaffSummaryApiClient
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 
 @st.cache_data(ttl=120, show_spinner=False)
-def _fetch_staff_options(base_url: str, header_items: tuple) -> dict[str, int]:
-    """Return {姓名(電話): id} mapping from /api/v1/staff."""
+def _fetch_staff_option_page(
+    base_url: str,
+    header_items: tuple,
+    after_id: int | None,
+) -> tuple[dict[str, int], int | None]:
+    """Return one bounded page of substitute-staff options."""
     try:
-        resp = requests.get(
-            f"{base_url}/api/v1/staff",
+        page = StaffSummaryApiClient(
+            base_url=base_url,
             headers=dict(header_items),
-            timeout=10,
-        )
-        resp.raise_for_status()
-        rows = resp.json().get("data") or []
-        return {
-            f"{r.get('name', '')}（{r.get('phone', '')}）": int(r["id"])
-            for r in rows
-            if r.get("id") and r.get("name")
+        ).query(page_size=200, after_id=after_id)
+        options = {
+            f"{item.name or ''}（{item.phone or ''}）": item.id
+            for item in page.items
+            if item.name
         }
+        return options, page.next_cursor
     except Exception:
-        return {}
+        return {}, None
+
+
+def _render_staff_option_pagination(assignment_id: int) -> dict[str, int]:
+    cursor_key = f"leave_substitute_after_id_{assignment_id}"
+    history_key = f"leave_substitute_history_{assignment_id}"
+    next_key = f"leave_substitute_next_cursor_{assignment_id}"
+    current_cursor = st.session_state.get(cursor_key)
+    options, next_cursor = _fetch_staff_option_page(
+        resolve_api_base_url(),
+        tuple(sorted(build_admin_headers().items())),
+        current_cursor,
+    )
+    st.session_state[next_key] = next_cursor
+    history = st.session_state.setdefault(history_key, [])
+    previous_column, page_column, next_column = st.columns([1, 2, 1])
+    if previous_column.button(
+        "上一頁月嫂",
+        disabled=not history,
+        key=f"leave_previous_staff_{assignment_id}",
+    ):
+        st.session_state[cursor_key] = history.pop()
+        st.rerun()
+    page_column.caption(f"代班月嫂第 {len(history) + 1} 頁，每頁最多 200 筆")
+    if next_column.button(
+        "下一頁月嫂",
+        disabled=not next_cursor,
+        key=f"leave_next_staff_{assignment_id}",
+    ):
+        history.append(current_cursor)
+        st.session_state[cursor_key] = next_cursor
+        st.rerun()
+    return options
 
 
 def render_leave_substitution_panel(case_no: str, client: LeaveSubstitutionApiClient, *, original_assignment_id: int) -> None:
@@ -62,17 +96,17 @@ def render_leave_substitution_panel(case_no: str, client: LeaveSubstitutionApiCl
     
     substitute = None
     if resolution == "指定代班月嫂":
-        staff_opts = _fetch_staff_options(
-            resolve_api_base_url(),
-            tuple(sorted(build_admin_headers().items())),
-        )
+        staff_opts = _render_staff_option_pagination(original_assignment_id)
         if not staff_opts:
             st.warning("無法載入月嫂名單，請確認後端服務正常。")
         else:
             sub_label = st.selectbox(
                 "代班月嫂",
                 ["請選擇代班月嫂", *staff_opts.keys()],
-                key=f"leave_substitute_{original_assignment_id}",
+                key=(
+                    f"leave_substitute_{original_assignment_id}_"
+                    f"{st.session_state.get(f'leave_substitute_after_id_{original_assignment_id}') or 0}"
+                ),
             )
             substitute = staff_opts.get(sub_label)
             

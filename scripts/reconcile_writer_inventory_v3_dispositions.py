@@ -21,6 +21,9 @@ def _load(path: Path) -> list[dict[str, object]]:
 
 def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
     path = str(record["relative_path"])
+    reviewed = _current_runtime_review(path)
+    if reviewed is not None:
+        return reviewed
     if path == "infrastructure/mysql/provisional_registration_repository.py":
         return _provisional_registration_review()
     if path == "subsystems/case_import/provisional_registration_application.py":
@@ -32,6 +35,61 @@ def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
     if path.startswith("subsystems/line/"):
         return _typed_line_review(path)
     return _service_review(path)
+
+
+def _current_runtime_review(path: str) -> tuple[str, str, str, str] | None:
+    metadata = {
+        "infrastructure/mysql/admin_capability_grant_repository.py": (
+            "access_control", "typed capability-grant Apply transaction",
+            "api/routes/capability_grants.py", "retain_canonical:grant event, session revocation, receipt, and authorization version share one Access Control transaction",
+        ),
+        "infrastructure/mysql/anomaly_registry_repository.py": (
+            "anomalies", "typed anomaly workflow transaction",
+            "subsystems/anomalies/root_fact_projection_workflow.py", "retain_canonical:manual-review resolution event is owned by the canonical anomaly workflow",
+        ),
+        "infrastructure/mysql/background_job_repository.py": (
+            "global_infrastructure", "durable job query adapter",
+            "subsystems/jobs/durable_job_worker.py", "retain_restricted:dynamic query helper is constrained to the versioned durable-job repository",
+        ),
+        "infrastructure/mysql/historical_reprocess_repository.py": (
+            "finance_import", "typed Historical Reprocess outer transaction",
+            "api/dependencies/finance_import.py", "retain_canonical:classification selection, run, receipt, outbox, and version update stay inside the owning workflow",
+        ),
+        "infrastructure/mysql/knowledge_retrieval_repository.py": (
+            "knowledge_retrieval", "typed knowledge review or publication transaction",
+            "api/routes/knowledge_retrieval.py", "retain_canonical:provenance item event, publication transition, and receipt are owned by Knowledge Retrieval",
+        ),
+        "subsystems/finance_import/ingestion.py": (
+            "finance_import", "typed Finance Import ingestion transaction",
+            "api/dependencies/finance_import.py",
+            "retain_canonical:batch contract, classification event, receipt, outbox, and independent failed-attempt audit are one Finance Import workflow boundary",
+        ),
+        "scripts/migrate_admin_capability_grants_schema.py": (
+            "global_infrastructure", "versioned additive release migration",
+            "preserve-data release manifest", "retain_restricted:operator-run additive schema upgrade is bounded by signed release artifacts",
+        ),
+        "scripts/migrate_order_contract_identity.py": (
+            "global_infrastructure", "versioned contract identity migration",
+            "preserve-data release manifest", "retain_restricted:operator-run schema migration is bounded by its explicit retirement contract",
+        ),
+        "subsystems/access/authentication_session.py": (
+            "access_control", "authenticated session and audit transaction",
+            "api/dependencies/admin_auth.py", "retain_canonical:session lifecycle and privacy-masked audit append are Access Control facts",
+        ),
+        "subsystems/access/security_audit_query.py": (
+            "access_control", "security-audit retention transaction",
+            "api/main.py lifespan worker", "retain_canonical:expired online audit rows move append-only into archive without deleting archive evidence",
+        ),
+        "subsystems/line/rich_menu_publication_workflow.py": (
+            "line_integration", "typed rich-menu preview and confirmation transaction",
+            "api/routes/line_rich_menus.py", "retain_canonical:preview receipt and confirmed publication job are owned by the LINE publication workflow",
+        ),
+        "subsystems/orders/client_finance_outbox_consumer.py": (
+            "client_finance", "committed Client Finance outbox recovery transaction",
+            "subsystems/orders/client_finance_outbox_consumer.py", "retain_canonical:consumer may only advance committed outbox delivery state",
+        ),
+    }
+    return metadata.get(path)
 
 
 def _provisional_registration_review() -> tuple[str, str, str, str]:

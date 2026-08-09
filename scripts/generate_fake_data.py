@@ -11,7 +11,7 @@
 若需擴充任何欄位型態、格式錯誤或業務異常測試資料，請新建並使用 scripts/seed_boundary_anomalies.py。
 """
 raise SystemExit(
-    "GenerateFakeData 已凍結，僅供人工參考；新增假資料需求請建立獨立腳本與 ADAD 節點。"
+    "GenerateFakeData 已凍結，僅供人工參考；新增假資料需求請建立獨立腳本與測試。"
 )
 
 import sys

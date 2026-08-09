@@ -83,6 +83,7 @@ from subsystems.finance_import.historical_reprocess_workflow import (
     HistoricalReprocessApplyRequest,
     HistoricalReprocessWorkflowError,
 )
+from subsystems.finance_import.ingestion import FinanceImportAttemptError
 from subsystems.finance_import.refund_return_review_workflow import (
     RefundReturnReviewApplyRequest,
     RefundReturnReviewWorkflowError,
@@ -219,6 +220,8 @@ async def ingest_finance_import_workbook(
             data=_materialize(receipt),
             message="銀行流水已入庫，請檢視 Preview 後再正式入帳",
         )
+    except FinanceImportAttemptError as error:
+        _raise_ingestion_attempt_error(error, correlation)
     except (TypeError, ValueError, FileNotFoundError) as error:
         _raise_validation_error(error, correlation)
     except OperationalError as error:
@@ -814,6 +817,28 @@ def _raise_validation_error(error, correlation_id):
         correlation_id,
     )
     raise _http_error(422, typed)
+
+
+def _raise_ingestion_attempt_error(error, correlation_id):
+    validation_codes = {
+        "finance_import_source_missing",
+        "finance_import_validation_failed",
+    }
+    category = (
+        ErrorCategory.VALIDATION
+        if error.attempt.error_code in validation_codes
+        else ErrorCategory.INTERNAL
+    )
+    typed = TypedError(
+        category,
+        error.attempt.error_code or "finance_import_ingestion_failed",
+        "Finance Import 匯入未完成；請使用相同 Idempotency-Key 查看原嘗試紀錄。",
+        correlation_id,
+    )
+    raise HTTPException(
+        status_code=422 if category is ErrorCategory.VALIDATION else 500,
+        detail={"error": _materialize(typed), "attempt": _materialize(error.attempt)},
+    )
 
 
 def _internal_error(correlation_id):

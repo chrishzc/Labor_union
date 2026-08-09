@@ -476,18 +476,10 @@ def preview_line_menu(menu_id: str):
 
 @router.post("/line-menus/{menu_id}/publish", status_code=202, dependencies=[Depends(require_line_manager)])
 def publish_line_menu(menu_id: str, request: Request):
-    principal = request.state.admin_principal
-    try:
-        publication = create_publication_job(menu_id, principal.id)
-    except RichMenuPublicationNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except RichMenuPublicationConflictError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    request.state.audit_action = "line.rich_menu.publish"
-    request.state.audit_resource_type = "line_rich_menu_publication"
-    request.state.audit_resource_id = str(publication["id"])
-    wake_worker()
-    return {"status": "accepted", "menu_id": menu_id, "publication_id": publication["id"]}
+    raise HTTPException(
+        status_code=410,
+        detail="請改用 /api/v1/line/rich-menus/{menu_id}/publish-preview 與 publish；發布前必須預覽並確認",
+    )
 
 
 # ---------------------------------------------------------------------------

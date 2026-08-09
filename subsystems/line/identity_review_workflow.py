@@ -8,7 +8,6 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -215,11 +214,6 @@ def get_line_review_summary() -> dict[str, int]:
     day_start = taipei_now.replace(hour=0, minute=0, second=0, microsecond=0)
     utc_day_start = day_start.astimezone(timezone.utc).replace(tzinfo=None)
     utc_day_end = (day_start + timedelta(days=1)).astimezone(timezone.utc).replace(tzinfo=None)
-    try:
-        stale_hours = max(1, int(os.getenv("LINE_REVIEW_STALE_HOURS", "24")))
-    except ValueError:
-        stale_hours = 24
-    stale_before = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=stale_hours)
     conn = get_connection()
     try:
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
@@ -230,11 +224,10 @@ def get_line_review_summary() -> dict[str, int]:
                     SUM(status='pending' AND request_type='staff_verification') AS staff_pending,
                     SUM(status='pending' AND request_type='client_rebind') AS rebind_pending,
                     SUM(status IN ('approved','rejected')
-                        AND reviewed_at >= %s AND reviewed_at < %s) AS processed_today,
-                    SUM(status='pending' AND created_at < %s) AS stale_pending
+                        AND reviewed_at >= %s AND reviewed_at < %s) AS processed_today
                 FROM line_confirmation_requests
                 """,
-                (utc_day_start, utc_day_end, stale_before),
+                (utc_day_start, utc_day_end),
             )
             row = cursor.fetchone() or {}
         return {
@@ -242,8 +235,6 @@ def get_line_review_summary() -> dict[str, int]:
             "staff_pending": _as_int(row.get("staff_pending")),
             "rebind_pending": _as_int(row.get("rebind_pending")),
             "processed_today": _as_int(row.get("processed_today")),
-            "stale_pending": _as_int(row.get("stale_pending")),
-            "stale_hours": stale_hours,
         }
     finally:
         conn.close()

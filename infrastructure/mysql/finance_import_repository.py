@@ -27,6 +27,9 @@ from domains.client_finance.refund_return_review import (
     RefundReturnReviewSelection,
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+from infrastructure.mysql.anomaly_registry_repository import (
+    append_finance_import_manual_review_resolution,
+)
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.money import MoneyNTD
 from subsystems.finance_import.correction_workflow import (
@@ -295,13 +298,11 @@ class MySqlFinanceImportRepository:
             )
 
     def append_alert_resolved_event(self, candidate, actor) -> None:
-        row_id = _row_database_id(candidate.row_identity)
-        with _mysql_cursor(self._connection) as cursor:
-            cursor.execute(_ACTIVE_ALERT_SELECT_SQL + " FOR UPDATE", (row_id,))
-            alert = cursor.fetchone()
-            if alert is None:
-                raise RuntimeError("recovery_action_not_available")
-            _insert_alert_resolved_event(cursor, candidate, actor, alert)
+        append_finance_import_manual_review_resolution(
+            self._connection,
+            candidate,
+            actor,
+        )
 
     def _append_correction_outbox(self, candidate) -> None:
         payload = {
@@ -556,26 +557,6 @@ def _government_subsidy_obligation(row):
         str(row["obligation_identity"]),
         FinanceOwningDomain.GOVERNMENT_SUBSIDY,
         MoneyNTD(int(row["remaining_amount_ntd"])),
-    )
-
-
-def _insert_alert_resolved_event(cursor, candidate, actor, alert) -> None:
-    expected_version = int(alert["workflow_version"])
-    event_identity = _hashed_identity(
-        "finance-import-alert-resolve",
-        candidate.fingerprint.value,
-    )
-    cursor.execute(
-        _ALERT_RESOLVED_EVENT_INSERT_SQL,
-        (
-            alert["fingerprint"],
-            expected_version,
-            expected_version + 1,
-            actor.actor_id,
-            candidate.reason,
-            event_identity,
-            event_identity,
-        ),
     )
 
 
@@ -976,12 +957,6 @@ _RECONCILIATION_RECEIPT_INSERT_SQL = (
     "INSERT INTO finance_import_reconciliation_receipts("
     "finance_import_row_id,candidate_fingerprint,owning_domain,"
     "allocation_count,amount_ntd) VALUES (%s,%s,%s,%s,%s)"
-)
-_ALERT_RESOLVED_EVENT_INSERT_SQL = (
-    "INSERT INTO anomaly_workflow_events("
-    "alert_fingerprint,action,expected_workflow_version,"
-    "resulting_workflow_version,actor,reason,correlation_id,idempotency_key"
-    ") VALUES (%s,'resolve',%s,%s,%s,%s,%s,%s)"
 )
 _OUTBOX_INSERT_SQL = (
     "INSERT INTO finance_import_outbox("

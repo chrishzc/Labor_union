@@ -54,7 +54,7 @@ class _Repository:
     def load_historical_reprocess(self, _, *, for_update): return self.facts
     def find_historical_reprocess_receipt(self, key): return self.receipts.get(key.value)
     def append_reprocess_classification_events(self, plan, actor): self.calls.append(("classification", plan, actor))
-    def append_reprocess_run(self, plan, count): self.calls.append(("run", plan, count)); return 99
+    def append_reprocess_run(self, plan, count, actor): self.calls.append(("run", plan, count, actor)); return 99
     def append_reprocess_outbox(self, plan): self.calls.append(("outbox", plan))
     def advance_batch_version(self, *args): self.calls.append(("version", *args))
     def save_historical_reprocess_receipt(self, key, stored): self.receipts[key.value] = stored
@@ -86,6 +86,7 @@ def test_apply_appends_events_dispatch_receipt_and_outbox_in_one_unit_of_work():
     assert receipt.reclassified_count == receipt.dispatched_count == 1
     assert receipt.reprocess_run_id == 99
     assert [call[0] for call in repository.calls] == ["classification", "run", "outbox", "version"]
+    assert repository.calls[1][3] == ActorContext("admin")
     assert posting.rows == [_row().after]
     assert unit.committed is True
 

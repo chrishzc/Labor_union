@@ -21,6 +21,7 @@ from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 EDIT_ROLES = {"line_manager", "system_admin"}
 FLASH_KEY = "line_rich_menu_flash"
 PREVIEW_KEY = "line_rich_menu_preview"
+PUBLISH_PREVIEW_KEY = "line_rich_menu_publish_preview"
 TAIPEI = ZoneInfo("Asia/Taipei")
 ROLE_LABELS = {
     "customer": "一般客戶／媽媽",
@@ -347,7 +348,26 @@ def render_rich_menu_manager(
             st.rerun()
 
     st.markdown("#### 套用到 LINE")
-    st.warning("請先儲存修改並確認預覽，再套用到使用者的 LINE。")
+    st.warning("請先儲存修改、確認預覽，然後建立本次套用確認。")
+    publish_preview = st.session_state.get(PUBLISH_PREVIEW_KEY)
+    preview_is_current = bool(
+        publish_preview and publish_preview.get("menu_id") == selected_id
+    )
+    if st.button("確認目前預覽，繼續套用", disabled=not can_edit):
+        try:
+            confirmation = client.create_line_menu_publish_preview(token, selected_id)
+        except LineAdminApiError as exc:
+            st.error(f"無法確認目前預覽：{exc}")
+        else:
+            st.session_state[PUBLISH_PREVIEW_KEY] = {
+                "menu_id": selected_id,
+                "preview_id": confirmation["preview_id"],
+            }
+            st.rerun()
+    if preview_is_current:
+        st.success("已確認目前版本的預覽；請再次勾選後套用。")
+    else:
+        st.info("先按「確認目前預覽，繼續套用」，才能啟用套用按鈕。")
     reason = st.text_input("本次修改備註（選填）", key=f"publish_reason_{selected_id}")
     confirmed = st.checkbox(
         "我已確認選單內容，要套用到 LINE",
@@ -356,10 +376,15 @@ def render_rich_menu_manager(
     if st.button(
         "套用到 LINE",
         type="primary",
-        disabled=not can_edit or not confirmed,
+        disabled=not can_edit or not preview_is_current or not confirmed,
     ):
         try:
-            publication = client.publish_line_menu(token, selected_id, reason=reason)
+            publication = client.publish_line_menu(
+                token,
+                selected_id,
+                preview_id=publish_preview["preview_id"],
+                reason=reason,
+            )
         except LineAdminApiError as exc:
             st.error(f"無法建立發布工作：{exc}")
         else:

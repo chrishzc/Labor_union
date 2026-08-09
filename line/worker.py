@@ -14,6 +14,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from subsystems.knowledge_retrieval.answer_query import answer_line_question
+
 import pymysql
 import requests
 
@@ -196,20 +198,8 @@ def _push_matching_willingness_card(task: dict[str, Any]) -> tuple[bool, bool, s
     return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
 
 
-def _rag_answer(user_text: str) -> str:
-    fallback = "很抱歉，我不太懂您的意思，已經幫您轉交給行政專員為您人工處理。"
-    try:
-        import chromadb
-
-        client = chromadb.PersistentClient(path="./db/chroma_data")
-        collection = client.get_or_create_collection("union_faq")
-        results = collection.query(query_texts=[user_text], n_results=1)
-        if results and results.get("distances") and results["distances"][0]:
-            if results["distances"][0][0] < 1.0:
-                return results["metadatas"][0][0].get("answer", fallback)
-    except Exception as exc:
-        print(f"[LINE Worker] RAG query failed: {exc}")
-    return fallback
+def _knowledge_retrieval_unavailable_reply() -> str:
+    return "很抱歉，目前無法提供已審核來源的自動回答，已轉交行政專員為您人工處理。"
 
 
 def _menu_action(task: dict[str, Any], link: bool) -> tuple[bool, bool, str, str]:
@@ -245,13 +235,21 @@ def _execute_task(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
     if task_type == "matching_willingness_card":
         return _push_matching_willingness_card(task)
     if task_type == "rag_reply":
-        payload = json.loads(task.get("payload_json") or "{}")
-        return _push_text(task, _rag_answer(payload.get("user_text", "")))
+        return _push_text(task, _knowledge_reply(task))
     if task_type == "rich_menu_link":
         return _menu_action(task, True)
     if task_type == "rich_menu_unlink":
         return _menu_action(task, False)
     return False, False, "unknown_task_type", task_type
+
+
+def _knowledge_reply(task: dict[str, Any]) -> str:
+    payload = json.loads(task.get("payload_json") or "{}")
+    question = str(payload.get("user_text") or "")
+    try:
+        return answer_line_question(question) or _knowledge_retrieval_unavailable_reply()
+    except Exception:
+        return _knowledge_retrieval_unavailable_reply()
 
 
 def _start_task_attempt(task: dict[str, Any]) -> int:

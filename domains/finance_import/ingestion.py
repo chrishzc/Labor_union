@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
+from typing import Literal
 
 from domains.finance_import.planning import (
     FinanceClassificationType,
@@ -57,6 +59,20 @@ class FinanceWorkbookIngestionReceipt:
     source_row_count: int
     canonical_created_count: int
     duplicate_occurrence_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class FinanceImportAttempt:
+    """Safe durable result for an ingestion command that did not commit."""
+
+    attempt_identity: str
+    source_content_digest: str
+    phase: str
+    error_code: str | None
+    transaction_outcome: Literal["committed", "rolled_back"]
+    started_at: datetime
+    completed_at: datetime
+    batch_identity: str | None = None
 
 
 # Kept cohesive so one fingerprint covers the complete initial decision.
@@ -120,6 +136,7 @@ def _decision_payload(facts, classification_type, disposition):
 
 
 __all__ = [
+    "FinanceImportAttempt",
     "FinanceWorkbookIngestionReceipt",
     "InitialClassificationDecision",
     "InitialClassificationFacts",

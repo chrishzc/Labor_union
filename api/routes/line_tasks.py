@@ -13,9 +13,8 @@ from typing import NoReturn
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from api.dependencies.admin_auth import (
-    require_line_agent,
-    require_line_manager,
-    require_line_viewer,
+    require_line_task_controller,
+    require_line_task_reader,
 )
 from api.schemas.base import BaseResponse
 from api.schemas.line_tasks import LineTaskActionRequest
@@ -35,7 +34,7 @@ from subsystems.line.delivery_task_admin_query import (
 router = APIRouter(
     prefix="/api/v1/line/tasks",
     tags=["LINE Tasks"],
-    dependencies=[Depends(require_line_viewer)],
+    dependencies=[Depends(require_line_task_reader)],
 )
 
 
@@ -108,7 +107,7 @@ def task_detail(task_id: int):
 @router.post(
     "/{task_id}/cancel",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_agent)],
+    dependencies=[Depends(require_line_task_controller)],
 )
 def cancel_task(task_id: int, payload: LineTaskActionRequest, request: Request):
     try:
@@ -127,7 +126,7 @@ def cancel_task(task_id: int, payload: LineTaskActionRequest, request: Request):
 @router.post(
     "/{task_id}/run-now",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_manager)],
+    dependencies=[Depends(require_line_task_controller)],
 )
 def run_task_now(task_id: int, payload: LineTaskActionRequest, request: Request):
     try:
@@ -147,7 +146,7 @@ def run_task_now(task_id: int, payload: LineTaskActionRequest, request: Request)
 @router.post(
     "/{task_id}/retry",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_agent)],
+    dependencies=[Depends(require_line_task_controller)],
 )
 def retry_task(task_id: int, payload: LineTaskActionRequest, request: Request):
     try:

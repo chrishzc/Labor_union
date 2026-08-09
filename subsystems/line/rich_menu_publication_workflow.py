@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import tempfile
 from datetime import datetime
@@ -53,7 +54,7 @@ def _decode_json(value: Any) -> Any:
     return json.loads(value) if isinstance(value, str) else value
 
 
-def create_publication_job(menu_id: str, requested_by_admin_user_id: int | None) -> dict[str, Any]:
+def _current_menu_snapshot(menu_id: str) -> tuple[RichMenuDefinition, str, str]:
     config = read_config("line_menus", LineMenusConfig)
     menu = next((item for item in config.menus if item.id == menu_id), None)
     if not menu:
@@ -69,12 +70,63 @@ def create_publication_job(menu_id: str, requested_by_admin_user_id: int | None)
             menu.size.height,
         ):
             raise RichMenuPublicationConflictError("圖片尺寸與 Rich Menu 尺寸不一致")
+    snapshot = menu.model_dump(mode="json")
+    fingerprint = hashlib.sha256(
+        json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return menu, config_revision("line_menus"), fingerprint
 
-    revision = config_revision("line_menus")
+
+def create_publication_preview(menu_id: str, previewed_by_admin_user_id: int | None) -> dict[str, Any]:
+    if previewed_by_admin_user_id is None:
+        raise RichMenuPublicationConflictError("發布預覽需要已登入的管理員")
+    menu, revision, fingerprint = _current_menu_snapshot(menu_id)
+    conn = get_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                INSERT INTO line_rich_menu_publish_previews (
+                    menu_config_id, config_revision, config_fingerprint,
+                    previewed_by_admin_user_id
+                ) VALUES (%s,%s,%s,%s)
+                ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id), previewed_at=UTC_TIMESTAMP()
+                """,
+                (menu.id, revision, fingerprint, previewed_by_admin_user_id),
+            )
+            preview_id = int(cursor.lastrowid)
+        conn.commit()
+        return {"preview_id": preview_id, "config_revision": revision, "config_fingerprint": fingerprint}
+    finally:
+        conn.close()
+
+
+def create_publication_job(
+    menu_id: str,
+    requested_by_admin_user_id: int | None,
+    *,
+    preview_id: int,
+) -> dict[str, Any]:
+    if requested_by_admin_user_id is None:
+        raise RichMenuPublicationConflictError("發布需要已登入的管理員")
+    menu, revision, fingerprint = _current_menu_snapshot(menu_id)
+
     conn = get_connection()
     try:
         conn.begin()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id FROM line_rich_menu_publish_previews
+                WHERE id=%s AND menu_config_id=%s AND config_revision=%s
+                  AND config_fingerprint=%s AND previewed_by_admin_user_id=%s
+                  AND publication_id IS NULL
+                FOR UPDATE
+                """,
+                (preview_id, menu_id, revision, fingerprint, requested_by_admin_user_id),
+            )
+            if not cursor.fetchone():
+                raise RichMenuPublicationConflictError("請先預覽目前版本的 Rich Menu，再確認套用")
             cursor.execute(
                 """
                 SELECT id FROM line_rich_menu_publications
@@ -105,6 +157,14 @@ def create_publication_job(menu_id: str, requested_by_admin_user_id: int | None)
                 ),
             )
             publication_id = int(cursor.lastrowid)
+            cursor.execute(
+                """
+                UPDATE line_rich_menu_publish_previews
+                SET publication_id=%s, confirmed_at=UTC_TIMESTAMP()
+                WHERE id=%s
+                """,
+                (publication_id, preview_id),
+            )
         conn.commit()
         return get_publication(publication_id)
     except Exception:

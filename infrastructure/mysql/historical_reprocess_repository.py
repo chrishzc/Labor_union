@@ -39,7 +39,7 @@ class MySqlHistoricalReprocessRepository:
             header = _load_header(cursor, batch_identity, for_update)
             rows = _load_rows(cursor, int(header["batch_id"]), for_update)
             maps = load_finance_identity_maps(cursor)
-            _require_complete_owner_selections(rows, owner_selections)
+            _validate_owner_selections(rows, owner_selections)
             planned_rows = tuple(
                 _reprocess_row(cursor, row, maps, _selection_for_row(owner_selections, row))
                 for row in rows
@@ -88,10 +88,13 @@ class MySqlHistoricalReprocessRepository:
             for row in plan.rows:
                 cursor.execute(_CLASSIFICATION_INSERT_SQL, _classification_values(batch_id, row, actor.actor_id))
 
-    def append_reprocess_run(self, plan, dispatched_count):
+    def append_reprocess_run(self, plan, dispatched_count, actor):
         batch_id = _batch_database_id(plan.batch_identity)
         with _mysql_cursor(self._connection) as cursor:
-            cursor.execute(_RUN_INSERT_SQL, _run_values(batch_id, plan, dispatched_count))
+            cursor.execute(
+                _RUN_INSERT_SQL,
+                _run_values(batch_id, plan, dispatched_count, actor.actor_id),
+            )
             run_id = int(cursor.lastrowid or 0)
         if run_id < 1:
             raise RuntimeError("historical_reprocess_run_not_created")
@@ -142,7 +145,11 @@ def _reprocess_row(cursor, row, maps, owner_selection):
 
 
 def _manual_owner_row(cursor, row, selection):
-    _require_open_refund_obligation(cursor, selection, _amount(row))
+    obligation_projection_version = _require_open_refund_obligation(
+        cursor,
+        selection,
+        _amount(row),
+    )
     row_identity = f"finance-import-row:{int(row['id'])}"
     after = CanonicalFinanceImportRow(
         row_identity,
@@ -155,6 +162,7 @@ def _manual_owner_row(cursor, row, selection):
             "case_no": selection.case_no,
             "obligation": selection.obligation_identity,
             "evidence": selection.evidence_references,
+            "obligation_projection_version": obligation_projection_version,
         }),
         (selection.obligation_identity,),
         tuple(sorted(set((*selection.evidence_references, "historical_owner_selection")))),
@@ -168,15 +176,13 @@ def _manual_owner_row(cursor, row, selection):
     )
 
 
-def _require_complete_owner_selections(rows, selections):
-    if not selections:
-        return
+def _validate_owner_selections(rows, selections):
     eligible = tuple(f"finance-import-row:{int(row['id'])}" for row in rows)
     selected = tuple(item.row_identity for item in selections)
     if selected != tuple(sorted(set(selected))):
         raise ValueError("historical_owner_selection_duplicate")
-    if selected != eligible:
-        raise ValueError("historical_owner_selection_incomplete")
+    if any(identity not in eligible for identity in selected):
+        raise ValueError("historical_owner_selection_not_eligible")
 
 
 def _selection_for_row(selections, row):
@@ -186,14 +192,16 @@ def _selection_for_row(selections, row):
 
 def _require_open_refund_obligation(cursor, selection, amount):
     cursor.execute(
-        "SELECT obligation_identity FROM client_obligations "
+        "SELECT projection_version FROM client_obligations "
         "WHERE obligation_identity=%s AND case_no=%s "
         "AND direction='payable_to_client' AND status='open' "
         "AND obligation_type IN ('refund','adjustment') AND amount_due_ntd=%s FOR UPDATE",
         (selection.obligation_identity, selection.case_no, amount),
     )
-    if cursor.fetchone() is None:
+    row = cursor.fetchone()
+    if row is None:
         raise ValueError("historical_owner_obligation_not_open_or_exact")
+    return int(row["projection_version"])
 
 
 def _obligation_projection_version(cursor, selection):
@@ -239,9 +247,9 @@ def _classification_values(batch_id, row, actor):
     return (batch_id, _row_database_id(row.row_identity), after.canonical_fact_version, after.canonical_fact_version, after.classification_type.value, after.disposition.value, after.decision_facts_fingerprint.value, _canonical_json(after.target_identities), _canonical_json(after.evidence), _canonical_json(after.available_actions), actor, "historical_reprocess")
 
 
-def _run_values(batch_id, plan, dispatched_count):
+def _run_values(batch_id, plan, dispatched_count, actor):
     summary = {"row_identities": tuple(row.row_identity for row in plan.rows), "plan_fingerprint": plan.fingerprint.value}
-    return (batch_id, "completed", "historical_reprocess:v1", plan.fingerprint.value, len(plan.rows), len(plan.rows), dispatched_count, dispatched_count, 0, _canonical_json(summary), _canonical_json(summary))
+    return (batch_id, "completed", actor, "historical_reprocess:v1", plan.fingerprint.value, len(plan.rows), len(plan.rows), dispatched_count, dispatched_count, 0, _canonical_json(summary), _canonical_json(summary))
 
 
 def _stored_receipt(row):
@@ -277,7 +285,7 @@ def _iso_value(value):
 _HEADER_SQL = "SELECT contract.batch_id,contract.batch_identity,contract.batch_version,contract.classifier_version,batch.status FROM finance_import_batch_contracts contract JOIN finance_import_batches batch ON batch.id=contract.batch_id WHERE contract.batch_identity=%s AND batch.status='completed'"
 _ROWS_SQL = "SELECT bank_row.*,classification.canonical_fact_version FROM finance_import_rows bank_row JOIN finance_import_occurrences occurrence ON occurrence.finance_import_row_id=bank_row.id JOIN finance_import_classification_events classification ON classification.id=(SELECT MAX(latest.id) FROM finance_import_classification_events latest WHERE latest.finance_import_row_id=bank_row.id) WHERE occurrence.batch_id=%s AND classification.classification_type='non_business_review' AND bank_row.reconciliation_status='pending' ORDER BY bank_row.id"
 _CLASSIFICATION_INSERT_SQL = "INSERT INTO finance_import_classification_events(batch_id,finance_import_row_id,classification_version,canonical_fact_version,classification_type,disposition,decision_facts_fingerprint,target_identities,evidence,available_actions,actor,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
-_RUN_INSERT_SQL = "INSERT INTO finance_import_reprocess_runs(batch_id,batch_status,actor,classifier_version,plan_fingerprint,selected_count,changed_count,dispatch_count,reconciled_count,pending_count,request_summary,result_summary) VALUES (%s,%s,'historical_reprocess',%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+_RUN_INSERT_SQL = "INSERT INTO finance_import_reprocess_runs(batch_id,batch_status,actor,classifier_version,plan_fingerprint,selected_count,changed_count,dispatch_count,reconciled_count,pending_count,request_summary,result_summary) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 _OUTBOX_INSERT_SQL = "INSERT INTO finance_import_outbox(batch_id,intent_key,intent_type,payload_snapshot) VALUES (%s,%s,'historical_reprocess_completed',%s)"
 _BATCH_VERSION_UPDATE_SQL = "UPDATE finance_import_batch_contracts SET batch_version=%s WHERE batch_identity=%s AND batch_version=%s"
 _RECEIPT_SELECT_SQL = "SELECT command_fingerprint,result_snapshot FROM finance_import_historical_reprocess_receipts WHERE idempotency_key=%s FOR UPDATE"

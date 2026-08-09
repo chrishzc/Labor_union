@@ -110,6 +110,106 @@ def test_real_taishin_workbook_becomes_root_fact_and_unresolved_reprocess_blocks
     assert error.value.error.code == "reprocess_owner_not_resolved"
 
 
+def test_historical_owner_selection_posts_once_without_mutating_bank_root_fact(tmp_path):
+    bootstrap(_arguments())
+    _seed_open_refund_obligation()
+    intake_receipt = _ingest_unresolved_taishin_outflow(tmp_path)
+
+    from api.dependencies.finance_import import HistoricalReprocessApplication
+    from infrastructure.mysql.finance_import_owning_domain_composite import (
+        MySqlFinanceImportOwningDomainComposite,
+    )
+    from infrastructure.mysql.finance_import_repository import FinanceImportMySqlUnitOfWork
+    from infrastructure.mysql.historical_reprocess_repository import MySqlHistoricalReprocessRepository
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from shared_kernel.identities import (
+        ActorContext,
+        CorrelationId,
+        ExpectedVersion,
+        IdempotencyKey,
+    )
+    from subsystems.finance_import.historical_reprocess_workflow import (
+        HistoricalOwnerSelection,
+        HistoricalReprocessApplyRequest,
+        HistoricalReprocessWorkflow,
+    )
+
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bank_references FROM finance_import_rows WHERE id=1"
+            )
+            original_bank_references = cursor.fetchone()["bank_references"]
+        posting_port = MySqlFinanceImportOwningDomainComposite(connection)
+        application = HistoricalReprocessApplication(
+            HistoricalReprocessWorkflow(
+                MySqlHistoricalReprocessRepository(connection),
+                posting_port,
+                lambda: FinanceImportMySqlUnitOfWork(connection),
+            ),
+            posting_port,
+        )
+        selection = HistoricalOwnerSelection(
+            "finance-import-row:1",
+            "C-1",
+            "refund:C-1",
+            "reviewed original bank statement and refund request",
+            ("bank-statement:line-3", "refund-request:C-1"),
+        )
+        preview = application.preview(
+            intake_receipt.batch_identity,
+            CorrelationId("historical-owner-selection-preview"),
+            (selection,),
+        )
+        request = HistoricalReprocessApplyRequest(
+            intake_receipt.batch_identity,
+            ExpectedVersion(preview.batch_version),
+            preview.fingerprint,
+            IdempotencyKey("historical-owner-selection-apply"),
+            ActorContext("lu-test-runner"),
+            "apply reviewed historical refund owner",
+            CorrelationId("historical-owner-selection-apply"),
+            (selection,),
+        )
+
+        receipt = application.apply(request)
+        assert application.apply(request) == receipt
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bank_references FROM finance_import_rows WHERE id=1"
+            )
+            assert cursor.fetchone()["bank_references"] == original_bank_references
+            cursor.execute(
+                "SELECT case_no,obligation_identity,source_canonical_fact_version,"
+                "resulting_canonical_fact_version,obligation_projection_version "
+                "FROM historical_owner_selection_events"
+            )
+            assert cursor.fetchone() == {
+                "case_no": "C-1",
+                "obligation_identity": "refund:C-1",
+                "source_canonical_fact_version": 0,
+                "resulting_canonical_fact_version": 1,
+                "obligation_projection_version": 0,
+            }
+            cursor.execute("SELECT actor FROM finance_import_reprocess_runs")
+            assert cursor.fetchone() == {"actor": "lu-test-runner"}
+            cursor.execute("SELECT entry_type,amount_ntd FROM client_ledger_entries")
+            assert cursor.fetchone() == {"entry_type": "refund", "amount_ntd": 300}
+            cursor.execute(
+                "SELECT amount_due_ntd,status FROM client_obligations "
+                "WHERE obligation_identity='refund:C-1'"
+            )
+            assert cursor.fetchone() == {"amount_due_ntd": 0, "status": "settled"}
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM finance_import_historical_reprocess_receipts"
+            )
+            assert cursor.fetchone() == {"count": 1}
+    finally:
+        connection.close()
+
+
 def test_manual_refund_correction_posts_ledger_allocation_and_resolves_anomaly(tmp_path):
     bootstrap(_arguments())
     _seed_open_refund_obligation()
@@ -732,9 +832,10 @@ def _seed_open_refund_obligation() -> None:
 
 def _ingest_unresolved_taishin_outflow(tmp_path, *, amount=300):
     workbook = tmp_path / "taishin-manual-refund.xlsx"
-    pd.DataFrame(
-        [["說明"], ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"], ["0001", "2026/08/04", "09:08:07", "2026/08/04", "轉帳", str(amount), "", "9000", "客戶退款 0012345678901234"]]
-    ).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
+    if not workbook.exists():
+        pd.DataFrame(
+            [["說明"], ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"], ["0001", "2026/08/04", "09:08:07", "2026/08/04", "轉帳", str(amount), "", "9000", "客戶退款 0012345678901234"]]
+        ).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
     from shared_kernel.identities import ActorContext, IdempotencyKey
     from subsystems.finance_import.ingestion import ingest_finance_workbook
     return ingest_finance_workbook(str(workbook), IdempotencyKey("lu-test-manual-refund-ingest"), ActorContext("lu-test-runner"))

@@ -178,7 +178,7 @@ def _facts(order, contract_completed, deposit_settled):
     return ContractCompletionFacts(
         case_no=str(order["case_no"]),
         aggregate_version=int(order["lifecycle_version"]),
-        contract_identity=_optional_text(order.get("contract_id")),
+        contract_identity=_optional_text(order.get("contract_identity")),
         contract_completed=contract_completed,
         lifecycle_status=OrderLifecycleStatus(str(order["status"])),
         deposit_settled=deposit_settled,
@@ -458,7 +458,7 @@ def _mysql_error_code(error):
 
 
 _ORDER_SELECT_SQL = (
-    "SELECT case_no,contract_id,lifecycle_version,status,"
+    "SELECT case_no,contract_identity,lifecycle_version,status,"
     "service_days,service_hours_per_day,floor_fee,"
     "service_start_time,service_end_time,service_end_day_offset "
     "FROM orders WHERE case_no=%s"

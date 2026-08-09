@@ -9,7 +9,6 @@ from api.routes import contracts
 CASE_FACTS = {
     "case_no": "115000001",
     "status": "服務中",
-    "contract_id": "C-1",
     "service_days": 20,
     "service_hours_per_day": 9,
     "client_identity_status": "一般市民",

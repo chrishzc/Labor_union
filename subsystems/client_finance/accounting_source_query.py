@@ -19,9 +19,9 @@ def _missing_terms(source: dict[str, Any]) -> list[str]:
     missing = []
     collection_schedule = source["collection_schedule"]
     if collection_schedule.get("deposit_service_days") is None:
-        missing.append("orders.deposit_service_days")
+        missing.append("client_payment_terms.deposit_service_days")
     if collection_schedule.get("deposit_due_date") is None:
-        missing.append("client_payments.deposit_due_date")
+        missing.append("client_payment_terms.deposit_due_date")
     if source["order"].get("actual_start_date") is None:
         missing.append("orders.actual_start_date")
     for assignment in source["staff_assignments"]:
@@ -43,17 +43,17 @@ def load_case_accounting_source_with_cursor(cursor: Any, case_no: str) -> dict[s
         """
         SELECT o.case_no, o.status, o.service_days, o.service_hours_per_day,
                o.floor_fee, o.start_date, o.end_date,
-               o.actual_start_date, o.actual_end_date, o.deposit_service_days,
+               o.actual_start_date, o.actual_end_date,
                c.id AS client_id, c.name AS client_name, c.identity_status,
                c.phone AS client_phone, c.city AS client_city,
                c.address AS client_address, c.service_time, c.service_type,
                b.query_no AS beclass_query_no, b.refund_bank_code,
                b.refund_account_no, b.survey_details,
-               cp.deposit_due_date
+               terms.deposit_service_days, terms.deposit_due_date
         FROM orders o
         JOIN clients c ON c.case_no = o.case_no
         LEFT JOIN beclass_records b ON b.query_no = o.case_no
-        LEFT JOIN client_payments cp ON cp.case_no = o.case_no
+        LEFT JOIN client_payment_terms terms ON terms.case_no = o.case_no
         WHERE o.case_no = %s
         """,
         (case_no,),
@@ -130,4 +130,3 @@ def load_case_accounting_source(case_no: str) -> dict[str, Any]:
             return load_case_accounting_source_with_cursor(cursor, case_no)
     finally:
         conn.close()
-

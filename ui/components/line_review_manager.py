@@ -106,15 +106,11 @@ def render_review_manager(
         st.error(f"無法載入審查統計：{exc}")
         return
 
-    metrics = st.columns(5)
+    metrics = st.columns(4)
     metrics[0].metric("全部待審", summary["pending_total"])
     metrics[1].metric("月嫂認證", summary["staff_pending"])
     metrics[2].metric("重新綁定", summary["rebind_pending"])
     metrics[3].metric("今日已處理", summary["processed_today"])
-    metrics[4].metric(
-        f"逾 {summary['stale_hours']} 小時",
-        summary["stale_pending"],
-    )
 
     filter1, filter2, filter3 = st.columns([1, 1, 2])
     type_label = filter1.selectbox("申請類型", ["全部", *TYPE_LABELS.values()])

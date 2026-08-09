@@ -16,7 +16,7 @@ def _row() -> dict[str, object]:
         "case_no": "CASE-1", "client_id": 1, "staff_id": None,
         "client_name": "Client", "staff_name": None, "order_status": "服務中",
         "identity_status": "一般市民", "cancel_reason": None, "line_group_id": None,
-        "contract_id": None, "actual_start_date": None, "actual_end_date": None,
+        "contract_identity": None, "actual_start_date": None, "actual_end_date": None,
         "deposit_date": date(2026, 1, 1), "start_date": date(2026, 1, 5),
         "end_date": date(2026, 1, 24), "service_days": 20,
         "service_hours_per_day": 8, "deposit_service_days": None,

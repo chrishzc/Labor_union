@@ -206,11 +206,6 @@ def _render_tab3_finance(orders_data):
         _render_staff_payment_ledger(selected_case_no, staff_detail)
 
 
-def _render_legacy_mixed_payment_overview(orders_data):
-    """相容 shim：委派至 _render_tab3_finance"""
-    return _render_tab3_finance(orders_data)
-
-
 def _render_client_payment_ledger(
     case_no,
     payment,

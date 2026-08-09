@@ -13,7 +13,7 @@ from shared_kernel.validation import require_canonical_text
 
 _DETAIL_FIELDS = frozenset({
     "actual_end_date", "actual_start_date", "cancel_reason", "case_no",
-    "client_id", "client_name", "contract_id", "custom_rest_dates",
+    "client_id", "client_name", "contract_identity", "custom_rest_dates",
     "deposit_date", "deposit_service_days", "end_date", "floor_fee",
     "identity_status", "line_group_id", "order_status", "service_days",
     "service_hours_per_day", "staff_id", "staff_name", "start_date",
@@ -43,7 +43,7 @@ class OrderDetail:
     identity_status: str
     cancel_reason: str | None
     line_group_id: str | None
-    contract_id: str | None
+    contract_identity: str | None
     actual_start_date: date | None
     actual_end_date: date | None
     deposit_date: date | None
@@ -76,7 +76,7 @@ def _detail(row: object) -> OrderDetail:
         staff_id=_optional_id(row, "staff_id"), client_name=_text(row, "client_name", 200),
         staff_name=_optional_text(row, "staff_name", 200), order_status=_text(row, "order_status", 100),
         identity_status=_text(row, "identity_status", 100), cancel_reason=_optional_text(row, "cancel_reason", 10000),
-        line_group_id=_optional_text(row, "line_group_id", 100), contract_id=_optional_text(row, "contract_id", 100),
+        line_group_id=_optional_text(row, "line_group_id", 100), contract_identity=_optional_text(row, "contract_identity", 191),
         actual_start_date=_optional_date(row, "actual_start_date"), actual_end_date=_optional_date(row, "actual_end_date"),
         deposit_date=_optional_date(row, "deposit_date"), start_date=_optional_date(row, "start_date"),
         end_date=_optional_date(row, "end_date"), service_days=_nonnegative_integer(row, "service_days"),

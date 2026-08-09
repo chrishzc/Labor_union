@@ -102,6 +102,17 @@ def test_historical_reprocess_preview_is_a_lossless_typed_plan_projection():
     }
 
 
+def test_historical_reprocess_preview_allows_auto_resolvable_rows_without_selection():
+    response = preview_historical_finance_reprocess(
+        FinanceImportHistoricalReprocessPreviewBody(batch_identity="batch:1"),
+        "preview-1",
+        _principal(),
+        _Application(),
+    )
+
+    assert response.data["row_count"] == 1
+
+
 def test_historical_reprocess_apply_carries_the_guarded_command_contract():
     application = _Application()
     response = apply_historical_finance_reprocess(

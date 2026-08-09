@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PATH = PROJECT_ROOT / "scripts" / "generate_fake_data.py"
 FROZEN_ERROR = (
     "GenerateFakeData 已凍結，僅供人工參考；"
-    "新增假資料需求請建立獨立腳本與 ADAD 節點。"
+    "新增假資料需求請建立獨立腳本與測試。"
 )
 
 

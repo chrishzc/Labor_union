@@ -6,9 +6,12 @@ import pytest
 from domains.finance_import.planning import FinanceClassificationType
 from infrastructure.mysql.historical_reprocess_repository import (
     _ROWS_SQL,
+    _manual_owner_row,
     _normalized_row,
     _target_identities,
+    _validate_owner_selections,
 )
+from subsystems.finance_import.historical_reprocess_workflow import HistoricalOwnerSelection
 
 
 def test_repository_normalizes_mysql_json_columns_before_classification():
@@ -63,3 +66,57 @@ def test_repository_refuses_to_guess_a_government_subsidy_target():
 def test_repository_uses_a_nonreserved_alias_for_live_mysql_compatibility():
     assert "finance_import_rows bank_row" in _ROWS_SQL
     assert "SELECT row.*" not in _ROWS_SQL
+
+
+def test_manual_owner_selection_is_optional_and_can_cover_only_ambiguous_rows():
+    rows = ({"id": 1}, {"id": 2})
+    selection = HistoricalOwnerSelection(
+        "finance-import-row:2",
+        "C-1",
+        "refund:C-1",
+        "reviewed by finance",
+        ("review:2",),
+    )
+
+    _validate_owner_selections(rows, ())
+    _validate_owner_selections(rows, (selection,))
+
+
+def test_manual_owner_selection_rejects_a_row_outside_the_reprocess_batch():
+    selection = HistoricalOwnerSelection(
+        "finance-import-row:2",
+        "C-1",
+        "refund:C-1",
+        "reviewed by finance",
+        ("review:2",),
+    )
+
+    with pytest.raises(ValueError, match="not_eligible"):
+        _validate_owner_selections(({"id": 1},), (selection,))
+
+
+def test_manual_owner_candidate_fingerprint_includes_obligation_projection_version():
+    selection = HistoricalOwnerSelection(
+        "finance-import-row:1",
+        "C-1",
+        "refund:C-1",
+        "reviewed by finance",
+        ("review:1",),
+    )
+    row = {"id": 1, "canonical_fact_version": 0, "credit": Decimal("300")}
+
+    first = _manual_owner_row(_OpenObligationCursor(0), row, selection)
+    second = _manual_owner_row(_OpenObligationCursor(1), row, selection)
+
+    assert first.after.decision_facts_fingerprint != second.after.decision_facts_fingerprint
+
+
+class _OpenObligationCursor:
+    def __init__(self, projection_version):
+        self._projection_version = projection_version
+
+    def execute(self, _query, _values):
+        return None
+
+    def fetchone(self):
+        return {"projection_version": self._projection_version}

@@ -8,7 +8,7 @@ from typing import Any
 _ORDER_DETAIL_SQL = """
 SELECT o.case_no, o.client_id, o.staff_id, c.name AS client_name,
        s.name AS staff_name, o.status AS order_status, c.identity_status,
-       o.cancel_reason, o.line_group_id, o.contract_id, o.actual_start_date,
+       o.cancel_reason, o.line_group_id, o.contract_identity, o.actual_start_date,
        o.actual_end_date, o.deposit_date, o.start_date, o.end_date,
        o.service_days, o.service_hours_per_day, o.deposit_service_days,
        o.floor_fee, o.custom_rest_dates

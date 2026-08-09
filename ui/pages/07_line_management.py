@@ -15,6 +15,7 @@ from ui.components.line_review_manager import render_review_manager
 from ui.components.line_rich_menu_manager import render_rich_menu_manager
 from ui.components.line_schedule_manager import render_schedule_manager
 from ui.components.line_task_manager import render_task_manager
+from ui.components.admin_audit_manager import render_admin_audit_manager
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 
 
@@ -154,11 +155,11 @@ def _render_customer_service(
 
 
 def _render_audit_log(
-    _client: LineAdminApiClient,
-    _token: str | None,
-    _profile: dict,
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
 ) -> None:
-    _planned_panel("操作紀錄", "管理員異動稽核")
+    render_admin_audit_manager(client, token, profile)
 
 
 LINE_WORKSPACE_RENDERERS = {

@@ -189,7 +189,7 @@ def _render_historical_reprocess(client: FinanceImportApiClient) -> None:
         batch_identity = st.text_input("歷史批次識別碼", key="historical_reprocess_batch_identity")
         owner_selection_json = st.text_area(
             "人工選案證據 JSON",
-            help="每列需有 row_identity、case_no、obligation_identity、reason、evidence_references；必須涵蓋此批次全部待確認列。",
+            help="只有無法由既有強證據判定 owner 的列才需要填寫；每列需有 row_identity、case_no、obligation_identity、reason、evidence_references。",
             key="historical_reprocess_owner_selections",
         )
         if st.button("產生歷史重處理 Preview", key="historical_reprocess_preview_btn"):
@@ -449,12 +449,14 @@ def _line_items(value: str) -> list[str]:
 
 
 def _historical_owner_selection_input(value: str) -> list[dict]:
+    if not value.strip():
+        return []
     try:
         decoded = json.loads(value)
     except json.JSONDecodeError as error:
         raise ValueError("人工選案證據必須是 JSON array") from error
-    if not isinstance(decoded, list) or not decoded:
-        raise ValueError("每個待確認銀行列都必須有人工選案證據")
+    if not isinstance(decoded, list):
+        raise ValueError("人工選案證據必須是 JSON array")
     if any(not isinstance(item, dict) for item in decoded):
         raise ValueError("人工選案證據每一項必須是 JSON object")
     return decoded

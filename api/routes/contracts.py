@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/v1/contracts", tags=["Contracts"])
 def _load_case_facts(cursor: Any, case_no: str) -> dict[str, Any] | None:
     cursor.execute(
         """
-        SELECT o.case_no, o.status, o.contract_id, o.service_days,
+        SELECT o.case_no, o.status, o.service_days,
                o.service_hours_per_day, o.floor_fee,
                o.start_date, o.end_date, o.actual_start_date, o.actual_end_date,
                c.id AS client_id, c.name AS client_name, c.phone AS client_phone,
@@ -95,7 +95,7 @@ def get_staff_contract_context(case_no: str, assignment_id: int | None = None) -
             order = {
                 key: case_facts.get(key)
                 for key in (
-                    "case_no", "status", "contract_id", "service_days",
+                    "case_no", "status", "service_days",
                     "service_hours_per_day", "floor_fee",
                     "start_date", "end_date", "actual_start_date", "actual_end_date",
                 )

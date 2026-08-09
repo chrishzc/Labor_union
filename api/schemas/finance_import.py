@@ -114,7 +114,7 @@ class HistoricalOwnerSelectionBody(_StrictModel):
 
 class FinanceImportHistoricalReprocessPreviewBody(_StrictModel):
     batch_identity: str = Field(min_length=1, max_length=191)
-    owner_selections: list[HistoricalOwnerSelectionBody] = Field(min_length=1)
+    owner_selections: list[HistoricalOwnerSelectionBody] = Field(default_factory=list)
 
 
 class FinanceImportHistoricalReprocessApplyBody(

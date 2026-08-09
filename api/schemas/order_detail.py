@@ -17,7 +17,7 @@ class OrderDetailView(BaseModel):
     identity_status: str
     cancel_reason: str | None
     line_group_id: str | None
-    contract_id: str | None
+    contract_identity: str | None
     actual_start_date: date | None
     actual_end_date: date | None
     deposit_date: date | None

@@ -171,8 +171,11 @@ def get_active_matching_plan_state(case_no: Any) -> dict[str, Any]:
         lock = cursor.fetchone()
         state["availability_lock"] = dict(lock) if isinstance(lock, Mapping) else None
         cursor.execute(
-            """SELECT deposit_receivable, deposit_received, deposit_received_at
-                 FROM client_payments
+            """SELECT contracted_amount_ntd AS deposit_receivable,
+                      allocated_net_amount_ntd AS deposit_received,
+                      CASE WHEN settlement_state = 'settled' THEN updated_at END
+                          AS deposit_received_at
+                 FROM client_deposit_settlement_projection
                 WHERE case_no = %s""",
             (case_no,),
         )

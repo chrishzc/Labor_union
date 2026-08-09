@@ -367,16 +367,6 @@ def get_assignment_schedule(assignment_id: int) -> dict[str, Any]:
             )
             has_active_staff_payment = bool(cursor.fetchone())
 
-            cursor.execute(
-                """SELECT smsd.id
-                   FROM staff_monthly_settlement_details smsd
-                   JOIN staff_monthly_settlements sms ON sms.id = smsd.settlement_id
-                   WHERE smsd.assignment_id = %s AND sms.status <> 'cancelled'
-                   LIMIT 1""",
-                (assignment_id,),
-            )
-            has_active_monthly_settlement = bool(cursor.fetchone())
-
             reasons: list[str] = []
             if assignment["status"] == "cancelled":
                 reasons.append("cancelled_assignment")
@@ -384,8 +374,6 @@ def get_assignment_schedule(assignment_id: int) -> dict[str, Any]:
                 reasons.append("actual_hours_adjustment_exists")
             if has_active_staff_payment:
                 reasons.append("active_staff_payment")
-            if has_active_monthly_settlement:
-                reasons.append("active_monthly_settlement")
 
             cursor.execute(
                 """SELECT id, case_no, staff_id, assignment_id, work_date,
@@ -414,7 +402,6 @@ def get_assignment_schedule(assignment_id: int) -> dict[str, Any]:
                     "is_cancelled": assignment["status"] == "cancelled",
                     "has_actual_hours_adjustments": has_actual_hours_adjustments,
                     "has_active_staff_payment": has_active_staff_payment,
-                    "has_active_monthly_settlement": has_active_monthly_settlement,
                     "reasons": reasons,
                 },
             }
@@ -667,24 +654,6 @@ def _get_case_schedule_conflict_snapshot_with_cursor(
                 require_id(row, "assignment_id")
             payments.sort(key=lambda row: (row["assignment_id"], row["id"]))
 
-            cursor.execute(
-                f"""SELECT smsd.id, a.case_no, smsd.assignment_id,
-                          smsd.settlement_id, sms.status
-                     FROM staff_monthly_settlement_details smsd
-                     JOIN staff_monthly_settlements sms ON sms.id = smsd.settlement_id
-                     JOIN case_staff_assignments a ON a.id = smsd.assignment_id
-                    WHERE a.case_no = %s AND sms.status <> 'cancelled'
-                    ORDER BY smsd.assignment_id ASC, smsd.id ASC{lock_clause}""",
-                (case_no,),
-            )
-            settlements = rows(cursor.fetchall(), "settlement")
-            for row in settlements:
-                require_case(row)
-                require_id(row, "id")
-                require_id(row, "assignment_id")
-                require_id(row, "settlement_id")
-            settlements.sort(key=lambda row: (row["assignment_id"], row["id"]))
-
             if verify_assignment_identity:
                 cursor.execute(
                     """SELECT id, staff_id
@@ -716,7 +685,6 @@ def _get_case_schedule_conflict_snapshot_with_cursor(
                     "leave_substitution_events": events,
                     "actual_hours_adjustments": adjustments,
                     "non_cancelled_payments": payments,
-                    "active_settlements": settlements,
                 },
             }
 
@@ -780,4 +748,3 @@ def get_case_schedule_conflict_snapshot(
             )
     finally:
         connection.close()
-

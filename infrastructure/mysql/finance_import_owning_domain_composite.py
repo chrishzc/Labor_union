@@ -65,7 +65,6 @@ from subsystems.client_finance.client_refund_reversal_workflow import (
 )
 from subsystems.finance_import.import_workflow import (
     FinanceDispatchOutcome,
-    FinanceImportApplyRequest,
     FinanceImportDispatchResult,
     FinanceImportRepositoryUnavailable,
 )
@@ -900,8 +899,9 @@ def _child_key(context, candidate, purpose):
 
 
 def _request_reason(request):
-    if isinstance(request, FinanceImportApplyRequest):
-        return request.reason
+    direct_reason = getattr(request, "reason", None)
+    if isinstance(direct_reason, str):
+        return direct_reason
     return request.selection.reason
 
 

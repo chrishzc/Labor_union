@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import Response
 
-from api.dependencies.admin_auth import require_line_manager, require_line_viewer
+from api.dependencies.admin_auth import require_line_menu_publisher, require_line_viewer
 from api.schemas.base import BaseResponse
 from api.schemas.line_config import LineMenusConfig, RichMenuDefinition
 from api.schemas.line_rich_menus import (
@@ -22,6 +22,7 @@ from subsystems.line.configuration_store import read_config
 from subsystems.line.rich_menu_publication_workflow import (
     RichMenuPublicationConflictError,
     RichMenuPublicationNotFoundError,
+    create_publication_preview,
     create_publication_job,
     get_publication,
     list_publications,
@@ -78,7 +79,7 @@ def preview_rich_menu(payload: RichMenuDefinition):
 @router.post(
     "/{menu_id}/images",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_manager)],
+    dependencies=[Depends(require_line_menu_publisher)],
 )
 async def upload_rich_menu_image(
     menu_id: str,
@@ -122,7 +123,7 @@ async def upload_rich_menu_image(
 @router.delete(
     "/images/{asset_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_line_manager)],
+    dependencies=[Depends(require_line_menu_publisher)],
 )
 def remove_rich_menu_image(asset_id: int, request: Request):
     config = read_config("line_menus", LineMenusConfig)
@@ -169,7 +170,7 @@ def publication_detail(publication_id: int):
 @router.post(
     "/publications/{publication_id}/retry",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_manager)],
+    dependencies=[Depends(require_line_menu_publisher)],
 )
 def publication_retry(
     publication_id: int,
@@ -189,10 +190,30 @@ def publication_retry(
 
 
 @router.post(
+    "/{menu_id}/publish-preview",
+    response_model=BaseResponse[dict],
+    dependencies=[Depends(require_line_menu_publisher)],
+)
+def create_rich_menu_publish_preview(menu_id: str, request: Request):
+    try:
+        result = create_publication_preview(menu_id, request.state.admin_principal.id)
+    except (
+        RichMenuPublicationNotFoundError,
+        RichMenuPublicationConflictError,
+        MediaAssetNotFoundError,
+    ) as exc:
+        _publication_error(exc)
+    request.state.audit_action = "line.rich_menu.publish.preview"
+    request.state.audit_resource_type = "line_rich_menu_config"
+    request.state.audit_resource_id = menu_id
+    return BaseResponse(data=result, message="已確認目前版本的預覽，可再次確認後套用")
+
+
+@router.post(
     "/{menu_id}/publish",
     response_model=BaseResponse[dict],
     status_code=status.HTTP_202_ACCEPTED,
-    dependencies=[Depends(require_line_manager)],
+    dependencies=[Depends(require_line_menu_publisher)],
 )
 def publish_rich_menu(
     menu_id: str,
@@ -200,7 +221,11 @@ def publish_rich_menu(
     request: Request,
 ):
     try:
-        result = create_publication_job(menu_id, request.state.admin_principal.id)
+        result = create_publication_job(
+            menu_id,
+            request.state.admin_principal.id,
+            preview_id=payload.preview_id,
+        )
     except (
         RichMenuPublicationNotFoundError,
         RichMenuPublicationConflictError,

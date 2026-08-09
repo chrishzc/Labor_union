@@ -16,16 +16,60 @@ from typing import Any
 import pymysql
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.access.security_audit_query import mask_audit_details
 
 
 SCRYPT_N = 2**14
 SCRYPT_R = 8
 SCRYPT_P = 1
+ADMIN_SESSION_IDLE_MINUTES = 30
+ADMIN_SESSION_MAXIMUM_MINUTES = 8 * 60
 ROLE_LEVELS = {
     "line_viewer": 10,
     "line_agent": 20,
     "line_manager": 30,
     "system_admin": 40,
+}
+
+CAPABILITY_REGISTRY = frozenset(
+    {
+        "line.identity.read",
+        "line.identity.review",
+        "line.review.read",
+        "line.task.read",
+        "line.task.control",
+        "line.menu.publish",
+        "integration.event.read",
+        "integration.event.retry",
+        "admin.user.manage",
+        "admin.session.revoke",
+        "admin.audit.read",
+        "data_browser.read",
+        "data_browser.write",
+        "system.configuration.manage",
+        "system.administration",
+        "knowledge.source.edit",
+        "knowledge.source.review",
+        "knowledge.source.publish",
+        "knowledge.answer.query",
+    }
+)
+
+ROLE_CAPABILITIES = {
+    "line_viewer": frozenset({"line.identity.read", "line.task.read"}),
+    "line_agent": frozenset({"line.identity.read", "line.review.read", "line.task.read"}),
+    "line_manager": frozenset(
+        {
+            "line.identity.read",
+            "line.identity.review",
+            "line.review.read",
+            "line.task.read",
+            "line.task.control",
+            "line.menu.publish",
+            "system.configuration.manage",
+        }
+    ),
+    "system_admin": CAPABILITY_REGISTRY,
 }
 
 
@@ -36,6 +80,7 @@ class AdminPrincipal:
     display_name: str
     role: str
     linked_line_user_id: str | None = None
+    capabilities: frozenset[str] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -49,6 +94,12 @@ class AdminPrincipal:
 
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _session_expiry(now: datetime, absolute_expires_at: datetime) -> datetime:
+    return min(
+        now + timedelta(minutes=ADMIN_SESSION_IDLE_MINUTES), absolute_expires_at
+    )
 
 
 def _token_hash(token: str) -> str:
@@ -171,28 +222,26 @@ def authenticate_admin(
                 return None
 
             now = _utc_now_naive()
-            expires_at = now + timedelta(minutes=max(5, min(session_minutes, 1440)))
+            del session_minutes
+            absolute_expires_at = now + timedelta(minutes=ADMIN_SESSION_MAXIMUM_MINUTES)
+            expires_at = _session_expiry(now, absolute_expires_at)
             token = secrets.token_urlsafe(48)
             cursor.execute(
                 """
                 INSERT INTO admin_sessions (
-                    admin_user_id, session_token_hash, expires_at, last_seen_at
-                ) VALUES (%s,%s,%s,%s)
+                    admin_user_id, session_token_hash, expires_at, absolute_expires_at,
+                    last_seen_at
+                ) VALUES (%s,%s,%s,%s,%s)
                 """,
-                (row["id"], _token_hash(token), expires_at, now),
+                (row["id"], _token_hash(token), expires_at, absolute_expires_at, now),
             )
             cursor.execute(
                 "UPDATE admin_users SET last_login_at=%s WHERE id=%s",
                 (now, row["id"]),
             )
+            principal = _principal_from_row(cursor, row)
         conn.commit()
-        return token, expires_at, AdminPrincipal(
-            id=int(row["id"]),
-            username=row["username"],
-            display_name=row["display_name"],
-            role=row["role"],
-            linked_line_user_id=row.get("linked_line_user_id"),
-        )
+        return token, expires_at, principal
     except Exception:
         conn.rollback()
         raise
@@ -215,6 +264,7 @@ def get_admin_session(token: str) -> AdminPrincipal | None:
                 WHERE s.session_token_hash=%s
                   AND s.revoked_at IS NULL
                   AND s.expires_at > UTC_TIMESTAMP()
+                  AND s.absolute_expires_at > UTC_TIMESTAMP()
                   AND u.enabled=TRUE
                 LIMIT 1
                 """,
@@ -224,17 +274,22 @@ def get_admin_session(token: str) -> AdminPrincipal | None:
             if not row:
                 return None
             cursor.execute(
-                "UPDATE admin_sessions SET last_seen_at=UTC_TIMESTAMP() WHERE session_token_hash=%s",
+                """
+                UPDATE admin_sessions
+                SET expires_at=LEAST(
+                        DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 MINUTE),
+                        absolute_expires_at
+                    ),
+                    last_seen_at=UTC_TIMESTAMP()
+                WHERE session_token_hash=%s
+                  AND revoked_at IS NULL
+                  AND absolute_expires_at > UTC_TIMESTAMP()
+                """,
                 (_token_hash(token),),
             )
+            principal = _principal_from_row(cursor, row)
         conn.commit()
-        return AdminPrincipal(
-            id=int(row["id"]),
-            username=row["username"],
-            display_name=row["display_name"],
-            role=row["role"],
-            linked_line_user_id=row.get("linked_line_user_id"),
-        )
+        return principal
     finally:
         conn.close()
 
@@ -264,9 +319,7 @@ def renew_admin_session(token: str, *, session_minutes: int) -> datetime | None:
     """Extend a valid session without exposing or replacing its stored hash."""
     if not token:
         return None
-    expires_at = _utc_now_naive() + timedelta(
-        minutes=max(5, min(session_minutes, 1440))
-    )
+    del session_minutes
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
@@ -274,23 +327,63 @@ def renew_admin_session(token: str, *, session_minutes: int) -> datetime | None:
                 """
                 UPDATE admin_sessions s
                 JOIN admin_users u ON u.id=s.admin_user_id
-                SET s.expires_at=%s, s.last_seen_at=UTC_TIMESTAMP()
+                SET s.expires_at=LEAST(
+                        DATE_ADD(UTC_TIMESTAMP(), INTERVAL 30 MINUTE),
+                        s.absolute_expires_at
+                    ),
+                    s.last_seen_at=UTC_TIMESTAMP()
                 WHERE s.session_token_hash=%s
                   AND s.revoked_at IS NULL
                   AND s.expires_at > UTC_TIMESTAMP()
+                  AND s.absolute_expires_at > UTC_TIMESTAMP()
                   AND u.enabled=TRUE
                 """,
-                (expires_at, _token_hash(token)),
+                (_token_hash(token),),
             )
             renewed = cursor.rowcount > 0
+            if renewed:
+                cursor.execute(
+                    "SELECT expires_at FROM admin_sessions WHERE session_token_hash=%s",
+                    (_token_hash(token),),
+                )
+                row = cursor.fetchone()
         conn.commit()
-        return expires_at if renewed else None
+        return row[0] if renewed and row else None
     finally:
         conn.close()
 
 
 def has_required_role(principal: AdminPrincipal, minimum_role: str) -> bool:
     return ROLE_LEVELS.get(principal.role, 0) >= ROLE_LEVELS.get(minimum_role, 10**9)
+
+
+def has_required_capability(principal: AdminPrincipal, capability: str) -> bool:
+    if capability not in CAPABILITY_REGISTRY:
+        return False
+    effective_capabilities = principal.capabilities
+    if effective_capabilities is None:
+        effective_capabilities = ROLE_CAPABILITIES.get(principal.role, frozenset())
+    return capability in effective_capabilities
+
+
+def _principal_from_row(cursor: Any, row: dict[str, Any]) -> AdminPrincipal:
+    role = str(row["role"])
+    capabilities = set(ROLE_CAPABILITIES.get(role, frozenset()))
+    cursor.execute(
+        """
+        SELECT capability FROM admin_capability_grants
+        WHERE admin_user_id=%s AND revoked_at IS NULL
+          AND effective_from <= UTC_TIMESTAMP()
+          AND (expires_at IS NULL OR expires_at > UTC_TIMESTAMP())
+        """,
+        (row["id"],),
+    )
+    capabilities.update(str(item["capability"]) for item in cursor.fetchall())
+    return AdminPrincipal(
+        id=int(row["id"]), username=row["username"], display_name=row["display_name"],
+        role=role, linked_line_user_id=row.get("linked_line_user_id"),
+        capabilities=frozenset(capabilities),
+    )
 
 
 def record_admin_audit(
@@ -325,7 +418,7 @@ def record_admin_audit(
                     http_method,
                     result_status,
                     ip_address,
-                    json.dumps(details, ensure_ascii=False) if details else None,
+                    json.dumps(mask_audit_details(details), ensure_ascii=False) if details else None,
                 ),
             )
         conn.commit()

@@ -101,7 +101,6 @@ def line_admin_capabilities():
             "planned_pages": [
                 "LINE 設定中心",
                 "客服入口",
-                "操作紀錄",
             ],
             "config_files": {
                 "message_templates": (PROJECT_ROOT / "config/message_templates.json").exists(),

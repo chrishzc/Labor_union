@@ -62,7 +62,8 @@
     *   **動作**：系統從環境變數或資料庫抓取 `LINE_LIFF_ID`，自動組裝出專屬的 `https://liff.line.me/{liff_id}` 網址。
     *   **回覆**：推播包含 LIFF 連結的引導文案，讓用戶點擊填寫。
 *   **一般聊天 (未攔截之文字)**
-    *   Webhook 只建立 `rag_reply` 任務；ChromaDB 查詢與 LINE API 發送都由 Worker 執行。
+    *   Webhook 只建立 `rag_reply` 任務；Worker 只查詢已發布、附來源與版本的 Knowledge
+        Retrieval read model，再由 LINE API 發送。查無已發布來源時轉人工，禁止讀取舊 Chroma FAQ。
 
 ---
 

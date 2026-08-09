@@ -19,6 +19,7 @@ from api.middleware.compression import ResponseCompressionMiddleware
 from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
     admin_auth,
+    admin_audit,
     anomaly_recovery,
     anomaly_registry,
     assignment_plan,
@@ -50,6 +51,7 @@ from api.routes import (
     multi_caregiver_schedule_read,
     caregiver_segment_availability,
     caregiver_availability_locks,
+    capability_grants,
     order_actual_start,
     order_auto_completion,
     order_cancellation,
@@ -62,11 +64,13 @@ from api.routes import (
     payroll_rebuild,
     schedule,
     jobs,
+    knowledge_retrieval,
     scheduling_current,
     staff,
     staff_monthly_schedule,
     staff_payout,
     staff_payments,
+    system_status,
 )
 
 
@@ -78,6 +82,10 @@ from api.schemas.base import BaseResponse
 from line.line_bot import router as line_router
 from line.worker import start_worker, stop_worker
 from subsystems.access.authentication_session import record_admin_audit
+from subsystems.access.security_audit_retention_worker import (
+    start_security_audit_retention_worker,
+    stop_security_audit_retention_worker,
+)
 from subsystems.anomalies.outbox_worker import (
     start_architecture_outbox_worker,
     stop_architecture_outbox_worker,
@@ -107,9 +115,11 @@ async def lifespan(_: FastAPI):
         return
     line_worker_task = start_worker()
     architecture_worker_task = start_architecture_outbox_worker()
+    security_audit_worker_task = start_security_audit_retention_worker()
     try:
         yield
     finally:
+        await stop_security_audit_retention_worker(security_audit_worker_task)
         await stop_architecture_outbox_worker(architecture_worker_task)
         await stop_worker(line_worker_task)
 
@@ -140,10 +150,13 @@ app.mount("/static", StaticFiles(directory="line/static"), name="static")
 # LINE/LIFF/webhook endpoints are a child router of this central application.
 app.include_router(line_router)
 app.include_router(admin_auth.router)
+app.include_router(admin_audit.router)
+app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
 app.include_router(line_reviews.router)
+app.include_router(knowledge_retrieval.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)
@@ -195,6 +208,7 @@ app.include_router(government_subsidy.router)
 app.include_router(anomaly_registry.router)
 app.include_router(anomaly_recovery.router)
 app.include_router(data_browser_admin.router)
+app.include_router(system_status.router)
 
 
 

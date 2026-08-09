@@ -5,14 +5,13 @@
 功能說明: LINE Bot 子路由，負責 Webhook、LIFF、使用者事件、身分切換與 LINE 訊息任務建立
 ================================================================================
 """
-from fastapi import APIRouter, Header, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 import pymysql
 import os
 import json
 import asyncio
 import sys
-import secrets
 import requests
 from typing import Any, Dict, Optional
 from datetime import datetime, timedelta, timezone
@@ -44,7 +43,6 @@ from subsystems.case_import.provisional_registration_application import (
 )
 from subsystems.line.user_lifecycle import (
     activate_follow,
-    apply_role,
     block_unfollow,
     cancel_pending_onboarding,
 )
@@ -92,14 +90,6 @@ def _load_rich_menu_id(role: str) -> str:
             return json.load(stream).get(key_by_role[role], "")
     except (OSError, ValueError, KeyError):
         return ""
-
-
-def _require_internal_api_key(x_internal_api_key: str | None) -> None:
-    expected = os.getenv("INTERNAL_API_KEY", "")
-    if not expected:
-        raise HTTPException(status_code=503, detail="Internal API authentication is not configured")
-    if not secrets.compare_digest(x_internal_api_key or "", expected):
-        raise HTTPException(status_code=401, detail="Invalid internal API key")
 
 
 def _notify_development_reviewer(request_type: str, request_id: str | int) -> None:
@@ -432,17 +422,15 @@ def reject_staff_review_request(
 
 
 @router.put("/api/line/users/{user_id}/role/{role}")
-def set_line_user_role(user_id: str, role: str, x_internal_api_key: str | None = Header(default=None)):
-    """Internal role administration endpoint for customer/staff/union_staff."""
-    _require_internal_api_key(x_internal_api_key)
-    if role not in {"customer", "staff", "union_staff"}:
-        raise HTTPException(status_code=422, detail="Unsupported LINE user role")
-    conn = get_db_connection()
-    try:
-        apply_role(conn, user_id, role)
-        return {"status": "success", "line_user_id": user_id, "role": role}
-    finally:
-        conn.close()
+def set_line_user_role(user_id: str, role: str) -> None:
+    """Block the internal-key-only writer until typed identity administration exists."""
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "line_role_api_retired",
+            "replacement": "typed LINE identity administration requires an approved work package",
+        },
+    )
 
 # ----------------- 1. LINE WEBHOOK 接收 -----------------
 class LineWebhookPayload(BaseModel):

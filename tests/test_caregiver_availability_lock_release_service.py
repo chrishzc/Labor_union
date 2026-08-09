@@ -1,6 +1,5 @@
 import json
 from datetime import date, timedelta
-from decimal import Decimal
 
 import pytest
 
@@ -62,9 +61,8 @@ class _Cursor:
         existing_event_reason: str = "release lock",
         event_payload: dict | None = None,
         plan_id: int = 7,
-        transactions: list[dict] | None = None,
-        summary_received: str = "0",
-        summary_receivable: str = "0",
+        deposit_projection: dict | None = None,
+        missing_deposit_projection: bool = False,
         fail_execute_at: int | None = None,
         fail_fetch_kind: str | None = None,
         fail_cursor_rowcount_days: int | None = None,
@@ -93,20 +91,18 @@ class _Cursor:
         self.existing_event_actor = existing_event_actor
         self.existing_event_reason = existing_event_reason
         self.plan_id = plan_id
-        self.transactions = transactions or [
-            {
-                "id": 31,
-                "transaction_type": "receipt",
-                "transaction_status": "failed",
-                "stage": "deposit",
-                "amount": Decimal("100"),
-                "occurred_at": date(2026, 8, 1),
-                "external_reference": "tx-31",
-                "reversal_of_transaction_id": None,
-            }
-        ]
-        self.summary_received = Decimal(summary_received)
-        self.summary_receivable = Decimal(summary_receivable)
+        self.deposit_projection = deposit_projection or {
+            "case_no": "C-1",
+            "deposit_obligation_identity": "deposit-obligation-1",
+            "settlement_state": "unsettled",
+            "contracted_amount_ntd": 1000,
+            "allocated_net_amount_ntd": 0,
+            "settlement_identity": None,
+            "source_fingerprint": "a" * 64,
+            "projection_version": 1,
+            "latest_ledger_entry_id": None,
+        }
+        self.missing_deposit_projection = missing_deposit_projection
         self.fail_execute_at = fail_execute_at
         self.fail_fetch_kind = fail_fetch_kind
 
@@ -216,15 +212,8 @@ class _Cursor:
                 "status": "洽談中",
             }
 
-        if "FROM client_payment_transactions" in self.executed[-1][0]:
-            return None
-
-        if "FROM client_payments" in self.executed[-1][0]:
-            return {
-                "case_no": "C-1",
-                "deposit_receivable": self.summary_receivable,
-                "deposit_received": self.summary_received,
-            }
+        if "FROM client_deposit_settlement_projection" in self.executed[-1][0]:
+            return None if self.missing_deposit_projection else dict(self.deposit_projection)
 
         raise AssertionError(self.executed[-1][0])
 
@@ -237,9 +226,6 @@ class _Cursor:
 
         if "FROM caregiver_availability_lock_days" in self.executed[-1][0]:
             return [dict(row) for row in self.lock_days]
-
-        if "FROM client_payment_transactions" in self.executed[-1][0]:
-            return [dict(row) for row in self.transactions]
 
         raise AssertionError(self.executed[-1][0])
 
@@ -334,6 +320,9 @@ def test_created_for_one_through_four_segments(monkeypatch, count):
     writes = [(sql, params) for sql, params in cursor.executed if sql.startswith(("UPDATE", "INSERT"))]
     assert writes[0][0].startswith("UPDATE caregiver_availability_lock_days")
     assert writes[-1][0].startswith("INSERT INTO caregiver_availability_lock_events")
+    reads = [sql for sql, _ in cursor.executed if sql.startswith("SELECT")]
+    assert any("FROM client_deposit_settlement_projection" in sql for sql in reads)
+    assert not any("client_payments" in sql or "client_payment_transactions" in sql for sql in reads)
 
 
 def test_exact_replay_returns_existing_for_released_lock(monkeypatch):
@@ -388,30 +377,25 @@ def test_released_lock_requires_existing_event_or_rejects(monkeypatch):
     assert connection.rollbacks == 1
 
 
-def test_existing_deposit_rows_must_balance_zero(monkeypatch):
-    connection, _, _ = _install(monkeypatch, summary_received="1")
-    with pytest.raises(ValueError, match="deposit summary is inconsistent"):
+def test_nonzero_canonical_deposit_blocks_release(monkeypatch):
+    connection, _, _ = _install(
+        monkeypatch,
+        deposit_projection={
+            "case_no": "C-1", "deposit_obligation_identity": "deposit-obligation-1",
+            "settlement_state": "unsettled", "contracted_amount_ntd": 1000,
+            "allocated_net_amount_ntd": 1, "settlement_identity": None,
+            "source_fingerprint": "a" * 64, "projection_version": 1,
+            "latest_ledger_entry_id": 31,
+        },
+    )
+    with pytest.raises(ValueError, match="existing deposit net amount must be zero"):
         service.release_caregiver_availability_lock(**_default_request())
     assert connection.rollbacks == 1
 
 
-def test_reversal_transaction_in_deposit_stream_fails_closed(monkeypatch):
-    connection, _, _ = _install(
-        monkeypatch,
-        transactions=[
-            {
-                "id": 31,
-                "transaction_type": "reversal",
-                "transaction_status": "succeeded",
-                "stage": "deposit",
-                "amount": Decimal("100"),
-                "occurred_at": date(2026, 8, 1),
-                "external_reference": "tx-31",
-                "reversal_of_transaction_id": 29,
-            }
-        ],
-    )
-    with pytest.raises(ValueError, match="reversal rows invalidate"):
+def test_missing_canonical_deposit_projection_fails_closed(monkeypatch):
+    connection, _, _ = _install(monkeypatch, missing_deposit_projection=True)
+    with pytest.raises(ValueError, match="client finance deposit settlement projection missing"):
         service.release_caregiver_availability_lock(**_default_request())
     assert connection.rollbacks == 1
 
@@ -442,7 +426,7 @@ def test_mutex_mismatch_or_exception_fails_closed(monkeypatch):
 
 
 def test_execute_and_fetch_failures_rollback_and_close(monkeypatch):
-    for fail_at in range(1, 15):
+    for fail_at in range(1, 14):
         connection, cursor, _ = _install(monkeypatch, fail_execute_at=fail_at)
         with pytest.raises(RuntimeError, match="execute failed"):
             service.release_caregiver_availability_lock(**_default_request())

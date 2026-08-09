@@ -4,7 +4,7 @@
 功能說明: 服務人員行事曆與檔期調控獨立頁面 (CalendarUI)
 專案名稱: Lobar Union - 服務人員與訂單管理系統
 建立日期: 2026-07-03
-架構規範: ADAD Version 18 (已從 OrderUI 完全解耦獨立)
+架構規範: 已從 OrderUI 完全解耦的獨立行事曆頁面
 ================================================================================
 職責與業務規則:
 1. 提供服務人員 (月嫂) 檔期行事曆檢視與切換。
@@ -42,6 +42,7 @@ class OrderLifecycleAdminApiClient:
     def get_control_state(self, *args, **kwargs): return None
 class OrderLifecycleAdminApiError(Exception): pass
 from ui.api_clients.order_summary_api_client import OrderSummaryApiClient
+from ui.api_clients.staff_summary_api_client import StaffSummaryApiClient
 from ui.api_clients.leave_substitution_api_client import (
     LeaveSubstitutionApiClient,
 )
@@ -91,6 +92,55 @@ def _calendar_reference_rows(path, admin_headers):
         f"{resolve_api_base_url()}{path}",
         tuple(sorted(admin_headers.items())),
     )
+
+
+@st.cache_data(
+    ttl=_REFERENCE_DATA_CACHE_SECONDS,
+    show_spinner=False,
+)
+def _load_staff_summary_rows(base_url, header_items, after_id=None):
+    page = StaffSummaryApiClient(
+        base_url=base_url,
+        headers=dict(header_items),
+    ).query(page_size=200, after_id=after_id)
+    return [item.model_dump(mode="json") for item in page.items], page.next_cursor
+
+
+def _load_staff_summary_page(workspace: str):
+    cursor_key = f"scheduling_{workspace}_staff_after_id"
+    next_key = f"scheduling_{workspace}_staff_next_cursor"
+    rows, next_cursor = _load_staff_summary_rows(
+        resolve_api_base_url(),
+        tuple(sorted(build_admin_headers().items())),
+        st.session_state.get(cursor_key),
+    )
+    st.session_state[next_key] = next_cursor
+    return rows
+
+
+def _render_staff_summary_pagination(workspace: str) -> None:
+    cursor_key = f"scheduling_{workspace}_staff_after_id"
+    history_key = f"scheduling_{workspace}_staff_cursor_history"
+    next_key = f"scheduling_{workspace}_staff_next_cursor"
+    history = st.session_state.setdefault(history_key, [])
+    current_cursor = st.session_state.get(cursor_key)
+    previous_column, page_column, next_column = st.columns([1, 2, 1])
+    if previous_column.button(
+        "上一頁月嫂",
+        disabled=not history,
+        key=f"{workspace}_previous_staff_page",
+    ):
+        st.session_state[cursor_key] = history.pop()
+        st.rerun()
+    page_column.caption(f"月嫂摘要第 {len(history) + 1} 頁，每頁最多 200 筆")
+    if next_column.button(
+        "下一頁月嫂",
+        disabled=not st.session_state.get(next_key),
+        key=f"{workspace}_next_staff_page",
+    ):
+        history.append(current_cursor)
+        st.session_state[cursor_key] = st.session_state[next_key]
+        st.rerun()
 
 def safe_int(val) -> int:
     """安全轉換整數，防護 None, NaN, Inf 及無效字串 (ADR-v18-03)"""
@@ -463,10 +513,7 @@ def _render_staff_calendar():
     try:
         admin_headers = build_admin_headers()
 
-        staff_list = _calendar_reference_rows(
-            "/api/v1/staff",
-            admin_headers,
-        )
+        staff_list = _load_staff_summary_page("calendar")
     except Exception as e:
         st.error(f"初始化載入服務人員資料失敗: {e}")
         return
@@ -474,6 +521,8 @@ def _render_staff_calendar():
     if not staff_list:
         st.warning("請先在服務人員名冊中建立服務人員。")
         return
+
+    _render_staff_summary_pagination("calendar")
 
     try:
         # 1. 選擇月嫂與年月（同一列）
@@ -1018,7 +1067,8 @@ def show():
             st.rerun()
         try:
             orders, _ = _load_matching_center_data(str(queue_item["case_no"]))
-            staff = _calendar_reference_rows("/api/v1/staff", build_admin_headers())
+            staff = _load_staff_summary_page("matching_queue")
+            _render_staff_summary_pagination("matching_queue")
             render_matching_center(
                 orders,
                 staff,
@@ -1065,7 +1115,7 @@ def _render_matching_workspace() -> None:
     try:
         with st.spinner("正在載入月嫂配對案件與人員…"):
             orders, next_cursor = _load_matching_center_data(query_text or None, after_case_no)
-            staff = _calendar_reference_rows("/api/v1/staff", build_admin_headers())
+            staff = _load_staff_summary_page("matching")
     except Exception as error:
         accept_request_result(
             st.session_state,
@@ -1079,6 +1129,7 @@ def _render_matching_workspace() -> None:
     if not _accept_matching_workspace_result(request, orders, staff):
         return
     _render_scheduling_order_pagination("matching", next_cursor)
+    _render_staff_summary_pagination("matching")
     render_matching_center(orders, staff)
 
 
@@ -1103,8 +1154,9 @@ def _render_case_staffing_workspace() -> None:
         query_text = st.text_input("搜尋案件編號或客戶姓名", key="scheduling_order_search").strip()
         after_case_no = _prepare_scheduling_order_page("staffing", query_text)
         orders, next_cursor = _load_matching_center_data(query_text or None, after_case_no)
-        staff = _calendar_reference_rows("/api/v1/staff", build_admin_headers())
+        staff = _load_staff_summary_page("staffing")
         _render_scheduling_order_pagination("staffing", next_cursor)
+        _render_staff_summary_pagination("staffing")
         render_case_staffing(orders=orders, staff=staff)
     except Exception as error:
         st.error(f"案件人力配置載入失敗：{error}")

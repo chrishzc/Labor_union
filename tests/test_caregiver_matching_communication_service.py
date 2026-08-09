@@ -66,7 +66,7 @@ class _Cursor:
                 "created_by": "admin",
                 "created_at": datetime(2026, 7, 3),
             }
-        elif compact.startswith("select deposit_receivable"):
+        elif compact.startswith("select contracted_amount_ntd as deposit_receivable"):
             self._result = {
                 "deposit_receivable": 1000,
                 "deposit_received": 1000,
@@ -166,6 +166,7 @@ def test_active_matching_plan_state_reloads_lock_and_deposit(monkeypatch):
     assert state["availability_lock"]["lock_id"] == 77
     assert state["deposit"]["deposit_received"] == 1000
     assert [segment["segment_id"] for segment in state["segments"]] == [71, 72]
+    assert not any("client_payments" in sql for sql, _ in cursor.calls)
 
 
 def test_resume_delivery_is_individual_atomic_and_adds_multi_caregiver_note(

@@ -74,7 +74,6 @@ def _run(
     reviews=None,
     events=None,
     payments=None,
-    settlements=None,
     pending_substitution_event=None,
 ):
     cursor = Cursor(
@@ -84,7 +83,6 @@ def _run(
         reviews or [],
         events or [],
         payments or [],
-        settlements or [],
     )
     return cursor, reconcile_assignment_payroll_with_cursor(
         cursor,
@@ -258,7 +256,7 @@ def test_legacy_review_cross_case_and_duplicate_rows_block_payment():
     assert result["can_create_staff_payments"] is False
 
 
-def test_payment_and_monthly_settlement_snapshots_match_or_fail_closed():
+def test_staff_payment_snapshots_match_or_fail_closed():
     payment = {
         "assignment_id": 1,
         "case_no": "CASE-1",
@@ -270,7 +268,7 @@ def test_payment_and_monthly_settlement_snapshots_match_or_fail_closed():
         "payment_status": "pending",
     }
     schedules = [_schedule(date(2026, 7, 1)), _schedule(date(2026, 7, 2))]
-    _, clean = _run(_order(), [_assignment()], schedules, payments=[payment], settlements=[payment])
+    _, clean = _run(_order(), [_assignment()], schedules, payments=[payment])
     assert clean["can_create_staff_payments"] is True
 
     for key, value in (

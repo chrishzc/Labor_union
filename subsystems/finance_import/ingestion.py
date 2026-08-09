@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 from typing import Any, Mapping
 
 from domains.finance_import.ingestion import (
+    FinanceImportAttempt,
     FinanceWorkbookIngestionReceipt,
     InitialClassificationFacts,
     build_initial_classification,
@@ -26,17 +28,40 @@ _FINGERPRINT_VERSION = "finance-transaction-fingerprint-v1"
 _INITIAL_CLASSIFICATION_REASON = "initial_bank_classification"
 
 
+@dataclass
+class _IngestionProgress:
+    phase: str = "normalization"
+
+
+class FinanceImportAttemptError(RuntimeError):
+    def __init__(self, attempt: FinanceImportAttempt) -> None:
+        self.attempt = attempt
+        super().__init__(attempt.error_code or "finance_import_ingestion_failed")
+
+
+class _IdempotencyConflict(ValueError):
+    def __init__(self) -> None:
+        super().__init__("idempotency_conflict")
+
+
 def ingest_finance_workbook(
     excel_path: str,
     idempotency_key: IdempotencyKey,
     actor: ActorContext,
 ) -> FinanceWorkbookIngestionReceipt:
+    # Kept cohesive: the primary UoW rollback and independent attempt audit are one boundary.
     source_path = _validated_source_path(excel_path)
     source_digest = _source_digest(source_path)
     command_fingerprint = _command_fingerprint(source_digest, actor)
-    normalized_result = normalize_workbook(str(source_path))
+    started_at = _utc_timestamp()
+    progress = _IngestionProgress()
     connection = get_connection()
     try:
+        with connection.cursor() as cursor:
+            replay = _find_replay_or_attempt(cursor, idempotency_key, command_fingerprint)
+        if replay is not None:
+            return replay
+        normalized_result = normalize_workbook(str(source_path))
         receipt = _ingest_or_replay(
             connection,
             normalized_result,
@@ -44,15 +69,38 @@ def ingest_finance_workbook(
             command_fingerprint,
             idempotency_key,
             actor,
+            progress,
         )
+        with connection.cursor() as cursor:
+            _save_success_attempt(
+                cursor,
+                idempotency_key,
+                command_fingerprint,
+                receipt,
+                started_at,
+            )
         connection.commit()
-        _wake_anomaly_projector()
-        return receipt
-    except Exception:
+    except FinanceImportAttemptError:
         connection.rollback()
         raise
+    except _IdempotencyConflict as error:
+        connection.rollback()
+        raise ValueError("idempotency_conflict") from error
+    except Exception as error:
+        connection.rollback()
+        attempt = _record_failed_attempt(
+            idempotency_key,
+            command_fingerprint,
+            source_digest,
+            progress.phase,
+            started_at,
+            _attempt_error_code(error),
+        )
+        raise FinanceImportAttemptError(attempt) from error
     finally:
         connection.close()
+    _wake_anomaly_projector()
+    return receipt
 
 
 def _ingest_or_replay(
@@ -62,17 +110,21 @@ def _ingest_or_replay(
     command_fingerprint: str,
     idempotency_key: IdempotencyKey,
     actor: ActorContext,
+    progress: _IngestionProgress,
 ) -> FinanceWorkbookIngestionReceipt:
     with connection.cursor() as cursor:
         replay = _find_replay(cursor, idempotency_key, command_fingerprint)
         if replay is not None:
             return replay
+        progress.phase = "staging"
         staged = stage_finance_rows(
             cursor,
             normalized_result,
             load_finance_identity_maps(cursor),
         )
+        progress.phase = "classification"
         receipt = _persist_ingestion(cursor, staged, source_digest, actor)
+        progress.phase = "receipt"
         _save_receipt(cursor, idempotency_key, command_fingerprint, receipt)
         return receipt
 
@@ -135,8 +187,40 @@ def _find_replay(cursor: Any, idempotency_key: IdempotencyKey, command_fingerpri
     if row is None:
         return None
     if str(row["command_fingerprint"]) != command_fingerprint:
-        raise ValueError("idempotency_conflict")
+        raise _IdempotencyConflict()
     return FinanceWorkbookIngestionReceipt(**_json_object(row["result_snapshot"]))
+
+
+def _find_replay_or_attempt(
+    cursor: Any,
+    idempotency_key: IdempotencyKey,
+    command_fingerprint: str,
+) -> FinanceWorkbookIngestionReceipt | None:
+    receipt = _find_replay(cursor, idempotency_key, command_fingerprint)
+    if receipt is not None:
+        return receipt
+    attempt = _find_attempt(cursor, idempotency_key, command_fingerprint)
+    if attempt is not None:
+        raise FinanceImportAttemptError(attempt)
+    return None
+
+
+def _find_attempt(
+    cursor: Any,
+    idempotency_key: IdempotencyKey,
+    command_fingerprint: str,
+) -> FinanceImportAttempt | None:
+    cursor.execute(
+        "SELECT * FROM finance_import_ingestion_attempts "
+        "WHERE idempotency_key=%s FOR UPDATE",
+        (idempotency_key.value,),
+    )
+    row = cursor.fetchone()
+    if row is None:
+        return None
+    if str(row["command_fingerprint"]) != command_fingerprint:
+        raise _IdempotencyConflict()
+    return _attempt_from_row(row)
 
 
 def _insert_batch_contract(
@@ -269,6 +353,103 @@ def _save_receipt(
     )
 
 
+def _save_success_attempt(
+    cursor: Any,
+    idempotency_key: IdempotencyKey,
+    command_fingerprint: str,
+    receipt: FinanceWorkbookIngestionReceipt,
+    started_at: datetime,
+) -> None:
+    cursor.execute(
+        "INSERT INTO finance_import_ingestion_attempts("
+        "idempotency_key,command_fingerprint,source_content_digest,phase,error_code,"
+        "transaction_outcome,batch_id,started_at,completed_at) "
+        "VALUES (%s,%s,%s,'completed',NULL,'committed',%s,%s,UTC_TIMESTAMP(6))",
+        (
+            idempotency_key.value,
+            command_fingerprint,
+            receipt.source_content_digest,
+            int(receipt.batch_identity.removeprefix("finance-import-batch:")),
+            started_at,
+        ),
+    )
+
+
+def _record_failed_attempt(
+    idempotency_key: IdempotencyKey,
+    command_fingerprint: str,
+    source_digest: str,
+    phase: str,
+    started_at: datetime,
+    error_code: str,
+) -> FinanceImportAttempt:
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            attempt = _save_or_load_failed_attempt(
+                cursor, idempotency_key, command_fingerprint, source_digest,
+                phase, started_at, error_code,
+            )
+        connection.commit()
+        return attempt
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def _save_or_load_failed_attempt(
+    cursor: Any,
+    idempotency_key: IdempotencyKey,
+    command_fingerprint: str,
+    source_digest: str,
+    phase: str,
+    started_at: datetime,
+    error_code: str,
+) -> FinanceImportAttempt:
+    existing = _find_attempt(cursor, idempotency_key, command_fingerprint)
+    if existing is not None:
+        return existing
+    cursor.execute(
+        "INSERT INTO finance_import_ingestion_attempts("
+        "idempotency_key,command_fingerprint,source_content_digest,phase,error_code,"
+        "transaction_outcome,batch_id,started_at,completed_at) "
+        "VALUES (%s,%s,%s,%s,%s,'rolled_back',NULL,%s,UTC_TIMESTAMP(6))",
+        (idempotency_key.value, command_fingerprint, source_digest, phase, error_code, started_at),
+    )
+    attempt = _find_attempt(cursor, idempotency_key, command_fingerprint)
+    if attempt is None:
+        raise RuntimeError("finance_import_attempt_persistence_failed")
+    return attempt
+
+
+def _attempt_from_row(row: Mapping[str, Any]) -> FinanceImportAttempt:
+    batch_id = row.get("batch_id")
+    return FinanceImportAttempt(
+        attempt_identity=f"finance-import-attempt:{int(row['id'])}",
+        source_content_digest=str(row["source_content_digest"]),
+        phase=str(row["phase"]),
+        error_code=str(row["error_code"]) if row.get("error_code") else None,
+        transaction_outcome=str(row["transaction_outcome"]),
+        batch_identity=f"finance-import-batch:{int(batch_id)}" if batch_id else None,
+        started_at=row["started_at"],
+        completed_at=row["completed_at"],
+    )
+
+
+def _attempt_error_code(error: Exception) -> str:
+    if isinstance(error, FileNotFoundError):
+        return "finance_import_source_missing"
+    if isinstance(error, ValueError):
+        return "finance_import_validation_failed"
+    return "finance_import_processing_failed"
+
+
+def _utc_timestamp() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def _unique_rows(staged_rows: Any) -> tuple[Mapping[str, Any], ...]:
     by_id: dict[int, Mapping[str, Any]] = {}
     for row in staged_rows:
@@ -330,4 +511,4 @@ def _wake_anomaly_projector() -> None:
     wake_architecture_outbox_worker()
 
 
-__all__ = ["ingest_finance_workbook"]
+__all__ = ["FinanceImportAttemptError", "ingest_finance_workbook"]

@@ -85,7 +85,7 @@ def get_order_by_case_no(case_no: str) -> dict | None:
             cursor.execute("""
                 SELECT o.case_no, o.client_id, o.staff_id, o.status, o.cancel_reason,
                        o.line_group_id, o.actual_start_date, o.actual_end_date,
-                       o.contract_id, o.service_days, o.service_hours_per_day,
+                       o.contract_identity, o.service_days, o.service_hours_per_day,
                        o.floor_fee, o.deposit_date,
                        o.start_date, o.end_date, o.custom_rest_dates,
                        o.created_at, o.updated_at,
@@ -138,7 +138,7 @@ def get_table_data(table_name: str) -> list[dict]:
                 cursor.execute("""
                     SELECT o.case_no, o.client_id, o.staff_id, o.status, o.cancel_reason,
                            o.line_group_id, o.actual_start_date, o.actual_end_date,
-                           o.contract_id, o.service_days, o.service_hours_per_day,
+                           o.contract_identity, o.service_days, o.service_hours_per_day,
                            o.floor_fee, o.deposit_date, o.start_date, o.end_date,
                            o.custom_rest_dates, o.created_at, o.updated_at,
                            c.identity_status AS identity_status, s.name AS staff_name
@@ -958,7 +958,7 @@ def get_recommended_staff_for_order(
     filter_time: bool = True
 ) -> list[dict]:
     """
-    ADAD INV-SVC-05: 智慧粗篩比對月嫂推薦引擎 (支援 7 天預留備用期持久化掃描與 city/address 區域比對)
+    智慧粗篩比對月嫂推薦引擎，支援 7 天預留備用期持久化掃描與 city/address 區域比對。
     """
     case_no = _resolve_case_no(case_no)
     conn = get_connection()

@@ -11,6 +11,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from subsystems.access.authentication_session import (
     AdminPrincipal,
     get_admin_session,
+    has_required_capability,
     has_required_role,
 )
 
@@ -92,7 +93,24 @@ def require_role(minimum_role: str) -> Callable[..., AdminPrincipal]:
     return dependency
 
 
-require_line_viewer = require_role("line_viewer")
-require_line_agent = require_role("line_agent")
-require_line_manager = require_role("line_manager")
-require_system_admin = require_role("system_admin")
+def require_capability(capability: str) -> Callable[..., AdminPrincipal]:
+    def dependency(principal: AdminPrincipal = Depends(require_admin)) -> AdminPrincipal:
+        if not has_required_capability(principal, capability):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"缺少必要能力：{capability}",
+            )
+        return principal
+
+    return dependency
+
+
+require_line_viewer = require_capability("line.identity.read")
+require_line_agent = require_capability("line.review.read")
+require_line_review_decider = require_capability("line.identity.review")
+require_line_manager = require_capability("system.configuration.manage")
+require_line_task_reader = require_capability("line.task.read")
+require_line_task_controller = require_capability("line.task.control")
+require_line_menu_publisher = require_capability("line.menu.publish")
+require_system_config_manager = require_capability("system.configuration.manage")
+require_system_admin = require_capability("system.administration")

@@ -15,7 +15,12 @@ from ui.api_clients.order_summary_api_client import OrderSummaryApiClient
 from ui.api_clients.staff_summary_api_client import StaffSummaryApiClient
 from ui.pages.order.tab1_overview import _render_tab1_overview
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
-from ui.request_state import accept_request_result, begin_request, request_snapshot
+from ui.request_state import (
+    accept_request_result,
+    begin_request,
+    mark_request_stale,
+    request_snapshot,
+)
 
 title = "📦 訂單與帳務管理系統"
 INITIAL_QUERY_WORKERS = 2
@@ -261,6 +266,7 @@ def show():
         key="orders_summary_search_text",
     ).strip()
     _prepare_order_summary_page(search_text)
+    _mark_order_summary_stale_if_refreshing(search_text)
     request = begin_request(st.session_state, "orders_summary_request")
     try:
         with st.spinner("正在載入案件摘要與月嫂清單…"):
@@ -338,6 +344,15 @@ def _cached_order_summary(query_text, after_case_no):
         return None
     candidate = cache.get(_order_summary_cache_key(query_text, after_case_no))
     return candidate if isinstance(candidate, dict) else None
+
+
+def _mark_order_summary_stale_if_refreshing(query_text) -> None:
+    cached = _cached_order_summary(
+        query_text,
+        st.session_state.get("orders_summary_after_case_no"),
+    )
+    if cached is not None and not _cache_is_fresh(cached):
+        mark_request_stale(st.session_state, "orders_summary_request")
 
 
 def _cache_is_fresh(cached) -> bool:

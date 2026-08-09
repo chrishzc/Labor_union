@@ -24,7 +24,7 @@ EDITABLE_COLUMNS = {
         'special_skills', 'name', 'identity_card', 'birthday', 'care_babies',
     },
     'orders': {
-        'line_group_id', 'contract_id',
+        'line_group_id',
     },
     'beclass_records': {
         'seq_num', 'email', 'tel', 'ext', 'city', 'zip_code', 'address',
@@ -85,7 +85,7 @@ READ_ONLY_TABLES = {
     "staff_schedule",
 }
 
-# ADAD INV-UI-BROWSER-01: 資料庫全量欄位中文對照映射表
+# 資料庫全量欄位中文對照映射表
 DB_COLUMN_LABEL_MAP = {
     # 通用/基礎欄位
     "id": "資料ID",
@@ -168,7 +168,6 @@ DB_COLUMN_LABEL_MAP = {
     "line_group_id": "LINE群組ID",
     "actual_start_date": "實際服務開始日",
     "actual_end_date": "實際服務結束日",
-    "contract_id": "線上契約ID",
     "service_hours_per_day": "每日服務時數",
     "floor_fee": "樓層費用",
     "deposit_date": "訂金收取日期",

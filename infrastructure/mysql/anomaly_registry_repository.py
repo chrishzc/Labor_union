@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import hashlib
 import json
 from typing import Iterator, Mapping
 
@@ -22,6 +23,12 @@ from subsystems.anomalies.alert_workflow import (
 )
 
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
+_FINANCE_IMPORT_ACTIVE_ALERT_SQL = (
+    "SELECT fingerprint,workflow_version FROM anomaly_current_alerts "
+    "WHERE definition_code='finance_import_manual_review' "
+    "AND source_identity=CONCAT('finance-import-row:',%s) "
+    "AND predicate_active=1 AND workflow_status<>'resolved' FOR UPDATE"
+)
 
 
 class AnomalyRepositoryUnavailable(RuntimeError):
@@ -205,6 +212,33 @@ class MySqlAnomalyRepository:
             )
             timeline = tuple(_timeline_event(item) for item in cursor.fetchall())
         return AnomalyDetail(_summary(row), timeline, ())
+
+def append_finance_import_manual_review_resolution(connection, candidate, actor) -> None:
+    """Append a resolve event in Finance Import's existing transaction."""
+    row_id = _finance_import_row_id(candidate.row_identity)
+    with _cursor(connection) as cursor:
+        cursor.execute(_FINANCE_IMPORT_ACTIVE_ALERT_SQL, (row_id,))
+        alert = cursor.fetchone()
+        if alert is None:
+            raise RuntimeError("recovery_action_not_available")
+        expected_version = int(alert["workflow_version"])
+        event_identity = _sha256_identity(
+            "finance-import-alert-resolve",
+            candidate.fingerprint.value,
+        )
+        cursor.execute(
+            _WORKFLOW_EVENT_INSERT_SQL,
+            (
+                alert["fingerprint"],
+                "resolve",
+                expected_version,
+                expected_version + 1,
+                actor.actor_id,
+                candidate.reason,
+                event_identity,
+                event_identity,
+            ),
+        )
 
 
 @contextmanager
@@ -407,6 +441,17 @@ def _json_dump(value):
     )
 
 
+def _finance_import_row_id(row_identity: str) -> int:
+    prefix = "finance-import-row:"
+    if not row_identity.startswith(prefix):
+        raise ValueError("finance import row identity is invalid")
+    return int(row_identity.removeprefix(prefix))
+
+
+def _sha256_identity(namespace: str, value: str) -> str:
+    return hashlib.sha256(f"{namespace}:{value}".encode("utf-8")).hexdigest()
+
+
 def _utc_now():
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -448,4 +493,5 @@ __all__ = [
     "AnomalyMySqlUnitOfWork",
     "AnomalyRepositoryUnavailable",
     "MySqlAnomalyRepository",
+    "append_finance_import_manual_review_resolution",
 ]
