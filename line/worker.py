@@ -11,13 +11,16 @@ import asyncio
 import json
 import os
 import uuid
+from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlencode
 
 import pymysql
 import requests
 
 from infrastructure.mysql.mysql_adapter import get_connection as get_db_connection
+from infrastructure.line.redis_wakeup import RedisLineWakeupPublisher
 from subsystems.line.rich_menu_publication_workflow import (
     import_legacy_rich_menu_ids,
     next_publication_run_at,
@@ -37,6 +40,24 @@ def _utc_now_naive() -> datetime:
 
 def wake_worker() -> None:
     _wakeup_event.set()
+    publisher = _redis_wakeup_publisher()
+    if publisher is None:
+        return
+    try:
+        publisher.publish()
+    except Exception as exc:
+        print(f"[LINE Worker] Redis wake signal failed; DB fallback remains active: {exc}")
+
+
+def wake_local_worker() -> None:
+    """Wake only the legacy loop in this process without republishing."""
+    _wakeup_event.set()
+
+
+@lru_cache(maxsize=1)
+def _redis_wakeup_publisher():
+    redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0").strip()
+    return RedisLineWakeupPublisher(redis_url) if redis_url else None
 
 
 def _recover_stale_tasks() -> None:
@@ -143,49 +164,60 @@ def _push_text(task: dict[str, Any], text: str) -> tuple[bool, bool, str, str]:
     return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
 
 
-def _push_matching_willingness_card(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
-    from urllib.parse import urlencode
-
-    payload = json.loads(task.get("payload_json") or "{}")
-    try:
-        case_no = str(payload["case_no"])
-        plan_id = int(payload["plan_id"])
-        segment_id = int(payload["segment_id"])
-    except (KeyError, TypeError, ValueError):
-        return False, False, "invalid_matching_payload", "Missing canonical matching identity"
-    if plan_id <= 0 or segment_id <= 0 or not case_no.strip():
-        return False, False, "invalid_matching_payload", "Invalid canonical matching identity"
-    actions = [
+def _matching_willingness_actions(
+    case_no: str,
+    plan_id: int,
+    segment_id: int,
+) -> list[dict[str, str]]:
+    return [
         {
             "type": "postback",
             "label": label,
-            "data": urlencode({
-                "action": willingness,
-                "case_no": case_no,
-                "plan_id": plan_id,
-                "segment_id": segment_id,
-            }),
+            "data": urlencode(
+                {
+                    "action": willingness,
+                    "case_no": case_no,
+                    "plan_id": plan_id,
+                    "segment_id": segment_id,
+                }
+            ),
         }
         for willingness, label in (("willing", "願意接案"), ("unwilling", "暫不考慮"))
     ]
+
+
+def _matching_willingness_message(task: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(task.get("payload_json") or "{}")
+    case_no = str(payload["case_no"]).strip()
+    plan_id = int(payload["plan_id"])
+    segment_id = int(payload["segment_id"])
+    if not case_no or plan_id <= 0 or segment_id <= 0:
+        raise ValueError("Invalid canonical matching identity")
+    return {
+        "type": "template",
+        "altText": "媒合意願確認",
+        "template": {
+            "type": "buttons",
+            "text": task.get("message_content") or "請確認是否願意接案。",
+            "actions": _matching_willingness_actions(case_no, plan_id, segment_id),
+        },
+    }
+
+
+def _push_matching_willingness_card(
+    task: dict[str, Any],
+) -> tuple[bool, bool, str, str]:
+    try:
+        message = _matching_willingness_message(task)
+    except (KeyError, TypeError, ValueError) as exc:
+        return False, False, "invalid_matching_payload", str(exc)
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
     if not token or token == "mock_token":
         return True, False, "", ""
     try:
         response = requests.post(
             "https://api.line.me/v2/bot/message/push",
-            json={
-                "to": task["to_user_id"],
-                "messages": [{
-                    "type": "template",
-                    "altText": "媒合意願確認",
-                    "template": {
-                        "type": "buttons",
-                        "text": task.get("message_content") or "請確認是否願意接案。",
-                        "actions": actions,
-                    },
-                }],
-            },
+            json={"to": task["to_user_id"], "messages": [message]},
             headers=_line_headers(task),
             timeout=10,
         )
@@ -194,22 +226,6 @@ def _push_matching_willingness_card(task: dict[str, Any]) -> tuple[bool, bool, s
     if response.status_code == 200:
         return True, False, "", ""
     return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
-
-
-def _rag_answer(user_text: str) -> str:
-    fallback = "很抱歉，我不太懂您的意思，已經幫您轉交給行政專員為您人工處理。"
-    try:
-        import chromadb
-
-        client = chromadb.PersistentClient(path="./db/chroma_data")
-        collection = client.get_or_create_collection("union_faq")
-        results = collection.query(query_texts=[user_text], n_results=1)
-        if results and results.get("distances") and results["distances"][0]:
-            if results["distances"][0][0] < 1.0:
-                return results["metadatas"][0][0].get("answer", fallback)
-    except Exception as exc:
-        print(f"[LINE Worker] RAG query failed: {exc}")
-    return fallback
 
 
 def _menu_action(task: dict[str, Any], link: bool) -> tuple[bool, bool, str, str]:
@@ -245,8 +261,7 @@ def _execute_task(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
     if task_type == "matching_willingness_card":
         return _push_matching_willingness_card(task)
     if task_type == "rag_reply":
-        payload = json.loads(task.get("payload_json") or "{}")
-        return _push_text(task, _rag_answer(payload.get("user_text", "")))
+        return False, False, "legacy_rag_retired", "Use canonical Knowledge Retrieval worker"
     if task_type == "rich_menu_link":
         return _menu_action(task, True)
     if task_type == "rich_menu_unlink":

@@ -1,0 +1,32 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "155_matching_line_communication.sql": {
+      "tables": {
+        "caregiver_matching_plans": [
+          "communication_version"
+        ],
+        "matching_notification_intents": [
+          "id", "plan_id", "segment_id", "notification_kind",
+          "recipient_line_user_id", "payload_snapshot", "projection_status",
+          "delivery_task_id", "idempotency_key", "payload_fingerprint",
+          "created_by_actor_id", "created_at_utc", "projected_at_utc"
+        ],
+        "matching_line_interactions": [
+          "id", "token_hash", "plan_id", "segment_id", "action_scope",
+          "recipient_line_user_id", "interaction_status", "expires_at_utc",
+          "consumed_at_utc", "consumed_by_line_user_id", "created_at_utc"
+        ],
+        "matching_response_events": [
+          "id", "plan_id", "segment_id", "response_type", "response_value",
+          "response_source", "actor_id", "line_user_id", "reason",
+          "idempotency_key", "payload_fingerprint", "occurred_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_matching_response_events_before_update",
+        "trg_matching_response_events_before_delete"
+      ]
+    }
+  }
+}

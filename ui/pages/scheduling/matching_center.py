@@ -571,6 +571,9 @@ def _render_multi_segment_matching(
             st.warning(f"聯繫紀錄讀取失敗：{error}")
     contact_state = st.session_state.get(contact_state_key) or {}
     contact_segments = contact_state.get("segments") or []
+    communication_version = int(
+        (contact_state.get("plan") or {}).get("communication_version") or 0
+    )
     lock_state_key = f"matching_lock_{case_no}"
     lock = (
         contact_state.get("availability_lock")
@@ -580,14 +583,8 @@ def _render_multi_segment_matching(
     lock_id = lock.get("lock_id") or lock.get("id")
     if plan_id:
         st.markdown("#### 發送紀錄與月嫂意願")
-        willingness_labels = {
-            "待回覆": "pending",
-            "願意": "willing",
-            "無意願": "unwilling",
-        }
-        reverse_willingness = {
-            value: label for label, value in willingness_labels.items()
-        }
+        willingness_labels = {"願意": "willing", "無意願": "unwilling"}
+        status_labels = {"pending": "待 LINE 回覆", "willing": "願意", "unwilling": "無意願"}
         for segment in contact_segments:
             segment_id = segment["segment_id"]
             with st.container(border=True):
@@ -595,7 +592,7 @@ def _render_multi_segment_matching(
                     f"{segment.get('staff_name') or '月嫂 ' + str(segment.get('staff_id'))}"
                     f"｜{segment.get('assigned_start_date')}～{segment.get('assigned_end_date')}"
                 )
-                info_1_col, info_2_col, willingness_col, update_col = st.columns(4)
+                info_1_col, info_2_col = st.columns(2)
                 if info_1_col.button(
                     "發送訂單資訊-1",
                     key=f"matching_info_1_{case_no}_{segment_id}",
@@ -606,6 +603,7 @@ def _render_multi_segment_matching(
                             method="POST",
                             payload={
                                 "info_type": 1,
+                                "expected_version": communication_version,
                                 "event_key": f"info1-{case_no}-{uuid.uuid4().hex}",
                                 "actor": _actor(),
                             },
@@ -624,6 +622,7 @@ def _render_multi_segment_matching(
                             method="POST",
                             payload={
                                 "info_type": 2,
+                                "expected_version": communication_version,
                                 "event_key": f"info2-{case_no}-{uuid.uuid4().hex}",
                                 "actor": _actor(),
                             },
@@ -632,40 +631,42 @@ def _render_multi_segment_matching(
                         st.rerun()
                     except Exception as error:
                         st.error(f"未發送：{error}")
-                current = reverse_willingness.get(
-                    segment.get("willingness"), "待回覆"
-                )
-                selected = willingness_col.selectbox(
-                    "意願",
-                    list(willingness_labels),
-                    index=list(willingness_labels).index(current),
-                    key=f"matching_willingness_{case_no}_{segment_id}",
-                )
-                if update_col.button(
-                    "更新月嫂意願",
-                    key=f"matching_willingness_update_{case_no}_{segment_id}",
-                ):
-                    try:
-                        _request(
-                            f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/segments/{segment_id}/willingness",
-                            method="PUT",
-                            payload={
-                                "willingness": willingness_labels[selected],
-                                "event_key": f"will-{case_no}-{uuid.uuid4().hex}",
-                                "actor": _actor(),
-                            },
-                        )
-                        st.success("月嫂意願已更新。")
-                        st.rerun()
-                    except Exception as error:
-                        st.error(f"意願更新失敗：{error}")
+                st.write("月嫂意願：" + status_labels.get(segment.get("willingness"), "未知"))
+                with st.expander("人工補登意願（LINE 無法回覆時使用）"):
+                    selected = st.selectbox(
+                        "補登結果",
+                        list(willingness_labels),
+                        key=f"matching_willingness_{case_no}_{segment_id}",
+                    )
+                    manual_reason = st.text_input(
+                        "補登原因",
+                        key=f"matching_willingness_reason_{case_no}_{segment_id}",
+                    )
+                    if st.button(
+                        "確認補登",
+                        key=f"matching_willingness_update_{case_no}_{segment_id}",
+                    ):
+                        try:
+                            _request(
+                                f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/segments/{segment_id}/willingness",
+                                method="PUT",
+                                payload={
+                                    "willingness": willingness_labels[selected],
+                                    "expected_version": communication_version,
+                                    "reason": manual_reason.strip(),
+                                    "event_key": f"will-{case_no}-{uuid.uuid4().hex}",
+                                    "actor": _actor(),
+                                },
+                            )
+                            st.success("月嫂意願已補登。")
+                            st.rerun()
+                        except Exception as error:
+                            st.error(f"意願補登失敗：{error}")
                 st.caption(
                     "資訊-1："
-                    + ("已發送" if segment.get("info_1_sent") else "未發送")
+                    + _delivery_status_label(segment.get("info_1_status"))
                     + "｜資訊-2："
-                    + ("已發送" if segment.get("info_2_sent") else "未發送")
-                    + "｜履歷："
-                    + ("已發送" if segment.get("resume_sent") else "未發送")
+                    + _delivery_status_label(segment.get("info_2_status"))
                 )
 
         cancel_reason = st.text_input(
@@ -703,22 +704,51 @@ def _render_multi_segment_matching(
         if lock_id:
             st.caption("目前方案已鎖定；若要取消案件，請使用既有訂單取消流程。")
 
-    all_resumes_sent = bool(contact_segments) and all(
-        segment.get("resume_sent") for segment in contact_segments
-    )
-    customer_confirmed = st.checkbox(
-        "客戶已確認上述履歷與服務區段",
-        key=f"matching_customer_confirmed_{case_no}",
-        disabled=not all_resumes_sent or bool(lock_id),
-    )
+    customer_decision = contact_state.get("customer_decision") or "pending"
+    st.write("客戶配對回覆：" + _customer_decision_label(customer_decision))
+    if plan_id:
+        with st.expander("人工補登客戶回覆（LINE 無法回覆時使用）"):
+            decision_labels = {
+                "接受此配對": "accepted",
+                "希望先聯絡": "contact_requested",
+                "不接受此配對": "declined",
+            }
+            manual_customer_decision = st.selectbox(
+                "補登結果",
+                list(decision_labels),
+                key=f"matching_customer_decision_{case_no}",
+            )
+            manual_customer_reason = st.text_input(
+                "補登原因",
+                key=f"matching_customer_reason_{case_no}",
+            )
+            if st.button(
+                "確認補登客戶回覆",
+                key=f"matching_customer_update_{case_no}",
+            ):
+                try:
+                    _request(
+                        f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/customer-decision",
+                        method="PUT",
+                        payload={
+                            "decision": decision_labels[manual_customer_decision],
+                            "expected_version": communication_version,
+                            "reason": manual_customer_reason.strip(),
+                            "event_key": f"customer-decision-{case_no}-{uuid.uuid4().hex}",
+                            "actor": _actor(),
+                        },
+                    )
+                    st.success("客戶回覆已補登。")
+                    st.rerun()
+                except Exception as error:
+                    st.error(f"客戶回覆補登失敗：{error}")
     if plan_id:
         _render_waiting_lock_acquisition(
             case_no,
             plan_id,
             lock_state_key,
             enabled=(
-                all_resumes_sent
-                and customer_confirmed
+                customer_decision == "accepted"
                 and not bool(lock_id)
             ),
         )
@@ -783,10 +813,11 @@ def _render_multi_segment_matching(
                             "event_key": f"resume-{case_no}-{uuid.uuid4().hex}",
                             "actor": _actor(),
                             "note": resume_note.strip(),
+                            "expected_version": communication_version,
                         },
                     )
                     st.success(
-                        f"已逐位建立 {len(result.get('line_task_ids') or [])} 筆履歷發送任務。"
+                        "已建立月嫂小卡與客戶確認按鈕的可靠發送任務。"
                     )
                     st.rerun()
                 except Exception as error:
@@ -794,6 +825,28 @@ def _render_multi_segment_matching(
     else:
         st.info("請先建立配對方案並完成月嫂聯繫後，才可傳送履歷。")
 
+
+
+def _delivery_status_label(status: str | None) -> str:
+    labels = {
+        None: "未建立",
+        "pending": "等待發送",
+        "processing": "發送中",
+        "sent": "已送達",
+        "retryable_failed": "等待重試",
+        "failed": "發送失敗",
+        "cancelled": "已取消",
+    }
+    return labels.get(status, "狀態未知")
+
+
+def _customer_decision_label(decision: str) -> str:
+    return {
+        "pending": "待 LINE 回覆",
+        "accepted": "已接受配對",
+        "declined": "不接受配對",
+        "contact_requested": "希望先聯絡",
+    }.get(decision, "狀態未知")
 
 
 def render_matching_center(

@@ -10,15 +10,19 @@ from pathlib import Path
 from typing import Any
 
 import pymysql
-from PIL import Image, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
+from PIL import Image, UnidentifiedImageError
 
+from infrastructure.line.rich_menu_image_store import (
+    ALLOWED_RICH_MENU_SIZES,
+    MAX_LINE_IMAGE_BYTES,
+    encode_line_jpeg,
+    render_rich_menu_image,
+)
 from infrastructure.mysql.mysql_adapter import get_connection
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
-MAX_LINE_IMAGE_BYTES = 1024 * 1024
-ALLOWED_RICH_MENU_SIZES = {(2500, 843), (2500, 1686)}
 
 
 class MediaValidationError(ValueError):
@@ -37,72 +41,6 @@ def media_storage_root() -> Path:
     root = root.resolve()
     root.mkdir(parents=True, exist_ok=True)
     return root
-
-
-def _font(size: int = 86):
-    for name in (
-        "msjh.ttc",
-        "Microsoft JhengHei.ttf",
-        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "arial.ttf",
-    ):
-        try:
-            return ImageFont.truetype(name, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
-
-
-def render_rich_menu_image(menu: dict[str, Any]) -> bytes:
-    width = int(menu["size"]["width"])
-    height = int(menu["size"]["height"])
-    if (width, height) not in ALLOWED_RICH_MENU_SIZES:
-        raise MediaValidationError("Rich Menu 圖片尺寸不受支援")
-    image = Image.new(
-        "RGB",
-        (width, height),
-        color=menu.get("appearance", {}).get("background_color", "#F5F5F5"),
-    )
-    draw = ImageDraw.Draw(image)
-    font = _font()
-    for button in menu.get("buttons", []):
-        bounds = button["bounds"]
-        left, top = int(bounds["x"]), int(bounds["y"])
-        right = left + int(bounds["width"])
-        bottom = top + int(bounds["height"])
-        draw.rectangle(
-            [left, top, right, bottom],
-            fill=button.get("background_color", "#4A90E2"),
-            outline="#FFFFFF",
-            width=4,
-        )
-        label = button["label"]
-        text_box = draw.textbbox((0, 0), label, font=font)
-        text_width = text_box[2] - text_box[0]
-        text_height = text_box[3] - text_box[1]
-        draw.text(
-            (
-                left + (int(bounds["width"]) - text_width) / 2,
-                top + (int(bounds["height"]) - text_height) / 2,
-            ),
-            label,
-            fill=button.get("text_color", "#FFFFFF"),
-            font=font,
-        )
-    return _encode_jpeg(image)
-
-
-def _encode_jpeg(image: Image.Image) -> bytes:
-    rgb = ImageOps.exif_transpose(image).convert("RGB")
-    for quality in (92, 86, 80, 74, 68, 60):
-        output = io.BytesIO()
-        rgb.save(output, format="JPEG", quality=quality, optimize=True)
-        data = output.getvalue()
-        if len(data) <= MAX_LINE_IMAGE_BYTES:
-            return data
-    raise MediaValidationError("圖片重新編碼後仍超過 LINE Rich Menu 可接受大小")
 
 
 def normalize_uploaded_rich_menu_image(
@@ -124,7 +62,7 @@ def normalize_uploaded_rich_menu_image(
                 raise MediaValidationError(
                     f"圖片尺寸必須是 {expected_width}x{expected_height}"
                 )
-            return _encode_jpeg(source)
+            return encode_line_jpeg(source)
     except UnidentifiedImageError as exc:
         raise MediaValidationError("檔案不是有效圖片") from exc
 

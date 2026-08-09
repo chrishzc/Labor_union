@@ -16,11 +16,11 @@ import pandas as pd
 import streamlit as st
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import has_capability
 
 
 FLASH_KEY = "line_schedule_flash"
 PREVIEW_KEY = "line_schedule_preview"
-EDIT_ROLES = {"line_manager", "system_admin"}
 
 
 def _build_schedule_payload(
@@ -136,7 +136,7 @@ def render_schedule_manager(
             suffix += 1
         template_names[item["id"]] = display_name
         name_to_id[display_name] = item["id"]
-    can_edit = profile.get("role") in EDIT_ROLES
+    can_edit = has_capability(profile, "line.config.manage")
     schedule_ids = [item["id"] for item in schedules]
     selected_id = st.selectbox(
         "設定名稱",

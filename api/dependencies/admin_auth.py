@@ -8,10 +8,19 @@ from collections.abc import Callable
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
+from shared_kernel.identities import ActorContext
 from subsystems.access.authentication_session import (
     AdminPrincipal,
     get_admin_session,
     has_required_role,
+)
+from subsystems.line.capabilities import (
+    LineCapability,
+    line_capabilities_for_role,
+)
+from subsystems.access.integration_capabilities import (
+    IntegrationCapability,
+    integration_capabilities_for_role,
 )
 
 
@@ -92,7 +101,79 @@ def require_role(minimum_role: str) -> Callable[..., AdminPrincipal]:
     return dependency
 
 
+def admin_actor_context(principal: AdminPrincipal) -> ActorContext:
+    actor_id = f"admin:{principal.id}" if principal.id is not None else "admin:development"
+    return ActorContext(actor_id, line_capabilities_for_role(principal.role))
+
+
+def require_capability(capability: LineCapability) -> Callable[..., AdminPrincipal]:
+    def dependency(
+        request: Request,
+        principal: AdminPrincipal = Depends(require_admin),
+    ) -> AdminPrincipal:
+        scope = line_capabilities_for_role(principal.role)
+        if capability.value not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"缺少操作權限：{capability.value}",
+            )
+        request.state.admin_actor = admin_actor_context(principal)
+        return principal
+
+    return dependency
+
+
+def require_integration_capability(
+    capability: IntegrationCapability,
+) -> Callable[..., AdminPrincipal]:
+    def dependency(principal: AdminPrincipal = Depends(require_admin)) -> AdminPrincipal:
+        scope = integration_capabilities_for_role(principal.role)
+        if capability.value not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"缺少操作權限：{capability.value}",
+            )
+        return principal
+
+    return dependency
+
+
 require_line_viewer = require_role("line_viewer")
 require_line_agent = require_role("line_agent")
 require_line_manager = require_role("line_manager")
 require_system_admin = require_role("system_admin")
+require_line_identity_reader = require_capability(LineCapability.IDENTITY_READ)
+require_line_identity_reviewer = require_capability(LineCapability.IDENTITY_REVIEW)
+require_line_review_reader = require_capability(LineCapability.REVIEW_READ)
+require_line_review_decider = require_capability(LineCapability.REVIEW_DECIDE)
+require_line_task_reader = require_capability(LineCapability.TASK_READ)
+require_line_task_controller = require_capability(LineCapability.TASK_CONTROL)
+require_line_configuration_reader = require_capability(LineCapability.CONFIG_READ)
+require_line_configuration_manager = require_capability(LineCapability.CONFIG_MANAGE)
+require_line_menu_publisher = require_capability(LineCapability.MENU_PUBLISH)
+require_line_order_group_reader = require_capability(LineCapability.ORDER_GROUP_READ)
+require_line_order_group_binder = require_capability(LineCapability.ORDER_GROUP_BIND)
+require_line_monitor_reader = require_capability(LineCapability.MONITOR_READ)
+require_line_alert_manager = require_capability(LineCapability.ALERT_MANAGE)
+require_line_audit_reader = require_capability(LineCapability.AUDIT_READ)
+require_line_matching_reader = require_capability(LineCapability.MATCHING_READ)
+require_line_matching_sender = require_capability(LineCapability.MATCHING_SEND)
+require_line_matching_override = require_capability(LineCapability.MATCHING_OVERRIDE)
+require_contract_evidence_reader = require_integration_capability(
+    IntegrationCapability.CONTRACT_EVIDENCE_READ
+)
+require_contract_evidence_manager = require_integration_capability(
+    IntegrationCapability.CONTRACT_EVIDENCE_MANAGE
+)
+require_knowledge_reader = require_integration_capability(
+    IntegrationCapability.KNOWLEDGE_READ
+)
+require_knowledge_manager = require_integration_capability(
+    IntegrationCapability.KNOWLEDGE_MANAGE
+)
+require_knowledge_publisher = require_integration_capability(
+    IntegrationCapability.KNOWLEDGE_PUBLISH
+)
+require_knowledge_reindexer = require_integration_capability(
+    IntegrationCapability.KNOWLEDGE_REINDEX
+)

@@ -1,0 +1,132 @@
+{
+  "application_compatibility": {
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "line-integration-v1"
+    ],
+    "minimum_api_contract": "typed-api-v1",
+    "post_cutover_smoke_ids": [
+      "line-schema-owned-objects",
+      "line-legacy-projection-compatibility"
+    ],
+    "required_restart_targets": [
+      "api",
+      "background-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "artifacts": [
+    {
+      "dependencies": [],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "147_line_integration_inbox_delivery.sql",
+      "relative_path": "db/schema_parts/147_line_integration_inbox_delivery.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-canonical-tables",
+      "sha256": "acbb6478b24a0f254e483e8e6a0b7f42c62f0932ec2c1817ff499037552e0b79"
+    },
+    {
+      "dependencies": [
+        "147_line_integration_inbox_delivery.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "148_line_identity_review_configuration.sql",
+      "relative_path": "db/schema_parts/148_line_identity_review_configuration.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-canonical-tables",
+      "sha256": "81faea49bc82d3ad64d3116b0e6e50c9bd14b2223e7077cfa55b6b6f67c15adb"
+    },
+    {
+      "dependencies": [
+        "148_line_identity_review_configuration.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "149_line_publication_media_order_group.sql",
+      "relative_path": "db/schema_parts/149_line_publication_media_order_group.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-canonical-tables",
+      "sha256": "683f8f78bf3f3989ebf32850039b3611eb52aed2fde939c49a4c72f48ae06ca1"
+    }
+  ],
+  "backfills": [],
+  "contract": "migration-release-manifest/v1",
+  "descriptor_artifact": {
+    "dependencies": [],
+    "name": "labor_union_2026_08_08_line_stage2_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_08_line_stage2_v1.descriptors.json",
+    "sha256": "b50ee7192e7cc2c286afebb765e273102bf5cc5dff33a5ecc5f35f269fb9839e"
+  },
+  "release_id": "labor-union-line-stage2-2026-08-08-v1",
+  "release_metadata": {
+    "application_version": "line-integration-v1",
+    "description": "Preserve-data canonical LINE integration persistence and provider adapters",
+    "published_at": "2026-08-08",
+    "release_name": "Labor Union LINE integration stage 2 v1"
+  },
+  "source_baseline": {
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "baseline_id": "legacy-production-compatible-v1",
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "source_must_be_read_only": true
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {
+      "blocking": true,
+      "phase": "post-restore",
+      "policy": "restored-schema-programs-equivalent",
+      "read_only": true,
+      "verification_id": "restored-schema-programs"
+    },
+    {
+      "blocking": true,
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "verification_id": "owned-object-descriptors"
+    },
+    {
+      "blocking": true,
+      "phase": "post-backfill",
+      "policy": "source-row-pk-and-full-row-fingerprint-unchanged",
+      "read_only": true,
+      "verification_id": "source-preservation"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "line-legacy-projections-unchanged",
+      "read_only": true,
+      "verification_id": "line-legacy-projection-compatibility"
+    },
+    {
+      "blocking": true,
+      "phase": "post-restart",
+      "policy": "all-application-smoke-ids-pass",
+      "read_only": true,
+      "verification_id": "application-read-smoke"
+    }
+  ]
+}

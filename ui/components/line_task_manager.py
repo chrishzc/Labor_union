@@ -15,15 +15,18 @@ import pandas as pd
 import streamlit as st
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import (
+    complete_operation,
+    has_capability,
+    operation_headers,
+)
 
 
 FLASH_KEY = "line_task_flash"
 PAGE_KEY = "line_task_page"
 FILTER_KEY = "line_task_filter_signature"
-OPERATE_ROLES = {"line_agent", "line_manager", "system_admin"}
-RUN_NOW_ROLES = {"line_manager", "system_admin"}
 STATUSES = ["pending", "processing", "sent", "failed", "cancelled"]
-TASK_TYPES = ["line_push", "rag_reply", "rich_menu_link", "rich_menu_unlink"]
+TASK_TYPES = ["line_push", "rich_menu_link", "rich_menu_unlink"]
 TAIPEI_TIMEZONE = ZoneInfo("Asia/Taipei")
 STATUS_LABELS = {
     "pending": "等待發送",
@@ -34,7 +37,6 @@ STATUS_LABELS = {
 }
 TASK_TYPE_LABELS = {
     "line_push": "LINE 訊息",
-    "rag_reply": "自動回覆",
     "rich_menu_link": "套用 LINE 選單",
     "rich_menu_unlink": "移除 LINE 選單",
 }
@@ -62,11 +64,24 @@ def _task_action(
     action: str,
     reason: str,
 ) -> None:
+    operation = f"line-task:{task_id}:{action}"
+    request_identity = operation_headers(
+        operation,
+        {"task_id": task_id, "action": action, "reason": reason},
+    )
     try:
-        client.line_task_action(token, task_id, action, reason=reason)
+        client.line_task_action(
+            token,
+            task_id,
+            action,
+            reason=reason,
+            idempotency_key=request_identity["Idempotency-Key"],
+            correlation_id=request_identity["X-Correlation-ID"],
+        )
     except LineAdminApiError as exc:
         st.error(f"操作失敗：{exc}")
         return
+    complete_operation(operation)
     st.session_state[FLASH_KEY] = "發送項目已更新"
     st.rerun()
 
@@ -215,8 +230,8 @@ def render_task_manager(
     else:
         st.caption("這筆通知尚未開始發送。")
 
-    can_operate = profile.get("role") in OPERATE_ROLES
-    can_run_now = profile.get("role") in RUN_NOW_ROLES
+    can_operate = has_capability(profile, "line.task.control")
+    can_run_now = can_operate
     if not can_operate:
         return
     reason = st.text_input("處理備註（選填）", key=f"task_reason_{task_id}")
