@@ -20,8 +20,8 @@
     {
       "dependencies": [],
       "data_effect": "schema_only",
-      "name": "147_line_runtime_control.sql",
-      "relative_path": "db/schema_parts/147_line_runtime_control.sql",
+      "name": "150_line_runtime_control.sql",
+      "relative_path": "db/schema_parts/150_line_runtime_control.sql",
       "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
       "rollback_policy": "code-rollback-preserve-runtime-facts",
       "sha256": "44eaacadc94a182b8f03ddc32915a1e1ba30d1175e14a90589bdb467f2cab4fa"
@@ -33,7 +33,7 @@
     "dependencies": [],
     "name": "labor_union_2026_08_08_line_stage3_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_08_line_stage3_v1.descriptors.json",
-    "sha256": "2fa6e7a76ad65bd4cb5e5248efd9a839459a3191d3b8b9cdde04eb43ca3c4f45"
+    "sha256": "a380e3cd7d87b79ac5963a0ad1fffe65fb98c13e3caa2f0d7b6ea30a2fc53c5f"
   },
   "release_id": "labor-union-line-stage3-2026-08-08-v1",
   "release_metadata": {

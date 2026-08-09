@@ -7,6 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
+from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.order_auto_completion import (
@@ -24,6 +25,7 @@ from subsystems.orders.auto_completion_workflow import (
 )
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Order Service Completion"])
+_RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 
 
 class OrderAutoCompletionApplyBody(BaseModel):
@@ -48,6 +50,8 @@ def apply_order_auto_completion(
         return BaseResponse(data=application.apply(request), message="成功記錄服務完成")
     except AutoCompletionWorkflowError as error:
         raise _typed_http_error(error.error) from error
+    except OperationalError as error:
+        raise _mysql_http_error(error, request.correlation_id) from error
     except ValueError as error:
         typed = TypedError(ErrorCategory.VALIDATION, str(error) or "auto_completion_validation_error", "服務完成請求未通過驗證。", request.correlation_id)
         raise _typed_http_error(typed) from error
@@ -55,6 +59,30 @@ def apply_order_auto_completion(
 
 def _typed_http_error(error):
     status = 409 if error.category in {ErrorCategory.DOMAIN_BLOCKED, ErrorCategory.CONFLICT, ErrorCategory.IDEMPOTENCY_MISMATCH} else 422
+    if error.category is ErrorCategory.UNAVAILABLE:
+        status = 503
     if error.category is ErrorCategory.INTERNAL:
         status = 500
     return HTTPException(status_code=status, detail={"error": {"category": error.category.value, "code": error.code, "message": error.message, "correlation_id": error.correlation_id.value, "domain_blockers": list(error.domain_blockers)}})
+
+
+def _mysql_http_error(error, correlation_id):
+    mysql_code = int(error.args[0]) if error.args else 0
+    if mysql_code in _RETRYABLE_MYSQL_CODES:
+        typed = TypedError(
+            ErrorCategory.UNAVAILABLE,
+            "auto_completion_transaction_temporarily_unavailable",
+            "Retry with the same idempotency key.",
+            correlation_id,
+            retryable=True,
+        )
+        response = _typed_http_error(typed)
+        response.headers = {"Retry-After": "1"}
+        return response
+    typed = TypedError(
+        ErrorCategory.INTERNAL,
+        "auto_completion_database_error",
+        "Order service completion persistence failed.",
+        correlation_id,
+    )
+    return _typed_http_error(typed)

@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from services import finance_import_application as importer
+from subsystems.finance_import import application as importer
 from domains.finance_import.transaction_classifier import classify_finance_transaction
 from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
 

@@ -15,6 +15,9 @@ from subsystems.orders.auto_completion_workflow import (
     AutoCompletionApplyRequest,
     AutoCompletionClaimState,
     AutoCompletionReceipt,
+    AutoCompletionRepositoryConflictError,
+    AutoCompletionRepositoryIntegrityError,
+    AutoCompletionRepositoryNotFoundError,
     StoredAutoCompletionReceipt,
 )
 from subsystems.orders.lifecycle_authoritative_facts_loader import (
@@ -47,9 +50,12 @@ class MySqlOrderAutoCompletionRepository:
         return None if row is None else _stored_receipt(row)
 
     def load_locked_facts(self, request):
-        with self._connection.cursor() as cursor:
-            envelope = lock_order_lifecycle_command_envelope(cursor, request.case_no, request.expected_order_version.value, request.idempotency_key.value)
-            return load_order_lifecycle_authoritative_facts(cursor, envelope, "evaluation_time_reached", request.evaluation_at)
+        try:
+            with self._connection.cursor() as cursor:
+                envelope = lock_order_lifecycle_command_envelope(cursor, request.case_no, request.expected_order_version.value, request.idempotency_key.value)
+                return load_order_lifecycle_authoritative_facts(cursor, envelope, "evaluation_time_reached", request.evaluation_at)
+        except (TypeError, ValueError) as error:
+            _raise_typed_root_read_error(error)
 
     def append_lifecycle_event(self, request, candidate, facts):
         snapshot = _lifecycle_snapshot(request, candidate, facts)
@@ -61,7 +67,9 @@ class MySqlOrderAutoCompletionRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(_ORDER_UPDATE_SQL, ("訂單完成", candidate.resulting_order_version, candidate.case_no, candidate.expected_order_version))
             if cursor.rowcount != 1:
-                raise RuntimeError("order_version_conflict")
+                raise AutoCompletionRepositoryConflictError(
+                    "order_version_conflict"
+                )
 
     def append_outbox(self, request, candidate, lifecycle_event_id):
         payload = {"after_status": "訂單完成", "completion_instant": candidate.completion_instant.isoformat(), "correlation_id": request.correlation_id.value, "resulting_order_version": candidate.resulting_order_version}
@@ -132,6 +140,18 @@ def _as_datetime(value):
 
 def _mysql_error_code(error):
     return error.args[0] if error.args and isinstance(error.args[0], int) else None
+
+
+def _raise_typed_root_read_error(error: Exception) -> None:
+    message = str(error)
+    if message == "order does not exist":
+        raise AutoCompletionRepositoryNotFoundError(message) from error
+    if message in {
+        "expected_version differs from locked lifecycle_version",
+        "lifecycle replay aggregate identity differs",
+    }:
+        raise AutoCompletionRepositoryConflictError(message) from error
+    raise AutoCompletionRepositoryIntegrityError(message) from error
 
 
 _CLAIM_INSERT_SQL = "INSERT INTO application_command_claims (idempotency_key,command_family,aggregate_identity,command_fingerprint,correlation_id) VALUES (%s,%s,%s,%s,%s)"

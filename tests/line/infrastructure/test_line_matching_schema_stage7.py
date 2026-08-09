@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_stage7_schema_has_intents_actions_responses_and_append_only_events() -> None:
-    sql = (ROOT / "db/schema_parts/152_matching_line_communication.sql").read_text(
+    sql = (ROOT / "db/schema_parts/155_matching_line_communication.sql").read_text(
         encoding="utf-8"
     )
 
@@ -36,7 +36,7 @@ def test_stage7_manifest_hashes_are_exact() -> None:
 
 
 def test_stage7_schema_does_not_persist_raw_interaction_token() -> None:
-    sql = (ROOT / "db/schema_parts/152_matching_line_communication.sql").read_text(
+    sql = (ROOT / "db/schema_parts/155_matching_line_communication.sql").read_text(
         encoding="utf-8"
     )
 

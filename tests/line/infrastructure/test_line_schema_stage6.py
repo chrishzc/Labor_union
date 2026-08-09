@@ -10,8 +10,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_stage6_schema_owns_group_monitor_and_alert_runtime() -> None:
-    group_sql = (ROOT / "db/schema_parts/150_line_order_group_runtime.sql").read_text(encoding="utf-8")
-    monitor_sql = (ROOT / "db/schema_parts/151_runtime_monitoring_line_alerts.sql").read_text(encoding="utf-8")
+    group_sql = (ROOT / "db/schema_parts/153_line_order_group_runtime.sql").read_text(encoding="utf-8")
+    monitor_sql = (ROOT / "db/schema_parts/154_runtime_monitoring_line_alerts.sql").read_text(encoding="utf-8")
     assert "line_order_group_participants" in group_sql
     assert "line_order_group_runtime_events" in group_sql
     assert "runtime_health_status" in monitor_sql

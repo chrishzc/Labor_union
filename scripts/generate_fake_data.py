@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import random
 import pandas as pd
 from datetime import datetime, timedelta, date
-from infrastructure.mysql.mysql_adapter import save_order_rest_dates, generate_default_schedule, get_connection
+from infrastructure.mysql.mysql_adapter import generate_default_schedule, get_connection
 
 # 確保中文輸出編碼正確
 try:
@@ -528,14 +528,6 @@ def generate_schedule_data():
                         # 先生成排班明細以取得精算後的正確結束日
                         generate_default_schedule(case_no, staff_id, start_d, service_days)
                         
-                        # 30% 機會為該訂單動態設定 1~3 天自訂放假日期並測試持久化與完工日自動順延
-                        if random.random() < 0.3:
-                            sample_rests = [
-                                (start_d + timedelta(days=random.randint(2, service_days - 2))).strftime("%Y-%m-%d")
-                                for _ in range(random.randint(1, 3))
-                            ]
-                            save_order_rest_dates(case_no, sample_rests)
-
                         # 查出最新的 end_date
                         cursor.execute("SELECT end_date FROM orders WHERE case_no = %s", (case_no,))
                         res = cursor.fetchone()

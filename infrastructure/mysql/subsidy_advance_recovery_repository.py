@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from domains.client_finance.subsidy_advance import SubsidyAdvanceFacts
@@ -50,7 +51,15 @@ class MySqlSubsidyAdvanceRecoveryRepository:
         return True
 
     def record_anomaly(self, event, reason: str) -> None:
-        payload = '{"reason":"' + reason + '","source_outbox_id":' + str(event.source_outbox_id) + '}'
+        payload = json.dumps(
+            {
+                "reason": reason,
+                "source_outbox_id": event.source_outbox_id,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
         with self._connection.cursor() as cursor:
             cursor.execute("INSERT INTO client_finance_outbox(case_no,intent_type,intent_key,payload_snapshot) VALUES (%s,'anomaly_review_required',%s,%s)", (event.case_no, f"subsidy-advance-review:{event.source_outbox_id}", payload))
 

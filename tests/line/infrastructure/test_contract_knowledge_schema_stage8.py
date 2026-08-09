@@ -8,8 +8,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_stage8_schema_owns_durable_contract_and_knowledge_roots() -> None:
-    contract_sql = (ROOT / "db/schema_parts/153_contract_integration.sql").read_text("utf-8")
-    knowledge_sql = (ROOT / "db/schema_parts/154_knowledge_retrieval.sql").read_text("utf-8")
+    contract_sql = (ROOT / "db/schema_parts/156_contract_integration.sql").read_text("utf-8")
+    knowledge_sql = (ROOT / "db/schema_parts/157_knowledge_retrieval.sql").read_text("utf-8")
 
     assert "CREATE TABLE IF NOT EXISTS contract_webhook_inbox" in contract_sql
     assert "CREATE TABLE IF NOT EXISTS external_contract_events" in contract_sql
@@ -35,4 +35,3 @@ def test_critical_legacy_breezysign_and_rag_bypasses_are_retired() -> None:
     assert "PersistentClient" not in legacy_worker
     assert "legacy_rag_retired" in legacy_worker
     assert "actual_start_date = %s" not in line_bot
-

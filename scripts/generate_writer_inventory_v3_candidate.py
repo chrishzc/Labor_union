@@ -21,8 +21,23 @@ from shared_kernel.writer_inventory import (  # noqa: E402
 )
 
 
-ROOTS = ("api", "domains", "infrastructure", "line", "scripts", "subsystems")
-OUTPUT_DIRECTORY = REPOSITORY_ROOT / "document" / "架構重整" / "evidence" / "writer_inventory_v3"
+ROOTS = (
+    "api",
+    "domains",
+    "infrastructure",
+    "line",
+    "scripts",
+    "services",
+    "subsystems",
+)
+OUTPUT_DIRECTORY = (
+    REPOSITORY_ROOT
+    / "document"
+    / "架構重整"
+    / "03_追蹤清單與證據"
+    / "evidence"
+    / "writer_inventory_v3"
+)
 RUNTIME_ROOTS = (*ROOTS, "ui")
 LEGACY_SUBSIDY_PROJECTION_FIELDS = (
     "subsidy_refund_receivable",
@@ -46,6 +61,8 @@ def _owner_candidate(relative_path: str) -> str | None:
         return "line_integration"
     if parts[0] == "scripts":
         return "global_infrastructure"
+    if parts[0] == "services":
+        return _service_owner(parts[-1])
     if parts[:2] == ("infrastructure", "mysql"):
         return _mysql_owner(parts[-1])
     if parts[:2] == ("infrastructure", "migration"):
@@ -70,6 +87,14 @@ def _subsystem_owner(name: str) -> str | None:
     }.get(name)
 
 
+def _service_owner(filename: str) -> str | None:
+    if filename.startswith(("anomaly_", "system_alert_")):
+        return "anomalies"
+    if filename.startswith("finance_import_"):
+        return "finance_import"
+    return None
+
+
 def _mysql_owner(filename: str) -> str | None:
     prefixes = (
         ("anomaly_", "anomalies"),
@@ -84,6 +109,7 @@ def _mysql_owner(filename: str) -> str | None:
         ("leave_", "scheduling"),
         ("order_", "orders"),
         ("payroll_", "payroll"),
+        ("provisional_registration_", "case_import"),
         ("scheduling_", "scheduling"),
         ("staff_", "staff_payables"),
     )
@@ -235,6 +261,7 @@ def main() -> int:
         "contract": "production-writer-inventory/v3-candidate",
         "roots": ROOTS,
         "finding_count": len(records),
+        "unique_identity_count": len({record["identity"] for record in records}),
         "scan_fingerprint": writer_scan_fingerprint(findings),
         "evidence_sha256": evidence_hash,
         "owner_candidate_counts": dict(sorted(Counter(record["owner_candidate"] or "unresolved" for record in records).items())),

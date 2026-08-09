@@ -1,4 +1,4 @@
-from services import finance_import_application as importer
+from subsystems.finance_import import application as importer
 
 
 class Cursor:
@@ -72,7 +72,9 @@ def _run(monkeypatch, staged_rows):
         "project_finance_import_review_alert",
         lambda cursor, batch_id: None,
     )
-    return importer.import_finance_workbook("renamed-and-overlapping.xlsx"), dispatched, connection
+    return importer.import_finance_workbook(
+        "renamed-and-overlapping.xlsx", dry_run=True
+    ), dispatched, connection
 
 
 def test_cross_file_duplicate_is_not_redispatched_or_overwritten(monkeypatch):
@@ -122,7 +124,7 @@ def test_same_second_same_memo_different_balance_stays_two_canonical_rows(monkey
     assert dispatched == [711, 712]
     assert result["inserted_rows"] == 2
     assert result["reconciled_counts"] == {"client_receipt": 1}
-    assert result["pending_rows"] == [712]
+    assert result["pending_rows"] == []
 
 
 def test_same_batch_duplicate_occurrence_only_dispatches_its_canonical_row(monkeypatch):

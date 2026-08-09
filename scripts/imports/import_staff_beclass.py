@@ -39,6 +39,7 @@ if cwd_str not in sys.path:
 
 try:
     from domains.case_import.staff_import_validation import (
+        EXCEL_TO_DB_COLUMN,
         fallback_case_key,
         validate_staff_row,
     )
@@ -220,6 +221,8 @@ def process_import(excel_path):
 
             if not identity_card:
                 review_required += 1
+                err_detail = f" - 欄位錯誤: {'、'.join(errors.keys()) if isinstance(errors, dict) else errors}" if errors else ""
+                print(f"[待確認警示] 第 {source_row} 列：查無身分證字號 (姓名: {name_for_alert or '未填'}, 電話: {phone_for_alert or '未填'}){err_detail}")
                 record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
@@ -253,6 +256,7 @@ def process_import(excel_path):
             if not name:
                 # staff.name 是 NOT NULL，缺姓名時無法建立資料，只能開警示提醒補件
                 review_required += 1
+                print(f"[待確認警示] 第 {source_row} 列：缺少姓名 (身分證: {identity_card}, 電話: {phone_for_alert or '未填'})")
                 record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
@@ -351,6 +355,7 @@ def process_import(excel_path):
                 if not existing_name or not name or existing_name == name:
                     continue
                 review_required += 1
+                print(f"[待確認警示] 第 {source_row} 列：身分證字號 {identity_card} 重複，但姓名不一致 (資料庫已有: 「{existing_name}」，本次匯入: 「{name}」)")
                 record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
@@ -376,6 +381,7 @@ def process_import(excel_path):
                 continue
             if existing_cnt > 1:
                 review_required += 1
+                print(f"[待確認警示] 第 {source_row} 列：身分證字號 {identity_card} 在資料庫中有多筆記錄 ({existing_cnt} 筆)")
                 record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
@@ -393,6 +399,8 @@ def process_import(excel_path):
                 continue
             if errors:
                 review_required += 1
+                err_msg = "、".join(errors.values()) if isinstance(errors, dict) else str(errors)
+                print(f"[欄位已阻擋] 第 {source_row} 列：服務人員 (身分證: {identity_card}, 姓名: {name}) 欄位驗證異常 - {err_msg}")
                 record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
@@ -415,7 +423,9 @@ def process_import(excel_path):
                     reason=f"服務人員 {identity_card} 匯入資料異常：{'、'.join(errors)}",
                     details=errors,
                 )
-                continue
+                for excel_column, database_column in EXCEL_TO_DB_COLUMN.items():
+                    if excel_column in errors:
+                        record[database_column] = None
 
             if existing_cnt == 0:
                 cols = ", ".join([f"`{k}`" for k in record.keys()])
@@ -426,7 +436,7 @@ def process_import(excel_path):
                 inserted += 1
 
                 bank_acc = clean_data(row.get('銀行帳號'), 'account_no')
-                if bank_acc:
+                if bank_acc and "銀行代3碼+分行代號4碼" not in errors:
                     # 範例檔實際表頭是「銀行代3碼+分行代號4碼」(少一個「碼」字)，
                     # 這裡兩種寫法都認，避免之後樣板又改回另一種寫法時又讀不到。
                     bank_branch_raw = row.get('銀行代3碼+分行代號4碼')

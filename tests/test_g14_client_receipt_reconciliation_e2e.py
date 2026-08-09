@@ -99,8 +99,8 @@ def _seed_case(connection) -> None:
         )
         client_id = int(cursor.lastrowid)
         cursor.execute(
-            "INSERT INTO orders(case_no,client_id,status,actual_start_date) "
-            "VALUES (%s,%s,'服務中','2026-08-01')",
+            "INSERT INTO orders(case_no,client_id,status,actual_start_date,service_days) "
+            "VALUES (%s,%s,'服務中','2026-08-01',20)",
             (CASE_NO, client_id),
         )
         cursor.execute(

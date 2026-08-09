@@ -9,7 +9,7 @@ from enum import Enum
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -24,6 +24,7 @@ from infrastructure.mysql.background_job_repository import (
     BackgroundJobRepository,
     JobIdempotencyConflict,
 )
+from shared_kernel.durable_job_queue import DurableJobCommand
 from api.schemas.staff_payout import (
     PayoutApplyBody,
     PayoutPreviewBody,
@@ -92,15 +93,12 @@ def preview_payout(
 )
 def apply_payout(
     body: PayoutApplyBody,
-    background_tasks: BackgroundTasks,
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: StaffPayoutApplication = Depends(get_staff_payout_application),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     return _apply_response(
-        application,
         lambda: _apply_request(
             _payout_selection(body),
             body,
@@ -108,8 +106,6 @@ def apply_payout(
             correlation_id,
             principal,
         ),
-        CorrelationId(correlation_id),
-        background_tasks,
         job_repository,
     )
 
@@ -139,15 +135,12 @@ def preview_return(
 )
 def apply_return(
     body: ReturnApplyBody,
-    background_tasks: BackgroundTasks,
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: StaffPayoutApplication = Depends(get_staff_payout_application),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     return _apply_response(
-        application,
         lambda: _apply_request(
             _return_selection(body),
             body,
@@ -155,8 +148,6 @@ def apply_return(
             correlation_id,
             principal,
         ),
-        CorrelationId(correlation_id),
-        background_tasks,
         job_repository,
     )
 
@@ -186,15 +177,12 @@ def preview_reversal(
 )
 def apply_reversal(
     body: ReversalApplyBody,
-    background_tasks: BackgroundTasks,
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: StaffPayoutApplication = Depends(get_staff_payout_application),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     return _apply_response(
-        application,
         lambda: _apply_request(
             _reversal_selection(body),
             body,
@@ -202,8 +190,6 @@ def apply_reversal(
             correlation_id,
             principal,
         ),
-        CorrelationId(correlation_id),
-        background_tasks,
         job_repository,
     )
 
@@ -243,28 +229,13 @@ def _build_preview_payload(application, build_selection, correlation_id):
     return _preview_payload(preview, selection.event_type)
 
 
-def _apply_response(application, build_request, correlation_id, background_tasks, job_repository):
+def _apply_response(build_request, job_repository):
     request = build_request()
     job_id = str(uuid.uuid4())
     try:
-        job_id = job_repository.enqueue_job(job_id, request.idempotency_key)
-        
-        def _background_worker():
-            job_repository.mark_running(job_id)
-            try:
-                receipt = _materialize(application.apply(request))
-                job_repository.mark_succeeded(job_id, receipt)
-            except StaffPayoutReconciliationError as error:
-                job_repository.mark_failed(job_id, {"error": _materialize(error.error)})
-            except OperationalError as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "INTERNAL", "code": "database_error", "message": str(error)}})
-            except ValueError as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "VALIDATION", "code": "invalid_staff_payout_intent", "message": str(error)}})
-            except Exception as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "INTERNAL", "code": "internal_error", "message": str(error)}})
-
-        background_tasks.add_task(_background_worker)
-        
+        job_id = job_repository.enqueue_command(
+            _staff_payout_command(job_id, request)
+        )
     except JobIdempotencyConflict as e:
         job_id = e.job_id
 
@@ -272,6 +243,37 @@ def _apply_response(application, build_request, correlation_id, background_tasks
         data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
         message="202 Accepted",
     )
+
+
+def _staff_payout_command(job_id, request):
+    return DurableJobCommand(
+        job_id,
+        request.idempotency_key.value,
+        "staff_payout_apply",
+        1,
+        _staff_payout_payload(request),
+        request.actor.actor_id,
+        request.correlation_id.value,
+    )
+
+
+def _staff_payout_payload(request):
+    selection = request.selection
+    return {
+        "actor": request.actor.actor_id,
+        "correlation_id": request.correlation_id.value,
+        "expected_bank_facts_version": request.expected_bank_facts_version.value,
+        "expected_staff_payables_version": request.expected_staff_payables_version.value,
+        "idempotency_key": request.idempotency_key.value,
+        "preview_fingerprint": request.preview_fingerprint.value,
+        "reason": request.reason,
+        "selection": {
+            "event_type": selection.event_type.value,
+            "bank_fact_identities": list(selection.bank_fact_identities),
+            "obligation_identities": list(selection.obligation_identities),
+            "reopen_fact_identity": selection.reopen_fact_identity,
+        },
+    }
 
 
 def _payout_selection(body) -> StaffPayoutSelection:

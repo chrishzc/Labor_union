@@ -7,7 +7,6 @@
 
 from typing import Any, Dict
 from infrastructure.mysql import mysql_adapter as db_service
-from subsystems.access.security_audit_repository import record_data_browser_patch_audit
 
 # 白名單資料表
 ALLOWED_TABLES = {
@@ -32,43 +31,13 @@ ALLOWED_TABLES = {
 
 # 可編輯欄位白名單
 EDITABLE_COLUMNS = {
-    'clients': [
-        'reject_reason', 'ip_address', 'name', 'gender', 'phone', 'city', 'address',
-        'service_time', 'due_month', 'service_start_date', 'notes',
-        'service_days', 'residence_type', 'delivery_type', 'service_type', 'baby_info',
-        'line_id', 'admin_notes',
-    ],
-    'staff': [
-        'registered_at', 'ip_address', 'phone', 'tel', 'tel_ext', 'email', 'city',
-        'zip_code', 'address', 'has_massage_cert', 'weekly_rest_days', 'service_regions',
-        'special_skills', 'name', 'identity_card', 'birthday', 'care_babies',
-    ],
-    'holidays': [
-        'holiday_name', 'is_double_pay',
-    ],
-    'matching_records': [
-        'caregiver_accepted',
-    ],
+    "clients": ["name", "gender", "phone", "city", "address", "notes", "admin_notes", "reject_reason"],
+    "beclass_records": ["name", "email", "phone", "tel", "ext", "city", "zip_code", "address", "admin_notes"],
+    "staff": ["name", "phone", "tel", "tel_ext", "email", "city", "zip_code", "address", "birthday", "has_massage_cert", "weekly_rest_days", "service_regions", "special_skills", "care_babies"],
 }
 
-# 唯讀表清單 (client_payments 與 staff_payments 財務關聯表強制鎖定唯讀)
-READ_ONLY_TABLES = {
-    "beclass_records",
-    "orders",
-    "holidays",
-    "matching_records",
-    "staff_bank_accounts",
-    "line_confirmation_requests",
-    "staff_bookings",
-    "case_staff_assignments",
-    "client_payments",
-    "client_payment_transactions",
-    "actual_hours_adjustments",
-    "staff_payments",
-    "staff_payment_transactions",
-    "payment_migration_reviews",
-    "staff_schedule",
-}
+# 唯讀表清單：僅來源主檔可經 source-correction workflow 變更。
+READ_ONLY_TABLES = ALLOWED_TABLES - set(EDITABLE_COLUMNS)
 
 
 # 下拉選單中繼資料 (SSOT)
@@ -109,76 +78,3 @@ def get_data_browser_table_schema(table_name: str) -> Dict[str, Any]:
         "valid_options": COLUMN_VALID_OPTIONS.get(table_name, {}),
         "read_only": is_read_only,
     }
-
-def patch_data_browser_table_row(
-    table_name: str,
-    row_id: str,
-    updates: Dict[str, Any],
-    operator_id: str = "admin_ui",
-    operator_role: str = "admin",
-) -> bool:
-    """
-    更新特定資料表單列，支援字串主鍵 (如 case_no)，並自動寫入稽核紀錄。
-    """
-    if table_name not in ALLOWED_TABLES:
-        raise ValueError(f"不允許存取的資料表: {table_name}")
-    if table_name in READ_ONLY_TABLES:
-        raise ValueError(f"資料表 {table_name} 屬於全表唯讀保護，禁止直接修改。")
-
-    if not updates:
-        raise ValueError("沒有包含任何更新欄位。")
-
-    # 1. 權限白名單 fail-closed 檢查（只要有非法欄位即全數拒絕）
-    allowed_cols = set(EDITABLE_COLUMNS.get(table_name, []))
-    invalid_cols = [k for k in updates.keys() if k not in allowed_cols]
-    if invalid_cols:
-        raise ValueError(f"欄位 {invalid_cols} 不在可編輯白名單中，更新已取消。")
-
-    if not allowed_cols:
-        raise ValueError("此資料表未設定可編輯欄位。")
-
-    if table_name not in db_service.TABLE_PRIMARY_KEYS:
-        raise ValueError(f"不允許存取的資料表: {table_name}")
-
-    pk_col = db_service.TABLE_PRIMARY_KEYS[table_name]
-
-    conn = db_service.get_connection()
-    try:
-        with conn.cursor() as cursor:
-            cursor.execute(f"SELECT * FROM `{table_name}` WHERE `{pk_col}` = %s FOR UPDATE", (row_id,))
-            before_snapshot = cursor.fetchone()
-            if before_snapshot is None:
-                raise ValueError("指定資料列不存在，更新已取消。")
-
-            updated = db_service.update_table_row(
-                table_name=table_name,
-                row_id=row_id,
-                updates=updates,
-                cursor=cursor,
-            )
-            if not updated:
-                raise ValueError("指定資料列不存在或欄位變更未生效，更新已取消。")
-
-            cursor.execute(f"SELECT * FROM `{table_name}` WHERE `{pk_col}` = %s", (row_id,))
-            after_snapshot = cursor.fetchone()
-            audited = record_data_browser_patch_audit(
-                table_name=table_name,
-                pk_value=str(row_id),
-                changed_fields=updates,
-                operator_id=operator_id,
-                actor=operator_id,
-                role=operator_role,
-                before_snapshot=before_snapshot,
-                after_snapshot=after_snapshot,
-                cursor=cursor,
-            )
-            if not audited:
-                raise RuntimeError("資料異動稽核寫入失敗，更新已回滾。")
-
-            conn.commit()
-            return True
-    except Exception:
-        conn.rollback()
-        raise
-    finally:
-        conn.close()

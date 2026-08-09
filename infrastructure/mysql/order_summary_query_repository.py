@@ -34,6 +34,11 @@ SELECT o.case_no,
   JOIN clients c ON c.id = o.client_id
   JOIN v_order_details order_details ON order_details.case_no = o.case_no
  WHERE o.case_no > %s
+   AND (
+       %s IS NULL
+       OR o.case_no LIKE CONCAT('%%', %s, '%%')
+       OR c.name LIKE CONCAT('%%', %s, '%%')
+   )
  ORDER BY o.case_no
  LIMIT %s
 """
@@ -48,13 +53,14 @@ class MySqlOrderSummaryQueryRepository:
         *,
         after_case_no: str | None,
         page_size: int,
+        query_text: str | None,
     ) -> tuple[Mapping[str, object], ...]:
         cursor_case_no = _cursor_case_no(after_case_no)
         result_limit = _result_limit(page_size)
         with self._connection.cursor() as cursor:
             cursor.execute(
                 _ORDER_SUMMARY_PAGE_SQL,
-                (cursor_case_no, result_limit),
+                (cursor_case_no, query_text, query_text, query_text, result_limit),
             )
             return tuple(cursor.fetchall() or ())
 

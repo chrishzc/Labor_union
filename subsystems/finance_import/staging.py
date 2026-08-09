@@ -49,14 +49,31 @@ def _matched_identity_ids(value: Any) -> list[Any]:
     return value
 
 
-def _identity_maps(identity_maps: Mapping[str, Any]) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
+def _identity_maps(
+    identity_maps: Mapping[str, Any],
+) -> tuple[
+    Mapping[str, Any],
+    Mapping[str, Any],
+    Mapping[str, Any] | None,
+    tuple[Any, ...],
+]:
     if not isinstance(identity_maps, Mapping):
         raise ValueError("identity_maps must be a mapping")
     client_accounts = identity_maps.get("client_refund_accounts", {})
     staff_accounts = identity_maps.get("staff_accounts", {})
-    if not isinstance(client_accounts, Mapping) or not isinstance(staff_accounts, Mapping):
+    subsidy_return_accounts = identity_maps.get("client_subsidy_return_accounts")
+    receipt_candidates = identity_maps.get("client_receipt_candidates", ())
+    if not isinstance(client_accounts, Mapping) or not isinstance(
+        staff_accounts, Mapping
+    ):
         raise ValueError("identity account maps must be mappings")
-    return client_accounts, staff_accounts
+    if subsidy_return_accounts is not None and not isinstance(
+        subsidy_return_accounts, Mapping
+    ):
+        raise ValueError("identity account maps must be mappings")
+    if not isinstance(receipt_candidates, tuple):
+        raise ValueError("client receipt candidates must be a tuple")
+    return client_accounts, staff_accounts, subsidy_return_accounts, receipt_candidates
 
 
 def stage_finance_rows(
@@ -80,7 +97,12 @@ def stage_finance_rows(
         raise ValueError("normalized_result must include sheet_name")
     if not isinstance(header_row, int) or isinstance(header_row, bool) or header_row < 1:
         raise ValueError("normalized_result must include a positive header_row")
-    client_accounts, staff_accounts = _identity_maps(identity_maps)
+    (
+        client_accounts,
+        staff_accounts,
+        subsidy_return_accounts,
+        receipt_candidates,
+    ) = _identity_maps(identity_maps)
 
     source_files = {row.get("source_file") for row in rows if isinstance(row, Mapping)}
     source_file = next(iter(source_files)) if len(source_files) == 1 else None
@@ -215,6 +237,8 @@ def stage_finance_rows(
             row,
             client_accounts,
             staff_accounts,
+            subsidy_return_accounts,
+            receipt_candidates,
         )
         classification_type = classification["classification_type"]
         matched_identity_ids = classification.get("matched_identity_ids", [])

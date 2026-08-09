@@ -7,9 +7,9 @@ from shared_kernel.migration_release import load_migration_release_manifest
 
 ROOT = Path(__file__).resolve().parents[3]
 SCHEMA_PARTS = (
-    "144_line_integration_inbox_delivery.sql",
-    "145_line_identity_review_configuration.sql",
-    "146_line_publication_media_order_group.sql",
+    "147_line_integration_inbox_delivery.sql",
+    "148_line_identity_review_configuration.sql",
+    "149_line_publication_media_order_group.sql",
 )
 
 

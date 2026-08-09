@@ -9,8 +9,8 @@
       "scripts",
       "subsystems"
     ],
-    "finding_count": 683,
-    "scan_fingerprint": "207592b5f11023babde0d4d0aad5632f44b813fe3cbf773d11dd188055a95196"
+    "finding_count": 674,
+    "scan_fingerprint": "ff3db10baa5e2853de7770df9aa33b393319e06752f07060035a07a74476ec56"
   },
   "legacy_projection_boundary": {
     "fields": [

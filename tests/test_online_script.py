@@ -43,6 +43,7 @@ def test_online_script_uses_expected_service_entrypoints_without_initializing_da
     assert '"%PY%" -m scripts.run_knowledge_worker' in script
     assert '"%PY%" scripts/run_line_worker.py' not in script
     assert '"%PY%" scripts/file_watcher.py' in script
+    assert '"%PY%" scripts/run_durable_job_worker.py' not in script
     assert "line.main:app" not in script
     assert "init_db" not in script.lower()
     assert "fake_data" not in script.lower()

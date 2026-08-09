@@ -46,9 +46,10 @@ class OrderSummaryApiClient:
         *,
         page_size: int = 50,
         after_case_no: str | None = None,
+        query_text: str | None = None,
         etag: str | None = None,
     ) -> OrderSummaryQueryResult:
-        response = self._send(page_size, after_case_no, etag)
+        response = self._send(page_size, after_case_no, query_text, etag)
         response_etag = response.headers.get("ETag", etag or "")
         if response.status_code == 304:
             return OrderSummaryQueryResult(None, response_etag, True)
@@ -63,13 +64,15 @@ class OrderSummaryApiClient:
             False,
         )
 
-    def _send(self, page_size, after_case_no, etag):
+    def _send(self, page_size, after_case_no, query_text, etag):
         headers = dict(self._headers)
         if etag:
             headers["If-None-Match"] = etag
         parameters = {"page_size": page_size}
         if after_case_no is not None:
             parameters["after_case_no"] = after_case_no
+        if query_text is not None:
+            parameters["query_text"] = query_text
         try:
             return self._session.get(
                 f"{self._base_url}/api/v1/orders/summaries",

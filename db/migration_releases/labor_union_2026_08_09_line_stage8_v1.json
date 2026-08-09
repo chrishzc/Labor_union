@@ -27,17 +27,17 @@
     {
       "dependencies": [],
       "data_effect": "schema_only",
-      "name": "153_contract_integration.sql",
-      "relative_path": "db/schema_parts/153_contract_integration.sql",
+      "name": "156_contract_integration.sql",
+      "relative_path": "db/schema_parts/156_contract_integration.sql",
       "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
       "rollback_policy": "code-rollback-preserve-contract-evidence",
       "sha256": "5e9597717acf06402f5653edffbcb1ce60b6f6473bb893b8a3aa61083976d4db"
     },
     {
-      "dependencies": ["153_contract_integration.sql"],
+      "dependencies": ["156_contract_integration.sql"],
       "data_effect": "schema_only",
-      "name": "154_knowledge_retrieval.sql",
-      "relative_path": "db/schema_parts/154_knowledge_retrieval.sql",
+      "name": "157_knowledge_retrieval.sql",
+      "relative_path": "db/schema_parts/157_knowledge_retrieval.sql",
       "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
       "rollback_policy": "code-rollback-preserve-knowledge-roots-and-receipts",
       "sha256": "119e7c52377ed8025986c73e30d7cc60c33581bbe0630720c4a8ab28a8cc03a2"
@@ -49,7 +49,7 @@
     "dependencies": [],
     "name": "labor_union_2026_08_09_line_stage8_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_09_line_stage8_v1.descriptors.json",
-    "sha256": "5282c9f3b3db2f9a0bc2cfeeb2d4bb4730ddd31b5b23b0ead0fd13a7126b327e"
+    "sha256": "7246eb688525d151a5226a970462fd7b6a7f79310fa27772ffb7542ee9376b4b"
   },
   "release_id": "labor-union-line-stage8-2026-08-09-v1",
   "release_metadata": {

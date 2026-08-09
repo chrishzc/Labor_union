@@ -284,6 +284,7 @@ def send_matching_plan_information(
             cursor,
             to_user_id=recipient.strip(),
             message_content=message,
+            task_type="matching_willingness_card",
             payload={
                 "case_no": case_no,
                 "plan_id": plan_id,
@@ -333,6 +334,9 @@ def record_matching_plan_willingness(
     willingness: Any,
     event_key: Any,
     actor: Any,
+    *,
+    reply_to_user_id: Any | None = None,
+    reply_message: Any | None = None,
 ) -> dict[str, Any]:
     case_no = _text(case_no, "case_no", 50)
     plan_id = _positive_int(plan_id, "plan_id")
@@ -341,6 +345,11 @@ def record_matching_plan_willingness(
         raise ValueError("willingness is invalid")
     event_key = _text(event_key, "event_key", 100)
     actor = _text(actor, "actor", 100)
+    if (reply_to_user_id is None) != (reply_message is None):
+        raise ValueError("LINE reply recipient and message must be supplied together")
+    if reply_to_user_id is not None:
+        reply_to_user_id = _text(reply_to_user_id, "reply_to_user_id", 255)
+        reply_message = _text(reply_message, "reply_message", 2000)
     connection = cursor = None
     try:
         connection = get_connection()
@@ -391,8 +400,19 @@ def record_matching_plan_willingness(
             ),
         )
         event_id = _positive_int(cursor.lastrowid, "event_id")
+        line_task_id = None
+        if reply_to_user_id is not None:
+            line_task_id = enqueue_line_task(
+                cursor,
+                to_user_id=reply_to_user_id,
+                message_content=reply_message,
+                source_event_id=event_key,
+                idempotency_key=f"line-matching-willingness:{event_key}",
+            )
+            if line_task_id is None:
+                raise ValueError("LINE willingness reply task was not created")
         connection.commit()
-        return {"status": "recorded", "event_id": event_id, **payload}
+        return {"status": "recorded", "event_id": event_id, "line_task_id": line_task_id, **payload}
     except Exception:
         if connection is not None:
             connection.rollback()

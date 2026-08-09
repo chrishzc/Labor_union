@@ -1,3 +1,4 @@
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -49,6 +50,21 @@ def test_schema_parts_sort_by_numeric_prefix_not_lexicographic_name(tmp_path):
         "104_order_lifecycle_state_history.sql",
         "109_scheduling_generations.sql",
     ]
+
+
+def test_release_managed_schema_part_prefixes_are_unique() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+    prefixes = [
+        path.name.partition("_")[0]
+        for path in (repository_root / "db" / "schema_parts").glob("*.sql")
+        if path.name.partition("_")[0].isdigit()
+        and int(path.name.partition("_")[0]) >= 100
+    ]
+    duplicate_prefixes = sorted(
+        prefix for prefix, count in Counter(prefixes).items() if count > 1
+    )
+
+    assert duplicate_prefixes == []
 
 
 def test_stops_at_first_failing_part_and_reports_filename(tmp_path):

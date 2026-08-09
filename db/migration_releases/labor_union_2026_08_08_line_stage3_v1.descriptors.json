@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "147_line_runtime_control.sql": {
+    "150_line_runtime_control.sql": {
       "tables": {
         "line_inbox_events": [
           "id", "event_identity", "provider_event_id", "destination_id",

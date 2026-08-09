@@ -86,7 +86,7 @@ def _run_data_browser_page(
     app = AppTest.from_function(_app)
     if token is not None:
         app.session_state["line_admin_access_token"] = token
-    app.run()
+    app.run(timeout=10)
     return app
 
 

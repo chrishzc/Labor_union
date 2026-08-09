@@ -27,14 +27,14 @@ def test_line_release_chain_selects_stage2_through_stage6() -> None:
         runner.configure_release_manifests(MANIFESTS)
 
         assert tuple(path.name for path in runner.SCHEMA_PARTS) == (
-            "144_line_integration_inbox_delivery.sql",
-            "145_line_identity_review_configuration.sql",
-            "146_line_publication_media_order_group.sql",
-            "147_line_runtime_control.sql",
-            "148_line_identity_runtime.sql",
-            "149_line_messaging_publication_runtime.sql",
-            "150_line_order_group_runtime.sql",
-            "151_runtime_monitoring_line_alerts.sql",
+            "147_line_integration_inbox_delivery.sql",
+            "148_line_identity_review_configuration.sql",
+            "149_line_publication_media_order_group.sql",
+            "150_line_runtime_control.sql",
+            "151_line_identity_runtime.sql",
+            "152_line_messaging_publication_runtime.sql",
+            "153_line_order_group_runtime.sql",
+            "154_runtime_monitoring_line_alerts.sql",
         )
         assert runner.MANIFEST_DRIVEN_RELEASE is True
         assert len(runner.RELEASE_MANIFEST.manifests) == 5
@@ -54,7 +54,7 @@ def test_stage6_descriptor_claims_only_columns_added_by_stage6() -> None:
     )
     descriptor = json.loads(descriptor_path.read_text(encoding="utf-8"))
     columns = descriptor["descriptors"][
-        "150_line_order_group_runtime.sql"
+        "153_line_order_group_runtime.sql"
     ]["tables"]["line_order_group_bindings"]
 
     assert columns == ["last_invitation_at_utc", "activated_at_utc"]

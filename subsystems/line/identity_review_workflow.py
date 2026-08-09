@@ -94,23 +94,120 @@ def _staff_rich_menu_id() -> str:
         return ""
 
 
-def _ensure_order_for_case_no(cursor, client_id: int, case_no: str | None) -> None:
-    normalized_case_no = str(case_no or "").strip()
-    if not normalized_case_no:
-        return
-    cursor.execute("SELECT client_id FROM orders WHERE case_no=%s", (normalized_case_no,))
-    existing = cursor.fetchone()
-    if existing:
-        existing_client_id = existing.get("client_id") if isinstance(existing, dict) else existing[0]
-        if int(existing_client_id) != int(client_id):
-            raise LineReviewDataConflictError(
-                f"案件編號 {normalized_case_no} 已連結其他客戶，無法完成重新綁定"
-            )
-        return
+def _replace_pending_staff_verification(cursor, line_user_id: str) -> int:
     cursor.execute(
-        "INSERT INTO orders (case_no,client_id) VALUES (%s,%s)",
-        (normalized_case_no, client_id),
+        """
+        UPDATE line_confirmation_requests SET status='cancelled', resolved_at=NOW()
+        WHERE request_type='staff_verification' AND line_user_id=%s AND status='pending'
+        """,
+        (line_user_id,),
     )
+    cursor.execute(
+        """
+        INSERT INTO line_confirmation_requests (request_type, line_user_id)
+        VALUES ('staff_verification', %s)
+        """,
+        (line_user_id,),
+    )
+    return int(cursor.lastrowid)
+
+
+def submit_client_rebind_request_in_transaction(
+    cursor,
+    *,
+    client_id: int,
+    client_name: str,
+    old_line_user_id: str,
+    new_line_user_id: str,
+) -> dict[str, Any]:
+    if not new_line_user_id.strip():
+        raise ValueError("重新綁定申請缺少新的 LINE 使用者")
+    cursor.execute(
+        """
+        UPDATE line_confirmation_requests SET status='cancelled', resolved_at=NOW()
+        WHERE request_type='client_rebind' AND client_id=%s
+          AND line_user_id=%s AND status='pending'
+        """,
+        (client_id, new_line_user_id),
+    )
+    cursor.execute(
+        """
+        INSERT INTO line_confirmation_requests (
+            request_type, line_user_id, client_id, client_name,
+            old_line_user_id, new_line_user_id
+        ) VALUES ('client_rebind', %s, %s, %s, %s, %s)
+        """,
+        (new_line_user_id, client_id, client_name, old_line_user_id, new_line_user_id),
+    )
+    return {"request_id": int(cursor.lastrowid), "worker_wakeup_required": True}
+
+
+def complete_client_binding_in_transaction(
+    cursor,
+    *,
+    client_id: int,
+    client_name: str,
+    case_no: str | None,
+    current_line_user_id: str | None,
+    line_user_id: str,
+) -> dict[str, Any]:
+    if not line_user_id.strip():
+        raise ValueError("客戶綁定缺少 LINE 使用者")
+    if not (current_line_user_id or "").strip():
+        cursor.execute("UPDATE clients SET line_user_id = %s WHERE id = %s", (line_user_id, client_id))
+    case_message = f"您的案件編號為：{case_no}。\n" if case_no else "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
+    enqueue_line_task(
+        cursor,
+        to_user_id=line_user_id,
+        message_content=(
+            f"【系統通知】\n服務綁定與查詢成功！您的 LINE 帳號已連結至客戶「{client_name}」的登記資料。\n"
+            f"{case_message}後續有最新媒合進度或排班通知，系統將會主動為您推播。"
+        ),
+    )
+    return {"worker_wakeup_required": True}
+
+
+def submit_staff_verification_in_transaction(
+    cursor,
+    line_user_id: str,
+    *,
+    source_event_id: str | None = None,
+) -> dict[str, Any]:
+    normalized_user_id = line_user_id.strip()
+    if not normalized_user_id:
+        raise ValueError("月嫂身分申請缺少 LINE 使用者")
+    request_id = _replace_pending_staff_verification(cursor, normalized_user_id)
+    enqueue_line_task(
+        cursor,
+        to_user_id=normalized_user_id,
+        message_content=_template(
+            "staff_verification_requested", "月嫂身分申請已送出，請等待工會人員確認。"
+        ),
+        source_event_id=source_event_id,
+        idempotency_key=f"staff-verification-request:{request_id}",
+    )
+    return {"request_id": request_id, "worker_wakeup_required": True}
+
+
+def submit_staff_verification(
+    line_user_id: str,
+    *,
+    source_event_id: str | None = None,
+) -> dict[str, Any]:
+    conn = get_connection()
+    try:
+        conn.begin()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            result = submit_staff_verification_in_transaction(
+                cursor, line_user_id, source_event_id=source_event_id
+            )
+        conn.commit()
+        return result
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def get_line_review_summary() -> dict[str, int]:
@@ -371,7 +468,6 @@ def approve_line_review(
                     "UPDATE clients SET line_user_id=%s WHERE id=%s",
                     (new_line_user_id, client_id),
                 )
-                _ensure_order_for_case_no(cursor, int(client_id), client.get("case_no"))
                 client_name = str(item.get("client_name") or client.get("name") or "")
                 enqueue_line_task(
                     cursor,

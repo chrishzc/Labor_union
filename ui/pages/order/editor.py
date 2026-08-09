@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import uuid4
 
 import requests
 import streamlit as st
@@ -54,13 +55,18 @@ def _render_basic_details(case_no, order, headers, key_prefix):
         key=f"{key_prefix}_client_{case_no}",
     )
     _render_read_only_identity(order, key_prefix, case_no)
-    if not st.button(
+    if st.button(
         "儲存訂單基本資料",
         type="primary",
         key=f"{key_prefix}_save_order_details_{case_no}",
     ):
-        return
-    _save_client_name(case_no, client_name, headers)
+        _save_client_name(case_no, client_name, headers)
+    preview = st.session_state.get(f"client_name_preview_{case_no}")
+    if preview:
+        st.info(f"預覽：客戶姓名將由「{preview.get('before') or '未設定'}」改為「{preview['name']}」；正式條款與排班不變。")
+        reason = st.text_input("客戶姓名異動原因", key=f"{key_prefix}_client_name_reason_{case_no}")
+        if st.button("確認套用客戶姓名", type="primary", key=f"{key_prefix}_apply_client_name_{case_no}"):
+            _apply_client_name(case_no, headers, preview, reason)
 
 
 def _render_read_only_identity(order, key_prefix, case_no):
@@ -84,17 +90,31 @@ def _read_only_field(column, label, value, key):
 
 
 def _save_client_name(case_no, client_name, headers):
-    try:
-        _request(
-            f"/api/v1/orders/{case_no}/full-details",
-            headers,
-            method="PUT",
-            payload={"client_name": client_name.strip() or None},
-        )
-    except (requests.RequestException, ValueError) as error:
-        st.error(f"訂單基本資料儲存失敗：{error}")
+    normalized_name = client_name.strip()
+    if not normalized_name:
+        st.error("客戶名稱不可空白。")
         return
-    st.success("訂單基本資料已儲存；正式條款與排班未變更。")
+    try:
+        preview = _request(f"/api/v1/orders/{case_no}/client-name/preview", headers, method="POST", payload={"client_name": normalized_name})
+    except (requests.RequestException, ValueError) as error:
+        st.error(f"客戶姓名預覽失敗：{error}")
+        return
+    data = preview.get("data") or {}
+    st.session_state[f"client_name_preview_{case_no}"] = {"name": normalized_name, "fingerprint": data.get("preview_fingerprint"), "before": data.get("before_client_name")}
+
+
+def _apply_client_name(case_no, headers, preview, reason):
+    if not reason.strip():
+        st.error("請填寫客戶姓名異動原因。")
+        return
+    try:
+        apply_headers = {**headers, "Idempotency-Key": str(uuid4())}
+        _request(f"/api/v1/orders/{case_no}/client-name/apply", apply_headers, method="POST", payload={"client_name": preview["name"], "preview_fingerprint": preview["fingerprint"], "reason": reason.strip()})
+    except (requests.RequestException, ValueError) as error:
+        st.error(f"客戶姓名套用失敗：{error}")
+        return
+    st.session_state.pop(f"client_name_preview_{case_no}", None)
+    st.success("客戶姓名已套用；正式條款與排班未變更。")
     st.rerun()
 
 

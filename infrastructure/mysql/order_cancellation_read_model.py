@@ -9,6 +9,7 @@ from domains.orders.cancellation import (
     CancellationOrderFacts,
     CancellationSchedulingFacts,
 )
+from subsystems.scheduling.occupancy_mutex import lock_staff_occupancy_mutex
 from subsystems.orders.cancellation_workflow import CancellationWorkflowFacts
 
 from .order_terms_read_model import (
@@ -158,7 +159,10 @@ def _cancellation_assignment(value):
 
 
 def _lock_staff(cursor, staff_ids) -> None:
-    _require_active_staff(cursor, staff_ids, lock=True)
+    locked_ids = tuple(lock_staff_occupancy_mutex(cursor, list(staff_ids)))
+    if locked_ids != staff_ids:
+        raise ValueError("scheduling_staff_not_found")
+    _require_active_staff(cursor, staff_ids, lock=False)
 
 
 def _require_active_staff(cursor, staff_ids, *, lock) -> None:

@@ -23,8 +23,8 @@
     {
       "dependencies": [],
       "data_effect": "schema_and_deterministic_backfill",
-      "name": "152_matching_line_communication.sql",
-      "relative_path": "db/schema_parts/152_matching_line_communication.sql",
+      "name": "155_matching_line_communication.sql",
+      "relative_path": "db/schema_parts/155_matching_line_communication.sql",
       "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
       "rollback_policy": "code-rollback-preserve-matching-communication-facts",
       "sha256": "f8bec32ecfc11169a873c8fcfacfed71f8920d2362dcc55f548eeab47a20cdec"
@@ -36,7 +36,7 @@
     "dependencies": [],
     "name": "labor_union_2026_08_09_line_stage7_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_09_line_stage7_v1.descriptors.json",
-    "sha256": "c6e0f765f5388dead88853f2a5ef1ce2998d3f3bea518719a3587d784780eb34"
+    "sha256": "829270440496fdd3e8b474813582b775258f8e2f14c7548c1ac6a5d58f9bb40e"
   },
   "release_id": "labor-union-line-stage7-2026-08-09-v1",
   "release_metadata": {

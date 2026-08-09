@@ -11,7 +11,7 @@ _CONTROL_TYPES = frozenset({"cancellation", "actual_start_reconfirmation", "huma
 _CONTROL_SCOPES = frozenset({"order", "enter_service", "auto_complete"})
 _CONTROL_STATES = frozenset({"active", "cleared"})
 _HASH_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
-_ORDER_KEYS = frozenset({"case_no", "status", "lifecycle_version", "cancel_reason", "actual_start_date", "actual_end_date", "service_start_time", "service_end_time", "service_end_day_offset"})
+_ORDER_KEYS = frozenset({"case_no", "status", "lifecycle_version", "service_days", "cancel_reason", "actual_start_date", "actual_end_date", "service_start_time", "service_end_time", "service_end_day_offset"})
 _CONTROL_STATE_KEYS = frozenset({"control_type", "control_key", "scope", "state", "current_event_id", "release_policy", "expires_at_utc", "confirmed_start_date", "deposit_settlement_identity_hash", "reason", "changed_by"})
 _CONTROL_EVENT_KEYS = frozenset({"id", "case_no", "control_type", "control_key", "scope", "action", "actor", "reason", "expected_version", "idempotency_key", "payload_hash", "payload_snapshot"})
 _LIFECYCLE_EVENT_KEYS = frozenset({"id", "case_no", "trigger_event", "before_status", "after_status", "actor", "business_date", "expected_version", "idempotency_key", "facts_snapshot"})
@@ -23,6 +23,7 @@ class OrderLifecycleCommandEnvelope:
     case_no: str
     current_status: str
     lifecycle_version: int
+    service_days: int
     cancel_reason: str | None
     actual_start_date: object
     actual_end_date: object
@@ -96,17 +97,18 @@ def _validate_control_state(row: Mapping[str, object]) -> None:
     if not valid: raise ValueError("human-hold control projection is inconsistent")
 
 
-def _validate_order_row(row: Mapping[str, object], case_no: str) -> tuple[str, int]:
+def _validate_order_row(row: Mapping[str, object], case_no: str) -> tuple[str, int, int]:
     if row["case_no"] != case_no: raise ValueError("locked order identity differs from case_no")
     status = row["status"]
     if status not in _CANONICAL_STATUSES: raise ValueError("locked order status is not canonical")
     version = _nonnegative_int(row["lifecycle_version"], "lifecycle_version")
+    service_days = _positive_int(row["service_days"], "service_days")
     if row["cancel_reason"] is not None and not isinstance(row["cancel_reason"], str): raise TypeError("cancel_reason must be a string or None")
     terms = (row["service_start_time"], row["service_end_time"], row["service_end_day_offset"])
     if not all(value is None for value in terms) and any(value is None for value in terms): raise ValueError("order service time terms are partially populated")
     offset = row["service_end_day_offset"]
     if offset is not None and (isinstance(offset, bool) or not isinstance(offset, int) or offset not in {0, 1}): raise ValueError("service_end_day_offset must be 0, 1, or None")
-    return str(status), version
+    return str(status), version, service_days
 
 
 def _validate_control_event(row: Mapping[str, object], *, case_no: str, idempotency_key: str) -> None:
@@ -136,11 +138,11 @@ def lock_order_lifecycle_command_envelope(cursor: Any, case_no: str, expected_ve
     case_no = _required_text(case_no, "case_no")
     request_expected_version = _nonnegative_int(expected_version, "expected_version")
     idempotency_key = _required_text(idempotency_key, "idempotency_key")
-    cursor.execute("SELECT case_no, status, lifecycle_version, cancel_reason,\n                  actual_start_date, actual_end_date, service_start_time,\n                  service_end_time, service_end_day_offset\n           FROM orders\n           WHERE case_no = %s\n           FOR UPDATE", (case_no,))
+    cursor.execute("SELECT case_no, status, lifecycle_version, service_days, cancel_reason,\n                  actual_start_date, actual_end_date, service_start_time,\n                  service_end_time, service_end_day_offset\n           FROM orders\n           WHERE case_no = %s\n           FOR UPDATE", (case_no,))
     order_value = cursor.fetchone()
     if order_value is None: raise ValueError("order does not exist")
     order = _exact_mapping(order_value, _ORDER_KEYS, "locked order")
-    current_status, lifecycle_version = _validate_order_row(order, case_no)
+    current_status, lifecycle_version, service_days = _validate_order_row(order, case_no)
     cursor.execute("SELECT control_type, control_key, scope, state, current_event_id,\n                  release_policy, expires_at_utc, confirmed_start_date,\n                  deposit_settlement_identity_hash, reason, changed_by\n           FROM order_lifecycle_control_state\n           WHERE case_no = %s\n           ORDER BY control_type, control_key\n           FOR UPDATE", (case_no,))
     state_values = cursor.fetchall()
     if not isinstance(state_values, Sequence) or isinstance(state_values, (str, bytes)): raise TypeError("control state query must return a sequence")
@@ -167,4 +169,4 @@ def lock_order_lifecycle_command_envelope(cursor: Any, case_no: str, expected_ve
         if control_event["expected_version"] != request_expected_version: raise ValueError("control replay expected_version differs")
         matching_state = next((row for row in control_states if row["control_type"] == control_event["control_type"] and row["control_key"] == control_event["control_key"]), None)
         if matching_state is None or matching_state["current_event_id"] != control_event["id"]: raise ValueError("control replay projection is partial or stale")
-    return OrderLifecycleCommandEnvelope(cursor, case_no, current_status, lifecycle_version, order["cancel_reason"], order["actual_start_date"], order["actual_end_date"], order["service_start_time"], order["service_end_time"], order["service_end_day_offset"], idempotency_key, request_expected_version, tuple(control_states), None if control_event is None else _freeze_row(control_event), None if lifecycle_event is None else _freeze_row(lifecycle_event))
+    return OrderLifecycleCommandEnvelope(cursor, case_no, current_status, lifecycle_version, service_days, order["cancel_reason"], order["actual_start_date"], order["actual_end_date"], order["service_start_time"], order["service_end_time"], order["service_end_day_offset"], idempotency_key, request_expected_version, tuple(control_states), None if control_event is None else _freeze_row(control_event), None if lifecycle_event is None else _freeze_row(lifecycle_event))

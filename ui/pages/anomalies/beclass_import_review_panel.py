@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 import streamlit as st

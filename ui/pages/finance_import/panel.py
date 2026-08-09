@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from uuid import uuid4
 
 import streamlit as st
@@ -19,6 +20,8 @@ from ui.api_clients.finance_import_api_client import (
 
 _BATCH_APPLY_STATE_KEY = "finance_import_batch_apply_state"
 _CORRECTION_APPLY_STATE_KEY = "finance_import_correction_apply_state"
+_HISTORICAL_REPROCESS_APPLY_STATE_KEY = "historical_reprocess_apply_state"
+_JOB_STATUS_POLL_INTERVAL_SECONDS = 5
 
 
 def render_finance_import_panel(client: FinanceImportApiClient) -> None:
@@ -38,12 +41,13 @@ def _render_ingestion(client: FinanceImportApiClient) -> None:
                 st.error("請先選擇銀行 Excel 檔案。")
                 return
             try:
-                receipt = client.ingest_workbook(
-                    workbook.name,
-                    workbook.getvalue(),
-                    idempotency_key=_new_key("finance-import-ingest"),
-                    correlation_id=_new_key("finance-import-correlation"),
-                )
+                with st.spinner("正在上傳並建立待確認批次…"):
+                    receipt = client.ingest_workbook(
+                        workbook.name,
+                        workbook.getvalue(),
+                        idempotency_key=_new_key("finance-import-ingest"),
+                        correlation_id=_new_key("finance-import-correlation"),
+                    )
             except FinanceImportApiError as error:
                 _show_api_error(error)
                 return
@@ -71,10 +75,11 @@ def _render_batch_preview_and_apply(client: FinanceImportApiClient) -> None:
 
 def _preview_batch(client: FinanceImportApiClient, batch_identity: str) -> None:
     try:
-        st.session_state["finance_import_batch_preview"] = client.preview_batch(
-            batch_identity,
-            _new_key("finance-import-preview"),
-        )
+        with st.spinner("正在產生批次 Preview…"):
+            st.session_state["finance_import_batch_preview"] = client.preview_batch(
+                batch_identity,
+                _new_key("finance-import-preview"),
+            )
         st.session_state.pop(_BATCH_APPLY_STATE_KEY, None)
     except (FinanceImportApiError, ValueError) as error:
         _show_api_error(error)
@@ -94,12 +99,13 @@ def _submit_batch_apply_request(client, preview, reason: str, state):
         return None, ValueError("正式入帳原因不可空白")
     command = _batch_apply_command(state, preview, reason)
     try:
-        job = client.apply_batch(
-            preview,
-            reason=command["reason"],
-            idempotency_key=command["idempotency_key"],
-            correlation_id=command["correlation_id"],
-        )
+        with st.spinner("正在受理正式入帳工作…"):
+            job = client.apply_batch(
+                preview,
+                reason=command["reason"],
+                idempotency_key=command["idempotency_key"],
+                correlation_id=command["correlation_id"],
+            )
     except (FinanceImportApiError, ValueError) as error:
         return None, error
     command["job_id"] = job.job_id
@@ -124,6 +130,7 @@ def _batch_apply_command(state, preview, reason: str) -> dict:
     return command
 
 
+@st.fragment(run_every=_JOB_STATUS_POLL_INTERVAL_SECONDS)
 def _render_batch_apply_status(client: FinanceImportApiClient) -> None:
     command = st.session_state.get(_BATCH_APPLY_STATE_KEY)
     if not isinstance(command, dict) or command.get("terminal"):
@@ -153,7 +160,8 @@ def _retry_batch_apply(client, command) -> None:
 
 def _refresh_batch_apply_status(client, command) -> None:
     try:
-        status = client.get_job_status(command["job_id"])
+        with st.spinner("正在查詢正式入帳工作狀態…"):
+            status = client.get_job_status(command["job_id"])
     except FinanceImportApiError as error:
         _show_api_error(error)
         return
@@ -179,8 +187,13 @@ def _render_historical_reprocess(client: FinanceImportApiClient) -> None:
     with st.expander("3. 歷史待確認資料重處理", expanded=False):
         st.caption("只處理 completed 批次中仍待確認的資料；政府補助沒有唯一標的時會停止。")
         batch_identity = st.text_input("歷史批次識別碼", key="historical_reprocess_batch_identity")
+        owner_selection_json = st.text_area(
+            "人工選案證據 JSON",
+            help="每列需有 row_identity、case_no、obligation_identity、reason、evidence_references；必須涵蓋此批次全部待確認列。",
+            key="historical_reprocess_owner_selections",
+        )
         if st.button("產生歷史重處理 Preview", key="historical_reprocess_preview_btn"):
-            _preview_historical_reprocess(client, batch_identity)
+            _preview_historical_reprocess(client, batch_identity, owner_selection_json)
         preview = _stored_preview(
             "historical_reprocess_preview",
             FinanceImportHistoricalReprocessPlanView,
@@ -189,35 +202,98 @@ def _render_historical_reprocess(client: FinanceImportApiClient) -> None:
             return
         st.json(preview.model_dump())
         reason = st.text_input("重處理原因", key="historical_reprocess_reason")
-        if st.button("依 Preview 執行歷史重處理", key="historical_reprocess_apply"):
-            _apply_historical_reprocess(client, preview, reason)
+        _render_historical_reprocess_apply(client, preview, reason)
 
 
-def _preview_historical_reprocess(client: FinanceImportApiClient, batch_identity: str) -> None:
+def _preview_historical_reprocess(client: FinanceImportApiClient, batch_identity: str, owner_selection_json: str) -> None:
     try:
+        selections = _historical_owner_selection_input(owner_selection_json)
         st.session_state["historical_reprocess_preview"] = (
             client.preview_historical_reprocess(
                 batch_identity,
                 _new_key("historical-reprocess-preview"),
+                selections,
             )
         )
+        st.session_state.pop(_HISTORICAL_REPROCESS_APPLY_STATE_KEY, None)
     except (FinanceImportApiError, ValueError) as error:
         _show_api_error(error)
+
+
+def _render_historical_reprocess_apply(client, preview, reason: str) -> None:
+    command = st.session_state.get(_HISTORICAL_REPROCESS_APPLY_STATE_KEY)
+    if not isinstance(command, dict):
+        if st.button("依 Preview 執行歷史重處理", key="historical_reprocess_apply"):
+            _apply_historical_reprocess(client, preview, reason)
+        return
+    _render_historical_reprocess_job_status(client, command)
 
 
 def _apply_historical_reprocess(client: FinanceImportApiClient, preview, reason: str) -> None:
+    if not reason.strip():
+        st.error("重處理原因不可空白")
+        return
+    command = {
+        "reason": reason.strip(),
+        "idempotency_key": _new_key("historical-reprocess-apply"),
+        "correlation_id": _new_key("historical-reprocess-apply-correlation"),
+        "job_id": None,
+        "terminal": False,
+    }
+    st.session_state[_HISTORICAL_REPROCESS_APPLY_STATE_KEY] = command
+    _submit_historical_reprocess(client, preview, command)
+
+
+def _submit_historical_reprocess(client, preview, command) -> None:
     try:
-        receipt = client.apply_historical_reprocess(
-            preview,
-            reason=reason,
-            idempotency_key=_new_key("historical-reprocess-apply"),
-            correlation_id=_new_key("historical-reprocess-apply-correlation"),
-        )
+        with st.spinner("正在受理歷史重處理工作…"):
+            job = client.apply_historical_reprocess(
+                preview,
+                reason=command["reason"],
+                idempotency_key=command["idempotency_key"],
+                correlation_id=command["correlation_id"],
+            )
     except (FinanceImportApiError, ValueError) as error:
         _show_api_error(error)
         return
-    st.success(f"歷史重處理完成，run #{receipt.reprocess_run_id}")
-    st.json(receipt.model_dump())
+    command["job_id"] = job.job_id
+    st.info(f"歷史重處理工作已受理：{job.job_id}")
+
+
+@st.fragment(run_every=_JOB_STATUS_POLL_INTERVAL_SECONDS)
+def _render_historical_reprocess_job_status(client, command) -> None:
+    if command.get("terminal"):
+        return
+    job_id = command.get("job_id")
+    if not job_id:
+        st.warning("歷史重處理結果尚未確認；可安全重送同一命令。")
+        if st.button("重送相同歷史重處理請求", key="historical_reprocess_retry"):
+            preview = st.session_state.get("historical_reprocess_preview")
+            if preview is not None:
+                _submit_historical_reprocess(client, preview, command)
+        return
+    st.info(f"歷史重處理處理中，工作編號：{job_id}")
+    if st.button("查詢歷史重處理狀態", key="historical_reprocess_status"):
+        _refresh_historical_reprocess_status(client, command)
+
+
+def _refresh_historical_reprocess_status(client, command) -> None:
+    try:
+        with st.spinner("正在查詢歷史重處理工作狀態…"):
+            status = client.get_job_status(command["job_id"])
+    except FinanceImportApiError as error:
+        _show_api_error(error)
+        return
+    if status.status in {"queued", "running"}:
+        st.info(f"歷史重處理仍在處理：{status.status}")
+        return
+    command["terminal"] = True
+    if status.status == "succeeded":
+        st.success("歷史重處理已完成。")
+        st.json(status.receipt_payload)
+        return
+    st.error(f"歷史重處理未完成：{status.status}")
+    st.json(status.error_payload)
 
 
 def _render_manual_correction(client: FinanceImportApiClient) -> None:
@@ -292,6 +368,7 @@ def _preview_correction(client, row_identity, classification, targets, ledger, r
     st.json(preview.model_dump())
 
 
+@st.fragment(run_every=_JOB_STATUS_POLL_INTERVAL_SECONDS)
 def _render_correction_apply_status(client) -> None:
     preview = _stored_preview(
         "finance_import_correction_preview",
@@ -320,11 +397,12 @@ def _apply_correction(client, preview) -> None:
 
 def _submit_correction(client, preview, command) -> None:
     try:
-        job = client.apply_correction(
-            preview,
-            idempotency_key=command["idempotency_key"],
-            correlation_id=command["correlation_id"],
-        )
+        with st.spinner("正在受理人工修正工作…"):
+            job = client.apply_correction(
+                preview,
+                idempotency_key=command["idempotency_key"],
+                correlation_id=command["correlation_id"],
+            )
     except (FinanceImportApiError, ValueError) as error:
         _show_api_error(error)
         return
@@ -349,7 +427,8 @@ def _render_correction_job_status(client, command) -> None:
 
 def _refresh_correction_status(client, command) -> None:
     try:
-        status = client.get_job_status(command["job_id"])
+        with st.spinner("正在查詢人工修正工作狀態…"):
+            status = client.get_job_status(command["job_id"])
     except FinanceImportApiError as error:
         _show_api_error(error)
         return
@@ -367,6 +446,18 @@ def _refresh_correction_status(client, command) -> None:
 
 def _line_items(value: str) -> list[str]:
     return [item.strip() for item in value.splitlines() if item.strip()]
+
+
+def _historical_owner_selection_input(value: str) -> list[dict]:
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise ValueError("人工選案證據必須是 JSON array") from error
+    if not isinstance(decoded, list) or not decoded:
+        raise ValueError("每個待確認銀行列都必須有人工選案證據")
+    if any(not isinstance(item, dict) for item in decoded):
+        raise ValueError("人工選案證據每一項必須是 JSON object")
+    return decoded
 
 
 def _stored_preview(key: str, expected_type):

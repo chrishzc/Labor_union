@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 CANONICAL_ORDER_STATUSES = frozenset({"洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"})
 CANONICAL_LIFECYCLE_TRIGGERS = frozenset({"case_created", "schedule_applied", "deposit_reconciled", "deposit_reversed", "actual_start_updated", "actual_start_reconfirmed", "evaluation_time_reached", "cancelled", "hold_activated", "hold_released", "manual_correction"})
-_REQUIRED_FACT_KEYS = frozenset({"cancellation", "cancellation_reason", "deposit_reconciled", "deposit_settlement_identity", "actual_start_date", "actual_end_date", "evaluation_at", "completion_instant", "completion_facts_consistent", "actual_start_reconfirmed", "transition_blockers", "manual_correction_target"})
+_REQUIRED_FACT_KEYS = frozenset({"cancellation", "cancellation_reason", "deposit_reconciled", "deposit_settlement_identity", "actual_start_date", "actual_end_date", "evaluation_at", "completion_instant", "completion_facts_consistent", "actual_start_reconfirmed", "effective_scheduling_generation_id", "official_service_dates", "transition_blockers", "manual_correction_target"})
 _BOOLEAN_FACT_KEYS = ("cancellation", "deposit_reconciled", "completion_facts_consistent", "actual_start_reconfirmed")
 _BLOCKER_SCOPES = frozenset({"enter_service", "auto_complete"})
 _ISO_DATE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
@@ -31,6 +31,8 @@ class ValidatedLifecycleFacts:
     completion_instant: datetime | None
     completion_facts_consistent: bool
     actual_start_reconfirmed: bool
+    effective_scheduling_generation_id: int | None
+    official_service_dates: tuple[date, ...]
     transition_blockers: Mapping[str, tuple[str, ...]]
     manual_correction_target: str | None
 
@@ -97,6 +99,29 @@ def _normalize_settlement_identity(value: object) -> str | None:
     return value
 
 
+def _normalize_generation_id(value: object) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError("effective_scheduling_generation_id must be a positive integer or None")
+    return value
+
+
+def _normalize_official_service_dates(value: object) -> tuple[date, ...]:
+    if not isinstance(value, tuple):
+        raise TypeError("official_service_dates must be a tuple")
+    normalized = tuple(
+        _parse_iso_date(item, field_name="official_service_dates item")
+        for item in value
+    )
+    if any(item is None for item in normalized):
+        raise ValueError("official_service_dates cannot contain None")
+    dates = tuple(item for item in normalized if item is not None)
+    if dates != tuple(sorted(set(dates))):
+        raise ValueError("official_service_dates must be unique and stably sorted")
+    return dates
+
+
 def validate_order_lifecycle_facts(current_status: str, trigger_event: str, authoritative_facts: Mapping[str, object]) -> OrderLifecycleFactsValidation:
     """Fail closed unless a lifecycle decision is based on the exact facts schema."""
     if current_status not in CANONICAL_ORDER_STATUSES:
@@ -127,5 +152,52 @@ def validate_order_lifecycle_facts(current_status: str, trigger_event: str, auth
         raise ValueError("manual_correction requires manual_correction_target")
     if trigger_event != "manual_correction" and correction_target is not None:
         raise ValueError("manual_correction_target is only valid for manual_correction")
-    facts = ValidatedLifecycleFacts(authoritative_facts["cancellation"], reason, authoritative_facts["deposit_reconciled"], _normalize_settlement_identity(authoritative_facts["deposit_settlement_identity"]), _parse_iso_date(authoritative_facts["actual_start_date"], field_name="actual_start_date"), _parse_iso_date(authoritative_facts["actual_end_date"], field_name="actual_end_date"), _parse_aware_instant(authoritative_facts["evaluation_at"], field_name="evaluation_at", nullable=False), _parse_aware_instant(authoritative_facts["completion_instant"], field_name="completion_instant", nullable=True), authoritative_facts["completion_facts_consistent"], authoritative_facts["actual_start_reconfirmed"], _normalize_transition_blockers(authoritative_facts["transition_blockers"]), correction_target)
+    facts = _validated_lifecycle_facts(authoritative_facts, reason, correction_target)
     return OrderLifecycleFactsValidation(current_status, trigger_event, facts)
+
+
+def _validated_lifecycle_facts(authoritative_facts, reason, correction_target):
+    generation_id = _normalize_generation_id(
+        authoritative_facts["effective_scheduling_generation_id"]
+    )
+    service_dates = _normalize_official_service_dates(
+        authoritative_facts["official_service_dates"]
+    )
+    if authoritative_facts["completion_facts_consistent"] and (
+        generation_id is None or not service_dates
+    ):
+        raise ValueError(
+            "completion-consistent facts require an effective generation and service days"
+        )
+    return ValidatedLifecycleFacts(
+        authoritative_facts["cancellation"],
+        reason,
+        authoritative_facts["deposit_reconciled"],
+        _normalize_settlement_identity(
+            authoritative_facts["deposit_settlement_identity"]
+        ),
+        _parse_iso_date(
+            authoritative_facts["actual_start_date"],
+            field_name="actual_start_date",
+        ),
+        _parse_iso_date(
+            authoritative_facts["actual_end_date"],
+            field_name="actual_end_date",
+        ),
+        _parse_aware_instant(
+            authoritative_facts["evaluation_at"],
+            field_name="evaluation_at",
+            nullable=False,
+        ),
+        _parse_aware_instant(
+            authoritative_facts["completion_instant"],
+            field_name="completion_instant",
+            nullable=True,
+        ),
+        authoritative_facts["completion_facts_consistent"],
+        authoritative_facts["actual_start_reconfirmed"],
+        generation_id,
+        service_dates,
+        _normalize_transition_blockers(authoritative_facts["transition_blockers"]),
+        correction_target,
+    )

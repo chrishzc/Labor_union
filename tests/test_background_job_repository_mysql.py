@@ -8,6 +8,7 @@ from infrastructure.mysql.background_job_repository import BackgroundJobReposito
 from infrastructure.mysql.mysql_adapter import get_connection
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
 from shared_kernel.durable_job_queue import DurableJobCommand
+from shared_kernel.durable_job_queue import DurableJobStateConflict
 
 
 pytestmark = pytest.mark.integration
@@ -111,6 +112,46 @@ def test_mysql_queue_recovers_an_expired_lease_without_changing_command_identity
         assert recovered_lease is not None
         assert recovered_lease.command.command_identity == identity
         assert recovered_lease.attempt_count == 2
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM background_jobs WHERE job_id = %s", (job_id,))
+        connection.commit()
+        connection.close()
+
+
+def test_mysql_queue_cancels_only_an_unclaimed_job():
+    _bootstrap_disposable_database()
+    job_id = "test-durable-cancel-" + uuid.uuid4().hex
+    identity = "test-durable-cancel-identity-" + uuid.uuid4().hex
+    connection = get_connection()
+    repository = BackgroundJobRepository(connection)
+    try:
+        repository.enqueue_command(_command(job_id, identity))
+        repository.cancel_queued_job(job_id)
+
+        stored = repository.get_job(job_id)
+        assert stored is not None
+        assert stored.status == "cancelled"
+        assert repository.claim_next_command("worker-a", 60) is None
+    finally:
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM background_jobs WHERE job_id = %s", (job_id,))
+        connection.commit()
+        connection.close()
+
+
+def test_mysql_queue_rejects_cancellation_after_claim():
+    _bootstrap_disposable_database()
+    job_id = "test-durable-claimed-" + uuid.uuid4().hex
+    identity = "test-durable-claimed-identity-" + uuid.uuid4().hex
+    connection = get_connection()
+    repository = BackgroundJobRepository(connection)
+    try:
+        repository.enqueue_command(_command(job_id, identity))
+        assert repository.claim_next_command("worker-a", 60) is not None
+
+        with pytest.raises(DurableJobStateConflict):
+            repository.cancel_queued_job(job_id)
     finally:
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM background_jobs WHERE job_id = %s", (job_id,))

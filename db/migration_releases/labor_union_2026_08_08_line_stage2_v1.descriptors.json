@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "144_line_integration_inbox_delivery.sql": {
+    "147_line_integration_inbox_delivery.sql": {
       "tables": {
         "line_command_receipts": [
           "id", "idempotency_key", "command_family", "payload_fingerprint",
@@ -51,7 +51,7 @@
         "trg_line_domain_audit_events_before_update"
       ]
     },
-    "145_line_identity_review_configuration.sql": {
+    "148_line_identity_review_configuration.sql": {
       "tables": {
         "line_configuration_current": [
           "configuration_kind", "revision", "revision_id", "updated_at_utc"
@@ -96,7 +96,7 @@
         "trg_line_review_decision_events_before_update"
       ]
     },
-    "146_line_publication_media_order_group.sql": {
+    "149_line_publication_media_order_group.sql": {
       "tables": {
         "line_media_records": [
           "id", "provider_media_id", "source_type", "source_identity", "source_user_id",

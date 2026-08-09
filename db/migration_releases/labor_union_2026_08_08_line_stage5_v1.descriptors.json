@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "149_line_messaging_publication_runtime.sql": {
+    "152_line_messaging_publication_runtime.sql": {
       "tables": {
         "line_domain_outbox": [
           "max_attempts", "error_message"

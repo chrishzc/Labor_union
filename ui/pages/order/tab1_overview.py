@@ -1,6 +1,8 @@
 import streamlit as st
+from ui.api_clients.order_detail_api_client import OrderDetailApiClient
 from ui.pages.order.shared import safe_int
 from ui.pages.order.editor import render_editor
+from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 
 def _render_tab1_overview(orders_data):
@@ -18,7 +20,7 @@ def _render_tab1_overview(orders_data):
     if selected_order is None:
         st.warning("目前無法定位到該筆訂單資料，請重新整理頁面。")
         return
-    _render_selected_order(selected_case_no, orders_data)
+    _render_selected_order(selected_case_no)
 
 
 def _filtered_orders(orders_data):
@@ -26,31 +28,15 @@ def _filtered_orders(orders_data):
         "篩選訂單狀態",
         options=["洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"],
     )
-    search_text = st.text_input(
-        "搜尋案件編號、客戶或服務人員姓名",
-        "",
-    ).strip().casefold()
     return [
         order
         for order in orders_data
         if _matches_status(order, status_filter)
-        and _matches_search(order, search_text)
     ]
 
 
 def _matches_status(order, status_filter):
     return not status_filter or order.get("order_status") in status_filter
-
-
-def _matches_search(order, search_text):
-    if not search_text:
-        return True
-    searchable_values = (
-        order.get("case_no"),
-        order.get("client_name"),
-        order.get("staff_name"),
-    )
-    return any(search_text in str(value or "").casefold() for value in searchable_values)
 
 
 def _select_case_number(filtered_orders):
@@ -86,11 +72,19 @@ def _find_order(orders, case_no):
     )
 
 
-def _render_selected_order(selected_case_no, orders_data):
+def _render_selected_order(selected_case_no):
     with st.container(border=True):
+        try:
+            selected_order = OrderDetailApiClient(
+                base_url=resolve_api_base_url(),
+                headers=build_admin_headers(),
+            ).query(selected_case_no)
+        except RuntimeError as error:
+            st.error(str(error))
+            return
         render_editor(
             target_case_no=selected_case_no,
-            orders_data=orders_data,
+            orders_data=[selected_order],
             payments_raw=[],
             key_prefix=f"tab1_acc_{selected_case_no}",
         )

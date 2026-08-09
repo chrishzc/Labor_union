@@ -14,6 +14,7 @@ from shared_kernel.validation import require_canonical_text, require_positive_in
 
 MAXIMUM_PAGE_SIZE = 200
 _MAXIMUM_CASE_NO_LENGTH = 50
+_MAXIMUM_QUERY_TEXT_LENGTH = 100
 _SUMMARY_FIELDS = frozenset({
     "actual_end_date",
     "actual_start_date",
@@ -35,7 +36,7 @@ class OrderSummaryContractError(ValueError):
 
 class OrderSummaryRepository(Protocol):
     def fetch_page(
-        self, *, after_case_no: str | None, page_size: int
+        self, *, after_case_no: str | None, page_size: int, query_text: str | None
     ) -> tuple[Mapping[str, object], ...]: ...
 
 
@@ -43,6 +44,7 @@ class OrderSummaryRepository(Protocol):
 class OrderSummaryQueryRequest:
     page_size: int
     after_case_no: str | None
+    query_text: str | None = None
 
     def __post_init__(self) -> None:
         require_positive_integer(self.page_size, "page_size")
@@ -51,6 +53,10 @@ class OrderSummaryQueryRequest:
         if self.after_case_no is not None:
             require_canonical_text(
                 self.after_case_no, "after_case_no", _MAXIMUM_CASE_NO_LENGTH
+            )
+        if self.query_text is not None:
+            require_canonical_text(
+                self.query_text, "query_text", _MAXIMUM_QUERY_TEXT_LENGTH
             )
 
 
@@ -82,7 +88,9 @@ class OrderSummaryQueryService:
 
     def query(self, request: OrderSummaryQueryRequest) -> OrderSummaryPage:
         rows = self._repository.fetch_page(
-            after_case_no=request.after_case_no, page_size=request.page_size
+            after_case_no=request.after_case_no,
+            page_size=request.page_size,
+            query_text=request.query_text,
         )
         _validate_repository_page(rows, request)
         items = tuple(_summary_item(row) for row in rows[: request.page_size])

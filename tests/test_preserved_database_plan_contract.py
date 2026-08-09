@@ -2,8 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
+import json
 from pathlib import Path
 
+import pytest
+
+from infrastructure.migration.maintenance import issue_maintenance_window_token
 from infrastructure.migration.rehearsal_runtime import (
     CandidateReadSmokePort,
     CandidateRuntimeConfig,
@@ -147,3 +153,185 @@ def test_empty_dataset_is_an_explicit_scheduling_and_payroll_smoke_case(tmp_path
 
 def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
+
+
+def test_release_chain_drives_schema_artifacts_and_v2_descriptor_presence() -> None:
+    artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
+
+    assert artifact_names[-1] == "144_order_auto_completion_workflow.sql"
+    assert runner.RELEASE_MANIFEST.release_id == "labor-union-2026-08-08-v2"
+    assert runner._descriptor_presence_state(
+        {"tables": {"order_auto_completion_apply_receipts": ["case_no"]}, "triggers": ["receipt_guard"]},
+        {"order_auto_completion_apply_receipts": {"id", "case_no"}},
+        {"receipt_guard"},
+    ) == "exact"
+
+
+def test_preflight_requires_live_read_only_principal_and_bound_token(
+    tmp_path, monkeypatch
+) -> None:
+    plan = {
+        "source": {"database": "rehearsal_source"},
+        "source_schema_sha256": "schema-digest",
+        "source_data": {"orders": {"count": 1}},
+        "plan_fingerprint": "plan-digest",
+    }
+    evidence = runner.SourcePrincipalEvidence(
+        principal="rehearsal_reader@localhost",
+        source_database="rehearsal_source",
+        privileges=frozenset({"SELECT"}),
+    )
+    source_data_digest = runner.fingerprint_source_data_evidence(
+        plan["source_data"]
+    )
+    now = datetime.now(timezone.utc)
+    token = issue_maintenance_window_token(
+        token_id="window-1",
+        source_database="rehearsal_source",
+        source_schema_sha256="schema-digest",
+        source_data_sha256=source_data_digest,
+        write_freeze_started_at=(now - timedelta(minutes=1)).isoformat(),
+        expires_at=(now + timedelta(minutes=5)).isoformat(),
+        issuer="release-manager",
+    )
+    evidence_path = tmp_path / "principal.json"
+    evidence_path.write_text(json.dumps({
+        "principal": evidence.principal,
+        "source_database": evidence.source_database,
+        "privileges": sorted(evidence.privileges),
+    }), encoding="utf-8")
+    token_path = tmp_path / "token.json"
+    token_path.write_text(json.dumps(asdict(token)), encoding="utf-8")
+    runtime = runner.SeparateDatabaseConfig(
+        runner.DatabaseDescriptor(
+            "source-read", "rehearsal_source",
+            runner.DatabaseConfig("host", 3306, "reader", "secret"),
+        ),
+        runner.DatabaseDescriptor(
+            "candidate-write", "rehearsal_candidate",
+            runner.DatabaseConfig("host", 3306, "writer", "secret"),
+        ),
+    )
+    monkeypatch.setattr(runner, "build_plan", lambda *_: plan)
+    monkeypatch.setattr(
+        runner, "inspect_source_read_only_principal", lambda *_: evidence
+    )
+
+    receipt = runner.run_source_safety_preflight(
+        runtime,
+        "rehearsal_source",
+        "rehearsal_candidate",
+        evidence_path,
+        token_path,
+        tmp_path / "receipts",
+        mode="dry-run",
+    )
+
+    assert receipt["status"] == "passed"
+    assert (tmp_path / "receipts" / "cutover.journal.jsonl").is_file()
+    assert "secret" not in json.dumps(receipt)
+
+
+def test_preflight_rejects_declared_principal_that_differs_from_live(
+    tmp_path, monkeypatch
+) -> None:
+    plan = {
+        "source": {"database": "rehearsal_source"},
+        "source_schema_sha256": "schema-digest",
+        "source_data": {},
+        "plan_fingerprint": "plan-digest",
+    }
+    declared = {
+        "principal": "declared_reader@localhost",
+        "source_database": "rehearsal_source",
+        "privileges": ["SELECT"],
+    }
+    evidence_path = tmp_path / "principal.json"
+    evidence_path.write_text(json.dumps(declared), encoding="utf-8")
+    token_path = tmp_path / "token.json"
+    token_path.write_text("{}", encoding="utf-8")
+    runtime = runner.SeparateDatabaseConfig(
+        runner.DatabaseDescriptor(
+            "source-read", "rehearsal_source",
+            runner.DatabaseConfig("host", 3306, "reader", "secret"),
+        ),
+        runner.DatabaseDescriptor(
+            "candidate-write", "rehearsal_candidate",
+            runner.DatabaseConfig("host", 3306, "writer", "secret"),
+        ),
+    )
+    live = runner.SourcePrincipalEvidence(
+        principal="live_reader@localhost",
+        source_database="rehearsal_source",
+        privileges=frozenset({"SELECT"}),
+    )
+    monkeypatch.setattr(runner, "build_plan", lambda *_: plan)
+    monkeypatch.setattr(
+        runner, "inspect_source_read_only_principal", lambda *_: live
+    )
+
+    with pytest.raises(runner.UpgradeBlocked, match="does not match"):
+        runner.run_source_safety_preflight(
+            runtime,
+            "rehearsal_source",
+            "rehearsal_candidate",
+            evidence_path,
+            token_path,
+            tmp_path / "receipts",
+            mode="backup",
+        )
+
+
+def test_recover_interrupted_switch_reports_restart_without_mutating_config(
+    tmp_path
+) -> None:
+    environment = tmp_path / ".env"
+    environment.write_text("DB_DATABASE=rehearsal_candidate\n", encoding="utf-8")
+    switch_receipt = tmp_path / "switch.json"
+    before = runner._sha256_bytes(b"DB_DATABASE=rehearsal_source\n")
+    after = runner._sha256_file(environment)
+    runner.write_receipt(switch_receipt, {
+        "status": "switched",
+        "before_sha256": before,
+        "after_sha256": after,
+    })
+
+    result = runner.recover_interrupted_switch(
+        environment, switch_receipt, tmp_path / "receipts"
+    )
+
+    assert result["state"] == "switched_requires_restart"
+    assert environment.read_text(encoding="utf-8") == (
+        "DB_DATABASE=rehearsal_candidate\n"
+    )
+
+
+def test_descriptor_runtime_rejects_shared_source_candidate_principal(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("PRESERVE_TEST_PASSWORD", "not-recorded")
+    source_path = tmp_path / "source.json"
+    candidate_path = tmp_path / "candidate.json"
+    source_path.write_text(json.dumps({
+        "contract": "preserve-data/database-descriptor/v1",
+        "role": "source-read",
+        "database": "union_db",
+        "host": "127.0.0.1",
+        "port": 3306,
+        "user": "shared_principal",
+        "password_env": "PRESERVE_TEST_PASSWORD",
+    }), encoding="utf-8")
+    candidate_path.write_text(json.dumps({
+        "contract": "preserve-data/database-descriptor/v1",
+        "role": "candidate-write",
+        "database": "rehearsal_candidate",
+        "host": "127.0.0.1",
+        "port": 3306,
+        "user": "shared_principal",
+        "password_env": "PRESERVE_TEST_PASSWORD",
+    }), encoding="utf-8")
+
+    with pytest.raises(runner.UpgradeBlocked, match="principals must differ"):
+        runner.build_descriptor_runtime(
+            source_path, candidate_path, "union_db", "rehearsal_candidate"
+        )

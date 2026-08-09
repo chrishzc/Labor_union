@@ -28,7 +28,7 @@ def test_line_release_chain_selects_stage2_through_stage8() -> None:
     try:
         runner.configure_release_manifests(MANIFESTS)
 
-        assert runner.SCHEMA_PARTS[-1].name == "154_knowledge_retrieval.sql"
+        assert runner.SCHEMA_PARTS[-1].name == "157_knowledge_retrieval.sql"
         assert len(runner.SCHEMA_PARTS) == 11
         assert len(runner.RELEASE_MANIFEST.manifests) == 7
         assert runner.MANIFEST_DRIVEN_RELEASE is True
@@ -41,8 +41,8 @@ def test_line_release_chain_selects_stage2_through_stage8() -> None:
 
 def test_stage8_descriptor_separates_contract_and_knowledge_roots() -> None:
     descriptors = _stage8_descriptors()
-    contract_tables = set(descriptors["153_contract_integration.sql"]["tables"])
-    knowledge_tables = set(descriptors["154_knowledge_retrieval.sql"]["tables"])
+    contract_tables = set(descriptors["156_contract_integration.sql"]["tables"])
+    knowledge_tables = set(descriptors["157_knowledge_retrieval.sql"]["tables"])
 
     assert "contract_webhook_security_receipts" in contract_tables
     assert "external_contract_events" in contract_tables

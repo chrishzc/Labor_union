@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "152_matching_line_communication.sql": {
+    "155_matching_line_communication.sql": {
       "tables": {
         "caregiver_matching_plans": [
           "communication_version"

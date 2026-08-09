@@ -71,7 +71,7 @@ def _taipei_instant(value: object) -> datetime:
 
 
 def _reload_locked_order(cursor: Any, envelope: object, case_no: str) -> Mapping[str, Any]:
-    cursor.execute("SELECT case_no, status, lifecycle_version, cancel_reason, actual_start_date, actual_end_date, service_start_time, service_end_time, service_end_day_offset FROM orders WHERE case_no = %s FOR UPDATE", (case_no,))
+    cursor.execute("SELECT case_no, status, lifecycle_version, service_days, cancel_reason, actual_start_date, actual_end_date, service_start_time, service_end_time, service_end_day_offset FROM orders WHERE case_no = %s FOR UPDATE", (case_no,))
     row = cursor.fetchone()
     if row is None:
         raise ValueError("locked order no longer exists")
@@ -134,13 +134,108 @@ def _control_facts(rows: list[Mapping[str, Any]], *, current_status: str, actual
     return cancellation, reason, reconfirmed, blockers
 
 
-def _load_completion_consistency(cursor: Any, case_no: str) -> tuple[bool, list[str]]:
-    cursor.execute("SELECT status FROM case_staff_assignments WHERE case_no = %s FOR UPDATE", (case_no,))
+def _load_effective_completion_facts(
+    cursor: Any,
+    case_no: str,
+    service_day_count: int,
+    actual_end_date: date | None,
+) -> tuple[int | None, tuple[date, ...], list[str]]:
+    generation_id = _lock_effective_generation_id(cursor, case_no)
+    if generation_id is None:
+        return None, (), ["auto_complete.effective_generation_missing"]
+    assignments = _lock_effective_assignments(cursor, generation_id)
+    schedules = _lock_effective_service_schedules(cursor, case_no, generation_id)
+    return generation_id, _official_dates(schedules), _completion_root_blockers(
+        assignments,
+        schedules,
+        service_day_count,
+        actual_end_date,
+    )
+
+
+def _lock_effective_generation_id(cursor: Any, case_no: str) -> int | None:
+    cursor.execute(
+        "SELECT effective_generation_id FROM scheduling_aggregates "
+        "WHERE case_no=%s FOR UPDATE",
+        (case_no,),
+    )
+    aggregate = cursor.fetchone()
+    if aggregate is None:
+        return None
+    generation_value = _mapping(aggregate, "scheduling aggregate").get(
+        "effective_generation_id"
+    )
+    if generation_value is None:
+        return None
+    if isinstance(generation_value, bool) or not isinstance(generation_value, int):
+        raise ValueError("effective scheduling generation identity is invalid")
+    cursor.execute(
+        "SELECT id FROM scheduling_generations "
+        "WHERE id=%s AND case_no=%s AND status='effective' "
+        "AND effective_marker=1 FOR UPDATE",
+        (generation_value, case_no),
+    )
+    generation = cursor.fetchone()
+    if generation is None:
+        return None
+    return int(_mapping(generation, "effective scheduling generation")["id"])
+
+
+def _lock_effective_assignments(cursor: Any, generation_id: int) -> tuple[Mapping[str, Any], ...]:
+    cursor.execute(
+        "SELECT id,status FROM case_staff_assignments "
+        "WHERE generation_id=%s ORDER BY id FOR UPDATE",
+        (generation_id,),
+    )
     rows = cursor.fetchall()
     if not isinstance(rows, Sequence):
-        raise TypeError("assignment rows must be a sequence")
-    inconsistent = any(_mapping(row, "assignment").get("status") not in _ACTIVE_ASSIGNMENT_STATUSES for row in rows)
-    return (not inconsistent, ["auto_complete.assignment_facts_inconsistent"] if inconsistent else [])
+        raise TypeError("effective assignment rows must be a sequence")
+    return tuple(_mapping(row, f"effective_assignment[{index}]") for index, row in enumerate(rows))
+
+
+def _lock_effective_service_schedules(
+    cursor: Any,
+    case_no: str,
+    generation_id: int,
+) -> tuple[Mapping[str, Any], ...]:
+    cursor.execute(
+        "SELECT id,assignment_id,work_date FROM staff_schedule "
+        "WHERE case_no=%s AND generation_id=%s AND effective_marker=1 "
+        "AND is_work_day=1 ORDER BY work_date,id FOR UPDATE",
+        (case_no, generation_id),
+    )
+    rows = cursor.fetchall()
+    if not isinstance(rows, Sequence):
+        raise TypeError("effective service schedule rows must be a sequence")
+    return tuple(_mapping(row, f"effective_service_schedule[{index}]") for index, row in enumerate(rows))
+
+
+def _official_dates(schedules: tuple[Mapping[str, Any], ...]) -> tuple[date, ...]:
+    return tuple(_optional_date(row.get("work_date"), "official service date") for row in schedules if row.get("work_date") is not None)
+
+
+def _completion_root_blockers(
+    assignments: tuple[Mapping[str, Any], ...],
+    schedules: tuple[Mapping[str, Any], ...],
+    service_day_count: int,
+    actual_end_date: date | None,
+) -> list[str]:
+    assignment_ids = {row.get("id") for row in assignments}
+    dates = _official_dates(schedules)
+    blockers: list[str] = []
+    if not assignments or any(row.get("status") not in _ACTIVE_ASSIGNMENT_STATUSES for row in assignments):
+        blockers.append("auto_complete.effective_assignment_facts_inconsistent")
+    if not schedules:
+        blockers.append("auto_complete.official_service_days_missing")
+    if any(row.get("assignment_id") not in assignment_ids for row in schedules):
+        blockers.append("auto_complete.official_service_owner_inconsistent")
+    if len(dates) != len(set(dates)):
+        blockers.append("auto_complete.official_service_days_duplicated")
+    if len(dates) != service_day_count:
+        blockers.append("auto_complete.official_service_day_count_mismatch")
+    if dates and actual_end_date != max(dates):
+        blockers.append("auto_complete.actual_end_date_drift")
+    return blockers
 
 
 def _completion_instant(actual_end_date: date | None, start: time | None, end: time | None, offset: object) -> tuple[datetime | None, list[str]]:
@@ -169,9 +264,17 @@ def load_order_lifecycle_authoritative_facts(cursor: Any, command_envelope: obje
     evaluation = _taipei_instant(evaluation_at); actual_start = _optional_date(order.get("actual_start_date"), "actual_start_date"); actual_end = _optional_date(order.get("actual_end_date"), "actual_end_date")
     controls = _canonical_control_rows(cursor, case_no)
     deposit = deposit_facts or ClientDepositLifecycleFacts(*_load_deposit_ledger(cursor, case_no))
-    completion_consistent, completion_blockers = _load_completion_consistency(cursor, case_no)
+    service_days = _nonnegative_int(order.get("service_days"), "service_days")
+    if service_days < 1:
+        raise ValueError("service_days must be positive")
+    generation_id, official_dates, completion_blockers = _load_effective_completion_facts(
+        cursor,
+        case_no,
+        service_days,
+        actual_end,
+    )
     completion, time_blockers = _completion_instant(actual_end, _optional_time(order.get("service_start_time"), "service_start_time"), _optional_time(order.get("service_end_time"), "service_end_time"), order.get("service_end_day_offset"))
     cancellation, reason, reconfirmed, blockers = _control_facts(controls, current_status=status, actual_start_date=actual_start, deposit_reconciled=deposit.reconciled, settlement_identity=deposit.settlement_identity, settlement_date=deposit.settlement_date)
     blockers["enter_service"].extend(deposit.blockers); blockers["auto_complete"].extend(completion_blockers + time_blockers)
-    facts = {"cancellation":cancellation,"cancellation_reason":reason,"deposit_reconciled":deposit.reconciled,"deposit_settlement_identity":deposit.settlement_identity,"actual_start_date":actual_start.isoformat() if actual_start else None,"actual_end_date":actual_end.isoformat() if actual_end else None,"evaluation_at":evaluation.isoformat(),"completion_instant":completion.isoformat() if completion else None,"completion_facts_consistent":completion_consistent and not time_blockers,"actual_start_reconfirmed":reconfirmed,"transition_blockers":{key:tuple(sorted(set(value))) for key,value in blockers.items()},"manual_correction_target":manual_correction_target}
+    facts = {"cancellation":cancellation,"cancellation_reason":reason,"deposit_reconciled":deposit.reconciled,"deposit_settlement_identity":deposit.settlement_identity,"actual_start_date":actual_start.isoformat() if actual_start else None,"actual_end_date":actual_end.isoformat() if actual_end else None,"evaluation_at":evaluation.isoformat(),"completion_instant":completion.isoformat() if completion else None,"completion_facts_consistent":not completion_blockers and not time_blockers,"actual_start_reconfirmed":reconfirmed,"effective_scheduling_generation_id":generation_id,"official_service_dates":tuple(value.isoformat() for value in official_dates),"transition_blockers":{key:tuple(sorted(set(value))) for key,value in blockers.items()},"manual_correction_target":manual_correction_target}
     return {"locked_order":dict(order), "authoritative_facts":facts, "existing_event":getattr(command_envelope, "existing_lifecycle_event", None)}

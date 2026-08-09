@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from argparse import Namespace
+from contextlib import nullcontext
 import os
 
 import pandas as pd
@@ -146,3 +147,6 @@ class _PanelDisplay:
 
     def error(self, message):
         self.errors.append(message)
+
+    def spinner(self, _message):
+        return nullcontext()

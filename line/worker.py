@@ -14,6 +14,7 @@ import uuid
 from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlencode
 
 import pymysql
 import requests
@@ -163,6 +164,70 @@ def _push_text(task: dict[str, Any], text: str) -> tuple[bool, bool, str, str]:
     return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
 
 
+def _matching_willingness_actions(
+    case_no: str,
+    plan_id: int,
+    segment_id: int,
+) -> list[dict[str, str]]:
+    return [
+        {
+            "type": "postback",
+            "label": label,
+            "data": urlencode(
+                {
+                    "action": willingness,
+                    "case_no": case_no,
+                    "plan_id": plan_id,
+                    "segment_id": segment_id,
+                }
+            ),
+        }
+        for willingness, label in (("willing", "願意接案"), ("unwilling", "暫不考慮"))
+    ]
+
+
+def _matching_willingness_message(task: dict[str, Any]) -> dict[str, Any]:
+    payload = json.loads(task.get("payload_json") or "{}")
+    case_no = str(payload["case_no"]).strip()
+    plan_id = int(payload["plan_id"])
+    segment_id = int(payload["segment_id"])
+    if not case_no or plan_id <= 0 or segment_id <= 0:
+        raise ValueError("Invalid canonical matching identity")
+    return {
+        "type": "template",
+        "altText": "媒合意願確認",
+        "template": {
+            "type": "buttons",
+            "text": task.get("message_content") or "請確認是否願意接案。",
+            "actions": _matching_willingness_actions(case_no, plan_id, segment_id),
+        },
+    }
+
+
+def _push_matching_willingness_card(
+    task: dict[str, Any],
+) -> tuple[bool, bool, str, str]:
+    try:
+        message = _matching_willingness_message(task)
+    except (KeyError, TypeError, ValueError) as exc:
+        return False, False, "invalid_matching_payload", str(exc)
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
+    if not token or token == "mock_token":
+        return True, False, "", ""
+    try:
+        response = requests.post(
+            "https://api.line.me/v2/bot/message/push",
+            json={"to": task["to_user_id"], "messages": [message]},
+            headers=_line_headers(task),
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        return False, True, "network_error", str(exc)
+    if response.status_code == 200:
+        return True, False, "", ""
+    return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
+
+
 def _menu_action(task: dict[str, Any], link: bool) -> tuple[bool, bool, str, str]:
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
     payload = json.loads(task.get("payload_json") or "{}")
@@ -193,6 +258,8 @@ def _execute_task(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
     task_type = task["task_type"]
     if task_type == "line_push":
         return _push_text(task, task.get("message_content") or "")
+    if task_type == "matching_willingness_card":
+        return _push_matching_willingness_card(task)
     if task_type == "rag_reply":
         return False, False, "legacy_rag_retired", "Use canonical Knowledge Retrieval worker"
     if task_type == "rich_menu_link":

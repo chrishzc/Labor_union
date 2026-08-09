@@ -19,6 +19,9 @@ from ui.pages.order.shared import (
 from ui.pages.order.client_refund_reversal_panel import (
     render_client_refund_reversal_panel,
 )
+from ui.pages.order.client_deposit_reversal_panel import (
+    render_client_deposit_reversal_panel,
+)
 
 
 def _to_arrow_scalar(value):
@@ -219,6 +222,7 @@ def _render_client_payment_ledger(
         _render_canonical_refunds(refund_detail)
         _render_canonical_subsidy_returns(refund_detail)
         render_client_refund_reversal_panel(case_no)
+        render_client_deposit_reversal_panel(case_no)
         return
 
     stages = [
@@ -248,6 +252,7 @@ def _render_client_payment_ledger(
     _render_canonical_refunds(refund_detail)
     _render_canonical_subsidy_returns(refund_detail)
     render_client_refund_reversal_panel(case_no)
+    render_client_deposit_reversal_panel(case_no)
 
     transactions = payment.get("transactions") or []
     with st.expander("客戶交易明細", expanded=False):

@@ -16,5 +16,7 @@ def test_form_management_uses_read_only_client_identity_for_fields_and_stats():
     assert "clients.identity_status" not in show_source
     assert "clients.identity_status" not in full_source
     assert '"identity_status"] = "身分資格（唯讀） (identity_status)"' in show_source
-    assert "o.get('identity_status')" in show_source
+    assert "FormManagementApiClient" in show_source
+    assert ".case_context(target_case_no)" in show_source
+    assert "global_subsidy_orders_count" not in show_source
     assert "form_db_table_fields" in show_source

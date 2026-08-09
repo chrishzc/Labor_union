@@ -44,6 +44,57 @@ CREATE TABLE IF NOT EXISTS finance_import_historical_reprocess_receipts (
         CHECK (JSON_TYPE(result_snapshot) = 'OBJECT')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Manual evidence is a separate immutable fact.  It must never be written
+-- back to finance_import_rows or its bank_references JSON root fact.
+CREATE TABLE IF NOT EXISTS historical_owner_selection_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    finance_import_row_id BIGINT NOT NULL,
+    batch_id BIGINT NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    obligation_identity VARCHAR(191) NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    evidence_references JSON NOT NULL,
+    source_canonical_fact_version BIGINT UNSIGNED NOT NULL,
+    resulting_canonical_fact_version BIGINT UNSIGNED NOT NULL,
+    batch_version BIGINT UNSIGNED NOT NULL,
+    obligation_projection_version BIGINT UNSIGNED NOT NULL,
+    preview_fingerprint CHAR(64) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_historical_owner_selection_idempotency (idempotency_key, finance_import_row_id),
+    INDEX idx_historical_owner_selection_row (finance_import_row_id, created_at),
+    CONSTRAINT fk_historical_owner_selection_row FOREIGN KEY (finance_import_row_id)
+        REFERENCES finance_import_rows(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_owner_selection_batch FOREIGN KEY (batch_id)
+        REFERENCES finance_import_batches(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_owner_selection_obligation FOREIGN KEY (obligation_identity, case_no)
+        REFERENCES client_obligations(obligation_identity, case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_owner_selection_versions CHECK (
+        resulting_canonical_fact_version = source_canonical_fact_version + 1
+        AND obligation_projection_version >= 0
+    ),
+    CONSTRAINT chk_historical_owner_selection_evidence CHECK (
+        JSON_TYPE(evidence_references) = 'ARRAY' AND JSON_LENGTH(evidence_references) > 0
+    ),
+    CONSTRAINT chk_historical_owner_selection_fingerprint CHECK (
+        preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_historical_owner_selection_before_update;
+CREATE TRIGGER trg_historical_owner_selection_before_update
+BEFORE UPDATE ON historical_owner_selection_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_owner_selection_events cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_owner_selection_before_delete;
+CREATE TRIGGER trg_historical_owner_selection_before_delete
+BEFORE DELETE ON historical_owner_selection_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_owner_selection_events cannot be deleted';
+
 DROP TRIGGER IF EXISTS trg_finance_import_historical_reprocess_receipt_before_update;
 CREATE TRIGGER trg_finance_import_historical_reprocess_receipt_before_update
 BEFORE UPDATE ON finance_import_historical_reprocess_receipts

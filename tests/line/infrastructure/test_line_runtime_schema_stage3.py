@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 def test_stage3_schema_contains_runtime_control_facts() -> None:
-    schema = (PROJECT_ROOT / "db/schema_parts/147_line_runtime_control.sql").read_text(
+    schema = (PROJECT_ROOT / "db/schema_parts/150_line_runtime_control.sql").read_text(
         encoding="utf-8"
     )
 
@@ -59,5 +59,5 @@ def test_stage3_migration_release_is_hash_locked() -> None:
 
     assert manifest.release_id == "labor-union-line-stage3-2026-08-08-v1"
     assert [item.artifact.name for item in manifest.schema_artifacts] == [
-        "147_line_runtime_control.sql"
+        "150_line_runtime_control.sql"
     ]

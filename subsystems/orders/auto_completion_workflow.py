@@ -21,6 +21,10 @@ from shared_kernel.identities import (
 )
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text
+from shared_kernel.clock import TAIPEI_TIME_ZONE
+from subsystems.orders.lifecycle_authoritative_facts import (
+    validate_order_lifecycle_facts,
+)
 
 
 class AutoCompletionClaimState(StrEnum):
@@ -44,6 +48,11 @@ class AutoCompletionApplyRequest:
         require_canonical_text(self.reason, "auto completion reason", 500)
         if self.evaluation_at.tzinfo is None or self.evaluation_at.utcoffset() is None:
             raise ValueError("evaluation_at must be timezone-aware")
+        object.__setattr__(
+            self,
+            "evaluation_at",
+            self.evaluation_at.astimezone(TAIPEI_TIME_ZONE),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,12 +88,36 @@ class AutoCompletionWorkflowError(Exception):
         self.error = error
 
 
+class AutoCompletionRepositoryNotFoundError(Exception):
+    """The requested Orders aggregate does not exist."""
+
+
+class AutoCompletionRepositoryConflictError(Exception):
+    """A concurrent Orders change invalidated the command."""
+
+
+class AutoCompletionRepositoryIntegrityError(Exception):
+    """Locked root facts could not support a safe completion decision."""
+
+
 class AutoCompleteOrderService:
     def __init__(self, repository: AutoCompletionWorkflowRepository, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
         self._repository = repository
         self._unit_of_work_factory = unit_of_work_factory
 
     def apply(self, request: AutoCompletionApplyRequest) -> AutoCompletionReceipt:
+        try:
+            return self._apply_in_transaction(request)
+        except AutoCompletionWorkflowError:
+            raise
+        except AutoCompletionRepositoryNotFoundError as error:
+            raise _error(request, ErrorCategory.NOT_FOUND, "order_not_found", "The requested Orders aggregate does not exist.") from error
+        except AutoCompletionRepositoryConflictError as error:
+            raise _error(request, ErrorCategory.CONFLICT, "order_version_conflict", "The Orders lifecycle version changed before Apply.") from error
+        except AutoCompletionRepositoryIntegrityError as error:
+            raise _error(request, ErrorCategory.DOMAIN_BLOCKED, "auto_completion_authoritative_facts_invalid", "Order service completion is blocked because its authoritative facts are inconsistent.", ("auto_complete.authoritative_facts_invalid",)) from error
+
+    def _apply_in_transaction(self, request: AutoCompletionApplyRequest) -> AutoCompletionReceipt:
         fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit_of_work:
             replay = self._claim_or_replay(request, fingerprint)
@@ -114,15 +147,13 @@ class AutoCompleteOrderService:
         return stored.receipt
 
     def _locked_facts(self, request):
-        try:
-            return self._repository.load_locked_facts(request)
-        except ValueError as error:
-            raise _error(request, ErrorCategory.CONFLICT, "order_version_conflict", "The Orders lifecycle version changed before Apply.") from error
+        return self._repository.load_locked_facts(request)
 
 
 def _candidate_or_block(request, facts):
     order = facts["locked_order"]
     authoritative = facts["authoritative_facts"]
+    _validate_authoritative_facts(request, order, authoritative)
     blockers = tuple(authoritative["transition_blockers"]["auto_complete"])
     if order["status"] != "服務中":
         blockers = tuple(sorted(set((*blockers, "auto_complete.order_not_in_service"))))
@@ -136,9 +167,26 @@ def _candidate_or_block(request, facts):
     try:
         return build_auto_completion_candidate(case_no=request.case_no, expected_order_version=request.expected_order_version.value, completion_instant=datetime.fromisoformat(completion), evaluation_at=request.evaluation_at)
     except ValueError as error:
-        if str(error) != "auto_completion_time_not_reached":
-            raise
-        raise _error(request, ErrorCategory.DOMAIN_BLOCKED, "auto_completion_time_not_reached", "Order service completion instant has not been reached.", ("auto_complete.completion_instant_not_reached",)) from error
+        if str(error) == "auto_completion_time_not_reached":
+            raise _error(request, ErrorCategory.DOMAIN_BLOCKED, "auto_completion_time_not_reached", "Order service completion instant has not been reached.", ("auto_complete.completion_instant_not_reached",)) from error
+        raise _error(request, ErrorCategory.DOMAIN_BLOCKED, "auto_completion_candidate_invalid", "Order service completion candidate is invalid.", ("auto_complete.candidate_invalid",)) from error
+
+
+def _validate_authoritative_facts(request, order, authoritative) -> None:
+    try:
+        validate_order_lifecycle_facts(
+            order["status"],
+            "evaluation_time_reached",
+            authoritative,
+        )
+    except (KeyError, TypeError, ValueError) as error:
+        raise _error(
+            request,
+            ErrorCategory.DOMAIN_BLOCKED,
+            "auto_completion_authoritative_facts_invalid",
+            "Order service completion is blocked because its authoritative facts are invalid.",
+            ("auto_complete.authoritative_facts_invalid",),
+        ) from error
 
 
 def _command_fingerprint(request):
@@ -149,4 +197,4 @@ def _error(request, category, code, message, blockers=()):
     return AutoCompletionWorkflowError(TypedError(category, code, message, request.correlation_id, domain_blockers=tuple(sorted(set(blockers)))))
 
 
-__all__ = ["AutoCompleteOrderService", "AutoCompletionApplyRequest", "AutoCompletionClaimState", "AutoCompletionReceipt", "AutoCompletionWorkflowError", "StoredAutoCompletionReceipt"]
+__all__ = ["AutoCompleteOrderService", "AutoCompletionApplyRequest", "AutoCompletionClaimState", "AutoCompletionReceipt", "AutoCompletionRepositoryConflictError", "AutoCompletionRepositoryIntegrityError", "AutoCompletionRepositoryNotFoundError", "AutoCompletionWorkflowError", "StoredAutoCompletionReceipt"]

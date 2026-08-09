@@ -27,9 +27,9 @@ def consume_client_finance_orders_events(connection, maximum_events: int = 50):
             _consume_event(connection, event)
             connection.commit()
             delivered += 1
-        except Exception:
+        except Exception as error:
             connection.rollback()
-            _mark_failed(connection, int(event["id"]))
+            _mark_failed(connection, int(event["id"]), error)
             failed += 1
     return delivered, failed
 
@@ -111,17 +111,22 @@ def _mark_delivered(connection, event_id: int) -> None:
             raise RuntimeError("client_finance_outbox_delivery_conflict")
 
 
-def _mark_failed(connection, event_id: int) -> None:
+def _mark_failed(connection, event_id: int, error: Exception) -> None:
+    error_message = _delivery_error_message(error)
     with connection.cursor() as cursor:
         cursor.execute(
             "UPDATE client_finance_outbox SET status='failed',"
             "attempt_count=attempt_count+1,"
             "next_attempt_at=DATE_ADD(CURRENT_TIMESTAMP,INTERVAL 30 SECOND),"
-            "last_error='orders deposit control delivery failed' "
-            "WHERE id=%s",
-            (event_id,),
+            "last_error=%s WHERE id=%s",
+            (error_message, event_id),
         )
     connection.commit()
+
+
+def _delivery_error_message(error: Exception) -> str:
+    message = str(error).strip() or "orders deposit control delivery failed"
+    return f"{type(error).__name__}: {message}"[:1000]
 
 
 def _payload(value) -> Mapping[str, object]:

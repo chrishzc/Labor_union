@@ -17,7 +17,7 @@ class RecordingCursor:
 
 
 def test_stage4_schema_has_durable_identity_and_friend_facts() -> None:
-    schema = (PROJECT_ROOT / "db/schema_parts/148_line_identity_runtime.sql").read_text(
+    schema = (PROJECT_ROOT / "db/schema_parts/151_line_identity_runtime.sql").read_text(
         encoding="utf-8"
     )
 
@@ -38,12 +38,12 @@ def test_stage4_migration_release_is_hash_locked() -> None:
 
     assert manifest.release_id == "labor-union-line-stage4-2026-08-08-v1"
     assert [item.artifact.name for item in manifest.schema_artifacts] == [
-        "148_line_identity_runtime.sql"
+        "151_line_identity_runtime.sql"
     ]
 
 
 def test_stage4_schema_replays_through_project_loader(tmp_path) -> None:
-    source = PROJECT_ROOT / "db/schema_parts/148_line_identity_runtime.sql"
+    source = PROJECT_ROOT / "db/schema_parts/151_line_identity_runtime.sql"
     parts = tmp_path / "schema_parts"
     parts.mkdir()
     (parts / source.name).write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
@@ -51,7 +51,7 @@ def test_stage4_schema_replays_through_project_loader(tmp_path) -> None:
 
     loaded = load_schema_parts(cursor, parts)
 
-    assert loaded == ["148_line_identity_runtime.sql"]
+    assert loaded == ["151_line_identity_runtime.sql"]
     assert any("CREATE TABLE IF NOT EXISTS line_identity_flows" in sql for sql in cursor.executed)
 
 

@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "150_line_order_group_runtime.sql": {
+    "153_line_order_group_runtime.sql": {
       "tables": {
         "line_order_group_bindings": [
           "last_invitation_at_utc", "activated_at_utc"
@@ -22,7 +22,7 @@
         "trg_line_order_group_runtime_events_before_delete"
       ]
     },
-    "151_runtime_monitoring_line_alerts.sql": {
+    "154_runtime_monitoring_line_alerts.sql": {
       "tables": {
         "runtime_service_heartbeats": [
           "service_name", "instance_id", "process_id", "host_name",

@@ -2,7 +2,10 @@ from shared_kernel.durable_job_queue import (
     DurableJobCommand,
     DurableJobLease,
     RetryableDurableJobError,
+    TerminalDurableJobError,
 )
+from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.identities import CorrelationId
 from infrastructure.mysql.background_job_repository import BackgroundJob
 from subsystems.jobs.durable_job_worker import DurableJobWorker
 
@@ -71,6 +74,28 @@ def test_unknown_command_is_terminal_and_does_not_run_a_domain_handler():
 
     assert worker.recover_and_run_once() is True
     assert repository.failed[0][1]["error"]["code"] == "durable_job_handler_not_registered"
+    assert repository.failed[0][2] is None
+
+
+def test_terminal_domain_error_is_preserved_as_queryable_job_error():
+    repository = FakeRepository(_lease())
+    typed_error = TypedError(
+        ErrorCategory.DOMAIN_BLOCKED,
+        "auto_completion_blocked",
+        "Order service completion is blocked.",
+        CorrelationId("job-1"),
+        domain_blockers=("auto_complete.human_hold_active",),
+    )
+    def blocked_handler(_payload):
+        raise TerminalDurableJobError(typed_error)
+
+    worker = DurableJobWorker(repository, {"test.command": blocked_handler}, "worker-1")
+
+    assert worker.recover_and_run_once() is True
+    error = repository.failed[0][1]["error"]
+    assert error["category"] == "domain_blocked"
+    assert error["code"] == "auto_completion_blocked"
+    assert error["domain_blockers"] == ["auto_complete.human_hold_active"]
     assert repository.failed[0][2] is None
 
 

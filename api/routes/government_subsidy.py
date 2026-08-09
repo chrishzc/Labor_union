@@ -6,13 +6,14 @@ from dataclasses import fields, is_dataclass
 from enum import Enum
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
 from api.schemas.jobs import JobAcceptedResponse
 from api.dependencies.jobs import get_job_repository
 from infrastructure.mysql.background_job_repository import (
     BackgroundJobRepository,
     JobIdempotencyConflict,
 )
+from shared_kernel.durable_job_queue import DurableJobCommand
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -190,7 +191,6 @@ def preview_government_subsidy_claim_plan(
 )
 def apply_government_subsidy_claim_plan(
     body: GovernmentSubsidyClaimPlanningApplyBody,
-    background_tasks: BackgroundTasks,
     idempotency_key: Annotated[
         str,
         Header(alias="Idempotency-Key", min_length=1, max_length=191),
@@ -200,9 +200,6 @@ def apply_government_subsidy_claim_plan(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: GovernmentSubsidyApplication = Depends(
-        get_government_subsidy_application
-    ),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     request = ClaimPlanningApplyRequest(
@@ -214,14 +211,7 @@ def apply_government_subsidy_claim_plan(
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _call_apply_async(
-        lambda: _materialize(application.apply_claim_plan(request)),
-        "成功建立政府補助申請批次",
-        request.correlation_id,
-        request.idempotency_key,
-        background_tasks,
-        job_repository,
-    )
+    return _enqueue_apply(_government_subsidy_command("claim_plan", body.intent.model_dump(), request), job_repository)
 
 
 @router.post(
@@ -260,7 +250,6 @@ def preview_government_subsidy_claim_submission(
 )
 def apply_government_subsidy_claim_submission(
     body: GovernmentSubsidyClaimSubmissionApplyBody,
-    background_tasks: BackgroundTasks,
     batch_id: int = Path(..., gt=0),
     idempotency_key: Annotated[
         str,
@@ -271,9 +260,6 @@ def apply_government_subsidy_claim_submission(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: GovernmentSubsidyApplication = Depends(
-        get_government_subsidy_application
-    ),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     request = ClaimSubmissionApplyRequest(
@@ -285,14 +271,7 @@ def apply_government_subsidy_claim_submission(
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _call_apply_async(
-        lambda: _materialize(application.apply_claim_submission(request)),
-        "成功送出政府補助申請批次",
-        request.correlation_id,
-        request.idempotency_key,
-        background_tasks,
-        job_repository,
-    )
+    return _enqueue_apply(_government_subsidy_command("claim_submission", {"batch_id": batch_id}, request), job_repository)
 
 
 @router.post(
@@ -331,7 +310,6 @@ def preview_government_subsidy_claim_approval(
 )
 def apply_government_subsidy_claim_approval(
     body: GovernmentSubsidyClaimApprovalApplyBody,
-    background_tasks: BackgroundTasks,
     batch_id: int = Path(..., gt=0),
     idempotency_key: Annotated[
         str,
@@ -342,9 +320,6 @@ def apply_government_subsidy_claim_approval(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: GovernmentSubsidyApplication = Depends(
-        get_government_subsidy_application
-    ),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     request = ClaimApprovalApplyRequest(
@@ -356,14 +331,7 @@ def apply_government_subsidy_claim_approval(
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _call_apply_async(
-        lambda: _materialize(application.apply_claim_approval(request)),
-        "成功記錄政府補助核准",
-        request.correlation_id,
-        request.idempotency_key,
-        background_tasks,
-        job_repository,
-    )
+    return _enqueue_apply(_government_subsidy_command("claim_approval", {"batch_id": batch_id, "item_approvals": [item.model_dump() for item in body.item_approvals]}, request), job_repository)
 
 
 @router.post(
@@ -400,7 +368,6 @@ def preview_government_subsidy_receipt(
 # FastAPI needs the full mutation contract on this callable for OpenAPI.
 def apply_government_subsidy_receipt(
     body: GovernmentSubsidyReceiptApplyBody,
-    background_tasks: BackgroundTasks,
     idempotency_key: Annotated[
         str,
         Header(alias="Idempotency-Key", min_length=1, max_length=191),
@@ -410,9 +377,6 @@ def apply_government_subsidy_receipt(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: GovernmentSubsidyApplication = Depends(
-        get_government_subsidy_application
-    ),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     request = GovernmentSubsidyReceiptApplyRequest(
@@ -424,14 +388,7 @@ def apply_government_subsidy_receipt(
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _call_apply_async(
-        lambda: _materialize(application.apply_receipt(request)),
-        "成功套用政府補助入款",
-        request.correlation_id,
-        request.idempotency_key,
-        background_tasks,
-        job_repository,
-    )
+    return _enqueue_apply(_government_subsidy_command("receipt", body.intent.model_dump(), request), job_repository)
 
 
 @router.post(
@@ -468,7 +425,6 @@ def preview_government_subsidy_reversal(
 # FastAPI needs the full mutation contract on this callable for OpenAPI.
 def apply_government_subsidy_reversal(
     body: GovernmentSubsidyReversalApplyBody,
-    background_tasks: BackgroundTasks,
     idempotency_key: Annotated[
         str,
         Header(alias="Idempotency-Key", min_length=1, max_length=191),
@@ -478,9 +434,6 @@ def apply_government_subsidy_reversal(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: GovernmentSubsidyApplication = Depends(
-        get_government_subsidy_application
-    ),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     request = GovernmentSubsidyReversalApplyRequest(
@@ -492,14 +445,7 @@ def apply_government_subsidy_reversal(
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _call_apply_async(
-        lambda: _materialize(application.apply_reversal(request)),
-        "成功套用政府補助沖正",
-        request.correlation_id,
-        request.idempotency_key,
-        background_tasks,
-        job_repository,
-    )
+    return _enqueue_apply(_government_subsidy_command("reversal", body.intent.model_dump(), request), job_repository)
 
 
 def _receipt_intent(view):
@@ -707,37 +653,38 @@ def _approval_amounts(candidate):
 
 
 
-def _call_apply_async(command, message, correlation_id, idempotency_key, background_tasks, job_repository):
+def _enqueue_apply(command, job_repository):
     job_id = str(uuid.uuid4())
     try:
-        job_id = job_repository.enqueue_job(job_id, idempotency_key)
-        
-        def _background_worker():
-            job_repository.mark_running(job_id)
-            try:
-                receipt = command()
-                job_repository.mark_succeeded(job_id, receipt)
-            except GovernmentSubsidyWorkflowError as error:
-                job_repository.mark_failed(job_id, {"error": _materialize(error.error)})
-            except GovernmentSubsidyClaimWorkflowError as error:
-                job_repository.mark_failed(job_id, {"error": _materialize(error.error)})
-            except GovernmentSubsidyDomainError as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "VALIDATION", "code": error.code, "message": str(error)}})
-            except OperationalError as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "INTERNAL", "code": "database_error", "message": str(error)}})
-            except ValueError as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "VALIDATION", "code": "invalid_government_subsidy_intent", "message": str(error)}})
-            except Exception as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "INTERNAL", "code": "internal_error", "message": str(error)}})
-
-        background_tasks.add_task(_background_worker)
-        
-    except JobIdempotencyConflict as e:
-        job_id = e.job_id
+        job_id = job_repository.enqueue_command(command(job_id))
+    except JobIdempotencyConflict as error:
+        job_id = error.job_id
 
     return BaseResponse(
         data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
         message="202 Accepted",
+    )
+
+
+def _government_subsidy_command(action, intent, request):
+    payload = {
+            "action": action,
+            "intent": intent,
+            "expected_batch_version": request.expected_batch_version.value,
+            "preview_fingerprint": request.preview_fingerprint.value,
+            "idempotency_key": request.idempotency_key.value,
+            "actor": request.actor.actor_id,
+            "reason": request.reason,
+            "correlation_id": request.correlation_id.value,
+    }
+    return lambda job_id: DurableJobCommand(
+        job_id,
+        request.idempotency_key.value,
+        "government_subsidy_apply",
+        1,
+        payload,
+        request.actor.actor_id,
+        request.correlation_id.value,
     )
 
 def _call_endpoint(command, message, correlation_id):

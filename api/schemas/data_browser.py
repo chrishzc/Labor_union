@@ -20,3 +20,12 @@ class DataBrowserTableResponse(BaseModel):
 
 class DataBrowserPatchRequest(BaseModel):
     updates: Dict[str, Any] = Field(..., description="要微調更新的欄位與值")
+
+
+class DataBrowserSourceCorrectionPreviewRequest(DataBrowserPatchRequest):
+    pass
+
+
+class DataBrowserSourceCorrectionApplyRequest(DataBrowserPatchRequest):
+    preview_fingerprint: str = Field(min_length=1)
+    reason: str = Field(min_length=1)

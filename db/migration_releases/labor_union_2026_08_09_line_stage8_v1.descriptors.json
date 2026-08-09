@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "153_contract_integration.sql": {
+    "156_contract_integration.sql": {
       "tables": {
         "contract_webhook_security_receipts": [
           "id", "provider", "canonical_payload_hash", "signature_verified",
@@ -40,7 +40,7 @@
         "trg_contract_mapping_events_before_delete"
       ]
     },
-    "154_knowledge_retrieval.sql": {
+    "157_knowledge_retrieval.sql": {
       "tables": {
         "knowledge_items": [
           "id", "source_identity", "title", "lifecycle_status", "current_version",

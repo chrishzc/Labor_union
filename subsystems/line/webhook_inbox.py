@@ -48,3 +48,17 @@ def mark_event(cursor, event_id: str | None, status: str, error: str | None = No
         (status, error, event_id),
     )
 
+
+def mark_events_completed(cursor, event_ids: list[str]) -> None:
+    """Mark the successfully handled batch without exposing inbox SQL to callers."""
+    if not event_ids:
+        return
+    placeholders = ",".join(["%s"] * len(event_ids))
+    cursor.execute(
+        f"""
+        UPDATE line_webhook_events
+        SET processing_status='completed', processed_at=NOW(), error_message=NULL
+        WHERE webhook_event_id IN ({placeholders})
+        """,
+        event_ids,
+    )

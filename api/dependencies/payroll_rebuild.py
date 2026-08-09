@@ -32,18 +32,23 @@ class PayrollRebuildApplication:
 
 def get_payroll_rebuild_application():
     connection = get_connection()
+    try:
+        yield build_payroll_rebuild_application(connection)
+    finally:
+        connection.close()
+
+
+def build_payroll_rebuild_application(connection):
     repository = MySqlPayrollRebuildRepository(connection)
     workflow = PayrollRebuildWorkflow(
         repository,
         lambda: PayrollRebuildMySqlUnitOfWork(connection),
     )
-    try:
-        yield PayrollRebuildApplication(repository, workflow)
-    finally:
-        connection.close()
+    return PayrollRebuildApplication(repository, workflow)
 
 
 __all__ = [
     "PayrollRebuildApplication",
+    "build_payroll_rebuild_application",
     "get_payroll_rebuild_application",
 ]

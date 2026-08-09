@@ -42,6 +42,17 @@ def test_query_returns_canonical_page_and_stable_etag() -> None:
     assert page.etag == "77ff6591a030269e0f595550548cfdb1ef1b86b0ed2e25fba2ecdf193060964a"
 
 
+def test_query_passes_case_or_client_search_text_to_repository() -> None:
+    captured = {}
+    service = OrderSummaryQueryService(
+        SimpleNamespace(fetch_page=lambda **arguments: captured.update(arguments) or (_row(),))
+    )
+
+    service.query(OrderSummaryQueryRequest(50, None, "陳小姐"))
+
+    assert captured["query_text"] == "陳小姐"
+
+
 def test_query_rejects_non_tuple_repository_page() -> None:
     with pytest.raises(OrderSummaryContractError, match="must be a tuple"):
         _service([_row()]).query(OrderSummaryQueryRequest(1, None))
@@ -71,3 +82,8 @@ def test_query_rejects_datetime_for_date_projection() -> None:
 def test_request_rejects_invalid_page_size(page_size: int) -> None:
     with pytest.raises(ValueError):
         OrderSummaryQueryRequest(page_size, None)
+
+
+def test_request_rejects_blank_search_text() -> None:
+    with pytest.raises(ValueError):
+        OrderSummaryQueryRequest(50, None, "   ")

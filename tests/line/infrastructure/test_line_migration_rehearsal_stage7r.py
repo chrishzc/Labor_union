@@ -27,7 +27,7 @@ def test_line_release_chain_selects_stage2_through_stage7() -> None:
     try:
         runner.configure_release_manifests(MANIFESTS)
 
-        assert runner.SCHEMA_PARTS[-1].name == "152_matching_line_communication.sql"
+        assert runner.SCHEMA_PARTS[-1].name == "155_matching_line_communication.sql"
         assert len(runner.SCHEMA_PARTS) == 9
         assert len(runner.RELEASE_MANIFEST.manifests) == 6
         assert runner.MANIFEST_DRIVEN_RELEASE is True
@@ -38,7 +38,7 @@ def test_line_release_chain_selects_stage2_through_stage7() -> None:
 
 def test_stage7_descriptor_owns_only_stage7_matching_objects() -> None:
     descriptor = _load_stage7_descriptor()
-    tables = descriptor["descriptors"]["152_matching_line_communication.sql"]["tables"]
+    tables = descriptor["descriptors"]["155_matching_line_communication.sql"]["tables"]
 
     assert tables["caregiver_matching_plans"] == ["communication_version"]
     assert set(tables) == {
@@ -52,7 +52,7 @@ def test_stage7_descriptor_owns_only_stage7_matching_objects() -> None:
 def test_stage7_descriptor_never_persists_raw_interaction_tokens() -> None:
     descriptor = _load_stage7_descriptor()
     interaction_columns = descriptor["descriptors"][
-        "152_matching_line_communication.sql"
+        "155_matching_line_communication.sql"
     ]["tables"]["matching_line_interactions"]
 
     assert "token_hash" in interaction_columns
