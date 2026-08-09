@@ -96,6 +96,7 @@ from subsystems.line.review_contracts import (
     DecideLineReviewResult,
     LineReviewListQuery,
     LineReviewPage,
+    LineReviewQueueSummary,
 )
 from subsystems.line.rich_menu_contracts import (
     ClaimLineRichMenuPublicationsQuery,
@@ -259,6 +260,8 @@ class LineIdentityReviewRepositoryPort(Protocol):
     def get(self, request_id: LineReviewRequestId) -> LineReviewSnapshot | None: ...
 
     def list(self, query: LineReviewListQuery) -> LineReviewPage: ...
+
+    def summary(self, stale_hours: int) -> LineReviewQueueSummary: ...
 
     def decide(
         self,

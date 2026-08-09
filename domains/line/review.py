@@ -53,6 +53,10 @@ class LineReviewSnapshot:
     assigned_at: datetime | None = None
     due_at: datetime | None = None
     reassignment_count: int = 0
+    reviewed_by_actor_id: str | None = None
+    decision_reason: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.review_type, LineReviewType):

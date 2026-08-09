@@ -53,23 +53,46 @@ echo ==========================================
 echo Database connection ready! Starting services...
 echo ==========================================
 echo [Notice] ngrok is development-only and is not started by online.bat.
-echo [Notice] LINE public webhook access requires the Cloudflare Tunnel planned for Stage 5.2.
+echo [Notice] LINE public webhook access requires an approved production HTTPS edge or tunnel.
+
+echo [Step 4] Validating LINE production readiness...
+"%PY%" -m scripts.validate_line_production_readiness
+if %errorlevel% neq 0 (
+    echo [Error] LINE production readiness validation failed.
+    pause
+    exit /b %errorlevel%
+)
 
 :: 4. Launch servers concurrently
-echo [Step 4] Launching FastAPI server...
+echo [Step 5] Launching FastAPI server...
 start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
 
-echo [Step 5] Launching independent LINE Worker...
-start "LINE Worker" cmd /k ""%PY%" scripts/run_line_worker.py"
+echo [Step 6] Launching independent LINE Worker...
+start "LINE Worker" cmd /k ""%PY%" -m scripts.run_line_worker"
 
-echo [Step 6] Launching Streamlit interface...
+echo [Step 7] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
 
-echo [Step 7] Launching active runtime monitor...
-start "Runtime Monitor" cmd /k ""%PY%" scripts/run_service_monitor.py"
+echo [Step 8] Launching active runtime monitor...
+start "Runtime Monitor" cmd /k ""%PY%" -m scripts.run_service_monitor"
 
-echo [Step 8] Launching File Watcher Service...
+echo [Step 9] Launching File Watcher Service...
 start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
+
+echo [Step 10] Launching Durable Background Worker...
+start "Durable Background Worker" cmd /k ""%PY%" -m scripts.run_durable_job_worker"
+
+findstr /R /B /I "^CONTRACT_INTEGRATION_RUNTIME_ENABLED=true" "%CD%\.env" >nul
+if %errorlevel% equ 0 (
+    echo [Step 11] Launching Contract Integration Worker...
+    start "Contract Integration Worker" cmd /k ""%PY%" -m scripts.run_contract_integration_worker"
+)
+
+findstr /R /B /I "^KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true" "%CD%\.env" >nul
+if %errorlevel% equ 0 (
+    echo [Step 12] Launching Knowledge Retrieval Worker...
+    start "Knowledge Retrieval Worker" cmd /k ""%PY%" -m scripts.run_knowledge_worker"
+)
 
 echo ==========================================
 echo Lobar Union System online services are running!
@@ -78,5 +101,6 @@ echo - Streamlit UI: http://localhost:8501
 echo - LINE Worker: independent durable queue consumer
 echo - Runtime Monitor: active health probes and alert projection
 echo - File Watcher: Monitoring downloads/ folder
+echo - Durable Background Worker: independently processes background jobs
 echo ==========================================
 pause

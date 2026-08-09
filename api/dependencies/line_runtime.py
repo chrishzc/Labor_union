@@ -19,6 +19,7 @@ from subsystems.line.runtime_contracts import (
     LineWebhookSecurityReceipt,
     LineWebhookVerificationOutcome,
 )
+from subsystems.line.runtime_cutover import validate_line_api_runtime
 from subsystems.line.configuration_application import LineConfigurationApplication
 from subsystems.line.delivery_admin_application import (
     LineDeliveryTaskAdminApplication,
@@ -29,14 +30,7 @@ from subsystems.line.webhook_intake import LineWebhookIntake
 
 
 def line_webhook_runtime_mode() -> LineRuntimeMode:
-    value = os.getenv("LINE_WEBHOOK_RUNTIME_MODE", "legacy").strip().lower()
-    try:
-        mode = LineRuntimeMode(value)
-    except ValueError as error:
-        raise RuntimeError("LINE_WEBHOOK_RUNTIME_MODE must be legacy or canonical") from error
-    if mode is LineRuntimeMode.COMPATIBILITY:
-        raise RuntimeError("compatibility mode is worker-only, not a webhook mode")
-    return mode
+    return validate_line_api_runtime(os.environ).webhook_mode
 
 
 @lru_cache(maxsize=1)

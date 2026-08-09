@@ -85,6 +85,7 @@ from api.routes import (
 
 
 from api.schemas.base import BaseResponse
+from api.dependencies.line_runtime import line_webhook_runtime_mode
 from line.line_bot import router as line_router
 from subsystems.access.authentication_session import record_admin_audit
 from subsystems.anomalies.outbox_worker import (
@@ -114,6 +115,7 @@ def _background_workers_enabled() -> bool:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    line_webhook_runtime_mode()
     if not _background_workers_enabled():
         yield
         return

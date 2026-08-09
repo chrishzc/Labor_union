@@ -117,6 +117,16 @@ class LineReviewPage:
     next_cursor: str | None
 
 
+@dataclass(frozen=True, slots=True)
+class LineReviewQueueSummary:
+    pending_total: int
+    staff_pending: int
+    rebind_pending: int
+    processed_today: int
+    stale_pending: int
+    stale_hours: int
+
+
 def _validate_enum_filter(values: tuple[object, ...], item_type: type, name: str) -> None:
     if not isinstance(values, tuple):
         raise TypeError(f"LINE {name} must be a tuple")
@@ -136,4 +146,5 @@ __all__ = [
     "LineReviewCommandOutcome",
     "LineReviewListQuery",
     "LineReviewPage",
+    "LineReviewQueueSummary",
 ]

@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time as time_module
 from typing import Any, Iterable, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -357,10 +358,22 @@ def _atomic_write(path: Path, payload: bytes) -> None:
             handle.write(payload)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        _replace_with_transient_lock_retry(temporary, path)
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def _replace_with_transient_lock_retry(source: Path, target: Path) -> None:
+    """Retry short Windows scanner locks without hiding persistent failures."""
+    retry_delays_seconds = (0.05, 0.1, 0.2, 0.4)
+    for retry_delay_seconds in retry_delays_seconds:
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            time_module.sleep(retry_delay_seconds)
+    os.replace(source, target)
 
 
 def write_receipt(path: str | Path, receipt: Mapping[str, Any]) -> str:

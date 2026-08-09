@@ -23,7 +23,9 @@ from api.schemas.base import BaseResponse
 from api.schemas.line_identity import (
     AdminIdentityBindingRequest,
     CanonicalLineReviewDecisionRequest,
+    CanonicalLineReviewPageResponse,
     CanonicalLineReviewResponse,
+    CanonicalLineReviewSummaryResponse,
     CustomerIdentityRequest,
     LineIdentityApplyResponse,
     LineIdentityCandidateResponse,
@@ -160,21 +162,48 @@ def apply_admin(payload: AdminIdentityBindingRequest):
 
 @review_router.get(
     "",
-    response_model=BaseResponse[list[CanonicalLineReviewResponse]],
+    response_model=BaseResponse[CanonicalLineReviewPageResponse],
     dependencies=[Depends(require_line_identity_reader)],
 )
 def list_reviews(
     review_status: LineReviewStatus | None = LineReviewStatus.PENDING,
     review_type: LineReviewType | None = None,
     page_size: int = Query(default=25, ge=1, le=100),
+    cursor: str | None = Query(default=None, min_length=1, max_length=191),
 ):
     query = LineReviewListQuery(
         statuses=(review_status,) if review_status else (),
         review_types=(review_type,) if review_type else (),
         page_size=page_size,
+        cursor=cursor,
     )
     page = get_line_identity_review_application().list(query)
-    return BaseResponse(data=[_review_response(item) for item in page.items])
+    return BaseResponse(
+        data=CanonicalLineReviewPageResponse(
+            items=[_review_response(item) for item in page.items],
+            next_cursor=page.next_cursor,
+        )
+    )
+
+
+@review_router.get(
+    "/summary",
+    response_model=BaseResponse[CanonicalLineReviewSummaryResponse],
+    dependencies=[Depends(require_line_identity_reader)],
+)
+def review_summary():
+    stale_hours = int(os.getenv("LINE_REVIEW_STALE_HOURS", "24"))
+    summary = get_line_identity_review_application().summary(stale_hours)
+    return BaseResponse(
+        data=CanonicalLineReviewSummaryResponse(
+            pending_total=summary.pending_total,
+            staff_pending=summary.staff_pending,
+            rebind_pending=summary.rebind_pending,
+            processed_today=summary.processed_today,
+            stale_pending=summary.stale_pending,
+            stale_hours=summary.stale_hours,
+        )
+    )
 
 
 @review_router.get(
@@ -300,7 +329,19 @@ def _review_response(snapshot):
         subject_reference=snapshot.subject_reference,
         assigned_admin_id=snapshot.assigned_admin_id,
         due_at=snapshot.due_at,
+        line_user_id_masked=_mask_line_user_id(snapshot.line_user_id.value),
+        display_name=f"{snapshot.subject_type.value} #{snapshot.subject_reference}",
+        decision_reason=snapshot.decision_reason,
+        reviewed_by_actor_id=snapshot.reviewed_by_actor_id,
+        reviewed_at=snapshot.reviewed_at,
+        created_at=snapshot.created_at,
     )
+
+
+def _mask_line_user_id(value: str) -> str:
+    if len(value) <= 8:
+        return value[:2] + "***"
+    return value[:4] + "…" + value[-4:]
 
 
 def _correlation_id(prefix: str) -> CorrelationId:

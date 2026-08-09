@@ -29,6 +29,7 @@ from subsystems.line.review_contracts import (
     DecideLineReviewCommand,
     LineReviewCommandOutcome,
     LineReviewListQuery,
+    LineReviewQueueSummary,
 )
 
 
@@ -60,6 +61,12 @@ class LineIdentityReviewApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.reviews.list(query)
 
+    def summary(self, stale_hours: int) -> LineReviewQueueSummary:
+        if stale_hours < 1 or stale_hours > 720:
+            raise ValueError("LINE review stale hours must be between 1 and 720")
+        with self._unit_of_work_factory() as unit_of_work:
+            return unit_of_work.reviews.summary(stale_hours)
+
     # Kept cohesive to show every side effect inside the caller-owned review transaction.
     def decide(self, command: DecideLineReviewCommand) -> ApplyLineReviewDecisionResult:
         require_line_capability(command.actor, LineCapability.IDENTITY_REVIEW)
@@ -83,9 +90,10 @@ class LineIdentityReviewApplication:
             else:
                 _apply_rejection(unit_of_work, snapshot, command)
             unit_of_work.reviews.decide(command, candidate)
-            resulting = _resulting_snapshot(snapshot, candidate)
+            reviewed_at = self._now()
+            resulting = _resulting_snapshot(snapshot, candidate, reviewed_at)
             _append_decision_facts(unit_of_work, command, candidate, resulting)
-            _enqueue_decision_message(unit_of_work, resulting, command, self._now())
+            _enqueue_decision_message(unit_of_work, resulting, command, reviewed_at)
             unit_of_work.commit()
         return ApplyLineReviewDecisionResult(LineReviewCommandOutcome.CREATED, resulting)
 
@@ -225,7 +233,7 @@ def _enqueue_decision_message(unit_of_work, snapshot, command, scheduled_at):
     unit_of_work.delivery_tasks.enqueue(request)
 
 
-def _resulting_snapshot(snapshot, candidate):
+def _resulting_snapshot(snapshot, candidate, reviewed_at):
     return LineReviewSnapshot(
         snapshot.request_id,
         snapshot.review_type,
@@ -240,6 +248,10 @@ def _resulting_snapshot(snapshot, candidate):
         snapshot.assigned_at,
         snapshot.due_at,
         snapshot.reassignment_count,
+        candidate.actor.actor_id,
+        candidate.reason,
+        reviewed_at,
+        snapshot.created_at,
     )
 
 

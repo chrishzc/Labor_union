@@ -513,7 +513,7 @@ class LineAdminApiClient:
         )
 
     def line_review_summary(self, token: str | None) -> dict[str, Any]:
-        return self._request("GET", "/api/v1/line/review-requests/summary", token=token)
+        return self._request("GET", "/api/v1/line/identity/reviews/summary", token=token)
 
     def line_reviews(
         self,
@@ -523,9 +523,13 @@ class LineAdminApiClient:
     ) -> dict[str, Any]:
         return self._request(
             "GET",
-            "/api/v1/line/review-requests",
+            "/api/v1/line/identity/reviews",
             token=token,
-            params={key: value for key, value in filters.items() if value not in {None, ""}},
+            params={
+                key: value
+                for key, value in filters.items()
+                if value not in {None, ""}
+            },
         )
 
     def line_review_detail(
@@ -535,7 +539,7 @@ class LineAdminApiClient:
     ) -> dict[str, Any]:
         return self._request(
             "GET",
-            f"/api/v1/line/review-requests/{request_id}",
+            f"/api/v1/line/identity/reviews/{request_id}",
             token=token,
         )
 
@@ -546,14 +550,20 @@ class LineAdminApiClient:
         action: str,
         *,
         reason: str,
+        expected_version: int,
+        idempotency_key: str,
     ) -> dict[str, Any]:
         if action not in {"approve", "reject"}:
             raise ValueError("不支援的人工審查操作")
         return self._request(
             "POST",
-            f"/api/v1/line/review-requests/{request_id}/{action}",
+            f"/api/v1/line/identity/reviews/{request_id}/{action}",
             token=token,
-            json={"reason": reason},
+            json={
+                "expected_version": expected_version,
+                "idempotency_key": idempotency_key,
+                "reason": reason,
+            },
         )
 
     def order_groups(

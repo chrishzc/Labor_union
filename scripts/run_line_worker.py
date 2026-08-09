@@ -28,7 +28,6 @@ from infrastructure.line.redis_wakeup import (
 from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
-from line.worker import process_due_tasks, wake_local_worker, worker_loop
 from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.follow_schedule_application import enqueue_follow_schedule
 from subsystems.line.media_application import (
@@ -40,6 +39,7 @@ from subsystems.line.runtime_alert_application import register_group_alert_targe
 from domains.line.media import LineMediaPolicy
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
+from subsystems.line.runtime_cutover import validate_line_worker_runtime
 from subsystems.line.rich_menu_worker import LineRichMenuWorker
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
@@ -60,8 +60,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 
 def main() -> int:
     arguments = _arguments()
-    mode = LineRuntimeMode(arguments.mode)
-    _require_compatible_runtime_modes(mode)
+    os.environ["LINE_WORKER_RUNTIME_MODE"] = arguments.mode
+    mode = validate_line_worker_runtime(os.environ).worker_mode
     worker_identity = arguments.worker_id or _default_worker_identity()
     if arguments.once:
         _run_once(mode, worker_identity)
@@ -80,6 +80,8 @@ def _run_once(mode: LineRuntimeMode, worker_identity: str) -> None:
     if mode is not LineRuntimeMode.LEGACY:
         _canonical_runtime(worker_identity, 60.0).run_once()
     if mode is not LineRuntimeMode.CANONICAL:
+        from line.worker import process_due_tasks
+
         asyncio.run(process_due_tasks())
 
 
@@ -88,6 +90,8 @@ async def _run_legacy_runtime(
     worker_identity: str,
     poll_seconds: float,
 ) -> None:
+    from line.worker import worker_loop
+
     stop_event = threading.Event()
     canonical_task = None
     if mode is LineRuntimeMode.COMPATIBILITY:
@@ -112,6 +116,8 @@ async def _run_legacy_runtime(
 
 
 async def _redis_legacy_wakeup_bridge() -> None:
+    from line.worker import wake_local_worker
+
     redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0").strip()
     if not redis_url:
         return
@@ -297,20 +303,6 @@ def _media_storage_root() -> Path:
     configured = os.getenv("MEDIA_STORAGE_ROOT", ".local_media").strip() or ".local_media"
     path = Path(configured)
     return path if path.is_absolute() else PROJECT_ROOT / path
-
-
-def _require_compatible_runtime_modes(worker_mode: LineRuntimeMode) -> None:
-    webhook_value = os.getenv("LINE_WEBHOOK_RUNTIME_MODE", "legacy").strip().lower()
-    try:
-        webhook_mode = LineRuntimeMode(webhook_value)
-    except ValueError as error:
-        raise RuntimeError("invalid LINE_WEBHOOK_RUNTIME_MODE") from error
-    if worker_mode is LineRuntimeMode.COMPATIBILITY:
-        return
-    if worker_mode is not webhook_mode:
-        raise RuntimeError(
-            "LINE worker and webhook runtime modes must match unless worker uses compatibility"
-        )
 
 
 def _default_worker_identity() -> str:

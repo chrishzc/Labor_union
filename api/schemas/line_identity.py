@@ -63,3 +63,23 @@ class CanonicalLineReviewResponse(BaseModel):
     subject_reference: str | None
     assigned_admin_id: int | None
     due_at: datetime | None
+    line_user_id_masked: str
+    display_name: str
+    decision_reason: str | None
+    reviewed_by_actor_id: str | None
+    reviewed_at: datetime | None
+    created_at: datetime | None
+
+
+class CanonicalLineReviewPageResponse(BaseModel):
+    items: list[CanonicalLineReviewResponse]
+    next_cursor: str | None
+
+
+class CanonicalLineReviewSummaryResponse(BaseModel):
+    pending_total: int
+    staff_pending: int
+    rebind_pending: int
+    processed_today: int
+    stale_pending: int
+    stale_hours: int

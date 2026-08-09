@@ -29,6 +29,7 @@ from subsystems.line.review_contracts import (
     LineReviewCommandOutcome,
     LineReviewListQuery,
     LineReviewPage,
+    LineReviewQueueSummary,
 )
 
 
@@ -355,6 +356,19 @@ class MySqlLineIdentityReviewRepository:
         next_cursor = str(visible_rows[-1]["id"]) if has_more else None
         return LineReviewPage(items, next_cursor)
 
+    def summary(self, stale_hours: int) -> LineReviewQueueSummary:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_REVIEW_SUMMARY_SQL, (stale_hours,))
+            row = optional_row(cursor.fetchone()) or {}
+        return LineReviewQueueSummary(
+            int(row.get("pending_total") or 0),
+            int(row.get("staff_pending") or 0),
+            int(row.get("rebind_pending") or 0),
+            int(row.get("processed_today") or 0),
+            int(row.get("stale_pending") or 0),
+            stale_hours,
+        )
+
     # Kept cohesive because review update and immutable decision event must be atomic.
     def decide(
         self,
@@ -459,6 +473,10 @@ def _review_snapshot(row):
         row.get("assigned_at_utc"),
         row.get("due_at_utc"),
         int(row.get("reassignment_count") or 0),
+        _optional_text(row.get("reviewed_by_actor_id")),
+        _optional_text(row.get("decision_reason")),
+        row.get("reviewed_at_utc"),
+        row.get("created_at_utc"),
     )
 
 
@@ -550,14 +568,26 @@ _REVIEW_SELECT_SQL = (
     "SELECT id,review_type,review_status,aggregate_version,line_user_id,"
     "subject_type,subject_reference,request_fingerprint,"
     "CAST(evidence_snapshot AS CHAR) AS evidence_snapshot,assigned_admin_id,"
-    "assigned_at_utc,due_at_utc,reassignment_count "
+    "assigned_at_utc,due_at_utc,reassignment_count,reviewed_by_actor_id,"
+    "decision_reason,reviewed_at_utc,created_at_utc "
     "FROM line_review_requests WHERE id=%s"
 )
 _REVIEW_LIST_SQL = (
     "SELECT id,review_type,review_status,aggregate_version,line_user_id,"
     "subject_type,subject_reference,request_fingerprint,"
     "CAST(evidence_snapshot AS CHAR) AS evidence_snapshot,assigned_admin_id,"
-    "assigned_at_utc,due_at_utc,reassignment_count FROM line_review_requests"
+    "assigned_at_utc,due_at_utc,reassignment_count,reviewed_by_actor_id,"
+    "decision_reason,reviewed_at_utc,created_at_utc FROM line_review_requests"
+)
+_REVIEW_SUMMARY_SQL = (
+    "SELECT SUM(review_status='pending') AS pending_total,"
+    "SUM(review_status='pending' AND review_type='staff_verification') AS staff_pending,"
+    "SUM(review_status='pending' AND review_type='client_rebind') AS rebind_pending,"
+    "SUM(review_status IN ('approved','rejected') AND reviewed_at_utc >= UTC_DATE()) "
+    "AS processed_today,"
+    "SUM(review_status='pending' AND created_at_utc < "
+    "TIMESTAMPADD(HOUR,-%s,UTC_TIMESTAMP(6))) AS stale_pending "
+    "FROM line_review_requests"
 )
 _REVIEW_SELECT_BY_FLOW_SQL = (
     _REVIEW_LIST_SQL + " WHERE identity_flow_id=%s LIMIT 1"
