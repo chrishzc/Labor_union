@@ -305,7 +305,7 @@ def _schedule_holiday_undecided_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
-        display_fields=("case_no", "holiday_date", "staff_id"),
+        display_fields=("case_no", "holiday_date", "staff_id", "staff_name"),
     )
 
 
@@ -329,7 +329,7 @@ def _schedule_overlap_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
-        display_fields=("assignment_id_a", "assignment_id_b", "staff_id"),
+        display_fields=("assignment_id_a", "assignment_id_b", "staff_id", "staff_name"),
     )
 
 
@@ -341,7 +341,7 @@ def _schedule_holiday_preference_conflict_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
-        display_fields=("case_no", "staff_id", "work_date"),
+        display_fields=("case_no", "staff_id", "staff_name", "work_date"),
     )
 
 

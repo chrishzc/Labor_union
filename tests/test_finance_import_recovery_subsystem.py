@@ -24,7 +24,6 @@ import pytest
 from scripts.imports.finance_statement_normalizer import normalize_workbook
 from subsystems.anomalies.finance_import_review_alert import (
     project_finance_import_review_alert,
-    scan_completed_finance_import_review_alerts,
 )
 from subsystems.anomalies.system_alert_projection import resolve_system_alert
 from domains.finance_import.transaction_classifier import classify_finance_transaction
@@ -1140,20 +1139,6 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
         connection.commit()
     finally:
         connection.close()
-
-    before_scan = _batch_snapshot(connect, batch_id)
-    connection = connect()
-    try:
-        with connection.cursor() as cursor:
-            scan = scan_completed_finance_import_review_alerts(cursor)
-            assert scan["reopened"] >= 1
-        connection.commit()
-    finally:
-        connection.close()
-    after_scan = _batch_snapshot(connect, batch_id)
-    for key in ("rows", "runs", "formal_counts"):
-        assert after_scan[key] == before_scan[key]
-    assert after_scan["system_alerts"][0]["status"] == "open"
 
     _update_row(
         connect,

@@ -230,10 +230,10 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
 
 
-def test_release_chain_drives_schema_artifacts_and_v8_descriptor_presence() -> None:
+def test_release_chain_drives_schema_artifacts_and_v9_descriptor_presence() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-11:] == (
+    assert artifact_names[-12:] == (
         "154_line_integration_inbox_delivery.sql",
         "155_line_identity_review_configuration.sql",
         "156_line_publication_media_order_group.sql",
@@ -245,9 +245,10 @@ def test_release_chain_drives_schema_artifacts_and_v8_descriptor_presence() -> N
         "162_matching_line_communication.sql",
         "163_knowledge_runtime.sql",
         "164_line_rich_menu_preview_bridge.sql",
+        "165_anomaly_workflow_event_idempotency_widen.sql",
     )
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
-    assert runner.RELEASE_MANIFEST.release_id == "labor-union-2026-08-09-v8"
+    assert runner.RELEASE_MANIFEST.release_id == "labor-union-2026-08-09-v9"
     assert runner._descriptor_presence_state(
         {"tables": {"knowledge_items": ["id", "version"]}, "triggers": []},
         {"knowledge_items": {"id", "version"}},

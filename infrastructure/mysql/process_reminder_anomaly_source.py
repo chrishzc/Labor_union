@@ -221,10 +221,11 @@ _SUBSIDY_ADVANCE_REMINDER_SQL = (
 )
 _SCHEDULE_HOLIDAY_UNDECIDED_SQL = (
     "SELECT csa.staff_id, csa.case_no, csa.status, h.holiday_date, h.holiday_name, "
-    "ss.id AS schedule_id "
+    "ss.id AS schedule_id, s.name AS staff_name "
     "FROM case_staff_assignments csa "
     "JOIN holidays h ON h.holiday_date BETWEEN csa.assigned_start_date AND csa.assigned_end_date "
     "LEFT JOIN staff_schedule ss ON ss.staff_id = csa.staff_id AND ss.work_date = h.holiday_date "
+    "JOIN staff s ON s.id = csa.staff_id "
     "WHERE csa.assigned_start_date IS NOT NULL AND csa.assigned_end_date IS NOT NULL"
 )
 _SCHEDULE_REPLACED_SQL = (
@@ -240,18 +241,21 @@ _SCHEDULE_OVERLAP_SQL = (
     "SELECT a.id AS a_id, a.case_no AS a_case_no, a.assigned_start_date AS a_start, "
     "a.assigned_end_date AS a_end, a.status AS a_status, "
     "b.id AS b_id, b.case_no AS b_case_no, b.assigned_start_date AS b_start, "
-    "b.assigned_end_date AS b_end, b.status AS b_status, a.staff_id "
+    "b.assigned_end_date AS b_end, b.status AS b_status, a.staff_id, s.name AS staff_name "
     "FROM case_staff_assignments a "
     "JOIN case_staff_assignments b ON a.staff_id = b.staff_id AND a.id < b.id "
+    "JOIN staff s ON s.id = a.staff_id "
     "WHERE a.assigned_start_date IS NOT NULL AND a.assigned_end_date IS NOT NULL "
     "AND b.assigned_start_date IS NOT NULL AND b.assigned_end_date IS NOT NULL"
 )
 _SCHEDULE_HOLIDAY_PREFERENCE_SQL = (
-    "SELECT ss.staff_id, ss.case_no, ss.work_date, ss.is_work_day, h.holiday_name "
+    "SELECT ss.staff_id, ss.case_no, ss.work_date, ss.is_work_day, h.holiday_name, "
+    "s.name AS staff_name "
     "FROM staff_schedule ss "
     "JOIN holidays h ON h.holiday_date = ss.work_date "
     "JOIN staff_holiday_availability sha "
-    "ON sha.staff_id = ss.staff_id AND sha.holiday_name = '國定假日必休'"
+    "ON sha.staff_id = ss.staff_id AND sha.holiday_name = '國定假日必休' "
+    "JOIN staff s ON s.id = ss.staff_id"
 )
 _CLIENT_LINE_SQL = (
     "SELECT o.case_no, c.line_user_id FROM orders o JOIN clients c ON c.case_no = o.case_no"

@@ -16,10 +16,18 @@ class StaffSummaryApiClient:
         self._base_url = base_url.rstrip("/")
         self._headers = dict(headers)
 
-    def query(self, *, page_size: int = 200, after_id: int | None = None) -> StaffSummaryPageView:
+    def query(
+        self,
+        *,
+        page_size: int = 200,
+        after_id: int | None = None,
+        staff_id: int | None = None,
+    ) -> StaffSummaryPageView:
         parameters = {"page_size": page_size}
         if after_id is not None:
             parameters["after_id"] = after_id
+        if staff_id is not None:
+            parameters["staff_id"] = staff_id
         try:
             response = requests.get(
                 f"{self._base_url}/api/v1/staff/summaries",

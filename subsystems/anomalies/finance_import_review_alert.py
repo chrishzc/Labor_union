@@ -11,13 +11,24 @@ from collections import Counter
 from pathlib import Path
 from typing import Any, Mapping
 
-from subsystems.anomalies.system_alert_projection import (
-    _decode_row,
-    _now,
-    _required_text,
-    get_system_alert,
-    upsert_system_alert,
-)
+from domains.anomalies.registry import DesiredAlertState, default_anomaly_registry
+from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
+from shared_kernel.fingerprints import fingerprint_payload
+from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
+class _BorrowedAnomalyUnitOfWork:
+    """No-op unit of work: the caller's own transaction owns commit/rollback."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exception_type, exception, traceback) -> bool:
+        return False
+
+    def commit(self) -> None:
+        return None
+
+    def rollback(self) -> None:
+        return None
 
 
 ALERT_CODE = "IMPORT-006"
@@ -79,7 +90,13 @@ def _integrity_summary(
     }
 
 
-def project_finance_import_review_alert(cursor: Any, batch_id: int) -> dict[str, Any]:
+def project_finance_import_review_alert(
+    cursor: Any,
+    batch_id: int,
+    *,
+    source_version: int = 0,
+    source_event_identity: str | None = None,
+) -> dict[str, Any]:
     """Project one completed batch into its current IMPORT-006 alert state."""
     if not callable(getattr(cursor, "execute", None)):
         raise AssertionError("cursor must provide execute()")
@@ -90,7 +107,15 @@ def project_finance_import_review_alert(cursor: Any, batch_id: int) -> dict[str,
     remaining, inconsistent = _review_rows(rows)
     latest_run = _load_latest_completed_reprocess_run(cursor, batch_id)
     return _project_batch_integrity_alert(
-        cursor, batch_id, batch, membership_counts, remaining, inconsistent, latest_run
+        cursor,
+        batch_id,
+        batch,
+        membership_counts,
+        remaining,
+        inconsistent,
+        latest_run,
+        source_version,
+        source_event_identity,
     )
 
 
@@ -184,28 +209,122 @@ def _project_batch_integrity_alert(
     remaining: list[Mapping[str, Any]],
     inconsistent: list[Mapping[str, Any]],
     latest_run: Mapping[str, Any] | None,
+    source_version: int,
+    source_event_identity: str | None,
 ) -> dict[str, Any]:
     summary = _projection_summary(batch, membership_counts, remaining, inconsistent, latest_run)
     details = _projection_details(batch_id, batch, summary, remaining, inconsistent, latest_run)
-    case_key = f"finance-import-batch:{batch_id}"
-    if summary["integrity_inconsistent_count"] > 0:
-        result = upsert_system_alert(
-            cursor,
-            alert_code=ALERT_CODE,
-            source_domain=SOURCE_DOMAIN,
-            case_key=case_key,
-            reason=ALERT_LABEL,
-            details=details,
-        )
-    else:
-        result = resolve_current_state_alert(
-            cursor,
-            alert_code=ALERT_CODE,
-            case_key=case_key,
-            reason="銀行對帳匯入已無完整性異常，自動解除",
-            operator="system",
-        )
-    return {"alert_action": result["result"], "summary": summary, "alert": result.get("alert")}
+    result = _project_canonical_import006_alert(
+        cursor,
+        batch_id,
+        summary,
+        details,
+        source_version=source_version,
+        source_event_identity=source_event_identity,
+    )
+    return {"alert_action": result["action"], "summary": summary, "alert": result["alert"]}
+
+
+def _project_canonical_import006_alert(
+    cursor: Any,
+    batch_id: int,
+    summary: Mapping[str, Any],
+    details: Mapping[str, Any],
+    *,
+    source_version: int,
+    source_event_identity: str | None,
+) -> dict[str, Any]:
+    """Project IMPORT-006 through the canonical registry in the caller's UoW."""
+    active = summary["integrity_inconsistent_count"] > 0
+    request = _canonical_projection_request(
+        batch_id,
+        active,
+        summary,
+        details,
+        source_version,
+        source_event_identity,
+    )
+    return _project_canonical_request(cursor, request)
+
+
+def _canonical_projection_request(
+    batch_id,
+    active,
+    summary,
+    details,
+    source_version,
+    source_event_identity,
+):
+    event_identity = source_event_identity or _summary_event_identity(
+        batch_id,
+        active,
+        summary,
+    )
+    desired = DesiredAlertState(
+        definition_code=ALERT_CODE,
+        source_identity=f"finance-import-batch:{batch_id}",
+        source_version=source_version,
+        active=active,
+        fingerprint_values={"batch_id": str(batch_id)},
+    )
+    return ProjectAlertRequest(
+        desired=desired,
+        source_event_identity=event_identity,
+        consumer_identity="finance-import-integrity-anomaly-source-v1",
+        partition_identity=f"finance-import-integrity:{batch_id}",
+        display_snapshot=dict(details),
+    )
+
+
+def _project_canonical_request(cursor, request):
+    registry = default_anomaly_registry()
+    repository = MySqlAnomalyRepository(cursor.connection)
+    already_processed = repository.checkpoint_matches(request)
+    fingerprint = registry.fingerprint(request.desired)
+    loaded = repository.load_current(fingerprint, for_update=True)
+    previous = None if loaded is None else loaded[0]
+    if already_processed:
+        return {"action": "existing", "alert": _alert_view(previous)}
+    application = AnomalyApplication(
+        registry,
+        repository,
+        _BorrowedAnomalyUnitOfWork,
+    )
+    resulting = application.project(request)
+    return {
+        "action": _projection_action(previous, resulting),
+        "alert": _alert_view(resulting),
+    }
+
+
+def _summary_event_identity(batch_id, active, summary) -> str:
+    digest = fingerprint_payload(
+        {"batch_id": batch_id, "active": active, "summary": dict(summary)}
+    ).value
+    return f"finance-import-integrity:{batch_id}:{digest}"
+
+
+def _projection_action(previous, resulting) -> str:
+    if resulting is None or resulting == previous:
+        return "existing"
+    if previous is None:
+        return "created"
+    if not resulting.predicate_active:
+        return "resolved"
+    if not previous.predicate_active:
+        return "reopened"
+    return "updated"
+
+
+def _alert_view(projection) -> dict[str, Any] | None:
+    if projection is None:
+        return None
+    return {
+        "fingerprint": projection.fingerprint.value,
+        "predicate_active": projection.predicate_active,
+        "workflow_status": projection.workflow_status.value,
+        "workflow_version": projection.workflow_version,
+    }
 
 
 def _projection_summary(
@@ -279,70 +398,9 @@ def _last_reprocess_details(latest_run: Mapping[str, Any] | None) -> dict[str, A
     }
 
 
-def scan_completed_finance_import_review_alerts(cursor: Any) -> dict[str, int]:
-    """Re-project IMPORT-006 for every completed Finance Import batch."""
-    if not callable(getattr(cursor, "execute", None)):
-        raise AssertionError("cursor must provide execute()")
-    cursor.execute(
-        """SELECT id
-           FROM finance_import_batches
-           WHERE status='completed'
-           ORDER BY id"""
-    )
-    batches = _mapping_rows(cursor.fetchall())
-    counts = {"created": 0, "updated": 0, "reopened": 0, "resolved": 0, "unchanged": 0}
-    for batch in batches:
-        action = project_finance_import_review_alert(
-            cursor, _positive_id(batch.get("id"), "batch_id")
-        )["alert_action"]
-        if action == "existing":
-            counts["unchanged"] += 1
-        elif action in counts:
-            counts[action] += 1
-        else:
-            raise RuntimeError(f"unsupported IMPORT-006 projection action: {action}")
-    return counts
-
-
-def resolve_current_state_alert(
-    cursor: Any,
-    *,
-    alert_code: str,
-    case_key: str,
-    reason: str,
-    operator: str = "system",
-) -> dict[str, Any]:
-    """Resolve a present open alert while retaining claimed/resolved history."""
-    alert_code = _required_text(alert_code, "alert_code", 50)
-    case_key = _required_text(case_key, "case_key", 100)
-    operator = _required_text(operator, "operator", 100)
-    reason = _required_text(reason, "reason", 500)
-    cursor.execute(
-        """SELECT * FROM system_alerts
-           WHERE alert_code=%s AND case_key=%s
-           FOR UPDATE""",
-        (alert_code, case_key),
-    )
-    alert = cursor.fetchone()
-    if alert is None:
-        return {"result": "existing", "alert": None}
-    if alert["status"] == "resolved":
-        return {"result": "existing", "alert": _decode_row(alert)}
-    cursor.execute(
-        """UPDATE system_alerts
-           SET status='resolved', resolved_by=%s, resolved_at=%s,
-               resolution_reason=%s
-           WHERE id=%s""",
-        (operator, _now(), reason, alert["id"]),
-    )
-    return {"result": "resolved", "alert": get_system_alert(cursor, alert["id"])}
-
-
 __all__ = [
     "ALERT_CODE",
     "ALERT_LABEL",
     "SOURCE_DOMAIN",
     "project_finance_import_review_alert",
-    "resolve_current_state_alert",
-    "scan_completed_finance_import_review_alerts",
 ]

@@ -1,7 +1,7 @@
 {
   "contract": "line-runtime-cutover-release/v1",
   "migration_manifests": [
-    "labor_union_2026_08_09_v8.json"
+    "labor_union_2026_08_09_v9.json"
   ],
   "post_cutover_smoke_ids": [
     "api-health",

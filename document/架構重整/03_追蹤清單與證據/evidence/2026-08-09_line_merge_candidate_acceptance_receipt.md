@@ -21,17 +21,17 @@ The regenerated queue contains 348 adjudicated entries:
 | CLI | 44 |
 | UI | 7 |
 
-Final statuses are 303 `active`, 44 `operator_only`, one `retired_410`, and zero
+Final statuses are 306 `active`, 41 `operator_only`, one `retired_410`, and zero
 `review_required`. The retired HTTP entry is retained only as a typed legacy
 boundary with a documented replacement.
 
 The remote merge added 41 entries and removed 10 superseded entries. All 41 new
 entries were reviewed against their concrete source boundary: 12 Knowledge API,
 11 LINE identity API, three LINE configuration API, three LINE order-group API,
-six runtime-health API, one matching-decision API, and five controlled operator
-CLI entries. Each remains required by a mounted route, canonical worker or
-release/monitoring operation, so the decision is 36 `active` API entries and five
-`operator_only` CLI entries.
+six runtime-health API, one matching-decision API, and five CLI entries. Each was
+checked against mounted routes, real callers and supported process launchers. The
+decision is 36 `active` API entries, three `active` production workers, and two
+`operator_only` bootstrap/readiness commands: 39 active plus two operator-only.
 
 The 10 removed entries are replacements, not lost functions:
 
@@ -46,12 +46,12 @@ and the release test rejects any queue containing an unreviewed entry.
 
 ## Isolated candidate acceptance
 
-Acceptance used disposable database `lu_test_merge_candidate_20260809` on an
-isolated local MySQL container. It did not read or modify the operational
+Acceptance used disposable database `lu_test_candidate_v9` in isolated local
+container `labor_union_candidate_v9_20260810` on port 33109. It did not read or modify the operational
 `mysql_db` container or any other deployment environment.
 
 - Bootstrap applied the base schema and ordered schema parts through
-  `164_line_rich_menu_preview_bridge.sql`.
+  `165_anomaly_workflow_event_idempotency_widen.sql`.
 - Replaying the complete bootstrap succeeded without duplicate or drift errors.
 - Restart followed by read-smoke confirmed the candidate database remained
   readable.
@@ -67,9 +67,9 @@ environment requires separate authorization.
 
 ## Verification
 
-- Full suite: `1473 passed, 61 skipped`.
+- Full suite: `1488 passed, 61 skipped`; static undefined-name/syntax gate: zero findings.
 - OpenAPI smoke: 274 paths; the remote LINE and Knowledge capability groups all
   remain represented.
 - Entry queue generator: 348 entries, zero `review_required`.
 - Release manifests and schema gates cover the ordered local history through
-  schema part 164.
+  schema part 165; v9 adds only the canonical anomaly idempotency-key widening.

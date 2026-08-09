@@ -51,6 +51,11 @@ from ui.api_clients.scheduling_current_api_client import (
 )
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 from ui.pages.scheduling.case_staffing import render_case_staffing
+from ui.pages.scheduling.navigation_state import (
+    clear_staff_calendar_navigation,
+    consume_staff_calendar_selection,
+    staff_option_label,
+)
 from ui.pages.scheduling.leave_substitution_panel import (
     render_leave_substitution_panel,
 )
@@ -116,6 +121,20 @@ def _load_staff_summary_page(workspace: str):
     )
     st.session_state[next_key] = next_cursor
     return rows
+
+
+@st.cache_data(
+    ttl=_REFERENCE_DATA_CACHE_SECONDS,
+    show_spinner=False,
+)
+def _load_staff_summary_by_id(base_url, header_items, staff_id):
+    page = StaffSummaryApiClient(
+        base_url=base_url,
+        headers=dict(header_items),
+    ).query(page_size=1, staff_id=staff_id)
+    if not page.items:
+        return None
+    return page.items[0].model_dump(mode="json")
 
 
 def _render_staff_summary_pagination(workspace: str) -> None:
@@ -505,6 +524,24 @@ def _render_attendance_result(preview):
     st.caption("此處只讀顯示後端計算；正式變更仍須走休假 Preview／Apply。")
 
 
+def _apply_pending_staff_calendar_selection(staff_options):
+    """套用來自異常警示中心的單次導向：預先選好月嫂與年月，並回傳要顯示的說明文字。
+
+    只在有 pending_staff_calendar_staff_id 時動作一次（用 pop 取出並清掉，
+    避免使用者手動切換人員/年月後，下次 rerun 又被異常導向的舊值蓋回去）。
+    """
+    selection = consume_staff_calendar_selection(st.session_state, staff_options)
+    if selection is None:
+        return None
+    st.session_state["cal_staff_main"] = selection.label
+    if selection.year is not None and selection.month is not None:
+        st.session_state["calendar_view_year"] = selection.year
+        st.session_state["calendar_view_month"] = selection.month
+        st.session_state["cal_year_choice"] = selection.year
+        st.session_state["cal_month_choice"] = selection.month
+    return selection.note
+
+
 def _render_staff_calendar():
     """服務人員行事曆與檔期調控獨立頁面入口 (CalendarUI)"""
     st.subheader("服務人員月曆")
@@ -514,6 +551,19 @@ def _render_staff_calendar():
         admin_headers = build_admin_headers()
 
         staff_list = _load_staff_summary_page("calendar")
+        pending_staff_id = st.session_state.get("pending_staff_calendar_staff_id")
+        if pending_staff_id is not None:
+            pending_staff = _load_staff_summary_by_id(
+                resolve_api_base_url(),
+                tuple(sorted(admin_headers.items())),
+                pending_staff_id,
+            )
+            if pending_staff is None:
+                clear_staff_calendar_navigation(st.session_state)
+                st.warning("異常導向的服務人員已不存在，未切換目前月曆選取。")
+                return
+            if all(item.get("id") != pending_staff_id for item in staff_list):
+                staff_list.insert(0, pending_staff)
     except Exception as e:
         st.error(f"初始化載入服務人員資料失敗: {e}")
         return
@@ -526,11 +576,17 @@ def _render_staff_calendar():
 
     try:
         # 1. 選擇月嫂與年月（同一列）
-        staff_options = {f"{s['name']} ({s['phone']})": s['id'] for s in staff_list if s.get('name')}
+        staff_options = {
+            staff_option_label(staff): staff["id"]
+            for staff in staff_list
+            if staff.get("name")
+        }
         if not staff_options:
             st.warning("目前無可用的服務人員姓名資料，無法載入日曆。")
             return
-        
+
+        pending_note = _apply_pending_staff_calendar_selection(staff_options)
+
         today = datetime.today()
         st.session_state.setdefault("calendar_view_year", today.year)
         st.session_state.setdefault("calendar_view_month", today.month)
@@ -539,6 +595,9 @@ def _render_staff_calendar():
         if st.session_state.pop("calendar_reset_choices", False):
             st.session_state["cal_year_choice"] = view_year
             st.session_state["cal_month_choice"] = view_month
+
+        if pending_note:
+            st.warning(pending_note)
 
         staff_col, year_col, month_col = st.columns(3)
         with staff_col:
@@ -1051,6 +1110,8 @@ def _load_order_calendar_detail(base_url, header_items, case_no):
 def show():
     """多月嫂排班集中入口。"""
     st.title("多月嫂排班")
+    if "pending_staff_calendar_staff_id" in st.session_state:
+        st.session_state["scheduling_workspace"] = "服務人員月曆"
     queue_item = nav_helper.current_queue_item(_MATCHING_QUEUE_KEY)
     if queue_item is not None:
         queue = nav_helper.current_queue(_MATCHING_QUEUE_KEY)
@@ -1073,6 +1134,7 @@ def show():
                 orders,
                 staff,
                 preferred_case_no=str(queue_item["case_no"]),
+                default_to_plan=True,
             )
         except Exception as error:
             st.error(f"月嫂配對中心載入失敗：{error}")

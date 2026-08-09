@@ -1625,7 +1625,7 @@ graph TD
 
 ## 第四部分：MCP 與地端行政助理規劃 (大綱)
 
-本部分規劃如何將系統的後端功能封裝為 Model Context Protocol (MCP) 伺服器，並結合地端大型語言模型 (Local LLM) 建構一個能夠語意解析與操作系統的「地端行政助理」。詳細規劃請參閱專屬規格書 [MCP+Agent.md](file:///C:/Users/TMP-214/Desktop/project/Labor_union/document/MCP+Agent.md)。
+本部分保留如何將系統後端封裝為 Model Context Protocol (MCP) 伺服器並結合地端大型語言模型 (Local LLM) 的歷史提案；原 `MCP+Agent.md` 已併入本無損稿並退役，不再保留失效連結。
 
 ### 4.1 專案目標與應用場景
 *   **出勤排假精算**：藉由自然語言操作排班、請假與結束日順延精算。

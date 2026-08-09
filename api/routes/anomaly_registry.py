@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import fields, is_dataclass
 from datetime import date, datetime, time
 from enum import Enum
-from typing import Annotated
+from typing import Annotated, Mapping
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pymysql.err import OperationalError
@@ -169,6 +169,7 @@ def _workflow_request(
 
 def _summary_payload(summary, *, include_snapshot=True):
     projection = summary.projection
+    display_snapshot = dict(summary.display_snapshot)
     return {
         "fingerprint": projection.fingerprint.value,
         "definition_code": projection.definition_code,
@@ -179,12 +180,38 @@ def _summary_payload(summary, *, include_snapshot=True):
         "predicate_active": projection.predicate_active,
         "workflow_status": projection.workflow_status.value,
         "workflow_version": projection.workflow_version,
+        "staff_calendar_navigation": _staff_calendar_navigation(
+            projection.definition_code,
+            display_snapshot,
+        ),
         **(
-            {"display_snapshot": dict(summary.display_snapshot)}
+            {"display_snapshot": display_snapshot}
             if include_snapshot
             else {}
         ),
     }
+
+
+def _staff_calendar_navigation(code: str, snapshot: Mapping[str, object]):
+    date_field_by_code = {
+        "SCHEDULE-001": "holiday_date",
+        "SCHEDULE-005": "work_date",
+    }
+    date_field = date_field_by_code.get(code)
+    target_date = snapshot.get(date_field) if date_field is not None else None
+    if code == "SCHEDULE-003":
+        assignment = snapshot.get("assignment_a")
+        target_date = assignment.get("start") if isinstance(assignment, Mapping) else None
+    staff_id = snapshot.get("staff_id")
+    if isinstance(staff_id, bool) or not isinstance(staff_id, int) or staff_id < 1:
+        return None
+    if not isinstance(target_date, str):
+        return None
+    try:
+        parsed_date = date.fromisoformat(target_date)
+    except ValueError:
+        return None
+    return {"staff_id": staff_id, "target_date": parsed_date.isoformat()}
 
 
 def _detail_payload(detail):

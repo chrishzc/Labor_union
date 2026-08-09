@@ -305,6 +305,7 @@ def build_schedule_holiday_undecided_requests(
         snapshot = {
             "case_no": row.get("case_no"),
             "staff_id": staff_id,
+            "staff_name": row.get("staff_name"),
             "holiday_date": str(holiday_date),
             "holiday_name": row.get("holiday_name"),
         }
@@ -377,6 +378,7 @@ def build_schedule_overlap_requests(
         )
         snapshot = {
             "staff_id": row.get("staff_id"),
+            "staff_name": row.get("staff_name"),
             "assignment_a": {"id": a_id, "case_no": row.get("a_case_no"), "start": str(row.get("a_start")), "end": str(row.get("a_end"))},
             "assignment_b": {"id": b_id, "case_no": row.get("b_case_no"), "start": str(row.get("b_start")), "end": str(row.get("b_end"))},
         }
@@ -406,6 +408,7 @@ def build_schedule_holiday_preference_requests(
         snapshot = {
             "case_no": row.get("case_no"),
             "staff_id": staff_id,
+            "staff_name": row.get("staff_name"),
             "work_date": str(work_date),
             "holiday_name": row.get("holiday_name"),
         }

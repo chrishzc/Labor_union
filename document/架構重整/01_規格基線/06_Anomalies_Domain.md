@@ -43,10 +43,10 @@ Finance Import 的警示依根因分成兩條互斥路由：
    `finance-import-row:<finance_import_row_id>`，同一 canonical row 同時最多一筆 active
    review，顯示於「異常警示中心 → 帳務」。
 2. 解析缺列、fingerprint collision、occurrence 缺失、批次部分完成或狀態矛盾等
-   匯入完整性問題，才以 `IMPORT-006` 投影至 `system_alerts`。Identity 為
+   匯入完整性問題，才以 `IMPORT-006` 投影至 canonical `anomaly_current_alerts`。Identity 為
    `finance-import-batch:<batch_id>`，每 batch 最多一筆，並阻擋該批正式 Apply。
 
-一般 Query 不 scan；只有 import／reprocess outbox 或明確 historical scan Command 可刷新。
+一般 Query 不 scan；只有 import／reprocess outbox 或明確 bounded historical scan Command 可刷新。
 Details 不得保存姓名、完整帳號或 raw payload。`IMPORT-006` 的 sample canonical row ids
 上限為 20。普通待確認帳務不得同時再形成 `IMPORT-006`；若同一 row 另有完整性故障，
 先顯示並處理阻擋型 `IMPORT-006`，完整性恢復後才投影可操作的財務待確認。

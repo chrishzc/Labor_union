@@ -101,7 +101,7 @@ def test_stage10_cutover_release_names_full_migration_chain() -> None:
     release = load_line_cutover_release(json.loads(path.read_text(encoding="utf-8")))
 
     assert release.migration_manifests == (
-        "labor_union_2026_08_09_v8.json",
+        "labor_union_2026_08_09_v9.json",
     )
     assert "legacy-writer-gone" in release.post_cutover_smoke_ids
     assert set(release.required_restart_targets) == {

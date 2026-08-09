@@ -329,11 +329,15 @@ def _import_row(row, ordinal, cursor, application, excel_path):
     case_no = record.get("case_no")
     if not case_no:
         return "review_required"
-    if application.case_exists(str(case_no)):
-        return "skipped_existing"
     validation_errors = validate_hcm_row(raw_row)
     if not isinstance(record.get("created_at"), datetime):
         validation_errors["報名時間(建檔)"] = "報名時間(建檔) 格式無法轉成 datetime"
+    if application.case_exists(str(case_no)):
+        return _replay_existing_hcm_anomaly(
+            case_no,
+            ordinal,
+            validation_errors,
+        )
     if validation_errors:
         _sanitize_hcm_record(record, validation_errors)
     try:
@@ -365,6 +369,16 @@ def _workflow_error_outcome(error):
     if error.error.category.value in review_categories:
         return "review_required"
     raise error
+
+
+def _replay_existing_hcm_anomaly(case_no, ordinal, validation_errors):
+    if not validation_errors:
+        return "skipped_existing"
+    try:
+        _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors)
+    except Exception:
+        return "review_required"
+    return "skipped_existing"
 
 
 def _report_import_failure(error):
@@ -472,12 +486,12 @@ def _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors):
                 source_identity=str(case_no),
                 source_version=1,
                 active=True,
-                display_snapshot={"errors": validation_errors, "row": ordinal},
+                fingerprint_values={"case_no": str(case_no)},
             ),
             source_event_identity=f"hcm-import-validation-{case_no}-{ordinal}",
             consumer_identity="hcm-import-script-v1",
-            partition_identity="default",
-            occurred_at=datetime.now(timezone.utc),
+            partition_identity=f"hcm-import-validation:{case_no}",
+            display_snapshot={"errors": validation_errors, "row": ordinal},
         )
         application.project(request)
     finally:

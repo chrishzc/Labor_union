@@ -27,6 +27,11 @@ class DomainActionView(_StrictModel):
     requires_preview: bool
 
 
+class StaffCalendarNavigationView(_StrictModel):
+    staff_id: int = Field(gt=0)
+    target_date: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+
+
 class AnomalySummaryView(_StrictModel):
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     definition_code: str
@@ -38,6 +43,7 @@ class AnomalySummaryView(_StrictModel):
     workflow_status: str
     workflow_version: int = Field(ge=0)
     display_snapshot: dict[str, Any] | None = None
+    staff_calendar_navigation: StaffCalendarNavigationView | None = None
 
 
 class AnomalyDetailView(_StrictModel):

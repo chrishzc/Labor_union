@@ -59,3 +59,15 @@ correction／ledger 行為。
 - 再次掃描確認 `/api/v1/finance-alerts` 與 `/api/v1/system-alerts` 僅在已退役的 UI
   說明文字中出現；實際路由與 UI client 均使用 `/api/v1/anomalies` 或
   `/api/v1/anomaly-recovery`。
+
+## 遠端異常功能合併裁決（2026-08-10）
+
+- 接受遠端讓 `IMPORT-006` 出現在 canonical 異常中心的功能目的，但拒絕同時維護
+  `system_alerts` 與 `anomaly_current_alerts` 兩份可變 current-state。
+- 初次 Finance Import 完成仍在原交易內投影；正式 historical reprocess 使用既有
+  `finance_import_outbox` 的 `historical_reprocess_completed` 事件，以 durable event id
+  作 monotonic source version，避免 active／inactive 往返時重用 workflow event key。
+- 移除每 60 秒單交易全表掃描 completed batches 的合併版本；一般 Query 與 worker
+  不做 unbounded scan。
+- projector idempotency key 改為 canonical tuple 的 SHA-256 固定長度值；schema v9
+  仍保留欄寬調整，以相容已存在與其他來源的歷史 key。

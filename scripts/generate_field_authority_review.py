@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 INVENTORY_ROOT = ROOT / "document" / "文件整併工作區" / "06_欄位權威性與計算邏輯盤點"
 OUTPUT_PATH = ROOT / "document" / "架構重整" / "03_追蹤清單與證據" / "evidence" / "field_authority_review_v1.md"
 PREVIOUSLY_CLOSED = frozenset({"audit_logs", "crawler_logs", "faq", "finance_import_reclassification_events", "staff_availability"})
+HISTORICAL_COMPATIBILITY = frozenset({"system_alerts"})
 
 
 def main() -> int:
@@ -31,7 +32,7 @@ def _render(documents: list[Path]) -> str:
         "|---|---|---|---|---|",
         rows,
         "",
-        "`order_before_snapshot` has no matching inventory MD and remains outside this review.",
+        "`order_before_snapshot` has no matching inventory MD; its retirement was previously closed and was not repeated.",
     )) + "\n"
 
 
@@ -40,6 +41,8 @@ def _row(path: Path) -> str:
     relative_path = path.relative_to(INVENTORY_ROOT).as_posix()
     if table in PREVIOUSLY_CLOSED:
         return f"| `{relative_path}` | existing retirement record | none | retained historical receipt | unchanged (previously closed) |"
+    if table in HISTORICAL_COMPATIBILITY:
+        return f"| `{relative_path}` | no current writer/query authority | none | preserved legacy rows only | retain historical compatibility data; no mutable current-state authority |"
     owner = _owner_for(relative_path)
     retention = "append-only lineage / audit evidence" if _is_audit_table(table) else "root fact or derived projection retained by owning domain"
     return f"| `{relative_path}` | {owner} typed service/query and schema release | no direct external field contract | {retention} | retain; no unsupported retirement evidence |"

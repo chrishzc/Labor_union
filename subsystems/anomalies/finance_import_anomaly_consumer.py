@@ -10,7 +10,19 @@ from domains.anomalies.registry import default_anomaly_registry
 from domains.anomalies.root_fact_projection import FinanceManualReviewRootFact, RootFactEventOrigin
 from infrastructure.mysql.anomaly_root_fact_projection_repository import MySqlRootFactProjectionRepository
 from shared_kernel.identities import CorrelationId
+from subsystems.anomalies.finance_import_review_alert import (
+    project_finance_import_review_alert,
+)
 from subsystems.anomalies.root_fact_projection_workflow import RootFactProjectionApplication
+
+_OUTBOX_SELECT_SQL = (
+    "SELECT id,intent_type,payload_snapshot,created_at FROM finance_import_outbox "
+    "WHERE intent_type IN ('initial_classification_recorded','dispatch_completed',"
+    "'manual_correction_completed','refund_return_review_recorded',"
+    "'historical_reprocess_completed') AND status IN ('pending','failed') "
+    "AND (next_attempt_at IS NULL OR next_attempt_at<=CURRENT_TIMESTAMP) "
+    "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,9 +66,16 @@ def _consume_next(connection):
         if event is None:
             connection.rollback()
             return None
-        application = _projection_application(connection)
-        for root_fact in _root_facts(connection, event):
-            application.project(root_fact, CorrelationId(f"finance-anomaly:{event['id']}:{root_fact.finance_import_row_id}"))
+        if event["intent_type"] == "historical_reprocess_completed":
+            _project_historical_reprocess_integrity(connection, event)
+        else:
+            application = _projection_application(connection)
+            for root_fact in _root_facts(connection, event):
+                correlation = CorrelationId(
+                    f"finance-anomaly:{event['id']}:"
+                    f"{root_fact.finance_import_row_id}"
+                )
+                application.project(root_fact, correlation)
         _mark_delivered(connection, int(event["id"]))
         connection.commit()
         return True
@@ -68,12 +87,28 @@ def _consume_next(connection):
 
 def _claim_next_event(connection):
     with connection.cursor() as cursor:
-        cursor.execute("SELECT id,intent_type,payload_snapshot,created_at FROM finance_import_outbox WHERE intent_type IN ('initial_classification_recorded','dispatch_completed','manual_correction_completed','refund_return_review_recorded') AND status IN ('pending','failed') AND (next_attempt_at IS NULL OR next_attempt_at<=CURRENT_TIMESTAMP) ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED")
+        cursor.execute(_OUTBOX_SELECT_SQL)
         return cursor.fetchone()
 
 
 def _projection_application(connection):
     return RootFactProjectionApplication(default_anomaly_registry(), MySqlRootFactProjectionRepository(connection), BorrowedProjectionUnitOfWork)
+
+
+def _project_historical_reprocess_integrity(connection, event) -> None:
+    payload = _json_object(event["payload_snapshot"])
+    batch_id = _prefixed_positive_integer(
+        payload.get("batch_identity"),
+        "finance-import-batch:",
+    )
+    event_id = _positive_integer(event["id"])
+    with connection.cursor() as cursor:
+        project_finance_import_review_alert(
+            cursor,
+            batch_id,
+            source_version=event_id,
+            source_event_identity=f"finance-import-historical-reprocess:{event_id}",
+        )
 
 
 def _root_facts(connection, event):

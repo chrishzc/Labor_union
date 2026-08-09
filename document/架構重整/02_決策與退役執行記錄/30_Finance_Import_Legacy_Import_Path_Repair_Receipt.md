@@ -63,7 +63,7 @@ flake8 `E999`（誤判為 null bytes）：轉為 UTF-8，內容未變更。
 `services.client_subsidy_return_transactions.record_client_subsidy_return`，
 但該模組已於重構 commit `2ad0f36` 隨 `subsidy_return` 交易模型一併移除，取而代之
 的是新的 `subsidy_advance` 結算模型（見
-[`25_Client_Refund_Completion_Decision_Package.md`](25_Client_Refund_Completion_Decision_Package.md:22)：
+[`25_Client_Refund_Completion_Decision_Package.md`](25_Client_Refund_Completion_Decision_Package.md) 第 22 行附近：
 「`subsystems/client_finance/subsidy_return_reconciliation.py` 已於零 caller
 的完整 runtime/maintenance caller 掃描後退役，其三個 projection writer 已不存在，
 且不得以相容路徑重新引入」）。
@@ -100,7 +100,7 @@ NotImplementedError`，並在程式碼註解中標明原因與本文件出處。
 - `services/finance_import_states.py`、`finance_import_dispatch.py`、
   `finance_import_application.py`、`finance_import_reprocessing.py`、
   `finance_import_review_alerts.py` 五個 legacy service 本身**未退役**，依
-  [`09_Finance_Import_Domain.md:573-596`](../01_規格基線/09_Finance_Import_Domain.md:573)
+  [`09_Finance_Import_Domain.md`](../01_規格基線/09_Finance_Import_Domain.md) 第 573～596 行
   仍在「現況吸收」階段，尚未開始退役工作前置條件未滿足，本次僅修正其 import
   路徑使其可正常運作，不構成退役完成。
 

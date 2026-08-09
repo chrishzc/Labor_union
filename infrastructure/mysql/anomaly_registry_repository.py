@@ -374,10 +374,16 @@ def _projector_reason(action):
 
 
 def _projector_key(request, action):
-    return (
-        f"anomaly-projector:{request.consumer_identity}:"
-        f"{request.partition_identity}:{request.source_event_identity}:{action}"
+    semantic_key = "\x1f".join(
+        (
+            request.consumer_identity,
+            request.partition_identity,
+            request.source_event_identity,
+            action,
+        )
     )
+    digest = hashlib.sha256(semantic_key.encode("utf-8")).hexdigest()
+    return f"anomaly-projector:{digest}"
 
 
 def _stored_workflow_event(row):

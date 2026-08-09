@@ -61,7 +61,7 @@ No field or table is retired merely because an HTTP route lacks a static caller.
 | `07_財務匯入與警示/finance_import_reclassification_events.md` | existing retirement record | none | retained historical receipt | unchanged (previously closed) |
 | `07_財務匯入與警示/finance_import_reprocess_runs.md` | Finance Import / Anomalies typed service/query and schema release | no direct external field contract | root fact or derived projection retained by owning domain | retain; no unsupported retirement evidence |
 | `07_財務匯入與警示/finance_import_rows.md` | Finance Import / Anomalies typed service/query and schema release | no direct external field contract | root fact or derived projection retained by owning domain | retain; no unsupported retirement evidence |
-| `07_財務匯入與警示/system_alerts.md` | Finance Import / Anomalies typed service/query and schema release | no direct external field contract | root fact or derived projection retained by owning domain | retain; no unsupported retirement evidence |
+| `07_財務匯入與警示/system_alerts.md` | no current writer/query authority | none | preserved legacy rows only | retain historical compatibility data; no mutable current-state authority |
 | `08_LINE與媒體整合/line_confirmation_requests.md` | LINE Integration / Access Control typed service/query and schema release | no direct external field contract | root fact or derived projection retained by owning domain | retain; no unsupported retirement evidence |
 | `08_LINE與媒體整合/line_rich_menu_publications.md` | LINE Integration / Access Control typed service/query and schema release | no direct external field contract | root fact or derived projection retained by owning domain | retain; no unsupported retirement evidence |
 | `08_LINE與媒體整合/line_task_attempts.md` | LINE Integration / Access Control typed service/query and schema release | no direct external field contract | append-only lineage / audit evidence | retain; no unsupported retirement evidence |
@@ -76,4 +76,4 @@ No field or table is retired merely because an HTTP route lacks a static caller.
 | `10_知識與擷取紀錄/crawler_logs.md` | existing retirement record | none | retained historical receipt | unchanged (previously closed) |
 | `10_知識與擷取紀錄/faq.md` | existing retirement record | none | retained historical receipt | unchanged (previously closed) |
 
-`order_before_snapshot` has no matching inventory MD and remains outside this review.
+`order_before_snapshot` has no matching inventory MD; its retirement was previously closed and was not repeated.
