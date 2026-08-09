@@ -61,6 +61,14 @@ class MySqlKnowledgeRetrievalRepository:
             )
         return version
 
+    def retire(self, command) -> int:
+        version = self._transition(command, KnowledgeItemStatus.RETIRED, "retired")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE knowledge_indexes SET index_status='stale' WHERE index_status='ready'"
+            )
+        return version
+
     def request_index_build(self, actor_id: str, idempotency_key: str) -> int:
         with self._connection.cursor() as cursor:
             cursor.execute("SELECT COALESCE(MAX(index_version),0)+1 AS version FROM knowledge_indexes FOR UPDATE")
@@ -191,11 +199,56 @@ class MySqlKnowledgeRetrievalRepository:
             if row["answer_request_id"] and not retry:
                 cursor.execute("UPDATE knowledge_answer_requests SET request_status='failed' WHERE id=%s", (row["answer_request_id"],))
 
-    def list_items(self, limit: int):
-        return self._rows("SELECT id,source_identity,title,lifecycle_status,current_version,source_digest,source_uri,updated_at_utc FROM knowledge_items ORDER BY updated_at_utc DESC,id DESC LIMIT %s", (limit,))
+    def list_items(self, limit: int, lifecycle_status: str | None = None):
+        return self._rows(_LIST_ITEMS, (lifecycle_status, lifecycle_status, limit))
 
-    def list_jobs(self, limit: int):
-        return self._rows("SELECT id,job_type,processing_status,answer_request_id,target_index_version,attempt_count,max_attempts,last_error_code,created_at_utc,completed_at_utc FROM knowledge_jobs ORDER BY created_at_utc DESC,id DESC LIMIT %s", (limit,))
+    def get_item(self, item_id: int):
+        rows = self._rows(_GET_ITEM, (item_id,))
+        return rows[0] if rows else None
+
+    def list_jobs(self, limit: int, processing_status: str | None = None):
+        return self._rows(_LIST_JOBS, (processing_status, processing_status, limit))
+
+    def list_indexes(self, limit: int):
+        return self._rows(_LIST_INDEXES, (limit,))
+
+    def get_answer_request(self, request_id: int):
+        rows = self._rows(_GET_ANSWER_REQUEST, (request_id,))
+        if not rows:
+            return None
+        result = rows[0]
+        result["citations"] = self._rows(_GET_ANSWER_SOURCES, (request_id,))
+        return result
+
+    # A manual retry is a new durable job so its idempotency identity remains immutable.
+    def retry_job(self, job_id: int, actor_id: str, idempotency_key: str) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM knowledge_jobs WHERE idempotency_key=%s", (idempotency_key,))
+            existing = cursor.fetchone()
+            if existing:
+                return int(existing["id"])
+            cursor.execute("SELECT * FROM knowledge_jobs WHERE id=%s FOR UPDATE", (job_id,))
+            source = cursor.fetchone()
+            if source is None:
+                raise LookupError("knowledge_job_not_found")
+            if source["processing_status"] != "failed":
+                raise RuntimeError("knowledge_job_state_conflict")
+            cursor.execute(_INSERT_RETRY_JOB, _retry_job_values(source, actor_id, idempotency_key))
+            retry_id = int(cursor.lastrowid)
+            self._reset_retry_projection(cursor, source)
+        return retry_id
+
+    def _reset_retry_projection(self, cursor, source) -> None:
+        if source["answer_request_id"] is not None:
+            cursor.execute(
+                "UPDATE knowledge_answer_requests SET request_status='pending',completed_at_utc=NULL WHERE id=%s",
+                (source["answer_request_id"],),
+            )
+        if source["target_index_version"] is not None:
+            cursor.execute(
+                "UPDATE knowledge_indexes SET index_status='requested' WHERE index_version=%s",
+                (source["target_index_version"],),
+            )
 
     def next_due_at(self):
         rows = self._rows("SELECT MIN(available_at_utc) AS due_at FROM knowledge_jobs WHERE processing_status IN ('pending','retry_pending')")
@@ -322,6 +375,35 @@ _PUBLISHED_ITEMS = """SELECT i.source_identity,i.title,i.current_version AS sour
 v.content,i.source_digest,i.source_uri FROM knowledge_items i JOIN knowledge_item_versions v
 ON v.item_id=i.id AND v.item_version=i.current_version WHERE i.lifecycle_status='published'
 ORDER BY i.id"""
+_LIST_ITEMS = """SELECT id,source_identity,title,lifecycle_status,current_version,
+source_digest,source_uri,updated_at_utc FROM knowledge_items
+WHERE (%s IS NULL OR lifecycle_status=%s) ORDER BY updated_at_utc DESC,id DESC LIMIT %s"""
+_GET_ITEM = """SELECT i.id,i.source_identity,i.title,i.lifecycle_status,i.current_version,
+i.source_digest,i.source_uri,i.updated_at_utc,v.content FROM knowledge_items i
+JOIN knowledge_item_versions v ON v.item_id=i.id AND v.item_version=i.current_version
+WHERE i.id=%s"""
+_LIST_JOBS = """SELECT id,job_type,processing_status,answer_request_id,target_index_version,
+attempt_count,max_attempts,last_error_code,created_at_utc,completed_at_utc FROM knowledge_jobs
+WHERE (%s IS NULL OR processing_status=%s) ORDER BY created_at_utc DESC,id DESC LIMIT %s"""
+_LIST_INDEXES = """SELECT index_version,index_status,content_set_digest,built_at_utc,created_at_utc
+FROM knowledge_indexes ORDER BY index_version DESC LIMIT %s"""
+_GET_ANSWER_REQUEST = """SELECT q.id,q.question,q.request_status,q.correlation_id,q.created_at_utc,
+q.completed_at_utc,r.answer_text,r.index_version,r.authoritative,r.line_delivery_task_id,r.answered_at_utc
+FROM knowledge_answer_requests q LEFT JOIN knowledge_answer_receipts r ON r.answer_request_id=q.id
+WHERE q.id=%s"""
+_GET_ANSWER_SOURCES = """SELECT s.source_identity,s.source_version,s.safe_excerpt,s.citation_order
+FROM knowledge_answer_sources s JOIN knowledge_answer_receipts r ON r.id=s.answer_receipt_id
+WHERE r.answer_request_id=%s ORDER BY s.citation_order"""
+_INSERT_RETRY_JOB = """INSERT INTO knowledge_jobs
+(job_type,answer_request_id,target_index_version,question,idempotency_key,created_by_actor_id)
+VALUES (%s,%s,%s,%s,%s,%s)"""
+
+
+def _retry_job_values(source, actor_id, idempotency_key):
+    return (
+        source["job_type"], source["answer_request_id"], source["target_index_version"],
+        source["question"], idempotency_key, actor_id,
+    )
 
 
 __all__ = [

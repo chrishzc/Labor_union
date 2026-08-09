@@ -52,6 +52,7 @@ class ContractEvidenceView:
     processing_status: str
     processing_attempts: int
     last_error_code: str | None = None
+    mapping_version: int = 0
 
 
 __all__ = [

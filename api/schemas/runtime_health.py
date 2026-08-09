@@ -30,7 +30,6 @@ class RuntimeHealthEventResponse(BaseModel):
 
 class AlertAdminTargetRequest(BaseModel):
     admin_user_id: int = Field(gt=0)
-    display_name: str = Field(min_length=1, max_length=191)
     minimum_status: str = Field(pattern="^(warning|critical)$")
 
 

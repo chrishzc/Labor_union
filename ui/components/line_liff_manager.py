@@ -18,9 +18,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import has_capability
 
 
-EDIT_ROLES = {"line_manager", "system_admin"}
 FLASH_KEY = "line_liff_flash"
 PAGE_LABELS = {
     "gateway": "入口選擇頁",
@@ -245,7 +245,7 @@ def render_liff_manager(
     flash = st.session_state.pop(FLASH_KEY, None)
     if flash:
         st.success(flash)
-    can_edit = profile.get("role") in EDIT_ROLES
+    can_edit = has_capability(profile, "line.config.manage")
     try:
         state = client.liff_config_state(token)
     except LineAdminApiError as exc:

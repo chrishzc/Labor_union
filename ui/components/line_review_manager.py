@@ -15,12 +15,12 @@ import pandas as pd
 import streamlit as st
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import has_capability
 
 
 FLASH_KEY = "line_review_flash"
 PAGE_KEY = "line_review_page"
 FILTER_KEY = "line_review_filter_signature"
-MANAGER_ROLES = {"line_manager", "system_admin"}
 TAIPEI_TIMEZONE = ZoneInfo("Asia/Taipei")
 TYPE_LABELS = {
     "staff_verification": "月嫂身分認證",
@@ -266,7 +266,7 @@ def render_review_manager(
         st.write("處理原因：", detail.get("decision_reason") or "未填寫")
         return
 
-    if profile.get("role") not in MANAGER_ROLES:
+    if not has_capability(profile, "line.review.decide"):
         st.info("目前帳號可以查看申請；核准或拒絕需要主管權限。")
         return
 

@@ -64,18 +64,31 @@ async def receive_breezysign_webhook(
 @admin_router.get("/evidence")
 def list_contract_evidence(
     limit: int = Query(100, ge=1, le=500),
+    provider_contract_id: str | None = Query(default=None, max_length=191),
+    processing_status: str | None = Query(default=None, max_length=32),
+    cursor: int | None = Query(default=None, gt=0),
     _=Depends(require_contract_evidence_reader),
 ):
     with open_contract_integration_unit_of_work() as unit_of_work:
-        evidence = unit_of_work.contracts.list_evidence(limit)
+        evidence = unit_of_work.contracts.list_evidence(
+            limit,
+            provider_contract_id=provider_contract_id,
+            processing_status=processing_status,
+            before_inbox_id=cursor,
+        )
         unit_of_work.commit()
-    return [_evidence_payload(item) for item in evidence]
+    items = [_evidence_payload(item) for item in evidence]
+    return {
+        "items": items,
+        "next_cursor": items[-1]["inbox_id"] if len(items) == limit else None,
+    }
 
 
 @admin_router.post("/mappings")
 # FastAPI needs the full mutation contract here for OpenAPI and audit middleware.
 def map_contract_evidence(
     body: ContractMappingBody,
+    request: Request,
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     correlation_id: str = Header(..., alias="X-Correlation-ID"),
     principal=Depends(require_contract_evidence_manager),
@@ -96,6 +109,10 @@ def map_contract_evidence(
             unit_of_work.commit()
     except RuntimeError as error:
         raise HTTPException(409, {"code": str(error)}) from error
+    request.state.audit_action = "contract.evidence.map"
+    request.state.audit_resource_type = "external_contract"
+    request.state.audit_resource_id = body.provider_contract_id
+    request.state.audit_details = {"reason": body.reason}
     return {"provider_contract_id": body.provider_contract_id, "version": version}
 
 
@@ -119,6 +136,7 @@ def _evidence_payload(evidence):
         "contract_status": event.contract_status.value,
         "provider_occurred_at": event.occurred_at,
         "internal_contract_identity": evidence.internal_contract_identity,
+        "mapping_version": evidence.mapping_version,
         "processing_status": evidence.processing_status,
         "processing_attempts": evidence.processing_attempts,
         "last_error_code": evidence.last_error_code,

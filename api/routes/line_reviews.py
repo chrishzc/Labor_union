@@ -12,7 +12,7 @@ from typing import NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from api.dependencies.admin_auth import require_line_agent, require_line_manager
+from api.dependencies.admin_auth import require_line_review_decider, require_line_review_reader
 from api.schemas.base import BaseResponse
 from api.schemas.line_reviews import LineReviewDecisionRequest
 from line.worker import wake_worker
@@ -32,7 +32,7 @@ from subsystems.line.identity_review_workflow import (
 router = APIRouter(
     prefix="/api/v1/line/review-requests",
     tags=["LINE Reviews"],
-    dependencies=[Depends(require_line_agent)],
+    dependencies=[Depends(require_line_review_reader)],
 )
 
 
@@ -99,13 +99,13 @@ def review_detail(request_id: int):
 @router.post(
     "/{request_id}/approve",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_manager)],
+    dependencies=[Depends(require_line_review_decider)],
 )
 def approve_review(
     request_id: int,
     payload: LineReviewDecisionRequest,
     request: Request,
-    principal: AdminPrincipal = Depends(require_line_manager),
+    principal: AdminPrincipal = Depends(require_line_review_decider),
 ):
     try:
         result = approve_line_review(
@@ -124,13 +124,13 @@ def approve_review(
 @router.post(
     "/{request_id}/reject",
     response_model=BaseResponse[dict],
-    dependencies=[Depends(require_line_manager)],
+    dependencies=[Depends(require_line_review_decider)],
 )
 def reject_review(
     request_id: int,
     payload: LineReviewDecisionRequest,
     request: Request,
-    principal: AdminPrincipal = Depends(require_line_manager),
+    principal: AdminPrincipal = Depends(require_line_review_decider),
 ):
     try:
         result = reject_line_review(

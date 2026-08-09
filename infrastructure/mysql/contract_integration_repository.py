@@ -95,9 +95,26 @@ class MySqlContractIntegrationRepository:
                 (status, error_code, inbox_id),
             )
 
-    def list_evidence(self, limit: int):
+    def list_evidence(
+        self,
+        limit: int,
+        provider_contract_id: str | None = None,
+        processing_status: str | None = None,
+        before_inbox_id: int | None = None,
+    ):
         with self._connection.cursor() as cursor:
-            cursor.execute(_LIST_EVIDENCE, (limit,))
+            cursor.execute(
+                _LIST_EVIDENCE,
+                (
+                    provider_contract_id,
+                    provider_contract_id,
+                    processing_status,
+                    processing_status,
+                    before_inbox_id,
+                    before_inbox_id,
+                    limit,
+                ),
+            )
             rows = cursor.fetchall() or ()
         return tuple(_evidence(row) for row in rows)
 
@@ -184,7 +201,7 @@ def _evidence(row):
     return ContractEvidenceView(
         int(row["id"]), event, row.get("internal_contract_identity"),
         str(row["processing_status"]), int(row["processing_attempts"]),
-        row.get("last_error_code"),
+        row.get("last_error_code"), int(row.get("mapping_version") or 0),
     )
 
 
@@ -251,15 +268,18 @@ _INSERT_INBOX = """INSERT INTO contract_webhook_inbox
 (provider,provider_event_id,provider_contract_id,provider_event_type,
 provider_contract_status,provider_occurred_at_utc,canonical_payload_hash,
 minimal_payload_json,received_at_utc) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"""
-_CLAIM_NEXT = """SELECT i.*,m.internal_contract_identity FROM contract_webhook_inbox i
+_CLAIM_NEXT = """SELECT i.*,m.internal_contract_identity,m.version AS mapping_version FROM contract_webhook_inbox i
 LEFT JOIN contract_provider_mappings m ON m.provider=i.provider
 AND m.provider_contract_id=i.provider_contract_id AND m.mapping_status='active'
 WHERE i.processing_status IN ('received','retry_pending') AND i.available_at_utc<=%s
 AND (i.lease_expires_at_utc IS NULL OR i.lease_expires_at_utc<=%s)
 ORDER BY i.available_at_utc,i.id LIMIT 1 FOR UPDATE SKIP LOCKED"""
-_LIST_EVIDENCE = """SELECT i.*,m.internal_contract_identity FROM contract_webhook_inbox i
+_LIST_EVIDENCE = """SELECT i.*,m.internal_contract_identity,m.version AS mapping_version FROM contract_webhook_inbox i
 LEFT JOIN contract_provider_mappings m ON m.provider=i.provider
 AND m.provider_contract_id=i.provider_contract_id AND m.mapping_status='active'
+WHERE (%s IS NULL OR i.provider_contract_id=%s)
+AND (%s IS NULL OR i.processing_status=%s)
+AND (%s IS NULL OR i.id<%s)
 ORDER BY i.received_at_utc DESC,i.id DESC LIMIT %s"""
 _INSERT_EXTERNAL_EVENT = """INSERT INTO external_contract_events
 (inbox_id,provider,provider_event_id,provider_contract_id,internal_contract_identity,

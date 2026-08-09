@@ -21,6 +21,7 @@ from api.exception_handlers.assignment_leave_resolution import (
 from api.middleware.compression import ResponseCompressionMiddleware
 from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
+    admin_audit,
     admin_auth,
     anomaly_recovery,
     anomaly_registry,
@@ -155,6 +156,7 @@ app.mount("/static", StaticFiles(directory="line/static"), name="static")
 app.include_router(line_router)
 app.include_router(contract_integration.public_router)
 app.include_router(admin_auth.router)
+app.include_router(admin_audit.router)
 app.include_router(line_admin.router)
 app.include_router(line_configurations.router)
 app.include_router(line_tasks.router)

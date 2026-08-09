@@ -26,6 +26,12 @@ class KnowledgeApplication:
             unit_of_work.commit()
         return version
 
+    def retire(self, command) -> int:
+        with self._unit_of_work() as unit_of_work:
+            version = unit_of_work.knowledge.retire(command)
+            unit_of_work.commit()
+        return version
+
     def request_index_build(self, actor_id: str, idempotency_key: str) -> int:
         with self._unit_of_work() as unit_of_work:
             job_id = unit_of_work.knowledge.request_index_build(actor_id, idempotency_key)
@@ -38,15 +44,36 @@ class KnowledgeApplication:
             unit_of_work.commit()
         return result
 
-    def list_items(self, limit: int):
+    def list_items(self, limit: int, lifecycle_status: str | None = None):
         with self._unit_of_work() as unit_of_work:
-            result = unit_of_work.knowledge.list_items(limit)
+            result = unit_of_work.knowledge.list_items(limit, lifecycle_status)
             unit_of_work.commit()
         return result
 
-    def list_jobs(self, limit: int):
+    def get_item(self, item_id: int):
+        return self._query("get_item", item_id)
+
+    def list_jobs(self, limit: int, processing_status: str | None = None):
         with self._unit_of_work() as unit_of_work:
-            result = unit_of_work.knowledge.list_jobs(limit)
+            result = unit_of_work.knowledge.list_jobs(limit, processing_status)
+            unit_of_work.commit()
+        return result
+
+    def list_indexes(self, limit: int):
+        return self._query("list_indexes", limit)
+
+    def get_answer_request(self, request_id: int):
+        return self._query("get_answer_request", request_id)
+
+    def retry_job(self, job_id: int, actor_id: str, idempotency_key: str) -> int:
+        with self._unit_of_work() as unit_of_work:
+            result = unit_of_work.knowledge.retry_job(job_id, actor_id, idempotency_key)
+            unit_of_work.commit()
+        return result
+
+    def _query(self, method: str, *args):
+        with self._unit_of_work() as unit_of_work:
+            result = getattr(unit_of_work.knowledge, method)(*args)
             unit_of_work.commit()
         return result
 

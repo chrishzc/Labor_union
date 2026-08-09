@@ -91,14 +91,32 @@ class MySqlRuntimeMonitorRepository:
             cursor.execute(_UPSERT_GROUP_TARGET, (group_id, display_name, actor_id))
         return not exists
 
-    def add_admin_target(self, admin_user_id: int, display_name: str, minimum_status: str, actor_id: str):
+    def add_admin_target(
+        self,
+        admin_user_id: int,
+        minimum_status: str,
+        actor_id: str,
+    ) -> int:
         with self._connection.cursor() as cursor:
-            cursor.execute(_UPSERT_ADMIN_TARGET, (admin_user_id, display_name, minimum_status, actor_id))
-            return int(cursor.lastrowid or 0)
+            cursor.execute(_LINKED_ADMIN, (admin_user_id,))
+            admin = cursor.fetchone()
+            if admin is None:
+                raise LookupError("line_alert_admin_not_linked")
+            cursor.execute(
+                _UPSERT_ADMIN_TARGET,
+                (admin_user_id, admin["display_name"], minimum_status, actor_id),
+            )
+            cursor.execute(_ADMIN_TARGET_ID, (admin_user_id,))
+            return int(cursor.fetchone()["id"])
 
     def list_targets(self):
         with self._connection.cursor() as cursor:
             cursor.execute(_LIST_TARGETS)
+            return tuple(cursor.fetchall() or ())
+
+    def list_admin_alert_candidates(self):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_LIST_ADMIN_ALERT_CANDIDATES)
             return tuple(cursor.fetchall() or ())
 
     def set_target_enabled(self, target_id: int, enabled: bool) -> bool:
@@ -130,7 +148,8 @@ def _health_record(row):
     return RuntimeHealthRecord(str(row["check_name"]), str(row["component"]), str(row["health_status"]),
         str(row["raw_status"]), str(row["message"]), row.get("response_ms"),
         int(row["consecutive_failures"]), int(row["consecutive_successes"]),
-        aware_utc(row["checked_at_utc"]), aware_utc(row["status_changed_at_utc"]))
+        aware_utc(row["checked_at_utc"]), aware_utc(row["status_changed_at_utc"]),
+        _json_object(row.get("details_snapshot")))
 
 
 def _health_event(row):
@@ -158,11 +177,28 @@ _UPSERT_ADMIN_TARGET = """INSERT INTO line_alert_notification_targets
 (target_type,admin_user_id,display_name,enabled,minimum_status,created_by_actor_id) VALUES ('admin_user',%s,%s,TRUE,%s,%s)
 ON DUPLICATE KEY UPDATE display_name=VALUES(display_name),minimum_status=VALUES(minimum_status),enabled=TRUE"""
 _LIST_TARGETS = "SELECT id,target_type,admin_user_id,group_id,display_name,enabled,minimum_status,created_at_utc,updated_at_utc FROM line_alert_notification_targets ORDER BY id"
+_LIST_ADMIN_ALERT_CANDIDATES = """SELECT id,display_name,role,
+(linked_line_user_id IS NOT NULL) AS line_linked FROM admin_users
+WHERE enabled=TRUE AND linked_line_user_id IS NOT NULL ORDER BY display_name,id"""
+_LINKED_ADMIN = """SELECT display_name FROM admin_users
+WHERE id=%s AND enabled=TRUE AND linked_line_user_id IS NOT NULL"""
+_ADMIN_TARGET_ID = """SELECT id FROM line_alert_notification_targets
+WHERE target_type='admin_user' AND admin_user_id=%s"""
 _PENDING_TARGETS = """SELECT t.id,t.target_type,t.group_id,t.minimum_status,a.linked_line_user_id,e.resulting_status,e.check_name,e.message,e.occurred_at_utc
 FROM runtime_health_events e JOIN line_alert_notification_targets t ON t.enabled=TRUE
 LEFT JOIN admin_users a ON a.id=t.admin_user_id
 LEFT JOIN line_alert_delivery_intents i ON i.health_event_id=e.id AND i.target_id=t.id
 WHERE e.id=%s AND i.id IS NULL"""
 _INSERT_ALERT_INTENT = "INSERT INTO line_alert_delivery_intents (health_event_id,target_id,delivery_task_id,projection_status,resolved_line_target_type,resolved_line_target_id,error_code) VALUES (%s,%s,%s,%s,%s,%s,%s)"
+
+
+def _json_object(value):
+    if isinstance(value, dict):
+        return value
+    try:
+        parsed = json.loads(value or "{}")
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 __all__ = ["MySqlRuntimeMonitorRepository"]

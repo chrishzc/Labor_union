@@ -35,6 +35,11 @@ class PublishKnowledgeItemCommand(ReviewKnowledgeItemCommand):
 
 
 @dataclass(frozen=True, slots=True)
+class RetireKnowledgeItemCommand(ReviewKnowledgeItemCommand):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
 class AskKnowledgeQuestionCommand:
     question: str
     requester_line_user_id: str | None
@@ -54,6 +59,6 @@ __all__ = [
     "IngestKnowledgeSourceCommand",
     "KnowledgeAnswerReceipt",
     "PublishKnowledgeItemCommand",
+    "RetireKnowledgeItemCommand",
     "ReviewKnowledgeItemCommand",
 ]
-

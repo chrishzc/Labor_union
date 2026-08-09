@@ -18,6 +18,9 @@ from api.schemas.base import BaseResponse
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
 from subsystems.line.runtime_health import classify_line_worker_health
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.access.integration_capabilities import integration_capabilities_for_role
+from subsystems.line.capabilities import line_capabilities_for_role
 
 
 router = APIRouter(
@@ -31,6 +34,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 def _configured(name: str) -> bool:
     value = os.getenv(name, "").strip()
     return bool(value and not value.startswith("your_") and value != "mock_token")
+
+
+def _enabled(name: str) -> bool:
+    return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _database_health() -> dict:
@@ -84,11 +91,20 @@ def line_admin_health():
 
 
 @router.get("/capabilities", response_model=BaseResponse[dict])
-def line_admin_capabilities():
+# Keep this projection together so operators can audit capability and feature drift in one response.
+def line_admin_capabilities(
+    principal: AdminPrincipal = Depends(require_line_viewer),
+):
     return BaseResponse(
         data={
-            "stage": "5.6",
-            "available": {
+            "stage": "9",
+            "effective_capabilities": sorted(
+                {
+                    *line_capabilities_for_role(principal.role),
+                    *integration_capabilities_for_role(principal.role),
+                }
+            ),
+            "features": {
                 "health_overview": True,
                 "message_template_api": True,
                 "message_schedule_api": True,
@@ -108,12 +124,19 @@ def line_admin_capabilities():
                 "admin_session": True,
                 "role_permissions": True,
                 "audit_log": True,
+                "order_group_management": True,
+                "contract_evidence": True,
+                "knowledge_management": True,
             },
-            "planned_pages": [
-                "LINE 設定中心",
-                "客服入口",
-                "操作紀錄",
-            ],
+            "runtime_availability": {
+                "line_worker_enabled": True,
+                "contract_worker_enabled": _enabled(
+                    "CONTRACT_INTEGRATION_RUNTIME_ENABLED"
+                ),
+                "knowledge_worker_enabled": _enabled(
+                    "KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED"
+                ),
+            },
             "config_files": {
                 "message_templates": (PROJECT_ROOT / "config/message_templates.json").exists(),
                 "message_schedules": (PROJECT_ROOT / "config/message_schedules.json").exists(),

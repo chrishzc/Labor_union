@@ -25,6 +25,7 @@ class LineCapability(StrEnum):
     ORDER_GROUP_BIND = "line.order_group.bind"
     MONITOR_READ = "line.monitor.read"
     ALERT_MANAGE = "line.alert.manage"
+    AUDIT_READ = "line.audit.read"
     MATCHING_READ = "line.matching.read"
     MATCHING_SEND = "line.matching.send"
     MATCHING_OVERRIDE = "line.matching.override"

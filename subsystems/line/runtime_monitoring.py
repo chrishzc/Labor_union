@@ -49,6 +49,7 @@ class RuntimeHealthRecord:
     consecutive_successes: int
     checked_at: datetime
     status_changed_at: datetime
+    details: dict[str, object] | None = None
 
 
 @dataclass(frozen=True, slots=True)

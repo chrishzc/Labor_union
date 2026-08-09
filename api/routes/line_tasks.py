@@ -252,7 +252,6 @@ def _message_preview(payload_json: str) -> str:
 
 def _legacy_task_type(source_type: str) -> str:
     return {
-        "rag_reply": "rag_reply",
         "rich_menu_link": "rich_menu_link",
         "rich_menu_unlink": "rich_menu_unlink",
     }.get(source_type, "line_push")
