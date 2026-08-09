@@ -1,0 +1,106 @@
+{
+  "application_compatibility": {
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "line-integration-v1",
+      "line-runtime-v1",
+      "line-identity-v1"
+    ],
+    "minimum_api_contract": "typed-api-v1",
+    "post_cutover_smoke_ids": [
+      "line-identity-owned-objects",
+      "line-liff-token-verification",
+      "line-review-capability"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "artifacts": [
+    {
+      "dependencies": [],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "158_line_identity_runtime.sql",
+      "relative_path": "db/schema_parts/158_line_identity_runtime.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-identity-facts",
+      "sha256": "1bfc6779618074664c5f7a833510ad6722b4fb9d8183041359816d7faeb0d8a0"
+    }
+  ],
+  "backfills": [],
+  "contract": "migration-release-manifest/v1",
+  "descriptor_artifact": {
+    "dependencies": [],
+    "name": "labor_union_2026_08_08_line_stage4_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_08_line_stage4_v1.descriptors.json",
+    "sha256": "f78a9b10bb640de9fcd36688ab2101cbdd3a2d60663762d5df0a668df55341a1"
+  },
+  "release_id": "labor-union-line-stage4-2026-08-08-v1",
+  "release_metadata": {
+    "application_version": "line-identity-v1",
+    "description": "Canonical LINE friend state, LIFF identity, and human review workflows",
+    "published_at": "2026-08-08",
+    "release_name": "Labor Union LINE identity stage 4 v1"
+  },
+  "source_baseline": {
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "baseline_id": "line-stage3-v1",
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "source_must_be_read_only": true
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {
+      "blocking": true,
+      "phase": "post-restore",
+      "policy": "restored-schema-programs-equivalent",
+      "read_only": true,
+      "verification_id": "restored-schema-programs"
+    },
+    {
+      "blocking": true,
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "verification_id": "owned-object-descriptors"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "liff-public-identity-evidence-verified",
+      "read_only": true,
+      "verification_id": "line-liff-token-verification"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "human-review-requires-admin-principal-and-capability",
+      "read_only": true,
+      "verification_id": "line-review-capability"
+    }
+  ]
+}

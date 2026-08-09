@@ -1,6 +1,33 @@
 # LINE／LIFF 可編輯設定規格
 
-本目錄保存可由 Web 或 UI 管理端透過 FastAPI 修改的靜態設定。前端不應直接讀寫檔案，而應串接 `/api/config` API；後端會使用 Pydantic 驗證並以原子替換方式寫入 JSON。
+本目錄保存 LINE 設定的**初始 bootstrap JSON**。自重構第 5 階段起，正式執行時的唯一資料來源是 MySQL `line_configuration_revisions`；Web／UI 不應直接讀寫本目錄，也不應再把 JSON 檔當成 runtime 設定。
+
+正式設定流程：
+
+```text
+config/*.json（只提供第一次初始化）
+  → scripts/bootstrap_line_configuration.py --apply
+  → MySQL 版本化設定
+  → /api/v1/line/configurations/{kind}
+```
+
+初始化前可只驗證 JSON，不寫 DB：
+
+```powershell
+.venv\Scripts\python.exe scripts\bootstrap_line_configuration.py
+```
+
+Stage 5 migration 套用完成後，才可用 `--apply` 寫入目前仍缺少的 revision-0 設定；已有正式 revision 的種類不會被 JSON 覆蓋。舊 `/api/config/*` 路由仍暫時保留給尚未於階段 9 移植的管理 UI，相容期內不得作為新功能的寫入入口。
+
+Canonical 設定 API：
+
+```text
+GET  /api/v1/line/configurations/{kind}
+POST /api/v1/line/configurations/{kind}/preview
+PUT  /api/v1/line/configurations/{kind}
+```
+
+`kind` 可為 `message_templates`、`message_schedules`、`rich_menus`、`liff` 或 `customer_service`。修改須帶 expected revision、idempotency key、correlation ID 與修改原因；衝突會回 409，不會靜默覆蓋。
 
 ## 設定檔
 
@@ -154,11 +181,11 @@ PUT /api/config/message-schedules
 
 重新綁定待審資料不再存放於 `config`。月嫂驗證與客戶重新綁定均保存在 MySQL `line_confirmation_requests`，`config` 目錄只保存可由管理介面維護的靜態設定。
 
-## 圖片與附件儲存建議（後續工作）
+## 圖片與附件儲存
 
-目前 `db/schema.sql` 沒有圖片、附件或媒體資料表。本次不修改 DB。
+重構 Schema 已建立 `line_media_objects` 保存 LINE 媒體中繼資料，並以 `line_domain_outbox` 可靠排程下載；Rich Menu 發布則以內容雜湊保存產生圖片。圖片本體位於 `MEDIA_STORAGE_ROOT` 指向的 filesystem 或 NAS，DB 不保存大型 BLOB。
 
-後續建議建立共用 `media_assets` 表，Rich Menu 圖片與 LINE 用戶照片共用，以欄位分類：
+若後續要讓非 LINE 功能共用媒體，可另由 Media domain 建立跨功能 `media_assets`，建議欄位如下：
 
 ```text
 id
@@ -179,8 +206,8 @@ deleted_at
 
 不建議將圖片二進位直接存 MySQL BLOB。建議優先順序：
 
-1. 正式環境：S3 相容物件儲存，例如 Cloudflare R2、AWS S3 或 MinIO。
-2. 地端環境：NAS 或專用媒體目錄，DB 只保存路徑與中繼資料。
+1. 正式地端環境：NAS 或受控專用媒體目錄，DB 只保存 storage key 與中繼資料。
+2. 未來雲端環境：S3 相容物件儲存，例如 Cloudflare R2、AWS S3 或 MinIO。
 3. 開發環境：專案外的 writable media 目錄，避免把用戶照片提交 Git。
 
 LINE 用戶照片應在 Webhook 收到 message ID 後下載至受控儲存區，再建立 `media_assets` 紀錄；不要長期依賴 LINE 暫時下載網址。

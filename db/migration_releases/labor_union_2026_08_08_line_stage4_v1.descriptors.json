@@ -1,0 +1,35 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "158_line_identity_runtime.sql": {
+      "tables": {
+        "line_friend_state_events": [
+          "id", "event_identity", "line_user_id", "event_type", "before_status",
+          "after_status", "expected_version", "resulting_version",
+          "occurred_at_utc", "created_at_utc"
+        ],
+        "line_identity_bindings": [
+          "active_subject_key"
+        ],
+        "line_identity_flows": [
+          "flow_id", "flow_purpose", "line_user_id", "flow_status",
+          "expires_at_utc", "used_at_utc", "attempt_count", "idempotency_key",
+          "correlation_id", "created_at_utc", "updated_at_utc"
+        ],
+        "line_platform_users": [
+          "line_user_id", "friend_status", "first_followed_at_utc",
+          "last_followed_at_utc", "blocked_at_utc", "last_event_at_utc",
+          "aggregate_version", "created_at_utc", "updated_at_utc"
+        ],
+        "line_review_requests": [
+          "identity_flow_id", "request_idempotency_key",
+          "request_correlation_id"
+        ]
+      },
+      "triggers": [
+        "trg_line_friend_state_events_before_delete",
+        "trg_line_friend_state_events_before_update"
+      ]
+    }
+  }
+}

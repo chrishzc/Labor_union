@@ -1,1 +1,1 @@
-"""Knowledge Retrieval subsystem boundaries."""
+"""Knowledge Retrieval application contracts and orchestration."""

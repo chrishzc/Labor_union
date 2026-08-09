@@ -1,7 +1,7 @@
 """
 ================================================================================
 檔案名稱: api/main.py
-功能說明: FastAPI 主程序，統一掛載 LINE、LIFF、管理介面與其他後端 API，並管理 LINE Worker 生命週期
+功能說明: FastAPI 主程序，掛載 LINE、LIFF、管理介面與其他後端 API；LINE Worker 由獨立程序管理
 ================================================================================
 """
 
@@ -18,8 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from api.middleware.compression import ResponseCompressionMiddleware
 from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
-    admin_auth,
     admin_audit,
+    admin_auth,
     anomaly_recovery,
     anomaly_registry,
     assignment_plan,
@@ -40,10 +40,15 @@ from api.routes import (
     holidays,
     leave_substitution,
     line_admin,
+    line_configurations,
+    line_identity,
+    line_order_groups,
     line_rich_menus,
     line_reviews,
+    runtime_health,
     line_system_config,
     line_tasks,
+    knowledge_retrieval,
     match_records,
     matches,
     multi_caregiver_case_assignments,
@@ -64,7 +69,6 @@ from api.routes import (
     payroll_rebuild,
     schedule,
     jobs,
-    knowledge_retrieval,
     scheduling_current,
     staff,
     staff_monthly_schedule,
@@ -79,8 +83,8 @@ from api.routes import (
 
 
 from api.schemas.base import BaseResponse
+from api.dependencies.line_runtime import line_webhook_runtime_mode
 from line.line_bot import router as line_router
-from line.worker import start_worker, stop_worker
 from subsystems.access.authentication_session import record_admin_audit
 from subsystems.access.security_audit_retention_worker import (
     start_security_audit_retention_worker,
@@ -110,10 +114,10 @@ def _background_workers_enabled() -> bool:
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    line_webhook_runtime_mode()
     if not _background_workers_enabled():
         yield
         return
-    line_worker_task = start_worker()
     architecture_worker_task = start_architecture_outbox_worker()
     security_audit_worker_task = start_security_audit_retention_worker()
     try:
@@ -121,7 +125,6 @@ async def lifespan(_: FastAPI):
     finally:
         await stop_security_audit_retention_worker(security_audit_worker_task)
         await stop_architecture_outbox_worker(architecture_worker_task)
-        await stop_worker(line_worker_task)
 
 
 app = FastAPI(
@@ -153,9 +156,14 @@ app.include_router(admin_auth.router)
 app.include_router(admin_audit.router)
 app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
+app.include_router(line_configurations.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
 app.include_router(line_reviews.router)
+app.include_router(line_identity.public_router)
+app.include_router(line_identity.review_router)
+app.include_router(line_identity.page_router)
+app.include_router(line_order_groups.router)
 app.include_router(knowledge_retrieval.router)
 
 # Existing administration API routers.
@@ -209,6 +217,7 @@ app.include_router(anomaly_registry.router)
 app.include_router(anomaly_recovery.router)
 app.include_router(data_browser_admin.router)
 app.include_router(system_status.router)
+app.include_router(runtime_health.router)
 
 
 

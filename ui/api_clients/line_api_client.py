@@ -20,10 +20,62 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
 
 
+_STATUS_ERRORS = {
+    401: ("unauthorized", "admin_session_invalid", "登入已失效，請重新登入。", False),
+    403: ("forbidden", "admin_capability_denied", "目前帳號沒有執行此操作的權限。", False),
+    409: ("conflict", "resource_version_conflict", "資料已更新，請重新載入後再操作。", False),
+    503: ("unavailable", "service_temporarily_unavailable", "服務暫時無法使用，請稍後重試。", True),
+}
+
+
 class LineAdminApiError(RuntimeError):
-    def __init__(self, message: str, *, status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        category: str = "internal",
+        code: str = "line_admin_request_failed",
+        correlation_id: str | None = None,
+        retryable: bool = False,
+    ) -> None:
         super().__init__(message)
         self.status_code = status_code
+        self.category = category
+        self.code = code
+        self.correlation_id = correlation_id
+        self.retryable = retryable
+
+
+def _response_error(status_code: int, payload: Any, response_text: str) -> LineAdminApiError:
+    category, fallback_code, fallback_message, retryable = _STATUS_ERRORS.get(
+        status_code,
+        ("validation" if status_code == 422 else "internal", "line_admin_request_failed", "API 請求失敗", status_code >= 500),
+    )
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    detail_object = detail if isinstance(detail, dict) else {}
+    message = fallback_message if status_code in _STATUS_ERRORS else _detail_message(detail, response_text)
+    return LineAdminApiError(
+        message,
+        status_code=status_code,
+        category=category,
+        code=str(detail_object.get("code") or fallback_code),
+        correlation_id=_correlation_id(payload, detail_object),
+        retryable=bool(detail_object.get("retryable", retryable)),
+    )
+
+
+def _detail_message(detail: Any, response_text: str) -> str:
+    if isinstance(detail, dict):
+        return str(detail.get("message") or detail.get("code") or "API 請求失敗")
+    return str(detail or response_text or "API 請求失敗")
+
+
+def _correlation_id(payload: Any, detail: dict[str, Any]) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    value = detail.get("correlation_id") or payload.get("correlation_id")
+    return str(value) if value else None
 
 
 class LineAdminApiClient:
@@ -77,18 +129,42 @@ class LineAdminApiClient:
                 timeout=8,
             )
         except requests.RequestException as exc:
-            raise LineAdminApiError(f"無法連線到 FastAPI：{exc}") from exc
+            raise LineAdminApiError(
+                f"無法連線到 FastAPI：{exc}",
+                category="unavailable",
+                code="line_admin_transport_unavailable",
+                retryable=True,
+            ) from exc
 
         try:
             payload = response.json()
         except ValueError:
             payload = None
         if not response.ok:
-            detail = payload.get("detail") if isinstance(payload, dict) else response.text
-            raise LineAdminApiError(str(detail or "API 請求失敗"), status_code=response.status_code)
+            raise _response_error(response.status_code, payload, response.text)
         if isinstance(payload, dict) and "data" in payload:
             return payload["data"]
         return payload
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        token: str | None = None,
+        json: dict[str, Any] | None = None,
+        extra_headers: dict[str, str] | None = None,
+        params: dict[str, Any] | None = None,
+    ) -> Any:
+        """Expose the shared authenticated transport to bounded domain clients."""
+        return self._request(
+            method,
+            path,
+            token=token,
+            json=json,
+            extra_headers=extra_headers,
+            params=params,
+        )
 
     def _request_bytes(
         self,
@@ -108,13 +184,18 @@ class LineAdminApiClient:
                 timeout=15,
             )
         except requests.RequestException as exc:
-            raise LineAdminApiError(f"無法連線到 FastAPI：{exc}") from exc
+            raise LineAdminApiError(
+                f"無法連線到 FastAPI：{exc}",
+                category="unavailable",
+                code="line_admin_transport_unavailable",
+                retryable=True,
+            ) from exc
         if not response.ok:
             try:
-                detail = response.json().get("detail")
+                payload = response.json()
             except ValueError:
-                detail = response.text
-            raise LineAdminApiError(str(detail or "API 請求失敗"), status_code=response.status_code)
+                payload = None
+            raise _response_error(response.status_code, payload, response.text)
         return response.content
 
     def login(self, username: str, password: str) -> dict[str, Any]:
@@ -138,13 +219,6 @@ class LineAdminApiClient:
 
     def capabilities(self, token: str | None) -> dict[str, Any]:
         return self._request("GET", "/api/v1/line/admin/capabilities", token=token)
-
-    def performance_snapshot(self, token: str | None) -> dict[str, Any]:
-        return self._request(
-            "GET",
-            "/api/v1/system/status/performance-snapshot",
-            token=token,
-        )
 
     def message_template_state(self, token: str | None) -> dict[str, Any]:
         return self._request("GET", "/api/config/message-templates/state", token=token)
@@ -251,6 +325,8 @@ class LineAdminApiClient:
         action: str,
         *,
         reason: str = "",
+        idempotency_key: str = "",
+        correlation_id: str = "",
     ) -> dict[str, Any]:
         if action not in {"cancel", "run-now", "retry"}:
             raise ValueError("不支援的 LINE 任務操作")
@@ -258,7 +334,11 @@ class LineAdminApiClient:
             "POST",
             f"/api/v1/line/tasks/{task_id}/{action}",
             token=token,
-            json={"reason": reason},
+            json={
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "correlation_id": correlation_id,
+            },
         )
 
     def line_menu_state(self, token: str | None) -> dict[str, Any]:
@@ -305,14 +385,18 @@ class LineAdminApiClient:
                 timeout=30,
             )
         except requests.RequestException as exc:
-            raise LineAdminApiError(f"無法上傳圖片：{exc}") from exc
+            raise LineAdminApiError(
+                f"無法上傳圖片：{exc}",
+                category="unavailable",
+                code="line_menu_upload_unavailable",
+                retryable=True,
+            ) from exc
         try:
             payload = response.json()
         except ValueError:
             payload = None
         if not response.ok:
-            detail = payload.get("detail") if isinstance(payload, dict) else response.text
-            raise LineAdminApiError(str(detail or "圖片上傳失敗"), status_code=response.status_code)
+            raise _response_error(response.status_code, payload, response.text)
         return payload["data"]
 
     def publish_line_menu(
@@ -322,16 +406,25 @@ class LineAdminApiClient:
         *,
         preview_id: int,
         reason: str = "",
+        idempotency_key: str = "",
+        correlation_id: str = "",
     ) -> dict[str, Any]:
         return self._request(
             "POST",
             f"/api/v1/line/rich-menus/{menu_id}/publish",
             token=token,
-            json={"preview_id": preview_id, "reason": reason},
+            json={
+                "preview_id": preview_id,
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "correlation_id": correlation_id,
+            },
         )
 
     def create_line_menu_publish_preview(
-        self, token: str | None, menu_id: str
+        self,
+        token: str | None,
+        menu_id: str,
     ) -> dict[str, Any]:
         return self._request(
             "POST",
@@ -363,31 +456,24 @@ class LineAdminApiClient:
             },
         )
 
-    def admin_audits(
-        self, token: str | None, *, page: int = 1, actor_query: str = ""
-    ) -> dict[str, Any]:
-        return self._request(
-            "GET", "/api/v1/admin/audits", token=token,
-            params={"page": page, "actor_query": actor_query or None},
-        )
-
-    def admin_audit_detail(self, token: str | None, audit_id: int) -> dict[str, Any]:
-        return self._request(
-            "GET", f"/api/v1/admin/audits/{audit_id}", token=token,
-        )
-
     def retry_line_menu_publication(
         self,
         token: str | None,
         publication_id: int,
         *,
         reason: str = "",
+        idempotency_key: str = "",
+        correlation_id: str = "",
     ) -> dict[str, Any]:
         return self._request(
             "POST",
             f"/api/v1/line/rich-menus/publications/{publication_id}/retry",
             token=token,
-            json={"reason": reason},
+            json={
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "correlation_id": correlation_id,
+            },
         )
 
     def liff_config_state(self, token: str | None) -> dict[str, Any]:
@@ -440,7 +526,7 @@ class LineAdminApiClient:
         )
 
     def line_review_summary(self, token: str | None) -> dict[str, Any]:
-        return self._request("GET", "/api/v1/line/review-requests/summary", token=token)
+        return self._request("GET", "/api/v1/line/identity/reviews/summary", token=token)
 
     def line_reviews(
         self,
@@ -450,9 +536,13 @@ class LineAdminApiClient:
     ) -> dict[str, Any]:
         return self._request(
             "GET",
-            "/api/v1/line/review-requests",
+            "/api/v1/line/identity/reviews",
             token=token,
-            params={key: value for key, value in filters.items() if value not in {None, ""}},
+            params={
+                key: value
+                for key, value in filters.items()
+                if value not in {None, ""}
+            },
         )
 
     def line_review_detail(
@@ -462,7 +552,7 @@ class LineAdminApiClient:
     ) -> dict[str, Any]:
         return self._request(
             "GET",
-            f"/api/v1/line/review-requests/{request_id}",
+            f"/api/v1/line/identity/reviews/{request_id}",
             token=token,
         )
 
@@ -473,12 +563,58 @@ class LineAdminApiClient:
         action: str,
         *,
         reason: str,
+        expected_version: int,
+        idempotency_key: str,
     ) -> dict[str, Any]:
         if action not in {"approve", "reject"}:
             raise ValueError("不支援的人工審查操作")
         return self._request(
             "POST",
-            f"/api/v1/line/review-requests/{request_id}/{action}",
+            f"/api/v1/line/identity/reviews/{request_id}/{action}",
             token=token,
-            json={"reason": reason},
+            json={
+                "expected_version": expected_version,
+                "idempotency_key": idempotency_key,
+                "reason": reason,
+            },
+        )
+
+    def order_groups(
+        self,
+        token: str | None,
+        *,
+        status: str | None = None,
+        limit: int = 100,
+    ) -> dict[str, Any]:
+        return self._request(
+            "GET",
+            "/api/v1/line/order-groups",
+            token=token,
+            params={"status": status, "limit": limit},
+        )
+
+    def order_group_events(
+        self,
+        token: str | None,
+        case_no: str,
+        *,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        return self._request(
+            "GET",
+            f"/api/v1/line/order-groups/{case_no}/events",
+            token=token,
+            params={"limit": limit},
+        )
+
+    def customer_service_config(self, token: str | None) -> dict[str, Any]:
+        return self._request("GET", "/api/config/customer-service", token=token)
+
+    def update_customer_service_config(
+        self,
+        token: str | None,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        return self._request(
+            "PUT", "/api/config/customer-service", token=token, json=payload
         )

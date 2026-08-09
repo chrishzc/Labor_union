@@ -101,6 +101,43 @@ def create_publication_preview(menu_id: str, previewed_by_admin_user_id: int | N
         conn.close()
 
 
+def validate_publication_preview(
+    menu_id: str,
+    preview_id: int,
+    previewed_by_admin_user_id: int | None,
+) -> dict[str, Any]:
+    if previewed_by_admin_user_id is None:
+        raise RichMenuPublicationConflictError("發布需要已登入的管理員")
+    _, revision, fingerprint = _current_menu_snapshot(menu_id)
+    conn = get_connection()
+    try:
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id FROM line_rich_menu_publish_previews
+                WHERE id=%s AND menu_config_id=%s AND config_revision=%s
+                  AND config_fingerprint=%s AND previewed_by_admin_user_id=%s
+                  AND publication_id IS NULL
+                  AND canonical_publication_task_id IS NULL
+                """,
+                (
+                    preview_id, menu_id, revision, fingerprint,
+                    previewed_by_admin_user_id,
+                ),
+            )
+            if cursor.fetchone() is None:
+                raise RichMenuPublicationConflictError(
+                    "請先預覽目前版本的 Rich Menu，再確認套用"
+                )
+        return {
+            "preview_id": preview_id,
+            "config_revision": revision,
+            "config_fingerprint": fingerprint,
+        }
+    finally:
+        conn.close()
+
+
 def create_publication_job(
     menu_id: str,
     requested_by_admin_user_id: int | None,

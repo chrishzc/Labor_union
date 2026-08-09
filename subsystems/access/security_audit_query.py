@@ -39,8 +39,10 @@ def mask_ip_address(ip_address: str | None) -> str | None:
     return ".".join([*parts[:3], "***"]) if len(parts) == 4 else "***"
 
 
-def list_admin_audits(*, page: int, page_size: int, action: str | None, actor_query: str | None, created_from: datetime | None, created_to: datetime | None) -> AuditPage:
-    clauses, params = _audit_filters(action, actor_query, created_from, created_to)
+def list_admin_audits(*, page: int, page_size: int, action: str | None, action_prefix: str | None = None, actor_query: str | None, created_from: datetime | None, created_to: datetime | None) -> AuditPage:
+    clauses, params = _audit_filters(
+        action, action_prefix, actor_query, created_from, created_to
+    )
     where_sql = " AND ".join(clauses)
     with get_connection() as connection:
         with connection.cursor(pymysql.cursors.DictCursor) as cursor:
@@ -74,10 +76,12 @@ def archive_expired_admin_audits(*, batch_size: int = 500) -> int:
             raise
 
 
-def _audit_filters(action, actor_query, created_from, created_to):
+def _audit_filters(action, action_prefix, actor_query, created_from, created_to):
     clauses, params = ["1=1"], []
     if action:
         clauses.append("a.action=%s"); params.append(action)
+    if action_prefix:
+        clauses.append("a.action LIKE %s"); params.append(f"{action_prefix.strip()}%")
     if actor_query:
         clauses.append("(u.username LIKE %s OR u.display_name LIKE %s)"); params.extend([f"%{actor_query.strip()}%"] * 2)
     if created_from:

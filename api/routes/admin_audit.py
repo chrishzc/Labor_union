@@ -19,6 +19,7 @@ router = APIRouter(prefix="/api/v1/admin/audits", tags=["Admin Audit"])
 @router.get("", response_model=BaseResponse[AdminAuditPage])
 def list_audits(
     action: str | None = None,
+    action_prefix: str | None = None,
     actor_query: str | None = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
@@ -26,7 +27,15 @@ def list_audits(
     page_size: int = Query(default=25, ge=1, le=100),
     _: AdminPrincipal = Depends(require_admin),
 ):
-    result = list_admin_audits(page=page, page_size=page_size, action=action, actor_query=actor_query, created_from=created_from, created_to=created_to)
+    result = list_admin_audits(
+        page=page,
+        page_size=page_size,
+        action=action,
+        action_prefix=action_prefix,
+        actor_query=actor_query,
+        created_from=created_from,
+        created_to=created_to,
+    )
     return BaseResponse(data=AdminAuditPage(items=result.items, page=result.page, page_size=result.page_size, total=result.total, total_pages=max(1, (result.total + result.page_size - 1) // result.page_size)))
 
 

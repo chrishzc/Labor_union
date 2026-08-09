@@ -36,9 +36,32 @@ CAPABILITY_REGISTRY = frozenset(
         "line.identity.read",
         "line.identity.review",
         "line.review.read",
+        "line.review.decide",
         "line.task.read",
         "line.task.control",
+        "line.task.retry",
+        "line.task.cancel",
+        "line.task.send",
         "line.menu.publish",
+        "line.config.read",
+        "line.config.manage",
+        "line.rich_menu.publish",
+        "line.identity.bind_admin",
+        "line.identity.review_staff",
+        "line.order_group.read",
+        "line.order_group.bind",
+        "line.monitor.read",
+        "line.alert.manage",
+        "line.audit.read",
+        "line.matching.read",
+        "line.matching.send",
+        "line.matching.override",
+        "contract.evidence.read",
+        "contract.evidence.manage",
+        "knowledge.read",
+        "knowledge.manage",
+        "knowledge.publish",
+        "knowledge.reindex",
         "integration.event.read",
         "integration.event.retry",
         "admin.user.manage",
@@ -55,20 +78,33 @@ CAPABILITY_REGISTRY = frozenset(
     }
 )
 
+LINE_VIEWER_CAPABILITIES = frozenset(
+    {
+        "line.identity.read",
+        "line.review.read",
+        "line.task.read",
+        "line.order_group.read",
+        "line.monitor.read",
+        "line.matching.read",
+        "knowledge.read",
+    }
+)
+LINE_AGENT_CAPABILITIES = LINE_VIEWER_CAPABILITIES | frozenset(
+    {
+        "line.order_group.bind",
+        "line.matching.send",
+    }
+)
+LINE_MANAGER_CAPABILITIES = frozenset(
+    capability
+    for capability in CAPABILITY_REGISTRY
+    if capability.startswith(("line.", "contract.", "knowledge."))
+) | frozenset({"system.configuration.manage"})
+
 ROLE_CAPABILITIES = {
-    "line_viewer": frozenset({"line.identity.read", "line.task.read"}),
-    "line_agent": frozenset({"line.identity.read", "line.review.read", "line.task.read"}),
-    "line_manager": frozenset(
-        {
-            "line.identity.read",
-            "line.identity.review",
-            "line.review.read",
-            "line.task.read",
-            "line.task.control",
-            "line.menu.publish",
-            "system.configuration.manage",
-        }
-    ),
+    "line_viewer": LINE_VIEWER_CAPABILITIES,
+    "line_agent": LINE_AGENT_CAPABILITIES,
+    "line_manager": LINE_MANAGER_CAPABILITIES,
     "system_admin": CAPABILITY_REGISTRY,
 }
 
@@ -89,7 +125,13 @@ class AdminPrincipal:
             "display_name": self.display_name,
             "role": self.role,
             "linked_line_user_id": self.linked_line_user_id,
+            "capabilities": sorted(self.effective_capabilities()),
         }
+
+    def effective_capabilities(self) -> frozenset[str]:
+        if self.capabilities is not None:
+            return self.capabilities
+        return ROLE_CAPABILITIES.get(self.role, frozenset())
 
 
 def _utc_now_naive() -> datetime:
@@ -360,10 +402,7 @@ def has_required_role(principal: AdminPrincipal, minimum_role: str) -> bool:
 def has_required_capability(principal: AdminPrincipal, capability: str) -> bool:
     if capability not in CAPABILITY_REGISTRY:
         return False
-    effective_capabilities = principal.capabilities
-    if effective_capabilities is None:
-        effective_capabilities = ROLE_CAPABILITIES.get(principal.role, frozenset())
-    return capability in effective_capabilities
+    return capability in principal.effective_capabilities()
 
 
 def _principal_from_row(cursor: Any, row: dict[str, Any]) -> AdminPrincipal:

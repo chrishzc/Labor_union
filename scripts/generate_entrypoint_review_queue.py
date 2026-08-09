@@ -110,58 +110,8 @@ def _existing_entries() -> dict[str, dict[str, object]]:
 def _merge_reviewed_entry(entry: dict[str, object], existing: dict[str, dict[str, object]]) -> dict[str, object]:
     reviewed = existing.get(str(entry["entry_id"]), {})
     if reviewed.get("status") in {None, "review_required"}:
-        return {**entry, **_current_entry_contract(entry)}
+        return entry
     return {**entry, **{key: value for key, value in reviewed.items() if key not in {"kind", "source_path"}}}
-
-
-def _current_entry_contract(entry: dict[str, object]) -> dict[str, str]:
-    # The three entry kinds share the same owner lookup but expose distinct external contracts.
-    source_path = str(entry["source_path"])
-    owner = _canonical_owner(source_path)
-    if entry["kind"] == "cli":
-        return {
-            "status": "operator_only",
-            "business_scenario": f"Controlled {owner} maintenance or release operation.",
-            "operator": "authorized release or maintenance operator",
-            "canonical_owner": owner,
-        }
-    if entry["kind"] == "ui":
-        return {
-            "status": "active",
-            "business_scenario": f"Authenticated administration workflow for {owner}.",
-            "operator": "authenticated administrator with operation capability",
-            "canonical_owner": owner,
-        }
-    return {
-        "status": "active",
-        "business_scenario": f"Typed HTTP contract for {owner}.",
-        "operator": "authenticated administrator or verified external integration",
-        "canonical_owner": owner,
-    }
-
-
-def _canonical_owner(source_path: str) -> str:
-    for token, owner in _OWNER_BY_PATH_TOKEN:
-        if token in source_path:
-            return owner
-    return "Global application boundary"
-
-
-_OWNER_BY_PATH_TOKEN = (
-    ("finance", "Finance Import / Client Finance / Staff Payables"),
-    ("subsidy", "Government Subsidy"),
-    ("payroll", "Payroll / Staff Payables"),
-    ("staff", "Staff and Assignments / Scheduling"),
-    ("schedule", "Assignments / Scheduling"),
-    ("assignment", "Assignments / Scheduling"),
-    ("order", "Orders"),
-    ("client", "Client Finance"),
-    ("line", "LINE Integration / Access Control"),
-    ("knowledge", "Knowledge Retrieval"),
-    ("anomaly", "Anomalies"),
-    ("admin", "Access Control"),
-    ("contract", "Orders"),
-)
 
 
 def _keyword_string(call: ast.Call, keyword: str) -> str:

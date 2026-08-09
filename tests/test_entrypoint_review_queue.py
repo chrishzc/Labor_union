@@ -17,6 +17,16 @@ def test_reviewed_entries_require_their_business_contract() -> None:
         _validate_entry(entry)
 
 
+def test_queue_has_no_unreviewed_entries() -> None:
+    unreviewed = [
+        entry["entry_id"]
+        for entry in _load_queue()
+        if entry["status"] == "review_required"
+    ]
+
+    assert unreviewed == []
+
+
 def _load_queue() -> list[dict[str, object]]:
     return [json.loads(line) for line in queue.QUEUE_PATH.read_text(encoding="utf-8").splitlines()]
 

@@ -19,6 +19,9 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from fastapi.responses import FileResponse
 from line.worker import wake_worker
+from api.dependencies.line_runtime import line_webhook_runtime_mode
+from api.line_webhook_boundary import canonical_line_webhook
+from subsystems.line.runtime_contracts import LineRuntimeMode
 from line.security import verify_line_signature
 from subsystems.line.delivery_task_workflow import enqueue_line_task
 from subsystems.line.postback_intent_registry import (
@@ -153,9 +156,24 @@ def _create_onboarding_tasks(cursor, user_id: str, source_event_id: str | None) 
 
 router = APIRouter(tags=["LINE"])
 
+
+def _require_legacy_line_surface(replacement: str) -> None:
+    if line_webhook_runtime_mode() is not LineRuntimeMode.CANONICAL:
+        return
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_line_route_retired",
+            "message": "此 LINE 舊入口已在 Canonical Runtime 退出。",
+            "replacement": replacement,
+        },
+    )
+
+
 # LINE LIFF 配置獲取端點
 @router.get("/api/line/config")
 async def get_line_config():
+    _require_legacy_line_surface("/api/v1/line/identity/runtime-config")
     liff_id = os.getenv("LINE_LIFF_ID", "")
     if not liff_id or liff_id == "your_liff_id_here":
         liff_id = get_setting("line_liff_id", "")
@@ -204,6 +222,7 @@ class LineBindPayload(BaseModel):
 
 @router.post("/api/line/bind")
 async def line_bind(payload: LineBindPayload):
+    _require_legacy_line_surface("/api/v1/line/identity/customer/apply")
     name = payload.name.strip()
     phone = payload.phone.strip()
     line_user_id = await _trusted_line_user_id(
@@ -263,6 +282,7 @@ class LineIdentityPayload(BaseModel):
 
 @router.post("/api/line/client-info")
 async def post_client_info(payload: LineIdentityPayload):
+    _require_legacy_line_surface("/api/v1/line/identity/customer/preview")
     trusted_user_id = await _trusted_line_user_id(
         payload.line_id_token,
         payload.line_user_id,
@@ -273,6 +293,7 @@ async def post_client_info(payload: LineIdentityPayload):
 @router.get("/api/line/client-info")
 async def get_client_info(userId: str = ""):
     """Development-compatible legacy endpoint; production requires POST with an ID token."""
+    _require_legacy_line_surface("/api/v1/line/identity/customer/preview")
     trusted_user_id = await _trusted_line_user_id(None, userId)
     return await _find_client_info(trusted_user_id)
 
@@ -308,6 +329,7 @@ class LineRegisterPayload(BaseModel):
 
 @router.post("/api/line/register")
 async def line_register(payload: LineRegisterPayload):
+    _require_legacy_line_surface("/api/v1/line/identity/customer/apply")
     line_user_id = await _trusted_line_user_id(
         payload.line_id_token,
         payload.line_user_id,
@@ -387,16 +409,19 @@ async def root_post(payload: dict, request: Request):
 @router.get("/gateway")
 async def serve_gateway_page():
     """前導選擇頁面 (自動相容舊版 LIFF 設定)"""
+    _require_legacy_line_surface("/line-identity")
     return FileResponse("line/static/gateway.html")
 
 @router.get("/bind-page")
 async def serve_bind_page():
     """提供舊客查詢與綁定專用的路徑"""
+    _require_legacy_line_surface("/line-identity")
     return FileResponse("line/static/bind.html")
 
 @router.get("/register-page")
 async def serve_register_page():
     """全新客戶原生註冊頁面"""
+    _require_legacy_line_surface("/line-identity")
     return FileResponse("line/static/register.html")
 
 
@@ -423,12 +448,12 @@ def reject_staff_review_request(
 
 @router.put("/api/line/users/{user_id}/role/{role}")
 def set_line_user_role(user_id: str, role: str) -> None:
-    """Block the internal-key-only writer until typed identity administration exists."""
+    """Retired writer; canonical identity administration owns role binding."""
     raise HTTPException(
         status_code=410,
         detail={
             "code": "line_role_api_retired",
-            "replacement": "typed LINE identity administration requires an approved work package",
+            "replacement": "/api/v1/line/identity",
         },
     )
 
@@ -450,6 +475,8 @@ async def line_webhook_get():
 @router.post("/webhook")
 @router.post("/webhook/")
 async def line_webhook(request: Request):
+    if line_webhook_runtime_mode() is LineRuntimeMode.CANONICAL:
+        return await canonical_line_webhook(request)
     raw_body = await request.body()
     signature = request.headers.get("x-line-signature", "")
     channel_secret = os.getenv("LINE_CHANNEL_SECRET", "")
@@ -635,11 +662,13 @@ async def line_webhook(request: Request):
                             print(f"[LINE Webhook] Intercepted keyword '{user_text}', queued query link for User: {user_id}")
                             continue
                         
+                        # Legacy runtime cannot provide reviewed sources/citations safely.
                         enqueue_line_task(
-                            cursor, to_user_id=user_id, task_type="rag_reply",
-                            payload={"user_text": user_text},
+                            cursor,
+                            to_user_id=user_id,
+                            message_content="此問題將由工會人員協助確認，請稍候。",
                             source_event_id=event.get("webhookEventId"),
-                            idempotency_key=f"rag:{event.get('webhookEventId')}",
+                            idempotency_key=f"knowledge-manual-fallback:{event.get('webhookEventId')}",
                         )
 
                         

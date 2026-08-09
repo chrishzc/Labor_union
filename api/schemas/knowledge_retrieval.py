@@ -1,37 +1,28 @@
-"""Typed knowledge source, publication, and cited-answer boundaries."""
+"""HTTP schemas for knowledge intake, review, publication, and answers."""
 
-from typing import Literal
-
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
-class KnowledgeCommandBody(BaseModel):
-    expected_version: int = Field(ge=0)
+class KnowledgeIngestBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    source_identity: str = Field(min_length=1, max_length=191)
+    source_trust_tier: str = Field(
+        pattern="^(internal_policy|government_source|approved_partner)$"
+    )
+    title: str = Field(min_length=1, max_length=500)
+    content: str = Field(min_length=1, max_length=100000)
+    source_uri: str | None = Field(default=None, max_length=1000)
+
+
+class KnowledgeTransitionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_version: int = Field(ge=1)
     reason: str = Field(min_length=1, max_length=500)
-    idempotency_key: str = Field(min_length=1, max_length=191)
-    correlation_id: str = Field(min_length=1, max_length=191)
-    source_uri: str | None = Field(default=None, max_length=500)
-    source_trust_tier: Literal["internal_policy", "government_source", "approved_partner"] | None = None
-    title: str | None = Field(default=None, max_length=300)
-    content: str | None = None
 
 
-class KnowledgeReceiptView(BaseModel):
-    knowledge_item_id: int
-    state: Literal["draft", "reviewed", "published", "retired"]
-    version: int
-    source_uri: str
-    content_digest: str
+class KnowledgeQuestionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    question: str = Field(min_length=1, max_length=2000)
 
 
-class KnowledgeCitationView(BaseModel):
-    knowledge_item_id: int
-    source_uri: str
-    content_digest: str
-    version: int
-
-
-class KnowledgeAnswerView(BaseModel):
-    answer: str
-    citations: list[KnowledgeCitationView]
-    authoritative: Literal[False]
+__all__ = ["KnowledgeIngestBody", "KnowledgeQuestionBody", "KnowledgeTransitionBody"]

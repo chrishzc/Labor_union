@@ -34,8 +34,11 @@
 
 1. `format-fixture`／`test-fixture` 只定義輸入或驗收格式，不決定 Domain 語意。
 2. `output-template-evidence` 只定義使用者輸出形狀；金額、狀態與資格仍由 owning Domain Query。
-3. 已裁決附件的內容摘要、來源對照與 `covered | conflict | historical | out-of-scope`
-   結果記於 `03_追蹤清單與證據/evidence/2026-08-09_human_content_review_precheck.md`。
+3. 其中九份涉及業務語意的附件已完成人工內容裁決；內容摘要、來源對照與
+   `covered | conflict | historical | out-of-scope` 結果記於
+   `03_追蹤清單與證據/evidence/2026-08-09_human_content_review_precheck.md`。其餘九份為
+   generated evidence、format/test fixture 或已有正式 Domain 對應的 output evidence，
+   由本索引記錄證據責任。
 4. hash 改變時，本索引失效；不得沿用舊的內容審查結論。
 5. 附件內容審查不得直接修改 production code 或把視覺欄位推定成 DB SSOT。
 

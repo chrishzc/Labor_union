@@ -1,7 +1,7 @@
 """
 ================================================================================
 檔案名稱: ui/pages/07_line_management.py
-功能說明: Streamlit LINE 管理中心主頁，整合訊息、自動通知、選單、表單、人工確認與發送紀錄
+功能說明: Streamlit LINE 薄管理介面，整合監控、訊息、群組、契約與知識管理 API
 ================================================================================
 """
 
@@ -15,8 +15,15 @@ from ui.components.line_review_manager import render_review_manager
 from ui.components.line_rich_menu_manager import render_rich_menu_manager
 from ui.components.line_schedule_manager import render_schedule_manager
 from ui.components.line_task_manager import render_task_manager
-from ui.components.admin_audit_manager import render_admin_audit_manager
+from ui.components.line_runtime_manager import render_runtime_manager
+from ui.components.line_order_group_manager import render_order_group_manager
+from ui.components.knowledge_management import render_knowledge_management
+from ui.components.line_customer_service_manager import render_customer_service_manager
+from ui.components.line_audit_manager import render_audit_manager
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.api_clients.runtime_health_api_client import RuntimeHealthApiClient
+from ui.api_clients.knowledge_retrieval_api_client import KnowledgeRetrievalApiClient
+from ui.components.line_ui_support import has_capability
 
 
 title = "💬 LINE 管理中心"
@@ -59,43 +66,7 @@ def _overview(
     token: str | None,
     profile: dict,
 ) -> None:
-    try:
-        health = client.health(token)
-        capabilities = client.capabilities(token)
-    except LineAdminApiError as exc:
-        if exc.status_code == 401:
-            _clear_session()
-            st.warning("登入已過期，請重新登入。")
-            st.rerun()
-        st.error(str(exc))
-        return
-
-    status_value = health.get("status", "unknown")
-    worker_running = health.get("worker", {}).get("running", False)
-    database_ok = health.get("database", {}).get("ok", False)
-    col1, col2, col3 = st.columns(3)
-    system_ok = status_value in {"ok", "healthy"} and database_ok
-    col1.metric("整體狀態", "可正常使用" if system_ok else "需要檢查")
-    col2.metric("自動發送", "正常運作" if worker_running else "目前暫停")
-    col3.metric("資料連線", "正常" if database_ok else "異常")
-
-    if system_ok and worker_running:
-        st.success("LINE 管理功能與自動發送服務目前運作正常。")
-    else:
-        st.warning("部分服務未正常運作，請通知系統管理員協助處理。")
-
-    if profile.get("role") == "system_admin":
-        with st.expander("系統管理資訊"):
-            available = capabilities.get("available", {})
-            for name, enabled in available.items():
-                st.write(("✅" if enabled else "⬜") + f" {name}")
-            st.caption("下列設定僅供系統管理員檢查，不會顯示實際金鑰內容。")
-            st.json(health.get("line_credentials", {}))
-
-
-def _planned_panel(name: str, description: str) -> None:
-    st.subheader(name)
-    st.info(f"5.1 已完成安全入口與接口骨架。{description}將在後續 5.x 接上現有 API。")
+    render_runtime_manager(RuntimeHealthApiClient(client), token, profile)
 
 
 def _render_automatic_notifications(
@@ -103,9 +74,17 @@ def _render_automatic_notifications(
     token: str | None,
     profile: dict,
 ) -> None:
+    options = []
+    if has_capability(profile, "line.config.read"):
+        options.append("新好友通知設定")
+    if has_capability(profile, "line.task.read"):
+        options.append("發送紀錄")
+    if not options:
+        st.info("目前帳號沒有自動通知的查看權限。")
+        return
     workspace = st.radio(
         "自動通知工作區",
-        ("新好友通知設定", "發送紀錄"),
+        options,
         horizontal=True,
     )
     if workspace == "新好友通知設定":
@@ -147,11 +126,11 @@ def _render_reviews(
 
 
 def _render_customer_service(
-    _client: LineAdminApiClient,
-    _token: str | None,
-    _profile: dict,
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
 ) -> None:
-    _planned_panel("客服入口", "工會人員客服系統")
+    render_customer_service_manager(client, token, profile)
 
 
 def _render_audit_log(
@@ -159,7 +138,15 @@ def _render_audit_log(
     token: str | None,
     profile: dict,
 ) -> None:
-    render_admin_audit_manager(client, token, profile)
+    render_audit_manager(RuntimeHealthApiClient(client), token, profile)
+
+
+def _render_order_groups(client, token, profile) -> None:
+    render_order_group_manager(client, token, profile)
+
+
+def _render_knowledge(client, token, profile) -> None:
+    render_knowledge_management(KnowledgeRetrievalApiClient(client), token, profile)
 
 
 LINE_WORKSPACE_RENDERERS = {
@@ -169,8 +156,23 @@ LINE_WORKSPACE_RENDERERS = {
     "LINE 下方選單": _render_rich_menu,
     "LINE 表單": _render_liff,
     "待確認申請": _render_reviews,
+    "訂單群組": _render_order_groups,
+    "知識內容": _render_knowledge,
     "客服入口": _render_customer_service,
     "操作紀錄": _render_audit_log,
+}
+
+WORKSPACE_CAPABILITIES = {
+    "使用狀態": {"line.monitor.read"},
+    "訊息內容": {"line.config.read"},
+    "自動通知": {"line.config.read", "line.task.read"},
+    "LINE 下方選單": {"line.config.read"},
+    "LINE 表單": {"line.config.read"},
+    "待確認申請": {"line.review.read"},
+    "訂單群組": {"line.order_group.read"},
+    "知識內容": {"knowledge.read"},
+    "客服入口": {"line.config.read"},
+    "操作紀錄": {"line.audit.read"},
 }
 
 
@@ -179,9 +181,17 @@ def _render_selected_workspace(
     token: str | None,
     profile: dict,
 ) -> None:
+    available = [
+        name
+        for name in LINE_WORKSPACE_RENDERERS
+        if any(has_capability(profile, capability) for capability in WORKSPACE_CAPABILITIES[name])
+    ]
+    if not available:
+        st.warning("目前帳號沒有 LINE 管理功能的查看權限。")
+        return
     workspace = st.radio(
         "LINE 管理工作區",
-        tuple(LINE_WORKSPACE_RENDERERS),
+        available,
         horizontal=True,
     )
     LINE_WORKSPACE_RENDERERS[workspace](client, token, profile)
@@ -203,10 +213,17 @@ def show() -> None:
 
     try:
         profile = client.me(token)
+        capability_state = client.capabilities(token)
     except LineAdminApiError as exc:
         _clear_session()
         st.warning(f"請重新登入：{exc}")
         return
+    profile["effective_capabilities"] = capability_state.get(
+        "effective_capabilities", []
+    )
+    profile["runtime_availability"] = capability_state.get(
+        "runtime_availability", {}
+    )
     st.session_state[ADMIN_KEY] = profile
 
     if bypassed:

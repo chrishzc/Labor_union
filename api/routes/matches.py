@@ -5,6 +5,8 @@
 ================================================================================
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal
@@ -12,12 +14,14 @@ from subsystems.scheduling.matching_plan_workflow import create_matching_plan_ve
 from subsystems.scheduling.matching_communication_workflow import (
     cancel_matching_plan,
     get_active_matching_plan_state,
-    get_matching_plan_contact_state,
-    record_matching_plan_willingness,
-    send_matching_plan_information,
-    send_matching_plan_resumes,
 )
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import (
+    admin_actor_context,
+    require_line_matching_override,
+    require_line_matching_reader,
+    require_line_matching_sender,
+    require_system_admin,
+)
 from api.schemas.base import BaseResponse
 from api.error_contracts import internal_query_error
 from api.schemas.matches import MatchReplyRequest, MatchAssignRequest
@@ -25,8 +29,28 @@ from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.scheduling.matching_recommendation_application import (
     query_matching_recommendations,
 )
+from domains.scheduling.matching_communication import (
+    CaregiverWillingness,
+    CustomerMatchingDecision,
+    MatchingNotificationKind,
+    MatchingPlanReference,
+)
+from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.scheduling.matching_notification_application import (
+    MatchingNotificationApplication,
+)
+from subsystems.scheduling.matching_notification_contracts import (
+    RecordManualMatchingResponseCommand,
+    RequestCaregiverInformationCommand,
+    RequestCustomerProfilesCommand,
+)
 
 router = APIRouter(prefix="/api/v1", tags=["Matches 案件配對與 LINE 訊息推播"])
+matching_notifications = MatchingNotificationApplication(
+    open_line_unit_of_work,
+    lambda: datetime.now(timezone.utc),
+)
 
 
 class MatchingPlanEventIdentity(BaseModel):
@@ -38,14 +62,24 @@ class MatchingPlanEventIdentity(BaseModel):
 
 class MatchingPlanInformationRequest(MatchingPlanEventIdentity):
     info_type: Literal[1, 2]
+    expected_version: int = Field(..., ge=0)
 
 
 class MatchingPlanWillingnessRequest(MatchingPlanEventIdentity):
-    willingness: Literal["pending", "willing", "unwilling"]
+    willingness: Literal["willing", "unwilling"]
+    expected_version: int = Field(..., ge=0)
+    reason: str = Field(..., min_length=1, max_length=500)
 
 
 class MatchingPlanResumeRequest(MatchingPlanEventIdentity):
     note: str = Field(..., min_length=1, max_length=1000)
+    expected_version: int = Field(..., ge=0)
+
+
+class MatchingPlanCustomerDecisionRequest(MatchingPlanEventIdentity):
+    decision: Literal["accepted", "declined", "contact_requested"]
+    expected_version: int = Field(..., ge=0)
+    reason: str = Field(..., min_length=1, max_length=500)
 
 
 class MatchingPlanCancellationRequest(MatchingPlanEventIdentity):
@@ -64,14 +98,20 @@ def _require_matching_actor(principal: AdminPrincipal, actor: str) -> None:
 def get_matching_plan_contact_state_route(
     case_no: str,
     plan_id: int,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_reader),
 ):
-    del principal
     try:
+        state = matching_notifications.get_contact_state(
+            admin_actor_context(principal),
+            case_no,
+            plan_id,
+        )
         return BaseResponse(
-            data=get_matching_plan_contact_state(case_no, plan_id),
+            data=_contact_state_data(state),
             message="成功讀取配對聯繫與意願狀態",
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -82,7 +122,7 @@ def get_matching_plan_contact_state_route(
 )
 def get_active_matching_plan_state_route(
     case_no: str,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_reader),
 ):
     del principal
     try:
@@ -103,16 +143,60 @@ def send_matching_plan_information_route(
     case_no: str,
     plan_id: int,
     segment_id: int,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_sender),
 ):
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=send_matching_plan_information(
-                case_no, plan_id, segment_id, req.info_type, req.event_key, req.actor
+            data=_notification_data(
+                matching_notifications.request_caregiver_information(
+                    RequestCaregiverInformationCommand(
+                        MatchingPlanReference(case_no, plan_id, req.expected_version),
+                        segment_id,
+                        MatchingNotificationKind(f"caregiver_info_{req.info_type}"),
+                        admin_actor_context(principal),
+                        ExpectedVersion(req.expected_version),
+                        IdempotencyKey(req.event_key),
+                        CorrelationId(f"matching-api:{req.event_key}"),
+                    )
+                )
             ),
             message=f"訂單資訊-{req.info_type} 已建立可靠發送任務",
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.put(
+    "/orders/{case_no}/matching-plans/{plan_id}/customer-decision",
+    response_model=BaseResponse[Dict[str, Any]],
+)
+def record_matching_customer_decision_route(
+    req: MatchingPlanCustomerDecisionRequest,
+    case_no: str,
+    plan_id: int,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+):
+    _require_matching_actor(principal, req.actor)
+    try:
+        result = matching_notifications.record_manual_response(
+            RecordManualMatchingResponseCommand(
+                MatchingPlanReference(case_no, plan_id, req.expected_version),
+                None,
+                None,
+                CustomerMatchingDecision(req.decision),
+                req.reason,
+                admin_actor_context(principal),
+                ExpectedVersion(req.expected_version),
+                IdempotencyKey(req.event_key),
+                CorrelationId(f"matching-api:{req.event_key}"),
+            )
+        )
+        return BaseResponse(data=_response_data(result), message="成功補登客戶配對決策")
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -126,23 +210,32 @@ def record_matching_plan_willingness_route(
     case_no: str,
     plan_id: int,
     segment_id: int,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
 ):
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=record_matching_plan_willingness(
-                case_no,
-                plan_id,
-                segment_id,
-                req.willingness,
-                req.event_key,
-                req.actor,
+            data=_response_data(
+                matching_notifications.record_manual_response(
+                    RecordManualMatchingResponseCommand(
+                        MatchingPlanReference(case_no, plan_id, req.expected_version),
+                        segment_id,
+                        CaregiverWillingness(req.willingness),
+                        None,
+                        req.reason,
+                        admin_actor_context(principal),
+                        ExpectedVersion(req.expected_version),
+                        IdempotencyKey(req.event_key),
+                        CorrelationId(f"matching-api:{req.event_key}"),
+                    )
+                )
             ),
             message="成功更新月嫂意願",
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.post(
@@ -153,16 +246,27 @@ def send_matching_plan_resumes_route(
     req: MatchingPlanResumeRequest,
     case_no: str,
     plan_id: int,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_sender),
 ):
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=send_matching_plan_resumes(
-                case_no, plan_id, req.note, req.event_key, req.actor
+            data=_notification_data(
+                matching_notifications.request_customer_profiles(
+                    RequestCustomerProfilesCommand(
+                        MatchingPlanReference(case_no, plan_id, req.expected_version),
+                        req.note,
+                        admin_actor_context(principal),
+                        ExpectedVersion(req.expected_version),
+                        IdempotencyKey(req.event_key),
+                        CorrelationId(f"matching-api:{req.event_key}"),
+                    )
+                )
             ),
-            message="已逐位建立履歷與備註的可靠發送任務",
+            message="已建立客戶月嫂小卡與確認按鈕的可靠發送任務",
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -309,6 +413,70 @@ def send_resume_for_case(
             "replacement": "Matching Plan resumes endpoint",
         },
     )
+
+
+def _contact_state_data(state) -> dict[str, Any]:
+    return {
+        "plan": {
+            "id": state.plan.plan_id,
+            "case_no": state.plan.case_no,
+            "communication_version": state.plan.version,
+            "status": state.plan_status,
+            "is_active": 1 if state.plan_is_active else None,
+        },
+        "segments": [_segment_state_data(segment) for segment in state.segments],
+        "all_willing": state.all_willing,
+        "customer_decision": state.customer_decision.value,
+        "customer_profiles_status": (
+            state.customer_profiles_status.value
+            if state.customer_profiles_status else None
+        ),
+    }
+
+
+def _segment_state_data(segment) -> dict[str, Any]:
+    return {
+        "segment_id": segment.segment_id,
+        "segment_order": segment.segment_order,
+        "staff_id": segment.staff_id,
+        "staff_name": segment.staff_name,
+        "assigned_start_date": segment.assigned_start_date,
+        "assigned_end_date": segment.assigned_end_date,
+        "willingness": segment.willingness.value,
+        "info_1_status": (
+            segment.information_1_status.value if segment.information_1_status else None
+        ),
+        "info_2_status": (
+            segment.information_2_status.value if segment.information_2_status else None
+        ),
+    }
+
+
+def _notification_data(result) -> dict[str, Any]:
+    return {
+        "intent_id": result.intent_id,
+        "line_delivery_task_id": (
+            result.line_delivery_task_id.value
+            if result.line_delivery_task_id else None
+        ),
+        "delivery_status": result.projection_status.value,
+        "notification_kind": result.notification_kind.value,
+    }
+
+
+def _response_data(result) -> dict[str, Any]:
+    return {
+        "event_id": result.event_id,
+        "communication_version": result.plan.version,
+        "source": result.source.value,
+        "willingness": (
+            result.caregiver_willingness.value
+            if result.caregiver_willingness else None
+        ),
+        "customer_decision": (
+            result.customer_decision.value if result.customer_decision else None
+        ),
+    }
 
 
 def _raise_legacy_matching_gone(match_id):
