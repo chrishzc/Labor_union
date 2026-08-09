@@ -9,7 +9,7 @@ from enum import Enum
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from pydantic import BaseModel, ConfigDict, Field
 from pymysql.err import OperationalError, ProgrammingError
 
@@ -30,6 +30,7 @@ from infrastructure.mysql.background_job_repository import (
     BackgroundJobRepository,
     JobIdempotencyConflict,
 )
+from shared_kernel.durable_job_queue import DurableJobCommand
 from domains.scheduling.assignment_plan import (
     AssignmentPlanIntent,
     AssignmentPlanSegmentIntent,
@@ -152,7 +153,6 @@ def preview_assignment_plan(
 # FastAPI requires the complete HTTP contract here for OpenAPI generation.
 def apply_assignment_plan(
     body: AssignmentPlanApplyBody,
-    background_tasks: BackgroundTasks,
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: Annotated[
         str,
@@ -163,9 +163,6 @@ def apply_assignment_plan(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: AssignmentPlanApplication = Depends(
-        get_assignment_plan_application
-    ),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     request = _apply_request(
@@ -178,24 +175,7 @@ def apply_assignment_plan(
     
     job_id = str(uuid.uuid4())
     try:
-        job_id = job_repository.enqueue_job(job_id, request.idempotency_key)
-        
-        def _background_worker():
-            job_repository.mark_running(job_id)
-            try:
-                receipt = _materialize(application.apply(request))
-                job_repository.mark_succeeded(job_id, receipt)
-            except AssignmentPlanWorkflowError as error:
-                job_repository.mark_failed(job_id, {"error": _materialize(error.error)})
-            except (OperationalError, ProgrammingError) as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "INTERNAL", "code": "database_error", "message": str(error)}})
-            except ValueError as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "VALIDATION", "code": str(error), "message": "Assignment Plan request was rejected."}})
-            except Exception as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "INTERNAL", "code": "internal_error", "message": str(error)}})
-
-        background_tasks.add_task(_background_worker)
-        
+        job_id = job_repository.enqueue_command(_assignment_plan_command(job_id, request))
     except JobIdempotencyConflict as e:
         job_id = e.job_id
 
@@ -203,6 +183,42 @@ def apply_assignment_plan(
         data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
         message="202 Accepted",
     )
+
+
+def _assignment_plan_command(job_id, request):
+    return DurableJobCommand(
+        job_id,
+        request.idempotency_key.value,
+        "assignment_plan_apply",
+        1,
+        _assignment_plan_payload(request),
+        request.actor.actor_id,
+        request.correlation_id.value,
+    )
+
+
+def _assignment_plan_payload(request):
+    return {
+        "case_no": request.case_no,
+        "segments": [
+            {
+                "staff_id": segment.staff_id,
+                "assigned_start_date": segment.assigned_start_date.isoformat(),
+                "assigned_end_date": segment.assigned_end_date.isoformat(),
+                "official_service_dates": [item.isoformat() for item in segment.official_service_dates],
+            }
+            for segment in request.intent.segments
+        ],
+        "expected_order_version": request.expected_order_version.value,
+        "expected_scheduling_version": request.expected_scheduling_version.value,
+        "expected_client_finance_version": request.expected_client_finance_version.value,
+        "expected_payroll_version": request.expected_payroll_version.value,
+        "preview_fingerprint": request.preview_fingerprint.value,
+        "idempotency_key": request.idempotency_key.value,
+        "actor": request.actor.actor_id,
+        "reason": request.reason,
+        "correlation_id": request.correlation_id.value,
+    }
 
 
 def _apply_request(case_no, body, key, correlation, principal):

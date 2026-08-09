@@ -32,7 +32,7 @@ class _Cursor:
 
 
 def _order(version=3):
-    return {"case_no":"C-1","status":"訂單成立","lifecycle_version":version,"cancel_reason":None,"actual_start_date":date(2026,8,1),"actual_end_date":None,"service_start_time":None,"service_end_time":None,"service_end_day_offset":None}
+    return {"case_no":"C-1","status":"訂單成立","lifecycle_version":version,"service_days":20,"cancel_reason":None,"actual_start_date":date(2026,8,1),"actual_end_date":None,"service_start_time":None,"service_end_time":None,"service_end_day_offset":None}
 
 
 def _envelope(cursor):

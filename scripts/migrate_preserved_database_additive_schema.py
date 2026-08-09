@@ -7,7 +7,7 @@ by an explicit, different candidate database identity and a durable receipt.
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timezone
 from decimal import Decimal
 import hashlib
@@ -20,11 +20,32 @@ import sys
 import tempfile
 from typing import Any, Iterable, Mapping
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 import pymysql
 
+from infrastructure.migration.cutover import (
+    AppendOnlyCutoverJournal,
+    reconcile_switch_state,
+)
+from infrastructure.migration.maintenance import (
+    MaintenanceWindowToken,
+    SourcePrincipalEvidence,
+)
+from infrastructure.migration.mysql_safety import (
+    inspect_source_read_only_principal,
+)
+from infrastructure.migration.preflight import (
+    SourceSafetyReceipt,
+    build_source_safety_receipt,
+    fingerprint_source_data_evidence,
+)
 
-ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_PARTS = (
+
+ROOT = PROJECT_ROOT
+LEGACY_SCHEMA_PARTS = (
     ROOT / "db" / "schema_parts" / "61_finance_import_reprocessing.sql",
     ROOT / "db" / "schema_parts" / "104_order_lifecycle_state_history.sql",
     ROOT / "db" / "schema_parts" / "105_order_service_time_terms.sql",
@@ -155,6 +176,30 @@ class DatabaseConfig:
         return pymysql.connect(**kwargs)
 
 
+@dataclass(frozen=True)
+class DatabaseDescriptor:
+    """A non-secret, single-purpose connection descriptor for rehearsal work."""
+
+    role: str
+    database: str
+    config: DatabaseConfig
+
+
+@dataclass(frozen=True)
+class SeparateDatabaseConfig:
+    """Routes source reads and candidate writes through different principals."""
+
+    source: DatabaseDescriptor
+    candidate: DatabaseDescriptor
+
+    def connect(self, database: str | None = None):
+        if database == self.source.database:
+            return self.source.config.connect(database)
+        if database in {None, self.candidate.database}:
+            return self.candidate.config.connect(database)
+        raise UpgradeBlocked("database is outside the preserve-data descriptors")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -169,6 +214,74 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+@dataclass(frozen=True)
+class ReleaseManifest:
+    """Validated append-only release chain used by preserve-data operations."""
+
+    release_id: str
+    fingerprint: str
+    artifacts: tuple[dict[str, Any], ...]
+    required_restart_targets: tuple[str, ...]
+    post_cutover_smoke_ids: tuple[str, ...]
+    verification_contracts: tuple[dict[str, Any], ...]
+    descriptors: Mapping[str, Mapping[str, Any]]
+
+
+def _load_release_chain() -> ReleaseManifest:
+    release_directory = ROOT / "db" / "migration_releases"
+    manifests = sorted(
+        path for path in release_directory.glob("labor_union_*_v*.json")
+        if not path.name.endswith(".descriptors.json")
+    )
+    if not manifests:
+        raise UpgradeBlocked("no migration release manifests are available")
+    artifacts: list[dict[str, Any]] = []
+    predecessor: str | None = None
+    fingerprints: list[str] = []
+    final_compatibility: Mapping[str, Any] = {}
+    final_contracts: tuple[dict[str, Any], ...] = ()
+    descriptors: dict[str, Mapping[str, Any]] = {}
+    for manifest_path in manifests:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if payload.get("contract") != "migration-release-manifest/v1":
+            raise UpgradeBlocked(f"invalid release manifest: {manifest_path.name}")
+        if predecessor is not None and payload.get("predecessor_release_id") != predecessor:
+            raise UpgradeBlocked(f"release predecessor mismatch: {manifest_path.name}")
+        descriptor = payload.get("descriptor_artifact") or {}
+        descriptor_path = ROOT / str(descriptor.get("relative_path", ""))
+        if not descriptor_path.is_file() or _sha256_file(descriptor_path) != descriptor.get("sha256"):
+            raise UpgradeBlocked(f"release descriptor hash mismatch: {manifest_path.name}")
+        descriptor_payload = json.loads(descriptor_path.read_text(encoding="utf-8"))
+        if descriptor_payload.get("contract") != "migration-owned-object-descriptors/v1":
+            raise UpgradeBlocked(f"invalid release descriptors: {descriptor_path.name}")
+        descriptors.update(descriptor_payload.get("descriptors") or {})
+        for artifact in payload.get("artifacts", []):
+            artifact_path = ROOT / str(artifact.get("relative_path", ""))
+            if not artifact_path.is_file() or _sha256_file(artifact_path) != artifact.get("sha256"):
+                raise UpgradeBlocked(f"release artifact hash mismatch: {artifact.get('name')}")
+            artifacts.append({**artifact, "release_id": payload["release_id"]})
+        predecessor = str(payload["release_id"])
+        fingerprints.append(_sha256_file(manifest_path))
+        final_compatibility = payload.get("application_compatibility") or {}
+        final_contracts = tuple(payload.get("verification_contracts") or ())
+    fingerprint = _sha256_bytes(json.dumps(
+        {"manifests": fingerprints, "artifacts": artifacts},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8"))
+    return ReleaseManifest(
+        predecessor or "", fingerprint, tuple(artifacts),
+        tuple(final_compatibility.get("required_restart_targets") or ()),
+        tuple(final_compatibility.get("post_cutover_smoke_ids") or ()),
+        final_contracts,
+        descriptors,
+    )
+
+
+RELEASE_MANIFEST = _load_release_chain()
+SCHEMA_PARTS = tuple(ROOT / artifact["relative_path"] for artifact in RELEASE_MANIFEST.artifacts)
+VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "verified"})
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -254,6 +367,94 @@ def config_from_env(path: Path) -> tuple[DatabaseConfig, str]:
     )
 
 
+def load_database_descriptor(
+    path: Path,
+    expected_role: str,
+) -> DatabaseDescriptor:
+    """Load a non-secret rehearsal descriptor; credentials stay in its env var."""
+    try:
+        payload = json.loads(path.expanduser().resolve().read_text("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UpgradeBlocked("database descriptor is not valid strict UTF-8 JSON") from exc
+    if not isinstance(payload, dict):
+        raise UpgradeBlocked("database descriptor must be an object")
+    if payload.get("contract") != "preserve-data/database-descriptor/v1":
+        raise UpgradeBlocked("database descriptor contract is unsupported")
+    if payload.get("role") != expected_role:
+        raise UpgradeBlocked(f"database descriptor must have role {expected_role}")
+    _reject_descriptor_secret(payload)
+    database = _descriptor_text(payload, "database")
+    host = _descriptor_text(payload, "host")
+    user = _descriptor_text(payload, "user")
+    password_env = _descriptor_text(payload, "password_env")
+    password = os.getenv(password_env, "")
+    if not password:
+        raise UpgradeBlocked("database descriptor password environment is empty")
+    try:
+        port = int(payload.get("port"))
+    except (TypeError, ValueError) as exc:
+        raise UpgradeBlocked("database descriptor port is invalid") from exc
+    if not 1 <= port <= 65535:
+        raise UpgradeBlocked("database descriptor port is invalid")
+    if not IDENTIFIER.fullmatch(database):
+        raise UpgradeBlocked("database descriptor database is invalid")
+    return DatabaseDescriptor(
+        expected_role,
+        database,
+        DatabaseConfig(host=host, port=port, user=user, password=password),
+    )
+
+
+def load_source_principal_evidence(path: Path) -> SourcePrincipalEvidence:
+    payload = _read_json_object(path, "source principal evidence")
+    privileges = payload.get("privileges")
+    if not isinstance(privileges, list) or not all(
+        isinstance(value, str) and value.strip() for value in privileges
+    ):
+        raise UpgradeBlocked("source principal evidence privileges are invalid")
+    return SourcePrincipalEvidence(
+        principal=_descriptor_text(payload, "principal"),
+        source_database=_descriptor_text(payload, "source_database"),
+        privileges=frozenset(privileges),
+    )
+
+
+def load_maintenance_token(path: Path) -> MaintenanceWindowToken:
+    payload = _read_json_object(path, "maintenance token")
+    required = (
+        "token_id", "source_database", "source_schema_sha256",
+        "source_data_sha256", "write_freeze_started_at", "expires_at",
+        "issuer", "fingerprint",
+    )
+    try:
+        values = {name: _descriptor_text(payload, name) for name in required}
+    except UpgradeBlocked:
+        raise
+    return MaintenanceWindowToken(**values)
+
+
+def _read_json_object(path: Path, label: str) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.expanduser().resolve().read_text("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise UpgradeBlocked(f"{label} is not valid strict UTF-8 JSON") from exc
+    if not isinstance(payload, dict):
+        raise UpgradeBlocked(f"{label} must be an object")
+    return payload
+
+
+def _descriptor_text(payload: Mapping[str, Any], name: str) -> str:
+    value = payload.get(name)
+    if not isinstance(value, str) or not value.strip():
+        raise UpgradeBlocked(f"database descriptor {name} is required")
+    return value.strip()
+
+
+def _reject_descriptor_secret(payload: Mapping[str, Any]) -> None:
+    if any(name in payload for name in ("password", "DB_PASSWORD")):
+        raise UpgradeBlocked("database descriptor must not contain a password")
+
+
 def validate_database_names(source: str, candidate: str) -> None:
     if not IDENTIFIER.fullmatch(source) or not IDENTIFIER.fullmatch(candidate):
         raise UpgradeBlocked("database names must match [A-Za-z0-9_]+")
@@ -261,7 +462,208 @@ def validate_database_names(source: str, candidate: str) -> None:
         raise UpgradeBlocked("candidate database must differ from source")
 
 
-def server_identity(config: DatabaseConfig, database: str) -> dict[str, Any]:
+def build_descriptor_runtime(
+    source_descriptor_path: Path,
+    candidate_descriptor_path: Path,
+    source: str,
+    candidate: str,
+) -> SeparateDatabaseConfig:
+    source_descriptor = load_database_descriptor(
+        source_descriptor_path, "source-read"
+    )
+    candidate_descriptor = load_database_descriptor(
+        candidate_descriptor_path, "candidate-write"
+    )
+    if source_descriptor.database != source:
+        raise UpgradeBlocked("source descriptor database identity mismatch")
+    if candidate_descriptor.database != candidate:
+        raise UpgradeBlocked("candidate descriptor database identity mismatch")
+    if (
+        source_descriptor.config.host == candidate_descriptor.config.host
+        and source_descriptor.config.port == candidate_descriptor.config.port
+        and source_descriptor.config.user == candidate_descriptor.config.user
+    ):
+        raise UpgradeBlocked("source and candidate principals must differ")
+    _require_dedicated_rehearsal_databases(source, candidate)
+    return SeparateDatabaseConfig(source_descriptor, candidate_descriptor)
+
+
+def _require_dedicated_rehearsal_databases(source: str, candidate: str) -> None:
+    forbidden = {"mysql_db", "union_db"}
+    if source.casefold() in forbidden or candidate.casefold() in forbidden:
+        raise UpgradeBlocked("operational databases are not rehearsal targets")
+
+
+def run_source_safety_preflight(
+    config: SeparateDatabaseConfig,
+    source: str,
+    candidate: str,
+    principal_evidence_path: Path,
+    maintenance_token_path: Path,
+    receipt_directory: Path,
+    *,
+    mode: str,
+) -> dict[str, Any]:
+    """Validate independent source authority and immutable plan facts."""
+    plan = build_plan(config, source, candidate)
+    source_safety = _validate_live_source_safety(
+        config, source, plan, principal_evidence_path, maintenance_token_path
+    )
+    receipt = _source_safety_receipt(mode, candidate, plan, source_safety)
+    receipt_path = _preflight_receipt_path(receipt_directory, mode, plan)
+    saved_receipt, created = _write_append_only_receipt(receipt_path, receipt)
+    if created:
+        _append_journal_event(
+            receipt_directory, "source_safety_preflight", saved_receipt
+        )
+    return {**saved_receipt, "receipt_path": str(receipt_path)}
+
+
+def _validate_live_source_safety(
+    config: SeparateDatabaseConfig,
+    source: str,
+    plan: Mapping[str, Any],
+    principal_evidence_path: Path,
+    maintenance_token_path: Path,
+) -> SourceSafetyReceipt:
+    declared_evidence = load_source_principal_evidence(principal_evidence_path)
+    inspected_evidence = inspect_source_read_only_principal(
+        config.source.config, source
+    )
+    if declared_evidence != inspected_evidence:
+        raise UpgradeBlocked("source principal evidence does not match live principal")
+    token = load_maintenance_token(maintenance_token_path)
+    try:
+        source_safety = build_source_safety_receipt(
+            plan,
+            inspected_evidence,
+            token,
+            now=datetime.now(timezone.utc),
+        )
+    except ValueError as exc:
+        raise UpgradeBlocked(str(exc)) from exc
+    return source_safety
+
+
+def _source_safety_receipt(
+    mode: str,
+    candidate: str,
+    plan: Mapping[str, Any],
+    source_safety: SourceSafetyReceipt,
+) -> dict[str, Any]:
+    return {
+        "kind": "preserve_data_source_safety_preflight",
+        "status": "passed",
+        "created_at": _now(),
+        "mode": mode,
+        "source": asdict(source_safety),
+        "plan_fingerprint": plan.get("plan_fingerprint"),
+        "candidate_database": candidate,
+    }
+
+
+def recover_interrupted_switch(
+    environment_file: Path,
+    switch_receipt_path: Path,
+    receipt_directory: Path,
+) -> dict[str, Any]:
+    """Report the sole safe next action; recovery never guesses a config state."""
+    receipt = read_receipt(switch_receipt_path)
+    before_sha256 = str(receipt.get("before_sha256") or "")
+    after_sha256 = str(receipt.get("after_sha256") or "")
+    if not before_sha256 or not after_sha256:
+        raise UpgradeBlocked("switch receipt lacks configuration digests")
+    current_sha256 = _sha256_file(environment_file.expanduser().resolve())
+    restart_receipt = receipt.get("post_restart") or {}
+    reconciliation = reconcile_switch_state(
+        current_config_sha256=current_sha256,
+        before_sha256=before_sha256,
+        after_sha256=after_sha256,
+        restart_receipt_present=bool(restart_receipt.get("restart_receipts")),
+        smoke_receipt_present=bool(restart_receipt.get("read_smokes")),
+    )
+    result = {
+        "kind": "interrupted_switch_recovery",
+        "status": "reconciled",
+        "created_at": _now(),
+        "switch_receipt_sha256": _sha256_file(switch_receipt_path),
+        "state": reconciliation.state,
+        "next_action": reconciliation.next_action,
+    }
+    saved_receipt, created = _write_append_only_receipt(
+        _recovery_receipt_path(receipt_directory, switch_receipt_path), result
+    )
+    if created:
+        _append_journal_event(receipt_directory, "switch_reconciled", saved_receipt)
+    if reconciliation.state == "ambiguous":
+        raise UpgradeBlocked("interrupted switch state is ambiguous; manual review required")
+    return saved_receipt
+
+
+def _preflight_receipt_path(
+    receipt_directory: Path, mode: str, plan: Mapping[str, Any]
+) -> Path:
+    fingerprint = str(plan.get("plan_fingerprint") or "unknown")[:16]
+    return receipt_directory.expanduser().resolve() / (
+        f"preflight-{mode}-{fingerprint}.json"
+    )
+
+
+def _recovery_receipt_path(receipt_directory: Path, switch_receipt: Path) -> Path:
+    digest = _sha256_file(switch_receipt)[:16]
+    return receipt_directory.expanduser().resolve() / f"recovery-{digest}.json"
+
+
+def _write_append_only_receipt(
+    path: Path, receipt: Mapping[str, Any]
+) -> tuple[dict[str, Any], bool]:
+    payload = _canonical_json(receipt)
+    if path.exists():
+        existing = read_receipt(path)
+        if _receipt_without_timestamp(existing) != _receipt_without_timestamp(receipt):
+            raise UpgradeBlocked("append-only receipt path already has different content")
+        return existing, False
+    _atomic_write(path, payload)
+    return dict(receipt), True
+
+
+def _receipt_without_timestamp(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value for key, value in receipt.items() if key != "created_at"
+    }
+
+
+def _append_journal_event(
+    receipt_directory: Path, event_type: str, receipt: Mapping[str, Any]
+) -> None:
+    AppendOnlyCutoverJournal(
+        receipt_directory.expanduser().resolve() / "cutover.journal.jsonl"
+    ).append(event_type, receipt)
+
+
+def _database_connection_config(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    database: str,
+) -> DatabaseConfig:
+    if isinstance(config, SeparateDatabaseConfig):
+        if database == config.source.database:
+            return config.source.config
+        if database == config.candidate.database:
+            return config.candidate.config
+        raise UpgradeBlocked("database is outside the preserve-data descriptors")
+    return config
+
+
+def _candidate_connection_config(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    candidate: str,
+) -> DatabaseConfig:
+    return _database_connection_config(config, candidate)
+
+
+def server_identity(
+    config: DatabaseConfig | SeparateDatabaseConfig, database: str
+) -> dict[str, Any]:
     connection = config.connect(database)
     try:
         with connection.cursor() as cursor:
@@ -274,16 +676,19 @@ def server_identity(config: DatabaseConfig, database: str) -> dict[str, Any]:
         connection.close()
     if not row or row.get("db") != database:
         raise UpgradeBlocked("database connection identity mismatch")
+    connection_config = _database_connection_config(config, database)
     return {
         "database": row["db"],
         "server": str(row["server"]),
         "version": str(row["version"]),
-        "host": config.host,
-        "port": config.port,
+        "host": connection_config.host,
+        "port": connection_config.port,
     }
 
 
-def database_exists(config: DatabaseConfig, database: str) -> bool:
+def database_exists(
+    config: DatabaseConfig | SeparateDatabaseConfig, database: str
+) -> bool:
     connection = config.connect()
     try:
         with connection.cursor() as cursor:
@@ -753,7 +1158,44 @@ def _owned_classification(snapshot: Mapping[str, Any]) -> dict[str, str]:
             result[part] = "drift"
         else:
             result[part] = "partial"
+    for artifact in RELEASE_MANIFEST.artifacts:
+        name = str(artifact["name"])
+        if name in result:
+            continue
+        descriptor = RELEASE_MANIFEST.descriptors.get(name)
+        if descriptor is None:
+            raise UpgradeBlocked(f"missing descriptor for release artifact: {name}")
+        result[name] = _descriptor_presence_state(
+            descriptor, present_columns, present_triggers,
+        )
     return result
+
+
+def _descriptor_presence_state(
+    descriptor: Mapping[str, Any],
+    present_columns: Mapping[str, set[str]],
+    present_triggers: set[str],
+) -> str:
+    """Classify an append-only artifact by its released table/trigger names."""
+    states: list[str] = []
+    for table, columns in (descriptor.get("tables") or {}).items():
+        actual = present_columns.get(str(table))
+        required = {str(column) for column in columns}
+        if actual is None:
+            states.append("absent")
+        elif required.issubset(actual):
+            states.append("exact")
+        elif required.intersection(actual):
+            states.append("partial")
+        else:
+            states.append("absent")
+    for trigger in descriptor.get("triggers") or ():
+        states.append("exact" if str(trigger) in present_triggers else "absent")
+    if not states or all(state == "absent" for state in states):
+        return "absent"
+    if all(state == "exact" for state in states):
+        return "exact"
+    return "partial"
 
 
 def schema_artifacts() -> list[dict[str, Any]]:
@@ -785,16 +1227,21 @@ def build_plan(
         )
     plan = {
         "contract": "preserved-database-additive-upgrade/v1",
+        "release_id": RELEASE_MANIFEST.release_id,
+        "release_fingerprint": RELEASE_MANIFEST.fingerprint,
         "created_at": _now(),
         "source": source_identity,
         "candidate_database": candidate,
         "candidate_exists": database_exists(config, candidate),
+        "candidate_precondition": "source_data_must_match_before_apply",
         "schema_artifacts": schema_artifacts(),
         "source_schema_sha256": source_snapshot["sha256"],
         "source_objects": source_objects,
         "source_data": _table_evidence(config, source),
         "phase_order": [path.name for path in SCHEMA_PARTS],
-        "status": "blocked" if database_exists(config, candidate) else "ready",
+        # A restored candidate is the normal resume point.  Creation is guarded
+        # by restore_candidate; planning never authorizes overwriting it.
+        "status": "ready",
     }
     plan["plan_fingerprint"] = _sha256_bytes(_canonical_json(plan))
     return plan
@@ -813,6 +1260,9 @@ def _validate_plan_integrity(
     for key in ("schema_artifacts", "phase_order"):
         if plan.get(key) != fresh.get(key):
             raise UpgradeBlocked(f"plan artifact changed after planning: {key}")
+    for key in ("release_id", "release_fingerprint"):
+        if plan.get(key) != fresh.get(key):
+            raise UpgradeBlocked(f"plan release changed after planning: {key}")
     if plan.get("candidate_database") != fresh.get("candidate_database"):
         raise UpgradeBlocked("plan candidate identity mismatch")
     planned_source = plan.get("source") or {}
@@ -863,6 +1313,7 @@ def _mysql_base(
 ) -> list[str]:
     prefix = [executable]
     host = config.host
+    port = config.port
     if container:
         if not IDENTIFIER.fullmatch(container.replace("-", "_")):
             raise UpgradeBlocked("invalid mysql container name")
@@ -871,8 +1322,9 @@ def _mysql_base(
             container, executable,
         ]
         host = "127.0.0.1"
+        port = 3306
     return prefix + [
-        "--host", host, "--port", str(config.port),
+        "--host", host, "--port", str(port),
         "--user", config.user, "--default-character-set=utf8mb4",
     ]
 
@@ -916,7 +1368,7 @@ def create_source_dump(
 
 
 def restore_candidate(
-    config: DatabaseConfig,
+    config: DatabaseConfig | SeparateDatabaseConfig,
     source: str,
     candidate: str,
     dump_path: Path,
@@ -927,6 +1379,7 @@ def restore_candidate(
     mysql_container: str | None = None,
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
+    candidate_config = _candidate_connection_config(config, candidate)
     if database_exists(config, candidate):
         raise UpgradeBlocked("candidate must not exist before restore")
     identity = server_identity(config, source)
@@ -941,19 +1394,21 @@ def restore_candidate(
         "source_dump": dump,
     }
     write_receipt(operation_receipt_path, prepared)
-    connection = config.connect()
+    connection = candidate_config.connect()
     try:
         with connection.cursor() as cursor:
             cursor.execute(f"CREATE DATABASE `{candidate}` CHARACTER SET utf8mb4")
     finally:
         connection.close()
     command = _mysql_base(
-        config, mysql, container=mysql_container
+        candidate_config, mysql, container=mysql_container
     ) + [candidate]
     with dump_path.expanduser().resolve().open("rb") as source_handle:
         completed = subprocess.run(
             command, stdin=source_handle, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, env=_client_environment(config), check=False,
+            stderr=subprocess.PIPE,
+            env=_client_environment(candidate_config),
+            check=False,
         )
     if completed.returncode != 0:
         prepared.update(
@@ -1773,7 +2228,7 @@ def _canonical_artifact_metadata_state(
 
 
 def apply_schema(
-    config: DatabaseConfig,
+    config: DatabaseConfig | SeparateDatabaseConfig,
     source: str,
     candidate: str,
     plan_path: Path,
@@ -1785,6 +2240,12 @@ def apply_schema(
     plan = read_receipt(plan_path)
     if plan.get("status") != "ready":
         raise UpgradeBlocked("plan is not ready")
+    existing_receipt = read_receipt(operation_receipt_path)
+    if existing_receipt.get("status") == "schema_applied":
+        return run_candidate_post_schema(
+            config, source, candidate, operation_receipt_path,
+            mysql_container=mysql_container,
+        )
     fresh = build_plan(config, source, candidate)
     _validate_plan_integrity(plan, fresh)
     if fresh["source_schema_sha256"] != plan.get("source_schema_sha256"):
@@ -1800,7 +2261,7 @@ def apply_schema(
     states = _owned_classification(before)
     if any(state in {"partial", "drift"} for state in states.values()):
         raise UpgradeBlocked(f"candidate schema is partial/drift: {states}")
-    receipt = read_receipt(operation_receipt_path)
+    receipt = existing_receipt
     if receipt.get("candidate_database") != candidate:
         raise UpgradeBlocked("operation receipt targets another candidate")
     steps = receipt.setdefault("schema_steps", [])
@@ -1985,15 +2446,16 @@ def _run_project_python(
 
 
 def _candidate_preddl_dump(
-    config: DatabaseConfig,
+    config: DatabaseConfig | SeparateDatabaseConfig,
     candidate: str,
     target: Path,
     *,
     mysqldump: str = "mysqldump",
     mysql_container: str | None = None,
 ) -> dict[str, Any]:
+    candidate_config = _candidate_connection_config(config, candidate)
     command = _mysql_base(
-        config, mysqldump, container=mysql_container
+        candidate_config, mysqldump, container=mysql_container
     ) + [
         "--single-transaction", "--routines", "--events", "--triggers",
         "--hex-blob", "--databases", candidate,
@@ -2001,7 +2463,7 @@ def _candidate_preddl_dump(
     with target.open("wb") as output:
         completed = subprocess.run(
             command, stdout=output, stderr=subprocess.PIPE,
-            env=_client_environment(config), check=False,
+            env=_client_environment(candidate_config), check=False,
         )
     if completed.returncode != 0 or not target.is_file() or target.stat().st_size <= 0:
         raise UpgradeBlocked("candidate pre-DDL mysqldump failed")
@@ -2013,7 +2475,7 @@ def _candidate_preddl_dump(
 
 
 def run_candidate_post_schema(
-    config: DatabaseConfig,
+    config: DatabaseConfig | SeparateDatabaseConfig,
     source: str,
     candidate: str,
     operation_receipt_path: Path,
@@ -2029,6 +2491,7 @@ def run_candidate_post_schema(
     backup = artifact_dir / f"{candidate}.pre_backfill.sql"
     plan = artifact_dir / f"{candidate}.backfill.plan.json"
     backfill_receipt = artifact_dir / f"{candidate}.backfill.receipt.json"
+    candidate_config = _candidate_connection_config(config, candidate)
     candidate_backup = _candidate_preddl_dump(
         config, candidate, backup, mysql_container=mysql_container
     )
@@ -2040,7 +2503,7 @@ def run_candidate_post_schema(
             migration, "--dry-run", "--target-database", candidate,
             "--receipt-path", str(plan),
         ],
-        config=config,
+        config=candidate_config,
         database=candidate,
     )
     applied = _run_project_python(
@@ -2049,7 +2512,7 @@ def run_candidate_post_schema(
             "--backup-receipt", str(backup), "--plan-receipt", str(plan),
             "--receipt-path", str(backfill_receipt),
         ],
-        config=config,
+        config=candidate_config,
         database=candidate,
     )
     verified = _run_project_python(
@@ -2057,15 +2520,15 @@ def run_candidate_post_schema(
             migration, "--verify", "--target-database", candidate,
             "--receipt-path", str(backfill_receipt),
         ],
-        config=config,
+        config=candidate_config,
         database=candidate,
     )
     view_migration = "scripts/migrate_order_details_lifecycle_version_view.py"
     view_dry = _run_project_python(
-        [view_migration], config=config, database=candidate
+        [view_migration], config=candidate_config, database=candidate
     )
     view_apply = _run_project_python(
-        [view_migration, "--apply"], config=config, database=candidate
+        [view_migration, "--apply"], config=candidate_config, database=candidate
     )
     receipt.update(
         status="backfilled",
@@ -2120,6 +2583,7 @@ def switch_environment(
     candidate: str,
     verified_receipt_path: Path,
     switch_receipt_path: Path,
+    config: DatabaseConfig | SeparateDatabaseConfig | None = None,
 ) -> dict[str, Any]:
     verified = read_receipt(verified_receipt_path)
     if verified.get("status") != "verified":
@@ -2147,20 +2611,26 @@ def switch_environment(
         or environment_port != verified_port
     ):
         raise UpgradeBlocked("environment connection identity is stale")
-    config, configured_source = config_from_env(environment_file)
+    connection_config = config
+    _, configured_environment = _read_env_bytes(environment_file)
+    configured_source = str(configured_environment.get("DB_DATABASE") or "")
     if configured_source != source:
         raise UpgradeBlocked("environment source database is stale")
-    current_source_identity = server_identity(config, source)
-    current_candidate_identity = server_identity(config, candidate)
+    if connection_config is None:
+        connection_config, configured_source = config_from_env(environment_file)
+        if configured_source != source:
+            raise UpgradeBlocked("environment source database is stale")
+    current_source_identity = server_identity(connection_config, source)
+    current_candidate_identity = server_identity(connection_config, candidate)
     if (
         current_source_identity.get("server") != source_identity.get("server")
         or current_candidate_identity.get("server")
         != candidate_identity.get("server")
     ):
         raise UpgradeBlocked("verified server identity is stale")
-    if _table_evidence(config, source) != verified.get("source_data"):
+    if _table_evidence(connection_config, source) != verified.get("source_data"):
         raise UpgradeBlocked("verified source data fingerprint is stale")
-    if _table_evidence(config, candidate) != verified.get("candidate_data"):
+    if _table_evidence(connection_config, candidate) != verified.get("candidate_data"):
         raise UpgradeBlocked("verified candidate data fingerprint is stale")
     updated = _replace_database_setting(raw, source, candidate)
     receipt = {
@@ -2470,17 +2940,57 @@ def verify_candidate(
     return receipt
 
 
+def complete_cutover_after_restart(
+    switch_receipt_path: Path,
+    restart_port: Any,
+    read_smoke_port: Any,
+) -> dict[str, Any]:
+    """Finish a reversible switch only after every release read smoke passes."""
+    receipt = read_receipt(switch_receipt_path)
+    if receipt.get("status") != "switched":
+        raise UpgradeBlocked("post-restart verification requires a switched receipt")
+    restart_receipts = []
+    smoke_receipts = []
+    try:
+        for target in RELEASE_MANIFEST.required_restart_targets:
+            restart_receipts.append(dict(restart_port.restart(target)))
+        for smoke_id in RELEASE_MANIFEST.post_cutover_smoke_ids:
+            smoke = dict(read_smoke_port.run(smoke_id))
+            if smoke.get("status") != "passed":
+                raise UpgradeBlocked(f"post-restart read smoke failed: {smoke_id}")
+            smoke_receipts.append(smoke)
+    finally:
+        shutdown_receipts = tuple(restart_port.shutdown())
+    receipt.update(
+        status="completed",
+        post_restart={
+            "restart_receipts": tuple(restart_receipts),
+            "read_smokes": tuple(smoke_receipts),
+            "shutdown_receipts": shutdown_receipts,
+        },
+        completed_at=_now(),
+    )
+    write_receipt(switch_receipt_path, receipt)
+    return receipt
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     modes = parser.add_mutually_exclusive_group(required=True)
     for name in (
         "check", "dry-run", "backup", "restore", "apply", "verify",
-        "switch", "rollback-switch",
+        "switch", "rollback-switch", "complete-restart",
+        "recover-interrupted-switch",
     ):
         modes.add_argument(f"--{name}", action="store_true")
     parser.add_argument("--environment-file", default=str(ROOT / ".env"))
     parser.add_argument("--source-database")
-    parser.add_argument("--candidate-database", required=True)
+    parser.add_argument("--candidate-database")
+    parser.add_argument("--source-read-descriptor")
+    parser.add_argument("--candidate-write-descriptor")
+    parser.add_argument("--source-principal-evidence")
+    parser.add_argument("--maintenance-token")
+    parser.add_argument("--receipt-directory")
     parser.add_argument("--plan-receipt")
     parser.add_argument("--operation-receipt")
     parser.add_argument("--source-dump")
@@ -2496,22 +3006,45 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     environment_file = Path(args.environment_file)
     try:
-        config, configured_source = config_from_env(environment_file)
-        source = (args.source_database or configured_source).strip()
-        if not source:
-            raise UpgradeBlocked(
-                "source database must be explicit when .env has no DB_DATABASE"
-            )
-        candidate = args.candidate_database
+        if not environment_file.is_file():
+            raise FileNotFoundError(environment_file)
+        source = (args.source_database or "").strip()
+        candidate = (args.candidate_database or "").strip()
         validate_database_names(source, candidate)
+        if not all((
+            args.source_read_descriptor,
+            args.candidate_write_descriptor,
+            args.source_principal_evidence,
+            args.maintenance_token,
+            args.receipt_directory,
+        )):
+            raise UpgradeBlocked("source/candidate safety arguments are required")
+        config = build_descriptor_runtime(
+            Path(args.source_read_descriptor),
+            Path(args.candidate_write_descriptor),
+            source,
+            candidate,
+        )
+        receipt_directory = Path(args.receipt_directory)
         mode = next(
             name.replace("_", "-")
             for name in (
                 "check", "dry_run", "backup", "restore", "apply", "verify",
-                "switch", "rollback_switch",
+                "switch", "rollback_switch", "complete_restart",
+                "recover_interrupted_switch",
             )
             if getattr(args, name)
         )
+        if mode in {"check", "dry-run", "backup", "switch", "complete-restart"}:
+            run_source_safety_preflight(
+                config,
+                source,
+                candidate,
+                Path(args.source_principal_evidence),
+                Path(args.maintenance_token),
+                receipt_directory,
+                mode=mode,
+            )
         if mode in {"check", "dry-run"}:
             result = build_plan(config, source, candidate)
             if mode == "dry-run":
@@ -2525,7 +3058,7 @@ def main(argv: list[str] | None = None) -> int:
                     "--source-backup-receipt"
                 )
             result = create_source_dump(
-                config, source, Path(args.source_dump),
+                config.source.config, source, Path(args.source_dump),
                 Path(args.source_backup_receipt), mysqldump=args.mysqldump,
                 mysql_container=args.mysql_container,
             )
@@ -2561,13 +3094,27 @@ def main(argv: list[str] | None = None) -> int:
                 raise UpgradeBlocked("switch receipts are required")
             result = switch_environment(
                 environment_file, source, candidate,
-                Path(args.operation_receipt), Path(args.switch_receipt),
+                Path(args.operation_receipt), Path(args.switch_receipt), config,
             )
-        else:
+        elif mode == "rollback-switch":
             if not args.switch_receipt:
                 raise UpgradeBlocked("rollback-switch requires switch receipt")
             result = rollback_environment(
                 environment_file, Path(args.switch_receipt)
+            )
+        elif mode == "recover-interrupted-switch":
+            if not args.switch_receipt:
+                raise UpgradeBlocked(
+                    "recover-interrupted-switch requires switch receipt"
+                )
+            result = recover_interrupted_switch(
+                environment_file,
+                Path(args.switch_receipt),
+                receipt_directory,
+            )
+        else:
+            raise UpgradeBlocked(
+                "complete-restart requires a target-host restart/read-smoke adapter"
             )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0

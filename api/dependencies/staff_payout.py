@@ -37,15 +37,23 @@ class StaffPayoutApplication:
 
 def get_staff_payout_application():
     connection = get_connection()
+    try:
+        yield build_staff_payout_application(connection)
+    finally:
+        connection.close()
+
+
+def build_staff_payout_application(connection):
     repository = MySqlStaffPayoutRepository(connection)
     workflow = StaffPayoutReconciliationWorkflow(
         repository,
         lambda: StaffPayoutMySqlUnitOfWork(connection),
     )
-    try:
-        yield StaffPayoutApplication(repository, workflow)
-    finally:
-        connection.close()
+    return StaffPayoutApplication(repository, workflow)
 
 
-__all__ = ["StaffPayoutApplication", "get_staff_payout_application"]
+__all__ = [
+    "StaffPayoutApplication",
+    "build_staff_payout_application",
+    "get_staff_payout_application",
+]

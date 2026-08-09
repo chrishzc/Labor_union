@@ -8,7 +8,7 @@ from enum import Enum
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException, Path, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.payroll_rebuild import (
@@ -22,6 +22,7 @@ from infrastructure.mysql.background_job_repository import (
     BackgroundJobRepository,
     JobIdempotencyConflict,
 )
+from shared_kernel.durable_job_queue import DurableJobCommand
 from api.schemas.payroll_rebuild import (
     PayrollRebuildApplyBody,
     PayrollRebuildPreviewView,
@@ -84,14 +85,10 @@ def preview_payroll_rebuild(
 )
 def apply_payroll_rebuild(
     body: PayrollRebuildApplyBody,
-    background_tasks: BackgroundTasks,
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: PayrollRebuildApplication = Depends(
-        get_payroll_rebuild_application
-    ),
     job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     request = PayrollRebuildRequest(
@@ -103,28 +100,11 @@ def apply_payroll_rebuild(
         body.reason,
         CorrelationId(correlation_id),
     )
-    
     job_id = str(uuid.uuid4())
     try:
-        job_id = job_repository.enqueue_job(job_id, request.idempotency_key)
-        
-        def _background_worker():
-            job_repository.mark_running(job_id)
-            try:
-                receipt = _receipt_payload(application.apply(request))
-                job_repository.mark_succeeded(job_id, receipt)
-            except PayrollRebuildError as error:
-                job_repository.mark_failed(job_id, {"error": _materialize(error.error)})
-            except PayrollRebuildRepositoryUnavailable as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "UNAVAILABLE" if error.retryable else "INTERNAL", "code": "transaction_failed", "message": str(error)}})
-            except (TypeError, ValueError) as error:
-                category, status_c = _validation_error_category(str(error) or "invalid_payroll_facts")
-                job_repository.mark_failed(job_id, {"error": {"category": category.name, "code": str(error) or "invalid_payroll_facts", "message": "Payroll root facts 未通過驗證。"}})
-            except Exception as error:
-                job_repository.mark_failed(job_id, {"error": {"category": "INTERNAL", "code": "transaction_failed", "message": str(error)}})
-
-        background_tasks.add_task(_background_worker)
-        
+        job_id = job_repository.enqueue_command(
+            _payroll_rebuild_command(job_id, request)
+        )
     except JobIdempotencyConflict as e:
         job_id = e.job_id
 
@@ -158,6 +138,30 @@ def query_staff_monthly_payroll(
         "成功取得月嫂月份薪資加總",
         correlation_id,
     )
+
+
+def _payroll_rebuild_command(job_id, request):
+    return DurableJobCommand(
+        job_id,
+        request.idempotency_key.value,
+        "payroll_rebuild_apply",
+        1,
+        _payroll_rebuild_payload(request),
+        request.actor.actor_id,
+        request.correlation_id.value,
+    )
+
+
+def _payroll_rebuild_payload(request):
+    return {
+        "actor": request.actor.actor_id,
+        "case_no": request.case_no,
+        "correlation_id": request.correlation_id.value,
+        "expected_payroll_version": request.expected_payroll_version.value,
+        "idempotency_key": request.idempotency_key.value,
+        "preview_fingerprint": request.preview_fingerprint.value,
+        "reason": request.reason,
+    }
 
 
 def _preview_payload(case_no, preview):

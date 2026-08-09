@@ -84,9 +84,10 @@ Client Finance:      工會 → 客戶 → subsidy-return obligation / payout
 
 若客戶在其 claim quarter 的第一個曆月實際結案，補助退款日期固定為「實際結案月份
 加兩個曆月的 15 日」。該日相關 claim item 尚未有政府入帳 allocation 時，系統建立
-`subsidy_advance_due` work item；人員以 Preview／Apply 執行工會墊付，且只限該客戶
-已建立、未清償的 `subsidy_return` 義務。這是客戶 payout，不是客戶收款、也不是
-政府 receipt。
+`subsidy_advance_due` read-only reminder；人員核對銀行對帳單與應付資料後，在銀行系統
+完成付款。系統不產生付款指令，也不因到期直接寫入 client ledger。付款後匯入的唯一
+canonical outgoing bank fact 才可經 Preview／Apply 核銷已建立、未清償的
+`subsidy_return` 義務；這是客戶 payout，不是客戶收款、也不是政府 receipt。
 
 之後政府整季款項入帳時，Government Subsidy 先完成 receipt → claim-item allocation，
 再透過 committed outbox 提供不可變 allocation fact。Client Finance 只可依該 fact 對

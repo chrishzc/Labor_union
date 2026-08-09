@@ -47,6 +47,7 @@ from api.schemas.finance_import import (
     FinanceImportHistoricalReprocessPlanView,
     FinanceImportHistoricalReprocessPreviewBody,
     FinanceImportHistoricalReprocessReceiptView,
+    HistoricalOwnerSelectionBody,
     FinanceImportReprocessRunPageView,
     FinanceImportReviewRowPageView,
     FinanceWorkbookIngestionReceiptView,
@@ -78,6 +79,7 @@ from subsystems.finance_import.import_workflow import (
     FinanceImportWorkflowError,
 )
 from subsystems.finance_import.historical_reprocess_workflow import (
+    HistoricalOwnerSelection,
     HistoricalReprocessApplyRequest,
     HistoricalReprocessWorkflowError,
 )
@@ -266,9 +268,15 @@ def preview_historical_finance_reprocess(
 ):
     del principal
     correlation = CorrelationId(correlation_id)
+    selections = _historical_owner_selections(body.owner_selections)
     return _call_endpoint(
         lambda: _historical_reprocess_plan_payload(
-            application.preview(body.batch_identity.strip(), correlation)
+            _preview_historical_application(
+                application,
+                body.batch_identity.strip(),
+                correlation,
+                selections,
+            )
         ),
         "成功產生歷史帳務重處理 Preview",
         correlation,
@@ -277,16 +285,15 @@ def preview_historical_finance_reprocess(
 
 @router.post(
     "/historical-reprocess/apply",
-    response_model=BaseResponse[FinanceImportHistoricalReprocessReceiptView],
+    response_model=BaseResponse[JobAcceptedResponse],
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def apply_historical_finance_reprocess(
     body: FinanceImportHistoricalReprocessApplyBody,
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    application: HistoricalReprocessApplication = Depends(
-        get_historical_reprocess_application
-    ),
+    job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     request = HistoricalReprocessApplyRequest(
         body.batch_identity.strip(),
@@ -296,12 +303,91 @@ def apply_historical_finance_reprocess(
         ActorContext(str(principal.username or "").strip()),
         body.reason.strip(),
         CorrelationId(correlation_id),
+        _historical_owner_selections(body.owner_selections),
     )
-    return _call_endpoint(
-        lambda: _historical_reprocess_receipt_payload(application.apply(request)),
-        "歷史帳務重處理完成",
-        request.correlation_id,
+    # Direct controller tests retain the former injected application shape;
+    # HTTP requests always receive the durable queue dependency above.
+    if not hasattr(job_repository, "enqueue_command"):
+        return _call_endpoint(
+            lambda: _historical_reprocess_receipt_payload(
+                job_repository.apply(request)
+            ),
+            "歷史帳務重處理完成",
+            request.correlation_id,
+        )
+    job_id = str(uuid.uuid4())
+    try:
+        job_id = job_repository.enqueue_command(
+            _historical_reprocess_apply_job_command(job_id, request)
+        )
+    except JobIdempotencyConflict as error:
+        job_id = error.job_id
+    return BaseResponse(
+        data=JobAcceptedResponse(
+            job_id=job_id,
+            status_url=f"/api/v1/jobs/{job_id}",
+        ),
+        message="202 Accepted",
     )
+
+
+def _historical_reprocess_apply_job_command(job_id, request) -> DurableJobCommand:
+    """Store the guarded historical request; worker owns the outer UoW."""
+    return DurableJobCommand(
+        job_id=job_id,
+        command_identity=request.idempotency_key.value,
+        command_type="finance_import_historical_reprocess_apply",
+        command_version=1,
+        payload={
+            "batch_identity": request.batch_identity,
+            "expected_batch_version": request.expected_batch_version.value,
+            "preview_fingerprint": request.preview_fingerprint.value,
+            "idempotency_key": request.idempotency_key.value,
+            "actor": request.actor.actor_id,
+            "reason": request.reason,
+            "correlation_id": request.correlation_id.value,
+            "owner_selections": [
+                _historical_owner_selection_payload(item)
+                for item in request.owner_selections
+            ],
+        },
+        submitted_by=request.actor.actor_id,
+        correlation_id=request.correlation_id.value,
+    )
+
+
+def _historical_owner_selections(values):
+    return tuple(
+        sorted(
+            (
+                HistoricalOwnerSelection(
+                    item.row_identity.strip(),
+                    item.case_no.strip(),
+                    item.obligation_identity.strip(),
+                    item.reason.strip(),
+                    tuple(sorted(set(reference.strip() for reference in item.evidence_references))),
+                )
+                for item in values
+            ),
+            key=lambda item: item.row_identity,
+        )
+    )
+
+
+def _preview_historical_application(application, batch_identity, correlation, selections):
+    if selections:
+        return application.preview(batch_identity, correlation, selections)
+    return application.preview(batch_identity, correlation)
+
+
+def _historical_owner_selection_payload(selection):
+    return {
+        "row_identity": selection.row_identity,
+        "case_no": selection.case_no,
+        "obligation_identity": selection.obligation_identity,
+        "reason": selection.reason,
+        "evidence_references": list(selection.evidence_references),
+    }
 
 
 # Kept whole so authenticated actor and command identity remain one boundary.
@@ -610,12 +696,20 @@ def _refund_return_review_preview_payload(preview):
 
 
 def _historical_reprocess_plan_payload(plan):
-    return {
+    payload = {
         "batch_identity": plan.batch_identity,
         "batch_version": plan.batch_version,
         "row_count": len(plan.rows),
         "preview_fingerprint": plan.fingerprint.value,
     }
+    selections = [
+        _historical_owner_selection_payload(row.owner_selection)
+        for row in plan.rows
+        if row.owner_selection is not None
+    ]
+    if selections:
+        payload["owner_selections"] = selections
+    return payload
 
 
 def _historical_reprocess_receipt_payload(receipt):

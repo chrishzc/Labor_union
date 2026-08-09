@@ -18,7 +18,6 @@ from api.schemas.finance_import import (
     FinanceImportCorrectionPreviewView,
     FinanceImportCorrectionReceiptView,
     FinanceImportHistoricalReprocessPlanView,
-    FinanceImportHistoricalReprocessReceiptView,
     FinanceImportReprocessRunPageView,
     FinanceImportReviewRowPageView,
     FinanceImportTypedErrorView,
@@ -263,11 +262,15 @@ class FinanceImportApiClient:
         self,
         batch_identity: str,
         correlation_id: str,
+        owner_selections: Sequence[Mapping[str, Any]] = (),
     ) -> FinanceImportHistoricalReprocessPlanView:
         return self._request(
             "POST",
             "/api/v1/finance-import/historical-reprocess/preview",
-            {"batch_identity": _canonical_text(batch_identity, "batch_identity")},
+            {
+                "batch_identity": _canonical_text(batch_identity, "batch_identity"),
+                "owner_selections": _historical_owner_selections(owner_selections),
+            },
             {"X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")},
             FinanceImportHistoricalReprocessPlanView,
         )
@@ -279,7 +282,7 @@ class FinanceImportApiClient:
         reason: str,
         idempotency_key: str,
         correlation_id: str,
-    ) -> FinanceImportHistoricalReprocessReceiptView:
+    ) -> JobAcceptedResponse:
         return self._request(
             "POST",
             "/api/v1/finance-import/historical-reprocess/apply",
@@ -288,9 +291,12 @@ class FinanceImportApiClient:
                 "expected_batch_version": preview.batch_version,
                 "preview_fingerprint": preview.preview_fingerprint,
                 "reason": _canonical_text(reason, "reason"),
+                "owner_selections": [
+                    item.model_dump() for item in preview.owner_selections
+                ],
             },
             _command_headers(idempotency_key, correlation_id),
-            FinanceImportHistoricalReprocessReceiptView,
+            JobAcceptedResponse,
         )
 
     def get_job_status(self, job_id: str) -> JobResponse:
@@ -367,6 +373,22 @@ def _command_headers(idempotency_key, correlation_id):
             "correlation_id",
         ),
     }
+
+
+def _historical_owner_selections(values):
+    selections = []
+    for item in values:
+        row_identity = _canonical_text(item["row_identity"], "row_identity")
+        selections.append(
+            {
+                "row_identity": row_identity,
+                "case_no": _canonical_text(item["case_no"], "case_no"),
+                "obligation_identity": _canonical_text(item["obligation_identity"], "obligation_identity"),
+                "reason": _canonical_text(item["reason"], "reason"),
+                "evidence_references": _canonical_sorted_text(item["evidence_references"], "evidence_references"),
+            }
+        )
+    return sorted(selections, key=lambda item: item["row_identity"])
 
 
 def _validated_data(response, response_type):

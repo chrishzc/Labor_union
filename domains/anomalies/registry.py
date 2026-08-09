@@ -184,7 +184,9 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
             _beclass_missing_definition(),
             _resume_not_sent_definition(),
             _client_receivable_overdue_definition(),
+            _client_payable_overdue_definition(),
             _subsidy_return_overdue_definition(),
+            _subsidy_advance_due_definition(),
             _schedule_holiday_undecided_definition(),
             _schedule_replaced_assignment_definition(),
             _schedule_overlap_definition(),
@@ -255,7 +257,7 @@ def _client_receivable_overdue_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
-        display_fields=("case_no", "overdue_stages"),
+        display_fields=("action", "case_no", "overdue_obligations"),
     )
 
 
@@ -267,7 +269,31 @@ def _subsidy_return_overdue_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
-        display_fields=("case_no",),
+        display_fields=("action", "case_no", "overdue_obligations"),
+    )
+
+
+def _client_payable_overdue_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="CLIENTPAYABLE-001",
+        source_domain="client_payable",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("action", "case_no", "overdue_obligations"),
+    )
+
+
+def _subsidy_advance_due_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="SUBSIDYADVANCE-001",
+        source_domain="client_finance",
+        fingerprint_fields=("case_no",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        display_fields=("action", "advance_candidates", "case_no"),
     )
 
 

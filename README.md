@@ -153,7 +153,16 @@ Lobar_union/
 * 啟動 Docker 中的 MySQL 8.0 容器。
 * 等待 MySQL 資料庫連線就緒。
 * **⚠️ 安全防護**：**不會**執行資料庫初始化與假資料生成，以確保歷史生產資料的安全。
-* 並行啟動 FastAPI 後端、Streamlit 網頁前端，以及 `file_watcher.py` 地端 Excel 檔案自動監控匯入服務。
+* 並行啟動 FastAPI 後端、Streamlit 網頁前端、`file_watcher.py` 地端 Excel 檔案自動監控匯入服務，以及互動式 Durable Job Worker 終端機。
+
+正式部署時，Durable Job Worker 必須改由 Windows Task Scheduler 監督，而不是依賴互動式終端機。請以系統管理員 PowerShell 執行：
+
+```powershell
+.\scripts\install_durable_job_worker_task.ps1 -StartNow
+.\scripts\get_durable_job_worker_task_status.ps1
+```
+
+開發階段只需執行 `online.bat`。它會啟動 API、Streamlit、檔案監看與獨立的 Durable Job Worker 終端機；不需要註冊 Windows Task Scheduler。Task Scheduler 僅供正式 24/7 無人值守部署，讓 Windows 開機自動啟動 Worker，並在 Worker 非預期結束時依排程規則重啟。
 
 ---
 

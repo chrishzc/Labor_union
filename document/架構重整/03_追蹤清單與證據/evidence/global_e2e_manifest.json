@@ -9,59 +9,76 @@
   "scenarios": [
     {
       "id": "G02",
-      "status": "partial",
-      "test_node_id": "tests/test_order_cancellation_disposable_mysql_e2e.py::test_g02_actual_start_correction_updates_each_domain_once",
-      "invariant": "An Actual Start correction atomically updates Orders, Scheduling, Client Finance, Payroll, lifecycle and their source outboxes exactly once.",
-      "limitations": [
-        "The direct canonical workflow is proven against isolated MySQL. The typed API and Streamlit loading trace remain separate acceptance gaps."
+      "status": "proven",
+      "evidence_observed_at": "2026-08-08",
+      "test_node_ids": [
+        "tests/test_order_cancellation_disposable_mysql_e2e.py::test_g02_actual_start_correction_updates_each_domain_once",
+        "tests/test_order_cancellation_disposable_mysql_e2e.py::test_g02_actual_start_panel_uses_real_http_preview_and_apply"
       ],
+      "invariant": "An Actual Start correction atomically updates Orders, Scheduling, Client Finance, Payroll, lifecycle and their source outboxes exactly once.",
       "assertions": [
         "a complete service-time root is required before correction",
         "replaying the same command returns the original receipt",
         "Orders, Scheduling, Client Finance and Payroll versions each advance once",
-        "one Actual Start event, one receipt and one source outbox event per affected Domain are persisted"
+        "one Actual Start event, one receipt and one source outbox event per affected Domain are persisted",
+        "the real Streamlit panel sends the corrected date through typed HTTP Preview and Apply with production-like request-scoped dependencies"
       ],
       "source_sha256": {
-        "tests/test_order_cancellation_disposable_mysql_e2e.py": "fcb8ac926be54eb6889b3313a18c4173bf34888aca6da0a7d03d94e87753d9eb"
+        "tests/test_order_cancellation_disposable_mysql_e2e.py": "f97bc46a142e5a3d29729965b2b570f2313bdc290868c1dcc65fb5fdf40966e0",
+        "subsystems/orders/actual_start_workflow.py": "ce54c58d6272f730e7df83ab1cd7023cd11ed49a46f3b40cfd7bb5a5b06fcf53",
+        "api/routes/order_actual_start.py": "adbc912523da19ee3c62dc37b2cd10820498782155f88fd93e0cfa522c38c7d0",
+        "ui/api_clients/order_actual_start_api_client.py": "d0705f885d15225f80fe6b235fcc66185150c5958e3bc070cc3c73108fbe3f3a",
+        "ui/pages/order/actual_start_panel.py": "5c90faf79659d6c432fbf4ad5744b6e071c1deee47bc221206883dce24d7dfc6"
       }
     },
     {
       "id": "G01",
-      "status": "partial",
-      "test_node_id": "tests/test_order_cancellation_disposable_mysql_e2e.py::test_terms_workflow_recovery_applies_one_canonical_cross_domain_change",
-      "invariant": "A safe Terms change rebuilds Scheduling, Client Finance, Payroll and lifecycle in one Orders transaction without duplicate delivery.",
-      "limitations": [
-        "This trace covers a safe same-day-count terms change. A service-day-count change without an approved assignment reallocation plan is correctly blocked rather than synthesized.",
-        "Anomalies projection and typed API/Streamlit traces remain separate acceptance gaps."
+      "status": "proven",
+      "evidence_observed_at": "2026-08-08",
+      "test_node_ids": [
+        "tests/test_order_cancellation_disposable_mysql_e2e.py::test_terms_workflow_recovery_applies_one_canonical_cross_domain_change",
+        "tests/test_order_cancellation_disposable_mysql_e2e.py::test_g01_terms_panel_uses_real_http_preview_and_apply"
       ],
+      "invariant": "A safe Terms change rebuilds Scheduling, Client Finance, Payroll and lifecycle in one Orders transaction without duplicate delivery. Terms Apply does not directly create an anomaly; a post-rebuild Scheduling coverage scan owns any actual coverage alert.",
       "assertions": [
         "the canonical workflow no longer contains a source-recovery stub",
         "one Apply advances Orders, Scheduling, Client Finance and Payroll once",
         "one source outbox event exists for Orders, Client Finance and Payroll",
-        "replaying the same idempotency key returns the original receipt without new writes"
+        "replaying the same idempotency key returns the original receipt without new writes",
+        "the real Streamlit panel sends the safe terms change through typed HTTP Preview and Apply",
+        "a service-day-count change without an approved assignment reallocation plan fails closed rather than synthesizing an unsafe assignment",
+        "Terms Apply writes no direct anomaly; post-rebuild coverage risk remains owned by the Scheduling coverage scan"
       ],
       "source_sha256": {
-        "tests/test_order_cancellation_disposable_mysql_e2e.py": "fcb8ac926be54eb6889b3313a18c4173bf34888aca6da0a7d03d94e87753d9eb",
-        "subsystems/orders/terms_workflow.py": "0b4ccdaf4e54b0184ab567e8127715cebc2616038bab60b1a23943bf921ad37a"
+        "tests/test_order_cancellation_disposable_mysql_e2e.py": "f97bc46a142e5a3d29729965b2b570f2313bdc290868c1dcc65fb5fdf40966e0",
+        "subsystems/orders/terms_workflow.py": "0b4ccdaf4e54b0184ab567e8127715cebc2616038bab60b1a23943bf921ad37a",
+        "api/routes/order_terms.py": "7f20ea1db105a713b0bc03eff992577de3dc38c7798b24893fa6af747c1f59eb",
+        "ui/api_clients/order_terms_api_client.py": "b455755aaba336ee7a81482e09e1744a25b0466542ce87f3020127c20898adfc",
+        "ui/pages/order/terms_panel.py": "0cab23c8971e63b08ef7da69758c0a12e797a253b715857b4f49b140eaaec00a"
       }
     },
     {
       "id": "G03",
-      "status": "partial",
-      "test_node_id": "tests/test_order_cancellation_disposable_mysql_e2e.py::test_g03_mid_service_multi_caregiver_cancellation_updates_each_domain_once",
-      "invariant": "A mid-service two-caregiver cancellation atomically updates Orders, Scheduling, Client Finance, Payroll and their source outboxes exactly once, without netting client refunds against staff payables.",
-      "limitations": [
-        "The previous G03 wording required both sides to settle to zero. That is not a valid cancellation invariant: the client refund payable and the new staff payable must remain independently open until their own payment workflows settle them."
+      "status": "proven",
+      "evidence_observed_at": "2026-08-08",
+      "test_node_ids": [
+        "tests/test_order_cancellation_disposable_mysql_e2e.py::test_g03_mid_service_multi_caregiver_cancellation_updates_each_domain_once",
+        "tests/test_order_cancellation_disposable_mysql_e2e.py::test_g03_panel_uses_real_http_preview_and_apply"
       ],
+      "invariant": "A mid-service two-caregiver cancellation atomically updates Orders, Scheduling, Client Finance, Payroll and their source outboxes exactly once, without netting client refunds against staff payables.",
       "assertions": [
         "replaying the same command returns the original receipt",
         "the original two assignments are replaced by one cancellation generation",
         "Orders, Scheduling, Client Finance and Payroll versions each advance once",
         "Orders, Client Finance and Payroll each append one source outbox event",
-        "a pre-paid client receives separate 1600 and 200 refund payables while the old unpaid staff obligations close and two new 2500 staff payables are created"
+        "a pre-paid client receives separate 1600 and 200 refund payables while the old unpaid staff obligations close and two new 2500 staff payables are created",
+        "the real Streamlit panel sends only the actually completed service days through typed HTTP Preview and Apply before the canonical cross-domain cancellation commits"
       ],
       "source_sha256": {
-        "tests/test_order_cancellation_disposable_mysql_e2e.py": "fcb8ac926be54eb6889b3313a18c4173bf34888aca6da0a7d03d94e87753d9eb"
+        "tests/test_order_cancellation_disposable_mysql_e2e.py": "f97bc46a142e5a3d29729965b2b570f2313bdc290868c1dcc65fb5fdf40966e0",
+        "ui/pages/order/cancellation_panel.py": "c62f470088fd8d02397e67f649625f401f233688abd1696341bf103042e9e65c",
+        "ui/api_clients/order_cancellation_api_client.py": "b25492ab4caa1d509aa56c5a1e1b64c75f6a90fc11618f9dd0f4213b4abcef03",
+        "api/routes/order_cancellation.py": "4b7f2210e23cc2d631a595d8fb77536a7a9290ae1edf52fa8aa214c99413cd0d"
       }
     },
     {
@@ -75,7 +92,37 @@
         "the existing payroll account version and both established staff obligations remain byte-for-byte equivalent"
       ],
       "source_sha256": {
-        "tests/test_order_cancellation_disposable_mysql_e2e.py": "fcb8ac926be54eb6889b3313a18c4173bf34888aca6da0a7d03d94e87753d9eb"
+        "tests/test_order_cancellation_disposable_mysql_e2e.py": "f97bc46a142e5a3d29729965b2b570f2313bdc290868c1dcc65fb5fdf40966e0"
+      }
+    },
+    {
+      "id": "G05",
+      "status": "proven",
+      "evidence_observed_at": "2026-08-08",
+      "test_node_ids": [
+        "tests/test_order_auto_completion_disposable_mysql_e2e.py::test_auto_completion_first_rejects_the_real_stale_leave_apply_without_writes",
+        "tests/test_order_auto_completion_disposable_mysql_e2e.py::test_real_leave_apply_stales_old_completion_then_recomputed_completion_succeeds"
+      ],
+      "isolation": {
+        "container": "labor_union_g05_mysql_20260808",
+        "database": "lu_test_g05_20260808",
+        "forbidden_databases": ["union_db", "mysql_db"]
+      },
+      "invariant": "AutoComplete and the real Leave/Substitution Apply serialize on the same Orders lifecycle aggregate; the stale command writes nothing and a changed official service day requires a recomputed completion instant.",
+      "assertions": [
+        "AutoComplete first appends exactly one Orders lifecycle event, source outbox event and auto-completion receipt, without Scheduling, Client Finance or Payroll writes",
+        "the true stale Leave Apply returns stale_version and leaves every captured Scheduling, Client Finance, Payroll, Orders outbox and leave outcome count unchanged",
+        "Leave first advances its official service-day and Orders lifecycle versions through the real workflow; the old completion returns order_version_conflict with no writes",
+        "a recomputed completion is blocked before the new completion instant and succeeds exactly once at that instant"
+      ],
+      "source_sha256": {
+        "tests/test_order_auto_completion_disposable_mysql_e2e.py": "a1d4b80a5d02b91637e786e4c42504bd0aa44bf85c90cca01ca384f369d928d7",
+        "domains/orders/auto_completion.py": "e60af89fed0a9fa7702d26effdf6cb119291a25f7c6129552a050794f75aa59d",
+        "subsystems/orders/auto_completion_workflow.py": "96d8670eda7925f87c140667ba3800f34630dd4d12696bac6dcf24a3bfa11984",
+        "subsystems/orders/lifecycle_authoritative_facts_loader.py": "9015a55e10245b6e5f056291652c6e18e61764ccf83031e477bb39da810b37b5",
+        "infrastructure/mysql/order_auto_completion_repository.py": "52bc79b6c891f1ea41ee1e63ee05207b2185f27cecbb600521be36347fe4c9c3",
+        "api/routes/order_auto_completion.py": "fb3c898628e54b810cc10ad25a89a9a87851cb9f04a7fbdb22dcab1dd2a70cc0",
+        "db/schema_parts/144_order_auto_completion_workflow.sql": "cd972354905bf5a5a2e772aa020e70cf3f82f50f6f0cc1b0be310427e6682c45"
       }
     },
     {
@@ -126,37 +173,47 @@
     },
     {
       "id": "G13",
-      "status": "partial",
-      "test_node_id": "tests/test_g13_staff_occupancy_mutex_disposable_mysql_e2e.py::test_g13_reverse_staff_sets_lock_in_one_canonical_order_without_deadlock",
-      "invariant": "Two concurrent, reversed staff sets acquire the canonical ascending staff mutex order without deadlock.",
-      "limitations": [
-        "This proves the real-MySQL mutex boundary only. A competing Leave/Substitution and contract-completion workflow trace with occupancy writes remains required before Global proof."
-      ],
+      "status": "proven",
+      "evidence_observed_at": "2026-08-08",
+      "test_node_id": "tests/test_g13_leave_cancellation_disposable_mysql_e2e.py::test_g13_leave_and_cancellation_serialize_shared_occupancy_write",
+      "isolation": {
+        "database_prefix": "lu_test_g13_",
+        "cleanup": "DROP DATABASE in test runner finally block",
+        "forbidden_databases": ["union_db", "mysql_db"]
+      },
+      "invariant": "Concurrent Leave/Substitution and Orders cancellation scheduling rebuilds for the same caregivers serialize through the canonical staff mutex; the later stale command returns a typed error without deadlock or duplicate same-caregiver, same-day occupancy.",
       "assertions": [
-        "both transactions commit after submitting reversed staff-id orders",
-        "both lock receipts return the same ascending staff-id sequence",
-        "the mutex itself creates no duplicate staff or occupancy rows"
+        "two real workflows begin from separate Previews against the same in-service two-caregiver order",
+        "exactly one Apply succeeds and the other returns a typed workflow error",
+        "both threads finish before the timeout, proving no deadlock",
+        "exactly one effective Scheduling generation remains",
+        "no staff/date group in scheduling_effective_occupancy contains more than one row"
       ],
       "source_sha256": {
-        "tests/test_g13_staff_occupancy_mutex_disposable_mysql_e2e.py": "b6683e8d8f3818da49b68fef595df7388e1427f9a8f48522f542f80ba4e886af",
-        "subsystems/scheduling/occupancy_mutex.py": "b9eed48f3765e74acac1b72fbeb174207e93146d0a5016d775276b78d47a6dd0"
+        "tests/test_g13_leave_cancellation_disposable_mysql_e2e.py": "6e6548d4bd5e98c0f33449728f6dfc32c46496df2710946f5a5b8b25248b54bd",
+        "subsystems/scheduling/occupancy_mutex.py": "b9eed48f3765e74acac1b72fbeb174207e93146d0a5016d775276b78d47a6dd0",
+        "infrastructure/mysql/order_cancellation_read_model.py": "6a7da4d7a4961cac4688f044a7711ce4ee154a9863f73610541a978b94ebac23",
+        "subsystems/scheduling/leave_substitution_workflow.py": "d960e310188516f2b250ad6667003c544eee4fe700c0bcc8596f89fb32b361e2"
       }
     },
     {
       "id": "G14",
-      "status": "partial",
-      "test_node_id": "tests/test_g14_client_receipt_reconciliation_e2e.py::test_g14_reversal_then_real_client_receipt_reconciliation_requires_reconfirmation",
-      "invariant": "A canonical deposit reversal reopens only the Client Finance deposit obligation; a later immutable Finance Import receipt reconciliation re-settles it and activates Orders actual-start reconfirmation without a legacy payment write.",
-      "limitations": [
-        "The isolated MySQL traces prove canonical reversal, replay, projection, real receipt reconciliation and source-outbox delivery. Typed API and Streamlit data-flow traces remain required before Global proof."
+      "status": "proven",
+      "evidence_observed_at": "2026-08-08",
+      "test_node_ids": [
+        "tests/test_g14_deposit_reversal_disposable_mysql_e2e.py::test_g14_pre_service_reversal_reopens_deposit_once_without_legacy_payment_writes",
+        "tests/test_g14_client_receipt_reconciliation_e2e.py::test_g14_reversal_then_real_client_receipt_reconciliation_requires_reconfirmation",
+        "tests/test_g14_deposit_reversal_ui_api_e2e.py::test_g14_panel_uses_real_http_preview_and_apply"
       ],
+      "invariant": "A canonical deposit reversal reopens only the Client Finance deposit obligation; a later immutable Finance Import receipt reconciliation re-settles it and activates Orders actual-start reconfirmation without a legacy payment write.",
       "assertions": [
         "the reversal appends one immutable Client Finance ledger entry and one obligation event",
         "the deposit projection changes from settled to unsettled without writing client_payments",
         "the same original Apply payload replays without additional writes",
         "a pre-service reversal emits orders_deposit_reversed only",
         "a post-service reversal does not change the Order status and also emits anomaly_review_required",
-        "a later immutable classified receipt runs the real Client Receipt workflow, re-settles the canonical projection and activates Orders reconfirmation without writing client_payments"
+        "a later immutable classified receipt runs the real Client Receipt workflow, re-settles the canonical projection and activates Orders reconfirmation without writing client_payments",
+        "the real Streamlit deposit-reversal panel sends Preview and Apply through the typed HTTP router and creates the canonical reversal without a legacy client_payments write"
       ],
       "source_sha256": {
         "tests/test_g14_deposit_reversal_disposable_mysql_e2e.py": "9551395e2426385d3d9fe83c205c504633fcb1446deb6efc11a2996e6097b647",
@@ -165,7 +222,10 @@
         "infrastructure/mysql/client_deposit_reversal_repository.py": "ab46f559639c4f241d0fc82dd917ba3a2028d0ab3f8e1c85442522a114bbfee4",
         "api/routes/client_deposit_reversal.py": "672f1c148fddb1dc0fad47c345e253821cc5999fb7b8fc7245f26a5923a17451",
         "db/schema_parts/142_client_deposit_reversal.sql": "5a3e4434f981667c1449a07579dc92bf3c11d3044883eedcc331ac7fbc831917",
-        "subsystems/orders/client_finance_outbox_consumer.py": "b291948f993d09c2450a5e685bbd948e49add61bd05cd7f9d5cc1f53c72742a7"
+        "subsystems/orders/client_finance_outbox_consumer.py": "b291948f993d09c2450a5e685bbd948e49add61bd05cd7f9d5cc1f53c72742a7",
+        "tests/test_g14_deposit_reversal_ui_api_e2e.py": "a89d409aeaa9f85598b97a8c6b6ef406d158540f53989a92eee5866f7d037564",
+        "ui/api_clients/client_deposit_reversal_api_client.py": "3974a15014e74fd1c12bf31497002419f70e1aa9bddc344fd9d896576d6c9c3d",
+        "ui/pages/order/client_deposit_reversal_panel.py": "9210690b48dc4bffefa4e12deeeb7b91e6834e52f2a330856529accb2723f5ac"
       }
     },
     {
@@ -273,9 +333,35 @@
         "infrastructure/mysql/background_job_repository.py": "f7fbbb608f682b083d53b4fc9d47dac00ff38fa3c6686c2944ed8e6dd94c34fe",
         "subsystems/jobs/durable_job_worker.py": "0dd90a3a2f1ef89e142b4030a5d352f447fcfca4ce532f66c3cfe5bda78b4d9e"
       }
+    },
+    {
+      "id": "G15",
+      "status": "proven",
+      "evidence_observed_at": "2026-08-08",
+      "test_node_ids": [
+        "tests/test_g15_cache_boundary_contract.py",
+        "tests/test_order_auto_completion_disposable_mysql_e2e.py::test_auto_completion_first_rejects_the_real_stale_leave_apply_without_writes"
+      ],
+      "isolation": {
+        "database_prefix": "lu_test_g15_",
+        "cleanup": "DROP DATABASE in test runner finally block",
+        "forbidden_databases": ["union_db", "mysql_db"]
+      },
+      "invariant": "Cache is confined to non-authoritative read projections. Formal command workflows read fresh locked facts without a cache dependency, and an Apply from a stale Preview returns a typed conflict without writes.",
+      "assertions": [
+        "every subsystem workflow source is free of QueryCachePort and TtlProjectionCache dependencies",
+        "the only TTL cache is the read-only holiday projection and has no transaction control",
+        "a real stale Leave Apply after AutoComplete returns stale_version",
+        "the stale Apply leaves captured Scheduling, Client Finance, Payroll, Orders outbox and leave outcome counts unchanged"
+      ],
+      "source_sha256": {
+        "tests/test_g15_cache_boundary_contract.py": "e48ff1aa2bf38b39aaaa997df622334f8b3ed1ed1e17f8f281139d849acc0547",
+        "tests/test_order_auto_completion_disposable_mysql_e2e.py": "d992f805e448336157e372a9de1be6ea9ee8821ef5055204d521224dc0dd2599",
+        "subsystems/scheduling/holiday_query_cache.py": "222f1ce9705ae8c7249cfde4ee55ff89e44b9ab2718c4dd993a672a4b2290b62"
+      }
     }
   ],
   "not_yet_proven": [
-    "G01", "G02", "G03", "G05", "G13", "G14", "G15"
+
   ]
 }

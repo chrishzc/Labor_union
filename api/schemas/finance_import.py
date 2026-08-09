@@ -104,8 +104,17 @@ class FinanceImportBatchApplyBody(FinanceImportBatchPreviewBody):
     reason: str = Field(min_length=1, max_length=500)
 
 
+class HistoricalOwnerSelectionBody(_StrictModel):
+    row_identity: str = Field(min_length=1, max_length=191)
+    case_no: str = Field(min_length=1, max_length=50)
+    obligation_identity: str = Field(min_length=1, max_length=191)
+    reason: str = Field(min_length=1, max_length=500)
+    evidence_references: list[str] = Field(min_length=1)
+
+
 class FinanceImportHistoricalReprocessPreviewBody(_StrictModel):
     batch_identity: str = Field(min_length=1, max_length=191)
+    owner_selections: list[HistoricalOwnerSelectionBody] = Field(min_length=1)
 
 
 class FinanceImportHistoricalReprocessApplyBody(
@@ -121,6 +130,7 @@ class FinanceImportHistoricalReprocessPlanView(_StrictModel):
     batch_version: int = Field(ge=0)
     row_count: int = Field(ge=1)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    owner_selections: list[HistoricalOwnerSelectionBody] = Field(default_factory=list)
 
 
 class FinanceImportHistoricalReprocessReceiptView(_StrictModel):
@@ -301,6 +311,7 @@ __all__ = [
     "FinanceImportHistoricalReprocessPlanView",
     "FinanceImportHistoricalReprocessPreviewBody",
     "FinanceImportHistoricalReprocessReceiptView",
+    "HistoricalOwnerSelectionBody",
     "FinanceImportReprocessRunPageView",
     "FinanceImportReprocessRunSummaryView",
     "FinanceImportReviewRowPageView",

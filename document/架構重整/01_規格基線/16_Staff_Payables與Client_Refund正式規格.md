@@ -270,6 +270,17 @@ refund_review:
 normal ↔ review_required
 ```
 
+### 3.6 銀行根事實與逾期提醒
+
+系統不直接接收銀行付款結果。人員匯入的 canonical bank fact 是退款是否實際發生的
+唯一根事實；沒有可核銷 bank fact 只表示尚未取得結果，不能建立 `payment_failed`、
+`submitted` 或 `bank_pending` 狀態。
+
+當 remaining amount 大於零且 business date 已過 due date，系統以 canonical
+obligation／ledger projection 建立 overdue reminder，請人員核對對帳單是否已匯入或需
+人工配對。有效 bank fact 經正式 Preview／Apply 精確 allocation 後，提醒自動解除；
+它不修改任何 obligation、ledger、allocation 或 Orders lifecycle。
+
 正式 refund ledger event append 後不可改寫。銀行退匯若需要重新應退，必須新增
 dedicated reversal／reopen event，不得刪除原 refund。
 
@@ -280,7 +291,7 @@ Finance outer Unit of Work 內 append dedicated reopen event、重算 progress�
 與 outbox 後單次 commit。不同 payload 重用 key、stale target、重複 return／reversal
 一律 conflict；只有 storage unavailable／deadlock／timeout 可安全重試。
 
-### 3.6 Typed errors
+### 3.7 Typed errors
 
 | Code | 類型 | 處理 |
 |---|---|---|
@@ -296,28 +307,31 @@ Finance outer Unit of Work 內 append dedicated reopen event、重算 progress�
 | `client_receipt_reversal_invalid` | blocker | 不得超額或重複沖正 |
 | `client_finance_storage_unavailable` | retryable | 安全重試／查 receipt |
 
-### 3.7 人工入口與異常
+### 3.8 人工入口與異常
 
 - UI 顯示 backend Query 的 bank facts、refund obligations、account version 與 blockers。
 - Apply 必須沿用同一次 Preview 的 fingerprint 與 stable idempotency key。
 - 金額不符、多義對象、缺 bank identity 或歷史資料不可唯一還原時，維持 open 並進
   Anomalies；不得猜測 allocation。
+- overdue reminder 的人工入口只導向 bank fact 匯入、查詢、配對或補正；不得直接把
+  提醒標示為已付款。
 
-### 3.8 Legacy exit
+### 3.9 Legacy exit
 
 - 舊「本階段不支援一般退款」標為 superseded。
 - 任何直接更新 `client_payments` summary、負收款、覆寫原 transaction 或跨案抵銷路徑退出。
 - Data Browser 不得修改 refund／receipt ledger。
 
-### 3.9 Implementation gaps
+### 3.10 Implementation gaps
 
 下列缺口未關閉前，Client Refund 不得標為 `proven`：
 
 1. Finance Import／bank classifier 產生正式 `client_refund` canonical classification；
 2. production dispatch 以 borrowed Client Finance Unit of Work 完成退款核銷；
 3. `partially_refunded`／`refunded`／`review_required` reducer；
-4. refund failure 與 canonical refund anomaly workflow（bank return 已有 Finance Import manual correction→borrowed Client Finance UoW 的 typed workflow，但尚無自動分類）；
-5. canonical refund anomalies 與全域退款待辦；
+4. 從 canonical obligation／ledger projection 導出退款逾期提醒；不得把未匯入銀行
+   對帳單誤建為付款失敗；
+5. bounded 全域退款待辦與人工核對入口，且核銷後由根事實自動解除提醒；
 6. Accounts Payable Export 明確區分 `customer_refund` 與 `subsidy_return`；
 7. Module、Subsystem、隔離 MySQL Domain 與 Global E2E 全部通過；
 8. writer inventory 證明負收款、原交易覆寫與 legacy refund caller 已退出。

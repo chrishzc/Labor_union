@@ -1,8 +1,15 @@
 ---
 doc_type: decision-package
+status: superseded-by-work-package-51
+superseded_by: 51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md
+superseded_date: 2026-08-09
 ---
 
 # Preserve-data Runner Completion Decision Package
+
+> 歷史決策基線：本文件記錄 2026-08-09 實作前的缺口。公開 runner 的本機收斂已由
+> `51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md` 授權並完成；專用
+> source→backup→candidate→migration→switch→restart/read-smoke 演練仍為未執行的 external gate。
 
 ## 1. Fresh live finding
 
@@ -19,24 +26,19 @@ The repository already contains useful lower-level contracts:
 - `scripts/migrate_preserved_database_additive_schema.py` implements backup,
   restore, additive apply, verification, switch and rollback-switch.
 
-The direct public CLI entrypoint has been repaired: it now establishes the
-project import path before importing runner modules, and it delays release
-manifest validation until parsed source/candidate input is valid.  Thus
-`--help` and invalid-input rejection do not attempt a database connection;
-valid operations still fail closed on a protected-artifact digest mismatch.
-The repair is covered by subprocess tests and the migration-focused suite
-(`27 passed`).
+The public CLI now establishes the project import path before runner imports,
+and validates a missing environment file before argument completeness. It
+requires separate source-read/candidate-write descriptors, rejects operational
+database names, verifies source read-only principal evidence and a
+source-fingerprint-bound maintenance token, and writes append-only operation
+receipts/journal entries. It also exposes `--complete-restart` and
+`--recover-interrupted-switch`; absent target-host restart/read-smoke adapters
+fail closed rather than claiming completion. Parser, preflight, journal,
+recovery and metadata tests cover this public path.
 
-The public CLI parser exposes `--check`, `--dry-run`, `--backup`, `--restore`,
-`--apply`, `--verify`, `--switch`, `--complete-restart`, and
-`--rollback-switch`. `--complete-restart` does invoke
-`complete_cutover_after_restart` with bounded candidate runtime/read-smoke
-ports. The CLI still neither accepts nor invokes source-principal evidence or
-a maintenance token, and it does not expose interrupted-switch recovery.
-There is also no dedicated preserve-data/cutover test suite found under
-`tests/`.
-
-This is a real execution-chain gap, not merely missing documentation.
+The remaining gap is the deliberately unexecuted disposable MySQL rehearsal,
+not the runner contract. Its integration test requires `MYSQL_TEST_CONTAINER`
+and remains a visible external acceptance gate.
 
 ## 2. Required public workflow
 
@@ -79,7 +81,8 @@ be reported as a successful cutover.
 
 ## 5. Authorization boundary
 
-This decision package performs no connection, backup, schema migration,
-environment-file switch, restart or database mutation.  A separate work
-package must authorize the runner implementation; a further package must
-authorize the disposable-source rehearsal.
+Work package 51 authorized the local runner implementation. This document and
+work package 51 still do not authorize a connection, backup, schema migration,
+environment-file switch, restart or database mutation against an operational
+environment. A separate operator-approved package remains required for the
+disposable-source rehearsal.

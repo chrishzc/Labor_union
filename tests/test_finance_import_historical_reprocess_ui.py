@@ -44,14 +44,26 @@ def test_historical_reprocess_client_uses_the_typed_preview_endpoint():
         session=session,
     )
 
-    preview = client.preview_historical_reprocess("batch:1", "correlation-1")
+    selection = [{
+        "row_identity": "finance-import-row:1",
+        "case_no": "C-1",
+        "obligation_identity": "client-obligation:1",
+        "reason": "reviewed",
+        "evidence_references": ["review:1"],
+    }]
+    preview = client.preview_historical_reprocess(
+        "batch:1", "correlation-1", selection
+    )
 
     assert preview.batch_version == 4
     assert session.calls[0][0] == (
         "POST",
         "http://api.test/api/v1/finance-import/historical-reprocess/preview",
     )
-    assert session.calls[0][1]["json"] == {"batch_identity": "batch:1"}
+    assert session.calls[0][1]["json"] == {
+        "batch_identity": "batch:1",
+        "owner_selections": selection,
+    }
 
 
 def test_finance_import_panel_is_not_a_stub_and_exposes_preview_apply_flow():
@@ -143,8 +155,19 @@ class _Display:
     def error(self, _message):
         raise AssertionError("unexpected UI error")
 
+    def spinner(self, _message):
+        return _NullContext()
+
     def json(self, _payload):
         return None
+
+
+class _NullContext:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
 
 
 class _JobStatusClient:

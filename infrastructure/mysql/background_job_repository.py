@@ -39,6 +39,29 @@ class JobIdempotencyConflict(Exception):
         super().__init__(f"Job already exists with id {job_id}")
 
 
+class DurableJobSchemaNotReady(RuntimeError):
+    """The current database cannot safely run the durable command worker."""
+
+    def __init__(self, missing_columns: frozenset[str]):
+        required = ", ".join(sorted(missing_columns))
+        super().__init__(
+            "durable_job_schema_not_ready: missing background_jobs columns "
+            f"[{required}]; apply the approved additive release before starting the worker"
+        )
+        self.missing_columns = missing_columns
+
+
+_DURABLE_QUEUE_COLUMNS = frozenset(
+    {
+        "job_id", "command_identity", "command_type", "command_version",
+        "command_payload", "submitted_by", "correlation_id", "status",
+        "available_at", "attempt_count", "max_attempts", "lease_token",
+        "lease_owner", "lease_expires_at", "receipt_payload", "error_payload",
+        "result_reference", "completed_at", "created_at", "updated_at",
+    }
+)
+
+
 class BackgroundJobRepository:
     def __init__(self, connection: Connection):
         self._connection = connection
@@ -60,6 +83,17 @@ class BackgroundJobRepository:
                 if existing is not None:
                     raise JobIdempotencyConflict(existing.job_id) from error
             raise
+
+    def assert_durable_queue_schema(self) -> None:
+        """Fail before job mutation when the current database lacks the queue release."""
+        rows = self._fetchall(
+            "SELECT column_name AS queue_column_name FROM information_schema.columns "
+            "WHERE table_schema = DATABASE() AND table_name = 'background_jobs'"
+        )
+        available_columns = {str(_value(row, "queue_column_name", 0)) for row in rows}
+        missing_columns = _DURABLE_QUEUE_COLUMNS - available_columns
+        if missing_columns:
+            raise DurableJobSchemaNotReady(frozenset(missing_columns))
 
     def enqueue_command(self, command: DurableJobCommand) -> str:
         """Persist one replayable command envelope before any worker can run it."""
@@ -237,6 +271,11 @@ class BackgroundJobRepository:
         with self._connection.cursor() as cursor:
             cursor.execute(sql, params)
             return cursor.fetchone()
+
+    def _fetchall(self, sql: str, params: tuple[Any, ...] = ()) -> list[Any]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            return list(cursor.fetchall())
 
 
 def _to_background_job(row: Any) -> BackgroundJob | None:

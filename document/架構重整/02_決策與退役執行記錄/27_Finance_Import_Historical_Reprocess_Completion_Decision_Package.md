@@ -16,7 +16,8 @@ eligible rows、計算 plan，最後永遠 rollback；`dry_run=False` 固定拋�
 `legacy_finance_import_reprocess_apply_retired`。CLI 也在取得資料庫連線前拒絕
 `--apply`。因此沒有現行 production writer 可誤寫舊 ledger，但正式規格所需的
 classification event、owning Domain dispatch、reprocess receipt 和 outbox 已由正式 workflow
-建立；仍尚未完成真實格式 Excel 與 isolated MySQL 的端到端驗證，也尚未建立 Streamlit 操作入口。
+建立；Finance Import panel 已提供 typed Preview／Apply 操作入口，但 Historical Reprocess
+本身仍尚未完成真實格式 Excel 與 isolated MySQL 的端到端驗證。
 
 既有 `db/schema_parts/61_finance_import_reprocessing.sql` 的 append-only run/event
 tables 是可重用的稽核基礎；它們不能被當成已完成的 application workflow。

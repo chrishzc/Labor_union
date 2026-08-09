@@ -104,6 +104,104 @@ def test_g04_full_service_cancellation_is_blocked_without_writes():
     assert _payroll_snapshot() == payroll_before
 
 
+def test_g03_panel_uses_real_http_preview_and_apply(monkeypatch):
+    bootstrap(_arguments())
+    _seed_in_service_case(settled_client_and_unpaid_staff=True)
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
+    monkeypatch.setenv("INTERNAL_API_KEY", "g03-ui-key")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.routes.order_cancellation import router
+    from ui.api_clients.order_cancellation_api_client import (
+        OrderCancellationApiClient,
+    )
+    from ui.pages.order import cancellation_panel
+
+    application = FastAPI()
+    application.include_router(router)
+    display = _CancellationPanelDisplay()
+    monkeypatch.setattr(cancellation_panel, "st", display)
+    with TestClient(application) as http_client:
+        client = OrderCancellationApiClient(
+            base_url="http://g03-ui.test",
+            headers={"X-Internal-API-Key": "g03-ui-key"},
+            session=_CancellationTestClientSession(http_client),
+        )
+        display.button_values["cancellation_preview_btn_G03-CASE"] = True
+        cancellation_panel.render_order_cancellation_panel("G03-CASE", client)
+        display.button_values["cancellation_preview_btn_G03-CASE"] = False
+        display.button_values["cancellation_apply_G03-CASE"] = True
+        cancellation_panel.render_order_cancellation_panel("G03-CASE", client)
+
+    assert display.errors == []
+    assert display.rerun_called is True
+    _assert_cross_domain_result()
+    _assert_no_cross_domain_auto_netting()
+
+
+class _CancellationTestClientSession:
+    def __init__(self, client) -> None:
+        self._client = client
+
+    def request(self, method, url, **kwargs):
+        path = url.replace("http://g03-ui.test", "", 1)
+        kwargs.pop("timeout", None)
+        return _CancellationResponseAdapter(
+            self._client.request(method, path, **kwargs)
+        )
+
+
+class _CancellationResponseAdapter:
+    def __init__(self, response) -> None:
+        self._response = response
+        self.ok = response.is_success
+        self.status_code = response.status_code
+
+    def json(self):
+        return self._response.json()
+
+
+class _CancellationPanelDisplay:
+    def __init__(self) -> None:
+        self.session_state = {}
+        self.button_values = {}
+        self.errors = []
+        self.rerun_called = False
+
+    def markdown(self, *_args, **_kwargs) -> None:
+        pass
+
+    def caption(self, *_args, **_kwargs) -> None:
+        pass
+
+    def info(self, *_args, **_kwargs) -> None:
+        pass
+
+    def checkbox(self, _label, *, key, **_kwargs) -> bool:
+        return key in {
+            "cancellation_day_G03-CASE_2026-08-01_1",
+            "cancellation_day_G03-CASE_2026-08-02_2",
+        }
+
+    def button(self, _label, *, key, **_kwargs) -> bool:
+        return self.button_values.get(key, False)
+
+    def text_input(self, *_args, **_kwargs) -> str:
+        return "client ended service after confirmed days"
+
+    def error(self, message) -> None:
+        self.errors.append(message)
+
+    def success(self, *_args, **_kwargs) -> None:
+        pass
+
+    def rerun(self) -> None:
+        self.rerun_called = True
+
+
 def test_terms_workflow_recovery_applies_one_canonical_cross_domain_change():
     bootstrap(_arguments())
     _seed_in_service_case(settled_client_and_unpaid_staff=True)
@@ -205,6 +303,223 @@ def test_g02_actual_start_correction_updates_each_domain_once():
     }
 
 
+def test_g01_terms_panel_uses_real_http_preview_and_apply(monkeypatch):
+    bootstrap(_arguments())
+    _seed_in_service_case(settled_client_and_unpaid_staff=True)
+    _configure_ui_api_environment(monkeypatch, "g01-ui-key")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.dependencies.order_terms import (
+        OrderTermsApplication,
+        get_order_terms_application,
+    )
+    from api.routes.order_terms import router
+    from ui.api_clients.order_terms_api_client import OrderTermsApiClient
+    from ui.pages.order import terms_panel
+
+    application = FastAPI()
+    application.include_router(router)
+    workflow, connection = _terms_workflow()
+    application.dependency_overrides[get_order_terms_application] = lambda: (
+        OrderTermsApplication(connection, workflow._repository, workflow)
+    )
+    display = _TermsPanelDisplay()
+    monkeypatch.setattr(terms_panel, "st", display)
+    try:
+        with TestClient(application) as http_client:
+            client = OrderTermsApiClient(
+                base_url="http://g01-ui.test",
+                headers={"X-Internal-API-Key": "g01-ui-key"},
+                session=_TestClientSession(http_client, "http://g01-ui.test"),
+            )
+            terms_panel.render_order_terms_panel("G03-CASE", client)
+            display.button_values["terms_apply_G03-CASE"] = True
+            terms_panel.render_order_terms_panel("G03-CASE", client)
+    finally:
+        connection.close()
+
+    assert display.errors == []
+    assert display.rerun_called is True
+    assert _terms_recovery_write_counts() == {
+        "client_outbox": 1,
+        "orders_outbox": 1,
+        "payroll_outbox": 1,
+        "terms_event": 1,
+        "terms_receipt": 1,
+    }
+
+
+def test_g02_actual_start_panel_uses_real_http_preview_and_apply(monkeypatch):
+    bootstrap(_arguments())
+    _seed_in_service_case(settled_client_and_unpaid_staff=True)
+    _configure_ui_api_environment(monkeypatch, "g02-ui-key")
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from api.dependencies.order_actual_start import (
+        ActualStartApplication,
+        get_actual_start_application,
+    )
+    from api.routes.order_actual_start import router
+    from ui.api_clients.order_actual_start_api_client import ActualStartApiClient
+    from ui.pages.order import actual_start_panel
+
+    application = FastAPI()
+    application.include_router(router)
+    application.dependency_overrides[
+        get_actual_start_application
+    ] = _fixed_actual_start_application
+    display = _ActualStartPanelDisplay()
+    monkeypatch.setattr(actual_start_panel, "st", display)
+    with TestClient(application) as http_client:
+        session = _TestClientSession(http_client, "http://g02-ui.test")
+        client = ActualStartApiClient(
+            base_url="http://g02-ui.test",
+            headers={"X-Internal-API-Key": "g02-ui-key"},
+            session=session,
+        )
+        actual_start_panel.render_actual_start_panel("G03-CASE", client)
+        display.button_values["actual_start_apply_G03-CASE"] = True
+        actual_start_panel.render_actual_start_panel("G03-CASE", client)
+
+    assert session.failed_bodies == []
+    assert display.errors == []
+    assert display.rerun_called is True
+    assert _actual_start_write_counts() == {
+        "actual_start_event": 1,
+        "actual_start_receipt": 1,
+        "client_outbox": 1,
+        "orders_outbox": 1,
+        "payroll_outbox": 1,
+    }
+
+
+def _configure_ui_api_environment(monkeypatch, api_key) -> None:
+    monkeypatch.setenv("APP_ENV", "test")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
+    monkeypatch.setenv("INTERNAL_API_KEY", api_key)
+
+
+def _fixed_actual_start_application():
+    from infrastructure.mysql.mysql_adapter import get_connection
+    from infrastructure.mysql.order_actual_start_repository import (
+        MySqlOrderActualStartRepository,
+    )
+    from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
+    from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+    from subsystems.orders.actual_start_workflow import ActualStartWorkflow
+    from api.dependencies.order_actual_start import ActualStartApplication
+
+    connection = get_connection()
+    repository = MySqlOrderActualStartRepository(connection)
+    workflow = ActualStartWorkflow(
+        repository,
+        lambda: MySqlUnitOfWork(connection),
+        FixedBusinessClock(datetime(2026, 8, 4, 9, tzinfo=TAIPEI_TIME_ZONE)),
+    )
+    try:
+        yield ActualStartApplication(repository, workflow)
+    finally:
+        connection.close()
+
+
+class _TestClientSession:
+    def __init__(self, client, base_url) -> None:
+        self._client = client
+        self._base_url = base_url
+        self.failed_bodies = []
+
+    def request(self, method, url, **kwargs):
+        path = url.replace(self._base_url, "", 1)
+        kwargs.pop("timeout", None)
+        response = self._client.request(method, path, **kwargs)
+        if not response.is_success:
+            self.failed_bodies.append(response.json())
+        return _CancellationResponseAdapter(response)
+
+
+class _TermsPanelDisplay:
+    def __init__(self) -> None:
+        self.session_state = {}
+        self.button_values = {}
+        self.errors = []
+        self.rerun_called = False
+
+    def markdown(self, *_args, **_kwargs) -> None:
+        pass
+
+    def caption(self, *_args, **_kwargs) -> None:
+        pass
+
+    def info(self, *_args, **_kwargs) -> None:
+        pass
+
+    def date_input(self, _label, *, value, **_kwargs):
+        return value
+
+    def number_input(self, _label, *, value, **_kwargs):
+        return 9 if _label == "每日服務時數" else value
+
+    def time_input(self, _label, *, value, **_kwargs):
+        return value
+
+    def selectbox(self, _label, options, *, index, **_kwargs):
+        return options[index]
+
+    def text_input(self, *_args, **_kwargs) -> str:
+        return "increase confirmed daily service hours"
+
+    def button(self, _label, *, key, **_kwargs) -> bool:
+        return self.button_values.get(key, False)
+
+    def error(self, message) -> None:
+        self.errors.append(message)
+
+    def success(self, *_args, **_kwargs) -> None:
+        pass
+
+    def rerun(self) -> None:
+        self.rerun_called = True
+
+
+class _ActualStartPanelDisplay:
+    def __init__(self) -> None:
+        self.session_state = {}
+        self.button_values = {}
+        self.errors = []
+        self.rerun_called = False
+
+    def markdown(self, *_args, **_kwargs) -> None:
+        pass
+
+    def caption(self, *_args, **_kwargs) -> None:
+        pass
+
+    def info(self, *_args, **_kwargs) -> None:
+        pass
+
+    def date_input(self, *_args, **_kwargs):
+        return _date(2)
+
+    def text_input(self, *_args, **_kwargs) -> str:
+        return "correct confirmed actual start by one day"
+
+    def button(self, _label, *, key, **_kwargs) -> bool:
+        return self.button_values.get(key, False)
+
+    def error(self, message) -> None:
+        self.errors.append(message)
+
+    def success(self, *_args, **_kwargs) -> None:
+        pass
+
+    def rerun(self) -> None:
+        self.rerun_called = True
+
+
 def _workflow():
     from infrastructure.mysql.mysql_adapter import get_connection
     from infrastructure.mysql.order_cancellation_repository import (
@@ -262,7 +577,10 @@ def _seed_in_service_case(*, completed_with_payroll: bool = False, settled_clien
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
-            cursor.execute("INSERT INTO clients(case_no,name) VALUES ('G03-CASE','G03 Client')")
+            cursor.execute(
+                "INSERT INTO clients(case_no,name,identity_status) "
+                "VALUES ('G03-CASE','G03 Client','一般市民')"
+            )
             client_id = cursor.lastrowid
             cursor.execute("INSERT INTO staff(name,status) VALUES ('G03 Staff 1','active')")
             assert cursor.lastrowid == 1

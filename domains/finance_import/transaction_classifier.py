@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
+from decimal import Decimal
 from typing import Any
+import unicodedata
 
 from scripts.imports.finance_normalized_row import validate_normalized_row
 from domains.finance_import.cancellation_code import resolve_finance_cancellation_code
@@ -13,6 +15,7 @@ from domains.finance_import.cancellation_code import resolve_finance_cancellatio
 CLASSIFICATION_TYPES = frozenset(
     {
         "client_receipt",
+        "client_refund",
         "government_subsidy",
         "client_subsidy_return",
         "staff_salary",
@@ -61,10 +64,69 @@ def _valid_client_virtual_account(row: Mapping[str, Any]) -> bool:
     return projection["cancellation_code"] is not None
 
 
+def _normalized_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = unicodedata.normalize("NFKC", value).strip()
+    return normalized or None
+
+
+def _incoming_amount(row: Mapping[str, Any]) -> int | None:
+    amount = row.get("credit")
+    if isinstance(amount, bool) or not isinstance(amount, (int, float, Decimal)):
+        return None
+    if isinstance(amount, float) and not amount.is_integer():
+        return None
+    if isinstance(amount, Decimal) and amount != amount.to_integral_value():
+        return None
+    return int(amount)
+
+
+def _receipt_candidate_matches(
+    row: Mapping[str, Any], candidate: Mapping[str, Any]
+) -> bool:
+    client_name = _normalized_text(row.get("counterparty_name"))
+    client_account = _normalized_text(row.get("counterparty_account"))
+    amount = _incoming_amount(row)
+    if client_name is None or client_account is None or amount is None:
+        return False
+    candidate_name = _normalized_text(candidate.get("name"))
+    candidate_account = _normalized_text(candidate.get("account"))
+    open_amounts = candidate.get("open_amounts")
+    if candidate_name != client_name or candidate_account != client_account:
+        return False
+    if not isinstance(open_amounts, Sequence) or isinstance(open_amounts, str):
+        return False
+    return amount in open_amounts
+
+
+def _classify_client_receipt_heuristic(
+    row: Mapping[str, Any], client_receipt_candidates: Sequence[Mapping[str, Any]]
+) -> dict[str, Any] | None:
+    matched_client_ids = {
+        candidate.get("client_id")
+        for candidate in client_receipt_candidates
+        if isinstance(candidate, Mapping)
+        and isinstance(candidate.get("client_id"), int)
+        and not isinstance(candidate.get("client_id"), bool)
+        and _receipt_candidate_matches(row, candidate)
+    }
+    if len(matched_client_ids) == 1:
+        return _result(
+            "client_receipt",
+            sorted(matched_client_ids),
+            "client_receipt_heuristic:name+account+amount",
+        )
+    if len(matched_client_ids) > 1:
+        return _review("client_receipt_heuristic_ambiguous")
+    return None
+
+
 def _classify_taishin_outgoing(
     row: Mapping[str, Any],
     client_refund_accounts: Mapping[str, Any],
     staff_accounts: Mapping[str, Any],
+    client_subsidy_return_accounts: Mapping[str, Any],
 ) -> dict[str, Any]:
     account = row["counterparty_account"]
     if account is None:
@@ -72,25 +134,43 @@ def _classify_taishin_outgoing(
     if not isinstance(account, str):
         return _review("counterparty_account_invalid")
 
-    client_ids = _ids_for_account(client_refund_accounts, account)
+    refund_client_ids = _ids_for_account(client_refund_accounts, account)
+    subsidy_return_client_ids = _ids_for_account(
+        client_subsidy_return_accounts, account
+    )
     staff_ids = _ids_for_account(staff_accounts, account)
-    if len(client_ids) == 1 and not staff_ids:
+    owner_categories = sum(
+        bool(ids)
+        for ids in (refund_client_ids, subsidy_return_client_ids, staff_ids)
+    )
+    if owner_categories > 1:
+        return _review("counterparty_identity_type_conflict")
+    if len(refund_client_ids) == 1:
         return _result(
-            "client_subsidy_return",
-            client_ids,
+            "client_refund",
+            refund_client_ids,
             "taishin_unique_client_refund_account",
             account,
         )
-    if len(staff_ids) == 1 and not client_ids:
+    if len(subsidy_return_client_ids) == 1:
+        return _result(
+            "client_subsidy_return",
+            subsidy_return_client_ids,
+            "taishin_unique_client_subsidy_return_account",
+            account,
+        )
+    if len(staff_ids) == 1:
         return _result(
             "staff_legacy_subsidy",
             staff_ids,
             "taishin_unique_staff_account",
             account,
         )
-    if client_ids and staff_ids:
-        return _review("counterparty_identity_type_conflict")
-    if len(client_ids) > 1 or len(staff_ids) > 1:
+    if (
+        len(refund_client_ids) > 1
+        or len(subsidy_return_client_ids) > 1
+        or len(staff_ids) > 1
+    ):
         return _review("counterparty_account_multiple_matches")
     return _review("counterparty_account_no_match")
 
@@ -158,6 +238,8 @@ def classify_finance_transaction(
     row: Mapping[str, Any],
     client_refund_accounts: Mapping[str, Any],
     staff_accounts: Mapping[str, Any],
+    client_subsidy_return_accounts: Mapping[str, Any] | None = None,
+    client_receipt_candidates: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Classify one normalized bank row without selecting a ledger target."""
 
@@ -168,10 +250,19 @@ def classify_finance_transaction(
     if direction == "unknown":
         return _review("direction_unknown")
 
+    if client_subsidy_return_accounts is None:
+        client_subsidy_return_accounts = client_refund_accounts
+        client_refund_accounts = {}
+
     if format_id in {"legacy", "sinopac"}:
         if direction == "incoming":
             if _valid_client_virtual_account(row):
                 return _result("client_receipt", [], "sinopac_valid_virtual_account")
+            heuristic_result = _classify_client_receipt_heuristic(
+                row, client_receipt_candidates
+            )
+            if heuristic_result is not None:
+                return heuristic_result
             return _review("sinopac_invalid_or_missing_virtual_account")
         return _classify_sinopac_outgoing(row, staff_accounts)
 
@@ -181,6 +272,11 @@ def classify_finance_transaction(
             if isinstance(memo, str) and "新竹市政府" in memo:
                 return _result("government_subsidy", [], "taishin_government_memo")
             return _review("taishin_incoming_not_government")
-        return _classify_taishin_outgoing(row, client_refund_accounts, staff_accounts)
+        return _classify_taishin_outgoing(
+            row,
+            client_refund_accounts,
+            staff_accounts,
+            client_subsidy_return_accounts,
+        )
 
     return _review("unsupported_bank_direction")

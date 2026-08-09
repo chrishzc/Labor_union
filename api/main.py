@@ -15,9 +15,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from api.exception_handlers.assignment_leave_resolution import (
-    assignment_leave_resolution_exception_handler,
-)
 from api.middleware.compression import ResponseCompressionMiddleware
 from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
@@ -85,9 +82,6 @@ from subsystems.anomalies.outbox_worker import (
     start_architecture_outbox_worker,
     stop_architecture_outbox_worker,
 )
-from subsystems.scheduling.leave_resolution_workflow import (
-    AssignmentLeaveResolutionDomainError,
-)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -122,14 +116,9 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Labor Union Webhook & API",
-    description="LINE, LIFF, BreezySign and labor union administration API",
+    description="LINE, LIFF and labor union administration API",
     version="1.0.0",
     lifespan=lifespan,
-)
-
-app.add_exception_handler(
-    AssignmentLeaveResolutionDomainError,
-    assignment_leave_resolution_exception_handler,
 )
 
 app.add_middleware(

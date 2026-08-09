@@ -32,6 +32,8 @@ VALID_CITIES_BOTH = set(VALID_CITIES) | {c.replace("台", "臺") for c in VALID_
 # 銀行代碼/帳號也不在這份清單裡：那兩欄寫在 staff_bank_accounts，不是 staff 表本身的欄位。
 EXCEL_TO_DB_COLUMN = {
     "IP位址": "ip_address",
+    "報名時間": "registered_at",
+    "民國出生年月日": "birthday",
     "行動電話": "phone",
     "EMAIL": "email",
     "縣市": "city",
@@ -108,5 +110,4 @@ def validate_staff_row(row: dict[str, Any]) -> dict[str, str]:
 
 
 __all__ = ["validate_staff_row", "fallback_case_key", "EXCEL_TO_DB_COLUMN"]
-
 

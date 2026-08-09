@@ -12,7 +12,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from services.finance_import_reprocessing import (
+from subsystems.finance_import.reprocessing import (
     DEFAULT_SAFETY_LIMIT,
     reprocess_finance_import_batch,
 )
@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--apply",
         action="store_true",
-        help="依 dry-run plan fingerprint 正式套用",
+        help="已退休；正式套用請使用 typed Preview／Apply API",
     )
     parser.add_argument("--actor", help="apply 必填操作者")
     parser.add_argument(
@@ -47,13 +47,8 @@ def _validate_before_database(args: argparse.Namespace) -> None:
         raise ValueError("batch-id must be a positive integer")
     if args.safety_limit < 1:
         raise ValueError("safety-limit must be a positive integer")
-    if args.apply and (not isinstance(args.actor, str) or not args.actor.strip()):
-        raise ValueError("--actor is required with --apply")
-    if args.apply and (
-        not isinstance(args.plan_fingerprint, str)
-        or len(args.plan_fingerprint) != 64
-    ):
-        raise ValueError("--plan-fingerprint is required with --apply")
+    if args.apply:
+        raise ValueError("legacy_finance_import_reprocess_apply_retired")
 
 
 def _write_report(path: str, result: dict[str, Any]) -> str:

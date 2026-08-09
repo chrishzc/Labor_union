@@ -26,6 +26,16 @@ def _principal():
     return AdminPrincipal(1, "admin", "Admin", "system_admin")
 
 
+def _owner_selection():
+    return [{
+        "row_identity": "finance-import-row:1",
+        "case_no": "C-1",
+        "obligation_identity": "client-obligation:1",
+        "reason": "bank memo reviewed",
+        "evidence_references": ["review:1"],
+    }]
+
+
 def _plan():
     row = CanonicalFinanceImportRow(
         "finance-import-row:1",
@@ -57,7 +67,7 @@ class _Application:
         self.plan = _plan()
         self.request = None
 
-    def preview(self, batch_identity, correlation_id):
+    def preview(self, batch_identity, correlation_id, _owner_selections=()):
         assert batch_identity == "batch:1"
         assert correlation_id == CorrelationId("preview-1")
         return self.plan
@@ -76,7 +86,9 @@ class _Application:
 
 def test_historical_reprocess_preview_is_a_lossless_typed_plan_projection():
     response = preview_historical_finance_reprocess(
-        FinanceImportHistoricalReprocessPreviewBody(batch_identity="batch:1"),
+        FinanceImportHistoricalReprocessPreviewBody(
+            batch_identity="batch:1", owner_selections=_owner_selection()
+        ),
         "preview-1",
         _principal(),
         _Application(),
@@ -98,6 +110,7 @@ def test_historical_reprocess_apply_carries_the_guarded_command_contract():
             expected_batch_version=4,
             preview_fingerprint="b" * 64,
             reason="correct historical classification",
+            owner_selections=_owner_selection(),
         ),
         "reprocess-1",
         "apply-1",
@@ -109,3 +122,33 @@ def test_historical_reprocess_apply_carries_the_guarded_command_contract():
     assert application.request.actor.actor_id == "admin"
     assert response.data["reprocess_run_id"] == 99
     assert response.data["resulting_batch_version"] == 5
+
+
+def test_historical_reprocess_apply_enqueues_a_replayable_durable_command():
+    class JobRepository:
+        def __init__(self):
+            self.command = None
+
+        def enqueue_command(self, command):
+            self.command = command
+            return command.job_id
+
+    repository = JobRepository()
+    response = apply_historical_finance_reprocess(
+        FinanceImportHistoricalReprocessApplyBody(
+            batch_identity="batch:1",
+            expected_batch_version=4,
+            preview_fingerprint="b" * 64,
+            reason="correct historical classification",
+            owner_selections=_owner_selection(),
+        ),
+        "reprocess-1",
+        "apply-1",
+        _principal(),
+        repository,
+    )
+
+    assert response.data.status_url.endswith(response.data.job_id)
+    assert repository.command.command_type == "finance_import_historical_reprocess_apply"
+    assert repository.command.command_identity == "reprocess-1"
+    assert repository.command.payload["owner_selections"] == _owner_selection()

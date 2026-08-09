@@ -189,8 +189,8 @@ def _seed_settled_deposit(*, status: str):
             cursor.execute("INSERT INTO clients(case_no,name) VALUES ('G14-CASE','G14 Client')")
             client_id = int(cursor.lastrowid)
             cursor.execute(
-                "INSERT INTO orders(case_no,client_id,status,actual_start_date) "
-                "VALUES ('G14-CASE',%s,%s,%s)",
+                "INSERT INTO orders(case_no,client_id,status,actual_start_date,service_days) "
+                "VALUES ('G14-CASE',%s,%s,%s,20)",
                 (client_id, status, "2026-08-01" if status == "服務中" else None),
             )
             cursor.execute("INSERT INTO client_finance_accounts(case_no,aggregate_version) VALUES ('G14-CASE',1)")

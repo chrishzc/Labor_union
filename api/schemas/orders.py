@@ -16,6 +16,15 @@ class OrderFullUpdateRequest(BaseModel):
 
     client_name: Optional[str] = Field(None, description="客戶姓名")
 
+
+class ClientNamePreviewRequest(BaseModel):
+    client_name: str = Field(min_length=1, max_length=100)
+
+
+class ClientNameApplyRequest(ClientNamePreviewRequest):
+    preview_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
 class OrderStatusUpdateRequest(BaseModel):
     """Retired request kept only for the legacy HTTP 410 response."""
 

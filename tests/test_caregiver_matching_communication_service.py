@@ -304,5 +304,12 @@ def test_information_send_revalidates_latest_full_plan_before_queueing(monkeypat
 
     assert result["line_task_id"] == 88
     assert queued[0]["to_user_id"] == "U-a"
+    assert queued[0]["task_type"] == "matching_willingness_card"
+    assert queued[0]["payload"] == {
+        "case_no": "CASE-1",
+        "plan_id": 7,
+        "segment_id": 71,
+        "info_type": 1,
+    }
     assert "2026-08-01～2026-08-10" in queued[0]["message_content"]
     assert connection.commits == 1

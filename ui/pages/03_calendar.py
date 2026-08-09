@@ -54,11 +54,14 @@ from ui.pages.scheduling.leave_substitution_panel import (
     render_leave_substitution_panel,
 )
 from ui.pages.scheduling.matching_center import render_matching_center
+from ui.pages.scheduling.holiday_management import render_holiday_management
+from ui.request_state import accept_request_result, begin_request, request_snapshot
 
 title = "多月嫂排班"
 _MATCHING_QUEUE_KEY = "multi_caregiver_matching_case_picker"
 _SCHEDULING_WORKSPACES = (
     "服務人員月曆",
+    "國定假日管理",
     "月嫂配對中心",
     "案件人力配置",
 )
@@ -610,7 +613,7 @@ def _render_staff_calendar():
 
         # 3. 兩階段操作選單
         try:
-            all_orders = _load_matching_order_summaries(
+            all_orders, _ = _load_matching_order_summaries(
                 resolve_api_base_url(),
                 tuple(sorted(admin_headers.items())),
             )
@@ -947,29 +950,41 @@ def _render_staff_calendar():
         st.exception(e_step3)
         return
 
-def _load_matching_center_data():
+def _load_matching_center_data(query_text=None, after_case_no=None):
     headers = build_admin_headers()
-    return (
-        _load_matching_order_summaries(
-            resolve_api_base_url(),
-            tuple(sorted(headers.items())),
-        ),
-        _calendar_reference_rows("/api/v1/staff", headers),
+    order_page = _load_matching_order_summaries(
+        resolve_api_base_url(),
+        tuple(sorted(headers.items())),
+        after_case_no,
+        query_text,
     )
+    return order_page
 
 
 @st.cache_data(
     ttl=_REFERENCE_DATA_CACHE_SECONDS,
     show_spinner=False,
 )
-def _load_matching_order_summaries(base_url, header_items):
+def _load_matching_order_summaries(
+    base_url,
+    header_items,
+    after_case_no=None,
+    query_text=None,
+):
     result = OrderSummaryApiClient(
         base_url=base_url,
         headers=dict(header_items),
-    ).query(page_size=200)
+    ).query(
+        page_size=50,
+        after_case_no=after_case_no,
+        query_text=query_text,
+    )
     if result.page is None:
         raise ValueError("訂單摘要 API 未回傳資料")
-    return [item.model_dump(mode="json") for item in result.page.items]
+    return (
+        [item.model_dump(mode="json") for item in result.page.items],
+        result.page.next_cursor,
+    )
 
 
 @st.cache_data(
@@ -1002,7 +1017,8 @@ def show():
             nav_helper.end_queue()
             st.rerun()
         try:
-            orders, staff = _load_matching_center_data()
+            orders, _ = _load_matching_center_data(str(queue_item["case_no"]))
+            staff = _calendar_reference_rows("/api/v1/staff", build_admin_headers())
             render_matching_center(
                 orders,
                 staff,
@@ -1027,6 +1043,10 @@ def _render_scheduling_workspace(workspace: str) -> None:
         _render_staff_calendar()
         return
 
+    if workspace == "國定假日管理":
+        render_holiday_management()
+        return
+
     if workspace == "月嫂配對中心":
         _render_matching_workspace()
         return
@@ -1039,19 +1059,87 @@ def _render_scheduling_workspace(workspace: str) -> None:
 
 
 def _render_matching_workspace() -> None:
+    query_text = st.text_input("搜尋案件編號或客戶姓名", key="scheduling_order_search").strip()
+    after_case_no = _prepare_scheduling_order_page("matching", query_text)
+    request = begin_request(st.session_state, "scheduling_matching_request")
     try:
-        orders, staff = _load_matching_center_data()
-        render_matching_center(orders, staff)
+        with st.spinner("正在載入月嫂配對案件與人員…"):
+            orders, next_cursor = _load_matching_center_data(query_text or None, after_case_no)
+            staff = _calendar_reference_rows("/api/v1/staff", build_admin_headers())
     except Exception as error:
+        accept_request_result(
+            st.session_state,
+            "scheduling_matching_request",
+            request,
+            item_count=0,
+            error_message=str(error),
+        )
         st.error(f"月嫂配對中心載入失敗：{error}")
+        return
+    if not _accept_matching_workspace_result(request, orders, staff):
+        return
+    _render_scheduling_order_pagination("matching", next_cursor)
+    render_matching_center(orders, staff)
+
+
+def _accept_matching_workspace_result(request, orders, staff) -> bool:
+    accepted = accept_request_result(
+        st.session_state,
+        "scheduling_matching_request",
+        request,
+        item_count=len(orders) + len(staff),
+    )
+    snapshot = request_snapshot(st.session_state, "scheduling_matching_request")
+    if not accepted or snapshot.generation != request.generation:
+        st.info("已忽略過期的配對資料回應，正在使用較新的查詢。")
+        return False
+    if snapshot.status == "empty":
+        st.info("目前沒有符合條件的配對案件或可用人員。")
+    return True
 
 
 def _render_case_staffing_workspace() -> None:
     try:
-        orders, staff = _load_matching_center_data()
+        query_text = st.text_input("搜尋案件編號或客戶姓名", key="scheduling_order_search").strip()
+        after_case_no = _prepare_scheduling_order_page("staffing", query_text)
+        orders, next_cursor = _load_matching_center_data(query_text or None, after_case_no)
+        staff = _calendar_reference_rows("/api/v1/staff", build_admin_headers())
+        _render_scheduling_order_pagination("staffing", next_cursor)
         render_case_staffing(orders=orders, staff=staff)
     except Exception as error:
         st.error(f"案件人力配置載入失敗：{error}")
+
+
+def _prepare_scheduling_order_page(workspace: str, query_text: str) -> str | None:
+    query_key = f"scheduling_{workspace}_order_query"
+    cursor_key = f"scheduling_{workspace}_order_after_case_no"
+    if st.session_state.get(query_key) != query_text:
+        st.session_state[query_key] = query_text
+        st.session_state[cursor_key] = None
+        st.session_state[f"scheduling_{workspace}_order_cursor_history"] = []
+    return st.session_state.get(cursor_key)
+
+
+def _render_scheduling_order_pagination(workspace: str, next_cursor: str | None) -> None:
+    cursor_key = f"scheduling_{workspace}_order_after_case_no"
+    history_key = f"scheduling_{workspace}_order_cursor_history"
+    history = st.session_state.setdefault(history_key, [])
+    previous_column, page_column, next_column = st.columns([1, 2, 1])
+    if previous_column.button("上一頁案件", disabled=not history, key=f"{workspace}_previous_order_page"):
+        st.session_state[cursor_key] = history.pop()
+        _clear_scheduling_page_selection(workspace)
+        st.rerun()
+    page_column.caption(f"案件摘要第 {len(history) + 1} 頁，每頁最多 50 筆")
+    if next_column.button("下一頁案件", disabled=not next_cursor, key=f"{workspace}_next_order_page"):
+        history.append(st.session_state.get(cursor_key))
+        st.session_state[cursor_key] = next_cursor
+        _clear_scheduling_page_selection(workspace)
+        st.rerun()
+
+
+def _clear_scheduling_page_selection(workspace: str) -> None:
+    selection_key = "matching_center_case" if workspace == "matching" else "staffing_case"
+    st.session_state.pop(selection_key, None)
 
 
 if __name__ == "__main__":

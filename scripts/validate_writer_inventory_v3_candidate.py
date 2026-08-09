@@ -10,7 +10,14 @@ import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-EVIDENCE_DIRECTORY = REPOSITORY_ROOT / "document" / "架構重整" / "evidence" / "writer_inventory_v3"
+EVIDENCE_DIRECTORY = (
+    REPOSITORY_ROOT
+    / "document"
+    / "架構重整"
+    / "03_追蹤清單與證據"
+    / "evidence"
+    / "writer_inventory_v3"
+)
 MANIFEST_PATH = EVIDENCE_DIRECTORY / "writer_inventory_v3_candidate.manifest.json"
 FINDINGS_PATH = EVIDENCE_DIRECTORY / "writer_inventory_v3_candidate.findings.jsonl"
 GENERATOR_PATH = REPOSITORY_ROOT / "scripts" / "generate_writer_inventory_v3_candidate.py"

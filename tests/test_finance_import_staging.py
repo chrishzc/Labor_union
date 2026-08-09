@@ -87,9 +87,17 @@ def test_stages_raw_row_before_classification_and_keeps_reconciliation_pending(m
     cursor = FakeCursor()
     calls = []
 
-    def classifier(row, client_accounts, staff_accounts):
+    def classifier(row, client_accounts, staff_accounts, subsidy_return_accounts, receipt_candidates):
         assert any(sql.startswith("INSERT INTO finance_import_rows") for sql, _ in cursor.executed)
-        calls.append((row, client_accounts, staff_accounts))
+        calls.append(
+            (
+                row,
+                client_accounts,
+                staff_accounts,
+                subsidy_return_accounts,
+                receipt_candidates,
+            )
+        )
         return {
             "classification_type": "client_subsidy_return",
             "matched_identity_ids": [8],
@@ -250,8 +258,8 @@ def test_empty_normalized_result_still_creates_batch(monkeypatch):
     assert len(cursor.executed) == 1
 
 
-def test_service_does_not_import_or_write_formal_accounting_modules():
-    source = Path("services/finance_import_staging.py").read_text(encoding="utf-8")
+def test_canonical_staging_does_not_import_or_write_formal_accounting_modules():
+    source = Path("subsystems/finance_import/staging.py").read_text(encoding="utf-8")
 
     assert "get_connection" not in source
     assert "client_payment" not in source

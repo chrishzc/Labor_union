@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -27,31 +28,9 @@ from scripts.migrate_preserved_database_additive_schema import (
     verify_candidate,
     write_receipt,
 )
-from services.anomaly_alert_detection import run_process_alert_scan
-
-
-EXPECTED_SCANNER_CODES = {
-    "ORDER-001",
-    "ORDER-002",
-    "ORDER-003",
-    "ORDER-004",
-    "BECLASS-001",
-    "LINE-001",
-    "LINE-005",
-    "DOC-SEND-001",
-    "IMPORT-003",
-    "RECEIVABLE-001",
-    "PAYOUT-001",
-    "RETURN-001",
-    "LINE-002",
-    "LINE-004",
-    "SCHEDULE-001",
-    "SCHEDULE-002",
-    "SCHEDULE-003",
-    "SCHEDULE-005",
-    "SCHEDULE-006",
-    "IMPORT-006",
-}
+from infrastructure.mysql.process_reminder_anomaly_source import (
+    consume_process_reminder_anomaly_sources,
+)
 
 
 def test_database_identity_guards_fail_closed() -> None:
@@ -1347,9 +1326,13 @@ def test_real_mysql_preserved_source_candidate_cutover(tmp_path: Path) -> None:
                 )
                 finance_rows_before_scan = int(cursor.fetchone()["n"])
                 connection.begin()
-                summary = run_process_alert_scan(cursor)
-                assert set(summary) == EXPECTED_SCANNER_CODES
-                assert "IMPORT-006" in summary
+                summary = consume_process_reminder_anomaly_sources(
+                    connection,
+                    as_of=date.today(),
+                    owns_transaction=False,
+                )
+                assert summary.succeeded
+                assert summary.projected_count > 0
                 connection.rollback()
         finally:
             connection.close()

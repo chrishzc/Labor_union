@@ -39,13 +39,14 @@ UoW; it does not duplicate Finance Domain rules.  The `/api/v1/jobs/{job_id}` st
 view now reports command type, attempts and receipt reference with typed
 `job_not_found`.
 
-Finance Import correction now uses the same persisted command envelope and
-independent worker as batch Apply. The remaining Assignment Plan, Payroll
-Rebuild, Staff Payout and Government Subsidy routes still use FastAPI
-`BackgroundTasks`. They are not durable-worker evidence. Worker supervision, deployment startup,
-automatic bounded polling with backoff/jitter, typed cancellation endpoint and
-preserve-data migration runner are also incomplete.  Finance Import has only a
-user-triggered one-request-per-click status refresh and same-key timeout retry.
+Finance Import correction, Assignment Plan, Payroll Rebuild, Staff Payout and
+all five Government Subsidy Apply routes now use the same persisted command
+envelope and independent worker as batch Apply. Each migrated Domain has
+isolated MySQL crash/replay evidence. A typed cancellation endpoint now limits
+the transition to still-unclaimed queued work. Worker supervision, deployment
+startup, automatic bounded polling with backoff/jitter, and preserve-data
+migration runner remain incomplete. Finance Import has only a user-triggered
+one-request-per-click status refresh and same-key timeout retry.
 
 ## 3.1 2026-08-04 implementation evidence
 

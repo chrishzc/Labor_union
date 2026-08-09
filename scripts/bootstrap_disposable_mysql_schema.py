@@ -61,6 +61,7 @@ def bootstrap(arguments) -> dict[str, object]:
     connection = _connect(arguments)
     try:
         with connection.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{database}`")
             statements, views = _partition_base_statements(database)
             for statement in statements:
                 cursor.execute(statement)

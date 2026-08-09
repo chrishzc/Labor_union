@@ -63,11 +63,18 @@ class GovernmentSubsidyApplication:
 
 
 def get_government_subsidy_application():
+    connection = get_connection()
+    try:
+        yield build_government_subsidy_application(connection)
+    finally:
+        connection.close()
+
+
+def build_government_subsidy_application(connection):
     from infrastructure.mysql.government_subsidy_repository import (
         MySqlGovernmentSubsidyRepository,
     )
 
-    connection = get_connection()
     repository = MySqlGovernmentSubsidyRepository(connection)
     ledger_workflow = GovernmentSubsidyLedgerWorkflow(
         repository,
@@ -77,17 +84,11 @@ def get_government_subsidy_application():
         repository,
         lambda: MySqlUnitOfWork(connection),
     )
-    try:
-        yield GovernmentSubsidyApplication(
-            repository,
-            ledger_workflow,
-            claim_workflow,
-        )
-    finally:
-        connection.close()
+    return GovernmentSubsidyApplication(repository, ledger_workflow, claim_workflow)
 
 
 __all__ = [
     "GovernmentSubsidyApplication",
+    "build_government_subsidy_application",
     "get_government_subsidy_application",
 ]

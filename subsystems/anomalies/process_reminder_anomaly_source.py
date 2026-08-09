@@ -1,6 +1,7 @@
 """Root-fact consumers for the process-reminder anomaly group.
 
-Covers ORDER-001~004, BECLASS-001, DOC-SEND-001, RECEIVABLE-001, RETURN-001,
+Covers ORDER-001~004, BECLASS-001, DOC-SEND-001, RECEIVABLE-001,
+CLIENTPAYABLE-001, RETURN-001,
 SCHEDULE-001/002/003/005 and LINE-001/002/004/005. Business rules are ported
 1:1 from the legacy services/anomaly_alert_detection.py scanners.
 
@@ -16,10 +17,17 @@ without a separate bulk-close step.
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Any, Mapping
 
 from domains.anomalies.registry import DesiredAlertState
+from domains.client_finance.subsidy_advance import (
+    SubsidyAdvanceDecisionKind,
+    SubsidyAdvanceFacts,
+    build_subsidy_advance_decision,
+)
 from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.money import MoneyNTD
 from subsystems.anomalies.alert_workflow import ProjectAlertRequest
 
 _CONSUMER_IDENTITY = "process-reminder-anomaly-source-v1"
@@ -116,30 +124,35 @@ def build_resume_not_sent_requests(
     return tuple(requests)
 
 
-_RECEIVABLE_STAGES = (
-    ("訂金", "deposit_due_date", "deposit_receivable", "deposit_received"),
-    ("第一期", "first_payment_due_date", "first_payment_receivable", "first_payment_received"),
-    ("第二期", "second_payment_due_date", "second_payment_receivable", "second_payment_received"),
-)
+_RECEIVABLE_STAGE_LABELS = {
+    "deposit": "訂金",
+    "first": "第一期",
+    "second": "第二期",
+    "adjustment": "調整款",
+}
 
 
 def build_client_receivable_requests(
     rows: list[Mapping[str, Any]], *, as_of: date
 ) -> tuple[ProjectAlertRequest, ...]:
-    """rows: every client_payments row (no WHERE filtering)."""
+    """rows: canonical client-obligation candidates, including inactive alert cases."""
     version = as_of.toordinal()
-    requests = []
-    for row in rows:
-        case_no = row["case_no"]
-        overdue_stages = []
-        for label, due_col, receivable_col, received_col in _RECEIVABLE_STAGES:
-            due = row.get(due_col)
-            if due is not None and due < as_of and row.get(received_col) < row.get(receivable_col):
-                overdue_stages.append(
-                    {"階段": label, "到期日": str(due), "應收": str(row.get(receivable_col)), "已收": str(row.get(received_col))}
-                )
-        active = bool(overdue_stages)
-        snapshot = {"case_no": case_no, "overdue_stages": overdue_stages}
+    requests: list[ProjectAlertRequest] = []
+    for case_no, obligations in _obligations_by_case(rows).items():
+        overdue_obligations = [
+            _overdue_obligation_snapshot(obligation, _RECEIVABLE_STAGE_LABELS, "未收")
+            for obligation in obligations
+            if _is_open_overdue_of_type(
+                obligation, as_of, "receivable_from_client", _RECEIVABLE_STAGE_LABELS
+            )
+        ]
+        overdue_obligations = [item for item in overdue_obligations if item is not None]
+        snapshot = {
+            "case_no": case_no,
+            "action": "核對應收資料、銀行對帳單與匯入結果",
+            "overdue_obligations": overdue_obligations,
+        }
+        active = bool(overdue_obligations)
         requests.append(_request("RECEIVABLE-001", case_no, version, active, snapshot, {"case_no": case_no}))
     return tuple(requests)
 
@@ -147,26 +160,135 @@ def build_client_receivable_requests(
 def build_subsidy_return_requests(
     rows: list[Mapping[str, Any]], *, as_of: date
 ) -> tuple[ProjectAlertRequest, ...]:
-    """rows: every client_payments row (no WHERE filtering)."""
+    """rows: canonical client-obligation candidates, including inactive alert cases."""
     version = as_of.toordinal()
-    requests = []
-    for row in rows:
-        case_no = row["case_no"]
-        due = row.get("subsidy_return_due_date")
-        active = (
-            due is not None
-            and due < as_of
-            and row.get("subsidy_return_refunded") < row.get("subsidy_return_receivable")
-        )
-        needs_review = row.get("subsidy_return_review_status") == "review_required"
+    requests: list[ProjectAlertRequest] = []
+    for case_no, obligations in _obligations_by_case(rows).items():
+        overdue_obligations = [
+            _overdue_obligation_snapshot(
+                obligation, {"subsidy_return": "客戶補助退還"}, "未付"
+            )
+            for obligation in obligations
+            if _is_open_overdue_of_type(
+                obligation, as_of, "payable_to_client", {"subsidy_return": "客戶補助退還"}
+            )
+        ]
+        overdue_obligations = [item for item in overdue_obligations if item is not None]
         snapshot = {
             "case_no": case_no,
-            "due_date": str(due) if due else None,
-            "needs_review": needs_review,
-            "review_reason": row.get("subsidy_return_review_reason"),
+            "action": "核對應付資料、銀行對帳單與匯入結果",
+            "overdue_obligations": overdue_obligations,
         }
+        active = bool(overdue_obligations)
         requests.append(_request("RETURN-001", case_no, version, active, snapshot, {"case_no": case_no}))
     return tuple(requests)
+
+
+def build_client_payable_requests(
+    rows: list[Mapping[str, Any]], *, as_of: date
+) -> tuple[ProjectAlertRequest, ...]:
+    """rows: canonical client-obligation candidates, including inactive alert cases."""
+    version = as_of.toordinal()
+    requests: list[ProjectAlertRequest] = []
+    labels = {"refund": "一般客戶退款", "adjustment": "客戶調整應付"}
+    for case_no, obligations in _obligations_by_case(rows).items():
+        overdue_obligations = [
+            _overdue_obligation_snapshot(obligation, labels, "未付")
+            for obligation in obligations
+            if _is_open_overdue_of_type(obligation, as_of, "payable_to_client", labels)
+        ]
+        overdue_obligations = [item for item in overdue_obligations if item is not None]
+        snapshot = {
+            "case_no": case_no,
+            "action": "核對應付資料、銀行對帳單與匯入結果",
+            "overdue_obligations": overdue_obligations,
+        }
+        requests.append(
+            _request("CLIENTPAYABLE-001", case_no, version, bool(overdue_obligations), snapshot, {"case_no": case_no})
+        )
+    return tuple(requests)
+
+
+def build_subsidy_advance_due_requests(
+    rows: list[Mapping[str, Any]], *, as_of: date
+) -> tuple[ProjectAlertRequest, ...]:
+    """rows: claim-linked subsidy-return candidates plus prior alert identities."""
+    version = as_of.toordinal()
+    requests: list[ProjectAlertRequest] = []
+    for case_no, candidates in _obligations_by_case(rows).items():
+        ready = [_subsidy_advance_snapshot(row, as_of) for row in candidates]
+        ready = [item for item in ready if item is not None]
+        snapshot = {
+            "case_no": case_no,
+            "action": "核對補助撥款、應付資料、銀行對帳單與匯入結果",
+            "advance_candidates": ready,
+        }
+        requests.append(
+            _request("SUBSIDYADVANCE-001", case_no, version, bool(ready), snapshot, {"case_no": case_no})
+        )
+    return tuple(requests)
+
+
+def _subsidy_advance_snapshot(row: Mapping[str, Any], as_of: date) -> dict[str, str] | None:
+    completed_on = row.get("actual_end_date")
+    entitled_amount = _whole_ntd(row.get("entitled_amount_ntd"))
+    allocated_amount = _whole_ntd(row.get("allocated_amount_ntd"))
+    if not isinstance(completed_on, date) or entitled_amount is None:
+        return None
+    if allocated_amount is None or entitled_amount <= 0:
+        return None
+    decision = build_subsidy_advance_decision(
+        SubsidyAdvanceFacts(
+            row["case_no"], completed_on, MoneyNTD(entitled_amount), MoneyNTD(allocated_amount)
+        ),
+        as_of,
+    )
+    if decision.kind is not SubsidyAdvanceDecisionKind.READY:
+        return None
+    return {"到期日": decision.refund_due_on.isoformat(), "待墊付": str(entitled_amount)}
+
+
+def _whole_ntd(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if not isinstance(value, (int, float, Decimal)) or int(value) != value:
+        return None
+    return int(value)
+
+
+def _obligations_by_case(rows: list[Mapping[str, Any]]) -> dict[str, list[Mapping[str, Any]]]:
+    obligations: dict[str, list[Mapping[str, Any]]] = {}
+    for row in rows:
+        obligations.setdefault(row["case_no"], []).append(row)
+    return obligations
+
+
+def _is_open_overdue_of_type(
+    row: Mapping[str, Any], as_of: date, direction: str, labels: Mapping[str, str]
+) -> bool:
+    if row.get("direction") != direction or row.get("obligation_type") not in labels:
+        return False
+    due_date = row.get("due_date")
+    return (
+        due_date is not None
+        and due_date < as_of
+        and row.get("status") == "open"
+        and row.get("amount_due_ntd", 0) > 0
+    )
+
+
+def _overdue_obligation_snapshot(
+    row: Mapping[str, Any], labels: Mapping[str, str], amount_label: str
+) -> dict[str, str] | None:
+    label = labels.get(str(row.get("obligation_type")))
+    if label is None:
+        return None
+    snapshot = {
+        "階段": label,
+        "到期日": str(row["due_date"]),
+    }
+    snapshot[amount_label] = str(row["amount_due_ntd"])
+    return snapshot
 
 
 def build_schedule_holiday_undecided_requests(
@@ -375,6 +497,7 @@ def build_line_identity_conflict_requests(
 __all__ = [
     "build_beclass_missing_requests",
     "build_client_missing_line_requests",
+    "build_client_payable_requests",
     "build_client_receivable_requests",
     "build_line_identity_conflict_requests",
     "build_line_task_no_reply_requests",
@@ -386,4 +509,5 @@ __all__ = [
     "build_schedule_replaced_assignment_requests",
     "build_staff_missing_line_requests",
     "build_subsidy_return_requests",
+    "build_subsidy_advance_due_requests",
 ]

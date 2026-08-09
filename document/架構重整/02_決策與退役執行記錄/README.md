@@ -25,7 +25,13 @@
 | [32_Client_Refund_Return_Anomaly_Package.md](32_Client_Refund_Return_Anomaly_Package.md) | gap-package | — | 一般客戶退款的銀行退回異常判斷根因與待補現況。 |
 | [33_G05_服務完成時刻與請假代班競爭契約.md](33_G05_服務完成時刻與請假代班競爭契約.md) | contract | — | G05 場景：服務完成時刻判定與請假／代班的競爭不變量正式規格。 |
 | [34_Preserve_Data_Runner_Completion_Decision_Package.md](34_Preserve_Data_Runner_Completion_Decision_Package.md) | decision-package | — | Preserve-data runner（保留資料遷移執行器）完成度落差。 |
+| [35_LINE_Ingress_Developer_Experience_Convergence_Contract.md](35_LINE_Ingress_Developer_Experience_Convergence_Contract.md) | contract | `decision-complete-implementation-deferred` | LINE 薄 ingress、Domain command 與 durable delivery 的收斂契約；新增功能採 intent registry 範本。 |
+| [36_Durable_Job_Assignment_Plan_Work_Package.md](36_Durable_Job_Assignment_Plan_Work_Package.md) | gap-package | `implementation-complete; isolated-mysql-e2e-proven` | Assignment Plan 已遷移至 server-side durable queue，隔離 MySQL crash/replay 與 same-key replay 證據已完成；不含 UI、部署或 schema 套用。 |
+| [37_Durable_Job_Payroll_Rebuild_Work_Package.md](37_Durable_Job_Payroll_Rebuild_Work_Package.md) | gap-package | `implementation-complete; isolated-mysql-e2e-proven` | Payroll Rebuild 已遷移至 server-side durable queue，隔離 MySQL crash/replay 與 same-key replay 證據已完成；不含 UI、部署或 schema 套用。 |
+| [38_Form_Management_Legacy_List_Caller_Migration_Receipt.md](38_Form_Management_Legacy_List_Caller_Migration_Receipt.md) | receipt | `completed` | Form Management 已改用 bounded Orders Summary、全域統計與單案 context typed Query，不再讀全量 Orders／Clients。 |
+| [39_Durable_Job_Staff_Payout_Work_Package.md](39_Durable_Job_Staff_Payout_Work_Package.md) | gap-package | `proven` | Payout、Return、Reversal 已遷移至 server-side durable queue，三種完整根事實鏈皆具隔離 MySQL crash/replay 證據。 |
+| [40_Durable_Job_Government_Subsidy_Work_Package.md](40_Durable_Job_Government_Subsidy_Work_Package.md) | gap-package | `proven` | 五種 Government Subsidy Apply 已遷移至 server-side durable queue，claim、receipt、reversal 根事實鏈均有隔離 MySQL crash/replay 證據。 |
 
 > `29_` 原本被三份文件重複使用（無明確時間序，只能靠檔名區分），2026-08-07
 > 已重新編號為 `32`～`34`（依原檔名字母序指派，不代表已還原真實時間序）。
-> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `34`）。
+> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `36`）。

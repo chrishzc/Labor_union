@@ -65,10 +65,14 @@ start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.a
 echo [Step 6] Launching File Watcher Service...
 start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
 
+echo [Step 7] Launching Durable Job Worker...
+start "Durable Job Worker" cmd /k ""%PY%" scripts/run_durable_job_worker.py"
+
 echo ==========================================
 echo Lobar Union System online services are running!
 echo - API Docs: http://127.0.0.1:8000/docs
 echo - Streamlit UI: http://localhost:8501
 echo - File Watcher: Monitoring downloads/ folder
+echo - Durable Job Worker: Processing persisted background commands
 echo ==========================================
 pause

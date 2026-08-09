@@ -23,6 +23,7 @@ from subsystems.anomalies.alert_workflow import AnomalyApplication
 from subsystems.anomalies.process_reminder_anomaly_source import (
     build_beclass_missing_requests,
     build_client_missing_line_requests,
+    build_client_payable_requests,
     build_client_receivable_requests,
     build_line_identity_conflict_requests,
     build_line_task_no_reply_requests,
@@ -34,6 +35,7 @@ from subsystems.anomalies.process_reminder_anomaly_source import (
     build_schedule_replaced_assignment_requests,
     build_staff_missing_line_requests,
     build_subsidy_return_requests,
+    build_subsidy_advance_due_requests,
 )
 
 
@@ -63,10 +65,11 @@ class BorrowedProcessReminderUnitOfWork:
 
 
 def consume_process_reminder_anomaly_sources(
-    connection: Any, *, as_of: date
+    connection: Any, *, as_of: date, owns_transaction: bool = True
 ) -> ProcessReminderConsumeResult:
     try:
-        connection.begin()
+        if owns_transaction:
+            connection.begin()
         requests = _scan_all(connection, as_of)
         application = AnomalyApplication(
             default_anomaly_registry(),
@@ -75,12 +78,14 @@ def consume_process_reminder_anomaly_sources(
         )
         for request in requests:
             application.project(request)
-        connection.commit()
+        if owns_transaction:
+            connection.commit()
         return ProcessReminderConsumeResult(
             len(requests), sum(request.desired.active for request in requests)
         )
     except Exception as error:
-        connection.rollback()
+        if owns_transaction:
+            connection.rollback()
         category = ErrorCategory.VALIDATION if isinstance(error, (TypeError, ValueError)) else ErrorCategory.INTERNAL
         code = "process_reminder_anomaly_source_invalid" if category is ErrorCategory.VALIDATION else "transaction_failed"
         message = "流程提醒異常來源資料不符合契約。" if category is ErrorCategory.VALIDATION else "流程提醒異常投影失敗。"
@@ -94,7 +99,8 @@ def _scan_all(connection, as_of: date) -> tuple:
         order_rows = _fetch(cursor, _ORDER_SQL)
         beclass_rows = _fetch(cursor, _BECLASS_SQL)
         resume_rows = _fetch(cursor, _RESUME_SQL)
-        payment_rows = _fetch(cursor, _CLIENT_PAYMENTS_SQL)
+        client_obligation_rows = _fetch(cursor, _CLIENT_OBLIGATION_REMINDER_SQL)
+        subsidy_advance_rows = _fetch(cursor, _SUBSIDY_ADVANCE_REMINDER_SQL)
         holiday_undecided_rows = _fetch(cursor, _SCHEDULE_HOLIDAY_UNDECIDED_SQL)
         replaced_rows = _fetch(cursor, _SCHEDULE_REPLACED_SQL)
         already_resolved = _fetch(cursor, _SCHEDULE_REPLACED_RESOLVED_SQL)
@@ -111,8 +117,10 @@ def _scan_all(connection, as_of: date) -> tuple:
         build_order_matching_requests(order_rows, as_of=as_of)
         + build_beclass_missing_requests(beclass_rows, as_of=as_of)
         + build_resume_not_sent_requests(resume_rows, as_of=as_of)
-        + build_client_receivable_requests(payment_rows, as_of=as_of)
-        + build_subsidy_return_requests(payment_rows, as_of=as_of)
+        + build_client_receivable_requests(client_obligation_rows, as_of=as_of)
+        + build_client_payable_requests(client_obligation_rows, as_of=as_of)
+        + build_subsidy_return_requests(client_obligation_rows, as_of=as_of)
+        + build_subsidy_advance_due_requests(subsidy_advance_rows, as_of=as_of)
         + build_schedule_holiday_undecided_requests(holiday_undecided_rows, as_of=as_of)
         + build_schedule_replaced_assignment_requests(
             replaced_rows, as_of=as_of, already_resolved_assignment_ids=already_resolved_ids
@@ -173,13 +181,43 @@ _RESUME_SQL = (
     "FROM orders o LEFT JOIN matching_records m ON m.case_no = o.case_no "
     "GROUP BY o.case_no, o.staff_id"
 )
-_CLIENT_PAYMENTS_SQL = (
-    "SELECT case_no, deposit_due_date, deposit_receivable, deposit_received, "
-    "first_payment_due_date, first_payment_receivable, first_payment_received, "
-    "second_payment_due_date, second_payment_receivable, second_payment_received, "
-    "subsidy_return_due_date, subsidy_return_receivable, subsidy_return_refunded, "
-    "subsidy_return_review_status, subsidy_return_review_reason "
-    "FROM client_payments"
+_CLIENT_OBLIGATION_REMINDER_SQL = (
+    "SELECT candidates.case_no, obligation.obligation_type, obligation.direction, "
+    "obligation.amount_due_ntd, obligation.due_date, obligation.status "
+    "FROM ("
+    "SELECT case_no FROM client_obligations "
+    "WHERE (direction='receivable_from_client' AND obligation_type IN ('deposit','first','second','adjustment')) "
+    "OR (direction='payable_to_client' AND obligation_type IN ('refund','adjustment','subsidy_return')) "
+    "UNION "
+    "SELECT source_identity AS case_no FROM anomaly_current_alerts "
+    "WHERE definition_code IN ('RECEIVABLE-001','CLIENTPAYABLE-001','RETURN-001')"
+    ") candidates "
+    "LEFT JOIN client_obligations obligation ON obligation.case_no=candidates.case_no "
+    "AND ((obligation.direction='receivable_from_client' "
+    "AND obligation.obligation_type IN ('deposit','first','second','adjustment')) "
+    "OR (obligation.direction='payable_to_client' "
+    "AND obligation.obligation_type IN ('refund','adjustment','subsidy_return'))) "
+    "ORDER BY candidates.case_no, obligation.due_date, obligation.obligation_identity"
+)
+_SUBSIDY_ADVANCE_REMINDER_SQL = (
+    "SELECT candidates.case_no, orders.actual_end_date, link.entitled_amount_ntd, "
+    "COALESCE(allocation.allocated_amount_ntd,0) allocated_amount_ntd "
+    "FROM ("
+    "SELECT obligation.case_no FROM client_obligations obligation "
+    "JOIN client_subsidy_return_claim_item_links link ON link.obligation_identity=obligation.obligation_identity "
+    "WHERE obligation.obligation_type='subsidy_return' "
+    "UNION SELECT source_identity AS case_no FROM anomaly_current_alerts "
+    "WHERE definition_code='SUBSIDYADVANCE-001'"
+    ") candidates "
+    "LEFT JOIN orders ON orders.case_no=candidates.case_no "
+    "LEFT JOIN client_obligations obligation ON obligation.case_no=candidates.case_no "
+    "AND obligation.obligation_type='subsidy_return' "
+    "LEFT JOIN client_subsidy_return_claim_item_links link ON link.obligation_identity=obligation.obligation_identity "
+    "LEFT JOIN (SELECT claim_item_id,SUM(CASE WHEN allocation_type='receipt' THEN allocated_amount "
+    "WHEN allocation_type='reversal' THEN -allocated_amount ELSE 0 END) allocated_amount_ntd "
+    "FROM government_subsidy_allocations GROUP BY claim_item_id) allocation "
+    "ON allocation.claim_item_id=link.claim_item_id "
+    "ORDER BY candidates.case_no, link.claim_item_id"
 )
 _SCHEDULE_HOLIDAY_UNDECIDED_SQL = (
     "SELECT csa.staff_id, csa.case_no, csa.status, h.holiday_date, h.holiday_name, "

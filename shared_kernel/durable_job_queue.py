@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from shared_kernel.errors import TypedError
+
 
 @dataclass(frozen=True, slots=True)
 class DurableJobCommand:
@@ -43,3 +45,11 @@ class RetryableDurableJobError(Exception):
         self.code = code
         self.message = message
         super().__init__(message)
+
+
+class TerminalDurableJobError(Exception):
+    """A domain command was rejected and must remain queryable as a failed job."""
+
+    def __init__(self, error: TypedError):
+        self.error = error
+        super().__init__(error.message)

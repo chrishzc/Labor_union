@@ -96,8 +96,8 @@ class HistoricalReprocessApplication:
     workflow: HistoricalReprocessWorkflow
     posting_port: FinanceImportOwningDomainCompositePort
 
-    def preview(self, batch_identity, correlation_id):
-        return self.workflow.preview(batch_identity, correlation_id)
+    def preview(self, batch_identity, correlation_id, owner_selections=()):
+        return self.workflow.preview(batch_identity, correlation_id, owner_selections)
 
     def apply(self, request: HistoricalReprocessApplyRequest):
         self.posting_port.bind_request(request)

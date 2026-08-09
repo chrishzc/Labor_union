@@ -241,7 +241,7 @@ Domain 測試使用隔離的正式 MySQL schema，驗證 FK、unique constraint�
 
 只保留高價值跨 Domain 場景：
 
-1. Terms change → Scheduling rebuild → Client Finance／Payroll → lifecycle／anomaly 一致。
+1. Terms change → Scheduling rebuild → Client Finance／Payroll → lifecycle 一致；若重建後存在 coverage 風險，由 Scheduling coverage scan 建立 anomaly，Terms Apply 不直接建立 alert。
 2. Actual Start 更正全鏈原子性。
 3. 多月嫂中途取消及雙端各自核銷歸零。
 4. 全部服務完成後取消零寫入、月嫂完整薪資不變。
@@ -258,7 +258,7 @@ Domain 測試使用隔離的正式 MySQL schema，驗證 FK、unique constraint�
     typed conflict，不 deadlock、不形成重複占用。
 14. Deposit reversal 在服務前／服務後的 lifecycle 結果分離；新 settlement identity
     使舊 actual-start reconfirmation 失效。
-15. cache hit／miss／unavailable 下正式 Apply 結果一致，且 stale Preview 仍 conflict。
+15. cache 僅用於非權威唯讀 projection；正式 Apply 不得讀取 cache，必須以 fresh locked facts 重算，且 stale Preview 仍 conflict。
 16. 202 durable job duplicate delivery／worker crash／通知遺失不重複正式 command。
 17. UI 立即顯示 pending 但不提前顯示正式成功；timeout 後以同一 idempotency identity
     查詢 receipt。

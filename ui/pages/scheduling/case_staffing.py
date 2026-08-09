@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-import requests
 import streamlit as st
 
 from ui.api_clients.assignment_plan_api_client import AssignmentPlanApiClient
@@ -27,16 +26,8 @@ def render_case_staffing(
     staff: list[dict[str, Any]] | None = None,
 ) -> None:
     st.subheader("案件人力配置")
-    orders = (
-        orders
-        if orders is not None
-        else _load_collection("/api/v1/orders", "案件")
-    )
-    staff = (
-        staff
-        if staff is not None
-        else _load_collection("/api/v1/staff", "月嫂")
-    )
+    orders = orders if orders is not None else []
+    staff = staff if staff is not None else []
     if orders is None or staff is None:
         return
     selectable_orders = _selectable_orders(orders)
@@ -88,24 +79,6 @@ def _apply_pending_case_selection(
     )
     if selected_label is not None:
         st.session_state["staffing_case"] = selected_label
-
-
-def _load_collection(path: str, label: str) -> list[dict[str, Any]] | None:
-    try:
-        response = requests.get(
-            f"{resolve_api_base_url()}{path}",
-            headers=build_admin_headers(),
-            timeout=15,
-        )
-        response.raise_for_status()
-        body = response.json()
-        data = body.get("data") if isinstance(body, dict) else None
-        if not isinstance(data, list):
-            raise ValueError("API response data must be a list")
-        return [item for item in data if isinstance(item, dict)]
-    except (requests.RequestException, ValueError) as error:
-        st.error(f"{label}資料載入失敗：{error}")
-        return None
 
 
 def _selectable_orders(

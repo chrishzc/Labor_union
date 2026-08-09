@@ -14,7 +14,8 @@ def render_client_refund_reversal_panel(case_no: str) -> None:
     """Show case-owned obligations; bank rows stay in Finance Import correction."""
     st.markdown("#### 正式客戶退款／補助退還")
     try:
-        facts = _client().query(case_no)
+        with st.spinner("正在載入正式退款與補助退還根事實…"):
+            facts = _client().query(case_no)
     except Exception as error:
         st.error(f"無法取得正式退款根事實：{error}")
         return

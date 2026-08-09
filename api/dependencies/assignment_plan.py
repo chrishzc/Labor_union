@@ -35,6 +35,14 @@ class AssignmentPlanApplication:
 
 def get_assignment_plan_application():
     connection = get_connection()
+    application = build_assignment_plan_application(connection)
+    try:
+        yield application
+    finally:
+        connection.close()
+
+
+def build_assignment_plan_application(connection):
     repository = MySqlAssignmentPlanRepository(connection)
     clock = SystemBusinessClock()
     workflow = AssignmentPlanWorkflow(
@@ -44,7 +52,4 @@ def get_assignment_plan_application():
         MySqlOrdersAssignmentImpactPort(connection, clock),
         lambda: MySqlUnitOfWork(connection),
     )
-    try:
-        yield AssignmentPlanApplication(connection, workflow)
-    finally:
-        connection.close()
+    return AssignmentPlanApplication(connection, workflow)

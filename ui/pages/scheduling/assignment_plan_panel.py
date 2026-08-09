@@ -13,6 +13,10 @@ from ui.api_clients.assignment_plan_api_client import (
 )
 
 
+_APPLY_STATE_SUFFIX = "assignment_plan_apply_state"
+_JOB_STATUS_POLL_INTERVAL_SECONDS = 5
+
+
 def render_assignment_plan_panel(
     case_no: str,
     client: AssignmentPlanApiClient,
@@ -106,10 +110,12 @@ def _preview_controls(case_no, client, segments) -> None:
     state_key = f"assignment_plan_preview_{case_no}"
     if st.button("產生正式人力配置 Preview", key=f"assignment_plan_preview_button_{case_no}"):
         try:
-            st.session_state[state_key] = client.preview(
-                case_no, segments, _command_id("assignment-plan-preview", case_no)
-            )
+            with st.spinner("正在產生正式人力配置 Preview…"):
+                st.session_state[state_key] = client.preview(
+                    case_no, segments, _command_id("assignment-plan-preview", case_no)
+                )
             st.session_state[f"assignment_plan_segments_{case_no}"] = segments
+            st.session_state.pop(_apply_state_key(case_no), None)
         except (AssignmentPlanApiError, ValueError) as error:
             st.error(f"Preview 失敗：{error}")
     preview = st.session_state.get(state_key)
@@ -121,11 +127,11 @@ def _apply_controls(case_no, client, preview) -> None:
     st.success(f"Preview 已產生：將建立 {len(preview.assignments)} 段正式指派。")
     reason = st.text_input("套用原因", key=f"assignment_plan_reason_{case_no}")
     confirmed = st.checkbox("確認依此 Preview 套用正式人力配置", key=f"assignment_plan_confirm_{case_no}")
-    if st.button("Apply 正式人力配置", disabled=not confirmed or not reason.strip(), key=f"assignment_plan_apply_{case_no}"):
+    command = st.session_state.get(_apply_state_key(case_no))
+    command_pending = isinstance(command, dict) and not command.get("terminal")
+    if st.button("Apply 正式人力配置", disabled=command_pending or not confirmed or not reason.strip(), key=f"assignment_plan_apply_{case_no}"):
         _submit_apply(case_no, client, preview, reason.strip())
-    job_id = st.session_state.get(f"assignment_plan_job_{case_no}")
-    if job_id and st.button("查詢 Apply 狀態", key=f"assignment_plan_job_status_{case_no}"):
-        _show_job_status(client, job_id)
+    _render_apply_status(case_no, client, preview)
 
 
 def _submit_apply(case_no, client, preview, reason) -> None:
@@ -133,23 +139,78 @@ def _submit_apply(case_no, client, preview, reason) -> None:
     if not isinstance(segments, list):
         st.error("請重新產生 Preview。")
         return
-    identity = _command_id("assignment-plan-apply", case_no)
+    command = _apply_command(case_no, preview, segments, reason, st.session_state)
     try:
-        accepted = client.apply(case_no, segments, preview, reason=reason, idempotency_key=identity, correlation_id=identity)
+        with st.spinner("正在受理正式人力配置工作…"):
+            accepted = client.apply(
+                case_no,
+                command["segments"],
+                command["preview"],
+                reason=command["reason"],
+                idempotency_key=command["idempotency_key"],
+                correlation_id=command["correlation_id"],
+            )
     except (AssignmentPlanApiError, ValueError) as error:
-        st.error(f"Apply 失敗：{error}")
+        st.warning(f"Apply 結果尚未確認：{error}")
         return
-    st.session_state[f"assignment_plan_job_{case_no}"] = accepted.job_id
+    command["job_id"] = accepted.job_id
     st.info(f"正式人力配置正在處理，工作編號：{accepted.job_id}")
 
 
-def _show_job_status(client, job_id) -> None:
+@st.fragment(run_every=_JOB_STATUS_POLL_INTERVAL_SECONDS)
+def _render_apply_status(case_no, client, preview) -> None:
+    command = st.session_state.get(_apply_state_key(case_no))
+    if not isinstance(command, dict) or command.get("terminal"):
+        return
+    if not command.get("job_id"):
+        st.warning("Apply 結果尚未確認；可安全重送同一命令。")
+        if st.button("重送相同 Apply 請求", key=f"assignment_plan_apply_retry_{case_no}"):
+            _submit_apply(case_no, client, preview, command["reason"])
+        return
+    st.info(f"正式人力配置處理中，工作編號：{command['job_id']}")
+    if st.button("查詢 Apply 狀態", key=f"assignment_plan_job_status_{case_no}"):
+        _show_job_status(client, command)
+
+
+def _show_job_status(client, command) -> None:
     try:
-        status = client.get_job_status(job_id)
+        with st.spinner("正在查詢正式人力配置工作狀態…"):
+            status = client.get_job_status(command["job_id"])
     except AssignmentPlanApiError as error:
         st.error(f"工作狀態查詢失敗：{error}")
         return
+    if status.status in {"queued", "running"}:
+        st.info(f"正式人力配置仍在處理：{status.status}")
+        return
+    command["terminal"] = True
+    if status.status == "succeeded":
+        st.success("正式人力配置已完成。")
+        st.json(status.receipt_payload)
+        return
+    st.error(f"正式人力配置未完成：{status.status}")
     st.write({"job_id": status.job_id, "status": status.status, "error": status.error_payload})
+
+
+def _apply_state_key(case_no: str) -> str:
+    return f"{_APPLY_STATE_SUFFIX}_{case_no}"
+
+
+def _apply_command(case_no, preview, segments, reason, state) -> dict:
+    existing = state.get(_apply_state_key(case_no))
+    if isinstance(existing, dict) and not existing.get("terminal"):
+        return existing
+    identity = _command_id("assignment-plan-apply", case_no)
+    command = {
+        "preview": preview,
+        "segments": segments,
+        "reason": reason,
+        "idempotency_key": identity,
+        "correlation_id": _command_id("assignment-plan-correlation", case_no),
+        "job_id": None,
+        "terminal": False,
+    }
+    state[_apply_state_key(case_no)] = command
+    return command
 
 
 def _as_date(value, fallback: date) -> date:

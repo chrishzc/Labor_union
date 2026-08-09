@@ -19,6 +19,10 @@ from subsystems.scheduling.segmented_availability import (
     derive_segment_availability,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.segmented_availability_repository import (
+    MySqlSegmentedAvailabilityFactsRepository,
+    SegmentedAvailabilityFactsPort,
+)
 
 
 def _as_optional_date(value: Any, field_name: str) -> date:
@@ -77,6 +81,7 @@ def search_segmented_caregiver_availability(
     segment_count: int,
     segment_drafts: List[dict],
     as_of: Any,
+    facts_port: SegmentedAvailabilityFactsPort | None = None,
 ) -> Dict[str, Any]:
     """Search for segmented caregiver availability for a single case."""
     if not case_no:
@@ -90,168 +95,87 @@ def search_segmented_caregiver_availability(
     if not isinstance(segment_drafts, list):
         raise ValueError("segment_drafts must be a list")
 
-    conn = get_connection()
-    cursor = None
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT o.case_no, o.status, o.start_date, o.end_date\n"
-            "FROM orders o\n"
-            "WHERE o.case_no = %s",
-            (case_no,),
+    facts = facts_port or MySqlSegmentedAvailabilityFactsRepository(get_connection)
+    loaded_facts = facts.load_case_facts(case_no)
+    order_row = loaded_facts["order"]
+    if not order_row:
+        raise ValueError("case not found")
+    if order_row["status"] != "洽談中":
+        raise ValueError("case is not in negotiation stage")
+
+    planned_start = _as_optional_date(order_row["start_date"], "planned_start_date")
+    planned_end = _as_optional_date(order_row["end_date"], "planned_end_date")
+    if planned_start > planned_end:
+        raise ValueError("planned_start_date cannot be after planned_end_date")
+
+    candidate_rows = loaded_facts["staff_rows"]
+    candidate_staff_ids = [row["id"] for row in candidate_rows if row is not None and "id" in row]
+    assignments = loaded_facts["assignments"]
+
+    assignment_schedule_days: list[dict[str, Any]] = []
+    for assignment in assignments:
+        assignment_schedule_days.extend(_expand_assignment_days(assignment, planned_start, planned_end))
+    for row in loaded_facts["schedule_rows"]:
+        assignment_schedule_days.append(
+            {
+                "assignment_id": row["assignment_id"],
+                "staff_id": row["staff_id"],
+                "work_date": _as_optional_date(row["work_date"], "staff_schedule.work_date").isoformat(),
+                "reason_code": "schedule",
+            }
         )
-        order_row = cursor.fetchone()
-        if not order_row:
-            raise ValueError("case not found")
-
-        if order_row["status"] != "洽談中":
-            raise ValueError("case is not in negotiation stage")
-
-        planned_start = _as_optional_date(order_row["start_date"], "planned_start_date")
-        planned_end = _as_optional_date(order_row["end_date"], "planned_end_date")
-        if planned_start > planned_end:
-            raise ValueError("planned_start_date cannot be after planned_end_date")
-
-        cursor.execute("SELECT id FROM staff WHERE status = 'active' ORDER BY id")
-        candidate_rows = cursor.fetchall() or []
-        candidate_staff_ids = [row["id"] for row in candidate_rows if row is not None and "id" in row]
-
-        cursor.execute(
-            "SELECT id, staff_id, assigned_start_date, assigned_end_date\n"
-            "FROM case_staff_assignments\n"
-            "WHERE (status IS NULL OR status <> 'cancelled')\n"
-            "  AND assigned_start_date <= %s\n"
-            "  AND assigned_end_date >= %s",
-            (planned_end.isoformat(), planned_start.isoformat()),
-        )
-        assignments = cursor.fetchall() or []
-
-        assignment_schedule_days: list[dict[str, Any]] = []
-        for assignment in assignments:
-            assignment_schedule_days.extend(
-                _expand_assignment_days(assignment, planned_start, planned_end)
-            )
-
-        cursor.execute(
-            "SELECT s.assignment_id, s.staff_id, s.work_date\n"
-            "FROM staff_schedule s\n"
-            "INNER JOIN case_staff_assignments a ON a.id = s.assignment_id\n"
-            "WHERE s.assignment_id IS NOT NULL\n"
-            "  AND s.work_date BETWEEN %s AND %s\n"
-            "  AND (a.status IS NULL OR a.status <> 'cancelled')",
-            (planned_start.isoformat(), planned_end.isoformat()),
-        )
-        for row in (cursor.fetchall() or []):
-            assignment_schedule_days.append(
-                {
-                    "assignment_id": row["assignment_id"],
-                    "staff_id": row["staff_id"],
-                    "work_date": _as_optional_date(row["work_date"], "staff_schedule.work_date").isoformat(),
-                    "reason_code": "schedule",
-                }
-            )
-
-        cursor.execute(
-            "SELECT staff_id, work_date\n"
-            "FROM staff_schedule\n"
-            "WHERE assignment_id IS NULL\n"
-            "  AND work_date BETWEEN %s AND %s",
-            (planned_start.isoformat(), planned_end.isoformat()),
-        )
-        for row in (cursor.fetchall() or []):
-            assignment_schedule_days.append(
-                {
-                    "staff_id": row["staff_id"],
-                    "work_date": _as_optional_date(row["work_date"], "staff_schedule.work_date").isoformat(),
-                    "assignment_id": None,
-                }
-            )
-
-        cursor.execute(
-            "SELECT assignment_id, staff_id, buffer_date "
-            "FROM scheduling_buffer_days "
-            "WHERE status = 'active' AND active_marker = 1 "
-            "AND buffer_date BETWEEN %s AND %s",
-            (planned_start.isoformat(), planned_end.isoformat()),
-        )
-        for row in (cursor.fetchall() or []):
-            assignment_schedule_days.append(
-                {
-                    "assignment_id": row["assignment_id"],
-                    "staff_id": row["staff_id"],
-                    "work_date": _as_optional_date(
-                        row["buffer_date"],
-                        "scheduling_buffer_days.buffer_date",
-                    ).isoformat(),
-                    "reason_code": "assignment",
-                }
-            )
-
-        cursor.execute(
-            "SELECT d.staff_id, d.lock_date, d.active_marker\n"
-            "FROM caregiver_availability_lock_days d\n"
-            "INNER JOIN caregiver_availability_locks h ON h.id = d.lock_id\n"
-            "WHERE h.status = 'active'\n"
-            "  AND h.is_active = 1\n"
-            "  AND d.lock_date BETWEEN %s AND %s",
-            (planned_start.isoformat(), planned_end.isoformat()),
-        )
-        lock_rows = cursor.fetchall() or []
-        active_lock_days = [
+    for row in loaded_facts["legacy_schedule_rows"]:
+        assignment_schedule_days.append(
             {
                 "staff_id": row["staff_id"],
-                "lock_date": _as_optional_date(
-                    row["lock_date"], "caregiver_availability_lock_days.lock_date"
-                ).isoformat(),
-                "active_marker": row["active_marker"],
+                "work_date": _as_optional_date(row["work_date"], "staff_schedule.work_date").isoformat(),
+                "assignment_id": None,
             }
-            for row in lock_rows
-        ]
-        cursor.execute(
-            "SELECT segment.id AS segment_id, segment.staff_id, "
-            "segment.assigned_start_date, segment.assigned_end_date "
-            "FROM caregiver_matching_plan_segments segment "
-            "INNER JOIN caregiver_availability_locks header "
-            "ON header.plan_id = segment.plan_id "
-            "WHERE header.status = 'active' AND header.is_active = 1 "
-            "AND segment.assigned_end_date < %s "
-            "AND DATE_ADD(segment.assigned_end_date, INTERVAL 7 DAY) >= %s",
-            (planned_end.isoformat(), planned_start.isoformat()),
         )
-        active_lock_days.extend(
-            _active_waiting_buffer_days(
-                cursor.fetchall() or [],
-                planned_start,
-                planned_end,
-            )
+    for row in loaded_facts["buffer_rows"]:
+        assignment_schedule_days.append(
+            {
+                "assignment_id": row["assignment_id"],
+                "staff_id": row["staff_id"],
+                "work_date": _as_optional_date(
+                    row["buffer_date"], "scheduling_buffer_days.buffer_date"
+                ).isoformat(),
+                "reason_code": "assignment",
+            }
         )
 
-        result = derive_segment_availability(
-            planned_start_date=planned_start.isoformat(),
-            planned_end_date=planned_end.isoformat(),
-            segment_count=segment_count,
-            segment_drafts=segment_drafts,
-            candidate_staff_ids=candidate_staff_ids,
-            assignment_schedule_days=assignment_schedule_days,
-            active_lock_days=active_lock_days,
-        )
-
-        return {
-            "case_no": order_row["case_no"],
-            "planned_start_date": result["validated_input"]["planned_start_date"],
-            "planned_end_date": result["validated_input"]["planned_end_date"],
-            "feasibility": "complete" if result["complete_combinations"] else "partial",
-            **{k: result[k] for k in ["complete_combinations", "segment_candidates", "conflicts"]},
+    active_lock_days = [
+        {
+            "staff_id": row["staff_id"],
+            "lock_date": _as_optional_date(
+                row["lock_date"], "caregiver_availability_lock_days.lock_date"
+            ).isoformat(),
+            "active_marker": row["active_marker"],
         }
-    finally:
-        if cursor is not None:
-            try:
-                cursor.close()
-            finally:
-                conn.close()
-        else:
-            conn.close()
+        for row in loaded_facts["active_lock_rows"]
+    ]
+    active_lock_days.extend(
+        _active_waiting_buffer_days(
+            loaded_facts["waiting_buffer_rows"], planned_start, planned_end
+        )
+    )
 
+    result = derive_segment_availability(
+        planned_start_date=planned_start.isoformat(),
+        planned_end_date=planned_end.isoformat(),
+        segment_count=segment_count,
+        segment_drafts=segment_drafts,
+        candidate_staff_ids=candidate_staff_ids,
+        assignment_schedule_days=assignment_schedule_days,
+        active_lock_days=active_lock_days,
+    )
+    return {
+        "case_no": order_row["case_no"],
+        "planned_start_date": result["validated_input"]["planned_start_date"],
+        "planned_end_date": result["validated_input"]["planned_end_date"],
+        "feasibility": "complete" if result["complete_combinations"] else "partial",
+        **{key: result[key] for key in ["complete_combinations", "segment_candidates", "conflicts"]},
+    }
 
 def _active_waiting_buffer_days(rows, window_start, window_end):
     buffer_days = []
@@ -280,4 +204,3 @@ def _active_waiting_buffer_days(rows, window_start, window_end):
             and window_start <= item.occupancy_date <= window_end
         )
     return buffer_days
-

@@ -23,6 +23,7 @@ LEGACY_COLUMN = "subsidy_" + "eligibility"
 SOURCE_DIRECTORIES = ("api", "db", "scripts", "services", "ui")
 SOURCE_SUFFIXES = {".py", ".sql"}
 CANONICAL_VIEW_NAME = "v_order_details"
+CANONICAL_VIEW_SCHEMA_PATH = ROOT / "db" / "schema_parts" / "999_v_order_details_view.sql"
 
 
 def database_config() -> dict[str, Any]:
@@ -192,11 +193,10 @@ def _show_create_view(cursor: Any, view_name: str) -> str:
 
 def _canonical_v_order_details_statement() -> str:
     """Load the version-controlled identity-status view definition verbatim."""
-    schema_path = ROOT / "db" / "schema.sql"
     try:
-        schema = schema_path.read_text(encoding="utf-8")
+        schema = CANONICAL_VIEW_SCHEMA_PATH.read_text(encoding="utf-8")
     except OSError as exc:
-        raise RuntimeError(f"cannot read canonical schema at {schema_path}") from exc
+        raise RuntimeError(f"cannot read canonical view schema at {CANONICAL_VIEW_SCHEMA_PATH}") from exc
     match = re.search(
         rf"(?ims)^CREATE\s+OR\s+REPLACE\s+VIEW\s+`?{CANONICAL_VIEW_NAME}`?\s+AS\b.*?;",
         schema,
