@@ -163,22 +163,6 @@ def _push_text(task: dict[str, Any], text: str) -> tuple[bool, bool, str, str]:
     return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
 
 
-def _rag_answer(user_text: str) -> str:
-    fallback = "很抱歉，我不太懂您的意思，已經幫您轉交給行政專員為您人工處理。"
-    try:
-        import chromadb
-
-        client = chromadb.PersistentClient(path="./db/chroma_data")
-        collection = client.get_or_create_collection("union_faq")
-        results = collection.query(query_texts=[user_text], n_results=1)
-        if results and results.get("distances") and results["distances"][0]:
-            if results["distances"][0][0] < 1.0:
-                return results["metadatas"][0][0].get("answer", fallback)
-    except Exception as exc:
-        print(f"[LINE Worker] RAG query failed: {exc}")
-    return fallback
-
-
 def _menu_action(task: dict[str, Any], link: bool) -> tuple[bool, bool, str, str]:
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
     payload = json.loads(task.get("payload_json") or "{}")
@@ -210,8 +194,7 @@ def _execute_task(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
     if task_type == "line_push":
         return _push_text(task, task.get("message_content") or "")
     if task_type == "rag_reply":
-        payload = json.loads(task.get("payload_json") or "{}")
-        return _push_text(task, _rag_answer(payload.get("user_text", "")))
+        return False, False, "legacy_rag_retired", "Use canonical Knowledge Retrieval worker"
     if task_type == "rich_menu_link":
         return _menu_action(task, True)
     if task_type == "rich_menu_unlink":

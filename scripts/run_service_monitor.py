@@ -88,7 +88,42 @@ def _database_observations(connection, runtime, now):
     matching_status = RuntimeHealthStatus.WARNING if matching_failed else RuntimeHealthStatus.HEALTHY
     observations.append(RuntimeHealthObservation("matching_delivery", "Matching LINE delivery", matching_status, f"配對通知失敗 {matching_failed} 筆", {"active": counts.get("matching_delivery_active", 0), "failed": matching_failed}, now))
     observations.append(_redis_probe(now))
+    observations.extend(_stage8_worker_observations(connection, now))
     return observations
+
+
+def _stage8_worker_observations(connection, now):
+    configured_workers = (
+        ("contract-integration-worker", "Contract Integration Worker", "CONTRACT_INTEGRATION_RUNTIME_ENABLED"),
+        ("knowledge-retrieval-worker", "Knowledge Retrieval Worker", "KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED"),
+    )
+    return tuple(
+        _optional_worker_observation(connection, service, component, flag, now)
+        for service, component, flag in configured_workers
+    )
+
+
+def _optional_worker_observation(connection, service, component, enabled_flag, now):
+    enabled = os.getenv(enabled_flag, "false").strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return _unknown(service, component, f"{enabled_flag} 尚未啟用")
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT last_seen_at_utc,service_status FROM runtime_service_heartbeats "
+            "WHERE service_name=%s ORDER BY last_seen_at_utc DESC LIMIT 1",
+            (service,),
+        )
+        row = cursor.fetchone()
+    age = None if row is None else (now - row["last_seen_at_utc"].replace(tzinfo=timezone.utc)).total_seconds()
+    healthy = row is not None and row["service_status"] == "running" and age <= 60
+    return RuntimeHealthObservation(
+        service,
+        component,
+        RuntimeHealthStatus.HEALTHY if healthy else RuntimeHealthStatus.CRITICAL,
+        f"{component} heartbeat 正常" if healthy else f"{component} heartbeat 過期或不存在",
+        {"age_seconds": age},
+        now,
+    )
 
 
 def _http_probe(name, component, url):

@@ -34,6 +34,7 @@ class LineWebhookIdentityHandlers:
         media_scheduler: Callable[[object, object], bool] | None = None,
         group_application: object | None = None,
         matching_postback_application: object | None = None,
+        knowledge_question_scheduler: Callable[[object, object, object, str], object] | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
@@ -42,6 +43,7 @@ class LineWebhookIdentityHandlers:
         self._media_scheduler = media_scheduler
         self._group_application = group_application
         self._matching_postback_application = matching_postback_application
+        self._knowledge_question_scheduler = knowledge_question_scheduler
 
     def registry(self):
         return {
@@ -92,6 +94,8 @@ class LineWebhookIdentityHandlers:
             return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
+            if self._knowledge_question_scheduler is not None:
+                self._knowledge_question_scheduler(inbox, unit_of_work, line_user_id, text)
             return
         source_type = getattr(inbox.event.source, "source_type", None)
         if source_type is not None and source_type.value != "user":

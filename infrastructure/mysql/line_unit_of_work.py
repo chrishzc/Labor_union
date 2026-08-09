@@ -45,6 +45,9 @@ from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.matching_notification_repository import (
     MySqlMatchingNotificationRepository,
 )
+from infrastructure.mysql.knowledge_retrieval_repository import (
+    MySqlKnowledgeQuestionIntakeAdapter,
+)
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -69,6 +72,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.audit = MySqlLineAuditRepository(connection)
         self.outbox = MySqlLineOutboxWriter(connection)
         self.matching_notifications = MySqlMatchingNotificationRepository(connection)
+        self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
 
 
 class ManagedLineMySqlUnitOfWork(LineMySqlUnitOfWork):

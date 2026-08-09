@@ -515,6 +515,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     audit: LineAuditPort
     outbox: LineOutboxRepositoryPort
     matching_notifications: object
+    knowledge_questions: object
 
 
 __all__ = [

@@ -1,0 +1,43 @@
+"""Ports for contract signature, normalization, persistence, and transactions."""
+
+from __future__ import annotations
+
+from typing import Protocol
+
+from domains.contract_integration.contract_event import VerifiedContractEvent
+from subsystems.contract_integration.contracts import ContractEvidenceView
+
+
+class ContractSignatureVerifierPort(Protocol):
+    def verify(self, raw_body: bytes, signature: str | None) -> bool: ...
+
+
+class ContractEventNormalizerPort(Protocol):
+    def normalize(self, raw_body: bytes) -> VerifiedContractEvent: ...
+
+
+class ContractIntegrationRepositoryPort(Protocol):
+    def record_security_receipt(self, provider, payload_hash, verified, received_at, correlation_id) -> int: ...
+    def add_inbox(self, event, minimal_payload_json, received_at) -> tuple[int, bool]: ...
+    def claim_next(self, worker_id: str) -> ContractEvidenceView | None: ...
+    def apply_verified_evidence(self, evidence: ContractEvidenceView) -> None: ...
+    def reject(self, inbox_id: int, error_code: str) -> None: ...
+    def list_evidence(self, limit: int) -> tuple[ContractEvidenceView, ...]: ...
+    def map_contract(self, command) -> int: ...
+    def next_due_at(self): ...
+
+
+class ContractIntegrationUnitOfWorkPort(Protocol):
+    contracts: ContractIntegrationRepositoryPort
+    def __enter__(self): ...
+    def __exit__(self, exception_type, exception, traceback) -> bool: ...
+    def commit(self) -> None: ...
+
+
+__all__ = [
+    "ContractEventNormalizerPort",
+    "ContractIntegrationRepositoryPort",
+    "ContractIntegrationUnitOfWorkPort",
+    "ContractSignatureVerifierPort",
+]
+

@@ -34,6 +34,7 @@ from api.routes import (
     client_payments,
     clients,
     contracts,
+    contract_integration,
     data_browser_admin,
     finance_import,
     finance_reports,
@@ -50,6 +51,7 @@ from api.routes import (
     runtime_health,
     line_system_config,
     line_tasks,
+    knowledge_retrieval,
     match_records,
     matches,
     multi_caregiver_case_assignments,
@@ -151,6 +153,7 @@ app.mount("/static", StaticFiles(directory="line/static"), name="static")
 
 # LINE/LIFF/webhook endpoints are a child router of this central application.
 app.include_router(line_router)
+app.include_router(contract_integration.public_router)
 app.include_router(admin_auth.router)
 app.include_router(line_admin.router)
 app.include_router(line_configurations.router)
@@ -161,6 +164,8 @@ app.include_router(line_identity.public_router)
 app.include_router(line_identity.review_router)
 app.include_router(line_identity.page_router)
 app.include_router(line_order_groups.router)
+app.include_router(contract_integration.admin_router)
+app.include_router(knowledge_retrieval.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)

@@ -1,0 +1,80 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "153_contract_integration.sql": {
+      "tables": {
+        "contract_webhook_security_receipts": [
+          "id", "provider", "canonical_payload_hash", "signature_verified",
+          "correlation_id", "received_at_utc"
+        ],
+        "contract_provider_mappings": [
+          "id", "provider", "provider_contract_id", "internal_contract_identity",
+          "mapping_status", "version", "mapped_by_actor_id", "mapped_at_utc"
+        ],
+        "contract_webhook_inbox": [
+          "id", "provider", "provider_event_id", "provider_contract_id",
+          "provider_event_type", "provider_contract_status", "provider_occurred_at_utc",
+          "canonical_payload_hash", "minimal_payload_json", "processing_status",
+          "processing_attempts", "available_at_utc", "lease_owner",
+          "lease_expires_at_utc", "last_error_code", "received_at_utc", "applied_at_utc"
+        ],
+        "contract_mapping_events": [
+          "id", "mapping_id", "provider", "provider_contract_id",
+          "internal_contract_identity", "resulting_version", "actor_id", "reason",
+          "idempotency_key", "payload_fingerprint", "occurred_at_utc"
+        ],
+        "external_contract_events": [
+          "id", "inbox_id", "provider", "provider_event_id", "provider_contract_id",
+          "internal_contract_identity", "event_type", "contract_status",
+          "canonical_payload_hash", "occurred_at_utc", "recorded_at_utc"
+        ],
+        "contract_evidence_outbox": [
+          "id", "external_event_id", "event_type", "aggregate_identity",
+          "payload_snapshot", "processing_status", "idempotency_key", "created_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_external_contract_events_before_update",
+        "trg_external_contract_events_before_delete",
+        "trg_contract_mapping_events_before_update",
+        "trg_contract_mapping_events_before_delete"
+      ]
+    },
+    "154_knowledge_retrieval.sql": {
+      "tables": {
+        "knowledge_items": [
+          "id", "source_identity", "title", "lifecycle_status", "current_version",
+          "source_digest", "source_uri", "created_by_actor_id", "created_at_utc", "updated_at_utc"
+        ],
+        "knowledge_item_versions": [
+          "id", "item_id", "item_version", "content", "source_digest", "event_type",
+          "actor_id", "reason", "idempotency_key", "recorded_at_utc"
+        ],
+        "knowledge_jobs": [
+          "id", "job_type", "processing_status", "answer_request_id", "target_index_version",
+          "question", "attempt_count", "max_attempts", "available_at_utc", "lease_owner",
+          "lease_expires_at_utc", "last_error_code", "idempotency_key", "created_by_actor_id",
+          "created_at_utc", "completed_at_utc"
+        ],
+        "knowledge_indexes": [
+          "id", "index_version", "index_status", "content_set_digest", "built_at_utc", "created_at_utc"
+        ],
+        "knowledge_answer_requests": [
+          "id", "question", "requester_line_user_id", "request_status", "idempotency_key",
+          "correlation_id", "created_at_utc", "completed_at_utc"
+        ],
+        "knowledge_answer_receipts": [
+          "id", "answer_request_id", "answer_text", "index_version", "authoritative",
+          "line_delivery_task_id", "answered_at_utc"
+        ],
+        "knowledge_answer_sources": [
+          "id", "answer_receipt_id", "source_identity", "source_version", "safe_excerpt", "citation_order"
+        ]
+      },
+      "triggers": [
+        "trg_knowledge_item_versions_before_update",
+        "trg_knowledge_item_versions_before_delete"
+      ]
+    }
+  }
+}

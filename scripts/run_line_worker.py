@@ -46,6 +46,9 @@ from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandler
 from subsystems.line.matching_postback_application import (
     LineMatchingPostbackApplication,
 )
+from subsystems.line.knowledge_question_application import (
+    enqueue_line_knowledge_question,
+)
 from subsystems.scheduling.matching_notification_application import (
     MatchingNotificationApplication,
 )
@@ -147,6 +150,7 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
                 matching_postback_application=LineMatchingPostbackApplication(
                     MatchingNotificationApplication(open_line_unit_of_work, now)
                 ),
+                knowledge_question_scheduler=enqueue_line_knowledge_question,
             ).registry()
         ),
         worker_identity,

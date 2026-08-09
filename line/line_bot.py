@@ -975,11 +975,13 @@ async def line_webhook(request: Request):
                             print(f"[LINE Webhook] Intercepted keyword '{user_text}', queued query link for User: {user_id}")
                             continue
                         
+                        # Legacy runtime cannot provide reviewed sources/citations safely.
                         enqueue_line_task(
-                            cursor, to_user_id=user_id, task_type="rag_reply",
-                            payload={"user_text": user_text},
+                            cursor,
+                            to_user_id=user_id,
+                            message_content="此問題將由工會人員協助確認，請稍候。",
                             source_event_id=event.get("webhookEventId"),
-                            idempotency_key=f"rag:{event.get('webhookEventId')}",
+                            idempotency_key=f"knowledge-manual-fallback:{event.get('webhookEventId')}",
                         )
 
                         
@@ -1009,98 +1011,3 @@ async def line_webhook(request: Request):
         conn.close()
         
     return {"status": "ok"}
-
-# ----------------- 2. 好好簽 WEBHOOK 接收 -----------------
-class BreezySignWebhookPayload(BaseModel):
-    event: str
-    contract_id: str
-    status: str
-    signed_at: str = ""
-
-@router.post("/webhook/breezysign")
-async def breezysign_webhook(payload: BreezySignWebhookPayload):
-    print(f"[Breezy Webhook] Received webhook for contract {payload.contract_id} with status {payload.status}")
-    
-    if payload.status in ["completed", "signed"]:
-        conn = get_db_connection()
-        try:
-            with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-                cursor.execute("""
-                    SELECT o.*, c.name as client_name, c.service_days, c.due_month, c.service_start_date,
-                           s.weekly_rest_days, s.name as staff_name
-                    FROM orders o
-                    JOIN clients c ON o.client_id = c.id
-                    LEFT JOIN staff s ON o.staff_id = s.id
-                    WHERE o.contract_id = %s
-                """, (payload.contract_id,))
-                ord = cursor.fetchone()
-                
-                if ord:
-                    case_no = ord["case_no"]
-                    staff_id = ord["staff_id"]
-                    client_id = ord["client_id"]
-                    service_days = ord["service_days"] if ord["service_days"] else 24
-                    
-                    print(f"[Breezy Webhook] Found case #{case_no}, triggering auto schedule refiner for {ord['staff_name']}")
-                    
-                    start_d = ord["actual_start_date"]
-                    if not start_d:
-                        start_d = date.today() + timedelta(days=10)
-                        
-                    rest_days = []
-                    if ord["weekly_rest_days"]:
-                        try:
-                            rest_days = json.loads(ord["weekly_rest_days"]) if isinstance(ord["weekly_rest_days"], str) else ord["weekly_rest_days"]
-                        except Exception:
-                            rest_days = []
-                            
-                    # 自動執行天數精算順延
-                    schedule_res = calculate_attendance_schedule(
-                        start_d, service_days, "週休1日", rest_days, set()
-                    )
-                    end_d = schedule_res.get('actual_end_date')
-                    
-                    # 更新狀態
-                    cursor.execute("""
-                        UPDATE orders 
-                        SET status = '訂單成立', actual_start_date = %s, actual_end_date = %s, service_mode = '週休 1 日'
-                        WHERE case_no = %s
-                    """, (start_d, end_d, case_no))
-                    
-                    # 清除舊排班
-                    cursor.execute("DELETE FROM staff_bookings WHERE staff_id = %s AND client_id = %s", (staff_id, client_id))
-                    
-                    refined_details = schedule_res.get('day_by_day', [])
-                    # 寫入工作日排班
-                    for day in refined_details:
-                        d_date = day["date"]
-                        if day["is_work_day"]:
-                            cursor.execute("""
-                                INSERT INTO staff_bookings (staff_id, client_id, start_date, end_date)
-                                VALUES (%s, %s, %s, %s)
-                            """, (staff_id, client_id, d_date, d_date))
-                            
-                    # 發送 LINE 訊息 (移除 emoji 以免 CP950 錯誤)
-                    client_msg = f"恭喜！您與月嫂 {ord['staff_name']} 的服務契約已線上簽署完畢！系統已自動為您登載排班出勤。實際服務區間為：{start_d.strftime('%Y-%m-%d')} ~ {end_d.strftime('%Y-%m-%d')}。"
-                    cursor.execute("""
-                        INSERT INTO line_tasks (to_user_id, message_content, status)
-                        VALUES (COALESCE((SELECT line_user_id FROM clients WHERE id = %s), 'mock_client_line_id'), %s, 'pending')
-                    """, (client_id, client_msg))
-                    
-                    staff_msg = f"恭喜！您與客戶 {ord['client_name']} 的服務合約已完成線上簽署！系統已為您登載排班日程：{start_d.strftime('%Y-%m-%d')} ~ {end_d.strftime('%Y-%m-%d')}，請做好服務準備。"
-                    cursor.execute("""
-                        INSERT INTO line_tasks (to_user_id, message_content, status)
-                        VALUES (COALESCE((SELECT line_user_id FROM staff WHERE id = %s), 'mock_staff_line_id'), %s, 'pending')
-                    """, (staff_id, staff_msg))
-                    
-                    conn.commit()
-                    wake_worker()
-                    print(f"[Breezy Webhook] Case #{case_no} processed. Schedule set to {start_d} ~ {end_d}")
-            
-        except Exception as e:
-            conn.rollback()
-            print(f"[Breezy Webhook] Failed to process webhook: {e}")
-        finally:
-            conn.close()
-            
-    return {"status": "success"}

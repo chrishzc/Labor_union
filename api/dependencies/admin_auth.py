@@ -18,6 +18,10 @@ from subsystems.line.capabilities import (
     LineCapability,
     line_capabilities_for_role,
 )
+from subsystems.access.integration_capabilities import (
+    IntegrationCapability,
+    integration_capabilities_for_role,
+)
 
 
 DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test"}
@@ -119,6 +123,21 @@ def require_capability(capability: LineCapability) -> Callable[..., AdminPrincip
     return dependency
 
 
+def require_integration_capability(
+    capability: IntegrationCapability,
+) -> Callable[..., AdminPrincipal]:
+    def dependency(principal: AdminPrincipal = Depends(require_admin)) -> AdminPrincipal:
+        scope = integration_capabilities_for_role(principal.role)
+        if capability.value not in scope:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"缺少操作權限：{capability.value}",
+            )
+        return principal
+
+    return dependency
+
+
 require_line_viewer = require_role("line_viewer")
 require_line_agent = require_role("line_agent")
 require_line_manager = require_role("line_manager")
@@ -137,3 +156,21 @@ require_line_alert_manager = require_capability(LineCapability.ALERT_MANAGE)
 require_line_matching_reader = require_capability(LineCapability.MATCHING_READ)
 require_line_matching_sender = require_capability(LineCapability.MATCHING_SEND)
 require_line_matching_override = require_capability(LineCapability.MATCHING_OVERRIDE)
+require_contract_evidence_reader = require_integration_capability(
+    IntegrationCapability.CONTRACT_EVIDENCE_READ
+)
+require_contract_evidence_manager = require_integration_capability(
+    IntegrationCapability.CONTRACT_EVIDENCE_MANAGE
+)
+require_knowledge_reader = require_integration_capability(
+    IntegrationCapability.KNOWLEDGE_READ
+)
+require_knowledge_manager = require_integration_capability(
+    IntegrationCapability.KNOWLEDGE_MANAGE
+)
+require_knowledge_publisher = require_integration_capability(
+    IntegrationCapability.KNOWLEDGE_PUBLISH
+)
+require_knowledge_reindexer = require_integration_capability(
+    IntegrationCapability.KNOWLEDGE_REINDEX
+)
