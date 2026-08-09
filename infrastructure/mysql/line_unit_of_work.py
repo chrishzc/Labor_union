@@ -42,6 +42,9 @@ from infrastructure.mysql.line_webhook_inbox_repository import (
 )
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.matching_notification_repository import (
+    MySqlMatchingNotificationRepository,
+)
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -65,6 +68,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.receipts = MySqlLineIdempotencyReceiptRepository(connection)
         self.audit = MySqlLineAuditRepository(connection)
         self.outbox = MySqlLineOutboxWriter(connection)
+        self.matching_notifications = MySqlMatchingNotificationRepository(connection)
 
 
 class ManagedLineMySqlUnitOfWork(LineMySqlUnitOfWork):

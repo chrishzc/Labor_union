@@ -25,6 +25,9 @@ class LineCapability(StrEnum):
     ORDER_GROUP_BIND = "line.order_group.bind"
     MONITOR_READ = "line.monitor.read"
     ALERT_MANAGE = "line.alert.manage"
+    MATCHING_READ = "line.matching.read"
+    MATCHING_SEND = "line.matching.send"
+    MATCHING_OVERRIDE = "line.matching.override"
 
 
 class LineCapabilityDeniedError(PermissionError):
@@ -37,6 +40,7 @@ _ROLE_CAPABILITIES = {
         LineCapability.REVIEW_READ,
         LineCapability.ORDER_GROUP_READ,
         LineCapability.MONITOR_READ,
+        LineCapability.MATCHING_READ,
     },
     "line_agent": {
         LineCapability.IDENTITY_READ,
@@ -45,6 +49,8 @@ _ROLE_CAPABILITIES = {
         LineCapability.ORDER_GROUP_READ,
         LineCapability.ORDER_GROUP_BIND,
         LineCapability.MONITOR_READ,
+        LineCapability.MATCHING_READ,
+        LineCapability.MATCHING_SEND,
     },
     "line_manager": set(LineCapability),
     "system_admin": set(LineCapability),

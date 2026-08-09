@@ -70,6 +70,16 @@ class MySqlLineRuntimeRepository:
                 )
                 row = optional_row(cursor.fetchone()) or {"total": 0}
                 counts[name] = int(row["total"])
+            cursor.execute(
+                "SELECT "
+                "SUM(processing_status IN ('pending','processing','retryable_failed')) AS active_total,"
+                "SUM(processing_status='failed') AS failed_total "
+                "FROM line_delivery_tasks "
+                "WHERE source_aggregate_type='matching_notification_intent'"
+            )
+            matching = optional_row(cursor.fetchone()) or {}
+            counts["matching_delivery_active"] = int(matching.get("active_total") or 0)
+            counts["matching_delivery_failed"] = int(matching.get("failed_total") or 0)
         return counts
 
 

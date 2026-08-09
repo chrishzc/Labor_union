@@ -73,17 +73,20 @@ def _database_observations(connection, runtime, now):
     with connection.cursor() as cursor:
         cursor.execute("SELECT 1 AS ready")
         cursor.fetchone()
-        cursor.execute("SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('line_delivery_tasks','runtime_health_status','line_alert_notification_targets')")
+        cursor.execute("SELECT COUNT(*) AS total FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name IN ('line_delivery_tasks','runtime_health_status','line_alert_notification_targets','matching_notification_intents','matching_response_events')")
         schema_count = int(cursor.fetchone()["total"])
-    db_status = RuntimeHealthStatus.HEALTHY if schema_count == 3 else RuntimeHealthStatus.CRITICAL
-    observations = [RuntimeHealthObservation("database", "MySQL", db_status, "資料庫與 Stage 6 schema 正常" if schema_count == 3 else "Stage 6 schema 尚未完整套用", {"required_tables": schema_count}, now, int((time.perf_counter()-started)*1000))]
+    db_status = RuntimeHealthStatus.HEALTHY if schema_count == 5 else RuntimeHealthStatus.CRITICAL
+    observations = [RuntimeHealthObservation("database", "MySQL", db_status, "資料庫與 Stage 7 schema 正常" if schema_count == 5 else "Stage 7 schema 尚未完整套用", {"required_tables": schema_count}, now, int((time.perf_counter()-started)*1000))]
     heartbeat = runtime.latest_heartbeat()
     worker_age = None if heartbeat is None else (now - heartbeat.heartbeat_at).total_seconds()
     worker_ok = heartbeat is not None and heartbeat.stopped_at is None and worker_age is not None and worker_age <= 60
     observations.append(RuntimeHealthObservation("line_worker", "LINE Worker", RuntimeHealthStatus.HEALTHY if worker_ok else RuntimeHealthStatus.CRITICAL, "LINE Worker heartbeat 正常" if worker_ok else "LINE Worker heartbeat 過期或不存在", {"age_seconds": worker_age}, now))
     counts = runtime.queue_counts()
-    backlog = sum(counts.values())
+    backlog = sum(counts.get(name, 0) for name in ("inbox_pending", "delivery_pending", "legacy_pending"))
     observations.append(RuntimeHealthObservation("line_queues", "LINE queues", RuntimeHealthStatus.WARNING if backlog >= int(os.getenv("MONITOR_QUEUE_WARNING", "100")) else RuntimeHealthStatus.HEALTHY, f"待處理任務 {backlog} 筆", counts, now))
+    matching_failed = counts.get("matching_delivery_failed", 0)
+    matching_status = RuntimeHealthStatus.WARNING if matching_failed else RuntimeHealthStatus.HEALTHY
+    observations.append(RuntimeHealthObservation("matching_delivery", "Matching LINE delivery", matching_status, f"配對通知失敗 {matching_failed} 筆", {"active": counts.get("matching_delivery_active", 0), "failed": matching_failed}, now))
     observations.append(_redis_probe(now))
     return observations
 

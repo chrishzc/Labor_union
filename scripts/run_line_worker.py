@@ -43,6 +43,12 @@ from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbe
 from subsystems.line.rich_menu_worker import LineRichMenuWorker
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
+from subsystems.line.matching_postback_application import (
+    LineMatchingPostbackApplication,
+)
+from subsystems.scheduling.matching_notification_application import (
+    MatchingNotificationApplication,
+)
 from subsystems.line.worker_runtime import CanonicalLineWorkerRuntime
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -137,6 +143,9 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
                 group_application=LineOrderGroupApplication(
                     now,
                     alert_group_registrar=register_group_alert_target,
+                ),
+                matching_postback_application=LineMatchingPostbackApplication(
+                    MatchingNotificationApplication(open_line_unit_of_work, now)
                 ),
             ).registry()
         ),

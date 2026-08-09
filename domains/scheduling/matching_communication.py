@@ -99,6 +99,11 @@ def record_customer_decision(
         raise MatchingDecisionNotReadyError("customer profiles are not available")
     if target is CustomerMatchingDecision.PENDING:
         raise MatchingCommunicationConflictError("customer decision cannot return to pending")
+    if current is CustomerMatchingDecision.CONTACT_REQUESTED and target in {
+        CustomerMatchingDecision.ACCEPTED,
+        CustomerMatchingDecision.DECLINED,
+    }:
+        return target
     _require_consistent_response(current, target, "customer matching decision")
     return target
 

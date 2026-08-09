@@ -7,6 +7,7 @@ from datetime import datetime
 from enum import StrEnum
 
 from domains.line.identities import LineDeliveryTaskId, LineUserId
+from domains.line.delivery import LineDeliveryStatus
 from domains.scheduling.matching_communication import (
     CaregiverWillingness,
     CustomerMatchingDecision,
@@ -51,6 +52,7 @@ class RequestCaregiverInformationCommand:
         }
         if self.notification_kind not in allowed:
             raise ValueError("caregiver notification kind is invalid")
+        _require_matching_version(self.plan, self.expected_version)
 
     @property
     def fingerprint(self) -> PreviewFingerprint:
@@ -60,15 +62,24 @@ class RequestCaregiverInformationCommand:
 @dataclass(frozen=True, slots=True)
 class RequestCustomerProfilesCommand:
     plan: MatchingPlanReference
+    note: str
     actor: ActorContext
     expected_version: ExpectedVersion
     idempotency_key: IdempotencyKey
     correlation_id: CorrelationId
 
+    def __post_init__(self) -> None:
+        require_canonical_text(self.note, "customer profile note", 1000)
+        _require_matching_version(self.plan, self.expected_version)
+
     @property
     def fingerprint(self) -> PreviewFingerprint:
         return fingerprint_payload(
-            {"plan_id": self.plan.plan_id, "plan_version": self.plan.version}
+            {
+                "plan_id": self.plan.plan_id,
+                "plan_version": self.plan.version,
+                "note": self.note,
+            }
         )
 
 
@@ -112,6 +123,7 @@ class RecordManualMatchingResponseCommand:
 
     def __post_init__(self) -> None:
         require_canonical_text(self.reason, "manual matching reason", _REASON_MAXIMUM_LENGTH)
+        _require_matching_version(self.plan, self.expected_version)
         _validate_manual_response(self)
 
 
@@ -124,6 +136,45 @@ class MatchingNotificationAudience:
     def __post_init__(self) -> None:
         require_canonical_text(self.display_name, "matching audience name", 100)
         require_canonical_text(self.subject_reference, "matching audience reference", 191)
+
+
+@dataclass(frozen=True, slots=True)
+class MatchingSegmentContact:
+    segment_id: int
+    segment_order: int
+    staff_id: int
+    staff_name: str
+    staff_line_user_id: LineUserId | None
+    assigned_start_date: str
+    assigned_end_date: str
+    willingness: CaregiverWillingness
+    information_1_status: LineDeliveryStatus | None = None
+    information_2_status: LineDeliveryStatus | None = None
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.segment_id, "matching segment ID")
+        require_positive_integer(self.segment_order, "matching segment order")
+        require_positive_integer(self.staff_id, "matching staff ID")
+        require_canonical_text(self.staff_name, "matching staff name", 100)
+
+
+@dataclass(frozen=True, slots=True)
+class MatchingContactState:
+    plan: MatchingPlanReference
+    plan_status: str
+    plan_is_active: bool
+    order_status: str
+    customer_line_user_id: LineUserId | None
+    customer_decision: CustomerMatchingDecision
+    customer_profiles_status: LineDeliveryStatus | None
+    segments: tuple[MatchingSegmentContact, ...]
+
+    @property
+    def all_willing(self) -> bool:
+        return bool(self.segments) and all(
+            segment.willingness is CaregiverWillingness.WILLING
+            for segment in self.segments
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,11 +231,21 @@ def _validate_manual_response(command: RecordManualMatchingResponseCommand) -> N
         raise ValueError("manual customer decision cannot contain a segment ID")
 
 
+def _require_matching_version(
+    plan: MatchingPlanReference,
+    expected_version: ExpectedVersion,
+) -> None:
+    if plan.version != expected_version.value:
+        raise ValueError("matching plan and expected versions do not match")
+
+
 __all__ = [
     "MatchingNotificationAudience",
+    "MatchingContactState",
     "MatchingNotificationProjectionStatus",
     "MatchingNotificationResult",
     "MatchingResponseResult",
+    "MatchingSegmentContact",
     "RecordCaregiverLineResponseCommand",
     "RecordCustomerLineDecisionCommand",
     "RecordManualMatchingResponseCommand",

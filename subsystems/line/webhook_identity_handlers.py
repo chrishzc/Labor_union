@@ -33,6 +33,7 @@ class LineWebhookIdentityHandlers:
         follow_scheduler: Callable[[object, object, object], int] | None = None,
         media_scheduler: Callable[[object, object], bool] | None = None,
         group_application: object | None = None,
+        matching_postback_application: object | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
@@ -40,6 +41,7 @@ class LineWebhookIdentityHandlers:
         self._follow_scheduler = follow_scheduler
         self._media_scheduler = media_scheduler
         self._group_application = group_application
+        self._matching_postback_application = matching_postback_application
 
     def registry(self):
         return {
@@ -48,6 +50,7 @@ class LineWebhookIdentityHandlers:
             "message": self.handle_message,
             "memberJoined": self.handle_group_membership,
             "memberLeft": self.handle_group_membership,
+            "postback": self.handle_postback,
         }
 
     def handle_follow(self, inbox, unit_of_work):
@@ -98,6 +101,10 @@ class LineWebhookIdentityHandlers:
     def handle_group_membership(self, inbox, unit_of_work):
         if self._group_application is not None:
             self._group_application.handle_membership(inbox, unit_of_work)
+
+    def handle_postback(self, inbox, unit_of_work):
+        if self._matching_postback_application is not None:
+            self._matching_postback_application.handle(inbox, unit_of_work)
 
     # Kept cohesive so the flow and its delivery task use the same event identity.
     def _open_and_notify(self, inbox, unit_of_work, line_user_id, purpose):

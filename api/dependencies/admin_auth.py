@@ -134,3 +134,6 @@ require_line_order_group_reader = require_capability(LineCapability.ORDER_GROUP_
 require_line_order_group_binder = require_capability(LineCapability.ORDER_GROUP_BIND)
 require_line_monitor_reader = require_capability(LineCapability.MONITOR_READ)
 require_line_alert_manager = require_capability(LineCapability.ALERT_MANAGE)
+require_line_matching_reader = require_capability(LineCapability.MATCHING_READ)
+require_line_matching_sender = require_capability(LineCapability.MATCHING_SEND)
+require_line_matching_override = require_capability(LineCapability.MATCHING_OVERRIDE)

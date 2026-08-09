@@ -9,6 +9,7 @@ from domains.scheduling.matching_communication import MatchingPlanReference
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.ports import UnitOfWork
 from subsystems.scheduling.matching_notification_contracts import (
+    MatchingContactState,
     MatchingNotificationAudience,
     MatchingNotificationResult,
     MatchingResponseResult,
@@ -21,6 +22,20 @@ from subsystems.scheduling.matching_notification_contracts import (
 
 
 class MatchingNotificationRepositoryPort(Protocol):
+    def get_contact_state(
+        self,
+        case_no: str,
+        plan_id: int,
+        *,
+        lock: bool = False,
+    ) -> MatchingContactState | None: ...
+
+    def get_intent_result(
+        self,
+        key: IdempotencyKey,
+        fingerprint: str,
+    ) -> MatchingNotificationResult | None: ...
+
     def request_caregiver_information(
         self,
         command: RequestCaregiverInformationCommand,
@@ -70,6 +85,7 @@ class MatchingNotificationUnitOfWorkPort(UnitOfWork, Protocol):
     matching_notifications: MatchingNotificationRepositoryPort
     matching_audiences: MatchingAudienceQueryPort
     matching_receipts: MatchingNotificationReceiptPort
+    delivery_tasks: object
 
 
 __all__ = [

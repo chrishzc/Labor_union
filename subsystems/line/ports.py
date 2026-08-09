@@ -514,6 +514,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     receipts: LineIdempotencyReceiptPort
     audit: LineAuditPort
     outbox: LineOutboxRepositoryPort
+    matching_notifications: object
 
 
 __all__ = [
