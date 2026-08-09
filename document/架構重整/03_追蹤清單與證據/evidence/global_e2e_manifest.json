@@ -1,6 +1,6 @@
 {
   "contract": "labor-union-global-e2e-manifest/v1",
-  "generated_at": "2026-08-04",
+  "generated_at": "2026-08-09",
   "isolation": {
     "database_prefix": "lu_test_",
     "forbidden_databases": ["union_db", "mysql_db"],
@@ -76,9 +76,9 @@
       ],
       "source_sha256": {
         "tests/test_order_cancellation_disposable_mysql_e2e.py": "f97bc46a142e5a3d29729965b2b570f2313bdc290868c1dcc65fb5fdf40966e0",
-        "ui/pages/order/cancellation_panel.py": "c62f470088fd8d02397e67f649625f401f233688abd1696341bf103042e9e65c",
-        "ui/api_clients/order_cancellation_api_client.py": "b25492ab4caa1d509aa56c5a1e1b64c75f6a90fc11618f9dd0f4213b4abcef03",
-        "api/routes/order_cancellation.py": "4b7f2210e23cc2d631a595d8fb77536a7a9290ae1edf52fa8aa214c99413cd0d"
+        "ui/pages/order/cancellation_panel.py": "7826206ab352df634ff7e14de164d493fa210f2523c2fba21da2c60225f3892c",
+        "ui/api_clients/order_cancellation_api_client.py": "a5490b8076d375286d0ff9149fae87c4b5c1a25075b22c8b421568bc3459e91a",
+        "api/routes/order_cancellation.py": "8dd7ed82634e03c01dc83388db3ed12bcacf78431b619da412f0698a0136bd16"
       }
     },
     {
@@ -116,7 +116,7 @@
         "a recomputed completion is blocked before the new completion instant and succeeds exactly once at that instant"
       ],
       "source_sha256": {
-        "tests/test_order_auto_completion_disposable_mysql_e2e.py": "a1d4b80a5d02b91637e786e4c42504bd0aa44bf85c90cca01ca384f369d928d7",
+        "tests/test_order_auto_completion_disposable_mysql_e2e.py": "d992f805e448336157e372a9de1be6ea9ee8821ef5055204d521224dc0dd2599",
         "domains/orders/auto_completion.py": "e60af89fed0a9fa7702d26effdf6cb119291a25f7c6129552a050794f75aa59d",
         "subsystems/orders/auto_completion_workflow.py": "96d8670eda7925f87c140667ba3800f34630dd4d12696bac6dcf24a3bfa11984",
         "subsystems/orders/lifecycle_authoritative_facts_loader.py": "9015a55e10245b6e5f056291652c6e18e61764ccf83031e477bb39da810b37b5",
@@ -136,8 +136,8 @@
         "the sole current alert is active finance_import_manual_review, not IMPORT-006"
       ],
       "source_sha256": {
-        "tests/test_finance_import_disposable_mysql_e2e.py": "6d674cb38b0ca3145e4c9b67d2b27923cc0c83d3060ba6828b101791fde789e6",
-        "subsystems/anomalies/finance_import_anomaly_consumer.py": "4262d2ef80dc68a33506283839d27917cadcd562e34ac7395caafeeab03ff55a"
+        "tests/test_finance_import_disposable_mysql_e2e.py": "d90bbc0a25bc72eba22f919e7de826d68a61a07a895c6534ee79c6d5c09c1d7a",
+        "subsystems/anomalies/finance_import_anomaly_consumer.py": "88cdf706230b001ba157cb9407a126d1e41ae473b01103571a3429836febe7fb"
       }
     },
     {
@@ -151,8 +151,8 @@
         "recovered projector delivers the event without changing those Domain facts"
       ],
       "source_sha256": {
-        "tests/test_finance_import_disposable_mysql_e2e.py": "6d674cb38b0ca3145e4c9b67d2b27923cc0c83d3060ba6828b101791fde789e6",
-        "subsystems/anomalies/finance_import_anomaly_consumer.py": "4262d2ef80dc68a33506283839d27917cadcd562e34ac7395caafeeab03ff55a"
+        "tests/test_finance_import_disposable_mysql_e2e.py": "d90bbc0a25bc72eba22f919e7de826d68a61a07a895c6534ee79c6d5c09c1d7a",
+        "subsystems/anomalies/finance_import_anomaly_consumer.py": "88cdf706230b001ba157cb9407a126d1e41ae473b01103571a3429836febe7fb"
       }
     },
     {
@@ -166,7 +166,7 @@
         "retry with the same idempotency key writes exactly one ledger, correction receipt and manual classification"
       ],
       "source_sha256": {
-        "tests/test_finance_import_disposable_mysql_e2e.py": "6d674cb38b0ca3145e4c9b67d2b27923cc0c83d3060ba6828b101791fde789e6",
+        "tests/test_finance_import_disposable_mysql_e2e.py": "d90bbc0a25bc72eba22f919e7de826d68a61a07a895c6534ee79c6d5c09c1d7a",
         "subsystems/finance_import/correction_workflow.py": "894c3e2451b2889a903a1396bcc3f4ac339f0ae7f61a30194c49608df1ec6303",
         "db/schema_parts/140_client_refund_return.sql": "495fb8f8f0693041879fcb2e51924b79ff12bf3be862494a1993a3932ac081f4"
       }
@@ -216,13 +216,13 @@
         "the real Streamlit deposit-reversal panel sends Preview and Apply through the typed HTTP router and creates the canonical reversal without a legacy client_payments write"
       ],
       "source_sha256": {
-        "tests/test_g14_deposit_reversal_disposable_mysql_e2e.py": "9551395e2426385d3d9fe83c205c504633fcb1446deb6efc11a2996e6097b647",
-        "tests/test_g14_client_receipt_reconciliation_e2e.py": "85ab1deb149989f231144f3e04ed21a0bc8fb1500f1330f1e30718ed66dd393d",
+        "tests/test_g14_deposit_reversal_disposable_mysql_e2e.py": "4894d03a9fb918c52a16eca8f8066b9d6751b1bf6268544f2cac7f4ed609ec99",
+        "tests/test_g14_client_receipt_reconciliation_e2e.py": "0d3eab4d63ac7244ccfa65e4a92c4ff2d2cd4ebd02c29959ad54f51674527c65",
         "subsystems/client_finance/deposit_reversal_workflow.py": "21f761f139ea8ffed643549301884ac02042c9c5d40870e6d283588f2ea92b64",
         "infrastructure/mysql/client_deposit_reversal_repository.py": "ab46f559639c4f241d0fc82dd917ba3a2028d0ab3f8e1c85442522a114bbfee4",
         "api/routes/client_deposit_reversal.py": "672f1c148fddb1dc0fad47c345e253821cc5999fb7b8fc7245f26a5923a17451",
         "db/schema_parts/142_client_deposit_reversal.sql": "5a3e4434f981667c1449a07579dc92bf3c11d3044883eedcc331ac7fbc831917",
-        "subsystems/orders/client_finance_outbox_consumer.py": "b291948f993d09c2450a5e685bbd948e49add61bd05cd7f9d5cc1f53c72742a7",
+        "subsystems/orders/client_finance_outbox_consumer.py": "86fd65d16ede482b878f21d06c187f75bf47400f8ff394afb1c7ecbc7b0b0da7",
         "tests/test_g14_deposit_reversal_ui_api_e2e.py": "a89d409aeaa9f85598b97a8c6b6ef406d158540f53989a92eee5866f7d037564",
         "ui/api_clients/client_deposit_reversal_api_client.py": "3974a15014e74fd1c12bf31497002419f70e1aa9bddc344fd9d896576d6c9c3d",
         "ui/pages/order/client_deposit_reversal_panel.py": "9210690b48dc4bffefa4e12deeeb7b91e6834e52f2a330856529accb2723f5ac"
@@ -241,8 +241,8 @@
       ],
       "source_sha256": {
         "tests/test_durable_finance_import_batch_e2e.py": "49371798a2dc46ef355e5962c4fc8701422ce922f50bcdb48575790a55cd9298",
-        "infrastructure/mysql/background_job_repository.py": "f7fbbb608f682b083d53b4fc9d47dac00ff38fa3c6686c2944ed8e6dd94c34fe",
-        "subsystems/jobs/durable_job_worker.py": "0dd90a3a2f1ef89e142b4030a5d352f447fcfca4ce532f66c3cfe5bda78b4d9e",
+        "infrastructure/mysql/background_job_repository.py": "342baf37fb4f65422c684586d4d579b25d37b6369c238892fcab3651f53eac12",
+        "subsystems/jobs/durable_job_worker.py": "610ac31924a77eaddc449eabc84239c43c2a8faba5b2f4a6d4c7cfcaebd1f136",
         "db/schema_parts/141_durable_background_job_queue.sql": "bdf1dc88cbd21adee99fdd8318792ffe080763a17bcb24069af33738de98fd03"
       }
     },
@@ -254,7 +254,7 @@
       "assertions": ["lock snapshot is unchanged after refund", "lock snapshot is unchanged after reversal"],
       "source_sha256": {
         "tests/test_g06_refund_service_lock_e2e.py": "f95210646f0ee0dc0b266fb0707bfc20838519aa280ce8cf00fcb7362337c5fc",
-        "infrastructure/mysql/client_refund_reversal_repository.py": "96fee85e855391c900b7ae87db3af2d75b4900209ad955e34045ae589a75be28",
+        "infrastructure/mysql/client_refund_reversal_repository.py": "e06b23c7cfc225034743a6050184a4beda76f0aa197a8d12ce27b7e545f4498c",
         "db/schema_parts/110_order_terms_workflow.sql": "e4823aa166e1e56dbd9c56ab1e54903b86b6c8001e64a5ba090e6efe63ea1846"
       }
     },
@@ -271,9 +271,9 @@
       ],
       "source_sha256": {
         "tests/test_durable_finance_import_batch_e2e.py": "49371798a2dc46ef355e5962c4fc8701422ce922f50bcdb48575790a55cd9298",
-        "api/routes/finance_import.py": "6e8c54b7c26557f500ccfc0641f08bb5cd2d35560b179fb04e10bcb399be27c1",
-        "infrastructure/mysql/background_job_repository.py": "f7fbbb608f682b083d53b4fc9d47dac00ff38fa3c6686c2944ed8e6dd94c34fe",
-        "subsystems/jobs/durable_job_worker.py": "0dd90a3a2f1ef89e142b4030a5d352f447fcfca4ce532f66c3cfe5bda78b4d9e",
+        "api/routes/finance_import.py": "933e5de5754bc08dc4acf1ce395fcae7ff6927634d751f7f586d2644a52cc3a0",
+        "infrastructure/mysql/background_job_repository.py": "342baf37fb4f65422c684586d4d579b25d37b6369c238892fcab3651f53eac12",
+        "subsystems/jobs/durable_job_worker.py": "610ac31924a77eaddc449eabc84239c43c2a8faba5b2f4a6d4c7cfcaebd1f136",
         "db/schema_parts/141_durable_background_job_queue.sql": "bdf1dc88cbd21adee99fdd8318792ffe080763a17bcb24069af33738de98fd03"
       }
     },
@@ -288,10 +288,10 @@
         "all runs use dedicated disposable lu_test_g08_* MySQL schemas"
       ],
       "source_sha256": {
-        "tests/test_finance_import_disposable_mysql_e2e.py": "6d674cb38b0ca3145e4c9b67d2b27923cc0c83d3060ba6828b101791fde789e6",
+        "tests/test_finance_import_disposable_mysql_e2e.py": "d90bbc0a25bc72eba22f919e7de826d68a61a07a895c6534ee79c6d5c09c1d7a",
         "subsystems/finance_import/correction_workflow.py": "894c3e2451b2889a903a1396bcc3f4ac339f0ae7f61a30194c49608df1ec6303",
-        "infrastructure/mysql/finance_import_repository.py": "a1feda9ac8a61766d244a125dbf4746f79c16f30d17bc2418643a60b351f8276",
-        "infrastructure/mysql/finance_import_owning_domain_composite.py": "45792693c8f132fd4b9b1e5b89ea128da0cbf06e9fea5abc8e304b7e8d1580ef",
+        "infrastructure/mysql/finance_import_repository.py": "14d0ec03f3bc4cc9672c62a17a9dc93d984a3f455c2d969db64d965489a675a7",
+        "infrastructure/mysql/finance_import_owning_domain_composite.py": "d8df38513e664feb7ed453b0576bcd683994d978944b4db3e764978740fcaea3",
         "db/schema_parts/121_finance_import_preview_apply.sql": "a629aeea3cb447b33c60546d51109dc34c9df0fd20dd38701278aebe1b94b51f"
       }
     },
@@ -306,11 +306,11 @@
         "the panel stores the server response without deriving a separate Preview"
       ],
       "source_sha256": {
-        "tests/test_g09_finance_import_ui_api_parity_e2e.py": "55a679fd8435698625f6447ec9fed13a0452fc50ca18e2337aedf1a98cbc6642",
-        "ui/pages/finance_import/panel.py": "8f6f4dc2e324c00f4a39a7964612daa05cdaab1e6eea7b2448b35801c7f2c5d3",
-        "ui/api_clients/finance_import_api_client.py": "e285eeda1a769e4e47db0efcbddc49b038cadffcaef7cf67d343eecdbed649ce",
-        "api/routes/finance_import.py": "6e8c54b7c26557f500ccfc0641f08bb5cd2d35560b179fb04e10bcb399be27c1",
-        "api/dependencies/finance_import.py": "b7cdf7a574c73635fdce659eed600f6b7b5779c9e34c9eaafff8298ca3373a5c"
+        "tests/test_g09_finance_import_ui_api_parity_e2e.py": "dabc9a1bb98904227762f3f58d35eda0707cf8f105ceb6ba0e39171edfffd2f2",
+        "ui/pages/finance_import/panel.py": "2f53c49a924cea4595b7e751c2bf1cb28e92a530bac83a676b55edbdf8f7aab7",
+        "ui/api_clients/finance_import_api_client.py": "95bd3cb4ddf17e40e4c8935123ac1090f9a5ef2915aa5879dc12a7fc9d751733",
+        "api/routes/finance_import.py": "933e5de5754bc08dc4acf1ce395fcae7ff6927634d751f7f586d2644a52cc3a0",
+        "api/dependencies/finance_import.py": "13481960b615c70661c0d129922b2fc27cd8e3d59cc9de2e1c15712692c871da"
       }
     },
     {
@@ -325,13 +325,13 @@
         "the panel reports success only after the worker stores a succeeded receipt"
       ],
       "source_sha256": {
-        "tests/test_g17_finance_import_ui_job_e2e.py": "e0cc9cb4fc9c23557002029f91a6acc4350fca1432caf256099aed8ed3257670",
-        "ui/pages/finance_import/panel.py": "8f6f4dc2e324c00f4a39a7964612daa05cdaab1e6eea7b2448b35801c7f2c5d3",
-        "ui/api_clients/finance_import_api_client.py": "e285eeda1a769e4e47db0efcbddc49b038cadffcaef7cf67d343eecdbed649ce",
-        "api/routes/jobs.py": "246173adafb05bfc6d04e417f5d9e955239d2c83021b774a4d0711807b21dafd",
-        "api/routes/finance_import.py": "6e8c54b7c26557f500ccfc0641f08bb5cd2d35560b179fb04e10bcb399be27c1",
-        "infrastructure/mysql/background_job_repository.py": "f7fbbb608f682b083d53b4fc9d47dac00ff38fa3c6686c2944ed8e6dd94c34fe",
-        "subsystems/jobs/durable_job_worker.py": "0dd90a3a2f1ef89e142b4030a5d352f447fcfca4ce532f66c3cfe5bda78b4d9e"
+        "tests/test_g17_finance_import_ui_job_e2e.py": "e13513baf4b3323c3d070670813407cb431d383f832beda35b746e510af3fd41",
+        "ui/pages/finance_import/panel.py": "2f53c49a924cea4595b7e751c2bf1cb28e92a530bac83a676b55edbdf8f7aab7",
+        "ui/api_clients/finance_import_api_client.py": "95bd3cb4ddf17e40e4c8935123ac1090f9a5ef2915aa5879dc12a7fc9d751733",
+        "api/routes/jobs.py": "f19f86b9ee29efe56f6630d0a23b4a8606d7ee94d995c0e47e3c0eef23f50bbe",
+        "api/routes/finance_import.py": "933e5de5754bc08dc4acf1ce395fcae7ff6927634d751f7f586d2644a52cc3a0",
+        "infrastructure/mysql/background_job_repository.py": "342baf37fb4f65422c684586d4d579b25d37b6369c238892fcab3651f53eac12",
+        "subsystems/jobs/durable_job_worker.py": "610ac31924a77eaddc449eabc84239c43c2a8faba5b2f4a6d4c7cfcaebd1f136"
       }
     },
     {

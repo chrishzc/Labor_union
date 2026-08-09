@@ -61,7 +61,7 @@ availability, waiting-lock, mutex, calendar, matching tests]
 4 passed in 1.46s
 
 .venv\\Scripts\\python.exe scripts\\validate_writer_inventory_v3_dispositions.py
-writer_inventory_v3_disposition records=663 approved_to_remove=0
+writer_inventory_v3_disposition records=658 approved_to_remove=0
 ```
 
 MySQL 端到端測試只使用暫時的 `mysql:8.4` 容器、localhost `127.0.0.1:33306` 及

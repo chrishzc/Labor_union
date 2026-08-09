@@ -1,14 +1,13 @@
-# External Integration、LINE 與 Access Control 正式規格
+# LINE、Access Control、Case Import 與 Knowledge 正式規格
 
 ## 1. 文件狀態
 
 - 狀態：`approved-architecture-baseline`
 - 人工核准日期：2026-08-03
-- BreezySign／LINE ownership：`consolidated-decision`
+- LINE ownership：`consolidated-decision`
 - Access Control：`consolidated-decision`
-- live `line/line_bot.py` 的 integration bypass：`live-drift`
-- 當前核准只啟用 Inventory v2 evidence；本文件 integration、Access、schema、
-  pytest 與 legacy exit 條款不授權本輪修改 production 或外部平台。
+- 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 integration、Access、schema、
+  pytest 與 legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
 
 ## 2. Global Integration Boundary
 
@@ -41,7 +40,7 @@
 - `ExternalEvidenceArchive`
 - `IntegrationClock`
 
-LINE、BreezySign 與 BeClass 可以共用 port contract，但不得共用模糊 payload table、
+LINE 與 BeClass 可以共用 port contract，但不得共用模糊 payload table、
 status enum 或 idempotency namespace。
 
 ### 2.3 Trusted system actor
@@ -71,133 +70,9 @@ SystemPrincipal 只能執行明確允許自動化的 typed Command；需要人�
 | `external_retry_exhausted` | failed＋alert |
 | `integration_storage_unavailable` | 503；不回成功 |
 
-## 3. Domain：Contract Integration／BreezySign
+## 3. Domain：LINE Integration
 
-### 3.1 責任與 non-goals
-
-Contract Integration 擁有：
-
-- provider contract identity 與內部 contract aggregate 的受控 mapping；
-- provider webhook durable inbox；
-- signature evidence、canonical payload hash、provider occurred time；
-- external contract event ledger 與 processing receipt；
-- downstream contract evidence outbox。
-
-不擁有：
-
-- Orders lifecycle；
-- actual service dates；
-- waiting-deposit lock；
-- assignment／schedule；
-- LINE delivery 成功狀態。
-
-### 3.2 根事實
-
-- `provider`
-- `provider_contract_id`
-- `provider_event_id`；若 provider 無可靠 ID，使用 versioned canonical fingerprint
-- `provider_event_type`
-- `provider_contract_status`
-- `provider_occurred_at`
-- `signature_verification_result`
-- `canonical_payload_hash`
-- `received_at`
-- `internal_contract_identity`
-- `processing_attempts`
-- `processing_outcome`
-
-只保存驗證與稽核需要的最小 payload；敏感原文若必須保存，必須進受控 evidence archive，
-不得進 log 或 UI。
-
-### 3.3 State machine
-
-Inbox：
-
-```text
-received → verified → normalized → applied
-                   ├→ rejected
-                   └→ retry_pending → applied | failed
-```
-
-External contract projection：
-
-```text
-pending_signature → signed | declined | cancelled | provider_failed
-```
-
-exact provider enum 必須由正式 provider contract 對照；未知值 fail closed，
-不得 mapping 成 `signed`。
-
-### 3.4 Subsystem：Contract Webhook Intake
-
-Modules：
-
-- `BreezySignSignatureVerifier`
-- `BreezySignEventNormalizer`
-- `ContractEventFingerprint`
-- `ContractInboxRepository`
-- `ContractMappingResolver`
-
-交易：
-
-1. 保存 request-level security receipt；signature 失敗則 quarantine 並停止；
-2. 驗證 signature；
-3. 正規化 canonical event；
-4. 以 provider event ID／fingerprint durable insert；
-5. 驗證 exact replay／payload conflict；
-6. 綁定 internal contract identity；
-7. append external contract event；
-8. append downstream outbox 並單次 commit。
-
-未知 contract、invalid signature 或 payload conflict 不產生 downstream Domain command。
-invalid receipt 永遠不得轉成 canonical provider event；signature failure burst 由
-security receipts 聚合告警，不需要保存不受信任的完整原文。
-
-### 3.5 Subsystem：Contract Evidence Dispatch
-
-Consumer 可以建立 `ContractCompletionEvidenceAvailable`，但不能自行 Apply Orders。
-
-正式流程：
-
-1. Orders Query 顯示已驗證 contract evidence；
-2. 在 automation policy 尚未另經人工確認前，只有具 capability 的
-   `AdminPrincipal` 可執行 `PreviewContractCompletion`；
-3. `ApplyContractCompletion` 由 Orders outer Unit of Work 建立正式契約完成 root event；
-4. 後續 Client Finance obligations 依既有跨 Domain 契約建立；
-5. 不建立 assignment；等待訂金與第一個 assignment 仍走各自正式 Command。
-
-`SystemPrincipal` 目前只可發出 `ContractCompletionEvidenceAvailable` outbox，
-不得 Preview／Apply Orders；未來自動化是 public behavior 變更，須另行人工確認。
-
-### 3.6 Alerts 與人工入口
-
-- invalid signature burst；
-- provider event key payload conflict；
-- unknown／ambiguous internal contract；
-- signed evidence 無 internal contract；
-- retry exhausted；
-- provider status regression。
-
-人工入口只能重新 mapping、重試 normalization／dispatch 或標記 evidence 已釐清；
-不得在 Integration UI 直接改 Orders、日期、assignment 或 schedule。
-
-### 3.7 Live drift 與退出
-
-`line/line_bot.py` 的 BreezySign webhook 目前：
-
-- 未驗 provider signature、未 durable 去重；
-- 以 `today + 10` 猜 actual start；
-- 直接更新 Orders status／dates／service mode；
-- 刪除並建立 legacy `staff_bookings`；
-- 直接插入 LINE task 且可 fallback mock user；
-- 例外 rollback 後仍回 success。
-
-此路徑標為 `critical-integration-bypass`。正式 Work Package 必須移除 route，
-或暫時固定回 `410 Gone`；不得包裝成相容轉接。
-
-## 4. Domain：LINE Integration
-
-### 4.1 責任與 SSOT
+### 3.1 責任與 SSOT
 
 LINE Integration 擁有：
 
@@ -211,7 +86,7 @@ LINE Integration 擁有：
 
 LINE 不擁有 Orders、Scheduling、Finance、Payroll 或 Staff Payables 狀態。
 
-### 4.2 Subsystem：LINE Webhook Inbox
+### 3.2 Subsystem：LINE Webhook Inbox
 
 Canonical state：
 
@@ -238,7 +113,7 @@ Modules：
 - `LineWebhookInboxRepository`
 - `LineEventDispatcher`
 
-### 4.3 Subsystem：LINE Delivery Task
+### 3.3 Subsystem：LINE Delivery Task
 
 State：
 
@@ -270,14 +145,13 @@ duplicate idempotency key 必須回既有 task／receipt，不得只回 `None`�
 retry 使用 bounded exponential backoff；非 retryable 4xx、invalid recipient、
 content validation failure 直接 failed＋alert。
 
-### 4.4 Subsystem：LINE Identity／Review
+### 3.4 Subsystem：LINE Identity／Review
 
 State：
 
 ```text
 Friend: unknown → active ↔ blocked
 Review: pending → approved | rejected | cancelled
-Review assignment: assigned → reassigned | escalated
 ```
 
 正式 approve／reject 必須：
@@ -291,16 +165,11 @@ Review assignment: assigned → reassigned | escalated
 
 legacy internal-key-only review／role mutation routes 不具人類授權，必須退出或 `410 Gone`。
 
-Review 保存 `assigned_admin_id`、`assigned_at`、`due_at`、`reassignment_count` 與
-expected version。超過 `due_at` 不自動批准／拒絕：
+待審案件沒有 `due_at`、逾期、自動核准、自動拒絕、轉派或 escalated state。它會以
+建立時間由早到晚留在待辦佇列，直到具 `line.identity.review` 的真人管理員明確核准、
+拒絕或取消；系統只可顯示待辦數量，不得以時間推導任何決定。
 
-1. projector 產生 overdue alert；
-2. `line_manager` 可 Preview／Apply reassignment；
-3. 超過最大轉派次數或無可用 assignee 時進 `escalated`；
-4. 原 assignee 的 stale decision 以 version conflict 拒絕；
-5. timeout、轉派次數與 escalated owner 必須在 production policy 確認後設定。
-
-### 4.5 Subsystem：Rich Menu／Media
+### 3.5 Subsystem：Rich Menu／Media
 
 Rich Menu publication：
 
@@ -315,10 +184,13 @@ pending → processing → published
 - retry 從已確認 provider receipt 繼續，不重複建立資產。
 - media DB 只保存 metadata、owner、digest、size、content type 與 archive location，
   不保存任意外部 URL 當永久根事實。
+- 正式套用採單人流程：管理員先看到目前 menu snapshot 的預覽，再按「確認目前預覽」取得
+  server-side preview receipt，最後勾選二次確認才可 Apply。Apply 必須鎖定同一管理員、
+  同一 menu、同一 config revision 與 fingerprint；任一內容變更使舊預覽失效。沒有雙人覆核。
 
-## 5. Domain：Access Control
+## 4. Domain：Access Control
 
-### 5.1 正式授權模型
+### 4.1 正式授權模型
 
 採「角色配置 capability」模型：
 
@@ -355,9 +227,20 @@ pending → processing → published
 - `data_browser.read`
 - `data_browser.write`
 - `system.configuration.manage`
+- `knowledge.source.edit`
+- `knowledge.source.review`
+- `knowledge.source.publish`
+- `knowledge.answer.query`
 
 新增 capability 是 public authorization contract 變更，必須更新 role bundle、Router
 inventory、audit policy 與 authorization tests。
+
+2026-08-09 已採用「fixed role bundle＋有期限的 dynamic grant」：`system_admin` 可為指定
+admin user grant 或 revoke 單一 capability，但 grant 必須有 expires_at、expected
+authorization version、reason、idempotency 與 correlation identity；成功 mutation 同交易
+保存不可變 event／receipt，並撤銷目標 user 的既有 session。固定 role bundle 仍是 baseline，
+不能被動態 grant 改寫。動態 `system.administration` revoke 必須鎖定並保護最後一位有效
+system-admin。
 
 Command／Query 最小對照：
 
@@ -372,12 +255,16 @@ Command／Query 最小對照：
 | `integration.event.retry` | retry eligible normalization／dispatch |
 | `admin.user.manage` | create／enable／disable／assign role capability／rotate credential |
 | `admin.session.revoke` | revoke admin session |
-| `admin.audit.read` | security audit Query |
+| `admin.audit.read` | compatibility capability；Security Audit Query 不以此能力作 gate |
 | `data_browser.read` | allowlisted read-only Data Browser Query |
 | `data_browser.write` | allowlisted non-root-fact maintenance only |
 | `system.configuration.manage` | versioned non-secret configuration mutation |
+| `knowledge.source.edit` | ingest draft knowledge source |
+| `knowledge.source.review` | review a draft created by another admin |
+| `knowledge.source.publish` | publish／retire reviewed knowledge created by another admin |
+| `knowledge.answer.query` | query published, cited, non-authoritative answer |
 
-### 5.2 根事實與 state machine
+### 4.2 根事實與 state machine
 
 根事實：
 
@@ -399,7 +286,7 @@ Credential: valid → rotated
 
 停權不刪除 user；role change、disable、credential rotation 都撤銷受影響 session。
 
-### 5.3 Subsystem：Authentication／Session
+### 4.3 Subsystem：Authentication／Session
 
 Modules：
 
@@ -415,10 +302,13 @@ Modules：
 - internal key 缺設定 fail closed；
 - Bearer session 必須存在、有效、未撤銷且 user enabled；
 - 原始 token 只回傳一次，DB 只保存 hash；
+- session 每次有效請求會滑動延長為 30 分鐘閒置期限，但首次登入起最多 8 小時；到達
+  absolute deadline 後即使持續操作也必須重新輸入密碼。舊 session 缺少 absolute deadline
+  時 fail closed；
 - `APP_ENV=production` 禁止 auth bypass；
 - development bypass 必須同時是允許環境＋顯式設定，並產生醒目 audit／startup warning。
 
-### 5.4 Subsystem：Authorization／Administration
+### 4.4 Subsystem：Authorization／Administration
 
 Commands：
 
@@ -430,7 +320,8 @@ Commands：
 - `RotateAdminCredential`
 
 每個 Command 使用 expected version、actor capability、reason 與 idempotency key。
-禁止最後一位 `system_admin` 自我停權／降權，除非經獨立 break-glass procedure。
+禁止最後一位 `system_admin` 自我停權／降權；本系統不採用 break-glass credential、
+緊急繞過 API 或自動復原流程。
 
 Ports：`AdminRepository`、`SessionRepository`、`CapabilityPolicy`、
 `SecurityAuditRepository`、`SecurityOutbox` 與 `AccessControlUnitOfWork`。
@@ -439,7 +330,7 @@ last-admin guard，寫入 grant／enabled event，撤銷受影響 session，appe
 receipt／outbox，最後由 outer Unit of Work 單次 commit。相同 key replay 回既有
 receipt；不同 payload、stale version 或並行 last-admin mutation 固定 conflict。
 
-### 5.5 Subsystem：Security Audit
+### 4.5 Subsystem：Security Audit
 
 Domain decision audit 必須與 mutation 同交易保存：
 
@@ -454,7 +345,15 @@ Domain decision audit 必須與 mutation 同交易保存：
 HTTP access log、latency 與 diagnostic audit 可獨立 best-effort，不能取代 Domain audit。
 Generic Data Browser 不得修改 admin users、sessions、capabilities 或 security audit。
 
-### 5.6 Typed errors
+2026-08-09 已採用 Security Audit policy：管理員可查最近兩年的 audit 摘要，不以
+`admin.audit.read` capability 作為查閱門檻；清單固定遮罩 IP，明細固定遮罩 token、password、
+Authorization、LINE user ID、電話與身分證等敏感值。所有已登入管理員可直接查看已遮罩明細。
+此為唯讀查詢，不要求填寫查閱原因，也不另寫入 Domain decision event；`reason` 僅是會改變
+資料、綁定、授權或核准結果的 Command audit 欄位。
+超過兩年的線上紀錄由每日 bounded worker 移至
+不對管理 UI 開放的 archive；archive 不自動刪除。
+
+### 4.6 Typed errors
 
 | Code | HTTP |
 |---|---|
@@ -468,7 +367,7 @@ Generic Data Browser 不得修改 admin users、sessions、capabilities 或 secu
 | `last_system_admin_protected` | 409 |
 | `security_audit_persistence_failed` | transaction rollback |
 
-### 5.7 Alerts 與人工入口
+### 4.7 Alerts 與人工入口
 
 - repeated login failure；
 - disabled user session usage；
@@ -481,9 +380,9 @@ Generic Data Browser 不得修改 admin users、sessions、capabilities 或 secu
 管理入口提供 user enable／disable、role capability assignment、session revoke、
 credential rotation 與 audit search；不得以 Data Browser generic PATCH 代替。
 
-## 6. Domain：Case Import
+## 5. Domain：Case Import
 
-### 6.1 責任與 SSOT
+### 5.1 責任與 SSOT
 
 Case Import 擁有：
 
@@ -497,7 +396,7 @@ Case Import 擁有：
 typed `ApplyCaseImport`／`ApplyBeClassReview` 委派各 owning Domain，在單一 outer
 Unit of Work 建立。
 
-### 6.2 State machine
+### 5.2 State machine
 
 ```text
 received → normalized → ready → applied
@@ -508,7 +407,7 @@ received → normalized → ready → applied
 同一 source row identity＋相同 payload 是 replay；相同 identity＋不同 payload 是
 source conflict。已存在 internal identity 時不得 insert-or-update 覆寫，必須進 review。
 
-### 6.3 Subsystems／Modules
+### 5.3 Subsystems／Modules
 
 Subsystems：
 
@@ -545,7 +444,7 @@ Ports：`CaseImportSourceArchive`、`CaseImportRepository`、`CaseIdentityQuery`
 payload digest 與 operation 組成 idempotency identity；stale／identity ambiguity
 不重試，只有 storage unavailable／deadlock／timeout 可安全重試。
 
-### 6.4 Typed errors／人工入口
+### 5.4 Typed errors／人工入口
 
 - `case_import_source_conflict`
 - `case_import_row_invalid`
@@ -562,9 +461,9 @@ reason、expected version 與 idempotency receipt；結果為 `rejected`，不�
 任何正式 Client／Order／Finance／Scheduling root fact。相同 key replay 回原 receipt，
 stale review 固定 conflict。
 
-## 7. Domain：Knowledge Retrieval
+## 6. Domain：Knowledge Retrieval
 
-### 7.1 責任與 non-goals
+### 6.1 責任與 non-goals
 
 Knowledge Retrieval 擁有：
 
@@ -576,7 +475,7 @@ Knowledge Retrieval 擁有：
 不擁有訂單、排班、帳務、權限或個案決策。RAG 回答不得作為 Domain Command、
 付款、資格、排班、退款或法律承諾的輸入。
 
-### 7.2 State machines
+### 6.2 State machines
 
 ```text
 Knowledge item: draft → reviewed → published → retired
@@ -587,7 +486,12 @@ Index build: requested → building → ready | stale | failed
 只有具 content-publish capability 的管理員能發布。來源更新使舊 index `stale`；
 stale／failed index 必須明確降級，不得用無來源模型答案假裝成功。
 
-### 7.3 Subsystems／Modules
+2026-08-09 已採用並實作：content author 不得覆核自己建立的 draft，content author 也不得
+發布自己的內容；只有 `published` item 能被查詢。答案必回 source URI、content digest 與
+published version，且固定 `authoritative=false`。舊 Chroma FAQ 直接回答維持退役；無來源、
+stale 或查詢失敗時 LINE 轉人工，不得編造答案。
+
+### 6.3 Subsystems／Modules
 
 Subsystems：
 
@@ -606,7 +510,7 @@ Modules：
 - `CitationAssembler`
 - `AnswerBoundaryPolicy`
 
-### 7.4 Query、錯誤與人工入口
+### 6.4 Query、錯誤與人工入口
 
 Query 回傳 answer、source identities、source versions、retrieved excerpts 的安全摘要、
 index version 與 `authoritative=false`。
@@ -636,21 +540,14 @@ stable idempotency key；鎖定 item／job 後 append versioned event、receipt�
 storage／provider transient failure bounded retry。legacy crawler／FAQ writer 必須改成
 durable source job 或退出；LINE bot 不得直接更新 knowledge root 或無 citation 回答。
 
-## 8. Human-decision-required
+## 7. Human-decision-required
 
-1. BreezySign 官方 signature header、algorithm、event ID 與 redelivery contract；
-2. exact provider contract status enum；
-3. 是否允許 BreezySign evidence 自動 Preview／Apply Orders；未決前固定 human-only；
-4. LINE Rich Menu 正式發布是否要求雙人覆核；
-5. LINE review timeout、最大轉派次數與 escalated owner；
-6. session TTL、idle timeout、renewal ceiling；
-7. security audit retention、遮罩與查閱能力；
-8. break-glass credential 的保管人與演練頻率。
+無。
 
-缺少以上值時，相應 production feature fail closed；不得使用 mock、固定 actor 或
-development bypass 補上。
+本節原先列出的所有人工作業政策均已決定；任何後續 policy 變更仍須先更新決策記錄，
+不得以 mock、固定 actor 或 development bypass 補上。
 
-## 9. 分層驗收
+## 8. 分層驗收
 
 ### Module
 
@@ -661,7 +558,6 @@ development bypass 補上。
 - duplicate／conflict／retry／stale processing；
 - LINE task exact replay；
 - review CAS；
-- Contract mapping ambiguity；
 - Domain audit failure rollback。
 
 ### Domain
@@ -671,7 +567,6 @@ development bypass 補上。
 
 ### Global
 
-- BreezySign signed event 不直接建立 assignment；
 - LINE webhook redelivery 不重複 side effect；
 - business commit＋LINE task 原子建立，provider failure 後可安全 retry；
 - internal key 無 Bearer／capability 不得執行 human mutation；
@@ -679,7 +574,7 @@ development bypass 補上。
 - invalid Case Import 不污染正式 Client／Order；
 - Knowledge answer 無來源或 index stale 時 fail closed，且不能觸發 Domain mutation。
 
-## 10. 來源追溯
+## 9. 來源追溯
 
 - `document/文件整併工作區/03_API_LINE與自動化_無損合併稿.md`
 - `document/文件整併工作區/05_潛在狀態機規則盤點.md`

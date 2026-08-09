@@ -44,10 +44,6 @@ Government Subsidy
   ├─擁有政府 claim、submission／approval、receipt／reversal ledger 與 allocation
   └─接受 Finance Import typed dispatch；不與 Client Finance 互相抵銷
 
-Contract Integration
-  ├─擁有 BreezySign provider identity、可信 evidence inbox 與 processing receipt
-  └─只把 verified evidence 提供給 Orders；不得直接改 Orders
-
 LINE Integration
   ├─擁有 LINE identity、inbox、delivery task、review、publication 與 media
   └─只負責平台互動；不得直接改 Orders、Scheduling 或 Finance
@@ -199,9 +195,16 @@ Anomalies 不直接寫 Orders、Scheduling、Client Finance、Payroll 或 Staff 
 
 ## 4. pytest 分層
 
-Activation guard：本章是已核准的未來 acceptance contract。當前 Work Package 只授權
-Inventory v2，不授權執行 pytest、撰寫 production module、修改 fixture／DB 或以測試
-驅動 caller 改接。
+### 歷史 activation guard
+
+上述限制是本基線最初的授權狀態。`46_Six_Remaining_Gaps_Completion_Architecture.md`
+於 2026-08-09 已取得實作授權，後續 Domain work package 已可依本章進行 production
+實作、pytest 與 isolated-MySQL 驗收；不得再將此歷史 guard 當作禁止修正已發現跨域缺口
+的理由。
+
+目前每個 Global scenario 是否完成，仍只可由「現行 source hash 對應的 isolated-MySQL
+E2E」證明。舊 manifest／收據是可追溯的歷史證據，程式或測試來源變動後必須重新執行並
+更新 source hash，不能以舊綠燈取代現況驗證。
 
 ### Module
 

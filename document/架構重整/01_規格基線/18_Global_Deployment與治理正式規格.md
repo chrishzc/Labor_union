@@ -5,8 +5,7 @@
 - 狀態：`approved-architecture-baseline`
 - 人工核准日期：2026-08-03
 - Logical deployment topology：`consolidated-decision`
-- 建議 production profile：`local-primary`（`recommended-candidate`）
-- Tunnel／edge vendor、RTO／RPO 與營運責任：`human-decision-required`
+- Deployment profile／target-host acceptance：`retired-by-user-2026-08-09`
 - ADAD／Checkpoint／Source Lock／system map gate：`historical`
 - 當前核准只啟用 Inventory v2 evidence；本文件 migration、deployment、release、
   pytest 與 recovery contract 不授權本輪執行任何 mutation。
@@ -53,7 +52,6 @@ External Platforms / Approved Admin Client
 允許：
 
 - LINE webhook；
-- BreezySign webhook；
 - LIFF callback／必要 public read endpoint；
 - health endpoint 的最小非敏感資訊。
 
@@ -69,9 +67,9 @@ External Platforms / Approved Admin Client
 Edge 必須提供 TLS、request size limit、timeout、rate limit、source／signature validation
 支援與 request correlation。
 
-正式傳輸目標為 HTTP/2；HTTP/1.1 是相容 fallback，HTTP/3 是可選優化，不得成為
-正確性或可用性的唯一前提。JSON／text 可以依共同效能契約壓縮，XLSX、圖片及已壓縮
-artifact 不得重複壓縮。
+HTTP/1.1 request／response 相容性是 application transport contract；HTTP/2、HTTP/3 與
+connection reuse 都是部署者可選的外部優化，不得成為正確性、可用性或 release 的唯一前提。
+JSON／text 可以依共同效能契約壓縮，XLSX、圖片及已壓縮 artifact 不得重複壓縮。
 
 ### 3.2 Application Zone
 
@@ -90,30 +88,12 @@ artifact 不得重複壓縮。
 - archive failure 不得使匯出／release receipt宣稱完整。
 - backup 必須可 restore 驗證；「檔案存在」不是可復原證據。
 
-## 4. Deployment profiles
+## 4. Deployment boundary
 
-### 4.1 `local-primary`（建議候選 profile）
-
-- FastAPI、Worker、Streamlit、File Watcher 在工會受管主機執行。
-- MySQL 位於同一受控網段或地端 NAS private network。
-- public webhook 經 managed HTTPS tunnel／edge 進入 FastAPI。
-- 管理 UI 只經 LAN／VPN 或同等受控入口。
-- 主機必須具備 service supervision、開機自啟、UPS／停電處置與遠端維護路徑。
-
-此 profile 是基於目前地端運作目標提出的候選，不因 `online.bat` 現況而自動生效。
-只有人工完成 deployment decision record 並通過 24/7、health、secret、recovery
-與責任歸屬驗證後，才能成為 target profile。
-
-### 4.2 `hybrid-app-host`（候選 profile）
-
-- FastAPI、Worker、Streamlit 可移至受管 cloud host。
-- MySQL 維持 private data zone，僅以 VPN／private network 連接。
-- cloud host 不保存長期 DB backup 或未加密敏感資料。
-- DB latency、VPN partition、credential rotation、data egress 與 incident ownership
-  必須在採用前完成 Global E2E。
-
-切換 profile 是 architecture／security／operations 變更，必須人工重新確認，
-不能只改環境變數。
+本系統不保存 deployment profile、target host、edge vendor、RTO/RPO 或 host ownership
+設定，也不以 target-host acceptance 作為程式 release gate。這些是部署者的外部作業選擇，
+不得寫入 application config、schema、API 或 UI。第 2 節的資料庫私網、HTTPS、secret
+不入 Git 與 preserve-data release 安全不變量仍然有效。
 
 ## 5. Subsystem：Release Orchestration
 
@@ -149,7 +129,6 @@ Manifest 至少包含：
 - schema release manifest digest；
 - application config schema version；
 - required secrets 的名稱，不含值；
-- target deployment profile；
 - source／candidate database identity；
 - backup receipt；
 - operator、maintenance window、correlation ID；
@@ -171,7 +150,6 @@ Fail closed 檢查：
 - DB host／schema／principal；
 - pending migration／schema drift；
 - backup target 可寫與 restore 工具可用；
-- public edge／private admin edge；
 - port collision；
 - worker／API／UI version一致；
 - legacy writer inventory release threshold；
@@ -234,15 +212,8 @@ Logs 必須具 correlation ID、service、release version、operation 與 typed 
 
 ## 8. Human-decision-required
 
-上線前必須補入正式 deployment decision record：
-
-1. public edge／tunnel provider、domain 與 certificate owner；
-2. 管理端 private access 方法；
-3. RTO、RPO、backup interval、retention 與 restore rehearsal interval；
-4. maintenance window、primary operator、approver 與 incident contact；
-5. service host／NAS／UPS／VPN ownership；
-6. production secret store 與 rotation interval；
-7. `local-primary` 是否達到 24/7 availability；若否，是否切換 `hybrid-app-host`。
+無。deployment profile 與 target-host acceptance 已退出正式產品設定；外部部署者不得藉此
+改變第 2 節的安全不變量或 Domain 行為。
 
 ## 9. 現行治理模型
 
@@ -287,7 +258,7 @@ system map 都不具現行 authority。
 - state machine／transaction boundary；
 - data contract／public API；
 - schema destructive change；
-- deployment profile／security boundary；
+- security boundary；
 - production DB、credentials、network 或 external platform side effect；
 - Work Package scope 擴大。
 
@@ -329,8 +300,7 @@ system map 都不具現行 authority。
 - production-like edge＋TLS＋signature；
 - DB 不暴露公網；
 - release artifact全部有 commit／digest；
-- `local-primary` 斷電、網路中斷、worker crash 與 backup restore演練；
-- profile switch 不改 Domain behavior。
+- worker crash 與 backup restore 的 disposable contract 演練。
 
 ## 12. 來源追溯
 
@@ -343,6 +313,8 @@ system map 都不具現行 authority。
 - `online.bat`
 - `start_fastapi_ngrok.py`
 - `scripts/bootstrap_admin_dev_env.ps1`
+- `53_Deployment_Profile_and_Target_Host_Acceptance_Retirement.md`
 - 根目錄 `AGENTS.md`
 
-live 啟動腳本僅作現況證據；正式 release 仍須依本文件 manifest 與 gate 驗證。
+live 啟動腳本僅作現況證據；正式 release 仍須依本文件 preserve-data manifest 驗證，
+不得要求 deployment profile 或 target-host acceptance。

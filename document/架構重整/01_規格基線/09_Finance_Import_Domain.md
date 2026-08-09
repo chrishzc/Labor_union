@@ -40,7 +40,7 @@ Client Finance、Staff Payables 與 Government Subsidy 只能透過 Finance Impo
 | classification | append-only classification decision event 的 current projection | derived, monotonic |
 | reconciliation | owning Finance Domain 的正式 ledger／allocation | cross-Domain root result |
 | reprocess receipt | `finance_import_reprocess_runs` | append-only audit |
-| reclassification audit | `finance_import_reclassification_events` | append-only event |
+| reclassification audit | `finance_import_classification_events` | append-only event |
 | import-review alert | Anomalies current projection | rebuildable derived state |
 
 Canonical raw columns、`fingerprint + fingerprint_version`、既有 occurrence、正式 ledger
@@ -123,15 +123,16 @@ Modules：
 - 同批完全重複只允許首次 canonical insertion 進入下游；
 - 任一 staging、classification 或 dispatch failure 使整批 Apply rollback。
 
-`failed` batch 若需要在 transaction rollback 後保留，必須由獨立 ingestion-attempt audit 記錄；不得宣稱已 rollback 的 batch row 同時持久存在。此 audit model 尚未建立前，失敗以 typed result、操作 log 與 Anomalies intent 表示。
+`failed` batch 由獨立 ingestion-attempt audit 留存；不得宣稱已 rollback 的 batch row 同時持久存在。
 
-目標採用 append-only `FinanceImportAttempt`：
+append-only `FinanceImportAttempt` 由 `finance_import_ingestion_attempts` 實作：
 
 - 在主 Apply transaction 外保存 command identity、source content digest、phase、typed error、
   started／completed time 與 transaction outcome；
 - 不保存 raw row、完整帳號、姓名或 credential；
 - 成功時連結 completed batch；失敗時不偽造 batch id；
-- exact retry 以 command id 與 canonical payload 回原 attempt／receipt。
+- exact retry 以 command id 與 canonical payload 回原 attempt／receipt，不重跑已 rollback 的
+  workbook transaction。
 
 ### 4.3 Classification
 
@@ -169,19 +170,23 @@ Modules：
    `review_required`。第二筆疑似重匯不得靜默略過或自動打平，必須保留 canonical row
    並形成可處理的 anomaly。
 
-### 4.3.1 真實銀行資料驗證註記
+### 4.3.1 銀行格式與分類品質驗證註記
 
-上述候選辨識規則是正式目標，但目前工作區沒有可再次隔離使用的真實對帳單樣本，故不得
-把 pure／fixture test 當成辨識率或誤配率證明。`019fb603-937a-7e92-b8a2-a4e2838362d6`
-的既有真實匯入紀錄只證明當時的虛擬帳號 classifier 覆蓋不足，不能用來宣稱新候選規則
-已通過。
+已去識別的真實銀行格式 Excel 是 parser、normalization 與完整 Preview／Apply 鏈路的
+產品驗收來源；fixture 的業務邊界案例則驗證唯一命中、零／多候選、衝突與疑似重匯時的
+fail-closed 行為。兩者可證明功能正確與不誤配，但不宣稱統計上的真實資料辨識率。
+`019fb603-937a-7e92-b8a2-a4e2838362d6` 的歷史匯入紀錄只證明當時的虛擬帳號 classifier
+覆蓋不足，不能用來推導目前的分類品質。
 
-待取得可使用的真實格式 Excel 後，必須在 disposable MySQL 驗證：
+未來取得可合法重播的實際資料分布樣本後，可在 disposable MySQL 追加下列分類品質量測：
 
 - 強識別命中、姓名／備註／帳號／金額／時間的單一候選，以及零／多候選；
 - 相同客戶不同日期的第二筆匯款，保留為疑似重匯而非自動打平；
 - 正確率、錯誤候選率、人工覆核率與可重播的 evidence；
 - intake → classification → Preview → Apply → owning Domain → Anomalies 的全鏈路。
+
+上述量測是持續品質改善 evidence，不是產品完成或 release gate；缺少樣本時仍必須維持
+唯一候選才自動分類、其餘全部人工覆核的安全行為。
 
 分類結果必須包含：
 
@@ -572,16 +577,13 @@ Stable errors：
 
 ## 11. 現況吸收與退出
 
-可吸收的現況：
-
-- `finance_import_staging.py`
-- `finance_transaction_classifier.py`
-- `finance_import_states.py`
-- `finance_import_dispatch.py`
-- `finance_import_application.py`
-- `finance_import_reprocessing.py`
-- `finance_import_review_alerts.py`
-- 兩支 thin CLI。
+先前列為「可吸收」的 service compatibility modules 已完成退出；正式 runtime 僅使用
+`domains/finance_import/` 的 classifier／cancellation-code 與
+`subsystems/finance_import/` 的 typed ingestion、application、reprocessing、query、
+reconciliation-dispatch workflows。`services/finance_cancellation_code.py` 的重複 helper、
+`services/finance_import_states.py` 的無 caller characterization state contract、以及
+`services/finance_import_dispatch.py` 的舊 dispatcher compatibility import 已移除；不得重新
+建立這些 import path。
 
 開始實作前必須修正的漂移：
 

@@ -23,8 +23,8 @@
 
 ## Related current architecture evidence
 
-- `formal_baseline_v1.json`: current live validation: 683 writers and 0 legacy projection runtime callers.
-- `writer_inventory_v3/writer_inventory_v3_candidate.manifest.json`: current live validation: 683 findings, 9 unresolved; every inventory disposition remains blocked and no removal approval is implied.
+- 2026-08-04 historical baseline: 683 writers and 0 legacy projection runtime callers.
+- 2026-08-04 historical writer inventory evidence: 683 findings, 9 unresolved; every inventory disposition remained blocked and no removal approval was implied.
 
 This receipt is supplementary evidence for the Client Finance and Government Subsidy completion matrix. It does not upgrade the remaining UI task-queue, loading-trace, historical-reprocess, or preserve-data release gaps to proven.
 

@@ -1,10 +1,13 @@
 ---
-doc_type: operational-acceptance-runbook
-status: awaiting-target-host-execution
+doc_type: retired-operational-acceptance-runbook
+status: retired-by-user-2026-08-09
 date: 2026-08-09
 ---
 
-# Target-host Deployment Acceptance Runbook
+# Retired Target-host Deployment Acceptance Runbook
+
+> 此 runbook 已依使用者決定退出正式產品設定與 release gate。內容僅保留歷史追溯，
+> 不得再要求填入 target host、edge、RTO/RPO 或 acceptance evidence。
 
 This runbook is evidence collection, not a local-development substitute. Run it
 only on the approved target host with a disposable acceptance command and a

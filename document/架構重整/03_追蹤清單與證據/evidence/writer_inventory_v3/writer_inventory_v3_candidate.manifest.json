@@ -9,54 +9,54 @@
     "services",
     "subsystems"
   ],
-  "finding_count": 672,
-  "unique_identity_count": 663,
-  "scan_fingerprint": "fd3f7d68476d4f48597aee2e9559ec8bfba29f1b3416610a7209c6fde3899b85",
-  "evidence_sha256": "ee51568c12dc7af8f9f868805c7d82c6bfda6cb3fcb9469c0d7f6ddf31c1c1bc",
+  "finding_count": 669,
+  "unique_identity_count": 660,
+  "scan_fingerprint": "665ae0f8a0f0dc40c131314eee3e112aef5021e1b8b21c488608e3744d1c084b",
+  "evidence_sha256": "a656e88e918905219911e6390a1e43476dde6dc1a469722ff295c73cf5b8cef4",
   "owner_candidate_counts": {
-    "access_control": 17,
-    "anomalies": 46,
+    "access_control": 23,
+    "anomalies": 47,
     "case_import": 40,
-    "client_finance": 65,
-    "finance_import": 35,
-    "global_infrastructure": 124,
-    "government_subsidy": 42,
-    "line_integration": 60,
+    "client_finance": 63,
+    "finance_import": 37,
+    "global_infrastructure": 130,
+    "government_subsidy": 37,
+    "line_integration": 62,
     "orders": 78,
     "payroll": 31,
-    "scheduling": 102,
-    "staff_payables": 13,
-    "unresolved": 19
+    "scheduling": 79,
+    "staff_payables": 9,
+    "unresolved": 33
   },
   "candidate_disposition_counts": {
-    "allowed_transaction_boundary_candidate": 140,
-    "canonical_writer_candidate": 532
+    "allowed_transaction_boundary_candidate": 144,
+    "canonical_writer_candidate": 525
   },
   "writer_type_candidate_counts": {
-    "canonical_persistence_writer_candidate": 411,
-    "dynamic_sql_writer_candidate": 103,
-    "migration_writer_candidate": 18,
-    "outer_transaction_boundary_candidate": 140
+    "canonical_persistence_writer_candidate": 399,
+    "dynamic_sql_writer_candidate": 105,
+    "migration_writer_candidate": 21,
+    "outer_transaction_boundary_candidate": 144
   },
   "recommendation_candidate_counts": {
-    "retain_canonical_candidate": 354,
-    "retain_restricted_maintenance_candidate": 111,
-    "strong_review_required_candidate": 207
+    "retain_canonical_candidate": 331,
+    "retain_restricted_maintenance_candidate": 116,
+    "strong_review_required_candidate": 222
   },
-  "high_risk_count": 498,
+  "high_risk_count": 505,
   "high_risk_tag_counts": {
-    "access_or_audit": 27,
-    "client_finance": 86,
-    "dynamic_sql": 103,
-    "government_subsidy": 49,
-    "line_integration": 60,
+    "access_or_audit": 43,
+    "client_finance": 84,
+    "dynamic_sql": 105,
+    "government_subsidy": 44,
+    "line_integration": 62,
     "order_lifecycle": 94,
-    "schema_or_data_migration": 19,
-    "staff_payables_or_month_close": 37,
-    "table_unresolved": 141,
-    "transaction_boundary": 140
+    "schema_or_data_migration": 22,
+    "staff_payables_or_month_close": 33,
+    "table_unresolved": 145,
+    "transaction_boundary": 144
   },
-  "unresolved_count": 19,
+  "unresolved_count": 33,
   "legacy_subsidy_projection_boundary": {
     "table": "client_payments",
     "fields": [

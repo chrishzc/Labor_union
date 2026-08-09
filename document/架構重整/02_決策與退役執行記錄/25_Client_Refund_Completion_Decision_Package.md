@@ -4,7 +4,7 @@ doc_type: decision-package
 
 # Client Refund Completion Decision Package
 
-## 2026-08-04 live gap evidence
+## 2026-08-04 live gap evidence（歷史狀態）
 
 - Deterministic amount-conserving partial allocation is now implemented and has focused tests;
   an outgoing bank fact may settle a refund obligation from `pending` to a remaining balance.
@@ -15,14 +15,13 @@ doc_type: decision-package
   references. A unique refund account alone is not case authority. Without that source evidence,
   the row remains manual review; an operator may only proceed through the typed Correction
   selection with exact open obligations, reason, and evidence.
-- Refund return/reversal foundations and focused tests exist. They are **not** sufficient for
-  completion: isolated-MySQL real-format Excel E2E, canonical anomaly/work queue, Global
-  scenarios and a publishable preserve-data release are still missing.
+- 當日 Refund return/reversal foundations and focused tests exist，但尚未完成 isolated-MySQL
+  real-format Excel E2E、canonical anomaly/work queue、Global scenarios 與
+  preserve-data release 的驗收；這是當日缺口紀錄，不是目前完成度。
 - A disposable MySQL 8.4 E2E now proves a real Taishin workbook can enter as immutable bank
   facts, open a canonical manual-review alert, and—after typed manual correction—create a
   `refund` ledger entry, exact allocation, settled obligation, correction outbox, and resolved
-  anomaly. This covers manual refund correction only; return/reversal and Global scenarios remain
-  incomplete.
+  anomaly. 當日僅覆蓋 manual refund correction；後續完成紀錄見下一節。
 - Client subsidy return remains a separate payable line. The legacy module
   `subsystems/client_finance/subsidy_return_reconciliation.py` has been retired after a
   full runtime/maintenance caller scan proved zero callers; its three projection writers no
@@ -33,6 +32,20 @@ doc_type: decision-package
   fixed due date, Finance Import records `subsidy_advance`. A full later allocation creates
   exactly one recovery link; a partial or otherwise mismatched allocation opens review and
   never creates a second client payout. This has both focused and isolated-MySQL evidence.
+
+## 2026-08-09 完成確認
+
+- `test_finance_import_disposable_mysql_e2e.py`、
+  `test_refund_return_review_disposable_mysql_e2e.py` 與
+  `test_g14_deposit_reversal_disposable_mysql_e2e.py` 的 six-case disposable MySQL 8.4
+  驗收已覆蓋 real-format bank fact、manual correction、refund return/reversal、subsidy
+  advance/recovery 與 canonical deposit reversal。
+- Client Finance focused suite、legacy receipt dispatch retirement 與 Scheduling deposit
+  boundary 合計 `116 passed, 1 skipped`；驗收來源與容器隔離資訊記錄於
+  `03_追蹤清單與證據/evidence/2026-08-09_client_finance_domain_revalidation_receipt.md`。
+- preserve-data additive migration 的 source → backup → candidate → switch → read-smoke
+  演練已完成，記錄於
+  `03_追蹤清單與證據/evidence/preserve_data_rehearsal_20260809/`。
 
 ## Formal completion scope
 

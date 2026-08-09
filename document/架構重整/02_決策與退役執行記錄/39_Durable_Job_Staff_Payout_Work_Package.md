@@ -1,6 +1,6 @@
 ---
 doc_type: gap-package
-declared_status: "proven"
+declared_status: "implementation-complete; isolated-mysql-e2e-proven"
 ---
 
 # Durable Job Staff Payout Work Package
@@ -30,11 +30,14 @@ supervision, schema or data migration changed.
 event payload identities, fresh-connection request reconstruction and worker
 registry ownership.
 
-## Remaining proof
+## Isolated MySQL crash/replay proof
 
-An isolated MySQL crash/replay E2E remains required. Its fixture must create
-the canonical Finance Import outgoing bank fact, staff payable obligation,
-primary staff bank account and, for return/reversal, the prior payout event
-chain. A simplified row fixture would not prove source eligibility,
-foreign-key behavior or the ownership transaction, so this package does not
-claim Global durable-job completion.
+`tests/test_staff_payout_durable_mysql_e2e.py` now creates the canonical
+Finance Import outgoing/incoming bank facts, staff payable obligation, primary
+staff bank account and the prior payout chain needed by return/reversal. The
+2026-08-09 disposable MySQL 8.4 run passed all payout, return and reversal
+durable replay cases; its Payroll-domain receipt is
+`03_追蹤清單與證據/evidence/2026-08-09_payroll_domain_revalidation_receipt.md`.
+This proves source eligibility, foreign-key behavior, fresh-connection worker
+reconstruction, same-key replay and expired-lease recovery without claiming
+target-host worker supervision or deployment acceptance.

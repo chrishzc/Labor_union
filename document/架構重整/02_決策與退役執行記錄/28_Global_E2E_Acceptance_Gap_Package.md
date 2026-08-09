@@ -12,6 +12,11 @@ needs one traceable isolated-MySQL E2E test with its root facts, API/UI entry
 point where applicable, transaction boundary, expected receipt, outbox state
 and recovery assertion named in the test or its companion evidence.
 
+Source hashes bind the manifest to the exact source snapshot that was executed.
+They are historical evidence rather than a claim about a later dirty worktree:
+any changed referenced source requires a new isolated-MySQL run and refreshed
+hashes before its scenario can again be called current.
+
 The current completion matrix identifies four business scenarios only in
 summary form (cancellation settlement, completed-service payroll retention,
 government subsidy allocation, and ambiguous batch → human review).  Their

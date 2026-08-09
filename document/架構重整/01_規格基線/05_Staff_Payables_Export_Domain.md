@@ -13,7 +13,7 @@
 | 概念 | 唯一權威 |
 |---|---|
 | 原始銀行支出 | Finance Import `CanonicalOutgoingBankFactPort` |
-| 月嫂付款義務 | Payroll 產生的有效 `staff_payments` |
+| 月嫂付款義務 | Payroll 產生的 assignment-owned immutable obligation events，以及其 `staff_obligations` current projection；`staff_payments` 僅 compatibility projection |
 | payout／return／reversal | immutable Staff Payout Ledger |
 | 銀行帳戶 owner | 唯一有效 primary `staff_bank_accounts` |
 | net paid | succeeded payout − return − reversal |

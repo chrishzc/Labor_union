@@ -24,7 +24,7 @@ a bank failure state.
 | Subsidy return / union advance | No automatic payment or settlement. | Client `subsidy_return` obligation; Government Subsidy funding and claim allocation facts. | Advance-due root-fact consumer and anomaly projection. | `RETURN-001` covers overdue client payout; a separate `subsidy_advance_due` reminder is derived from funding facts and exposes a read-only review queue. |
 | Scheduling / Payroll exit | Legacy mutation must not bypass typed ownership. | Scheduling assignment/service-date facts; Payroll obligations/ledger. | Inventory exit assertions. | Each legacy path is absent, returns Gone, or has no production caller; typed owner is the only writer. |
 | Orders Query | All list reads are bounded and all case detail fields are intentional. | Orders and assignment projections. | Summary keyset query and typed detail query. | Orders and Scheduling preserve cursor history/next cursor; complete case detail has typed schema, authorization, repository and router tests; no runtime fallback to full list. |
-| Global readiness | UI is a replaceable display layer and command identity is stable through retries. | Server-owned command/job state. | UI operation-state adapter and durable-job status query. | Idle/loading/success/empty/stale/error state, request supersession, same-command single-flight and bounded polling have tests. Deployment evidence separately proves TLS/HTTP2/latency/worker recovery. |
+| Global readiness | UI is a replaceable display layer and command identity is stable through retries. | Server-owned command/job state. | UI operation-state adapter and durable-job status query. | Idle/loading/success/empty/stale/error state, request supersession, same-command single-flight and bounded polling have tests. Target-host TLS/HTTP2/latency acceptance was later retired by decision 53; worker recovery remains a product behavior with local evidence. |
 
 ## State and transaction rules
 
@@ -53,14 +53,12 @@ a bank failure state.
 2. Finish finance alert review queues and thin UI loading/state handling.
 3. Deliver Orders cursor pagination and typed complete-detail read model.
 4. Apply the shared UI operation-state adapter to durable command workspaces.
-5. Run target-host deployment acceptance: TLS reverse proxy HTTP/2, optional
-   HTTP/3 evaluation, latency smoke, Task Scheduler installation and queued-job
-   recovery drill. These are external operational gates, not code-only claims.
+5. Retired: target-host deployment acceptance is no longer a product setting or
+   release gate; deployment choices must not change Domain behavior.
 
 ## Confirmation
 
 The user approved this architecture on 2026-08-09. Target-host deployment
-steps are explicitly deferred while LINE remains in local development. They
-remain a release gate, not a local-development blocker, and require the
-operator to provide the host, reverse-proxy/certificate ownership and a safe
-disposable acceptance environment before release acceptance begins.
+acceptance was retired as a product setting and release gate on the same date.
+It remains only historical operational guidance and cannot block local release
+contract verification.

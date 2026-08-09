@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-status: approved-for-implementation
+status: implemented-and-rehearsed
 date: 2026-08-09
 approved_by: user
 approval_date: 2026-08-09
@@ -16,8 +16,10 @@ approval_date: 2026-08-09
 2. Historical Reprocess 對「銀行根事實沒有 case reference」退款列的人工 owner
    selection。
 
-它不授權接觸 `union_db`、正式 `.env`、真實銀行資料、目標主機、或執行切換。那些仍是
-獨立 disposable rehearsal／deployment external gate。
+它不授權接觸 `union_db`、正式 `.env` 或真實銀行資料。2026-08-09 已經使用僅綁定
+localhost 的可丟棄 MySQL 容器完成專用 source→backup→candidate→migration→switch→restart/read-smoke rehearsal；可合法重播的銀行格式
+品質仍是獨立 external gate；target-host deployment
+acceptance 已由決策 53 退役。
 
 ## A. Global → Preserve-data Runner
 
@@ -70,8 +72,12 @@ Historical Reprocess Apply 改為既有 durable-job envelope：API 接受固定 
 stale/rollback、API/UI loading/data flow、release metadata 與 disposable MySQL source/candidate
 contract tests。
 
-外部驗收：專用 source→backup→candidate→migration→switch→restart/read-smoke rehearsal、真實
-但可合法重播的銀行樣本、以及 TLS/HTTP2/latency/worker recovery target-host evidence。
+已完成的隔離驗收：專用 source→backup→candidate→migration→switch→restart/read-smoke，收據
+位於 `03_追蹤清單與證據/evidence/preserve_data_rehearsal_20260809/`。來源 preflight 使用
+唯讀 principal；MySQL trigger 定義匯出需要較高的 metadata 權限，因此僅在此 disposable
+container 由既有 root snapshot 匯出，沒有對來源做資料或 schema 寫入。真實但可合法重播的
+銀行樣本仍為外部驗收。TLS／HTTP2／latency／target-host worker recovery acceptance
+已由決策 53 退役。
 
 ## 請確認
 

@@ -18,7 +18,6 @@ Orders 不擁有：
 - assignments、正式服務日、檔期鎖及 `actual_hours`；
 - 月嫂薪資與應付款；
 - Alert 的 open／claimed／resolved；
-- BreezySign 等契約平台 workflow。
 
 ## 2. Orders SSOT
 
@@ -262,5 +261,4 @@ Live writer 退出清單：
 - 全部服務完成後取消零寫入；
 - 完成但未鎖時補登正確服務根事實；
 - 鎖形成後退款／reversal 不解鎖；
-- BreezySign 事件不得越權改 Orders；
 - legacy status／assignment writers 不可達或固定 Gone。

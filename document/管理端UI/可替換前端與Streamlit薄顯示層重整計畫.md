@@ -305,7 +305,6 @@ stateDiagram-v2
 | manual actual-hours adjustment | 有付款／月結鎖與事後 `can_confirm` 結果 | 即使總時數不守恆仍可 commit，直接違反「正式儲存前擋下」；不得把事後 warning 當防禦 |
 | generic order status API | 無集中式防禦 | 無 auth、合法轉移、reason、版本、冪等或歷史，可直接繞過生命週期 predicates，應由 typed lifecycle commands 取代 |
 | Admin Data Browser PATCH orders | system-admin 與 audit | 仍可直接修改 `service_days`、`service_hours_per_day`、`custom_rest_dates`，卻不觸發排班、actual end 或財務投影重算；這些欄位不得保留 generic PATCH |
-| BreezySign webhook | 外部簽署事件可觸發正式程式 | 目前直接猜測 actual dates、寫「訂單成立」及 legacy booking；簽署不能取代訂金核銷、真正開始日確認或 canonical schedule command |
 | ClientPayment writer／Finance Excel importer | 有各自付款／匯入流程 | 仍可直接把訂單推進「訂單成立」，未委派 lifecycle owner；Finance importer 更與其「薄 CLI、不得擁有 SQL／status」SSOT 契約直接衝突 |
 | `fix_schedule_conflicts.py --repair` | 維運人員可執行 | 可依錯誤的固定 priority 降級案件並刪除排班，沒有付款鎖、candidate preview、逐案確認或 lifecycle history；只能保留 report／preview，修正須走正式人工 Command |
 | historical／master／fixture importers | 非一般 UI，但可建立基線資料 | 必須分流：historical insert-only 需建立 imported baseline event；client master insert-only 可作 case-created；fixture-only／frozen generator 不得被誤列為 production bypass |
@@ -332,7 +331,7 @@ typed Command
 - 專案目前仍在測試階段，不承擔既有 production client 的切換成本；已確認為 legacy、generic bypass 或沒有合法 aggregate 防禦的公開寫入入口，直接移除。
 - 若為了讓舊測試、舊 client 或操作人員取得明確淘汰訊號而短期保留 route，該 route 只能固定回 `410 Gone`；不得接受 payload、不得呼叫舊 writer，也不得在內部轉接 canonical Command。
 - 新前端與測試必須改呼叫正式 typed Command。不得用 `410` route 當長期 alias，也不得因舊測試失敗而恢復 legacy writer。
-- 第一批適用範圍包含任意 order status PUT、legacy assignment rest-dates PUT、legacy `/schedule/save`、legacy assign-staff、standalone schedule generate／single-day adjust，以及 Admin Data Browser 對服務量／休假來源欄位的 generic PATCH。BreezySign、Finance importer 與維運修復 script 的正式副作用則必須移除，之後另以 typed Domain Command 重建。
+- 第一批適用範圍包含任意 order status PUT、legacy assignment rest-dates PUT、legacy `/schedule/save`、legacy assign-staff、standalone schedule generate／single-day adjust，以及 Admin Data Browser 對服務量／休假來源欄位的 generic PATCH。Finance importer 與維運修復 script 的正式副作用則必須移除，之後另以 typed Domain Command 重建。
 
 ### 已確認決策：命令分開、核心規則共用
 

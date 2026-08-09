@@ -18,7 +18,7 @@ Payroll 不建立 assignment、不處理客戶收款、不核銷銀行出款、�
 | 雙倍薪日 | 明確 special-pay event；不從 Holiday 猜測 |
 | 樓層費 | Orders 條款＋實際服務日 ownership 的整數守恆分配 |
 | 調整額 | 不可變 adjustment 及其 assignment allocations |
-| 逐 assignment 應付 | `staff_payments` projection |
+| 逐 assignment 應付 | `staff_obligations` current projection；不可變來源為 `staff_obligation_events`，`staff_payments` 若存在只可作 compatibility read projection |
 
 費率政策：
 
@@ -54,7 +54,7 @@ total_payable = service_salary + floor_fee_allocated + effective_adjustments
 
 ### Staff Obligation Projection
 
-未核銷義務可依新根事實重建；已有正式付款歷史時不得覆寫，改追加 adjustment／reversal 義務。Orders 在第一次形成正式 `actual_end_date` 時，以 `calculate_staff_payment_due_date` 建立 `staff_payment_due_date`。該日期只讀取 Client Finance 的衍生 `client_payable_amount` 與「全補助訂單」判定：金額大於 0 時為結案後次一曆月 15 日；金額為 0 且本案實際服務時數未超過補助市民 120 小時上限、樓層費及其他自費項目皆為 0 時，才是全補助訂單並為結案後第二曆月 15 日。補助資格本身不是付款日分支；第 121 小時起以每小時 350 元、任何樓層費均形成客戶應收。後者不建立 Client Finance 收款核銷；若政府款尚未入帳而月嫂款到期，由 Government Subsidy／工會墊付流程處理。原日形成後不因取消、實際服務日更正或晚形成差額自動改到下一個 15 日。
+未核銷的 `staff_obligations` current projection 可依新根事實重建；已有正式付款歷史時不得覆寫，改追加 immutable adjustment／reversal obligation event。`staff_payments` 若存在只可由這些 canonical obligation 投影為 compatibility read model，不得回寫 Payroll SSOT。Orders 在第一次形成正式 `actual_end_date` 時，以 `calculate_staff_payment_due_date` 建立 `staff_payment_due_date`。該日期只讀取 Client Finance 的衍生 `client_payable_amount` 與「全補助訂單」判定：金額大於 0 時為結案後次一曆月 15 日；金額為 0 且本案實際服務時數未超過補助市民 120 小時上限、樓層費及其他自費項目皆為 0 時，才是全補助訂單並為結案後第二曆月 15 日。補助資格本身不是付款日分支；第 121 小時起以每小時 350 元、任何樓層費均形成客戶應收。後者不建立 Client Finance 收款核銷；若政府款尚未入帳而月嫂款到期，由 Government Subsidy／工會墊付流程處理。原日形成後不因取消、實際服務日更正或晚形成差額自動改到下一個 15 日。
 
 ## 4. Modules
 
@@ -142,5 +142,6 @@ Stable errors：
   `services/actual_hours_adjustment_confirmation_service.py` 不得再直接寫 actual hours 或薪資。
 - `services/payment_service.py` 建立 `staff_payments` 的入口遷移後關閉。
 - `services/staff_monthly_settlements.py` 只保留 legacy read-only；不得建立新 Payroll SSOT。
-- final writer scan 必須證明新 `staff_payments` obligation、rate snapshot、floor-fee
-  allocation 與 payroll adjustment 只有 Payroll persistence adapter 可寫。
+- final writer scan 必須證明 `staff_obligations`／`staff_obligation_events`、rate snapshot、
+  floor-fee allocation 與 payroll adjustment 只有 Payroll persistence adapter 可寫；
+  `staff_payments` 只允許 compatibility read projection，不得成為新 obligation writer。

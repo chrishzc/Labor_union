@@ -91,7 +91,7 @@ versioned evidence artifact；不會自動把任何 finding 升為 `approved_to_
 9. root fact、transaction、idempotency、outbox、audit 與 rollback 等價證據；
 10. schema／歷史資料保留策略；退出 code 不代表 DROP table 或刪資料；
 11. 測試只使用 disposable DB／credential；禁止正式 `.env`、`union_db`、LINE、
-    BreezySign 或 production credentials；
+    外部平台或 production credentials；
 12. code rollback、config switch、migration recovery、worker replay 與人工 recovery入口；
 13. Module、Subsystem、Domain、Global 分層驗收；
 14. fresh writer inventory 與 before／after fingerprint；

@@ -263,7 +263,8 @@ outbox、整數 contract 與 append-only triggers。既有 rows 先做 read-only
 - 任何以金額唯一相等就直接過帳、卻沒有 Preview fingerprint／人工 review 的 fallback；
 - UI 直接修改 batch paid amount、status 或 allocation。
 
-未完成新 owner migration前，`government_subsidy` Apply 固定 fail closed。
+Government Subsidy 新 owner migration 已完成；若正式 repository、schema 或 typed command
+依賴缺失，`government_subsidy` Apply 仍必須 fail closed，不得回退至舊 reconciliation writer。
 
 ## 10. pytest 驗收
 

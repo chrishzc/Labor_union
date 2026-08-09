@@ -2,8 +2,8 @@
 
 ## Decision
 
-The approved `local-primary` deployment mechanism for the durable job worker is
-Windows Task Scheduler. The task name is `LaborUnionDurableJobWorker`.
+The durable job worker supervision mechanism is Windows Task Scheduler. The task
+name is `LaborUnionDurableJobWorker`; it is not a deployment profile setting.
 
 The task runs `scripts/run_durable_job_worker.py` with the project's virtual
 environment Python under the `SYSTEM` service account. It starts at system
@@ -41,7 +41,5 @@ a one-minute interval after an unexpected process exit.
 .\scripts\uninstall_durable_job_worker_task.ps1 -WhatIf
 ```
 
-Installation requires Administrator privileges. Before production installation,
-verify that `SYSTEM` can read the project directory and `.env`, and perform a
-controlled queued-job recovery drill. Task registration artifacts prove the
-deployment contract, but do not replace target-host installation evidence.
+Task registration artifacts document the worker supervision contract. They do
+not create a target-host acceptance requirement or release gate.

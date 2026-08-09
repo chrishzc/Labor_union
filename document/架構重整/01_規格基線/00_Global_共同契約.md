@@ -108,12 +108,12 @@ current_version
 只有同時具備下列證據，架構才可進入實作：
 
 Activation guard：下列是 architecture readiness／future acceptance condition，不是
-自動施工授權。目前只允許 Inventory v2；production code、pytest 或其他 mutation
-仍須另立 exact-scope Work Package 並取得人工核准。
+自動施工授權。2026-08-03 的原始核准只允許 Inventory v2；後續 production code、pytest
+或其他 mutation 必須各自依人工核准的 exact-scope Work Package 執行，不能由本節自動推導。
 
-- 十三個 Domain（Orders、Assignments／Scheduling、Payroll、Client Finance、
-  Staff Payables、Government Subsidy、Finance Import、Anomalies、Contract Integration、
-  LINE Integration、Access Control、Case Import、Knowledge Retrieval）的 SSOT 與
+- 十二個 Domain（Orders、Assignments／Scheduling、Payroll、Client Finance、
+  Staff Payables、Government Subsidy、Finance Import、Anomalies、LINE Integration、
+  Access Control、Case Import、Knowledge Retrieval）的 SSOT 與
   typed ports 不互相重疊；
 - Migration、Deployment、Release、Runtime Supervision／Observability、Performance／UX
   及 Accounts Payable Export 等 Global Subsystem 不得被誤建成業務 Domain；

@@ -7,7 +7,7 @@
 - 已確認帳務邊界：本表保存原始銀行事實，即使金額無法完整核銷也必須保留；但不得因此建立部分正式交易。只有核銷 Preview 能使每筆所選金流與每筆所選義務都同時歸 0，才可原子建立下游正式交易與分配。未打平列留在本表並進入財務異常／人工處理。
 - 已確認共同核銷識別：同一次原子核銷 Apply 選取的所有列，成功後須寫入相同 `reconciliation_reference`。此欄只作同批追蹤與冪等，不代表外部流水號，也不參與任何應收／應付計算；現況服務有時寫入單列 fingerprint 或外部 reference，屬待重整漂移。
 - Schema：`db/schema_parts/60_finance_import_staging.sql`
-- 主要 writer：`services/finance_import_staging.py`、`services/finance_import_reprocessing.py`，以及各正式核銷 Service。
+- 主要 writer：`subsystems/finance_import/ingestion.py::ingest_finance_workbook` 透過 `subsystems/finance_import/staging.py::stage_finance_rows` 建立 canonical row；受控歷史重處理由 `HistoricalReprocessWorkflow` 的 MySQL repository 更新目前分類投影。舊 `services/finance_import_staging.py`／`services/finance_import_reprocessing.py` 已退役，不能再作 writer 依據。
 - 子表關係：每次實際匯入位置由 `finance_import_occurrences.finance_import_row_id` 關聯；正式交易與警示亦可引用本表。
 - 第一遍（live 現況）：已補齊 35 個 Schema 欄位。
 - 第二遍（衍生判定）：已完成。

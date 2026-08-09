@@ -13,7 +13,7 @@ schema、資料、外部平台與退役作業，必須以個別 Work Package、�
 不得把單一基線核准或 live 現況誤讀成所有後續變更的授權。
 
 2026-08-03 已把 `document/文件整併工作區` 中尚未收斂的月結、退款、
-BreezySign、LINE、管理權限、部署與治理語彙集中到 `15`～`18`。這四份文件目前是
+LINE、管理權限、部署與治理語彙集中到 `15`～`18`。這四份文件目前是
 `approved-architecture-baseline`；核准本身不構成 production mutation 或外部副作用授權。
 
 ## 權威順序

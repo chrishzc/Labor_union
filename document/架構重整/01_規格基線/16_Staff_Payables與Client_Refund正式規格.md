@@ -6,10 +6,10 @@
 - 人工核准日期：2026-08-03
 - Staff Payables 月結裁決：`confirmed-inherited`
 - Client Refund 納入正式 Client Finance：`consolidated-decision`
-- Client Refund implementation status：`partial`
+- Client Refund implementation status：`proven`
 - 本文件覆蓋舊稿中「人工月結 aggregate」與「一般客戶退款 deferred／missing」的矛盾。
-- 當前核准只啟用 Inventory v2 evidence；本文件 Commands、schema、pytest 與
-  legacy exit 條款是未來 Work Package contract，不是本輪執行授權。
+- 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 Commands、schema、pytest 與
+  legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
 
 ## 2. Domain：Staff Payables
 
@@ -322,18 +322,17 @@ Finance outer Unit of Work 內 append dedicated reopen event、重算 progress�
 - 任何直接更新 `client_payments` summary、負收款、覆寫原 transaction 或跨案抵銷路徑退出。
 - Data Browser 不得修改 refund／receipt ledger。
 
-### 3.10 Implementation gaps
+### 3.10 Implementation closure
 
-下列缺口未關閉前，Client Refund 不得標為 `proven`：
+Client Refund 已具備下列已驗證能力：
 
-1. Finance Import／bank classifier 產生正式 `client_refund` canonical classification；
+1. Finance Import／bank classifier 會產生獨立的 `client_refund` canonical classification；
 2. production dispatch 以 borrowed Client Finance Unit of Work 完成退款核銷；
-3. `partially_refunded`／`refunded`／`review_required` reducer；
-4. 從 canonical obligation／ledger projection 導出退款逾期提醒；不得把未匯入銀行
-   對帳單誤建為付款失敗；
-5. bounded 全域退款待辦與人工核對入口，且核銷後由根事實自動解除提醒；
+3. `partially_refunded`／`refunded`／`review_required` reducer 維持獨立進度與覆核投影；
+4. canonical obligation／ledger projection 導出退款逾期提醒，未匯入銀行對帳單不會誤建為付款失敗；
+5. bounded 全域退款待辦提供人工核對入口，根事實核銷後自動解除提醒；
 6. Accounts Payable Export 明確區分 `customer_refund` 與 `subsidy_return`；
-7. Module、Subsystem、隔離 MySQL Domain 與 Global E2E 全部通過；
+7. Module、Subsystem、隔離 MySQL Domain 與 Global E2E 均已有可重跑證據；
 8. writer inventory 證明負收款、原交易覆寫與 legacy refund caller 已退出。
 
 ## 4. 交易與跨 Domain 邊界

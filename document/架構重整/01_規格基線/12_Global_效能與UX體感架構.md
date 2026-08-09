@@ -18,11 +18,31 @@
 - cache hit／miss／age／invalidation reason；
 - background job queued／started／completed time；
 - projector／outbox lag；
-- deployment protocol、connection reuse 與 compression evidence。
+- compression response behavior 與 payload evidence；部署協定由部署者在系統外自行處理。
 
 「感覺很快」、開發機單次測量、mock timing 或 console print 不是 release evidence。
-正式效能 budget 必須按本機隔離環境、內網部署與實際主機分開保存，不能用某一台機器的
-數字冒充 Global invariant。
+正式效能 budget 必須按可重跑的本機隔離環境保存；不得用單次開發機測量冒充 Global
+invariant。target-host／edge latency 不屬產品設定或 release gate。
+
+效能量測不得建立逐請求 telemetry 資料表、不得把 request／response payload 或逐筆 timing
+寫入資料庫，也不得輸出無上限的 slow-request console log。API 僅在當次回應附
+`Server-Timing` 與 `X-Response-Time-Ms`；cache telemetry 僅為程序記憶體中的固定計數，
+程序重啟即歸零。可重跑 benchmark 的彙總結果以有限 evidence artifact 保存，不是長期
+operation log；工作單、receipt、outbox 等業務稽核資料不屬效能 telemetry，仍依各自資料
+生命週期保存。
+
+效能 budget 採 record-only：只供人工在效能快照檢視與比較，不顯示即時警告、不建立 anomaly、
+不影響 command 結果，也不阻擋 release。每一筆彙總仍標示量測層級（UI、API、DB、cache 或
+job），使人工需要改善時可辨識方向。
+
+### 2.1 管理端查看入口
+
+系統管理員在 Streamlit 導覽列開啟「🩺 系統狀態」，由
+`GET /api/v1/system/status/performance-snapshot` 讀取記憶體快照。此 read-only endpoint 使用
+既有 `system.administration` capability，不要求 `admin.audit.read`。目前畫面顯示 API service
+本次啟動後的樣本數、平均、p50／p95 的固定 latency-bucket 上限及最大值；它不顯示 URL、
+案件、人員、request／response payload 或逐筆 timestamp。服務重啟後快照歸零，因此它不是
+歷史趨勢報表；cache、DB 與 job 的可重跑彙總則隨各 benchmark evidence artifact 人工比較。
 
 ## 3. 前端關卡：先回應，再取得權威結果
 
@@ -91,10 +111,10 @@ Streamlit 先使用 placeholder、`session_state` 的 local draft／stable idemp
 
 ### 4.2 Connection／protocol
 
-- production reverse proxy／application server 必須使用 keep-alive 與連線池。
-- HTTPS 部署以 HTTP/2 多路複用為基準目標；需用部署 smoke evidence 證明實際協定。
-- HTTP/3 是基礎設施可選優化，只有 proxy、TLS、UDP、監控與 fallback 驗證完成後啟用。
-- HTTP/1.1 fallback 必須正確；應用程式業務語意不得依 HTTP/2 或 HTTP/3 改變。
+- HTTP/1.1 request／response 與 compression negotiation 必須正確；應用程式業務語意不得
+  依部署協定改變。
+- reverse proxy、keep-alive、HTTP/2、HTTP/3、TLS、UDP 與 connection reuse 是部署者可選的
+  外部基礎設施優化，不保存為 deployment profile，也不是產品 release gate。
 
 ### 4.3 Conditional query
 
@@ -215,7 +235,6 @@ Ports：
 - `BackgroundJobQueuePort`
 - `JobCompletionNotificationPort`
 - `DomainProjectionFreshnessPort`
-- `DeploymentProtocolEvidencePort`
 
 ## 8. Typed results／errors
 
@@ -276,9 +295,11 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
 - 實際頁面驗證 first feedback、skeleton、loading、empty、stale、success、typed error。
 - 真實 MySQL 與真實格式 Excel 下量測 Query、Preview、Apply、export、projector lag、
   payload bytes、query count、lock wait 與 job latency。
-- HTTP/2／HTTP/3 只以實際部署協定 evidence 驗收。
-- 建立每個 environment 的 baseline 與 release budget；超出 budget 必須定位至 frontend、
-  network、backend、DB lock 或 background queue，不以取消正確性檢查換取通過。
+- 不要求 HTTP/2／HTTP/3 或 target-host 協定 evidence；部署者可在系統外量測其選用的
+  基礎設施。
+- 建立可重跑本機隔離環境的 baseline 與 record-only budget；彙總結果標示 frontend、
+  backend、DB lock 或 background queue 的量測層級，供人工檢視，不以取消正確性檢查換取
+  通過。
 
 ## 10. 實作順序
 
@@ -289,7 +310,8 @@ worker unavailable 才回 typed unavailable。UI 不得依 error message 字串�
    與 request supersession。
 4. 以實測選出高成本重複 Query，再逐一加入 cache；每一項都要有 invalidation test。
 5. 以實測選出超過互動 budget 的 report／export／scan，再導入 durable job。
-6. API／proxy 完成 compression、keep-alive、HTTP/2 evidence；HTTP/3 最後獨立評估。
+6. API 維持 compression negotiation 與 HTTP/1.1 相容；proxy／HTTP/2／HTTP/3 由部署者
+   在系統外自行評估，不能阻擋產品 release。
 
 不得在缺少 baseline 時先部署 Redis、queue 或 WebSocket，避免把基礎設施複雜度當成效能
 成果。
