@@ -30,14 +30,7 @@
       "sha256": "f8bec32ecfc11169a873c8fcfacfed71f8920d2362dcc55f548eeab47a20cdec"
     }
   ],
-  "backfills": [
-    {
-      "backfill_id": "legacy-matching-willingness-to-canonical-responses",
-      "idempotency_policy": "legacy-event-id-derived-key",
-      "source": "caregiver_matching_plan_events",
-      "target": "matching_response_events"
-    }
-  ],
+  "backfills": [],
   "contract": "migration-release-manifest/v1",
   "descriptor_artifact": {
     "dependencies": [],
