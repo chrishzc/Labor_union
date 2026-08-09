@@ -14,6 +14,7 @@ import asyncio
 import sys
 import secrets
 import requests
+import re
 from typing import Any, Dict, Optional
 from datetime import datetime, timedelta, date, timezone
 from zoneinfo import ZoneInfo
@@ -465,15 +466,18 @@ class LineBindPayload(BaseModel):
 async def line_bind(payload: LineBindPayload):
     name = payload.name.strip()
     phone = payload.phone.strip()
+    normalized_phone = _normalize_digits(phone)
+    if not name or len(name) < 2 or any(char.isdigit() for char in name):
+        raise HTTPException(status_code=400, detail="請填寫正確姓名，至少 2 個字且不可包含數字。")
+    if not re.fullmatch(r"09\d{8}", normalized_phone):
+        raise HTTPException(status_code=400, detail="聯絡電話需為 09 開頭的 10 碼手機號碼，例如 0912345678。")
+
     line_user_id = await _trusted_line_user_id(
         payload.line_id_token,
         payload.line_user_id,
     )
     
     print(f"[API Bind] Attempting to bind name={name}, phone={phone} to line_user_id={line_user_id}")
-    
-    # 正規化電話：去除所有空白與 "-" 
-    normalized_phone = phone.replace(" ", "").replace("-", "")
     
     conn = get_db_connection()
     try:
@@ -490,7 +494,11 @@ async def line_bind(payload: LineBindPayload):
             if not client:
                 return {
                     "status": "error",
-                    "message": "查無此姓名與電話之登記資料，請確認輸入是否正確，或聯絡公會專員。\n如尚未登記政府補助請先至政府官網登記"
+                    "message": (
+                        "查無此姓名與電話的既有服務登記資料，無法使用「已登記服務」綁定。\n"
+                        "請確認姓名與手機號碼是否與原登記資料一致；若您尚未填寫登記表單，"
+                        "請返回服務登記入口，改點選「尚未填寫登記表單」。"
+                    )
                 }
                 
             client_id = client["id"]
@@ -905,8 +913,114 @@ class LineRegisterPayload(BaseModel):
     survey_details: Dict[str, Any] = {}
 
 
+def _normalize_digits(value: str | None) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+def _is_valid_taiwan_id(value: str) -> bool:
+    normalized = value.strip().upper()
+    if not normalized:
+        return True
+    if not re.fullmatch(r"[A-Z][12]\d{8}", normalized):
+        return False
+    letter_map = {
+        "A": 10, "B": 11, "C": 12, "D": 13, "E": 14, "F": 15, "G": 16, "H": 17, "I": 34,
+        "J": 18, "K": 19, "L": 20, "M": 21, "N": 22, "O": 35, "P": 23, "Q": 24, "R": 25,
+        "S": 26, "T": 27, "U": 28, "V": 29, "W": 32, "X": 30, "Y": 31, "Z": 33,
+    }
+    code = letter_map.get(normalized[0])
+    if not code:
+        return False
+    digits = [code // 10, code % 10] + [int(char) for char in normalized[1:]]
+    weights = [1, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1]
+    return sum(digit * weight for digit, weight in zip(digits, weights)) % 10 == 0
+
+
+def _shift_year_safe(value: date, years: int) -> date:
+    try:
+        return value.replace(year=value.year + years)
+    except ValueError:
+        return value.replace(month=2, day=28, year=value.year + years)
+
+
+def _validate_registration_payload(payload: LineRegisterPayload) -> str:
+    errors: list[str] = []
+    name = payload.name.strip()
+    phone = _normalize_digits(payload.phone)
+    address = payload.address.strip()
+    id_number = (payload.id_number or "").strip().upper()
+    email = (payload.email or "").strip()
+    tel = (payload.tel or "").strip()
+    city = (payload.city or "").strip()
+    zip_code = (payload.zip_code or "").strip()
+
+    if not name:
+        errors.append("請填寫產婦姓名。")
+    elif len(name) < 2:
+        errors.append("產婦姓名至少需 2 個字。")
+    elif any(char.isdigit() for char in name):
+        errors.append("產婦姓名不可包含數字。")
+
+    if id_number and not _is_valid_taiwan_id(id_number):
+        errors.append("身分證字號格式不正確，請填 1 個英文字母加 9 個數字。")
+    elif id_number and not id_number.startswith("O"):
+        errors.append("本補助限新竹市市民申請；身分證字號需為新竹市核發的 O 開頭格式，例如 O100000004。")
+
+    if payload.birth_date:
+        birth_date = _parse_registration_date(payload.birth_date)
+        if not birth_date or birth_date > date.today():
+            errors.append("出生年月日不可晚於今天。")
+
+    if not re.fullmatch(r"09\d{8}", phone):
+        errors.append("行動電話需為 09 開頭的 10 碼數字，例如 0912345678。")
+
+    if tel and not re.fullmatch(r"[0-9()\-\s#轉分機extEXT]{6,20}", tel):
+        errors.append("市話可填區碼與號碼，必要時加分機，例如 03-5551234 ext 12。")
+
+    if email and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+        errors.append("Email 格式不正確，請確認包含 @ 與網域。")
+
+    if city and not re.fullmatch(r"[\u4e00-\u9fa5A-Za-z]{2,20}", city):
+        errors.append("縣市請填中文或英文地名，例如新竹市。")
+
+    if zip_code and not re.fullmatch(r"\d{3,5}", zip_code):
+        errors.append("郵遞區號請填 3 至 5 碼數字，例如 300。")
+
+    if not address:
+        errors.append("請填寫服務地址。")
+    elif len(address) < 6:
+        errors.append("服務地址請填寫完整地址，至少 6 個字。")
+
+    expected_date = _parse_registration_date(payload.expected_date)
+    today = date.today()
+    if not expected_date:
+        errors.append("請選擇預產期或已生產日期。")
+    elif not (_shift_year_safe(today, -1) <= expected_date <= _shift_year_safe(today, 1)):
+        errors.append("預產期或已生產日期需在今天前後 1 年內，請確認是否填錯年份。")
+
+    if payload.service_days < 1 or payload.service_days > 60:
+        errors.append("預計服務天數需介於 1 至 60 天。")
+
+    survey_details = payload.survey_details or {}
+    required_agreements = {
+        "※已確實詳閱退費原則：": "請確認已詳閱退費原則。",
+        "退費原則彈窗已閱讀並同意：": "請先詳閱退費原則內容並確認同意。",
+        "我確實了解並願意遵照辦理以上相關規定，說明及退費原則(勾選後等同簽名確認)": "請確認了解並願意遵照相關規定。",
+        "需自行負擔銀行轉帳手續費": "請確認需自行負擔銀行轉帳手續費。",
+    }
+    for key, message in required_agreements.items():
+        if str(survey_details.get(key, "")).strip().upper() != "Y":
+            errors.append(message)
+
+    return " ".join(errors)
+
+
 @router.post("/api/line/register")
 async def line_register(payload: LineRegisterPayload):
+    validation_error = _validate_registration_payload(payload)
+    if validation_error:
+        raise HTTPException(status_code=400, detail=validation_error)
+
     name = payload.name.strip()
     phone = payload.phone.strip()
     line_user_id = await _trusted_line_user_id(
@@ -914,7 +1028,7 @@ async def line_register(payload: LineRegisterPayload):
         payload.line_user_id,
     )
     
-    normalized_phone = phone.replace(" ", "").replace("-", "")
+    normalized_phone = _normalize_digits(phone)
     
     conn = get_db_connection()
     try:
