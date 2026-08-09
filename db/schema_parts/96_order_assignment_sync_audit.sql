@@ -2,7 +2,6 @@
 CREATE TABLE IF NOT EXISTS order_assignment_change_audits (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     case_no VARCHAR(50) NOT NULL,
-    order_before_snapshot JSON NOT NULL,
     order_after_snapshot JSON NOT NULL,
     assignment_plan_snapshot JSON NOT NULL,
     applied_by VARCHAR(100) NOT NULL,

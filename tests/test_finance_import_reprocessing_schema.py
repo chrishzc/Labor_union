@@ -6,6 +6,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SCHEMA_PATH = (
     PROJECT_ROOT / "db" / "schema_parts" / "61_finance_import_reprocessing.sql"
 )
+RETIREMENT_PATH = (
+    PROJECT_ROOT
+    / "db"
+    / "schema_parts"
+    / "153_retire_empty_legacy_field_inventory.sql"
+)
 
 
 def _schema_sql() -> str:
@@ -63,50 +69,19 @@ def test_reprocess_schema_is_additive_and_has_required_run_contract() -> None:
     )
 
 
-def test_reclassification_event_records_only_changed_canonical_rows() -> None:
+def test_reprocess_run_audit_rows_are_database_append_only() -> None:
     sql = _compact(_schema_sql())
 
-    assert (
-        "create table if not exists finance_import_reclassification_events"
-        in sql
-    )
-    assert (
-        "foreign key (run_id) references finance_import_reprocess_runs(id)"
-        in sql
-    )
-    assert (
-        "foreign key (finance_import_row_id) references finance_import_rows(id)"
-        in sql
-    )
-    assert (
-        "unique key uq_finance_import_reclassification_event_row "
-        "( run_id, finance_import_row_id )"
-        in sql
-    )
-    for prefix in ("before", "after"):
-        assert f"{prefix}_classification_type varchar(100) not null" in sql
-        assert f"{prefix}_classification_reason varchar(255) null" in sql
-        assert f"{prefix}_matched_identity_ids json not null" in sql
-        assert (
-            f"{prefix}_resolved_counterparty_account varchar(191) null"
-            in sql
-        )
-    assert "dispatch_result varchar(100) not null" in sql
-    assert "dispatch_reason varchar(255) null" in sql
-    assert "dispatch_references json not null" in sql
-    assert "chk_finance_import_reclassification_event_changed" in sql
+    for operation in ("update", "delete"):
+        trigger = f"trg_finance_import_reprocess_runs_before_{operation}"
+        assert f"drop trigger if exists {trigger}" in sql
+        assert f"create trigger {trigger}" in sql
+        assert f"before {operation} on finance_import_reprocess_runs" in sql
+        assert "signal sqlstate '45000'" in sql
 
 
-def test_run_and_event_audit_rows_are_database_append_only() -> None:
-    sql = _compact(_schema_sql())
 
-    for table in (
-        "finance_import_reprocess_runs",
-        "finance_import_reclassification_events",
-    ):
-        for operation in ("update", "delete"):
-            trigger = f"trg_{table}_{'before_' + operation}"
-            assert f"drop trigger if exists {trigger}" in sql
-            assert f"create trigger {trigger}" in sql
-            assert f"before {operation} on {table}" in sql
-            assert "signal sqlstate '45000'" in sql
+def test_retirement_artifact_drops_legacy_reclassification_audit_table() -> None:
+    sql = RETIREMENT_PATH.read_text(encoding="utf-8").lower()
+
+    assert "drop table if exists finance_import_reclassification_events" in sql

@@ -1,0 +1,11 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "151_admin_security_audit_retention.sql": {
+      "tables": {
+        "admin_audit_log_archive": ["source_audit_id", "admin_user_id", "action", "resource_type", "resource_id", "request_path", "http_method", "result_status", "ip_address", "details_json", "created_at", "archived_at"]
+      },
+      "triggers": []
+    }
+  }
+}

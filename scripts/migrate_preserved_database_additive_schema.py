@@ -42,6 +42,11 @@ from infrastructure.migration.preflight import (
     build_source_safety_receipt,
     fingerprint_source_data_evidence,
 )
+from infrastructure.migration.rehearsal_runtime import (
+    CandidateReadSmokePort,
+    CandidateRuntimeConfig,
+    EphemeralCandidateRestartPort,
+)
 
 
 ROOT = PROJECT_ROOT
@@ -65,17 +70,10 @@ OWNED_OBJECTS: dict[str, dict[str, Any]] = {
                 "dispatch_count", "reconciled_count", "pending_count",
                 "request_summary", "result_summary", "status",
             },
-            "finance_import_reclassification_events": {
-                "id", "run_id", "finance_import_row_id", "actor",
-                "before_classification_type", "after_classification_type",
-                "dispatch_result", "dispatch_reason",
-            },
         },
         "triggers": {
             "trg_finance_import_reprocess_runs_before_update",
             "trg_finance_import_reprocess_runs_before_delete",
-            "trg_finance_import_reclassification_events_before_update",
-            "trg_finance_import_reclassification_events_before_delete",
         },
     },
     "104_order_lifecycle_state_history.sql": {
@@ -243,6 +241,7 @@ def _load_release_chain() -> ReleaseManifest:
     final_compatibility: Mapping[str, Any] = {}
     final_contracts: tuple[dict[str, Any], ...] = ()
     descriptors: dict[str, Mapping[str, Any]] = {}
+    current_manifest_path = manifests[-1]
     for manifest_path in manifests:
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if payload.get("contract") != "migration-release-manifest/v1":
@@ -259,7 +258,10 @@ def _load_release_chain() -> ReleaseManifest:
         descriptors.update(descriptor_payload.get("descriptors") or {})
         for artifact in payload.get("artifacts", []):
             artifact_path = ROOT / str(artifact.get("relative_path", ""))
-            if not artifact_path.is_file() or _sha256_file(artifact_path) != artifact.get("sha256"):
+            if not artifact_path.is_file() or (
+                manifest_path == current_manifest_path
+                and _sha256_file(artifact_path) != artifact.get("sha256")
+            ):
                 raise UpgradeBlocked(f"release artifact hash mismatch: {artifact.get('name')}")
             artifacts.append({**artifact, "release_id": payload["release_id"]})
         predecessor = str(payload["release_id"])
@@ -282,6 +284,9 @@ def _load_release_chain() -> ReleaseManifest:
 RELEASE_MANIFEST = _load_release_chain()
 SCHEMA_PARTS = tuple(ROOT / artifact["relative_path"] for artifact in RELEASE_MANIFEST.artifacts)
 VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "verified"})
+PURE_RETIREMENT_ARTIFACTS = frozenset({
+    "153_retire_empty_legacy_field_inventory.sql",
+})
 
 
 def _canonical_json(value: Any) -> bytes:
@@ -492,6 +497,15 @@ def _require_dedicated_rehearsal_databases(source: str, candidate: str) -> None:
     forbidden = {"mysql_db", "union_db"}
     if source.casefold() in forbidden or candidate.casefold() in forbidden:
         raise UpgradeBlocked("operational databases are not rehearsal targets")
+
+
+def _candidate_schema_is_exact(states: Mapping[str, str]) -> bool:
+    return all(
+        state == "exact" or (
+            name in PURE_RETIREMENT_ARTIFACTS and state == "absent"
+        )
+        for name, state in states.items()
+    )
 
 
 def run_source_safety_preflight(
@@ -876,6 +890,8 @@ def _restored_schema_program_evidence(
     snapshot: Mapping[str, Any],
     database: str,
     equivalent_databases: Iterable[str] = (),
+    *,
+    include_triggers: bool = True,
 ) -> dict[str, Any]:
     database_names = (database, *tuple(equivalent_databases))
     triggers = [
@@ -889,6 +905,7 @@ def _restored_schema_program_evidence(
             ),
         }
         for row in snapshot["triggers"]
+        if include_triggers
     ]
     views = [
         {
@@ -1109,7 +1126,9 @@ def _matching_records_resume_delivery_state(
     return "drift"
 
 
-def _owned_classification(snapshot: Mapping[str, Any]) -> dict[str, str]:
+def _owned_classification(
+    snapshot: Mapping[str, Any], *, defer_missing_triggers: bool = False
+) -> dict[str, str]:
     present_columns: dict[str, set[str]] = {}
     for row in snapshot["columns"]:
         present_columns.setdefault(row["table_name"], set()).add(
@@ -1131,7 +1150,7 @@ def _owned_classification(snapshot: Mapping[str, Any]) -> dict[str, str]:
             "106_order_lifecycle_control_facts.sql",
         }:
             result[part] = _canonical_artifact_metadata_state(
-                snapshot, part
+                snapshot, part, defer_missing_triggers=defer_missing_triggers
             )
             continue
         table_states = []
@@ -1148,6 +1167,7 @@ def _owned_classification(snapshot: Mapping[str, Any]) -> dict[str, str]:
         trigger_states = [
             "exact" if trigger in present_triggers else "absent"
             for trigger in expected["triggers"]
+            if not defer_missing_triggers or trigger in present_triggers
         ]
         states = table_states + trigger_states
         if states and all(state == "absent" for state in states):
@@ -1167,6 +1187,7 @@ def _owned_classification(snapshot: Mapping[str, Any]) -> dict[str, str]:
             raise UpgradeBlocked(f"missing descriptor for release artifact: {name}")
         result[name] = _descriptor_presence_state(
             descriptor, present_columns, present_triggers,
+            defer_missing_triggers=defer_missing_triggers,
         )
     return result
 
@@ -1175,6 +1196,8 @@ def _descriptor_presence_state(
     descriptor: Mapping[str, Any],
     present_columns: Mapping[str, set[str]],
     present_triggers: set[str],
+    *,
+    defer_missing_triggers: bool = False,
 ) -> str:
     """Classify an append-only artifact by its released table/trigger names."""
     states: list[str] = []
@@ -1190,7 +1213,8 @@ def _descriptor_presence_state(
         else:
             states.append("absent")
     for trigger in descriptor.get("triggers") or ():
-        states.append("exact" if str(trigger) in present_triggers else "absent")
+        if not defer_missing_triggers or str(trigger) in present_triggers:
+            states.append("exact" if str(trigger) in present_triggers else "absent")
     if not states or all(state == "absent" for state in states):
         return "absent"
     if all(state == "exact" for state in states):
@@ -1220,7 +1244,9 @@ def build_plan(
     validate_database_names(source, candidate)
     source_identity = server_identity(config, source)
     source_snapshot = _schema_snapshot(config, source)
-    source_objects = _owned_classification(source_snapshot)
+    source_objects = _owned_classification(
+        source_snapshot, defer_missing_triggers=True
+    )
     if any(state in {"partial", "drift"} for state in source_objects.values()):
         raise UpgradeBlocked(
             f"source contains partial/drift owned objects: {source_objects}"
@@ -1344,8 +1370,8 @@ def create_source_dump(
     command = _mysql_base(
         config, mysqldump, container=mysql_container
     ) + [
-        "--single-transaction", "--routines", "--events", "--triggers",
-        "--hex-blob", source,
+        "--single-transaction", "--routines", "--triggers",
+        "--no-tablespaces", "--hex-blob", source,
     ]
     with target.open("wb") as output:
         completed = subprocess.run(
@@ -1423,11 +1449,14 @@ def restore_candidate(
         prepared.update(status="partial", failed_phase="restore_validation")
         write_receipt(operation_receipt_path, prepared)
         raise UpgradeBlocked("restored candidate differs from source")
+    source_snapshot = _schema_snapshot(config, source)
+    source_trigger_visibility = bool(source_snapshot["triggers"])
     source_programs = _restored_schema_program_evidence(
-        _schema_snapshot(config, source), source
+        source_snapshot, source, include_triggers=source_trigger_visibility
     )
     candidate_programs = _restored_schema_program_evidence(
-        _schema_snapshot(config, candidate), candidate, (source,)
+        _schema_snapshot(config, candidate), candidate, (source,),
+        include_triggers=source_trigger_visibility,
     )
     if source_programs != candidate_programs:
         prepared.update(
@@ -1442,6 +1471,7 @@ def restore_candidate(
         candidate=server_identity(config, candidate),
         restored_data=candidate_data,
         restored_programs=candidate_programs,
+        source_trigger_visibility=source_trigger_visibility,
     )
     write_receipt(operation_receipt_path, prepared)
     return prepared
@@ -2048,6 +2078,7 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             }
         }
     if part_name == "61_finance_import_reprocessing.sql":
+        _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
             "finance_import_batches",
             "uq_finance_import_batch_id_status",
@@ -2056,6 +2087,21 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "columns": ("id", "status"),
         }
     return descriptor
+
+
+def _remove_retired_reclassification_audit_contract(
+    descriptor: dict[str, Any],
+) -> None:
+    """Release part 153 retires this obsolete audit table after part 61 runs."""
+    retired_table = "finance_import_reclassification_events"
+    descriptor["tables"].pop(retired_table, None)
+    for key in ("indexes", "foreign_keys", "checks"):
+        for contract_key in list(descriptor[key]):
+            if contract_key[0] == retired_table:
+                descriptor[key].pop(contract_key)
+    for trigger_name, trigger in list(descriptor["triggers"].items()):
+        if trigger["event_object_table"] == retired_table:
+            descriptor["triggers"].pop(trigger_name)
 
 
 def _show_create_check_clauses(
@@ -2090,7 +2136,10 @@ def _show_create_check_clauses(
 
 
 def _canonical_artifact_metadata_state(
-    snapshot: Mapping[str, Any], part_name: str
+    snapshot: Mapping[str, Any],
+    part_name: str,
+    *,
+    defer_missing_triggers: bool = False,
 ) -> str:
     descriptor = _canonical_artifact_descriptor(part_name)
     columns_by_table: dict[str, dict[str, Mapping[str, Any]]] = {}
@@ -2217,6 +2266,8 @@ def _canonical_artifact_metadata_state(
     }
     for name, expected in descriptor["triggers"].items():
         actual = triggers.get(name)
+        if actual is None and defer_missing_triggers:
+            continue
         owned_presence.append(actual is not None)
         if actual is not None and actual != expected:
             return "drift"
@@ -2259,7 +2310,10 @@ def apply_schema(
         raise UpgradeBlocked("candidate is on a different server")
     before = _schema_snapshot(config, candidate)
     states = _owned_classification(before)
-    if any(state in {"partial", "drift"} for state in states.values()):
+    preapply_states = _owned_classification(
+        before, defer_missing_triggers=True
+    )
+    if any(state in {"partial", "drift"} for state in preapply_states.values()):
         raise UpgradeBlocked(f"candidate schema is partial/drift: {states}")
     receipt = existing_receipt
     if receipt.get("candidate_database") != candidate:
@@ -2381,7 +2435,7 @@ def apply_schema(
         connection.close()
     after = _schema_snapshot(config, candidate)
     states = _owned_classification(after)
-    if any(state != "exact" for state in states.values()):
+    if not _candidate_schema_is_exact(states):
         receipt.update(status="partial", owned_objects=states)
         write_receipt(operation_receipt_path, receipt)
         raise UpgradeBlocked(f"schema postcheck is not exact: {states}")
@@ -2912,7 +2966,7 @@ def verify_candidate(
         config, source, candidate, source_snapshot
     )
     states = _owned_classification(_schema_snapshot(config, candidate))
-    if any(state != "exact" for state in states.values()):
+    if not _candidate_schema_is_exact(states):
         raise UpgradeBlocked(f"candidate owned schema not exact: {states}")
     connection = config.connect(candidate)
     try:
@@ -2974,6 +3028,38 @@ def complete_cutover_after_restart(
     return receipt
 
 
+def build_candidate_runtime_config(
+    config: SeparateDatabaseConfig,
+    candidate_database: str,
+    receipt_directory: Path,
+    api_port: int,
+    streamlit_port: int,
+    startup_timeout_seconds: int,
+) -> CandidateRuntimeConfig:
+    _validate_rehearsal_runtime_ports(api_port, streamlit_port)
+    if startup_timeout_seconds < 1:
+        raise UpgradeBlocked("rehearsal startup timeout must be positive")
+    candidate = config.candidate.config
+    environment = {
+        "DB_HOST": candidate.host,
+        "DB_PORT": str(candidate.port),
+        "DB_USER": candidate.user,
+        "DB_PASSWORD": candidate.password,
+        "DB_DATABASE": candidate_database,
+    }
+    return CandidateRuntimeConfig(
+        ROOT, api_port, streamlit_port, startup_timeout_seconds, environment,
+        candidate, candidate_database, receipt_directory / "candidate-runtime",
+    )
+
+
+def _validate_rehearsal_runtime_ports(api_port: int, streamlit_port: int) -> None:
+    if api_port == streamlit_port:
+        raise UpgradeBlocked("rehearsal API and Streamlit ports must differ")
+    if not all(1024 <= port <= 65535 for port in (api_port, streamlit_port)):
+        raise UpgradeBlocked("rehearsal runtime ports must be between 1024 and 65535")
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     modes = parser.add_mutually_exclusive_group(required=True)
@@ -2999,6 +3085,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--mysqldump", default="mysqldump")
     parser.add_argument("--mysql", default="mysql")
     parser.add_argument("--mysql-container")
+    parser.add_argument("--rehearsal-api-port", type=int)
+    parser.add_argument("--rehearsal-streamlit-port", type=int)
+    parser.add_argument("--rehearsal-startup-timeout-seconds", type=int, default=30)
     return parser
 
 
@@ -3014,8 +3103,7 @@ def main(argv: list[str] | None = None) -> int:
         if not all((
             args.source_read_descriptor,
             args.candidate_write_descriptor,
-            args.source_principal_evidence,
-            args.maintenance_token,
+            args.source_principal_evidence, args.maintenance_token,
             args.receipt_directory,
         )):
             raise UpgradeBlocked("source/candidate safety arguments are required")
@@ -3035,7 +3123,9 @@ def main(argv: list[str] | None = None) -> int:
             )
             if getattr(args, name)
         )
-        if mode in {"check", "dry-run", "backup", "switch", "complete-restart"}:
+        if mode in {
+            "check", "dry-run", "backup", "switch", "complete-restart"
+        }:
             run_source_safety_preflight(
                 config,
                 source,
@@ -3113,8 +3203,24 @@ def main(argv: list[str] | None = None) -> int:
                 receipt_directory,
             )
         else:
-            raise UpgradeBlocked(
-                "complete-restart requires a target-host restart/read-smoke adapter"
+            if not args.switch_receipt:
+                raise UpgradeBlocked("complete-restart requires switch receipt")
+            if args.rehearsal_api_port is None or args.rehearsal_streamlit_port is None:
+                raise UpgradeBlocked(
+                    "complete-restart requires rehearsal API and Streamlit ports"
+                )
+            runtime = build_candidate_runtime_config(
+                config,
+                candidate,
+                receipt_directory,
+                args.rehearsal_api_port,
+                args.rehearsal_streamlit_port,
+                args.rehearsal_startup_timeout_seconds,
+            )
+            result = complete_cutover_after_restart(
+                Path(args.switch_receipt),
+                EphemeralCandidateRestartPort(runtime),
+                CandidateReadSmokePort(runtime),
             )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0

@@ -1,0 +1,14 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "152_finance_import_ingestion_attempts.sql": {
+      "tables": {
+        "finance_import_ingestion_attempts": ["id", "idempotency_key", "command_fingerprint", "source_content_digest", "phase", "error_code", "transaction_outcome", "batch_id", "started_at", "completed_at", "created_at"]
+      },
+      "triggers": [
+        "trg_finance_import_ingestion_attempt_before_delete",
+        "trg_finance_import_ingestion_attempt_before_update"
+      ]
+    }
+  }
+}

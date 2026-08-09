@@ -37,26 +37,7 @@ CREATE TABLE IF NOT EXISTS clients (
     INDEX idx_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2. FAQ 語意問答知識庫表
-CREATE TABLE IF NOT EXISTS faq (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    question TEXT NOT NULL COMMENT '標準問題',
-    answer TEXT NOT NULL COMMENT '預設答案',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 3. 爬蟲執行日誌表
-CREATE TABLE IF NOT EXISTS crawler_logs (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    crawled_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    status VARCHAR(50) NOT NULL COMMENT '執行狀態 (SUCCESS/FAILED)',
-    records_inserted INT DEFAULT 0 COMMENT '新增筆數',
-    records_updated INT DEFAULT 0 COMMENT '更新筆數',
-    message TEXT COMMENT '日誌詳細說明或錯誤原因'
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 4. BeClass 報名紀錄表（主關聯欄位為 beclass_records.query_no <=> clients.case_no；案件識別一律以 clients.case_no 為準）
+-- 2. BeClass 報名紀錄表（主關聯欄位為 beclass_records.query_no <=> clients.case_no；案件識別一律以 clients.case_no 為準）
 CREATE TABLE IF NOT EXISTS beclass_records (
     id INT AUTO_INCREMENT PRIMARY KEY,
     seq_num INT COMMENT '項次',
@@ -183,19 +164,7 @@ CREATE TABLE IF NOT EXISTS staff_baby_types (
     FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 14. 人員可工作時間區間表
-CREATE TABLE IF NOT EXISTS staff_availability (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    staff_id INT NOT NULL,
-    start_date DATE NOT NULL COMMENT '可工作開始日期',
-    end_date DATE NOT NULL COMMENT '可工作結束日期',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE CASCADE,
-    INDEX idx_avail_dates (start_date, end_date)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- 15. 人員已被預約/排班時間區間表
+-- 14. 人員已被預約/排班時間區間表
 CREATE TABLE IF NOT EXISTS staff_bookings (
     id INT AUTO_INCREMENT PRIMARY KEY,
     staff_id INT NOT NULL,
@@ -219,7 +188,7 @@ CREATE TABLE IF NOT EXISTS orders (
     line_group_id VARCHAR(100) NULL COMMENT '三方服務 LINE 群組 ID',
     actual_start_date DATE NULL COMMENT '實際生產服務開始日',
     actual_end_date DATE NULL COMMENT '實際生產服務結束日',
-    contract_id VARCHAR(100) NULL COMMENT '好好簽線上契約 ID',
+    contract_identity VARCHAR(191) NULL COMMENT '訂單契約識別；不得綁定特定簽署平台',
     
     -- 新增與計算公式直接關聯的基礎欄位
     service_days INT DEFAULT 0 COMMENT '服務天數 (N)',

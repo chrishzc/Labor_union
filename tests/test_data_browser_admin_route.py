@@ -50,7 +50,7 @@ def test_admin_router_rejects_insufficient_formal_role(monkeypatch):
     )
 
     assert response.status_code == 403
-    assert response.json()["detail"] == "需要 system_admin 或更高權限"
+    assert response.json()["detail"] == "缺少必要能力：system.administration"
 
 
 def test_patch_is_retired_and_redirects_to_owning_domain():

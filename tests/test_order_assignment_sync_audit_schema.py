@@ -26,7 +26,8 @@ def test_declares_append_only_order_assignment_change_audit_table():
     compact = "".join(sql.split())
 
     assert "CREATETABLEIFNOTEXISTSorder_assignment_change_audits" in compact
-    assert compact.count("JSONNOTNULL") == 3
+    assert compact.count("JSONNOTNULL") == 2
+    assert "order_before_snapshot" not in sql
     assert "applied_byVARCHAR(100)NOTNULL" in compact
     assert "applied_atTIMESTAMPNOTNULLDEFAULTCURRENT_TIMESTAMP" in compact
     assert "CHECK(CHAR_LENGTH(TRIM(applied_by))>0)" in compact

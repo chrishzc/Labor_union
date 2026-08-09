@@ -23,7 +23,7 @@ from scripts import migrate_preserved_database_additive_schema as runner
 def test_plan_remains_ready_after_restore_candidate_exists(monkeypatch) -> None:
     monkeypatch.setattr(runner, "server_identity", lambda *_: {"server": "test"})
     monkeypatch.setattr(runner, "_schema_snapshot", lambda *_: {"sha256": "schema"})
-    monkeypatch.setattr(runner, "_owned_classification", lambda *_: {})
+    monkeypatch.setattr(runner, "_owned_classification", lambda *_, **__: {})
     monkeypatch.setattr(runner, "database_exists", lambda *_: True)
     monkeypatch.setattr(runner, "schema_artifacts", lambda: [])
     monkeypatch.setattr(runner, "_table_evidence", lambda *_: {"orders": {"count": 1}})
@@ -82,6 +82,81 @@ def test_complete_restart_records_shutdown_after_all_read_smokes(tmp_path, monke
     assert completed["post_restart"]["shutdown_receipts"] == (
         {"status": "passed", "target": "streamlit"},
     )
+
+
+def test_complete_restart_cli_wires_candidate_only_runtime_ports(tmp_path, monkeypatch) -> None:
+    environment = tmp_path / "rehearsal.env"
+    environment.write_text("DB_DATABASE=rehearsal_source\n", encoding="utf-8")
+    source = runner.DatabaseDescriptor(
+        "source-read", "rehearsal_source",
+        runner.DatabaseConfig("source-host", 3306, "reader", "reader-secret"),
+    )
+    candidate = runner.DatabaseDescriptor(
+        "candidate-write", "rehearsal_candidate",
+        runner.DatabaseConfig("candidate-host", 3307, "writer", "writer-secret"),
+    )
+    config = runner.SeparateDatabaseConfig(source, candidate)
+    received = {}
+
+    class RestartPort:
+        def __init__(self, runtime):
+            received["runtime"] = runtime
+
+    class SmokePort:
+        def __init__(self, runtime):
+            received["smoke_runtime"] = runtime
+
+    monkeypatch.setattr(runner, "build_descriptor_runtime", lambda *_: config)
+    monkeypatch.setattr(runner, "run_source_safety_preflight", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(runner, "EphemeralCandidateRestartPort", RestartPort)
+    monkeypatch.setattr(runner, "CandidateReadSmokePort", SmokePort)
+    monkeypatch.setattr(
+        runner,
+        "complete_cutover_after_restart",
+        lambda _receipt, restart, smoke: {
+            "status": "completed",
+            "restart_port": type(restart).__name__,
+            "smoke_port": type(smoke).__name__,
+        },
+    )
+
+    exit_code = runner.main([
+        "--complete-restart",
+        "--environment-file", str(environment),
+        "--source-database", "rehearsal_source",
+        "--candidate-database", "rehearsal_candidate",
+        "--source-read-descriptor", str(tmp_path / "source.json"),
+        "--candidate-write-descriptor", str(tmp_path / "candidate.json"),
+        "--source-principal-evidence", str(tmp_path / "principal.json"),
+        "--maintenance-token", str(tmp_path / "token.json"),
+        "--receipt-directory", str(tmp_path / "receipts"),
+        "--switch-receipt", str(tmp_path / "switch.json"),
+        "--rehearsal-api-port", "18022",
+        "--rehearsal-streamlit-port", "18522",
+    ])
+
+    assert exit_code == 0
+    assert received["runtime"].database_environment["DB_DATABASE"] == "rehearsal_candidate"
+    assert received["runtime"].database_environment["DB_HOST"] == "candidate-host"
+    assert received["runtime"] == received["smoke_runtime"]
+
+
+def test_candidate_runtime_rejects_unsafe_or_colliding_ports(tmp_path) -> None:
+    config = runner.SeparateDatabaseConfig(
+        runner.DatabaseDescriptor(
+            "source-read", "rehearsal_source",
+            runner.DatabaseConfig("source-host", 3306, "reader", "reader-secret"),
+        ),
+        runner.DatabaseDescriptor(
+            "candidate-write", "rehearsal_candidate",
+            runner.DatabaseConfig("candidate-host", 3307, "writer", "writer-secret"),
+        ),
+    )
+
+    with pytest.raises(runner.UpgradeBlocked, match="must differ"):
+        runner.build_candidate_runtime_config(
+            config, "rehearsal_candidate", tmp_path, 18022, 18022, 30,
+        )
 
 
 def test_schema_applied_receipt_resumes_post_schema_phase(tmp_path, monkeypatch) -> None:
@@ -155,15 +230,23 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
 
 
-def test_release_chain_drives_schema_artifacts_and_v2_descriptor_presence() -> None:
+def test_release_chain_drives_schema_artifacts_and_v7_descriptor_presence() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-1] == "144_order_auto_completion_workflow.sql"
-    assert runner.RELEASE_MANIFEST.release_id == "labor-union-2026-08-08-v2"
+    assert artifact_names[-7:] == (
+        "149_admin_authorization_version.sql",
+        "147_access_capability_grants.sql",
+        "148_knowledge_retrieval.sql",
+        "150_line_publication_confirmation_and_session_expiry.sql",
+        "151_admin_security_audit_retention.sql",
+        "152_finance_import_ingestion_attempts.sql",
+        "153_retire_empty_legacy_field_inventory.sql",
+    )
+    assert runner.RELEASE_MANIFEST.release_id == "labor-union-2026-08-09-v7"
     assert runner._descriptor_presence_state(
-        {"tables": {"order_auto_completion_apply_receipts": ["case_no"]}, "triggers": ["receipt_guard"]},
-        {"order_auto_completion_apply_receipts": {"id", "case_no"}},
-        {"receipt_guard"},
+        {"tables": {"knowledge_items": ["id", "version"]}, "triggers": []},
+        {"knowledge_items": {"id", "version"}},
+        set(),
     ) == "exact"
 
 

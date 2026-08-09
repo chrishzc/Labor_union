@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
+
+import scripts.migrate_preserved_database_additive_schema as migration
 
 from scripts.migrate_preserved_database_additive_schema import (
     DatabaseConfig,
@@ -64,3 +67,28 @@ def test_container_client_uses_mysql_internal_port_not_host_mapping() -> None:
     assert command[6] == "mysqldump"
     assert command[command.index("--host") + 1] == "127.0.0.1"
     assert command[command.index("--port") + 1] == "3306"
+
+
+def test_source_backup_avoids_process_privilege_for_tablespace_metadata(
+    monkeypatch, tmp_path: Path
+) -> None:
+    captured: list[str] = []
+
+    def fake_run(command, **kwargs):
+        captured.extend(command)
+        kwargs["stdout"].write(b"-- dump")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(
+        migration, "server_identity", lambda config, database: {"server": "test"}
+    )
+    monkeypatch.setattr(migration.subprocess, "run", fake_run)
+    migration.create_source_dump(
+        DatabaseConfig("127.0.0.1", 3306, "reader", "password"),
+        "lu_source",
+        tmp_path / "source.sql",
+        tmp_path / "receipt.json",
+    )
+
+    assert "--no-tablespaces" in captured
+    assert "--events" not in captured

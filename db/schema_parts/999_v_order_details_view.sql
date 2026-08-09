@@ -8,7 +8,7 @@ SELECT
     o.line_group_id,
     o.actual_start_date,
     o.actual_end_date,
-    o.contract_id,
+    o.contract_identity,
     c.id AS client_id,
     c.name AS client_name,
     c.phone AS client_phone,

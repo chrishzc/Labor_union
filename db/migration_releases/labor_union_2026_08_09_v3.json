@@ -1,0 +1,77 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-2026-08-09-v3",
+  "predecessor_release_id": "labor-union-2026-08-08-v2",
+  "release_metadata": {
+    "release_name": "Labor Union access and reviewed knowledge release v3",
+    "application_version": "global-architecture-v1",
+    "description": "Additive versioned capability grants and reviewed cited Knowledge Retrieval",
+    "published_at": "2026-08-09"
+  },
+  "source_baseline": {
+    "baseline_id": "labor-union-2026-08-08-v2",
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"]
+  },
+  "artifacts": [
+    {
+      "name": "149_admin_authorization_version.sql",
+      "relative_path": "db/schema_parts/149_admin_authorization_version.sql",
+      "sha256": "848a271e408dd8f01cd1f594019831eb239fcc1c59be1f9235e3ded4e5272df7",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact"
+    },
+    {
+      "name": "147_access_capability_grants.sql",
+      "relative_path": "db/schema_parts/147_access_capability_grants.sql",
+      "sha256": "262f087b82108e5bf2cd6fbacd61db2bfc3b724d73e2f0001428840e3efb45f1",
+      "dependencies": ["149_admin_authorization_version.sql"],
+      "data_effect": "schema_only",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact"
+    },
+    {
+      "name": "148_knowledge_retrieval.sql",
+      "relative_path": "db/schema_parts/148_knowledge_retrieval.sql",
+      "sha256": "ef8b5daf10472493f720a4db3fb351b35c7e2fa30f2f057b82c01a065e186194",
+      "dependencies": ["147_access_capability_grants.sql"],
+      "data_effect": "schema_only",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact"
+    }
+  ],
+  "backfills": [],
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_09_v3.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_09_v3.descriptors.json",
+    "sha256": "fc1ff69c3adce306856d55282e93f1092ad5db0a3d52ec543bde2b4f90f08971",
+    "dependencies": []
+  },
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["global-architecture-v1", "access-control-v1", "knowledge-retrieval-v1"],
+    "required_restart_targets": ["api", "streamlit", "file-watcher", "background-worker"],
+    "post_cutover_smoke_ids": ["orders-read", "finance-import-read", "scheduling-read", "payroll-payables-read", "anomalies-read"],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "receipt_archive_policy": "append-only-per-operation",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {"verification_id": "restored-schema-programs", "phase": "post-restore", "policy": "restored-schema-programs-equivalent", "read_only": true, "blocking": true},
+    {"verification_id": "owned-object-descriptors", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true},
+    {"verification_id": "legacy-projection-compatibility", "phase": "pre-switch", "policy": "orders-legacy-projection-unchanged", "read_only": true, "blocking": true},
+    {"verification_id": "application-read-smoke", "phase": "post-restart", "policy": "all-application-smoke-ids-pass", "read_only": true, "blocking": true}
+  ]
+}

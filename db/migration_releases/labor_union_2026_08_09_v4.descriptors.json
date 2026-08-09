@@ -1,0 +1,12 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "150_line_publication_confirmation_and_session_expiry.sql": {
+      "tables": {
+        "admin_sessions": ["absolute_expires_at"],
+        "line_rich_menu_publish_previews": ["id", "menu_config_id", "config_revision", "config_fingerprint", "previewed_by_admin_user_id", "publication_id", "previewed_at", "confirmed_at"]
+      },
+      "triggers": []
+    }
+  }
+}
