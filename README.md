@@ -4,10 +4,35 @@
 銀行流水匯入與政府補助的地端行政系統。管理端是 Streamlit；正式業務操作透過 FastAPI、
 application workflow 與 MySQL 完成。
 
-目前的開發主線是「架構重整」：系統以 `Global → Domain → Subsystem → Module` 分層，
+「架構重整」分支已完成架構重整與遺留退役治理，正作為取代 `main` 的 release candidate。
+系統以 `Global → Domain → Subsystem → Module` 分層，
 並以明確的根事實、typed command、Preview／Apply、outer Unit of Work、receipt 與 outbox
 維持可重播、可稽核的業務操作。版本與驗收狀態以 Git、release manifest 及架構文件內的
 evidence 為準；不要以本 README 的文字代替實際驗收。
+
+## 2026-08-10 Release Candidate
+
+本候選版本相較目前 `main` 的主要新增與收斂項目：
+
+- LINE runtime：保留 webhook、身分綁定與人工 review、訊息設定、Rich Menu、媒體、
+  order group、delivery task、matching notification、runtime health 與正式 worker 啟動流程。
+- Knowledge Retrieval：提供索引、知識項目、publication/review、重試工作與問答的 typed API、
+  管理 UI、worker 與 MySQL runtime schema。
+- Access Control：管理員權限改由資料庫 capability grant 與 authorization version 控制，
+  靜態 LINE role 不再是授權權威。
+- Anomalies／Finance Import：IMPORT-004 可安全補送遺漏告警；IMPORT-006 只寫 canonical
+  `anomaly_current_alerts`，歷史補投影使用單調 outbox event version，不再常駐掃描全歷史批次。
+- Scheduling UI：異常中心提供 typed 服務人員月曆 deep link；配對中心採單一分支渲染、
+  一次性 navigation token，並保留智慧配對實際流程。
+- Schema release：candidate schema 已收斂至 part 165 與 migration release v9；BreezySign、
+  舊 Contract API、舊 alert authority 及其他已裁決 legacy boundaries 不再是正式入口。
+- 治理：348 個 API／CLI／UI entry 已全部裁決，結果為 306 `active`、41 `operator_only`、
+  1 `retired_410`、0 `review_required`；九份業務附件已依目前 hash 完成人工語意裁決。
+
+本機隔離 candidate 已完成兩次 bootstrap、restart/read-smoke 與退役結構不存在驗證；
+這不代表已授權套用到任何其他部署環境。詳細結果見
+[`2026-08-09_line_merge_candidate_acceptance_receipt.md`](document/架構重整/03_追蹤清單與證據/evidence/2026-08-09_line_merge_candidate_acceptance_receipt.md)，
+版本摘要見 [`CHANGELOG.md`](CHANGELOG.md)。
 
 ## 給開發者與 Agent 的開始方式
 
@@ -137,9 +162,15 @@ Durable Job Worker，但**不會**自動套用資料庫 schema。正式 24/7 部
 # 指定測試案例
 .\.venv\Scripts\python.exe -m pytest tests/test_order_auto_completion_workflow.py -k stale
 
+# 完整 release candidate 測試
+.\.venv\Scripts\python.exe -m pytest -q
+
 # 提交前格式檢查
 git diff --check
 ```
+
+2026-08-10 release candidate 的完整測試結果為 `1488 passed, 61 skipped`；skip 項目是依環境、
+外部服務或明確退役流程隔離的測試，不可將此數字直接套用到未授權的部署環境。
 
 需要 MySQL 的 integration／E2E 測試只能使用明確設定的 disposable 資料庫；不要將測試、candidate、
 fixture 或 production database 混用。
