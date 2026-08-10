@@ -4,8 +4,8 @@ from datetime import date, timedelta
 
 import pytest
 
-from services import caregiver_matching_plan_service as service
-from services.caregiver_segment_availability_service import derive_segment_availability
+from subsystems.scheduling import matching_plan_workflow as service
+from subsystems.scheduling.segmented_availability import derive_segment_availability
 
 
 class MatchingPlanServiceCursor:

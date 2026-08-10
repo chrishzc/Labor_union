@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, Any
 from api.schemas.base import BaseResponse
 from api.schemas.orders import ScheduleCalculationRequest
-from services import order_schedule_calculation_service
+from subsystems.scheduling import attendance_schedule_query
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Orders 訂單與排班精算"])
 
@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/v1/orders", tags=["Orders 訂單與排班精算"
 def calculate_schedule(req: ScheduleCalculationRequest):
     """精算服務人員出勤日、扣除排休與國定假日順延完工日"""
     try:
-        res = order_schedule_calculation_service.calculate_order_attendance_schedule(
+        res = attendance_schedule_query.calculate_order_attendance_schedule(
             actual_start_date=req.actual_start_date,
             target_service_days=req.target_service_days,
             service_mode=req.service_mode,

@@ -1,0 +1,178 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-2026-08-09-v8",
+  "predecessor_release_id": "labor-union-2026-08-09-v7",
+  "release_metadata": {
+    "release_name": "Labor Union canonical LINE and governed knowledge integration v8",
+    "application_version": "global-architecture-v1",
+    "description": "Add canonical LINE runtime while preserving local governance and retirement boundaries",
+    "published_at": "2026-08-09"
+  },
+  "source_baseline": {
+    "baseline_id": "labor-union-2026-08-09-v7",
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ]
+  },
+  "artifacts": [
+    {
+      "dependencies": [
+        "153_retire_empty_legacy_field_inventory.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "154_line_integration_inbox_delivery.sql",
+      "relative_path": "db/schema_parts/154_line_integration_inbox_delivery.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-canonical-tables",
+      "sha256": "acbb6478b24a0f254e483e8e6a0b7f42c62f0932ec2c1817ff499037552e0b79"
+    },
+    {
+      "dependencies": [
+        "154_line_integration_inbox_delivery.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "155_line_identity_review_configuration.sql",
+      "relative_path": "db/schema_parts/155_line_identity_review_configuration.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-canonical-tables",
+      "sha256": "81faea49bc82d3ad64d3116b0e6e50c9bd14b2223e7077cfa55b6b6f67c15adb"
+    },
+    {
+      "dependencies": [
+        "155_line_identity_review_configuration.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "156_line_publication_media_order_group.sql",
+      "relative_path": "db/schema_parts/156_line_publication_media_order_group.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-canonical-tables",
+      "sha256": "683f8f78bf3f3989ebf32850039b3611eb52aed2fde939c49a4c72f48ae06ca1"
+    },
+    {
+      "dependencies": [
+        "156_line_publication_media_order_group.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "157_line_runtime_control.sql",
+      "relative_path": "db/schema_parts/157_line_runtime_control.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-runtime-facts",
+      "sha256": "44eaacadc94a182b8f03ddc32915a1e1ba30d1175e14a90589bdb467f2cab4fa"
+    },
+    {
+      "dependencies": [
+        "157_line_runtime_control.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "158_line_identity_runtime.sql",
+      "relative_path": "db/schema_parts/158_line_identity_runtime.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-identity-facts",
+      "sha256": "1bfc6779618074664c5f7a833510ad6722b4fb9d8183041359816d7faeb0d8a0"
+    },
+    {
+      "dependencies": [
+        "158_line_identity_runtime.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "159_line_messaging_publication_runtime.sql",
+      "relative_path": "db/schema_parts/159_line_messaging_publication_runtime.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-messaging-publication-facts",
+      "sha256": "bb1a99410fa4b7474ad0d9f47f474a30aa4db0641496c2aa7265504740eca946"
+    },
+    {
+      "dependencies": [
+        "159_line_messaging_publication_runtime.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "160_line_order_group_runtime.sql",
+      "relative_path": "db/schema_parts/160_line_order_group_runtime.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-order-group-facts",
+      "sha256": "c071f7e12ea7c3a87c3fd61c278578a6866867a50571309e0459665b6f99cb93"
+    },
+    {
+      "dependencies": [
+        "160_line_order_group_runtime.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "161_runtime_monitoring_line_alerts.sql",
+      "relative_path": "db/schema_parts/161_runtime_monitoring_line_alerts.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-health-and-alert-facts",
+      "sha256": "fbe0e4c6615550a7091d9e949b023853cdfe25faea8a8cd1f556428b3a74a6e1"
+    },
+    {
+      "dependencies": [
+        "161_runtime_monitoring_line_alerts.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "162_matching_line_communication.sql",
+      "relative_path": "db/schema_parts/162_matching_line_communication.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-matching-communication-facts",
+      "sha256": "f8bec32ecfc11169a873c8fcfacfed71f8920d2362dcc55f548eeab47a20cdec"
+    },
+    {
+      "dependencies": [
+        "162_matching_line_communication.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "163_knowledge_runtime.sql",
+      "relative_path": "db/schema_parts/163_knowledge_runtime.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-knowledge-roots-and-receipts",
+      "sha256": "2b9cd58cfc819519d81d80966068579e1083d73ea2e7a283d5aa34f6c405974f"
+    },
+    {
+      "dependencies": [
+        "163_knowledge_runtime.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "164_line_rich_menu_preview_bridge.sql",
+      "relative_path": "db/schema_parts/164_line_rich_menu_preview_bridge.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-publication-confirmations",
+      "sha256": "247b37b8cb6b544d7f912e9b6efb9af1dca614af065521124f60d06229246e61"
+    }
+  ],
+  "backfills": [],
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_09_v8.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_09_v8.descriptors.json",
+    "sha256": "6d83174c89f802bedaaf134b177dfca36ab9ed803dca439a4888e77626b573a0",
+    "dependencies": []
+  },
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "line-integration-v1",
+      "line-runtime-v1",
+      "knowledge-retrieval-v1"
+    ],
+    "required_restart_targets": [
+      "api",
+      "streamlit",
+      "line-worker",
+      "knowledge-retrieval-worker",
+      "runtime-monitor"
+    ],
+    "post_cutover_smoke_ids": [
+      "line-runtime-read",
+      "knowledge-publish-index-answer",
+      "line-rich-menu-preview-confirmation"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  }
+}

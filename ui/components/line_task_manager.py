@@ -15,15 +15,18 @@ import pandas as pd
 import streamlit as st
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import (
+    complete_operation,
+    has_capability,
+    operation_headers,
+)
 
 
 FLASH_KEY = "line_task_flash"
 PAGE_KEY = "line_task_page"
 FILTER_KEY = "line_task_filter_signature"
-OPERATE_ROLES = {"line_agent", "line_manager", "system_admin"}
-RUN_NOW_ROLES = {"line_manager", "system_admin"}
 STATUSES = ["pending", "processing", "sent", "failed", "cancelled"]
-TASK_TYPES = ["line_push", "line_push_message", "rag_reply", "rich_menu_link", "rich_menu_unlink"]
+TASK_TYPES = ["line_push", "rich_menu_link", "rich_menu_unlink"]
 TAIPEI_TIMEZONE = ZoneInfo("Asia/Taipei")
 STATUS_LABELS = {
     "pending": "等待發送",
@@ -34,8 +37,6 @@ STATUS_LABELS = {
 }
 TASK_TYPE_LABELS = {
     "line_push": "LINE 訊息",
-    "line_push_message": "LINE 按鈕訊息",
-    "rag_reply": "自動回覆",
     "rich_menu_link": "套用 LINE 選單",
     "rich_menu_unlink": "移除 LINE 選單",
 }
@@ -63,11 +64,24 @@ def _task_action(
     action: str,
     reason: str,
 ) -> None:
+    operation = f"line-task:{task_id}:{action}"
+    request_identity = operation_headers(
+        operation,
+        {"task_id": task_id, "action": action, "reason": reason},
+    )
     try:
-        client.line_task_action(token, task_id, action, reason=reason)
+        client.line_task_action(
+            token,
+            task_id,
+            action,
+            reason=reason,
+            idempotency_key=request_identity["Idempotency-Key"],
+            correlation_id=request_identity["X-Correlation-ID"],
+        )
     except LineAdminApiError as exc:
         st.error(f"操作失敗：{exc}")
         return
+    complete_operation(operation)
     st.session_state[FLASH_KEY] = "發送項目已更新"
     st.rerun()
 
@@ -111,7 +125,7 @@ def render_task_manager(
         (key for key, label in TASK_TYPE_LABELS.items() if label == type_label), None
     )
 
-    if st.button("重新整理", key="line_task_refresh", use_container_width=False):
+    if st.button("重新整理", key="line_task_refresh", width="content"):
         st.rerun()
 
     filter_signature = (
@@ -157,10 +171,10 @@ def render_task_manager(
         }
         for item in items
     ]
-    st.dataframe(pd.DataFrame(display_rows), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(display_rows), width="stretch", hide_index=True)
 
     nav1, nav2, nav3 = st.columns([1, 2, 1])
-    if nav1.button("上一頁", disabled=result["page"] <= 1, use_container_width=True):
+    if nav1.button("上一頁", disabled=result["page"] <= 1, width="stretch"):
         st.session_state[PAGE_KEY] = result["page"] - 1
         st.rerun()
     nav2.markdown(
@@ -168,7 +182,7 @@ def render_task_manager(
         unsafe_allow_html=True,
     )
     if nav3.button(
-        "下一頁", disabled=result["page"] >= result["total_pages"], use_container_width=True
+        "下一頁", disabled=result["page"] >= result["total_pages"], width="stretch"
     ):
         st.session_state[PAGE_KEY] = result["page"] + 1
         st.rerun()
@@ -199,7 +213,7 @@ def render_task_manager(
     }
     st.dataframe(
         pd.DataFrame([{"項目": key, "內容": value} for key, value in detail_rows.items()]),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
     st.markdown("#### 處理紀錄")
@@ -212,12 +226,12 @@ def render_task_manager(
             }
             for item in detail["attempts"]
         ]
-        st.dataframe(attempts, use_container_width=True, hide_index=True)
+        st.dataframe(attempts, width="stretch", hide_index=True)
     else:
         st.caption("這筆通知尚未開始發送。")
 
-    can_operate = profile.get("role") in OPERATE_ROLES
-    can_run_now = profile.get("role") in RUN_NOW_ROLES
+    can_operate = has_capability(profile, "line.task.control")
+    can_run_now = can_operate
     if not can_operate:
         return
     reason = st.text_input("處理備註（選填）", key=f"task_reason_{task_id}")
@@ -227,16 +241,16 @@ def render_task_manager(
         if action_columns[0].button(
             "現在發送",
             disabled=not confirmed or not can_run_now,
-            use_container_width=True,
+            width="stretch",
         ):
             _task_action(client, token, task_id, "run-now", reason)
         if action_columns[1].button(
-            "取消發送", disabled=not confirmed, use_container_width=True
+            "取消發送", disabled=not confirmed, width="stretch"
         ):
             _task_action(client, token, task_id, "cancel", reason)
     elif task["status"] == "failed":
         if action_columns[0].button(
-            "重新發送", disabled=not confirmed, use_container_width=True
+            "重新發送", disabled=not confirmed, width="stretch"
         ):
             _task_action(client, token, task_id, "retry", reason)
     else:

@@ -181,6 +181,27 @@ def test_200_base_response_schema_mismatch_fails():
     assert result.kind == "FAIL_SCHEMA"
 
 
+def test_openapi_component_references_resolve_from_the_document_root():
+    openapi = _openapi()
+    openapi["components"] = {
+        "schemas": {
+            "BaseResponse": {
+                "type": "object",
+                "required": ["success"],
+                "properties": {"success": {"type": "boolean"}},
+            }
+        }
+    }
+
+    error = api_contract_smoke._validate_success_payload(
+        {"success": True, "message": "ok", "data": {}},
+        {"$ref": "#/components/schemas/BaseResponse"},
+        openapi,
+    )
+
+    assert error is None
+
+
 def test_matching_records_integer_options_are_caught_by_openapi_schema():
     openapi = {
         "openapi": "3.1.0",

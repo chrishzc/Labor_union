@@ -8,14 +8,26 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from datetime import date
+from datetime import date, datetime
+from decimal import Decimal
 
 class OrderFullUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     client_name: Optional[str] = Field(None, description="客戶姓名")
 
+
+class ClientNamePreviewRequest(BaseModel):
+    client_name: str = Field(min_length=1, max_length=100)
+
+
+class ClientNameApplyRequest(ClientNamePreviewRequest):
+    preview_fingerprint: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
 class OrderStatusUpdateRequest(BaseModel):
+    """Retired request kept only for the legacy HTTP 410 response."""
+
     status: str = Field(..., description="訂單狀態: 洽談中/訂單成立/服務中/訂單完成/訂單取消")
     cancel_reason: Optional[str] = Field(None, description="當狀態為訂單取消時的取消原因")
 
@@ -36,6 +48,180 @@ class OrderLockCancellationRequest(BaseModel):
         if not normalized:
             raise ValueError("must be a non-empty string")
         return normalized
+
+
+class OrderAssignmentSynchronizationOrderChange(BaseModel):
+    """Complete Calendar Preview order target shared by synchronization commands."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    client_name: str = Field(..., min_length=1)
+    service_days: StrictInt = Field(..., ge=1)
+    service_hours_per_day: Decimal = Field(..., gt=0)
+    floor_fee: Decimal = Field(..., ge=0)
+    deposit_date: date | None = None
+    start_date: date
+    end_date: date
+    actual_start_date: date
+    actual_end_date: date
+
+    @field_validator("client_name")
+    @classmethod
+    def validate_canonical_client_name(cls, value: Any) -> str:
+        if (
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+        ):
+            raise ValueError("client_name must be a canonical non-empty string")
+        return value
+
+
+class _OrderLifecycleCommandRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: StrictInt = Field(..., ge=0)
+    idempotency_key: str = Field(..., min_length=1, max_length=191)
+    actor: str = Field(..., min_length=1, max_length=100)
+    reason: str = Field(..., min_length=1, max_length=500)
+
+    @field_validator("idempotency_key", "actor", "reason")
+    @classmethod
+    def validate_canonical_command_text(cls, value: Any) -> str:
+        if (
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+        ):
+            raise ValueError("command text must be canonical and non-empty")
+        return value
+
+
+class OrderLifecycleCancellationRequest(_OrderLifecycleCommandRequest):
+    """Authenticated canonical order-cancellation command."""
+
+
+class OrderAssignmentSynchronizationAssignment(BaseModel):
+    """One explicit target assignment segment from Calendar Preview."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    assignment_id: Optional[StrictInt] = Field(None, gt=0)
+    staff_id: StrictInt = Field(..., gt=0)
+    assignment_sequence: StrictInt = Field(..., gt=0)
+    assigned_start_date: date
+    assigned_end_date: date
+
+    @model_validator(mode="after")
+    def validate_assigned_dates(self):
+        if self.assigned_start_date > self.assigned_end_date:
+            raise ValueError(
+                "assigned_start_date must not be after assigned_end_date"
+            )
+        return self
+
+
+class OrderAssignmentSynchronizationScheduleChangePlan(BaseModel):
+    """Exact assignment-owned schedule removals confirmed by Preview."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    remove_schedule_ids: List[StrictInt]
+
+    @field_validator("remove_schedule_ids")
+    @classmethod
+    def validate_remove_schedule_ids(
+        cls,
+        value: List[int],
+    ) -> List[int]:
+        if any(item <= 0 for item in value):
+            raise ValueError("remove_schedule_ids must contain positive integers")
+        if len(value) != len(set(value)):
+            raise ValueError("remove_schedule_ids must be unique")
+        return value
+
+
+class OrderActualStartReconfirmationRequest(
+    _OrderLifecycleCommandRequest
+):
+    """Calendar-confirmed actual-start and assignment synchronization command."""
+
+    new_actual_start_date: date
+    order_change: OrderAssignmentSynchronizationOrderChange
+    assignment_plan: List[
+        OrderAssignmentSynchronizationAssignment
+    ] = Field(..., min_length=1)
+    schedule_change_plan: OrderAssignmentSynchronizationScheduleChangePlan
+
+    @model_validator(mode="after")
+    def validate_calendar_preview_contract(self):
+        if self.order_change.actual_start_date != self.new_actual_start_date:
+            raise ValueError(
+                "order_change.actual_start_date must equal "
+                "new_actual_start_date"
+            )
+        return self
+
+
+class OrderLifecycleHoldRequest(_OrderLifecycleCommandRequest):
+    """Explicit scoped lifecycle hold activation or release command."""
+
+    hold_key: str = Field(..., min_length=1, max_length=100)
+    scope: Literal["enter_service", "auto_complete"]
+    release_policy: Literal["manual", "expires_at"]
+    expires_at: datetime | None = None
+
+    @field_validator("hold_key")
+    @classmethod
+    def validate_canonical_hold_key(cls, value: Any) -> str:
+        if (
+            not isinstance(value, str)
+            or not value
+            or value != value.strip()
+        ):
+            raise ValueError("hold_key must be canonical and non-empty")
+        return value
+
+    @model_validator(mode="after")
+    def validate_release_policy(self):
+        if self.release_policy == "manual":
+            if self.expires_at is not None:
+                raise ValueError(
+                    "manual release_policy must not have expires_at"
+                )
+            return self
+        if self.expires_at is None:
+            raise ValueError(
+                "expires_at release_policy requires expires_at"
+            )
+        if (
+            self.expires_at.tzinfo is None
+            or self.expires_at.utcoffset() is None
+        ):
+            raise ValueError("expires_at must be timezone-aware")
+        return self
+
+
+class OrderLifecycleManualCorrectionRequest(
+    _OrderLifecycleCommandRequest
+):
+    """Authenticated request for one non-cancellation canonical target."""
+
+    requested_status: Literal[
+        "洽談中",
+        "訂單成立",
+        "服務中",
+        "訂單完成",
+        "訂單取消",
+    ]
+
+    @model_validator(mode="after")
+    def reject_cancellation_target(self):
+        if self.requested_status == "訂單取消":
+            raise ValueError(
+                "訂單取消 must use OrderLifecycleCancellationRequest"
+            )
+        return self
 
 
 class ScheduleCalculationRequest(BaseModel):

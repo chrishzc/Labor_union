@@ -1,6 +1,5 @@
 """Final subsystem contract for finance import recovery.
 
-The ASUS target-host acceptance is deliberately opt-in and read-only here.
 Applying a historical plan remains an explicit operator command after its
 dry-run fingerprint has been reviewed.
 """
@@ -23,13 +22,12 @@ import pymysql
 import pytest
 
 from scripts.imports.finance_statement_normalizer import normalize_workbook
-from services.finance_import_review_alerts import (
+from subsystems.anomalies.finance_import_review_alert import (
     project_finance_import_review_alert,
-    scan_completed_finance_import_review_alerts,
 )
-from services.system_alert_service import resolve_system_alert
-from services.finance_transaction_classifier import classify_finance_transaction
-from services.db_service import DB_CONFIG
+from subsystems.anomalies.system_alert_projection import resolve_system_alert
+from domains.finance_import.transaction_classifier import classify_finance_transaction
+from infrastructure.mysql.mysql_adapter import DB_CONFIG
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -37,22 +35,22 @@ ROOT = PROJECT_ROOT
 REPOSITORY_FIXTURE = (
     PROJECT_ROOT / "document" / "資料庫、資料處理" / "歷史對帳單.xlsx"
 )
-APPLICATION_SOURCE = PROJECT_ROOT / "services" / "finance_import_application.py"
-REPROCESS_SOURCE = PROJECT_ROOT / "services" / "finance_import_reprocessing.py"
+APPLICATION_SOURCE = PROJECT_ROOT / "subsystems" / "finance_import" / "application.py"
+REPROCESS_SOURCE = PROJECT_ROOT / "subsystems" / "finance_import" / "reprocessing.py"
 IMPORT_CLI_SOURCE = (
     PROJECT_ROOT / "scripts" / "imports" / "import_finance_excel.py"
 )
 REPROCESS_CLI_SOURCE = (
     PROJECT_ROOT / "scripts" / "imports" / "reprocess_finance_import_batch.py"
 )
-DISPOSABLE_SCHEMA_PREFIX = "adad_finance_recovery_"
+DISPOSABLE_SCHEMA_PREFIX = "finance_recovery_"
 ASUS_OCCURRENCE_COUNT = 2659
 ASUS_DISTINCT_COUNT = 2655
 ASUS_INCOMING_COUNT = 2058
 ASUS_OUTGOING_COUNT = 597
 ASUS_VALID_VIRTUAL_ACCOUNT_COUNT = 279
 ASUS_REMAINING_REVIEW_COUNT = 2376
-_DISPOSABLE_SCHEMA = re.compile(r"^adad_finance_recovery_[0-9a-f]{12}$")
+_DISPOSABLE_SCHEMA = re.compile(r"^finance_recovery_[0-9a-f]{12}$")
 _REQUIRED_SOURCE_TABLES = frozenset(
     {
         "beclass_records",
@@ -62,7 +60,6 @@ _REQUIRED_SOURCE_TABLES = frozenset(
         "finance_alerts",
         "finance_import_batches",
         "finance_import_occurrences",
-        "finance_import_reclassification_events",
         "finance_import_reprocess_runs",
         "finance_import_rows",
         "government_subsidy_transactions",
@@ -582,14 +579,6 @@ def _batch_snapshot(connect: object, batch_id: int) -> dict[str, object]:
                 (batch_id,),
             )
             runs = cursor.fetchall()
-            event_count = _fetch_scalar(
-                cursor,
-                """SELECT COUNT(*) AS count
-                   FROM finance_import_reclassification_events event
-                   JOIN finance_import_reprocess_runs run ON run.id=event.run_id
-                   WHERE run.batch_id=%s""",
-                (batch_id,),
-            )
             formal_counts = {
                 "client": _fetch_scalar(
                     cursor,
@@ -645,7 +634,6 @@ def _batch_snapshot(connect: object, batch_id: int) -> dict[str, object]:
             return {
                 "rows": rows,
                 "runs": runs,
-                "event_count": event_count,
                 "formal_counts": formal_counts,
                 "finance_alerts": finance_alerts,
                 "system_alerts": system_alerts,
@@ -713,14 +701,14 @@ def test_repository_fixture_is_one_row_and_never_uses_name_as_identity() -> None
     assert row.get("counterparty_name") is None
 
 
-def test_import_and_reprocess_use_the_same_public_dispatch_entrypoint() -> None:
+def test_legacy_reprocess_is_diagnostic_only() -> None:
     expected = (
-        "services.finance_import_dispatch",
+        "subsystems.finance_import.reconciliation_dispatch",
         "dispatch_finance_import_row",
     )
 
     assert expected in _imported_names(APPLICATION_SOURCE)
-    assert expected in _imported_names(REPROCESS_SOURCE)
+    assert "dispatch_finance_import_row" not in _strict_source(REPROCESS_SOURCE)
     for cli_path in (IMPORT_CLI_SOURCE, REPROCESS_CLI_SOURCE):
         cli_source = _strict_source(cli_path)
         assert "dispatch_finance_import_row" not in cli_source
@@ -751,28 +739,12 @@ def test_recovery_sources_preserve_plan_replay_and_bounded_output_contracts() ->
 
     assert "expected_plan_fingerprint" in reprocess
     assert "transaction_outcome" in reprocess
-    assert '"existing"' in reprocess
-    assert "finance_import_reclassification_events" in reprocess
-    assert "project_finance_import_review_alert" in reprocess
+    assert "legacy_finance_import_reprocess_apply_retired" in reprocess
+    assert "finance_import_reclassification_events" not in reprocess
+    assert "project_finance_import_review_alert" not in reprocess
     assert "row_results" not in reprocess_cli
     assert "raw_payload" not in reprocess_cli
     assert "raw_payload" not in import_cli
-
-
-def test_target_host_acceptance_is_not_silently_replaced_by_local_data(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.delenv(
-        "FINANCE_IMPORT_RECOVERY_TARGET_BATCH_ID",
-        raising=False,
-    )
-    target_batch_id = None
-    target_host_acceptance = (
-        "passed" if target_batch_id is not None else "not_executed"
-    )
-
-    assert target_host_acceptance == "not_executed"
-    assert len(normalize_workbook(str(REPOSITORY_FIXTURE))["normalized_rows"]) == 1
 
 
 def _captured_summary(
@@ -825,39 +797,18 @@ def test_bounded_cli_stdout_reports_and_apply_prevalidation(
     workbook = tmp_path / "fixture.xlsx"
     workbook.write_bytes(b"CLI service is monkeypatched; workbook is not read")
     import_report = tmp_path / "import-report.json"
-    import_manifest = {
-        "mode": "dry_run",
-        "transaction_outcome": "rolled_back",
-        "source_path": str(workbook),
-        "format_manifest": {
-            "format_id": "legacy",
-            "normalized_row_count": 1,
-        },
-        "batch_id": None,
-        "inserted_rows": 1,
-        "skipped_existing": 0,
-        "reconciled_counts": {},
-        "row_results": [
-            {
-                "fingerprint": "a" * 64,
-                "classification_type": "non_business_review",
-                "dispatch_result": "pending",
-                "reason": "sinopac_staff_account_no_match",
-            }
-        ],
-        "alert_action": {"alert_action": "created"},
-    }
+    normalized_workbook = {"format_id": "legacy", "normalized_rows": [{}]}
     import_calls = 0
 
-    def fake_import(*_args: object, **_kwargs: object) -> dict[str, object]:
+    def fake_normalize(*_args: object, **_kwargs: object) -> dict[str, object]:
         nonlocal import_calls
         import_calls += 1
-        return import_manifest
+        return normalized_workbook
 
-    monkeypatch.setattr(import_cli, "import_finance_workbook", fake_import)
+    monkeypatch.setattr(import_cli, "normalize_workbook", fake_normalize)
     assert import_cli.main(["--excel-path", str(workbook), "--dry-run"]) == 0
     import_summary = _captured_summary(capsys)
-    assert import_summary["pending_count"] == 1
+    assert import_summary["pending_count"] == 0
     assert import_summary["report_path"] is None
     assert not import_report.exists()
 
@@ -875,15 +826,13 @@ def test_bounded_cli_stdout_reports_and_apply_prevalidation(
         import_report.resolve()
     )
     import_payload = _strict_json_report(import_report)
-    assert len(import_payload["row_results"]) <= (
-        import_payload["format_manifest"]["normalized_row_count"]
-    )
+    assert import_payload["format_manifest"]["normalized_row_count"] == 1
     assert import_calls == 2
 
     reprocess_report = tmp_path / "reprocess-report.json"
     reprocess_result = {
         "db_identity": {
-            "database": "adad_finance_recovery_simulation",
+            "database": "finance_recovery_simulation",
             "server": "mysql-test",
         },
         "batch_manifest": {"batch_id": 1},
@@ -938,7 +887,10 @@ def test_bounded_cli_stdout_reports_and_apply_prevalidation(
         "reprocess_finance_import_batch",
         fake_reprocess,
     )
-    with pytest.raises(ValueError, match="actor is required"):
+    with pytest.raises(
+        ValueError,
+        match="legacy_finance_import_reprocess_apply_retired",
+    ):
         reprocess_cli.main(["--batch-id", "1", "--apply"])
     assert reprocess_calls == 0
     assert capsys.readouterr().out == ""
@@ -966,6 +918,7 @@ def test_bounded_cli_stdout_reports_and_apply_prevalidation(
     assert reprocess_calls == 2
 
 
+@pytest.mark.skip(reason="legacy Finance Import reprocess apply is retired")
 @pytest.mark.integration
 def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
     asus_recovery_database: dict[str, object],
@@ -1108,7 +1061,6 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
     )
     after_apply = _batch_snapshot(connect, batch_id)
     assert len(after_apply["runs"]) == 1
-    assert after_apply["event_count"] == ASUS_VALID_VIRTUAL_ACCOUNT_COUNT
     assert after_apply["formal_counts"] == {
         "client": 0,
         "government": 0,
@@ -1187,20 +1139,6 @@ def test_real_mysql_asus_state_dry_run_apply_replay_and_alert_lifecycle(
         connection.commit()
     finally:
         connection.close()
-
-    before_scan = _batch_snapshot(connect, batch_id)
-    connection = connect()
-    try:
-        with connection.cursor() as cursor:
-            scan = scan_completed_finance_import_review_alerts(cursor)
-            assert scan["reopened"] >= 1
-        connection.commit()
-    finally:
-        connection.close()
-    after_scan = _batch_snapshot(connect, batch_id)
-    for key in ("rows", "runs", "event_count", "formal_counts"):
-        assert after_scan[key] == before_scan[key]
-    assert after_scan["system_alerts"][0]["status"] == "open"
 
     _update_row(
         connect,

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any
-from services import db_service
+from infrastructure.mysql import mysql_adapter as db_service
 from api.schemas.base import BaseResponse
 
 router = APIRouter(prefix="/api/v1/clients", tags=["Clients 客戶名冊"])

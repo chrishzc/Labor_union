@@ -1,4 +1,4 @@
-from services import accounting_source_projection as projection
+from subsystems.client_finance import accounting_source_query as projection
 
 
 class FakeCursor:
@@ -75,9 +75,10 @@ def test_projects_raw_source_tables_and_explicit_gaps(monkeypatch):
     }
     assert result["missing_terms"] == []
     queries = "\n".join(sql for sql, _params in connection.cursor_instance.calls)
-    assert "o.deposit_service_days" in queries
-    assert "cp.deposit_due_date" in queries
-    assert "LEFT JOIN client_payments cp ON cp.case_no = o.case_no" in queries
+    assert "terms.deposit_service_days" in queries
+    assert "terms.deposit_due_date" in queries
+    assert "LEFT JOIN client_payment_terms terms ON terms.case_no = o.case_no" in queries
+    assert "client_payments" not in queries
     assert "v_order_details" not in queries.lower()
     assert "order_id" not in queries.lower()
     assert "o.clients.identity_status" not in queries
@@ -123,8 +124,8 @@ def test_missing_collection_terms_are_reported_without_defaults(monkeypatch):
         "deposit_due_date": None,
     }
     assert result["missing_terms"] == [
-        "orders.deposit_service_days",
-        "client_payments.deposit_due_date",
+        "client_payment_terms.deposit_service_days",
+        "client_payment_terms.deposit_due_date",
         "orders.actual_start_date",
     ]
 

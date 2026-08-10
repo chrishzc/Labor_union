@@ -4,7 +4,7 @@ import re
 
 import pytest
 
-from services.finance_transaction_fingerprint import build_dedup_fingerprint
+from domains.finance_import.transaction_fingerprint import build_dedup_fingerprint
 
 
 def normalized_row(**changes):

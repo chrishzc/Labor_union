@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
@@ -19,7 +18,7 @@ from api.schemas.admin_auth import (
     AdminSessionResponse,
 )
 from api.schemas.base import BaseResponse
-from services.admin_auth_service import (
+from subsystems.access.authentication_session import (
     AdminPrincipal,
     authenticate_admin,
     record_admin_audit,
@@ -29,14 +28,6 @@ from services.admin_auth_service import (
 
 
 router = APIRouter(prefix="/api/v1/admin/auth", tags=["Admin Auth"])
-
-
-def _session_minutes() -> int:
-    try:
-        return int(os.getenv("ADMIN_SESSION_MINUTES", "30"))
-    except ValueError:
-        return 30
-
 
 def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
@@ -52,7 +43,7 @@ async def login(
         authenticate_admin,
         payload.username,
         payload.password,
-        session_minutes=_session_minutes(),
+        session_minutes=30,
     )
     if result is None:
         await asyncio.to_thread(
@@ -101,7 +92,7 @@ async def refresh(
     expires_at = await asyncio.to_thread(
         renew_admin_session,
         token,
-        session_minutes=_session_minutes(),
+        session_minutes=30,
     )
     if expires_at is None:
         raise HTTPException(status_code=401, detail="管理員 Session 已失效")

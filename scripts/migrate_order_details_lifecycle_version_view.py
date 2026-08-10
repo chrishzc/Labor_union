@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_PATH = ROOT / "db" / "schema.sql"
+SCHEMA_PATH = ROOT / "db" / "schema_parts" / "999_v_order_details_view.sql"
 VIEW_NAME = "v_order_details"
 _FORBIDDEN_SQL = re.compile(
     r"\b(?:DROP\s+(?:DATABASE|TABLE)|CREATE\s+DATABASE|TRUNCATE|"

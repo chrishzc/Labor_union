@@ -16,11 +16,16 @@ import pandas as pd
 import streamlit as st
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import (
+    complete_operation,
+    has_capability,
+    operation_headers,
+)
 
 
-EDIT_ROLES = {"line_manager", "system_admin"}
 FLASH_KEY = "line_rich_menu_flash"
 PREVIEW_KEY = "line_rich_menu_preview"
+PUBLISH_PREVIEW_KEY = "line_rich_menu_publish_preview"
 TAIPEI = ZoneInfo("Asia/Taipei")
 ROLE_LABELS = {
     "customer": "一般客戶／媽媽",
@@ -169,7 +174,8 @@ def render_rich_menu_manager(
     flash = st.session_state.pop(FLASH_KEY, None)
     if flash:
         st.success(flash)
-    can_edit = profile.get("role") in EDIT_ROLES
+    can_edit = has_capability(profile, "line.config.manage")
+    can_publish = has_capability(profile, "line.menu.publish")
 
     try:
         state = client.line_menu_state(token)
@@ -254,7 +260,7 @@ def render_rich_menu_manager(
             _button_rows(selected_menu),
             num_rows="fixed",
             disabled=not can_edit,
-            use_container_width=True,
+            width="stretch",
             column_order=["label", "action_kind", "action_value"],
             column_config={
                 "label": st.column_config.TextColumn("按鈕名稱", required=True),
@@ -271,10 +277,10 @@ def render_rich_menu_manager(
         )
         preview_col, save_col = st.columns(2)
         preview_clicked = preview_col.form_submit_button(
-            "查看預覽", use_container_width=True
+            "查看預覽", width="stretch"
         )
         save_clicked = save_col.form_submit_button(
-            "儲存修改", type="primary", disabled=not can_edit, use_container_width=True
+            "儲存修改", type="primary", disabled=not can_edit, width="stretch"
         )
 
     if preview_clicked or save_clicked:
@@ -307,13 +313,14 @@ def render_rich_menu_manager(
                 except LineAdminApiError as exc:
                     st.error(f"儲存失敗：{exc}")
                 else:
+                    st.session_state.pop(PUBLISH_PREVIEW_KEY, None)
                     st.session_state[FLASH_KEY] = "選單修改已儲存，尚未套用到 LINE。"
                     st.rerun()
 
     preview = st.session_state.get(PREVIEW_KEY)
     if preview:
         st.markdown("#### 選單預覽")
-        st.image(preview, use_container_width=True)
+        st.image(preview, width="stretch")
 
     st.markdown("#### 自訂選單圖片")
     st.caption("若不上傳圖片，系統會依上方顏色自動產生選單。")
@@ -343,11 +350,33 @@ def render_rich_menu_manager(
         except LineAdminApiError as exc:
             st.error(f"圖片上傳失敗：{exc}")
         else:
+            st.session_state.pop(PUBLISH_PREVIEW_KEY, None)
             st.session_state[FLASH_KEY] = "自訂圖片已套用至選單。"
             st.rerun()
 
     st.markdown("#### 套用到 LINE")
-    st.warning("請先儲存修改並確認預覽，再套用到使用者的 LINE。")
+    st.warning("請先儲存修改、確認預覽，然後建立本次套用確認。")
+    publish_preview = st.session_state.get(PUBLISH_PREVIEW_KEY)
+    preview_is_current = bool(
+        publish_preview and publish_preview.get("menu_id") == selected_id
+    )
+    if st.button("確認目前預覽，繼續套用", disabled=not can_publish):
+        try:
+            confirmation = client.create_line_menu_publish_preview(
+                token, selected_id
+            )
+        except LineAdminApiError as exc:
+            st.error(f"無法確認目前預覽：{exc}")
+        else:
+            st.session_state[PUBLISH_PREVIEW_KEY] = {
+                "menu_id": selected_id,
+                "preview_id": confirmation["preview_id"],
+            }
+            st.rerun()
+    if preview_is_current:
+        st.success("已確認目前版本的預覽；請再次勾選後套用。")
+    else:
+        st.info("先按「確認目前預覽，繼續套用」，才能啟用套用按鈕。")
     reason = st.text_input("本次修改備註（選填）", key=f"publish_reason_{selected_id}")
     confirmed = st.checkbox(
         "我已確認選單內容，要套用到 LINE",
@@ -356,13 +385,27 @@ def render_rich_menu_manager(
     if st.button(
         "套用到 LINE",
         type="primary",
-        disabled=not can_edit or not confirmed,
+        disabled=not can_publish or not preview_is_current or not confirmed,
     ):
+        operation = f"rich-menu-publish:{selected_id}"
+        request_identity = operation_headers(
+            operation,
+            {"menu_id": selected_id, "reason": reason},
+        )
         try:
-            publication = client.publish_line_menu(token, selected_id, reason=reason)
+            client.publish_line_menu(
+                token,
+                selected_id,
+                preview_id=publish_preview["preview_id"],
+                reason=reason,
+                idempotency_key=request_identity["Idempotency-Key"],
+                correlation_id=request_identity["X-Correlation-ID"],
+            )
         except LineAdminApiError as exc:
             st.error(f"無法建立發布工作：{exc}")
         else:
+            complete_operation(operation)
+            st.session_state.pop(PUBLISH_PREVIEW_KEY, None)
             st.session_state[FLASH_KEY] = "選單已排入套用流程，請稍後重新整理查看結果。"
             st.rerun()
 
@@ -387,9 +430,9 @@ def render_rich_menu_manager(
         }
         for item in history["items"]
     ]
-    st.dataframe(pd.DataFrame(table), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
     failed = [item for item in history["items"] if item["status"] == "failed"]
-    if failed and can_edit:
+    if failed and can_publish:
         retry_id = st.selectbox(
             "選擇要重新套用的紀錄",
             [item["id"] for item in failed],
@@ -402,12 +445,22 @@ def render_rich_menu_manager(
         retry_reason = st.text_input("處理備註", key=f"retry_reason_{retry_id}")
         retry_confirmed = st.checkbox("我確認要重新套用這個選單")
         if st.button("重新套用", disabled=not retry_confirmed):
+            operation = f"rich-menu-retry:{retry_id}"
+            request_identity = operation_headers(
+                operation,
+                {"publication_id": retry_id, "reason": retry_reason},
+            )
             try:
                 client.retry_line_menu_publication(
-                    token, retry_id, reason=retry_reason
+                    token,
+                    retry_id,
+                    reason=retry_reason,
+                    idempotency_key=request_identity["Idempotency-Key"],
+                    correlation_id=request_identity["X-Correlation-ID"],
                 )
             except LineAdminApiError as exc:
                 st.error(f"重新排入失敗：{exc}")
             else:
+                complete_operation(operation)
                 st.session_state[FLASH_KEY] = "選單已重新排入套用流程。"
                 st.rerun()

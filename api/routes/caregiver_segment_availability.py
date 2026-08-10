@@ -4,15 +4,16 @@ from __future__ import annotations
 
 import re
 from datetime import date, datetime
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, Path
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from api.dependencies.admin_auth import require_system_admin
+from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
-from services.admin_auth_service import AdminPrincipal
-from services.caregiver_segment_availability_query_service import (
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
 )
 
@@ -69,7 +70,7 @@ class CaregiverSegmentDraft(BaseModel):
 class CaregiverSegmentAvailabilitySearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    segment_count: Literal[2, 3, 4] = Field(...)
+    segment_count: Literal[1, 2, 3, 4] = Field(...)
     segment_drafts: list[CaregiverSegmentDraft] = Field(...)
     as_of: date = Field(...)
 
@@ -144,6 +145,34 @@ def _value_to_status(message: str) -> int:
     return 422
 
 
+def _value_to_error_code(message: str) -> str:
+    if message == "case not found":
+        return "caregiver_availability_case_not_found"
+    if message == "case is not in negotiation stage":
+        return "caregiver_availability_stage_conflict"
+    return "caregiver_availability_request_invalid"
+
+
+def _raise_availability_value_error(
+    error: ValueError,
+    failure_message: str,
+    correlation_id: str,
+) -> NoReturn:
+    raw_message = str(error)
+    status_code = _value_to_status(raw_message)
+    category = {
+        404: "not_found",
+        409: "conflict",
+    }.get(status_code, "validation")
+    raise typed_http_error(
+        status_code,
+        category,
+        _value_to_error_code(raw_message),
+        failure_message,
+        correlation_id,
+    ) from error
+
+
 def _response_from_service(
     service_result: dict[str, Any],
     message: str,
@@ -166,7 +195,13 @@ def check_single_caregiver_eligibility(
     """Check whether one caregiver covers the whole period before multi-segment UI."""
     del principal
     if request.start_date > request.end_date:
-        raise HTTPException(status_code=422, detail="start_date cannot be after end_date")
+        raise typed_http_error(
+            422,
+            "validation",
+            "caregiver_availability_date_range_invalid",
+            "開始日期不得晚於結束日期。",
+            "caregiver-single-eligibility",
+        )
     try:
         result = search_segmented_caregiver_availability(
             case_no=case_no,
@@ -184,14 +219,16 @@ def check_single_caregiver_eligibility(
             "Single-caregiver eligibility check completed",
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=_value_to_status(str(exc)),
-            detail=str(exc),
-        ) from exc
+        _raise_availability_value_error(
+            exc,
+            "月嫂檔期資格查詢未通過。",
+            "caregiver-single-eligibility",
+        )
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Unexpected error during single-caregiver eligibility check",
+        raise internal_query_error(
+            "caregiver_single_eligibility_internal_error",
+            "月嫂單人檔期資格查詢失敗。",
+            "caregiver-single-eligibility",
         ) from exc
 
 
@@ -218,12 +255,14 @@ def search_caregiver_segment_availability(
             "Caregiver segment availability search completed",
         )
     except ValueError as exc:
-        raise HTTPException(
-            status_code=_value_to_status(str(exc)),
-            detail=str(exc),
-        ) from exc
+        _raise_availability_value_error(
+            exc,
+            "月嫂分段檔期查詢未通過。",
+            "caregiver-segment-availability",
+        )
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail="Unexpected error during caregiver segment availability search",
+        raise internal_query_error(
+            "caregiver_segment_availability_internal_error",
+            "月嫂分段檔期查詢失敗。",
+            "caregiver-segment-availability",
         ) from exc

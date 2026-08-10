@@ -1,11 +1,18 @@
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from typing import List, Dict, Any
 from datetime import date
 from api.dependencies.admin_auth import require_system_admin
-from services import db_service
-from services.admin_auth_service import AdminPrincipal
+from api.error_contracts import internal_query_error
+from infrastructure.mysql.admin_command_repository import AdminCommandRepository
+from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.scheduling.holiday_query_cache import (
+    invalidate_holiday_query_cache,
+    query_holidays,
+)
+from subsystems.access.authentication_session import AdminPrincipal
 from api.schemas.base import BaseResponse
-from api.schemas.holidays import HolidayCreateRequest
+from api.schemas.holidays import HolidayApplyRequest, HolidayPreviewRequest
+from subsystems.scheduling import holiday_maintenance
 
 router = APIRouter(prefix="/api/v1/holidays", tags=["Holidays 國定假日設定"])
 
@@ -15,35 +22,47 @@ def get_all_holidays(
 ):
     """取得中華民國國定假日設定列表"""
     try:
-        data = db_service.get_table_data("holidays")
+        data = query_holidays()
         return BaseResponse(data=data, message="成功取得國定假日列表")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "holiday_query_internal_error",
+            "國定假日查詢失敗。",
+            "holiday-query",
+        ) from error
 
-@router.post("", response_model=BaseResponse[bool])
-def add_or_update_holiday(
-    req: HolidayCreateRequest,
+@router.post("/preview", response_model=BaseResponse[Dict[str, Any]])
+def preview_holiday_change(
+    req: HolidayPreviewRequest,
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """新增或更新國定假日"""
+    del principal
+    connection = get_connection()
     try:
-        success = db_service.add_or_update_holiday(
-            holiday_date=req.holiday_date,
-            holiday_name=req.holiday_name,
-            is_double_pay_default=req.is_double_pay_default
-        )
-        return BaseResponse(data=success, message="成功儲存國定假日")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        result = holiday_maintenance.preview(AdminCommandRepository(connection), req.command())
+        return BaseResponse(data=result, message="已產生國定假日變更預覽")
+    except Exception as error:
+        raise internal_query_error("holiday_preview_internal_error", "國定假日預覽失敗。", "holiday-preview") from error
+    finally:
+        connection.close()
 
-@router.delete("/{holiday_date}", response_model=BaseResponse[bool])
-def delete_holiday(
-    holiday_date: date = Path(..., description="假日日期 (YYYY-MM-DD)"),
+@router.post("/apply", response_model=BaseResponse[Dict[str, Any]])
+def apply_holiday_change(
+    req: HolidayApplyRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=191),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """刪除指定國定假日"""
+    connection = get_connection()
     try:
-        success = db_service.delete_holiday(holiday_date)
-        return BaseResponse(data=success, message="成功刪除國定假日")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        result = holiday_maintenance.apply(AdminCommandRepository(connection), req.command(), req.preview_fingerprint, idempotency_key, principal.username, req.reason)
+        invalidate_holiday_query_cache()
+        return BaseResponse(data=result, message="已套用國定假日變更")
+    except ValueError as error:
+        connection.rollback()
+        code = str(error)
+        raise HTTPException(status_code=409 if code in {"stale_preview", "idempotency_key_conflict"} else 404 if code == "holiday_not_found" else 422, detail={"code": code}) from error
+    except Exception as error:
+        connection.rollback()
+        raise internal_query_error("holiday_apply_internal_error", "國定假日套用失敗。", "holiday-apply") from error
+    finally:
+        connection.close()

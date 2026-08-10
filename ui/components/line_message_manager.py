@@ -17,6 +17,7 @@ import pandas as pd
 import streamlit as st
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import has_capability
 
 
 SELECTED_KEY = "line_message_template_selected"
@@ -27,7 +28,6 @@ FLASH_KEY = "line_message_template_flash"
 
 CATEGORIES = ["webhook_reply", "push", "scheduled_push", "customer_service"]
 USAGES = ["webhook", "push", "schedule", "customer_service"]
-EDIT_ROLES = {"line_manager", "system_admin"}
 USE_CASES = {
     "auto_reply": {
         "label": "收到訊息時自動回覆",
@@ -184,7 +184,7 @@ def render_message_manager(
     config = state["config"]
     templates = list(config.get("templates", []))
     by_id = {item["id"]: item for item in templates}
-    can_edit = profile.get("role") in EDIT_ROLES
+    can_edit = has_capability(profile, "line.config.manage")
 
     if not can_edit:
         st.info("目前帳號只有查看權限；如需修改，請聯絡 LINE 主管。")
@@ -237,14 +237,14 @@ def render_message_manager(
         selected = None
         list_col.info("目前篩選條件沒有符合的訊息。")
 
-    if action_col.button("新增訊息", disabled=not can_edit, use_container_width=True):
+    if action_col.button("新增訊息", disabled=not can_edit, width="stretch"):
         st.session_state[NEW_SEED_KEY] = _empty_template()
         st.session_state[SELECTED_KEY] = "__new__"
         st.session_state.pop(PREVIEW_KEY, None)
         st.rerun()
 
     if selected and selected != "__new__" and action_col.button(
-        "複製訊息", disabled=not can_edit, use_container_width=True
+        "複製訊息", disabled=not can_edit, width="stretch"
     ):
         seed = deepcopy(by_id[selected])
         seed["id"] = _copy_id(seed["id"], set(by_id))
@@ -307,12 +307,12 @@ def render_message_manager(
         )
 
         button_col1, button_col2 = st.columns(2)
-        preview_clicked = button_col1.form_submit_button("查看預覽", use_container_width=True)
+        preview_clicked = button_col1.form_submit_button("查看預覽", width="stretch")
         save_clicked = button_col2.form_submit_button(
             "儲存訊息",
             type="primary",
             disabled=not can_edit,
-            use_container_width=True,
+            width="stretch",
         )
 
     if preview_clicked or save_clicked:
@@ -366,7 +366,7 @@ def render_message_manager(
         else:
             st.warning(f"確定刪除「{item['name']}」？此操作無法從管理介面復原。")
             confirm_col, cancel_col = st.columns(2)
-            if confirm_col.button("確認刪除", type="primary", use_container_width=True):
+            if confirm_col.button("確認刪除", type="primary", width="stretch"):
                 try:
                     client.delete_message_template(token, selected, revision=revision)
                 except LineAdminApiError as exc:
@@ -377,6 +377,6 @@ def render_message_manager(
                     st.session_state.pop(PREVIEW_KEY, None)
                     st.session_state[FLASH_KEY] = f"已刪除「{item['name']}」"
                     st.rerun()
-            if cancel_col.button("取消", use_container_width=True):
+            if cancel_col.button("取消", width="stretch"):
                 st.session_state.pop(DELETE_KEY, None)
                 st.rerun()

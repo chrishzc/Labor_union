@@ -1,0 +1,105 @@
+{
+  "application_compatibility": {
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "line-integration-v1",
+      "line-runtime-v1",
+      "knowledge-retrieval-v1"
+    ],
+    "minimum_api_contract": "typed-api-v1",
+    "post_cutover_smoke_ids": [
+      "knowledge-publish-index-answer",
+      "knowledge-answer-line-delivery",
+      "line-rich-menu-preview-confirmation"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker",
+      "knowledge-retrieval-worker",
+      "runtime-monitor"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "artifacts": [
+    {
+      "dependencies": [],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "163_knowledge_runtime.sql",
+      "relative_path": "db/schema_parts/163_knowledge_runtime.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-knowledge-roots-and-receipts",
+      "sha256": "2b9cd58cfc819519d81d80966068579e1083d73ea2e7a283d5aa34f6c405974f"
+    },
+    {
+      "dependencies": [
+        "163_knowledge_runtime.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "164_line_rich_menu_preview_bridge.sql",
+      "relative_path": "db/schema_parts/164_line_rich_menu_preview_bridge.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-publication-confirmations",
+      "sha256": "247b37b8cb6b544d7f912e9b6efb9af1dca614af065521124f60d06229246e61"
+    }
+  ],
+  "backfills": [],
+  "contract": "migration-release-manifest/v1",
+  "descriptor_artifact": {
+    "dependencies": [],
+    "name": "labor_union_2026_08_09_line_stage8_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_09_line_stage8_v1.descriptors.json",
+    "sha256": "26dc11f491d736d8f3a641e2cf75c68566a620d47d99097db87aec2d6f688014"
+  },
+  "release_id": "labor-union-line-stage8-2026-08-09-v1",
+  "release_metadata": {
+    "application_version": "governed-knowledge-runtime-v1",
+    "description": "Reviewed cited knowledge runtime and Rich Menu preview confirmation bridge",
+    "published_at": "2026-08-09",
+    "release_name": "Labor Union governed knowledge stage 8 v1"
+  },
+  "source_baseline": {
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "baseline_id": "line-stage7-v1",
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "source_must_be_read_only": true
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {
+      "blocking": true,
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "verification_id": "line-stage8-owned-objects"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "reviewed-knowledge-and-preview-confirmation-boundaries",
+      "read_only": true,
+      "verification_id": "knowledge-line-boundaries"
+    }
+  ]
+}

@@ -1,0 +1,105 @@
+{
+  "contract": "legacy-retirement-wave-decision/v1",
+  "wave_id": "LEGACY-RETIREMENT-WAVE-2",
+  "generated_at": "2026-08-03T14:20:47.5628043+08:00",
+  "status": "decision_complete_no_qualified_remove_candidate",
+  "architecture_baseline": {
+    "15_sha256": "19696a2db17f9c35b25b993e3dbb3e617fa3d5f2c02ef90f8471e737e2d40b5d",
+    "16_sha256": "e6229d77f1002463aeb33c5fbed0739d66d5654c80b4a886282dff41015715d8",
+    "17_sha256": "24011a2d5b3c16e21085b9b7238c7d9eaffb825600ef0c02500c6587c0d83f7c",
+    "18_sha256": "c27fc67a4d8214339e034f59c9af98fedbce3a6d89690f343dba941fae4437a3"
+  },
+  "repository": {
+    "branch": "codex/refactor-api-streamlit-architecture",
+    "head": "4081a9b40c91a030c64f1d488411287ec6c01bdc",
+    "dirty": true
+  },
+  "wave_1a_inventory": {
+    "finding_count": 662,
+    "scan_fingerprint": "d0a0007df33120d761d82d60707b948b28ccadc9e2e31ecd394762027cae1ddb",
+    "historical_final_manifest_sha256": "a04b6342390e90498fd9cf6821cb3f1c3dea1a19d40b13d60df4a8dda25883e3"
+  },
+  "decision": {
+    "remove_candidates": [],
+    "migrate_then_remove": [
+      {
+        "path": "services/multi_caregiver_schedule_generation.py",
+        "sha256": "97b9764001f262f08bf94ef03cac5d1aa6ec9dd46196d84cfed00729ae340867",
+        "blockers": [
+          "production_caller_nonzero",
+          "legacy_synchronization_still_active",
+          "public_410_not_proven"
+        ]
+      },
+      {
+        "path": "services/order_assignment_synchronization.py",
+        "sha256": "5ec681c43d5f6d493a9073e4bf9788383422819fe389b837d66a99a4f52e17fc",
+        "blockers": [
+          "dirty_overlap",
+          "production_caller_nonzero",
+          "caller_is_excluded_untracked_orders_module",
+          "public_410_not_proven"
+        ]
+      },
+      {
+        "path": "services/finance_alert_workflow.py",
+        "sha256": "2470c112f9591b10b4f4f1c84fc11f2fab9f2399ddbd603b5f21bc3b6d6a3a1e",
+        "blockers": [
+          "production_caller_nonzero",
+          "typed_anomalies_caller_cutover_incomplete",
+          "public_410_not_proven"
+        ]
+      },
+      {
+        "path": "services/finance_alert_events.py",
+        "sha256": "b86591954a69fa08f2eb02ff7dec2eab9521d0ac0d81fefcaafc0a65f8150a60",
+        "blockers": [
+          "production_caller_nonzero",
+          "legacy_event_read_contract_still_active"
+        ]
+      },
+      {
+        "path": "services/finance_alert_detection.py",
+        "sha256": "ab74569ff80936906188dbcda0d01c43c0c99024c0d5f0f4879806b936335da4",
+        "blockers": [
+          "production_caller_nonzero",
+          "source_domain_outbox_cutover_incomplete"
+        ]
+      }
+    ],
+    "retain": [
+      {
+        "path": "services/assignment_payroll_reconciliation_service.py",
+        "sha256": "c39d96db5f374ed8f6ce9d692765145439a9783bb6d0e3478ceb1fd341c206e3",
+        "reason": "live scheduling caller and scanner finding is a dynamic read"
+      },
+      {
+        "path": "services/staff_occupancy_mutex_service.py",
+        "sha256": "1f997c401bdf43b07f03122701d8602bcf43e0498dcb045b790dc89dec26d1c0",
+        "reason": "formal scheduling concurrency primitive with live callers"
+      },
+      {
+        "path": "services/caregiver_matching_plan_service.py",
+        "sha256": "1b8220d9cd77ec6d455ef8e097b2ee0e93e612cf8b2ee24d6b804ebdd6c351ce",
+        "reason": "live Matching Plan API caller and no verified replacement cutover"
+      },
+      {
+        "path": "services/caregiver_matching_communication_service.py",
+        "sha256": "350fccead48655775c237a6e639bb37400843acd5424227a35ed2de3142b1540",
+        "reason": "live caller and excluded LINE external side effects"
+      }
+    ],
+    "approved_to_remove": false,
+    "effective_disposition": "blocked",
+    "execution_authority": "none"
+  },
+  "prohibited_actions": [
+    "modify_or_remove_production_code",
+    "modify_or_remove_tests",
+    "modify_schema_or_data",
+    "deploy",
+    "git_stage",
+    "git_commit",
+    "git_push"
+  ]
+}

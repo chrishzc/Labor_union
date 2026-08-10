@@ -2,7 +2,7 @@
 """
 scripts/migrate_assignment_schedule_integrity.py
 
-可稽核的 live-DB migration 腳本 (ADAD bf3dbb 完備防護強化版)：
+可稽核的 live-DB migration 腳本（具備完整防護）：
 1. 預設為 check 模式，僅執行檢核與產出 Manifest JSON，零寫入破壞。
 2. 傳入 --apply 時，在上游前置檢查與緊接在 ALTER 前的第二輪連線檢查均無錯誤的前提下，執行：
    ALTER TABLE staff_schedule ADD UNIQUE KEY uq_staff_schedule_assignment_date (assignment_id, work_date)

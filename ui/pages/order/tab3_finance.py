@@ -14,8 +14,13 @@ from ui.pages.order.shared import (
     safe_float,
     safe_int,
     _derive_staff_payment_date,
-    _derive_subsidy_refund_date,
     _payment_api_request,
+)
+from ui.pages.order.client_refund_reversal_panel import (
+    render_client_refund_reversal_panel,
+)
+from ui.pages.order.client_deposit_reversal_panel import (
+    render_client_deposit_reversal_panel,
 )
 
 
@@ -105,7 +110,6 @@ def _render_tab3_finance(orders_data):
             "第二期應收日": second_payment_due_date,
             "第二期實收日": payment.get("second_payment_received_at"),
             "服務人員付款日（衍生公式）": _derive_staff_payment_date(related_order),
-            "補助退款日（衍生公式）": _derive_subsidy_refund_date(related_order),
             "應收總額": receivable,
             "實收總額": received,
             "未收餘額": receivable - received,
@@ -171,31 +175,49 @@ def _render_tab3_finance(orders_data):
                         raise
                     client_detail = None
                 staff_detail = _payment_api_request(f"/staff-payments/{selected_case_no}") or []
+                refund_detail = _payment_api_request(
+                    f"/orders/{selected_case_no}/client-finance/refund-reversal"
+                ) or {}
             except requests.RequestException as err:
                 st.error(f"讀取案件明細失敗：{err}")
                 return
-            st.session_state[f"payment_detail_{selected_case_no}"] = (client_detail, staff_detail)
+            st.session_state[f"payment_detail_{selected_case_no}"] = (
+                client_detail,
+                staff_detail,
+                refund_detail,
+            )
 
         detail = st.session_state.get(f"payment_detail_{selected_case_no}")
         if not detail:
             st.info("按下「載入／重新整理交易明細」後才會讀取交易紀錄。")
             return
-        client_detail, staff_detail = detail
+        client_detail, staff_detail, refund_detail = detail
         detail_client_tab, detail_staff_tab = st.tabs(["客戶帳務與交易", "月嫂帳務與交易"])
     with detail_client_tab:
-        _render_client_payment_ledger(selected_case_no, client_detail)
+        _render_client_payment_ledger(
+            selected_case_no,
+            client_detail,
+            refund_detail,
+            lifecycle_version=order_by_case.get(selected_case_no, {}).get(
+                "lifecycle_version"
+            ),
+        )
     with detail_staff_tab:
         _render_staff_payment_ledger(selected_case_no, staff_detail)
 
 
-def _render_legacy_mixed_payment_overview(orders_data):
-    """相容 shim：委派至 _render_tab3_finance"""
-    return _render_tab3_finance(orders_data)
-
-
-def _render_client_payment_ledger(case_no, payment):
+def _render_client_payment_ledger(
+    case_no,
+    payment,
+    refund_detail,
+    lifecycle_version=None,
+):
     if not payment:
-        st.info("此案件尚未建立客戶帳務摘要。")
+        st.info("此案件尚未建立舊客戶帳務摘要；以下仍顯示正式 Client Finance 應收／應付。")
+        _render_canonical_refunds(refund_detail)
+        _render_canonical_subsidy_returns(refund_detail)
+        render_client_refund_reversal_panel(case_no)
+        render_client_deposit_reversal_panel(case_no)
         return
 
     stages = [
@@ -222,17 +244,10 @@ def _render_client_payment_ledger(case_no, payment):
     client_rows_df = _normalize_arrow_compatible_df(client_rows_df)
     st.dataframe(client_rows_df, width="stretch", hide_index=True)
 
-    subsidy_return = safe_float(payment.get("subsidy_return_receivable"))
-    if subsidy_return:
-        st.markdown("#### 退還補助款")
-        subsidy_df = pd.DataFrame([{
-            "應退金額": subsidy_return,
-            "已退金額": safe_float(payment.get("subsidy_return_refunded")),
-            "應退日期": payment.get("subsidy_return_due_date"),
-            "退還日期": payment.get("subsidy_return_at"),
-        }])
-        subsidy_df = _normalize_arrow_compatible_df(subsidy_df)
-        st.dataframe(subsidy_df, width="stretch", hide_index=True)
+    _render_canonical_refunds(refund_detail)
+    _render_canonical_subsidy_returns(refund_detail)
+    render_client_refund_reversal_panel(case_no)
+    render_client_deposit_reversal_panel(case_no)
 
     transactions = payment.get("transactions") or []
     with st.expander("客戶交易明細", expanded=False):
@@ -244,6 +259,55 @@ def _render_client_payment_ledger(case_no, payment):
             st.markdown("補登／沖正交易")
             stage = st.selectbox("階段", ["deposit", "first_payment", "second_payment"], format_func={"deposit": "訂金", "first_payment": "第一期", "second_payment": "第二期"}.get)
             transaction_type = st.selectbox("交易類型", ["receipt", "reversal"], format_func={"receipt": "收款", "reversal": "沖正"}.get)
+            reversal_of_transaction_id = None
+            if transaction_type == "reversal":
+                reversed_by_receipt = {}
+                for transaction in transactions:
+                    if (
+                        transaction.get("transaction_type") == "reversal"
+                        and transaction.get("transaction_status") == "succeeded"
+                        and safe_int(transaction.get("reversal_of_transaction_id")) > 0
+                    ):
+                        original_id = safe_int(
+                            transaction.get("reversal_of_transaction_id")
+                        )
+                        reversed_by_receipt[original_id] = (
+                            reversed_by_receipt.get(original_id, 0.0)
+                            + safe_float(transaction.get("amount"))
+                        )
+                eligible_receipts = []
+                receipt_by_id = {}
+                for transaction in transactions:
+                    receipt_id = safe_int(transaction.get("id"))
+                    remaining = (
+                        safe_float(transaction.get("amount"))
+                        - reversed_by_receipt.get(receipt_id, 0.0)
+                    )
+                    if (
+                        receipt_id > 0
+                        and transaction.get("stage") == stage
+                        and transaction.get("transaction_type") == "receipt"
+                        and transaction.get("transaction_status") == "succeeded"
+                        and remaining > 0
+                    ):
+                        receipt_by_id[receipt_id] = {
+                            "transaction": transaction,
+                            "remaining": remaining,
+                        }
+                        eligible_receipts.append(receipt_id)
+                reversal_of_transaction_id = st.selectbox(
+                    "原收款交易",
+                    eligible_receipts,
+                    format_func=lambda receipt_id: (
+                        f"#{receipt_id}｜"
+                        f"{receipt_by_id[receipt_id]['transaction'].get('occurred_at') or '—'}｜"
+                        f"{receipt_by_id[receipt_id]['transaction'].get('external_reference') or '—'}｜"
+                        f"可沖正 {receipt_by_id[receipt_id]['remaining']:,.2f}"
+                    ),
+                    key=f"client_reversal_receipt_{case_no}_{stage}",
+                )
+                if not eligible_receipts:
+                    st.warning("此階段沒有尚可沖正的成功收款交易。")
             amount = st.number_input("金額", min_value=0.01, step=1.0)
             occurred_at = st.date_input("交易日期", value=datetime.today().date())
             external_reference = st.text_input("銀行流水號／外部識別", key=f"client_reference_{case_no}")
@@ -252,14 +316,94 @@ def _render_client_payment_ledger(case_no, payment):
         if submitted:
             if not external_reference.strip() or not notes.strip():
                 st.error("請填寫銀行流水號／外部識別與調整原因。")
+            elif transaction_type == "reversal" and not reversal_of_transaction_id:
+                st.error("請選擇同階段且尚有餘額的原收款交易。")
+            elif stage == "deposit" and (
+                isinstance(lifecycle_version, bool)
+                or not isinstance(lifecycle_version, int)
+                or lifecycle_version < 0
+            ):
+                st.error("訂單版本資料缺失，請重新整理頁面後再提交訂金交易。")
             else:
                 try:
-                    _payment_api_request("/client-payments/transaction", "POST", {"case_no": case_no, "stage": stage, "transaction_type": transaction_type, "amount": amount, "occurred_at": occurred_at.isoformat(), "external_reference": external_reference.strip(), "notes": notes.strip()})
+                    payload = {
+                        "case_no": case_no,
+                        "stage": stage,
+                        "transaction_type": transaction_type,
+                        "transaction_status": "succeeded",
+                        "amount": amount,
+                        "occurred_at": occurred_at.isoformat(),
+                        "external_reference": external_reference.strip(),
+                        "notes": notes.strip(),
+                    }
+                    if transaction_type == "reversal":
+                        payload["reversal_of_transaction_id"] = int(
+                            reversal_of_transaction_id
+                        )
+                    if stage == "deposit":
+                        payload["lifecycle_expected_version"] = lifecycle_version
+                    _payment_api_request(
+                        "/client-payments/transaction",
+                        "POST",
+                        payload,
+                    )
+                except requests.HTTPError as err:
+                    if (
+                        err.response is not None
+                        and err.response.status_code in {400, 409}
+                    ):
+                        st.error(
+                            "訂單或帳務狀態已更新，請重新整理頁面後再提交。"
+                        )
+                    else:
+                        st.error(f"新增客戶交易失敗：{err}")
                 except requests.RequestException as err:
                     st.error(f"新增客戶交易失敗：{err}")
                 else:
                     st.success("已新增交易，帳務摘要已由交易明細重新計算。")
                     st.rerun()
+
+
+def _render_canonical_subsidy_returns(refund_detail):
+    obligations = (refund_detail or {}).get("subsidy_return_obligations") or []
+    if not obligations:
+        return
+    st.markdown("#### 客戶補助退還（正式應付）")
+    rows = [
+        {
+            "義務識別": item.get("obligation_identity"),
+            "待退金額": safe_float(item.get("amount_due_ntd")),
+            "預定退還日": item.get("due_date"),
+            "進度": "待退",
+        }
+        for item in obligations
+    ]
+    st.dataframe(
+        _normalize_arrow_compatible_df(pd.DataFrame(rows)),
+        width="stretch",
+        hide_index=True,
+    )
+
+
+def _render_canonical_refunds(refund_detail):
+    obligations = (refund_detail or {}).get("refund_obligations") or []
+    if not obligations:
+        return
+    st.markdown("#### 一般客戶退款（正式應付）")
+    rows = [
+        {
+            "義務識別": item.get("obligation_identity"),
+            "待退金額": safe_float(item.get("amount_due_ntd")),
+            "預定退款日": item.get("due_date"),
+            "進度": "待退",
+        }
+        for item in obligations
+    ]
+    st.dataframe(
+        _normalize_arrow_compatible_df(pd.DataFrame(rows)),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 def _render_staff_payment_ledger(case_no, payments):

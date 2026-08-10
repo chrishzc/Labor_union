@@ -1,11 +1,12 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "PYTHONPATH=%CD%"
 chcp 65001 >nul
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 echo ==========================================
-echo Lobar Union System Online Startup Script
+echo Labor Union Local Development Startup Script
 echo ==========================================
 
 :: 1. Launch Docker Compose
@@ -26,7 +27,7 @@ if not exist .venv\Scripts\python.exe (
 )
 set "PY=%CD%\.venv\Scripts\python.exe"
 
-:: Production/online mode must use the persistent key configured in .env.
+:: Local development still requires the configured internal API key.
 if defined INTERNAL_API_KEY goto internal_api_key_ready
 for /f "tokens=1,* delims==" %%A in ('findstr /R /B /I "^INTERNAL_API_KEY=" "%CD%\\.env"') do (
     if /I "%%A"=="INTERNAL_API_KEY" set "INTERNAL_API_KEY=%%B"
@@ -51,23 +52,42 @@ if %errorlevel% neq 0 (
 echo ==========================================
 echo Database connection ready! Starting services...
 echo ==========================================
-echo [Notice] ngrok is development-only and is not started by online.bat.
-echo [Notice] LINE public webhook access requires the Cloudflare Tunnel planned for Stage 5.2.
+echo [Notice] online.bat is for local development only; it is not a production deployment entrypoint.
+echo [Notice] Production readiness validation is intentionally not run by this development launcher.
 
 :: 4. Launch servers concurrently
 echo [Step 4] Launching FastAPI server...
 start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
 
-echo [Step 5] Launching Streamlit interface...
+echo [Step 5] Launching independent LINE Worker...
+start "LINE Worker" cmd /k ""%PY%" -m scripts.run_line_worker"
+
+echo [Step 6] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
 
-echo [Step 6] Launching File Watcher Service...
+echo [Step 7] Launching active runtime monitor...
+start "Runtime Monitor" cmd /k ""%PY%" -m scripts.run_service_monitor"
+
+echo [Step 8] Launching File Watcher Service...
 start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
+
+echo [Step 9] Launching Durable Background Worker...
+start "Durable Background Worker" cmd /k ""%PY%" -m scripts.run_durable_job_worker"
+
+findstr /R /B /I "^KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true" "%CD%\.env" >nul
+if %errorlevel% equ 0 (
+    echo [Step 10] Launching Knowledge Retrieval Worker...
+    start "Knowledge Retrieval Worker" cmd /k ""%PY%" -m scripts.run_knowledge_worker"
+)
 
 echo ==========================================
 echo Lobar Union System online services are running!
 echo - API Docs: http://127.0.0.1:8000/docs
 echo - Streamlit UI: http://localhost:8501
+echo - LINE Worker: independent durable queue consumer
+echo - Runtime Monitor: active health probes and alert projection
 echo - File Watcher: Monitoring downloads/ folder
+echo - Durable Background Worker: independently processes background jobs
 echo ==========================================
 pause
+exit /b 0

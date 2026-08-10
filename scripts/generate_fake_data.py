@@ -11,7 +11,7 @@
 若需擴充任何欄位型態、格式錯誤或業務異常測試資料，請新建並使用 scripts/seed_boundary_anomalies.py。
 """
 raise SystemExit(
-    "GenerateFakeData 已凍結，僅供人工參考；新增假資料需求請建立獨立腳本與 ADAD 節點。"
+    "GenerateFakeData 已凍結，僅供人工參考；新增假資料需求請建立獨立腳本與測試。"
 )
 
 import sys
@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 import random
 import pandas as pd
 from datetime import datetime, timedelta, date
-from services.db_service import save_order_rest_dates, generate_default_schedule, get_connection
+from infrastructure.mysql.mysql_adapter import generate_default_schedule, get_connection
 
 # 確保中文輸出編碼正確
 try:
@@ -446,7 +446,7 @@ def generate_schedule_data():
     """
     print("-> 正在生成多樣化月掃檔期、訂單生命週期狀態與行事曆假資料...")
     sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-    from services.db_service import get_connection, generate_default_schedule
+    from infrastructure.mysql.mysql_adapter import get_connection, generate_default_schedule
     from datetime import date, timedelta
     import json
 
@@ -528,14 +528,6 @@ def generate_schedule_data():
                         # 先生成排班明細以取得精算後的正確結束日
                         generate_default_schedule(case_no, staff_id, start_d, service_days)
                         
-                        # 30% 機會為該訂單動態設定 1~3 天自訂放假日期並測試持久化與完工日自動順延
-                        if random.random() < 0.3:
-                            sample_rests = [
-                                (start_d + timedelta(days=random.randint(2, service_days - 2))).strftime("%Y-%m-%d")
-                                for _ in range(random.randint(1, 3))
-                            ]
-                            save_order_rest_dates(case_no, sample_rests)
-
                         # 查出最新的 end_date
                         cursor.execute("SELECT end_date FROM orders WHERE case_no = %s", (case_no,))
                         res = cursor.fetchone()
@@ -1335,7 +1327,6 @@ def _clear_generator_owned_demo_data(cursor) -> None:
     generator's ownership and must never be read or mutated by seed mode.
     """
     tables = (
-        "finance_alert_events", "finance_alerts",
         "finance_import_occurrences", "finance_import_rows", "finance_import_batches",
         "staff_transfer_allocations", "staff_actual_transfers",
         "staff_monthly_settlement_details", "staff_monthly_settlements",
@@ -1388,7 +1379,10 @@ def _import_seed_master_data(roster_output_file: str,
         "clients": import_hcm(roster_output_file),
         "beclass": import_beclass(roster_output_file),
         "staff": import_staff(roster_output_file),
-        "historical_orders": import_historical(historical_output_file),
+        "historical_orders": import_historical(
+            historical_output_file,
+            fixture_write_authorized=True,
+        ),
     }
     failures = {
         name: result for name, result in results.items()
@@ -1559,7 +1553,7 @@ def _finance_duplicate_normalized_result(reference_date: date, source_file: str,
 
 def seed_finance_import_duplicate_fact(reference_date: date) -> dict:
     """Persist two batches pointing at one canonical bank row via the staging service."""
-    from services.finance_import_staging import stage_finance_rows
+    from subsystems.finance_import.staging import stage_finance_rows
 
     conn = get_connection()
     try:
@@ -1588,27 +1582,6 @@ def seed_finance_import_duplicate_fact(reference_date: date) -> dict:
             ):
                 raise RuntimeError("財務匯入重複事實未形成兩批次、一 canonical row、兩 occurrences")
 
-            from datetime import datetime, timezone
-            from services.finance_alert_detection import create_or_get_finance_alert
-            create_or_get_finance_alert(
-                cursor,
-                alert_code="DUPLICATE_IMPORT_SUSPECTED",
-                source_domain="COMMON",
-                source_type="finance_import_row",
-                source_id=str(first_row["row_id"]),
-                reason="跨檔重複匯入測試：發現相同指紋之重複銀行流水，保持 pending 待人工審核",
-                candidate_snapshot={
-                    "finance_import_row_id": first_row["row_id"],
-                    "batch_ids": [first["batch_id"], second["batch_id"]],
-                    "duplicate_count": 2,
-                },
-                finance_import_row_id=first_row["row_id"],
-                finance_import_batch_id=first["batch_id"],
-                expected_amount=Decimal("1200.00"),
-                actual_amount=Decimal("1200.00"),
-                difference_amount=Decimal("0.00"),
-                detected_at=datetime.combine(reference_date, datetime.min.time()).replace(tzinfo=timezone.utc),
-            )
         conn.commit()
         return {
             "batch_ids": [first["batch_id"], second["batch_id"]],
@@ -2045,16 +2018,6 @@ def validate_seed_database(reference_date: date) -> dict:
                           OR admin_notes NOT LIKE 'fixture_type=%%; boundary_type=%%'""",
                     (),
                     "客戶邊界標籤格式不完整",
-                ),
-                (
-                    "SELECT (SELECT COUNT(*) FROM finance_alerts WHERE status = 'open') != 1 AS count",
-                    (),
-                    "finance_alerts 必須剛好 1 筆 open 狀態警示",
-                ),
-                (
-                    "SELECT (SELECT COUNT(*) FROM finance_alert_events WHERE event_type = 'detected') != 1 AS count",
-                    (),
-                    "finance_alert_events 必須剛好 1 筆 detected 事件",
                 ),
             ]
             errors = []

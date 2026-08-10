@@ -1,0 +1,102 @@
+{
+  "application_compatibility": {
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "line-integration-v1",
+      "line-runtime-v1",
+      "line-identity-v1",
+      "line-messaging-publication-v1"
+    ],
+    "minimum_api_contract": "typed-api-v1",
+    "post_cutover_smoke_ids": [
+      "line-stage5-owned-objects",
+      "line-configuration-revisions",
+      "line-delivery-administration",
+      "line-rich-menu-worker",
+      "line-media-archive-worker"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "artifacts": [
+    {
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "name": "159_line_messaging_publication_runtime.sql",
+      "relative_path": "db/schema_parts/159_line_messaging_publication_runtime.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-messaging-publication-facts",
+      "sha256": "bb1a99410fa4b7474ad0d9f47f474a30aa4db0641496c2aa7265504740eca946"
+    }
+  ],
+  "backfills": [],
+  "contract": "migration-release-manifest/v1",
+  "descriptor_artifact": {
+    "dependencies": [],
+    "name": "labor_union_2026_08_08_line_stage5_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_08_line_stage5_v1.descriptors.json",
+    "sha256": "f1cec398e885b41aecf5c81ed3b458fa7d7c2eda11b62706be27b760f2b48d82"
+  },
+  "release_id": "labor-union-line-stage5-2026-08-08-v1",
+  "release_metadata": {
+    "application_version": "line-messaging-publication-v1",
+    "description": "Versioned LINE messages and schedules, canonical delivery administration, Rich Menu publication, and media archival runtime",
+    "published_at": "2026-08-08",
+    "release_name": "Labor Union LINE messaging and publication stage 5 v1"
+  },
+  "source_baseline": {
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "baseline_id": "line-stage4-v1",
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "source_must_be_read_only": true
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {
+      "blocking": true,
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "verification_id": "line-stage5-owned-objects"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "configuration-revisions-and-task-payloads-immutable",
+      "read_only": true,
+      "verification_id": "line-configuration-revisions"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "worker-provider-calls-outside-database-transactions",
+      "read_only": true,
+      "verification_id": "line-rich-menu-worker"
+    }
+  ]
+}

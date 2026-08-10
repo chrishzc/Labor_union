@@ -1,9 +1,14 @@
 from pathlib import Path
 
-from api.dependencies.admin_auth import admin_auth_is_enabled
-from services.admin_auth_service import (
+from api.dependencies.admin_auth import (
+    admin_auth_is_enabled,
+    require_line_menu_publisher,
+    require_line_task_controller,
+)
+from subsystems.access.authentication_session import (
     AdminPrincipal,
     hash_admin_password,
+    has_required_capability,
     has_required_role,
     verify_admin_password,
 )
@@ -29,6 +34,21 @@ def test_admin_role_order_is_enforced():
     assert has_required_role(manager, "line_viewer")
     assert has_required_role(manager, "line_manager")
     assert not has_required_role(viewer, "line_manager")
+
+
+def test_fixed_role_bundles_authorize_capabilities_without_role_ordering():
+    manager = AdminPrincipal(1, "manager", "Manager", "line_manager")
+    agent = AdminPrincipal(2, "agent", "Agent", "line_agent")
+
+    assert has_required_capability(manager, "line.identity.review")
+    assert has_required_capability(manager, "line.task.control")
+    assert has_required_capability(agent, "line.review.read")
+    assert not has_required_capability(agent, "line.task.control")
+    assert not has_required_capability(agent, "unknown.capability")
+
+
+def test_line_router_dependencies_target_their_operation_capabilities():
+    assert require_line_task_controller is not require_line_menu_publisher
 
 
 def test_line_config_keeps_public_liff_read_but_protects_management_routes():

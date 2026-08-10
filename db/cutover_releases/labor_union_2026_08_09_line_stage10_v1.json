@@ -1,0 +1,43 @@
+{
+  "contract": "line-runtime-cutover-release/v1",
+  "migration_manifests": [
+    "labor_union_2026_08_09_v9.json"
+  ],
+  "post_cutover_smoke_ids": [
+    "api-health",
+    "canonical-webhook-signature",
+    "canonical-inbox-idempotency",
+    "canonical-delivery-once",
+    "identity-review-decision",
+    "liff-runtime-config",
+    "streamlit-api-read",
+    "legacy-writer-gone"
+  ],
+  "release_id": "labor-union-line-stage10-2026-08-09-v1",
+  "required_restart_targets": [
+    "api",
+    "background-worker",
+    "line-worker",
+    "runtime-monitor",
+    "streamlit",
+    "file-watcher",
+    "knowledge-retrieval-worker"
+  ],
+  "retired_route_prefixes": [
+    "/api/line/bind",
+    "/api/line/register",
+    "/api/line/rebind_requests",
+    "/api/line/staff/review-requests",
+    "/api/line/users",
+    "/api/v1/line/review-requests"
+  ],
+  "rollback_contract": {
+    "legacy_flag": "LINE_LEGACY_ROLLBACK_MODE=true",
+    "webhook_mode": "legacy",
+    "worker_mode": "legacy"
+  },
+  "target_runtime": {
+    "webhook_mode": "canonical",
+    "worker_mode": "canonical"
+  }
+}

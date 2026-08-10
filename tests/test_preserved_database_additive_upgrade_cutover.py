@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 import uuid
@@ -27,31 +28,9 @@ from scripts.migrate_preserved_database_additive_schema import (
     verify_candidate,
     write_receipt,
 )
-from services.anomaly_alert_detection import run_process_alert_scan
-
-
-EXPECTED_SCANNER_CODES = {
-    "ORDER-001",
-    "ORDER-002",
-    "ORDER-003",
-    "ORDER-004",
-    "BECLASS-001",
-    "LINE-001",
-    "LINE-005",
-    "DOC-SEND-001",
-    "IMPORT-003",
-    "RECEIVABLE-001",
-    "PAYOUT-001",
-    "RETURN-001",
-    "LINE-002",
-    "LINE-004",
-    "SCHEDULE-001",
-    "SCHEDULE-002",
-    "SCHEDULE-003",
-    "SCHEDULE-005",
-    "SCHEDULE-006",
-    "IMPORT-006",
-}
+from infrastructure.mysql.process_reminder_anomaly_source import (
+    consume_process_reminder_anomaly_sources,
+)
 
 
 def test_database_identity_guards_fail_closed() -> None:
@@ -161,7 +140,7 @@ def _configure_fake_apply(
     monkeypatch.setattr(
         migration,
         "_owned_classification",
-        lambda snapshot: {schema_part.name: snapshot["state"]},
+        lambda snapshot, **_: {schema_part.name: snapshot["state"]},
     )
     monkeypatch.setattr(
         migration,
@@ -418,6 +397,21 @@ def test_105_owned_column_subset_is_partial_then_exact() -> None:
     )
 
 
+def test_source_preflight_defers_trigger_visibility_to_candidate_verification() -> None:
+    part = "61_finance_import_reprocessing.sql"
+    descriptor = migration._canonical_artifact_descriptor(part)
+    snapshot = _snapshot_from_descriptor(descriptor)
+    snapshot["triggers"] = []
+
+    assert migration._canonical_artifact_metadata_state(snapshot, part) == "partial"
+    assert (
+        migration._canonical_artifact_metadata_state(
+            snapshot, part, defer_missing_triggers=True
+        )
+        == "exact"
+    )
+
+
 def _system_alert_transition_snapshot(
     stage: str,
     *,
@@ -597,7 +591,7 @@ def test_build_plan_blocks_source_with_107_transitional_shape(
     monkeypatch.setattr(
         migration,
         "_owned_classification",
-        lambda value: {"107_system_alert_current_projection.sql": "partial"},
+        lambda value, **_: {"107_system_alert_current_projection.sql": "partial"},
     )
     config = migration.DatabaseConfig("127.0.0.1", 3306, "user", "secret")
     with pytest.raises(
@@ -853,6 +847,30 @@ def test_plan_artifact_and_fingerprint_staleness_fail_closed() -> None:
         migration._validate_plan_integrity(corrupt, dict(payload))
 
 
+def test_write_receipt_retries_a_transient_windows_file_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    receipt_path = tmp_path / "receipt.json"
+    replace_attempts = 0
+    real_replace = migration.os.replace
+
+    def transiently_locked_replace(source: Path, target: Path) -> None:
+        nonlocal replace_attempts
+        replace_attempts += 1
+        if replace_attempts == 1:
+            raise PermissionError("temporary scanner lock")
+        real_replace(source, target)
+
+    monkeypatch.setattr(migration.os, "replace", transiently_locked_replace)
+    monkeypatch.setattr(migration.time_module, "sleep", lambda _seconds: None)
+
+    write_receipt(receipt_path, {"status": "ready"})
+
+    assert read_receipt(receipt_path) == {"status": "ready"}
+    assert replace_attempts == 2
+
+
 def test_backup_receipt_mismatch_fails_before_restore(tmp_path: Path) -> None:
     dump = tmp_path / "source.sql"
     dump.write_bytes(
@@ -922,6 +940,11 @@ def test_restore_program_evidence_normalizes_only_database_qualifier() -> None:
         source_snapshot, "source_db"
     ) != migration._restored_schema_program_evidence(
         candidate_snapshot, "candidate_db"
+    )
+    assert migration._restored_schema_program_evidence(
+        source_snapshot, "source_db", include_triggers=False
+    ) == migration._restored_schema_program_evidence(
+        candidate_snapshot, "candidate_db", include_triggers=False
     )
 
 
@@ -1110,7 +1133,7 @@ def _drop_created_test_databases(config, names: list[str]) -> None:
     try:
         with connection.cursor() as cursor:
             for name in names:
-                assert name.startswith("adad_cutover_")
+                assert name.startswith("preserved_cutover_")
                 validate_database_names("guard_source", name)
                 cursor.execute(f"DROP DATABASE `{name}`")
     finally:
@@ -1121,8 +1144,8 @@ def _drop_created_test_databases(config, names: list[str]) -> None:
 def test_real_mysql_preserved_source_candidate_cutover(tmp_path: Path) -> None:
     container = os.getenv("MYSQL_TEST_CONTAINER", "").strip()
     if not container:
-        pytest.fail(
-            "MYSQL_TEST_CONTAINER is required for the real MySQL cutover gate"
+        pytest.skip(
+            "requires an explicitly configured disposable MySQL container"
         )
     live_environment = ROOT / ".env"
     config, configured_source = config_from_env(live_environment)
@@ -1134,11 +1157,11 @@ def test_real_mysql_preserved_source_candidate_cutover(tmp_path: Path) -> None:
         pytest.fail(
             "PRESERVED_DB_TEST_SOURCE is required when .env has no DB_DATABASE"
         )
-    assert live_source not in {"", "adad_cutover_source", "adad_cutover_candidate"}
+    assert live_source not in {"", "preserved_cutover_source", "preserved_cutover_candidate"}
 
     nonce = uuid.uuid4().hex[:12]
-    disposable_source = f"adad_cutover_source_{nonce}"
-    candidate = f"adad_cutover_candidate_{nonce}"
+    disposable_source = f"preserved_cutover_source_{nonce}"
+    candidate = f"preserved_cutover_candidate_{nonce}"
     created: list[str] = []
     completed = False
 
@@ -1347,9 +1370,13 @@ def test_real_mysql_preserved_source_candidate_cutover(tmp_path: Path) -> None:
                 )
                 finance_rows_before_scan = int(cursor.fetchone()["n"])
                 connection.begin()
-                summary = run_process_alert_scan(cursor)
-                assert set(summary) == EXPECTED_SCANNER_CODES
-                assert "IMPORT-006" in summary
+                summary = consume_process_reminder_anomaly_sources(
+                    connection,
+                    as_of=date.today(),
+                    owns_transaction=False,
+                )
+                assert summary.succeeded
+                assert summary.projected_count > 0
                 connection.rollback()
         finally:
             connection.close()

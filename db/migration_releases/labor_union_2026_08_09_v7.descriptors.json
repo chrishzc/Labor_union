@@ -1,0 +1,9 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "153_retire_empty_legacy_field_inventory.sql": {
+      "tables": {},
+      "triggers": []
+    }
+  }
+}

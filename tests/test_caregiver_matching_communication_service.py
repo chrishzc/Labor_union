@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 import pytest
 
-from services import caregiver_matching_communication_service as service
+from subsystems.scheduling import matching_communication_workflow as service
 
 
 class _Cursor:
@@ -66,7 +66,7 @@ class _Cursor:
                 "created_by": "admin",
                 "created_at": datetime(2026, 7, 3),
             }
-        elif compact.startswith("select deposit_receivable"):
+        elif compact.startswith("select contracted_amount_ntd as deposit_receivable"):
             self._result = {
                 "deposit_receivable": 1000,
                 "deposit_received": 1000,
@@ -166,6 +166,7 @@ def test_active_matching_plan_state_reloads_lock_and_deposit(monkeypatch):
     assert state["availability_lock"]["lock_id"] == 77
     assert state["deposit"]["deposit_received"] == 1000
     assert [segment["segment_id"] for segment in state["segments"]] == [71, 72]
+    assert not any("client_payments" in sql for sql, _ in cursor.calls)
 
 
 def test_resume_delivery_is_individual_atomic_and_adds_multi_caregiver_note(
@@ -304,5 +305,12 @@ def test_information_send_revalidates_latest_full_plan_before_queueing(monkeypat
 
     assert result["line_task_id"] == 88
     assert queued[0]["to_user_id"] == "U-a"
+    assert queued[0]["task_type"] == "matching_willingness_card"
+    assert queued[0]["payload"] == {
+        "case_no": "CASE-1",
+        "plan_id": 7,
+        "segment_id": 71,
+        "info_type": 1,
+    }
     assert "2026-08-01～2026-08-10" in queued[0]["message_content"]
     assert connection.commits == 1

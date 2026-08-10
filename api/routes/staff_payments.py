@@ -3,8 +3,7 @@ from typing import List, Dict, Any, Optional
 from datetime import date
 from pydantic import BaseModel, Field, model_validator
 from api.schemas.base import BaseResponse
-from services.db_service import get_connection
-from services.staff_payment_transactions import record_staff_payment_transaction
+from infrastructure.mysql.mysql_adapter import get_connection
 
 router = APIRouter(prefix="/api/v1/staff-payments", tags=["Staff Payments 月嫂帳務"])
 
@@ -69,20 +68,9 @@ def get_staff_payments_by_case_no(case_no: str = Path(..., description="案件�
 
 @router.post("/transaction", response_model=BaseResponse[Dict[str, Any]])
 def create_staff_transaction(req: StaffTransactionCreate):
-    """新增月嫂付款交易明細並自動更新狀態"""
-    try:
-        # 呼叫服務層持久化與計算
-        update_result = record_staff_payment_transaction(
-            staff_payment_id=req.staff_payment_id,
-            transaction_type=req.transaction_type,
-            transaction_status=req.transaction_status,
-            amount=req.amount,
-            occurred_at=req.occurred_at.strftime("%Y-%m-%d"),
-            external_reference=req.external_reference,
-            notes=req.notes
-        )
-        return BaseResponse(data=update_result, message="月嫂轉帳交易紀錄新增並計算完成")
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Legacy free-form staff transaction writer is permanently unavailable."""
+    del req
+    raise HTTPException(
+        status_code=410,
+        detail="use_staff_payables_preview_apply",
+    )

@@ -84,19 +84,19 @@ def _render_tab3_contract_management(form_db_table_fields, form_table_for_key, g
     with c_btn_edit:
         st.write("")
         if not is_contract_editing:
-            if st.button("✏️ 編輯對照", key=f"btn_c_edit_{curr_cid}", use_container_width=True):
+            if st.button("✏️ 編輯對照", key=f"btn_c_edit_{curr_cid}", width="stretch"):
                 st.session_state[contract_edit_key] = True
                 st.session_state[contract_draft_key] = json.loads(json.dumps(curr_contract))
                 st.rerun()
         else:
-            if st.button("✖️ 取消編輯", key=f"btn_c_cancel_{curr_cid}", use_container_width=True):
+            if st.button("✖️ 取消編輯", key=f"btn_c_cancel_{curr_cid}", width="stretch"):
                 st.session_state[contract_edit_key] = False
                 st.session_state.pop(contract_draft_key, None)
                 st.rerun()
 
     with c_btn_del:
         st.write("")
-        if st.button("🗑️ 刪除範本", key=f"btn_c_del_{curr_cid}", type="secondary", use_container_width=True):
+        if st.button("🗑️ 刪除範本", key=f"btn_c_del_{curr_cid}", type="secondary", width="stretch"):
             st.session_state[contract_del_modal_key] = True
 
     if st.session_state.get(contract_del_modal_key, False):
@@ -233,7 +233,7 @@ def _render_tab3_contract_management(form_db_table_fields, form_table_for_key, g
                     file_name=f"{curr_contract['name']}_{contract_target_order.get('case_no', 'SAMPLE') if contract_target_order else 'DEMO'}.html",
                     mime="text/html",
                     key=f"dl_c_pdf_{curr_cid}",
-                    use_container_width=True
+                    width="stretch"
                 )
             with pdf_col2:
                 st.download_button(
@@ -242,6 +242,6 @@ def _render_tab3_contract_management(form_db_table_fields, form_table_for_key, g
                     file_name=f"{curr_contract['name']}.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                     key=f"dl_c_xlsx_{curr_cid}",
-                    use_container_width=True,
+                    width="stretch",
                     disabled=True
                 )

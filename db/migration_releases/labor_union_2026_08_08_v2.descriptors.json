@@ -1,0 +1,198 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "137_background_jobs.sql": {
+      "tables": {
+        "background_jobs": [
+          "command_identity",
+          "created_at",
+          "error_payload",
+          "job_id",
+          "receipt_payload",
+          "status",
+          "updated_at"
+        ]
+      },
+      "triggers": []
+    },
+    "138_client_subsidy_advance_settlement.sql": {
+      "tables": {
+        "client_ledger_entries": [
+          "entry_type"
+        ],
+        "client_subsidy_advance_recoveries": [
+          "advance_ledger_entry_id",
+          "case_no",
+          "created_at",
+          "government_allocation_id",
+          "id",
+          "recovered_amount_ntd",
+          "source_outbox_id"
+        ],
+        "client_subsidy_return_claim_item_links": [
+          "claim_item_id",
+          "created_at",
+          "entitled_amount_ntd",
+          "id",
+          "obligation_identity"
+        ],
+        "government_subsidy_outbox": [
+          "intent_type"
+        ]
+      },
+      "triggers": [
+        "trg_client_subsidy_advance_recovery_before_delete",
+        "trg_client_subsidy_advance_recovery_before_update",
+        "trg_client_subsidy_return_claim_item_link_before_delete",
+        "trg_client_subsidy_return_claim_item_link_before_update"
+      ]
+    },
+    "139_finance_import_historical_reprocess.sql": {
+      "tables": {
+        "finance_import_classification_events": [
+          "classification_type"
+        ],
+        "finance_import_historical_reprocess_receipts": [
+          "batch_id",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "reprocess_run_id",
+          "result_snapshot"
+        ],
+        "historical_owner_selection_events": [
+          "actor",
+          "batch_id",
+          "batch_version",
+          "case_no",
+          "created_at",
+          "evidence_references",
+          "finance_import_row_id",
+          "id",
+          "idempotency_key",
+          "obligation_identity",
+          "obligation_projection_version",
+          "preview_fingerprint",
+          "reason",
+          "resulting_canonical_fact_version",
+          "source_canonical_fact_version"
+        ],
+        "finance_import_outbox": [
+          "intent_type"
+        ]
+      },
+      "triggers": [
+        "trg_finance_import_historical_reprocess_receipt_before_delete",
+        "trg_finance_import_historical_reprocess_receipt_before_update",
+        "trg_historical_owner_selection_before_delete",
+        "trg_historical_owner_selection_before_update"
+      ]
+    },
+    "140_client_refund_return.sql": {
+      "tables": {
+        "client_refund_reversal_apply_receipts": [
+          "correction_type"
+        ],
+        "client_ledger_entries": [],
+        "finance_import_classification_events": [
+          "classification_type"
+        ]
+      },
+      "triggers": []
+    },
+    "141_durable_background_job_queue.sql": {
+      "tables": {
+        "background_jobs": [
+          "attempt_count",
+          "available_at",
+          "command_payload",
+          "command_type",
+          "command_version",
+          "completed_at",
+          "correlation_id",
+          "lease_expires_at",
+          "lease_owner",
+          "lease_token",
+          "max_attempts",
+          "result_reference",
+          "submitted_by"
+        ]
+      },
+      "triggers": []
+    },
+    "142_client_deposit_reversal.sql": {
+      "tables": {
+        "client_deposit_reversal_apply_receipts": [
+          "case_no",
+          "command_fingerprint",
+          "created_at",
+          "id",
+          "idempotency_key",
+          "preview_fingerprint",
+          "result_snapshot",
+          "resulting_account_version"
+        ]
+      },
+      "triggers": [
+        "trg_client_deposit_reversal_receipts_before_delete",
+        "trg_client_deposit_reversal_receipts_before_update"
+      ]
+    },
+    "143_client_refund_return_review.sql": {
+      "tables": {
+        "client_refund_return_review_events": [
+          "actor",
+          "case_no",
+          "correlation_id",
+          "created_at",
+          "evidence",
+          "finance_import_row_id",
+          "id",
+          "idempotency_key",
+          "original_refund_ledger_entry_id",
+          "reason"
+        ],
+        "client_refund_return_review_receipts": [
+          "command_fingerprint",
+          "created_at",
+          "finance_import_row_id",
+          "id",
+          "idempotency_key",
+          "result_snapshot",
+          "review_event_id"
+        ],
+        "finance_import_outbox": [
+          "intent_type"
+        ]
+      },
+      "triggers": [
+        "trg_client_refund_return_review_event_before_delete",
+        "trg_client_refund_return_review_event_before_update",
+        "trg_client_refund_return_review_receipt_before_delete",
+        "trg_client_refund_return_review_receipt_before_update"
+      ]
+    },
+    "144_order_auto_completion_workflow.sql": {
+      "tables": {
+        "order_auto_completion_apply_receipts": [
+          "case_no",
+          "command_fingerprint",
+          "completion_instant",
+          "created_at",
+          "evaluation_at",
+          "id",
+          "idempotency_key",
+          "lifecycle_event_id",
+          "order_version",
+          "result_snapshot"
+        ]
+      },
+      "triggers": [
+        "trg_order_auto_completion_receipts_before_delete",
+        "trg_order_auto_completion_receipts_before_update"
+      ]
+    }
+  }
+}

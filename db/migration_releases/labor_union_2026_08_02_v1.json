@@ -1,0 +1,576 @@
+{
+  "application_compatibility": {
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "orders-lifecycle-v1",
+      "finance-import-reprocessing-v1"
+    ],
+    "minimum_api_contract": "typed-api-v1",
+    "post_cutover_smoke_ids": [
+      "orders-read",
+      "finance-import-read",
+      "scheduling-read",
+      "payroll-payables-read",
+      "anomalies-read"
+    ],
+    "required_restart_targets": [
+      "api",
+      "streamlit",
+      "file-watcher",
+      "background-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "artifacts": [
+    {
+      "dependencies": [],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "61_finance_import_reprocessing.sql",
+      "relative_path": "db/schema_parts/61_finance_import_reprocessing.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "5844bef63d2eb05c5fd612cf8f585c7ccae06eb9db292591c41cebfca7230986"
+    },
+    {
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "name": "104_order_lifecycle_state_history.sql",
+      "relative_path": "db/schema_parts/104_order_lifecycle_state_history.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "756d00e32e5a0f8db162c953305a809797ecb73cfa669386d39af8b114273019"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "105_order_service_time_terms.sql",
+      "relative_path": "db/schema_parts/105_order_service_time_terms.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "09a3c8d65358496d8a62d3b591e176d52f6183e4e16a1f43f124a9561a9dd7a8"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql",
+        "105_order_service_time_terms.sql"
+      ],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "106_order_lifecycle_control_facts.sql",
+      "relative_path": "db/schema_parts/106_order_lifecycle_control_facts.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "b606ac910ce8c7df78a78852ad1521f09bd0dabbba81427c495a8327c46c58a3"
+    },
+    {
+      "dependencies": [],
+      "data_effect": "schema_and_deterministic_backfill",
+      "name": "107_system_alert_current_projection.sql",
+      "relative_path": "db/schema_parts/107_system_alert_current_projection.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "5b936b688c850054b7357cc7f381790d8a9a18bfe0c4ab8ed6c37a1009ac3f69"
+    },
+    {
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "name": "108_matching_records_resume_delivery.sql",
+      "relative_path": "db/schema_parts/108_matching_records_resume_delivery.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "a9175d9ccbc1e332bb0e3ab3a936b865c28495b6a7cb58845b1063986a1ae68d"
+    },
+    {
+      "dependencies": [
+        "105_order_service_time_terms.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "109_scheduling_generations.sql",
+      "relative_path": "db/schema_parts/109_scheduling_generations.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "9b65461e34c043af7dc9bf6e2908d74abb1e367abc6979f04471e9e20a7d2723"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql",
+        "105_order_service_time_terms.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "110_order_terms_workflow.sql",
+      "relative_path": "db/schema_parts/110_order_terms_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "e4823aa166e1e56dbd9c56ab1e54903b86b6c8001e64a5ba090e6efe63ea1846"
+    },
+    {
+      "dependencies": [
+        "61_finance_import_reprocessing.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "111_client_finance_ledger.sql",
+      "relative_path": "db/schema_parts/111_client_finance_ledger.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "febb38c9cc137132e35aedbc046d64a29c3ce37bc20c095f063a3c95c34d51bc"
+    },
+    {
+      "dependencies": [
+        "109_scheduling_generations.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "112_payroll_obligations.sql",
+      "relative_path": "db/schema_parts/112_payroll_obligations.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "722076732339b9334e3979ea8cfd36bf57dafb11a02388f275f652467b887468"
+    },
+    {
+      "dependencies": [
+        "61_finance_import_reprocessing.sql",
+        "107_system_alert_current_projection.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "113_anomaly_registry_projection.sql",
+      "relative_path": "db/schema_parts/113_anomaly_registry_projection.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "e0e6645acc312b702c3cc94c04602400d03b030b68779fbd812e029b09f484ad"
+    },
+    {
+      "dependencies": [
+        "61_finance_import_reprocessing.sql",
+        "112_payroll_obligations.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "114_staff_payout_ledger.sql",
+      "relative_path": "db/schema_parts/114_staff_payout_ledger.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "22a4a10d8b1a76bf2d31fbb4abe5a2e73858d765edf472fa030a7d5db04b64cf"
+    },
+    {
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "name": "115_global_command_claims.sql",
+      "relative_path": "db/schema_parts/115_global_command_claims.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "3d32ef8e5bd281c80ced3d03325ba3a81031bef4e21db66085a01c874e5181a9"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql",
+        "106_order_lifecycle_control_facts.sql",
+        "109_scheduling_generations.sql",
+        "110_order_terms_workflow.sql",
+        "111_client_finance_ledger.sql",
+        "112_payroll_obligations.sql",
+        "115_global_command_claims.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "116_order_actual_start_workflow.sql",
+      "relative_path": "db/schema_parts/116_order_actual_start_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "1899b1107132346c3755655a7728bd69be0ea90e4fdc31a7af65e78c78108439"
+    },
+    {
+      "dependencies": [
+        "111_client_finance_ledger.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "117_client_deposit_settlement_projection.sql",
+      "relative_path": "db/schema_parts/117_client_deposit_settlement_projection.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "831ea914af1a6e71d72d97dd185c4c986c8a4da3107ab00ef60c912956aa5e44"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql",
+        "106_order_lifecycle_control_facts.sql",
+        "109_scheduling_generations.sql",
+        "111_client_finance_ledger.sql",
+        "112_payroll_obligations.sql",
+        "115_global_command_claims.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "118_order_cancellation_workflow.sql",
+      "relative_path": "db/schema_parts/118_order_cancellation_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "a17fb63af10cd87ecc93946bb2145df17b94324b573c22a1d39ef4aefb4dbd1e"
+    },
+    {
+      "dependencies": [
+        "109_scheduling_generations.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "119_assignment_plan_workflow.sql",
+      "relative_path": "db/schema_parts/119_assignment_plan_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "d02344ecbf775d388c52075139b1e150e6fef4380d2d5397b1f2fc2587f4e302"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql",
+        "106_order_lifecycle_control_facts.sql",
+        "109_scheduling_generations.sql",
+        "111_client_finance_ledger.sql",
+        "112_payroll_obligations.sql",
+        "115_global_command_claims.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "120_leave_substitution_workflow.sql",
+      "relative_path": "db/schema_parts/120_leave_substitution_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "40ec659f53bc656e4e94b0893a79111c5b7c079918278ad7c8dc88e7d73c425d"
+    },
+    {
+      "dependencies": [
+        "61_finance_import_reprocessing.sql",
+        "111_client_finance_ledger.sql",
+        "113_anomaly_registry_projection.sql",
+        "114_staff_payout_ledger.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "121_finance_import_preview_apply.sql",
+      "relative_path": "db/schema_parts/121_finance_import_preview_apply.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "a629aeea3cb447b33c60546d51109dc34c9df0fd20dd38701278aebe1b94b51f"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql",
+        "110_order_terms_workflow.sql",
+        "115_global_command_claims.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "122_order_contract_completion_workflow.sql",
+      "relative_path": "db/schema_parts/122_order_contract_completion_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "7eeabe2ee27fbbac1acffef0fbfae161aee6cdd37e678e45cc7808ba047419ee"
+    },
+    {
+      "dependencies": [
+        "104_order_lifecycle_state_history.sql",
+        "106_order_lifecycle_control_facts.sql",
+        "115_global_command_claims.sql",
+        "118_order_cancellation_workflow.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "123_order_reopen_workflow.sql",
+      "relative_path": "db/schema_parts/123_order_reopen_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "3e52378087871f2b875dbb8610029800f2662414be9214f55cddecd6028fff4d"
+    },
+    {
+      "dependencies": [
+        "109_scheduling_generations.sql",
+        "111_client_finance_ledger.sql",
+        "112_payroll_obligations.sql",
+        "115_global_command_claims.sql"
+      ],
+      "data_effect": "schema_and_deterministic_seed",
+      "name": "124_case_architecture_bootstrap.sql",
+      "relative_path": "db/schema_parts/124_case_architecture_bootstrap.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "182eb965db91b104b05091313a18d2b66c68d759798270912a3a468443d73022"
+    },
+    {
+      "dependencies": [
+        "109_scheduling_generations.sql",
+        "115_global_command_claims.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "125_government_subsidy_domain.sql",
+      "relative_path": "db/schema_parts/125_government_subsidy_domain.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "613d7b505edb6fb5d56a979c4d3e6d99c81696bb56f8dd798091d690388cc64d"
+    },
+    {
+      "dependencies": [
+        "111_client_finance_ledger.sql",
+        "115_global_command_claims.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "126_client_refund_reversal.sql",
+      "relative_path": "db/schema_parts/126_client_refund_reversal.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "7fe4db2b822c7f4b33e71594f05b137f795d9cceb141642bf4018385e815a11e"
+    },
+    {
+      "dependencies": [
+        "113_anomaly_registry_projection.sql",
+        "121_finance_import_preview_apply.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "127_anomaly_root_fact_projector.sql",
+      "relative_path": "db/schema_parts/127_anomaly_root_fact_projector.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "1b02ade84c3f09e4c2645c0c619f291e0b876614a2bc1b11d6910d6c95d99163"
+    },
+    {
+      "dependencies": [
+        "121_finance_import_preview_apply.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "128_finance_import_ingestion.sql",
+      "relative_path": "db/schema_parts/128_finance_import_ingestion.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "c54b5f75f820adbcc3b18856dbd8d4a6f3623d3f99abceee1335a0ed29b29d42"
+    },
+    {
+      "dependencies": [
+        "115_global_command_claims.sql",
+        "124_case_architecture_bootstrap.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "129_case_import.sql",
+      "relative_path": "db/schema_parts/129_case_import.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "73f4b51033536c9c03bbdfe6308b9d3236fc5caa2d3bc39e33854111fed41fb7"
+    },
+    {
+      "dependencies": [
+        "111_client_finance_ledger.sql",
+        "112_payroll_obligations.sql",
+        "115_global_command_claims.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "133_financial_adjustments.sql",
+      "relative_path": "db/schema_parts/133_financial_adjustments.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "57cea59e39570f8c16c2a0844e1d784fb0c77516e1bef4f6a8da4a78194eae52"
+    },
+    {
+      "dependencies": [
+        "115_global_command_claims.sql",
+        "125_government_subsidy_domain.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "134_government_subsidy_claim_workflow.sql",
+      "relative_path": "db/schema_parts/134_government_subsidy_claim_workflow.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "1c47451b8b83069b150e19dc5d15d66aeb1088261a34e16f67d2c34df66bbd7b"
+    },
+    {
+      "dependencies": [
+        "133_financial_adjustments.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "135_client_only_financial_adjustments.sql",
+      "relative_path": "db/schema_parts/135_client_only_financial_adjustments.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "9b453894b033f1c8340e63a1eb9c9d018165cf4b89742133064b27a4b6f705fb"
+    },
+    {
+      "dependencies": [
+        "113_anomaly_registry_projection.sql",
+        "115_global_command_claims.sql",
+        "129_case_import.sql"
+      ],
+      "data_effect": "schema_only",
+      "name": "136_beclass_import_review.sql",
+      "relative_path": "db/schema_parts/136_beclass_import_review.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "restore-candidate-from-pre-ddl-artifact",
+      "sha256": "bf4ad266425617a0de9ca1033f8604600cf706d6d2c829cc4e89ce3d257202a2"
+    }
+  ],
+  "backfills": [
+    {
+      "apply_arguments": [
+        "--apply",
+        "--target-database",
+        "{candidate}",
+        "--backup-receipt",
+        "{backup}",
+        "--plan-receipt",
+        "{plan}",
+        "--receipt-path",
+        "{receipt}"
+      ],
+      "archive_policy": "operation-receipt-sibling-artifacts",
+      "artifact": {
+        "dependencies": [
+          "109_scheduling_generations.sql"
+        ],
+        "name": "migrate_scheduling_generation_bootstrap.py",
+        "relative_path": "scripts/migrate_scheduling_generation_bootstrap.py",
+        "sha256": "89fc8a927c4f2e6cd1695c9437aafd21cde3957f0efd0549ac089e79d4576cca"
+      },
+      "backfill_id": "scheduling-generation-bootstrap-v1",
+      "dry_run_arguments": [
+        "--dry-run",
+        "--target-database",
+        "{candidate}",
+        "--receipt-path",
+        "{plan}"
+      ],
+      "receipt_contract": "scheduling-generation-bootstrap/v1",
+      "transaction_boundary": "script-owned-candidate-transaction",
+      "verify_arguments": [
+        "--verify",
+        "--target-database",
+        "{candidate}",
+        "--receipt-path",
+        "{receipt}"
+      ]
+    },
+    {
+      "apply_arguments": [
+        "--apply",
+        "--target-database",
+        "{candidate}",
+        "--backup-receipt",
+        "{backup}",
+        "--plan-receipt",
+        "{plan}",
+        "--receipt-path",
+        "{receipt}"
+      ],
+      "archive_policy": "operation-receipt-sibling-artifacts",
+      "artifact": {
+        "dependencies": [
+          "106_order_lifecycle_control_facts.sql"
+        ],
+        "name": "migrate_order_lifecycle_control_facts.py",
+        "relative_path": "scripts/migrate_order_lifecycle_control_facts.py",
+        "sha256": "1dd816bebe7a1b538ee10d1b6f2ba247d2b8ccb59a36be9735276d6f193c082e"
+      },
+      "backfill_id": "order-lifecycle-control-facts-v1",
+      "dry_run_arguments": [
+        "--dry-run",
+        "--target-database",
+        "{candidate}",
+        "--receipt-path",
+        "{plan}"
+      ],
+      "receipt_contract": "order-lifecycle-control-facts-migration/v1",
+      "transaction_boundary": "script-owned-candidate-transaction",
+      "verify_arguments": [
+        "--verify",
+        "--target-database",
+        "{candidate}",
+        "--receipt-path",
+        "{receipt}"
+      ]
+    },
+    {
+      "apply_arguments": [
+        "--apply"
+      ],
+      "archive_policy": "operation-receipt-result-digest",
+      "artifact": {
+        "dependencies": [
+          "106_order_lifecycle_control_facts.sql"
+        ],
+        "name": "migrate_order_details_lifecycle_version_view.py",
+        "relative_path": "scripts/migrate_order_details_lifecycle_version_view.py",
+        "sha256": "416f785dfd8221c08d46db58162b0745f14238d7e526dbf221b84d03f0960085"
+      },
+      "backfill_id": "order-details-lifecycle-version-view-v1",
+      "dry_run_arguments": [],
+      "receipt_contract": "subprocess-result-digest/v1",
+      "transaction_boundary": "script-owned-candidate-transaction",
+      "verify_arguments": []
+    }
+  ],
+  "contract": "migration-release-manifest/v1",
+  "descriptor_artifact": {
+    "dependencies": [],
+    "name": "labor_union_2026_08_02_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_02_v1.descriptors.json",
+    "sha256": "0fddffc05b7389aeeb517de45e6754b00eb5abb8a18b6b7aaf9ded38195f7626"
+  },
+  "release_id": "labor-union-2026-08-02-v1",
+  "release_metadata": {
+    "application_version": "global-architecture-v1",
+    "description": "Preserve-data additive architecture foundation",
+    "published_at": "2026-08-02",
+    "release_name": "Labor Union architecture foundation v1"
+  },
+  "source_baseline": {
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "baseline_id": "legacy-production-compatible-v1",
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "source_must_be_read_only": true
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {
+      "blocking": true,
+      "phase": "post-restore",
+      "policy": "restored-schema-programs-equivalent",
+      "read_only": true,
+      "verification_id": "restored-schema-programs"
+    },
+    {
+      "blocking": true,
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "verification_id": "owned-object-descriptors"
+    },
+    {
+      "blocking": true,
+      "phase": "post-backfill",
+      "policy": "source-row-pk-and-full-row-fingerprint-unchanged",
+      "read_only": true,
+      "verification_id": "source-preservation"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "orders-legacy-projection-unchanged",
+      "read_only": true,
+      "verification_id": "legacy-projection-compatibility"
+    },
+    {
+      "blocking": true,
+      "phase": "post-restart",
+      "policy": "all-application-smoke-ids-pass",
+      "read_only": true,
+      "verification_id": "application-read-smoke"
+    }
+  ]
+}

@@ -9,8 +9,13 @@ from pydantic import BaseModel, Field
 
 
 class RichMenuPublishRequest(BaseModel):
+    preview_id: int = Field(ge=1)
     reason: str = Field(default="", max_length=500)
+    idempotency_key: str = Field(default="", max_length=191)
+    correlation_id: str = Field(default="", max_length=191)
 
 
 class RichMenuPublicationRetryRequest(BaseModel):
     reason: str = Field(default="", max_length=500)
+    idempotency_key: str = Field(default="", max_length=191)
+    correlation_id: str = Field(default="", max_length=191)

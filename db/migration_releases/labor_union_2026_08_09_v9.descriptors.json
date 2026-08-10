@@ -1,0 +1,13 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "165_anomaly_workflow_event_idempotency_widen.sql": {
+      "tables": {
+        "anomaly_workflow_events": [
+          "idempotency_key"
+        ]
+      },
+      "triggers": []
+    }
+  }
+}

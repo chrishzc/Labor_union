@@ -1,0 +1,104 @@
+{
+  "application_compatibility": {
+    "compatible_contracts": [
+      "global-architecture-v1",
+      "line-integration-v1",
+      "line-runtime-v1"
+    ],
+    "minimum_api_contract": "typed-api-v1",
+    "post_cutover_smoke_ids": [
+      "line-runtime-owned-objects",
+      "line-worker-heartbeat"
+    ],
+    "required_restart_targets": [
+      "api",
+      "line-worker"
+    ],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "artifacts": [
+    {
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "name": "157_line_runtime_control.sql",
+      "relative_path": "db/schema_parts/157_line_runtime_control.sql",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-runtime-facts",
+      "sha256": "44eaacadc94a182b8f03ddc32915a1e1ba30d1175e14a90589bdb467f2cab4fa"
+    }
+  ],
+  "backfills": [],
+  "contract": "migration-release-manifest/v1",
+  "descriptor_artifact": {
+    "dependencies": [],
+    "name": "labor_union_2026_08_08_line_stage3_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_08_line_stage3_v1.descriptors.json",
+    "sha256": "33960b1a52d23e4c69bc0c971d21854944068773f0eb67aae31b74381fa79170"
+  },
+  "release_id": "labor-union-line-stage3-2026-08-08-v1",
+  "release_metadata": {
+    "application_version": "line-runtime-v1",
+    "description": "Independent durable LINE webhook and delivery worker runtime",
+    "published_at": "2026-08-08",
+    "release_name": "Labor Union LINE runtime stage 3 v1"
+  },
+  "source_baseline": {
+    "allowed_owned_object_states": [
+      "absent",
+      "exact"
+    ],
+    "baseline_id": "line-stage2-v1",
+    "forbidden_owned_object_states": [
+      "partial",
+      "drift"
+    ],
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "source_must_be_read_only": true
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  },
+  "verification_contracts": [
+    {
+      "blocking": true,
+      "phase": "post-restore",
+      "policy": "restored-schema-programs-equivalent",
+      "read_only": true,
+      "verification_id": "restored-schema-programs"
+    },
+    {
+      "blocking": true,
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "verification_id": "owned-object-descriptors"
+    },
+    {
+      "blocking": true,
+      "phase": "pre-switch",
+      "policy": "line-webhook-runtime-mode-mutually-exclusive",
+      "read_only": true,
+      "verification_id": "line-runtime-cutover-mode"
+    },
+    {
+      "blocking": true,
+      "phase": "post-restart",
+      "policy": "line-worker-heartbeat-not-stale",
+      "read_only": true,
+      "verification_id": "line-worker-heartbeat"
+    }
+  ]
+}

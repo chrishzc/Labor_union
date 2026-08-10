@@ -15,8 +15,12 @@ from fastapi import APIRouter, Depends
 
 from api.dependencies.admin_auth import require_line_viewer
 from api.schemas.base import BaseResponse
-from line.worker import worker_is_running
-from services.db_service import get_connection
+from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
+from subsystems.line.runtime_health import classify_line_worker_health
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.access.integration_capabilities import integration_capabilities_for_role
+from subsystems.line.capabilities import line_capabilities_for_role
 
 
 router = APIRouter(
@@ -32,6 +36,10 @@ def _configured(name: str) -> bool:
     return bool(value and not value.startswith("your_") and value != "mock_token")
 
 
+def _enabled(name: str) -> bool:
+    return os.getenv(name, "false").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _database_health() -> dict:
     try:
         conn = get_connection()
@@ -39,30 +47,40 @@ def _database_health() -> dict:
             with conn.cursor(pymysql.cursors.DictCursor) as cursor:
                 cursor.execute("SELECT 1 AS ok")
                 database_ok = bool(cursor.fetchone()["ok"])
-                cursor.execute(
-                    """
-                    SELECT status, COUNT(*) AS total
-                    FROM line_tasks
-                    GROUP BY status
-                    """
-                )
-                task_counts = {row["status"]: int(row["total"]) for row in cursor.fetchall()}
+                task_counts = _legacy_task_counts(cursor)
+            runtime = MySqlLineRuntimeRepository(conn)
+            heartbeat = runtime.latest_heartbeat()
+            queue_counts = runtime.queue_counts()
         finally:
             conn.close()
-        return {"ok": database_ok, "line_task_counts": task_counts}
+        return {
+            "ok": database_ok,
+            "line_task_counts": task_counts,
+            "queue_counts": queue_counts,
+            "worker": classify_line_worker_health(
+                heartbeat,
+                stale_after_seconds=float(os.getenv("LINE_WORKER_STALE_SECONDS", "90")),
+            ),
+        }
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+def _legacy_task_counts(cursor) -> dict[str, int]:
+    cursor.execute("SELECT status,COUNT(*) AS total FROM line_tasks GROUP BY status")
+    return {row["status"]: int(row["total"]) for row in cursor.fetchall()}
 
 
 @router.get("/health", response_model=BaseResponse[dict])
 def line_admin_health():
     database = _database_health()
-    status_text = "healthy" if database.get("ok") and worker_is_running() else "degraded"
+    worker = database.get("worker", {"status": "unknown", "running": False})
+    status_text = "healthy" if database.get("ok") and worker.get("running") else "degraded"
     return BaseResponse(
         data={
             "status": status_text,
             "database": database,
-            "worker": {"running": worker_is_running()},
+            "worker": worker,
             "line_credentials": {
                 "channel_secret": _configured("LINE_CHANNEL_SECRET"),
                 "channel_access_token": _configured("LINE_CHANNEL_ACCESS_TOKEN"),
@@ -73,11 +91,20 @@ def line_admin_health():
 
 
 @router.get("/capabilities", response_model=BaseResponse[dict])
-def line_admin_capabilities():
+# Keep this projection together so operators can audit capability and feature drift in one response.
+def line_admin_capabilities(
+    principal: AdminPrincipal = Depends(require_line_viewer),
+):
     return BaseResponse(
         data={
-            "stage": "5.6",
-            "available": {
+            "stage": "9",
+            "effective_capabilities": sorted(
+                {
+                    *line_capabilities_for_role(principal.role),
+                    *integration_capabilities_for_role(principal.role),
+                }
+            ),
+            "features": {
                 "health_overview": True,
                 "message_template_api": True,
                 "message_schedule_api": True,
@@ -92,18 +119,24 @@ def line_admin_capabilities():
                 "liff_runtime_config": True,
                 "liff_revision_history": True,
                 "customer_service_config_api": True,
-                "customer_service_ticket_api": True,
-                "customer_service_center": True,
                 "staff_review_api": True,
                 "staff_review_management": True,
                 "admin_session": True,
                 "role_permissions": True,
                 "audit_log": True,
+                "order_group_management": True,
+                "contract_evidence": True,
+                "knowledge_management": True,
             },
-            "planned_pages": [
-                "LINE 設定中心",
-                "操作紀錄",
-            ],
+            "runtime_availability": {
+                "line_worker_enabled": True,
+                "contract_worker_enabled": _enabled(
+                    "CONTRACT_INTEGRATION_RUNTIME_ENABLED"
+                ),
+                "knowledge_worker_enabled": _enabled(
+                    "KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED"
+                ),
+            },
             "config_files": {
                 "message_templates": (PROJECT_ROOT / "config/message_templates.json").exists(),
                 "message_schedules": (PROJECT_ROOT / "config/message_schedules.json").exists(),

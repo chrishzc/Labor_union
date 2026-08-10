@@ -1,7 +1,7 @@
 # UI API／DB 串接實作計畫
 
 - 建立日期：2026-07-24
-- 狀態：Phase 1 規劃草案，尚未通過人工 Checkpoint 1
+- 狀態：歷史規劃草案；不構成現行實作流程或驗收 gate
 - 範圍：Data Browser、訂單與媒合、訂單編輯器、行事曆、表單管理
 - 架構原則：Streamlit UI → FastAPI Router → Domain Service → DB
 
@@ -24,32 +24,14 @@
 - 禁止重新依賴 legacy `orders.staff_id` 作為正式指派來源。
 - API 失敗時，UI 不得偷偷退回直接呼叫 `DbService`。
 
-## 2. Phase 0：修復 ADAD 架構狀態
+## 2. Phase 0：確認現行架構依據
 
-目前 `ui/ui_system_map.yaml` 比根 `system_map.yaml` 新。修改任何架構契約前，必須先恢復同步：
+修改任何架構契約前，應以現行基線規格、人工裁決、live schema、production caller
+與有限測試確認漂移；`system_map*` 只作歷史追溯，不可作為 gate。
 
-```powershell
-.venv\Scripts\python.exe .agents\skills\adad-workflow\scripts\compile_map.py
-.venv\Scripts\python.exe .agents\skills\adad-workflow\scripts\check_source_binding.py
-.venv\Scripts\python.exe .agents\skills\adad-workflow\scripts\check_domain_boundary.py
-.venv\Scripts\python.exe .agents\skills\adad-workflow\scripts\resume_analysis.py
-```
+工作區既有 `fixtures/db_snapshot_v2/v3/` 刪除不納入本次修改。
 
-接著檢查：
-
-- 本次涉及節點的既有 Task 是否 stale。
-- `.agents/tasks/.source_locks` 是否鎖住相關來源檔。
-- Task index 是否與重新編譯後的 map 一致。
-- 工作區既有 `fixtures/db_snapshot_v2/v3/` 刪除不納入本次修改。
-
-完成條件：
-
-- `system_map.yaml` 編譯成功。
-- Schema、source binding、domain boundary 全部通過。
-- `read_context.py` 能正常讀取本次節點。
-- 尚不自行核准任何 Checkpoint。
-
-## 3. Phase 1：system_map 架構契約
+## 3. Phase 1：架構契約
 
 ### 3.1 既有 API 遷移節點
 
@@ -251,7 +233,7 @@ PUT /api/v1/orders/{case_no}/rest-dates
 PUT /api/v1/assignment-schedules/{assignment_id}/rest-dates
 ```
 
-Checkpoint 1 前必須決定採訂單層或 assignment 層，不能同時建立兩套來源。設計必須保證：
+實作前必須決定採訂單層或 assignment 層，不能同時建立兩套來源。設計必須保證：
 
 - 不刪除其他 assignment 的 `staff_schedule`。
 - `custom_rest_dates`、實際結束日及日排班在同一 transaction 更新。
@@ -287,7 +269,7 @@ PATCH /api/v1/client-payments/{case_no}/due-dates
 
 ## 5. Phase 2：原子施工順序
 
-每個項目必須分別完成 CP-1、Task、實作、驗證與 CP-2：
+每個項目應分別完成架構確認、實作與有限驗證：
 
 1. `Page2TabNavigation`
 2. `FormManagementUI`
@@ -311,18 +293,15 @@ PATCH /api/v1/client-payments/{case_no}/due-dates
 20. `CalendarUI` 休假保存遷移
 21. `EditOrderUI` 帳務欄位唯讀修正
 
-單節點流程：
+單一改善單位流程：
 
 ```text
-修改 system_map.md
-→ compile_map.py
-→ 人工 Checkpoint 1
-→ generate_task.py
-→ 單節點實作
+確認基線規格與人工裁決
+→ 檢查 live schema、production caller 與 dirty worktree
+→ 單一改善單位實作
 → lint / py_compile / pytest
-→ submit Task
-→ 人工 Checkpoint 2
-→ 下一節點
+→ 更新可重跑 evidence
+→ 下一份規格
 ```
 
 ## 6. 明確排除範圍
@@ -335,7 +314,7 @@ PATCH /api/v1/client-payments/{case_no}/due-dates
 - 直接包裝 `assign_staff_to_order()`。
 - 直接把 `save_order_rest_dates()` 暴露成 API。
 - UI 在 API 失敗時退回 DbService。
-- 未經人工 Checkpoint 自動把節點推進為 validated 或 deployed。
+- 不得把歷史規劃狀態當成已驗收或已部署的證據。
 
 ## 7. 驗證計畫
 
@@ -400,4 +379,3 @@ UI 只保留：
 - JSON／Excel 模板管理。
 
 所有正式 DB 讀寫、權限、欄位白名單、交易原子性與 assignment ownership 集中在 API／service 層。
-

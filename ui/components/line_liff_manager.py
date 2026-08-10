@@ -18,9 +18,9 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.components.line_ui_support import has_capability
 
 
-EDIT_ROLES = {"line_manager", "system_admin"}
 FLASH_KEY = "line_liff_flash"
 PAGE_LABELS = {
     "gateway": "入口選擇頁",
@@ -245,7 +245,7 @@ def render_liff_manager(
     flash = st.session_state.pop(FLASH_KEY, None)
     if flash:
         st.success(flash)
-    can_edit = profile.get("role") in EDIT_ROLES
+    can_edit = has_capability(profile, "line.config.manage")
     try:
         state = client.liff_config_state(token)
     except LineAdminApiError as exc:
@@ -296,7 +296,7 @@ def render_liff_manager(
             _content_rows(page),
             num_rows="dynamic" if can_edit else "fixed",
             disabled=not can_edit,
-            use_container_width=True,
+            width="stretch",
             column_order=["label", "text"],
             column_config={
                 "label": st.column_config.TextColumn("用途說明", disabled=True),
@@ -312,7 +312,7 @@ def render_liff_manager(
                 _action_rows(page),
                 num_rows="fixed",
                 disabled=not can_edit,
-                use_container_width=True,
+                width="stretch",
                 column_order=["label", "description", "enabled", "order"],
                 column_config={
                     "label": st.column_config.TextColumn("入口名稱"),
@@ -329,7 +329,7 @@ def render_liff_manager(
                 _field_rows(page),
                 num_rows="dynamic" if can_edit else "fixed",
                 disabled=not can_edit,
-                use_container_width=True,
+                width="stretch",
                 column_order=[
                     "label",
                     "type",
@@ -422,7 +422,7 @@ def render_liff_manager(
                 }
                 for item in history
             ]
-            st.dataframe(history_rows, use_container_width=True, hide_index=True)
+            st.dataframe(history_rows, width="stretch", hide_index=True)
             restore_revision = st.selectbox(
                 "選擇要還原的版本",
                 [item["revision"] for item in history],

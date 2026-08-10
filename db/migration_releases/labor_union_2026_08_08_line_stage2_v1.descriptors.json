@@ -1,0 +1,135 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "154_line_integration_inbox_delivery.sql": {
+      "tables": {
+        "line_command_receipts": [
+          "id", "idempotency_key", "command_family", "payload_fingerprint",
+          "result_reference", "result_snapshot", "correlation_id", "created_at_utc"
+        ],
+        "line_delivery_attempt_events": [
+          "id", "task_id", "attempt_number", "outcome", "provider_outcome_type",
+          "provider_message_id", "error_code", "error_message", "retry_after_seconds",
+          "started_at_utc", "completed_at_utc", "idempotency_key", "correlation_id",
+          "created_at_utc"
+        ],
+        "line_delivery_tasks": [
+          "id", "recipient_type", "recipient_identity", "message_kind",
+          "payload_snapshot", "payload_fingerprint", "scheduled_at_utc",
+          "source_aggregate_type", "source_aggregate_identity", "idempotency_key",
+          "correlation_id", "processing_status", "completed_attempts", "max_attempts",
+          "next_attempt_at_utc", "lease_owner", "lease_acquired_at_utc",
+          "lease_expires_at_utc", "provider_message_id", "error_code", "error_message",
+          "sent_at_utc", "failed_at_utc", "created_at_utc", "updated_at_utc"
+        ],
+        "line_domain_audit_events": [
+          "id", "action", "actor_id", "aggregate_type", "aggregate_identity",
+          "occurred_at_utc"
+        ],
+        "line_domain_outbox": [
+          "id", "aggregate_type", "aggregate_identity", "intent_type",
+          "payload_snapshot", "idempotency_identity", "processing_status",
+          "attempt_count", "next_attempt_at_utc", "lease_owner", "lease_expires_at_utc",
+          "error_code", "created_at_utc", "completed_at_utc"
+        ],
+        "line_inbox_events": [
+          "id", "event_identity", "provider_event_id", "destination_id", "event_type",
+          "source_type", "source_identity", "source_user_id", "occurred_at_utc",
+          "payload_fingerprint", "payload_snapshot", "identity_source", "is_redelivery",
+          "processing_status", "aggregate_version", "attempt_count", "max_attempts",
+          "next_attempt_at_utc", "lease_owner", "lease_acquired_at_utc",
+          "lease_expires_at_utc", "error_code", "error_message", "received_at_utc",
+          "processed_at_utc", "updated_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_line_command_receipts_before_delete",
+        "trg_line_command_receipts_before_update",
+        "trg_line_delivery_attempt_events_before_delete",
+        "trg_line_delivery_attempt_events_before_update",
+        "trg_line_domain_audit_events_before_delete",
+        "trg_line_domain_audit_events_before_update"
+      ]
+    },
+    "155_line_identity_review_configuration.sql": {
+      "tables": {
+        "line_configuration_current": [
+          "configuration_kind", "revision", "revision_id", "updated_at_utc"
+        ],
+        "line_configuration_revisions": [
+          "id", "configuration_kind", "revision", "definition_snapshot",
+          "definition_fingerprint", "actor_id", "reason", "idempotency_key",
+          "correlation_id", "created_at_utc"
+        ],
+        "line_identity_binding_events": [
+          "id", "line_user_id", "action", "subject_type", "subject_reference",
+          "expected_version", "resulting_version", "actor_id", "payload_fingerprint",
+          "idempotency_key", "correlation_id", "occurred_at_utc"
+        ],
+        "line_identity_bindings": [
+          "line_user_id", "binding_status", "subject_type", "subject_reference",
+          "aggregate_version", "created_at_utc", "updated_at_utc"
+        ],
+        "line_identity_migration_anomalies": [
+          "id", "line_user_id", "candidate_count", "candidate_snapshot",
+          "detected_at_utc"
+        ],
+        "line_review_decision_events": [
+          "id", "review_request_id", "before_status", "after_status",
+          "expected_version", "resulting_version", "actor_id", "reason",
+          "decision_fingerprint", "idempotency_key", "correlation_id", "occurred_at_utc"
+        ],
+        "line_review_requests": [
+          "id", "review_type", "line_user_id", "subject_type", "subject_reference",
+          "review_status", "aggregate_version", "request_fingerprint", "evidence_snapshot",
+          "assigned_admin_id", "assigned_at_utc", "due_at_utc", "reassignment_count",
+          "reviewed_by_actor_id", "decision_reason", "reviewed_at_utc", "created_at_utc",
+          "updated_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_line_configuration_revisions_before_delete",
+        "trg_line_configuration_revisions_before_update",
+        "trg_line_identity_binding_events_before_delete",
+        "trg_line_identity_binding_events_before_update",
+        "trg_line_review_decision_events_before_delete",
+        "trg_line_review_decision_events_before_update"
+      ]
+    },
+    "156_line_publication_media_order_group.sql": {
+      "tables": {
+        "line_media_records": [
+          "id", "provider_media_id", "source_type", "source_identity", "source_user_id",
+          "content_type", "size_bytes", "content_sha256", "received_at_utc",
+          "media_category", "owner_type", "owner_reference", "object_reference",
+          "legacy_media_asset_id", "idempotency_key", "created_at_utc"
+        ],
+        "line_order_group_binding_events": [
+          "id", "case_no", "action", "before_group_id", "resulting_group_id",
+          "expected_version", "resulting_version", "actor_id", "binding_fingerprint",
+          "idempotency_key", "correlation_id", "occurred_at_utc"
+        ],
+        "line_order_group_bindings": [
+          "case_no", "group_id", "binding_status", "aggregate_version",
+          "created_at_utc", "updated_at_utc"
+        ],
+        "line_order_group_migration_anomalies": [
+          "id", "case_no", "legacy_group_id", "anomaly_code", "details_snapshot",
+          "detected_at_utc"
+        ],
+        "line_rich_menu_publication_tasks": [
+          "id", "menu_definition_id", "configuration_revision", "operation",
+          "publication_status", "definition_snapshot", "image_object_reference",
+          "provider_menu_id", "previous_provider_menu_id", "idempotency_key",
+          "correlation_id", "requested_by_actor_id", "attempt_count", "max_attempts",
+          "next_attempt_at_utc", "lease_owner", "lease_expires_at_utc", "error_code",
+          "error_message", "created_at_utc", "updated_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_line_order_group_binding_events_before_delete",
+        "trg_line_order_group_binding_events_before_update"
+      ]
+    }
+  }
+}

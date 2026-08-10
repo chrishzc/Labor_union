@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from services import multi_caregiver_schedule_read as service
+from subsystems.scheduling import assignment_schedule_query as service
 
 FIXED_DB_DATE = date(2026, 7, 10)
 
@@ -69,7 +69,7 @@ class QueryAwareCursor:
     def execute(self, sql, params=None):
         self.executed.append((" ".join(sql.split()), tuple(params) if params is not None else None))
         sql_upper = sql.upper()
-        if "SELECT CURRENT_DATE AS CURRENT_DATE" in sql_upper:
+        if "SELECT CURRENT_DATE" in sql_upper:
             self.current = self.fixture.get("current_date")
         elif "FROM CASE_STAFF_ASSIGNMENTS A" in sql_upper and "WHERE A.ID = %S" in sql_upper:
             self.current = self.fixture["assignments"].get(params[0]) if params else None
@@ -77,8 +77,6 @@ class QueryAwareCursor:
             self.current = self.fixture["actual_hours_adjustments"].get(params[0]) if params else None
         elif "FROM STAFF_PAYMENTS" in sql_upper:
             self.current = self.fixture["staff_payments"].get(params[0]) if params else None
-        elif "FROM STAFF_MONTHLY_SETTLEMENT_DETAILS" in sql_upper:
-            self.current = self.fixture["staff_monthly_settlement_details"].get(params[0]) if params else None
         elif "FROM STAFF_SCHEDULE" in sql_upper:
             self.current = self.fixture["schedule_by_assignment"].get(params[0])
             if self.current is None and params:
@@ -157,7 +155,6 @@ def test_reads_explicit_assignment_and_owned_schedule_days_with_fixed_db_date_an
         assignment(),
         None,
         None,
-        None,
         [
             schedule_day(work_date=FIXED_DB_DATE - timedelta(days=1)),
             schedule_day(work_date=FIXED_DB_DATE, id=8),
@@ -182,11 +179,10 @@ def test_reads_explicit_assignment_and_owned_schedule_days_with_fixed_db_date_an
         "is_cancelled": False,
         "has_actual_hours_adjustments": False,
         "has_active_staff_payment": False,
-        "has_active_monthly_settlement": False,
         "reasons": [],
     }
     assert connection.cursor_obj.executed[1][0].startswith("SELECT a.id, a.case_no, a.staff_id")
-    assert "WHERE assignment_id = %s" in connection.cursor_obj.executed[5][0]
+    assert "WHERE assignment_id = %s" in connection.cursor_obj.executed[4][0]
     assert connection.closed is True
     _assert_only_select_no_transaction(connection)
 
@@ -216,7 +212,6 @@ def test_rejects_schedule_rows_not_owned_by_assignment_id(monkeypatch):
             assignment(),
             None,
             None,
-            None,
             [schedule_day(assignment_id=None)],
         ]
     )
@@ -235,7 +230,6 @@ def test_rejects_schedule_rows_with_case_staff_mismatch(monkeypatch):
             assignment(),
             None,
             None,
-            None,
             [schedule_day(case_no="WRONG", staff_id=8)],
         ]
     )
@@ -249,7 +243,6 @@ def test_rejects_schedule_rows_with_case_staff_mismatch(monkeypatch):
         [
             {"current_date": FIXED_DB_DATE},
             assignment(),
-            None,
             None,
             None,
             [schedule_day(case_no="115000001", staff_id=999)],
@@ -269,7 +262,6 @@ def test_adjustment_guard_evaluates_all_flags_and_keeps_fixed_order(monkeypatch)
             assignment(status="cancelled"),
             {"id": 1},
             {"id": 2},
-            {"id": 3},
             [schedule_day()],
         ]
     )
@@ -281,19 +273,16 @@ def test_adjustment_guard_evaluates_all_flags_and_keeps_fixed_order(monkeypatch)
         "is_cancelled": True,
         "has_actual_hours_adjustments": True,
         "has_active_staff_payment": True,
-        "has_active_monthly_settlement": True,
         "reasons": [
             "cancelled_assignment",
             "actual_hours_adjustment_exists",
             "active_staff_payment",
-            "active_monthly_settlement",
         ],
     }
     # ensure no short-circuit in guard queries
-    assert len(connection.cursor_obj.executed) == 6
+    assert len(connection.cursor_obj.executed) == 5
     assert any("FROM actual_hours_adjustments" in sql for sql, _ in connection.cursor_obj.executed)
     assert any("FROM staff_payments" in sql for sql, _ in connection.cursor_obj.executed)
-    assert any("FROM staff_monthly_settlement_details" in sql for sql, _ in connection.cursor_obj.executed)
 
 
 def test_only_requested_assignment_rows_are_loaded(monkeypatch):
@@ -307,7 +296,6 @@ def test_only_requested_assignment_rows_are_loaded(monkeypatch):
             assignment(),
             None,
             None,
-            None,
             same_staff_other_assignment_schedule,
         ]
     )
@@ -316,7 +304,7 @@ def test_only_requested_assignment_rows_are_loaded(monkeypatch):
     with pytest.raises(ValueError, match="does not belong"):
         service.get_assignment_schedule(21)
 
-    assert connection.cursor_obj.executed[5][0].startswith("SELECT id, case_no, staff_id, assignment_id")
+    assert connection.cursor_obj.executed[4][0].startswith("SELECT id, case_no, staff_id, assignment_id")
     assert connection.closed is True
 
 
@@ -335,7 +323,6 @@ def test_only_target_assignment_isolated_when_same_staff_has_multiple_assignment
         },
         "actual_hours_adjustments": {21: None, 22: None},
         "staff_payments": {21: None, 22: None},
-        "staff_monthly_settlement_details": {21: None, 22: None},
         "schedule_by_assignment": {
             21: [
                 schedule_day(id=7, case_no="115000001", staff_id=8, assignment_id=21, work_date=FIXED_DB_DATE - timedelta(days=1)),
@@ -434,15 +421,6 @@ def _conflict_snapshot_responses(**overrides):
                 "payment_status": "pending",
             }
         ],
-        "settlements": [
-            {
-                "id": 12,
-                "case_no": "115000001",
-                "assignment_id": 21,
-                "settlement_id": 13,
-                "status": "draft",
-            }
-        ],
     }
     values.update(overrides)
     return [
@@ -454,7 +432,6 @@ def _conflict_snapshot_responses(**overrides):
         values["events"],
         values["adjustments"],
         values["payments"],
-        values["settlements"],
         values.get("final_assignments", values["assignments"]),
     ]
 
@@ -476,8 +453,7 @@ def test_conflict_snapshot_returns_canonical_read_only_facts(monkeypatch):
     assert result["historical_facts"]["leave_substitution_events"][0]["id"] == 6
     assert result["historical_facts"]["actual_hours_adjustments"][0]["id"] == 10
     assert result["historical_facts"]["non_cancelled_payments"][0]["id"] == 11
-    assert result["historical_facts"]["active_settlements"][0]["id"] == 12
-    assert len(connection.cursor_obj.executed) == 10
+    assert len(connection.cursor_obj.executed) == 9
     assert connection.cursor_obj.executed[3][1] == (
         date(2026, 7, 1),
         date(2026, 7, 31),
@@ -646,7 +622,7 @@ def test_conflict_snapshot_duplicate_or_malformed_assignment_facts_propagate_val
 def test_conflict_snapshot_final_database_error_propagates_raw_and_closes_connection(monkeypatch):
     class FinalQueryFailureCursor(FakeCursor):
         def execute(self, sql, params=None):
-            if len(self.executed) == 9:
+            if len(self.executed) == 7:
                 raise OSError("database unavailable")
             super().execute(sql, params)
 
@@ -808,7 +784,7 @@ def test_conflict_snapshot_cursor_helper_keeps_snapshot_equal_and_only_adds_row_
     )
 
     assert locked_snapshot == read_snapshot
-    assert len(read_cursor.executed) == len(locked_cursor.executed) == 9
+    assert len(read_cursor.executed) == len(locked_cursor.executed) == 8
     assert all("FOR UPDATE" not in sql.upper() for sql, _ in read_cursor.executed)
     assert "FOR UPDATE" not in locked_cursor.executed[0][0].upper()
     assert all("FOR UPDATE" in sql.upper() for sql, _ in locked_cursor.executed[1:])

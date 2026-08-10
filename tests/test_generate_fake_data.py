@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE_PATH = PROJECT_ROOT / "scripts" / "generate_fake_data.py"
 FROZEN_ERROR = (
     "GenerateFakeData 已凍結，僅供人工參考；"
-    "新增假資料需求請建立獨立腳本與 ADAD 節點。"
+    "新增假資料需求請建立獨立腳本與測試。"
 )
 
 
@@ -87,7 +87,7 @@ def test_import_is_rejected_before_runtime_dependencies_load():
             "except SystemExit as exc:\n"
             "    print(str(exc), file=sys.stderr)\n"
             "    print('pandas_loaded=' + str('pandas' in sys.modules), file=sys.stderr)\n"
-            "    print('db_service_loaded=' + str('services.db_service' in sys.modules), file=sys.stderr)\n"
+            "    print('db_service_loaded=' + str('infrastructure.mysql.mysql_adapter' in sys.modules), file=sys.stderr)\n"
             "    raise\n"
         ),
     )

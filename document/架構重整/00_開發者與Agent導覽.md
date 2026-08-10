@@ -1,0 +1,99 @@
+# 重整後開發者與 Agent 導覽
+
+## 目的與使用方式
+
+本文件是進入程式碼前的快速導航，不取代正式規格、人工裁決或部署決策。
+要修改某個業務流程時，先依下列順序閱讀：
+
+1. 根目錄 `AGENTS.md`：工作區規則、dirty worktree 與驗證方式。
+2. 根目錄 `README.md`：執行入口、目錄與安全界線。
+3. `01_規格基線/00_Global_共同契約.md`：跨領域共同不變量。
+4. 對應 Domain 的正式規格；衝突時以 `15_正式規格索引與裁決總表.md` 的權威順序判定。
+5. 對應的 `02_決策與退役執行記錄/` Work Package 與 `03_追蹤清單與證據/` evidence。
+6. 最後才讀 live schema、route、subsystem、repository 與既有測試，確認規格和現況是否漂移。
+
+歷史 `system_map*.md`、`system_map*.yaml` 和 ADAD 產物僅供追溯，均不是 SSOT 或實作 gate。
+
+## 一分鐘架構圖
+
+```mermaid
+flowchart LR
+  UI["Streamlit\n薄顯示層"] --> API["FastAPI\nTyped API / Webhook"]
+  EXT["LINE / 檔案 / 外部平台"] --> API
+  API --> APP["Subsystem Application Workflow\n唯一 outer Unit of Work"]
+  WORKER["Durable Job / Inbox / Outbox Worker"] --> APP
+  APP --> DOMAIN["Domain\n業務規則與根事實"]
+  DOMAIN --> PORT["Typed ports"]
+  PORT --> INFRA["infrastructure/mysql\n及外部 adapter"]
+  INFRA --> MYSQL[(MySQL)]
+  APP --> OUTBOX["receipt / outbox / durable job"]
+  OUTBOX --> WORKER
+```
+
+依賴只能由外往內：`api`／`ui`／`line` 是 adapter，`subsystems` 編排命令，`domains` 定義
+業務規則，`infrastructure` 實作 ports。UI、route、webhook、file watcher 和 repository 都不得
+自行重算業務規則或隱藏 commit。
+
+## 先辨認責任，再改程式
+
+| 層級 | 主要位置 | 責任 | 不可做的事 |
+|---|---|---|---|
+| Global | `shared_kernel/`、跨域 contract／規格 | command envelope、actor、版本、fingerprint、idempotency、typed error、outer UoW、receipt、outbox、部署與 migration 邊界 | 擁有某個 Domain 的金額、日期或狀態公式 |
+| Domain | `domains/<domain>/` | 根事實、狀態機、不變量、typed business rule | 直接依賴 FastAPI、Streamlit 或 MySQL concrete adapter |
+| Subsystem | `subsystems/<domain>/` | Preview／Apply 編排、fresh fact 驗證、交易與跨 Domain 協調 | 讓 repository 自行 commit，或把 UI payload 當事實 |
+| Module／Adapter | `api/`、`ui/`、`line/`、`infrastructure/`、`scripts/` | 傳輸、驗證、顯示、port 實作、worker 與維運入口 | 旁路寫入 Domain 根事實 |
+
+所有 mutation 共用以下規則：Query 唯讀、Preview 零寫入、Apply 重新讀取鎖定的最新根事實；同一
+命令以 idempotency／receipt 保證重播；外部副作用只從已提交 outbox 或 durable job 執行。
+
+## Domain 導覽
+
+| Domain | 程式入口 | 主要責任 |
+|---|---|---|
+| Orders | `domains/orders/`、`subsystems/orders/` | 條款、服務開始、完成、取消、reopen 與 lifecycle control facts |
+| Assignments／Scheduling | `domains/scheduling/`、`subsystems/scheduling/` | assignment generation、正式服務日、檔期、請假、代班與 occupancy |
+| Payroll | `domains/payroll/`、`subsystems/payroll/` | assignment-owned 薪資義務與調整 |
+| Client Finance | `domains/client_finance/`、`subsystems/client_finance/` | 客戶應收、收款、退款、沖正、調整與核銷 |
+| Staff Payables | `domains/staff_payables/`、`subsystems/staff_payables/` | 月嫂應付、出款與退匯／沖正投影 |
+| Finance Import | `domains/finance_import/`、`subsystems/finance_import/` | 銀行來源事實、分類、修正，並以 borrowed UoW 委派 owning Domain |
+| Government Subsidy | `domains/government_subsidy/`、`subsystems/government_subsidy/` | 申請、核准、政府撥款、allocation 與 reversal |
+| Anomalies | `domains/anomalies/`、`subsystems/anomalies/` | 根事實異常的 projection、告警與人工處理進度 |
+| Case Import | `domains/case_import/`、`subsystems/case_import/` | BeClass／HCM 來源驗證、review 與 case bootstrap |
+| Access／LINE／Jobs | `subsystems/access/`、`subsystems/line/`、`subsystems/jobs/` | 管理員身分與 capability、LINE inbox／delivery、durable worker supervision |
+
+完整 Domain ownership、SSOT 與跨域關係請讀
+`01_規格基線/15_正式規格索引與裁決總表.md`；其中的圖與裁決優先於本摘要。
+
+## 常見改動的定位
+
+| 需求類型 | 先讀／先改的邊界 |
+|---|---|
+| 新增或更改業務命令 | 對應 Domain 規格 → `subsystems/<domain>/` Preview／Apply workflow → typed API schema／route → UI client／panel |
+| 新增唯讀畫面或查詢 | owning Domain read model／query repository → API route → `ui/api_clients/` → 頁面；不可讓 UI 組合商業規則 |
+| 銀行流水、補助或付款處理 | Finance Import 只處理來源與分類；由 Client Finance、Staff Payables 或 Government Subsidy 寫入自己的根事實 |
+| 外部 webhook、LINE 或檔案監控 | 只產生／驗證 inbox 或 durable job；Worker 再呼叫 application workflow |
+| MySQL schema 或保留資料升級 | `db/schema_parts/` → `db/schema.sql` → versioned `db/migration_releases/` → preserve-data migration／驗證腳本 |
+| 異常與人工處理入口 | Anomalies projection 與 typed recovery workflow；audit 是證據，不是授權 |
+
+## 文件地圖
+
+- `01_規格基線/`：正式 Global／Domain 契約；`15` 是規格收斂入口，`16`～`18` 補足帳務、外部整合與部署治理。
+- `02_決策與退役執行記錄/`：已核准的 Work Package、退役、驗收與部署決策；先確認 `declared_status`，不要把草案當授權。
+- `03_追蹤清單與證據/`：legacy inventory、evidence、收據；是現況證據，不自動構成業務規格或刪檔權限。
+- `03_追蹤清單與證據/evidence/global_e2e_manifest.json`：目前 Global E2E 驗收宣告與證據索引。
+
+## 開發與驗證安全界線
+
+- 先讀取 branch、HEAD、status 和相鄰檔案；既有 dirty path 一律視為使用者成果。
+- 測試一律使用 `.venv\Scripts\python.exe -m pytest`，先跑受影響模組，再依 Domain／Global 層級擴大。
+- `fixtures/db_snapshot_v2/v3` 是測試快照，不得自行刪除、整理或套用到正式資料庫。
+- `db/schema_parts/` 與 migration release 必須 additive、可驗證；`online.bat` 不會自動套 schema。
+- Streamlit 只顯示 typed API result；正式資料庫、candidate、fixture 和測試資料必須隔離。
+
+## 交付前自查
+
+1. 修改是否只屬於一個明確 Domain／Subsystem 範圍？
+2. 根事實、衍生 projection、交易 owner 與 typed error 是否仍清楚？
+3. Preview、Apply、replay、stale version、partial failure 和人工 recovery 是否保有既有契約？
+4. 是否更新受影響的規格／決策／evidence 索引，而沒有把 live code 誤寫成規格？
+5. 是否以正確層級完成測試與 `git diff --check`？

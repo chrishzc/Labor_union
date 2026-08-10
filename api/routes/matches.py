@@ -5,38 +5,52 @@
 ================================================================================
 """
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Body, Depends, HTTPException, Path
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal
-from services.caregiver_matching_plan_service import create_matching_plan_version
-from services.caregiver_matching_communication_service import (
+from subsystems.scheduling.matching_plan_workflow import create_matching_plan_version
+from subsystems.scheduling.matching_communication_workflow import (
     cancel_matching_plan,
     get_active_matching_plan_state,
-    get_matching_plan_contact_state,
-    record_matching_plan_willingness,
-    send_matching_plan_information,
-    send_matching_plan_resumes,
 )
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import (
+    admin_actor_context,
+    require_line_matching_override,
+    require_line_matching_reader,
+    require_line_matching_sender,
+    require_system_admin,
+)
 from api.schemas.base import BaseResponse
-from api.schemas.matches import (
-    MatchAssignRequest,
-    MatchCreateRequest,
-    MatchLineTestBindingRequest,
-    MatchReplyRequest,
+from api.error_contracts import internal_query_error
+from api.schemas.matches import MatchReplyRequest, MatchAssignRequest
+from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.scheduling.matching_recommendation_application import (
+    query_matching_recommendations,
 )
-from services.admin_auth_service import AdminPrincipal
-from services import db_service
-from services.legacy_caregiver_matching_service import (
-    assign_legacy_staff_to_order,
-    recommend_legacy_staff,
-    record_legacy_matching_reply,
-    send_legacy_matching_information,
-    send_legacy_resume_for_case,
-    send_legacy_resume_to_client,
+from domains.scheduling.matching_communication import (
+    CaregiverWillingness,
+    CustomerMatchingDecision,
+    MatchingNotificationKind,
+    MatchingPlanReference,
+)
+from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
+from subsystems.scheduling.matching_notification_application import (
+    MatchingNotificationApplication,
+)
+from subsystems.scheduling.matching_notification_contracts import (
+    RecordManualMatchingResponseCommand,
+    RequestCaregiverInformationCommand,
+    RequestCustomerProfilesCommand,
 )
 
 router = APIRouter(prefix="/api/v1", tags=["Matches 案件配對與 LINE 訊息推播"])
+matching_notifications = MatchingNotificationApplication(
+    open_line_unit_of_work,
+    lambda: datetime.now(timezone.utc),
+)
 
 
 class MatchingPlanEventIdentity(BaseModel):
@@ -48,14 +62,24 @@ class MatchingPlanEventIdentity(BaseModel):
 
 class MatchingPlanInformationRequest(MatchingPlanEventIdentity):
     info_type: Literal[1, 2]
+    expected_version: int = Field(..., ge=0)
 
 
 class MatchingPlanWillingnessRequest(MatchingPlanEventIdentity):
-    willingness: Literal["pending", "willing", "unwilling"]
+    willingness: Literal["willing", "unwilling"]
+    expected_version: int = Field(..., ge=0)
+    reason: str = Field(..., min_length=1, max_length=500)
 
 
 class MatchingPlanResumeRequest(MatchingPlanEventIdentity):
     note: str = Field(..., min_length=1, max_length=1000)
+    expected_version: int = Field(..., ge=0)
+
+
+class MatchingPlanCustomerDecisionRequest(MatchingPlanEventIdentity):
+    decision: Literal["accepted", "declined", "contact_requested"]
+    expected_version: int = Field(..., ge=0)
+    reason: str = Field(..., min_length=1, max_length=500)
 
 
 class MatchingPlanCancellationRequest(MatchingPlanEventIdentity):
@@ -74,14 +98,20 @@ def _require_matching_actor(principal: AdminPrincipal, actor: str) -> None:
 def get_matching_plan_contact_state_route(
     case_no: str,
     plan_id: int,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_reader),
 ):
-    del principal
     try:
+        state = matching_notifications.get_contact_state(
+            admin_actor_context(principal),
+            case_no,
+            plan_id,
+        )
         return BaseResponse(
-            data=get_matching_plan_contact_state(case_no, plan_id),
+            data=_contact_state_data(state),
             message="成功讀取配對聯繫與意願狀態",
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
@@ -92,7 +122,7 @@ def get_matching_plan_contact_state_route(
 )
 def get_active_matching_plan_state_route(
     case_no: str,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_reader),
 ):
     del principal
     try:
@@ -113,16 +143,60 @@ def send_matching_plan_information_route(
     case_no: str,
     plan_id: int,
     segment_id: int,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_sender),
 ):
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=send_matching_plan_information(
-                case_no, plan_id, segment_id, req.info_type, req.event_key, req.actor
+            data=_notification_data(
+                matching_notifications.request_caregiver_information(
+                    RequestCaregiverInformationCommand(
+                        MatchingPlanReference(case_no, plan_id, req.expected_version),
+                        segment_id,
+                        MatchingNotificationKind(f"caregiver_info_{req.info_type}"),
+                        admin_actor_context(principal),
+                        ExpectedVersion(req.expected_version),
+                        IdempotencyKey(req.event_key),
+                        CorrelationId(f"matching-api:{req.event_key}"),
+                    )
+                )
             ),
             message=f"訂單資訊-{req.info_type} 已建立可靠發送任務",
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.put(
+    "/orders/{case_no}/matching-plans/{plan_id}/customer-decision",
+    response_model=BaseResponse[Dict[str, Any]],
+)
+def record_matching_customer_decision_route(
+    req: MatchingPlanCustomerDecisionRequest,
+    case_no: str,
+    plan_id: int,
+    principal: AdminPrincipal = Depends(require_line_matching_override),
+):
+    _require_matching_actor(principal, req.actor)
+    try:
+        result = matching_notifications.record_manual_response(
+            RecordManualMatchingResponseCommand(
+                MatchingPlanReference(case_no, plan_id, req.expected_version),
+                None,
+                None,
+                CustomerMatchingDecision(req.decision),
+                req.reason,
+                admin_actor_context(principal),
+                ExpectedVersion(req.expected_version),
+                IdempotencyKey(req.event_key),
+                CorrelationId(f"matching-api:{req.event_key}"),
+            )
+        )
+        return BaseResponse(data=_response_data(result), message="成功補登客戶配對決策")
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -136,23 +210,32 @@ def record_matching_plan_willingness_route(
     case_no: str,
     plan_id: int,
     segment_id: int,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_override),
 ):
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=record_matching_plan_willingness(
-                case_no,
-                plan_id,
-                segment_id,
-                req.willingness,
-                req.event_key,
-                req.actor,
+            data=_response_data(
+                matching_notifications.record_manual_response(
+                    RecordManualMatchingResponseCommand(
+                        MatchingPlanReference(case_no, plan_id, req.expected_version),
+                        segment_id,
+                        CaregiverWillingness(req.willingness),
+                        None,
+                        req.reason,
+                        admin_actor_context(principal),
+                        ExpectedVersion(req.expected_version),
+                        IdempotencyKey(req.event_key),
+                        CorrelationId(f"matching-api:{req.event_key}"),
+                    )
+                )
             ),
             message="成功更新月嫂意願",
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
-        raise HTTPException(status_code=422, detail=str(error)) from error
+        raise HTTPException(status_code=409, detail=str(error)) from error
 
 
 @router.post(
@@ -163,16 +246,27 @@ def send_matching_plan_resumes_route(
     req: MatchingPlanResumeRequest,
     case_no: str,
     plan_id: int,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_line_matching_sender),
 ):
     _require_matching_actor(principal, req.actor)
     try:
         return BaseResponse(
-            data=send_matching_plan_resumes(
-                case_no, plan_id, req.note, req.event_key, req.actor
+            data=_notification_data(
+                matching_notifications.request_customer_profiles(
+                    RequestCustomerProfilesCommand(
+                        MatchingPlanReference(case_no, plan_id, req.expected_version),
+                        req.note,
+                        admin_actor_context(principal),
+                        ExpectedVersion(req.expected_version),
+                        IdempotencyKey(req.event_key),
+                        CorrelationId(f"matching-api:{req.event_key}"),
+                    )
+                )
             ),
-            message="已逐位建立履歷與備註的可靠發送任務",
+            message="已建立客戶月嫂小卡與確認按鈕的可靠發送任務",
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
 
@@ -251,7 +345,7 @@ def recommend_staff(
     """智慧粗篩比對月嫂推薦引擎 API (比對 clients.city/address 與檔期 7 天預留備用期)"""
     del principal
     try:
-        data = recommend_legacy_staff(
+        data = query_matching_recommendations(
             case_no=case_no,
             filter_region=filter_region,
             filter_schedule=filter_schedule,
@@ -259,34 +353,30 @@ def recommend_staff(
             filter_time=filter_time
         )
         return BaseResponse(data=data, message="成功計算月嫂智慧粗篩推薦名單")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as error:
+        raise internal_query_error(
+            "matching_recommendation_query_internal_error",
+            "月嫂推薦名單查詢失敗。",
+            "matching-recommendation-query",
+        ) from error
 
 @router.post("/matches/{match_id}/send-info-1", response_model=BaseResponse[Dict[str, Any]])
 def send_info_1(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """發送訂單資訊-1 (粗篩卡片)。若月嫂綁定 staff.line_user_id，同步進行 LINE 實體推播"""
+    """Retired writer; reliable information delivery is matching-plan owned."""
     del principal
-    try:
-        result = send_legacy_matching_information(match_id, 1)
-        return BaseResponse(data=result["data"], message=result["message"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    _raise_legacy_matching_gone(match_id)
 
 @router.post("/matches/{match_id}/send-info-2", response_model=BaseResponse[Dict[str, Any]])
 def send_info_2(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """發送訂單資訊-2 (精篩照護圖譜)。若月嫂綁定 staff.line_user_id，同步進行 LINE 實體推播"""
+    """Retired writer; reliable information delivery is matching-plan owned."""
     del principal
-    try:
-        result = send_legacy_matching_information(match_id, 2)
-        return BaseResponse(data=result["data"], message=result["message"])
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    _raise_legacy_matching_gone(match_id)
 
 @router.put("/matches/{match_id}/reply", response_model=BaseResponse[bool])
 def reply_matching_inquiry(
@@ -294,28 +384,18 @@ def reply_matching_inquiry(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """更新月嫂意願回覆狀態 (1: 願意, 0: 拒絕, NULL: 待回覆)"""
-    del principal
-    try:
-        success = record_legacy_matching_reply(match_id, req.accepted)
-        return BaseResponse(data=success, message="成功更新月嫂接案意願狀態")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Retired writer; willingness is matching-plan-segment owned."""
+    del req, principal
+    _raise_legacy_matching_gone(match_id)
 
 @router.post("/matches/{match_id}/send-resume", response_model=BaseResponse[bool])
 def send_resume_to_client(
     match_id: int = Path(..., description="配對紀錄 ID"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """傳送去識別化月嫂履歷圖卡給客戶 LINE 帳號"""
+    """Retired writer; reliable resume delivery is matching-plan owned."""
     del principal
-    try:
-        return BaseResponse(
-            data=send_legacy_resume_to_client(match_id),
-            message="已成功將去識別化月嫂履歷傳送給客戶 LINE 帳號",
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    _raise_legacy_matching_gone(match_id)
 
 
 @router.post("/orders/{case_no}/send-resume", response_model=BaseResponse[Dict[str, Any]])
@@ -323,90 +403,91 @@ def send_resume_for_case(
     case_no: str = Path(..., description="案件編號"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """找出該案件中已被接受但履歷尚未發送的候選人，發送履歷並記錄時間 (供異常警示中心一鍵使用)。"""
+    """Retired writer; anomaly recovery must navigate to the matching plan."""
     del principal
-    try:
-        match_id = send_legacy_resume_for_case(case_no)
-        if match_id is None:
-            raise HTTPException(status_code=404, detail="找不到已接受媒合且履歷尚未發送的候選人")
-        return BaseResponse(data={"match_id": match_id}, message="履歷已發送並記錄")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_case_resume_writer_retired",
+            "case_no": case_no,
+            "replacement": "Matching Plan resumes endpoint",
+        },
+    )
 
 
-@router.post("/orders/{case_no}/line-bindings", response_model=BaseResponse[Dict[str, Any]])
-def apply_line_bindings(
-    req: MatchLineTestBindingRequest,
-    case_no: str = Path(..., description="案件編號"),
-    principal: AdminPrincipal = Depends(require_system_admin),
-):
-    """將 LINE userId 綁到此案件客戶與指定月嫂。"""
-    del principal
-    try:
-        conn = db_service.get_connection()
-        try:
-            with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT c.id AS client_id
-                    FROM orders o
-                    JOIN clients c ON c.id = o.client_id
-                    WHERE o.case_no = %s
-                    """,
-                    (case_no,),
-                )
-                order_row = cursor.fetchone()
-                if not order_row:
-                    raise HTTPException(status_code=404, detail="訂單不存在")
-                cursor.execute("SELECT id FROM staff WHERE id = %s", (req.staff_id,))
-                if not cursor.fetchone():
-                    raise HTTPException(status_code=404, detail="月嫂不存在")
+def _contact_state_data(state) -> dict[str, Any]:
+    return {
+        "plan": {
+            "id": state.plan.plan_id,
+            "case_no": state.plan.case_no,
+            "communication_version": state.plan.version,
+            "status": state.plan_status,
+            "is_active": 1 if state.plan_is_active else None,
+        },
+        "segments": [_segment_state_data(segment) for segment in state.segments],
+        "all_willing": state.all_willing,
+        "customer_decision": state.customer_decision.value,
+        "customer_profiles_status": (
+            state.customer_profiles_status.value
+            if state.customer_profiles_status else None
+        ),
+    }
 
-                client_line_user_id = req.client_line_user_id.strip()
-                staff_line_user_id = req.staff_line_user_id.strip()
-                cursor.execute(
-                    "UPDATE clients SET line_user_id = %s WHERE id = %s",
-                    (client_line_user_id, order_row["client_id"]),
-                )
-                cursor.execute(
-                    "UPDATE staff SET line_user_id = %s WHERE id = %s",
-                    (staff_line_user_id, req.staff_id),
-                )
-                cursor.execute(
-                    """
-                    INSERT INTO line_users (line_user_id, role, status, last_event_at)
-                    VALUES (%s, 'customer', 'active', NOW())
-                    ON DUPLICATE KEY UPDATE role = 'customer', status = 'active', last_event_at = NOW()
-                    """,
-                    (client_line_user_id,),
-                )
-                cursor.execute(
-                    """
-                    INSERT INTO line_users (line_user_id, role, status, last_event_at)
-                    VALUES (%s, 'staff', 'active', NOW())
-                    ON DUPLICATE KEY UPDATE role = 'staff', status = 'active', last_event_at = NOW()
-                    """,
-                    (staff_line_user_id,),
-                )
-            conn.commit()
-        finally:
-            conn.close()
-        return BaseResponse(
-            data={
-                "case_no": case_no,
-                "client_line_user_id": client_line_user_id,
-                "staff_id": req.staff_id,
-                "staff_line_user_id": staff_line_user_id,
-            },
-            message="已更新 LINE 身分綁定",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
+def _segment_state_data(segment) -> dict[str, Any]:
+    return {
+        "segment_id": segment.segment_id,
+        "segment_order": segment.segment_order,
+        "staff_id": segment.staff_id,
+        "staff_name": segment.staff_name,
+        "assigned_start_date": segment.assigned_start_date,
+        "assigned_end_date": segment.assigned_end_date,
+        "willingness": segment.willingness.value,
+        "info_1_status": (
+            segment.information_1_status.value if segment.information_1_status else None
+        ),
+        "info_2_status": (
+            segment.information_2_status.value if segment.information_2_status else None
+        ),
+    }
+
+
+def _notification_data(result) -> dict[str, Any]:
+    return {
+        "intent_id": result.intent_id,
+        "line_delivery_task_id": (
+            result.line_delivery_task_id.value
+            if result.line_delivery_task_id else None
+        ),
+        "delivery_status": result.projection_status.value,
+        "notification_kind": result.notification_kind.value,
+    }
+
+
+def _response_data(result) -> dict[str, Any]:
+    return {
+        "event_id": result.event_id,
+        "communication_version": result.plan.version,
+        "source": result.source.value,
+        "willingness": (
+            result.caregiver_willingness.value
+            if result.caregiver_willingness else None
+        ),
+        "customer_decision": (
+            result.customer_decision.value if result.customer_decision else None
+        ),
+    }
+
+
+def _raise_legacy_matching_gone(match_id):
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_matching_writer_retired",
+            "match_id": match_id,
+            "replacement": "Matching Plan communication endpoints",
+        },
+    )
 
 @router.post("/orders/{case_no}/assign-staff", response_model=BaseResponse[bool])
 def assign_staff_to_order(
@@ -414,10 +495,13 @@ def assign_staff_to_order(
     case_no: str = Path(..., description="案件編號"),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
-    """成立訂單並定案指派服務人員/月嫂"""
-    del principal
-    try:
-        success = assign_legacy_staff_to_order(case_no=case_no, staff_id=req.staff_id)
-        return BaseResponse(data=success, message="成功定案指派月嫂，訂單狀態升級為訂單成立！")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Retired writer; formal staffing requires Assignment Plan Preview and Apply."""
+    del req, principal
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "legacy_single_staff_assignment_endpoint_retired",
+            "case_no": case_no,
+            "replacement": "Assignment Plan Query/Preview/Apply",
+        },
+    )

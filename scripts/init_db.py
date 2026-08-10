@@ -4,6 +4,7 @@ import argparse
 from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
+from scripts.sql_statements import split_sql
 
 # 確保中文輸出編碼正確
 sys.stdout.reconfigure(encoding='utf-8')
@@ -27,32 +28,22 @@ def load_schema_parts(cursor, schema_parts_dir):
     parts_dir = Path(schema_parts_dir)
     assert parts_dir.name == "schema_parts" or parts_dir.exists()
     loaded_parts = []
-    for part_path in sorted(parts_dir.glob("*.sql"), key=lambda path: path.name):
+    for part_path in sorted(parts_dir.glob("*.sql"), key=_schema_part_sort_key):
         sql_content = part_path.read_text(encoding="utf-8")
-        statements = []
-        current_stmt = []
-        for line in sql_content.split("\n"):
-            if line.strip().startswith("--"):
-                continue
-            segments = line.split(";")
-            for segment_index, segment in enumerate(segments):
-                current_stmt.append(segment)
-                if segment_index < len(segments) - 1:
-                    statement = "\n".join(current_stmt).strip()
-                    if statement:
-                        statements.append(statement)
-                    current_stmt = []
-        trailing = "\n".join(current_stmt).strip()
-        if trailing:
-            statements.append(trailing)
-
         try:
-            for statement in statements:
+            for statement in split_sql(sql_content):
                 cursor.execute(statement)
         except Exception as exc:
             raise RuntimeError(f"載入 schema part 失敗：{part_path.name}: {exc}") from exc
         loaded_parts.append(part_path.name)
     return loaded_parts
+
+
+def _schema_part_sort_key(path: Path) -> tuple[int, str]:
+    prefix = path.name.partition("_")[0]
+    if prefix.isdigit():
+        return int(prefix), path.name
+    return 10**9, path.name
 
 def main():
     parser = argparse.ArgumentParser()
