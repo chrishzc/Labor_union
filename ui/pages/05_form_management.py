@@ -56,6 +56,8 @@ def _merge_client_context(target_order, context):
 def _render_order_summary_pagination(next_cursor):
     cursor = st.session_state.get("form_management_summary_after_case_no")
     history = st.session_state.setdefault("form_management_summary_cursor_history", [])
+    if not history and not next_cursor:
+        return
     previous_column, page_column, next_column = st.columns([1, 2, 1])
     if previous_column.button("上一頁案件", disabled=not history, key="form_management_previous_page"):
         st.session_state["form_management_summary_after_case_no"] = history.pop()
@@ -65,7 +67,6 @@ def _render_order_summary_pagination(next_cursor):
         history.append(cursor)
         st.session_state["form_management_summary_after_case_no"] = next_cursor
         st.rerun()
-
 
 def _render_form_management_page_shell(form_db_table_fields, field_types, field_widths, global_stats, target_order, form_table_for_key):
     """Render FormManagementUI's 2 fixed tabs."""

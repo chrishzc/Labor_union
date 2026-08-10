@@ -433,12 +433,14 @@ def _prepare_order_summary_page(query_text) -> None:
 def _render_order_summary_pagination() -> None:
     cursor = st.session_state.get("orders_summary_after_case_no")
     history = st.session_state.setdefault("orders_summary_cursor_history", [])
+    next_cursor = st.session_state.get("orders_summary_next_cursor")
+    if not history and not next_cursor:
+        return
     previous_column, page_column, next_column = st.columns([1, 2, 1])
     if previous_column.button("上一頁案件", disabled=not history):
         st.session_state["orders_summary_after_case_no"] = history.pop()
         st.rerun()
     page_column.caption(f"案件摘要第 {len(history) + 1} 頁，每頁最多 50 筆")
-    next_cursor = st.session_state.get("orders_summary_next_cursor")
     if next_column.button("下一頁案件", disabled=not next_cursor):
         history.append(cursor)
         st.session_state["orders_summary_after_case_no"] = next_cursor
@@ -448,12 +450,14 @@ def _render_order_summary_pagination() -> None:
 def _render_staff_summary_pagination() -> None:
     cursor = st.session_state.get("staff_summary_after_id")
     history = st.session_state.setdefault("staff_summary_cursor_history", [])
+    next_cursor = st.session_state.get("staff_summary_next_cursor")
+    if not history and not next_cursor:
+        return
     previous_column, page_column, next_column = st.columns([1, 2, 1])
     if previous_column.button("上一頁月嫂", disabled=not history):
         st.session_state["staff_summary_after_id"] = history.pop()
         st.rerun()
     page_column.caption(f"月嫂摘要第 {len(history) + 1} 頁，每頁最多 200 筆")
-    next_cursor = st.session_state.get("staff_summary_next_cursor")
     if next_column.button("下一頁月嫂", disabled=not next_cursor):
         history.append(cursor)
         st.session_state["staff_summary_after_id"] = next_cursor

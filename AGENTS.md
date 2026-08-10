@@ -26,6 +26,12 @@
   卻破壞同層契約或跨層不變量。
 - Streamlit 是可替換薄顯示層，只能呼叫後端 API 並顯示 typed results；
   業務規則只能存在 Server／Service 層。
+- 新增或修改 UI API client 時，client 必須對應單一 bounded domain；跨 Domain 的
+  endpoint 不得附加到既有 Domain client。需要共用認證時，以明確的 shared transport
+  composition 處理。
+- UI API client 邊界必須將成功 payload 驗證為 Pydantic view 或其他 typed result，並將
+  transport／schema 錯誤轉成 typed client error；不得讓未驗證的 raw `dict` 穿透到 UI
+  render function。
 
 ## 3. Dirty worktree 保護
 
@@ -86,6 +92,9 @@
 
 - 所有文字檔使用 strict UTF-8，預設無 BOM；不得用 replacement 或 ignore 隱藏解碼錯誤。
 - Python 測試使用專案 `.venv\Scripts\python.exe -m pytest`，指定有限 timeout。
+- 每一個 production、script 或 test 的直接第三方 import，都必須在 `pyproject.toml`
+  的 `dependencies` 或適當的 dependency group 明確聲明；不得依賴 transitive package
+  恰好存在。變更相依後必須同步更新 `uv.lock`，並以 `pytest -W error` 驗證。
 - 測試資料、正式資料庫與外部服務必須明確隔離；不得把測試操作套用到正式資料。
 - 只有兩個以上互不依賴、寫入範圍不重疊且交接成本合理的工作才平行派工。
 - 子代理不得擴大範圍、修改共享檔案或自行 commit；主代理負責整合與最終自我檢查。

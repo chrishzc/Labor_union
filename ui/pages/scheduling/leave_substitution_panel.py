@@ -48,6 +48,8 @@ def _render_staff_option_pagination(assignment_id: int) -> dict[str, int]:
     )
     st.session_state[next_key] = next_cursor
     history = st.session_state.setdefault(history_key, [])
+    if not history and not next_cursor:
+        return options
     previous_column, page_column, next_column = st.columns([1, 2, 1])
     if previous_column.button(
         "上一頁月嫂",

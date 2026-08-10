@@ -143,6 +143,9 @@ def _render_staff_summary_pagination(workspace: str) -> None:
     next_key = f"scheduling_{workspace}_staff_next_cursor"
     history = st.session_state.setdefault(history_key, [])
     current_cursor = st.session_state.get(cursor_key)
+    next_cursor = st.session_state.get(next_key)
+    if not history and not next_cursor:
+        return
     previous_column, page_column, next_column = st.columns([1, 2, 1])
     if previous_column.button(
         "上一頁月嫂",
@@ -154,11 +157,11 @@ def _render_staff_summary_pagination(workspace: str) -> None:
     page_column.caption(f"月嫂摘要第 {len(history) + 1} 頁，每頁最多 200 筆")
     if next_column.button(
         "下一頁月嫂",
-        disabled=not st.session_state.get(next_key),
+        disabled=not next_cursor,
         key=f"{workspace}_next_staff_page",
     ):
         history.append(current_cursor)
-        st.session_state[cursor_key] = st.session_state[next_key]
+        st.session_state[cursor_key] = next_cursor
         st.rerun()
 
 def safe_int(val) -> int:
@@ -1238,6 +1241,8 @@ def _render_scheduling_order_pagination(workspace: str, next_cursor: str | None)
     cursor_key = f"scheduling_{workspace}_order_after_case_no"
     history_key = f"scheduling_{workspace}_order_cursor_history"
     history = st.session_state.setdefault(history_key, [])
+    if not history and not next_cursor:
+        return
     previous_column, page_column, next_column = st.columns([1, 2, 1])
     if previous_column.button("上一頁案件", disabled=not history, key=f"{workspace}_previous_order_page"):
         st.session_state[cursor_key] = history.pop()
