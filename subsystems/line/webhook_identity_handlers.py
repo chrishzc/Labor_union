@@ -50,6 +50,7 @@ _SERVICE_HELP_CATEGORIES = {
         "如需工會人員協助，請直接在此聊天室留下您的問題、案件編號或聯絡電話。"
         "工會人員確認後會再協助回覆。"
     ),
+    "月嫂身分認證": "若您是月嫂本人，請點選下方「我是月嫂」或直接回覆「我是月嫂」，系統會送出身分確認申請。",
     "其他問題": (
         "請直接輸入您的問題內容。若已經有案件編號，也請一起提供，方便工會人員協助查詢。"
     ),
@@ -60,6 +61,7 @@ _SERVICE_HELP_CATEGORY_KEYS = {
     "查詢服務進度": "service-progress",
     "修改登記資料": "profile-update",
     "聯絡工會人員": "contact-union",
+    "月嫂身分認證": "staff-verification",
     "其他問題": "other",
 }
 
@@ -225,10 +227,13 @@ def _handle_service_help_text(inbox, unit_of_work, line_user_id, text, scheduled
     reply_text = _SERVICE_HELP_CATEGORIES[normalized]
     if normalized == "修改登記資料":
         reply_text = f"{reply_text}\n\n{_liff_url('?target=profile_update')}"
+    payload = _text_message_payload(reply_text)
+    if normalized == "月嫂身分認證":
+        payload["quickReply"] = {"items": [_quick_reply_item("我是月嫂")]}
     unit_of_work.delivery_tasks.enqueue(
         _text_delivery(
             line_user_id,
-            _text_message_payload(reply_text),
+            payload,
             event_identity,
             correlation_id,
             scheduled_at,
