@@ -19,6 +19,7 @@ from reportlab.lib.units import cm
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+import pymysql
 
 
 DOC_FONT = "STHeiti"
@@ -34,8 +35,6 @@ def _apply_font(run, size: Pt | None = None) -> None:
 
 
 def _connect() -> pymysql.connections.Connection:
-    import pymysql
-
     return pymysql.connect(
         host=os.getenv("DB_HOST", "127.0.0.1"),
         port=int(os.getenv("DB_PORT", "3306")),
