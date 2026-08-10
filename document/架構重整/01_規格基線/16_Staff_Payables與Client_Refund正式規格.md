@@ -7,9 +7,24 @@
 - Staff Payables 月結裁決：`confirmed-inherited`
 - Client Refund 納入正式 Client Finance：`consolidated-decision`
 - Client Refund implementation status：`proven`
+- 2026-08-10 金流證據與超收裁決：`approved`
+- 2026-08-11 差額付款與追償可執行契約：`approved`
 - 本文件覆蓋舊稿中「人工月結 aggregate」與「一般客戶退款 deferred／missing」的矛盾。
 - 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 Commands、schema、pytest 與
   legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
+
+### 1.1 共通金流證據邊界（2026-08-10 裁決）
+
+- 系統只被動匯入銀行對帳單；canonical bank fact 是實際收款、付款、退匯或扣回的唯一
+  現金根事實。
+- 應付帳款清冊是每月 5 日交會計師的付款指示與封存快照，不是付款指令執行結果；產生、
+  下載、封存或交付清冊都不得將 obligation、ledger 或提醒改為已付款／已退款／已完成。
+- 所有實際付款結果都必須由後續匯入的 canonical bank fact 經 Preview／Apply 核銷後才
+  改變。未看到流水不代表付款失敗，只表示仍待付款或待核對。
+- 金額或對象不唯一時，必須保留原始銀行事實與 typed anomaly；不得猜測 allocation、
+  不得直接建立已付款紀錄，也不得重複列出可能已付款的義務。
+- 「退匯」只指銀行已退回既有出款的後續銀行事實；客戶超收後交會計師處理的項目名稱為
+  「客戶退款應付／退款清冊列」，不得混稱為退匯。
 
 ## 2. Domain：Staff Payables
 
@@ -20,7 +35,7 @@ Staff Payables 擁有：
 - Payroll 已建立之 assignment-owned 月嫂應付義務的付款生命週期與投影；
 - 正式銀行出款、退匯／沖正的 immutable ledger event；
 - payout event 與 payable obligation 的 allocation／link；
-- `payable | completed | anomaly` 衍生投影；
+- `payable | partially_paid | completed | recovery_required | anomaly` 衍生投影；
 - 應付款清單、同月嫂彙總與 XLSX 歸檔。
 
 Staff Payables 不擁有：
@@ -44,7 +59,7 @@ Staff Payables 不擁有：
 衍生值：
 
 - 應付餘額；
-- `payable | completed | anomaly`；
+- `payable | partially_paid | completed | recovery_required | anomaly`；
 - 指定付款日應付款清單；
 - 同一月嫂、同一付款日的 XLSX 聚合列；
 - payout anomaly 與重新應付狀態。
@@ -84,6 +99,10 @@ Commands：
 - `ApplyStaffPayoutReturn`
 - `PreviewStaffPayoutReversal`
 - `ApplyStaffPayoutReversal`
+- `PreviewStaffPayoutDifference`
+- `ApplyStaffPayoutDifference`
+- `PreviewStaffOverpaymentRecovery`
+- `ApplyStaffOverpaymentRecovery`
 
 共同 Apply 交易：
 
@@ -98,14 +117,74 @@ Commands：
 
 事件別 guard：
 
-- payout：選定銀行出款與選定 payable obligation 精確相等；
+- 一般 payout：選定銀行出款與選定 payable obligation 精確相等；
+- payout difference：只允許已確認唯一月嫂、唯一銀行帳戶 snapshot 與同一付款範圍內的
+  obligations；銀行總額可以小於或大於 obligation remaining，但每一元銀行出款都必須由
+  payout allocation 或 overpayment recovery root 完整表達；
 - return：必須指向一筆仍有效的 payout 與 canonical 銀行退匯入款，重開相同義務；
 - reversal：必須指向一筆仍有效的錯誤 payout，不要求銀行入款，但要求人工 reason、
   operation capability 與不可重複沖正；
 - return／reversal 都不得超過目標 payout 的尚未重開金額。
 
-正式核銷不得留下「部分完成」。不足、超付、帳戶不一致或 allocation 不唯一時，
-整筆不建立正式 payout，轉 typed blocker／anomaly。
+帳戶不一致、收款人不唯一或 allocation 不唯一時，整筆仍不得建立正式 payout，轉 typed
+blocker／anomaly。只有金額差異且 ownership 唯一時，才可使用專用 difference action；
+一般 payout action 仍維持 exact-only。
+
+#### 2.4.1 公會對月嫂付款不足
+
+公會實際出款小於選定 obligation remaining 時，預設作業仍是一次足額支付；不足只作為
+會計執行疏失的補救流程，不是正常分期付款產品。
+
+`ApplyStaffPayoutDifference(mode=underpayment)` 必須在單一 Staff Payables UoW 內：
+
+1. append 每筆 canonical bank outflow 對應的 immutable payout event；
+2. 依 obligation identity 順序 deterministic allocation，allocation 總額必須等於銀行總額；
+3. 計算 `remaining = obligation_amount - net_valid_payout`，不得由 UI 傳入；
+4. remaining 大於零時投影為 `partially_paid`，並建立
+   `staff_payout_underpayment` anomaly；
+5. 下一次應付清冊只輸出 remaining，不得重列原 obligation amount；
+6. 後續 canonical outflow 可繼續清償 remaining；歸零才轉 `completed` 並自動解除異常。
+
+不得因部分出款更新 Payroll obligation 原始金額，也不得建立第二筆薪資義務。清冊生成與
+重新下載不改變 remaining。
+
+#### 2.4.2 公會對月嫂付款超額與追償
+
+公會實際出款大於選定 obligation remaining 時，`ApplyStaffPayoutDifference(mode=overpayment)`
+必須：
+
+1. 保存完整 canonical outflow 與全額 payout ledger event；
+2. obligation 額度內建立 payout allocation，使原 obligation 歸零並轉 `completed`；
+3. 差額建立獨立 `staff_overpayment_recovery` root，不能提高 Payroll obligation；
+4. 保存 bank fact、payout event、obligation 與 recovery identity 的 immutable lineage；
+5. 投影 `recovery_required` anomaly，且 recovery 不得進入應付清冊；
+6. 不得自動從其他案件或未來薪資扣抵。
+
+`staff_overpayment_recovery` 最少保存：`recovery_identity`、`staff_id`、來源 bank fact、來源
+payout event、來源 obligation identities、原始追償額、remaining、status、version、actor、
+reason、evidence 與 current event identity。狀態機為：
+
+```text
+open／partially_recovered ──canonical incoming return allocation；remaining>0──> partially_recovered
+open／partially_recovered ──canonical incoming return allocation；remaining=0──> recovered
+open／partially_recovered ──authorized adjustment──> adjusted
+```
+
+回收款只接受唯一月嫂與唯一 open recovery 的 canonical incoming bank fact。預設要求一次
+足額收回；若實際入款不足，仍保存實收並降低 remaining，作為疏失補救。授權 adjustment
+必須具 `staff_payables.recovery.adjust` capability、不可變 reason/evidence、expected version
+與 idempotency receipt；不得由 UI 直接修改 remaining。
+
+#### 2.4.3 Staff payout difference typed contract
+
+Preview intent 只接受：bank fact identities、obligation identities、`mode`、evidence references。
+Apply 另接受 expected aggregate version、Preview fingerprint、stable idempotency key、actor、
+reason 與 correlation id。Preview 回傳：bank total、obligation remaining total、allocations、
+remaining payable、recovery amount、resulting states 與 blockers。
+
+金額關係必須與 mode 一致；`underpayment` 要求 `bank_total < remaining_total`，`overpayment`
+要求 `bank_total > remaining_total`。相等時必須改走一般 payout action。stale、已使用 bank
+row、跨月嫂、帳戶不唯一或 mode 不符時零正式寫入。
 
 ### 2.5 Global／Application Subsystem：Accounts Payable Query／Export
 
@@ -121,17 +200,24 @@ Query：
 Export：
 
 1. 在一致 read snapshot 讀取 `payable` obligations，以及 review=`normal` 的
-   `pending`／`partially_refunded` 客戶退款義務；
+   `pending`／`partially_refunded` 客戶退款義務，以及 Government Subsidy 提供的
+   `government_overpayment_return` typed payable view；
 2. 月嫂列依 `staff_id + target_payment_date + bank_identity` 聚合；
 3. anomaly／completed／refunded／review-required 不進應付款清單；
 4. client refund row 只輸出 remaining amount，並明確標示
    `customer_refund` 或 `subsidy_return`，不得重複輸出已清償金額；
    `subsidy_return` 的 target payment date 是結案月份加兩個曆月的 15 日，且列必須
    顯示為 `client_subsidy_return`，不得與月嫂 payout 合併或抵銷；
-5. 只生成一次 workbook bytes；
-6. 使用者下載 bytes 與 archive bytes 必須完全相同；
-7. archive 名稱不可覆蓋，保存 SHA-256 receipt；
-8. Query／下載／歸檔不改變 payable 狀態。
+5. government return row 只輸出 remaining、政府收款資訊 snapshot、來源 overpayment identity
+   與 due date；不得與 staff/client 列合併或抵銷；
+6. 只生成一次 workbook bytes；
+7. 使用者下載 bytes 與 archive bytes 必須完全相同；
+8. archive 名稱不可覆蓋，保存 SHA-256 receipt；
+9. Query／下載／歸檔不改變 payable 狀態。
+
+清冊列應能追溯 obligation identity、款項類型、案件、收款帳戶 snapshot、remaining amount
+與重開／追償原因。被 anomaly 或付款證據待確認 blocker 排除的義務，必須另有可查詢的
+排除原因與人工處理入口，不能靜默消失。
 
 XLSX 是輸出快照，不是月結 entity。
 
@@ -144,7 +230,10 @@ XLSX 是輸出快照，不是月結 entity。
 | `idempotency_conflict` | conflict | 拒絕重用不同 payload |
 | `staff_obligation_not_exactly_settled` | blocker | 人工核對銀行事實與義務 |
 | `staff_bank_account_ambiguous` | blocker | 人工確認唯一有效帳戶 |
-| `staff_payout_amount_mismatch` | blocker | 人工核對銀行金額與義務 |
+| `staff_payout_amount_mismatch` | blocker | 一般 payout 不可套用；改由異常中心選正確 difference action |
+| `staff_payout_difference_mode_invalid` | validation | 金額關係與 underpayment／overpayment mode 不符 |
+| `staff_overpayment_recovery_target_ambiguous` | blocker | 人工確認唯一月嫂 recovery |
+| `staff_overpayment_recovery_adjustment_forbidden` | forbidden | 缺 capability，不可調整 recovery |
 | `staff_payout_reversal_invalid` | blocker | 不得 reversal-of-reversal 或超額 |
 | `transaction_failed` | transaction | 只有 storage unavailable／deadlock／timeout 標 retryable |
 | `accounts_payable_export_has_anomaly` | blocker | 異常中心處理 |
@@ -200,6 +289,15 @@ Client Finance 擁有：
 可以由多筆不可變銀行出款逐步清償，因此 obligation 可以有 `partially_refunded` 投影。
 任何 allocation 都不得使累積有效退款超過 obligation amount。
 
+若 canonical bank outflow 確實大於該退款 obligation 的 remaining amount，系統不得丟棄
+已發生的出款。它必須：
+
+1. 將 obligation 額度內的金額作為 refund allocation；
+2. 將超額金額建立獨立的 `client_over_refund_recovery` 追償應收與 anomaly；
+3. 保留原 bank fact、原 refund ledger 與超額追償之間的完整可追溯鏈；
+4. 不再建立新的退款應付，亦不得自動以後續客戶款項抵銷；只有後續 canonical 入款或經
+   授權的不可變 adjustment 才能結清追償。
+
 一般退款 ledger entry type 固定為 `refund`，其退匯／沖正固定為
 `refund_reversal`；客戶補助退還則固定為 `subsidy_return`，其退匯／沖正固定為
 `subsidy_return_reversal`。兩條線不得共用 transaction type、remaining balance 或
@@ -212,10 +310,25 @@ Commands：
 - `CreateCustomerRefundObligation`
 - `CreateSubsidyReturnObligation`
 - `AdjustRefundObligation`
+- `ApplyClientReceiptWithOverage`
+- `ApplyClientRefundWithOverage`
 
 root fact 必須來自已提交的 cancellation／financial adjustment／subsidy-return 業務事件。
 每個 obligation 保存 source event identity、case number、integer amount、reason、
 version 與 immutable creation event。
+
+客戶超收是額外的合法 root-fact 來源。`ApplyClientReceiptWithOverage` 僅能在選定的
+canonical incoming bank fact、唯一 case、唯一應收義務與人工確認都成立時執行，且須在
+同一 outer Unit of Work 內：
+
+1. append 全額實收的 receipt ledger；
+2. 將應收額度內的金額 allocation 至原 receivable；
+3. 將差額建立 `customer_refund` payable obligation，來源明確指向該 receipt ledger；
+4. 寫入超收處置 receipt、version、idempotency receipt 與 outbox。
+
+不得將超收直接視為退款已完成，也不得只把 `client_receipt_overpaid` 留在 alert 而遺失
+已收現金的正式表達。案件或義務不唯一、重複匯入、疑似錯誤分類時，仍只能保留 bank fact
+與 review，不得建立退款 obligation。
 
 ### 3.4 Subsystem：Refund／Reversal Preview and Apply
 
@@ -252,8 +365,9 @@ Apply：
 7. 更新 projection、version、outbox 與 receipt；
 8. outer Unit of Work 單次 commit。
 
-每一筆選定 bank outflow 的金額必須被精確分配；不足 obligation 全額時形成
-`partially_refunded`，超過 remaining refundable amount 時整筆拒絕。
+每一筆選定 bank outflow 的金額必須被完整表達；不足 obligation 全額時形成
+`partially_refunded`。超過 remaining refundable amount 時，`ApplyClientRefundWithOverage`
+必須依 3.2 建立超額追償應收，而不是拒絕並遺失銀行現金事實。
 
 ### 3.5 State machine
 
@@ -269,6 +383,59 @@ refunded ──valid refund return／reversal event──> pending | partially_r
 refund_review:
 normal ↔ review_required
 ```
+
+`client_over_refund_recovery` 另有獨立的 `open → recovered | adjusted` 投影；它不屬於
+refund progress，且不得自動與客戶新應收或其他案件抵銷。
+
+#### 3.5.1 `client_over_refund_recovery` 可執行契約
+
+每筆 recovery root 最少保存：
+
+- `recovery_identity`、case number、client identity；
+- 來源 canonical refund outflow bank fact、來源 refund ledger entry、來源 refund obligation；
+- `original_amount_ntd`、derived `remaining_amount_ntd`；
+- `status=open|partially_recovered|recovered|adjusted`、aggregate version、current event identity；
+- 建立時的 actor、reason、evidence、idempotency key 與 correlation id。
+
+不可變 recovery events：
+
+- `established`：退款實際多匯 Apply 同交易建立；
+- `cash_recovered`：連結後續 canonical incoming bank fact 與 recovery allocation；
+- `authorized_adjustment`：沒有銀行入款，只能由具 capability 的人工裁決追加；
+- `reversed`：只修正錯誤分類／錯誤 recovery event，必須指向原 event，不代表現金退回。
+
+Commands：
+
+- `QueryClientOverRefundRecovery`
+- `PreviewClientOverRefundRecoveryReceipt`
+- `ApplyClientOverRefundRecoveryReceipt`
+- `PreviewClientOverRefundRecoveryAdjustment`
+- `ApplyClientOverRefundRecoveryAdjustment`
+
+銀行入款結清規則：
+
+1. bank fact 必須是尚未被正式 ledger 使用的 canonical incoming row；
+2. 必須由案件、客戶／退款參考或人工證據唯一指向一筆 open recovery；
+3. 入款金額不得大於 recovery remaining；超額時停止並建立新的金額異常，不能自動轉作
+   客戶一般收款；
+4. 預設要求一次足額收回；實際入款不足時仍 append `cash_recovered` 作為疏失補救，狀態為
+   `partially_recovered`，remaining 保持可追；
+5. 同一 bank fact 只能對一筆 recovery 建立一份正式 allocation；
+6. remaining 歸零才轉 `recovered`，並由根事實 projector 自動解除 recovery anomaly。
+
+Adjustment 規則：
+
+- 只允許 `client_finance.recovery.adjust` capability；
+- 必須提供 adjustment amount、reason、evidence reference 與 expected version；
+- adjustment amount 不得超過 remaining，也不得為負數或零；
+- adjustment 只追加不可變 event，不建立虛構銀行 receipt；
+- 部分 adjustment 後仍為 `open`，remaining 歸零才為 `adjusted`；
+- 不得以 adjustment 偷渡跨案抵扣、改寫原 refund、client receipt 或 Orders lifecycle。
+
+Preview 零寫入；Apply 鎖定 recovery、bank fact（cash only）、account version 與 active anomaly，
+fresh rebuild candidate 後同交易 append ledger／event／allocation、CAS projection/version、outbox、
+receipt 與 anomaly desired-state event。完全相同 idempotency key＋payload回 existing receipt；
+不同 payload conflict。
 
 ### 3.6 銀行根事實與逾期提醒
 
@@ -302,8 +469,12 @@ Finance outer Unit of Work 內 append dedicated reopen event、重算 progress�
 | `idempotency_conflict` | conflict | 拒絕不同 payload |
 | `invalid_client_refund_intent` | validation | 修正選擇 |
 | `client_refund_bank_allocation_incomplete` | blocker | 每筆銀行出款未被完整分配 |
-| `client_refund_exceeds_remaining_amount` | blocker | 拒絕超額退款 |
+| `client_refund_exceeds_remaining_amount` | blocker | 一般 refund action 拒絕；改走專用 overage action 建立追償應收 |
 | `client_refund_return_invalid` | blocker | 退款退匯／沖正目標無效 |
+| `client_over_refund_recovery_not_found` | not-found | 重新 Query 異常與 recovery |
+| `client_over_refund_recovery_amount_exceeded` | blocker | 入款／adjustment 不得超過 remaining |
+| `client_over_refund_recovery_target_ambiguous` | blocker | 人工確認唯一 recovery |
+| `client_over_refund_recovery_adjustment_forbidden` | forbidden | 缺 capability，不可調整 |
 | `client_receipt_reversal_invalid` | blocker | 不得超額或重複沖正 |
 | `client_finance_storage_unavailable` | retryable | 安全重試／查 receipt |
 
@@ -335,13 +506,17 @@ Client Refund 已具備下列已驗證能力：
 7. Module、Subsystem、隔離 MySQL Domain 與 Global E2E 均已有可重跑證據；
 8. writer inventory 證明負收款、原交易覆寫與 legacy refund caller 已退出。
 
+以上 implementation closure 只適用於既有 exact／partial refund、return／reversal 與清冊能力。
+2026-08-11 新增的 client recovery collection／adjustment、staff payout difference／recovery 與
+government return payable contract 在人工確認及相應 E2E 完成前，不得列為 `proven`。
+
 ## 4. 交易與跨 Domain 邊界
 
 - cancellation／adjustment 產生 refund obligation 時，由相應 Global coordinator 的
   outer Unit of Work 同交易委派 Client Finance。
 - 實際銀行退款核銷由 Client Finance 擁有，不回寫 Orders lifecycle。
-- Accounts Payable Export 可以唯讀合併 staff payable 與 client refund rows，
-  但不能在同一 Query 中互相抵銷。
+- Accounts Payable Export 可以唯讀合併 staff payable、client refund 與 Government Subsidy
+  提供的 government return payable rows，但不能在同一 Query 中互相抵銷。
 - Finance Import 只提供 canonical bank facts，透過 borrowed Unit of Work 委派
   Client Finance 或 Staff Payables，不直接寫正式 ledger。
 
@@ -349,8 +524,9 @@ Client Refund 已具備下列已驗證能力：
 
 ### Module
 
-- integer NTD、exact allocation、deterministic ordering、reversal guards；
-- payout／refund projection reducer；
+- integer NTD、一般 action exact allocation、difference action 金額守恆、deterministic ordering、
+  reversal guards；
+- payout／refund／remaining／recovery projection reducer；
 - workbook aggregation、bytes digest 與 filename。
 
 ### Subsystem
@@ -359,16 +535,23 @@ Client Refund 已具備下列已驗證能力：
 - Apply replay、idempotency mismatch、stale、rollback、retry；
 - refund／reversal 排他；
 - payout return／reversal 重開義務；
+- staff payout difference、client/staff recovery collection 的 stale、歧義、partial remedy 與 replay；
 - archive failure 不宣稱完成。
 
 ### Domain
 
 - 隔離 MySQL 驗證 FK、unique、append-only trigger、row lock 與單次 commit；
 - 同月嫂多訂單聚合不建立月結；
-- 每筆 bank outflow exact allocation，obligation 可逐筆清償並於餘額歸零後 refunded。
+- 每筆 bank outflow 必須完整表達為 obligation allocation 加上具血緣的 recovery root；
+- staff underpayment remaining、staff/client recovery collection 與 government return payable 均於
+  餘額歸零後才完成。
 
 ### Global
 
+- customer over-receipt 3,000／receivable 2,500 → receipt 3,000＋refund obligation 500
+  → 5 日退款清冊 → 後續 500 bank outflow → refunded；
+- refund obligation 500 → 750 bank outflow → refund allocation 500＋recovery receivable 250
+  → anomaly 與後續 canonical incoming recovery；
 - cancellation／adjustment→refund obligation→bank refund；
 - Payroll→staff payable→payout／return；
 - Finance Import dispatch 不繞過 owning Domain；

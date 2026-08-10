@@ -77,10 +77,67 @@ API 回傳 typed summary、detail 與 allowed actions。財務 occurrence 與 cu
   active alert 與所選義務，重新計算 candidate，驗證銀行金額完整 allocation 且每個所選
   義務精確歸零，再依序 append classification event、寫入 owning Finance ledger／allocation、
   reconciliation receipt 與 alert resolved event。任一步驟失敗全部 rollback。
+- 上述 `CorrectAndPostFinanceImportRow` 只處理金額可精確核銷的一般分支。實際金額與義務
+  不相等時，必須改走 Registry 指定的 Client Finance、Staff Payables 或 Government Subsidy
+  專用 difference／overage command，並驗證「正式 allocation＋remaining／recovery／overpayment
+  root＝完整銀行金額」；不得放寬一般 action 或由 Anomalies 自行拆帳。
 - 上述「直接修正」只代表 UI 呼叫 typed backend command；UI 不得直接 SQL，且不得修改銀行
   日期、金額、方向、帳號、撤銷碼、raw payload、fingerprint 或 occurrence 等來源根事實。
 - 操作成功後由新根事實驅動 projector 自動更新／解除 Alert；人工 resolve 不可取代正式操作。
 - 原因或修復方式不唯一時只提供選項與證據，不預選、不自動 Apply。
+
+### Typed Recovery Action Registry（2026-08-11，已人工確認）
+
+`AnomalyDefinitionRegistry` 必須同時保存定義與有限 action descriptors。每個 descriptor 為
+後端 typed result，至少包含：
+
+- `action_key`、業務中文 `label`、`owning_domain`、`form_schema_key`；
+- `source_bindings`：由 anomaly context 固定帶入、UI 不可改寫的 bank row、case、staff、
+  obligation、recovery、batch/item identity 與 source version；
+- `required_operator_inputs`：唯一選擇、reason、evidence、disposition 或 capability；
+- `preview_operation`、`apply_operation`、required capability；
+- `completion_predicate` 與 Apply 後應重新投影的 definition codes；
+- action contract version。
+
+Registry 不保存衍生金額。Recovery context assembler 必須向 owning Domain Query 取得 current
+remaining、候選 target 與 versions；UI 不得從 alert details JSON 或中文 message 推算 action。
+
+#### 正式 action mapping
+
+| Definition／predicate | Action key | 系統預填 | 人員可輸入 | 完成 predicate |
+|---|---|---|---|---|
+| `finance_import_manual_review` | `classify_and_post_bank_row` | bank row、batch、fact/alert version | 唯一 classification/target、reason、evidence | row 已由 owning Domain 正式 posting，manual-review predicate 消失 |
+| `client_receipt_overage_disposition_required` | `apply_client_receipt_overage` | incoming row、case、receivable | reason、evidence；歧義時唯一 target | receipt 全額存在、receivable 歸零、差額 refund payable 成立 |
+| `client_refund_underpayment` | `apply_client_refund_underpayment` | outgoing row、case、refund obligation | reason、evidence | bank row 已核銷且 refund remaining 正確；underpayment 可轉 overdue reminder |
+| `client_refund_overage_recovery_required` | `apply_client_refund_overage` | outgoing row、case、refund obligation | reason、evidence | refund obligation 歸零且同額差額 recovery root 成立 |
+| `client_over_refund_recovery_open` | `collect_client_over_refund_recovery` | incoming row、client recovery | reason、evidence；歧義時唯一 recovery | recovery remaining 歸零或正確降低；原 overage anomaly 依 remaining 決定消失 |
+| `staff_payout_underpayment` | `apply_staff_payout_underpayment` | outgoing row、staff、payable obligations | reason、evidence | payout 已記錄且 remaining payable／partial 狀態正確 |
+| `staff_payout_overpayment` | `apply_staff_payout_overpayment` | outgoing row、staff、payable obligations | reason、evidence | obligations 歸零且 staff recovery root 成立 |
+| `staff_overpayment_recovery_open` | `collect_staff_overpayment_recovery` | incoming row、staff recovery | reason、evidence；歧義時唯一 recovery | recovery remaining 歸零或正確降低 |
+| `GOVSUB-006` | `dispose_government_subsidy_overpayment` | incoming row、receipt、overpayment root、eligible targets | `offset|return`、合法 target／recipient snapshot、reason、evidence | overpayment 進入 offset 或 return payable 分支，不再 pending_review |
+| `government_overpayment_return_pending` | `apply_government_overpayment_return_payout` | outgoing row、government payable | reason、evidence | payable remaining 正確降低／歸零 |
+
+同一 anomaly 若只有一個合法 action，UI 直接顯示該表單；有有限分支（例如政府 offset／return）
+時，分支是同一 owning Domain Preview intent 的 enum，不是 UI 自由拼 endpoint。沒有完整 backend
+action 時 `available_actions=[]` 並顯示「尚未支援此修復」，不得產生假按鈕。
+
+#### UI dispatcher 邊界
+
+UI 只依 `form_schema_key` 選擇已註冊的 typed renderer，renderer 必須對應單一 bounded Domain
+API client。Dispatcher 不接收 raw endpoint、不用 definition code 寫業務 if/else，也不傳未驗證
+dict。未知 contract version／schema key fail closed，顯示 `recovery_action_not_supported`。
+
+所有表單流程固定：Query context → Preview → 顯示金額守恆／row changes／blockers → Apply →
+顯示 receipt → 重新 Query anomaly。Apply disabled 直到 Preview 成功且 fingerprint、source version、
+operator inputs 未改變。timeout 先查 receipt/job；不得換新 idempotency key盲目重送。
+
+#### Registry 驗收
+
+- 每個 active finance definition 必須明確為 `no_automated_recovery` 或至少一個 descriptor；
+- action key、schema key、capability 與 contract version 唯一且可靜態驗證；
+- source bindings 缺失、跨 Domain、stale 或多義時 Preview fail closed；
+- completion predicate 仍成立時 anomaly 保持 open，不因 Apply receipt 或人工 resolve 假結案；
+- 新增 definition 未登記 action 時 CI 失敗，但不影響只讀異常清單顯示。
 
 ## 3. Modules
 
@@ -104,6 +161,9 @@ API 回傳 typed summary、detail 與 allowed actions。財務 occurrence 與 cu
 - `RecoveryContextAssembler`
 - `DomainActionLinkBuilder`
 - `RecoveryCompletionPredicate`
+- `RecoveryActionDescriptor`
+- `RecoveryActionRegistryValidator`
+- `TypedRecoveryFormSchema`
 
 ## 4. Ports 與交易
 
@@ -181,6 +241,9 @@ Stable errors：
 - `anomaly_projection_stale`
 - `anomaly_projection_data_integrity_violation`
 - `recovery_action_not_available`
+- `recovery_action_not_supported`
+- `recovery_action_contract_version_mismatch`
+- `recovery_source_binding_incomplete`
 - `projector_unavailable`
 - `transaction_failed`
 

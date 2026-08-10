@@ -4,6 +4,8 @@
 > 本 Domain 與 Client Finance、Staff Payables、Finance Import 分開；不得把政府撥款
 > 映射成客戶收款，也不得由 Finance Import 直接寫正式補助 ledger。
 
+> 2026-08-11 政府溢撥 disposition 可執行契約：`approved`。
+
 ## 1. Domain 責任
 
 Government Subsidy 是正式政府補助申請、政府核准、政府撥款／退匯及逐案件分配的唯一
@@ -68,8 +70,9 @@ government amount 均 fail closed 並送異常中心。
 3. 政府核准不覆寫 requested facts；approval 以新事件保存。
 4. receipt／return／reversal 與 allocation 一律 append-only。
 5. 每筆 allocation 的 batch 必須同時等於 transaction batch 與 claim item batch。
-6. receipt allocation 總額必須精確等於 receipt amount；reversal allocation 總額必須
-   精確等於 reversal amount，且不得超過各原 allocation 尚未沖銷餘額。
+6. 一般 receipt action 的 allocation 總額必須精確等於 receipt amount；政府溢撥專用 action
+   則必須滿足 `claim allocations + government overpayment root = receipt amount`。reversal
+   allocation 總額必須精確等於 reversal amount，且不得超過各原 allocation 尚未沖銷餘額。
 7. reversal 只能指向 receipt；禁止 reversal-of-reversal。
 8. `net allocated` 不得小於 0，也不得大於 approved total。
 9. 全額撥款只在 `outstanding = 0` 時成立；退匯後依 ledger 重開 outstanding，不改寫
@@ -79,6 +82,8 @@ government amount 均 fail closed 並送異常中心。
 11. Finance Import 的 `reconciliation_status` 只作 compatibility projection；正式答案
     是本 Domain ledger 對 `finance_import_row_id` 的直接關聯。
 12. Query 與 Preview 零寫入；Apply 在同一外層 UoW 重新鎖定、重算並驗證。
+13. canonical 政府入款超過所有已核准 outstanding 時，已核准範圍可正常 allocation；超額
+    必須建立獨立 overpayment root，不得使 claim `net allocated` 超過 approved total。
 
 ## 4. Subsystems
 
@@ -123,6 +128,62 @@ Finance Import 傳入 canonical bank fact identity、amount、date 與唯一分�
 
 以原 receipt identity 與要沖銷的原 allocation identities為根。Apply 追加 reversal
 transaction、逐筆 reversal allocation、重建 net allocated／outstanding 與 batch status。
+
+### 4.5.1 Government Overpayment Disposition
+
+當 canonical government incoming bank fact 大於選定 approved outstanding 時，使用專用
+`Preview／ApplyGovernmentSubsidyReceiptWithOverage`，不得走一般 receipt action。
+
+同一 outer UoW 必須：
+
+1. 保存完整 canonical incoming bank fact 與全額 government receipt ledger；
+2. approved outstanding 範圍內建立正常 claim allocations；
+3. 差額建立 `government_subsidy_overpayment` root 與 anomaly；
+4. 保存 bank fact、receipt ledger、allocated claims 與 overpayment identity 的 immutable lineage；
+5. 不得把差額寫入 Client Finance、Staff Payables 或任一 claim approved amount。
+
+`government_subsidy_overpayment` 最少保存：`overpayment_identity`、來源 bank fact、來源 receipt
+ledger、government payer identity、original／remaining amount、status、version、current event、
+actor、reason、evidence 與可選的 selected disposition target。狀態機：
+
+```text
+pending_review
+  ├─ authorized offset decision ─> offset_reserved ─> offset_applied
+  └─ authorized return decision ─> return_payable ─> partially_returned ─> returned
+```
+
+#### Offset 規則
+
+- `Preview／ApplyGovernmentSubsidyOverpaymentOffset` 只接受 overpayment identity 與明確的 claim
+  batch/item targets，不接受前端傳入 remaining 或 resulting status；
+- target 必須已正式 submitted、approved、同一政府付款方且仍有 outstanding；draft、未核准、
+  不同政府付款方或不唯一時不得 reserve／apply；
+- 尚無合法 target 時維持 `pending_review`，不能先猜測未來案件；
+- offset allocation 使用原 overpayment credit，不新增虛構銀行 receipt；
+- allocation 總額不得超過 overpayment remaining 或 target outstanding；
+- 部分 offset 可保留 `offset_reserved` remaining，歸零才為 `offset_applied`；
+- 同一 overpayment credit 不得同時成為 return payable。
+
+#### Return payable 規則
+
+`Preview／ApplyGovernmentSubsidyOverpaymentReturn` 需人工選定有效政府收款資訊 snapshot：
+agency identity/name、bank code、account number masked/display value、account fingerprint、effective
+date、due date、法源／核准 evidence reference。Apply 建立獨立
+`government_overpayment_return` payable obligation；不得使用 client refund 或 staff payable 表示。
+
+該 obligation 可進每月 5 日會計師清冊，列型別固定為
+`government_overpayment_return`，輸出 remaining、government recipient snapshot、來源
+overpayment/receipt identity 與 due date。清冊不改付款狀態。後續 canonical outgoing bank fact
+經 `Preview／ApplyGovernmentOverpaymentReturnPayout` 才 append payout allocation；實際少匯時
+保留 remaining，實際多匯時停止並建立新的 outbound amount anomaly，不得增加原 obligation。
+
+#### Disposition command contract
+
+所有 disposition Apply 必須具 `government_subsidy.overpayment.disposition` capability，並接受
+expected overpayment version、Preview fingerprint、stable idempotency key、actor、reason、evidence
+與 correlation id。Apply 鎖定 bank row、receipt、overpayment、targets、recipient snapshot 與
+active anomaly，fresh rebuild 後同交易寫 events／allocations／payable、CAS version、outbox、receipt。
+不同 payload 重用 key、已 disposition、stale target 或跨付款方一律 conflict，零部分寫入。
 
 ### 4.6 Query
 
@@ -203,6 +264,12 @@ POST /government-subsidy/receipts/preview
 POST /government-subsidy/receipts/apply
 POST /government-subsidy/reversals/preview
 POST /government-subsidy/reversals/apply
+POST /government-subsidy/receipt-overages/preview
+POST /government-subsidy/receipt-overages/apply
+POST /government-subsidy/overpayments/{identity}/offset/preview
+POST /government-subsidy/overpayments/{identity}/offset/apply
+POST /government-subsidy/overpayments/{identity}/return/preview
+POST /government-subsidy/overpayments/{identity}/return/apply
 ```
 
 Apply 只接受 intent、expected aggregate version、Preview fingerprint、actor、reason、
@@ -223,6 +290,12 @@ Stable errors：
 - `government_subsidy_allocation_exceeds_approved`
 - `government_subsidy_reversal_target_invalid`
 - `government_subsidy_reversal_amount_exceeded`
+- `government_subsidy_overpayment_not_found`
+- `government_subsidy_overpayment_target_ambiguous`
+- `government_subsidy_overpayment_target_not_eligible`
+- `government_subsidy_overpayment_already_disposed`
+- `government_subsidy_return_recipient_invalid`
+- `government_subsidy_overpayment_disposition_forbidden`
 - `government_subsidy_version_conflict`
 - `stale_preview`
 - `idempotency_mismatch`
@@ -239,6 +312,7 @@ Stable errors：
 - `GOVSUB-003`：receipt／allocation／projection integrity 不一致；
 - `GOVSUB-004`：reversal target 或剩餘可沖銷金額不一致；
 - `GOVSUB-005`：claim item 與 assignment service facts 漂移。
+- `GOVSUB-006`：政府入款超過 approved outstanding，等待 offset 或 return disposition。
 
 異常中心顯示 bank fact、候選批次、item outstanding、既有 allocation 與合法 action。
 人員 action 只能導航至本 Domain Preview，不得直接寫 allocation、paid amount 或 status。
@@ -272,7 +346,8 @@ Government Subsidy 新 owner migration 已完成；若正式 repository、schema
 
 - 整數 requested／approved／allocated／outstanding 守恆；
 - partial receipt、multiple batches、ambiguous items 形成 review；
-- receipt、reversal allocation exact total；
+- 一般 receipt、reversal allocation exact total；溢撥 receipt 則驗證
+  `claim allocations + overpayment root = bank amount`；
 - 禁止 reversal-of-reversal 與超額沖銷；
 - deterministic status／fingerprint。
 
@@ -283,6 +358,8 @@ Government Subsidy 新 owner migration 已完成；若正式 repository、schema
 - partial failure at transaction、allocation、projection、outbox、receipt 時整筆 rollback；
 - borrowed outer UoW 不自行 commit；
 - 人工 allocation 修正後同一 bank fact 正式入帳。
+- overpayment disposition 的 offset／return 互斥、stale target、capability、idempotency 與
+  transaction rollback。
 
 ### Domain
 
@@ -290,6 +367,7 @@ Government Subsidy 新 owner migration 已完成；若正式 repository、schema
   CAS、concurrent Apply、reversal 與 exact replay；
 - 多筆 government receipts 對同批次 partial→paid；
 - reversal 後 paid→partially_paid／approved 的正確重開；
+- 溢撥 root 的 pending_review→offset_reserved／return_payable，以及 partial return remaining；
 - legacy backfill 不改 requested／approved 歷史。
 
 ### Global
