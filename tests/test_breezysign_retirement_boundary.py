@@ -40,7 +40,6 @@ def _current_runtime_schema_and_baseline_paths() -> tuple[Path, ...]:
     )
     metadata_files = (
         REPOSITORY_ROOT / "document" / "架構重整" / "README.md",
-        REPOSITORY_ROOT / "system_map.yaml",
         REPOSITORY_ROOT / "document" / "管理端UI" / "可替換前端與Streamlit薄顯示層重整計畫.md",
     )
     return source_files + schema_files + baseline_files + metadata_files
