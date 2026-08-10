@@ -134,9 +134,9 @@ docker compose up -d
 .\.venv\Scripts\python.exe scripts/run_durable_job_worker.py
 ```
 
-[`online.bat`](online.bat) 是上線啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控與互動式
-Durable Job Worker，但**不會**自動套用資料庫 schema。正式 24/7 部署使用 Windows Task Scheduler
-監督 worker：
+[`online.bat`](online.bat) 是本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控與互動式
+Durable Job Worker，但**不會**自動套用資料庫 schema。它不是正式部署入口；正式 24/7 部署使用
+已核准的 deployment release workflow 與 Windows Task Scheduler 監督 worker：
 
 ```powershell
 .\scripts\install_durable_job_worker_task.ps1 -StartNow
@@ -147,7 +147,7 @@ Durable Job Worker，但**不會**自動套用資料庫 schema。正式 24/7 部
 
 - Schema 調整先新增 `db/schema_parts/`，再同步 `db/schema.sql` 與對應的 migration release metadata。
 - 保留資料升級、cutover、回復與目標主機操作必須依 Work Package／runbook 執行，不可自行套用 migration。
-- `online.bat` 不初始化、不重建也不假資料化正式資料庫。
+- `online.bat` 不初始化、不重建也不假資料化資料庫；它只用於本機開發，禁止當作正式部署入口。
 - `fixtures/db_snapshot_v2/v3` 是測試快照；只能在隔離的測試／本機資料庫流程使用，禁止自行刪除、整理或用於正式資料庫。
 - 銀行檔、LINE webhook、BeClass／HCM 與其他外部輸入先進 inbox／import workflow，再由 owning Domain 寫入正式事實。
 

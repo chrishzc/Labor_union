@@ -1,4 +1,4 @@
-"""Static acceptance coverage for the production startup batch script."""
+"""Static acceptance coverage for the local-development startup batch script."""
 
 from pathlib import Path
 
@@ -30,12 +30,16 @@ def test_online_script_waits_for_database_before_launching_services():
     assert "exit /b %errorlevel%" in script
 
 
-def test_online_script_uses_expected_service_entrypoints_without_initializing_data():
+def test_online_script_is_development_only_and_uses_non_destructive_entrypoints():
     script = _script()
 
     assert '"%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000' in script
     assert '"%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501' in script
-    assert '"%PY%" -m scripts.validate_line_production_readiness' in script
+    assert "Local Development Startup Script" in script
+    assert '"%PY%" -m scripts.validate_line_production_readiness' not in script
+    assert "ONLINE_SKIP_PRODUCTION_READINESS" not in script
+    assert "production_not_supported" not in script
+    assert "ONLINE_APP_ENV" not in script
     assert '"%PY%" -m scripts.run_line_worker' in script
     assert '"%PY%" -m scripts.run_service_monitor' in script
     assert '"%PY%" -m scripts.run_durable_job_worker' in script
