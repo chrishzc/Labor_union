@@ -15,7 +15,7 @@ RUNTIME_SOURCE_ROOTS = (
 
 
 def _runtime_python_sources() -> list[Path]:
-    source_paths = [PROJECT_ROOT / "main_03_calendar.py"]
+    source_paths = []
     for source_root in RUNTIME_SOURCE_ROOTS:
         source_paths.extend((PROJECT_ROOT / source_root).rglob("*.py"))
     return source_paths
