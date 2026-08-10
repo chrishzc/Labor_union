@@ -14,7 +14,7 @@ from typing import Any
 from urllib.parse import quote
 
 import requests
-from jsonschema import RefResolver, ValidationError, validate
+from jsonschema import Draft202012Validator, ValidationError
 
 
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -189,11 +189,7 @@ def _validate_success_payload(
 ) -> str | None:
     if schema is not None:
         try:
-            validate(
-                instance=payload,
-                schema=schema,
-                resolver=RefResolver.from_schema(openapi),
-            )
+            _openapi_response_validator(schema, openapi).validate(payload)
         except ValidationError as exc:
             location = ".".join(str(part) for part in exc.absolute_path)
             return f"OpenAPI schema mismatch at {location or '<root>'}: {exc.message}"
@@ -206,6 +202,13 @@ def _validate_success_payload(
         if "message" not in payload or not isinstance(payload.get("message"), str):
             return "BaseResponse.message must be string"
     return None
+
+
+def _openapi_response_validator(
+    schema: dict[str, Any],
+    openapi: dict[str, Any],
+) -> Draft202012Validator:
+    return Draft202012Validator(openapi).evolve(schema=schema)
 
 
 def _redact(value: str, secrets: list[str]) -> str:
