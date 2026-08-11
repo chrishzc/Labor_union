@@ -8,7 +8,7 @@
 1. 根目錄 `AGENTS.md`：工作區規則、dirty worktree 與驗證方式。
 2. 根目錄 `README.md`：執行入口、目錄與安全界線。
 3. `01_規格基線/00_Global_共同契約.md`：跨領域共同不變量。
-4. 對應 Domain 的正式規格；衝突時以 `15_正式規格索引與裁決總表.md` 的權威順序判定。
+4. `15_正式規格索引與裁決總表.md`、對應 Domain 規格及 `16`～`20` 中與任務相關的最新補充裁決。
 5. 對應的 `02_決策與退役執行記錄/` Work Package 與 `03_追蹤清單與證據/` evidence。
 6. 最後才讀 live schema、route、subsystem、repository 與既有測試，確認規格和現況是否漂移。
 
@@ -62,7 +62,9 @@ flowchart LR
 | Access／LINE／Jobs | `subsystems/access/`、`subsystems/line/`、`subsystems/jobs/` | 管理員身分與 capability、LINE inbox／delivery、durable worker supervision |
 
 完整 Domain ownership、SSOT 與跨域關係請讀
-`01_規格基線/15_正式規格索引與裁決總表.md`；其中的圖與裁決優先於本摘要。
+`01_規格基線/15_正式規格索引與裁決總表.md`；其中的圖、`16`～`20` 補充裁決與權威順序
+優先於本摘要。銀行流水、帳務異常及管理端處置另以
+`20_銀行流水匯入與帳務異常處理正式規格.md` 的最新明確裁決為準。
 
 ## 常見改動的定位
 
@@ -70,14 +72,15 @@ flowchart LR
 |---|---|
 | 新增或更改業務命令 | 對應 Domain 規格 → `subsystems/<domain>/` Preview／Apply workflow → typed API schema／route → UI client／panel |
 | 新增唯讀畫面或查詢 | owning Domain read model／query repository → API route → `ui/api_clients/` → 頁面；不可讓 UI 組合商業規則 |
-| 銀行流水、補助或付款處理 | Finance Import 只處理來源與分類；由 Client Finance、Staff Payables 或 Government Subsidy 寫入自己的根事實 |
+| 銀行流水、補助或付款處理 | 先讀 `20_銀行流水匯入與帳務異常處理正式規格.md`；Finance Import 擁有來源、分類與 typed dispatch，由 Client Finance、Staff Payables 或 Government Subsidy 寫入自己的根事實 |
 | 外部 webhook、LINE 或檔案監控 | 只產生／驗證 inbox 或 durable job；Worker 再呼叫 application workflow |
+| 新增、保留或退役 API／Streamlit／CLI 入口 | 先讀 `19_Global_Entry_Point_Governance.md`；逐項確認操作者、業務情境、canonical owner、replacement 與 review queue，不得只因找不到 static caller 就刪除 |
 | MySQL schema 或保留資料升級 | `db/schema_parts/` → `db/schema.sql` → versioned `db/migration_releases/` → preserve-data migration／驗證腳本 |
 | 異常與人工處理入口 | Anomalies projection 與 typed recovery workflow；audit 是證據，不是授權 |
 
 ## 文件地圖
 
-- `01_規格基線/`：正式 Global／Domain 契約；`15` 是規格收斂入口，`16`～`18` 補足帳務、外部整合與部署治理。
+- `01_規格基線/`：正式 Global／Domain／Application 契約；`15` 是規格收斂入口，目前正式範圍為 `15`～`20`。`16`～`18` 補足帳務衝突、外部整合／權限與部署治理，`19` 管理 entry point，`20` 裁決銀行流水與帳務異常處置。
 - `02_決策與退役執行記錄/`：已核准的 Work Package、退役、驗收與部署決策；先確認 `declared_status`，不要把草案當授權。
 - `03_追蹤清單與證據/`：legacy inventory、evidence、收據；是現況證據，不自動構成業務規格或刪檔權限。
 - `03_追蹤清單與證據/evidence/global_e2e_manifest.json`：目前 Global E2E 驗收宣告與證據索引。
@@ -86,7 +89,7 @@ flowchart LR
 
 - 先讀取 branch、HEAD、status 和相鄰檔案；既有 dirty path 一律視為使用者成果。
 - 測試一律使用 `.venv\Scripts\python.exe -m pytest`，先跑受影響模組，再依 Domain／Global 層級擴大。
-- `fixtures/db_snapshot_v2/v3` 是測試快照，不得自行刪除、整理或套用到正式資料庫。
+- snapshot、golden artifact、`tests/fixtures/` 與 `validation/` 資料都是受保護測試資產；未經明確授權不得刪除、重產或套用到正式資料庫。
 - `db/schema_parts/` 與 migration release 必須 additive、可驗證；`online.bat` 不會自動套 schema。
 - Streamlit 只顯示 typed API result；正式資料庫、candidate、fixture 和測試資料必須隔離。
 
