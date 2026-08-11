@@ -80,6 +80,16 @@ class LineIdentityApplication:
             unit_of_work.commit()
         return result
 
+    def validate_flow(self, flow_id, purpose, line_user_id):
+        with self._unit_of_work_factory() as unit_of_work:
+            return _require_flow(
+                unit_of_work,
+                flow_id,
+                purpose,
+                line_user_id,
+                self._now(),
+            )
+
     def preview_customer(self, flow_id, line_user_id, proof):
         with self._unit_of_work_factory() as unit_of_work:
             _require_flow(

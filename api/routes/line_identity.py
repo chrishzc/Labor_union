@@ -34,6 +34,8 @@ from api.schemas.line_identity import (
     CustomerIdentityRequest,
     LineIdentityApplyResponse,
     LineIdentityCandidateResponse,
+    LineIdentityFlowValidationRequest,
+    LineIdentityFlowValidationResponse,
     LineIdentityPreviewResponse,
     LineIdentityRuntimeConfigResponse,
     ProvisionalRegistrationRequest,
@@ -45,6 +47,7 @@ from domains.case_import.provisional_registration import (
     ProvisionalRegistrationIntent,
 )
 from domains.line.identities import LineIdentityFlowId, LineReviewRequestId, LineUserId
+from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.review import LineReviewDecision, LineReviewStatus, LineReviewType
 from infrastructure.line.liff_token_verifier import (
     InvalidLiffTokenError,
@@ -80,8 +83,11 @@ review_router = APIRouter(
 page_router = APIRouter(tags=["LINE Identity"])
 _IDENTITY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "identity.html"
 _REGISTRATION_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "register.html"
+_STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
+_STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
 
 
+@page_router.get("/line-identity/", include_in_schema=False)
 @page_router.get("/line-identity")
 def identity_page():
     return FileResponse(_IDENTITY_PAGE)
@@ -90,6 +96,16 @@ def identity_page():
 @page_router.get("/line-registration")
 def registration_page():
     return FileResponse(_REGISTRATION_PAGE)
+
+
+@page_router.get("/line-staff-orders")
+def staff_orders_page():
+    return FileResponse(_STAFF_ORDERS_PAGE)
+
+
+@page_router.get("/line-staff-schedule")
+def staff_schedule_page():
+    return FileResponse(_STAFF_SCHEDULE_PAGE)
 
 
 @public_router.get(
@@ -101,6 +117,26 @@ def identity_runtime_config():
     if not liff_id or liff_id == "your_liff_id_here":
         raise HTTPException(status_code=503, detail="LIFF 尚未完成設定")
     return BaseResponse(data=LineIdentityRuntimeConfigResponse(liff_id=liff_id))
+
+
+@public_router.post(
+    "/flow/validate",
+    response_model=BaseResponse[LineIdentityFlowValidationResponse],
+)
+def validate_identity_flow(payload: LineIdentityFlowValidationRequest):
+    line_user_id = _verified_line_user_id(payload)
+    snapshot = _translate_identity_errors(
+        get_line_identity_application().validate_flow,
+        LineIdentityFlowId(payload.flow_id),
+        LineIdentityFlowPurpose(payload.purpose),
+        line_user_id,
+    )
+    return BaseResponse(
+        data=LineIdentityFlowValidationResponse(
+            status="active",
+            expires_at=snapshot.expires_at,
+        )
+    )
 
 
 @public_router.post(
@@ -196,9 +232,10 @@ def apply_provisional_registration(
 ):
     line_user_id = _verified_line_user_id(payload)
     receipt = _apply_registration(application, payload, line_user_id)
+    identity_status = _complete_registration_identity(payload, line_user_id)
     if receipt.worker_wakeup_required:
         publish_line_wakeup_best_effort()
-    return BaseResponse(data=_registration_response(receipt))
+    return BaseResponse(data=_registration_response(receipt, identity_status))
 
 
 def _apply_registration(application, payload, line_user_id):
@@ -212,14 +249,29 @@ def _apply_registration(application, payload, line_user_id):
         raise _registration_http_error(503, str(error), "登記服務暫時無法使用") from error
 
 
-def _registration_response(receipt):
+def _registration_response(receipt, identity_status):
     return ProvisionalRegistrationResponse(
         registration_id=receipt.registration_id,
         client_id=receipt.client_id,
         beclass_record_id=receipt.beclass_record_id,
         client_name=receipt.client_name,
         replayed=receipt.replayed,
+        identity_status=identity_status,
     )
+
+
+def _complete_registration_identity(payload, line_user_id):
+    if not payload.flow_id:
+        return None
+    result = _translate_identity_errors(
+        get_line_identity_application().apply_customer,
+        LineIdentityFlowId(payload.flow_id),
+        line_user_id,
+        CustomerIdentityProof(payload.name.strip(), payload.phone.strip()),
+        _correlation_id("registration"),
+    )
+    publish_line_wakeup_best_effort()
+    return result.status.value
 
 
 @review_router.get(

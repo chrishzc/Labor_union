@@ -20,7 +20,7 @@ from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 
 _STAFF_COMMAND = "我是月嫂"
 _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
-_CUSTOMER_COMMANDS = {"綁定", "綁定訂單", "我要綁定訂單", "查詢訂單", "訂單查詢"}
+_CUSTOMER_COMMANDS = {"綁定", "綁定訂單", "我要綁定訂單", "查詢訂單", "訂單查詢", "服務登記"}
 
 
 class LineWebhookIdentityHandlers:
@@ -35,6 +35,7 @@ class LineWebhookIdentityHandlers:
         group_application: object | None = None,
         matching_postback_application: object | None = None,
         knowledge_question_scheduler: Callable[[object, object, object, str], object] | None = None,
+        service_help_application: object | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
@@ -44,6 +45,7 @@ class LineWebhookIdentityHandlers:
         self._group_application = group_application
         self._matching_postback_application = matching_postback_application
         self._knowledge_question_scheduler = knowledge_question_scheduler
+        self._service_help_application = service_help_application
 
     def registry(self):
         return {
@@ -94,6 +96,10 @@ class LineWebhookIdentityHandlers:
             return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
+            if self._service_help_application is not None and self._service_help_application.handle(
+                inbox, unit_of_work, line_user_id, text
+            ):
+                return
             if self._knowledge_question_scheduler is not None:
                 self._knowledge_question_scheduler(inbox, unit_of_work, line_user_id, text)
             return

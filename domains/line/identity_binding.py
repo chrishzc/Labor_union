@@ -23,6 +23,7 @@ class LineIdentityBindingStatus(StrEnum):
     UNBOUND = "unbound"
     PENDING_REVIEW = "pending_review"
     BOUND = "bound"
+    REVOCATION_PENDING = "revocation_pending"
     REVOKED = "revoked"
 
 
@@ -35,7 +36,13 @@ _ALLOWED_BINDING_TRANSITIONS = {
         LineIdentityBindingStatus.BOUND,
         LineIdentityBindingStatus.REVOKED,
     },
-    LineIdentityBindingStatus.BOUND: {LineIdentityBindingStatus.REVOKED},
+    LineIdentityBindingStatus.BOUND: {
+        LineIdentityBindingStatus.REVOCATION_PENDING,
+        LineIdentityBindingStatus.REVOKED,
+    },
+    LineIdentityBindingStatus.REVOCATION_PENDING: {
+        LineIdentityBindingStatus.REVOKED,
+    },
     LineIdentityBindingStatus.REVOKED: {
         LineIdentityBindingStatus.PENDING_REVIEW,
     },

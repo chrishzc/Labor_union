@@ -20,6 +20,7 @@ from domains.line.identity_binding import (
     LineIdentityBindingStatus,
 )
 from domains.line.identity_flow import (
+    LineIdentityFlowConflict,
     LineIdentityFlowPurpose,
     LineIdentityFlowSnapshot,
     LineIdentityFlowStatus,
@@ -158,6 +159,28 @@ def test_staff_apply_creates_manual_review_without_binding_owner() -> None:
     assert identities.saved_claims[0].subject_type is LineBindingSubjectType.STAFF
     assert uow.committed is True
     assert len(deliveries.items) == 1
+
+
+def test_validate_flow_rejects_expired_link_before_identity_form_is_shown() -> None:
+    expired_flow = LineIdentityFlowSnapshot(
+        LineIdentityFlowId("flow-expired"),
+        LineIdentityFlowPurpose.STAFF_VERIFICATION,
+        LineUserId("U-staff"),
+        LineIdentityFlowStatus.ACTIVE,
+        NOW,
+        "staff-flow:expired",
+    )
+    application = LineIdentityApplication(
+        lambda: FakeUow(identity_flows=FlowRepository(expired_flow)),
+        lambda: NOW,
+    )
+
+    with pytest.raises(LineIdentityFlowConflict, match="expired"):
+        application.validate_flow(
+            expired_flow.flow_id,
+            expired_flow.purpose,
+            expired_flow.line_user_id,
+        )
 
 
 def test_review_approval_requires_capability_and_binds_in_one_uow() -> None:

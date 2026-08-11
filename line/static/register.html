@@ -640,6 +640,7 @@
                 email: document.getElementById("email").value || "",
                 city: document.getElementById("city").value || "",
                 zip_code: document.getElementById("zip_code").value || "",
+                flow_id: new URLSearchParams(window.location.search).get('flow_id') || null,
                 line_id_token: currentIdToken,
                 development_line_user_id: developmentLineUserId,
                 liff_config_revision: liffConfigRevision,

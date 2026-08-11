@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>月嫂訂單查詢</title><script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <style>
+    *{box-sizing:border-box} body{margin:0;background:#fff7f8;color:#27272a;font-family:'Noto Sans TC',sans-serif} main{max-width:720px;margin:auto;padding:24px 16px 40px} h1{margin:0 0 8px} p{color:#71717a;line-height:1.6}.panel,.order{background:#fff;border:1px solid #fecdd3;border-radius:12px;padding:16px;margin-top:16px}label{display:block;font-weight:700;margin-bottom:8px}input{width:100%;padding:12px;border:1px solid #d4d4d8;border-radius:8px;font-size:16px}button{width:100%;margin-top:12px;padding:13px;border:0;border-radius:8px;background:#be123c;color:#fff;font-size:16px;font-weight:700}.message{margin-top:14px;padding:12px;border-radius:8px;background:#f4f4f5}.error{background:#fee2e2;color:#b91c1c}.grid{display:grid;grid-template-columns:1fr;gap:8px}.item{padding:8px 0;border-bottom:1px solid #f4f4f5}.item b{display:block;color:#52525b;font-size:13px}@media(min-width:640px){.grid{grid-template-columns:1fr 1fr}}
+  </style>
+</head>
+<body><main><h1>訂單查詢</h1><p>僅顯示正式指派給您的案件。</p><section class="panel"><label for="keyword">案件編號或客戶姓名</label><input id="keyword" placeholder="請輸入案件編號或客戶姓名"><button id="search">查詢訂單資訊</button><div id="message" class="message" hidden></div></section><section id="results"></section></main>
+<script>
+let idToken='';
+function message(text,error=false){const box=document.getElementById('message');box.textContent=text;box.className='message'+(error?' error':'');box.hidden=false}
+function value(value){return value===null||value===undefined||value===''?'未填寫':String(value)}
+function row(label,text){const item=document.createElement('div');item.className='item';const title=document.createElement('b');title.textContent=label;item.append(title,document.createTextNode(value(text)));return item}
+function render(items){const root=document.getElementById('results');root.replaceChildren();if(!items.length){message('查無可檢視的訂單，請確認條件及案件是否已正式指派。',true);return}message(`共找到 ${items.length} 筆訂單。`);for(const order of items){const card=document.createElement('article');card.className='order';const title=document.createElement('h2');title.textContent=`${value(order.client_name)}｜${value(order.case_no)}`;const grid=document.createElement('div');grid.className='grid';const fields=[['案件狀態',order.order_status],['客戶電話',order.client_phone],['服務地址',`${value(order.city)} ${value(order.address)}`],['服務期間',`${value(order.start_date)} 至 ${value(order.end_date)}`],['服務天數',order.service_days],['每日時數',order.service_hours_per_day],['預產期',order.due_month],['預計服務日期',order.service_start_date],['服務時間',order.service_time],['居住型態',order.residence_type],['生產方式',order.delivery_type],['服務方式',order.service_type],['寶寶資訊',order.baby_info],['其他事項',order.notes]];fields.forEach(([label,text])=>grid.append(row(label,text)));card.append(title,grid);root.append(card)}}
+async function initialize(){const config=await fetch('/api/v1/line/identity/runtime-config').then(r=>r.json());await liff.init({liffId:config.data.liff_id});if(!liff.isLoggedIn()){liff.login();return}idToken=liff.getIDToken()||'';if(!idToken)throw new Error('無法取得 LINE 登入憑證')}
+document.getElementById('search').addEventListener('click',async()=>{const keyword=document.getElementById('keyword').value.trim();if(!keyword){message('請先輸入查詢條件。',true);return}message('查詢中…');try{const response=await fetch('/api/v1/line/staff-self-service/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({keyword,line_id_token:idToken})});const result=await response.json();if(!response.ok)throw new Error(result.detail?.message||'查詢失敗');render(result.data.items)}catch(error){message(error.message||'查詢失敗',true)}});
+initialize().catch(error=>message(error.message||'LIFF 初始化失敗，請重新開啟頁面。',true));
+</script></body></html>

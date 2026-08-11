@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, SecretStr
 
@@ -12,6 +12,15 @@ class LiffIdentityContext(BaseModel):
     flow_id: str = Field(min_length=1, max_length=191)
     line_id_token: str = Field(default="", max_length=4096)
     development_line_user_id: str = Field(default="", max_length=191)
+
+
+class LineIdentityFlowValidationRequest(LiffIdentityContext):
+    purpose: Literal["customer_binding", "staff_verification", "admin_binding"]
+
+
+class LineIdentityFlowValidationResponse(BaseModel):
+    status: Literal["active"]
+    expires_at: datetime
 
 
 class CustomerIdentityRequest(LiffIdentityContext):
@@ -46,6 +55,7 @@ class LineIdentityApplyResponse(BaseModel):
 
 
 class ProvisionalRegistrationRequest(BaseModel):
+    flow_id: str | None = Field(default=None, max_length=191)
     line_id_token: str = Field(default="", max_length=4096)
     development_line_user_id: str = Field(default="", max_length=191)
     name: str = Field(min_length=1, max_length=100)
@@ -71,6 +81,7 @@ class ProvisionalRegistrationResponse(BaseModel):
     beclass_record_id: int
     client_name: str
     replayed: bool
+    identity_status: str | None = None
 
 
 class LineIdentityRuntimeConfigResponse(BaseModel):

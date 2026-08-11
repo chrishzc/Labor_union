@@ -66,6 +66,11 @@ CAPABILITY_REGISTRY = frozenset(
         "line.matching.read",
         "line.matching.send",
         "line.matching.override",
+        "line.customer_service.read",
+        "line.customer_service.handle",
+        "line.identity.binding.read",
+        "line.identity.binding.manage",
+        "line.identity.binding.override",
         "contract.evidence.read",
         "contract.evidence.manage",
         "knowledge.read",
@@ -96,6 +101,8 @@ LINE_VIEWER_CAPABILITIES = frozenset(
         "line.order_group.read",
         "line.monitor.read",
         "line.matching.read",
+        "line.customer_service.read",
+        "line.identity.binding.read",
         "knowledge.read",
     }
 )
@@ -103,12 +110,14 @@ LINE_AGENT_CAPABILITIES = LINE_VIEWER_CAPABILITIES | frozenset(
     {
         "line.order_group.bind",
         "line.matching.send",
+        "line.customer_service.handle",
     }
 )
 LINE_MANAGER_CAPABILITIES = frozenset(
     capability
     for capability in CAPABILITY_REGISTRY
     if capability.startswith(("line.", "contract.", "knowledge."))
+    and capability != "line.identity.binding.override"
 ) | frozenset({"system.configuration.manage"})
 
 ROLE_CAPABILITIES = {

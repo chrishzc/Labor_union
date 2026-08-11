@@ -170,6 +170,17 @@ require_line_audit_reader = require_capability(LineCapability.AUDIT_READ)
 require_line_matching_reader = require_capability(LineCapability.MATCHING_READ)
 require_line_matching_sender = require_capability(LineCapability.MATCHING_SEND)
 require_line_matching_override = require_capability(LineCapability.MATCHING_OVERRIDE)
+require_customer_service_reader = require_capability(LineCapability.CUSTOMER_SERVICE_READ)
+require_customer_service_handler = require_capability(LineCapability.CUSTOMER_SERVICE_HANDLE)
+require_line_identity_binding_reader = require_capability(
+    LineCapability.IDENTITY_BINDING_READ
+)
+require_line_identity_binding_manager = require_capability(
+    LineCapability.IDENTITY_BINDING_MANAGE
+)
+require_line_identity_binding_override = require_capability(
+    LineCapability.IDENTITY_BINDING_OVERRIDE
+)
 require_contract_evidence_reader = require_integration_capability(
     IntegrationCapability.CONTRACT_EVIDENCE_READ
 )

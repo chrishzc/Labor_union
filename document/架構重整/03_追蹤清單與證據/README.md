@@ -10,4 +10,5 @@
 | [legacy_active_201_可追蹤清單.md](legacy_active_201_可追蹤清單.md) / [.csv](legacy_active_201_可追蹤清單.csv) | 201 筆依 path pattern 產生的 legacy finding 初步分類清單；status 欄不是執行授權。 |
 | [過期文件候選清單_20260803.md](過期文件候選清單_20260803.md) | `document/文件整併工作區`、`document/架構重整` 範圍內可能過期文件的候選清單（第一版）。 |
 | [31_可刪暫存清單.md](31_可刪暫存清單.md) | 可丟棄測試產物（MySQL test evidence／pytest basetemp 等）的盤點，同樣不授權直接刪除。 |
+| [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |
 | [evidence/](evidence/) | 上述決策包／收據對應的原始 evidence 產物（JSON／SQL／receipt）。 |

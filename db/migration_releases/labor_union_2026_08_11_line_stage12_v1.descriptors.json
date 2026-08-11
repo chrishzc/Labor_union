@@ -1,0 +1,42 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "167_line_identity_management.sql": {
+      "tables": {
+        "line_identity_bindings": [
+          "binding_status",
+          "active_subject_key"
+        ],
+        "line_identity_binding_events": [
+          "action"
+        ],
+        "line_identity_revocation_requests": [
+          "id",
+          "line_user_id",
+          "subject_type",
+          "subject_reference",
+          "request_status",
+          "requested_binding_version",
+          "pending_binding_version",
+          "completed_binding_version",
+          "default_menu_publication_id",
+          "provider_menu_id",
+          "requested_by_actor_id",
+          "request_reason",
+          "idempotency_key",
+          "correlation_id",
+          "attempt_count",
+          "last_error_code",
+          "last_error_message",
+          "requested_at_utc",
+          "menu_reset_at_utc",
+          "completed_at_utc",
+          "completed_by_actor_id",
+          "completion_reason",
+          "active_marker"
+        ]
+      },
+      "triggers": []
+    }
+  }
+}

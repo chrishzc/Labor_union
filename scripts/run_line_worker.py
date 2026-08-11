@@ -53,6 +53,11 @@ from subsystems.line.matching_postback_application import (
 from subsystems.line.knowledge_question_application import (
     enqueue_line_knowledge_question,
 )
+from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.identity_management_application import (
+    IDENTITY_MENU_RESET_INTENT,
+)
+from subsystems.line.identity_revocation_worker import LineIdentityRevocationWorker
 from subsystems.scheduling.matching_notification_application import (
     MatchingNotificationApplication,
 )
@@ -161,6 +166,7 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
                     MatchingNotificationApplication(open_line_unit_of_work, now)
                 ),
                 knowledge_question_scheduler=enqueue_line_knowledge_question,
+                service_help_application=LineServiceHelpApplication(now),
             ).registry()
         ),
         worker_identity,
@@ -185,6 +191,12 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
         now,
     )
     rich_menu_binding_worker = LineRichMenuBindingWorker(
+        open_line_unit_of_work,
+        rich_menu_provider,
+        worker_identity,
+        now,
+    )
+    identity_revocation_worker = LineIdentityRevocationWorker(
         open_line_unit_of_work,
         rich_menu_provider,
         worker_identity,
@@ -222,6 +234,7 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
             "media_archives": media_worker,
             "rich_menu_publications": rich_menu_worker,
             "rich_menu_bindings": rich_menu_binding_worker,
+            "identity_revocations": identity_revocation_worker,
         },
     )
 
@@ -234,6 +247,7 @@ def _next_due_at():
             unit_of_work.rich_menu_publications.next_due_at(),
             unit_of_work.outbox.next_due_at(),
             unit_of_work.outbox.next_due_at(RICH_MENU_BINDING_INTENT),
+            unit_of_work.outbox.next_due_at(IDENTITY_MENU_RESET_INTENT),
         )
         unit_of_work.commit()
     available = tuple(due_at for due_at in due_times if due_at is not None)

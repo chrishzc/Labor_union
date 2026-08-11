@@ -48,6 +48,12 @@ from infrastructure.mysql.matching_notification_repository import (
 from infrastructure.mysql.knowledge_retrieval_repository import (
     MySqlKnowledgeQuestionIntakeAdapter,
 )
+from infrastructure.mysql.customer_service_repository import (
+    MySqlCustomerServiceRepository,
+)
+from infrastructure.mysql.line_identity_management_repository import (
+    MySqlLineIdentityManagementRepository,
+)
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -73,6 +79,8 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.outbox = MySqlLineOutboxWriter(connection)
         self.matching_notifications = MySqlMatchingNotificationRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
+        self.customer_service = MySqlCustomerServiceRepository(connection)
+        self.identity_management = MySqlLineIdentityManagementRepository(connection)
 
 
 class ManagedLineMySqlUnitOfWork(LineMySqlUnitOfWork):
