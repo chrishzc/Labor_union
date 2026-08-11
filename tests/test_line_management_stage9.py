@@ -104,6 +104,37 @@ def test_line_task_client_forwards_stable_operation_identity(monkeypatch) -> Non
     assert captured["json"]["correlation_id"] == "corr-task"
 
 
+def test_rich_menu_client_reads_and_writes_canonical_configuration(monkeypatch) -> None:
+    calls = []
+
+    def request(method, url, **kwargs):
+        calls.append({"method": method, "url": url, **kwargs})
+        definition = {"version": 2, "menus": []}
+        return _Response(
+            200,
+            {"data": {"revision": 4, "definition": definition}},
+        )
+
+    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
+    monkeypatch.setattr("ui.api_clients.line_api_client.requests.request", request)
+    client = LineAdminApiClient()
+
+    state = client.line_menu_state("session-token")
+    client.update_line_menus(
+        "session-token",
+        state["config"],
+        revision=state["revision"],
+        reason="儲存 Rich Menu",
+        idempotency_key="idem-rich-menu",
+        correlation_id="corr-rich-menu",
+    )
+
+    assert state == {"revision": 4, "config": {"version": 2, "menus": []}}
+    assert calls[0]["url"].endswith("/api/v1/line/configurations/rich_menus")
+    assert calls[1]["json"]["expected_revision"] == 4
+    assert calls[1]["json"]["idempotency_key"] == "idem-rich-menu"
+
+
 @pytest.mark.parametrize(
     ("status_code", "category", "message"),
     [
@@ -136,6 +167,28 @@ def test_line_transport_preserves_typed_error_semantics(
     assert captured.value.code == "backend_code"
     assert captured.value.correlation_id == "corr-9"
     assert message in str(captured.value)
+
+
+def test_line_transport_displays_typed_conflict_message(monkeypatch) -> None:
+    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
+    monkeypatch.setattr(
+        "ui.api_clients.line_api_client.requests.request",
+        lambda *args, **kwargs: _Response(
+            409,
+            {
+                "detail": {
+                    "code": "staff_identity_binding_conflict",
+                    "message": "月嫂目前綁定的 LINE 已變更，請重新確認後再審核。",
+                }
+            },
+        ),
+    )
+
+    with pytest.raises(LineAdminApiError) as captured:
+        LineAdminApiClient().request("GET", "/api/v1/test", token="session")
+
+    assert captured.value.code == "staff_identity_binding_conflict"
+    assert "月嫂目前綁定" in str(captured.value)
 
 
 def test_operation_identity_is_stable_until_payload_changes_or_completes(monkeypatch) -> None:

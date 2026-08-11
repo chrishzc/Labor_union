@@ -54,7 +54,9 @@ def _response_error(status_code: int, payload: Any, response_text: str) -> LineA
     )
     detail = payload.get("detail") if isinstance(payload, dict) else None
     detail_object = detail if isinstance(detail, dict) else {}
-    message = fallback_message if status_code in _STATUS_ERRORS else _detail_message(detail, response_text)
+    message = _response_error_message(
+        status_code, detail, detail_object, response_text, fallback_message
+    )
     return LineAdminApiError(
         message,
         status_code=status_code,
@@ -63,6 +65,15 @@ def _response_error(status_code: int, payload: Any, response_text: str) -> LineA
         correlation_id=_correlation_id(payload, detail_object),
         retryable=bool(detail_object.get("retryable", retryable)),
     )
+
+
+def _response_error_message(status_code, detail, detail_object, response_text, fallback):
+    typed_message = detail_object.get("message")
+    if typed_message:
+        return str(typed_message)
+    if status_code in _STATUS_ERRORS:
+        return fallback
+    return _detail_message(detail, response_text)
 
 
 def _detail_message(detail: Any, response_text: str) -> str:
@@ -342,21 +353,34 @@ class LineAdminApiClient:
         )
 
     def line_menu_state(self, token: str | None) -> dict[str, Any]:
-        return self._request("GET", "/api/config/line-menus/state", token=token)
+        snapshot = self._request(
+            "GET",
+            "/api/v1/line/configurations/rich_menus",
+            token=token,
+        )
+        return {"revision": snapshot["revision"], "config": snapshot["definition"]}
 
     def update_line_menus(
         self,
         token: str | None,
         payload: dict[str, Any],
         *,
-        revision: str,
+        revision: int,
+        reason: str,
+        idempotency_key: str,
+        correlation_id: str,
     ) -> dict[str, Any]:
         return self._request(
             "PUT",
-            "/api/config/line-menus",
+            "/api/v1/line/configurations/rich_menus",
             token=token,
-            json=payload,
-            extra_headers={"If-Match": revision},
+            json={
+                "expected_revision": revision,
+                "definition": payload,
+                "reason": reason,
+                "idempotency_key": idempotency_key,
+                "correlation_id": correlation_id,
+            },
         )
 
     def preview_line_menu(self, token: str | None, menu: dict[str, Any]) -> bytes:

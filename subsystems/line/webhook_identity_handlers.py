@@ -78,6 +78,7 @@ class LineWebhookIdentityHandlers:
         group_application: object | None = None,
         matching_postback_application: object | None = None,
         knowledge_question_scheduler: Callable[[object, object, object, str], object] | None = None,
+        service_help_application: object | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
@@ -87,6 +88,7 @@ class LineWebhookIdentityHandlers:
         self._group_application = group_application
         self._matching_postback_application = matching_postback_application
         self._knowledge_question_scheduler = knowledge_question_scheduler
+        self._service_help_application = service_help_application
 
     def registry(self):
         return {

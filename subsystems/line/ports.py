@@ -197,6 +197,11 @@ class LineRuntimeRepositoryPort(Protocol):
 class LineIdentityRepositoryPort(Protocol):
     def get(self, line_user_id: LineUserId) -> LineIdentityBindingSnapshot | None: ...
 
+    def list_bound_by_subject_type(
+        self,
+        subject_type: LineBindingSubjectType,
+    ) -> tuple[LineIdentityBindingSnapshot, ...]: ...
+
     def save_claim(
         self,
         claim: LineIdentityClaim,
@@ -215,6 +220,33 @@ class LineIdentityRepositoryPort(Protocol):
     def revoke(
         self,
         line_user_id: LineUserId,
+        expected_version: ExpectedVersion,
+        actor_id: str,
+        idempotency_key: IdempotencyKey,
+        correlation_id: str,
+    ) -> LineIdentityBindingSnapshot: ...
+
+    def request_revocation(
+        self,
+        line_user_id: LineUserId,
+        expected_version: ExpectedVersion,
+        actor_id: str,
+        idempotency_key: IdempotencyKey,
+        correlation_id: str,
+    ) -> LineIdentityBindingSnapshot: ...
+
+    def complete_revocation(
+        self,
+        line_user_id: LineUserId,
+        expected_version: ExpectedVersion,
+        actor_id: str,
+        idempotency_key: IdempotencyKey,
+        correlation_id: str,
+    ) -> LineIdentityBindingSnapshot: ...
+
+    def replace_subject(
+        self,
+        claim: LineIdentityClaim,
         expected_version: ExpectedVersion,
         actor_id: str,
         idempotency_key: IdempotencyKey,
@@ -341,6 +373,8 @@ class LineRichMenuPublicationRepositoryPort(Protocol):
         query: LineRichMenuPublicationQuery,
     ) -> tuple[LineRichMenuPublicationSnapshot, ...]: ...
 
+    def published_provider_menu_id(self, menu_definition_id: str) -> str | None: ...
+
     def queue(
         self,
         command: QueueLineRichMenuPublicationCommand,
@@ -411,7 +445,7 @@ class LineOutboxRepositoryPort(OutboxWriter, Protocol):
 
     def complete(self, command: CompleteLineOutboxCommand) -> None: ...
 
-    def next_due_at(self) -> datetime | None: ...
+    def next_due_at(self, intent_type: str = "line.media.archive") -> datetime | None: ...
 
 
 class LineAuditPort(Protocol):
@@ -459,6 +493,12 @@ class CustomerIdentityOwnerPort(Protocol):
         expected_current_line_user_id: LineUserId | None,
     ) -> None: ...
 
+    def clear_customer(
+        self,
+        subject_reference: str,
+        line_user_id: LineUserId,
+    ) -> None: ...
+
 
 class StaffIdentityOwnerPort(Protocol):
     def resolve_staff(self, proof: StaffIdentityProof) -> LineIdentityCandidate | None: ...
@@ -468,6 +508,12 @@ class StaffIdentityOwnerPort(Protocol):
         subject_reference: str,
         line_user_id: LineUserId,
         expected_current_line_user_id: LineUserId | None,
+    ) -> None: ...
+
+    def clear_staff(
+        self,
+        subject_reference: str,
+        line_user_id: LineUserId,
     ) -> None: ...
 
 
@@ -482,6 +528,12 @@ class AdminIdentityOwnerPort(Protocol):
         subject_reference: str,
         line_user_id: LineUserId,
         expected_current_line_user_id: LineUserId | None,
+    ) -> None: ...
+
+    def clear_admin(
+        self,
+        subject_reference: str,
+        line_user_id: LineUserId,
     ) -> None: ...
 
     def get_linked_admin(self, line_user_id: LineUserId) -> LinkedLineAdmin | None: ...
@@ -519,6 +571,8 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     outbox: LineOutboxRepositoryPort
     matching_notifications: object
     knowledge_questions: object
+    customer_service: object
+    identity_management: object
 
 
 __all__ = [

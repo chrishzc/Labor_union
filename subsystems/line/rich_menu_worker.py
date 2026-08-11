@@ -6,6 +6,7 @@ from datetime import datetime
 from typing import Callable
 
 from subsystems.line.ports import LineRichMenuProviderPort, LineUnitOfWorkPort
+from subsystems.line.rich_menu_binding import schedule_published_menu_rebindings
 from subsystems.line.rich_menu_contracts import (
     ClaimLineRichMenuPublicationsQuery,
     LineRichMenuProviderOutcome,
@@ -89,6 +90,13 @@ class LineRichMenuWorker:
                     self._now(),
                 )
             )
+            if outcome.outcome_type is LineRichMenuProviderOutcomeType.SUCCESS:
+                schedule_published_menu_rebindings(
+                    unit_of_work,
+                    item.definition_json,
+                    item.publication.publication_id,
+                    outcome.provider_menu_id,
+                )
             unit_of_work.commit()
 
 

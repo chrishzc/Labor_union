@@ -115,6 +115,7 @@ class MySqlLineOutboxWriter:
             cursor.execute(
                 _OUTBOX_CLAIM_SQL,
                 (
+                    query.intent_type,
                     database_utc(query.now),
                     database_utc(query.now),
                     query.batch_size,
@@ -145,7 +146,7 @@ class MySqlLineOutboxWriter:
         if command.succeeded:
             status = "completed"
             next_attempt_at = None
-        elif attempts >= item.maximum_attempts:
+        elif not command.retryable or attempts >= item.maximum_attempts:
             status = "dead"
             next_attempt_at = None
         else:
@@ -170,9 +171,9 @@ class MySqlLineOutboxWriter:
             if cursor.rowcount != 1:
                 raise RuntimeError("line_outbox_lease_lost")
 
-    def next_due_at(self):
+    def next_due_at(self, intent_type: str = "line.media.archive"):
         with self._connection.cursor() as cursor:
-            cursor.execute(_OUTBOX_NEXT_DUE_SQL)
+            cursor.execute(_OUTBOX_NEXT_DUE_SQL, (intent_type,))
             row = optional_row(cursor.fetchone())
         value = None if row is None else row.get("next_due_at_utc")
         return None if value is None else aware_utc(value)
@@ -222,7 +223,7 @@ _OUTBOX_WORK_SELECT_SQL = (
 )
 _OUTBOX_CLAIM_SQL = (
     f"SELECT {_OUTBOX_WORK_COLUMNS} FROM line_domain_outbox WHERE "
-    "intent_type='line.media.archive' AND ((processing_status='pending' "
+    "intent_type=%s AND ((processing_status='pending' "
     "AND (next_attempt_at_utc IS NULL OR next_attempt_at_utc<=%s)) "
     "OR (processing_status='processing' AND lease_expires_at_utc<=%s) "
     ") ORDER BY COALESCE(next_attempt_at_utc,created_at_utc),id LIMIT %s "
@@ -242,7 +243,7 @@ _OUTBOX_NEXT_DUE_SQL = (
     "SELECT MIN(CASE WHEN processing_status='pending' THEN "
     "COALESCE(next_attempt_at_utc,created_at_utc) "
     "WHEN processing_status='processing' THEN lease_expires_at_utc END) AS next_due_at_utc "
-    "FROM line_domain_outbox WHERE intent_type='line.media.archive' "
+    "FROM line_domain_outbox WHERE intent_type=%s "
     "AND processing_status IN ('pending','processing')"
 )
 _AUDIT_INSERT_SQL = (

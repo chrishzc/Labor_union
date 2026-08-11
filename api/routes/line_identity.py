@@ -19,6 +19,11 @@ from api.dependencies.line_identity import (
     get_line_identity_application,
     get_line_identity_review_application,
 )
+from api.dependencies.line_runtime import publish_line_wakeup_best_effort
+from api.dependencies.provisional_registration import (
+    ProvisionalRegistrationApplication,
+    get_provisional_registration_application,
+)
 from api.schemas.base import BaseResponse
 from api.schemas.line_identity import (
     AdminIdentityBindingRequest,
@@ -29,11 +34,20 @@ from api.schemas.line_identity import (
     CustomerIdentityRequest,
     LineIdentityApplyResponse,
     LineIdentityCandidateResponse,
+    LineIdentityFlowValidationRequest,
+    LineIdentityFlowValidationResponse,
     LineIdentityPreviewResponse,
     LineIdentityRuntimeConfigResponse,
+    ProvisionalRegistrationRequest,
+    ProvisionalRegistrationResponse,
     StaffIdentityRequest,
 )
+from domains.case_import.provisional_registration import (
+    ProvisionalRegistrationDomainError,
+    ProvisionalRegistrationIntent,
+)
 from domains.line.identities import LineIdentityFlowId, LineReviewRequestId, LineUserId
+from domains.line.identity_flow import LineIdentityFlowPurpose
 from domains.line.review import LineReviewDecision, LineReviewStatus, LineReviewType
 from infrastructure.line.liff_token_verifier import (
     InvalidLiffTokenError,
@@ -56,6 +70,10 @@ from subsystems.line.identity_review_application import (
     LineReviewNotFoundError,
 )
 from subsystems.line.review_contracts import DecideLineReviewCommand, LineReviewListQuery
+from subsystems.case_import.provisional_registration_application import (
+    ProvisionalRegistrationConflictError,
+    ProvisionalRegistrationStorageError,
+)
 
 public_router = APIRouter(prefix="/api/v1/line/identity", tags=["LINE Identity"])
 review_router = APIRouter(
@@ -64,11 +82,30 @@ review_router = APIRouter(
 )
 page_router = APIRouter(tags=["LINE Identity"])
 _IDENTITY_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "identity.html"
+_REGISTRATION_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "register.html"
+_STAFF_ORDERS_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_order_search.html"
+_STAFF_SCHEDULE_PAGE = Path(__file__).resolve().parents[2] / "line" / "static" / "staff_schedule.html"
 
 
+@page_router.get("/line-identity/", include_in_schema=False)
 @page_router.get("/line-identity")
 def identity_page():
     return FileResponse(_IDENTITY_PAGE)
+
+
+@page_router.get("/line-registration")
+def registration_page():
+    return FileResponse(_REGISTRATION_PAGE)
+
+
+@page_router.get("/line-staff-orders")
+def staff_orders_page():
+    return FileResponse(_STAFF_ORDERS_PAGE)
+
+
+@page_router.get("/line-staff-schedule")
+def staff_schedule_page():
+    return FileResponse(_STAFF_SCHEDULE_PAGE)
 
 
 @public_router.get(
@@ -80,6 +117,26 @@ def identity_runtime_config():
     if not liff_id or liff_id == "your_liff_id_here":
         raise HTTPException(status_code=503, detail="LIFF 尚未完成設定")
     return BaseResponse(data=LineIdentityRuntimeConfigResponse(liff_id=liff_id))
+
+
+@public_router.post(
+    "/flow/validate",
+    response_model=BaseResponse[LineIdentityFlowValidationResponse],
+)
+def validate_identity_flow(payload: LineIdentityFlowValidationRequest):
+    line_user_id = _verified_line_user_id(payload)
+    snapshot = _translate_identity_errors(
+        get_line_identity_application().validate_flow,
+        LineIdentityFlowId(payload.flow_id),
+        LineIdentityFlowPurpose(payload.purpose),
+        line_user_id,
+    )
+    return BaseResponse(
+        data=LineIdentityFlowValidationResponse(
+            status="active",
+            expires_at=snapshot.expires_at,
+        )
+    )
 
 
 @public_router.post(
@@ -110,6 +167,7 @@ def apply_customer(payload: CustomerIdentityRequest):
         CustomerIdentityProof(payload.name.strip(), payload.phone.strip()),
         _correlation_id("customer"),
     )
+    publish_line_wakeup_best_effort()
     return BaseResponse(data=_apply_response(result))
 
 
@@ -141,6 +199,7 @@ def apply_staff(payload: StaffIdentityRequest):
         StaffIdentityProof(payload.name.strip(), payload.identity_card.strip(), payload.birthday),
         _correlation_id("staff"),
     )
+    publish_line_wakeup_best_effort()
     return BaseResponse(data=_apply_response(result))
 
 
@@ -157,7 +216,62 @@ def apply_admin(payload: AdminIdentityBindingRequest):
         AdminCredentialProof(payload.username.strip(), payload.password.get_secret_value()),
         _correlation_id("admin"),
     )
+    publish_line_wakeup_best_effort()
     return BaseResponse(data=_apply_response(result))
+
+
+@public_router.post(
+    "/registration/apply",
+    response_model=BaseResponse[ProvisionalRegistrationResponse],
+)
+def apply_provisional_registration(
+    payload: ProvisionalRegistrationRequest,
+    application: ProvisionalRegistrationApplication = Depends(
+        get_provisional_registration_application
+    ),
+):
+    line_user_id = _verified_line_user_id(payload)
+    receipt = _apply_registration(application, payload, line_user_id)
+    identity_status = _complete_registration_identity(payload, line_user_id)
+    if receipt.worker_wakeup_required:
+        publish_line_wakeup_best_effort()
+    return BaseResponse(data=_registration_response(receipt, identity_status))
+
+
+def _apply_registration(application, payload, line_user_id):
+    try:
+        return application.apply(_registration_intent(payload, line_user_id))
+    except ProvisionalRegistrationConflictError as error:
+        raise _registration_http_error(409, "registration_conflict", str(error)) from error
+    except ProvisionalRegistrationDomainError as error:
+        raise _registration_http_error(422, error.issue.value, str(error)) from error
+    except ProvisionalRegistrationStorageError as error:
+        raise _registration_http_error(503, str(error), "登記服務暫時無法使用") from error
+
+
+def _registration_response(receipt, identity_status):
+    return ProvisionalRegistrationResponse(
+        registration_id=receipt.registration_id,
+        client_id=receipt.client_id,
+        beclass_record_id=receipt.beclass_record_id,
+        client_name=receipt.client_name,
+        replayed=receipt.replayed,
+        identity_status=identity_status,
+    )
+
+
+def _complete_registration_identity(payload, line_user_id):
+    if not payload.flow_id:
+        return None
+    result = _translate_identity_errors(
+        get_line_identity_application().apply_customer,
+        LineIdentityFlowId(payload.flow_id),
+        line_user_id,
+        CustomerIdentityProof(payload.name.strip(), payload.phone.strip()),
+        _correlation_id("registration"),
+    )
+    publish_line_wakeup_best_effort()
+    return result.status.value
 
 
 @review_router.get(
@@ -244,12 +358,53 @@ def decide_review(
         result = get_line_identity_review_application().decide(command)
     except LineReviewNotFoundError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    except (LineReviewDataConflictError, ValueError, RuntimeError) as error:
-        raise HTTPException(status_code=409, detail=str(error)) from error
+    except LineReviewDataConflictError as error:
+        raise _review_http_conflict(error.code, str(error)) from error
+    except ValueError as error:
+        raise _review_http_conflict("line_review_version_conflict", str(error)) from error
+    except RuntimeError as error:
+        raise _review_http_conflict("line_review_data_conflict", str(error)) from error
     request.state.audit_action = f"line.identity.review.{decision.value}"
     request.state.audit_resource_type = "line_review_request"
     request.state.audit_resource_id = str(request_id)
+    publish_line_wakeup_best_effort()
     return BaseResponse(data=_review_response(result.snapshot))
+
+
+# Kept as one mapping so every public registration field has one auditable owner input.
+def _registration_intent(payload, line_user_id):
+    return ProvisionalRegistrationIntent(
+        line_user_id=line_user_id.value,
+        name=payload.name,
+        phone=payload.phone,
+        expected_date=payload.expected_date,
+        service_days=payload.service_days,
+        address=payload.address,
+        gender=payload.gender,
+        email=payload.email,
+        birth_date=payload.birth_date,
+        tel=payload.tel,
+        ext=payload.ext,
+        city=payload.city,
+        zip_code=payload.zip_code,
+        id_number=payload.id_number,
+        liff_config_revision=payload.liff_config_revision,
+        survey_details=payload.survey_details,
+    )
+
+
+def _registration_http_error(status_code, code, message):
+    return HTTPException(
+        status_code=status_code,
+        detail={"code": code, "message": message, "retryable": status_code >= 500},
+    )
+
+
+def _review_http_conflict(code, message):
+    return HTTPException(
+        status_code=409,
+        detail={"code": code, "message": message, "retryable": False},
+    )
 
 
 def _verified_line_user_id(payload) -> LineUserId:

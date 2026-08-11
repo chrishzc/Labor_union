@@ -52,6 +52,12 @@ class MySqlLineIdentityRepository:
             row = optional_row(cursor.fetchone())
         return None if row is None else _identity_snapshot(row)
 
+    def list_bound_by_subject_type(self, subject_type):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_IDENTITY_LIST_BOUND_SQL, (subject_type.value,))
+            rows = tuple(cursor.fetchall() or ())
+        return tuple(_identity_snapshot(row) for row in rows)
+
     # Kept cohesive because the row lock, transition, and event form one repository write.
     def save_claim(
         self,
@@ -106,6 +112,137 @@ class MySqlLineIdentityRepository:
         idempotency_key,
         correlation_id,
     ):
+        return self._transition_status(
+            line_user_id,
+            expected_version,
+            LineIdentityBindingStatus.REVOKED,
+            "revoked",
+            actor_id,
+            idempotency_key,
+            correlation_id,
+        )
+
+    def request_revocation(
+        self,
+        line_user_id,
+        expected_version,
+        actor_id,
+        idempotency_key,
+        correlation_id,
+    ):
+        return self._transition_status(
+            line_user_id,
+            expected_version,
+            LineIdentityBindingStatus.REVOCATION_PENDING,
+            "revocation_requested",
+            actor_id,
+            idempotency_key,
+            correlation_id,
+        )
+
+    def complete_revocation(
+        self,
+        line_user_id,
+        expected_version,
+        actor_id,
+        idempotency_key,
+        correlation_id,
+    ):
+        return self._transition_status(
+            line_user_id,
+            expected_version,
+            LineIdentityBindingStatus.REVOKED,
+            "revoked",
+            actor_id,
+            idempotency_key,
+            correlation_id,
+        )
+
+    # Kept cohesive because subject correction must preserve one locked aggregate event.
+    def replace_subject(
+        self,
+        claim,
+        expected_version,
+        actor_id,
+        idempotency_key,
+        correlation_id,
+    ):
+        with self._connection.cursor() as cursor:
+            existing = self._existing_event(cursor, idempotency_key.value)
+            if existing is not None:
+                snapshot = self.get(claim.line_user_id)
+                if snapshot is None:
+                    raise RuntimeError("line_identity_binding_missing")
+                replay = LineIdentityBindingSnapshot(
+                    claim.line_user_id,
+                    snapshot.status,
+                    snapshot.version,
+                    claim.subject_type,
+                    claim.subject_reference,
+                )
+                _require_same_transition_event(
+                    existing,
+                    replay,
+                    LineIdentityBindingStatus.BOUND,
+                    "rebound",
+                    actor_id,
+                )
+                return snapshot
+            cursor.execute(_IDENTITY_SELECT_SQL + " FOR UPDATE", (claim.line_user_id.value,))
+            row = optional_row(cursor.fetchone())
+            if row is None:
+                raise LookupError("line_identity_binding_not_found")
+            current = _identity_snapshot(row)
+            _require_replaceable_binding(current, claim, expected_version)
+            resulting_version = expected_version.value + 1
+            cursor.execute(
+                _IDENTITY_UPDATE_SQL,
+                (
+                    LineIdentityBindingStatus.BOUND.value,
+                    claim.subject_type.value,
+                    claim.subject_reference,
+                    resulting_version,
+                    claim.line_user_id.value,
+                    expected_version.value,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("line_identity_binding_conflict")
+            resulting = LineIdentityBindingSnapshot(
+                claim.line_user_id,
+                LineIdentityBindingStatus.BOUND,
+                ExpectedVersion(resulting_version),
+                claim.subject_type,
+                claim.subject_reference,
+            )
+            self._append_transition_event(
+                cursor,
+                LineIdentityBindingSnapshot(
+                    current.line_user_id,
+                    current.status,
+                    current.version,
+                    claim.subject_type,
+                    claim.subject_reference,
+                ),
+                LineIdentityBindingStatus.BOUND,
+                "rebound",
+                actor_id,
+                idempotency_key.value,
+                correlation_id,
+            )
+        return resulting
+
+    # Kept cohesive because replay validation, row lock, transition, and event are atomic.
+    def _transition_status(
+        self,
+        line_user_id,
+        expected_version,
+        target,
+        action,
+        actor_id,
+        idempotency_key,
+        correlation_id,
+    ):
         with self._connection.cursor() as cursor:
             existing = self._existing_event(cursor, idempotency_key.value)
             if existing is not None:
@@ -115,8 +252,8 @@ class MySqlLineIdentityRepository:
                 _require_same_transition_event(
                     existing,
                     snapshot,
-                    LineIdentityBindingStatus.REVOKED,
-                    "revoked",
+                    target,
+                    action,
                     actor_id,
                 )
                 return snapshot
@@ -125,11 +262,11 @@ class MySqlLineIdentityRepository:
             if row is None:
                 raise LookupError("line_identity_binding_not_found")
             snapshot = _identity_snapshot(row)
-            if snapshot.status is LineIdentityBindingStatus.REVOKED:
+            if snapshot.status is target:
                 return snapshot
             if snapshot.version != expected_version:
                 raise RuntimeError("line_identity_binding_conflict")
-            target = transition_binding_status(snapshot.status, LineIdentityBindingStatus.REVOKED)
+            transition_binding_status(snapshot.status, target)
             resulting_version = expected_version.value + 1
             cursor.execute(
                 _IDENTITY_STATUS_UPDATE_SQL,
@@ -141,7 +278,7 @@ class MySqlLineIdentityRepository:
                 cursor,
                 snapshot,
                 target,
-                "revoked",
+                action,
                 actor_id,
                 idempotency_key.value,
                 correlation_id,
@@ -443,6 +580,17 @@ def _require_claim_matches_snapshot(snapshot, claim):
         return
     if snapshot.subject_type is not claim.subject_type:
         raise RuntimeError("line_identity_subject_conflict")
+
+
+def _require_replaceable_binding(snapshot, claim, expected_version):
+    if snapshot.status is not LineIdentityBindingStatus.BOUND:
+        raise RuntimeError("line_identity_binding_not_bound")
+    if snapshot.version != expected_version:
+        raise RuntimeError("line_identity_binding_conflict")
+    if snapshot.subject_type is not claim.subject_type:
+        raise RuntimeError("line_identity_subject_type_change_forbidden")
+    if snapshot.subject_reference == claim.subject_reference:
+        raise RuntimeError("line_identity_subject_unchanged")
     if snapshot.subject_reference != claim.subject_reference:
         raise RuntimeError("line_identity_subject_conflict")
 
@@ -534,6 +682,11 @@ _IDENTITY_SELECT_SQL = (
 _IDENTITY_SELECT_BY_SUBJECT_SQL = (
     _IDENTITY_SELECT_SQL.replace("WHERE line_user_id=%s", "WHERE subject_type=%s AND subject_reference=%s ")
     + "AND binding_status IN ('pending_review','bound') LIMIT 1"
+)
+_IDENTITY_LIST_BOUND_SQL = (
+    "SELECT line_user_id,binding_status,subject_type,subject_reference,"
+    "aggregate_version FROM line_identity_bindings "
+    "WHERE subject_type=%s AND binding_status='bound' ORDER BY line_user_id"
 )
 _IDENTITY_INSERT_SQL = (
     "INSERT INTO line_identity_bindings (line_user_id,binding_status,subject_type,"

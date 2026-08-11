@@ -20,6 +20,7 @@ from ui.components.line_order_group_manager import render_order_group_manager
 from ui.components.knowledge_management import render_knowledge_management
 from ui.components.line_customer_service_manager import render_customer_service_manager
 from ui.components.line_audit_manager import render_audit_manager
+from ui.components.line_identity_binding_manager import render_identity_binding_manager
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 from ui.api_clients.runtime_health_api_client import RuntimeHealthApiClient
 from ui.api_clients.knowledge_retrieval_api_client import KnowledgeRetrievalApiClient
@@ -125,6 +126,14 @@ def _render_reviews(
     render_review_manager(client, token, profile)
 
 
+def _render_identity_bindings(
+    client: LineAdminApiClient,
+    token: str | None,
+    profile: dict,
+) -> None:
+    render_identity_binding_manager(client, token, profile)
+
+
 def _render_customer_service(
     client: LineAdminApiClient,
     token: str | None,
@@ -153,9 +162,10 @@ LINE_WORKSPACE_RENDERERS = {
     "使用狀態": _overview,
     "訊息內容": _render_messages,
     "自動通知": _render_automatic_notifications,
-    "LINE 下方選單": _render_rich_menu,
-    "LINE 表單": _render_liff,
+    "Rich Menu": _render_rich_menu,
+    "LIFF 表單": _render_liff,
     "待確認申請": _render_reviews,
+    "身分管理": _render_identity_bindings,
     "訂單群組": _render_order_groups,
     "知識內容": _render_knowledge,
     "客服入口": _render_customer_service,
@@ -166,12 +176,13 @@ WORKSPACE_CAPABILITIES = {
     "使用狀態": {"line.monitor.read"},
     "訊息內容": {"line.config.read"},
     "自動通知": {"line.config.read", "line.task.read"},
-    "LINE 下方選單": {"line.config.read"},
-    "LINE 表單": {"line.config.read"},
+    "Rich Menu": {"line.config.read"},
+    "LIFF 表單": {"line.config.read"},
     "待確認申請": {"line.review.read"},
+    "身分管理": {"line.identity.binding.read"},
     "訂單群組": {"line.order_group.read"},
     "知識內容": {"knowledge.read"},
-    "客服入口": {"line.config.read"},
+    "客服入口": {"line.customer_service.read"},
     "操作紀錄": {"line.audit.read"},
 }
 

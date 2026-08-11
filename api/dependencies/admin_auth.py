@@ -11,6 +11,7 @@ from fastapi import Depends, Header, HTTPException, Request, status
 from shared_kernel.identities import ActorContext
 from subsystems.access.authentication_session import (
     AdminPrincipal,
+    AdminSessionStorageError,
     get_admin_session,
     has_required_capability,
     has_required_role,
@@ -20,6 +21,9 @@ from subsystems.access.integration_capabilities import IntegrationCapability
 
 
 DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test"}
+DEVELOPMENT_BYPASS_DENIED_CAPABILITIES = frozenset(
+    {"line.menu.publish", "line.rich_menu.publish"}
+)
 
 
 def admin_auth_is_enabled() -> bool:
@@ -62,18 +66,23 @@ def require_admin(
     _: None = Depends(require_internal_service),
 ) -> AdminPrincipal:
     if not admin_auth_is_enabled():
-        principal = AdminPrincipal(
-            id=None,
-            username="development-bypass",
-            display_name="開發模式管理員",
-            role="system_admin",
-        )
+        principal = _development_bypass_principal()
         request.state.admin_principal = principal
         request.state.admin_auth_bypassed = True
         return principal
 
     token = get_bearer_token(authorization)
-    principal = get_admin_session(token)
+    try:
+        principal = get_admin_session(token)
+    except AdminSessionStorageError as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "admin_session_storage_unavailable",
+                "message": str(error),
+                "retryable": True,
+            },
+        ) from error
     if principal is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -82,6 +91,20 @@ def require_admin(
     request.state.admin_principal = principal
     request.state.admin_session_token = token
     return principal
+
+
+def _development_bypass_principal() -> AdminPrincipal:
+    base = AdminPrincipal(None, "development-bypass", "開發模式管理員", "system_admin")
+    capabilities = frozenset(
+        base.effective_capabilities() - DEVELOPMENT_BYPASS_DENIED_CAPABILITIES
+    )
+    return AdminPrincipal(
+        base.id,
+        base.username,
+        base.display_name,
+        base.role,
+        capabilities=capabilities,
+    )
 
 
 def require_role(minimum_role: str) -> Callable[..., AdminPrincipal]:
@@ -147,6 +170,17 @@ require_line_audit_reader = require_capability(LineCapability.AUDIT_READ)
 require_line_matching_reader = require_capability(LineCapability.MATCHING_READ)
 require_line_matching_sender = require_capability(LineCapability.MATCHING_SEND)
 require_line_matching_override = require_capability(LineCapability.MATCHING_OVERRIDE)
+require_customer_service_reader = require_capability(LineCapability.CUSTOMER_SERVICE_READ)
+require_customer_service_handler = require_capability(LineCapability.CUSTOMER_SERVICE_HANDLE)
+require_line_identity_binding_reader = require_capability(
+    LineCapability.IDENTITY_BINDING_READ
+)
+require_line_identity_binding_manager = require_capability(
+    LineCapability.IDENTITY_BINDING_MANAGE
+)
+require_line_identity_binding_override = require_capability(
+    LineCapability.IDENTITY_BINDING_OVERRIDE
+)
 require_contract_evidence_reader = require_integration_capability(
     IntegrationCapability.CONTRACT_EVIDENCE_READ
 )

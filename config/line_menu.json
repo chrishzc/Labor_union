@@ -9,11 +9,15 @@
       "selected": true,
       "set_as_default": true,
       "chat_bar_text": "用戶選單",
-      "size": {"width": 2500, "height": 843},
+      "size": {
+        "width": 2500,
+        "height": 843
+      },
       "appearance": {
         "background_color": "#F5F5F5",
         "image_mode": "generated",
-        "image_path": "line/default_menu.jpg"
+        "image_path": "line/default_menu.jpg",
+        "image_asset_id": null
       },
       "buttons": [
         {
@@ -21,16 +25,38 @@
           "label": "服務登記",
           "text_color": "#FFFFFF",
           "background_color": "#1E3A8A",
-          "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "uri", "uri_source": "liff", "uri": null, "text": null, "data": null}
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "message",
+            "text": "服務登記",
+            "uri": null,
+            "uri_source": "literal",
+            "data": null
+          }
         },
         {
           "id": "contact_staff",
           "label": "服務說明",
           "text_color": "#FFFFFF",
           "background_color": "#3B82F6",
-          "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "message", "text": "服務說明", "uri": null, "uri_source": "literal", "data": null}
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "message",
+            "text": "服務說明",
+            "uri": null,
+            "uri_source": "literal",
+            "data": null
+          }
         }
       ]
     },
@@ -42,11 +68,15 @@
       "selected": true,
       "set_as_default": false,
       "chat_bar_text": "月嫂專區",
-      "size": {"width": 2500, "height": 843},
+      "size": {
+        "width": 2500,
+        "height": 843
+      },
       "appearance": {
         "background_color": "#FFF1F2",
         "image_mode": "generated",
-        "image_path": "line/staff_menu.jpg"
+        "image_path": "line/staff_menu.jpg",
+        "image_asset_id": null
       },
       "buttons": [
         {
@@ -54,16 +84,38 @@
           "label": "訂單查詢",
           "text_color": "#FFFFFF",
           "background_color": "#BE123C",
-          "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "uri", "text": null, "uri": "?target=staff_order_search", "uri_source": "liff", "data": null}
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=staff_order_search",
+            "uri_source": "liff",
+            "data": null
+          }
         },
         {
           "id": "schedule_query",
           "label": "排班資訊",
           "text_color": "#FFFFFF",
           "background_color": "#F43F5E",
-          "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "uri", "text": null, "uri": "?target=staff_schedule", "uri_source": "liff", "data": null}
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "uri",
+            "text": null,
+            "uri": "?target=staff_schedule",
+            "uri_source": "liff",
+            "data": null
+          }
         }
       ]
     },
@@ -75,11 +127,15 @@
       "selected": true,
       "set_as_default": false,
       "chat_bar_text": "工會客服",
-      "size": {"width": 2500, "height": 843},
+      "size": {
+        "width": 2500,
+        "height": 843
+      },
       "appearance": {
         "background_color": "#ECFDF5",
         "image_mode": "generated",
-        "image_path": "line/union_staff_menu.jpg"
+        "image_path": "line/union_staff_menu.jpg",
+        "image_asset_id": null
       },
       "buttons": [
         {
@@ -87,16 +143,38 @@
           "label": "客服系統",
           "text_color": "#FFFFFF",
           "background_color": "#047857",
-          "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "message", "text": "開啟客服系統", "uri": null, "uri_source": "literal", "data": null}
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "message",
+            "text": "開啟客服系統",
+            "uri": null,
+            "uri_source": "literal",
+            "data": null
+          }
         },
         {
           "id": "staff_verification_admin",
           "label": "月嫂驗證",
           "text_color": "#FFFFFF",
           "background_color": "#059669",
-          "bounds": {"x": 1250, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "message", "text": "月嫂驗證管理", "uri": null, "uri_source": "literal", "data": null}
+          "bounds": {
+            "x": 1250,
+            "y": 0,
+            "width": 1250,
+            "height": 843
+          },
+          "action": {
+            "type": "message",
+            "text": "月嫂驗證管理",
+            "uri": null,
+            "uri_source": "literal",
+            "data": null
+          }
         }
       ]
     }

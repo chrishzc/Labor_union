@@ -157,6 +157,14 @@ class MySqlLineRichMenuPublicationRepository:
             rows = tuple(cursor.fetchall() or ())
         return tuple(_publication_snapshot(row) for row in rows)
 
+    def published_provider_menu_id(self, menu_definition_id: str) -> str | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_MENU_PUBLISHED_PROVIDER_ID_SQL, (menu_definition_id,))
+            row = optional_row(cursor.fetchone())
+        if row is None or not row.get("provider_menu_id"):
+            return None
+        return str(row["provider_menu_id"])
+
     def queue(
         self,
         command: QueueLineRichMenuPublicationCommand,
@@ -502,6 +510,11 @@ _MENU_RETRY_SQL = (
     "error_code=NULL,error_message=NULL WHERE id=%s"
 )
 _MENU_LIST_SQL = f"SELECT {_MENU_COLUMNS} FROM line_rich_menu_publication_tasks"
+_MENU_PUBLISHED_PROVIDER_ID_SQL = (
+    "SELECT provider_menu_id FROM line_rich_menu_publication_tasks "
+    "WHERE menu_definition_id=%s AND publication_status='published' "
+    "AND provider_menu_id IS NOT NULL ORDER BY id DESC LIMIT 1"
+)
 _MENU_CONFIGURATION_SELECT_SQL = (
     "SELECT definition_snapshot FROM line_configuration_revisions "
     "WHERE configuration_kind='rich_menus' AND revision=%s"

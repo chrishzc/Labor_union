@@ -29,6 +29,11 @@ class LineCapability(StrEnum):
     MATCHING_READ = "line.matching.read"
     MATCHING_SEND = "line.matching.send"
     MATCHING_OVERRIDE = "line.matching.override"
+    CUSTOMER_SERVICE_READ = "line.customer_service.read"
+    CUSTOMER_SERVICE_HANDLE = "line.customer_service.handle"
+    IDENTITY_BINDING_READ = "line.identity.binding.read"
+    IDENTITY_BINDING_MANAGE = "line.identity.binding.manage"
+    IDENTITY_BINDING_OVERRIDE = "line.identity.binding.override"
 
 
 class LineCapabilityDeniedError(PermissionError):
@@ -42,6 +47,8 @@ _ROLE_CAPABILITIES = {
         LineCapability.ORDER_GROUP_READ,
         LineCapability.MONITOR_READ,
         LineCapability.MATCHING_READ,
+        LineCapability.CUSTOMER_SERVICE_READ,
+        LineCapability.IDENTITY_BINDING_READ,
     },
     "line_agent": {
         LineCapability.IDENTITY_READ,
@@ -52,8 +59,9 @@ _ROLE_CAPABILITIES = {
         LineCapability.MONITOR_READ,
         LineCapability.MATCHING_READ,
         LineCapability.MATCHING_SEND,
+        LineCapability.CUSTOMER_SERVICE_HANDLE,
     },
-    "line_manager": set(LineCapability),
+    "line_manager": set(LineCapability) - {LineCapability.IDENTITY_BINDING_OVERRIDE},
     "system_admin": set(LineCapability),
 }
 

@@ -38,6 +38,7 @@ from subsystems.line.identity_contracts import (
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 from subsystems.line.review_contracts import CreateLineReviewCommand
+from subsystems.line.rich_menu_binding import schedule_rich_menu_binding
 
 
 class LineIdentityNotFoundError(LookupError):
@@ -78,6 +79,16 @@ class LineIdentityApplication:
             result = unit_of_work.identity_flows.open(command)
             unit_of_work.commit()
         return result
+
+    def validate_flow(self, flow_id, purpose, line_user_id):
+        with self._unit_of_work_factory() as unit_of_work:
+            return _require_flow(
+                unit_of_work,
+                flow_id,
+                purpose,
+                line_user_id,
+                self._now(),
+            )
 
     def preview_customer(self, flow_id, line_user_id, proof):
         with self._unit_of_work_factory() as unit_of_work:
@@ -325,6 +336,7 @@ def _bind_result(unit_of_work, line_user_id, candidate, correlation_id):
             line_user_id.value,
         )
     )
+    schedule_rich_menu_binding(unit_of_work, snapshot)
     status = (
         LineIdentityApplyStatus.EXISTING
         if snapshot.status is LineIdentityBindingStatus.BOUND
