@@ -230,6 +230,30 @@ def _push_matching_willingness_card(
     return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
 
 
+def _push_line_message(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
+    try:
+        message = json.loads(task.get("payload_json") or "{}")
+    except json.JSONDecodeError as exc:
+        return False, False, "invalid_line_message_payload", str(exc)
+    if not isinstance(message, dict) or not message.get("type"):
+        return False, False, "invalid_line_message_payload", "LINE message payload must be an object"
+    token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
+    if not token or token == "mock_token":
+        return True, False, "", ""
+    try:
+        response = requests.post(
+            "https://api.line.me/v2/bot/message/push",
+            json={"to": task["to_user_id"], "messages": [message]},
+            headers=_line_headers(task),
+            timeout=10,
+        )
+    except requests.RequestException as exc:
+        return False, True, "network_error", str(exc)
+    if response.status_code == 200:
+        return True, False, "", ""
+    return False, response.status_code in RETRYABLE_HTTP, f"http_{response.status_code}", response.text
+
+
 def _menu_action(task: dict[str, Any], link: bool) -> tuple[bool, bool, str, str]:
     token = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "mock_token")
     payload = json.loads(task.get("payload_json") or "{}")
@@ -262,6 +286,8 @@ def _execute_task(task: dict[str, Any]) -> tuple[bool, bool, str, str]:
         return _push_text(task, task.get("message_content") or "")
     if task_type == "matching_willingness_card":
         return _push_matching_willingness_card(task)
+    if task_type == "line_message":
+        return _push_line_message(task)
     if task_type == "rag_reply":
         return False, False, "legacy_rag_retired", "Use canonical Knowledge Retrieval worker"
     if task_type == "rich_menu_link":

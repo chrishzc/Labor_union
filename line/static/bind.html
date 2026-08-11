@@ -122,6 +122,18 @@
             background: #fff;
             box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.15);
         }
+        .form-input.invalid {
+            border-color: var(--error);
+            box-shadow: 0 0 0 3px rgba(239, 83, 80, 0.12);
+        }
+        .field-error {
+            display: none;
+            margin-top: 6px;
+            color: var(--error);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        .field-error.visible { display: block; }
 
         .btn-submit {
             width: 100%;
@@ -313,7 +325,7 @@
 
         <div class="status-message" id="statusMessage"></div>
 
-        <form id="bindForm" onsubmit="handleFormSubmit(event)">
+        <form id="bindForm" onsubmit="handleFormSubmit(event)" novalidate>
             <!-- LINE User ID 欄位 (一般情況下隱藏，僅在開發測試模式下顯示) -->
             <div class="form-group" id="userIdGroup" style="display: none;">
                 <span class="test-badge" id="testModeBadge" style="display: none;">開發測試模式</span>
@@ -323,12 +335,12 @@
 
             <div class="form-group">
                 <label class="form-label" for="userName" id="userNameLabel">您的真實姓名</label>
-                <input class="form-input" type="text" id="userName" placeholder="請輸入姓名" required autocomplete="name">
+                <input class="form-input" type="text" id="userName" placeholder="請輸入姓名" required maxlength="30" autocomplete="name">
             </div>
 
             <div class="form-group">
                 <label class="form-label" for="userPhone" id="userPhoneLabel">您的聯絡電話</label>
-                <input class="form-input" type="tel" id="userPhone" placeholder="請輸入聯絡電話（例 0912345678）" required autocomplete="tel">
+                <input class="form-input" type="tel" id="userPhone" placeholder="請輸入聯絡電話（例 0912345678）" required inputmode="numeric" maxlength="20" autocomplete="tel">
             </div>
 
             <button class="btn-submit" type="submit" id="btnSubmit">確認綁定</button>
@@ -383,6 +395,61 @@
     function showMessage(text, type = 'info') {
         statusMessage.textContent = text;
         statusMessage.className = `status-message ${type}`;
+    }
+
+    function normalizePhone(value) {
+        return String(value || '').replace(/\D/g, '');
+    }
+
+    function setFieldError(input, message) {
+        const group = input.closest('.form-group');
+        if (!group) return;
+        let error = group.querySelector('.field-error');
+        if (!error) {
+            error = document.createElement('div');
+            error.className = 'field-error';
+            group.appendChild(error);
+        }
+        input.classList.toggle('invalid', Boolean(message));
+        error.textContent = message || '';
+        error.classList.toggle('visible', Boolean(message));
+    }
+
+    function clearFieldErrors() {
+        document.querySelectorAll('.form-input.invalid').forEach(input => input.classList.remove('invalid'));
+        document.querySelectorAll('.field-error').forEach(error => {
+            error.textContent = '';
+            error.classList.remove('visible');
+        });
+    }
+
+    function validateBindForm(nameInput, phoneInput, lineUserId) {
+        clearFieldErrors();
+        const errors = [];
+        const name = nameInput.value.trim();
+        const phone = normalizePhone(phoneInput.value);
+        phoneInput.value = phone;
+        if (!name) {
+            errors.push('請填寫姓名。');
+            setFieldError(nameInput, '請填寫姓名。');
+        } else if (name.length < 2) {
+            errors.push('姓名至少需 2 個字。');
+            setFieldError(nameInput, '姓名至少需 2 個字。');
+        } else if (/\d/.test(name)) {
+            errors.push('姓名不可包含數字。');
+            setFieldError(nameInput, '姓名不可包含數字。');
+        }
+        if (!/^09\d{8}$/.test(phone)) {
+            errors.push('聯絡電話需為 09 開頭的 10 碼手機號碼，例如 0912345678。');
+            setFieldError(phoneInput, '聯絡電話需為 09 開頭的 10 碼手機號碼，例如 0912345678。');
+        }
+        if (!lineUserId) {
+            errors.push('無法取得 LINE 用戶識別碼，請重新從 LINE 開啟此頁。');
+        }
+        return {
+            ok: errors.length === 0,
+            message: errors[0] || ''
+        };
     }
 
     // 輔助函式：隱藏載入中
@@ -540,12 +607,15 @@
     async function handleFormSubmit(event) {
         event.preventDefault();
         
-        const name = document.getElementById('userName').value.trim();
-        const phone = document.getElementById('userPhone').value.trim();
+        const nameInput = document.getElementById('userName');
+        const phoneInput = document.getElementById('userPhone');
+        const name = nameInput.value.trim();
+        const phone = normalizePhone(phoneInput.value);
         const lineUserId = lineUserIdInput.value.trim();
 
-        if (!name || !phone || !lineUserId) {
-            showMessage(runtimePage?.content?.validation_error || '請填寫所有必要欄位。', 'error');
+        const validation = validateBindForm(nameInput, phoneInput, lineUserId);
+        if (!validation.ok) {
+            showMessage(validation.message || runtimePage?.content?.validation_error || '請填寫所有必要欄位。', 'error');
             return;
         }
 

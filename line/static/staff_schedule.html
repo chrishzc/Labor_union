@@ -1,18 +1,217 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-Hant-TW">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>月嫂排班資訊</title><script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>月嫂排班資訊</title>
   <style>
-    *{box-sizing:border-box}body{margin:0;background:#fff7f8;color:#27272a;font-family:'Noto Sans TC',sans-serif}main{max-width:760px;margin:auto;padding:24px 12px 40px}h1{margin:0 0 8px}p{color:#71717a;line-height:1.6}.panel{background:#fff;border:1px solid #fecdd3;border-radius:12px;padding:14px;margin-top:16px}.toolbar{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:end}label{display:block;font-weight:700;margin-bottom:7px}input,button{width:100%;padding:11px;border-radius:8px;font-size:16px}input{border:1px solid #d4d4d8}button{border:0;background:#be123c;color:#fff;font-weight:700}.message{margin-top:12px;padding:10px;background:#f4f4f5;border-radius:8px}.error{background:#fee2e2;color:#b91c1c}.calendar{display:grid;grid-template-columns:repeat(7,1fr);margin-top:14px;border:1px solid #e4e4e7;border-radius:8px;overflow:hidden}.head,.day{min-height:70px;padding:5px;border-right:1px solid #e4e4e7;border-bottom:1px solid #e4e4e7;font-size:12px}.head{min-height:auto;text-align:center;background:#f4f4f5;font-weight:700}.work{background:#ffe4e6}.rest{background:#dcfce7}.locked{background:#fef3c7}.date{font-weight:700;margin-bottom:4px}.notice{margin-top:14px;color:#52525b;font-size:14px}
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #fff7f8; color: #27272a; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 44px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { color: #71717a; line-height: 1.6; }
+    .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 18px 0; }
+    .tabs button, .primary { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; color: #fff; background: #be123c; }
+    .tabs button:not(.active) { background: #e4e4e7; color: #3f3f46; }
+    .panel { background: #fff; border: 1px solid #fecdd3; border-radius: 8px; padding: 16px; margin-top: 14px; }
+    .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
+    label { display: block; font-weight: 700; margin-bottom: 7px; }
+    input, textarea, select { width: 100%; border: 1px solid #d4d4d8; border-radius: 6px; padding: 11px; font-size: 16px; }
+    textarea { min-height: 86px; resize: vertical; }
+    .message { margin-top: 14px; padding: 12px; border-radius: 6px; background: #f4f4f5; color: #3f3f46; }
+    .error { background: #fee2e2; color: #b91c1c; }
+    .calendar { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #e4e4e7; border-radius: 8px; overflow: hidden; margin-top: 14px; }
+    .head, .day { min-height: 74px; border-right: 1px solid #e4e4e7; border-bottom: 1px solid #e4e4e7; padding: 6px; font-size: 13px; }
+    .head { min-height: auto; background: #f4f4f5; text-align: center; font-weight: 700; }
+    .day:nth-child(7n), .head:nth-child(7n) { border-right: 0; }
+    .date { font-weight: 700; margin-bottom: 4px; }
+    .work { background: #ffe4e6; }
+    .rest { background: #dcfce7; }
+    .available { background: #fff; color: #71717a; }
+    .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 14px; color: #52525b; }
+    .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+    .hide { display: none; }
   </style>
 </head>
-<body><main><h1>排班資訊</h1><p>查詢您的正式服務日、休息日與待成立鎖定檔期。</p><section class="panel"><div class="toolbar"><div><label for="month">查詢月份</label><input id="month" type="month"></div><button id="load">查詢班表</button></div><div id="message" class="message" hidden></div><div id="calendar" class="calendar"></div><div class="notice">請假或代班會影響正式案件、薪資與客戶期程，第一版請聯絡工會人員提出申請，由工會完成預覽及確認後套用。</div></section></main>
+<body>
+<main>
+  <h1>排班資訊</h1>
+  <p>您可以查詢個人班表月曆，也可以送出請假申請。請假送出後會先由工會人員確認。</p>
+  <div class="tabs">
+    <button id="tabCalendar" class="active">查詢班表</button>
+    <button id="tabLeave">請假申請</button>
+  </div>
+
+  <section id="calendarPanel" class="panel">
+    <div class="toolbar">
+      <div>
+        <label for="monthInput">查詢月份</label>
+        <input id="monthInput" type="month">
+      </div>
+      <button id="loadSchedule" class="primary">查詢班表</button>
+    </div>
+    <div id="calendarStatus" class="message" style="display:none;"></div>
+    <div class="legend">
+      <span><i class="dot" style="background:#ffe4e6"></i>服務日</span>
+      <span><i class="dot" style="background:#dcfce7"></i>休息/請假</span>
+      <span><i class="dot" style="background:#fff;border:1px solid #d4d4d8"></i>未排班</span>
+    </div>
+    <div id="calendar" class="calendar"></div>
+  </section>
+
+  <section id="leavePanel" class="panel hide">
+    <label for="leaveStart">請假開始日期</label>
+    <input id="leaveStart" type="date">
+    <label for="leaveEnd" style="margin-top:12px;">請假結束日期</label>
+    <input id="leaveEnd" type="date">
+    <label for="leaveReason" style="margin-top:12px;">請假原因</label>
+    <textarea id="leaveReason" placeholder="請簡要說明請假原因"></textarea>
+    <label for="substituteFound" style="margin-top:12px;">是否已找到代班人員</label>
+    <select id="substituteFound">
+      <option value="false">尚未找到</option>
+      <option value="true">已找到</option>
+    </select>
+    <div id="substituteFields" class="hide">
+      <label for="substituteName" style="margin-top:12px;">代班人員姓名</label>
+      <input id="substituteName" placeholder="請填寫代班人員姓名">
+      <label for="substitutePhone" style="margin-top:12px;">代班人員聯絡電話</label>
+      <input id="substitutePhone" placeholder="請填寫代班人員聯絡電話">
+      <label for="substituteNote" style="margin-top:12px;">代班補充資訊</label>
+      <textarea id="substituteNote" placeholder="例如：可代班日期、可服務時段或其他說明"></textarea>
+    </div>
+    <button id="submitLeave" class="primary">送出請假申請</button>
+    <div id="leaveStatus" class="message" style="display:none;"></div>
+  </section>
+</main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-let idToken='';
-function message(text,error=false){const box=document.getElementById('message');box.textContent=text;box.className='message'+(error?' error':'');box.hidden=false}
-function render(data){const root=document.getElementById('calendar');root.replaceChildren();['日','一','二','三','四','五','六'].forEach(name=>{const head=document.createElement('div');head.className='head';head.textContent=name;root.append(head)});const first=new Date(data.year,data.month-1,1);for(let i=0;i<first.getDay();i++){const blank=document.createElement('div');blank.className='day';root.append(blank)}const grouped={};for(const item of data.days){const day=Number(String(item.work_date).slice(-2));(grouped[day]??=[]).push(item)}const last=new Date(data.year,data.month,0).getDate();for(let day=1;day<=last;day++){const items=grouped[day]||[];const working=items.filter(item=>item.status==='working');const resting=items.filter(item=>item.status==='resting');const locked=items.filter(item=>item.status==='waiting_deposit_lock');const cell=document.createElement('div');cell.className='day '+(working.length?'work':resting.length?'rest':locked.length?'locked':'');const date=document.createElement('div');date.className='date';date.textContent=day;const detail=document.createElement('div');detail.textContent=working.length?working.map(item=>`${item.client_name||'服務案件'} ${item.case_no||''}`).join('、'):resting.length?'休息／請假':locked.length?'待成立鎖定':'未排班';cell.append(date,detail);root.append(cell)}}
-async function initialize(){const now=new Date();document.getElementById('month').value=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}`;const config=await fetch('/api/v1/line/identity/runtime-config').then(r=>r.json());await liff.init({liffId:config.data.liff_id});if(!liff.isLoggedIn()){liff.login();return}idToken=liff.getIDToken()||'';if(!idToken)throw new Error('無法取得 LINE 登入憑證');await loadSchedule()}
-async function loadSchedule(){const selected=document.getElementById('month').value;if(!selected){message('請選擇月份。',true);return}const [year,month]=selected.split('-').map(Number);message('班表查詢中…');try{const response=await fetch(`/api/v1/line/staff-self-service/schedule?year=${year}&month=${month}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({line_id_token:idToken})});const result=await response.json();if(!response.ok)throw new Error(result.detail?.message||'查詢失敗');message(`${result.data.staff_name} 的 ${year} 年 ${month} 月排班`);render(result.data)}catch(error){message(error.message||'查詢失敗',true)}}
-document.getElementById('load').addEventListener('click',loadSchedule);initialize().catch(error=>message(error.message||'LIFF 初始化失敗，請重新開啟頁面。',true));
-</script></body></html>
+let lineUserId = "";
+let lineIdToken = "";
+
+function show(id, text, isError = false) {
+  const box = document.getElementById(id);
+  box.textContent = text;
+  box.className = "message" + (isError ? " error" : "");
+  box.style.display = "block";
+}
+
+function identityPayload() {
+  return { line_user_id: lineUserId, line_id_token: lineIdToken };
+}
+
+function switchTab(tab) {
+  document.getElementById("tabCalendar").classList.toggle("active", tab === "calendar");
+  document.getElementById("tabLeave").classList.toggle("active", tab === "leave");
+  document.getElementById("calendarPanel").classList.toggle("hide", tab !== "calendar");
+  document.getElementById("leavePanel").classList.toggle("hide", tab !== "leave");
+}
+
+function renderCalendar(schedule) {
+  const root = document.getElementById("calendar");
+  const year = schedule.year;
+  const month = schedule.month;
+  const first = new Date(year, month - 1, 1);
+  const lastDay = new Date(year, month, 0).getDate();
+  const weekNames = ["日", "一", "二", "三", "四", "五", "六"];
+  const byDay = {};
+  for (const item of schedule.days || []) {
+    const day = Number(String(item.work_date).slice(-2));
+    if (!byDay[day]) byDay[day] = [];
+    byDay[day].push(item);
+  }
+  root.innerHTML = weekNames.map(name => `<div class="head">${name}</div>`).join("");
+  for (let i = 0; i < first.getDay(); i++) root.insertAdjacentHTML("beforeend", `<div class="day available"></div>`);
+  for (let day = 1; day <= lastDay; day++) {
+    const items = byDay[day] || [];
+    const workItems = items.filter(item => item.status === "working");
+    const restItems = items.filter(item => item.status === "resting");
+    const css = workItems.length ? "work" : (restItems.length ? "rest" : "available");
+    const text = workItems.length
+      ? workItems.map(item => `${item.client_name || "服務案件"} ${item.case_no || ""}`).join("<br>")
+      : (restItems.length ? "休息/請假" : "未排班");
+    root.insertAdjacentHTML("beforeend", `<div class="day ${css}"><div class="date">${day}</div><div>${text}</div></div>`);
+  }
+}
+
+async function loadSchedule() {
+  const value = document.getElementById("monthInput").value;
+  if (!value) {
+    show("calendarStatus", "請先選擇查詢月份。", true);
+    return;
+  }
+  const [year, month] = value.split("-").map(Number);
+  show("calendarStatus", "班表查詢中...");
+  const response = await fetch(`/api/line/staff/monthly-schedule?year=${year}&month=${month}`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(identityPayload())
+  });
+  const data = await response.json();
+  if (data.status !== "success") {
+    show("calendarStatus", data.message || "查詢失敗", true);
+    return;
+  }
+  show("calendarStatus", `${data.staff.name} 的 ${year} 年 ${month} 月排班`);
+  renderCalendar(data.schedule);
+}
+
+async function submitLeave() {
+  const substituteFound = document.getElementById("substituteFound").value === "true";
+  const payload = {
+    ...identityPayload(),
+    leave_start_date: document.getElementById("leaveStart").value,
+    leave_end_date: document.getElementById("leaveEnd").value,
+    leave_reason: document.getElementById("leaveReason").value,
+    substitute_found: substituteFound,
+    substitute_name: document.getElementById("substituteName").value,
+    substitute_phone: document.getElementById("substitutePhone").value,
+    substitute_note: document.getElementById("substituteNote").value
+  };
+  if (!payload.leave_start_date || !payload.leave_end_date) {
+    show("leaveStatus", "請填寫請假開始與結束日期。", true);
+    return;
+  }
+  show("leaveStatus", "送出中...");
+  const response = await fetch("/api/line/staff/leave-requests", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  show("leaveStatus", data.message || "已送出", data.status !== "success");
+}
+
+async function init() {
+  const now = new Date();
+  document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  const params = new URLSearchParams(location.search);
+  lineUserId = params.get("userId") || "";
+  try {
+    const config = await fetch("/api/line/config").then(r => r.json());
+    if (config.liff_id) {
+      await liff.init({ liffId: config.liff_id });
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: location.href });
+        return;
+      }
+      const profile = await liff.getProfile();
+      lineUserId = profile.userId;
+      try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+    }
+  } catch (_) {
+    show("calendarStatus", "LIFF 初始化失敗，請重新開啟頁面。", true);
+  }
+  loadSchedule();
+}
+
+document.getElementById("tabCalendar").addEventListener("click", () => switchTab("calendar"));
+document.getElementById("tabLeave").addEventListener("click", () => switchTab("leave"));
+document.getElementById("loadSchedule").addEventListener("click", loadSchedule);
+document.getElementById("submitLeave").addEventListener("click", submitLeave);
+document.getElementById("substituteFound").addEventListener("change", event => {
+  document.getElementById("substituteFields").classList.toggle("hide", event.target.value !== "true");
+});
+init();
+</script>
+</body>
+</html>

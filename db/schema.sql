@@ -439,7 +439,7 @@ CREATE TABLE IF NOT EXISTS staff_schedule (
 CREATE TABLE IF NOT EXISTS line_tasks (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     to_user_id VARCHAR(100) NOT NULL COMMENT '接收訊息的 LINE 用戶唯一識別碼',
-    task_type VARCHAR(50) NOT NULL DEFAULT 'line_push' COMMENT 'line_push/rag_reply/rich_menu_link/rich_menu_unlink',
+    task_type VARCHAR(50) NOT NULL DEFAULT 'line_push' COMMENT 'line_push/line_push_message/rag_reply/rich_menu_link/rich_menu_unlink',
     message_content TEXT NULL COMMENT '文字推播內容',
     payload_json JSON NULL COMMENT '非純文字任務參數',
     status ENUM('pending','processing','sent','failed','cancelled') NOT NULL DEFAULT 'pending',

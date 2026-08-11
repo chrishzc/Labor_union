@@ -60,6 +60,11 @@ scratch/
 
 # Local backups and generated database snapshots
 backups/
+.codex_db_migration/
+
+# Personal local startup scripts
+*.local.sh
+*.mac.local.sh
 
 # Personal presentation files
 
