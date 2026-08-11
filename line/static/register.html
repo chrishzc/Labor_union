@@ -80,6 +80,18 @@
             background: rgba(255, 255, 255, 0.8); font-size: 15px; color: var(--text-dark); outline: none; transition: all 0.2s ease;
         }
         .form-input:focus, .form-select:focus { border-color: var(--primary); background: #fff; box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.15); }
+        .form-input.invalid, .form-select.invalid {
+            border-color: var(--error);
+            box-shadow: 0 0 0 3px rgba(239, 83, 80, 0.12);
+        }
+        .field-error {
+            display: none;
+            margin-top: 6px;
+            color: var(--error);
+            font-size: 13px;
+            line-height: 1.45;
+        }
+        .field-error.visible { display: block; }
         textarea.form-input { resize: vertical; min-height: 80px; }
 
         .checkbox-group, .radio-group {
@@ -106,6 +118,73 @@
         }
         .status-message.error { background: rgba(239, 83, 80, 0.1); border: 1px solid rgba(239, 83, 80, 0.2); color: var(--error); display: block; }
 
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(20, 35, 55, 0.45);
+            display: none;
+            align-items: flex-end;
+            justify-content: center;
+            padding: 18px 12px calc(18px + env(safe-area-inset-bottom));
+            z-index: 120;
+        }
+        .modal-overlay.visible { display: flex; }
+        .modal-card {
+            width: 100%;
+            max-width: 560px;
+            max-height: 78vh;
+            background: #fff;
+            border-radius: 18px 18px 0 0;
+            box-shadow: 0 18px 50px rgba(31, 38, 135, 0.2);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            animation: slideUpModal 0.22s ease-out;
+        }
+        .modal-card::before {
+            content: '';
+            width: 44px;
+            height: 5px;
+            border-radius: 999px;
+            background: rgba(98, 125, 152, 0.35);
+            align-self: center;
+            margin-top: 10px;
+        }
+        .modal-header {
+            padding: 18px 20px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-dark);
+        }
+        .modal-body {
+            padding: 18px 20px;
+            overflow-y: auto;
+            color: var(--text-dark);
+            font-size: 15px;
+            line-height: 1.7;
+        }
+        .modal-body ol { padding-left: 22px; }
+        .modal-body li { margin-bottom: 10px; }
+        .modal-footer {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            padding: 14px 20px 18px;
+            border-top: 1px solid rgba(0, 0, 0, 0.08);
+        }
+        .btn-secondary {
+            width: 100%;
+            padding: 13px;
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            border-radius: 10px;
+            background: #f8fafc;
+            color: var(--text-dark);
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+
         .loader-overlay {
             position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(255, 255, 255, 0.85);
             backdrop-filter: blur(4px); display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 100;
@@ -126,10 +205,21 @@
         .success-desc { font-size: 16px; color: var(--text-muted); line-height: 1.6; margin-bottom: 25px; }
         
         @keyframes spin { 100% { transform: rotate(360deg); } }
+        @keyframes slideUpModal {
+            from { transform: translateY(28px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
 
         @media (max-width: 480px) {
             .grid-2 { grid-template-columns: 1fr; }
             .container { padding: 20px 15px; }
+            .modal-footer { grid-template-columns: 1fr; }
+            .modal-overlay { padding: 0 0 env(safe-area-inset-bottom); }
+            .modal-card {
+                max-width: none;
+                max-height: 82vh;
+                border-radius: 20px 20px 0 0;
+            }
         }
     </style>
 </head>
@@ -144,17 +234,17 @@
 
     <div id="statusMessage" class="status-message"></div>
 
-    <form id="registerForm">
+    <form id="registerForm" novalidate>
         <!-- Section 1: 基本資料 -->
         <div class="section-title">👩 1. 基本資料</div>
         <div class="grid-2">
             <div class="form-group">
                 <label class="form-label required">產婦姓名</label>
-                <input type="text" class="form-input" id="name" required placeholder="請填寫真實姓名">
+                <input type="text" class="form-input" id="name" required maxlength="30" placeholder="請填寫真實姓名">
             </div>
             <div class="form-group">
                 <label class="form-label">身分證字號</label>
-                <input type="text" class="form-input" id="id_number" placeholder="身分證字號">
+                <input type="text" class="form-input" id="id_number" maxlength="12" placeholder="新竹市市民身分證，例如: O100000004">
             </div>
         </div>
         <div class="grid-2">
@@ -172,30 +262,30 @@
         <div class="grid-2">
             <div class="form-group">
                 <label class="form-label required">行動電話</label>
-                <input type="tel" class="form-input" id="phone" required placeholder="例如: 0912345678">
+                <input type="tel" class="form-input" id="phone" required inputmode="numeric" maxlength="20" placeholder="例如: 0912345678">
             </div>
             <div class="form-group">
                 <label class="form-label">市話 (含分機)</label>
-                <input type="tel" class="form-input" id="tel" placeholder="例如: 03-5551234 ext 12">
+                <input type="tel" class="form-input" id="tel" maxlength="20" placeholder="例如: 03-5551234 ext 12">
             </div>
         </div>
         <div class="form-group">
             <label class="form-label">Email</label>
-            <input type="email" class="form-input" id="email" placeholder="example@gmail.com">
+            <input type="email" class="form-input" id="email" maxlength="120" placeholder="example@gmail.com">
         </div>
         <div class="grid-2">
             <div class="form-group">
                 <label class="form-label">縣市</label>
-                <input type="text" class="form-input" id="city" placeholder="例如: 新竹市">
+                <input type="text" class="form-input" id="city" maxlength="20" placeholder="例如: 新竹市">
             </div>
             <div class="form-group">
                 <label class="form-label">郵遞區號</label>
-                <input type="text" class="form-input" id="zip_code" placeholder="例如: 300">
+                <input type="text" class="form-input" id="zip_code" inputmode="numeric" maxlength="6" placeholder="例如: 300">
             </div>
         </div>
         <div class="form-group">
             <label class="form-label required">服務地址</label>
-            <input type="text" class="form-input" id="address" required placeholder="請填寫完整地址 (含巷弄樓層)">
+            <input type="text" class="form-input" id="address" required maxlength="120" placeholder="請填寫完整地址 (含巷弄樓層)">
         </div>
 
         <!-- Section 2: 照護與環境 -->
@@ -376,6 +466,26 @@
         <div class="spinner"></div>
         <div id="loaderText" style="font-size: 15px; font-weight:500; color:var(--text-dark);">資料傳送中，請稍候...</div>
     </div>
+
+    <div class="modal-overlay" id="refundPolicyModal" role="dialog" aria-modal="true" aria-labelledby="refundPolicyTitle">
+        <div class="modal-card">
+            <div class="modal-header" id="refundPolicyTitle">退費原則</div>
+            <div class="modal-body">
+                <p>請先詳閱以下退費原則，確認了解後再勾選同意。</p>
+                <ol>
+                    <li>服務媒合與期程確認前，如需取消或異動，請儘早通知工會服務人員。</li>
+                    <li>已完成月嫂媒合、排班或簽約流程後，退費方式將依工會公告、合約條款與實際服務進度辦理。</li>
+                    <li>如已產生銀行轉帳、匯款或行政處理費用，相關手續費需由申請人自行負擔。</li>
+                    <li>政府補助、補助款退還或補助資格異動，仍須依主管機關審核結果與工會後續通知為準。</li>
+                    <li>若因填寫資料錯誤、資格不符或未依通知完成補件，可能影響媒合、補助申請或退費時程。</li>
+                </ol>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn-secondary" id="refundPolicyCancel">返回再確認</button>
+                <button type="button" class="btn-submit" id="refundPolicyAccept" style="margin-top:0;">已閱讀並同意</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
@@ -384,6 +494,7 @@
     let currentIdToken = "";
     let liffConfigRevision = "";
     let runtimePage = null;
+    let refundPolicyAccepted = false;
 
     async function initializeLiff() {
         try {
@@ -422,6 +533,7 @@
 
     document.addEventListener("DOMContentLoaded", () => {
         initializeLiff();
+        setupRefundPolicyAgreement();
     });
 
     function applyRuntime(runtime) {
@@ -516,6 +628,12 @@
                 control = document.createElement('input');
                 control.className = 'form-input';
                 control.type = { phone: 'tel', email: 'email', date: 'date', number: 'number' }[field.type] || 'text';
+                if (field.type === 'phone') {
+                    control.inputMode = 'numeric';
+                    control.maxLength = 20;
+                } else if (field.type === 'email') {
+                    control.maxLength = 120;
+                }
             }
             if (field.type !== 'multiple_choice') {
                 control.dataset.liffField = field.id;
@@ -565,11 +683,252 @@
         return true;
     }
 
+    function openRefundPolicyModal() {
+        document.getElementById('agree1').scrollIntoView({ behavior: 'smooth', block: 'center' });
+        document.getElementById('refundPolicyModal').classList.add('visible');
+    }
+
+    function closeRefundPolicyModal() {
+        document.getElementById('refundPolicyModal').classList.remove('visible');
+    }
+
+    function setupRefundPolicyAgreement() {
+        const agree1 = document.getElementById('agree1');
+        const agree1Label = document.querySelector('label[for="agree1"]');
+        const acceptButton = document.getElementById('refundPolicyAccept');
+        const cancelButton = document.getElementById('refundPolicyCancel');
+        agree1.checked = false;
+        agree1.addEventListener('click', event => {
+            if (!refundPolicyAccepted) {
+                event.preventDefault();
+                openRefundPolicyModal();
+            }
+        });
+        agree1Label.addEventListener('click', event => {
+            if (!refundPolicyAccepted) {
+                event.preventDefault();
+                openRefundPolicyModal();
+            }
+        });
+        acceptButton.addEventListener('click', () => {
+            refundPolicyAccepted = true;
+            agree1.checked = true;
+            setFieldError(agree1, '');
+            closeRefundPolicyModal();
+        });
+        cancelButton.addEventListener('click', () => {
+            agree1.checked = false;
+            closeRefundPolicyModal();
+        });
+        document.getElementById('refundPolicyModal').addEventListener('click', event => {
+            if (event.target.id === 'refundPolicyModal') {
+                agree1.checked = false;
+                closeRefundPolicyModal();
+            }
+        });
+    }
+
+    function normalizePhone(value) {
+        return String(value || '').replace(/\D/g, '');
+    }
+
+    function fieldLabel(control) {
+        const group = control.closest('.form-group');
+        const label = group ? group.querySelector('.form-label') : null;
+        return label ? label.textContent.replace('*', '').trim() : '此欄位';
+    }
+
+    function setFieldError(control, message) {
+        if (!control) return;
+        const group = control.closest('.form-group');
+        if (!group) return;
+        let error = group.querySelector('.field-error');
+        if (!error) {
+            error = document.createElement('div');
+            error.className = 'field-error';
+            group.appendChild(error);
+        }
+        control.classList.toggle('invalid', Boolean(message));
+        error.textContent = message || '';
+        error.classList.toggle('visible', Boolean(message));
+    }
+
+    function clearFieldErrors() {
+        document.querySelectorAll('.form-input.invalid, .form-select.invalid').forEach(control => {
+            control.classList.remove('invalid');
+        });
+        document.querySelectorAll('.field-error').forEach(error => {
+            error.textContent = '';
+            error.classList.remove('visible');
+        });
+    }
+
+    function addError(errors, control, message) {
+        errors.push({ control, message });
+        setFieldError(control, message);
+    }
+
+    function isValidTaiwanId(value) {
+        const normalized = String(value || '').trim().toUpperCase();
+        if (!normalized) return true;
+        if (!/^[A-Z][12]\d{8}$/.test(normalized)) return false;
+        const letterMap = {
+            A: 10, B: 11, C: 12, D: 13, E: 14, F: 15, G: 16, H: 17, I: 34,
+            J: 18, K: 19, L: 20, M: 21, N: 22, O: 35, P: 23, Q: 24, R: 25,
+            S: 26, T: 27, U: 28, V: 29, W: 32, X: 30, Y: 31, Z: 33
+        };
+        const code = letterMap[normalized[0]];
+        if (!code) return false;
+        const digits = [Math.floor(code / 10), code % 10, ...normalized.slice(1).split('').map(Number)];
+        const weights = [1, 9, 8, 7, 6, 5, 4, 3, 2, 1, 1];
+        const sum = digits.reduce((total, digit, index) => total + digit * weights[index], 0);
+        return sum % 10 === 0;
+    }
+
+    function validateRegistrationForm() {
+        clearFieldErrors();
+        const errors = [];
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        const name = document.getElementById('name');
+        const idNumber = document.getElementById('id_number');
+        const birthDate = document.getElementById('birth_date');
+        const phone = document.getElementById('phone');
+        const tel = document.getElementById('tel');
+        const email = document.getElementById('email');
+        const city = document.getElementById('city');
+        const zipCode = document.getElementById('zip_code');
+        const address = document.getElementById('address');
+        const expectedDate = document.getElementById('expected_date');
+        const serviceDays = document.getElementById('service_days');
+        const agree1 = document.getElementById('agree1');
+        const agree2 = document.getElementById('agree2');
+        const agree3 = document.getElementById('agree3');
+
+        const nameValue = name.value.trim();
+        if (!nameValue) addError(errors, name, '請填寫產婦姓名。');
+        else if (nameValue.length < 2) addError(errors, name, '產婦姓名至少需 2 個字。');
+        else if (/\d/.test(nameValue)) addError(errors, name, '產婦姓名不可包含數字。');
+
+        const idValue = idNumber.value.trim().toUpperCase();
+        idNumber.value = idValue;
+        if (idValue && !isValidTaiwanId(idValue)) {
+            addError(errors, idNumber, '身分證字號格式不正確，請填 1 個英文字母加 9 個數字。');
+        } else if (idValue && !idValue.startsWith('O')) {
+            addError(errors, idNumber, '本補助限新竹市市民申請；身分證字號需為新竹市核發的 O 開頭格式，例如 O100000004。');
+        }
+
+        if (birthDate.value) {
+            const birth = new Date(`${birthDate.value}T00:00:00`);
+            if (Number.isNaN(birth.getTime()) || birth > today) {
+                addError(errors, birthDate, '出生年月日不可晚於今天。');
+            }
+        }
+
+        const phoneDigits = normalizePhone(phone.value);
+        phone.value = phoneDigits;
+        if (!phoneDigits) addError(errors, phone, '請填寫行動電話。');
+        else if (!/^09\d{8}$/.test(phoneDigits)) {
+            addError(errors, phone, '行動電話需為 09 開頭的 10 碼數字，例如 0912345678。');
+        }
+
+        const telValue = tel.value.trim();
+        if (telValue && !/^[0-9()\-\s#轉分機extEXT]{6,20}$/.test(telValue)) {
+            addError(errors, tel, '市話可填區碼與號碼，必要時加分機，例如 03-5551234 ext 12。');
+        }
+
+        const emailValue = email.value.trim();
+        if (emailValue && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+            addError(errors, email, 'Email 格式不正確，請確認包含 @ 與網域。');
+        }
+
+        const cityValue = city.value.trim();
+        if (cityValue && !/^[\u4e00-\u9fa5A-Za-z]{2,20}$/.test(cityValue)) {
+            addError(errors, city, '縣市請填中文或英文地名，例如新竹市。');
+        }
+
+        const zipValue = zipCode.value.trim();
+        if (zipValue && !/^\d{3,5}$/.test(zipValue)) {
+            addError(errors, zipCode, '郵遞區號請填 3 至 5 碼數字，例如 300。');
+        }
+
+        const addressValue = address.value.trim();
+        if (!addressValue) addError(errors, address, '請填寫服務地址。');
+        else if (addressValue.length < 6) addError(errors, address, '服務地址請填寫完整地址，至少 6 個字。');
+
+        if (!expectedDate.value) {
+            addError(errors, expectedDate, '請選擇預產期或已生產日期。');
+        } else {
+            const expected = new Date(`${expectedDate.value}T00:00:00`);
+            const lowerBound = new Date(today);
+            lowerBound.setFullYear(lowerBound.getFullYear() - 1);
+            const upperBound = new Date(today);
+            upperBound.setFullYear(upperBound.getFullYear() + 1);
+            if (Number.isNaN(expected.getTime()) || expected < lowerBound || expected > upperBound) {
+                addError(errors, expectedDate, '日期需在今天前後 1 年內，請確認是否填錯年份。');
+            }
+        }
+
+        const days = Number.parseInt(serviceDays.value, 10);
+        if (!Number.isInteger(days)) addError(errors, serviceDays, '請填寫預計服務天數。');
+        else if (days < 1 || days > 60) addError(errors, serviceDays, '預計服務天數需介於 1 至 60 天。');
+
+        if (!agree1.checked || !refundPolicyAccepted) addError(errors, agree1, '請先點選退費原則並詳閱內容，按下「已閱讀並同意」後才可送出。');
+        if (!agree2.checked) addError(errors, agree2, '請確認了解並願意遵照相關規定。');
+        if (!agree3.checked) addError(errors, agree3, '請確認需自行負擔銀行轉帳手續費。');
+
+        if (runtimePage) {
+            runtimePage.fields.filter(field => !field.system_field).forEach(field => {
+                const controls = [...document.querySelectorAll(`[data-liff-field="${field.id}"]`)];
+                if (!controls.length) return;
+                if (field.required) {
+                    if (field.type === 'multiple_choice' && !controls.some(control => control.checked)) {
+                        addError(errors, controls[0], `請至少選擇「${field.label}」一個選項。`);
+                    } else if (field.type === 'boolean' && !controls[0].checked) {
+                        addError(errors, controls[0], `請確認「${field.label}」。`);
+                    } else if (!['multiple_choice', 'boolean'].includes(field.type) && !controls[0].value.trim()) {
+                        addError(errors, controls[0], `請填寫「${field.label}」。`);
+                    }
+                }
+                if (!['multiple_choice', 'boolean'].includes(field.type)) {
+                    const control = controls[0];
+                    const value = control.value.trim();
+                    if (!value) return;
+                    if (field.type === 'phone') {
+                        const digits = normalizePhone(value);
+                        control.value = digits;
+                        if (!/^09\d{8}$/.test(digits)) addError(errors, control, `${field.label}需為 09 開頭的 10 碼手機號碼。`);
+                    } else if (field.type === 'email' && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+                        addError(errors, control, `${field.label}的 Email 格式不正確。`);
+                    } else if (field.type === 'number' && Number.isNaN(Number(value))) {
+                        addError(errors, control, `${field.label}請填寫數字。`);
+                    } else if (field.type === 'date' && Number.isNaN(new Date(`${value}T00:00:00`).getTime())) {
+                        addError(errors, control, `${fieldLabel(control)}日期格式不正確。`);
+                    }
+                }
+            });
+        }
+
+        if (errors.length) {
+            errors[0].control.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            errors[0].control.focus({ preventScroll: true });
+            return {
+                ok: false,
+                message: errors.length === 1
+                    ? errors[0].message
+                    : `請修正 ${errors.length} 個欄位後再送出，第一個需修正欄位：${fieldLabel(errors[0].control)}。`
+            };
+        }
+        return { ok: true };
+    }
+
     document.getElementById("registerForm").addEventListener("submit", async function(e) {
         e.preventDefault();
-        if (!validateCustomFields()) {
+        const validation = validateRegistrationForm();
+        if (!validation.ok || !validateCustomFields()) {
             const requiredMessage = document.getElementById("statusMessage");
-            requiredMessage.textContent = "請完成所有必填的服務需求欄位。";
+            requiredMessage.textContent = validation.message || "請完成所有必填的服務需求欄位。";
             requiredMessage.className = "status-message error";
             requiredMessage.style.display = "block";
             return;
@@ -622,6 +981,7 @@
             
             // 加入強制同意項目
             surveyDetails['※已確實詳閱退費原則：'] = document.getElementById('agree1').checked ? 'Y' : '';
+            surveyDetails['退費原則彈窗已閱讀並同意：'] = refundPolicyAccepted ? 'Y' : '';
             surveyDetails['我確實了解並願意遵照辦理以上相關規定，說明及退費原則(勾選後等同簽名確認)'] = document.getElementById('agree2').checked ? 'Y' : '';
             surveyDetails['需自行負擔銀行轉帳手續費'] = document.getElementById('agree3').checked ? 'Y' : '';
             Object.assign(surveyDetails, collectCustomFields());

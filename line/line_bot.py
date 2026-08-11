@@ -154,6 +154,105 @@ def _create_onboarding_tasks(cursor, user_id: str, source_event_id: str | None) 
         )
 
 
+SERVICE_HELP_REPLIES = {
+    "服務流程": (
+        "服務流程如下：\n\n"
+        "1. 先完成服務登記。\n"
+        "2. 工會確認您的資料與服務期程。\n"
+        "3. 系統篩選可配合的月嫂。\n"
+        "4. 月嫂同意接案後，工會提供月嫂資料給您確認。\n"
+        "5. 雙方確認後，進入後續媒合與簽約流程。\n\n"
+        "如您尚未登記，請點選下方選單的「服務登記」。"
+    ),
+    "收費與補助": (
+        "收費與補助說明：\n\n"
+        "實際費用會依服務天數、每日服務時數、服務地點與個案條件確認。"
+        "若要申請補助，請於服務登記時填寫身分證字號與戶籍資料，工會會再依規範協助確認資格。"
+    ),
+    "查詢服務進度": (
+        "若要查詢服務進度，請先完成服務登記或帳號綁定。\n\n"
+        "已完成登記者，請回覆您的案件編號或登記姓名，工會人員會依資料協助確認目前進度。"
+    ),
+    "修改登記資料": (
+        "若要修改已送出的登記資料，請開啟下方頁面填寫資料異動申請。"
+        "送出後資料會先暫存，待工會人員審核通過後才會正式更新。"
+    ),
+    "聯絡工會人員": (
+        "如需工會人員協助，請直接在此聊天室留下您的問題、案件編號或聯絡電話。"
+        "工會人員確認後會再協助回覆。"
+    ),
+    "月嫂身分認證": "若您是月嫂本人，請點選下方「我是月嫂」或直接回覆「我是月嫂」，系統會送出身分確認申請。",
+    "其他問題": "請直接輸入您的問題內容。若已經有案件編號，也請一起提供，方便工會人員協助查詢。",
+}
+
+
+def _liff_url(query: str = "") -> str:
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if not liff_id or liff_id == "your_liff_id_here":
+        liff_id = get_setting("line_liff_id", "").strip()
+    if not liff_id:
+        return "LIFF 尚未完成設定，請聯絡工會人員。"
+    return f"https://liff.line.me/{liff_id}/{query}"
+
+
+def _quick_reply_item(label: str, text: str | None = None) -> dict[str, Any]:
+    return {
+        "type": "action",
+        "action": {
+            "type": "message",
+            "label": label,
+            "text": text or label,
+        },
+    }
+
+
+def _enqueue_service_help_menu(cursor, user_id: str, source_event_id: str | None) -> None:
+    payload = {
+        "type": "text",
+        "text": "請選擇您想了解或處理的項目：",
+        "quickReply": {
+            "items": [_quick_reply_item(label) for label in SERVICE_HELP_REPLIES]
+        },
+    }
+    enqueue_line_task(
+        cursor,
+        to_user_id=user_id,
+        task_type="line_message",
+        payload=payload,
+        source_event_id=source_event_id,
+        idempotency_key=f"service-help-menu:{source_event_id or user_id}",
+    )
+
+
+def _enqueue_service_help_reply(
+    cursor,
+    user_id: str,
+    user_text: str,
+    source_event_id: str | None,
+) -> bool:
+    normalized = user_text.strip()
+    if normalized == "服務說明":
+        _enqueue_service_help_menu(cursor, user_id, source_event_id)
+        return True
+    if normalized not in SERVICE_HELP_REPLIES:
+        return False
+    reply_text = SERVICE_HELP_REPLIES[normalized]
+    payload: dict[str, Any] = {"type": "text", "text": reply_text}
+    if normalized == "修改登記資料":
+        payload["text"] = f"{reply_text}\n\n{_liff_url('?target=profile_update')}"
+    if normalized == "月嫂身分認證":
+        payload["quickReply"] = {"items": [_quick_reply_item("我是月嫂")]}
+    enqueue_line_task(
+        cursor,
+        to_user_id=user_id,
+        task_type="line_message",
+        payload=payload,
+        source_event_id=source_event_id,
+        idempotency_key=f"service-help-reply:{normalized}:{source_event_id or user_id}",
+    )
+    return True
+
+
 router = APIRouter(tags=["LINE"])
 
 
@@ -632,6 +731,15 @@ async def line_webhook(request: Request):
                                 source_event_id=event.get("webhookEventId"),
                                 idempotency_key=f"menu-unlink:{event.get('webhookEventId')}",
                             )
+                            continue
+
+                        if _enqueue_service_help_reply(
+                            cursor,
+                            user_id,
+                            user_text,
+                            event.get("webhookEventId"),
+                        ):
+                            print(f"[LINE Webhook] Service help handled for {user_id}: {user_text}")
                             continue
 
                         # 攔截「查詢訂單」或「綁定」關鍵字對話流

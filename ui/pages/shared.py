@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(PROJECT_ROOT / ".env")
+load_dotenv(PROJECT_ROOT / ".env", override=True)
 
 API_BASE_URL_ENV = "API_BASE_URL"
 API_BASE_URL_DEFAULT = "http://localhost:8000"

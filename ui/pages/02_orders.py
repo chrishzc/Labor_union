@@ -260,7 +260,7 @@ def _staff_options(staff_list) -> dict[str, int]:
 
 def show():
     st.title("📦 訂單與帳務管理系統")
-    st.write("本系統串接了 `v_order_details` 整合計算檢視表，提供訂單生命週期、指派配對以及帳務實收狀態的管理。")
+    st.write("本系統整合訂單進度、月嫂指派、服務期程與帳務實收狀態，協助工會人員掌握案件完整流程。")
     search_text = st.text_input(
         "搜尋案件編號或客戶姓名",
         key="orders_summary_search_text",
