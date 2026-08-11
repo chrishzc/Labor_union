@@ -63,14 +63,19 @@ def _decode_json(value: Any) -> Any:
     return json.loads(value) if isinstance(value, str) else value
 
 
-def _current_menu_snapshot(menu_id: str) -> tuple[RichMenuDefinition, str, str]:
+def _current_menu_configuration() -> tuple[LineMenusConfig, str]:
     with open_line_unit_of_work() as unit_of_work:
         configuration_snapshot = unit_of_work.configurations.get(
             LineConfigurationKind.RICH_MENUS
         )
-    config = LineMenusConfig.model_validate(
+    configuration = LineMenusConfig.model_validate(
         configuration_definition(configuration_snapshot)
     )
+    return configuration, str(configuration_snapshot.revision.value)
+
+
+def _current_menu_snapshot(menu_id: str) -> tuple[RichMenuDefinition, str, str]:
+    config, revision = _current_menu_configuration()
     menu = next((item for item in config.menus if item.id == menu_id), None)
     if not menu:
         raise RichMenuPublicationNotFoundError(f"找不到 Rich Menu {menu_id}")
@@ -89,7 +94,7 @@ def _current_menu_snapshot(menu_id: str) -> tuple[RichMenuDefinition, str, str]:
     fingerprint = hashlib.sha256(
         json.dumps(menu_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    return menu, str(configuration_snapshot.revision.value), fingerprint
+    return menu, revision, fingerprint
 
 
 def create_publication_preview(menu_id: str, previewed_by_admin_user_id: int | None) -> dict[str, Any]:
@@ -375,8 +380,7 @@ def import_legacy_rich_menu_ids() -> int:
         legacy = json.loads(LEGACY_IDS_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return 0
-    config = read_config("line_menus", LineMenusConfig)
-    revision = config_revision("line_menus")
+    config, revision = _current_menu_configuration()
     key_by_role = {
         "customer": "default_rich_menu_id",
         "staff": "staff_rich_menu_id",

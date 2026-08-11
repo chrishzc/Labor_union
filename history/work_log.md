@@ -582,3 +582,20 @@
   後，再驗收新帳號首次授權、過期連結、跨帳號與一次性使用。
 - 所有既有 dirty paths 均保留，未執行 `git add`、commit、push、reset、clean 或 stash。
 
+## [2026-08-11] LINE Rich Menu Legacy 匯入 CI 修復
+
+- 修復 `subsystems/line/rich_menu_publication_workflow.py` 的 flake8 `F821`：Rich Menu
+  canonical configuration 遷移至 MySQL 後，worker 啟動時的 legacy ID 匯入仍引用已移除的
+  `read_config` 與 `config_revision`。
+- 抽出共用 current Rich Menu configuration loader，讓發布預覽與 legacy 匯入都從同一份
+  MySQL `LineConfigurationSnapshot` 取得設定與 revision；未恢復舊檔案設定 store 依賴。
+- legacy `config/rich_menu_ids.json` 仍只作既有 LINE 平台 ID 的一次性匯入來源；匯入不呼叫
+  LINE API、不重新發布選單，既有 current publication、交易 commit／rollback 行為不變。
+- 新增實際呼叫 legacy 匯入函式的回歸測試，驗證寫入 publication 的 menu、audience role、
+  revision 與 provider Rich Menu ID 均正確取自 canonical snapshot 與 legacy ID mapping。
+- `.venv\Scripts\python.exe -m pytest -W error` 執行 Rich Menu snapshot 與 LINE access policy
+  測試共 `5 passed`；GitHub Actions fatal flake8 規則 `E9,F63,F7,F82` 在排除 CI 不會存在的
+  本機 `.venv` 後為 `0`。
+- `git diff --check` 與異動檔 strict UTF-8、無 BOM 驗證通過；未修改 schema、migration、
+  正式資料庫、LINE provider 或專案相依檔，也未建立或遺留一次性程式檔案。
+
