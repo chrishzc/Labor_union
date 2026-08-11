@@ -24,6 +24,16 @@ SCRYPT_R = 8
 SCRYPT_P = 1
 ADMIN_SESSION_IDLE_MINUTES = 30
 ADMIN_SESSION_MAXIMUM_MINUTES = 8 * 60
+REQUIRED_ADMIN_SESSION_COLUMNS = frozenset(
+    {
+        "admin_user_id",
+        "session_token_hash",
+        "expires_at",
+        "absolute_expires_at",
+        "last_seen_at",
+        "revoked_at",
+    }
+)
 ROLE_LEVELS = {
     "line_viewer": 10,
     "line_agent": 20,
@@ -107,6 +117,14 @@ ROLE_CAPABILITIES = {
     "line_manager": LINE_MANAGER_CAPABILITIES,
     "system_admin": CAPABILITY_REGISTRY,
 }
+
+
+class AdminSessionSchemaError(RuntimeError):
+    """Raised when the preserved database lacks the governed session schema."""
+
+
+class AdminSessionStorageError(RuntimeError):
+    """Raised when administrator session storage is temporarily unavailable."""
 
 
 @dataclass(frozen=True)
@@ -248,6 +266,7 @@ def authenticate_admin(
     try:
         conn.begin()
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            _require_admin_session_schema(cursor)
             cursor.execute(
                 """
                 SELECT id, username, password_hash, display_name, role,
@@ -284,6 +303,12 @@ def authenticate_admin(
             principal = _principal_from_row(cursor, row)
         conn.commit()
         return token, expires_at, principal
+    except AdminSessionSchemaError:
+        conn.rollback()
+        raise
+    except pymysql.MySQLError as error:
+        conn.rollback()
+        raise AdminSessionStorageError("管理員登入儲存服務暫時無法使用") from error
     except Exception:
         conn.rollback()
         raise
@@ -332,6 +357,8 @@ def get_admin_session(token: str) -> AdminPrincipal | None:
             principal = _principal_from_row(cursor, row)
         conn.commit()
         return principal
+    except pymysql.MySQLError as error:
+        raise AdminSessionStorageError("管理員 Session 服務暫時無法使用") from error
     finally:
         conn.close()
 
@@ -353,6 +380,8 @@ def revoke_admin_session(token: str) -> bool:
             changed = cursor.rowcount > 0
         conn.commit()
         return changed
+    except pymysql.MySQLError as error:
+        raise AdminSessionStorageError("管理員 Session 服務暫時無法使用") from error
     finally:
         conn.close()
 
@@ -391,8 +420,23 @@ def renew_admin_session(token: str, *, session_minutes: int) -> datetime | None:
                 row = cursor.fetchone()
         conn.commit()
         return row[0] if renewed and row else None
+    except pymysql.MySQLError as error:
+        raise AdminSessionStorageError("管理員 Session 服務暫時無法使用") from error
     finally:
         conn.close()
+
+
+def _require_admin_session_schema(cursor: Any) -> None:
+    cursor.execute(
+        "SELECT COLUMN_NAME AS column_name FROM information_schema.columns "
+        "WHERE table_schema=DATABASE() AND table_name='admin_sessions'"
+    )
+    available = {str(row["column_name"]) for row in cursor.fetchall()}
+    missing = sorted(REQUIRED_ADMIN_SESSION_COLUMNS - available)
+    if missing:
+        raise AdminSessionSchemaError(
+            "管理員 Session schema 尚未完成：缺少 " + ", ".join(missing)
+        )
 
 
 def has_required_role(principal: AdminPrincipal, minimum_role: str) -> bool:

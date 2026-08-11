@@ -31,6 +31,7 @@ from subsystems.line.review_contracts import (
     LineReviewListQuery,
     LineReviewQueueSummary,
 )
+from subsystems.line.rich_menu_binding import schedule_rich_menu_binding
 
 
 class LineReviewNotFoundError(LookupError):
@@ -38,7 +39,14 @@ class LineReviewNotFoundError(LookupError):
 
 
 class LineReviewDataConflictError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "line_review_data_conflict",
+    ) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class LineIdentityReviewApplication:
@@ -86,7 +94,7 @@ class LineIdentityReviewApplication:
                 reason=command.reason,
             )
             if command.decision is LineReviewDecision.APPROVE:
-                _apply_approval(unit_of_work, snapshot, command)
+                _apply_approval_with_typed_conflicts(unit_of_work, snapshot, command)
             else:
                 _apply_rejection(unit_of_work, snapshot, command)
             unit_of_work.reviews.decide(command, candidate)
@@ -96,6 +104,28 @@ class LineIdentityReviewApplication:
             _enqueue_decision_message(unit_of_work, resulting, command, reviewed_at)
             unit_of_work.commit()
         return ApplyLineReviewDecisionResult(LineReviewCommandOutcome.CREATED, resulting)
+
+
+def _apply_approval_with_typed_conflicts(unit_of_work, snapshot, command):
+    try:
+        _apply_approval(unit_of_work, snapshot, command)
+    except LineReviewDataConflictError:
+        raise
+    except RuntimeError as error:
+        code = str(error) or "line_review_data_conflict"
+        message = _OWNER_CONFLICT_MESSAGES.get(code, "LINE 身分資料已變更，請重新確認綁定狀態。")
+        raise LineReviewDataConflictError(message, code=code) from error
+
+
+_OWNER_CONFLICT_MESSAGES = {
+    "customer_identity_binding_conflict": "客戶目前綁定的 LINE 已變更，請重新確認後再審核。",
+    "staff_identity_binding_conflict": "月嫂目前綁定的 LINE 已變更，請重新確認後再審核。",
+    "admin_identity_binding_conflict": "工會帳號目前綁定的 LINE 已變更，請重新確認後再審核。",
+    "line_identity_already_used_by_customer": "此 LINE 已綁定其他客戶，不能核准本申請。",
+    "line_identity_already_used_by_staff": "此 LINE 已綁定其他月嫂，不能核准本申請。",
+    "line_identity_already_used_by_admin": "此 LINE 已綁定其他工會帳號，不能核准本申請。",
+    "line_identity_binding_conflict": "LINE 身分版本已更新，請重新載入後再審核。",
+}
 
 
 def _existing_decision_result(unit_of_work, command):
@@ -132,7 +162,8 @@ def _apply_approval(unit_of_work, snapshot, command):
             command.correlation_id.value,
         )
     _bind_owner_projection(unit_of_work, snapshot, old_line_user_id)
-    _bind_review_claim(unit_of_work, snapshot, command)
+    binding = _bind_review_claim(unit_of_work, snapshot, command)
+    schedule_rich_menu_binding(unit_of_work, binding)
 
 
 def _bind_owner_projection(unit_of_work, snapshot, old_line_user_id):

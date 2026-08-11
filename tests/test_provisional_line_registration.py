@@ -119,7 +119,7 @@ def test_first_submission_writes_only_provisional_roots_and_one_task():
     assert connection.commits == 1
     assert any(statement.startswith("INSERT INTO clients") for statement in statements)
     assert any(statement.startswith("INSERT INTO beclass_records") for statement in statements)
-    assert any("INSERT IGNORE INTO line_tasks" in statement for statement in statements)
+    assert any("INSERT INTO line_delivery_tasks" in statement for statement in statements)
     assert not any("INSERT INTO orders" in statement for statement in statements)
 
 
@@ -138,7 +138,7 @@ def test_exact_replay_returns_original_receipt_without_duplicate_write():
     assert receipt.worker_wakeup_required is False
     assert not any(statement.startswith("INSERT INTO clients") for statement in statements)
     assert not any(statement.startswith("INSERT INTO beclass_records") for statement in statements)
-    assert not any("INSERT IGNORE INTO line_tasks" in statement for statement in statements)
+    assert not any("INSERT INTO line_delivery_tasks" in statement for statement in statements)
 
 
 def test_different_payload_creates_one_admin_conflict_and_returns_conflict():
@@ -162,6 +162,7 @@ def test_legacy_liff_route_delegates_to_typed_owner(monkeypatch):
     connection = SimpleNamespace(close=lambda: None)
     monkeypatch.setattr(line_bot, "get_db_connection", lambda: connection)
     monkeypatch.setattr(line_bot, "wake_worker", lambda: None)
+    monkeypatch.setattr(line_bot, "_require_legacy_line_surface", lambda _: None)
     monkeypatch.setattr(line_bot, "build_provisional_registration_application", lambda _: application)
     monkeypatch.setattr(
         line_bot,

@@ -15,6 +15,8 @@
     input { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid #c9d1d9; border-radius: 9px; font-size: 16px; }
     button { width: 100%; margin-top: 22px; padding: 13px; border: 0; border-radius: 9px; background: #06c755; color: white; font-size: 17px; font-weight: 700; }
     button:disabled { opacity: .55; }
+    #customer-choice button { margin-top: 12px; }
+    #register-new { background: #18212b; }
     #message { margin-top: 16px; white-space: pre-wrap; line-height: 1.5; }
     .error { color: #b42318; }
   </style>
@@ -23,13 +25,14 @@
 <main><section>
   <h1 id="title">LINE 身分確認</h1>
   <p id="description">正在確認登入狀態…</p>
+  <div id="customer-choice" hidden>
+    <button id="bind-existing" type="button">我已填寫過表單，直接綁定</button>
+    <button id="register-new" type="button">我還沒填寫，前往填寫完整表單</button>
+  </div>
   <form id="form" hidden></form>
   <div id="message" role="status"></div>
 </section></main>
 <script>
-const parameters = new URLSearchParams(location.search);
-const flowId = parameters.get("flow_id") || "";
-const purpose = parameters.get("purpose") || "";
 const definitions = {
   customer_binding: {
     title: "客戶資料綁定",
@@ -51,6 +54,7 @@ const definitions = {
   }
 };
 let idToken = "";
+let flowId = "";
 
 function showMessage(text, isError = false) {
   const target = document.getElementById("message");
@@ -76,8 +80,28 @@ function buildForm(definition) {
   button.type = "submit";
   button.textContent = "送出確認";
   form.append(button);
-  form.hidden = false;
   form.addEventListener("submit", event => submitForm(event, definition, button));
+}
+
+function showIdentityEntry(definition, purpose) {
+  buildForm(definition);
+  if (purpose !== "customer_binding") {
+    document.getElementById("form").hidden = false;
+    return;
+  }
+  document.getElementById("description").textContent = "請選擇您是否已填寫過工會基本資料表單。";
+  document.getElementById("customer-choice").hidden = false;
+}
+
+function configureCustomerChoice(definition) {
+  document.getElementById("bind-existing").addEventListener("click", () => {
+    document.getElementById("customer-choice").hidden = true;
+    document.getElementById("description").textContent = definition.description;
+    document.getElementById("form").hidden = false;
+  });
+  document.getElementById("register-new").addEventListener("click", () => {
+    location.assign("/line-registration");
+  });
 }
 
 async function submitForm(event, definition, button) {
@@ -101,19 +125,37 @@ async function submitForm(event, definition, button) {
   }
 }
 
-async function initialize() {
+async function loadLiffId() {
+  const response = await fetch("/api/v1/line/identity/runtime-config");
+  const result = await response.json();
+  if (!response.ok || !result.data?.liff_id) {
+    throw new Error("LIFF 尚未完成設定，請聯絡工會人員。");
+  }
+  return result.data.liff_id;
+}
+
+function readIdentityFlowContext() {
+  const parameters = new URLSearchParams(location.search);
+  const purpose = parameters.get("purpose") || "";
   const definition = definitions[purpose];
-  if (!flowId || !definition) throw new Error("連結無效，請回到 LINE 重新取得入口。");
+  flowId = parameters.get("flow_id") || "";
+  if (!flowId || !definition) {
+    throw new Error("連結無效，請回到 LINE 重新取得入口。");
+  }
+  return {definition, purpose};
+}
+
+async function initialize() {
+  const liffId = await loadLiffId();
+  await liff.init({liffId});
+  if (!liff.isLoggedIn()) { liff.login(); return; }
+  const {definition, purpose} = readIdentityFlowContext();
   document.getElementById("title").textContent = definition.title;
   document.getElementById("description").textContent = definition.description;
-  const configResponse = await fetch("/api/v1/line/identity/runtime-config");
-  const config = await configResponse.json();
-  if (!configResponse.ok || !config.data?.liff_id) throw new Error("LIFF 尚未完成設定，請聯絡工會人員。");
-  await liff.init({liffId: config.data.liff_id});
-  if (!liff.isLoggedIn()) { liff.login(); return; }
   idToken = liff.getIDToken() || "";
   if (!idToken) throw new Error("無法取得 LINE 登入憑證，請重新開啟此頁。");
-  buildForm(definition);
+  configureCustomerChoice(definition);
+  showIdentityEntry(definition, purpose);
 }
 
 initialize().catch(error => showMessage(error.message || "頁面初始化失敗。", true));

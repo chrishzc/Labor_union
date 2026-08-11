@@ -52,6 +52,12 @@ class MySqlLineIdentityRepository:
             row = optional_row(cursor.fetchone())
         return None if row is None else _identity_snapshot(row)
 
+    def list_bound_by_subject_type(self, subject_type):
+        with self._connection.cursor() as cursor:
+            cursor.execute(_IDENTITY_LIST_BOUND_SQL, (subject_type.value,))
+            rows = tuple(cursor.fetchall() or ())
+        return tuple(_identity_snapshot(row) for row in rows)
+
     # Kept cohesive because the row lock, transition, and event form one repository write.
     def save_claim(
         self,
@@ -534,6 +540,11 @@ _IDENTITY_SELECT_SQL = (
 _IDENTITY_SELECT_BY_SUBJECT_SQL = (
     _IDENTITY_SELECT_SQL.replace("WHERE line_user_id=%s", "WHERE subject_type=%s AND subject_reference=%s ")
     + "AND binding_status IN ('pending_review','bound') LIMIT 1"
+)
+_IDENTITY_LIST_BOUND_SQL = (
+    "SELECT line_user_id,binding_status,subject_type,subject_reference,"
+    "aggregate_version FROM line_identity_bindings "
+    "WHERE subject_type=%s AND binding_status='bound' ORDER BY line_user_id"
 )
 _IDENTITY_INSERT_SQL = (
     "INSERT INTO line_identity_bindings (line_user_id,binding_status,subject_type,"

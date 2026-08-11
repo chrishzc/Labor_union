@@ -380,44 +380,45 @@
 
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-    let currentLineUserId = "mock_line_user_id";
     let currentIdToken = "";
     let liffConfigRevision = "";
     let runtimePage = null;
+    const developmentLineUserId = new URLSearchParams(location.search).get("userId") || "";
 
     async function initializeLiff() {
         try {
-            // 1. 動態載入 LIFF 與外觀設定
             const configRes = await fetch('/api/config/liff/runtime?page=registration');
             if (!configRes.ok) throw new Error('無法取得 LIFF 頁面設定');
             const appConfig = await configRes.json();
             liffConfigRevision = appConfig.revision || '';
             runtimePage = appConfig.page;
             applyRuntime(appConfig);
-
-            // 2. 初始化 LIFF
-            const response = await fetch('/api/line/config');
-            const config = await response.json();
-            
-            if (config.liff_id && config.liff_id !== "your_liff_id_here") {
-                await liff.init({ liffId: config.liff_id });
-                if (liff.isLoggedIn()) {
-                    const profile = await liff.getProfile();
-                    currentLineUserId = profile.userId;
-                    currentIdToken = liff.getIDToken() || '';
-                } else {
-                    liff.login();
-                }
-            } else {
-                console.warn("LIFF ID未設定，使用 Mock ID");
-                const urlParams = new URLSearchParams(window.location.search);
-                if (urlParams.has('userId')) currentLineUserId = urlParams.get('userId');
-            }
+            const liffId = await loadLiffId();
+            await liff.init({liffId});
+            if (!liff.isLoggedIn()) { liff.login(); return; }
+            currentIdToken = liff.getIDToken() || '';
+            if (!currentIdToken) throw new Error('無法取得 LINE 登入憑證，請重新開啟此頁。');
         } catch (error) {
             console.error("初始化失敗", error);
-            const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.has('userId')) currentLineUserId = urlParams.get('userId');
+            showInitializationError(error);
         }
+    }
+
+    async function loadLiffId() {
+        const response = await fetch('/api/v1/line/identity/runtime-config');
+        const result = await response.json();
+        if (!response.ok || !result.data?.liff_id) throw new Error('LIFF 尚未完成設定。');
+        return result.data.liff_id;
+    }
+
+    function showInitializationError(error) {
+        const status = document.getElementById('statusMessage');
+        status.textContent = error.message || '頁面初始化失敗，請回到 LINE 重新開啟。';
+        status.className = 'status-message error';
+        status.style.display = 'block';
+        document.querySelectorAll('#registerForm input, #registerForm button').forEach(
+            control => control.disabled = true
+        );
     }
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -639,13 +640,13 @@
                 email: document.getElementById("email").value || "",
                 city: document.getElementById("city").value || "",
                 zip_code: document.getElementById("zip_code").value || "",
-                line_user_id: currentLineUserId,
                 line_id_token: currentIdToken,
+                development_line_user_id: developmentLineUserId,
                 liff_config_revision: liffConfigRevision,
                 survey_details: surveyDetails
             };
 
-            const response = await fetch('/api/line/register', {
+            const response = await fetch('/api/v1/line/identity/registration/apply', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -655,12 +656,12 @@
             
             loader.style.display = "none";
             
-            if (response.ok && result.status === "success") {
+            if (response.ok && result.data) {
                 document.getElementById("formHeader").style.display = "none";
                 document.getElementById("registerForm").style.display = "none";
                 document.getElementById("successCard").style.display = "block";
             } else {
-                statusMsg.textContent = result.message || result.detail || "發生未知錯誤，請重試。";
+                statusMsg.textContent = registrationErrorMessage(result);
                 statusMsg.className = "status-message error";
             }
         } catch (error) {
@@ -670,6 +671,12 @@
             statusMsg.className = "status-message error";
         }
     });
+
+    function registrationErrorMessage(result) {
+        if (typeof result.detail === 'string') return result.detail;
+        if (result.detail?.message) return result.detail.message;
+        return '發生未知錯誤，請重試。';
+    }
 </script>
 </body>
 </html>

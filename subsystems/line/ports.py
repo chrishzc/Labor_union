@@ -197,6 +197,11 @@ class LineRuntimeRepositoryPort(Protocol):
 class LineIdentityRepositoryPort(Protocol):
     def get(self, line_user_id: LineUserId) -> LineIdentityBindingSnapshot | None: ...
 
+    def list_bound_by_subject_type(
+        self,
+        subject_type: LineBindingSubjectType,
+    ) -> tuple[LineIdentityBindingSnapshot, ...]: ...
+
     def save_claim(
         self,
         claim: LineIdentityClaim,
@@ -341,6 +346,8 @@ class LineRichMenuPublicationRepositoryPort(Protocol):
         query: LineRichMenuPublicationQuery,
     ) -> tuple[LineRichMenuPublicationSnapshot, ...]: ...
 
+    def published_provider_menu_id(self, menu_definition_id: str) -> str | None: ...
+
     def queue(
         self,
         command: QueueLineRichMenuPublicationCommand,
@@ -411,7 +418,7 @@ class LineOutboxRepositoryPort(OutboxWriter, Protocol):
 
     def complete(self, command: CompleteLineOutboxCommand) -> None: ...
 
-    def next_due_at(self) -> datetime | None: ...
+    def next_due_at(self, intent_type: str = "line.media.archive") -> datetime | None: ...
 
 
 class LineAuditPort(Protocol):

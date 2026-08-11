@@ -13,6 +13,7 @@ class ClaimLineOutboxQuery:
     lease_owner: str
     now: datetime
     batch_size: int = 10
+    intent_type: str = "line.media.archive"
 
     def __post_init__(self) -> None:
         require_canonical_text(self.lease_owner, "LINE outbox lease owner", 191)
@@ -21,6 +22,7 @@ class ClaimLineOutboxQuery:
         require_positive_integer(self.batch_size, "LINE outbox batch size")
         if self.batch_size > 50:
             raise ValueError("LINE outbox batch size exceeds maximum")
+        require_canonical_text(self.intent_type, "LINE outbox intent type", 191)
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,12 +45,15 @@ class CompleteLineOutboxCommand:
     error_code: str | None = None
     error_message: str | None = None
     retry_after_seconds: int = 15
+    retryable: bool = True
 
     def __post_init__(self) -> None:
         if self.completed_at.tzinfo is None or self.completed_at.utcoffset() is None:
             raise ValueError("LINE outbox completion time must be timezone-aware")
         if self.retry_after_seconds < 0:
             raise ValueError("LINE outbox retry delay cannot be negative")
+        if not isinstance(self.retryable, bool):
+            raise TypeError("LINE outbox retryable flag must be boolean")
 
     @property
     def succeeded(self) -> bool:

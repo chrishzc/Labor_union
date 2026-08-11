@@ -60,6 +60,9 @@ scratch/
 # Local backups and generated database snapshots
 backups/
 
+# Personal presentation files
+*.pptx
+
 # Local test, coverage, type-check and runtime artifacts
 .pytest_cache/
 .coverage

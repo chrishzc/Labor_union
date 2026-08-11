@@ -19,8 +19,8 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 
 _STAFF_COMMAND = "我是月嫂"
-_ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號"}
-_CUSTOMER_COMMANDS = {"綁定", "查詢訂單"}
+_ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
+_CUSTOMER_COMMANDS = {"綁定", "綁定訂單", "我要綁定訂單", "查詢訂單", "訂單查詢"}
 
 
 class LineWebhookIdentityHandlers:

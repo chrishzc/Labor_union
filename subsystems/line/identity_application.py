@@ -38,6 +38,7 @@ from subsystems.line.identity_contracts import (
 )
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 from subsystems.line.review_contracts import CreateLineReviewCommand
+from subsystems.line.rich_menu_binding import schedule_rich_menu_binding
 
 
 class LineIdentityNotFoundError(LookupError):
@@ -325,6 +326,7 @@ def _bind_result(unit_of_work, line_user_id, candidate, correlation_id):
             line_user_id.value,
         )
     )
+    schedule_rich_menu_binding(unit_of_work, snapshot)
     status = (
         LineIdentityApplyStatus.EXISTING
         if snapshot.status is LineIdentityBindingStatus.BOUND

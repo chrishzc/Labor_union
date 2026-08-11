@@ -69,6 +69,13 @@ def get_line_wakeup_publisher():
     return _wakeup_publisher()
 
 
+def publish_line_wakeup_best_effort() -> None:
+    try:
+        get_line_wakeup_publisher().publish()
+    except Exception as error:
+        print(f"[LINE Runtime] Redis wake signal failed; DB fallback remains active: {error}")
+
+
 def _wakeup_publisher():
     redis_url = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0").strip()
     if redis_url:
@@ -111,5 +118,6 @@ __all__ = [
     "get_line_webhook_intake",
     "get_line_wakeup_publisher",
     "line_webhook_runtime_mode",
+    "publish_line_wakeup_best_effort",
     "record_line_webhook_security_receipt",
 ]

@@ -178,6 +178,29 @@ def test_existing_unbound_identity_is_updated_not_inserted() -> None:
     assert not any(sql.startswith("INSERT INTO line_identity_bindings ") for sql in statements)
 
 
+def test_identity_repository_lists_only_bound_subject_audience() -> None:
+    cursor = ScriptedCursor(
+        all_rows=(
+            (
+                {
+                    "line_user_id": "U-union",
+                    "binding_status": "bound",
+                    "subject_type": "admin",
+                    "subject_reference": "7",
+                    "aggregate_version": 1,
+                },
+            ),
+        )
+    )
+    repository = MySqlLineIdentityRepository(FakeConnection(cursor))
+
+    result = repository.list_bound_by_subject_type(LineBindingSubjectType.ADMIN)
+
+    assert result[0].line_user_id == LineUserId("U-union")
+    assert cursor.executed[0][1] == ("admin",)
+    assert "binding_status='bound'" in cursor.executed[0][0]
+
+
 def test_group_binding_idempotency_returns_before_current_state_validation() -> None:
     cursor = ScriptedCursor(
         one_rows=(

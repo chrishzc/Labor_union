@@ -72,7 +72,13 @@ def _publication_error(exc: Exception) -> None:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     if isinstance(exc, LineRichMenuNotFoundError):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if isinstance(exc, (RichMenuPublicationConflictError, RuntimeError)):
+    if isinstance(exc, RichMenuPublicationConflictError):
+        status_code = 401 if exc.code == "authenticated_admin_required" else 409
+        raise HTTPException(
+            status_code=status_code,
+            detail={"code": exc.code, "message": str(exc), "retryable": False},
+        ) from exc
+    if isinstance(exc, RuntimeError):
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if isinstance(exc, (MediaValidationError, ValueError)):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
