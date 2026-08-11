@@ -22,7 +22,7 @@
           "text_color": "#FFFFFF",
           "background_color": "#1E3A8A",
           "bounds": {"x": 0, "y": 0, "width": 1250, "height": 843},
-          "action": {"type": "uri", "uri_source": "liff", "uri": null, "text": null, "data": null}
+          "action": {"type": "uri", "uri_source": "liff", "uri": "?target=registration_entry&v=20260811", "text": null, "data": null}
         },
         {
           "id": "contact_staff",

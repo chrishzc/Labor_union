@@ -1139,6 +1139,12 @@ async def serve_gateway_page():
     """前導選擇頁面 (自動相容舊版 LIFF 設定)"""
     return FileResponse("line/static/gateway.html")
 
+
+@router.get("/line-identity")
+async def serve_retired_identity_entry_page():
+    """相容已發布 LIFF 舊入口；此分支仍以 gateway 作為服務登記入口。"""
+    return FileResponse("line/static/gateway.html")
+
 @router.get("/bind-page")
 async def serve_bind_page():
     """提供舊客查詢與綁定專用的路徑"""
@@ -1150,9 +1156,21 @@ async def serve_register_page():
     return FileResponse("line/static/register.html")
 
 
+@router.get("/api/static/register.html")
+async def serve_legacy_register_page():
+    """相容 LINE Developers 或 Rich Menu 曾使用的舊靜態表單路徑。"""
+    return FileResponse("line/static/register.html")
+
+
 @router.get("/profile-update-page")
 async def serve_profile_update_page():
     """客戶修改登記資料申請頁面。"""
+    return FileResponse("line/static/profile_update.html")
+
+
+@router.get("/api/static/profile_update.html")
+async def serve_legacy_profile_update_page():
+    """相容 LINE Developers 或 Rich Menu 曾使用的舊修改資料路徑。"""
     return FileResponse("line/static/profile_update.html")
 
 
