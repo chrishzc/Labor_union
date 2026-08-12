@@ -58,6 +58,9 @@ Typed errors：
 1. revoked 身分明確 link canonical current publication 的 `default_menu`，不依賴 legacy unlink 或 LINE 全域隱含狀態。
 2. `config/line_menu.json` 只提供 bootstrap source；既有環境由 MySQL `line_configuration_current` 指向的 revision 決定管理中心預設值。
 3. 舊「訂單查詢／尋找專員」只能在 current fingerprint 符合已知舊版時，以 expected revision 與 idempotent upgrade 追加新 revision，更新為「服務登記／服務說明」。人工已修改的 divergent revision 必須阻擋，不得覆蓋。
+4. 新解除請求的 publication root 必須指向 `line_rich_menu_publication_tasks`；
+   `line_rich_menu_publications` 只保留 stage 12 以前的 legacy 解除歷史參照，不得參與新請求的
+   default menu 選擇。既有 legacy request 必須保持可讀，且不得藉 migration 改寫其 provider receipt。
 
 ## 7. 管理 UI 與權限
 

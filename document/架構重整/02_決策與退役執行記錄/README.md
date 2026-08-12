@@ -36,10 +36,11 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 | [63_Global_Writer_Inventory_v3_Owner_Review_Work_Package.md](63_Global_Writer_Inventory_v3_Owner_Review_Work_Package.md) | work-package | `in-progress` | 347 筆 `needs_decision` writer identity 的唯一 active owner／transaction-boundary review queue。 |
 | [64 LINE Menu Command Canonical Replacement](64_LINE_Menu_Command_Canonical_Replacement_Work_Package.md) | work-package | `completed` | union menu 與 `esc` 已保留並改走 canonical identity gate、outbox 與 Rich Menu worker。 |
 | [65 LINE Ingress Canonical Cutover Completion](65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | completion-receipt | `completed` | runtime default 已切至 canonical；legacy 僅保留受控 rollback。 |
+| [66_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md](66_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md) | work-package | `completed-local-deployed` | 已修正身分解除仍讀 legacy Rich Menu publication 的 live-drift，並完成本機 stage 13、restart、health 與受影響帳號修正。 |
 
 > `29_` 原本被三份文件重複使用（無明確時間序，只能靠檔名區分），2026-08-07
 > 已重新編號為 `32`～`34`（依原檔名字母序指派，不代表已還原真實時間序）。
-> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `59`）。
+> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `66`）。
 
 > 注意：本表不是只保留字面上的 `in-progress`。仍需實作、等待 release／migration、保留人工操作
 > 邊界、缺少 completion evidence，或仍約束現行操作的文件都屬 active working set。已完成但尚與 active
