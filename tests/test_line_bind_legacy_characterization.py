@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
 from line import line_bot
 
 
@@ -50,7 +52,7 @@ class _Connection:
         return None
 
 
-def test_first_time_bind_does_not_create_an_order(monkeypatch):
+def test_legacy_first_time_bind_is_retired_in_canonical_runtime(monkeypatch):
     connection = _Connection()
     monkeypatch.setattr(line_bot, "get_db_connection", lambda: connection)
     monkeypatch.setattr(line_bot, "wake_worker", lambda: None)
@@ -59,8 +61,8 @@ def test_first_time_bind_does_not_create_an_order(monkeypatch):
         "_trusted_line_user_id",
         lambda *_: asyncio.sleep(0, result="U-client"),
     )
-    result = asyncio.run(
-        line_bot.line_bind(
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(line_bot.line_bind(
             SimpleNamespace(
                 name="王小美",
                 phone="0912-345-678",
@@ -68,12 +70,10 @@ def test_first_time_bind_does_not_create_an_order(monkeypatch):
                 line_id_token="signed-token",
                 force_rebind=False,
             )
-        )
-    )
+        ))
 
-    statements = [statement for statement, _ in connection.cursor_instance.statements]
-    assert result["status"] == "success"
-    assert any("UPDATE clients SET line_user_id = %s WHERE id = %s" in statement for statement in statements)
-    assert any("INSERT IGNORE INTO line_tasks" in statement for statement in statements)
-    assert not any("INSERT INTO orders" in statement for statement in statements)
-    assert connection.commits == 1
+    assert exc_info.value.status_code == 410
+    assert exc_info.value.detail["code"] == "legacy_line_route_retired"
+    assert exc_info.value.detail["replacement"] == "/api/v1/line/identity/customer/apply"
+    assert connection.cursor_instance.statements == []
+    assert connection.commits == 0

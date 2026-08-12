@@ -15,9 +15,6 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
-REHEARSAL_INTERNAL_API_KEY = "preserve-rehearsal-only"
-
-
 class RehearsalRuntimeError(RuntimeError):
     """A candidate-only runtime target did not become safely readable."""
 
@@ -179,12 +176,15 @@ def _runtime_environment(database_environment):
         {
             "APP_ENV": "test",
             "ENABLE_ADMIN_AUTH": "false",
-            "INTERNAL_API_KEY": REHEARSAL_INTERNAL_API_KEY,
             "PRESERVE_DATA_REHEARSAL_READ_ONLY": "true",
             "PYTHONUTF8": "1",
         }
     )
     return environment
+
+
+def _read_smoke_headers():
+    return {}
 
 
 def _require_no_active_jobs(database_config, candidate_database):
@@ -210,10 +210,6 @@ def _wait_for_http(url, process, timeout_seconds):
         except (URLError, HTTPError):
             time.sleep(0.2)
     raise RehearsalRuntimeError(f"runtime did not become readable: {url}")
-
-
-def _read_smoke_headers():
-    return {"X-Internal-API-Key": REHEARSAL_INTERNAL_API_KEY}
 
 
 def _read_http(url, headers=None, accepted_statuses=frozenset({200})):

@@ -58,6 +58,7 @@ scratch/
 .agents/
 .codex/
 .monitor_state/
+graphify-out/
 
 # Local backups and generated database snapshots
 backups/

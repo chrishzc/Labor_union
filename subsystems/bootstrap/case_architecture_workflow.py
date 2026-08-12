@@ -144,7 +144,7 @@ class CaseArchitectureBootstrapWorkflow:
         return receipt
 
     def _persist_candidate(self, command: EnsureCaseArchitectureBootstrap, candidate: CaseArchitectureBootstrapCandidate) -> int:
-        if candidate.mutation is BootstrapMutation.CREATE:
+        if candidate.mutation is not BootstrapMutation.KEEP_EXISTING:
             return self._repository.create_bootstrap(command, candidate)
         return self._repository.existing_bootstrap_event_id(candidate.case_no)
 

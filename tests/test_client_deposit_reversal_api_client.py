@@ -57,7 +57,7 @@ def test_deposit_reversal_client_carries_preview_version_and_apply_identity():
     )
     client = ClientDepositReversalApiClient(
         base_url="https://api.example",
-        headers={"X-Internal-API-Key": "test"},
+        headers={"X-Legacy-Shared-Key": "test"},
         session=session,
     )
 

@@ -129,7 +129,7 @@ def test_main_rolls_back_closes_and_propagates_schema_part_failure(monkeypatch, 
     monkeypatch.setattr(init_db, "load_schema_parts", fail_schema_part)
 
     with pytest.raises(RuntimeError, match="60_broken.sql"):
-        init_db.main()
+        init_db.main(["--allow-drop"])
 
     output = capsys.readouterr().out
     assert connection.rollbacks == 1

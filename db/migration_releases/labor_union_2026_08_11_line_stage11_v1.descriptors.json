@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "166_customer_service_runtime.sql": {
+    "185_customer_service_runtime.sql": {
       "tables": {
         "customer_service_tickets": [
           "id",

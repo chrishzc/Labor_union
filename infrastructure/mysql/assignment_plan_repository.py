@@ -42,6 +42,80 @@ from .scheduling_replacement_writer import persist_scheduling_replacement
 _COMMAND_FAMILY = "scheduling_assignment_plan"
 
 
+def _require_schedule_confirmation_gate(
+    cursor,
+    case_no: str,
+    intent: AssignmentPlanIntent,
+    *,
+    lock: bool = False,
+) -> None:
+    lock_clause = " FOR UPDATE" if lock else ""
+    cursor.execute(
+        "SELECT s.id FROM matching_schedule_snapshots s "
+        "JOIN confirmed_service_date_versions v ON v.id=s.confirmed_version_id "
+        "WHERE s.case_no=%s AND s.current_marker=1 AND s.status='sent' AND v.is_current=1"
+        + lock_clause,
+        (case_no,),
+    )
+    snapshot = cursor.fetchone()
+    if not snapshot:
+        raise ValueError("matching_schedule_confirmation_required")
+    required_segments = _matching_schedule_segments(cursor, snapshot["id"], intent)
+    if required_segments is None:
+        raise ValueError("matching_schedule_confirmation_required_for_target_segments")
+    if not _confirmed_schedule_recipients(cursor, snapshot["id"], required_segments):
+        raise ValueError("matching_schedule_two_party_confirmation_required")
+
+
+def _matching_schedule_segments(cursor, snapshot_id, intent):
+    requested = {
+        (
+            segment.staff_id,
+            segment.assigned_start_date,
+            segment.assigned_end_date,
+        )
+        for segment in intent.segments
+    }
+    if not requested:
+        return None
+    cursor.execute(
+        "SELECT r.segment_id,p.staff_id,p.assigned_start_date,p.assigned_end_date "
+        "FROM matching_schedule_recipient_snapshots r "
+        "JOIN caregiver_matching_plan_segments p ON p.id=r.segment_id "
+        "WHERE r.parent_snapshot_id=%s AND r.audience_type='caregiver'",
+        (snapshot_id,),
+    )
+    segment_by_identity = {
+        (row["staff_id"], row["assigned_start_date"], row["assigned_end_date"]): row["segment_id"]
+        for row in cursor.fetchall()
+    }
+    if not requested.issubset(segment_by_identity):
+        return None
+    return tuple(segment_by_identity[identity] for identity in requested)
+
+
+def _confirmed_schedule_recipients(cursor, snapshot_id, segment_ids):
+    placeholders = ",".join("%s" for _ in segment_ids)
+    cursor.execute(
+        "SELECT COUNT(*) total,"
+        "SUM(CASE WHEN latest.confirmation_value IN ('confirmed','manually_confirmed') THEN 1 ELSE 0 END) confirmed "
+        "FROM matching_schedule_recipient_snapshots r "
+        "LEFT JOIN matching_schedule_confirmation_events latest "
+        "ON latest.id=(SELECT e.id FROM matching_schedule_confirmation_events e "
+        "WHERE e.recipient_snapshot_id=r.id ORDER BY e.occurred_at_utc DESC,e.id DESC LIMIT 1) "
+        "WHERE r.parent_snapshot_id=%s AND (r.audience_type='customer' OR r.segment_id IN ("
+        + placeholders
+        + "))",
+        (snapshot_id, *segment_ids),
+    )
+    counts = cursor.fetchone() or {}
+    expected_count = len(segment_ids) + 1
+    return (
+        int(counts.get("total") or 0) == expected_count
+        and int(counts.get("confirmed") or 0) == expected_count
+    )
+
+
 class MySqlAssignmentPlanRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -57,6 +131,7 @@ class MySqlAssignmentPlanRepository:
         intent: AssignmentPlanIntent,
     ) -> AssignmentPlanWorkflowFacts:
         with self._connection.cursor() as cursor:
+            _require_schedule_confirmation_gate(cursor, case_no, intent)
             source = load_preview_facts(cursor, case_no)
             case_staff_ids = preflight_staff_ids(cursor, case_no)
             staff_ids = tuple(
@@ -101,6 +176,12 @@ class MySqlAssignmentPlanRepository:
 
         with self._connection.cursor() as cursor:
             ensure_scheduling_aggregate(cursor, request.case_no)
+            _require_schedule_confirmation_gate(
+                cursor,
+                request.case_no,
+                request.intent,
+                lock=True,
+            )
             source = load_locked_facts(
                 cursor,
                 request.case_no,

@@ -15,8 +15,8 @@
   "input_digests": {
     "scenario_fixture": "d7ddde0bd289244de68a18c20f9e273cdde211e67494b4fe5c44fe161f7fd632",
     "expected_manifest": "d7211148c9eea51cce4f27077dfbfb578cfa350ccd60acf6419787bf8660769e",
-    "workflow_tests": "7c0838eeafa00b180e2c610629906dbb98fee9919ef5d0af9d90c0236ff8bc6b",
-    "source_tests": "23b302614d17103886e4cf892dec07b7d25538c6b1f09bb65b2374e1476531c5",
+    "workflow_tests": "77e16be75001fdb3ff3f46af8b9968c81e3cb2dca31f6eaa40f9d2ad5ba424b7",
+    "source_tests": "4eb5ab70f2299b1bc84e3198fe7f077b3646bebbe52c10dcef20dc667fbd9e21",
     "api_client_tests": "a162f603e7a42a8717a31a65d9092776ab7bc78038bda9e49546b7f8a705f303"
   },
   "input_paths": {

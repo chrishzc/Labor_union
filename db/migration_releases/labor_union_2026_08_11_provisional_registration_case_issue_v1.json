@@ -15,8 +15,8 @@
   },
   "artifacts": [
     {
-      "name": "165_provisional_registration_case_issue.sql",
-      "relative_path": "db/schema_parts/165_provisional_registration_case_issue.sql",
+      "name": "184_provisional_registration_case_issue.sql",
+      "relative_path": "db/schema_parts/184_provisional_registration_case_issue.sql",
       "dependencies": [
         "129_case_import.sql",
         "146_provisional_client_registrations.sql"

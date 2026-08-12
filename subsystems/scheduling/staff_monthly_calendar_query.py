@@ -7,7 +7,7 @@
 
 from typing import Dict, Any, List
 from calendar import monthrange
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from infrastructure.mysql.mysql_adapter import get_connection
 
 
@@ -33,7 +33,7 @@ def _coerce_bool(value: Any) -> bool:
 
 
 def _priority_status(status: str) -> int:
-    return {"red": 3, "green": 2, "yellow": 1}.get(status, 0)
+    return {"red": 3, "green": 2, "yellow": 1, "historical": 1}.get(status, 0)
 
 def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) -> Dict[str, Any]:
     """
@@ -77,6 +77,7 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
                 JOIN staff s ON csa.staff_id = s.id
                 WHERE csa.staff_id = %s
                   AND ss.assignment_id IS NOT NULL
+                  AND (csa.status IS NULL OR csa.status <> 'cancelled')
                   AND ss.work_date BETWEEN %s AND %s
                 ORDER BY ss.work_date, ss.id
             """, (staff_id, month_start, month_end))
@@ -123,6 +124,58 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
                     current["status"] == day_status and current.get("assignment_id") is None and assignment_id is not None
                 ):
                     schedule_map[day] = candidate
+
+            # Completed legacy cases may retain an assignment interval without
+            # assignment-owned daily schedule rows. Show that immutable history
+            # without claiming its days are current service ownership.
+            cursor.execute(
+                """
+                SELECT csa.id AS assignment_id,csa.case_no,csa.staff_id,
+                       csa.assigned_start_date,csa.assigned_end_date,
+                       c.name AS client_name,o.status AS order_status,s.name AS staff_name
+                FROM case_staff_assignments csa
+                JOIN orders o ON o.case_no=csa.case_no
+                JOIN clients c ON c.id=o.client_id
+                JOIN staff s ON s.id=csa.staff_id
+                WHERE csa.staff_id=%s AND csa.status='completed'
+                  AND csa.assigned_start_date<=%s AND csa.assigned_end_date>=%s
+                ORDER BY csa.assigned_start_date,csa.id
+                """,
+                (staff_id, month_end, month_start),
+            )
+            for row in cursor.fetchall():
+                assigned_start = _as_date(row["assigned_start_date"])
+                assigned_end = _as_date(row["assigned_end_date"])
+                if assigned_start is None or assigned_end is None:
+                    continue
+                start = max(assigned_start, month_start)
+                end = min(assigned_end, month_end)
+                while start <= end:
+                    day = start.day
+                    if not grouped_rows.get(day):
+                        item = {
+                            "work_date": start.strftime("%Y-%m-%d"),
+                            "status": "historical_assignment",
+                            "assignment_id": row["assignment_id"],
+                            "case_no": row["case_no"],
+                            "staff_id": row["staff_id"],
+                            "client_name": row["client_name"],
+                            "order_status": row["order_status"],
+                            "staff_name": row["staff_name"],
+                            "is_work_day": False,
+                            "is_double_pay": False,
+                            "notes": "歷史正式指派區段",
+                        }
+                        grouped_rows[day] = [item]
+                        schedule_map[day] = {
+                            "status": "historical",
+                            "case_no": row["case_no"],
+                            "client_name": row["client_name"],
+                            "is_work_day": False,
+                            "is_double_pay": False,
+                            "assignment_id": row["assignment_id"],
+                        }
+                    start += timedelta(days=1)
 
             cursor.execute(
                 """
@@ -185,7 +238,6 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
                     }
 
             # 補齊正式排班完工後的 7 天緩衝期
-            from datetime import timedelta
             cursor.execute(
                 """
                 SELECT
@@ -282,4 +334,3 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
         }
     finally:
         conn.close()
-

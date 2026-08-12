@@ -171,7 +171,7 @@ class _IdentityFlows:
 
 
 def test_first_release_schema_has_versioned_ticket_and_append_only_events():
-    schema = (PROJECT_ROOT / "db/schema_parts/166_customer_service_runtime.sql").read_text(encoding="utf-8")
+    schema = (PROJECT_ROOT / "db/schema_parts/185_customer_service_runtime.sql").read_text(encoding="utf-8")
     assert "version BIGINT NOT NULL" in schema
     assert "customer_service_ticket_events" in schema
     assert "UNIQUE KEY uq_customer_service_event_key" in schema
@@ -194,7 +194,7 @@ def test_stage11_manifest_is_accepted_by_the_canonical_loader():
     )
     manifest = load_migration_release_manifest(path, PROJECT_ROOT)
     artifact_names = [item.artifact.name for item in manifest.schema_artifacts]
-    assert artifact_names == ["166_customer_service_runtime.sql"]
+    assert artifact_names == ["185_customer_service_runtime.sql"]
 
 
 def test_customer_context_uses_canonical_identity_binding_ssot():

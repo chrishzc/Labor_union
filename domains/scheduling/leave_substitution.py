@@ -138,6 +138,7 @@ class _ServiceOwner:
 def build_leave_substitution_candidate(
     facts: LeaveSubstitutionFacts,
     intent: LeaveSubstitutionBatchIntent,
+    holiday_rest_dates: tuple[date, ...] = (),
 ) -> LeaveSubstitutionCandidate:
     if facts.service_data_locked:
         raise LeaveSubstitutionDomainError(
@@ -145,7 +146,12 @@ def build_leave_substitution_candidate(
             "service data is permanently locked",
         )
     selected = _selected_schedule_facts(facts, intent)
-    transformed = _transform_service_ownership(facts, intent, selected)
+    transformed = _transform_service_ownership(
+        facts,
+        intent,
+        selected,
+        _canonical_holiday_rest_dates(holiday_rest_dates),
+    )
     assignments = _build_assignments(facts, intent, transformed)
     buffers = _build_buffers(assignments, facts.assignment_plan.service_started)
     _validate_external_occupancy(
@@ -183,8 +189,8 @@ def _validate_resolution(item: LeaveSubstitutionItem) -> None:
 
 
 def _validate_batch_items(items: tuple[LeaveSubstitutionItem, ...]) -> None:
-    if not isinstance(items, tuple) or not items:
-        _raise_invalid("leave batch requires at least one item")
+    if not isinstance(items, tuple):
+        _raise_invalid("leave batch items must be a tuple")
     if any(not isinstance(item, LeaveSubstitutionItem) for item in items):
         raise TypeError("leave batch contains an invalid item")
     ordered = tuple(sorted(items, key=lambda item: (item.work_date, item.original_schedule_id)))
@@ -250,6 +256,7 @@ def _transform_service_ownership(
     facts: LeaveSubstitutionFacts,
     intent: LeaveSubstitutionBatchIntent,
     selected: dict[date, OfficialScheduleFact],
+    holiday_rest_dates: tuple[date, ...],
 ) -> tuple[_ServiceOwner, ...]:
     intent_by_date = {item.work_date: item for item in intent.items}
     deferred_dates = tuple(
@@ -257,12 +264,48 @@ def _transform_service_ownership(
         for item in intent.items
         if item.resolution_type is LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS
     )
-    transformed = tuple(
-        _transform_service_row(row, intent_by_date.get(row.work_date), deferred_dates)
-        for row in facts.official_schedules
-    )
+    transformed = []
+    previous_service_date = None
+    for row in facts.official_schedules:
+        base_date = row.work_date + timedelta(
+            days=sum(deferred_date <= row.work_date for deferred_date in deferred_dates)
+        )
+        service_date = _next_service_date(
+            base_date,
+            previous_service_date,
+            holiday_rest_dates,
+        )
+        item = intent_by_date.get(row.work_date)
+        transformed.append(
+            _ServiceOwner(
+                service_date,
+                row.staff_id if item is None or item.resolution_type is not LeaveResolutionType.SUBSTITUTE else item.substitute_staff_id,
+                row.assignment_id,
+                row.schedule_id,
+                row.is_double_pay if item is None or item.resolution_type is not LeaveResolutionType.SUBSTITUTE else item.is_double_pay,
+            )
+        )
+        previous_service_date = service_date
+    transformed = tuple(transformed)
     _validate_transformed_service_rows(facts, transformed, selected)
     return transformed
+
+
+def _canonical_holiday_rest_dates(values: tuple[date, ...]) -> tuple[date, ...]:
+    if not isinstance(values, tuple) or any(not isinstance(value, date) for value in values):
+        raise TypeError("holiday rest dates must be a tuple of dates")
+    if values != tuple(sorted(set(values))):
+        raise ValueError("holiday rest dates must be canonically ordered")
+    return values
+
+
+def _next_service_date(base_date, previous_service_date, holiday_rest_dates):
+    service_date = base_date
+    if previous_service_date is not None:
+        service_date = max(service_date, previous_service_date + timedelta(days=1))
+    while service_date in holiday_rest_dates:
+        service_date += timedelta(days=1)
+    return service_date
 
 
 # One row owns the defer offset and substitution ownership decision together.
@@ -354,20 +397,13 @@ def _build_source_assignment(
 ) -> AssignmentCandidate:
     if assignment.assigned_start_date is None or assignment.assigned_end_date is None:
         _raise_assignment("effective assignment interval is incomplete")
-    deferred_dates = _deferred_dates(intent)
-    start_offset = sum(
-        value < assignment.assigned_start_date for value in deferred_dates
-    )
-    end_offset = sum(
-        value <= assignment.assigned_end_date for value in deferred_dates
-    )
     return AssignmentCandidate(
         candidate_key="pending-sequence",
         source_assignment_id=assignment.assignment_id,
         staff_id=assignment.staff_id,
         sequence=1,
-        assigned_start_date=assignment.assigned_start_date + timedelta(days=start_offset),
-        assigned_end_date=assignment.assigned_end_date + timedelta(days=end_offset),
+        assigned_start_date=min(row.service_date for row in rows),
+        assigned_end_date=max(row.service_date for row in rows),
         service_dates=tuple(row.service_date for row in rows),
         actual_hours=len(rows) * facts.assignment_plan.service_hours_per_day,
         lineage_source_assignment_ids=(assignment.assignment_id,),

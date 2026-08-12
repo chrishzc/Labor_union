@@ -9,7 +9,6 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from api.dependencies.admin_auth import (
     get_bearer_token,
     require_admin,
-    require_internal_service,
 )
 from api.schemas.admin_auth import (
     AdminLoginRequest,
@@ -40,7 +39,6 @@ def _client_ip(request: Request) -> str | None:
 async def login(
     payload: AdminLoginRequest,
     request: Request,
-    _: None = Depends(require_internal_service),
 ):
     result = await _authenticate(payload)
     if result is None:

@@ -26,6 +26,50 @@ class LeaveSubstitutionOutcomeView(BaseModel):
     is_double_pay: bool
 
 
+class LeaveCalendarDayView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    calendar_date: date
+    before_kind: str
+    after_kind: str
+    change_kind: str
+    before_staff_id: int | None
+    after_staff_id: int | None
+
+
+class LeaveCalendarCandidateView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    before_service_day_count: int = Field(ge=0)
+    after_service_day_count: int = Field(ge=0)
+    before_service_start_date: date | None
+    before_service_end_date: date | None
+    after_service_start_date: date | None
+    after_service_end_date: date | None
+    contracted_service_day_count: int = Field(ge=0)
+    deferred_day_count: int = Field(ge=0)
+    substitute_day_count: int = Field(ge=0)
+    leave_day_count: int = Field(ge=0)
+    holiday_rest_day_count: int = Field(ge=0)
+    fixed_rest_day_count: int = Field(ge=0)
+    holiday_version: str = Field(min_length=1)
+    holiday_rows: list[tuple[date, str]]
+    conservation_status: str
+    day_cells: list[LeaveCalendarDayView]
+
+
+class LeaveApplyReadinessView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: str
+    blockers: list[str]
+
+
+class LeaveAssignmentSummaryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    assignment_id: int = Field(gt=0)
+    staff_id: int = Field(gt=0)
+    assigned_start_date: date
+    assigned_end_date: date
+
+
 class LeaveSubstitutionPreviewView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -41,6 +85,8 @@ class LeaveSubstitutionPreviewView(BaseModel):
     client_finance_impact: dict[str, Any]
     payroll_impact: dict[str, Any]
     orders_impact: dict[str, Any]
+    calendar_candidate: LeaveCalendarCandidateView
+    apply_readiness: LeaveApplyReadinessView
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

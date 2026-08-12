@@ -278,7 +278,7 @@ system map 都不具現行 authority。
 - `document/文件整併工作區` 保留為來源與追溯，不再使用 ADAD 授權語彙。
 - `system_map*.md`／`system_map*.yaml` 只供歷史比對。
 - `start_fastapi_ngrok.py` 只屬 development。
-- `online.bat`／`start.bat` 是本機開發 launcher，不得用於 production deployment，也不構成
+- `online.bat`／`online.sh`／`start.bat` 是本機開發 launcher，不得用於 production deployment，也不構成
   deployment SSOT。
 - `04_部署架構_無損合併稿.md` 的方案比較保留，但本文件的 logical topology、
   profile recommended-candidate 與人工選擇規則優先。
@@ -335,6 +335,7 @@ history、validation assets、release artifacts 或 current recovery evidence。
 - `README.md`
 - `start.bat`
 - `online.bat`
+- `online.sh`
 - `start_fastapi_ngrok.py`
 - `scripts/bootstrap_admin_dev_env.ps1`
 - `../04_已完成與上線封存/release_records/53_Deployment_Profile_and_Target_Host_Acceptance_Retirement.md`

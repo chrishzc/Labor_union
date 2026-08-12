@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import timedelta
 from enum import Enum
 from typing import Callable, Protocol
 
@@ -12,6 +13,11 @@ from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersio
 from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_canonical_text
 from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanPersistenceContext, AssignmentPlanWorkflowFacts, VersionedImpactCandidate
+from subsystems.scheduling.holiday_calendar_query import (
+    HolidayCalendarFacts,
+    HolidayCalendarUnavailable,
+    SchedulingHolidayQuery,
+)
 
 _CASE_NUMBER_MAXIMUM_LENGTH = 50
 _REASON_MAXIMUM_LENGTH = 500
@@ -19,11 +25,17 @@ _REASON_MAXIMUM_LENGTH = 500
 
 @dataclass(frozen=True, slots=True)
 class LeaveSubstitutionWorkflowFacts:
-    impact_facts: AssignmentPlanWorkflowFacts
+    impact_facts: AssignmentPlanWorkflowFacts | None
     official_schedules: tuple
+    preview_blockers: tuple[str, ...] = ()
+    scheduling_facts: LeaveSubstitutionFacts | None = None
 
     @property
     def leave_facts(self) -> LeaveSubstitutionFacts:
+        if self.scheduling_facts is not None:
+            return self.scheduling_facts
+        if self.impact_facts is None:
+            raise ValueError("leave_preview_facts_missing")
         return LeaveSubstitutionFacts(self.impact_facts.assignment_plan, self.official_schedules, self.impact_facts.lifecycle.service_data_locked)
 
 
@@ -52,6 +64,36 @@ class LeaveSubstitutionApplyRequest:
 class LeaveSubstitutionPreview:
     candidate: LeaveSubstitutionCandidate; client_finance_impact: VersionedImpactCandidate; payroll_impact: VersionedImpactCandidate; orders_impact: VersionedImpactCandidate
     order_version: int; scheduling_version: int; client_finance_version: int; payroll_version: int; fingerprint: PreviewFingerprint
+    calendar_candidate: "LeaveCalendarCandidate"; apply_readiness: "LeaveApplyReadiness"
+
+
+@dataclass(frozen=True, slots=True)
+class LeaveCalendarDay:
+    calendar_date: str; before_kind: str; after_kind: str; change_kind: str
+    before_staff_id: int | None; after_staff_id: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class LeaveCalendarCandidate:
+    before_service_day_count: int; after_service_day_count: int
+    before_service_start_date: str | None; before_service_end_date: str | None
+    after_service_start_date: str | None; after_service_end_date: str | None
+    contracted_service_day_count: int; deferred_day_count: int; substitute_day_count: int; leave_day_count: int
+    holiday_rest_day_count: int; fixed_rest_day_count: int; holiday_version: str; holiday_rows: tuple[tuple[str, str], ...]
+    conservation_status: str; day_cells: tuple[LeaveCalendarDay, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class LeaveApplyReadiness:
+    status: str; blockers: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class BlockedLeaveImpact:
+    expected_version: int
+    resulting_version: int
+    fingerprint: PreviewFingerprint
+    blockers: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,11 +158,11 @@ class LeaveSubstitutionWorkflowError(Exception):
 
 
 class LeaveSubstitutionWorkflow:
-    def __init__(self, repository: LeaveSubstitutionRepository, client_finance_port: LeaveClientFinanceImpactPort, payroll_port: LeavePayrollImpactPort, orders_port: LeaveOrdersImpactPort, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
-        self._repository = repository; self._client_finance_port = client_finance_port; self._payroll_port = payroll_port; self._orders_port = orders_port; self._unit_of_work_factory = unit_of_work_factory
+    def __init__(self, repository: LeaveSubstitutionRepository, client_finance_port: LeaveClientFinanceImpactPort, payroll_port: LeavePayrollImpactPort, orders_port: LeaveOrdersImpactPort, holiday_query: SchedulingHolidayQuery, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
+        self._repository = repository; self._client_finance_port = client_finance_port; self._payroll_port = payroll_port; self._orders_port = orders_port; self._holiday_query = holiday_query; self._unit_of_work_factory = unit_of_work_factory
 
     def preview(self, request: LeaveSubstitutionPreviewRequest) -> LeaveSubstitutionPreview:
-        return self._build_preview(self._repository.load_for_preview(request.case_no, request.intent), request.intent, request.correlation_id)
+        return self._build_preview(self._repository.load_for_preview(request.case_no, request.intent), request.intent, request.correlation_id, lock_holidays=False)
 
     def apply(self, request: LeaveSubstitutionApplyRequest) -> LeaveSubstitutionReceipt:
         try: return self._apply_transaction(request)
@@ -139,22 +181,63 @@ class LeaveSubstitutionWorkflow:
 
     def _apply_fresh(self, request, command_fingerprint, preflight, facts):
         _validate_locked_staff_set(request, facts, preflight); _validate_expected_versions(request, facts.leave_facts)
-        preview = self._build_preview(facts, request.intent, request.correlation_id); _validate_preview_fingerprint(request, preview)
+        preview = self._build_preview(facts, request.intent, request.correlation_id, lock_holidays=True); _validate_preview_fingerprint(request, preview)
+        _raise_if_impacts_blocked(request.correlation_id, preview.client_finance_impact, preview.payroll_impact, preview.orders_impact)
         return self._persist(request, preview, command_fingerprint)
 
-    def _build_preview(self, facts, intent, correlation_id):
-        candidate = _build_domain_candidate(facts, intent, correlation_id)
-        client_finance, payroll, orders = self._build_impacts(facts.impact_facts, candidate, correlation_id)
-        _raise_if_impacts_blocked(correlation_id, client_finance, payroll, orders)
-        return _preview_result(facts.leave_facts, candidate, client_finance, payroll, orders)
+    def _build_preview(self, facts, intent, correlation_id, *, lock_holidays):
+        try:
+            holiday_facts = _query_holiday_facts(
+                facts.leave_facts,
+                intent,
+                self._holiday_query,
+                lock_holidays,
+            )
+        except HolidayCalendarUnavailable as error:
+            raise _workflow_error(
+                correlation_id,
+                ErrorCategory.UNAVAILABLE,
+                "holiday_calendar_unavailable",
+                "The canonical holiday calendar is unavailable.",
+            ) from error
+        candidate = _build_domain_candidate(
+            facts,
+            intent,
+            correlation_id,
+            tuple(item.holiday_date for item in holiday_facts.holidays),
+        )
+        calendar_candidate = _calendar_candidate(
+            facts.leave_facts,
+            candidate,
+            holiday_facts,
+        )
+        client_finance, payroll, orders = self._build_impacts(facts, candidate, correlation_id)
+        return _preview_result(facts.leave_facts, candidate, client_finance, payroll, orders, calendar_candidate)
 
     def _build_impacts(self, facts, candidate, correlation_id):
-        try:
-            client_finance = self._client_finance_port.preview_leave_substitution(facts, candidate.scheduling)
-            payroll = self._payroll_port.preview_leave_substitution(facts, candidate.scheduling)
-            orders = self._orders_port.preview_leave_substitution(facts, candidate.scheduling, client_finance)
-            return client_finance, payroll, orders
-        except ValueError as exception: raise _impact_workflow_error(correlation_id, exception) from exception
+        if facts.impact_facts is None:
+            blocked = tuple(_blocked_impact(code) for code in facts.preview_blockers)
+            return blocked[0], blocked[0], blocked[0]
+        client_finance = _preview_impact(
+            lambda: self._client_finance_port.preview_leave_substitution(
+                facts.impact_facts,
+                candidate.scheduling,
+            )
+        )
+        payroll = _preview_impact(
+            lambda: self._payroll_port.preview_leave_substitution(
+                facts.impact_facts,
+                candidate.scheduling,
+            )
+        )
+        orders = _preview_impact(
+            lambda: self._orders_port.preview_leave_substitution(
+                facts.impact_facts,
+                candidate.scheduling,
+                client_finance,
+            )
+        )
+        return client_finance, payroll, orders
 
     def _persist(self, request, preview, command_fingerprint):
         context = AssignmentPlanPersistenceContext(request.idempotency_key, request.actor, request.reason, request.correlation_id, preview.fingerprint, command_fingerprint, preview.order_version, ())
@@ -168,16 +251,96 @@ class LeaveSubstitutionWorkflow:
         return receipt
 
 
-def _build_domain_candidate(facts, intent, correlation_id):
-    try: return build_leave_substitution_candidate(facts.leave_facts, intent)
+def _build_domain_candidate(facts, intent, correlation_id, holiday_rest_dates=()):
+    try: return build_leave_substitution_candidate(facts.leave_facts, intent, holiday_rest_dates)
     except LeaveSubstitutionDomainError as exception: raise _domain_workflow_error(correlation_id, exception) from exception
-def _preview_result(facts, candidate, client_finance, payroll, orders): return LeaveSubstitutionPreview(candidate, client_finance, payroll, orders, facts.assignment_plan.order_version, facts.assignment_plan.scheduling_version, facts.assignment_plan.client_finance_version, facts.assignment_plan.payroll_version, fingerprint_payload({"leave":candidate.fingerprint.value,"client_finance":client_finance.fingerprint.value,"payroll":payroll.fingerprint.value,"orders":orders.fingerprint.value}))
+def _preview_result(facts, candidate, client_finance, payroll, orders, calendar_candidate):
+    blockers = tuple(sorted(set(item for impact in (client_finance, payroll, orders) for item in impact.blockers)))
+    return LeaveSubstitutionPreview(candidate, client_finance, payroll, orders, facts.assignment_plan.order_version, facts.assignment_plan.scheduling_version, facts.assignment_plan.client_finance_version, facts.assignment_plan.payroll_version, fingerprint_payload({"leave":candidate.fingerprint.value,"client_finance":client_finance.fingerprint.value,"payroll":payroll.fingerprint.value,"orders":orders.fingerprint.value,"holiday_version":calendar_candidate.holiday_version}), calendar_candidate, LeaveApplyReadiness("blocked" if blockers else "ready", blockers))
+
+
+def _blocked_impact(blocker):
+    return BlockedLeaveImpact(
+        0,
+        0,
+        fingerprint_payload({"leave_preview_blocker": blocker}),
+        (blocker,),
+    )
+
+
+def _calendar_candidate(facts, candidate, holiday_facts):
+    before = {item.work_date: item.staff_id for item in facts.official_schedules}
+    after = {service_date: assignment.staff_id for assignment in candidate.scheduling.assignments for service_date in assignment.service_dates}
+    outcomes = {item.original_work_date: item for item in candidate.outcomes}
+    cells = []
+    for calendar_date in sorted(set(before) | set(after)):
+        outcome = outcomes.get(calendar_date)
+        change = "unchanged"
+        if outcome is not None:
+            change = "substitute" if outcome.resolution_type.value == "substitute" else "deferred_from"
+        elif calendar_date not in before:
+            change = "deferred_to"
+        cells.append(LeaveCalendarDay(calendar_date.isoformat(), "service" if calendar_date in before else "none", "service" if calendar_date in after else "none", change, before.get(calendar_date), after.get(calendar_date)))
+    service_dates = tuple(sorted(set(before) | set(after)))
+    holidays = tuple(
+        item
+        for item in holiday_facts.holidays
+        if min(service_dates) <= item.holiday_date <= max(service_dates)
+    )
+    outcomes_by_type = tuple(item.resolution_type.value for item in candidate.outcomes)
+    return LeaveCalendarCandidate(
+        len(before),
+        len(after),
+        _calendar_boundary(before, min),
+        _calendar_boundary(before, max),
+        _calendar_boundary(after, min),
+        _calendar_boundary(after, max),
+        facts.assignment_plan.contracted_service_days,
+        outcomes_by_type.count("defer_following_assignments"),
+        outcomes_by_type.count("substitute"),
+        len(candidate.outcomes),
+        len(holidays),
+        0,
+        holiday_facts.holiday_version,
+        tuple((item.holiday_date.isoformat(), item.holiday_name) for item in holidays),
+        "conserved" if len(before) == len(after) else "failed",
+        tuple(cells),
+    )
+
+
+def _query_holiday_facts(facts, intent, holiday_query, lock_holidays):
+    service_dates = tuple(item.work_date for item in facts.official_schedules)
+    if not service_dates:
+        raise HolidayCalendarUnavailable("service dates are missing")
+    service_horizon = facts.assignment_plan.contracted_service_days + len(intent.items)
+    return holiday_query.query(
+        min(service_dates),
+        max(service_dates) + timedelta(days=service_horizon),
+        lock=lock_holidays,
+    )
+
+
+def _calendar_boundary(service_days, reducer):
+    return None if not service_days else reducer(service_days).isoformat()
+
+
+def _preview_impact(build_impact):
+    try:
+        return build_impact()
+    except ValueError as exception:
+        code = str(exception) or "leave_substitution_impact_invalid"
+        return BlockedLeaveImpact(
+            0,
+            0,
+            fingerprint_payload({"blocked_impact": code}),
+            (code,),
+        )
 def _build_receipt(request, preview, event_ids):
     scheduling = preview.candidate.scheduling; return LeaveSubstitutionReceipt(request.idempotency_key.value, request.case_no, preview.orders_impact.resulting_version, scheduling.generation_number, scheduling.resulting_aggregate_version, preview.client_finance_impact.resulting_version, preview.payroll_impact.resulting_version, event_ids, preview.fingerprint)
 def _validate_replay_evidence(request, command_fingerprint, claim, evidence):
-    parts = (evidence.header is not None, bool(evidence.outcomes), evidence.receipt is not None)
+    parts = (evidence.header is not None, evidence.receipt is not None)
     if claim is CommandClaimState.CREATED:
-        if any(parts): _raise_replay_integrity(request, "batch evidence exists without its claim")
+        if any(parts) or evidence.outcomes: _raise_replay_integrity(request, "batch evidence exists without its claim")
         return None
     if not all(parts): _raise_replay_integrity(request, "batch replay evidence is incomplete")
     _validate_header_identity(request, command_fingerprint, evidence.header); _validate_outcome_evidence(request, evidence.header, evidence.outcomes); _validate_receipt_outcomes(request, evidence)

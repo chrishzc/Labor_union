@@ -7,7 +7,7 @@ verified_at: 2026-08-09
 # LINE、Access Control、Case Import 與 Knowledge 重新驗證收據
 
 本輪已採用的 LINE review、Rich Menu 與管理員 session 具體政策，見
-`02_決策與退役執行記錄/52_LINE_Review_Rich_Menu_and_Admin_Session_Policy_Decision.md`。
+`04_已完成與上線封存/work_packages/52_LINE_Review_Rich_Menu_and_Admin_Session_Policy_Decision.md`。
 
 ## 已落地且重新驗證的範圍
 

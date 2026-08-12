@@ -1,0 +1,92 @@
+﻿{
+    "application_compatibility":  {
+                                      "watcher_worker_compatibility":  "same-release-required",
+                                      "post_cutover_smoke_ids":  [
+                                                                     "service-date-preview-apply",
+                                                                     "matching-schedule-send-fail-closed",
+                                                                     "matching-schedule-confirmation-gate"
+                                                                 ],
+                                      "minimum_api_contract":  "typed-api-v1",
+                                      "required_restart_targets":  [
+                                                                       "api",
+                                                                       "line-worker",
+                                                                       "streamlit-ui"
+                                                                   ],
+                                      "compatible_contracts":  [
+                                                                   "global-architecture-v1",
+                                                                   "orders-confirmed-service-dates-v1",
+                                                                   "matching-schedule-confirmation-v1",
+                                                                   "line-integration-v1"
+                                                               ]
+                                  },
+    "tool_archive_policy":  {
+                                "artifact_hash_algorithm":  "sha256",
+                                "receipt_archive_policy":  "permanent-release-archive",
+                                "journal_archive_policy":  "append-only-per-operation",
+                                "restore_required_mode":  "new-absent-candidate-only",
+                                "backup_archive_policy":  "permanent-release-archive",
+                                "mysqldump_required_options":  [
+                                                                   "--single-transaction",
+                                                                   "--routines",
+                                                                   "--events",
+                                                                   "--triggers",
+                                                                   "--hex-blob"
+                                                               ]
+                            },
+    "contract":  "migration-release-manifest/v1",
+    "verification_contracts":  [
+                                   {
+                                       "phase":  "post-schema",
+                                       "policy":  "candidate-owned-objects-exact",
+                                       "blocking":  true,
+                                       "verification_id":  "wp68-owned-objects",
+                                       "read_only":  true
+                                   }
+                               ],
+    "release_id":  "labor-union-wp68-2026-08-12-v1",
+    "backfills":  [
+
+                  ],
+    "artifacts":  [
+                      {
+                          "rollback_policy":  "code-rollback-preserve-confirmed-date-and-schedule-confirmation-history",
+                          "name":  "181_matching_service_date_confirmation.sql",
+                          "resumable_boundary_policy":  "statement-sha256-with-durable-receipt",
+                          "sha256":  "503e8b88e74b23102f87dfee845cd701f7f59330be6be903a8a39580e15eb63f",
+                          "dependencies":  [
+
+                                           ],
+                          "data_effect":  "schema_only",
+                          "relative_path":  "db/schema_parts/181_matching_service_date_confirmation.sql"
+                      }
+                  ],
+    "release_metadata":  {
+                             "published_at":  "2026-08-12",
+                             "description":  "Versioned confirmed service dates and recipient-scoped schedule confirmation snapshots",
+                             "release_name":  "Labor Union WP68 confirmed service dates and schedule confirmation",
+                             "application_version":  "wp68-matching-schedule-confirmation-v1"
+                         },
+    "source_baseline":  {
+                            "required_character_set":  "utf8mb4",
+                            "forbidden_owned_object_states":  [
+                                                                  "partial",
+                                                                  "drift"
+                                                              ],
+                            "minimum_mysql_version":  "8.0",
+                            "allowed_owned_object_states":  [
+                                                                "absent",
+                                                                "exact"
+                                                            ],
+                            "maintenance_token_required":  true,
+                            "source_must_be_read_only":  true,
+                            "baseline_id":  "wp68-pre-release"
+                        },
+    "descriptor_artifact":  {
+                                "relative_path":  "db/migration_releases/labor_union_2026_08_12_wp68_v1.descriptors.json",
+                                "name":  "labor_union_2026_08_12_wp68_v1.descriptors.json",
+                                "sha256":  "16d1335c625c4ff31975fcfd1174e696658f180df639db53874a7b046a06154b",
+                                "dependencies":  [
+
+                                                 ]
+                            }
+}

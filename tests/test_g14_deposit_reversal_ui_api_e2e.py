@@ -52,7 +52,7 @@ def test_g14_panel_uses_real_http_preview_and_apply(monkeypatch):
     _seed_settled_deposit()
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
-    monkeypatch.setenv("INTERNAL_API_KEY", "g14-ui-key")
+    monkeypatch.setenv("LEGACY_SHARED_KEY", "g14-ui-key")
 
     from api.routes.client_deposit_reversal import router
     from ui.api_clients.client_deposit_reversal_api_client import (
@@ -67,7 +67,7 @@ def test_g14_panel_uses_real_http_preview_and_apply(monkeypatch):
     with TestClient(app) as http_client:
         client = ClientDepositReversalApiClient(
             base_url="http://g14-ui.test",
-            headers={"X-Internal-API-Key": "g14-ui-key"},
+            headers={"X-Legacy-Shared-Key": "g14-ui-key"},
             session=_TestClientSession(http_client),
         )
         monkeypatch.setattr(panel, "_client", lambda: client)

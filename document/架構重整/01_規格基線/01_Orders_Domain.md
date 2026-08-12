@@ -130,6 +130,32 @@ Orders contract event 與 Client Finance 補足義務必須使用同一 outer Un
 
 Lifecycle Application 是 status、history 與服務資料鎖投影的唯一 writer。任何 caller 都不得傳入 target status。
 
+### 3.3.1 服務完成時刻與 AutoComplete
+
+`AutoCompleteOrderService` 是 Orders 唯一可將服務完成結果持久化的 command。它必須在同一
+Orders outer Unit of Work 中鎖定 lifecycle aggregate、effective Scheduling generation、
+assignment-owned official service days、`actual_end_date`、完整 service time tuple 與 active
+lifecycle controls，再以 Asia/Taipei business clock 評估：
+
+```text
+completion_instant
+= actual_end_date + service_end_day_offset + service_end_time
+```
+
+只有 `evaluation_at >= completion_instant`、正式服務日完整一致、沒有 `auto_complete` blocker，
+且訂單未取消／未完成時，才可由 `服務中` 轉為 `訂單完成`。Apply 必須追加 immutable lifecycle
+event、以 expected lifecycle version 更新 projection、保存 idempotency receipt 及 post-commit Orders
+source outbox，最後單次 commit；不得重建或結清 Client Finance、Payroll、退款或補助義務。
+
+相同 idempotency key 與 command fingerprint replay 回原 receipt；payload mismatch、expected version
+或 authoritative facts 漂移固定回 typed conflict。時刻未到、服務日不完整、effective generation
+矛盾、human hold 或取消固定為 typed `domain_blocked` 且零寫入。automatic discovery 只可將 due
+candidate 放入 durable command queue；worker 仍只能呼叫此 command，不得直接更新 `orders.status`。
+
+AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Orders lifecycle aggregate。
+任一方先提交都會使另一方持有的 Orders expected version 失效；舊 command 不得以舊服務日完成，
+也不得在完成後補寫請假。人工後續更正必須使用獨立、可稽核的 correction command。
+
 訂金 receipt／reversal 與 actual-start reconfirm 綁定：
 
 - 訂金有效性只由 Client Finance 的正式 deposit obligation、succeeded receipt、合法 reversal
@@ -168,6 +194,32 @@ Lifecycle Application 是 status、history 與服務資料鎖投影的唯一 wri
 - 受理後必須 fresh Preview；已有正式退款或結算時另建新訂單。
 
 ## 4. Module
+
+### Confirmed Service Dates (2026-08-12)
+
+Orders owns the `Confirm Service Dates` Preview/Apply command. The candidate must contain
+exactly the contracted service-day count, be unique and sorted, and every date must be within
+the server-provided selectable range. Apply locks current Orders/Scheduling facts, validates the
+Preview fingerprint, creates one immutable version and receipt, and invalidates the current
+matching schedule snapshot. It never creates an assignment, staff schedule, Payroll impact, or
+outbound LINE task.
+
+Calendar-week views use Sunday through Saturday. A modification never overwrites historical
+confirmed versions or prior schedule-confirmation events; it creates a new current lineage which
+must be previewed, sent, and confirmed again before formal assignment can proceed.
+
+### Confirmed Service Dates (2026-08-12)
+
+Orders owns the `Confirm Service Dates` Preview/Apply command. The candidate must contain
+exactly the contracted service-day count, be unique and sorted, and every date must be within
+the server-provided selectable range. Apply locks current Orders/Scheduling facts, validates the
+Preview fingerprint, creates one immutable version and receipt, and invalidates the current
+matching schedule snapshot. It never creates an assignment, staff schedule, Payroll impact, or
+outbound LINE task.
+
+Calendar-week views use Sunday through Saturday. A modification never overwrites historical
+confirmed versions or prior schedule-confirmation events; it creates a new current lineage which
+must be previewed, sent, and confirmed again before formal assignment can proceed.
 
 | Module | Input | Output | SSOT／限制 |
 |---|---|---|---|

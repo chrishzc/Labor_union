@@ -109,7 +109,7 @@ def test_g03_panel_uses_real_http_preview_and_apply(monkeypatch):
     _seed_in_service_case(settled_client_and_unpaid_staff=True)
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
-    monkeypatch.setenv("INTERNAL_API_KEY", "g03-ui-key")
+    monkeypatch.setenv("LEGACY_SHARED_KEY", "g03-ui-key")
 
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
@@ -127,7 +127,7 @@ def test_g03_panel_uses_real_http_preview_and_apply(monkeypatch):
     with TestClient(application) as http_client:
         client = OrderCancellationApiClient(
             base_url="http://g03-ui.test",
-            headers={"X-Internal-API-Key": "g03-ui-key"},
+            headers={"X-Legacy-Shared-Key": "g03-ui-key"},
             session=_CancellationTestClientSession(http_client),
         )
         display.button_values["cancellation_preview_btn_G03-CASE"] = True
@@ -331,7 +331,7 @@ def test_g01_terms_panel_uses_real_http_preview_and_apply(monkeypatch):
         with TestClient(application) as http_client:
             client = OrderTermsApiClient(
                 base_url="http://g01-ui.test",
-                headers={"X-Internal-API-Key": "g01-ui-key"},
+                headers={"X-Legacy-Shared-Key": "g01-ui-key"},
                 session=_TestClientSession(http_client, "http://g01-ui.test"),
             )
             terms_panel.render_order_terms_panel("G03-CASE", client)
@@ -378,7 +378,7 @@ def test_g02_actual_start_panel_uses_real_http_preview_and_apply(monkeypatch):
         session = _TestClientSession(http_client, "http://g02-ui.test")
         client = ActualStartApiClient(
             base_url="http://g02-ui.test",
-            headers={"X-Internal-API-Key": "g02-ui-key"},
+            headers={"X-Legacy-Shared-Key": "g02-ui-key"},
             session=session,
         )
         actual_start_panel.render_actual_start_panel("G03-CASE", client)
@@ -400,7 +400,7 @@ def test_g02_actual_start_panel_uses_real_http_preview_and_apply(monkeypatch):
 def _configure_ui_api_environment(monkeypatch, api_key) -> None:
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
-    monkeypatch.setenv("INTERNAL_API_KEY", api_key)
+    monkeypatch.setenv("LEGACY_SHARED_KEY", api_key)
 
 
 def _fixed_actual_start_application():

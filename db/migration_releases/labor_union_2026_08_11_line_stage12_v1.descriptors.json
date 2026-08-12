@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "167_line_identity_management.sql": {
+    "186_line_identity_management.sql": {
       "tables": {
         "line_identity_bindings": [
           "binding_status",

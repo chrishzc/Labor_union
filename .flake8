@@ -1,0 +1,2 @@
+[flake8]
+exclude = .git,.venv,.pytest_tmp,graphify-out,history

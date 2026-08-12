@@ -1,8 +1,7 @@
-"""Internal service-key and administrator-session dependencies."""
+"""Administrator-session dependencies."""
 
 from __future__ import annotations
 
-import hmac
 import os
 from collections.abc import Callable
 
@@ -34,22 +33,6 @@ def admin_auth_is_enabled() -> bool:
     return not (app_env in DEVELOPMENT_ENVIRONMENTS and requested_bypass)
 
 
-def require_internal_service(
-    x_internal_api_key: str | None = Header(default=None, alias="X-Internal-API-Key"),
-) -> None:
-    expected = os.getenv("INTERNAL_API_KEY", "").strip()
-    if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="INTERNAL_API_KEY 尚未設定",
-        )
-    if not x_internal_api_key or not hmac.compare_digest(x_internal_api_key, expected):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="內部服務金鑰錯誤",
-        )
-
-
 def get_bearer_token(authorization: str | None) -> str:
     scheme, _, token = (authorization or "").partition(" ")
     if scheme.lower() != "bearer" or not token.strip():
@@ -63,7 +46,6 @@ def get_bearer_token(authorization: str | None) -> str:
 def require_admin(
     request: Request,
     authorization: str | None = Header(default=None),
-    _: None = Depends(require_internal_service),
 ) -> AdminPrincipal:
     if not admin_auth_is_enabled():
         principal = _development_bypass_principal()

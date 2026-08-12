@@ -11,10 +11,11 @@ The allowed final dispositions are `retain_canonical`, `retain_restricted`,
 `migrate_then_remove`, `gone`, and `needs_decision`. Only `gone` may set
 `approved_to_remove` to true, and it requires a non-empty replacement receipt.
 
-The current reviewed layer has 1,028 disposition records for all 1,028 unique identities in the fresh
-candidate. 474 are `retain_canonical`, 207 are `retain_restricted`, and 347 are explicit
-`needs_decision` records with no inferred owner. The latter are carried only by
-`63_Global_Writer_Inventory_v3_Owner_Review_Work_Package.md`; they neither authorize removal nor make a
-writer canonical. The legacy Holiday, client-name, and Data Browser generic adapter writers were removed after
+The current reviewed layer has 1,027 disposition records for all 1,027 unique identities in the fresh
+candidate. WP63 resolved the complete owner-review queue: 745 are `retain_canonical`, 278 are
+`retain_restricted`, 4 are `migrate_then_remove`, and 0 remain `needs_decision`. No record is approved to
+remove. The four migration candidates are the legacy client identity direct-update boundary and the
+unmounted staff-leave review direct transaction; each requires its own approved retirement package before
+code changes. The legacy Holiday, client-name, and Data Browser generic adapter writers were removed after
 their typed replacement was implemented; absent candidates are intentionally not retained as disposition
 records because the validator requires every record to reference a current candidate identity.

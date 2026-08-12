@@ -7,12 +7,7 @@ $envFile = Join-Path $root ".env"
 $desired = [ordered]@{
     APP_ENV = "development"
     ENABLE_ADMIN_AUTH = "false"
-    INTERNAL_API_KEY = ""
 }
-
-$bytes = New-Object byte[] 32
-[System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes) | Out-Null
-$desired["INTERNAL_API_KEY"] = [Convert]::ToBase64String($bytes).Replace("+", "-").Replace("/", "_").Replace("=", "")
 
 $existing = @()
 if (Test-Path $envFile) {
@@ -46,4 +41,3 @@ Set-Content -Path $envFile -Value $next -Encoding UTF8
 Write-Host "[OK] .env updated:"
 Write-Host "APP_ENV=$($desired['APP_ENV'])"
 Write-Host "ENABLE_ADMIN_AUTH=$($desired['ENABLE_ADMIN_AUTH'])"
-Write-Host "INTERNAL_API_KEY=updated (value hidden)"

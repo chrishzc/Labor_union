@@ -94,3 +94,7 @@
 - 產品範圍 service／API／UI／schema／integration 測試：`795 passed`；國定假日雙倍薪新契約聚焦驗證 `2 passed`。
 - `/calendar` 瀏覽器驗收：月份標題／選單同步；正式服務日無「可接案」矛盾；已完成賴琪訂單可選；多人測試預覽零寫入；案件人力配置 Preview 顯示「調整前／調整後」，且不再出現 `current assignments missing ownership on 2026-10-10`。
 - System Map：編譯成功；JSON Schema、source binding、domain boundary 全部通過，且無 orphan、misplaced、untracked 或 unbound module。
+
+## 2026-08-12 Candidate Contact Pool 驗收補充
+
+新增驗收：多選完整覆蓋候選人；每位候選人的資訊-1／2 獨立發送、時間／狀態、意願與拒絕理由；選定 willing 候選人才建立正式單月嫂 plan；候選聯繫不產生 lock／assignment／日期表 snapshot。

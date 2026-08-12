@@ -220,12 +220,12 @@ LINE 用戶照片應在 Webhook 收到 message ID 後下載至受控儲存區，
 - 正式環境由 LIFF 傳送 ID Token，FastAPI 使用 `LINE_LOGIN_CHANNEL_ID` 向 LINE 驗證後才採用 token 中的使用者 ID；不信任瀏覽器自行提交的 `line_user_id`。
 - API 只操作固定白名單檔案，不能由前端傳入任意檔案路徑。
 - Rich Menu 發布會呼叫 LINE API，應限制為管理員操作。
-- 月嫂驗證查詢及角色管理底層接口仍需使用 `X-Internal-API-Key`；Web/UI 經由後端 Client 呼叫，不把金鑰交給瀏覽器。
+- 月嫂驗證查詢及角色管理底層接口仍需使用 `X-Legacy-Shared-Key`；Web/UI 經由後端 Client 呼叫，不把金鑰交給瀏覽器。
 
 相關環境變數：
 
 ```env
-INTERNAL_API_KEY=<固定長隨機值>
+LEGACY_SHARED_KEY=<固定長隨機值>
 API_BASE_URL=http://127.0.0.1:8000
 ADMIN_SESSION_MINUTES=30
 ENABLE_ADMIN_AUTH=true
@@ -238,7 +238,7 @@ LINE_REVIEW_STALE_HOURS=24
 ```
 
 `ENABLE_ADMIN_AUTH=false` 僅能在 `APP_ENV=development/dev/local/test` 略過帳號登入；正式環境
-即使誤設為 `false` 仍會強制驗證。略過登入不會關閉 `X-Internal-API-Key`。
+即使誤設為 `false` 仍會強制驗證。略過登入不會關閉 `X-Legacy-Shared-Key`。
 
 ## 工會工作人員統一待審接口
 
@@ -255,7 +255,7 @@ POST /api/line/staff/review-requests/{request_type}/{request_id}/reject
 以上接口一律要求：
 
 ```http
-X-Internal-API-Key: <INTERNAL_API_KEY>
+X-Legacy-Shared-Key: <LEGACY_SHARED_KEY>
 ```
 
 `client_rebind` 的 approve 會更新客戶 LINE 綁定，reject 會保留原綁定並通知申請者。`staff_verification` 的 approve 會直接將 LINE 角色切換為 `staff` 並綁定月嫂選單，reject 則保留原角色並通知申請者。兩種請求共用 MySQL `line_confirmation_requests`，不產生月嫂驗證碼。

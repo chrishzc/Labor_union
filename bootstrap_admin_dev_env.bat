@@ -12,5 +12,4 @@ if %ERRORLEVEL% neq 0 (
 echo [Done] 已完成 `.env` 本機開發環境參數補齊：
 echo  - APP_ENV=development
 echo  - ENABLE_ADMIN_AUTH=false
-echo  - INTERNAL_API_KEY=已寫入
 pause

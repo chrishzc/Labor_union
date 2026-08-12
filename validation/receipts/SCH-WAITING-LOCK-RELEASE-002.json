@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "SCH-WAITING-LOCK-RELEASE-002",
-  "scenario_digest": "9d2ae28b3ede1b3b596d2e647dfbf21b8c1e22c44e2b7233bd7bd61a969d00da",
+  "scenario_digest": "3fb3d3a73cc76c469ce76afc5e5b56cca88c49a3e6d5ce869ba3cf5073aa21c0",
   "result": "passed",
   "assertion_count": 74,
   "runner": [

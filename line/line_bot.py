@@ -98,14 +98,12 @@ def _load_rich_menu_id(role: str) -> str:
 def _notify_development_reviewer(request_type: str, request_id: str | int) -> None:
     """Push one review event to the local dev supervisor; never affect webhook success."""
     notify_url = os.getenv("DEV_REVIEW_NOTIFY_URL", "").strip()
-    internal_key = os.getenv("INTERNAL_API_KEY", "").strip()
-    if not notify_url or not internal_key:
+    if not notify_url:
         return
     try:
         response = requests.post(
             notify_url,
             json={"type": request_type, "request_id": str(request_id)},
-            headers={"X-Internal-API-Key": internal_key},
             timeout=1,
         )
         response.raise_for_status()

@@ -30,7 +30,10 @@ class MySqlSegmentedAvailabilityFactsRepository:
 
     def _load_order(self, cursor: Any, case_no: str) -> dict[str, Any] | None:
         cursor.execute(
-            "SELECT o.case_no, o.status, o.start_date, o.end_date FROM orders o WHERE o.case_no = %s",
+            "SELECT o.case_no, o.status, o.start_date, o.end_date,"
+            "COALESCE(g.aggregate_version, 0) AS scheduling_version "
+            "FROM orders o LEFT JOIN scheduling_aggregates g ON g.case_no=o.case_no "
+            "WHERE o.case_no = %s",
             (case_no,),
         )
         return cursor.fetchone()
@@ -39,6 +42,7 @@ class MySqlSegmentedAvailabilityFactsRepository:
         window_start, window_end = _availability_window(order)
         return {
             "order": order,
+            "confirmed_service_dates": self._load_confirmed_service_dates(cursor, order["case_no"]),
             "staff_rows": self._load_active_staff(cursor),
             "assignments": self._load_assignments(cursor, window_start, window_end),
             "schedule_rows": self._load_assignment_schedule_rows(cursor, window_start, window_end),
@@ -47,6 +51,15 @@ class MySqlSegmentedAvailabilityFactsRepository:
             "active_lock_rows": self._load_active_lock_rows(cursor, window_start, window_end),
             "waiting_buffer_rows": self._load_waiting_buffer_rows(cursor, window_start, window_end),
         }
+
+    def _load_confirmed_service_dates(self, cursor: Any, case_no: str) -> list[dict[str, Any]]:
+        cursor.execute(
+            "SELECT d.service_date FROM confirmed_service_date_versions v "
+            "JOIN confirmed_service_date_days d ON d.confirmed_version_id=v.id "
+            "WHERE v.case_no=%s AND v.is_current=1 ORDER BY d.ordinal",
+            (case_no,),
+        )
+        return cursor.fetchall() or []
 
     def _load_active_staff(self, cursor: Any) -> list[dict[str, Any]]:
         cursor.execute("SELECT id FROM staff WHERE status = 'active' ORDER BY id")

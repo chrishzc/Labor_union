@@ -18,8 +18,8 @@ evidence 為準；不要以本 README 的文字代替實際驗收。
   order group、delivery task、matching notification、runtime health 與正式 worker 啟動流程。
 - Knowledge Retrieval：提供索引、知識項目、publication/review、重試工作與問答的 typed API、
   管理 UI、worker 與 MySQL runtime schema。
-- Access Control：管理員權限改由資料庫 capability grant 與 authorization version 控制，
-  靜態 LINE role 不再是授權權威。
+- Internal Access：所有已登入且 enabled 的內部使用者具有相同業務功能權限；保留登入驗證、
+  操作人員身分、session 與安全稽核，不使用 role／capability 差異限制業務功能。
 - Anomalies／Finance Import：IMPORT-004 可安全補送遺漏告警；IMPORT-006 只寫 canonical
   `anomaly_current_alerts`，歷史補投影使用單調 outbox event version，不再常駐掃描全歷史批次。
 - Scheduling UI：異常中心提供 typed 服務人員月曆 deep link；配對中心採單一分支渲染、
@@ -96,7 +96,7 @@ document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 e
 | Government Subsidy | `domains/government_subsidy/`、`subsystems/government_subsidy/` | 補助申請、核准、撥款、allocation 與 reversal |
 | Anomalies | `domains/anomalies/`、`subsystems/anomalies/` | 異常 projection、告警與人工處理進度 |
 | Case Import | `domains/case_import/`、`subsystems/case_import/` | BeClass／HCM 驗證、review 與 case bootstrap |
-| Access／LINE／Jobs | `subsystems/access/`、`subsystems/line/`、`subsystems/jobs/` | 管理權限、webhook／delivery、durable worker |
+| Access／LINE／Jobs | `subsystems/access/`、`subsystems/line/`、`subsystems/jobs/` | 內部登入、actor／audit、webhook／delivery、durable worker |
 
 完整 ownership、SSOT、狀態機與跨域不變量請以
 [`15_正式規格索引與裁決總表.md`](document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md)
@@ -111,10 +111,10 @@ document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 e
 ```env
 APP_ENV=development
 ENABLE_ADMIN_AUTH=false
-INTERNAL_API_KEY=<本機專用的長隨機字串>
+LEGACY_SHARED_KEY=<本機專用的長隨機字串>
 ```
 
-`ENABLE_ADMIN_AUTH=false` 只適用於 development／dev／local／test；`INTERNAL_API_KEY` 仍會驗證。
+`ENABLE_ADMIN_AUTH=false` 只適用於 development／dev／local／test；`LEGACY_SHARED_KEY` 仍會驗證。
 production 必須啟用管理員 session，且不得將 `.env`、token、私鑰或正式資料提交至 Git。
 
 ### 啟動服務

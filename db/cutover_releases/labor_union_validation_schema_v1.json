@@ -4,14 +4,14 @@
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
-    "sha256": "bc00526f7f7af488a080503afe71b0348a58c68551024d5a94d86bca983593b0"
+    "sha256": "b8409a514eda6061fac269a4fd52aa241d96517b45134d0009a15d07336bd116"
   },
   "schema_parts": {
     "directory": "db/schema_parts",
     "selection": "all_sql_files",
     "order": "numeric_prefix_then_letter_suffix_then_filename",
-    "expected_count": 96,
-    "ordered_digest_sha256": "20a40a7ffec27b7fb92b2e18985b3f388c5c077a61167309d8d2477995fd0575",
+    "expected_count": 105,
+    "ordered_digest_sha256": "a6055c09b1e0a2fc605f8682f0b9608c75daefa351461c0305a385f2c6f4090a",
     "terminal_artifact": "999_v_order_details_view.sql"
   },
   "full_release": {

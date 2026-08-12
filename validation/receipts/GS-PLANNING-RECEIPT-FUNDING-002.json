@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "GS-PLANNING-RECEIPT-FUNDING-002",
-  "scenario_digest": "1980283a1e914abeff5c6fc0be5e0d07a1c24aac65886bfb67bc62066784965b",
+  "scenario_digest": "b02710bb7510d1bc2ea6242a3c5df60b2ae253346930247af0694352b4c40e1a",
   "result": "passed",
   "assertion_count": 8,
   "runner": [

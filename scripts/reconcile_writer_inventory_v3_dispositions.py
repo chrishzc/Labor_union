@@ -24,6 +24,9 @@ def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
     reviewed = _current_runtime_review(path)
     if reviewed is not None:
         return reviewed
+    reviewed = _owner_review_registry().get(path)
+    if reviewed is not None:
+        return reviewed
     if path == "infrastructure/mysql/provisional_registration_repository.py":
         return _provisional_registration_review()
     if path == "subsystems/case_import/provisional_registration_application.py":
@@ -90,6 +93,93 @@ def _current_runtime_review(path: str) -> tuple[str, str, str, str] | None:
         ),
     }
     return metadata.get(path)
+
+
+def _owner_review_registry() -> dict[str, tuple[str, str, str, str]]:
+    """Exact-path owner decisions for the WP63 merge-introduced review queue."""
+    canonical = "retain_canonical:typed owner persists root facts, events, receipts, or outbox within its reviewed transaction"
+    restricted = "retain_restricted:operator or worker state is bounded to this explicit maintenance or execution entry"
+    return {
+        "api/dependencies/line_runtime.py": ("line_ingress", "LINE runtime security-receipt transaction", "api/main.py LINE runtime dependency", canonical),
+        "api/routes/clients.py": ("client_identity", "legacy client identity compatibility transaction", "api/main.py mounts clients router", "migrate_then_remove:typed LINE identity workflow is the canonical replacement; removal requires a separate entrypoint package"),
+        "api/routes/line_staff_self_service.py": ("line_self_service", "read-only self-service request transaction", "api/main.py mounts LINE staff self-service router", restricted),
+        "api/routes/runtime_health.py": ("global_operations", "runtime-health observation transaction", "api/main.py mounts runtime health router", restricted),
+        "infrastructure/mysql/assignment_plan_repository.py": ("scheduling", "typed Assignment Plan outer transaction", "Scheduling assignment-plan workflows", canonical),
+        "infrastructure/mysql/case_import_repository.py": ("case_import", "typed Case Import outer transaction", "api/dependencies/case_import.py", canonical),
+        "infrastructure/mysql/client_over_refund_recovery_repository.py": ("client_finance", "typed Client Finance recovery transaction", "ClientOverRefundRecovery workflows", canonical),
+        "infrastructure/mysql/client_receipt_reconciliation_repository.py": ("client_finance", "typed receipt reconciliation transaction", "Client Finance reconciliation workflow", canonical),
+        "infrastructure/mysql/client_refund_reversal_repository.py": ("client_finance", "typed refund reversal transaction", "Client Refund reversal workflow", canonical),
+        "infrastructure/mysql/customer_service_repository.py": ("customer_service", "typed Customer Service ticket transaction", "subsystems/customer_service/application.py", canonical),
+        "infrastructure/mysql/financial_adjustment_repository.py": ("client_finance", "typed financial adjustment transaction", "Client Finance adjustment workflow", canonical),
+        "infrastructure/mysql/government_payer_master_repository.py": ("government_subsidy", "typed payer-master version transaction", "GovernmentPayerMasterWorkflow", canonical),
+        "infrastructure/mysql/government_return_outbound_overage_anomaly_source.py": ("anomalies", "bounded government-return anomaly projection transaction", "Anomalies scheduled source scan", restricted),
+        "infrastructure/mysql/government_subsidy_repository.py": ("government_subsidy", "typed Government Subsidy outer transaction", "Government Subsidy overpayment workflows", canonical),
+        "infrastructure/mysql/line_configuration_publication_repository.py": ("line_integration", "typed LINE configuration and publication transaction", "LINE configuration and Rich Menu applications", canonical),
+        "infrastructure/mysql/line_delivery_task_repository.py": ("line_delivery", "typed delivery task state transaction", "LINE delivery worker and admin application", canonical),
+        "infrastructure/mysql/line_identity_management_repository.py": ("line_identity", "typed identity revocation transaction", "LineIdentityManagementApplication and worker", canonical),
+        "infrastructure/mysql/line_identity_owner_adapters.py": ("line_identity", "borrowed LINE identity owner transaction", "LineIdentityApplication", canonical),
+        "infrastructure/mysql/line_identity_review_repository.py": ("line_identity", "typed identity binding and review transaction", "LINE identity and review applications", canonical),
+        "infrastructure/mysql/line_media_order_group_repository.py": ("line_integration", "typed media and order-group transaction", "LINE media and order-group applications", canonical),
+        "infrastructure/mysql/line_order_group_adapters.py": ("orders", "borrowed Orders LINE audience projection transaction", "LineOrderGroupApplication", canonical),
+        "infrastructure/mysql/line_platform_identity_repository.py": ("line_identity", "typed platform identity and friend-state transaction", "LINE webhook identity applications", canonical),
+        "infrastructure/mysql/line_receipt_outbox_audit.py": ("line_integration", "caller-owned LINE receipt, audit, and outbox transaction", "typed LINE applications and workers", canonical),
+        "infrastructure/mysql/line_runtime_repository.py": ("line_operations", "runtime heartbeat and security evidence transaction", "LINE runtime health and worker", restricted),
+        "infrastructure/mysql/line_webhook_inbox_repository.py": ("line_ingress", "typed webhook inbox claim transaction", "LineWebhookIntake and LineWebhookEventConsumer", canonical),
+        "infrastructure/mysql/matching_notification_repository.py": ("scheduling", "typed matching notification transaction", "MatchingNotificationApplication", canonical),
+        "infrastructure/mysql/order_contract_completion_repository.py": ("orders", "typed contract-completion outer transaction", "Contract Completion workflow", canonical),
+        "infrastructure/mysql/order_terms_read_model.py": ("orders", "read-model query boundary", "Orders terms query", restricted),
+        "infrastructure/mysql/runtime_monitor_repository.py": ("global_operations", "runtime monitor observation and alert-intent transaction", "scripts/run_service_monitor.py", restricted),
+        "infrastructure/mysql/staff_overpayment_recovery_repository.py": ("staff_payables", "typed Staff Payables recovery transaction", "StaffOverpaymentRecovery workflows", canonical),
+        "infrastructure/mysql/staff_payout_repository.py": ("staff_payables", "typed staff payout outer transaction", "Staff Payout workflow", canonical),
+        "scripts/bootstrap_disposable_mysql_schema.py": ("validation", "disposable validation schema bootstrap", "test and validation operator", restricted),
+        "scripts/migrate_legacy_ui_dataset.py": ("global_migration", "versioned legacy UI dataset migration", "reviewed migration operator", restricted),
+        "scripts/plan_legacy_ui_dataset_integration.py": ("global_migration", "read-only migration planning boundary", "reviewed migration operator", restricted),
+        "scripts/rebuild_legacy_ui_dataset_projections.py": ("global_migration", "restricted projection rebuild transaction", "reviewed migration operator", restricted),
+        "scripts/run_case_import_invalid_scenario.py": ("validation", "disposable Case Import scenario transaction", "validation operator", restricted),
+        "scripts/run_knowledge_worker.py": ("knowledge_retrieval", "knowledge worker heartbeat transaction", "knowledge worker operator", restricted),
+        "scripts/run_line_worker.py": ("line_operations", "LINE worker heartbeat transaction", "LINE worker operator", restricted),
+        "scripts/run_service_monitor.py": ("global_operations", "runtime monitor cycle transaction", "service monitor operator", restricted),
+        "scripts/seed_contract_signing_line_identities.py": ("validation", "contract-signing validation seed transaction", "validation operator", restricted),
+        "scripts/seed_contract_signing_roots.py": ("validation", "contract-signing validation seed transaction", "validation operator", restricted),
+        "scripts/seed_validation_beclass_review.py": ("validation", "Case Import validation seed transaction", "validation operator", restricted),
+        "scripts/verify_contract_signing_normal_chain.py": ("validation", "read-only contract-signing verifier", "validation operator", restricted),
+        "scripts/verify_contract_signing_preconversion_isolation.py": ("validation", "read-only preconversion verifier", "validation operator", restricted),
+        "scripts/verify_integrated_ui_validation_dataset.py": ("validation", "read-only integrated dataset verifier", "validation operator", restricted),
+        "subsystems/anomalies/client_over_refund_recovery_anomaly_consumer.py": ("anomalies", "Client Finance outbox projection delivery transaction", "Anomalies outbox worker", canonical),
+        "subsystems/anomalies/client_refund_underpayment_anomaly_consumer.py": ("anomalies", "Client Finance outbox projection delivery transaction", "Anomalies outbox worker", canonical),
+        "subsystems/anomalies/government_overpayment_anomaly_consumer.py": ("anomalies", "Government Subsidy outbox projection delivery transaction", "Anomalies outbox worker", canonical),
+        "subsystems/anomalies/staff_overpayment_recovery_anomaly_consumer.py": ("anomalies", "Staff Payables outbox projection delivery transaction", "Anomalies outbox worker", canonical),
+        "subsystems/anomalies/staff_payout_difference_anomaly_consumer.py": ("anomalies", "Staff Payables outbox projection delivery transaction", "Anomalies outbox worker", canonical),
+        "subsystems/client_finance/over_refund_recovery_matching_workflow.py": ("client_finance", "typed recovery-matching outer transaction", "Client Finance recovery-matching API", canonical),
+        "subsystems/client_finance/over_refund_recovery_workflow.py": ("client_finance", "typed recovery outer transaction", "Client Finance recovery API", canonical),
+        "subsystems/contract_signing/client_contract_application.py": ("contract_signing", "typed client-contract outer transaction", "Contract Signing client API", canonical),
+        "subsystems/contract_signing/command_receipts.py": ("contract_signing", "caller-owned contract receipt and outbox transaction", "Contract Signing applications", canonical),
+        "subsystems/contract_signing/staff_contract_application.py": ("contract_signing", "typed staff-contract outer transaction", "Contract Signing staff API", canonical),
+        "subsystems/customer_service/application.py": ("customer_service", "typed Customer Service outer transaction", "Customer Service API and LINE Service Help", canonical),
+        "subsystems/government_subsidy/overpayment_workflow.py": ("government_subsidy", "typed overpayment outer transaction", "Government Subsidy overpayment API", canonical),
+        "subsystems/government_subsidy/payer_master_workflow.py": ("government_subsidy", "typed payer-master outer transaction", "Government payer-master API", canonical),
+        "subsystems/knowledge_retrieval/application.py": ("knowledge_retrieval", "typed Knowledge Retrieval application or worker transaction", "Knowledge API and worker", canonical),
+        "subsystems/line/configuration_application.py": ("line_integration", "typed LINE configuration transaction", "LINE configuration API", canonical),
+        "subsystems/line/delivery_admin_application.py": ("line_delivery", "typed delivery administration transaction", "LINE delivery admin API", canonical),
+        "subsystems/line/delivery_worker.py": ("line_delivery", "worker claim and attempt transaction", "LINE delivery worker", restricted),
+        "subsystems/line/identity_application.py": ("line_identity", "typed identity binding outer transaction", "LINE identity API and ingress", canonical),
+        "subsystems/line/identity_management_application.py": ("line_identity", "typed identity management transaction", "LINE identity management API", canonical),
+        "subsystems/line/identity_review_application.py": ("line_identity", "typed identity review transaction", "LINE identity review API", canonical),
+        "subsystems/line/identity_revocation_worker.py": ("line_identity", "worker revocation claim transaction", "LINE identity revocation worker", restricted),
+        "subsystems/line/media_application.py": ("line_media", "media archive worker transaction", "LINE media archive worker", restricted),
+        "subsystems/line/order_group_application.py": ("line_order_group", "order-group query transaction", "LINE order-group API", restricted),
+        "subsystems/line/rich_menu_application.py": ("line_rich_menu", "typed Rich Menu queue transaction", "LINE Rich Menu API", canonical),
+        "subsystems/line/rich_menu_binding.py": ("line_rich_menu", "Rich Menu binding worker transaction", "LINE Rich Menu binding worker", restricted),
+        "subsystems/line/rich_menu_worker.py": ("line_rich_menu", "Rich Menu publication worker transaction", "LINE Rich Menu worker", restricted),
+        "subsystems/line/webhook_event_consumer.py": ("line_ingress", "webhook inbox claim and consume transaction", "LINE webhook worker", restricted),
+        "subsystems/line/webhook_intake.py": ("line_ingress", "typed webhook intake transaction", "LINE webhook route", canonical),
+        "subsystems/scheduling/customer_service_ticket_service.py": ("customer_service", "legacy customer-service compatibility transaction", "legacy Customer Service routes", "retain_restricted:canonical CustomerServiceApplication exists; migration requires a separate approved package"),
+        "subsystems/scheduling/matching_notification_application.py": ("scheduling", "typed matching notification outer transaction", "Matching notification API and LINE callbacks", canonical),
+        "subsystems/scheduling/staff_leave_review_service.py": ("scheduling", "legacy leave-review direct transaction", "no canonical route; LINE leave request plan is pending", "migrate_then_remove:approved product direction requires a new Scheduling request workflow before this legacy drift can be removed"),
+        "subsystems/staff_payables/overpayment_recovery.py": ("staff_payables", "typed recovery outer transaction", "Staff Payables recovery API", canonical),
+        "subsystems/staff_payables/overpayment_recovery_matching.py": ("staff_payables", "typed recovery-matching outer transaction", "Staff Payables recovery-matching API", canonical),
+        "subsystems/validation_dataset/staff_master_source.py": ("validation", "validation dataset source transaction", "integrated validation dataset builder", restricted),
+    }
 
 
 def _provisional_registration_review() -> tuple[str, str, str, str]:
@@ -212,7 +302,11 @@ def main() -> int:
         if identity in reviewed_identities:
             continue
         reviewed_identities.add(identity)
-        if identity not in existing or identity.startswith(("services/", "line/line_bot.py:")):
+        if (
+            identity not in existing
+            or existing[identity].get("final_disposition") == "needs_decision"
+            or identity.startswith(("services/", "line/line_bot.py:"))
+        ):
             existing[identity] = _disposition(candidate)
         records.append(existing[identity])
     records.sort(key=lambda record: str(record["identity"]))

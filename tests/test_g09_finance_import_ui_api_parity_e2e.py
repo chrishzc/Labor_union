@@ -36,7 +36,7 @@ def test_g09_ui_client_and_direct_typed_preview_have_the_same_result(tmp_path, m
     bootstrap(_arguments())
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
-    monkeypatch.setenv("INTERNAL_API_KEY", "g09-internal-key")
+    monkeypatch.setenv("LEGACY_SHARED_KEY", "g09-internal-key")
     workbook = _write_real_taishin_workbook(tmp_path)
 
     ui_preview = _ui_preview(workbook, monkeypatch)
@@ -76,7 +76,7 @@ def _ui_preview(workbook, monkeypatch):
     with TestClient(application) as http_client:
         client = FinanceImportApiClient(
             base_url="http://g09.test",
-            headers={"X-Internal-API-Key": "g09-internal-key"},
+            headers={"X-Legacy-Shared-Key": "g09-internal-key"},
             session=_TestClientSession(http_client),
         )
         receipt = client.ingest_workbook(

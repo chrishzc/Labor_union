@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "KN-KNOWLEDGE-LIFECYCLE-001",
-  "scenario_digest": "e451e77a4b2e570f1b70e9ac4f6c913e8eb729ded991b35329a065bca4e3ef2d",
+  "scenario_digest": "e0df5b2d4a36fdd1741bf876036761c7985cda55c244d35a4018a6c42ec12e74",
   "result": "passed",
   "assertion_count": 7,
   "runner": [
@@ -16,7 +16,7 @@
     "scenario_fixture": "ab10e3b63955043463a0d6ae79bbdc3c3dde80519308322b4f5487877b932b45",
     "expected_manifest": "76be36e854c92fc969c0fabf4fd6e7c4e805d011a4422c16784ebddfb8f485ca",
     "integration_test": "4049ea4ca54dcdafe67d57d576b929556700cb4772cbac508d68cdcb3dc6d1d9",
-    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+    "validation_schema_manifest": "48f9f520812f86f6eac0a9ee01d2874b0a5c6a75f46430a4ad29a8de2305c7cd"
   },
   "input_paths": {
     "scenario_fixture": "validation/fixtures/KN-KNOWLEDGE-LIFECYCLE-001.json",

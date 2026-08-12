@@ -533,7 +533,7 @@
   binding 查詢自己的有效 assignment 案件及 Scheduling-owned 月曆投影，不新增排班 writer。
 - 客戶新登記流程保留 canonical identity `flow_id`，登記完成後才續行同一身分綁定；
   Rich Menu 預設入口與圖面同步為「服務登記／服務說明」及月嫂自助查詢入口。
-- 新增 `166_customer_service_runtime.sql`、Stage 11 descriptor／release manifest；release 宣告
+- 新增 `185_customer_service_runtime.sql`、Stage 11 descriptor／release manifest；release 宣告
   API、LINE Worker、Streamlit 必須同版重啟，schema 只允許 absent／exact，partial／drift
   必須 fail closed。
 - 建立 merge 未移植 history，明確保留 query-string userId、LIFF 直接改排班、客服直接
@@ -553,7 +553,7 @@
 - 新增 fingerprint-gated `upgrade_line_menu_merge_defaults.py`；只在 current revision 等於已知
   merge baseline 時追加 canonical revision，人工 divergent revision 不會被覆蓋。此檔是正式
   可稽核升級工具，不是開發用一次性腳本。
-- 新增 `167_line_identity_management.sql`、Stage 12 descriptor／release manifest，保存解除 root、
+- 新增 `186_line_identity_management.sql`、Stage 12 descriptor／release manifest，保存解除 root、
   provider menu、attempt、error、actor、reason、idempotency 與 correlation 等追蹤事實。
 
 ## [2026-08-11] Canonical LIFF 首次登入與 15 分鐘期限修復

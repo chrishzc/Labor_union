@@ -9,7 +9,7 @@
 
 管理後台目前主要以開發模式運行。正式上線前必須完成：
 
-1. 完整退役 `INTERNAL_API_KEY` 與 `X-Internal-API-Key`；
+1. 完整退役 `LEGACY_SHARED_KEY` 與 `X-Legacy-Shared-Key`；
 2. 正式環境的管理員登入必須同時通過帳號、密碼與 Google Authenticator 相容的 TOTP；
 3. 新增獨立的帳號管理頁，供授權管理員建立、停用、啟用、調整角色／能力、撤銷 Session、
    發起 TOTP 綁定或重設；
@@ -60,7 +60,7 @@ development profile，再分辨帳號資料、schema、API envelope、UI session
 
 Global 責任是確保所有管理與業務 API 的 human actor 都來自有效 `AdminPrincipal`，且：
 
-- 正式環境不得使用 auth bypass 或 `INTERNAL_API_KEY`；
+- 正式環境不得使用 auth bypass 或 `LEGACY_SHARED_KEY`；
 - 未登入 public surface 只保留健康檢查、登入、TOTP enrollment challenge 所需的最小入口；
 - 每個受保護操作仍由 owning Domain 的 operation capability 作最終授權；
 - Streamlit 只保存短效 Session token、呼叫 typed API client、顯示 typed result；
@@ -69,7 +69,7 @@ Global 責任是確保所有管理與業務 API 的 human actor 都來自有效 
   必須在 production cutover 前確認；TOTP 不可補償明文傳輸。
 
 Global release invariant：正式 profile 中搜尋 runtime source、startup、文件與部署設定，
-不得再存在 `INTERNAL_API_KEY`、`X-Internal-API-Key` 或以它作為 human authorization 的 fallback。
+不得再存在 `LEGACY_SHARED_KEY`、`X-Legacy-Shared-Key` 或以它作為 human authorization 的 fallback。
 
 ### 3.2 Domain：Access Control
 
@@ -284,14 +284,14 @@ TOTP 可顯著提高帳密被竊後的防護，但不是 phishing-resistant；�
 - [ ] `AC-P4-05` 建立帳號管理頁與 capability-based visibility；
 - [ ] `AC-P4-06` UI 驗證不得有 raw dict 穿透 render function，且 secret／QR 不持久化。
 
-### P5：退役 INTERNAL_API_KEY
+### P5：退役 LEGACY_SHARED_KEY
 
 - [ ] `AC-P5-01` login route 移除 internal service dependency，改由 rate-limit＋MFA policy 保護；
 - [ ] `AC-P5-02` human admin routes 的 `require_admin` 改為純 Bearer Session＋capability；
-- [ ] `AC-P5-03` UI shared transport 移除 `X-Internal-API-Key` 與 configured gate；
+- [ ] `AC-P5-03` UI shared transport 移除 `X-Legacy-Shared-Key` 與 configured gate；
 - [ ] `AC-P5-04` machine callers 逐一改成明確 scoped identity，或以證據確認無需保留；
 - [ ] `AC-P5-05` 更新 smoke／E2E／migration rehearsal、startup scripts、README 與部署設定；
-- [ ] `AC-P5-06` source／runtime scan 證明 `INTERNAL_API_KEY` 與 header 已無 active caller；
+- [ ] `AC-P5-06` source／runtime scan 證明 `LEGACY_SHARED_KEY` 與 header 已無 active caller；
 - [ ] `AC-P5-07` 不提供 legacy fallback、雙軌 key＋Session 或 query-string credential。
 
 ### P6：Domain／Global 驗收
@@ -335,7 +335,7 @@ Mock PASS 不得取代 Domain／Global 的真實 MySQL 與 runtime evidence。�
 4. MFA reset、password rotation、disable、role／capability change 全部撤銷既有 Session；
 5. 不提供 production HTTP break-glass endpoint，最後管理員復原走受控離線維運程序；
 6. 本期採 RFC 6238 TOTP；WebAuthn／passkey 另案，不阻擋本期；
-7. `INTERNAL_API_KEY` 完整退役；若 inventory 找到真實 machine caller，必須另建 scoped machine
+7. `LEGACY_SHARED_KEY` 完整退役；若 inventory 找到真實 machine caller，必須另建 scoped machine
    identity contract，不得保留同一把全域共用 key。
 
 人工確認後，實作順序固定為 `P0 → P1 → P2/P3 → P4 → P5 → P6 → P7`。只有在寫入範圍互不

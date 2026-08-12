@@ -2,7 +2,7 @@
 
 ## Scope
 
-This is local evidence for Work Package `55_Finance_Amendment_Executable_Contracts_Work_Package.md`. It is neither an approval nor a production deployment record. It records the completed disposable-MySQL cases and interactive-browser evidence below.
+This is local evidence for archived Work Package `04_已完成與上線封存/work_packages/55_Finance_Amendment_Executable_Contracts_Work_Package.md`. It is neither an approval nor a production deployment record. It records the completed disposable-MySQL cases and interactive-browser evidence below.
 
 ## Latest focused regression
 

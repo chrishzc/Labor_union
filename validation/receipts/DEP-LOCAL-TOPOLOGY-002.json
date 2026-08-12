@@ -4,7 +4,9 @@
   "scenario_digest": "5f66776b5a920cb64ea8f2d6c9f16c937c87a1fe19b9378fb170b121c042f2b5",
   "result": "passed",
   "assertion_count": 1,
-  "runner": [".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_docker_compose_local_security.py"],
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_docker_compose_local_security.py"
+  ],
   "environment": {
     "python": "3.14.2",
     "execution_scope": "Version-controlled local container topology only"

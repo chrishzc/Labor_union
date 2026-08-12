@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "ORD-DETAIL-TYPED-QUERY-004",
-  "scenario_digest": "b61d14e2dbd169524553b9d2092c4bfeedd0952bc932c457893e8fb79e7e2528",
+  "scenario_digest": "61e8bc25c1de58574887f1ed8cb8797ac92d69219ed8de026fb69b27e17cd9ba",
   "result": "passed",
   "assertion_count": 13,
   "runner": [
@@ -15,9 +15,9 @@
   "input_digests": {
     "scenario_fixture": "cd780540c534687857dafa900da13b7b13c1fe280a3b6654770b95e8ddfdf9b2",
     "expected_manifest": "3d7c26c1869f2cd89cb4ed9c53bab900f4db75401965204a161be9e25bb0e0a5",
-    "query_service_test": "d37cff23ca9c10327086bdc1c476bac216849fc42d58a64f46aa4e926ff0e521",
+    "query_service_test": "029a1fce303a62a8ce438f6387ad378336dd2e7e318f03ee2b288f2ee37bca92",
     "query_repository_test": "4cdc18e902aff82c9403b59a206b30a6685817f37de34792d5e91bac4ae55775",
-    "ui_client_boundary_test": "940818dc5f26b7dec7cb8d4275b224e242b7d23d947fa070d02c0e8d6aee5089"
+    "ui_client_boundary_test": "304f7e1aca633fedfbb457d998216a31fb872657affd10c67a5361aac0934607"
   },
   "input_paths": {
     "scenario_fixture": "validation/fixtures/ORD-DETAIL-TYPED-QUERY-004.json",

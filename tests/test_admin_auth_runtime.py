@@ -43,7 +43,6 @@ def test_login_route_returns_typed_schema_unavailable(monkeypatch):
             admin_auth.login(
                 AdminLoginRequest(username="admin", password="password"),
                 request,
-                None,
             )
         )
 
@@ -62,7 +61,6 @@ def test_login_route_returns_typed_invalid_credentials(monkeypatch):
             admin_auth.login(
                 AdminLoginRequest(username="admin", password="wrong"),
                 request,
-                None,
             )
         )
 
@@ -76,7 +74,7 @@ def test_development_bypass_cannot_publish_to_line(monkeypatch):
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
     request = Request({"type": "http"})
 
-    principal = require_admin(request, None, None)
+    principal = require_admin(request, None)
 
     assert "line.config.manage" in principal.effective_capabilities()
     assert "line.menu.publish" not in principal.effective_capabilities()

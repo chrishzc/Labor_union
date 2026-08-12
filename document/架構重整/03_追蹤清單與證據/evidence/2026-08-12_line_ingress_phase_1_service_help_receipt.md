@@ -1,7 +1,7 @@
 # LINE Ingress Phase 1 Service Help Receipt
 
 - Date: 2026-08-12
-- Work Package: `61_LINE_Ingress_Convergence_Phase_1_Work_Package.md`
+- Work Package: `04_已完成與上線封存/work_packages/61_LINE_Ingress_Convergence_Phase_1_Work_Package.md`
 - Scope: canonical Service Help delegation only; no runtime-default, cutover, schema, UI or external delivery mutation.
 
 ## Verified behavior

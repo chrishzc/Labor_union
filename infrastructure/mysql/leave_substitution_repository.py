@@ -6,16 +6,25 @@ from datetime import date
 import json
 from typing import Any, Mapping
 
-from domains.scheduling.leave_substitution import OfficialScheduleFact
+from domains.scheduling.assignment_plan import AssignmentPlanFacts, EffectiveAssignmentFact
+from domains.scheduling.leave_substitution import LeaveSubstitutionFacts, OfficialScheduleFact
 from infrastructure.mysql.assignment_plan_repository import (
     build_assignment_plan_workflow_facts,
     ensure_scheduling_aggregate,
     load_occupancy_snapshot,
 )
 from infrastructure.mysql.order_terms_read_model import (
+    _order_facts,
+    _segments,
+    _select_assignments,
+    _select_generation,
+    _select_schedules,
+    _service_dates_by_assignment,
     load_locked_facts,
     load_preview_facts,
     preflight_staff_ids,
+    select_order,
+    select_scheduling_aggregate,
 )
 from infrastructure.mysql.scheduling_replacement_writer import (
     persist_scheduling_replacement,
@@ -45,7 +54,6 @@ class MySqlLeaveSubstitutionRepository:
 
     def load_for_preview(self, case_no, intent):
         with self._connection.cursor() as cursor:
-            source = load_preview_facts(cursor, case_no)
             staff_ids = _preflight_staff_ids(cursor, case_no, intent)
             occupancy, lock_ids = load_occupancy_snapshot(
                 cursor,
@@ -54,7 +62,33 @@ class MySqlLeaveSubstitutionRepository:
                 lock=False,
             )
             schedules = _official_schedules(cursor, case_no)
+            try:
+                source = load_preview_facts(cursor, case_no)
+            except ValueError as error:
+                blocker = _preview_dependency_blocker(error)
+                if blocker is None:
+                    raise
+                return LeaveSubstitutionWorkflowFacts(
+                    None,
+                    schedules,
+                    (blocker,),
+                    _scheduling_only_leave_facts(
+                        cursor, case_no, occupancy, lock_ids, schedules
+                    ),
+                )
         return _workflow_facts(source, occupancy, lock_ids, schedules)
+
+    def list_effective_assignments(self, case_no):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT a.id,a.staff_id,a.assigned_start_date,a.assigned_end_date "
+                "FROM scheduling_aggregates g JOIN case_staff_assignments a "
+                "ON a.generation_id=g.effective_generation_id "
+                "WHERE g.case_no=%s AND a.status NOT IN ('cancelled','replaced') "
+                "ORDER BY a.assignment_sequence,a.id",
+                (case_no,),
+            )
+            return tuple(cursor.fetchall())
 
     def preflight_impacted_staff_ids(self, case_no, intent):
         with self._connection.cursor() as cursor:
@@ -164,6 +198,58 @@ def _workflow_facts(source, occupancy, lock_ids, schedules):
         lock_ids,
     )
     return LeaveSubstitutionWorkflowFacts(impact_facts, schedules)
+
+
+def _preview_dependency_blocker(error):
+    code = str(error)
+    return code if code in {
+        "client_finance_bootstrap_required",
+        "payroll_bootstrap_required",
+    } else None
+
+
+def _scheduling_only_leave_facts(cursor, case_no, occupancy, lock_ids, schedules):
+    order_row = select_order(cursor, case_no, lock=False)
+    order = _order_facts(order_row)
+    aggregate = select_scheduling_aggregate(cursor, case_no, lock=False)
+    generation = _select_generation(cursor, aggregate, lock=False)
+    assignment_rows = _select_assignments(cursor, generation, lock=False)
+    schedule_rows = _select_schedules(cursor, generation, lock=False)
+    segments = _segments(
+        assignment_rows,
+        _service_dates_by_assignment(schedule_rows),
+    )
+    assignment_plan = AssignmentPlanFacts(
+        case_no=order.case_no,
+        order_version=order.version,
+        scheduling_version=int(aggregate["aggregate_version"]),
+        scheduling_generation=(
+            0 if generation is None else int(generation["generation_number"])
+        ),
+        client_finance_version=0,
+        payroll_version=0,
+        contracted_service_days=order.terms.service_days,
+        service_hours_per_day=order.terms.service_hours_per_day,
+        service_started=order_row["actual_start_date"] is not None,
+        effective_assignments=tuple(
+            EffectiveAssignmentFact(
+                assignment_id=segment.assignment_id,
+                staff_id=segment.staff_id,
+                sequence=segment.sequence,
+                assigned_start_date=segment.assigned_start_date,
+                assigned_end_date=segment.assigned_end_date,
+                official_service_dates=segment.official_service_dates,
+            )
+            for segment in segments
+        ),
+        external_occupancy=occupancy,
+        current_waiting_lock_ids=lock_ids,
+    )
+    return LeaveSubstitutionFacts(
+        assignment_plan,
+        schedules,
+        order.service_data_locked,
+    )
 
 
 def _preflight_staff_ids(cursor, case_no, intent):

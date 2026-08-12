@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "CF-EXPLICIT-REFUND-RECOVERY-002",
-  "scenario_digest": "20337362dc93958c3f1fd0503a29ab1bdc9811ff535543497cf0bd09f75ca393",
+  "scenario_digest": "ff34d47b417f0e978aa58b17ded74a9771686336614a2d3aa92192b9633a1320",
   "result": "passed",
   "assertion_count": 15,
   "runner": [
@@ -15,8 +15,8 @@
   "input_digests": {
     "scenario_fixture": "5f283c43f124cf3cd2fb26fa5a58dc15448c62d9013173433a7fda1978433623",
     "expected_manifest": "bca34dd08ead39742fdd73549fb6f905d316a1387236f21eb9564e8958932a39",
-    "integration_test": "a0c60e8008faf0cb0f5b39ae665f6420ed79fdd7fd2b33e37d2e49795fe220c5",
-    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+    "integration_test": "ad25288d3ad1f2be7ea39063b3f7d26bd6e8a7d75e79e3889bd08795ab10436c",
+    "validation_schema_manifest": "48f9f520812f86f6eac0a9ee01d2874b0a5c6a75f46430a4ad29a8de2305c7cd"
   },
   "input_paths": {
     "scenario_fixture": "validation/fixtures/CF-EXPLICIT-REFUND-RECOVERY-002.json",

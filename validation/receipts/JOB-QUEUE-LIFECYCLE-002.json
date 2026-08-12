@@ -14,7 +14,7 @@
   },
   "input_digests": {
     "integration_test": "1581ae12537dec9f5f05e332131a4994c5b8e82d67d57ba08e38f9273b52d4e4",
-    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+    "validation_schema_manifest": "48f9f520812f86f6eac0a9ee01d2874b0a5c6a75f46430a4ad29a8de2305c7cd"
   },
   "input_paths": {
     "integration_test": "tests/test_durable_job_disposable_mysql_e2e.py",

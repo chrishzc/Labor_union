@@ -13,7 +13,7 @@
     "execution_scope": "active source/schema/document retired-field scan with explicit migration and evidence exceptions"
   },
   "input_digests": {
-    "audit_manifest": "4a2e28e8994f000dd586b5d08773c4dfd8969614b95fc246d6e979f6d4153478",
+    "audit_manifest": "6f846cb8f89c8d9a747b98a9056166db6c10bc370c432ce896ca5266e034dacd",
     "audit_validator": "8e553efff6cdb020ae3a9c056c6fc2d743f9e689205bd7c06bfcea75ca853866",
     "audit_tests": "2b441c795f1cb8cbf53a1c3b5aad0b766c9b54cebd5972405d89907d97d67be2"
   },

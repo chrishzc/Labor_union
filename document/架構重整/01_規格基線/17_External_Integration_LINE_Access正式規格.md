@@ -115,6 +115,20 @@ Modules：
 
 ### 3.3 Subsystem：LINE Delivery Task
 
+#### Matching Schedule Confirmation Delivery (2026-08-12)
+
+The owning Matching/Scheduling subsystem creates immutable customer-parent and caregiver-segment
+schedule snapshots only after a staff member explicitly sends a previewed, current confirmed
+service-date version. LINE owns recipient binding, durable delivery tasks, interaction tokens,
+and provider retries. If any required recipient lacks a LINE binding, the Send command fails
+closed and creates neither snapshot nor delivery task.
+
+LINE confirmation buttons append recipient-scoped events only after token, current snapshot and
+bound LINE user checks pass. A rejection first enters `awaiting_rejection_reason`, sends a
+durable text request, and becomes a rejected event only when a nonblank reply is received. The
+webhook consumer must dispatch both postback and subsequent message through the same matching
+schedule confirmation application; duplicate provider events reuse durable event identities.
+
 State：
 
 ```text
@@ -195,79 +209,19 @@ pending → processing → published
 
 ## 4. Domain：Access Control
 
-### 4.1 正式授權模型
+### 4.1 正式內部使用者存取模型
 
-採「角色配置 capability」模型：
+2026-08-12 最新人工裁決：所有已登入且 enabled 的內部使用者具有相同業務功能權限。本系統不以
+role、capability、職稱或部門限制內部使用者可操作的業務功能，也不採 fixed role bundle、dynamic
+grant／revoke、階層比較或雙人權限覆核。
 
-- role 是管理與顯示用 bundle；
-- operation capability 是 API 最終授權依據；
-- `AdminPrincipal` 是唯一 human actor identity；
-- `X-Internal-API-Key` 只證明受信任 service caller，不代表任何 human capability；
-- body、query、UI session label 或任意 role 字串不得成為 actor。
-
-初始角色 bundle：
-
-| Role | 初始能力 |
-|---|---|
-| `line_viewer` | LINE read |
-| `line_agent` | LINE read、review detail、task observation |
-| `line_manager` | LINE review decision、task control、publication |
-| `system_admin` | 全管理能力、帳號與安全設定 |
-
-每個 Router 必須宣告 operation capability；階層比較只能作現有相容 adapter，
-長期不得成為唯一 policy engine。
-
-最小 capability registry：
-
-- `line.identity.read`
-- `line.identity.review`
-- `line.task.read`
-- `line.task.control`
-- `line.menu.publish`
-- `integration.event.read`
-- `integration.event.retry`
-- `admin.user.manage`
-- `admin.session.revoke`
-- `admin.audit.read`
-- `data_browser.read`
-- `data_browser.write`
-- `system.configuration.manage`
-- `knowledge.source.edit`
-- `knowledge.source.review`
-- `knowledge.source.publish`
-- `knowledge.answer.query`
-
-新增 capability 是 public authorization contract 變更，必須更新 role bundle、Router
-inventory、audit policy 與 authorization tests。
-
-2026-08-09 已採用「fixed role bundle＋有期限的 dynamic grant」：`system_admin` 可為指定
-admin user grant 或 revoke 單一 capability，但 grant 必須有 expires_at、expected
-authorization version、reason、idempotency 與 correlation identity；成功 mutation 同交易
-保存不可變 event／receipt，並撤銷目標 user 的既有 session。固定 role bundle 仍是 baseline，
-不能被動態 grant 改寫。動態 `system.administration` revoke 必須鎖定並保護最後一位有效
-system-admin。
-
-Command／Query 最小對照：
-
-| Capability | Operations |
-|---|---|
-| `line.identity.read` | LINE identity／review Query |
-| `line.identity.review` | Preview／Apply LINE review、reassignment |
-| `line.task.read` | delivery task／attempt Query |
-| `line.task.control` | retry／cancel delivery task |
-| `line.menu.publish` | Preview／Apply Rich Menu publication |
-| `integration.event.read` | contract／LINE inbox Query |
-| `integration.event.retry` | retry eligible normalization／dispatch |
-| `admin.user.manage` | create／enable／disable／assign role capability／rotate credential |
-| `admin.session.revoke` | revoke admin session |
-| `admin.audit.read` | compatibility capability；Security Audit Query 不以此能力作 gate |
-| `data_browser.read` | allowlisted read-only Data Browser Query |
-| `data_browser.write` | allowlisted non-root-fact maintenance only |
-| `system.configuration.manage` | versioned non-secret configuration mutation |
-| `knowledge.source.edit` | ingest draft knowledge source |
-| `knowledge.source.review` | review a draft created by another admin |
-| `knowledge.source.publish` | publish／retire reviewed knowledge created by another admin |
-| `knowledge.answer.query` | query published, cited, non-authoritative answer |
+- `AdminPrincipal` 是 human actor identity，用於 authentication、操作歸屬與 audit，不代表差異化權限。
+- 業務 API 只判斷 session 是否有效且 user 是否 enabled；通過後可使用相同業務功能集合。
+- `X-Legacy-Shared-Key` 只證明受信任 service caller，不能冒充 human actor。
+- body、query、UI session label 或任意 role／capability 字串不得成為 actor 或改變可用功能。
+- UI 不顯示依人員而異的業務選單，也不建立「有權／無權角色」驗收案例。
+- 外部 provider、production environment、secret、資料庫 target、SystemPrincipal 自動命令範圍及
+  Preview／Confirm／Apply 等安全門禁不屬於人員差異化權限，仍須遵守各自契約。
 
 ### 4.2 根事實與 state machine
 
@@ -276,7 +230,6 @@ Command／Query 最小對照：
 - admin user identity；
 - password hash／credential version；
 - enabled flag；
-- role／capability grants；
 - hashed session token；
 - issued、expires、last-seen、revoked time；
 - security decision audit。
@@ -289,7 +242,7 @@ Session: active → expired | revoked
 Credential: valid → rotated
 ```
 
-停權不刪除 user；role change、disable、credential rotation 都撤銷受影響 session。
+停權不刪除 user；disable、credential rotation 都撤銷受影響 session。
 
 ### 4.3 Subsystem：Authentication／Session
 
@@ -313,33 +266,30 @@ Modules：
 - `APP_ENV=production` 禁止 auth bypass；
 - development bypass 必須同時是允許環境＋顯式設定，並產生醒目 audit／startup warning。
 
-### 4.4 Subsystem：Authorization／Administration
+### 4.4 Subsystem：Account／Session Administration
 
 Commands：
 
 - `CreateAdminUser`
 - `DisableAdminUser`
 - `EnableAdminUser`
-- `AssignAdminRoleCapabilities`
 - `RevokeAdminSessions`
 - `RotateAdminCredential`
 
-每個 Command 使用 expected version、actor capability、reason 與 idempotency key。
-禁止最後一位 `system_admin` 自我停權／降權；本系統不採用 break-glass credential、
-緊急繞過 API 或自動復原流程。
+每個 Command 使用 expected version、authenticated actor、reason 與 idempotency key。本系統不採用
+break-glass credential、緊急繞過 API 或自動復原流程。
 
-Ports：`AdminRepository`、`SessionRepository`、`CapabilityPolicy`、
-`SecurityAuditRepository`、`SecurityOutbox` 與 `AccessControlUnitOfWork`。
-role change／disable 依固定順序鎖定 user，驗證 expected version、capability 與
-last-admin guard，寫入 grant／enabled event，撤銷受影響 session，append audit、
+Ports：`AdminRepository`、`SessionRepository`、`SecurityAuditRepository`、`SecurityOutbox` 與
+`AccessControlUnitOfWork`。disable 依固定順序鎖定 user，驗證 expected version 與 authenticated actor，
+寫入 enabled event，撤銷受影響 session，append audit、
 receipt／outbox，最後由 outer Unit of Work 單次 commit。相同 key replay 回既有
-receipt；不同 payload、stale version 或並行 last-admin mutation 固定 conflict。
+receipt；不同 payload或 stale version 固定 conflict。
 
 ### 4.5 Subsystem：Security Audit
 
 Domain decision audit 必須與 mutation 同交易保存：
 
-- actor identity／role／effective capabilities；
+- actor identity；
 - action；
 - resource identity；
 - before／after version或摘要；
@@ -350,8 +300,8 @@ Domain decision audit 必須與 mutation 同交易保存：
 HTTP access log、latency 與 diagnostic audit 可獨立 best-effort，不能取代 Domain audit。
 Generic Data Browser 不得修改 admin users、sessions、capabilities 或 security audit。
 
-2026-08-09 已採用 Security Audit policy：管理員可查最近兩年的 audit 摘要，不以
-`admin.audit.read` capability 作為查閱門檻；清單固定遮罩 IP，明細固定遮罩 token、password、
+2026-08-09 已採用 Security Audit policy：所有已登入且 enabled 的內部使用者可查最近兩年的 audit
+摘要；清單固定遮罩 IP，明細固定遮罩 token、password、
 Authorization、LINE user ID、電話與身分證等敏感值。所有已登入管理員可直接查看已遮罩明細。
 此為唯讀查詢，不要求填寫查閱原因，也不另寫入 Domain decision event；`reason` 僅是會改變
 資料、綁定、授權或核准結果的 Command audit 欄位。
@@ -367,9 +317,7 @@ Authorization、LINE user ID、電話與身分證等敏感值。所有已登入�
 | `missing_or_invalid_admin_session` | 401 |
 | `admin_session_expired` | 401 |
 | `admin_user_disabled` | 401／403 |
-| `insufficient_capability` | 403 |
 | `admin_version_conflict` | 409 |
-| `last_system_admin_protected` | 409 |
 | `security_audit_persistence_failed` | transaction rollback |
 
 ### 4.7 Alerts 與人工入口
@@ -377,13 +325,11 @@ Authorization、LINE user ID、電話與身分證等敏感值。所有已登入�
 - repeated login failure；
 - disabled user session usage；
 - production auth bypass attempt；
-- unknown role／capability；
-- last-admin mutation attempt；
 - orphan／overlong session；
 - Domain audit persistence failure。
 
-管理入口提供 user enable／disable、role capability assignment、session revoke、
-credential rotation 與 audit search；不得以 Data Browser generic PATCH 代替。
+管理入口提供 user enable／disable、session revoke、credential rotation 與 audit search；不得以
+Data Browser generic PATCH 代替。
 
 ## 5. Domain：Case Import
 
@@ -488,7 +434,7 @@ Ingestion job: pending → processing → completed | failed
 Index build: requested → building → ready | stale | failed
 ```
 
-只有具 content-publish capability 的管理員能發布。來源更新使舊 index `stale`；
+所有已登入且 enabled 的內部使用者都能執行發布。來源更新使舊 index `stale`；
 stale／failed index 必須明確降級，不得用無來源模型答案假裝成功。
 
 2026-08-09 已採用並實作：content author 不得覆核自己建立的 draft，content author 也不得
@@ -556,7 +502,7 @@ durable source job 或退出；LINE bot 不得直接更新 knowledge root 或無
 
 ### Module
 
-- signature、canonical fingerprint、role→capability、session validity、state reducer。
+- signature、canonical fingerprint、session validity／enabled user、state reducer。
 
 ### Subsystem
 
@@ -574,7 +520,7 @@ durable source job 或退出；LINE bot 不得直接更新 knowledge root 或無
 
 - LINE webhook redelivery 不重複 side effect；
 - business commit＋LINE task 原子建立，provider failure 後可安全 retry；
-- internal key 無 Bearer／capability 不得執行 human mutation；
+- internal key 無有效 internal-user session 不得執行 human mutation；
 - Integration／Access failure 不破壞 owning Domain transaction。
 - invalid Case Import 不污染正式 Client／Order；
 - Knowledge answer 無來源或 index stale 時 fail closed，且不能觸發 Domain mutation。

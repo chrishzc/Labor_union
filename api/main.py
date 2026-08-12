@@ -29,6 +29,7 @@ from api.routes import (
     client_deposit_reversal,
     client_receipt_reconciliation,
     client_refund_reversal,
+    contract_signing,
     client_payments,
     clients,
     contracts,
@@ -54,6 +55,7 @@ from api.routes import (
     knowledge_retrieval,
     match_records,
     matches,
+    candidate_contact_pool,
     multi_caregiver_case_assignments,
     multi_caregiver_schedule,
     multi_caregiver_schedule_read,
@@ -66,6 +68,8 @@ from api.routes import (
     order_contract_completion,
     order_reopen,
     order_schedule_calculation,
+    service_date_confirmation,
+    matching_schedule_confirmation,
     order_terms,
     orders,
     payroll,
@@ -177,6 +181,7 @@ app.include_router(orders.router)
 app.include_router(case_architecture_bootstrap.router)
 app.include_router(order_terms.router)
 app.include_router(order_contract_completion.router)
+app.include_router(contract_signing.router)
 app.include_router(order_actual_start.router)
 app.include_router(order_auto_completion.router)
 app.include_router(order_cancellation.router)
@@ -184,16 +189,20 @@ app.include_router(order_reopen.router)
 app.include_router(assignment_plan.router)
 app.include_router(leave_substitution.router)
 app.include_router(order_schedule_calculation.router)
+app.include_router(service_date_confirmation.router)
+app.include_router(matching_schedule_confirmation.router)
 app.include_router(assignment_schedule_rest_dates.router)
 
 
 app.include_router(matches.router)
+app.include_router(candidate_contact_pool.router)
 app.include_router(match_records.router)
 
 app.include_router(schedule.router)
 app.include_router(jobs.router)
 app.include_router(scheduling_current.router)
 app.include_router(multi_caregiver_case_assignments.router)
+app.include_router(multi_caregiver_case_assignments.staff_router)
 app.include_router(multi_caregiver_schedule.router)
 app.include_router(multi_caregiver_schedule_read.router)
 app.include_router(caregiver_segment_availability.router)

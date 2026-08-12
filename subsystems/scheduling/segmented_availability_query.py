@@ -160,6 +160,9 @@ def search_segmented_caregiver_availability(
         )
     )
 
+    required_service_dates = _required_service_dates(
+        loaded_facts.get("confirmed_service_dates") or [], planned_start, planned_end
+    )
     result = derive_segment_availability(
         planned_start_date=planned_start.isoformat(),
         planned_end_date=planned_end.isoformat(),
@@ -174,8 +177,96 @@ def search_segmented_caregiver_availability(
         "planned_start_date": result["validated_input"]["planned_start_date"],
         "planned_end_date": result["validated_input"]["planned_end_date"],
         "feasibility": "complete" if result["complete_combinations"] else "partial",
-        **{key: result[key] for key in ["complete_combinations", "segment_candidates", "conflicts"]},
+        "complete_combinations": result["complete_combinations"],
+        "segment_candidates": result["segment_candidates"],
+        "candidate_options": _candidate_options(result["segment_candidates"], candidate_rows,
+                                                  required_service_dates, segment_drafts,
+                                                  int(order_row.get("scheduling_version") or 0)),
+        "conflicts": result["conflicts"],
     }
+
+
+def _required_service_dates(confirmed_rows, planned_start, planned_end):
+    if confirmed_rows:
+        return tuple(_as_optional_date(row["service_date"], "confirmed_service_date") for row in confirmed_rows)
+    return tuple(planned_start + timedelta(days=offset)
+                 for offset in range((planned_end - planned_start).days + 1))
+
+
+def _candidate_options(candidate_rows, staff_rows, required_service_dates, segment_drafts,
+                       scheduling_version):
+    staff_names = {
+        int(row["id"]): str(row.get("name") or "")
+        for row in staff_rows
+        if row and row.get("id") is not None
+    }
+    options = {}
+    for candidate in candidate_rows:
+        key = (int(candidate["segment_index"]), int(candidate["staff_id"]))
+        option = options.setdefault(
+            key,
+            {
+                "segment_index": key[0],
+                "staff_id": key[1],
+                "staff_name": staff_names.get(key[1], ""),
+                "coverage_day_count": 0,
+                "available_ranges": [],
+            },
+        )
+        start_date = _as_optional_date(candidate["start_date"], "candidate.start_date")
+        end_date = _as_optional_date(candidate["end_date"], "candidate.end_date")
+        option["available_ranges"].append(
+            {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()}
+        )
+    return [_coverage_view(options[key], required_service_dates, segment_drafts,
+                           scheduling_version) for key in sorted(options)]
+
+
+def _coverage_view(option, required_service_dates, segment_drafts, scheduling_version):
+    supported = tuple(service_date for service_date in required_service_dates
+                      if any(_as_optional_date(interval["start_date"], "range.start") <= service_date <=
+                             _as_optional_date(interval["end_date"], "range.end")
+                             for interval in option["available_ranges"]))
+    draft = segment_drafts[option["segment_index"]] if option["segment_index"] < len(segment_drafts) else {}
+    segment_start = _as_optional_date(draft.get("start_date"), "segment.start") if draft.get("start_date") else required_service_dates[0]
+    segment_end = _as_optional_date(draft.get("end_date"), "segment.end") if draft.get("end_date") else required_service_dates[-1]
+    required_segment = tuple(day for day in required_service_dates if segment_start <= day <= segment_end)
+    supported_segment = set(supported)
+    uncovered = tuple(day for day in required_segment if day not in supported_segment)
+    return {
+        **option,
+        "coverage_day_count": len(supported),
+        "case_period_start": required_service_dates[0].isoformat(),
+        "case_period_end": required_service_dates[-1].isoformat(),
+        "required_service_dates": [day.isoformat() for day in required_service_dates],
+        "supported_service_dates": [day.isoformat() for day in supported],
+        "supported_ranges": _date_ranges(supported),
+        "supported_day_count": len(supported),
+        "required_day_count": len(required_service_dates),
+        "full_case_coverage": len(supported) == len(required_service_dates),
+        "selected_segment_start": segment_start.isoformat(),
+        "selected_segment_end": segment_end.isoformat(),
+        "full_selected_segment_coverage": not uncovered,
+        "uncovered_segment_dates": [day.isoformat() for day in uncovered],
+        "source_scheduling_version": scheduling_version,
+    }
+
+
+def _date_ranges(dates):
+    if not dates:
+        return []
+    ranges, start, previous = [], dates[0], dates[0]
+    for current in dates[1:]:
+        if current == previous + timedelta(days=1):
+            previous = current
+            continue
+        ranges.append({"start_date": start.isoformat(), "end_date": previous.isoformat(),
+                       "service_day_count": (previous - start).days + 1})
+        start = previous = current
+    ranges.append({"start_date": start.isoformat(), "end_date": previous.isoformat(),
+                   "service_day_count": (previous - start).days + 1})
+    return ranges
+
 
 def _active_waiting_buffer_days(rows, window_start, window_end):
     buffer_days = []

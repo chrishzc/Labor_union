@@ -31,7 +31,12 @@ _PERSISTENT_DATABASE_FORBIDDEN_PATTERNS = (
 def load_receipts(directory: Path = DEFAULT_RECEIPT_DIRECTORY) -> list[dict[str, object]]:
     if not directory.is_dir():
         return []
-    return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(directory.glob("*.json"))]
+    return [
+        receipt
+        for path in sorted(directory.glob("*.json"))
+        for receipt in [json.loads(path.read_text(encoding="utf-8"))]
+        if receipt.get("contract") == RECEIPT_CONTRACT
+    ]
 
 
 def verify_receipts(

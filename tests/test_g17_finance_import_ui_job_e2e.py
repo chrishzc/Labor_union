@@ -58,7 +58,7 @@ def test_g17_panel_shows_pending_until_the_independent_worker_succeeds(tmp_path,
     raw_status = client._session.request(
         "GET",
         f"http://g17.test/api/v1/jobs/{command['job_id']}",
-        headers={"X-Internal-API-Key": "g17-internal-key"},
+        headers={"X-Legacy-Shared-Key": "g17-internal-key"},
     )
     assert raw_status.ok, raw_status.json()
     completed_status = client.get_job_status(command["job_id"])
@@ -71,7 +71,7 @@ def test_g17_panel_shows_pending_until_the_independent_worker_succeeds(tmp_path,
 def _configure_test_auth(monkeypatch):
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
-    monkeypatch.setenv("INTERNAL_API_KEY", "g17-internal-key")
+    monkeypatch.setenv("LEGACY_SHARED_KEY", "g17-internal-key")
 
 
 def _panel_and_client(monkeypatch):
@@ -89,7 +89,7 @@ def _panel_and_client(monkeypatch):
     session = _TestClientSession(http_client, lose_first_apply_response=True)
     client = FinanceImportApiClient(
         base_url="http://g17.test",
-        headers={"X-Internal-API-Key": "g17-internal-key"},
+        headers={"X-Legacy-Shared-Key": "g17-internal-key"},
         session=session,
     )
     return display, panel, client, session

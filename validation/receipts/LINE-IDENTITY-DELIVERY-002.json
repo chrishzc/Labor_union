@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "LINE-IDENTITY-DELIVERY-002",
-  "scenario_digest": "98beffd1e316f99b2a6f1d6d6e66351cc0694ee1351781964b73e4e9dcf4cff7",
+  "scenario_digest": "69bc01d928a387ba40a2cdf3fd9686d1934db485fabecff3f0be1e7638134cc4",
   "result": "passed",
   "assertion_count": 40,
   "runner": [
@@ -20,7 +20,7 @@
     "identity_review_tests": "e8c78c2971832b85bf5efee8305e04a7c995a60296f7d577882e92b59daa92ef",
     "delivery_tests": "06b0129d47901939e5e4d0ae7a9ec88ee6884b40a022b26e9d7acbc3dec5bad3",
     "idempotency_tests": "df72fc37031c20094dbbd29f9a47bb38740a7617a4273921dbfec2895d1b0caf",
-    "identity_subsystem_tests": "a3253f7bd59e6ffb229dc947c5a811e6fd42b553c2a69a9d266fd14e8de363ec",
+    "identity_subsystem_tests": "3d5c78162f28245581f4e0cf51ba9b1992c5b182b65ad758df515c9ae9a02f8b",
     "runtime_tests": "0ac8b052150f86298a971dae829abcde9736acbd109c10d387664209978a6fea",
     "provider_adapter_tests": "f7a5c3eaed37d522db4abc19b51ce723ea8a6fbd17818b9dd27103aa3fdb02de"
   },

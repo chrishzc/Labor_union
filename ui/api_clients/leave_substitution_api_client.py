@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from api.schemas.base import BaseResponse
 from api.schemas.leave_substitution import (
+    LeaveAssignmentSummaryView,
     LeaveSubstitutionPreviewView,
     LeaveSubstitutionReceiptView,
     LeaveSubstitutionTypedErrorView,
@@ -40,6 +41,9 @@ class LeaveSubstitutionApiClient:
 
     def assignment_schedule(self, assignment_id: int) -> dict[str, Any]:
         return self._request("GET", f"/api/v1/assignment-schedules/{_positive_id(assignment_id)}")
+
+    def assignments(self, case_no: str) -> list[LeaveAssignmentSummaryView]:
+        return self._request("GET", f"/api/v1/orders/{_case_no(case_no)}/leave-substitution/assignments", response_type=list[LeaveAssignmentSummaryView])
 
     def preview(self, case_no: str, payload: dict[str, Any], correlation_id: str) -> LeaveSubstitutionPreviewView:
         return self._request("POST", f"/api/v1/orders/{_case_no(case_no)}/leave-substitution/preview", payload, {"X-Correlation-ID": correlation_id}, LeaveSubstitutionPreviewView)

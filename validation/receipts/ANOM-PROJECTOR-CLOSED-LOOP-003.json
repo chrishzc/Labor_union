@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "ANOM-PROJECTOR-CLOSED-LOOP-003",
-  "scenario_digest": "202e827121079451da553d56c078223ef3258fd36a119ce72af93baa0b099326",
+  "scenario_digest": "ca18ccb652922069ada75815167c7e2eddd0c855c4181198fd55c8c0e0beead1",
   "result": "passed",
   "assertion_count": 39,
   "runner": [

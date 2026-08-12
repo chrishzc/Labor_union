@@ -17,7 +17,7 @@ owner: Scheduling / LINE Integration
 - 月嫂請假審核採 Scheduling bounded API／typed client；不得放在 LINE route 或
   `LineAdminApiClient`。
 - `綁定訂單`、`訂單查詢` 保留 customer binding；`綁定後台帳號` 保留 admin binding。
-- `online.sh` 是其他開發者的環境專用腳本，不列入本次 Windows 合併驗收。
+- `online.sh` 與 `online.bat` 同為本機開發 launcher；僅限 operator 使用，不得作 production deployment。
 
 ## 本次 write set
 

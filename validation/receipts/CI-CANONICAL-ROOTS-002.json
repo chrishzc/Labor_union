@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "CI-CANONICAL-ROOTS-002",
-  "scenario_digest": "425e8544227886670d059f642d56f551bf03c833cbfb887d6d6419fd5372dadb",
+  "scenario_digest": "0ee20ea550ea440f86f8e30341d5813249319df592d7f4d4da41018b4ed55e77",
   "result": "passed",
   "assertion_count": 10,
   "runner": [
@@ -15,8 +15,8 @@
   "input_digests": {
     "scenario_fixture": "406c7c3f1ea46fdf9360d5e1ff0e43f08b1669e8a4692a58b7542fb529a27d22",
     "expected_manifest": "66ae8695f6a5a5dad9b1d0d1cc24828e1fa0805864a09ab9b483d70e64a04bc2",
-    "integration_test": "8c571628db1aad17fd68fdf54a1681997658a39ceed006b4aaf5b018e1e70f4f",
-    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+    "integration_test": "a2031ca38ff8f7a8428cc2440e07b52819d8a06805eb27701e1821a80d32cdd9",
+    "validation_schema_manifest": "48f9f520812f86f6eac0a9ee01d2874b0a5c6a75f46430a4ad29a8de2305c7cd"
   },
   "input_paths": {
     "scenario_fixture": "validation/fixtures/CI-CANONICAL-ROOTS-002.json",

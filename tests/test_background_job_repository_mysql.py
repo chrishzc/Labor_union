@@ -15,6 +15,15 @@ pytestmark = pytest.mark.integration
 
 
 def _require_disposable_database() -> None:
+    required_names = (
+        "LABOR_UNION_TEST_MYSQL_HOST",
+        "LABOR_UNION_TEST_MYSQL_PORT",
+        "LABOR_UNION_TEST_MYSQL_USER",
+        "LABOR_UNION_TEST_MYSQL_PASSWORD",
+        "LABOR_UNION_TEST_MYSQL_DATABASE",
+    )
+    if any(not os.environ.get(name) for name in required_names):
+        pytest.skip("requires LABOR_UNION_TEST_MYSQL_* disposable database configuration")
     database = os.environ.get("DB_DATABASE", "")
     if not database.startswith("lu_test_"):
         pytest.skip("requires an explicitly configured disposable MySQL database")

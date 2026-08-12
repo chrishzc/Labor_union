@@ -80,6 +80,8 @@ def render_leave_substitution_panel(case_no: str, client: LeaveSubstitutionApiCl
     if not work_days:
         st.info("此指派沒有可處理的正式服務日。")
         return
+
+    _render_service_day_baseline(work_days)
     
     labels = {f"{row['work_date']}｜排班 #{row['id']}": row for row in work_days}
     
@@ -139,8 +141,11 @@ def render_leave_substitution_panel(case_no: str, client: LeaveSubstitutionApiCl
                 st.session_state.pop(f"leave_preview_{original_assignment_id}", None)
                 st.rerun()
                 
-        st.markdown("---")
-        _preview_and_apply(case_no, client, original_assignment_id, st.session_state[batch_key])
+    else:
+        st.info("尚未加入手動調整項目；可直接產生國定假日精算 Preview。")
+
+    st.markdown("---")
+    _preview_and_apply(case_no, client, original_assignment_id, st.session_state[batch_key])
 
 
 def _item(schedule_day, resolution, substitute) -> dict:
@@ -173,19 +178,46 @@ def _preview_and_apply(case_no, client, assignment_id, items) -> None:
     if preview is None:
         return
         
-    st.success("預覽已產生，請查看月曆上的視覺變化（綠色為排休/順延、紅色為新工作日）。")
-    st.dataframe([outcome.model_dump(mode="json") for outcome in preview.outcomes], hide_index=True, width="stretch")
+    st.success("預覽已產生；目前尚未寫入資料庫。")
+    candidate = preview.calendar_candidate
+    summary_columns = st.columns(4)
+    summary_columns[0].metric("合約服務天數", candidate.contracted_service_day_count)
+    summary_columns[1].metric("服務天數", f"{candidate.before_service_day_count} → {candidate.after_service_day_count}")
+    summary_columns[2].metric("本批調整", f"順延 {candidate.deferred_day_count}／代班 {candidate.substitute_day_count}")
+    summary_columns[3].metric("服務天數守恆", candidate.conservation_status)
+    st.caption(
+        "分類："
+        f"國定假日休假 {candidate.holiday_rest_day_count}／"
+        f"固定排休 {candidate.fixed_rest_day_count}／"
+        f"本批請假 {candidate.leave_day_count}"
+    )
+    st.caption(
+        "服務期間："
+        f"{candidate.before_service_start_date or '-'} ～ {candidate.before_service_end_date or '-'}"
+        " → "
+        f"{candidate.after_service_start_date or '-'} ～ {candidate.after_service_end_date or '-'}"
+    )
+    if candidate.holiday_rows:
+        st.caption(
+            "國定假日（預設休假，已納入服務日順延）："
+            + "、".join(f"{holiday_date} {holiday_name}" for holiday_date, holiday_name in candidate.holiday_rows)
+        )
+    _render_calendar_changes(candidate.day_cells)
+
+    is_ready = preview.apply_readiness.status == "ready"
+    if not is_ready:
+        st.warning("目前只能預覽，尚不可儲存：" + "、".join(preview.apply_readiness.blockers))
     
     reason = st.text_input("確認儲存：請輸入請假／代班原因", key=f"leave_reason_{assignment_id}")
     confirm = st.checkbox("確認依此 Preview 套用", key=f"leave_confirm_{assignment_id}")
     
-    if st.button("💾 確認儲存 (Apply)", disabled=not confirm or not reason.strip(), key=f"leave_apply_{assignment_id}"):
+    if st.button("💾 確認儲存 (Apply)", disabled=not is_ready or not confirm or not reason.strip(), key=f"leave_apply_{assignment_id}"):
         _apply(case_no, client, assignment_id, preview, reason.strip())
 
 
 def _apply(case_no, client, assignment_id, preview, reason) -> None:
     items = st.session_state.get(f"leave_batch_{assignment_id}")
-    if not isinstance(items, list) or not items:
+    if not isinstance(items, list):
         st.error("請重新產生 Preview。")
         return
         
@@ -222,3 +254,30 @@ def _apply(case_no, client, assignment_id, preview, reason) -> None:
 
 def _identity(prefix: str, case_no: str) -> str:
     return f"{prefix}-{case_no}-{uuid.uuid4().hex}"
+
+
+def _render_service_day_baseline(work_days: list[dict]) -> None:
+    service_dates = sorted(str(row["work_date"])[:10] for row in work_days)
+    columns = st.columns(2)
+    columns[0].metric("目前正式服務天數", len(service_dates))
+    columns[1].metric(
+        "目前正式服務期間",
+        f"{service_dates[0]} ～ {service_dates[-1]}",
+    )
+    st.caption("加入休假或代班項目後，產生 Preview 才會顯示調整後的服務日差異。")
+
+
+def _render_calendar_changes(day_cells) -> None:
+    changes = [cell for cell in day_cells if cell.change_kind != "unchanged"]
+    if not changes:
+        return
+    st.markdown("#### 行事曆差異")
+    st.caption("圖例：休假日不計服務天數並順延；順延後與代班日都是服務工作日。")
+    for cell in changes:
+        owner = f"月嫂 {cell.before_staff_id or '-'} → 月嫂 {cell.after_staff_id or '-'}"
+        label = {
+            "deferred_from": "休假日（扣除服務日並順延）",
+            "deferred_to": "順延後服務日",
+            "substitute": "代班服務日",
+        }.get(cell.change_kind, cell.change_kind)
+        st.write(f"{cell.calendar_date}｜{label}｜{owner}")

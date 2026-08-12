@@ -130,7 +130,6 @@ def _environment(*, webhook: str, worker: str) -> dict[str, str]:
         "LINE_LEGACY_ROLLBACK_MODE": "false",
         "ENABLE_ADMIN_AUTH": "true",
         "LIFF_REQUIRE_ID_TOKEN": "true",
-        "INTERNAL_API_KEY": "internal-secret",
         "LINE_CHANNEL_SECRET": "channel-secret",
         "LINE_CHANNEL_ACCESS_TOKEN": "access-token",
         "LINE_LOGIN_CHANNEL_ID": "1234567890",

@@ -22,26 +22,23 @@ def _client() -> TestClient:
 
 def _headers() -> dict[str, str]:
     return {
-        "X-Internal-API-Key": "internal-test-key",
         "Authorization": "Bearer session-token",
     }
 
 
-def test_admin_router_get_without_internal_key_returns_401(monkeypatch):
+def test_admin_router_get_without_session_returns_401(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
-    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
 
     response = _client().get("/api/v1/admin/data-browser/orders")
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "內部服務金鑰錯誤"
+    assert response.json()["detail"] == "缺少有效的管理員 Session"
 
 
 def test_admin_router_rejects_insufficient_formal_role(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
-    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setattr(admin_auth, "get_admin_session", lambda _token: _principal("line_manager"))
 
     response = _client().get(

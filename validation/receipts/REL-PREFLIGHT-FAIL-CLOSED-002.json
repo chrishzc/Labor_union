@@ -13,7 +13,7 @@
     "execution_scope": "temporary release preflight and switch-config harness; no deployment target"
   },
   "input_digests": {
-    "release_preflight_test": "fcd8997c76c31e461fdbfe007c43380d39048525493d76836b073f4e2d27f662"
+    "release_preflight_test": "ed45e9eb237368f0378f59cd8e65fc582182ac7a7b07b7f7ad564f4b30138025"
   },
   "input_paths": {
     "release_preflight_test": "tests/test_preserved_database_additive_upgrade_cutover.py"
