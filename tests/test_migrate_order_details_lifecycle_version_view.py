@@ -272,6 +272,21 @@ def test_show_create_dictcursor_key_is_case_insensitive() -> None:
     assert statement == ORIGINAL
 
 
+def test_view_column_metadata_accepts_pymysql_tuple_rows(
+    tmp_path: Path,
+) -> None:
+    cursor = FakeCursor()
+    original_fetchall = cursor.fetchall
+    cursor.fetchall = lambda: tuple(original_fetchall())
+
+    manifest = migration.run_migration(
+        FakeConnection(cursor),
+        schema_path=schema_file(tmp_path),
+    )
+
+    assert manifest["status"] == "ready"
+
+
 def test_show_create_non_mapping_shape_fails_closed() -> None:
     class TupleCursor:
         def execute(self, sql):

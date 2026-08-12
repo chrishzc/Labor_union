@@ -58,15 +58,8 @@ def load_contract_client_finance_facts(
     aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=lock)
     generation_row = _select_generation(cursor, aggregate_row, lock)
     schedule_rows = _select_schedules(cursor, generation_row, lock)
+    charge_days = _contract_charge_days(cursor, case_no, schedule_rows, lock)
     source = _load_client_finance(cursor, order_row, schedule_rows, lock)
-    charge_days = tuple(
-        ClientChargeDay(
-            row["work_date"],
-            bool(row["is_double_pay"]),
-        )
-        for row in schedule_rows
-        if bool(row["is_work_day"])
-    )
     return ClientFinanceTermsFacts(
         case_no=case_no,
         account_version=source.account_version,
@@ -76,6 +69,34 @@ def load_contract_client_finance_facts(
         payment_terms=source.payment_terms,
         existing_obligations=source.existing_obligations,
         open_nonstage_obligation_count=source.open_nonstage_obligation_count,
+    )
+
+
+def _contract_charge_days(cursor, case_no, schedule_rows, lock):
+    scheduled_days = tuple(
+        ClientChargeDay(row["work_date"], bool(row["is_double_pay"]))
+        for row in schedule_rows
+        if bool(row["is_work_day"])
+    )
+    if scheduled_days:
+        return scheduled_days
+    return _committed_charge_days(cursor, case_no, lock)
+
+
+def _committed_charge_days(cursor, case_no, lock):
+    lock_clause = " FOR UPDATE" if lock else ""
+    cursor.execute(
+        "SELECT day.service_date FROM precontract_service_commitment_days day "
+        "JOIN precontract_service_commitments commitment ON commitment.id=day.commitment_id "
+        "WHERE commitment.case_no=%s AND NOT EXISTS (SELECT 1 "
+        "FROM precontract_service_commitment_events event "
+        "WHERE event.commitment_id=commitment.id) "
+        "ORDER BY day.service_date,day.id" + lock_clause,
+        (case_no,),
+    )
+    return tuple(
+        ClientChargeDay(row["service_date"], False)
+        for row in cursor.fetchall()
     )
 
 

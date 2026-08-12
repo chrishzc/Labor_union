@@ -12,9 +12,9 @@ class OrderSummaryItemView(BaseModel):
     client_name: str
     order_status: str
     staff_name: str | None
-    identity_status: str
+    identity_status: str | None
     start_date: date
-    end_date: date
+    end_date: date | None
     actual_start_date: date | None
     actual_end_date: date | None
     service_days: int = Field(gt=0)

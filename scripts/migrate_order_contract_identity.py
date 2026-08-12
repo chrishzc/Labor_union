@@ -6,6 +6,7 @@ import sys
 from typing import Any
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from scripts.migrate_order_details_lifecycle_version_view import canonical_view_statement
 
 
 LEGACY_COLUMN = "contract_id"
@@ -32,9 +33,15 @@ def retire_legacy_contract_column(cursor: Any) -> str:
     raise RuntimeError("orders contract identity columns are absent or ambiguous")
 
 
+def rebuild_order_details_view(cursor: Any) -> None:
+    cursor.execute(canonical_view_statement())
+
+
 def migrate(connection: Any) -> dict[str, str]:
     with connection.cursor() as cursor:
         outcome = retire_legacy_contract_column(cursor)
+        if outcome == "renamed":
+            rebuild_order_details_view(cursor)
     connection.commit()
     return {"status": outcome, "canonical_column": CANONICAL_COLUMN}
 
