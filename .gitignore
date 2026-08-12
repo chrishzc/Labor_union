@@ -46,7 +46,8 @@ task_index.json
 
 # System generated agent logs & planning
 history/refactor_line_bot
-git_push.md
+/history/git_PR.md
+/history/git_PR.md.example
 task-*.md
 PROJECT_SPEC.md
 scratch/
