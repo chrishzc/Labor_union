@@ -1,5 +1,9 @@
 ---
 doc_type: decision-package
+declared_status: completed
+completed_at: 2026-08-11
+superseded_by: document/架構重整/01_規格基線/13_規格實作完成度矩陣.md
+evidence: document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md
 ---
 
 # Durable Job Completion Decision Package
@@ -123,3 +127,14 @@ An implementation work package must explicitly authorize the additive schema
 migration, the selected first command, worker process configuration and its
 isolated-MySQL tests.  Deployment, production queue operation and any data
 backfill remain separate authorizations.
+
+## 9. 2026-08-11 收斂裁決
+
+本文件第 2～3 節是 2026-08-04 的歷史 partial snapshot。後續 additive queue、獨立 worker、
+lease recovery、typed status、command registry、Assignment／Payroll／Staff Payout／Government
+Subsidy／Finance Import handlers、bounded UI polling 與 G16／G17 均已由正式完成度矩陣及 evidence
+驗證。Windows worker supervision 已另由現行 decision `41` 擁有；target-host acceptance 不再是
+產品 completion gate。
+
+因此本舊總包改列 `completed` 並封存，不建立重複 residual。實際 production queue operation 或
+未來新增 command 仍需各自 release／Work Package，不會因本文件完成而自動取得授權。

@@ -99,6 +99,10 @@ API 回傳 typed summary、detail 與 allowed actions。財務 occurrence 與 cu
 - `completion_predicate` 與 Apply 後應重新投影的 definition codes；
 - action contract version。
 
+每個 active finance definition 必須顯式二擇一：有完整 `available_actions`，或設
+`no_automated_recovery=true`。兩者不可同時成立，也不可同時缺席；後者只代表 state-only，
+不得由 UI、相容 API 或人工 resolve 補成未登記的金錢操作。
+
 Registry 不保存衍生金額。Recovery context assembler 必須向 owning Domain Query 取得 current
 remaining、候選 target 與 versions；UI 不得從 alert details JSON 或中文 message 推算 action。
 
@@ -107,15 +111,16 @@ remaining、候選 target 與 versions；UI 不得從 alert details JSON 或中�
 | Definition／predicate | Action key | 系統預填 | 人員可輸入 | 完成 predicate |
 |---|---|---|---|---|
 | `finance_import_manual_review` | `classify_and_post_bank_row` | bank row、batch、fact/alert version | 唯一 classification/target、reason、evidence | row 已由 owning Domain 正式 posting，manual-review predicate 消失 |
-| `client_receipt_overage_disposition_required` | `apply_client_receipt_overage` | incoming row、case、receivable | reason、evidence；歧義時唯一 target | receipt 全額存在、receivable 歸零、差額 refund payable 成立 |
-| `client_refund_underpayment` | `apply_client_refund_underpayment` | outgoing row、case、refund obligation | reason、evidence | bank row 已核銷且 refund remaining 正確；underpayment 可轉 overdue reminder |
-| `client_refund_overage_recovery_required` | `apply_client_refund_overage` | outgoing row、case、refund obligation | reason、evidence | refund obligation 歸零且同額差額 recovery root 成立 |
+| `finance_import_manual_review`（選定客戶入款列） | `apply_client_receipt_overage` | incoming row | case、receivable obligation、收款階段、reason；歧義時唯一 target | receipt 全額存在、receivable 歸零、差額 refund payable 成立 |
+| `client_refund_underpayment` | 無第二次 Apply（state-only） | 已建立的退款少匯 source | 無 | 原出款列已由 `finance_import_manual_review` 的客戶退款核銷 Preview／Apply 消費；後續只能以新的同帳戶出款列對原退款單 remaining 重走 Preview／Apply，全部結清才關閉 |
+| `finance_import_manual_review`（選定客戶退款出款列） | `apply_client_refund_overage` | outgoing row | case、refund obligation、reason、evidence | refund obligation 歸零且同額差額 recovery root 成立 |
 | `client_over_refund_recovery_open` | `collect_client_over_refund_recovery` | incoming row、client recovery | reason、evidence；歧義時唯一 recovery | recovery remaining 歸零或正確降低；原 overage anomaly 依 remaining 決定消失 |
-| `staff_payout_underpayment` | `apply_staff_payout_underpayment` | outgoing row、staff、payable obligations | reason、evidence | payout 已記錄且 remaining payable／partial 狀態正確 |
-| `staff_payout_overpayment` | `apply_staff_payout_overpayment` | outgoing row、staff、payable obligations | reason、evidence | obligations 歸零且 staff recovery root 成立 |
+| `finance_import_manual_review`（選定月嫂出款列） | `apply_staff_payout_difference` | outgoing row | `underpayment|overpayment`、同一月嫂 payable obligations、reason、evidence | payout 已記錄；少匯投影 remaining／partial，或多匯建立 staff recovery root |
+| `staff_payout_underpayment`／`staff_payout_overpayment` | 無第二次 Apply（state-only） | 已建立的 payout difference source | 無 | 少匯在 remaining 清償後關閉；多匯在 recovery 結清／adjust 後關閉；不得重送已消費銀行列 |
 | `staff_overpayment_recovery_open` | `collect_staff_overpayment_recovery` | incoming row、staff recovery | reason、evidence；歧義時唯一 recovery | recovery remaining 歸零或正確降低 |
 | `GOVSUB-006` | `dispose_government_subsidy_overpayment` | incoming row、receipt、overpayment root、eligible targets | `offset|return`、合法 target／recipient snapshot、reason、evidence | overpayment 進入 offset 或 return payable 分支，不再 pending_review |
-| `government_overpayment_return_pending` | `apply_government_overpayment_return_payout` | outgoing row、government payable | reason、evidence | payable remaining 正確降低／歸零 |
+| `GOVSUB-007` | 無 Apply（state-only） | 已解析的 government outgoing row、唯一未結退款單、超額事實 | 無 | 實際多匯保持可見；不得由 alert 自動核銷、抵扣或新增付款義務 |
+| `finance_import_manual_review`（選定出款列） | `reconcile_government_overpayment_return` | canonical outgoing row | government overpayment identity、reason、evidence；多筆候選時唯一退款單 | bank row 已對回退款單且 remaining 正確降低／歸零；退款單日期不是配對條件 |
 
 同一 anomaly 若只有一個合法 action，UI 直接顯示該表單；有有限分支（例如政府 offset／return）
 時，分支是同一 owning Domain Preview intent 的 enum，不是 UI 自由拼 endpoint。沒有完整 backend

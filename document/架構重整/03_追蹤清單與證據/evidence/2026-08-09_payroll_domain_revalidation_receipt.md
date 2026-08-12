@@ -10,9 +10,9 @@ verified_at: 2026-08-09
 
 - 規格基線：`01_規格基線/03_Payroll_Domain.md`
 - 決策／退役記錄：
-  - `37_Durable_Job_Payroll_Rebuild_Work_Package.md`
-  - `39_Durable_Job_Staff_Payout_Work_Package.md`
-  - `47_Scheduling_Payroll_Legacy_Writer_Exit_Inventory_Receipt.md`
+  - `../../04_已完成與上線封存/work_packages/37_Durable_Job_Payroll_Rebuild_Work_Package.md`
+  - `../../04_已完成與上線封存/work_packages/39_Durable_Job_Staff_Payout_Work_Package.md`
+  - `../../04_已完成與上線封存/receipts/47_Scheduling_Payroll_Legacy_Writer_Exit_Inventory_Receipt.md`
 - 既有 G13 競爭證據：`evidence/2026-08-08_g13_leave_cancellation_mysql_receipt.md`
 
 ## 實作檢查結果

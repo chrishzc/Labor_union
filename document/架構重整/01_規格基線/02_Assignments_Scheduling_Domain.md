@@ -60,6 +60,12 @@
 正式 assignment。轉換前仍必須驗證契約流程完成、服務時間完整及訂金正式核銷；
 legacy 缺漏只能進異常與人工修正，不得由 Assignment Plan 猜測或補造。
 
+依第 `21` 份正式規格，存在簽約前 commitment 時，第一次 bootstrap 還必須鎖定並驗證
+matching plan/version、staff 與精確日期集合完全相同；不同時回
+`commitment_execution_mismatch` 且零寫入。成功時 assignments、schedules、Payroll impact、
+commitment `converted` terminal event、outbox 與 receipt 同一交易提交。Calendar Read、Payroll
+與 Government Subsidy 在 conversion 前不得讀取 commitment days。
+
 ### Schedule Projection
 
 由 assignment segment、排休規則及正式 leave outcome 產生完整 assignment-owned 日曆。禁止單日 CRUD、獨立 Generate 或 UI 直接切換 `is_work_day`。

@@ -1,9 +1,31 @@
 ---
 doc_type: decision-package
-declared_status: decision-complete-removal-not-authorized
+declared_status: completed
 ---
 
 # Legacy Retirement Wave 1 Decision Package
+
+## 2026-08-12 retroactive removal reconciliation
+
+The user authorized reconciliation and closeout on 2026-08-12. A fresh check at
+HEAD `1333a1fd03dde08c6364ac12758a3c3bf7383364` confirmed that both approved
+Wave 1A targets had already been removed by historical commit `8f79a4856b90a6de57f726a23e88fda866b23529`
+on 2026-08-09:
+
+- `services/caregiver_availability_lock_conversion_service.py`;
+- `tests/test_caregiver_availability_lock_conversion_service.py`.
+
+The fresh production/test-tree caller scan found no import or reference to the
+legacy module or `convert_availability_lock_to_assignments`. The retained legacy
+HTTP convert adapter continues to return `410` and points callers to Assignment
+Plan Preview/Apply. Focused replacement regression passed: `5 passed in 0.44s`
+for `tests/test_waiting_deposit_lock_api_client.py` and
+`tests/line/subsystems/test_line_waiting_lock_gate_stage7.py`.
+
+This retroactive closeout does not assert that the 2026-08-09 removal itself was
+previously authorized. It records the current completed state after the user's
+2026-08-12 explicit reconciliation authorization. The detailed receipt is
+`../03_追蹤清單與證據/evidence/2026-08-12_legacy_retirement_wave_1_reconciliation_receipt.md`.
 
 ## 1. 狀態與授權邊界
 

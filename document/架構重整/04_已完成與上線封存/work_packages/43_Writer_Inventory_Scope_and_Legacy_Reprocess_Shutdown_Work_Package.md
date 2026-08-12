@@ -1,7 +1,10 @@
 ---
 doc_type: work-package
+declared_status: completed
 authorized_by: user
 authorization_date: 2026-08-08
+completed_at: 2026-08-11
+evidence: document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md
 ---
 
 # Writer Inventory Scope 與 Legacy Reprocess Shutdown Work Package
@@ -31,3 +34,9 @@ authorization_date: 2026-08-08
 - legacy `--apply` 不建立資料庫連線，且舊 integration test 不再主張 retired writer 的
   commit 行為；
 - 所有變更使用 focused pytest 驗證，inventory 維持 `blocked` 直到逐筆 disposition 完成。
+
+## 完成確認
+
+2026-08-11 fresh validator 完整覆蓋 660 筆 reviewed disposition，`approved_to_remove=0`；
+legacy reprocess Apply 仍在取得資料庫連線前 fail closed，focused tests 通過。此完成狀態不新增
+任何 writer removal authority。

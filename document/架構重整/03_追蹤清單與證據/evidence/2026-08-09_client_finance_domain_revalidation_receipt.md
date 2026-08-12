@@ -10,9 +10,9 @@ verified_at: 2026-08-09
 
 - 規格基線：`01_規格基線/04_Client_Finance_Domain.md`
 - 決策／退役記錄：
-  - `25_Client_Refund_Completion_Decision_Package.md`
+  - `../../04_已完成與上線封存/work_packages/25_Client_Refund_Completion_Decision_Package.md`
   - `42_Client_Finance_Bank_Fact_and_Overdue_Reminder_Decision.md`
-  - `45_Client_Finance_Canonical_Overdue_Reminder_Work_Package.md`
+  - `../../04_已完成與上線封存/work_packages/45_Client_Finance_Canonical_Overdue_Reminder_Work_Package.md`
 - 既有補助墊付證據：
   `evidence/2026-08-04_subsidy_return_and_advance_e2e_receipt.md`
 

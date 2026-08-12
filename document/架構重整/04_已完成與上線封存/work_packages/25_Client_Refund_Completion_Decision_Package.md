@@ -1,5 +1,8 @@
 ---
 doc_type: decision-package
+declared_status: completed
+completed_at: 2026-08-11
+evidence: document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md
 ---
 
 # Client Refund Completion Decision Package
@@ -69,3 +72,9 @@ doc_type: decision-package
 - Real-format Excel in an isolated disposable MySQL database proves ingestion → classification → Preview → Apply → Client Finance ledger/projection → Anomalies.
 - Global E2E proves customer refund and Staff Payables payout coexist without netting.
 - Writer Inventory v3 records the resulting canonical writers and proves no legacy refund caller remains.
+
+## Closeout
+
+2026-08-11 fresh focused validation 與既有 disposable-MySQL evidence 已滿足本 package 的
+completion scope。Current SSOT 為 Client Finance／Staff Payables 正式規格與規格實作完成度矩陣；
+本文件改列 `completed` 並只供歷史追溯。

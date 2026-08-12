@@ -22,10 +22,10 @@ production code、pytest scope 或資料庫。
 - `evidence/global_e2e_manifest.json`：17 個 scenario 均為 `proven`，
   `not_yet_proven` 為空；其隔離 MySQL evidence 另見
   `2026-08-09_cross_domain_global_e2e_revalidation_receipt.md`。
-- `34_Preserve_Data_Runner_Completion_Decision_Package.md` 已明示被 `51` supersede；
+- `../../04_已完成與上線封存/superseded_specs/34_Preserve_Data_Runner_Completion_Decision_Package.md` 已明示被封存的 `51` supersede；
   preserve-data runner 的本機收斂與 external rehearsal boundary 已在
   `2026-08-09_preserve_data_cutover_revalidation_receipt.md` 記錄。
-- `46_Six_Remaining_Gaps_Completion_Architecture.md` 已對齊決策 53：target-host deployment、
+- `../../04_已完成與上線封存/superseded_specs/46_Six_Remaining_Gaps_Completion_Architecture.md` 已對齊決策 53：target-host deployment、
   TLS／HTTP2／latency acceptance 已退役；worker recovery 仍是可由本機隔離測試驗證的產品
   行為。historical matrix 不得重新建立 deployment acceptance gate。
 

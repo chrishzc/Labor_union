@@ -16,7 +16,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 
 | 檔案 | doc_type | declared_status | 一句話摘要 |
 |---|---|---|---|
-| [19_Legacy_Retirement_Wave_1_Decision_Package.md](19_Legacy_Retirement_Wave_1_Decision_Package.md) | decision-package | `decision-complete-removal-not-authorized` | 第一波 legacy 退役候選盤點，裁決完成但未授權實際刪除。 |
+| [19 Legacy Retirement Wave 1（封存）](../04_已完成與上線封存/work_packages/19_Legacy_Retirement_Wave_1_Decision_Package.md) | decision-package | `completed` | Wave 1A target 已歷史移除，2026-08-12 完成 fresh caller/replacement reconciliation。 |
 | [24_MySQL_Adapter_Mutation_Exit_Decision_Package.md](24_MySQL_Adapter_Mutation_Exit_Decision_Package.md) | decision-package | `decision-ready; no code removal in this package` | `mysql_adapter.py` 內部 mutation 函式的退役排程，本包不含任何刪除。 |
 | [33_G05_服務完成時刻與請假代班競爭契約.md](33_G05_服務完成時刻與請假代班競爭契約.md) | contract | — | G05 場景：服務完成時刻判定與請假／代班的競爭不變量正式規格。 |
 | [35_LINE_Ingress_Developer_Experience_Convergence_Contract.md](35_LINE_Ingress_Developer_Experience_Convergence_Contract.md) | contract | `decision-complete-implementation-deferred` | LINE 薄 ingress、Domain command 與 durable delivery 的收斂契約；新增功能採 intent registry 範本。 |

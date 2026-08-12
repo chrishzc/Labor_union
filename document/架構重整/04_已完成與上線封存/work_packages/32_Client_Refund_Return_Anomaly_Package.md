@@ -1,5 +1,8 @@
 ---
 doc_type: gap-package
+declared_status: completed
+completed_at: 2026-08-11
+evidence: document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md
 ---
 
 # Client Refund Return Anomaly Package
@@ -136,3 +139,9 @@ re-evaluate matching review event；只有 row identity 與 original refund ledg
 6. subsidy return／advance bank row 或 ledger target 一律被拒絕，不建立一般退款 review event。
 7. 隔離 MySQL E2E 需記錄 input Excel、review receipt、outbox、anomaly、ledger/reopen、replay
    與 source hashes；不得使用 `union_db`。
+
+## 8. Closeout
+
+後續 Client Finance／Anomalies implementation 與 2026-08-09 revalidation receipts 已完成上述
+七項驗收；2026-08-11 fresh focused tests 再驗 review、reversal、anomaly 與 route boundary。
+本 gap 改列 `completed`，current SSOT 留在正式規格與完成度矩陣。

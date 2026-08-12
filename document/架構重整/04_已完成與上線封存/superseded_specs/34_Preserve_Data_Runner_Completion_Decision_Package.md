@@ -1,14 +1,14 @@
 ---
 doc_type: decision-package
 status: superseded-by-work-package-51
-superseded_by: 51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md
+superseded_by: ../work_packages/51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md
 superseded_date: 2026-08-09
 ---
 
 # Preserve-data Runner Completion Decision Package
 
 > 歷史決策基線：本文件記錄 2026-08-09 實作前的缺口。公開 runner 的本機收斂已由
-> `51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md` 授權並完成；專用
+> `../work_packages/51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md` 授權並完成；專用
 > source→backup→candidate→migration→switch→restart/read-smoke 演練仍為未執行的 external gate。
 
 ## 1. Fresh live finding

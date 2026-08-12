@@ -1,7 +1,10 @@
 ---
 doc_type: work-package
+declared_status: completed
 authorized_by: user
 authorization_date: 2026-08-08
+completed_at: 2026-08-11
+evidence: document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md
 ---
 
 # Client Finance Canonical Overdue Reminder Work Package
@@ -27,3 +30,9 @@ authorization_date: 2026-08-08
 - 同一案件多筆逾期義務只產生一個對應業務線的提醒，snapshot 列出每筆未清餘額。
 - canonical obligation 結清、餘額為零、尚未到期或移除後，下次掃描送出 inactive 並自動結案。
 - 掃描模組不再讀取 `client_payments` 的到期、應收、已收或補助退還欄位。
+
+## 完成確認
+
+`RECEIVABLE-001`／`RETURN-001` 已由 canonical obligation source 投影，focused tests 覆蓋同案聚合、
+inactive auto-resolve、舊 projection 不可作 SSOT 與 thin UI。2026-08-11 fresh suite 通過；提醒仍只
+要求人工核對銀行結果，不建立付款、失敗或自動 settlement。

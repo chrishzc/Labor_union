@@ -1,5 +1,8 @@
 ---
 doc_type: gap-package
+declared_status: completed
+completed_at: 2026-08-11
+evidence: document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md
 ---
 
 # Global E2E Acceptance Gap Package
@@ -73,3 +76,8 @@ database, or a fixture that elides transaction/foreign-key behavior.
 This gap package authorizes no code, schema or data change.  The actual Global
 E2E implementation should be split only after the dependency packages have
 their data contracts approved, to avoid tests locking in temporary behavior.
+
+## 6. Closeout
+
+G01～G17 均已在 `03_追蹤清單與證據/evidence/global_e2e_manifest.json` 標為 `proven`，正式
+完成度矩陣保存 current acceptance 結論。本文件的 gap 任務已完成，封存後不再作 active backlog。

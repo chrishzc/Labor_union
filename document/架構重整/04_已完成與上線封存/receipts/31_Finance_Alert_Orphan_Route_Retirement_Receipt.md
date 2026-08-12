@@ -81,7 +81,7 @@ worker／outbox 呼叫。共用測試輔助 `tests/_finance_alert_mock_support.p
 「架構重整」路徑漂移的漏網之魚：`from services import finance_import_staging`
 改為 `from subsystems.finance_import import staging`（`services.finance_import_staging`
 已不存在，正式位置在 `subsystems/finance_import/staging.py`，與
-[`模組正式位置對照表.md`](../03_追蹤清單與證據/模組正式位置對照表.md) 表一一致）。
+[`模組正式位置對照表.md`](../../03_追蹤清單與證據/模組正式位置對照表.md) 表一一致）。
 
 ## 驗證
 

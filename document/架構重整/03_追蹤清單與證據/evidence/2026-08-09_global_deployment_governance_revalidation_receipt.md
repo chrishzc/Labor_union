@@ -10,9 +10,9 @@ verified_at: 2026-08-09
 
 - 規格基線：`01_規格基線/18_Global_Deployment與治理正式規格.md`；
 - worker supervision：`41_Durable_Job_Worker_Supervision_Deployment_Decision.md`；
-- retired target-host runbook：`50_Target_Host_Deployment_Acceptance_Runbook.md`；
-- deployment setting retirement：`53_Deployment_Profile_and_Target_Host_Acceptance_Retirement.md`；
-- preserve-data closure：`51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md`。
+- retired target-host runbook：`../../04_已完成與上線封存/release_records/50_Target_Host_Deployment_Acceptance_Runbook.md`；
+- deployment setting retirement：`../../04_已完成與上線封存/release_records/53_Deployment_Profile_and_Target_Host_Acceptance_Retirement.md`；
+- preserve-data closure：`../../04_已完成與上線封存/work_packages/51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md`。
 
 ## 本次 release-chain 修復
 

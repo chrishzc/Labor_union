@@ -21,6 +21,9 @@
   下載、封存或交付清冊都不得將 obligation、ledger 或提醒改為已付款／已退款／已完成。
 - 所有實際付款結果都必須由後續匯入的 canonical bank fact 經 Preview／Apply 核銷後才
   改變。未看到流水不代表付款失敗，只表示仍待付款或待核對。
+- 所有退款先建立退款單，再產生交會計的應付明細並等待對帳單。退款單的 due date／明細
+  產生日期只服務排程，不是後續銀行列核銷條件；緊急先匯時，canonical outflow 仍以
+  收款對象的 canonical 收款帳戶與金額（多筆候選時人工唯一選定）對回既有退款單。
 - 金額或對象不唯一時，必須保留原始銀行事實與 typed anomaly；不得猜測 allocation、
   不得直接建立已付款紀錄，也不得重複列出可能已付款的義務。
 - 「退匯」只指銀行已退回既有出款的後續銀行事實；客戶超收後交會計師處理的項目名稱為
@@ -196,6 +199,19 @@ Query：
 
 - `QueryAccountsPayable(target_payment_date)`
 - `QueryAccountsPayableArchive(year)`
+
+退款付款與事後核銷邊界：所有客戶退款都先由 Client Finance 建立 `payable_to_client`
+退款單，再由 Accounts Payable Query 產出給會計的付款明細；系統不執行匯款。後續 canonical
+outgoing bank row 只能以退款單建立時固化的收款帳戶快照與可清償金額核銷，不能以 `due_date`、
+付款明細產生日期或銀行交易日期作為配對條件。故 7/15 期的退款單即使會計在 7/1 緊急匯款，
+仍可在銀行流水匯入後正確補登；無帳戶快照或銀行列未解析出收款帳戶時必須 fail closed。
+
+客戶退款少匯（2026-08-11 人工核准）：canonical outgoing bank amount 小於同一退款單集合
+remaining 時，Client Finance 在同一 UoW 保存不可變的不足來源事實（bank-row set、退款單 set、
+帳戶快照、已匯額、remaining、版本、actor/reason/evidence、receipt 與 outbox），並將原退款單
+投影為剩餘 payable；不得建立第二張退款單或由 UI 改 remaining。outbox 投影
+`client_refund_underpayment`；後續只能以**新的**同帳戶 canonical outgoing row 對原退款單
+remaining 做 Preview → Apply，全部歸零才解除。日期不參與此流程。
 
 Export：
 

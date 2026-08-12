@@ -1,9 +1,12 @@
 ---
 doc_type: architecture-decision
-status: approved-for-implementation
+status: completed
+declared_status: completed
 authorization_request_date: 2026-08-08
 approved_by: user
 approval_date: 2026-08-09
+completed_at: 2026-08-11
+evidence: document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md
 ---
 
 # Six Remaining Gaps Completion Architecture
@@ -62,3 +65,15 @@ The user approved this architecture on 2026-08-09. Target-host deployment
 acceptance was retired as a product setting and release gate on the same date.
 It remains only historical operational guidance and cannot block local release
 contract verification.
+
+## Completion reconciliation
+
+2026-08-11 逐項核對結果：Writer Inventory／legacy reprocess 由 WP 43 關閉；Client Refund 與
+canonical overdue reminders 由 25／32／45 及正式 Client Finance evidence 關閉；Subsidy return／
+advance 由 Government Subsidy 與 Client Finance evidence 關閉；Scheduling／Payroll writer exit
+已有驗收 receipt；Orders bounded summary／detail Query 與 Global request-state／durable polling
+均有 focused tests及正式完成度矩陣證據；LINE follow／unfollow lifecycle transaction tests通過。
+
+六個 goal 均已由後續 owning 規格、Work Package 或 receipt 承接，本 umbrella architecture
+改列 `completed` 並封存。這不包含文件 49 的 provisional registration case-issuance consume；
+該功能是獨立 Case Import residual，不能重新算入本包。
