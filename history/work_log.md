@@ -645,18 +645,3 @@
   Contract Signing router 的既有防護提交，未執行遠端 push。
 - 驗證 `api.main` 可成功載入；合約封存與驗證資料集聚焦測試 `13 passed`；完整 pytest
   成功收集 `1902` 項測試。
-
-## [2026-08-12] Agent 個人規則與本機 Git／PR 紀錄治理
-
-- 根目錄 `AGENTS.md` 新增每次新任務必讀 `.agents/AGENTS.md` 的規則，並定義檔案不存在、
-  UTF-8 解碼失敗、HEAD或內容變更時的處理方式；個人規則仍與專案共同規則分離。
-- 明確保護 `.agents/`、`history/git_PR.md` 及其他Git忽略的本機個人檔案，禁止在stage、
-  commit、push、fetch、pull、merge、切換分支或清理時刪除、覆蓋或納入版本控制。
-- 個人Git流程由已退役的 `history/git_push.md` 改用 `history/git_PR.md`；新檔以繁體中文、
-  strict UTF-8無BOM保存，並由 `.gitignore` 精準排除，不會上傳遠端。
-- 將 PR 書寫規則獨立移至本機 `history/git_PR.md.example`，要求 AI 每次更新 PR 紀錄前先完整
-  閱讀；`history/git_PR.md` 現在只保存實際 PR 內容，避免規則與交付文字混在同一檔案。
-- `history/git_PR.md.example` 與 `history/git_PR.md` 均由 `.gitignore` 精準排除，且已同步加入
-  根層與個人 Agent 保護規則；兩者不得上傳，也不得在 Git 更新或清理時遺失。
-- 修改前 `history/git_push.md` 已不存在；新的 `git_PR.md` 僅依本次聊天可確認的兩次本地
-  merge紀錄重建，沒有捏造無法確認的其他歷史。
