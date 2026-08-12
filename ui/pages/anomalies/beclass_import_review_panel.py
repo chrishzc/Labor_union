@@ -1,5 +1,5 @@
 import json
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 from uuid import uuid4
 
 import streamlit as st
@@ -15,19 +15,27 @@ from ui.api_clients.beclass_import_review_api_client import (
 
 
 _PREVIEW_STATE_KEY = "beclass_review_preview"
+_APPLY_STATE_KEY = "beclass_review_apply_state"
 
 
-def render_beclass_import_review_panel(client: BeClassImportReviewApiClient) -> None:
+def render_beclass_import_review_panel(
+    client: BeClassImportReviewApiClient,
+    *,
+    suggested_review_identities: Sequence[str] = (),
+) -> None:
     st.subheader("BeClass 匯入待修正資料")
     st.caption("依 review_identity 查詢，先做 Preview，再正式套用修正。")
+    _render_active_review_selector(suggested_review_identities)
     identity = st.text_input(
         "review_identity",
-        value=str(st.session_state.get("beclass_import_review_identity") or ""),
         key="beclass_review_identity",
     )
     if st.button("讀取資料", key="beclass_review_load"):
         _load_review(client, identity)
     query = st.session_state.get("beclass_review_query")
+    if query is not None and query.review_identity != identity:
+        _clear_review_state()
+        query = None
     if query is None and identity:
         _load_review(client, identity)
         query = st.session_state.get("beclass_review_query")
@@ -37,12 +45,47 @@ def render_beclass_import_review_panel(client: BeClassImportReviewApiClient) -> 
     _render_edit_and_preview(client, query)
 
 
+def _render_active_review_selector(review_identities: Sequence[str]) -> None:
+    options = tuple(dict.fromkeys(identity for identity in review_identities if identity.strip()))
+    if not options:
+        return
+    selected = st.selectbox(
+        "從目前待修正異常選擇",
+        options,
+        index=None,
+        placeholder="選擇後自動帶入 review_identity",
+        key="beclass_active_review_selector",
+    )
+    if selected:
+        st.session_state["beclass_review_identity"] = selected
+
+
 def _load_review(client: BeClassImportReviewApiClient, identity: str) -> None:
     try:
-        st.session_state["beclass_review_query"] = client.query_review(_text(identity))
+        review_identity = _text(identity)
+        existing = st.session_state.get("beclass_review_query")
+        if existing is not None and existing.review_identity != review_identity:
+            _clear_review_state()
+        st.session_state["beclass_review_query"] = client.query_review(review_identity)
     except (BeClassImportReviewApiError, ValueError) as error:
         st.error(f"讀取失敗：{error}")
         st.session_state.pop("beclass_review_query", None)
+
+
+def _clear_review_state() -> None:
+    for key in (
+        "beclass_review_query",
+        _PREVIEW_STATE_KEY,
+        _APPLY_STATE_KEY,
+        "beclass_corrected_fields",
+        "beclass_resolved_issue_codes",
+        "beclass_review_reason",
+    ):
+        st.session_state.pop(key, None)
+
+
+def _form_key(field_name: str, review: BeClassImportReviewQueryView) -> str:
+    return f"{field_name}:{review.review_identity}"
 
 
 def _render_review(review: BeClassImportReviewQueryView) -> None:
@@ -67,16 +110,18 @@ def _render_edit_and_preview(
     review: BeClassImportReviewQueryView,
 ) -> None:
     with st.expander("產生修正 Preview", expanded=True):
+        corrected_fields_key = _form_key("beclass_corrected_fields", review)
+        resolved_issue_codes_key = _form_key("beclass_resolved_issue_codes", review)
         corrected_json = st.text_area(
             "corrected_fields（JSON）",
             value=_to_json(review.effective_payload),
             height=220,
-            key="beclass_corrected_fields",
+            key=corrected_fields_key,
         )
         resolved_issue_codes = st.text_area(
             "resolved_issue_codes（每行一個）",
             value="\n".join(review.issue_codes),
-            key="beclass_resolved_issue_codes",
+            key=resolved_issue_codes_key,
         )
         if st.button("產生 Preview", key="beclass_preview_button"):
             corrected = _as_json(corrected_json, "corrected_fields")
@@ -99,32 +144,26 @@ def _render_preview(
         return
     st.success("Preview 已建立")
     st.json(preview.model_dump())
-    reason = st.text_input("修正原因", key="beclass_review_reason")
+    reason = st.text_input(
+        "修正原因",
+        key=_form_key("beclass_review_reason", review),
+    )
     if st.button("提交正式修正（Apply）", key="beclass_apply_button"):
-        corrected = _as_json(
-            st.session_state.get("beclass_corrected_fields", "{}"),
-            "corrected_fields",
-        )
-        issues = _lines_to_list(
-            str(st.session_state.get("beclass_resolved_issue_codes", ""))
-        )
-        if corrected is None:
-            st.error("corrected_fields 需要合法 JSON 字典。")
-            return
-        if not reason.strip():
+        apply_state = _get_apply_state(review, preview, reason)
+        if apply_state is None:
             st.error("請先輸入修正原因。")
             return
         try:
-            st.session_state.pop(_PREVIEW_STATE_KEY)
             receipt = client.apply_review(
                 review.review_identity,
                 preview,
-                corrected_fields=corrected,
-                resolved_issue_codes=issues,
-                reason=reason,
-                idempotency_key=_new_key("beclass-review-apply"),
-                correlation_id=_new_key("beclass-review-apply-correlation"),
+                corrected_fields=preview.candidate.corrected_payload,
+                resolved_issue_codes=preview.candidate.resolved_issue_codes,
+                reason=apply_state["reason"],
+                idempotency_key=apply_state["idempotency_key"],
+                correlation_id=apply_state["correlation_id"],
             )
+            apply_state["receipt"] = receipt.model_dump()
             st.success("Apply 成功")
             st.json(receipt.model_dump())
         except (BeClassImportReviewApiError, ValueError) as error:
@@ -138,6 +177,7 @@ def _preview_review(
     issues: list[str],
 ) -> None:
     try:
+        st.session_state.pop(_APPLY_STATE_KEY, None)
         st.session_state[_PREVIEW_STATE_KEY] = client.preview_review(
             review.review_identity,
             corrected_fields=corrected,
@@ -146,6 +186,27 @@ def _preview_review(
         )
     except (BeClassImportReviewApiError, ValueError) as error:
         st.error(f"Preview 失敗：{error}")
+
+
+def _get_apply_state(
+    review: BeClassImportReviewQueryView,
+    preview: BeClassImportReviewPreviewView,
+    reason: str,
+) -> dict[str, str | dict[str, Any]] | None:
+    existing = st.session_state.get(_APPLY_STATE_KEY)
+    if isinstance(existing, dict) and existing.get("review_identity") == review.review_identity:
+        return existing
+    if not reason.strip():
+        return None
+    state: dict[str, str | dict[str, Any]] = {
+        "review_identity": review.review_identity,
+        "preview_fingerprint": preview.preview_fingerprint,
+        "reason": reason.strip(),
+        "idempotency_key": _new_key("beclass-review-apply"),
+        "correlation_id": _new_key("beclass-review-apply-correlation"),
+    }
+    st.session_state[_APPLY_STATE_KEY] = state
+    return state
 
 
 def _as_json(value: object, field_name: str) -> dict[str, Any] | None:

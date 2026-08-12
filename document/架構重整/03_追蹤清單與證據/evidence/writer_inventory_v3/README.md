@@ -11,14 +11,10 @@ The allowed final dispositions are `retain_canonical`, `retain_restricted`,
 `migrate_then_remove`, `gone`, and `needs_decision`. Only `gone` may set
 `approved_to_remove` to true, and it requires a non-empty replacement receipt.
 
-The current reviewed slice resolves all 17 findings whose path could not
-determine an owner, all 20 current migrate-then-remove candidates, and 50
-unreachable findings in the frozen fake-data fixture (47 unique identities),
-and 30 Government Subsidy canonical repository identities, plus 65 Client
-Finance repository/workflow identities. It has 614 disposition records, including 78 Orders lifecycle/terms identities:
-48 canonical persistence or transaction-boundary operations and 30 restricted root-fact queries, plus 30 Payroll rebuild/adjustment/terms unique identities:
-24 canonical persistence or transaction-boundary operations and 6 restricted root-fact or reconciliation queries. The legacy Holiday, client-name, and Data Browser
-generic adapter writers were removed after their typed replacement was
-implemented; absent candidates are intentionally not retained as disposition
-records because the validator requires every record to reference a current
-candidate identity. The remaining 90 candidate findings stay blocked.
+The current reviewed layer has 1,028 disposition records for all 1,028 unique identities in the fresh
+candidate. 474 are `retain_canonical`, 207 are `retain_restricted`, and 347 are explicit
+`needs_decision` records with no inferred owner. The latter are carried only by
+`63_Global_Writer_Inventory_v3_Owner_Review_Work_Package.md`; they neither authorize removal nor make a
+writer canonical. The legacy Holiday, client-name, and Data Browser generic adapter writers were removed after
+their typed replacement was implemented; absent candidates are intentionally not retained as disposition
+records because the validator requires every record to reference a current candidate identity.

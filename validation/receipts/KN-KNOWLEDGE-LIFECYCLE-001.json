@@ -1,0 +1,27 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "KN-KNOWLEDGE-LIFECYCLE-001",
+  "scenario_digest": "e451e77a4b2e570f1b70e9ac4f6c913e8eb729ded991b35329a065bca4e3ef2d",
+  "result": "passed",
+  "assertion_count": 7,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_access_knowledge_disposable_mysql_e2e.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "disposable MySQL capability grant and reviewed knowledge lifecycle"
+  },
+  "input_digests": {
+    "scenario_fixture": "ab10e3b63955043463a0d6ae79bbdc3c3dde80519308322b4f5487877b932b45",
+    "expected_manifest": "76be36e854c92fc969c0fabf4fd6e7c4e805d011a4422c16784ebddfb8f485ca",
+    "integration_test": "4049ea4ca54dcdafe67d57d576b929556700cb4772cbac508d68cdcb3dc6d1d9",
+    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/KN-KNOWLEDGE-LIFECYCLE-001.json",
+    "expected_manifest": "validation/expected/KN-KNOWLEDGE-LIFECYCLE-001.json",
+    "integration_test": "tests/test_access_knowledge_disposable_mysql_e2e.py",
+    "validation_schema_manifest": "db/cutover_releases/labor_union_validation_schema_v1.json"
+  }
+}

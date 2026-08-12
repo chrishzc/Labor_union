@@ -1,0 +1,26 @@
+{
+  "contract": "labor-union-ui-reobserve-api-replay-receipt/v1",
+  "receipt_id": "UI-ORD-CONTRACT-001-UI-043",
+  "work_package": "WP56",
+  "scenario_id": "UI-ORD-CONTRACT-001",
+  "database": "lu_test_dataset_contract_signing_v4",
+  "case_no": "WP56-5C3EBFD2D8FB",
+  "date": "2026-08-12",
+  "ui_reobserve": {
+    "surface": "Streamlit 8501 / 訂單管理 / 正式業務操作 / 契約簽署流程",
+    "observed": ["staff_signed: 1/1", "commitment_created", "client_signed", "immutable_document_archive", "contract_completed"],
+    "selected_document_version_id": 88,
+    "terminal_mutation_policy": "The completed UI intentionally hides signed-return upload controls; it does not permit same-key replacement with a different file."
+  },
+  "typed_api_replay": {
+    "staff_signed_return": {"document_version_id": 89, "signing_event_id": 86, "commitment_id": 19, "exact_replay_equal": true},
+    "client_signed_return": {"document_version_id": 91, "signing_event_id": 88, "contract_identity": "client-contract:92af6bad591952d2364c25c49b555bf897476595dfcddc4f35046c2bc1cf6faa", "exact_replay_equal": true},
+    "payload_policy": "Each replay used the same command object, immutable document bytes, expected document version, idempotency key, and correlation id."
+  },
+  "db_oracle": {
+    "oracle_source": "captured normal-chain database observation",
+    "valid": true,
+    "observed": {"archive_digest_count": 4, "staff_signed_count": 1, "client_signed_count": 1, "commitment_count": 1, "converted_commitment_count": 1, "settled_deposit_count": 1, "assignment_count": 1, "schedule_day_count": 5}
+  },
+  "result": "verified"
+}

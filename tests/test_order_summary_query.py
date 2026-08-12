@@ -78,6 +78,17 @@ def test_query_rejects_datetime_for_date_projection() -> None:
         _service((row,)).query(OrderSummaryQueryRequest(1, None))
 
 
+def test_query_preserves_legacy_rows_with_unknown_identity_or_planned_end() -> None:
+    row = _row()
+    row["identity_status"] = None
+    row["end_date"] = None
+
+    page = _service((row,)).query(OrderSummaryQueryRequest(1, None))
+
+    assert page.items[0].identity_status is None
+    assert page.items[0].end_date is None
+
+
 @pytest.mark.parametrize("page_size", [0, 201])
 def test_request_rejects_invalid_page_size(page_size: int) -> None:
     with pytest.raises(ValueError):

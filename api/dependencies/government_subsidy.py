@@ -14,6 +14,7 @@ from subsystems.government_subsidy.claim_workflow import (
     GovernmentSubsidyClaimRepository,
     GovernmentSubsidyClaimWorkflow,
 )
+from subsystems.government_subsidy.overpayment_workflow import GovernmentSubsidyOverpaymentWorkflow
 
 
 @dataclass(slots=True)
@@ -24,6 +25,7 @@ class GovernmentSubsidyApplication:
     )
     ledger_workflow: GovernmentSubsidyLedgerWorkflow
     claim_workflow: GovernmentSubsidyClaimWorkflow
+    overpayment_workflow: GovernmentSubsidyOverpaymentWorkflow
 
     def list_batches(self, cursor, limit):
         return self.claim_workflow.list_batches(cursor, limit)
@@ -61,6 +63,30 @@ class GovernmentSubsidyApplication:
     def apply_reversal(self, request):
         return self.ledger_workflow.apply_reversal(request)
 
+    def preview_receipt_with_overage(self, row_id, batch_id, intents):
+        return self.overpayment_workflow.preview_receipt_with_overage(row_id, batch_id, intents)
+
+    def apply_receipt_with_overage(self, request):
+        return self.overpayment_workflow.apply_receipt_with_overage(request)
+
+    def preview_overpayment_offset(self, identity, intents):
+        return self.overpayment_workflow.preview_offset(identity, intents)
+
+    def apply_overpayment_offset(self, request):
+        return self.overpayment_workflow.apply_offset(request)
+
+    def preview_overpayment_return(self, identity, due_date, evidence_reference):
+        return self.overpayment_workflow.preview_return(identity, due_date, evidence_reference)
+
+    def apply_overpayment_return(self, request):
+        return self.overpayment_workflow.apply_return(request)
+
+    def preview_overpayment_return_reconciliation(self, identity, finance_import_row_id):
+        return self.overpayment_workflow.preview_return_reconciliation(identity, finance_import_row_id)
+
+    def apply_overpayment_return_reconciliation(self, request):
+        return self.overpayment_workflow.apply_return_reconciliation(request)
+
 
 def get_government_subsidy_application():
     connection = get_connection()
@@ -84,7 +110,7 @@ def build_government_subsidy_application(connection):
         repository,
         lambda: MySqlUnitOfWork(connection),
     )
-    return GovernmentSubsidyApplication(repository, ledger_workflow, claim_workflow)
+    return GovernmentSubsidyApplication(repository, ledger_workflow, claim_workflow, GovernmentSubsidyOverpaymentWorkflow(repository, lambda: MySqlUnitOfWork(connection)))
 
 
 __all__ = [

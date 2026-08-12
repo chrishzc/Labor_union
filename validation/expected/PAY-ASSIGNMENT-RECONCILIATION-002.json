@@ -1,0 +1,10 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "PAY-ASSIGNMENT-RECONCILIATION-002",
+  "assertions": [
+    "A normal assignment calculates service salary from official hours and rate without a staff-payment write.",
+    "Substitution preserves original-day ownership while the substitute alone receives the double-pay component.",
+    "Floor-fee allocation remains conserved after ROUND_HALF_UP remainder handling across an assignment family.",
+    "Invalid amount, duplicated ownership, legacy-review and snapshot mismatch roots block candidate creation with typed errors."
+  ]
+}

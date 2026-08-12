@@ -396,3 +396,30 @@ def test_list_and_detail_are_bounded_read_only_projections():
 def test_list_rejects_unbounded_pagination(limit, offset):
     with pytest.raises(ValueError):
         list_system_alerts(Cursor(), limit=limit, offset=offset)
+
+
+def test_detector_root_claim_reopen_auto_resolve_and_read_model_form_one_closed_loop():
+    cursor = Cursor()
+    projected = _upsert(cursor, case_key="batch:closed-loop")
+    alert_id = projected["alert"]["id"]
+
+    assert claim_system_alert(cursor, alert_id=alert_id, operator="amy")["result"] == "claimed"
+    assert resolve_system_alert(cursor, alert_id=alert_id, operator="amy", reason="checked")["result"] == "resolved"
+
+    reopened = _upsert(cursor, case_key="batch:closed-loop", reason="root remains active")
+    assert reopened["result"] == "reopened"
+    assert reopened["alert"]["status"] == "open"
+
+    assert resolve_absent_current_state_alerts(
+        cursor,
+        alert_code="IMPORT-006",
+        still_present_case_keys=set(),
+        reason="owning root repaired",
+    ) == 1
+    detail = get_system_alert(cursor, alert_id)
+    before_read = copy.deepcopy(cursor.rows)
+    listed = list_system_alerts(cursor, alert_code="IMPORT-006", limit=10, offset=0)
+
+    assert detail["status"] == "resolved"
+    assert listed[0]["id"] == alert_id
+    assert cursor.rows == before_read

@@ -41,6 +41,13 @@ def test_development_compatibility_is_explicitly_allowed() -> None:
     assert result.worker_mode is LineRuntimeMode.COMPATIBILITY
 
 
+def test_runtime_defaults_are_canonical_and_legacy_requires_an_explicit_value() -> None:
+    selection = resolve_line_runtime_selection({"APP_ENV": "development"})
+
+    assert selection.webhook_mode is LineRuntimeMode.CANONICAL
+    assert selection.worker_mode is LineRuntimeMode.CANONICAL
+
+
 def test_production_readiness_reports_modes_without_secrets() -> None:
     environment = _environment(webhook="canonical", worker="canonical")
 

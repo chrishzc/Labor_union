@@ -86,21 +86,25 @@ Apply：
 
 ### 3.2.1 Contract Completion Preview／Apply
 
-正式契約完成是 Orders 根事實，但第一次三期客戶應收義務由 Client Finance 擁有。兩者
-必須使用同一 outer Unit of Work：
+正式契約完成是 Orders 根事實，但客戶應收義務由 Client Finance 擁有。依第 `21` 份正式
+規格，最後一位月嫂簽回並形成有效 commitment 時可先建立唯一 deposit obligation；客戶
+簽回時的 Contract Completion 必須保留該 deposit，只補足尚未建立的剩餘期款。客戶簽回、
+Orders contract event 與 Client Finance 補足義務必須使用同一 outer Unit of Work：
 
-1. Preview 讀取契約身分、完整服務時段、目前有效正式服務日、Client Finance 付款條款、
-   既有義務與兩個 aggregate versions。
-2. 正式服務日數必須精確等於訂單服務天數；不得由起訖日猜測休假日。缺漏時回
-   `official_service_dates_incomplete` 且零寫入。
+1. Preview 讀取客戶簽回證據、有效 commitment 的精確服務日、完整服務時段、Client Finance
+   付款條款、既有 deposit／剩餘義務與兩個 aggregate versions。
+2. commitment 精確服務日數必須等於訂單服務天數；不得由起訖日猜測休假日。缺漏時仍回
+   stable error `official_service_dates_incomplete` 且零寫入；不得為滿足此 blocker 先建立
+   execution schedule。
 3. 舊資料若已有客戶義務、卻沒有正式契約完成事件，回
    `client_obligation_history_conflict` 交異常中心人工確認；不得反推補造事件。
-4. Preview 顯示預計建立的義務筆數，以及訂金、第一期、第二期各自的正式服務日數、
-   整數金額與到期日。
-5. Apply fresh-read 並驗證 Orders 與 Client Finance expected version、Preview fingerprint
-   及 idempotency key；先追加契約完成事件，再委派 Client Finance 建立三期義務，最後
+4. Preview 顯示既有 deposit 與預計補足義務的筆數、服務日數、整數金額與到期日，並證明
+   deposit 金額與 identity 不會被重建或重複計入。
+5. Apply fresh-read 並驗證 Contract Signing status、Orders 與 Client Finance expected version、
+   Preview fingerprint 及 idempotency key；先追加契約完成事件，再委派 Client Finance 補足
+   尚未建立的正式期款，最後
    重評 lifecycle、寫 outbox 與 receipt，單一 commit。
-6. 任一步失敗時，契約事件、三期義務、兩端 outbox、versions 與 receipt 全部回滾；
+6. 任一步失敗時，簽回事件、契約事件、新義務、兩端 outbox、versions 與 receipt 全部回滾；
    相同命令 replay 回傳原 receipt，不得重複建立義務。
 
 ### 3.3 Lifecycle Projection
@@ -120,8 +124,8 @@ Apply：
 
 1. 全部約定服務尚未完成且有有效取消事件：訂單取消。
 2. 全部約定服務已完成：訂單完成；拒絕後續取消。
-3. 訂金有效、actual start 已到且無 reconfirm blocker：服務中。
-4. 契約流程完成且訂金有效：訂單成立。
+3. 契約完成、訂金有效、execution schedule 有效、actual start 已到且無 reconfirm blocker：服務中。
+4. 訂金有效：訂單成立；此狀態不代表客戶已簽回，也不授權 execution conversion。
 5. 其他：洽談中。
 
 Lifecycle Application 是 status、history 與服務資料鎖投影的唯一 writer。任何 caller 都不得傳入 target status。

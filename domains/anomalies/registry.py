@@ -10,6 +10,9 @@ from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.validation import require_canonical_text, require_nonnegative_integer
 
 _IDENTITY_MAXIMUM_LENGTH = 191
+_FINANCE_SOURCE_DOMAINS = frozenset(
+    {"client_finance", "finance_import", "government_subsidy", "staff_payables"}
+)
 
 
 class AnomalySeverity(StrEnum):
@@ -29,11 +32,65 @@ class AlertWorkflowStatus(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
-class DomainActionLink:
-    action_code: str
+class RecoveryActionDescriptor:
+    """Declarative recovery contract; it never carries derived money or an endpoint."""
+
+    action_key: str
     owning_domain: str
-    command_name: str
+    preview_operation: str
     requires_preview: bool
+    label: str = ""
+    form_schema_key: str = "recovery.unsupported.v1"
+    source_binding_keys: tuple[str, ...] = ()
+    source_bindings: Mapping[str, str | int] | None = None
+    required_operator_inputs: tuple[str, ...] = ()
+    apply_operation: str | None = None
+    required_capability: str | None = None
+    completion_predicate: str = "source_predicate_cleared"
+    action_contract_version: int = 1
+
+    def __post_init__(self) -> None:
+        _validate_identity(self.action_key, "recovery action key")
+        _validate_identity(self.owning_domain, "recovery owning domain")
+        _validate_identity(self.preview_operation, "recovery preview operation")
+        _validate_identity(self.form_schema_key, "recovery form schema key")
+        _validate_identity(self.completion_predicate, "recovery completion predicate")
+        if self.action_contract_version < 1:
+            raise ValueError("recovery action contract version must be positive")
+        if self.source_binding_keys != tuple(sorted(set(self.source_binding_keys))):
+            raise ValueError("recovery source binding keys must be sorted and unique")
+        if self.required_operator_inputs != tuple(sorted(set(self.required_operator_inputs))):
+            raise ValueError("recovery operator inputs must be sorted and unique")
+        for key in self.source_binding_keys + self.required_operator_inputs:
+            _validate_identity(key, "recovery action field")
+        if self.source_bindings is not None:
+            if set(self.source_bindings) != set(self.source_binding_keys):
+                raise ValueError("recovery source bindings must match declared keys")
+            for key, value in self.source_bindings.items():
+                _validate_identity(key, "recovery source binding key")
+                if isinstance(value, bool) or not isinstance(value, (str, int)):
+                    raise ValueError("recovery source binding value is invalid")
+        if not self.label:
+            object.__setattr__(self, "label", self.action_key)
+        _validate_identity(self.label, "recovery action label")
+        if self.apply_operation is not None:
+            _validate_identity(self.apply_operation, "recovery apply operation")
+        if self.required_capability is not None:
+            _validate_identity(self.required_capability, "recovery capability")
+
+    @property
+    def action_code(self) -> str:
+        """Temporary read compatibility for callers not yet migrated to action_key."""
+        return self.action_key
+
+    @property
+    def command_name(self) -> str:
+        """Temporary read compatibility for callers not yet migrated to preview_operation."""
+        return self.preview_operation
+
+
+# Compatibility alias prevents old projection readers from becoming untyped raw links.
+DomainActionLink = RecoveryActionDescriptor
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,7 +100,8 @@ class AnomalyDefinition:
     fingerprint_fields: tuple[str, ...]
     severity: AnomalySeverity
     projection_kind: AnomalyProjectionKind
-    available_actions: tuple[DomainActionLink, ...]
+    available_actions: tuple[RecoveryActionDescriptor, ...]
+    no_automated_recovery: bool = False
     display_fields: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
@@ -55,6 +113,10 @@ class AnomalyDefinition:
             raise ValueError("fingerprint fields must be sorted and unique")
         if self.display_fields != tuple(sorted(set(self.display_fields))):
             raise ValueError("display fields must be sorted and unique")
+        if not isinstance(self.no_automated_recovery, bool):
+            raise TypeError("no automated recovery must be boolean")
+        if self.source_domain in _FINANCE_SOURCE_DOMAINS:
+            _validate_finance_recovery_contract(self)
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,6 +151,7 @@ class AnomalyDefinitionRegistry:
         self._definitions = {item.code: item for item in definitions}
         if len(self._definitions) != len(definitions):
             raise ValueError("anomaly definition codes must be unique")
+        _validate_recovery_action_keys(definitions)
 
     def require(self, code: str) -> AnomalyDefinition:
         try:
@@ -107,7 +170,7 @@ class AnomalyDefinitionRegistry:
             }
         )
 
-    def available_actions(self, code: str) -> tuple[DomainActionLink, ...]:
+    def available_actions(self, code: str) -> tuple[RecoveryActionDescriptor, ...]:
         return self.require(code).available_actions
 
 
@@ -171,6 +234,13 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
             _government_subsidy_integrity_definition(),
             _government_subsidy_reversal_definition(),
             _government_subsidy_assignment_drift_definition(),
+            _government_subsidy_overpayment_definition(),
+            _government_return_outbound_overage_definition(),
+            _client_over_refund_recovery_open_definition(),
+            _client_refund_underpayment_definition(),
+            _staff_overpayment_recovery_open_definition(),
+            _staff_payout_difference_definition("staff_payout_underpayment"),
+            _staff_payout_difference_definition("staff_payout_overpayment"),
             _beclass_validation_definition(),
             _beclass_identity_conflict_definition(),
             _finance_manual_review_definition(),
@@ -293,6 +363,7 @@ def _subsidy_advance_due_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
+        no_automated_recovery=True,
         display_fields=("action", "advance_candidates", "case_no"),
     )
 
@@ -548,6 +619,117 @@ def _government_subsidy_assignment_drift_definition():
     )
 
 
+def _government_subsidy_overpayment_definition():
+    return AnomalyDefinition(
+        code="GOVSUB-006",
+        source_domain="government_subsidy",
+        fingerprint_fields=("overpayment_identity",),
+        severity=AnomalySeverity.BLOCKING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="dispose_government_subsidy_overpayment",
+                label="處置政府補助溢撥",
+                owning_domain="government_subsidy",
+                preview_operation="PreviewGovernmentSubsidyOverpaymentDisposition",
+                apply_operation="ApplyGovernmentSubsidyOverpaymentDisposition",
+                requires_preview=True,
+                form_schema_key="government_subsidy.overpayment.disposition.v1",
+                source_binding_keys=("overpayment_identity", "overpayment_version"),
+                required_operator_inputs=("disposition", "evidence_reference", "reason"),
+                required_capability="government_subsidy.overpayment.disposition",
+                completion_predicate="government_subsidy_overpayment_disposed",
+            ),
+        ),
+        display_fields=("overpayment_identity",),
+    )
+
+
+def _government_return_outbound_overage_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="GOVSUB-007",
+        source_domain="government_subsidy",
+        fingerprint_fields=("payable_identity",),
+        severity=AnomalySeverity.BLOCKING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        no_automated_recovery=True,
+        display_fields=("bank_amount_ntd", "excess_amount_ntd", "overpayment_identity", "payable_identity"),
+    )
+
+
+def _client_over_refund_recovery_open_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="client_over_refund_recovery_open",
+        source_domain="client_finance",
+        fingerprint_fields=("recovery_identity",),
+        severity=AnomalySeverity.BLOCKING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(
+            RecoveryActionDescriptor(
+                action_key="collect_client_over_refund_recovery",
+                label="收回客戶退款超額追償",
+                owning_domain="client_finance",
+                preview_operation="PreviewCollectMatchedClientOverRefundRecovery",
+                apply_operation="ApplyCollectMatchedClientOverRefundRecovery",
+                requires_preview=True,
+                form_schema_key="client_finance.over_refund_recovery.collection.v1",
+                source_binding_keys=(
+                    "account_version",
+                    "case_no",
+                    "finance_import_row_identity",
+                    "matching_identity",
+                    "matching_version",
+                    "recovery_identity",
+                    "recovery_version",
+                ),
+                required_operator_inputs=("evidence", "reason"),
+                required_capability="client_finance.recovery.collect",
+                completion_predicate="client_over_refund_recovery_remaining_updated",
+            ),
+        ),
+        display_fields=("recovery_identity",),
+    )
+
+
+def _client_refund_underpayment_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="client_refund_underpayment", source_domain="client_finance",
+        fingerprint_fields=("underpayment_identity",), severity=AnomalySeverity.BLOCKING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE, available_actions=(),
+        no_automated_recovery=True,
+        display_fields=("underpayment_identity",),
+    )
+
+
+def _staff_overpayment_recovery_open_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="staff_overpayment_recovery_open", source_domain="staff_payables",
+        fingerprint_fields=("recovery_identity",), severity=AnomalySeverity.BLOCKING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(RecoveryActionDescriptor(
+            action_key="collect_staff_overpayment_recovery", label="收回月嫂超額付款追償",
+            owning_domain="staff_payables", preview_operation="PreviewCollectMatchedStaffOverpaymentRecovery",
+            apply_operation="ApplyCollectMatchedStaffOverpaymentRecovery", requires_preview=True,
+            form_schema_key="staff_payables.overpayment_recovery.collection.v1",
+            source_binding_keys=("finance_import_row_identity", "matching_identity", "matching_version", "recovery_identity", "recovery_version", "staff_id", "staff_payables_version"),
+            required_operator_inputs=("evidence", "reason"), required_capability="staff_payables.recovery.collect",
+            completion_predicate="staff_overpayment_recovery_remaining_updated",
+        ),), display_fields=("recovery_identity", "staff_id"),
+    )
+
+
+def _staff_payout_difference_definition(code: str) -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code=code, source_domain="staff_payables", fingerprint_fields=("payout_difference_identity",),
+        severity=AnomalySeverity.BLOCKING, projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(), no_automated_recovery=True,
+        display_fields=("payout_difference_identity", "staff_id"),
+    )
+
+
+
+
 def _government_subsidy_definition(
     code,
     fingerprint_fields,
@@ -630,11 +812,23 @@ def _finance_manual_review_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.WARNING,
         projection_kind=AnomalyProjectionKind.FINANCE_OCCURRENCE,
         available_actions=(
-            DomainActionLink(
-                "correct_and_post",
-                "finance_import",
-                "PreviewCorrectAndPostFinanceImportRow",
-                True,
+            RecoveryActionDescriptor(
+                action_key="classify_and_post_bank_row",
+                label="分類並正式入帳銀行流水",
+                owning_domain="finance_import",
+                preview_operation="PreviewCorrectAndPostFinanceImportRow",
+                apply_operation="CorrectAndPostFinanceImportRow",
+                requires_preview=True,
+                form_schema_key="finance_import.correction.v1",
+                source_binding_keys=("finance_import_row_identity", "source_version"),
+                required_operator_inputs=(
+                    "classification_type",
+                    "evidence",
+                    "reason",
+                    "target_obligation_identities",
+                ),
+                required_capability="finance_import.correct_and_post",
+                completion_predicate="finance_import_manual_review_cleared",
             ),
         ),
     )
@@ -651,11 +845,23 @@ def _client_refund_return_definition() -> AnomalyDefinition:
         severity=AnomalySeverity.BLOCKING,
         projection_kind=AnomalyProjectionKind.FINANCE_OCCURRENCE,
         available_actions=(
-            DomainActionLink(
-                "correct_refund_return",
-                "finance_import",
-                "PreviewCorrectAndPostClientRefundReturn",
-                True,
+            RecoveryActionDescriptor(
+                action_key="classify_client_refund_return",
+                label="處理客戶退款退匯",
+                owning_domain="finance_import",
+                preview_operation="PreviewCorrectAndPostClientRefundReturn",
+                apply_operation="CorrectAndPostClientRefundReturn",
+                requires_preview=True,
+                form_schema_key="finance_import.correction.v1",
+                source_binding_keys=("finance_import_row_identity", "source_version"),
+                required_operator_inputs=(
+                    "evidence",
+                    "reason",
+                    "refund_ledger_entry_identity",
+                    "target_obligation_identities",
+                ),
+                required_capability="finance_import.correct_and_post",
+                completion_predicate="client_refund_return_cleared",
             ),
         ),
     )
@@ -732,6 +938,23 @@ def _require_workflow_version(current, expected_version) -> None:
 
 def _validate_identity(value: str, field_name: str) -> None:
     require_canonical_text(value, field_name, _IDENTITY_MAXIMUM_LENGTH)
+
+
+def _validate_recovery_action_keys(definitions: tuple[AnomalyDefinition, ...]) -> None:
+    contracts: dict[tuple[str, int], RecoveryActionDescriptor] = {}
+    for definition in definitions:
+        for action in definition.available_actions:
+            identity = (action.action_key, action.action_contract_version)
+            previous = contracts.get(identity)
+            if previous is not None and previous != action:
+                raise ValueError("recovery action contract key is ambiguous")
+            contracts[identity] = action
+
+
+def _validate_finance_recovery_contract(definition: AnomalyDefinition) -> None:
+    has_actions = bool(definition.available_actions)
+    if has_actions == definition.no_automated_recovery:
+        raise ValueError("finance recovery contract must declare actions or state-only")
 
 
 def _hcm_validation_definition() -> AnomalyDefinition:

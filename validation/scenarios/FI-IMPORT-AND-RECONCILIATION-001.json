@@ -1,0 +1,38 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "FI-IMPORT-AND-RECONCILIATION-001",
+  "track": "A",
+  "suite_id": "FI",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["FI-01", "FI-02", "FI-03", "FSM-01", "FSM-02", "FSM-03", "FSM-04", "IMPORT-001", "IMPORT-003", "IMPORT-004", "IMPORT-006"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-01"
+  ],
+  "root_facts": [
+    "Versioned bank workbook fixtures with source digest, sheet/row occurrence and raw bank fields.",
+    "Duplicate, collision, incomplete-batch and invalid-direction source variants.",
+    "A typed human classification and selected owning-Finance reconciliation command."
+  ],
+  "forbidden_direct_seed": [
+    "canonical fingerprint, direction, classification or reconciliation state",
+    "client/staff ledger, allocation, receipt and current-alert rows",
+    "batch completed state or review action projection"
+  ],
+  "commands": [
+    "Ingest each workbook, replay the same file and inspect canonical rows versus occurrences.",
+    "Run classification Preview and owning Finance Apply for an exact allocation.",
+    "Run collision, incomplete-batch and unavailable persistence seams to verify zero partial dispatch."
+  ],
+  "expected": [
+    "Fingerprint deduplicates canonical rows while preserving every occurrence.",
+    "Incomplete or ambiguous input remains pending and projects IMPORT-006 instead of a guessed finance result.",
+    "Finance Import never directly changes a Finance reconciliation state; the owning workflow commits ledger, allocation, receipt and alert result atomically.",
+    "API/UI shows a typed pending, review or error state with no false success."
+  ],
+  "receipt_requirements": [
+    "workbook and normalized-root digests", "canonical/occurrence/ledger row deltas", "batch/classification/reconciliation history", "alert and UI snapshots", "replay and rollback evidence"
+  ]
+}

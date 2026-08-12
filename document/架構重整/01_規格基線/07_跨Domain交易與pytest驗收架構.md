@@ -197,7 +197,7 @@ Anomalies 不直接寫 Orders、Scheduling、Client Finance、Payroll 或 Staff 
 
 ### 歷史 activation guard
 
-上述限制是本基線最初的授權狀態。`46_Six_Remaining_Gaps_Completion_Architecture.md`
+上述限制是本基線最初的授權狀態。封存的 `../04_已完成與上線封存/superseded_specs/46_Six_Remaining_Gaps_Completion_Architecture.md`
 於 2026-08-09 已取得實作授權，後續 Domain work package 已可依本章進行 production
 實作、pytest 與 isolated-MySQL 驗收；不得再將此歷史 guard 當作禁止修正已發現跨域缺口
 的理由。

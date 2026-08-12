@@ -15,6 +15,14 @@
 3. LIFF 正式身分只信任 server-side 驗證後的 ID token 與正式 binding；query string userId 不是身分證明。
 4. LINE Integration 不擁有 Orders、Scheduling、Customer Service 或客戶主檔狀態。
 5. Rich Menu 圖面與文字可沿用 merge，但 definition、revision、publication 與 per-user binding 仍以 wen DB 為 SSOT。
+6. `綁定訂單`、`訂單查詢` 固定進入 customer binding；`綁定後台帳號` 固定進入 admin binding。
+   Service Help／Customer Service 不得攔截或重定義這三個既有 identity aliases。
+7. `工會選單`、`開啟客服系統`、`月嫂驗證管理` 只接受已 bound 的 admin LINE identity，並透過
+   Rich Menu binding outbox 套用 `union_staff_menu`；`esc` 對所有 LINE user 透過同一 outbox
+   套用 `default_menu`。兩者都不直接查 legacy role table、直接寫 task 或呼叫 LINE API。
+8. 2026-08-12 人工授權 canonical cutover：webhook 與 worker 的未設定預設都是 `canonical`。
+   `legacy` 僅可由 webhook／worker 同時明確設為 `legacy`，且 production 必須另設
+   `LINE_LEGACY_ROLLBACK_MODE=true` 才能作受控 rollback。
 
 ## 3. Customer Service Domain
 
@@ -75,6 +83,9 @@ waiting → handling → resolved
 ### 5.3 請假
 
 第一版不允許 LIFF 直接改正式排班。未來若啟用，只能先建立人工 intake，再由管理員使用既有 Leave/Substitution Preview／Apply；其版本、fingerprint、mutex 與跨 Domain impact 不得省略。
+
+請假審核 API、管理 client 與 UI caller 屬 Scheduling；不得附加到 LINE identity review route
+或 `LineAdminApiClient`。LINE Integration 只接受已提交的通知 intent 並回報 delivery outcome。
 
 Typed errors：
 

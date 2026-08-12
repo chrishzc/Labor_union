@@ -23,8 +23,8 @@
     {
       "dependencies": [],
       "data_effect": "schema_only",
-      "name": "168_line_identity_canonical_menu_publication.sql",
-      "relative_path": "db/schema_parts/168_line_identity_canonical_menu_publication.sql",
+      "name": "179_line_identity_canonical_menu_publication.sql",
+      "relative_path": "db/schema_parts/179_line_identity_canonical_menu_publication.sql",
       "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
       "rollback_policy": "code-rollback-preserve-legacy-and-canonical-revocation-publication-roots",
       "sha256": "0197685f9a53cb661913365ba48b4c85eb099ca4d1f9627706c6122d53b44265"
@@ -36,7 +36,7 @@
     "dependencies": [],
     "name": "labor_union_2026_08_12_line_stage13_v1.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_12_line_stage13_v1.descriptors.json",
-    "sha256": "f7e6474d16e532a9321f94f7bae7a112d0dc38d24551ecd4ebca36ae13d7c96c"
+    "sha256": "eace1240e16f976ce5267b1b6633f3fdc4ac16fbfba0303b73ede2c09b846706"
   },
   "release_id": "labor-union-line-stage13-2026-08-12-v1",
   "release_metadata": {

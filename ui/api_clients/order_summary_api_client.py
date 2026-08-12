@@ -8,7 +8,6 @@ from dataclasses import dataclass
 import requests
 from pydantic import ValidationError
 
-from api.schemas.base import BaseResponse
 from api.schemas.order_summary import OrderSummaryPageView
 
 
@@ -89,20 +88,24 @@ class OrderSummaryApiClient:
 
 def _validated_page(response) -> OrderSummaryPageView:
     try:
-        envelope = BaseResponse[OrderSummaryPageView].model_validate(
-            response.json()
-        )
+        payload = response.json()
     except (ValueError, ValidationError, TypeError) as error:
         raise OrderSummaryApiError(
             response.status_code,
             "訂單摘要 API 回傳格式不正確。",
         ) from error
-    if not envelope.success or envelope.data is None:
+    if not isinstance(payload, dict) or payload.get("success") is not True:
         raise OrderSummaryApiError(
             response.status_code,
             "訂單摘要 API 回傳狀態不正確。",
         )
-    return envelope.data
+    try:
+        return OrderSummaryPageView.model_validate(payload["data"])
+    except (KeyError, ValidationError, TypeError, ValueError) as error:
+        raise OrderSummaryApiError(
+            response.status_code,
+            "訂單摘要 API 回傳格式不正確。",
+        ) from error
 
 
 def _error_message(response) -> str:

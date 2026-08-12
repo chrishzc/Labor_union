@@ -6,11 +6,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_active_orders_shell_does_not_load_legacy_payment_overview() -> None:
-    source = (ROOT / "ui/pages/02_orders.py").read_text(encoding="utf-8")
+def test_finance_center_owns_formal_payment_workspaces() -> None:
+    source = (ROOT / "ui/pages/04_finance.py").read_text(encoding="utf-8")
 
     assert "tab3_finance" not in source
-    assert "_render_staff_payout_tab" in source
+    assert "💰 帳務作業中心" in source
+    assert "FINANCE_WORKSPACES" in source
+    assert "_render_staff_payout_workspace" in source
     assert "_render_accounts_payable_workspace" in source
 
 

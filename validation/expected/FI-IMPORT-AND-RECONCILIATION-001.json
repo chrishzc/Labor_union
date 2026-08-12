@@ -1,0 +1,5 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "FI-IMPORT-AND-RECONCILIATION-001",
+  "assertions": ["Duplicate fingerprint creates one canonical row and multiple occurrences.", "Incomplete/collision variants retain roots, create no formal ledger allocation and project typed review/IMPORT-006.", "Only owning Finance Apply can commit ledger/allocation/receipt; Import classification alone cannot.", "Replays and failures leave no partial formal transaction."]
+}

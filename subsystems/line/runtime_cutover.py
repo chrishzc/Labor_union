@@ -170,7 +170,7 @@ def _required_text(value: Any, name: str) -> str:
 
 
 def _runtime_mode(environment: Mapping[str, str], name: str) -> LineRuntimeMode:
-    value = environment.get(name, "legacy").strip().lower()
+    value = environment.get(name, "canonical").strip().lower()
     try:
         return LineRuntimeMode(value)
     except ValueError as error:

@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"SCH-ASSIGNMENT-COVERAGE-001","assertions":["Each official service day has exactly one owner; coverage and hours are conserved.","Conflict/lock/stale cases create zero formal row delta and typed blocker.","Leave/substitution preserves old/new lineage and only changes affected family."]}

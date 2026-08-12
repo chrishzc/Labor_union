@@ -1,5 +1,4 @@
 # Work Log
-
 ## [2026-07-12]
 - 刪除 `.env` 中未使用的環境變數 `END_POINT`。
 - 更新 `.env.example` 中的 `DB_PORT` 預設值為 `3307`，以與 `docker-compose.yml` 保持一致。
@@ -598,13 +597,13 @@
   本機 `.venv` 後為 `0`。
 - `git diff --check` 與異動檔 strict UTF-8、無 BOM 驗證通過；未修改 schema、migration、
   正式資料庫、LINE provider 或專案相依檔，也未建立或遺留一次性程式檔案。
-
 ## [2026-08-12] LINE 身分解除回復 canonical 用戶選單
 
 - 修復月嫂身分解除後仍讀取 legacy `line_rich_menu_publications`，因而切回「訂單查詢／
   尋找專員」舊版用戶選單的 live-drift；新解除請求改選
   `line_rich_menu_publication_tasks` 最新 published `default_menu`。
-- 新增 additive schema part 168 與 LINE stage 13 release manifest／descriptor；新解除 request
+- 新增 additive schema part 179（合併前部署 artifact 編號為 168）與 LINE stage 13 release
+  manifest／descriptor；新解除 request
   保存 canonical publication FK，stage 12 以前的 legacy request 保持可讀且不回填、不改寫。
 - 新增 repository、schema 與 release hash 回歸測試；聚焦測試 13 項、擴大 LINE 回歸 29 項、
   schema loader／bootstrap／release 回歸 8 項通過。
@@ -617,3 +616,21 @@
   readback 確認實際 Rich Menu 一致。
 - 備份僅保存在 Git ignored `scratch/line-identity-stage13-deploy-20260812/`，不得提交或外傳；
   完整驗收見 `2026-08-12_line_identity_canonical_default_menu_repair_receipt.md`。
+
+## [2026-08-12] 合併 upstream/main UI 調整 #42
+
+- 將 upstream/main `cfc3b87401e663e6b5e8bda6cab9a739ae6c2a7f` 合併至本地 `main`；
+  非重疊功能完整保留，`README.md` 與本工作紀錄的雙邊新增內容均語意合併。
+- upstream 已使用 schema part 168～178 與 Work Package 55～65；本次 LINE 修復功能保留，
+  repository artifact 改編號為 schema part 179、Work Package 66，並同步 manifest、descriptor、
+  hash、測試、索引與 evidence 歷史說明。
+- LINE 身分、canonical menu command、客服與 runtime cutover 聚焦回歸為 `36 passed`；
+  migration/bootstrap metadata 群組另有 `22 passed`。
+- schema 群組的兩項既知失敗（prefix `101`／`165`／`166`／`167` 重號，以及
+  `init_db.main()` 未隔離 pytest argv）可在純 upstream tree 重現，依合併裁決保留雲端版本。
+- 完整 pytest 在 collection 階段另發現 upstream 新增 Contract Signing import 所需的
+  `infrastructure.archive.contract_documents` 未存在，以及 validation seed 測試仍匯入不存在的
+  `_INGESTION_KEY`；這些非本次 LINE write set，未擴張修補。合併版本 FastAPI 因前者暫時無法
+  啟動，需另案補齊 upstream 漏檔／測試契約後才能恢復直接測試。
+- `git diff --check` 所列 trailing whitespace 均可在純 upstream diff 重現；本次衝突解析檔無
+  新增 whitespace 錯誤。`history/git_push.md` 仍由 `.gitignore` 排除，本次未執行 remote push。

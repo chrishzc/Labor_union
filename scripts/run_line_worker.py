@@ -54,6 +54,7 @@ from subsystems.line.knowledge_question_application import (
     enqueue_line_knowledge_question,
 )
 from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.menu_command_application import LineMenuCommandApplication
 from subsystems.line.identity_management_application import (
     IDENTITY_MENU_RESET_INTENT,
 )
@@ -166,7 +167,8 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
                     MatchingNotificationApplication(open_line_unit_of_work, now)
                 ),
                 knowledge_question_scheduler=enqueue_line_knowledge_question,
-                service_help_application=LineServiceHelpApplication(now),
+                service_help_application=LineServiceHelpApplication(now, _identity_flow_url),
+                menu_command_application=LineMenuCommandApplication(),
             ).registry()
         ),
         worker_identity,
@@ -344,7 +346,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         choices=tuple(mode.value for mode in LineRuntimeMode),
-        default=os.getenv("LINE_WORKER_RUNTIME_MODE", "legacy"),
+        default=os.getenv("LINE_WORKER_RUNTIME_MODE", "canonical"),
     )
     parser.add_argument("--worker-id", default="")
     parser.add_argument("--poll-seconds", type=float, default=60.0)

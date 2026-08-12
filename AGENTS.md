@@ -10,15 +10,16 @@
 
 1. fresh-read branch、HEAD、`git status --short`、本檔與任務相關檔案。
 2. 讀 `README.md` 與 `document/架構重整/00_開發者與Agent導覽.md`。
-3. 讀 `document/架構重整/01_規格基線/00_Global_共同契約.md`、`15_正式規格索引與裁決總表.md`、對應 Domain 規格及最新補充裁決；目前正式收斂範圍為 `15`～`20`。
-4. 讀對應的 `02_決策與退役執行記錄/` Work Package／decision，以及 `03_追蹤清單與證據/` inventory／evidence。
-5. 最後才讀 live schema、API、Domain、Subsystem、repository、caller 與測試，確認規格和現況是否漂移。
+3. 讀 `document/架構重整/01_規格基線/00_Global_共同契約.md`、`15_正式規格索引與裁決總表.md`、對應 Domain 規格及最新補充裁決；目前正式收斂範圍為 `15`～`21`。
+4. 只讀任務直接對應、仍 active 的 `02_決策與退役執行記錄/` Work Package／decision，以及 `03_追蹤清單與證據/` inventory／evidence；不要整目錄載入。
+5. `04_已完成與上線封存/` 是低頻歷史區，日常任務禁止預設或遞迴讀取。只有歷史追溯、incident／rollback、migration/cutover、舊 release 重現、稽核，或 current SSOT 明確引用 archive identity 時，才先精準搜尋 manifest，再讀命中的單一文件。
+6. 最後才讀 live schema、API、Domain、Subsystem、repository、caller 與測試，確認規格和現況是否漂移。
 
 思考程式、資料與流程時，先從實際 business scenario、操作者、根事實與不可破壞的不變量出發，以第一性原理拆解責任，不從既有頁面、資料表或函式形狀反推需求。
 
 權威順序為：人工最新明確裁決 → 已人工確認的正式規格 → 可追溯的既有業務規格與欄位權威文件 → 其他架構文件 → live 現況證據。live code、schema、測試、log、receipt 或 UI 能運作都不代表規格已改變；不一致時必須標示 `live-drift`，不得用現況覆蓋業務語意。
 
-`02_決策與退役執行記錄/` 必須依文件文字及 `declared_status` 解讀；draft、gap、decision-complete 或 inventory 不自動授權實作、部署、刪除或外部副作用。`03_追蹤清單與證據/` 只保存盤點與證據，不構成規格或操作授權。
+`02_決策與退役執行記錄/` 必須依文件文字及 `declared_status` 解讀；draft、gap、decision-complete 或 inventory 不自動授權實作、部署、刪除或外部副作用。`03_追蹤清單與證據/` 只保存 active 盤點與證據，不構成規格或操作授權。`04_已完成與上線封存/` 的內容僅供歷史追溯，權威低於 current SSOT，也不能作為新 mutation 授權。
 
 ## 2. Global → Domain → Subsystem → Module 架構
 
@@ -44,16 +45,17 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 
 ## 4. 專案文件與檔案落點
 
-新增檔案前先分類；同一資訊只能有一個 canonical owner，不得在 `docs/`、`document/`、根目錄與 Agent 暫存區建立競爭 SSOT。
+新增檔案前先分類；同一資訊只能有一個 canonical owner，不得在 `document/`、根目錄與 Agent 暫存區建立競爭 SSOT。
 
 | 類型 | 正式位置 | 規則 |
 |---|---|---|
 | Global／Domain 正式規格 | `document/架構重整/01_規格基線/` | 更新正式規格索引；人工確認前標明 draft／proposed，不得冒充 approved。 |
 | 架構裁決、Work Package、gap、退役或執行記錄 | `document/架構重整/02_決策與退役執行記錄/` | 記錄 `doc_type`、`declared_status`、date、owner、scope、write set、acceptance 與 out-of-scope，並更新該目錄 `README.md`。 |
 | 盤點、人工 review queue、正式 evidence／receipt | `document/架構重整/03_追蹤清單與證據/` | evidence 放其 `evidence/`，更新索引或 manifest；證據不等於授權。 |
+| 已完成／已上線／已被取代的低頻歷史文件 | `document/架構重整/04_已完成與上線封存/` | 只封存不再 active 的 Work Package、superseded 舊規格與 closed release／receipt；現行正式規格即使已上線仍留在 `01`。封存前須通過 archive gate、更新 inbound links 與 manifest；Agent 日常不得全文載入。 |
 | 功能提案與尚未核准的共享開發計畫 | `document/功能開發計畫/` | 一個 initiative 一份文件，必須標明狀態、owner、Domain、範圍、依賴、驗收條件與更新日期；若影響架構，核准後收斂到 `01`／`02`，不得保留雙 SSOT。 |
-| 不改變業務／架構契約的通用技術 ADR | `docs/adr/` | 使用 `ADR-NNN_<slug>.md`；若涉及 owner、SSOT、交易或部署裁決，改放 `02_決策與退役執行記錄/`。 |
-| 穩定的開發指南與通用 pattern | `docs/` | 不得在此放正式業務規格、共同代辦或驗收授權。 |
+| 不改變業務／架構契約的通用技術 ADR | `document/架構重整/02_決策與退役執行記錄/` | 使用明確 `doc_type: architecture-decision`；若涉及 owner、SSOT、交易或部署裁決，同樣在此記錄完整 Work Package／裁決。 |
+| 穩定的開發指南與通用 pattern | `AGENTS.md` 或 `document/架構重整/00_開發者與Agent導覽.md` | 不得在此放正式業務規格、共同代辦或驗收授權。 |
 | pytest 測試程式 | `tests/` | `test_<business_behavior>.py`；新檔按 Domain／Subsystem／integration／global 邊界歸類，既有平鋪測試只在相關任務中逐步收斂。 |
 | 測試 helper 與 pytest fixture code | `tests/support/`、`tests/conftest.py` | 不得把測試專用邏輯放進 production module 或 `scripts/`。 |
 | 測試專用靜態資料 | `tests/fixtures/<domain>/` | 僅可放最小、去敏、可版本化的 deterministic input；禁止正式資料與個資。 |
@@ -71,7 +73,10 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 - 狀態使用明確且有限的集合：`draft`、`proposed`、`approved`、`in-progress`、`blocked`、`completed`、`superseded`；`completed` 必須連結驗收證據，`blocked` 必須記錄阻塞條件與人工入口。
 - 個人或 Agent 的即時 checklist 放 `scratch/<task-slug>/`，不提交且不構成團隊承諾。不得使用 root `task*.md`、`PROJECT_SPEC.md`、`implementation_plan.md`、checkpoint 或 code comment TODO 作為正式 backlog。
 - production code 中不得留下沒有 owner／issue／Work Package 連結的 `TODO`、`FIXME` 或暫時繞過；無法在本任務完成時，回寫正式代辦並使程式 fail closed。
-- 工作完成後更新原代辦狀態與 evidence／index，不另建「完成版」複本；被取代文件標示 `superseded` 並連結 successor，不靜默覆寫歷史裁決。
+- 工作完成後先在原代辦更新 `completed`、evidence／index 與 release 結果，不另建「完成版」複本。符合 archive gate 後可把不再 active 的 Work Package／舊版本文件移至 `04_已完成與上線封存/`；被取代文件標示 `superseded` 並連結 successor，不靜默覆寫歷史裁決。
+- 「已實作」不等於「可封存」；仍約束 current production 的正式規格永遠留在 `01_規格基線/`。只有 current successor 已完整承接語意，且舊文件不含 active blocker、操作入口或 rollback 責任時，才可封存舊版本。
+- 封存不是依檔名或 status 自動搬移。必須確認 completion／deployment receipt、release identity（如適用）、successor、inbound links、content digest、restore triggers，並更新 `04_已完成與上線封存/archive_manifest.json`。沒有唯一判定時留在原位並進人工 review queue。
+- active 索引只保留 current／in-progress／blocked／awaiting-execution 文件與必要的一行 archive pointer；不得把 archive 全目錄或完整 manifest 注入一般 Agent 上下文。
 
 ## 6. 分層實作與驗證
 

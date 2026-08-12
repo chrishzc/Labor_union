@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "ANOM-PROJECTOR-CLOSED-LOOP-003",
+  "scenario_digest": "202e827121079451da553d56c078223ef3258fd36a119ce72af93baa0b099326",
+  "result": "passed",
+  "assertion_count": 39,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_system_alert_service.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "System Alert detector projection, workflow state and read-model boundary"
+  },
+  "input_digests": {
+    "scenario_fixture": "6d31fcc4070c3bd3be9b2664e569bc021844cfba3b61a279704dfb0283e60564",
+    "expected_manifest": "f7e0d1d5fc098cc64f7810dca2c1eb8d8979c6dfa34145c402d7c8ff75975811",
+    "system_alert_test": "c386b79e6ab698f34985d0c428558fb9237c6b71db0d16a024efbdfd6131d54b"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/ANOM-PROJECTOR-CLOSED-LOOP-003.json",
+    "expected_manifest": "validation/expected/ANOM-PROJECTOR-CLOSED-LOOP-003.json",
+    "system_alert_test": "tests/test_system_alert_service.py"
+  }
+}

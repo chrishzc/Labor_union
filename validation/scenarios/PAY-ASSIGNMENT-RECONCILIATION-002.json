@@ -1,0 +1,45 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "PAY-ASSIGNMENT-RECONCILIATION-002",
+  "track": "A",
+  "suite_id": "PAY",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["domain_root_data", "expected_manifest"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["PAY-01", "PAY-02", "PAY-03"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#PAY-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#PAY-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#PAY-03"
+  ],
+  "root_facts": [
+    "Official assignment-owned work days, effective assignment terms, hourly-rate policy and floor-fee allocation.",
+    "Explicit leave/substitution lineage and double-pay markers for the affected official days."
+  ],
+  "forbidden_direct_seed": [
+    "staff payment amount or status",
+    "payable projection or monthly settlement",
+    "payroll anomaly or adjustment result"
+  ],
+  "commands": [
+    "Reconcile assignment-owned official work facts into a read-only payroll calculation result.",
+    "Evaluate substitution, double-pay, rounding, conservation and invalid-source cases."
+  ],
+  "expected": [
+    "Per-assignment hours, service salary and floor-fee amounts are derived from official facts and retain assignment ownership.",
+    "A substitute alone owns its double-pay component; family floor-fee rounding conserves the original total.",
+    "Missing, non-finite, negative or conflicting roots fail closed and do not create a staff-payment candidate."
+  ],
+  "receipt_requirements": [
+    "root fixture and expected-manifest digests",
+    "assignment amount, double-pay and floor-fee conservation assertions",
+    "typed fail-closed anomaly assertions and zero-write query proof"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_assignment_payroll_reconciliation_service.py"
+    ],
+    "test_paths": ["tests/test_assignment_payroll_reconciliation_service.py"]
+  }
+}

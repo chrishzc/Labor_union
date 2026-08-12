@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 def split_sql(text: str) -> list[str]:
     # Kept cohesive because SQL quoting, comments, and delimiters share one scanner state.
     statements: list[str] = []

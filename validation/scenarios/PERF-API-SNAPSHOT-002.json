@@ -1,0 +1,49 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "PERF-API-SNAPSHOT-002",
+  "track": "B",
+  "suite_id": "PERF",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["PERF-02", "PERF-03", "PERF-04", "PERF-05", "PERF-07", "PERF-08"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "An in-process FastAPI request, fixed handler latency samples and a typed system-status response fixture."
+  ],
+  "forbidden_direct_seed": [
+    "performance aggregate, UI display state, cache-control result or slow-request alert"
+  ],
+  "commands": [
+    "Issue query and mutation requests through performance middleware.",
+    "Record fixed latency samples, retrieve the typed performance endpoint and decode it through the UI client.",
+    "Exercise cache-key, payload-budget, single-flight and stale-response policies."
+  ],
+  "expected": [
+    "Query responses expose ephemeral timing headers; mutations are no-store.",
+    "The in-memory aggregate uses fixed latency buckets without request logs and is information-only in the System Status UI.",
+    "Typed UI client rejects malformed payloads and policy guards reject stale or duplicate requests.",
+    "This scenario does not measure browser event-to-paint latency or create a performance alert."
+  ],
+  "receipt_requirements": [
+    "middleware response assertions",
+    "aggregate-bucket assertions",
+    "router/UI-client typed payload assertions",
+    "policy guard assertions"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_api_performance_middleware.py tests\\test_performance_snapshot.py tests\\test_system_status_ui.py tests\\test_system_status_router.py tests\\test_system_status_api_client.py tests\\test_performance_policies.py"
+    ],
+    "test_paths": [
+      "tests/test_api_performance_middleware.py",
+      "tests/test_performance_snapshot.py",
+      "tests/test_system_status_ui.py",
+      "tests/test_system_status_router.py",
+      "tests/test_system_status_api_client.py",
+      "tests/test_performance_policies.py"
+    ]
+  }
+}

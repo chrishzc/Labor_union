@@ -10,6 +10,7 @@ from subsystems.staff_payables.accounts_payable_export import (
     AccountsPayableExportWorkflow,
     ArchivedWorkbook,
     ClientRefundExportFact,
+    GovernmentOverpaymentReturnExportFact,
     StaffPayableExportFact,
     aggregate_accounts_payable_rows,
     build_accounts_payable_workbook,
@@ -55,6 +56,10 @@ def _refund(identity, amount, *, payable=True, anomaly=False, refund_type="custo
     return ClientRefundExportFact(identity, "CASE-R", "林客戶", "004", "998", MoneyNTD(amount), date(2026, 8, 31), payable, anomaly, refund_type)
 
 
+def _government_return(identity="government-return:1", amount=600):
+    return GovernmentOverpaymentReturnExportFact(identity, "overpayment:1", "新竹市政府", "004", "****1234", MoneyNTD(amount), date(2026, 8, 31))
+
+
 def test_aggregate_merges_same_staff_day_and_excludes_non_payable_or_anomalous_rows():
     rows = aggregate_accounts_payable_rows(
         (_staff("obligation:2", "CASE-2", 200), _staff("obligation:1", "CASE-1", 300), _staff("obligation:3", "CASE-3", 99, status=StaffPayableStatus.COMPLETED)),
@@ -72,9 +77,17 @@ def test_aggregate_rejects_inconsistent_staff_bank_identity():
         aggregate_accounts_payable_rows((_staff("obligation:1", "CASE-1", 100), _staff("obligation:2", "CASE-2", 100, account="002")), ())
 
 
+def test_aggregate_includes_government_return_as_an_accounting_detail_only():
+    rows = aggregate_accounts_payable_rows((), (), (_government_return(),))
+
+    assert [(row.payment_type, row.amount.amount, row.obligation_identities) for row in rows] == [
+        ("government_overpayment_return", 600, ("government-return:1",)),
+    ]
+
+
 def test_export_uses_snapshot_writes_hash_verified_archive_and_returns_workbook():
     archive = _Archive()
-    workflow = AccountsPayableExportWorkflow(_Source((_staff("obligation:1", "CASE-1", 500),)), _Source((_refund("refund:1", 120),)), archive, _Snapshot, lambda: datetime(2026, 8, 31, 9, tzinfo=timezone.utc))
+    workflow = AccountsPayableExportWorkflow(_Source((_staff("obligation:1", "CASE-1", 500),)), _Source((_refund("refund:1", 120),)), _Source(()), archive, _Snapshot, lambda: datetime(2026, 8, 31, 9, tzinfo=timezone.utc))
 
     receipt = workflow.export(date(2026, 8, 31))
 
@@ -86,7 +99,7 @@ def test_export_uses_snapshot_writes_hash_verified_archive_and_returns_workbook(
 
 def test_export_rejects_archive_hash_mismatch():
     archive = _Archive("wrong")
-    workflow = AccountsPayableExportWorkflow(_Source((_staff("obligation:1", "CASE-1", 500),)), _Source(()), archive, _Snapshot, lambda: datetime(2026, 8, 31, 9, tzinfo=timezone.utc))
+    workflow = AccountsPayableExportWorkflow(_Source((_staff("obligation:1", "CASE-1", 500),)), _Source(()), _Source(()), archive, _Snapshot, lambda: datetime(2026, 8, 31, 9, tzinfo=timezone.utc))
 
     with pytest.raises(RuntimeError, match="accounts_payable_archive_failed"):
         workflow.export(date(2026, 8, 31))

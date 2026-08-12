@@ -40,7 +40,7 @@ class OrderDetail:
     client_name: str
     staff_name: str | None
     order_status: str
-    identity_status: str
+    identity_status: str | None
     cancel_reason: str | None
     line_group_id: str | None
     contract_identity: str | None
@@ -75,7 +75,7 @@ def _detail(row: object) -> OrderDetail:
         case_no=_text(row, "case_no", 50), client_id=_positive_id(row, "client_id"),
         staff_id=_optional_id(row, "staff_id"), client_name=_text(row, "client_name", 200),
         staff_name=_optional_text(row, "staff_name", 200), order_status=_text(row, "order_status", 100),
-        identity_status=_text(row, "identity_status", 100), cancel_reason=_optional_text(row, "cancel_reason", 10000),
+        identity_status=_optional_text(row, "identity_status", 100), cancel_reason=_optional_text(row, "cancel_reason", 10000),
         line_group_id=_optional_text(row, "line_group_id", 100), contract_identity=_optional_text(row, "contract_identity", 191),
         actual_start_date=_optional_date(row, "actual_start_date"), actual_end_date=_optional_date(row, "actual_end_date"),
         deposit_date=_optional_date(row, "deposit_date"), start_date=_optional_date(row, "start_date"),

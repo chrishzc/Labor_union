@@ -6,7 +6,9 @@ from domains.client_finance.obligation_planning import (
     ClientChargeDay,
     ClientFinanceTermsFacts,
     ClientPaymentTerms,
+    ExistingClientStageObligation,
 )
+from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.contract_completion import (
     ContractCompletionBlocker,
     ContractCompletionFacts,
@@ -66,7 +68,7 @@ class _Repository:
         self.receipt = command.stored_receipt
 
 
-def _facts(*, charge_days=2):
+def _facts(*, charge_days=2, existing_obligations=()):
     order = ContractCompletionFacts(
         "CASE-1", 4, "CONTRACT-1", False, OrderLifecycleStatus.DISCUSSION,
         True, ServiceTimeTerms(time(8), time(17), 0),
@@ -74,7 +76,7 @@ def _facts(*, charge_days=2):
     finance = ClientFinanceTermsFacts(
         "CASE-1", 6, 8, MoneyNTD(0),
         tuple(ClientChargeDay(date(2026, 8, day), False) for day in range(1, charge_days + 1)),
-        ClientPaymentTerms(0, MoneyNTD(100), date(2026, 7, 1), date(2026, 8, 1), None), (),
+        ClientPaymentTerms(0, MoneyNTD(100), date(2026, 7, 1), date(2026, 8, 1), None), existing_obligations,
     )
     return ContractCompletionWorkflowFacts(order, finance, 2)
 
@@ -139,3 +141,14 @@ def test_apply_rejects_stale_client_finance_version():
     )
     with pytest.raises(ContractCompletionWorkflowError, match="Client Finance"):
         workflow.apply(request)
+
+
+def test_contract_completion_carries_the_one_precontract_deposit_obligation():
+    deposit = ExistingClientStageObligation(
+        "client-obligation:CASE-1:deposit", PaymentStage.DEPOSIT,
+        MoneyNTD(0), MoneyNTD(0), date(2026, 7, 1), False,
+    )
+
+    query = _workflow(_Repository(_facts(existing_obligations=(deposit,)))).query("CASE-1")
+
+    assert query.completion_available is True

@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "FI-STAGING-DEDUP-002",
+  "assertions": [
+    "Raw normalized rows are persisted before classification; classification completion does not imply reconciliation completion.",
+    "The same deterministic fingerprint creates one canonical row plus every occurrence, retaining prior canonical state on re-import.",
+    "Malformed, ambiguous, dry-run and downstream-failure cases reject or roll back without a false completed batch."
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "CACHE-READ-PROJECTION-002",
+  "track": "B",
+  "suite_id": "CACHE",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["CACHE-01", "CACHE-02", "CACHE-04", "CACHE-05", "CACHE-06", "CACHE-07"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "A read-only holiday source answer, scoped cache-key inputs and concurrent-command identity fixtures."
+  ],
+  "forbidden_direct_seed": [
+    "cached response, freshness result, invalidation outcome or formal Apply result"
+  ],
+  "commands": [
+    "Read the holiday projection through miss, hit and explicit invalidation.",
+    "Build cache keys for changed scopes and fact versions, then exercise duplicate-command and late-response guards.",
+    "Scan formal workflows for a prohibited cache dependency."
+  ],
+  "expected": [
+    "Hit and reloaded values equal the source answer and caller mutation cannot change the cached projection.",
+    "The cache telemetry reports two loads, one hit and one invalidation for the isolated sequence.",
+    "Cache identity changes for scope or facts; formal workflows have no cache dependency."
+  ],
+  "receipt_requirements": [
+    "cache source and telemetry assertions",
+    "key/scope and single-flight output",
+    "workflow dependency scan"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_holiday_query_cache_boundary.py tests\\test_g15_cache_boundary_contract.py tests\\test_performance_policies.py"
+    ],
+    "test_paths": [
+      "tests/test_holiday_query_cache_boundary.py",
+      "tests/test_g15_cache_boundary_contract.py",
+      "tests/test_performance_policies.py"
+    ]
+  }
+}

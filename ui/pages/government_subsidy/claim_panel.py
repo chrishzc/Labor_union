@@ -33,11 +33,11 @@ def render_government_subsidy_claim_panel(client: GovernmentSubsidyApiClient) ->
     st.caption("先 Preview 再 Apply，與異常導向頁一致。")
     _render_batch_list_panel(client)
     _render_batch_query_panel(client)
+    _render_planning_panel(client)
     batch = st.session_state.get(_BATCH_STATE_KEY)
     if batch is None:
         return
     _render_batch_detail(batch)
-    _render_planning_panel(client)
     _render_submission_panel(client, batch.batch_id)
     _render_approval_panel(client, batch.batch_id)
 
@@ -411,7 +411,7 @@ def _coerce_approval(item: object) -> GovernmentSubsidyApprovalItemView:
 
 def _build_claim_command(action_label: str, apply_state_key: str) -> dict:
     existing = st.session_state.get(apply_state_key)
-    if isinstance(existing, dict) and not existing.get("terminal"):
+    if isinstance(existing, dict):
         return existing
     return {
         "action": action_label,

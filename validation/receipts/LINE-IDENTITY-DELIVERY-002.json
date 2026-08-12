@@ -1,0 +1,39 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "LINE-IDENTITY-DELIVERY-002",
+  "scenario_digest": "98beffd1e316f99b2a6f1d6d6e66351cc0694ee1351781964b73e4e9dcf4cff7",
+  "result": "passed",
+  "assertion_count": 40,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\line\\domain\\test_line_webhook_domain.py tests\\line\\domain\\test_line_identity_stage4_domain.py tests\\line\\domain\\test_line_identity_review_domain.py tests\\line\\domain\\test_line_delivery_domain.py tests\\line\\domain\\test_line_idempotency_domain.py tests\\line\\subsystems\\test_line_identity_stage4.py tests\\line\\subsystems\\test_line_runtime_stage3.py tests\\line\\infrastructure\\test_line_provider_adapters.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "LINE webhook identity-flow/review and delivery state with provider-fault mapping"
+  },
+  "input_digests": {
+    "scenario_fixture": "6cc3a1cda179ec31c3019a736e065c31383fbe6473e7baba7f94429c76e81c9d",
+    "expected_manifest": "5e01305060d9d6231cc99ecea6c07040fded7877d8d442d965de101af5ea9e4c",
+    "webhook_tests": "286e1ddf586c78f012f9b710771d9ade1d09e09a0442c581d1ed5c8776954d05",
+    "identity_flow_tests": "4b776dc2a4ba3883b952531c4b13029a85c5bda70e641172e9a211b7b72bc815",
+    "identity_review_tests": "e8c78c2971832b85bf5efee8305e04a7c995a60296f7d577882e92b59daa92ef",
+    "delivery_tests": "06b0129d47901939e5e4d0ae7a9ec88ee6884b40a022b26e9d7acbc3dec5bad3",
+    "idempotency_tests": "df72fc37031c20094dbbd29f9a47bb38740a7617a4273921dbfec2895d1b0caf",
+    "identity_subsystem_tests": "a3253f7bd59e6ffb229dc947c5a811e6fd42b553c2a69a9d266fd14e8de363ec",
+    "runtime_tests": "0ac8b052150f86298a971dae829abcde9736acbd109c10d387664209978a6fea",
+    "provider_adapter_tests": "f7a5c3eaed37d522db4abc19b51ce723ea8a6fbd17818b9dd27103aa3fdb02de"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/LINE-IDENTITY-DELIVERY-002.json",
+    "expected_manifest": "validation/expected/LINE-IDENTITY-DELIVERY-002.json",
+    "webhook_tests": "tests/line/domain/test_line_webhook_domain.py",
+    "identity_flow_tests": "tests/line/domain/test_line_identity_stage4_domain.py",
+    "identity_review_tests": "tests/line/domain/test_line_identity_review_domain.py",
+    "delivery_tests": "tests/line/domain/test_line_delivery_domain.py",
+    "idempotency_tests": "tests/line/domain/test_line_idempotency_domain.py",
+    "identity_subsystem_tests": "tests/line/subsystems/test_line_identity_stage4.py",
+    "runtime_tests": "tests/line/subsystems/test_line_runtime_stage3.py",
+    "provider_adapter_tests": "tests/line/infrastructure/test_line_provider_adapters.py"
+  }
+}

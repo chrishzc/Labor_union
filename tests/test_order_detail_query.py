@@ -59,6 +59,15 @@ def test_query_reports_missing_selected_case() -> None:
         _service(None).query("CASE-1")
 
 
+def test_query_preserves_legacy_order_with_unknown_identity_status() -> None:
+    row = _row()
+    row["identity_status"] = None
+
+    detail = _service(row).query("CASE-1")
+
+    assert detail.identity_status is None
+
+
 def test_query_rejects_blank_case_number_before_repository_call() -> None:
     with pytest.raises(ValueError):
         _service(_row()).query(" ")

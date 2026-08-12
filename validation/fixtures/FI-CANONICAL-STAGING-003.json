@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "FI-CANONICAL-STAGING-003",
+  "test_kind": "external_input_fixture",
+  "root_inputs": [
+    "two normalized external-bank source occurrences with matching content",
+    "unmatched counterparty-account evidence and empty identity maps",
+    "an explicitly configured lu_test_validation_v1 target"
+  ],
+  "seed_fields": [
+    "bank_source.transaction_date",
+    "bank_source.debit",
+    "bank_source.counterparty_account",
+    "bank_source.bank_references",
+    "bank_occurrence.source_row"
+  ],
+  "derived_fields": [
+    "finance_import_row.dedup_fingerprint",
+    "finance_import_row.classification_type",
+    "finance_import_row.reconciliation_status",
+    "finance_import_occurrence.id",
+    "formal_finance_ledger_entry"
+  ],
+  "expected_manifest_path": "validation/expected/FI-CANONICAL-STAGING-003.json"
+}

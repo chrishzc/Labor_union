@@ -1,0 +1,27 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "ANOM-SCHEDULING-CLOSED-LOOP-002",
+  "scenario_digest": "45ceaf88b5456fa0de6df6d55b1f2af323475db73d8d35d436534fe5bdafb33d",
+  "result": "passed",
+  "assertion_count": 13,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_anomaly_closed_loop_disposable_mysql_e2e.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "disposable MySQL scheduling anomaly claim, repair and recurrence loop"
+  },
+  "input_digests": {
+    "scenario_fixture": "694702e00723769078499ab1021ef4a626cec4ea5c2dd90113f7cd4bbcb57a3b",
+    "expected_manifest": "78ce3f6542975195f8f889b0a506f5e4f14c45f8b05682b14c866e12cd887330",
+    "integration_test": "3b28921d2e0b552daa483ec8b288d7cccb5bfee1301a87c188608eb9fa4775fa",
+    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/ANOM-SCHEDULING-CLOSED-LOOP-002.json",
+    "expected_manifest": "validation/expected/ANOM-SCHEDULING-CLOSED-LOOP-002.json",
+    "integration_test": "tests/test_anomaly_closed_loop_disposable_mysql_e2e.py",
+    "validation_schema_manifest": "db/cutover_releases/labor_union_validation_schema_v1.json"
+  }
+}

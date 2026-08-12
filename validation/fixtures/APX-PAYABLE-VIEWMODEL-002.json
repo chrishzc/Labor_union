@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "APX-PAYABLE-VIEWMODEL-002",
+  "test_kind": "domain_root_data",
+  "root_inputs": [
+    "staff payable obligation identity/status/amount/bank facts",
+    "client refund or subsidy-return obligation/ledger facts",
+    "consistent-read target date"
+  ],
+  "seed_fields": [
+    "staff_payable.obligation_identity",
+    "staff_payable.status",
+    "client_refund.obligation_identity",
+    "client_refund.net_refunded_amount",
+    "export.target_date"
+  ],
+  "derived_fields": [
+    "accounts_payable_export.row",
+    "accounts_payable_export.aggregate_amount",
+    "accounts_payable_workbook.bytes",
+    "accounts_payable_archive.sha256"
+  ],
+  "expected_manifest_path": "validation/expected/APX-PAYABLE-VIEWMODEL-002.json"
+}

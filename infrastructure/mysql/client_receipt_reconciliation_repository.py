@@ -46,6 +46,7 @@ _SUPPORTED_RECEIPT_STAGES = frozenset(
 class _BankMetadata:
     row_id: int
     occurred_on: date
+    amount_ntd: int
 
 
 class ClientReceiptRepositoryUnavailable(RuntimeError):
@@ -125,7 +126,7 @@ class MySqlClientReceiptReconciliationRepository:
     def append_ledger_entries(self, candidate) -> None:
         request = self._require_request()
         self._settlement_identity = candidate.settlement_identity.value
-        amounts = _allocated_amounts_by_bank(candidate)
+        amounts = _bank_amounts(candidate, self._bank_metadata)
         with _mysql_cursor(self._connection) as cursor:
             for ordinal, identity in enumerate(sorted(amounts), start=1):
                 entry_id = _insert_ledger_entry(
@@ -189,6 +190,66 @@ class MySqlClientReceiptReconciliationRepository:
                 request,
                 settlement_identity,
                 resulting_version,
+            )
+
+    def establish_overage_refund(self, candidate, resulting_version) -> None:
+        if candidate.status is not ReconciliationStatus.OVERAGE:
+            return
+        request = self._require_request()
+        if len(request.selection.obligation_identities) != 1:
+            raise RuntimeError("client_receipt_overage_requires_one_obligation")
+        if len(self._ledger_entry_ids) != 1:
+            raise RuntimeError("client_receipt_overage_requires_one_bank_fact")
+        obligation_identity = request.selection.obligation_identities[0]
+        receipt_ledger_entry_id = next(iter(self._ledger_entry_ids.values()))
+        refund_identity = _overage_refund_identity(candidate.settlement_identity.value)
+        source_identity = f"receipt-overage:{candidate.settlement_identity.value}"
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute(
+                _OVERAGE_REFUND_EVENT_INSERT_SQL,
+                (
+                    refund_identity,
+                    request.selection.case_no,
+                    candidate.overage_amount.amount,
+                    source_identity,
+                    obligation_identity,
+                    request.expected_account_version.value,
+                    _child_key(request, "overage-refund-event", 1),
+                    request.actor.actor_id,
+                    request.reason,
+                ),
+            )
+            event_id = int(cursor.lastrowid or 0)
+            if event_id <= 0:
+                raise RuntimeError("client_receipt_overage_event_missing")
+            cursor.execute(
+                _OVERAGE_REFUND_PROJECTION_INSERT_SQL,
+                (
+                    refund_identity,
+                    request.selection.case_no,
+                    obligation_identity,
+                    candidate.overage_amount.amount,
+                    event_id,
+                    resulting_version,
+                ),
+            )
+            _insert_refund_recipient_snapshot(
+                cursor, refund_identity, request.selection.case_no, "receipt_overage"
+            )
+            cursor.execute(
+                _OVERAGE_DISPOSITION_INSERT_SQL,
+                (
+                    request.selection.case_no,
+                    self._bank_metadata[request.selection.bank_fact_identities[0]].row_id,
+                    receipt_ledger_entry_id,
+                    obligation_identity,
+                    refund_identity,
+                    candidate.overage_amount.amount,
+                    candidate.settlement_identity.value,
+                    _child_key(request, "overage-disposition", 1),
+                    request.actor.actor_id,
+                    request.reason,
+                ),
             )
 
     def append_orders_deposit_intent(self, candidate) -> None:
@@ -257,6 +318,7 @@ class MySqlClientReceiptReconciliationRepository:
             str(row["id"]): _BankMetadata(
                 int(row["id"]),
                 row["transaction_date"],
+                _integer_money(row["credit"]).amount,
             )
             for row in bank_rows
             if isinstance(row.get("transaction_date"), date)
@@ -387,7 +449,7 @@ def _bank_facts(bank_rows, selection):
     facts = tuple(
         _incoming_bank_fact(row, selection.payment_stage)
         for row in bank_rows
-        if _bank_row_is_eligible(row, selection.case_no)
+        if _bank_row_is_eligible(row, selection)
     )
     return tuple(sorted(facts, key=lambda item: item.identity))
 
@@ -417,9 +479,9 @@ def _obligation_facts(rows):
     return tuple(sorted(facts, key=lambda item: item.identity))
 
 
-def _bank_row_is_eligible(row, case_no) -> bool:
+def _bank_row_is_eligible(row, selection) -> bool:
     return (
-        row.get("format_id") in {"legacy", "sinopac"}
+        row.get("format_id") in {"legacy", "sinopac", "taishin"}
         and row.get("direction") == "incoming"
         and _is_zero_or_none(row.get("debit"))
         and _is_positive_integer_money(row.get("credit"))
@@ -428,7 +490,7 @@ def _bank_row_is_eligible(row, case_no) -> bool:
         and row.get("transaction_date") is not None
         and row.get("ledger_entry_id") is None
         and _is_twd(row.get("currency"))
-        and _bank_row_case_matches_selection(row, case_no)
+        and _bank_row_matches_selection(row, selection)
     )
 
 
@@ -441,10 +503,19 @@ def _resolved_case_no(row) -> str | None:
     return f"{roc_year}{int(sequence):06d}"
 
 
-def _bank_row_case_matches_selection(row, case_no) -> bool:
-    if _resolved_case_no(row) == case_no:
+def _bank_row_matches_selection(row, selection) -> bool:
+    if _resolved_case_no(row) == selection.case_no:
         return True
-    return _is_single_heuristic_client_candidate(row)
+    if _is_single_heuristic_client_candidate(row):
+        return True
+    return _has_exact_authoritative_targets(row, selection)
+
+
+def _has_exact_authoritative_targets(row, selection) -> bool:
+    if _classification_type(row) != "client_receipt":
+        return False
+    targets = _json_array(row.get("authoritative_target_identities"))
+    return tuple(sorted(targets)) == selection.obligation_identities
 
 
 def _is_single_heuristic_client_candidate(row) -> bool:
@@ -509,14 +580,15 @@ def _is_twd(value) -> bool:
     return value is None or str(value).upper() in {"TWD", "NTD"}
 
 
-def _allocated_amounts_by_bank(candidate):
-    amounts: dict[str, int] = {}
-    for allocation in candidate.allocations:
-        identity = allocation.bank_fact_identity
-        amounts[identity] = amounts.get(identity, 0) + allocation.amount.amount
+def _bank_amounts(candidate, metadata):
+    amounts = {identity: item.amount_ntd for identity, item in metadata.items()}
     if sum(amounts.values()) != candidate.bank_total.amount:
-        raise RuntimeError("Client Receipt bank allocations are incomplete")
+        raise RuntimeError("Client Receipt bank facts do not match preview")
     return amounts
+
+
+def _overage_refund_identity(settlement_identity: str) -> str:
+    return f"refund:overage:{settlement_identity[:48]}"
 
 
 # Kept cohesive so immutable entry insertion and source-row claiming cannot drift.
@@ -868,6 +940,45 @@ _OUTBOX_INSERT_SQL = (
     "INSERT INTO client_finance_outbox "
     "(case_no,intent_type,intent_key,payload_snapshot) "
     "VALUES (%s,%s,%s,%s)"
+)
+_OVERAGE_REFUND_EVENT_INSERT_SQL = (
+    "INSERT INTO client_obligation_events "
+    "(obligation_identity,case_no,obligation_type,direction,event_type,"
+    "before_amount_ntd,after_amount_ntd,before_due_date,after_due_date,"
+    "source_event_identity,source_obligation_identity,expected_account_version,"
+    "idempotency_key,actor,reason) "
+    "VALUES (%s,%s,'refund','payable_to_client','established',0,%s,NULL,NULL,"
+    "%s,%s,%s,%s,%s,%s)"
+)
+_OVERAGE_REFUND_PROJECTION_INSERT_SQL = (
+    "INSERT INTO client_obligations "
+    "(obligation_identity,case_no,obligation_type,direction,source_obligation_identity,"
+    "amount_due_ntd,due_date,status,current_event_id,projection_version) "
+    "VALUES (%s,%s,'refund','payable_to_client',%s,%s,NULL,'open',%s,%s)"
+)
+_OVERAGE_DISPOSITION_INSERT_SQL = (
+    "INSERT INTO client_receipt_overage_dispositions "
+    "(case_no,finance_import_row_id,receipt_ledger_entry_id,receivable_obligation_identity,"
+    "refund_obligation_identity,overage_amount_ntd,settlement_identity,idempotency_key,actor,reason) "
+    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+)
+
+
+def _insert_refund_recipient_snapshot(cursor, refund_identity, case_no, source_kind) -> None:
+    cursor.execute(
+        _REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL,
+        (refund_identity, source_kind, case_no),
+    )
+    if cursor.rowcount != 1:
+        raise ValueError("client_refund_recipient_snapshot_missing")
+
+
+_REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL = (
+    "INSERT INTO client_refund_recipient_snapshots "
+    "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
+    "SELECT %s,query_no,refund_bank_code,refund_account_no,%s FROM beclass_records "
+    "WHERE query_no=%s AND CHAR_LENGTH(TRIM(refund_bank_code))>0 "
+    "AND CHAR_LENGTH(TRIM(refund_account_no))>0"
 )
 _RECEIPT_INSERT_SQL = (
     "INSERT INTO client_finance_apply_receipts "

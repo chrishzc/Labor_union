@@ -1,0 +1,10 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "ORD-AUTO-COMPLETION-002",
+  "assertions": [
+    "An evaluation one minute before the official completion instant is rejected with no formal Orders write.",
+    "At the official completion instant, the isolated Order moves from 服務中 to 訂單完成 at lifecycle version 1.",
+    "The successful transition creates exactly one command claim, lifecycle event, completion receipt and Orders outbox intent.",
+    "Exact replay returns the stored receipt, while a fresh stale-version command creates no additional write."
+  ]
+}

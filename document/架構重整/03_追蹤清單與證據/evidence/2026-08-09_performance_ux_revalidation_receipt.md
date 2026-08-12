@@ -9,9 +9,9 @@ verified_at: 2026-08-09
 ## 追溯依據
 
 - 規格基線：`01_規格基線/12_Global_效能與UX體感架構.md`
-- Durable job 決策：`26_Durable_Job_Completion_Decision_Package.md`
+- Durable job 決策：`../../04_已完成與上線封存/superseded_specs/26_Durable_Job_Completion_Decision_Package.md`
 - Worker supervision 決策：`41_Durable_Job_Worker_Supervision_Deployment_Decision.md`
-- Global readiness：`46_Six_Remaining_Gaps_Completion_Architecture.md`
+- Global readiness：`../../04_已完成與上線封存/superseded_specs/46_Six_Remaining_Gaps_Completion_Architecture.md`
 
 ## 本次修復與驗證
 

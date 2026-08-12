@@ -9,9 +9,9 @@ verified_at: 2026-08-09
 ## 追溯依據
 
 - 規格基線：`01_規格基線/14_Government_Subsidy_Domain.md`
-- durable command：`40_Durable_Job_Government_Subsidy_Work_Package.md`
-- Global readiness：`46_Six_Remaining_Gaps_Completion_Architecture.md`
-- historical selection/release boundary：`51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md`
+- durable command：`../../04_已完成與上線封存/work_packages/40_Durable_Job_Government_Subsidy_Work_Package.md`
+- Global readiness：`../../04_已完成與上線封存/superseded_specs/46_Six_Remaining_Gaps_Completion_Architecture.md`
+- historical selection/release boundary：`../../04_已完成與上線封存/work_packages/51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md`
 
 ## 已驗證架構邊界
 

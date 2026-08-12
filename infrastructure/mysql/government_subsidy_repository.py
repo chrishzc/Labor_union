@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
@@ -35,7 +36,9 @@ from domains.government_subsidy.ledger import (
     SourceReceiptFacts,
     reduce_batch_status,
 )
-from shared_kernel.fingerprints import PreviewFingerprint
+from domains.government_subsidy.overpayment import GovernmentRecipientSnapshot, GovernmentSubsidyOverpayment, GovernmentSubsidyOverpaymentStatus
+from domains.government_subsidy.payer_master import PAYER_IDENTITY, PAYER_NAME
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import IdempotencyKey
 from shared_kernel.money import MoneyNTD
 from subsystems.government_subsidy.ledger_workflow import (
@@ -57,11 +60,75 @@ from subsystems.government_subsidy.claim_workflow import (
     GovernmentSubsidyClaimReceiptCommand,
     StoredGovernmentSubsidyClaimReceipt,
 )
+from subsystems.government_subsidy.overpayment_workflow import OffsetApplyRequest, ReceiptWithOverageApplyRequest, ReturnApplyRequest, ReturnReconciliationApplyRequest
 
 _GENERAL_CITIZEN = "一般市民"
 _SUBSIDIZED_CITIZEN = "補助市民"
 _GENERAL_CITIZEN_UNIT_PRICE_NTD = 300
 _SUBSIDIZED_CITIZEN_UNIT_PRICE_NTD = 350
+
+
+def _advance_overpayment(cursor, request, candidate, event_type, evidence_reference):
+    cursor.execute("UPDATE government_subsidy_overpayments SET remaining_amount_ntd=%s,status=%s,projection_version=%s WHERE overpayment_identity=%s AND projection_version=%s", (candidate.remaining_after_ntd.amount, candidate.resulting_status.value, request.expected_version.value + 1, request.identity, request.expected_version.value))
+    _require_single_updated_row(cursor)
+    cursor.execute("INSERT INTO government_subsidy_overpayment_events (overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)", (request.identity, event_type, candidate.remaining_before_ntd.amount, candidate.remaining_after_ntd.amount, candidate.resulting_status.value, request.expected_version.value, request.expected_version.value + 1, candidate.fingerprint.value, request.idempotency_key.value, request.actor.actor_id, request.reason, evidence_reference))
+
+
+def _overpayment_receipt(candidate, payable_identity=None):
+    return {"overpayment_identity": candidate.overpayment_identity, "remaining_after_ntd": candidate.remaining_after_ntd.amount, "status": candidate.resulting_status.value, "preview_fingerprint": candidate.fingerprint.value, "payable_identity": payable_identity}
+
+
+def _overpayment_outbox_lineage(cursor, overpayment_identity):
+    cursor.execute(
+        "SELECT transaction.claim_batch_id,transaction.id transaction_id,"
+        "(SELECT event.id FROM government_subsidy_projection_events event "
+        "WHERE event.batch_id=transaction.claim_batch_id ORDER BY event.id DESC LIMIT 1) projection_event_id "
+        "FROM government_subsidy_overpayments overpayment "
+        "JOIN government_subsidy_transactions transaction "
+        "ON transaction.id=overpayment.source_transaction_id "
+        "WHERE overpayment.overpayment_identity=%s FOR UPDATE",
+        (overpayment_identity,),
+    )
+    row = cursor.fetchone()
+    if row is None or row["projection_event_id"] is None:
+        raise RuntimeError("government_subsidy_overpayment_lineage_missing")
+    return int(row["claim_batch_id"]), int(row["transaction_id"]), int(row["projection_event_id"])
+
+
+def _apply_offset_target_accounts(cursor, overpayment_event_id, request, candidate):
+    amount_by_item = {item.claim_item_id: item.amount_ntd.amount for item in request.intents}
+    targets_by_batch = defaultdict(list)
+    for target in candidate.offset_targets:
+        targets_by_batch[target.claim_batch_id].append(target)
+    for batch_id, targets in targets_by_batch.items():
+        first = targets[0]
+        if any(target.batch_version != first.batch_version for target in targets):
+            raise RuntimeError("government_subsidy_overpayment_target_version_conflict")
+        amount = sum(amount_by_item[target.claim_item_id] for target in targets)
+        after_net = first.batch_net_allocated_amount_ntd.amount + amount
+        after_outstanding = first.batch_approved_amount_ntd.amount - after_net
+        if after_outstanding < 0:
+            raise RuntimeError("government_subsidy_overpayment_amount_exceeded")
+        after_status = "paid" if after_outstanding == 0 else "partially_paid"
+        cursor.execute(
+            "UPDATE government_subsidy_batch_accounts SET net_allocated_ntd=%s,"
+            "outstanding_ntd=%s,status=%s,aggregate_version=%s "
+            "WHERE batch_id=%s AND aggregate_version=%s",
+            (after_net, after_outstanding, after_status, first.batch_version + 1,
+             batch_id, first.batch_version),
+        )
+        _require_single_updated_row(cursor)
+        cursor.execute(
+            "INSERT INTO government_subsidy_overpayment_target_projection_events "
+            "(overpayment_event_id,batch_id,before_net_allocated_ntd,"
+            "after_net_allocated_ntd,outstanding_ntd,expected_batch_version,"
+            "resulting_batch_version,preview_fingerprint,actor,reason) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+            (overpayment_event_id, batch_id, first.batch_net_allocated_amount_ntd.amount,
+             after_net, after_outstanding, first.batch_version,
+             first.batch_version + 1, candidate.fingerprint.value,
+             request.actor.actor_id, request.reason),
+        )
 
 
 class MySqlGovernmentSubsidyRepository:
@@ -94,6 +161,230 @@ class MySqlGovernmentSubsidyRepository:
             )
             batch = _load_batch(cursor, source.batch_id, lock)
         return GovernmentSubsidyReversalContext(bank, batch, source)
+
+    def load_overage_receipt_context(self, row_id, batch_id, *, lock):
+        with self._connection.cursor() as cursor:
+            return _load_bank_fact(cursor, row_id, lock), _load_batch(cursor, batch_id, lock)
+
+    def load_overpayment(self, identity, *, lock):
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT overpayment_identity,payer_identity,remaining_amount_ntd,status,projection_version FROM government_subsidy_overpayments WHERE overpayment_identity=%s" + (" FOR UPDATE" if lock else ""), (identity,))
+            row=cursor.fetchone()
+        if row is None: raise ValueError("government_subsidy_overpayment_not_found")
+        return GovernmentSubsidyOverpayment(str(row['overpayment_identity']),str(row['payer_identity']),MoneyNTD(int(row['remaining_amount_ntd'])),GovernmentSubsidyOverpaymentStatus(str(row['status'])),int(row['projection_version']))
+
+    def find_overpayment_apply_receipt(self, idempotency_key, command_fingerprint):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT command_fingerprint,result_snapshot FROM government_subsidy_overpayment_apply_receipts "
+                "WHERE idempotency_key=%s FOR UPDATE",
+                (idempotency_key.value,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        if str(row["command_fingerprint"]) != command_fingerprint.value:
+            raise ValueError("government_subsidy_overpayment_idempotency_mismatch")
+        result = json.loads(row["result_snapshot"])
+        if not isinstance(result, dict):
+            raise RuntimeError("government_subsidy_overpayment_idempotency_evidence_incomplete")
+        return result
+
+    def save_overpayment_apply_receipt(self, request, candidate, receipt, command_kind, command_fingerprint):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO government_subsidy_overpayment_apply_receipts "
+                "(idempotency_key,command_fingerprint,preview_fingerprint,command_kind,overpayment_identity,result_snapshot) "
+                "VALUES (%s,%s,%s,%s,%s,%s)",
+                (request.idempotency_key.value, command_fingerprint.value,
+                 candidate.fingerprint.value, command_kind, request.identity,
+                 _canonical_json(receipt)),
+            )
+
+    def load_offset_targets(self, intents, *, lock):
+        ids=tuple(item.claim_item_id for item in intents)
+        if not ids: return ()
+        from domains.government_subsidy.overpayment import GovernmentSubsidyOffsetTarget
+        marks=','.join('%s' for _ in ids)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                f"SELECT i.id claim_item_id,i.batch_id,account.aggregate_version,"
+                "account.approved_total_ntd,account.net_allocated_ntd,"
+                "(i.approved_amount-COALESCE(receipts.net_amount,0)-COALESCE(offsets.offset_amount,0)) outstanding,"
+                "batch.submitted_at IS NOT NULL submitted,batch.approved_at IS NOT NULL approved "
+                "FROM subsidy_claim_batch_items i "
+                "JOIN government_subsidy_batch_accounts account ON account.batch_id=i.batch_id "
+                "JOIN subsidy_claim_batches batch ON batch.id=i.batch_id "
+                "LEFT JOIN (SELECT claim_item_id,claim_batch_id,SUM(CASE WHEN allocation_type='receipt' THEN allocated_amount WHEN allocation_type='reversal' THEN -allocated_amount ELSE 0 END) net_amount FROM government_subsidy_allocations GROUP BY claim_item_id,claim_batch_id) receipts ON receipts.claim_item_id=i.id AND receipts.claim_batch_id=i.batch_id "
+                "LEFT JOIN (SELECT claim_item_id,claim_batch_id,SUM(allocated_amount_ntd) offset_amount FROM government_subsidy_overpayment_offsets GROUP BY claim_item_id,claim_batch_id) offsets ON offsets.claim_item_id=i.id AND offsets.claim_batch_id=i.batch_id "
+                f"WHERE i.id IN ({marks})" + (" FOR UPDATE" if lock else ""),
+                ids,
+            )
+            rows=cursor.fetchall()
+        return tuple(
+            GovernmentSubsidyOffsetTarget(
+                int(row["claim_item_id"]), int(row["batch_id"]),
+                int(row["aggregate_version"]), MoneyNTD(int(row["approved_total_ntd"])),
+                MoneyNTD(int(row["net_allocated_ntd"])), PAYER_IDENTITY,
+                MoneyNTD(int(row["outstanding"])), bool(row["submitted"]),
+                bool(row["approved"]),
+            )
+            for row in rows
+        )
+
+    def load_return_recipient(self, due_date, evidence_reference, *, lock):
+        lock_clause = " FOR UPDATE" if lock else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bank_code,account_number,effective_from FROM government_payer_receiving_accounts "
+                "WHERE payer_identity=%s AND effective_until IS NULL "
+                "ORDER BY effective_from DESC LIMIT 1" + lock_clause,
+                (PAYER_IDENTITY,),
+            )
+            account = cursor.fetchone()
+        if account is None:
+            raise ValueError("government_subsidy_recipient_account_missing")
+        account_number = str(account["account_number"])
+        display = "*" * max(0, len(account_number) - 4) + account_number[-4:]
+        fingerprint = fingerprint_payload({
+            "payer_identity": PAYER_IDENTITY,
+            "bank_code": str(account["bank_code"]),
+            "account_number": account_number,
+            "effective_date": account["effective_from"].isoformat(),
+        })
+        return GovernmentRecipientSnapshot(
+            PAYER_IDENTITY, PAYER_NAME, str(account["bank_code"]), display,
+            fingerprint.value, account["effective_from"].isoformat(), due_date,
+            evidence_reference,
+        )
+
+    def load_return_reconciliation_context(self, identity, finance_import_row_id, *, lock):
+        lock_clause = " FOR UPDATE" if lock else ""
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT overpayment_identity,payer_identity,remaining_amount_ntd,status,projection_version "
+                "FROM government_subsidy_overpayments WHERE overpayment_identity=%s" + lock_clause,
+                (identity,),
+            )
+            overpayment = cursor.fetchone()
+            cursor.execute(
+                "SELECT payable_identity,remaining_amount_ntd,projection_version "
+                "FROM government_overpayment_return_payables WHERE overpayment_identity=%s "
+                "AND status IN ('payable','partially_paid')" + lock_clause,
+                (identity,),
+            )
+            payable = cursor.fetchone()
+            bank = _load_bank_fact(cursor, finance_import_row_id, lock)
+            _require_return_recipient_matches_bank(cursor, bank)
+        if overpayment is None:
+            raise ValueError("government_subsidy_overpayment_not_found")
+        if payable is None:
+            raise ValueError("government_overpayment_return_not_open")
+        return (
+            GovernmentSubsidyOverpayment(
+                str(overpayment["overpayment_identity"]), str(overpayment["payer_identity"]),
+                MoneyNTD(int(overpayment["remaining_amount_ntd"])),
+                GovernmentSubsidyOverpaymentStatus(str(overpayment["status"])),
+                int(overpayment["projection_version"]),
+            ),
+            (str(payable["payable_identity"]), MoneyNTD(int(payable["remaining_amount_ntd"])), int(payable["projection_version"])),
+            bank,
+        )
+
+    def persist_receipt_with_overage(self, request, candidate, bank, batch):
+        with self._connection.cursor() as cursor:
+            cursor.execute("INSERT INTO government_subsidy_transactions (claim_batch_id,finance_import_row_id,transaction_type,transaction_status,amount,occurred_at,external_reference,expected_batch_version,resulting_batch_version,preview_fingerprint,idempotency_key,actor,reason,correlation_id) VALUES (%s,%s,'receipt','succeeded',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(batch.batch_id,request.finance_import_row_id,bank.amount_ntd.amount,bank.occurred_on,bank.bank_fact_identity,batch.aggregate_version,batch.aggregate_version+1,candidate.fingerprint.value,request.idempotency_key.value,request.actor.actor_id,request.reason,request.correlation_id.value))
+            transaction_id=int(cursor.lastrowid)
+            cursor.executemany("INSERT INTO government_subsidy_allocations (transaction_id,claim_batch_id,claim_item_id,allocation_type,allocated_amount) VALUES (%s,%s,%s,'receipt',%s)",tuple((transaction_id,batch.batch_id,item.claim_item_id,item.amount_ntd.amount) for item in candidate.allocations))
+            cursor.execute(_ACCOUNT_UPDATE_SQL,(batch.requested_total_ntd.amount,batch.approved_total_ntd.amount,candidate.resulting_net_allocated_ntd.amount,candidate.resulting_outstanding_ntd.amount,candidate.resulting_batch_status,batch.aggregate_version+1,batch.batch_id,batch.aggregate_version))
+            _require_single_updated_row(cursor)
+            identity=f"government-overpayment:{bank.bank_fact_identity}"
+            cursor.execute("INSERT INTO government_subsidy_overpayments (overpayment_identity,source_finance_import_row_id,source_transaction_id,payer_identity,original_amount_ntd,remaining_amount_ntd,status,projection_version,actor,reason,evidence_reference) VALUES (%s,%s,%s,%s,%s,%s,'pending_review',1,%s,%s,%s)",(identity,request.finance_import_row_id,transaction_id,PAYER_IDENTITY,candidate.overpayment_amount_ntd.amount,candidate.overpayment_amount_ntd.amount,request.actor.actor_id,request.reason,request.evidence_reference))
+            cursor.execute("INSERT INTO government_subsidy_overpayment_events (overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) VALUES (%s,'established',1,%s,'pending_review',0,1,%s,%s,%s,%s,%s)",(identity,candidate.overpayment_amount_ntd.amount,candidate.fingerprint.value,request.idempotency_key.value,request.actor.actor_id,request.reason,request.evidence_reference))
+            cursor.execute("INSERT INTO government_subsidy_projection_events (batch_id,transaction_id,before_status,after_status,before_net_allocated_ntd,after_net_allocated_ntd,outstanding_ntd,expected_batch_version,resulting_batch_version,preview_fingerprint,actor,reason,idempotency_key) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",(batch.batch_id,transaction_id,reduce_batch_status(batch).value,candidate.resulting_batch_status,batch.net_allocated_total_ntd.amount,candidate.resulting_net_allocated_ntd.amount,candidate.resulting_outstanding_ntd.amount,batch.aggregate_version,batch.aggregate_version+1,candidate.fingerprint.value,request.actor.actor_id,request.reason,request.idempotency_key.value))
+            projection_event_id=int(cursor.lastrowid)
+            cursor.execute(_OUTBOX_INSERT_SQL,(batch.batch_id,transaction_id,projection_event_id,f"government_subsidy_overpayment:{request.idempotency_key.value}",'government_subsidy_overpayment_established',_canonical_json({'overpayment_identity':identity,'amount_ntd':candidate.overpayment_amount_ntd.amount,'payer_identity':PAYER_IDENTITY})))
+        return {'overpayment_identity':identity,'transaction_id':transaction_id,'status':'pending_review','amount_ntd':candidate.overpayment_amount_ntd.amount,'preview_fingerprint':candidate.fingerprint.value}
+
+    def persist_offset(self, request: OffsetApplyRequest, candidate):
+        with self._connection.cursor() as cursor:
+            _advance_overpayment(cursor, request, candidate, "offset_applied", request.evidence_reference)
+            lineage = _overpayment_outbox_lineage(cursor, request.identity)
+            cursor.execute("SELECT id FROM government_subsidy_overpayment_events WHERE idempotency_key=%s", (request.idempotency_key.value,))
+            event_id = int(cursor.fetchone()["id"])
+            cursor.executemany(
+                "INSERT INTO government_subsidy_overpayment_offsets (overpayment_event_id,overpayment_identity,claim_batch_id,claim_item_id,allocated_amount_ntd) SELECT %s,%s,batch_id,%s,%s FROM subsidy_claim_batch_items WHERE id=%s",
+                tuple((event_id, request.identity, item.claim_item_id, item.amount_ntd.amount, item.claim_item_id) for item in request.intents),
+            )
+            _apply_offset_target_accounts(cursor, event_id, request, candidate)
+            cursor.execute(_OUTBOX_INSERT_SQL, (*lineage, f"government_overpayment_offset:{request.idempotency_key.value}", "government_subsidy_overpayment_offset", _canonical_json({"overpayment_identity": request.identity, "remaining_ntd": candidate.remaining_after_ntd.amount})))
+        return _overpayment_receipt(candidate)
+
+    def persist_return(self, request: ReturnApplyRequest, candidate, recipient):
+        with self._connection.cursor() as cursor:
+            _advance_overpayment(cursor, request, candidate, "return_payable_created", recipient.evidence_reference)
+            lineage = _overpayment_outbox_lineage(cursor, request.identity)
+            payable_identity = f"government-overpayment-return:{request.identity}"
+            cursor.execute(
+                "INSERT INTO government_overpayment_return_payables (payable_identity,overpayment_identity,amount_due_ntd,remaining_amount_ntd,status,agency_identity,agency_name,bank_code,account_display,account_fingerprint,effective_date,due_date,evidence_reference,projection_version) VALUES (%s,%s,%s,%s,'payable',%s,%s,%s,%s,%s,%s,%s,%s,1)",
+                (payable_identity, request.identity, candidate.disposition_amount_ntd.amount, candidate.disposition_amount_ntd.amount, recipient.agency_identity, recipient.agency_name, recipient.bank_code, recipient.account_display, recipient.account_fingerprint, recipient.effective_date, recipient.due_date, recipient.evidence_reference),
+            )
+            cursor.execute(_OUTBOX_INSERT_SQL, (*lineage, f"government_overpayment_return:{request.idempotency_key.value}", "government_overpayment_return_payable", _canonical_json({"overpayment_identity": request.identity, "payable_identity": payable_identity})))
+        return _overpayment_receipt(candidate, payable_identity)
+
+    def persist_return_reconciliation(self, request: ReturnReconciliationApplyRequest, candidate):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE government_overpayment_return_payables SET remaining_amount_ntd=%s,"
+                "status=%s,projection_version=projection_version+1 "
+                "WHERE payable_identity=%s AND remaining_amount_ntd=%s",
+                (candidate.remaining_after_ntd.amount,
+                 "paid" if candidate.remaining_after_ntd.amount == 0 else "partially_paid",
+                 candidate.payable_identity,
+                 candidate.amount_ntd.amount + candidate.remaining_after_ntd.amount),
+            )
+            _require_single_updated_row(cursor)
+            cursor.execute(
+                "UPDATE government_subsidy_overpayments SET remaining_amount_ntd=%s,status=%s,"
+                "projection_version=%s WHERE overpayment_identity=%s AND projection_version=%s",
+                (candidate.remaining_after_ntd.amount, candidate.resulting_status.value,
+                 request.expected_version.value + 1, request.identity,
+                 request.expected_version.value),
+            )
+            _require_single_updated_row(cursor)
+            cursor.execute(
+                "INSERT INTO government_subsidy_overpayment_events "
+                "(overpayment_identity,event_type,before_remaining_ntd,after_remaining_ntd,resulting_status,"
+                "expected_version,resulting_version,preview_fingerprint,idempotency_key,actor,reason,evidence_reference) "
+                "VALUES (%s,'return_reconciled',%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (request.identity, candidate.amount_ntd.amount + candidate.remaining_after_ntd.amount,
+                 candidate.remaining_after_ntd.amount, candidate.resulting_status.value,
+                 request.expected_version.value, request.expected_version.value + 1,
+                 candidate.fingerprint.value, request.idempotency_key.value,
+                 request.actor.actor_id, request.reason, request.evidence_reference),
+            )
+            event_id = int(cursor.lastrowid)
+            cursor.execute(
+                "INSERT INTO government_overpayment_return_payouts "
+                "(overpayment_event_id,payable_identity,finance_import_row_id,amount_ntd,"
+                "preview_fingerprint,idempotency_key,actor,reason,evidence_reference) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (event_id, candidate.payable_identity, request.finance_import_row_id,
+                 candidate.amount_ntd.amount, candidate.fingerprint.value,
+                 request.idempotency_key.value, request.actor.actor_id, request.reason,
+                 request.evidence_reference),
+            )
+            lineage = _overpayment_outbox_lineage(cursor, request.identity)
+            cursor.execute(
+                _OUTBOX_INSERT_SQL,
+                (*lineage, f"government_overpayment_return_reconciliation:{request.idempotency_key.value}",
+                 "government_overpayment_return_payout", _canonical_json({
+                    "overpayment_identity": request.identity,
+                    "payable_identity": candidate.payable_identity,
+                    "remaining_ntd": candidate.remaining_after_ntd.amount,
+                 })),
+            )
+        return _overpayment_receipt(candidate)
 
     def load_batch(
         self,
@@ -669,7 +960,24 @@ def _load_bank_fact(cursor, row_id, lock):
         MoneyNTD(amount),
         row["transaction_date"],
         _optional_positive_integer(row.get("existing_transaction_id")),
+        str(row.get("resolved_counterparty_account") or ""),
     )
+
+
+def _require_return_recipient_matches_bank(cursor, bank):
+    if not bank.counterparty_account:
+        raise ValueError("government_overpayment_return_recipient_mismatch")
+    # The refund bill snapshots its recipient; the preserved receiving-account
+    # history is the canonical way to verify that the later bank row targets it.
+    # The bank date deliberately is not part of this predicate.
+    # This helper is called while the canonical bank row is locked.
+    cursor.execute(
+        "SELECT COUNT(*) AS count FROM government_payer_receiving_accounts "
+        "WHERE payer_identity=%s AND account_number=%s",
+        (PAYER_IDENTITY, bank.counterparty_account),
+    )
+    if int(cursor.fetchone()["count"]) != 1:
+        raise ValueError("government_overpayment_return_recipient_mismatch")
 
 
 def _bank_amount_and_direction(row):
@@ -1328,7 +1636,7 @@ _CLAIM_RECEIPT_PAYLOAD_KEYS = frozenset(
 )
 _BANK_FACT_SELECT_SQL = (
     "SELECT r.id,r.dedup_fingerprint,r.transaction_date,r.debit,r.credit,"
-    "r.direction,r.classification_type,"
+    "r.direction,r.classification_type,r.resolved_counterparty_account,"
     "(SELECT t.id FROM government_subsidy_transactions t "
     "WHERE t.finance_import_row_id=r.id LIMIT 1) AS existing_transaction_id "
     "FROM finance_import_rows r WHERE r.id=%s"
@@ -1362,7 +1670,8 @@ _CLAIM_ITEMS_SELECT_SQL = (
     "MAKEDATE(b.application_year,1) + "
     "INTERVAL (b.quarter*3) MONTH)*o.service_hours_per_day "
     "AS official_service_hours,"
-    "COALESCE(ga.net_allocated_amount,0) AS net_allocated_amount "
+    "COALESCE(ga.net_allocated_amount,0)+COALESCE(oa.offset_amount,0) "
+    "AS net_allocated_amount "
     "FROM subsidy_claim_batch_items i "
     "JOIN subsidy_claim_batches b ON b.id=i.batch_id "
     "JOIN case_staff_assignments a ON a.id=i.assignment_id "
@@ -1375,6 +1684,11 @@ _CLAIM_ITEMS_SELECT_SQL = (
     "AS net_allocated_amount FROM government_subsidy_allocations "
     "GROUP BY claim_item_id,claim_batch_id) ga "
     "ON ga.claim_item_id=i.id AND ga.claim_batch_id=i.batch_id "
+    "LEFT JOIN (SELECT claim_item_id,claim_batch_id,"
+    "SUM(allocated_amount_ntd) AS offset_amount "
+    "FROM government_subsidy_overpayment_offsets "
+    "GROUP BY claim_item_id,claim_batch_id) oa "
+    "ON oa.claim_item_id=i.id AND oa.claim_batch_id=i.batch_id "
     "WHERE i.batch_id=%s ORDER BY i.id"
 )
 _CLAIM_ITEM_SOURCE_LOCK_SQL = (

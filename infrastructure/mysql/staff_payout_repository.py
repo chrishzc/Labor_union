@@ -19,6 +19,7 @@ from domains.staff_payables.reconciliation import (
     StaffPayableFacts,
     StaffPayableStatus,
     StaffPayoutCandidate,
+    StaffPayoutDifferenceMode,
     StaffPayoutEvent,
     StaffPayoutEventType,
     StaffPayoutReopenFact,
@@ -121,6 +122,30 @@ class MySqlStaffPayoutRepository:
                 ordinals[link.event_identity] = ordinal
                 _insert_link(cursor, self._event_ids, link, ordinal)
 
+    def append_overpayment_recovery(self, candidate) -> None:
+        if not isinstance(candidate, StaffPayoutCandidate) or candidate.recovery is None:
+            return
+        recovery = candidate.recovery
+        source_event_ids = tuple(
+            self._event_ids[event.identity]
+            for event in candidate.events
+        )
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute(
+                _RECOVERY_INSERT_SQL,
+                (
+                    recovery.identity,
+                    recovery.staff_id,
+                    recovery.original_amount.amount,
+                    recovery.original_amount.amount,
+                    _canonical_json(recovery.source_bank_fact_identities),
+                    _canonical_json(source_event_ids),
+                    _canonical_json(recovery.source_obligation_identities),
+                    self._require_request().actor.actor_id,
+                    self._require_request().reason,
+                ),
+            )
+
     def update_payable_projection(
         self,
         selection,
@@ -130,23 +155,47 @@ class MySqlStaffPayoutRepository:
         request = self._require_request()
         with _mysql_cursor(self._connection) as cursor:
             rows = _projection_rows(cursor, selection.obligation_identities)
-            _validate_projection_rows(rows, resulting_status)
+            _validate_projection_rows(rows, resulting_status, request.selection.difference_mode)
             for row in rows:
                 _upsert_projection(cursor, row, resulting_version)
             _advance_account_version(cursor, request, resulting_version)
 
     def append_outbox(self, candidate) -> None:
         request = self._require_request()
-        payload = _outbox_payload(candidate, request)
+        difference_identity = self._persist_difference_source(candidate, request)
+        payload = _outbox_payload(candidate, request, difference_identity)
         with _mysql_cursor(self._connection) as cursor:
             cursor.execute(
                 _OUTBOX_INSERT_SQL,
                 (
                     candidate.staff_id,
                     _outbox_intent_key(request.idempotency_key),
+                    _outbox_intent_type(request),
                     _canonical_json(payload),
                 ),
             )
+
+    def _persist_difference_source(self, candidate, request) -> str | None:
+        if request.selection.difference_mode is None:
+            return None
+        if not isinstance(candidate, StaffPayoutCandidate):
+            raise RuntimeError("staff_payout_difference_candidate_missing")
+        identity = _payout_difference_identity(request.idempotency_key)
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute(
+                "INSERT INTO staff_payout_difference_sources (payout_difference_identity,staff_id,difference_mode,bank_total_ntd,obligation_total_ntd,recovery_identity,resulting_staff_payables_version,source_bank_facts_version,idempotency_key,actor,reason,correlation_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)",
+                (identity, candidate.staff_id, request.selection.difference_mode.value,
+                 candidate.bank_total.amount, candidate.obligation_total.amount,
+                 None if candidate.recovery is None else candidate.recovery.identity,
+                 request.expected_staff_payables_version.value + 1,
+                 request.expected_bank_facts_version.value, request.idempotency_key.value,
+                 request.actor.actor_id, request.reason, request.correlation_id.value),
+            )
+            for ordinal, identity_value in enumerate(request.selection.bank_fact_identities, start=1):
+                cursor.execute("INSERT INTO staff_payout_difference_source_bank_rows (payout_difference_identity,finance_import_row_id,ordinal) VALUES (%s,%s,%s)", (identity, int(identity_value), ordinal))
+            for ordinal, obligation_identity in enumerate(request.selection.obligation_identities, start=1):
+                cursor.execute("INSERT INTO staff_payout_difference_source_obligations (payout_difference_identity,obligation_identity,ordinal) VALUES (%s,%s,%s)", (identity, obligation_identity, ordinal))
+        return identity
 
     def save_receipt(self, key, stored_receipt) -> None:
         receipt = stored_receipt.receipt
@@ -173,6 +222,18 @@ class MySqlStaffPayoutRepository:
             "obligations": obligations,
             "events": events,
         }
+
+    def query_payout_difference_source(self, identity: str) -> dict[str, object]:
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute("SELECT payout_difference_identity,staff_id,difference_mode,bank_total_ntd,obligation_total_ntd,recovery_identity,resulting_staff_payables_version,source_bank_facts_version FROM staff_payout_difference_sources WHERE payout_difference_identity=%s", (identity,))
+            source = cursor.fetchone()
+            if source is None:
+                raise ValueError("staff_payout_difference_source_not_found")
+            cursor.execute("SELECT finance_import_row_id FROM staff_payout_difference_source_bank_rows WHERE payout_difference_identity=%s ORDER BY ordinal", (identity,))
+            bank_rows = [int(row["finance_import_row_id"]) for row in cursor.fetchall()]
+            cursor.execute("SELECT obligation_identity FROM staff_payout_difference_source_obligations WHERE payout_difference_identity=%s ORDER BY ordinal", (identity,))
+            obligations = [str(row["obligation_identity"]) for row in cursor.fetchall()]
+        return {**source, "finance_import_row_ids": bank_rows, "obligation_identities": obligations}
 
     # Kept cohesive so every Apply follows one visible, stable MySQL lock order.
     def _load_facts(self, cursor, selection, for_update):
@@ -880,10 +941,21 @@ def _projection_rows(cursor, obligation_identities):
     return tuple(cursor.fetchall())
 
 
-def _validate_projection_rows(rows, expected_status) -> None:
+def _validate_projection_rows(rows, expected_status, difference_mode) -> None:
     if not rows:
         raise RuntimeError("staff payable projection rows are missing")
     statuses = tuple(_projection_status(row) for row in rows)
+    if difference_mode is StaffPayoutDifferenceMode.UNDERPAYMENT:
+        if StaffPayableStatus.PARTIALLY_PAID in statuses and all(
+            status in (StaffPayableStatus.PARTIALLY_PAID, StaffPayableStatus.COMPLETED)
+            for status in statuses
+        ):
+            return
+        raise RuntimeError("staff payable underpayment projection invariant failed")
+    if difference_mode is StaffPayoutDifferenceMode.OVERPAYMENT:
+        if all(status is StaffPayableStatus.COMPLETED for status in statuses):
+            return
+        raise RuntimeError("staff payable overpayment projection invariant failed")
     if any(status is not expected_status for status in statuses):
         raise RuntimeError("staff payable exact-zero projection invariant failed")
 
@@ -895,7 +967,7 @@ def _projection_status(row) -> StaffPayableStatus:
         return StaffPayableStatus.PAYABLE
     if net_paid == obligation:
         return StaffPayableStatus.COMPLETED
-    return StaffPayableStatus.ANOMALY
+    return StaffPayableStatus.PARTIALLY_PAID
 
 
 def _upsert_projection(cursor, row, version) -> None:
@@ -943,12 +1015,22 @@ def _candidate_staff_id_from_request_context(cursor, request) -> int:
     return int(row["staff_id"])
 
 
-def _outbox_payload(candidate, request) -> dict[str, object]:
+def _outbox_payload(candidate, request, payout_difference_identity=None) -> dict[str, object]:
     return {
         "staff_id": candidate.staff_id,
         "event_type": request.selection.event_type.value,
         "obligation_identities": request.selection.obligation_identities,
         "resulting_status": candidate.resulting_status.value,
+        "difference_mode": None if request.selection.difference_mode is None else request.selection.difference_mode.value,
+        "payout_difference_identity": payout_difference_identity,
+        "finance_import_row_identities": tuple(
+            event.finance_import_fact_identity
+            for event in _candidate_events(candidate)
+            if event.finance_import_fact_identity is not None
+        ),
+        "recovery_identity": None if not isinstance(candidate, StaffPayoutCandidate) or candidate.recovery is None else candidate.recovery.identity,
+        "resulting_staff_payables_version": request.expected_staff_payables_version.value + 1,
+        "expected_bank_facts_version": request.expected_bank_facts_version.value,
         "correlation_id": request.correlation_id.value,
     }
 
@@ -956,6 +1038,17 @@ def _outbox_payload(candidate, request) -> dict[str, object]:
 def _outbox_intent_key(key: IdempotencyKey) -> str:
     digest = hashlib.sha256(key.value.encode("utf-8")).hexdigest()
     return f"staff-payable-refresh:{digest}"
+
+
+def _payout_difference_identity(key: IdempotencyKey) -> str:
+    digest = hashlib.sha256(key.value.encode("utf-8")).hexdigest()
+    return f"staff-payout-difference:{digest}"
+
+
+def _outbox_intent_type(request: StaffPayoutApplyRequest) -> str:
+    if request.selection.difference_mode is not None:
+        return "payout_anomaly_required"
+    return "payable_projection_refresh"
 
 
 def _event_idempotency_key(key, ordinal) -> str:
@@ -973,6 +1066,9 @@ def _receipt_payload(receipt) -> dict[str, object]:
         "event_count": receipt.event_count,
         "obligation_link_count": receipt.obligation_link_count,
         "preview_fingerprint": receipt.preview_fingerprint.value,
+        "difference_mode": None if receipt.difference_mode is None else receipt.difference_mode.value,
+        "recovery_identity": receipt.recovery_identity,
+        "recovery_amount_ntd": receipt.recovery_amount_ntd,
     }
 
 
@@ -987,6 +1083,9 @@ def _stored_receipt(row) -> StoredStaffPayoutReceipt:
         int(payload["event_count"]),
         int(payload["obligation_link_count"]),
         PreviewFingerprint(str(payload["preview_fingerprint"])),
+        None if payload.get("difference_mode") is None else StaffPayoutDifferenceMode(str(payload["difference_mode"])),
+        payload.get("recovery_identity"),
+        int(payload.get("recovery_amount_ntd", 0)),
     )
     if receipt.preview_fingerprint.value != str(row["preview_fingerprint"]):
         raise RuntimeError("staff payout receipt preview fingerprint mismatch")
@@ -1111,12 +1210,18 @@ _PROJECTION_UPSERT_SQL = (
 _OUTBOX_INSERT_SQL = (
     "INSERT INTO staff_payables_outbox "
     "(staff_id,intent_key,intent_type,payload_snapshot) "
-    "VALUES (%s,%s,'payable_projection_refresh',%s)"
+    "VALUES (%s,%s,%s,%s)"
 )
 _RECEIPT_INSERT_SQL = (
     "INSERT INTO staff_payables_apply_receipts "
     "(idempotency_key,command_fingerprint,preview_fingerprint,"
     "staff_id,result_snapshot) VALUES (%s,%s,%s,%s,%s)"
+)
+_RECOVERY_INSERT_SQL = (
+    "INSERT INTO staff_overpayment_recoveries "
+    "(recovery_identity,staff_id,original_amount_ntd,remaining_amount_ntd,"
+    "source_bank_fact_identities,source_payout_event_ids,source_obligation_identities,"
+    "actor,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 
 __all__ = [

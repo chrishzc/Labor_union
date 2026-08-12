@@ -63,6 +63,19 @@ def test_review_rows_require_formal_batch_and_preserve_query_params() -> None:
     assert cursor.calls[0][1] == ("batch-1",)
 
 
+def test_review_row_query_uses_a_non_reserved_table_alias() -> None:
+    cursor = _Cursor([])
+
+    FinanceImportQueryService(_Connection(cursor))._fetch_review_rows(
+        ("batch-1", None, None, "manual_review", "business_pending", "blocked", 10)
+    )
+
+    statement = cursor.calls[0][0]
+    assert "JOIN finance_import_rows finance_row" in statement
+    assert "finance_row.id" in statement
+    assert " row.id" not in statement
+
+
 def test_query_rejects_missing_formal_batch() -> None:
     with pytest.raises(FinanceImportQueryNotFound):
         FinanceImportQueryService(_Connection(_Cursor([]))).list_reprocess_runs(

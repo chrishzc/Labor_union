@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "ORD-CANCELLATION-WORKFLOW-003",
+  "scenario_digest": "72aaa5344dabaec7bf92dbccc35a36df91d01acc017ffbe5beba1e64cb7dc984",
+  "result": "passed",
+  "assertion_count": 10,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_order_cancellation_workflow.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "Orders cancellation workflow state-machine harness over authoritative read snapshots"
+  },
+  "input_digests": {
+    "scenario_fixture": "cf2e82e3d9e72449b46da867cbe7514031d946f2a6ae30baaf7f48a88cf8a749",
+    "expected_manifest": "df9515fe7cc5af4a3e84eb0916cbe4603a1ca14654500a5d3df9a14197f7be82",
+    "workflow_test": "1f827fddb38f6ffb05126dd68b04f67926713ec8ef7f78ab425a216f8d0e8ee8"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/ORD-CANCELLATION-WORKFLOW-003.json",
+    "expected_manifest": "validation/expected/ORD-CANCELLATION-WORKFLOW-003.json",
+    "workflow_test": "tests/test_order_cancellation_workflow.py"
+  }
+}

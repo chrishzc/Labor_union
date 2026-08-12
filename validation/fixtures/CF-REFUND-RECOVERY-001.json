@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "CF-REFUND-RECOVERY-001",
+  "test_kind": "domain_root_data",
+  "root_inputs": [
+    "cancelled case terms and effective refund obligation",
+    "immutable TWD 600 and TWD 400 outgoing bank facts",
+    "immutable reversal bank fact"
+  ],
+  "seed_fields": [
+    "refund_obligation.effective_amount",
+    "bank_outflow.amount",
+    "bank_outflow.occurred_at",
+    "refund_reversal.source_reference",
+    "recovery_command.confirmed_actual_underpayment"
+  ],
+  "derived_fields": [
+    "refund_progress.status",
+    "refund_progress.remaining_amount",
+    "refund_review.status",
+    "refund_ledger.allocation",
+    "anomaly_current_alert.status"
+  ],
+  "expected_manifest_path": "validation/expected/CF-REFUND-RECOVERY-001.json"
+}

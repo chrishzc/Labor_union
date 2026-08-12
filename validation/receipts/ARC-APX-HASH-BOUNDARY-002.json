@@ -1,0 +1,20 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "ARC-APX-HASH-BOUNDARY-002",
+  "scenario_digest": "f35b3ecdb5153e318f793bdabd95973e400e1c802dfd00628d6189cc0d26085f",
+  "result": "passed",
+  "assertion_count": 5,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_accounts_payable_export_workflow.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "Accounts Payable archive hash boundary with isolated snapshot and archive adapter"
+  },
+  "input_digests": {
+    "archive_export_harness_test": "7c0838eeafa00b180e2c610629906dbb98fee9919ef5d0af9d90c0236ff8bc6b"
+  },
+  "input_paths": {
+    "archive_export_harness_test": "tests/test_accounts_payable_export_workflow.py"
+  }
+}

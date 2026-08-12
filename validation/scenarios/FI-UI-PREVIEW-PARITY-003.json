@@ -1,0 +1,42 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "FI-UI-PREVIEW-PARITY-003",
+  "track": "A",
+  "suite_id": "FI",
+  "status": "bound",
+  "requires_database": true,
+  "database_execution_mode": "persistent_append_only",
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["FI-01", "FSM-01"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-01",
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#5.3"
+  ],
+  "root_facts": [
+    "A unique external Taishin workbook source and the API client credentials used only by the test application boundary."
+  ],
+  "forbidden_direct_seed": [
+    "batch preview, UI session state, classification result, formal ledger or success display"
+  ],
+  "commands": [
+    "Ingest the workbook through the Finance Import API, request Preview through the typed UI API client and render it into the panel state.",
+    "Request the same Preview through the authoritative server application and compare typed values."
+  ],
+  "expected": [
+    "UI client preview version, fingerprint, blocker list and counts exactly match the authoritative server Preview.",
+    "Ingest and Preview may create canonical import roots, but make no client ledger, staff payout or government-subsidy formal transaction."
+  ],
+  "receipt_requirements": [
+    "root fixture and expected-manifest digests",
+    "API/client/panel versus server Preview parity assertion",
+    "zero-formal-ledger delta assertion"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_ui_preview_persistent_mysql_e2e.py"
+    ],
+    "test_paths": ["tests/test_finance_import_ui_preview_persistent_mysql_e2e.py"]
+  }
+}

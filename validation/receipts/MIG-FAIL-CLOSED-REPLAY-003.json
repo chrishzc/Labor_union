@@ -1,0 +1,21 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "MIG-FAIL-CLOSED-REPLAY-003",
+  "scenario_digest": "51ec545afba1c93f5c23590600ab68cba65a0d831fe907bb341e9269dec1f1dc",
+  "result": "passed",
+  "assertion_count": 42,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_preserved_database_additive_upgrade_cutover.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "Migration failure/replay harness using temporary artifacts and isolated fake adapters",
+    "skipped": "One optional live-environment test was intentionally skipped because it is not configured in this receipt."
+  },
+  "input_digests": {
+    "migration_harness_test": "fcd8997c76c31e461fdbfe007c43380d39048525493d76836b073f4e2d27f662"
+  },
+  "input_paths": {
+    "migration_harness_test": "tests/test_preserved_database_additive_upgrade_cutover.py"
+  }
+}

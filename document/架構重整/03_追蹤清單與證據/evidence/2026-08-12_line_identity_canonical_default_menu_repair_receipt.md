@@ -2,7 +2,7 @@
 scope: LINE Identity Management canonical default menu repair
 status: implementation-complete-local-deployed-live-proven
 verified_at: 2026-08-12
-work_package: 55_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md
+work_package: 66_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md
 ---
 
 # LINE 身分解除 canonical default menu 修復驗收收據
@@ -39,8 +39,9 @@ work_package: 55_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md
 - 擴大 LINE 身分、Rich Menu、客服與 release，warnings-as-errors：
   `29 passed, 1 deselected in 1.33s`。
 - schema loader／disposable bootstrap／既有 v9 release：`8 passed in 1.36s`。
-- disposable MySQL 完整 bootstrap 至
-  `168_line_identity_canonical_menu_publication.sql` 成功；legacy 與 canonical FK 均存在，
+- disposable MySQL 完整 bootstrap 至合併前的
+  `168_line_identity_canonical_menu_publication.sql` 成功；合併 upstream 後相同 SQL 內容改編號為
+  `179_line_identity_canonical_menu_publication.sql`，legacy 與 canonical FK 均存在，
   兩欄皆允許兼容歷史的 `NULL`。
 - disposable MySQL rollback E2E：legacy publication ID 101 與 canonical publication task ID 2
   同時存在時，新 request 選 ID 2、legacy FK 為 `NULL`、canonical FK 為 2、provider menu 為
@@ -75,7 +76,8 @@ work_package: 55_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md
 - 未排除時，`test_line_customer_service_first_release.py` 的既有安全測試發現
   `line/static/staff_order_search.html` 仍含 `userId`；本次 write set 未包含該檔，未順帶修正。
 - Global schema 全檔測試另發現既有重複 `101_` prefix，以及 `init_db.main()` 測試未隔離 pytest
-  argv；part 168 的 prefix、loader、完整 MySQL bootstrap 與 release metadata 均已另行通過。
+  argv；合併前 part 168 的 loader、完整 MySQL bootstrap 與 release metadata 均已另行通過；
+  upstream 合併後 canonical repository artifact 為 part 179。
 
 ## 部署後邊界
 

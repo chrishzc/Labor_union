@@ -1,0 +1,14 @@
+{
+  "contract": "labor-union-validation-schema-release-receipt/v1",
+  "receipt_id": "WP56-VALIDATION-SCHEMA-RELEASE-047",
+  "work_package": "WP56",
+  "target": "lu_test_dataset_contract_signing_v4",
+  "schema_source": "db/schema_parts/166_contract_signing_workflow.sql",
+  "result": "verified",
+  "observed_tables": {
+    "contract_signing_command_receipts": ["id", "idempotency_key", "command_fingerprint", "command_kind", "case_no", "document_version_id", "signing_event_id", "correlation_id", "result_snapshot", "created_at"],
+    "contract_signing_outbox": ["id", "case_no", "signing_event_id", "intent_key", "intent_type", "payload_snapshot", "created_at"]
+  },
+  "validation": "read-only information_schema inspection on 2026-08-12",
+  "out_of_scope": ["production schema apply", "deployment", "cutover"]
+}

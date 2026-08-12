@@ -1,0 +1,29 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "APX-PAYABLE-VIEWMODEL-002",
+  "scenario_digest": "2f9099e658d8384d224c46ff89986365dc71bbdb6c784ebbe29287a8ea4dc395",
+  "result": "passed",
+  "assertion_count": 9,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_accounts_payable_export_workflow.py tests\\test_accounts_payable_export_sources.py tests\\test_accounts_payable_export_api_client.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "typed accounts-payable source aggregation and export view model"
+  },
+  "input_digests": {
+    "scenario_fixture": "d7ddde0bd289244de68a18c20f9e273cdde211e67494b4fe5c44fe161f7fd632",
+    "expected_manifest": "d7211148c9eea51cce4f27077dfbfb578cfa350ccd60acf6419787bf8660769e",
+    "workflow_tests": "7c0838eeafa00b180e2c610629906dbb98fee9919ef5d0af9d90c0236ff8bc6b",
+    "source_tests": "23b302614d17103886e4cf892dec07b7d25538c6b1f09bb65b2374e1476531c5",
+    "api_client_tests": "a162f603e7a42a8717a31a65d9092776ab7bc78038bda9e49546b7f8a705f303"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/APX-PAYABLE-VIEWMODEL-002.json",
+    "expected_manifest": "validation/expected/APX-PAYABLE-VIEWMODEL-002.json",
+    "workflow_tests": "tests/test_accounts_payable_export_workflow.py",
+    "source_tests": "tests/test_accounts_payable_export_sources.py",
+    "api_client_tests": "tests/test_accounts_payable_export_api_client.py"
+  }
+}

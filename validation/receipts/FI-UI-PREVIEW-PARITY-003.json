@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "FI-UI-PREVIEW-PARITY-003",
+  "scenario_digest": "8bc1f55e5e23fa4062c5706e12d253d802fce9355286cb8baf6cc39cd9850725",
+  "result": "passed",
+  "assertion_count": 1,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_ui_preview_persistent_mysql_e2e.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "Finance Import API, typed UI client, panel preview and authoritative server parity"
+  },
+  "input_digests": {
+    "scenario_fixture": "54157531b3856e04eeaf6f9cabada82c5ef2959c96440ce2cac8fa4646225523",
+    "expected_manifest": "07796570af9ac468cc0949509f5eff8eee962457d80d750de4af86aeb4e828f5",
+    "integration_test": "af4d8dda8c6cf2e6aff95626bf112f43766d02a295fb491701bb6f52b747dcf3"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/FI-UI-PREVIEW-PARITY-003.json",
+    "expected_manifest": "validation/expected/FI-UI-PREVIEW-PARITY-003.json",
+    "integration_test": "tests/test_finance_import_ui_preview_persistent_mysql_e2e.py"
+  }
+}

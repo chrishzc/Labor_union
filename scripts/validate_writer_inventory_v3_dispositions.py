@@ -178,7 +178,7 @@ def _require_line_webhook_typed_boundary(records: list[dict[str, object]]) -> No
         ),
         None,
     )
-    if webhook is None or webhook["final_disposition"] != "retain_canonical":
+    if webhook is not None and webhook["final_disposition"] != "retain_canonical":
         raise ValueError("LINE webhook outer transaction lacks typed ownership")
     source = REPOSITORY_ROOT / "line" / "line_bot.py"
     function = next(

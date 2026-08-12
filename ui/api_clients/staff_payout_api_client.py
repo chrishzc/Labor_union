@@ -14,7 +14,21 @@ from api.schemas.jobs import JobAcceptedResponse, JobResponse
 from api.schemas.staff_payout import (
     StaffPayablesQueryView,
     StaffPayoutPreviewView,
+    StaffPayoutDifferenceSourceView,
     StaffPayoutTypedErrorView,
+    StaffOverpaymentRecoveryAdjustmentApplyBody,
+    StaffOverpaymentRecoveryAdjustmentPreviewBody,
+    StaffOverpaymentRecoveryAdjustmentPreviewView,
+    StaffOverpaymentRecoveryApplyBody,
+    StaffOverpaymentRecoveryMatchedApplyBody,
+    StaffOverpaymentRecoveryMatchedPreviewBody,
+    StaffOverpaymentRecoveryMatchingApplyBody,
+    StaffOverpaymentRecoveryMatchingPreviewBody,
+    StaffOverpaymentRecoveryMatchingPreviewView,
+    StaffOverpaymentRecoveryMatchingReceiptView,
+    StaffOverpaymentRecoveryPreviewBody,
+    StaffOverpaymentRecoveryPreviewView,
+    StaffOverpaymentRecoveryReceiptView,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -56,6 +70,16 @@ class StaffPayoutApiClient:
             f"/api/v1/staff-payables/{_positive_integer(staff_id, 'staff_id')}",
             response_type=StaffPayablesQueryView,
         )
+
+    def query_payout_difference_source(self, identity: str) -> StaffPayoutDifferenceSourceView:
+        return self._request("GET", f"/api/v1/staff-payables/payout-differences/{_canonical_text(identity, 'payout_difference_identity')}", response_type=StaffPayoutDifferenceSourceView)
+
+    def preview_payout_difference(self, finance_import_row_ids: Sequence[int], obligation_identities: Sequence[str], mode: str, correlation_id: str) -> StaffPayoutPreviewView:
+        return self._preview("payout-difference", {**_payout_intent(finance_import_row_ids, obligation_identities), "mode": _difference_mode(mode)}, correlation_id)
+
+    def apply_payout_difference(self, finance_import_row_ids: Sequence[int], obligation_identities: Sequence[str], mode: str, preview: StaffPayoutPreviewView, *, reason: str, idempotency_key: str, correlation_id: str) -> JobAcceptedResponse:
+        intent = {**_payout_intent(finance_import_row_ids, obligation_identities), "mode": _difference_mode(mode)}
+        return self._apply("payout-difference", intent, preview, _command_identity(reason, idempotency_key, correlation_id))
 
     def preview_payout(
         self,
@@ -163,6 +187,70 @@ class StaffPayoutApiClient:
         )
         return self._apply("reversal", intent, preview, command_identity)
 
+    def preview_overpayment_recovery_collection(
+        self,
+        body: StaffOverpaymentRecoveryPreviewBody,
+        correlation_id: str,
+    ) -> StaffOverpaymentRecoveryPreviewView:
+        return self._request(
+            "POST",
+            "/api/v1/staff-payables/overpayment-recoveries/collection/preview",
+            payload=body.model_dump(mode="json"),
+            command_headers={"X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")},
+            response_type=StaffOverpaymentRecoveryPreviewView,
+        )
+
+    def preview_matched_overpayment_recovery_collection(self, body: StaffOverpaymentRecoveryMatchedPreviewBody, correlation_id: str) -> StaffOverpaymentRecoveryPreviewView:
+        return self._request("POST", "/api/v1/staff-payables/overpayment-recoveries/matched/preview", response_type=StaffOverpaymentRecoveryPreviewView, payload=body.model_dump(mode="json"), command_headers={"X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")})
+
+    def apply_matched_overpayment_recovery_collection(self, body: StaffOverpaymentRecoveryMatchedApplyBody, idempotency_key: str, correlation_id: str) -> StaffOverpaymentRecoveryReceiptView:
+        return self._request("POST", "/api/v1/staff-payables/overpayment-recoveries/matched/apply", response_type=StaffOverpaymentRecoveryReceiptView, payload=body.model_dump(mode="json"), command_headers={"Idempotency-Key": _canonical_text(idempotency_key, "idempotency_key"), "X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")})
+
+    def preview_overpayment_recovery_matching(self, body: StaffOverpaymentRecoveryMatchingPreviewBody, correlation_id: str) -> StaffOverpaymentRecoveryMatchingPreviewView:
+        return self._request("POST", "/api/v1/staff-payables/overpayment-recoveries/matching/preview", response_type=StaffOverpaymentRecoveryMatchingPreviewView, payload=body.model_dump(mode="json"), command_headers={"X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")})
+
+    def apply_overpayment_recovery_matching(self, body: StaffOverpaymentRecoveryMatchingApplyBody, idempotency_key: str, correlation_id: str) -> StaffOverpaymentRecoveryMatchingReceiptView:
+        return self._request("POST", "/api/v1/staff-payables/overpayment-recoveries/matching/apply", response_type=StaffOverpaymentRecoveryMatchingReceiptView, payload=body.model_dump(mode="json"), command_headers={"Idempotency-Key": _canonical_text(idempotency_key, "idempotency_key"), "X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")})
+
+    def apply_overpayment_recovery_collection(
+        self,
+        body: StaffOverpaymentRecoveryApplyBody,
+        idempotency_key: str,
+        correlation_id: str,
+    ) -> StaffOverpaymentRecoveryReceiptView:
+        return self._recovery_apply(
+            "collection",
+            body,
+            idempotency_key,
+            correlation_id,
+        )
+
+    def preview_overpayment_recovery_adjustment(
+        self,
+        body: StaffOverpaymentRecoveryAdjustmentPreviewBody,
+        correlation_id: str,
+    ) -> StaffOverpaymentRecoveryAdjustmentPreviewView:
+        return self._request(
+            "POST",
+            "/api/v1/staff-payables/overpayment-recoveries/adjustment/preview",
+            payload=body.model_dump(mode="json"),
+            command_headers={"X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")},
+            response_type=StaffOverpaymentRecoveryAdjustmentPreviewView,
+        )
+
+    def apply_overpayment_recovery_adjustment(
+        self,
+        body: StaffOverpaymentRecoveryAdjustmentApplyBody,
+        idempotency_key: str,
+        correlation_id: str,
+    ) -> StaffOverpaymentRecoveryReceiptView:
+        return self._recovery_apply(
+            "adjustment",
+            body,
+            idempotency_key,
+            correlation_id,
+        )
+
     def _preview(self, operation, intent, correlation_id):
         return self._request(
             "POST",
@@ -188,6 +276,18 @@ class StaffPayoutApiClient:
             payload=payload,
             command_headers=_command_headers(command_identity),
             response_type=JobAcceptedResponse,
+        )
+
+    def _recovery_apply(self, operation, body, idempotency_key, correlation_id):
+        return self._request(
+            "POST",
+            f"/api/v1/staff-payables/overpayment-recoveries/{operation}/apply",
+            payload=body.model_dump(mode="json"),
+            command_headers={
+                "Idempotency-Key": _canonical_text(idempotency_key, "idempotency_key"),
+                "X-Correlation-ID": _canonical_text(correlation_id, "correlation_id"),
+            },
+            response_type=StaffOverpaymentRecoveryReceiptView,
         )
 
     def get_job_status(self, job_id: str) -> JobResponse:
@@ -229,6 +329,12 @@ def _payout_intent(finance_row_ids, obligation_identities):
         ),
         "obligation_identities": _identity_list(obligation_identities),
     }
+
+
+def _difference_mode(value):
+    if value not in {"underpayment", "overpayment"}:
+        raise ValueError("difference mode is invalid")
+    return value
 
 
 def _return_intent(finance_row_id, source_event_id, obligation_identities):

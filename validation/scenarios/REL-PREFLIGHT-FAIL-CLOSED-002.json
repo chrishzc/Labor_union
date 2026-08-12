@@ -1,0 +1,45 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "REL-PREFLIGHT-FAIL-CLOSED-002",
+  "track": "B",
+  "suite_id": "REL",
+  "status": "bound",
+  "requires_database": false,
+  "coverage_scope": "supplemental",
+  "test_kinds": ["metadata_fixture", "process_network_harness"],
+  "coverage_ids": ["REL-01", "REL-02", "REL-04"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1",
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.2"
+  ],
+  "root_facts": [
+    "Temporary source/candidate database identities, a release-plan payload, artifact digest and quoted environment-config bytes.",
+    "Injected stale artifact, stale plan fingerprint and invalid source/candidate identity conditions."
+  ],
+  "forbidden_direct_seed": [
+    "released, failed, recovery_required or recovered release state",
+    "verified switch receipt or post-cutover smoke success"
+  ],
+  "commands": [
+    "Validate source/candidate database identities before a cutover can be planned.",
+    "Validate plan payload and artifact fingerprint before replay or switch.",
+    "Attempt a switch with stale identity/config evidence."
+  ],
+  "expected": [
+    "Identical or malformed source/candidate names are rejected before mutation.",
+    "Changed artifacts and stale plan fingerprints raise a typed cutover block rather than replaying a release.",
+    "Switch identity or config staleness preserves config bytes and prevents a false completed release.",
+    "This evidence does not prove approval workflows, a real restart, smoke success or recovery orchestration."
+  ],
+  "receipt_requirements": [
+    "release preflight test-source digest",
+    "identity, artifact and config-staleness failure assertions",
+    "explicit evidence-scope limitation"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_preserved_database_additive_upgrade_cutover.py::test_database_identity_guards_fail_closed tests\\test_preserved_database_additive_upgrade_cutover.py::test_plan_artifact_and_fingerprint_staleness_fail_closed tests\\test_preserved_database_additive_upgrade_cutover.py::test_switch_identity_config_staleness_and_quoted_round_trip"
+    ],
+    "test_paths": ["tests/test_preserved_database_additive_upgrade_cutover.py"]
+  }
+}

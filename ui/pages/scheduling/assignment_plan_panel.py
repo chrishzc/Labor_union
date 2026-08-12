@@ -117,7 +117,11 @@ def _preview_controls(case_no, client, segments) -> None:
             st.session_state[f"assignment_plan_segments_{case_no}"] = segments
             st.session_state.pop(_apply_state_key(case_no), None)
         except (AssignmentPlanApiError, ValueError) as error:
-            st.error(f"Preview 失敗：{error}")
+            if isinstance(error, AssignmentPlanApiError):
+                st.error(f"Preview 失敗 [{error.error.code}]：{error.error.message}")
+                st.json(error.error.model_dump(exclude_none=True))
+            else:
+                st.error(f"Preview 失敗：{error}")
     preview = st.session_state.get(state_key)
     if preview is not None:
         _apply_controls(case_no, client, preview)
@@ -129,7 +133,11 @@ def _apply_controls(case_no, client, preview) -> None:
     confirmed = st.checkbox("確認依此 Preview 套用正式人力配置", key=f"assignment_plan_confirm_{case_no}")
     command = st.session_state.get(_apply_state_key(case_no))
     command_pending = isinstance(command, dict) and not command.get("terminal")
-    if st.button("Apply 正式人力配置", disabled=command_pending or not confirmed or not reason.strip(), key=f"assignment_plan_apply_{case_no}"):
+    if isinstance(command, dict) and command.get("terminal"):
+        st.caption("已保留相同的 immutable Apply command；重送會查回既有 durable job。")
+        if st.button("重送相同 Apply 請求", key=f"assignment_plan_apply_replay_{case_no}"):
+            _submit_apply(case_no, client, preview, command["reason"])
+    elif st.button("Apply 正式人力配置", disabled=command_pending or not confirmed or not reason.strip(), key=f"assignment_plan_apply_{case_no}"):
         _submit_apply(case_no, client, preview, reason.strip())
     _render_apply_status(case_no, client, preview)
 
@@ -160,7 +168,10 @@ def _submit_apply(case_no, client, preview, reason) -> None:
 @st.fragment(run_every=_JOB_STATUS_POLL_INTERVAL_SECONDS)
 def _render_apply_status(case_no, client, preview) -> None:
     command = st.session_state.get(_apply_state_key(case_no))
-    if not isinstance(command, dict) or command.get("terminal"):
+    if not isinstance(command, dict):
+        return
+    if command.get("terminal"):
+        _render_terminal_apply_status(command)
         return
     if not command.get("job_id"):
         st.warning("Apply 結果尚未確認；可安全重送同一命令。")
@@ -183,6 +194,9 @@ def _show_job_status(client, command) -> None:
         st.info(f"正式人力配置仍在處理：{status.status}")
         return
     command["terminal"] = True
+    command["status"] = status.status
+    command["receipt_payload"] = status.receipt_payload
+    command["error_payload"] = status.error_payload
     if status.status == "succeeded":
         st.success("正式人力配置已完成。")
         st.json(status.receipt_payload)
@@ -191,13 +205,23 @@ def _show_job_status(client, command) -> None:
     st.write({"job_id": status.job_id, "status": status.status, "error": status.error_payload})
 
 
+def _render_terminal_apply_status(command) -> None:
+    status = command.get("status", "unknown")
+    if status == "succeeded":
+        st.success("正式人力配置已完成；可安全重送相同 Apply 請求。")
+        st.json(command.get("receipt_payload"))
+        return
+    st.error(f"正式人力配置未完成：{status}")
+    st.write({"job_id": command.get("job_id"), "status": status, "error": command.get("error_payload")})
+
+
 def _apply_state_key(case_no: str) -> str:
     return f"{_APPLY_STATE_SUFFIX}_{case_no}"
 
 
 def _apply_command(case_no, preview, segments, reason, state) -> dict:
     existing = state.get(_apply_state_key(case_no))
-    if isinstance(existing, dict) and not existing.get("terminal"):
+    if isinstance(existing, dict):
         return existing
     identity = _command_id("assignment-plan-apply", case_no)
     command = {

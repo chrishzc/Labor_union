@@ -14,6 +14,7 @@ _IDENTITY_MAXIMUM_LENGTH = 191
 
 class ClientFinanceCorrectionType(StrEnum):
     REFUND = "refund"
+    REFUND_OVERAGE = "refund_overage"
     REFUND_RETURN = "refund_return"
     REVERSAL = "reversal"
 
@@ -125,6 +126,7 @@ class ClientRefundReversalCandidate:
     allocations: tuple[ClientCorrectionAllocation, ...]
     affected_obligations: tuple[str, ...]
     reversal_entry_type: str | None
+    recovery_amount: MoneyNTD
     fingerprint: PreviewFingerprint
 
 
@@ -133,11 +135,18 @@ def build_client_refund_candidate(
     bank_facts: tuple[ClientRefundBankFact, ...],
     obligations: tuple[ClientRefundObligation, ...],
     purpose: ClientRefundPurpose = ClientRefundPurpose.CUSTOMER_REFUND,
+    *,
+    allow_partial_refund_recovery: bool = False,
 ) -> ClientRefundReversalCandidate:
     _validate_refund_scope(case_no, bank_facts, obligations)
     ordered_banks = tuple(sorted(bank_facts, key=lambda item: item.identity))
     ordered_obligations = tuple(sorted(obligations, key=lambda item: item.identity))
-    _require_bank_total_is_payable(ordered_banks, ordered_obligations)
+    _require_bank_total_is_payable(
+        ordered_banks,
+        ordered_obligations,
+        purpose,
+        allow_partial_refund_recovery,
+    )
     _validate_refund_obligation_types(ordered_obligations, purpose)
     entries = tuple(_refund_entry(item, purpose) for item in ordered_banks)
     allocations = _allocate_refund(ordered_banks, ordered_obligations)
@@ -147,6 +156,31 @@ def build_client_refund_candidate(
         entries,
         allocations,
         None,
+    )
+
+
+def build_client_refund_overage_candidate(
+    case_no: str,
+    bank_facts: tuple[ClientRefundBankFact, ...],
+    obligations: tuple[ClientRefundObligation, ...],
+) -> ClientRefundReversalCandidate:
+    _validate_refund_scope(case_no, bank_facts, obligations)
+    ordered_banks = tuple(sorted(bank_facts, key=lambda item: item.identity))
+    ordered_obligations = tuple(sorted(obligations, key=lambda item: item.identity))
+    _validate_refund_obligation_types(ordered_obligations, ClientRefundPurpose.CUSTOMER_REFUND)
+    bank_total = sum(item.amount.amount for item in ordered_banks)
+    obligation_total = sum(item.amount_due.amount for item in ordered_obligations)
+    if bank_total <= obligation_total:
+        raise ValueError("client_refund_overage_required")
+    entries = tuple(_refund_entry(item, ClientRefundPurpose.CUSTOMER_REFUND) for item in ordered_banks)
+    allocations = _allocate_refund(ordered_banks, ordered_obligations, allow_overage=True)
+    return _candidate(
+        ClientFinanceCorrectionType.REFUND_OVERAGE,
+        case_no,
+        entries,
+        allocations,
+        None,
+        recovery_amount=MoneyNTD(bank_total - obligation_total),
     )
 
 
@@ -228,20 +262,32 @@ def _validate_refund_obligation_types(obligations, purpose) -> None:
         raise ValueError("invalid_client_refund_intent")
 
 
-def _require_bank_total_is_payable(bank_facts, obligations) -> None:
+def _require_bank_total_is_payable(
+    bank_facts,
+    obligations,
+    purpose,
+    allow_partial_refund_recovery,
+) -> None:
     bank_total = sum(item.amount.amount for item in bank_facts)
     obligation_total = sum(item.amount_due.amount for item in obligations)
     if bank_total > obligation_total:
         raise ValueError("allocation_exceeds_obligation")
+    if purpose is not ClientRefundPurpose.CUSTOMER_REFUND:
+        return
+    if bank_total == obligation_total:
+        return
+    if allow_partial_refund_recovery and bank_total < obligation_total:
+        return
+    raise ValueError("refund_requires_exact_settlement")
 
 
-def _allocate_refund(bank_facts, obligations):
+def _allocate_refund(bank_facts, obligations, *, allow_overage=False):
     remaining_banks = [[item, item.amount.amount] for item in bank_facts]
     remaining_obligations = [[item, item.amount_due.amount] for item in obligations]
     allocations: list[ClientCorrectionAllocation] = []
     while remaining_banks and remaining_obligations:
         allocations.append(_consume_refund_front(remaining_banks, remaining_obligations))
-    if remaining_banks:
+    if remaining_banks and not allow_overage:
         raise ValueError("allocation_exceeds_obligation")
     return tuple(allocations)
 
@@ -314,10 +360,18 @@ def _validate_reversal_allocations(targets, allocations) -> None:
         raise ValueError("reversal_target_invalid")
 
 
-def _candidate(correction_type, case_no, entries, allocations, reversal_entry_type):
+def _candidate(
+    correction_type,
+    case_no,
+    entries,
+    allocations,
+    reversal_entry_type,
+    *,
+    recovery_amount=MoneyNTD(0),
+):
     amount = MoneyNTD(sum(item.amount.amount for item in entries))
     obligations = tuple(sorted({item.obligation_identity for item in allocations}))
-    payload = _candidate_payload(correction_type, case_no, entries, allocations, reversal_entry_type)
+    payload = _candidate_payload(correction_type, case_no, entries, allocations, reversal_entry_type, recovery_amount)
     return ClientRefundReversalCandidate(
         correction_type,
         case_no,
@@ -326,15 +380,17 @@ def _candidate(correction_type, case_no, entries, allocations, reversal_entry_ty
         allocations,
         obligations,
         reversal_entry_type,
+        recovery_amount,
         fingerprint_payload(payload),
     )
 
 
-def _candidate_payload(correction_type, case_no, entries, allocations, reversal_entry_type):
+def _candidate_payload(correction_type, case_no, entries, allocations, reversal_entry_type, recovery_amount):
     return {
         "correction_type": correction_type.value,
         "case_no": case_no,
         "reversal_entry_type": reversal_entry_type,
+        "recovery_amount_ntd": recovery_amount.amount,
         "entries": tuple(_entry_payload(item) for item in entries),
         "allocations": tuple(_allocation_payload(item) for item in allocations),
     }
@@ -400,6 +456,7 @@ __all__ = [
     "ClientRefundReversalCandidate",
     "ClientReversalTarget",
     "build_client_refund_candidate",
+    "build_client_refund_overage_candidate",
     "build_client_refund_return_candidate",
     "build_client_reversal_candidate",
 ]

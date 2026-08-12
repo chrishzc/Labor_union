@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "SCH-WAITING-LOCK-RELEASE-002",
+  "scenario_digest": "9d2ae28b3ede1b3b596d2e647dfbf21b8c1e22c44e2b7233bd7bd61a969d00da",
+  "result": "passed",
+  "assertion_count": 74,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_caregiver_availability_lock_release_service.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "Scheduling waiting-deposit lock release state-machine harness"
+  },
+  "input_digests": {
+    "scenario_fixture": "b661cac99f9e23027c5dad57e21eae56edaffbf50453a900d6817fbd735fc85d",
+    "expected_manifest": "617c11ba092e89fc9557abce4aefa47353e5248a44581e01413d9c346937bcd4",
+    "release_workflow_test": "07eefa06375a28209355d3cc40399a557d2874ca75a31391ec847d8af64739ff"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/SCH-WAITING-LOCK-RELEASE-002.json",
+    "expected_manifest": "validation/expected/SCH-WAITING-LOCK-RELEASE-002.json",
+    "release_workflow_test": "tests/test_caregiver_availability_lock_release_service.py"
+  }
+}

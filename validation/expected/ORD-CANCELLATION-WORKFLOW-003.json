@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "ORD-CANCELLATION-WORKFLOW-003",
+  "assertions": [
+    "A preview-bound mid-service cancellation derives cancelled lifecycle state and the expected new aggregate versions.",
+    "The workflow persists the canonical cross-domain cancellation chain before saving one stored receipt.",
+    "Exact idempotency replay returns that stored receipt without new writes."
+  ]
+}

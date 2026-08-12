@@ -12,6 +12,12 @@ from domains.scheduling.assignment_plan import (
     EffectiveAssignmentFact,
     StaffOccupancyFact,
 )
+from domains.scheduling.commitment_execution import (
+    CommitmentExecutionMismatch,
+    CommitmentServiceDay,
+    ExecutionServiceDay,
+    require_exact_commitment_execution,
+)
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import IdempotencyKey
 from subsystems.orders.terms_workflow import SchedulingReplacementCommand
@@ -153,8 +159,16 @@ class MySqlAssignmentPlanRepository:
             correlation_id=context.correlation_id,
         )
         with self._connection.cursor() as cursor:
+            commitment_id = _require_exact_commitment_execution(
+                cursor,
+                command.candidate,
+                context.waiting_lock_ids,
+            )
             result = persist_scheduling_replacement(cursor, command)
             _convert_waiting_locks(cursor, command, result, context)
+            _append_commitment_conversion(
+                cursor, command, result, context, commitment_id
+            )
             return result
 
     def save_receipt(
@@ -327,6 +341,79 @@ def _convert_waiting_locks(cursor, command, result, context) -> None:
         _convert_waiting_lock_days(cursor, lock_id, command)
         _convert_waiting_lock_header(cursor, lock_id, command)
         _append_waiting_lock_conversion(cursor, lock_id, command, result)
+
+
+def _require_exact_commitment_execution(cursor, candidate, lock_ids) -> int:
+    cursor.execute(
+        "SELECT commitment.id,commitment.matching_plan_id,event.id AS terminal_event_id "
+        "FROM precontract_service_commitments commitment "
+        "LEFT JOIN precontract_service_commitment_events event "
+        "ON event.commitment_id=commitment.id "
+        "WHERE commitment.case_no=%s FOR UPDATE",
+        (candidate.case_no,),
+    )
+    commitment = cursor.fetchone()
+    if commitment is None or commitment["terminal_event_id"] is not None:
+        raise CommitmentExecutionMismatch("commitment_not_effective")
+    commitment_id = int(commitment["id"])
+    cursor.execute(
+        "SELECT staff_id,service_date FROM precontract_service_commitment_days "
+        "WHERE commitment_id=%s ORDER BY staff_id,service_date FOR UPDATE",
+        (commitment_id,),
+    )
+    commitment_days = tuple(
+        CommitmentServiceDay(int(row["staff_id"]), row["service_date"])
+        for row in cursor.fetchall()
+    )
+    lock_plan_ids = _locked_waiting_lock_plan_ids(cursor, lock_ids)
+    execution_days = tuple(
+        ExecutionServiceDay(assignment.staff_id, service_date)
+        for assignment in candidate.assignments
+        for service_date in assignment.service_dates
+    )
+    require_exact_commitment_execution(
+        int(commitment["matching_plan_id"]),
+        lock_plan_ids,
+        commitment_days,
+        execution_days,
+    )
+    return commitment_id
+
+
+def _locked_waiting_lock_plan_ids(cursor, lock_ids) -> tuple[int, ...]:
+    if not lock_ids:
+        return ()
+    placeholders = ",".join("%s" for _ in lock_ids)
+    cursor.execute(
+        "SELECT plan_id FROM caregiver_availability_locks "
+        f"WHERE id IN ({placeholders}) AND status='active' AND is_active=1 "
+        "ORDER BY id FOR UPDATE",
+        lock_ids,
+    )
+    return tuple(int(row["plan_id"]) for row in cursor.fetchall())
+
+
+def _append_commitment_conversion(cursor, command, result, context, commitment_id) -> None:
+    assignment_ids = tuple(
+        sorted(result.assignment_resolution.assignment_id_by_candidate_key.values())
+    )
+    payload = {
+        "assignment_ids": assignment_ids,
+        "case_no": command.candidate.case_no,
+        "generation_id": result.generation_id,
+        "preview_fingerprint": context.preview_fingerprint.value,
+    }
+    cursor.execute(
+        "INSERT INTO precontract_service_commitment_events "
+        "(commitment_id,event_type,event_key,actor,payload) "
+        "VALUES (%s,'converted',%s,%s,%s)",
+        (
+            commitment_id,
+            f"commitment-converted:{context.command_fingerprint.value}",
+            command.actor.actor_id,
+            _canonical_json(payload),
+        ),
+    )
 
 
 def _convert_waiting_lock_days(cursor, lock_id, command) -> None:

@@ -24,7 +24,7 @@ services:
       MYSQL_DATABASE: ${DB_DATABASE:-union_db}
       MYSQL_ROOT_PASSWORD: "${DB_PASSWORD:-1234}"  # 與 .env 的 DB_PASSWORD 一致
     ports:
-      - "${DB_PORT:-3306}:3306"  # 對外映射埠改讀取 .env 的 DB_PORT，讓本機的 Python 匯入程式可以直接連線
+      - "127.0.0.1:${DB_PORT:-3306}:3306"  # 僅本機 Python 匯入程式可連線，不公開 MySQL
     volumes:
       # 持久化資料庫數據，防止容器重啟時資料遺失
       - mysql-data:/var/lib/mysql

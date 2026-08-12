@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "LINE-IDENTITY-DELIVERY-002",
+  "test_kind": "external_input_fixture",
+  "root_inputs": [
+    "signed LINE webhook bytes and provider event ID",
+    "LINE user identity and active identity-flow purpose/expiry",
+    "review command actor capability and expected version",
+    "provider timeout, rate-limit and accepted-retry response fixtures"
+  ],
+  "seed_fields": [
+    "webhook.provider_event_id",
+    "identity_flow.line_user_id",
+    "review_command.expected_version",
+    "provider_response.status_code"
+  ],
+  "derived_fields": [
+    "webhook_inbox.processing_status",
+    "line_identity_binding.status",
+    "line_review.status",
+    "line_delivery_task.status",
+    "line_delivery_attempt.outcome"
+  ],
+  "expected_manifest_path": "validation/expected/LINE-IDENTITY-DELIVERY-002.json"
+}

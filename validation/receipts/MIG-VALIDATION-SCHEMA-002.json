@@ -1,0 +1,33 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "MIG-VALIDATION-SCHEMA-002",
+  "scenario_digest": "464946fb6bdbb0f231c7a0ce0c3108546d9a9bbcd60a1c217e7058436a5a145e",
+  "result": "passed",
+  "assertion_count": 11,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe scripts\\verify_validation_schema_manifest.py",
+    ".\\.venv\\Scripts\\python.exe scripts\\verify_validation_database.py --database lu_test_validation_v1",
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_verify_validation_schema_manifest.py tests\\test_bootstrap_disposable_mysql_schema.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "versioned validation schema reproducibility and read-only postcheck"
+  },
+  "input_digests": {
+    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba",
+    "validation_schema_release": "41c735024cd82eb3ae6f82c5e88c64f551792f66b9f945641e610111a81d4220",
+    "manifest_verifier": "fa16e874ed133af82079870d263bd8cc918f5aba22c7045847955ad046e5c1be",
+    "database_verifier": "b64cd56c8a8d0e44b4a5118c0a5282a2ae2abf6710d4e921ab632b32305baeef",
+    "manifest_tests": "cacad06fbae2dbcbd53da37df0752179014f4f324f0320168b37d1b1917623a8",
+    "bootstrap_tests": "4324b67711375eea7163da8d417998fbd53c3e50176e00626a1a291e4efb6702"
+  },
+  "input_paths": {
+    "validation_schema_manifest": "db/cutover_releases/labor_union_validation_schema_v1.json",
+    "validation_schema_release": "db/releases/labor_union_validation_schema_v1.sql",
+    "manifest_verifier": "scripts/verify_validation_schema_manifest.py",
+    "database_verifier": "scripts/verify_validation_database.py",
+    "manifest_tests": "tests/test_verify_validation_schema_manifest.py",
+    "bootstrap_tests": "tests/test_bootstrap_disposable_mysql_schema.py"
+  }
+}

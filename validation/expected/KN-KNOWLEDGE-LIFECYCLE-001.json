@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"KN-KNOWLEDGE-LIFECYCLE-001","assertions":["A capability grant revokes the target's active session.","A separate reviewer advances the knowledge item from draft to reviewed to published.","The published item is retrieved as a non-authoritative answer with its current source URI and version-three citation."]}

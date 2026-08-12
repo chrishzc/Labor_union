@@ -15,6 +15,7 @@ class _StrictModel(BaseModel):
 class ClientRefundPreviewBody(_StrictModel):
     finance_import_row_ids: list[int] = Field(min_length=1)
     obligation_identities: list[str] = Field(min_length=1)
+    allow_partial_refund_recovery: bool = False
 
 
 class ClientRefundApplyBody(ClientRefundPreviewBody):
@@ -43,6 +44,107 @@ class ClientRefundReturnApplyBody(ClientRefundReturnPreviewBody):
     expected_account_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+
+
+class ClientOverRefundRecoveryPreviewBody(_StrictModel):
+    recovery_identity: str = Field(min_length=1, max_length=191)
+    finance_import_row_id: int = Field(gt=0)
+
+
+class ClientOverRefundRecoveryApplyBody(ClientOverRefundRecoveryPreviewBody):
+    expected_recovery_version: int = Field(ge=0)
+    expected_account_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ClientOverRefundRecoveryMatchedPreviewBody(ClientOverRefundRecoveryPreviewBody):
+    matching_identity: str = Field(min_length=1, max_length=191)
+    matching_version: int = Field(ge=1)
+
+
+class ClientOverRefundRecoveryMatchedApplyBody(
+    ClientOverRefundRecoveryMatchedPreviewBody
+):
+    expected_recovery_version: int = Field(ge=0)
+    expected_account_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ClientOverRefundRecoveryAdjustmentPreviewBody(_StrictModel):
+    recovery_identity: str = Field(min_length=1, max_length=191)
+    adjustment_amount_ntd: int = Field(gt=0)
+
+
+class ClientOverRefundRecoveryAdjustmentApplyBody(
+    ClientOverRefundRecoveryAdjustmentPreviewBody
+):
+    expected_recovery_version: int = Field(ge=0)
+    expected_account_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ClientOverRefundRecoveryMatchingPreviewBody(_StrictModel):
+    recovery_identity: str = Field(min_length=1, max_length=191)
+    finance_import_row_id: int = Field(gt=0)
+
+
+class ClientOverRefundRecoveryMatchingApplyBody(
+    ClientOverRefundRecoveryMatchingPreviewBody
+):
+    expected_recovery_version: int = Field(ge=0)
+    expected_account_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class ClientOverRefundRecoveryPreviewView(_StrictModel):
+    recovery_identity: str
+    account_version: int = Field(ge=0)
+    recovery_version: int = Field(ge=0)
+    amount_received_ntd: int = Field(gt=0)
+    remaining_before_ntd: int = Field(gt=0)
+    remaining_after_ntd: int = Field(ge=0)
+    resulting_status: str
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ClientOverRefundRecoveryReceiptView(_StrictModel):
+    recovery_identity: str
+    account_version: int = Field(ge=0)
+    recovery_version: int = Field(ge=0)
+    remaining_after_ntd: int = Field(ge=0)
+    resulting_status: str
+
+
+class ClientOverRefundRecoveryAdjustmentPreviewView(_StrictModel):
+    recovery_identity: str
+    account_version: int = Field(ge=0)
+    recovery_version: int = Field(ge=0)
+    adjustment_amount_ntd: int = Field(gt=0)
+    remaining_before_ntd: int = Field(gt=0)
+    remaining_after_ntd: int = Field(ge=0)
+    resulting_status: str
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ClientOverRefundRecoveryMatchingPreviewView(_StrictModel):
+    recovery_identity: str
+    finance_import_row_identity: str
+    recovery_version: int = Field(ge=0)
+    account_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ClientOverRefundRecoveryMatchingReceiptView(_StrictModel):
+    matching_identity: str
+    matching_version: int = Field(ge=1)
+    recovery_identity: str
+    finance_import_row_identity: str
+    recovery_version: int = Field(ge=0)
+    account_version: int = Field(ge=0)
 
 
 class ClientRefundReversalPreviewView(_StrictModel):
@@ -78,6 +180,19 @@ __all__ = [
     "ClientRefundReversalReceiptView",
     "ClientRefundReturnApplyBody",
     "ClientRefundReturnPreviewBody",
+    "ClientOverRefundRecoveryApplyBody",
+    "ClientOverRefundRecoveryMatchedApplyBody",
+    "ClientOverRefundRecoveryMatchedPreviewBody",
+    "ClientOverRefundRecoveryAdjustmentApplyBody",
+    "ClientOverRefundRecoveryAdjustmentPreviewBody",
+    "ClientOverRefundRecoveryAdjustmentPreviewView",
+    "ClientOverRefundRecoveryMatchingApplyBody",
+    "ClientOverRefundRecoveryMatchingPreviewBody",
+    "ClientOverRefundRecoveryMatchingPreviewView",
+    "ClientOverRefundRecoveryMatchingReceiptView",
+    "ClientOverRefundRecoveryPreviewBody",
+    "ClientOverRefundRecoveryPreviewView",
+    "ClientOverRefundRecoveryReceiptView",
     "ClientReversalApplyBody",
     "ClientReversalPreviewBody",
 ]

@@ -26,6 +26,36 @@ from ui.api_clients.anomaly_registry_api_client import (
     AnomalyRegistryApiClient,
     AnomalyRegistryApiError,
 )
+from ui.api_clients.finance_import_api_client import FinanceImportApiClient
+from ui.api_clients.client_refund_reversal_api_client import ClientRefundReversalApiClient
+from ui.api_clients.client_receipt_reconciliation_api_client import ClientReceiptReconciliationApiClient
+from api.schemas.client_receipt_reconciliation import ClientReceiptApplyBody, ClientReceiptPreviewBody
+from api.schemas.client_refund_reversal import (
+    ClientRefundApplyBody,
+    ClientRefundPreviewBody,
+    ClientOverRefundRecoveryMatchedApplyBody,
+    ClientOverRefundRecoveryMatchedPreviewBody,
+    ClientOverRefundRecoveryMatchingApplyBody,
+    ClientOverRefundRecoveryMatchingPreviewBody,
+)
+from ui.api_clients.staff_payout_api_client import StaffPayoutApiClient, StaffPayoutApiError
+from api.schemas.staff_payout import (
+    StaffOverpaymentRecoveryMatchedApplyBody,
+    StaffOverpaymentRecoveryMatchedPreviewBody,
+    StaffOverpaymentRecoveryMatchingApplyBody,
+    StaffOverpaymentRecoveryMatchingPreviewBody,
+)
+from ui.api_clients.government_subsidy_api_client import (
+    GovernmentSubsidyApiClient,
+    GovernmentSubsidyApiError,
+)
+from api.schemas.government_subsidy import (
+    GovernmentSubsidyOverpaymentDispositionApplyBody,
+    GovernmentSubsidyOverpaymentDispositionPreviewBody,
+    GovernmentOverpaymentReturnReconciliationApplyBody,
+    GovernmentOverpaymentReturnReconciliationPreviewBody,
+    GovernmentSubsidyOverpaymentOffsetIntentView,
+)
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 
@@ -33,6 +63,7 @@ title = "異常警示中心"
 
 _MATCHING_PAGE_TITLE = "多月嫂排班"
 _MATCHING_QUEUE_TARGET_KEY = "multi_caregiver_matching_case_picker"
+_FINANCE_RECOVERY_SELECTION_KEY = "finance_anomaly_recovery_selection"
 
 _IMPORT_CODES = {"IMPORT-001", "IMPORT-003", "IMPORT-004", "IMPORT-006"}
 _ORDER_MATCH_CODES = {"ORDER-001", "ORDER-002", "ORDER-003", "ORDER-004"}
@@ -47,6 +78,11 @@ _FINANCE_CODES = {
     "GOVSUB-003",
     "GOVSUB-004",
     "GOVSUB-005",
+    "GOVSUB-006",
+    "client_over_refund_recovery_open",
+    "staff_overpayment_recovery_open",
+    "staff_payout_underpayment",
+    "staff_payout_overpayment",
 }
 _STAFF_CODES = {
     "SCHEDULE-001",
@@ -94,6 +130,11 @@ _ALERT_CODE_LABELS = {
     "GOVSUB-003": "政府補助批次完整性異常",
     "GOVSUB-004": "政府補助沖正異常",
     "GOVSUB-005": "政府補助請款資料漂移",
+    "GOVSUB-006": "政府補助溢撥待處置",
+    "client_over_refund_recovery_open": "客戶退款超額追償待收回",
+    "staff_overpayment_recovery_open": "月嫂超額付款追償待收回",
+    "staff_payout_underpayment": "月嫂付款不足待補足",
+    "staff_payout_overpayment": "月嫂付款超額待追償",
 }
 _STATUS_LABELS = {
     "open": "🟡 待處理",
@@ -185,6 +226,13 @@ def _navigate_to_staff_calendar(staff_id: int, date_text: str, note: str) -> Non
     nav_helper.navigate_to(_MATCHING_PAGE_TITLE)
 
 
+def _navigate_to_assignment_repair(case_no: str) -> None:
+    nav_helper.end_queue()
+    st.session_state["pending_scheduling_case_no"] = case_no
+    st.session_state["scheduling_workspace"] = "案件人力配置"
+    nav_helper.navigate_to(_MATCHING_PAGE_TITLE)
+
+
 def _filter(
     items: tuple[AnomalySummaryView, ...], codes: set[str]
 ) -> tuple[AnomalySummaryView, ...]:
@@ -264,16 +312,61 @@ def _render_recovery_action(
     key_prefix: str,
 ) -> None:
     if st.button(
-        f"前往修復：{action.command_name}", key=f"{key_prefix}_recovery_{action.action_code}"
+        action.label or "開啟修復",
+        key=f"{key_prefix}_recovery_{action.action_key}",
     ):
         try:
             link = recovery_client.query_recovery_preview_link(
-                summary.fingerprint, action.action_code
+                summary.fingerprint, action.action_key
             )
         except (AnomalyRecoveryApiError, ValueError) as error:
             st.error(f"查詢修復入口失敗：{error}")
         else:
-            st.info(f"請前往：{link.command_name}（{link.preview_endpoint}）")
+            _select_recovery(summary, link)
+
+
+def _select_recovery(summary: AnomalySummaryView, link) -> None:
+    renderer = _recovery_renderer(link.owning_domain, link.form_schema_key)
+    if renderer is None:
+        st.warning("recovery_action_not_supported：此異常尚未提供可直接處理的修復表單。")
+        return
+    st.session_state[_FINANCE_RECOVERY_SELECTION_KEY] = {
+        "fingerprint": summary.fingerprint,
+        "action_label": link.label,
+        "owning_domain": link.owning_domain,
+        "form_schema_key": link.form_schema_key,
+        "source_bindings": link.source_bindings,
+    }
+    st.rerun()
+
+
+def _recovery_renderer(owning_domain: str, form_schema_key: str):
+    """Registry-key dispatch only; a descriptor never supplies a raw endpoint or callable."""
+    renderers = {
+        ("finance_import", "finance_import.correction.v1"):
+            _render_finance_import_correction,
+        ("government_subsidy", "government_subsidy.payer_refund_account.v1"):
+            _render_government_refund_account,
+        ("government_subsidy", "government_subsidy.overpayment.disposition.v1"):
+            _render_government_overpayment_disposition,
+        ("government_subsidy", "government_subsidy.overpayment.return_reconciliation.v1"):
+            _render_government_return_reconciliation,
+        ("client_finance", "client_finance.over_refund_recovery.collection.v1"):
+            _render_client_over_refund_recovery_collection,
+        ("client_finance", "client_finance.over_refund_recovery.matching.v1"):
+            _render_client_over_refund_recovery_matching,
+        ("client_finance", "client_finance.refund_overage.v1"):
+            _render_client_refund_overage,
+        ("client_finance", "client_finance.receipt_overage.v1"):
+            _render_client_receipt_overage,
+        ("staff_payables", "staff_payables.overpayment_recovery.collection.v1"):
+            _render_staff_overpayment_recovery_collection,
+        ("staff_payables", "staff_payables.overpayment_recovery.matching.v1"):
+            _render_staff_overpayment_recovery_matching,
+        ("staff_payables", "staff_payables.payout_difference.v1"):
+            _render_staff_payout_difference,
+    }
+    return renderers.get((owning_domain, form_schema_key))
 
 
 def _render_action(
@@ -409,7 +502,582 @@ def _render_finance_tab(
     limit = 50
     start = (int(page) - 1) * limit
     paged_items = finance_items[start : start + limit]
-    _render_selectable_list(paged_items, registry_client, recovery_client, key_prefix="finance")
+    _render_selected_finance_recovery()
+    _render_selectable_list(
+        paged_items,
+        registry_client,
+        recovery_client,
+        key_prefix="finance",
+        show_manual_actions=False,
+    )
+
+
+def _render_selected_finance_recovery() -> None:
+    selection = st.session_state.get(_FINANCE_RECOVERY_SELECTION_KEY)
+    if not isinstance(selection, dict):
+        return
+    action_label = selection.get("action_label")
+    owning_domain = selection.get("owning_domain")
+    form_schema_key = selection.get("form_schema_key")
+    source_bindings = selection.get("source_bindings")
+    if not isinstance(action_label, str) or not isinstance(owning_domain, str) or not isinstance(form_schema_key, str) or not isinstance(source_bindings, dict):
+        st.session_state.pop(_FINANCE_RECOVERY_SELECTION_KEY, None)
+        return
+    st.divider()
+    if st.button("取消本次帳務異常處理", key="cancel_finance_anomaly_recovery"):
+        st.session_state.pop(_FINANCE_RECOVERY_SELECTION_KEY, None)
+        st.rerun()
+    renderer = _recovery_renderer(owning_domain, form_schema_key)
+    if renderer is None:
+        st.error("recovery_action_not_supported：修復表單版本尚未支援。")
+        return
+    renderer(source_bindings, action_label)
+
+
+def _render_finance_import_correction(source_bindings: dict[str, object], action_label: str) -> None:
+    row_identity = source_bindings.get("finance_import_row_identity")
+    if not isinstance(row_identity, str) or not row_identity:
+        st.error("recovery_source_binding_incomplete：修復動作缺少銀行流水識別。")
+        return
+    try:
+        from ui.pages.finance_import.panel import render_finance_import_correction_panel
+
+        client = FinanceImportApiClient(
+            base_url=resolve_api_base_url(),
+            headers=build_admin_headers(),
+        )
+        render_finance_import_correction_panel(
+            client,
+            row_identity=row_identity,
+            action_label=action_label,
+        )
+    except Exception as error:
+        st.error(f"帳務異常處理工作區載入失敗：{error}")
+
+
+def _render_government_refund_account(source_bindings: dict[str, object], action_label: str) -> None:
+    del source_bindings, action_label
+    try:
+        from ui.api_clients.government_subsidy_api_client import GovernmentSubsidyApiClient
+        from ui.pages.government_subsidy.payer_master_panel import (
+            render_government_refund_account_editor,
+        )
+
+        render_government_refund_account_editor(
+            GovernmentSubsidyApiClient(
+                base_url=resolve_api_base_url(),
+                headers=build_admin_headers(),
+            ),
+            key_prefix="finance_anomaly_government_refund_account",
+        )
+    except Exception as error:
+        st.error(f"政府退款帳戶工作區載入失敗：{error}")
+
+
+def _render_government_overpayment_disposition(
+    source_bindings: dict[str, object],
+    action_label: str,
+) -> None:
+    identity = source_bindings.get("overpayment_identity")
+    version = source_bindings.get("overpayment_version")
+    if not isinstance(identity, str) or not identity or isinstance(version, bool) or not isinstance(version, int):
+        st.error("recovery_source_binding_incomplete：缺少政府溢撥識別或版本。")
+        return
+    st.markdown(f"#### {action_label}")
+    key_prefix = f"government_disposition_{identity}"
+    disposition = st.radio("處置方式", ("offset", "return"), format_func=lambda value: "抵扣已核准補助" if value == "offset" else "建立政府退款應付", key=f"{key_prefix}_kind")
+    evidence = st.text_input("法源／核准證據", key=f"{key_prefix}_evidence")
+    reason = st.text_area("處置原因", key=f"{key_prefix}_reason")
+    preview_body = _government_disposition_preview_body(
+        identity,
+        disposition,
+        evidence,
+        key_prefix,
+    )
+    if preview_body is None:
+        return
+    signature = (preview_body.model_dump_json(), reason.strip())
+    preview_key = f"{key_prefix}_preview"
+    client = GovernmentSubsidyApiClient(
+        base_url=resolve_api_base_url(),
+        headers=build_admin_headers(),
+    )
+    if st.button(
+        "Preview 處置",
+        key=f"{key_prefix}_preview_button",
+        disabled=not reason.strip(),
+    ):
+        try:
+            preview = client.preview_overpayment_disposition(
+                preview_body,
+                f"government-overpayment-disposition-preview-{uuid.uuid4().hex}",
+            )
+        except GovernmentSubsidyApiError as error:
+            st.error(f"Preview 失敗 [{error.error.code}]：{error}")
+        else:
+            st.session_state[preview_key] = (signature, preview)
+            st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview；更動處置內容後必須重新 Preview。")
+        return
+    preview = stored[1]
+    st.caption(f"本次處置 {preview.disposition_amount_ntd:,} 元，處置後剩餘 {preview.remaining_after_ntd:,} 元。")
+    apply_body = GovernmentSubsidyOverpaymentDispositionApplyBody(
+        **preview_body.model_dump(),
+        expected_overpayment_version=version,
+        preview_fingerprint=preview.preview_fingerprint,
+        reason=reason,
+    )
+    if st.button("Apply 處置", key=f"{key_prefix}_apply", disabled=not reason.strip()):
+        try:
+            receipt = client.apply_overpayment_disposition(
+                apply_body,
+                f"government-overpayment-disposition-{uuid.uuid4().hex}",
+                f"government-overpayment-disposition-apply-{uuid.uuid4().hex}",
+            )
+        except GovernmentSubsidyApiError as error:
+            st.error(f"Apply 失敗 [{error.error.code}]：{error}")
+        else:
+            st.success(f"已完成處置；剩餘 {receipt.remaining_after_ntd:,} 元。")
+            st.session_state.pop(preview_key, None)
+
+
+def _render_government_return_reconciliation(
+    source_bindings: dict[str, object], action_label: str,
+) -> None:
+    row_id = _matching_row_id(source_bindings)
+    if row_id is None:
+        return
+    st.markdown(f"#### {action_label}")
+    key_prefix = f"government_return_reconciliation_{row_id}"
+    overpayment_identity = st.text_input("政府溢撥識別", key=f"{key_prefix}_overpayment")
+    reason = st.text_area("核對原因", key=f"{key_prefix}_reason")
+    evidence = st.text_input("對帳證據", key=f"{key_prefix}_evidence")
+    if not overpayment_identity.strip():
+        st.info("請選定唯一政府退款單所屬溢撥識別，再產生 Preview。")
+        return
+    preview_body = GovernmentOverpaymentReturnReconciliationPreviewBody(
+        overpayment_identity=overpayment_identity.strip(), finance_import_row_id=row_id,
+    )
+    signature = (preview_body.model_dump_json(), reason.strip(), evidence.strip())
+    preview_key = f"{key_prefix}_preview"
+    client = GovernmentSubsidyApiClient(base_url=resolve_api_base_url(), headers=build_admin_headers())
+    if st.button("Preview 對帳", key=f"{preview_key}_button", disabled=not reason.strip() or not evidence.strip()):
+        try:
+            preview = client.preview_overpayment_return_reconciliation(
+                preview_body, f"government-return-reconciliation-preview-{uuid.uuid4().hex}"
+            )
+        except GovernmentSubsidyApiError as error:
+            st.error(f"Preview 失敗 [{error.error.code}]：{error}")
+        else:
+            st.session_state[preview_key] = (signature, preview)
+            st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview；變更退款單、原因或證據後必須重新 Preview。")
+        return
+    preview = stored[1]
+    st.caption(f"此出款列核對 {preview.amount_ntd:,} 元；核對後退款單剩餘 {preview.remaining_after_ntd:,} 元。")
+    apply_body = GovernmentOverpaymentReturnReconciliationApplyBody(
+        **preview_body.model_dump(), expected_overpayment_version=preview.overpayment_version,
+        preview_fingerprint=preview.preview_fingerprint, reason=reason.strip(),
+        evidence_reference=evidence.strip(),
+    )
+    if st.button("Apply 對帳", key=f"{preview_key}_apply"):
+        try:
+            receipt = client.apply_overpayment_return_reconciliation(
+                apply_body, f"government-return-reconciliation-{uuid.uuid4().hex}",
+                f"government-return-reconciliation-apply-{uuid.uuid4().hex}",
+            )
+        except GovernmentSubsidyApiError as error:
+            st.error(f"Apply 失敗 [{error.error.code}]：{error}")
+        else:
+            st.success(f"已核對退款單；剩餘 {receipt.remaining_after_ntd:,} 元。")
+            st.session_state.pop(preview_key, None)
+
+
+def _render_client_over_refund_recovery_collection(
+    source_bindings: dict[str, object], action_label: str
+) -> None:
+    required_text = ("case_no", "recovery_identity", "finance_import_row_identity", "matching_identity")
+    if any(not isinstance(source_bindings.get(key), str) or not source_bindings[key] for key in required_text):
+        st.error("recovery_source_binding_incomplete：缺少客戶追償配對識別。")
+        return
+    required_versions = ("account_version", "recovery_version", "matching_version")
+    if any(isinstance(source_bindings.get(key), bool) or not isinstance(source_bindings.get(key), int) for key in required_versions):
+        st.error("recovery_source_binding_incomplete：缺少客戶追償版本。")
+        return
+    case_no = str(source_bindings["case_no"])
+    recovery_identity = str(source_bindings["recovery_identity"])
+    row_id = int(str(source_bindings["finance_import_row_identity"]))
+    matching_identity = str(source_bindings["matching_identity"])
+    matching_version = int(source_bindings["matching_version"])
+    st.markdown(f"#### {action_label}")
+    reason = st.text_area("收款核對原因", key=f"client_recovery_reason_{matching_identity}")
+    evidence = st.text_input("收款證據", key=f"client_recovery_evidence_{matching_identity}")
+    body = ClientOverRefundRecoveryMatchedPreviewBody(
+        recovery_identity=recovery_identity, finance_import_row_id=row_id,
+        matching_identity=matching_identity, matching_version=matching_version,
+    )
+    signature = (body.model_dump_json(), reason.strip(), evidence.strip())
+    preview_key = f"client_recovery_preview_{matching_identity}"
+    client = ClientRefundReversalApiClient(base_url=resolve_api_base_url(), headers=build_admin_headers())
+    if st.button("Preview 收款", key=f"{preview_key}_button", disabled=not reason.strip() or not evidence.strip()):
+        try:
+            preview = client.preview_matched_refund_overage_recovery(case_no, body)
+        except Exception as error:
+            st.error(f"Preview 失敗：{error}")
+        else:
+            st.session_state[preview_key] = (signature, preview)
+            st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview；變更原因或證據後必須重新 Preview。")
+        return
+    preview = stored[1]
+    st.caption(f"本次收款 {preview.amount_received_ntd:,} 元；收款後剩餘 {preview.remaining_after_ntd:,} 元。")
+    apply = ClientOverRefundRecoveryMatchedApplyBody(
+        **body.model_dump(), expected_recovery_version=int(source_bindings["recovery_version"]),
+        expected_account_version=int(source_bindings["account_version"]),
+        preview_fingerprint=preview.preview_fingerprint, reason=f"{reason.strip()}｜evidence:{evidence.strip()}",
+    )
+    if st.button("Apply 收款", key=f"{preview_key}_apply"):
+        try:
+            receipt = client.apply_matched_refund_overage_recovery(case_no, apply, f"client-recovery-collect-{uuid.uuid4().hex}")
+        except Exception as error:
+            st.error(f"Apply 失敗：{error}")
+        else:
+            st.success(f"已核銷；追償餘額 {receipt.remaining_after_ntd:,} 元。")
+            st.session_state.pop(preview_key, None)
+
+
+def _render_client_over_refund_recovery_matching(
+    source_bindings: dict[str, object], action_label: str
+) -> None:
+    row_id = _matching_row_id(source_bindings)
+    if row_id is None:
+        return
+    key_prefix = f"client_recovery_matching_{row_id}"
+    st.markdown(f"#### {action_label}")
+    case_no = st.text_input("案件編號", key=f"{key_prefix}_case")
+    recovery_identity = st.text_input("客戶追償識別", key=f"{key_prefix}_recovery")
+    reason = st.text_area("配對原因", key=f"{key_prefix}_reason")
+    evidence = st.text_input("配對證據", key=f"{key_prefix}_evidence")
+    if not case_no.strip() or not recovery_identity.strip():
+        st.info("請確認唯一案件與追償識別後，再產生 Preview。")
+        return
+    body = ClientOverRefundRecoveryMatchingPreviewBody(
+        recovery_identity=recovery_identity.strip(), finance_import_row_id=row_id
+    )
+    signature = (case_no.strip(), body.model_dump_json(), reason.strip(), evidence.strip())
+    preview_key = f"{key_prefix}_preview"
+    client = ClientRefundReversalApiClient(base_url=resolve_api_base_url(), headers=build_admin_headers())
+    if st.button("Preview 配對", key=f"{preview_key}_button", disabled=not reason.strip() or not evidence.strip()):
+        try:
+            preview = client.preview_refund_overage_recovery_matching(case_no.strip(), body)
+        except Exception as error:
+            st.error(f"Preview 失敗：{error}")
+        else:
+            st.session_state[preview_key] = (signature, preview)
+            st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview；變更案件、追償、原因或證據後必須重新 Preview。")
+        return
+    preview = stored[1]
+    st.caption("Preview 已確認此入款列、案件與追償可建立不可變配對。")
+    apply = ClientOverRefundRecoveryMatchingApplyBody(
+        **body.model_dump(), expected_recovery_version=preview.recovery_version,
+        expected_account_version=preview.account_version,
+        preview_fingerprint=preview.preview_fingerprint,
+        reason=f"{reason.strip()}｜evidence:{evidence.strip()}",
+    )
+    if st.button("Apply 建立配對", key=f"{preview_key}_apply"):
+        try:
+            client.apply_refund_overage_recovery_matching(
+                case_no.strip(), apply, f"client-recovery-match-{uuid.uuid4().hex}"
+            )
+        except Exception as error:
+            st.error(f"Apply 失敗：{error}")
+        else:
+            st.success("已建立配對；異常中心將顯示正式收款動作。")
+            st.session_state.pop(preview_key, None)
+
+
+def _render_client_refund_overage(source_bindings: dict[str, object], action_label: str) -> None:
+    row_id = _matching_row_id(source_bindings)
+    if row_id is None:
+        return
+    st.markdown(f"#### {action_label}")
+    key = f"client_refund_overage_{row_id}"
+    case_no = st.text_input("案件編號", key=f"{key}_case")
+    obligations = tuple(value.strip() for value in st.text_area("退款義務識別（每行一筆）", key=f"{key}_obligations").splitlines() if value.strip())
+    reason = st.text_area("處理原因", key=f"{key}_reason")
+    if not case_no.strip() or not obligations:
+        st.info("請輸入唯一案件與退款義務識別。")
+        return
+    body = ClientRefundPreviewBody(finance_import_row_ids=[row_id], obligation_identities=list(obligations))
+    client = ClientRefundReversalApiClient(base_url=resolve_api_base_url(), headers=build_admin_headers())
+    signature = (case_no.strip(), body.model_dump_json(), reason.strip())
+    preview_key = f"{key}_preview"
+    if st.button("Preview 退款多匯", key=f"{preview_key}_button", disabled=not reason.strip()):
+        try: preview = client.preview_refund_overage(case_no.strip(), body)
+        except Exception as error: st.error(f"Preview 失敗：{error}")
+        else: st.session_state[preview_key] = (signature, preview); st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview。")
+        return
+    preview = stored[1]
+    apply = ClientRefundApplyBody(**body.model_dump(), expected_account_version=preview.account_version, preview_fingerprint=preview.preview_fingerprint, reason=reason.strip())
+    if st.button("Apply 退款多匯", key=f"{preview_key}_apply"):
+        try: client.apply_refund_overage(case_no.strip(), apply, f"client-refund-overage-{uuid.uuid4().hex}")
+        except Exception as error: st.error(f"Apply 失敗：{error}")
+        else: st.success("已建立客戶退款超額追償。"); st.session_state.pop(preview_key, None)
+
+
+def _render_staff_overpayment_recovery_collection(source_bindings: dict[str, object], action_label: str) -> None:
+    required_text = ("recovery_identity", "finance_import_row_identity", "matching_identity")
+    required_numbers = ("recovery_version", "staff_payables_version", "matching_version")
+    if any(not isinstance(source_bindings.get(key), str) or not source_bindings[key] for key in required_text) or any(isinstance(source_bindings.get(key), bool) or not isinstance(source_bindings.get(key), int) for key in required_numbers):
+        st.error("recovery_source_binding_incomplete：缺少月嫂追償配對或版本。")
+        return
+    identity = str(source_bindings["matching_identity"])
+    body = StaffOverpaymentRecoveryMatchedPreviewBody(recovery_identity=str(source_bindings["recovery_identity"]), finance_import_row_id=int(str(source_bindings["finance_import_row_identity"])), matching_identity=identity, matching_version=int(source_bindings["matching_version"]))
+    st.markdown(f"#### {action_label}")
+    reason = st.text_area("收款核對原因", key=f"staff_recovery_reason_{identity}")
+    evidence = st.text_input("收款證據", key=f"staff_recovery_evidence_{identity}")
+    signature = (body.model_dump_json(), reason.strip(), evidence.strip())
+    preview_key = f"staff_recovery_preview_{identity}"
+    client = StaffPayoutApiClient(base_url=resolve_api_base_url(), headers=build_admin_headers())
+    if st.button("Preview 收款", key=f"{preview_key}_button", disabled=not reason.strip() or not evidence.strip()):
+        try: preview = client.preview_matched_overpayment_recovery_collection(body, f"staff-recovery-preview-{uuid.uuid4().hex}")
+        except StaffPayoutApiError as error: st.error(f"Preview 失敗 [{error.error.code}]：{error}")
+        else: st.session_state[preview_key] = (signature, preview); st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview；變更原因或證據後必須重新 Preview。")
+        return
+    preview = stored[1]
+    st.caption(f"本次收款 {preview.received_amount_ntd:,} 元；收款後剩餘 {preview.remaining_after_ntd:,} 元。")
+    apply = StaffOverpaymentRecoveryMatchedApplyBody(**body.model_dump(), expected_recovery_version=int(source_bindings["recovery_version"]), expected_staff_payables_version=int(source_bindings["staff_payables_version"]), preview_fingerprint=preview.preview_fingerprint, reason=f"{reason.strip()}｜evidence:{evidence.strip()}")
+    if st.button("Apply 收款", key=f"{preview_key}_apply"):
+        try: receipt = client.apply_matched_overpayment_recovery_collection(apply, f"staff-recovery-collect-{uuid.uuid4().hex}", f"staff-recovery-apply-{uuid.uuid4().hex}")
+        except StaffPayoutApiError as error: st.error(f"Apply 失敗 [{error.error.code}]：{error}")
+        else: st.success(f"已核銷；追償餘額 {receipt.remaining_after_ntd:,} 元。"); st.session_state.pop(preview_key, None)
+
+
+def _render_staff_overpayment_recovery_matching(
+    source_bindings: dict[str, object], action_label: str
+) -> None:
+    row_id = _matching_row_id(source_bindings)
+    if row_id is None:
+        return
+    key_prefix = f"staff_recovery_matching_{row_id}"
+    st.markdown(f"#### {action_label}")
+    recovery_identity = st.text_input("月嫂追償識別", key=f"{key_prefix}_recovery")
+    reason = st.text_area("配對原因", key=f"{key_prefix}_reason")
+    evidence = st.text_input("配對證據", key=f"{key_prefix}_evidence")
+    if not recovery_identity.strip():
+        st.info("請確認唯一月嫂追償識別後，再產生 Preview。")
+        return
+    body = StaffOverpaymentRecoveryMatchingPreviewBody(
+        recovery_identity=recovery_identity.strip(), finance_import_row_id=row_id
+    )
+    signature = (body.model_dump_json(), reason.strip(), evidence.strip())
+    preview_key = f"{key_prefix}_preview"
+    client = StaffPayoutApiClient(base_url=resolve_api_base_url(), headers=build_admin_headers())
+    if st.button("Preview 配對", key=f"{preview_key}_button", disabled=not reason.strip() or not evidence.strip()):
+        try:
+            preview = client.preview_overpayment_recovery_matching(body, f"staff-recovery-match-preview-{uuid.uuid4().hex}")
+        except StaffPayoutApiError as error:
+            st.error(f"Preview 失敗 [{error.error.code}]：{error}")
+        else:
+            st.session_state[preview_key] = (signature, preview)
+            st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview；變更追償、原因或證據後必須重新 Preview。")
+        return
+    preview = stored[1]
+    st.caption("Preview 已確認此入款列與月嫂追償可建立不可變配對。")
+    apply = StaffOverpaymentRecoveryMatchingApplyBody(
+        **body.model_dump(), expected_recovery_version=preview.recovery_version,
+        expected_staff_payables_version=preview.staff_payables_version,
+        preview_fingerprint=preview.preview_fingerprint,
+        reason=f"{reason.strip()}｜evidence:{evidence.strip()}",
+    )
+    if st.button("Apply 建立配對", key=f"{preview_key}_apply"):
+        try:
+            client.apply_overpayment_recovery_matching(
+                apply, f"staff-recovery-match-{uuid.uuid4().hex}",
+                f"staff-recovery-match-apply-{uuid.uuid4().hex}",
+            )
+        except StaffPayoutApiError as error:
+            st.error(f"Apply 失敗 [{error.error.code}]：{error}")
+        else:
+            st.success("已建立配對；異常中心將顯示正式收款動作。")
+            st.session_state.pop(preview_key, None)
+
+
+def _render_staff_payout_difference(
+    source_bindings: dict[str, object], action_label: str,
+) -> None:
+    row_id = _matching_row_id(source_bindings)
+    if row_id is None:
+        return
+    st.markdown(f"#### {action_label}")
+    key_prefix = f"staff_payout_difference_{row_id}"
+    mode = st.radio("實際出款差異", ("underpayment", "overpayment"), format_func=lambda value: "少匯" if value == "underpayment" else "多匯", key=f"{key_prefix}_mode")
+    raw_obligations = st.text_area("月嫂應付識別（每行一筆）", key=f"{key_prefix}_obligations")
+    reason = st.text_area("處理原因", key=f"{key_prefix}_reason")
+    obligations = tuple(line.strip() for line in raw_obligations.splitlines() if line.strip())
+    if not obligations:
+        st.info("請輸入已確認同一月嫂的應付識別。")
+        return
+    client = StaffPayoutApiClient(base_url=resolve_api_base_url(), headers=build_admin_headers())
+    signature = (mode, obligations, reason.strip())
+    preview_key = f"{key_prefix}_preview"
+    if st.button("Preview 差額處理", key=f"{preview_key}_button", disabled=not reason.strip()):
+        try:
+            preview = client.preview_payout_difference([row_id], obligations, mode, f"staff-payout-difference-preview-{uuid.uuid4().hex}")
+        except StaffPayoutApiError as error:
+            st.error(f"Preview 失敗 [{error.error.code}]：{error}")
+        else:
+            st.session_state[preview_key] = (signature, preview)
+            st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview；變更模式、應付項目或原因後必須重新 Preview。")
+        return
+    preview = stored[1]
+    st.caption("Preview 已驗證出款列、月嫂帳戶與所選應付項目的金額差異。")
+    if st.button("Apply 差額處理", key=f"{preview_key}_apply"):
+        try:
+            client.apply_payout_difference([row_id], obligations, mode, preview, reason=reason.strip(), idempotency_key=f"staff-payout-difference-{uuid.uuid4().hex}", correlation_id=f"staff-payout-difference-apply-{uuid.uuid4().hex}")
+        except StaffPayoutApiError as error:
+            st.error(f"Apply 失敗 [{error.error.code}]：{error}")
+        else:
+            st.success("已送出正式月嫂付款差額處理。")
+            st.session_state.pop(preview_key, None)
+
+
+def _matching_row_id(source_bindings: dict[str, object]) -> int | None:
+    identity = source_bindings.get("finance_import_row_identity")
+    raw = identity.removeprefix("finance-import-row:") if isinstance(identity, str) else ""
+    if not raw.isdigit() or int(raw) <= 0:
+        st.error("recovery_source_binding_incomplete：缺少可用的銀行流水識別。")
+        return None
+    return int(raw)
+
+
+def _render_client_receipt_overage(source_bindings: dict[str, object], action_label: str) -> None:
+    row_id = _matching_row_id(source_bindings)
+    if row_id is None:
+        return
+    st.markdown(f"#### {action_label}")
+    key = f"client_receipt_overage_{row_id}"
+    case_no = st.text_input("案件編號", key=f"{key}_case")
+    stage = st.selectbox("收款階段", ("deposit", "first", "second", "adjustment"), key=f"{key}_stage")
+    obligations = tuple(item.strip() for item in st.text_area("應收義務識別（每行一筆）", key=f"{key}_obligations").splitlines() if item.strip())
+    reason = st.text_area("處理原因", key=f"{key}_reason")
+    if not case_no.strip() or not obligations:
+        st.info("請輸入案件與應收義務。")
+        return
+    body = ClientReceiptPreviewBody(payment_stage=stage, finance_import_row_ids=[row_id], obligation_identities=list(obligations))
+    client = ClientReceiptReconciliationApiClient(base_url=resolve_api_base_url(), headers=build_admin_headers())
+    signature = (case_no.strip(), body.model_dump_json(), reason.strip())
+    preview_key = f"{key}_preview"
+    if st.button("Preview 收款超額", key=f"{preview_key}_button", disabled=not reason.strip()):
+        try:
+            preview = client.preview_overage(case_no.strip(), body)
+        except Exception as error:
+            st.error(f"Preview 失敗：{error}")
+        else:
+            st.session_state[preview_key] = (signature, preview)
+            st.rerun()
+    stored = st.session_state.get(preview_key)
+    if not isinstance(stored, tuple) or len(stored) != 2 or stored[0] != signature:
+        st.info("請先成功 Preview；變更案件、義務、階段或原因後必須重新 Preview。")
+        return
+    preview = stored[1]
+    apply = ClientReceiptApplyBody(**body.model_dump(), expected_account_version=preview.account_version, preview_fingerprint=preview.preview_fingerprint, reason=reason.strip())
+    if st.button("Apply 收款超額", key=f"{preview_key}_apply"):
+        try:
+            client.apply_overage(case_no.strip(), apply, f"client-receipt-overage-{uuid.uuid4().hex}")
+        except Exception as error:
+            st.error(f"Apply 失敗：{error}")
+        else:
+            st.success("已建立客戶超收退款應付。")
+            st.session_state.pop(preview_key, None)
+
+
+def _government_disposition_preview_body(
+    identity: str,
+    disposition: str,
+    evidence: str,
+    key_prefix: str,
+) -> GovernmentSubsidyOverpaymentDispositionPreviewBody | None:
+    if disposition == "return":
+        due_date = st.date_input("退款到期日", key=f"{key_prefix}_due_date")
+        try:
+            return GovernmentSubsidyOverpaymentDispositionPreviewBody(
+                overpayment_identity=identity,
+                disposition="return",
+                due_date=due_date.isoformat(),
+                evidence_reference=evidence,
+            )
+        except ValueError as error:
+            st.info(f"請補齊退還資料：{error}")
+            return None
+    targets = _government_offset_targets(key_prefix)
+    if not targets:
+        st.info("至少輸入一筆已核准、同付款方的 claim item 與抵扣金額。")
+        return None
+    try:
+        return GovernmentSubsidyOverpaymentDispositionPreviewBody(
+            overpayment_identity=identity,
+            disposition="offset",
+            targets=targets,
+            evidence_reference=evidence,
+        )
+    except ValueError as error:
+        st.info(f"請補齊抵扣資料：{error}")
+        return None
+
+
+def _government_offset_targets(
+    key_prefix: str,
+) -> list[GovernmentSubsidyOverpaymentOffsetIntentView]:
+    targets: list[GovernmentSubsidyOverpaymentOffsetIntentView] = []
+    st.caption("可同時輸入最多三筆抵扣 target；不足可先完成一筆，再對剩餘溢撥重新處置。")
+    for index in range(3):
+        columns = st.columns(2)
+        item_id = columns[0].number_input(
+            f"Claim item {index + 1}",
+            min_value=0,
+            step=1,
+            key=f"{key_prefix}_target_item_{index}",
+        )
+        amount = columns[1].number_input(
+            f"抵扣金額 {index + 1}",
+            min_value=0,
+            step=1,
+            key=f"{key_prefix}_target_amount_{index}",
+        )
+        if item_id == 0 and amount == 0:
+            continue
+        if item_id == 0 or amount == 0:
+            st.info(f"第 {index + 1} 筆 target 必須同時填 claim item 與金額。")
+            return []
+        targets.append(
+            GovernmentSubsidyOverpaymentOffsetIntentView(
+                claim_item_id=int(item_id),
+                amount_ntd=int(amount),
+            )
+        )
+    return targets
 
 
 def _render_per_row_action_table(
@@ -496,10 +1164,18 @@ def _schedule_staff_calendar_target(item: AnomalySummaryView) -> tuple[int, str,
     return None
 
 
+def _schedule_assignment_repair_case(item: AnomalySummaryView) -> str | None:
+    if item.definition_code != "SCHEDULE-006":
+        return None
+    case_no = _case_no(item).strip()
+    return case_no or None
+
+
 def _render_staff_table(items: tuple[AnomalySummaryView, ...]) -> None:
     """服務人員分頁：SCHEDULE-001/003/005 有明確的月嫂＋日期，逐列給「前往處理」
     直接定位到「多月嫂排班→服務人員月曆」該月嫂當月行事曆（不受案件狀態影響）；
-    SCHEDULE-002/006、PAYOUT-* 沒有明確可深連結的目的地，維持純表格列。"""
+    SCHEDULE-006 導向既有的「案件人力配置」Preview/Apply；其餘沒有明確可深連結
+    目的地的警示維持純表格列。"""
     if not items:
         st.info("目前沒有符合條件的異常。")
         return
@@ -516,6 +1192,12 @@ def _render_staff_table(items: tuple[AnomalySummaryView, ...]) -> None:
                 staff_id, date_text, note = target
                 if row_cols[0].button("🎯 前往處理", key=f"staff_row_{item.fingerprint[:8]}"):
                     _navigate_to_staff_calendar(staff_id, date_text, note)
+            elif repair_case_no := _schedule_assignment_repair_case(item):
+                if row_cols[0].button(
+                    "🎯 前往正式人力配置",
+                    key=f"staff_assignment_{item.fingerprint[:8]}",
+                ):
+                    _navigate_to_assignment_repair(repair_case_no)
             else:
                 row_cols[0].caption("尚無對應頁面")
             row_cols[1].write(_case_no(item))
@@ -562,7 +1244,7 @@ def _render_process_tab(items: tuple[AnomalySummaryView, ...]) -> None:
 
 def show() -> None:
     st.title(title)
-    st.caption("人工檢視、認領與解除異常；本頁不建立、修改或強制對平正式帳務。")
+    st.caption("依異常類型提供固定 Preview／Apply 處置；正式帳務只能由後端核銷命令建立。")
     try:
         registry_client = _registry_client()
         recovery_client = _recovery_client()
@@ -580,11 +1262,7 @@ def show() -> None:
     )
 
     with import_tab:
-        _render_table_only(
-            "資料匯入異常",
-            "HCM／BeClass 欄位驗證、身分衝突、銀行對帳匯入完整性。",
-            _filter(items, _IMPORT_CODES),
-        )
+        _render_import_tab(items)
 
     with process_tab:
         _render_process_tab(items)
@@ -606,6 +1284,35 @@ def show() -> None:
             "客戶/服務人員尚未綁定 LINE、群組任務推播無回覆、同一帳號同時綁定兩種身分。",
             _filter(items, _LINE_CODES),
         )
+
+
+def _render_import_tab(items: tuple[AnomalySummaryView, ...]) -> None:
+    _render_table_only(
+        "資料匯入異常",
+        "HCM／BeClass 欄位驗證、身分衝突、銀行對帳匯入完整性。",
+        _filter(items, _IMPORT_CODES),
+    )
+    _render_beclass_review_workspace(_filter(items, {"IMPORT-001"}))
+
+
+def _render_beclass_review_workspace(items: tuple[AnomalySummaryView, ...]) -> None:
+    try:
+        from ui.api_clients.beclass_import_review_api_client import (
+            BeClassImportReviewApiClient,
+        )
+        from ui.pages.anomalies.beclass_import_review_panel import (
+            render_beclass_import_review_panel,
+        )
+
+        render_beclass_import_review_panel(
+            BeClassImportReviewApiClient(
+                base_url=resolve_api_base_url(),
+                headers=build_admin_headers(),
+            ),
+            suggested_review_identities=tuple(item.source_identity for item in items),
+        )
+    except Exception as error:
+        st.error(f"BeClass 匯入修正工作區載入失敗：{error}")
 
 
 if __name__ == "__main__":

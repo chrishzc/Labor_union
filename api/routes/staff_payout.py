@@ -12,9 +12,11 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from pymysql.err import OperationalError
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_capability, require_system_admin
 from api.dependencies.staff_payout import (
     StaffPayoutApplication,
+    get_staff_overpayment_recovery_application,
+    get_staff_overpayment_recovery_matching_application,
     get_staff_payout_application,
 )
 from api.schemas.base import BaseResponse
@@ -27,6 +29,8 @@ from infrastructure.mysql.background_job_repository import (
 from shared_kernel.durable_job_queue import DurableJobCommand
 from api.schemas.staff_payout import (
     PayoutApplyBody,
+    PayoutDifferenceApplyBody,
+    PayoutDifferencePreviewBody,
     PayoutPreviewBody,
     ReturnApplyBody,
     ReturnPreviewBody,
@@ -34,9 +38,23 @@ from api.schemas.staff_payout import (
     ReversalPreviewBody,
     StaffPayablesQueryView,
     StaffPayoutPreviewView,
+    StaffPayoutDifferenceSourceView,
     StaffPayoutReceiptView,
+    StaffOverpaymentRecoveryApplyBody,
+    StaffOverpaymentRecoveryMatchedApplyBody,
+    StaffOverpaymentRecoveryMatchedPreviewBody,
+    StaffOverpaymentRecoveryMatchingApplyBody,
+    StaffOverpaymentRecoveryMatchingPreviewBody,
+    StaffOverpaymentRecoveryMatchingPreviewView,
+    StaffOverpaymentRecoveryMatchingReceiptView,
+    StaffOverpaymentRecoveryAdjustmentApplyBody,
+    StaffOverpaymentRecoveryAdjustmentPreviewBody,
+    StaffOverpaymentRecoveryAdjustmentPreviewView,
+    StaffOverpaymentRecoveryPreviewBody,
+    StaffOverpaymentRecoveryPreviewView,
+    StaffOverpaymentRecoveryReceiptView,
 )
-from domains.staff_payables.reconciliation import StaffPayoutEventType
+from domains.staff_payables.reconciliation import StaffPayoutDifferenceMode, StaffPayoutEventType
 from infrastructure.mysql.staff_payout_repository import (
     build_return_reopen_identity,
     build_reversal_reopen_identity,
@@ -44,6 +62,7 @@ from infrastructure.mysql.staff_payout_repository import (
 from subsystems.access.authentication_session import AdminPrincipal
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.money import MoneyNTD
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -54,6 +73,19 @@ from subsystems.staff_payables.payout_reconciliation import (
     StaffPayoutApplyRequest,
     StaffPayoutReconciliationError,
     StaffPayoutSelection,
+)
+from subsystems.staff_payables.overpayment_recovery import (
+    StaffOverpaymentRecoveryAction,
+    StaffOverpaymentRecoveryApplyRequest,
+    StaffOverpaymentRecoveryError,
+    StaffOverpaymentRecoverySelection,
+    StaffOverpaymentRecoveryWorkflow,
+)
+from subsystems.staff_payables.overpayment_recovery_matching import (
+    StaffOverpaymentRecoveryMatchingApplyRequest,
+    StaffOverpaymentRecoveryMatchingError,
+    StaffOverpaymentRecoveryMatchingSelection,
+    StaffOverpaymentRecoveryMatchingWorkflow,
 )
 
 router = APIRouter(prefix="/api/v1/staff-payables", tags=["Staff Payables"])
@@ -105,6 +137,45 @@ def apply_payout(
             idempotency_key,
             correlation_id,
             principal,
+        ),
+        job_repository,
+    )
+
+
+@router.post(
+    "/payout-difference/preview",
+    response_model=BaseResponse[StaffPayoutPreviewView],
+)
+def preview_payout_difference(
+    body: PayoutDifferencePreviewBody,
+    correlation_id: _CorrelationHeader = "staff-payout-difference-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: StaffPayoutApplication = Depends(get_staff_payout_application),
+):
+    del principal
+    return _preview_response(
+        application,
+        lambda: _payout_difference_selection(body),
+        CorrelationId(correlation_id),
+    )
+
+
+@router.post(
+    "/payout-difference/apply",
+    response_model=BaseResponse[JobAcceptedResponse],
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def apply_payout_difference(
+    body: PayoutDifferenceApplyBody,
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+):
+    return _apply_response(
+        lambda: _apply_request(
+            _payout_difference_selection(body), body, idempotency_key,
+            correlation_id, principal,
         ),
         job_repository,
     )
@@ -211,6 +282,151 @@ def query_staff_payables(
     )
 
 
+@router.get("/payout-differences/{payout_difference_identity}", response_model=BaseResponse[StaffPayoutDifferenceSourceView])
+def query_payout_difference_source(
+    payout_difference_identity: str = Path(..., min_length=1, max_length=191),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: StaffPayoutApplication = Depends(get_staff_payout_application),
+):
+    del principal
+    return _call_endpoint(lambda: application.query_payout_difference_source(payout_difference_identity), "成功取得月嫂付款差額來源", CorrelationId(f"staff-payout-difference-source:{payout_difference_identity}"))
+
+
+@router.post(
+    "/overpayment-recoveries/collection/preview",
+    response_model=BaseResponse[StaffOverpaymentRecoveryPreviewView],
+)
+def preview_overpayment_recovery_collection(
+):
+    _raise_unmatched_recovery_retired()
+
+
+@router.post(
+    "/overpayment-recoveries/collection/apply",
+    response_model=BaseResponse[StaffOverpaymentRecoveryReceiptView],
+)
+def apply_overpayment_recovery_collection(
+):
+    _raise_unmatched_recovery_retired()
+
+
+@router.post("/overpayment-recoveries/matched/preview", response_model=BaseResponse[StaffOverpaymentRecoveryPreviewView])
+def preview_matched_overpayment_recovery_collection(
+    body: StaffOverpaymentRecoveryMatchedPreviewBody,
+    correlation_id: _CorrelationHeader = "staff-overpayment-recovery-matched-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow: StaffOverpaymentRecoveryWorkflow = Depends(get_staff_overpayment_recovery_application),
+):
+    del principal
+    correlation = CorrelationId(correlation_id)
+    return _call_endpoint(lambda: _recovery_preview_payload(workflow.preview(_matched_recovery_selection(body), correlation)), "成功產生已配對月嫂追償收款預覽", correlation)
+
+
+@router.post("/overpayment-recoveries/matched/apply", response_model=BaseResponse[StaffOverpaymentRecoveryReceiptView])
+def apply_matched_overpayment_recovery_collection(
+    body: StaffOverpaymentRecoveryMatchedApplyBody,
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow: StaffOverpaymentRecoveryWorkflow = Depends(get_staff_overpayment_recovery_application),
+):
+    correlation = CorrelationId(correlation_id)
+    request = StaffOverpaymentRecoveryApplyRequest(
+        _matched_recovery_selection(body), ExpectedVersion(body.expected_recovery_version),
+        ExpectedVersion(body.expected_staff_payables_version), PreviewFingerprint(body.preview_fingerprint),
+        IdempotencyKey(idempotency_key), ActorContext(str(principal.username or "").strip()), body.reason, correlation,
+    )
+    return _call_endpoint(lambda: _materialize(workflow.apply(request)), "已核銷已配對月嫂追償入款", correlation)
+
+
+@router.post("/overpayment-recoveries/matching/preview", response_model=BaseResponse[StaffOverpaymentRecoveryMatchingPreviewView])
+def preview_overpayment_recovery_matching(
+    body: StaffOverpaymentRecoveryMatchingPreviewBody,
+    correlation_id: _CorrelationHeader = "staff-overpayment-recovery-matching-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow: StaffOverpaymentRecoveryMatchingWorkflow = Depends(get_staff_overpayment_recovery_matching_application),
+):
+    del principal
+    correlation = CorrelationId(correlation_id)
+    return _call_endpoint(lambda: _matching_preview_payload(workflow.preview(_matching_selection(body), correlation)), "成功產生月嫂追償入款配對預覽", correlation)
+
+
+@router.post("/overpayment-recoveries/matching/apply", response_model=BaseResponse[StaffOverpaymentRecoveryMatchingReceiptView])
+def apply_overpayment_recovery_matching(
+    body: StaffOverpaymentRecoveryMatchingApplyBody,
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow: StaffOverpaymentRecoveryMatchingWorkflow = Depends(get_staff_overpayment_recovery_matching_application),
+):
+    correlation = CorrelationId(correlation_id)
+    request = StaffOverpaymentRecoveryMatchingApplyRequest(
+        _matching_selection(body), ExpectedVersion(body.expected_recovery_version),
+        ExpectedVersion(body.expected_staff_payables_version), PreviewFingerprint(body.preview_fingerprint),
+        IdempotencyKey(idempotency_key), ActorContext(str(principal.username or "").strip()),
+        body.reason, correlation,
+    )
+    return _call_matching_endpoint(lambda: _materialize(workflow.apply(request)), "已建立月嫂追償入款配對", correlation)
+
+
+@router.post(
+    "/overpayment-recoveries/adjustment/preview",
+    response_model=BaseResponse[StaffOverpaymentRecoveryAdjustmentPreviewView],
+)
+def preview_overpayment_recovery_adjustment(
+    body: StaffOverpaymentRecoveryAdjustmentPreviewBody,
+    correlation_id: _CorrelationHeader = "staff-overpayment-recovery-adjustment-preview",
+    principal: AdminPrincipal = Depends(
+        require_capability("staff_payables.recovery.adjust")
+    ),
+    workflow: StaffOverpaymentRecoveryWorkflow = Depends(
+        get_staff_overpayment_recovery_application
+    ),
+):
+    del principal
+    correlation = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _recovery_adjustment_preview_payload(
+            workflow.preview(_recovery_adjustment_selection(body), correlation)
+        ),
+        "成功產生月嫂超額付款追償調整預覽",
+        correlation,
+    )
+
+
+@router.post(
+    "/overpayment-recoveries/adjustment/apply",
+    response_model=BaseResponse[StaffOverpaymentRecoveryReceiptView],
+)
+def apply_overpayment_recovery_adjustment(
+    body: StaffOverpaymentRecoveryAdjustmentApplyBody,
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    principal: AdminPrincipal = Depends(
+        require_capability("staff_payables.recovery.adjust")
+    ),
+    workflow: StaffOverpaymentRecoveryWorkflow = Depends(
+        get_staff_overpayment_recovery_application
+    ),
+):
+    correlation = CorrelationId(correlation_id)
+    request = StaffOverpaymentRecoveryApplyRequest(
+        _recovery_adjustment_selection(body),
+        ExpectedVersion(body.expected_recovery_version),
+        ExpectedVersion(body.expected_staff_payables_version),
+        PreviewFingerprint(body.preview_fingerprint),
+        IdempotencyKey(idempotency_key),
+        ActorContext(str(principal.username or "").strip()),
+        body.reason,
+        correlation,
+    )
+    return _call_endpoint(
+        lambda: _materialize(workflow.apply(request)),
+        "已套用月嫂超額付款追償調整",
+        correlation,
+    )
+
+
 def _preview_response(application, build_selection, correlation_id):
     return _call_endpoint(
         lambda: _build_preview_payload(
@@ -272,6 +488,7 @@ def _staff_payout_payload(request):
             "bank_fact_identities": list(selection.bank_fact_identities),
             "obligation_identities": list(selection.obligation_identities),
             "reopen_fact_identity": selection.reopen_fact_identity,
+            "difference_mode": None if selection.difference_mode is None else selection.difference_mode.value,
         },
     }
 
@@ -281,6 +498,15 @@ def _payout_selection(body) -> StaffPayoutSelection:
         StaffPayoutEventType.PAYOUT,
         _canonical_integer_identities(body.finance_import_row_ids),
         _canonical_text_identities(body.obligation_identities),
+    )
+
+
+def _payout_difference_selection(body) -> StaffPayoutSelection:
+    return StaffPayoutSelection(
+        StaffPayoutEventType.PAYOUT,
+        _canonical_integer_identities(body.finance_import_row_ids),
+        _canonical_text_identities(body.obligation_identities),
+        difference_mode=StaffPayoutDifferenceMode(body.mode),
     )
 
 
@@ -324,6 +550,68 @@ def _apply_request(selection, body, key, correlation, principal):
     )
 
 
+def _matched_recovery_selection(body) -> StaffOverpaymentRecoverySelection:
+    return StaffOverpaymentRecoverySelection(body.recovery_identity.strip(), StaffOverpaymentRecoveryAction.COLLECT, str(body.finance_import_row_id), matching_identity=body.matching_identity.strip(), matching_version=body.matching_version)
+
+
+def _raise_unmatched_recovery_retired() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "error": {
+                "code": "staff_overpayment_recovery_matching_required",
+                "message": "追償收款必須先建立不可變入款配對。",
+                "replacement": "/overpayment-recoveries/matching/preview",
+            }
+        },
+    )
+
+
+def _recovery_adjustment_selection(body) -> StaffOverpaymentRecoverySelection:
+    return StaffOverpaymentRecoverySelection(
+        body.recovery_identity.strip(),
+        StaffOverpaymentRecoveryAction.ADJUST,
+        adjustment_amount=MoneyNTD(body.adjustment_amount_ntd),
+    )
+
+
+def _matching_selection(body) -> StaffOverpaymentRecoveryMatchingSelection:
+    return StaffOverpaymentRecoveryMatchingSelection(body.recovery_identity.strip(), str(body.finance_import_row_id))
+
+
+def _matching_preview_payload(preview):
+    candidate = preview.candidate
+    return {"recovery_identity": candidate.recovery_identity, "staff_id": candidate.staff_id, "finance_import_row_identity": candidate.finance_import_row_identity, "recovery_version": candidate.recovery_version, "staff_payables_version": candidate.staff_payables_version, "preview_fingerprint": preview.fingerprint.value}
+
+
+def _recovery_preview_payload(preview):
+    candidate = preview.candidate
+    return {
+        "recovery_identity": candidate.recovery_identity,
+        "recovery_version": preview.recovery_version,
+        "staff_payables_version": preview.staff_payables_version,
+        "received_amount_ntd": candidate.received_amount.amount,
+        "remaining_before_ntd": candidate.remaining_before.amount,
+        "remaining_after_ntd": candidate.remaining_after.amount,
+        "resulting_status": candidate.resulting_status.value,
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+
+
+def _recovery_adjustment_preview_payload(preview):
+    candidate = preview.candidate
+    return {
+        "recovery_identity": candidate.recovery_identity,
+        "recovery_version": preview.recovery_version,
+        "staff_payables_version": preview.staff_payables_version,
+        "adjustment_amount_ntd": candidate.adjustment_amount.amount,
+        "remaining_before_ntd": candidate.remaining_before.amount,
+        "remaining_after_ntd": candidate.remaining_after.amount,
+        "resulting_status": candidate.resulting_status.value,
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+
+
 def _preview_payload(preview, event_type):
     return {
         "event_type": event_type.value,
@@ -358,6 +646,8 @@ def _call_endpoint(command, message, correlation_id):
         return BaseResponse(data=command(), message=message)
     except StaffPayoutReconciliationError as error:
         _raise_typed_error(error.error)
+    except StaffOverpaymentRecoveryError as error:
+        _raise_typed_error(error.error)
     except OperationalError as error:
         _raise_mysql_error(error, correlation_id)
     except ValueError as error:
@@ -366,6 +656,15 @@ def _call_endpoint(command, message, correlation_id):
         raise
     except Exception as error:
         raise _internal_error(correlation_id) from error
+
+
+def _call_matching_endpoint(command, message, correlation_id):
+    try:
+        return BaseResponse(data=command(), message=message)
+    except StaffOverpaymentRecoveryMatchingError as error:
+        _raise_typed_error(error.error)
+    except ValueError as error:
+        _raise_value_error(error, correlation_id)
 
 
 def _raise_typed_error(error: TypedError) -> None:

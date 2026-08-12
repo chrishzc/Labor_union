@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "ENTRY-001",
+  "scenario_digest": "d32b99b85c94749b2ae7644e565eb65b22989fdaa9c99c981796601f172b1ebe",
+  "result": "passed",
+  "assertion_count": 3,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_entrypoint_review_queue.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "static entry-point governance"
+  },
+  "input_digests": {
+    "entrypoint_review_queue": "28508a64c392b0f72c147c06313973f47eff817675f3ab0d2db1ee1343d96463",
+    "entrypoint_queue_generator": "1b18f0937cc35b152442a053d88cc178974c761031329eaa3128b05cc2a25eb1",
+    "entrypoint_queue_tests": "e88875ac4aa7a7e308f10e7f52ec34bd0e6f05346c4cd247dcb69ecd65a26879"
+  },
+  "input_paths": {
+    "entrypoint_review_queue": "document/架構重整/03_追蹤清單與證據/evidence/entrypoint_review_queue_v1.jsonl",
+    "entrypoint_queue_generator": "scripts/generate_entrypoint_review_queue.py",
+    "entrypoint_queue_tests": "tests/test_entrypoint_review_queue.py"
+  }
+}

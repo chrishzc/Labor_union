@@ -1,0 +1,43 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "ORD-CANCELLATION-WORKFLOW-003",
+  "track": "A",
+  "suite_id": "ORD",
+  "status": "bound",
+  "requires_database": false,
+  "coverage_scope": "supplemental",
+  "test_kinds": ["subsystem_state_machine", "expected_manifest"],
+  "coverage_ids": ["ORD-05"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ORD-05",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#5.7"
+  ],
+  "root_facts": [
+    "An authoritative, read-only cancellation workflow snapshot: order terms, assignment-owned official days, client-finance and payroll terms, lifecycle precondition and aggregate versions.",
+    "A typed confirmed-service-day command, fixed business clock, expected versions, actor, correlation and idempotency identities."
+  ],
+  "forbidden_direct_seed": [
+    "cancellation lifecycle event, cancellation control, replaced scheduling generation, client-finance impact, payroll impact or stored receipt",
+    "cancelled order projection or any cancellation output status"
+  ],
+  "commands": [
+    "Preview a mid-service cancellation from the authoritative read snapshot.",
+    "Apply the preview-bound cancellation command and replay its exact idempotency identity."
+  ],
+  "expected": [
+    "Apply derives the cancelled lifecycle status and advances each affected aggregate version exactly once.",
+    "The canonical chain persists a cancellation event, scheduling replacement, finance impact, payroll impact, cancellation control, lifecycle update and stored receipt in workflow order.",
+    "Exact replay returns the stored receipt without any additional workflow write."
+  ],
+  "receipt_requirements": [
+    "authoritative snapshot-harness and expected-manifest digests",
+    "derived versions, lifecycle status and canonical persistence-chain assertions",
+    "exact replay write-count assertion"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_order_cancellation_workflow.py"
+    ],
+    "test_paths": ["tests/test_order_cancellation_workflow.py"]
+  }
+}

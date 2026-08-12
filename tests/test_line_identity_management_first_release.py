@@ -335,7 +335,7 @@ def test_revocation_repository_selects_canonical_published_default_menu() -> Non
 def test_stage13_schema_preserves_legacy_requests_and_owns_new_canonical_fk() -> None:
     schema = (
         PROJECT_ROOT
-        / "db/schema_parts/168_line_identity_canonical_menu_publication.sql"
+        / "db/schema_parts/179_line_identity_canonical_menu_publication.sql"
     ).read_text(encoding="utf-8")
 
     assert "MODIFY COLUMN default_menu_publication_id BIGINT NULL" in schema
@@ -369,7 +369,7 @@ def test_stage13_manifest_hashes_and_loads_canonical_publication_fk() -> None:
         assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
     manifest = load_migration_release_manifest(path, PROJECT_ROOT)
     assert [item.artifact.name for item in manifest.schema_artifacts] == [
-        "168_line_identity_canonical_menu_publication.sql"
+        "179_line_identity_canonical_menu_publication.sql"
     ]
 
 

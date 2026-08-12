@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"APX-EXPORT-DATA-001","assertions":["Only eligible source rows appear with source IDs preserved.","Same staff/month aggregates at query/export layer only.","Export preparation has zero business row delta; archive bytes are B-track evidence."]}

@@ -1,4 +1,4 @@
-"""Bounded Orders summary query without legacy read-model fallbacks."""
+"""Bounded Orders summary query for canonical and preserved legacy cases."""
 
 from __future__ import annotations
 
@@ -66,9 +66,9 @@ class OrderSummaryItem:
     client_name: str
     order_status: str
     staff_name: str | None
-    identity_status: str
+    identity_status: str | None
     start_date: date
-    end_date: date
+    end_date: date | None
     actual_start_date: date | None
     actual_end_date: date | None
     service_days: int
@@ -116,9 +116,9 @@ def _summary_item(row: object) -> OrderSummaryItem:
         client_name=_required_text(row, "client_name", 200),
         order_status=_required_text(row, "order_status", 100),
         staff_name=_optional_text(row, "staff_name", 200),
-        identity_status=_required_text(row, "identity_status", 100),
+        identity_status=_optional_text(row, "identity_status", 100),
         start_date=_required_date(row, "start_date"),
-        end_date=_required_date(row, "end_date"),
+        end_date=_optional_date(row, "end_date"),
         actual_start_date=_optional_date(row, "actual_start_date"),
         actual_end_date=_optional_date(row, "actual_end_date"),
         service_days=_positive_integer(row, "service_days"),
@@ -205,7 +205,7 @@ def _item_representation(item: OrderSummaryItem) -> dict[str, object]:
         "staff_name": item.staff_name,
         "identity_status": item.identity_status,
         "start_date": item.start_date.isoformat(),
-        "end_date": item.end_date.isoformat(),
+        "end_date": _date_representation(item.end_date),
         "actual_start_date": _date_representation(item.actual_start_date),
         "actual_end_date": _date_representation(item.actual_end_date),
         "service_days": item.service_days,

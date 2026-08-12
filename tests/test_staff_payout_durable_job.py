@@ -3,10 +3,11 @@
 from datetime import date
 
 from api.routes.staff_payout import _staff_payout_command
-from domains.staff_payables.reconciliation import StaffPayoutEventType
+from domains.staff_payables.reconciliation import StaffPayoutDifferenceMode, StaffPayoutEventType
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.jobs.durable_job_worker import (
+    _staff_payout_request,
     default_job_handlers,
     staff_payout_apply_handler,
 )
@@ -34,6 +35,7 @@ def test_staff_payout_command_preserves_all_three_event_identities():
     assert payout.payload["selection"] == {
         "event_type": "payout", "bank_fact_identities": ["bank-1"],
         "obligation_identities": ["obligation-1"], "reopen_fact_identity": None,
+        "difference_mode": None,
     }
     assert returned.payload["selection"]["reopen_fact_identity"] == "return-1"
     assert reversal.payload["selection"]["reopen_fact_identity"] == "reversal-1"
@@ -75,6 +77,25 @@ def test_staff_payout_handler_reconstructs_existing_apply_request(monkeypatch):
     assert reference == "staff_payout:1"
     assert captured["request"].selection.bank_fact_identities == ("bank-1",)
     assert captured["closed"] is True
+
+
+def test_staff_payout_command_preserves_difference_mode():
+    request = StaffPayoutApplyRequest(
+        StaffPayoutSelection(
+            StaffPayoutEventType.PAYOUT,
+            ("bank-1",),
+            ("obligation-1",),
+            difference_mode=StaffPayoutDifferenceMode.OVERPAYMENT,
+        ),
+        ExpectedVersion(3), ExpectedVersion(4), PreviewFingerprint("a" * 64),
+        IdempotencyKey("staff-payout-overpayment"), ActorContext("payroll-admin"),
+        "record staff overpayment", CorrelationId("staff-payout-overpayment"),
+    )
+
+    payload = _staff_payout_command("job-overpayment", request).payload
+
+    assert payload["selection"]["difference_mode"] == "overpayment"
+    assert _staff_payout_request(payload).selection.difference_mode is StaffPayoutDifferenceMode.OVERPAYMENT
 
 
 def test_default_durable_worker_registry_includes_staff_payout_handler():

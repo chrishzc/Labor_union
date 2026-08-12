@@ -1,0 +1,43 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "ANOM-SCHEDULING-CLOSED-LOOP-002",
+  "track": "A",
+  "suite_id": "ANOM",
+  "status": "bound",
+  "requires_database": true,
+  "database_execution_mode": "persistent_append_only",
+  "test_kinds": ["domain_root_data", "expected_manifest"],
+  "coverage_ids": ["ANOM-01", "ANOM-02", "ASM-01", "ASM-02", "SCHEDULE-006"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ANOM-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#SCHEDULE-006"
+  ],
+  "root_facts": [
+    "A versioned scheduling-coverage root fact with an effective completed generation and mismatched official service days.",
+    "Two independently identified operator actions and successive source versions for repair and recurrence."
+  ],
+  "forbidden_direct_seed": [
+    "current alert, alert workflow event, workflow status, display snapshot or repair navigation data"
+  ],
+  "commands": [
+    "Project the active root twice, claim it, race a stale claim, manually resolve it, then replay succeeding root versions for repair and recurrence."
+  ],
+  "expected": [
+    "The active root creates one open SCHEDULE-006 projection and exact replay does not duplicate it.",
+    "A stale second claim returns anomaly_version_conflict.",
+    "A still-active root reopens a manual resolution; an inactive owner-root version auto-resolves it; recurrence reopens with preserved workflow history.",
+    "The typed anomaly detail exposes the source-domain display snapshot and claim/resolve/reopen timeline."
+  ],
+  "receipt_requirements": [
+    "root-fact and expected-manifest digests",
+    "current projection row count",
+    "claim conflict result",
+    "typed detail snapshot and workflow timeline"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_anomaly_closed_loop_disposable_mysql_e2e.py"
+    ],
+    "test_paths": ["tests/test_anomaly_closed_loop_disposable_mysql_e2e.py"]
+  }
+}

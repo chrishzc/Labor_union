@@ -11,8 +11,8 @@ verified_at: 2026-08-09
 - 規格基線：`01_規格基線/02_Assignments_Scheduling_Domain.md`
 - 決策／退役記錄：
   - `19_Legacy_Retirement_Wave_1_Decision_Package.md`
-  - `36_Durable_Job_Assignment_Plan_Work_Package.md`
-  - `47_Scheduling_Payroll_Legacy_Writer_Exit_Inventory_Receipt.md`
+  - `../../04_已完成與上線封存/work_packages/36_Durable_Job_Assignment_Plan_Work_Package.md`
+  - `../../04_已完成與上線封存/receipts/47_Scheduling_Payroll_Legacy_Writer_Exit_Inventory_Receipt.md`
 - 既有證據：
   - `evidence/2026-08-08_availability_query_port_receipt.md`
   - `evidence/2026-08-08_g13_leave_cancellation_mysql_receipt.md`

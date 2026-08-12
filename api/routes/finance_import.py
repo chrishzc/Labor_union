@@ -576,6 +576,9 @@ def _correction_apply_job_command(job_id, request) -> DurableJobCommand:
             "reason": selection.reason,
             "evidence": list(selection.evidence),
             "refund_ledger_entry_identity": selection.refund_ledger_entry_identity,
+            "allow_partial_refund_recovery": selection.allow_partial_refund_recovery,
+            "allow_refund_overage_recovery": selection.allow_refund_overage_recovery,
+            "allow_client_receipt_overage": selection.allow_client_receipt_overage,
             "expected_batch_version": request.expected_batch_version.value,
             "expected_canonical_fact_version": request.expected_canonical_fact_version.value,
             "expected_alert_version": request.expected_alert_version.value,
@@ -604,6 +607,9 @@ def _selection(body):
         body.reason.strip(),
         tuple(sorted(set(item.strip() for item in body.evidence))),
         None if body.refund_ledger_entry_identity is None else body.refund_ledger_entry_identity.strip(),
+        body.allow_partial_refund_recovery,
+        body.allow_refund_overage_recovery,
+        body.allow_client_receipt_overage,
     )
 
 

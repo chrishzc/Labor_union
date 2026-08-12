@@ -10,8 +10,8 @@ verified_at: 2026-08-09
 
 - 規格基線：`01_規格基線/07_跨Domain交易與pytest驗收架構.md`
 - 決策／驗收依據：
-  - `28_Global_E2E_Acceptance_Gap_Package.md`
-  - `46_Six_Remaining_Gaps_Completion_Architecture.md`
+  - `../../04_已完成與上線封存/work_packages/28_Global_E2E_Acceptance_Gap_Package.md`
+  - `../../04_已完成與上線封存/superseded_specs/46_Six_Remaining_Gaps_Completion_Architecture.md`
 - Global manifest：`evidence/global_e2e_manifest.json`
 
 ## 本次修復

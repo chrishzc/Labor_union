@@ -1,0 +1,27 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "AC-CAPABILITY-SESSION-002",
+  "scenario_digest": "191537104c8afac3c2d115f27a9677a9d1456bb6077aebb7fab0838d866271d4",
+  "result": "passed",
+  "assertion_count": 7,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_access_knowledge_disposable_mysql_e2e.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "disposable MySQL temporary capability grant and active-session revocation"
+  },
+  "input_digests": {
+    "scenario_fixture": "da47d04ff9b55041c82b5aabf2c485aa39c3253e65511a454992b211b3a9ef2d",
+    "expected_manifest": "c0e9cf30c3f8e5af8c8c42204acff8555eec8dc73f0148cc4201d2333fa36605",
+    "integration_test": "4049ea4ca54dcdafe67d57d576b929556700cb4772cbac508d68cdcb3dc6d1d9",
+    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/AC-CAPABILITY-SESSION-002.json",
+    "expected_manifest": "validation/expected/AC-CAPABILITY-SESSION-002.json",
+    "integration_test": "tests/test_access_knowledge_disposable_mysql_e2e.py",
+    "validation_schema_manifest": "db/cutover_releases/labor_union_validation_schema_v1.json"
+  }
+}

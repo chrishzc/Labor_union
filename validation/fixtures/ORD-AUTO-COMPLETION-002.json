@@ -1,0 +1,27 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "ORD-AUTO-COMPLETION-002",
+  "test_kind": "domain_root_data",
+  "root_inputs": [
+    "isolated in-service Order precondition",
+    "effective assignment and official service-day facts",
+    "Client Finance and Payroll authoritative term snapshots",
+    "evaluation clock, idempotency key and expected version"
+  ],
+  "seed_fields": [
+    "order_completion_precondition.status",
+    "official_service_day.assignment_id",
+    "client_payment_terms.policy_version",
+    "payroll_rate_snapshot.policy_version",
+    "completion_command.evaluation_at"
+  ],
+  "derived_fields": [
+    "orders.completed_status",
+    "orders.lifecycle_version",
+    "order_lifecycle_state_event",
+    "order_auto_completion_apply_receipt",
+    "orders_domain_outbox.intent",
+    "application_command_claim"
+  ],
+  "expected_manifest_path": "validation/expected/ORD-AUTO-COMPLETION-002.json"
+}

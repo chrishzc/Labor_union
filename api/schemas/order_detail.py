@@ -14,7 +14,7 @@ class OrderDetailView(BaseModel):
     client_name: str
     staff_name: str | None
     order_status: str
-    identity_status: str
+    identity_status: str | None
     cancel_reason: str | None
     line_group_id: str | None
     contract_identity: str | None

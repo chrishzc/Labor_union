@@ -1,0 +1,39 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "LEGACY-FIELD-AUTHORITY-002",
+  "track": "B",
+  "suite_id": "LEGACY",
+  "status": "bound",
+  "requires_database": false,
+  "coverage_ids": ["LEGACY-FIELD-AUTHORITY-002"],
+  "test_kinds": ["metadata_fixture", "process_network_harness"],
+  "source_refs": [
+    "document/文件整併工作區/06_欄位權威性與計算邏輯盤點.md#文件狀態",
+    "document/架構重整/03_追蹤清單與證據/evidence/field_authority_live_audit_20260810.md#orders.contract_id"
+  ],
+  "root_facts": [
+    "Versioned legacy-to-canonical field mapping, active source roots and explicit historical/migration retention paths."
+  ],
+  "forbidden_direct_seed": [
+    "legacy-reference audit outcome or canonical usage result"
+  ],
+  "commands": [
+    "Search all active source, schema, test and documentation roots for each retired token and verify required canonical use."
+  ],
+  "expected": [
+    "An unapproved retired field reference fails the gate.",
+    "Only named migration, migration-test and historical-evidence paths may retain the retired field name.",
+    "Each required schema, repository and active-document path contains the canonical replacement."
+  ],
+  "receipt_requirements": [
+    "mapping manifest digest",
+    "unexpected-reference report",
+    "required canonical-path report"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_field_authority_legacy_name_audit.py"
+    ],
+    "test_paths": ["tests/test_field_authority_legacy_name_audit.py"]
+  }
+}

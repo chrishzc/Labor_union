@@ -1,0 +1,41 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "JOB-QUEUE-LIFECYCLE-002",
+  "track": "B",
+  "suite_id": "JOB",
+  "status": "bound",
+  "requires_database": true,
+  "database_execution_mode": "persistent_append_only",
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["JOB-02", "JOB-05", "JOB-06"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "Unique durable command identities, a transient worker error and explicit cancellation requests."
+  ],
+  "forbidden_direct_seed": [
+    "job status, retry count, receipt payload, lease token or cancellation result"
+  ],
+  "commands": [
+    "Enqueue one command and replay the identical envelope.",
+    "Claim, fail retryably, reclaim and complete it with a receipt.",
+    "Cancel one queued command and attempt cancellation after another command is claimed."
+  ],
+  "expected": [
+    "Duplicate command identity is rejected without a second durable job.",
+    "A retry preserves identity, increments attempt count and finishes with one queryable receipt.",
+    "Queued cancellation is recorded, while a claimed command returns a typed state conflict."
+  ],
+  "receipt_requirements": [
+    "unique command identities",
+    "lease and retry assertions",
+    "stored receipt and cancellation-state assertions"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_durable_job_disposable_mysql_e2e.py"
+    ],
+    "test_paths": ["tests/test_durable_job_disposable_mysql_e2e.py"]
+  }
+}

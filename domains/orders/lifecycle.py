@@ -146,7 +146,7 @@ def _lifecycle_status(
         return OrderLifecycleStatus.IN_SERVICE
     if root_facts.current_status is OrderLifecycleStatus.IN_SERVICE:
         return OrderLifecycleStatus.IN_SERVICE
-    if root_facts.contract_completed and client_settlement.deposit_settled:
+    if client_settlement.deposit_settled:
         return OrderLifecycleStatus.ESTABLISHED
     return OrderLifecycleStatus.DISCUSSION
 
@@ -156,6 +156,7 @@ def _service_should_be_active(root_facts, client_settlement, evaluation_at):
         root_facts.actual_start_date is not None
         and root_facts.actual_start_date <= evaluation_at.date()
         and client_settlement.deposit_settled
+        and root_facts.contract_completed
         and root_facts.actual_start_reconfirmed
     )
 

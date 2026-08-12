@@ -1,0 +1,28 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "GS-PLANNING-RECEIPT-FUNDING-002",
+  "test_kind": "external_input_fixture",
+  "root_inputs": [
+    "official assignment service facts and unit-price policy",
+    "approved claim item snapshot",
+    "immutable incoming government-bank fact",
+    "client self-pay and government/union funding facts at a fixed due date",
+    "claim and receipt idempotency command identities"
+  ],
+  "seed_fields": [
+    "official_assignment_service.hours",
+    "subsidy_policy.unit_price_ntd",
+    "approved_claim_item.remaining_amount",
+    "government_bank_fact.amount",
+    "staff_funding_fact.client_payable",
+    "staff_funding_fact.government_allocation"
+  ],
+  "derived_fields": [
+    "government_subsidy_claim_batch.total_ntd",
+    "government_subsidy_ledger_transaction",
+    "government_subsidy_receipt_allocation",
+    "government_subsidy_batch_account.status",
+    "staff_payout_funding.state"
+  ],
+  "expected_manifest_path": "validation/expected/GS-PLANNING-RECEIPT-FUNDING-002.json"
+}

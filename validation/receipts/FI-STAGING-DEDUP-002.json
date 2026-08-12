@@ -1,0 +1,28 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "FI-STAGING-DEDUP-002",
+  "scenario_digest": "5001b8b01ed3a3a5896c0469eacb448a89bbef439d698c186ae9c22015ce2da9",
+  "result": "passed",
+  "assertion_count": 40,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_staging.py tests\\test_finance_import_orchestrator.py tests\\test_finance_transaction_classifier.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "Finance Import canonical staging, deduplication and batch rollback boundary"
+  },
+  "input_digests": {
+    "scenario_fixture": "46e9eeea729b9b704bdb5ad174b840f1fabc5cc03a1fb728b2da60f743d320b9",
+    "expected_manifest": "6155e0d26632ae7875fa2385b4f53105584468fb957c7eded9dac57b395a0603",
+    "staging_test": "d0470e6a7e01ed4566b674cef9a96240faf3b8bbac3a412b65cc63794777fd04",
+    "orchestrator_test": "540b184a710870943eeb4336f995616f18066514b5f1d77082af5a1572c0aef0",
+    "classifier_test": "a8576c696b8524eddb1e5c686a5919cb680c83f62f65fd1b4ced4164eee29fdd"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/FI-STAGING-DEDUP-002.json",
+    "expected_manifest": "validation/expected/FI-STAGING-DEDUP-002.json",
+    "staging_test": "tests/test_finance_import_staging.py",
+    "orchestrator_test": "tests/test_finance_import_orchestrator.py",
+    "classifier_test": "tests/test_finance_transaction_classifier.py"
+  }
+}

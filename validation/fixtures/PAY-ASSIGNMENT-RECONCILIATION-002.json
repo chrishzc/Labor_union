@@ -1,0 +1,27 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "PAY-ASSIGNMENT-RECONCILIATION-002",
+  "test_kind": "domain_root_data",
+  "root_inputs": [
+    "assignment-owned official service days",
+    "effective assignment hourly rate and floor-fee terms",
+    "explicit substitution lineage and double-pay markers",
+    "invalid amount and ownership-conflict variants"
+  ],
+  "seed_fields": [
+    "assignment.actual_hours",
+    "assignment.hourly_rate",
+    "assignment.floor_fee_allocated",
+    "official_service_day.is_work_day",
+    "official_service_day.is_double_pay",
+    "substitution_event.original_schedule_id"
+  ],
+  "derived_fields": [
+    "assignment_payroll.service_salary",
+    "assignment_payroll.double_pay_hours",
+    "assignment_payroll.expected_family_floor_fee",
+    "staff_payment_candidate.can_create",
+    "staff_payment_candidate.errors"
+  ],
+  "expected_manifest_path": "validation/expected/PAY-ASSIGNMENT-RECONCILIATION-002.json"
+}

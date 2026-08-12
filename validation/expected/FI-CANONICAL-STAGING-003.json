@@ -1,0 +1,8 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "FI-CANONICAL-STAGING-003",
+  "assertions": [
+    "Identical bank-content roots create one canonical Finance Import row and two source occurrences.",
+    "An unmatched outgoing source is classified non_business_review and remains pending rather than entering a formal ledger."
+  ]
+}

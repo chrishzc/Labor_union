@@ -205,6 +205,9 @@ class FinanceImportApiClient:
         evidence: Sequence[str],
         correlation_id: str,
         refund_ledger_entry_identity: str | None = None,
+        allow_partial_refund_recovery: bool = False,
+        allow_refund_overage_recovery: bool = False,
+        allow_client_receipt_overage: bool = False,
     ) -> FinanceImportCorrectionPreviewView:
         payload = _correction_payload(
             row_identity,
@@ -213,6 +216,9 @@ class FinanceImportApiClient:
             reason,
             evidence,
             refund_ledger_entry_identity,
+            allow_partial_refund_recovery,
+            allow_refund_overage_recovery,
+            allow_client_receipt_overage,
         )
         return self._request(
             "POST",
@@ -244,6 +250,9 @@ class FinanceImportApiClient:
                 candidate.reason,
                 candidate.evidence,
                 candidate.refund_ledger_entry_identity,
+                candidate.allow_partial_refund_recovery,
+                candidate.allow_refund_overage_recovery,
+                candidate.allow_client_receipt_overage,
             ),
             "expected_batch_version": preview.batch_version,
             "expected_canonical_fact_version": preview.canonical_fact_version,
@@ -338,6 +347,9 @@ def _correction_payload(
     reason,
     evidence,
     refund_ledger_entry_identity=None,
+    allow_partial_refund_recovery=False,
+    allow_refund_overage_recovery=False,
+    allow_client_receipt_overage=False,
 ):
     targets = _canonical_sorted_text(
         target_obligation_identities,
@@ -353,6 +365,9 @@ def _correction_payload(
         "target_obligation_identities": targets,
         "reason": _canonical_text(reason, "reason"),
         "evidence": evidence_items,
+        "allow_partial_refund_recovery": allow_partial_refund_recovery,
+        "allow_refund_overage_recovery": allow_refund_overage_recovery,
+        "allow_client_receipt_overage": allow_client_receipt_overage,
     }
     if refund_ledger_entry_identity is not None:
         payload["refund_ledger_entry_identity"] = _canonical_text(

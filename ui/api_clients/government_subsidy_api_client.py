@@ -29,6 +29,18 @@ from api.schemas.government_subsidy import (
     GovernmentSubsidyReceiptView,
     GovernmentSubsidyReversalIntentView,
     GovernmentSubsidyTypedErrorView,
+    GovernmentPayerAccountApplyBody,
+    GovernmentPayerAccountPreviewBody,
+    GovernmentPayerAccountPreviewView,
+    GovernmentPayerAccountReceiptView,
+    GovernmentPayerMasterView,
+    GovernmentSubsidyOverpaymentPreviewView,
+    GovernmentSubsidyOverpaymentReceiptView,
+    GovernmentSubsidyOverpaymentDispositionApplyBody,
+    GovernmentSubsidyOverpaymentDispositionPreviewBody,
+    GovernmentOverpaymentReturnReconciliationApplyBody,
+    GovernmentOverpaymentReturnReconciliationPreviewBody,
+    GovernmentOverpaymentReturnReconciliationPreviewView,
 )
 
 T = TypeVar("T", bound=BaseModel)
@@ -64,6 +76,87 @@ class GovernmentSubsidyApiClient:
             "GET",
             f"/api/v1/government-subsidy/claim-batches/{batch_id}",
             response_type=GovernmentSubsidyBatchView,
+        )
+
+    def query_payer_master(self) -> GovernmentPayerMasterView:
+        return self._request("GET", "/api/v1/government-subsidy/payer-master", response_type=GovernmentPayerMasterView)
+
+    def preview_overpayment_offset(self, overpayment_identity: str, targets: list[dict[str, int]], correlation_id: str) -> GovernmentSubsidyOverpaymentPreviewView:
+        return self._request("POST", "/api/v1/government-subsidy/overpayments/offset/preview", payload={"overpayment_identity": overpayment_identity, "targets": targets}, command_headers={"X-Correlation-ID": correlation_id}, response_type=GovernmentSubsidyOverpaymentPreviewView)
+
+    def apply_overpayment_offset(self, overpayment_identity: str, targets: list[dict[str, int]], expected_overpayment_version: int, preview: GovernmentSubsidyOverpaymentPreviewView, *, reason: str, evidence_reference: str, idempotency_key: str, correlation_id: str) -> GovernmentSubsidyOverpaymentReceiptView:
+        return self._request("POST", "/api/v1/government-subsidy/overpayments/offset/apply", payload={"overpayment_identity": overpayment_identity, "targets": targets, "expected_overpayment_version": expected_overpayment_version, "preview_fingerprint": preview.preview_fingerprint, "reason": _canonical_text(reason, "reason"), "evidence_reference": _canonical_text(evidence_reference, "evidence_reference")}, command_headers={"Idempotency-Key": idempotency_key, "X-Correlation-ID": correlation_id}, response_type=GovernmentSubsidyOverpaymentReceiptView)
+
+    def preview_overpayment_return(self, overpayment_identity: str, due_date: str, evidence_reference: str, correlation_id: str) -> GovernmentSubsidyOverpaymentPreviewView:
+        return self._request("POST", "/api/v1/government-subsidy/overpayments/return/preview", payload={"overpayment_identity": overpayment_identity, "due_date": due_date, "evidence_reference": evidence_reference}, command_headers={"X-Correlation-ID": correlation_id}, response_type=GovernmentSubsidyOverpaymentPreviewView)
+
+    def apply_overpayment_return(self, overpayment_identity: str, due_date: str, evidence_reference: str, expected_overpayment_version: int, preview: GovernmentSubsidyOverpaymentPreviewView, *, reason: str, idempotency_key: str, correlation_id: str) -> GovernmentSubsidyOverpaymentReceiptView:
+        return self._request("POST", "/api/v1/government-subsidy/overpayments/return/apply", payload={"overpayment_identity": overpayment_identity, "due_date": due_date, "evidence_reference": _canonical_text(evidence_reference, "evidence_reference"), "expected_overpayment_version": expected_overpayment_version, "preview_fingerprint": preview.preview_fingerprint, "reason": _canonical_text(reason, "reason")}, command_headers={"Idempotency-Key": idempotency_key, "X-Correlation-ID": correlation_id}, response_type=GovernmentSubsidyOverpaymentReceiptView)
+
+    def preview_overpayment_disposition(
+        self,
+        body: GovernmentSubsidyOverpaymentDispositionPreviewBody,
+        correlation_id: str,
+    ) -> GovernmentSubsidyOverpaymentPreviewView:
+        return self._request(
+            "POST",
+            "/api/v1/government-subsidy/overpayments/disposition/preview",
+            payload=body.model_dump(mode="json"),
+            command_headers={"X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")},
+            response_type=GovernmentSubsidyOverpaymentPreviewView,
+        )
+
+    def apply_overpayment_disposition(
+        self,
+        body: GovernmentSubsidyOverpaymentDispositionApplyBody,
+        idempotency_key: str,
+        correlation_id: str,
+    ) -> GovernmentSubsidyOverpaymentReceiptView:
+        return self._request(
+            "POST",
+            "/api/v1/government-subsidy/overpayments/disposition/apply",
+            payload=body.model_dump(mode="json"),
+            command_headers={
+                "Idempotency-Key": _canonical_text(idempotency_key, "idempotency_key"),
+                "X-Correlation-ID": _canonical_text(correlation_id, "correlation_id"),
+            },
+            response_type=GovernmentSubsidyOverpaymentReceiptView,
+        )
+
+    def preview_overpayment_return_reconciliation(
+        self, body: GovernmentOverpaymentReturnReconciliationPreviewBody, correlation_id: str
+    ) -> GovernmentOverpaymentReturnReconciliationPreviewView:
+        return self._request(
+            "POST", "/api/v1/government-subsidy/overpayments/return-reconciliation/preview",
+            payload=body.model_dump(mode="json"),
+            command_headers={"X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")},
+            response_type=GovernmentOverpaymentReturnReconciliationPreviewView,
+        )
+
+    def apply_overpayment_return_reconciliation(
+        self, body: GovernmentOverpaymentReturnReconciliationApplyBody, idempotency_key: str, correlation_id: str
+    ) -> GovernmentSubsidyOverpaymentReceiptView:
+        return self._request(
+            "POST", "/api/v1/government-subsidy/overpayments/return-reconciliation/apply",
+            payload=body.model_dump(mode="json"),
+            command_headers={"Idempotency-Key": _canonical_text(idempotency_key, "idempotency_key"), "X-Correlation-ID": _canonical_text(correlation_id, "correlation_id")},
+            response_type=GovernmentSubsidyOverpaymentReceiptView,
+        )
+
+    def preview_refund_account(self, account: GovernmentPayerAccountPreviewBody, correlation_id: str) -> GovernmentPayerAccountPreviewView:
+        return self._request(
+            "POST", "/api/v1/government-subsidy/payer-master/refund-accounts/preview",
+            payload=account.model_dump(mode="json"),
+            command_headers={"X-Correlation-ID": correlation_id},
+            response_type=GovernmentPayerAccountPreviewView,
+        )
+
+    def apply_refund_account(self, body: GovernmentPayerAccountApplyBody, correlation_id: str) -> GovernmentPayerAccountReceiptView:
+        return self._request(
+            "POST", "/api/v1/government-subsidy/payer-master/refund-accounts/apply",
+            payload=body.model_dump(mode="json"),
+            command_headers={"X-Correlation-ID": correlation_id},
+            response_type=GovernmentPayerAccountReceiptView,
         )
 
     def list_batches(
@@ -256,7 +349,11 @@ class GovernmentSubsidyApiClient:
 
 
     def get_job_status(self, job_id: str) -> JobStatusResponse:
-        return self._query(f"/api/v1/jobs/{job_id}", None, JobStatusResponse)
+        return self._request(
+            "GET",
+            f"/api/v1/jobs/{job_id}",
+            response_type=JobStatusResponse,
+        )
 
     def _request(
         self,

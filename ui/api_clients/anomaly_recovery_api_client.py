@@ -57,11 +57,11 @@ class AnomalyRecoveryApiClient:
     def query_recovery_preview_link(
         self,
         fingerprint: str,
-        action_code: str,
+        action_key: str,
     ) -> RecoveryActionView:
         return self._request(
             "GET",
-            f"/api/v1/anomaly-recovery/{_canonical_text(fingerprint, 'fingerprint')}/actions/{_canonical_text(action_code, 'action_code')}",
+            f"/api/v1/anomaly-recovery/{_canonical_text(fingerprint, 'fingerprint')}/actions/{_canonical_text(action_key, 'action_key')}",
             response_type=RecoveryActionView,
         )
 

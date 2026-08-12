@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
+from datetime import date
 from enum import Enum
 from typing import Annotated
 
@@ -19,10 +20,13 @@ import uuid
 from pydantic import BaseModel, ConfigDict, Field
 from pymysql.err import OperationalError
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_capability, require_system_admin
 from api.dependencies.government_subsidy import (
     GovernmentSubsidyApplication,
     get_government_subsidy_application,
+)
+from api.dependencies.government_subsidy_payer_master import (
+    get_government_payer_master_workflow,
 )
 from api.schemas.base import BaseResponse
 from api.schemas.government_subsidy import (
@@ -40,7 +44,23 @@ from api.schemas.government_subsidy import (
     GovernmentSubsidyReceiptIntentView,
     GovernmentSubsidyReceiptView,
     GovernmentSubsidyReversalIntentView,
+    GovernmentPayerAccountApplyBody,
+    GovernmentPayerAccountPreviewBody,
+    GovernmentPayerAccountPreviewView,
+    GovernmentPayerAccountReceiptView,
+    GovernmentPayerMasterView,
+    GovernmentSubsidyOverageReceiptPreviewBody,
+    GovernmentSubsidyOverageReceiptApplyBody,
+    GovernmentSubsidyOverpaymentOffsetApplyBody,
+    GovernmentSubsidyOverpaymentOffsetPreviewBody,
+    GovernmentSubsidyOverpaymentReturnApplyBody,
+    GovernmentSubsidyOverpaymentReturnPreviewBody,
+    GovernmentSubsidyOverpaymentDispositionApplyBody,
+    GovernmentSubsidyOverpaymentDispositionPreviewBody,
+    GovernmentOverpaymentReturnReconciliationApplyBody,
+    GovernmentOverpaymentReturnReconciliationPreviewBody,
 )
+from domains.government_subsidy.payer_master import GovernmentRefundAccount
 from domains.government_subsidy.claims import (
     ClaimApprovalCandidate,
     ClaimApprovalIntent,
@@ -77,6 +97,18 @@ from subsystems.government_subsidy.claim_workflow import (
     ClaimSubmissionIntent,
     GovernmentSubsidyClaimWorkflowError,
 )
+from subsystems.government_subsidy.payer_master_workflow import (
+    GovernmentPayerMasterWorkflow,
+    GovernmentPayerMasterWorkflowError,
+    GovernmentRefundAccountApplyRequest,
+)
+from subsystems.government_subsidy.overpayment_workflow import (
+    OffsetApplyRequest,
+    ReceiptWithOverageApplyRequest,
+    ReturnApplyRequest,
+    ReturnReconciliationApplyRequest,
+)
+from domains.government_subsidy.overpayment import GovernmentSubsidyOffsetIntent
 
 router = APIRouter(
     prefix="/api/v1/government-subsidy",
@@ -811,6 +843,375 @@ def _materialize_collection(value):
     if isinstance(value, (tuple, list)):
         return [_materialize(item) for item in value]
     return value
+
+
+@router.get(
+    "/payer-master",
+    response_model=BaseResponse[GovernmentPayerMasterView],
+)
+def query_government_payer_master(
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow: GovernmentPayerMasterWorkflow = Depends(get_government_payer_master_workflow),
+):
+    del principal
+    master = workflow.query()
+    return BaseResponse(data=_payer_master_payload(master, workflow), message="成功取得政府付款方主檔")
+
+
+@router.post(
+    "/payer-master/refund-accounts/preview",
+    response_model=BaseResponse[GovernmentPayerAccountPreviewView],
+)
+def preview_government_refund_account(
+    body: GovernmentPayerAccountPreviewBody,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = "government-payer-account-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow: GovernmentPayerMasterWorkflow = Depends(get_government_payer_master_workflow),
+):
+    del principal
+    return _call_payer_endpoint(
+        lambda: BaseResponse(data=_payer_preview_payload(workflow.preview(_payer_account(body.account)), workflow), message="成功產生政府退款帳戶預覽"),
+        CorrelationId(correlation_id),
+    )
+
+
+@router.post(
+    "/payer-master/refund-accounts/apply",
+    response_model=BaseResponse[GovernmentPayerAccountReceiptView],
+)
+def apply_government_refund_account(
+    body: GovernmentPayerAccountApplyBody,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    workflow: GovernmentPayerMasterWorkflow = Depends(get_government_payer_master_workflow),
+):
+    request = GovernmentRefundAccountApplyRequest(
+        _payer_account(body.account), PreviewFingerprint(body.preview_fingerprint),
+        _actor(principal), CorrelationId(correlation_id),
+    )
+    return _call_payer_endpoint(
+        lambda: BaseResponse(data=_payer_receipt_payload(workflow.apply(request)), message="成功新增政府退款帳戶版本"),
+        request.correlation_id,
+    )
+
+
+def _payer_account(view):
+    try:
+        effective_from = date.fromisoformat(view.effective_from)
+    except ValueError as error:
+        raise ValueError("government_payer_account_effective_date_invalid") from error
+    return GovernmentRefundAccount(view.bank_code, view.account_number, view.account_name, effective_from, view.reason, view.evidence_reference)
+
+
+def _payer_master_payload(master, workflow):
+    active = master.active_account
+    return {
+        "payer_identity": master.payer_identity,
+        "payer_name": master.payer_name,
+        "active_refund_account": None if active is None else {
+            "bank_code": active.account.bank_code,
+            "account_display": workflow.account_display(active.account.account_number),
+            "account_name": active.account.account_name,
+            "effective_from": active.account.effective_from.isoformat(),
+            "effective_until": active.effective_until.isoformat() if active.effective_until else None,
+        },
+    }
+
+
+def _payer_preview_payload(preview, workflow):
+    return {
+        "payer_identity": preview.payer_identity,
+        "effective_from": preview.account.effective_from.isoformat(),
+        "previous_effective_from": preview.previous_effective_from.isoformat() if preview.previous_effective_from else None,
+        "account_display": workflow.account_display(preview.account.account_number),
+        "preview_fingerprint": preview.fingerprint.value,
+    }
+
+
+def _payer_receipt_payload(receipt):
+    return {
+        "payer_identity": receipt.payer_identity,
+        "effective_from": receipt.effective_from,
+        "previous_effective_from": None,
+        "account_display": receipt.account_display,
+        "preview_fingerprint": receipt.preview_fingerprint.value,
+        "replayed": receipt.replayed,
+    }
+
+
+def _call_payer_endpoint(command, correlation_id):
+    try:
+        return command()
+    except GovernmentPayerMasterWorkflowError as error:
+        _raise_typed_error(error.error)
+    except OperationalError as error:
+        _raise_mysql_error(error, correlation_id)
+    except ValueError as error:
+        _raise_value_error(error, correlation_id)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise _internal_error(correlation_id) from error
+
+
+@router.post("/receipts-with-overage/preview")
+def preview_government_subsidy_receipt_with_overage(body: GovernmentSubsidyOverageReceiptPreviewBody, application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application), principal: AdminPrincipal = Depends(require_system_admin)):
+    del principal
+    candidate = application.preview_receipt_with_overage(body.intent.finance_import_row_id, body.intent.batch_id, _overage_intents(body.intent.allocations))
+    return BaseResponse(data={"batch_id":candidate.batch_id,"allocated_amount_ntd":candidate.allocated_amount_ntd.amount,"overpayment_amount_ntd":candidate.overpayment_amount_ntd.amount,"preview_fingerprint":candidate.fingerprint.value}, message="成功產生政府補助溢撥預覽")
+
+
+@router.post("/receipts-with-overage/apply")
+def apply_government_subsidy_receipt_with_overage(body: GovernmentSubsidyOverageReceiptApplyBody, idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ..., correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ..., application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application), principal: AdminPrincipal = Depends(require_system_admin)):
+    request = ReceiptWithOverageApplyRequest(body.intent.finance_import_row_id, body.intent.batch_id, _overage_intents(body.intent.allocations), body.intent.evidence_reference, ExpectedVersion(body.expected_batch_version), PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key), _actor(principal), body.reason, CorrelationId(correlation_id))
+    return _call_endpoint(lambda: BaseResponse(data=application.apply_receipt_with_overage(request), message="成功建立政府補助溢撥"), "成功建立政府補助溢撥", request.correlation_id)
+
+
+def _overage_intents(values):
+    return tuple(GovernmentSubsidyOffsetIntent(item.target_identity, MoneyNTD(item.amount_ntd)) for item in values)
+
+
+@router.post("/overpayments/disposition/preview")
+def preview_government_subsidy_overpayment_disposition(
+    body: GovernmentSubsidyOverpaymentDispositionPreviewBody,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = "government-overpayment-disposition-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    """Keep the finite disposition branch inside Government Subsidy's typed intent."""
+    del principal
+    correlation = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _overpayment_candidate_payload(
+            _preview_overpayment_disposition(application, body)
+        ),
+        "成功產生政府補助溢撥處置預覽",
+        correlation,
+    )
+
+
+@router.post("/overpayments/disposition/apply")
+def apply_government_subsidy_overpayment_disposition(
+    body: GovernmentSubsidyOverpaymentDispositionApplyBody,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_capability("government_subsidy.overpayment.disposition")),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    request = _disposition_apply_request(body, idempotency_key, correlation_id, principal)
+    return _call_endpoint(
+        lambda: _apply_overpayment_disposition(application, body.disposition, request),
+        "成功套用政府補助溢撥處置",
+        request.correlation_id,
+    )
+
+
+def _preview_overpayment_disposition(application, body):
+    if body.disposition == "offset":
+        return application.preview_overpayment_offset(
+            body.overpayment_identity,
+            _overpayment_offset_intents(body.targets),
+        )
+    _require_iso_date(body.due_date or "")
+    return application.preview_overpayment_return(
+        body.overpayment_identity,
+        body.due_date or "",
+        body.evidence_reference,
+    )
+
+
+def _disposition_apply_request(body, idempotency_key, correlation_id, principal):
+    common = (
+        body.overpayment_identity,
+        ExpectedVersion(body.expected_overpayment_version),
+        PreviewFingerprint(body.preview_fingerprint),
+        IdempotencyKey(idempotency_key),
+        _actor(principal),
+        body.reason,
+        CorrelationId(correlation_id),
+    )
+    if body.disposition == "offset":
+        return OffsetApplyRequest(
+            common[0], _overpayment_offset_intents(body.targets), *common[1:6],
+            body.evidence_reference, common[6],
+        )
+    _require_iso_date(body.due_date or "")
+    return ReturnApplyRequest(
+        common[0], body.due_date or "", body.evidence_reference,
+        *common[1:],
+    )
+
+
+def _apply_overpayment_disposition(application, disposition, request):
+    if disposition == "offset":
+        return application.apply_overpayment_offset(request)
+    return application.apply_overpayment_return(request)
+
+
+@router.post("/overpayments/offset/preview")
+def preview_government_subsidy_overpayment_offset(
+    body: GovernmentSubsidyOverpaymentOffsetPreviewBody,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = "government-overpayment-offset-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    del principal
+    correlation = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _overpayment_candidate_payload(
+            application.preview_overpayment_offset(
+                body.overpayment_identity, _overpayment_offset_intents(body.targets)
+            )
+        ),
+        "成功產生政府補助溢撥抵扣預覽",
+        correlation,
+    )
+
+
+@router.post("/overpayments/offset/apply")
+def apply_government_subsidy_overpayment_offset(
+    body: GovernmentSubsidyOverpaymentOffsetApplyBody,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_capability("government_subsidy.overpayment.disposition")),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    request = OffsetApplyRequest(
+        body.overpayment_identity, _overpayment_offset_intents(body.targets),
+        ExpectedVersion(body.expected_overpayment_version),
+        PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key),
+        _actor(principal), body.reason, body.evidence_reference,
+        CorrelationId(correlation_id),
+    )
+    return _call_endpoint(
+        lambda: application.apply_overpayment_offset(request),
+        "成功套用政府補助溢撥抵扣",
+        request.correlation_id,
+    )
+
+
+@router.post("/overpayments/return/preview")
+def preview_government_subsidy_overpayment_return(
+    body: GovernmentSubsidyOverpaymentReturnPreviewBody,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = "government-overpayment-return-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    del principal
+    _require_iso_date(body.due_date)
+    correlation = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _overpayment_candidate_payload(
+            application.preview_overpayment_return(
+                body.overpayment_identity, body.due_date, body.evidence_reference
+            )
+        ),
+        "成功產生政府補助溢撥退還預覽",
+        correlation,
+    )
+
+
+@router.post("/overpayments/return/apply")
+def apply_government_subsidy_overpayment_return(
+    body: GovernmentSubsidyOverpaymentReturnApplyBody,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_capability("government_subsidy.overpayment.disposition")),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    _require_iso_date(body.due_date)
+    request = ReturnApplyRequest(
+        body.overpayment_identity, body.due_date, body.evidence_reference,
+        ExpectedVersion(body.expected_overpayment_version),
+        PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key),
+        _actor(principal), body.reason, CorrelationId(correlation_id),
+    )
+    return _call_endpoint(
+        lambda: application.apply_overpayment_return(request),
+        "成功建立政府補助溢撥退還應付",
+        request.correlation_id,
+    )
+
+
+def _overpayment_offset_intents(values):
+    return tuple(
+        GovernmentSubsidyOffsetIntent(item.claim_item_id, MoneyNTD(item.amount_ntd))
+        for item in values
+    )
+
+
+def _overpayment_candidate_payload(candidate):
+    return {
+        "overpayment_identity": candidate.overpayment_identity,
+        "overpayment_version": candidate.overpayment_version,
+        "remaining_before_ntd": candidate.remaining_before_ntd.amount,
+        "disposition_amount_ntd": candidate.disposition_amount_ntd.amount,
+        "remaining_after_ntd": candidate.remaining_after_ntd.amount,
+        "resulting_status": candidate.resulting_status.value,
+        "disposition_kind": candidate.disposition_kind,
+        "preview_fingerprint": candidate.fingerprint.value,
+    }
+
+
+def _require_iso_date(value):
+    try:
+        date.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError("government_subsidy_return_due_date_invalid") from error
+
+
+@router.post("/overpayments/return-reconciliation/preview")
+def preview_government_overpayment_return_reconciliation(
+    body: GovernmentOverpaymentReturnReconciliationPreviewBody,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = "government-overpayment-return-reconciliation-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    del principal
+    correlation = CorrelationId(correlation_id)
+    return _call_endpoint(
+        lambda: _return_reconciliation_candidate_payload(
+            application.preview_overpayment_return_reconciliation(
+                body.overpayment_identity, body.finance_import_row_id
+            )
+        ),
+        "成功產生政府退款單銀行對帳預覽",
+        correlation,
+    )
+
+
+@router.post("/overpayments/return-reconciliation/apply")
+def apply_government_overpayment_return_reconciliation(
+    body: GovernmentOverpaymentReturnReconciliationApplyBody,
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
+    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,
+    principal: AdminPrincipal = Depends(require_capability("government_subsidy.overpayment.disposition")),
+    application: GovernmentSubsidyApplication = Depends(get_government_subsidy_application),
+):
+    request = ReturnReconciliationApplyRequest(
+        body.overpayment_identity, body.finance_import_row_id,
+        ExpectedVersion(body.expected_overpayment_version),
+        PreviewFingerprint(body.preview_fingerprint), IdempotencyKey(idempotency_key),
+        _actor(principal), body.reason, body.evidence_reference,
+        CorrelationId(correlation_id),
+    )
+    return _call_endpoint(
+        lambda: application.apply_overpayment_return_reconciliation(request),
+        "成功記錄政府退款單銀行對帳",
+        request.correlation_id,
+    )
+
+
+def _return_reconciliation_candidate_payload(candidate):
+    return {
+        "overpayment_identity": candidate.overpayment_identity,
+        "payable_identity": candidate.payable_identity,
+        "bank_fact_identity": candidate.bank_fact_identity,
+        "amount_ntd": candidate.amount_ntd.amount,
+        "remaining_after_ntd": candidate.remaining_after_ntd.amount,
+        "resulting_status": candidate.resulting_status.value,
+        "preview_fingerprint": candidate.fingerprint.value,
+    }
 
 
 __all__ = [

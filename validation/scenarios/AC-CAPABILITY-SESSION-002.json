@@ -1,0 +1,42 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "AC-CAPABILITY-SESSION-002",
+  "track": "A",
+  "suite_id": "AC",
+  "status": "bound",
+  "requires_database": true,
+  "database_execution_mode": "persistent_append_only",
+  "coverage_scope": "supplemental",
+  "test_kinds": ["domain_root_data", "expected_manifest"],
+  "coverage_ids": ["AC-CAPABILITY-SESSION-002"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ACSM-01",
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#5.2"
+  ],
+  "root_facts": [
+    "Unique administrator identities, one active session, a temporary capability-grant command and a fixed authorization version."
+  ],
+  "forbidden_direct_seed": [
+    "effective capability decision, capability-grant event, session revocation timestamp, knowledge authorization result or security-alert projection"
+  ],
+  "commands": [
+    "Issue a temporary capability grant to an administrator with an active session, then use separately granted editor and reviewer capabilities in the bounded knowledge workflow."
+  ],
+  "expected": [
+    "Applying a valid capability grant revokes the target's active session as one persisted authorization effect.",
+    "A role-local editor cannot review or publish without separately granted capability roots.",
+    "The session revocation and effective authorization are derived by the grant workflow, not supplied as result rows."
+  ],
+  "receipt_requirements": [
+    "unique administrator/session root evidence",
+    "capability-grant command identities",
+    "persisted session-revocation assertion",
+    "separate editor/reviewer authorization assertions"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_access_knowledge_disposable_mysql_e2e.py"
+    ],
+    "test_paths": ["tests/test_access_knowledge_disposable_mysql_e2e.py"]
+  }
+}

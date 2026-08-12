@@ -15,6 +15,7 @@ from domains.customer_service.ticket import (
 from domains.line.identities import LineUserId
 from shared_kernel.migration_release import load_migration_release_manifest
 from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -92,6 +93,81 @@ def test_contact_union_creates_ticket_audit_and_delivery_in_one_uow_boundary():
     assert unit_of_work.customer_service.messages[0].event_key == "line-service-help:contact_union:event-2"
     assert len(unit_of_work.audit.intents) == 1
     assert len(unit_of_work.delivery_tasks.requests) == 1
+
+
+def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
+    unit_of_work = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
+
+    handled = application.handle(_inbox("event-4"), unit_of_work, LineUserId("U123456789"), "訂單進度")
+
+    assert handled is True
+    assert "服務登記" in unit_of_work.delivery_tasks.requests[0].payload_json
+
+    application.handle(_inbox("event-5"), unit_of_work, LineUserId("U123456789"), "收費與補助")
+
+    assert "實際金額以工會確認結果為準" in unit_of_work.delivery_tasks.requests[1].payload_json
+
+
+def test_unbound_progress_creates_a_canonical_customer_binding_flow():
+    unit_of_work = _unit_of_work()
+    unit_of_work.identity_flows = _IdentityFlows()
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc),
+        lambda purpose, flow_id: f"https://example.test/{purpose}/{flow_id}",
+    )
+
+    handled = application.handle(_inbox("event-6"), unit_of_work, LineUserId("U123456789"), "查詢進度")
+
+    assert handled is True
+    assert unit_of_work.identity_flows.commands[0].idempotency_key.value == "service-help-binding:event-6"
+    assert "https://example.test/customer_binding/flow-1" in unit_of_work.delivery_tasks.requests[0].payload_json
+
+
+def test_webhook_handler_delegates_service_help_to_the_injected_owner_workflow():
+    service_help = _RecordingServiceHelpApplication()
+    handler = LineWebhookIdentityHandlers(
+        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc),
+        lambda _purpose, _flow_id: "https://example.test/identity",
+        service_help_application=service_help,
+    )
+    inbox = SimpleNamespace(
+        event=SimpleNamespace(
+            event_id=SimpleNamespace(value="event-3"),
+            occurred_at=datetime(2026, 8, 11, tzinfo=timezone.utc),
+            payload_json='{"message":{"type":"text","text":"服務說明"}}',
+            source=SimpleNamespace(
+                source_type=SimpleNamespace(value="user"),
+                user_id=LineUserId("U123456789"),
+            ),
+        )
+    )
+    unit_of_work = SimpleNamespace(platform_users=SimpleNamespace(apply_friend_event=lambda _event: None))
+
+    handler.handle_message(inbox, unit_of_work)
+
+    assert service_help.calls == [("U123456789", "服務說明")]
+
+
+class _RecordingServiceHelpApplication:
+    def __init__(self):
+        self.calls = []
+
+    def handle(self, _inbox, _unit_of_work, line_user_id, text):
+        self.calls.append((line_user_id.value, text))
+        return True
+
+
+class _IdentityFlows:
+    def __init__(self):
+        self.commands = []
+
+    def open(self, command):
+        self.commands.append(command)
+        return SimpleNamespace(
+            purpose=command.purpose,
+            flow_id=SimpleNamespace(value="flow-1"),
+        )
 
 
 def test_first_release_schema_has_versioned_ticket_and_append_only_events():

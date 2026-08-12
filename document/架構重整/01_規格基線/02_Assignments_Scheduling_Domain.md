@@ -60,6 +60,12 @@
 正式 assignment。轉換前仍必須驗證契約流程完成、服務時間完整及訂金正式核銷；
 legacy 缺漏只能進異常與人工修正，不得由 Assignment Plan 猜測或補造。
 
+依第 `21` 份正式規格，存在簽約前 commitment 時，第一次 bootstrap 還必須鎖定並驗證
+matching plan/version、staff 與精確日期集合完全相同；不同時回
+`commitment_execution_mismatch` 且零寫入。成功時 assignments、schedules、Payroll impact、
+commitment `converted` terminal event、outbox 與 receipt 同一交易提交。Calendar Read、Payroll
+與 Government Subsidy 在 conversion 前不得讀取 commitment days。
+
 ### Schedule Projection
 
 由 assignment segment、排休規則及正式 leave outcome 產生完整 assignment-owned 日曆。禁止單日 CRUD、獨立 Generate 或 UI 直接切換 `is_work_day`。
@@ -67,6 +73,12 @@ legacy 缺漏只能進異常與人工修正，不得由 Assignment Plan 猜測�
 ### Leave／Substitution
 
 多日請假為一次 Preview、一個 fingerprint、一次 Apply transaction；每一天保存 immutable outcome。正式結果只允許順延或指定代班。代班建立獨立 assignment；取消或更正以反向／替代事件處理。
+
+2026-08-12 人工裁決：月嫂請假審核的 API、typed client 與管理入口由 Scheduling 擁有，
+不得掛在 LINE identity review route 或 `LineAdminApiClient`。LINE 只提供 verified identity、
+delivery intent 與通知結果。現有依賴已退役 `services.*` 的 review service 是 `live-drift`，
+在 canonical repository／outer UoW、capability、typed result 與 entrypoint replacement 完成前
+不得掛入 FastAPI。
 
 Batch replay：
 

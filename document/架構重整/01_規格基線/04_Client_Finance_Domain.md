@@ -25,7 +25,12 @@
 
 ### Payment Terms／Obligation Planning
 
-依 Orders Terms、正式服務日及費率政策建立訂金、第一期、第二期及調整義務。樓層費只計入一次。條款變更只重算未核銷義務；已核銷差額建立 adjustment 或 refund obligation。
+依 Orders Terms、服務日根事實及費率政策建立訂金、第一期、第二期及調整義務。樓層費只計入一次。條款變更只重算未核銷義務；已核銷差額建立 adjustment 或 refund obligation。
+
+依第 `21` 份正式規格，最後一位月嫂簽回並形成有效簽約前 commitment 時，只建立一次且
+唯一的 deposit obligation，使用 commitment 的精確服務日、時數、費率與樓層費計算。客戶
+簽回後的 Contract Completion 保留該 deposit identity、金額、ledger 與 allocation，只補足
+尚未建立的剩餘正式期款；不得重建、重複計入或因客戶晚簽而撤銷已合法核銷的 deposit。
 
 補助資格與客戶收費採同一組衍生政策：補助市民（含低收入戶／中低收入戶映射）的月嫂服務薪資與政府請款單價均為每小時 350 元；政府先負擔最多 120 小時，第 121 小時起按每小時 350 元形成客戶應收。這使服務薪資在時數層由「政府補助＋客戶超額自費」完整覆蓋。樓層費不受時數補助抵銷，永遠是客戶應收。故「全補助訂單」只表示本案實際時數未超過 120 且無樓層費或其他自費項目，不能作為客戶身分的別名。
 

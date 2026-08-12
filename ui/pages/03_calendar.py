@@ -1216,7 +1216,16 @@ def _accept_matching_workspace_result(request, orders, staff) -> bool:
 
 def _render_case_staffing_workspace() -> None:
     try:
-        query_text = st.text_input("搜尋案件編號或客戶姓名", key="scheduling_order_search").strip()
+        pending_case_no = st.session_state.get("pending_scheduling_case_no")
+        manual_query_text = st.text_input(
+            "搜尋案件編號或客戶姓名",
+            key="scheduling_order_search",
+        ).strip()
+        query_text = (
+            pending_case_no.strip()
+            if isinstance(pending_case_no, str) and pending_case_no.strip()
+            else manual_query_text
+        )
         after_case_no = _prepare_scheduling_order_page("staffing", query_text)
         orders, next_cursor = _load_matching_center_data(query_text or None, after_case_no)
         staff = _load_staff_summary_page("staffing")
