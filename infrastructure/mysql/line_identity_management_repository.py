@@ -231,13 +231,16 @@ _LIST_SQL = _BASE_SELECT + "WHERE {where} ORDER BY b.updated_at_utc DESC LIMIT %
 _DETAIL_SQL = _BASE_SELECT + "WHERE b.line_user_id=%s"
 _COUNT_SQL = "SELECT COUNT(*) total FROM (" + _BASE_SELECT + "WHERE {where}) counted"
 _DEFAULT_MENU_SQL = (
-    "SELECT id,line_rich_menu_id FROM line_rich_menu_publications "
-    "WHERE menu_config_id='default_menu' AND status='published' AND is_current=1 "
-    "AND line_rich_menu_id IS NOT NULL ORDER BY id DESC LIMIT 1"
+    "SELECT id,provider_menu_id AS line_rich_menu_id "
+    "FROM line_rich_menu_publication_tasks "
+    "WHERE menu_definition_id='default_menu' AND publication_status='published' "
+    "AND provider_menu_id IS NOT NULL ORDER BY id DESC LIMIT 1"
 )
 _REQUEST_SELECT_SQL = (
     "SELECT id,line_user_id,subject_type,subject_reference,request_status,"
-    "requested_binding_version,pending_binding_version,default_menu_publication_id,"
+    "requested_binding_version,pending_binding_version,"
+    "COALESCE(canonical_default_menu_publication_id,default_menu_publication_id) "
+    "AS default_menu_publication_id,"
     "provider_menu_id,requested_by_actor_id,request_reason,idempotency_key,"
     "correlation_id,attempt_count,last_error_code,"
     "last_error_message FROM line_identity_revocation_requests WHERE id=%s"
@@ -246,7 +249,7 @@ _REQUEST_BY_KEY_SQL = _REQUEST_SELECT_SQL.replace("WHERE id=%s", "WHERE idempote
 _REQUEST_INSERT_SQL = (
     "INSERT INTO line_identity_revocation_requests (line_user_id,subject_type,"
     "subject_reference,requested_binding_version,pending_binding_version,"
-    "default_menu_publication_id,provider_menu_id,requested_by_actor_id,"
+    "canonical_default_menu_publication_id,provider_menu_id,requested_by_actor_id,"
     "request_reason,idempotency_key,correlation_id) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 _REQUEST_FAILURE_SQL = (

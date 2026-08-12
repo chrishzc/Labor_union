@@ -1,0 +1,14 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "179_line_identity_canonical_menu_publication.sql": {
+      "tables": {
+        "line_identity_revocation_requests": [
+          "default_menu_publication_id",
+          "canonical_default_menu_publication_id"
+        ]
+      },
+      "triggers": []
+    }
+  }
+}

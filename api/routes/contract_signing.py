@@ -77,7 +77,7 @@ def send_staff_contract(
 @router.post("/{case_no}/contract-signing/staff-segments/{segment_id}/signed-return", response_model=BaseResponse[dict])
 def record_staff_signed_return(
     document: UploadFile = File(...),
-    expected_document_version_id: int = Form(..., gt=0),
+    expected_document_version_id: Annotated[int, Form(gt=0)] = ...,
     case_no: str = Path(..., min_length=1, max_length=50),
     segment_id: int = Path(..., gt=0),
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
@@ -106,7 +106,7 @@ def send_client_contract(
 @router.post("/{case_no}/contract-signing/client/signed-return", response_model=BaseResponse[dict])
 def record_client_signed_return(
     document: UploadFile = File(...),
-    expected_document_version_id: int = Form(..., gt=0),
+    expected_document_version_id: Annotated[int, Form(gt=0)] = ...,
     case_no: str = Path(..., min_length=1, max_length=50),
     idempotency_key: Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=191)] = ...,
     correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = ...,

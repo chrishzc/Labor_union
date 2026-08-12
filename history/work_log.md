@@ -95,7 +95,7 @@
 - 修改 `line/worker.py`：使用 transaction 與 `FOR UPDATE SKIP LOCKED` 領取任務；加入卡住任務恢復、LINE Retry Key、暫時錯誤指數退避及永久失敗狀態。
 - 修改 `config/message_templates.json`：啟用 D+1 並新增 D+2、D+3、月嫂驗證提示與失敗文案。
 - 修改 `api/schemas/line_config.py`、`api/routes/line_system_config.py`、`services/json_config_service.py`：新增排程 JSON 驗證與 GET／PUT 前端預留接口。
-- 修改 `.env.example`：新增 `LEGACY_SHARED_KEY` 範例。
+- 修改 `.env.example`：新增 `INTERNAL_API_KEY` 範例。
 
 ### 第四階段功能
 - Webhook 無有效 LINE 簽章時回 401，不寫 DB、不建立任務。
@@ -112,7 +112,7 @@
 - 建立 `customer`、`caregiver`、`union_staff` 三種 LINE 角色。
 - 修改 `config/line_menu.json`，新增工會人員客服選單，預留客服系統與月嫂驗證管理入口。
 - 「我是月嫂」不再直接升級身分；改為密碼學安全隨機六位數驗證碼、10 分鐘期限、最多 5 次嘗試，成功後才切換角色與選單。
-- 月嫂驗證碼查詢及角色設定接口必須帶 `X-Legacy-Shared-Key`，避免公開取得驗證碼或任意升級角色。
+- 月嫂驗證碼查詢及角色設定接口必須帶 `X-Internal-API-Key`，避免公開取得驗證碼或任意升級角色。
 
 ### 資料庫與驗證
 - 已執行 `scripts/init_db.py` 重建開發資料庫，成功執行 35 個 schema statement；本次資料為開發資料。
@@ -161,7 +161,7 @@
 
 - 修改 `line/line_bot.py`，新增 `GET /api/line/staff/review-requests`，統一彙整 `client_rebind` 與 `caregiver_verification` 待處理事項。
 - 新增統一 approve／reject API；客戶重新綁定沿用既有核准與拒絕邏輯，月嫂核准時才向工作人員回傳驗證碼，拒絕時取消驗證碼並建立通知任務。
-- 既有重新綁定 GET／approve／reject 接口保留相容性，但補上 `X-Legacy-Shared-Key` 驗證。
+- 既有重新綁定 GET／approve／reject 接口保留相容性，但補上 `X-Internal-API-Key` 驗證。
 - 修改 `line/start_line_bot.py`，新增非阻塞重新綁定審核器；不阻塞 FastAPI／LIFF 請求，也能持續監控 ngrok 與 FastAPI。
 - 新增 `ENABLE_REBIND_CONSOLE_REVIEW` 開關；開發終端輸入 `y` 呼叫正式核准 API、輸入 `n` 呼叫正式拒絕 API，`APP_ENV=production` 時強制停用。
 - 修改 `config/message_templates.json`，新增月嫂驗證申請被拒絕時的通知文字。
@@ -202,9 +202,9 @@
 - LINE 月嫂角色由 `caregiver` 統一改為 `staff`，與既有 `staff` 主表、`staff_id`、排班及媒合API命名一致；`union_staff` 保留表示工會人員。
 - `line_confirmation_requests.request_type` 由 `caregiver_verification` 改為 `staff_verification`，並移除六位數驗證碼、期限及嘗試次數欄位。
 - 使用者輸入「我是月嫂」後只建立待審請求，不再產生或接受驗證碼；工會人員核准後，系統在同一交易內將角色改為 `staff`、完成請求並排入月嫂Rich Menu綁定任務。
-- 統一待審API保留給正式Web/UI串接：`GET /api/line/staff/review-requests` 及對應approve／reject接口，持續以 `X-Legacy-Shared-Key` 保護。
+- 統一待審API保留給正式Web/UI串接：`GET /api/line/staff/review-requests` 及對應approve／reject接口，持續以 `X-Internal-API-Key` 保護。
 - 開發啟動器改為同時顯示月嫂身分與客戶重新綁定待審項目，接受終端 `y/n`；由 `ENABLE_LINE_REVIEW_CONSOLE` 控制，正式環境強制停用。
-- 開發環境未設定 `LEGACY_SHARED_KEY` 時，啟動器會建立只存在本次程序生命週期的隨機內部金鑰，FastAPI子程序共用但不寫入檔案。
+- 開發環境未設定 `INTERNAL_API_KEY` 時，啟動器會建立只存在本次程序生命週期的隨機內部金鑰，FastAPI子程序共用但不寫入檔案。
 - Rich Menu、訊息範本、圖片檔、SOP、設定說明、階段報告及資料字典同步改用 `staff` 命名。
 - 已以 `scripts/init_db.py` 重建開發Schema；整合測試通過有效簽章「我是月嫂」→待審→核准→`role=staff`→`status=approved`，測試資料已清除，未建立一次性Python檔案。
 
@@ -212,7 +212,7 @@
 
 - 移除`start_line_bot.py`每3秒呼叫`GET /api/line/staff/review-requests`的固定輪詢。
 - 啟動器新增只綁定`127.0.0.1`與隨機Port的臨時通知入口；URL只透過子程序環境變數`DEV_REVIEW_NOTIFY_URL`傳給FastAPI。
-- Webhook或LIFF成功提交`staff_verification`／`client_rebind`後，以`X-Legacy-Shared-Key`向本機入口推送一次通知，終端立即顯示`y/n`。
+- Webhook或LIFF成功提交`staff_verification`／`client_rebind`後，以`X-Internal-API-Key`向本機入口推送一次通知，終端立即顯示`y/n`。
 - 啟動器只在每次啟動完成時掃描一次既有待審資料，作為服務中斷期間通知遺失的恢復機制。
 - 通知失敗不影響Webhook或LIFF成功回應，確認請求仍保存在MySQL並可由正式Web/UI處理。
 - Python語法及單筆通知測試通過：通知佇列只收到一筆`staff_verification`事件，沒有建立一次性Python檔案。
@@ -241,7 +241,7 @@
 
 - 新增 `ENABLE_ADMIN_AUTH` 開關；開發環境設為 `false` 時使用暫時的 `system_admin` 開發身分，不要求輸入帳密。
 - `APP_ENV=production` 強制啟用管理員 Session，無法透過開關略過。
-- `X-Legacy-Shared-Key` 在開發略過模式仍為必要條件，不會把內部金鑰交給瀏覽器。
+- `X-Internal-API-Key` 在開發略過模式仍為必要條件，不會把內部金鑰交給瀏覽器。
 - Streamlit LINE 管理中心在略過模式直接進入並顯示醒目警告，不顯示登入／登出控制。
 - 稽核紀錄支援沒有 DB 帳號 ID 的開發身分，避免外鍵錯誤。
 - 開發 `.env` 已設為 `ENABLE_ADMIN_AUTH=false`；`.env.example` 維持安全預設 `true`。
@@ -310,7 +310,7 @@
 - 新增客戶重新綁定核准／拒絕訊息範本及 5.6 整合測試；5.1～5.6 LINE 回歸共 43 項通過。
 - 未建立任何一次性 Python 檔案。
 
-## [2026-07-24] 修復第五階段啟動器 LEGACY_SHARED_KEY 載入失敗
+## [2026-07-24] 修復第五階段啟動器 INTERNAL_API_KEY 載入失敗
 
 - 修正 `start.bat` 在 Windows `cmd` 中無法接收 Python dotenv 輸出的問題；開發啟動時會優先沿用既有環境變數，其次讀取 `.env`，仍無設定時建立本次程序專用的臨時金鑰。
 - 同步修正第五階段曾修改的 `online.bat`；正式啟動會優先沿用既有環境變數，其次讀取 `.env`，兩者皆無金鑰時維持拒絕啟動。
@@ -442,7 +442,7 @@
 - 訊息內容管理新增「傳給媽媽」、「傳給月嫂」及「群組工具說明」三種工會快捷分類與排序；設定仍保存在 `config/message_templates.json`，不新增另一份範本來源。
 - 工會人員在一對一官方帳號點選快捷分類後，Webhook 會驗證 `line_users.role='union_staff'`，再以可靠任務送出 Quick Reply；未綁定身分不可使用。
 - Worker 新增 `line_push_messages` 任務，可發送文字與 Quick Reply 等 1～5 個 LINE 訊息物件，沿用既有任務鎖、重試及執行紀錄。
-- 新增工會人員 LIFF 手機入口及 Session API，以 LINE ID Token 與 `admin_users.linked_line_user_id` 驗證身分；瀏覽器不持有 `X-Legacy-Shared-Key`。目前完成狀態、訂單、排休、待確認及訊息功能的安全入口與導覽，詳細查詢／異動仍列為後續逐項串接。
+- 新增工會人員 LIFF 手機入口及 Session API，以 LINE ID Token 與 `admin_users.linked_line_user_id` 驗證身分；瀏覽器不持有 `X-Internal-API-Key`。目前完成狀態、訂單、排休、待確認及訊息功能的安全入口與導覽，詳細查詢／異動仍列為後續逐項串接。
 - 修正 LIFF 導覽頁使用網址參數組合 HTML 的風險，改以 `textContent` 建立畫面，避免手動竄改網址造成前端注入。
 - 更新設定規格、檔案功能說明及 Rich Menu／訊息／LIFF 回歸測試；目標 31 項通過，擴大回歸 65 項通過。另 1 項既有監督器測試因本機保留正常關機標記而顯示 maintenance，與本次功能無關，未刪除使用者的執行狀態檔。
 - 本次未修改資料庫 Schema、未重建資料庫，也未建立或遺留一次性 Python 檔案。
@@ -597,3 +597,51 @@
   本機 `.venv` 後為 `0`。
 - `git diff --check` 與異動檔 strict UTF-8、無 BOM 驗證通過；未修改 schema、migration、
   正式資料庫、LINE provider 或專案相依檔，也未建立或遺留一次性程式檔案。
+## [2026-08-12] LINE 身分解除回復 canonical 用戶選單
+
+- 修復月嫂身分解除後仍讀取 legacy `line_rich_menu_publications`，因而切回「訂單查詢／
+  尋找專員」舊版用戶選單的 live-drift；新解除請求改選
+  `line_rich_menu_publication_tasks` 最新 published `default_menu`。
+- 新增 additive schema part 179（合併前部署 artifact 編號為 168）與 LINE stage 13 release
+  manifest／descriptor；新解除 request
+  保存 canonical publication FK，stage 12 以前的 legacy request 保持可讀且不回填、不改寫。
+- 新增 repository、schema 與 release hash 回歸測試；聚焦測試 13 項、擴大 LINE 回歸 29 項、
+  schema loader／bootstrap／release 回歸 8 項通過。
+- 以 disposable MySQL 驗證完整 bootstrap、legacy/canonical publication 並存、新 request
+  canonical FK 寫入及既有 legacy request 讀取；測試資料庫於驗證後刪除。
+- 經使用者授權，在本機 `union_db` 套用 stage 13 前建立全庫備份並實際還原驗證；來源與還原庫
+  222 張 base table 的逐表 row count 完全一致，migration 後 3 筆既有解除歷史保持不變。
+- 啟動同版 FastAPI、canonical LINE worker 與 Streamlit；API／UI HTTP 200、worker heartbeat
+  無錯誤。最新 completed revocation request 3 已重新 link canonical publication 5，LINE provider
+  readback 確認實際 Rich Menu 一致。
+- 備份僅保存在 Git ignored `scratch/line-identity-stage13-deploy-20260812/`，不得提交或外傳；
+  完整驗收見 `2026-08-12_line_identity_canonical_default_menu_repair_receipt.md`。
+
+## [2026-08-12] 合併 upstream/main UI 調整 #42
+
+- 將 upstream/main `cfc3b87401e663e6b5e8bda6cab9a739ae6c2a7f` 合併至本地 `main`；
+  非重疊功能完整保留，`README.md` 與本工作紀錄的雙邊新增內容均語意合併。
+- upstream 已使用 schema part 168～178 與 Work Package 55～65；本次 LINE 修復功能保留，
+  repository artifact 改編號為 schema part 179、Work Package 66，並同步 manifest、descriptor、
+  hash、測試、索引與 evidence 歷史說明。
+- LINE 身分、canonical menu command、客服與 runtime cutover 聚焦回歸為 `36 passed`；
+  migration/bootstrap metadata 群組另有 `22 passed`。
+- schema 群組的兩項既知失敗（prefix `101`／`165`／`166`／`167` 重號，以及
+  `init_db.main()` 未隔離 pytest argv）可在純 upstream tree 重現，依合併裁決保留雲端版本。
+- 完整 pytest 在 collection 階段另發現 upstream 新增 Contract Signing import 所需的
+  `infrastructure.archive.contract_documents` 未存在，以及 validation seed 測試仍匯入不存在的
+  `_INGESTION_KEY`；這些非本次 LINE write set，未擴張修補。合併版本 FastAPI 因前者暫時無法
+  啟動，需另案補齊 upstream 漏檔／測試契約後才能恢復直接測試。
+- `git diff --check` 所列 trailing whitespace 均可在純 upstream diff 重現；本次衝突解析檔無
+  新增 whitespace 錯誤。`history/git_push.md` 仍由 `.gitignore` 排除，本次未執行 remote push。
+
+## [2026-08-12] 更新 upstream/main 合約封存修復
+
+- 確認 upstream/main `e9de8b7015ab1ef1a77c639e0723e98e32fc2f64` 已補回缺少的
+  `infrastructure/archive/contract_documents.py`，解除 `api.main` 載入時的模組阻塞。
+- 上游同步將驗證資料種子測試從不存在的 `_INGESTION_KEY` 改為正式
+  `_ingestion_key(...)` 契約，原先兩個完整測試收集阻塞均已修復。
+- 以 `--no-commit --no-ff` 合併最新 upstream/main，過程沒有衝突；保留本地 LINE 修復與
+  Contract Signing router 的既有防護提交，未執行遠端 push。
+- 驗證 `api.main` 可成功載入；合約封存與驗證資料集聚焦測試 `13 passed`；完整 pytest
+  成功收集 `1902` 項測試。
