@@ -13,7 +13,7 @@
     "execution_scope": "static entry-point governance"
   },
   "input_digests": {
-    "entrypoint_review_queue": "28508a64c392b0f72c147c06313973f47eff817675f3ab0d2db1ee1343d96463",
+    "entrypoint_review_queue": "1373186f6bda5850670d7e581e6a112fad332da319493d1d88dce71968dcb4c0",
     "entrypoint_queue_generator": "1b18f0937cc35b152442a053d88cc178974c761031329eaa3128b05cc2a25eb1",
     "entrypoint_queue_tests": "e88875ac4aa7a7e308f10e7f52ec34bd0e6f05346c4cd247dcb69ecd65a26879"
   },

@@ -284,7 +284,7 @@ def _work_item(attempt_count, maximum_attempts):
 
 
 def test_stage12_schema_preserves_history_and_requires_menu_first_saga() -> None:
-    schema = (PROJECT_ROOT / "db/schema_parts/167_line_identity_management.sql").read_text(encoding="utf-8")
+    schema = (PROJECT_ROOT / "db/schema_parts/186_line_identity_management.sql").read_text(encoding="utf-8")
     assert "revocation_pending" in schema
     assert "line_identity_revocation_requests" in schema
     assert "completed_at_utc" in schema
@@ -354,7 +354,7 @@ def test_stage12_manifest_hashes_and_loads_all_owned_objects() -> None:
         assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
     manifest = load_migration_release_manifest(path, PROJECT_ROOT)
     assert [item.artifact.name for item in manifest.schema_artifacts] == [
-        "167_line_identity_management.sql"
+        "186_line_identity_management.sql"
     ]
 
 

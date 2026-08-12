@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "FI-STAGING-DEDUP-002",
-  "scenario_digest": "5001b8b01ed3a3a5896c0469eacb448a89bbef439d698c186ae9c22015ce2da9",
+  "scenario_digest": "bf298577864d09c1281b4fff0cb5c2e4dc0d9901c3c847895852334436054524",
   "result": "passed",
   "assertion_count": 40,
   "runner": [

@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "165_provisional_registration_case_issue.sql": {
+    "184_provisional_registration_case_issue.sql": {
       "tables": {
         "provisional_registration_case_issue_events": [
           "id",

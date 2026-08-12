@@ -504,11 +504,19 @@ def _resolved_case_no(row) -> str | None:
 
 
 def _bank_row_matches_selection(row, selection) -> bool:
+    if isinstance(selection, str):
+        return _matches_legacy_case_selection(row, selection)
     if _resolved_case_no(row) == selection.case_no:
         return True
     if _is_single_heuristic_client_candidate(row):
         return True
     return _has_exact_authoritative_targets(row, selection)
+
+
+def _matches_legacy_case_selection(row, case_no: str) -> bool:
+    if _resolved_case_no(row) == case_no:
+        return True
+    return _is_single_heuristic_client_candidate(row)
 
 
 def _has_exact_authoritative_targets(row, selection) -> bool:

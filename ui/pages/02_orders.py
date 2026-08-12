@@ -33,7 +33,7 @@ def show():
     _mark_order_summary_stale_if_refreshing(search_text)
     request = begin_request(st.session_state, "orders_summary_request")
     try:
-        with st.spinner("正在載入案件摘要…"):
+        with st.spinner("正在載入案件摘要與月嫂清單…"):
             orders_data = _load_initial_orders(search_text, request)
     except Exception as error:
         accept_request_result(

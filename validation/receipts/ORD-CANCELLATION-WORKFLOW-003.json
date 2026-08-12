@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "ORD-CANCELLATION-WORKFLOW-003",
-  "scenario_digest": "72aaa5344dabaec7bf92dbccc35a36df91d01acc017ffbe5beba1e64cb7dc984",
+  "scenario_digest": "2930045c2dcbe8900f091297add5d9d32697718affe80a4240d5f6b15d6ea585",
   "result": "passed",
   "assertion_count": 10,
   "runner": [

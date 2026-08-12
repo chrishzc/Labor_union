@@ -46,14 +46,14 @@ def _schema_part_sort_key(path: Path) -> tuple[int, str, str]:
         return int(match.group(1)), match.group(2).lower(), path.name
     return 10**9, "", path.name
 
-def main():
+def main(argv: list[str] | None = None):
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--allow-drop",
         action="store_true",
         help="允許執行 db/schema.sql 內的 DROP DATABASE；僅限明確重建本機資料庫時使用。",
     )
-    args = parser.parse_args()
+    args = parser.parse_args([] if argv is None else argv)
     schema_path = r'db/schema.sql'
     if not os.path.exists(schema_path):
         # 嘗試相對路徑
@@ -164,4 +164,4 @@ def main():
         print("資料庫連線已關閉。")
 
 if __name__ == '__main__':
-    main()
+    main(sys.argv[1:])

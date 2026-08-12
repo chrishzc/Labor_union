@@ -54,7 +54,8 @@ from api.routes import (
     line_tasks,
     knowledge_retrieval,
     match_records,
-    matches,`r`n    candidate_contact_pool,
+    matches,
+    candidate_contact_pool,
     multi_caregiver_case_assignments,
     multi_caregiver_schedule,
     multi_caregiver_schedule_read,
@@ -193,7 +194,8 @@ app.include_router(matching_schedule_confirmation.router)
 app.include_router(assignment_schedule_rest_dates.router)
 
 
-app.include_router(matches.router)`r`napp.include_router(candidate_contact_pool.router)
+app.include_router(matches.router)
+app.include_router(candidate_contact_pool.router)
 app.include_router(match_records.router)
 
 app.include_router(schedule.router)

@@ -41,7 +41,7 @@ UI、通知及 API 都不得顯示「請假已完成」。
 
 - `line/static/staff_schedule.html` 已提供請假表單，呼叫
   `POST /api/line/staff/leave-requests`，但 live API 沒有此 endpoint。
-- `db/schema_parts/101_staff_leave_requests.sql` 已定義 `staff_leave_requests`，但 production source
+- `db/schema_parts/183_staff_leave_requests.sql` 已定義 `staff_leave_requests`，但 production source
   沒有 INSERT writer。
 - `subsystems/scheduling/staff_leave_review_service.py` 依賴不存在的 `services.db_service` 與
   `services.line_task_service`，沒有 route、typed client 或 UI caller，不可掛入 FastAPI。

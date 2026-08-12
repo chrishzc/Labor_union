@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "FI-CANONICAL-STAGING-003",
-  "scenario_digest": "d31f475d1f06f343d7558b0434ec0d9c3c8429b77adf899554fd1407d6553e98",
+  "scenario_digest": "1378800b032c4a0184cf41d24d187c27196dc425a208b2aec02a120b49258fb4",
   "result": "passed",
   "assertion_count": 1,
   "runner": [

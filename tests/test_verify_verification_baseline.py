@@ -311,8 +311,8 @@ def test_gate_report_separates_complete_contracts_from_unverified_execution():
     assert all(item["satisfied"] for item in report["baseline_deliverables"])
     assert report["errors"]["field_authority"] == []
     assert report["field_authority"]["mappings"][0]["unexpected_legacy_references"] == []
-    assert report["business_matrix"] == {"required": 118, "missing": []}
-    assert report["fixtures"]["fixture_count"] == 31
+    assert report["business_matrix"] == {"required": 127, "missing": []}
+    assert report["fixtures"]["fixture_count"] == 32
     assert report["fixtures"]["valid"] is True
     assert report["fixtures"]["all_a_scenarios_have_fixture"] is True
     assert all(not track["suites_missing_contract"] for track in report["tracks"])
@@ -381,7 +381,7 @@ def test_gate_report_separates_data_fixtures_from_runtime_evidence():
     assert boundaries["A"]["domain_root_data"]["declared_scenarios"] >= 1
     assert boundaries["A"]["external_input_fixture"]["declared_scenarios"] >= 1
     assert boundaries["A"]["subsystem_state_machine"] == {
-        "declared_scenarios": 2,
+        "declared_scenarios": 3,
         "bound_scenarios": 2,
         "passing_receipts": 2,
     }

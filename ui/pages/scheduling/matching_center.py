@@ -945,8 +945,13 @@ def _render_single_caregiver_matching(target_order, staff_list):
     target_case_no = target_order["case_no"]
     st.markdown(f"#### ⚡ 智慧配對與指派 (案件 #{target_case_no})")
     st.caption("先尋找一位可完整承接服務期間的月嫂；多月嫂僅作備案。")
-    start_date = _as_date(target_order.get("actual_start_date") or target_order.get("start_date"))
-    end_date = _as_date(target_order.get("actual_end_date") or target_order.get("end_date"))
+    start_date_value = target_order.get("actual_start_date") or target_order.get("start_date")
+    end_date_value = target_order.get("actual_end_date") or target_order.get("end_date")
+    if start_date_value is None or end_date_value is None:
+        _render_multi_segment_matching(target_order, staff_list)
+        return
+    start_date = _as_date(start_date_value)
+    end_date = _as_date(end_date_value)
     result = _request(
         f"/api/v1/orders/{target_case_no}/caregiver-segment-availability/search",
         method="POST",

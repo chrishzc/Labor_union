@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "FI-UI-PREVIEW-PARITY-003",
-  "scenario_digest": "8bc1f55e5e23fa4062c5706e12d253d802fce9355286cb8baf6cc39cd9850725",
+  "scenario_digest": "8cb7d13df96f6859805fa89348aaad0c5be0854fc55a44a2b0d52aaf43a0ec51",
   "result": "passed",
   "assertion_count": 1,
   "runner": [
@@ -15,7 +15,7 @@
   "input_digests": {
     "scenario_fixture": "54157531b3856e04eeaf6f9cabada82c5ef2959c96440ce2cac8fa4646225523",
     "expected_manifest": "07796570af9ac468cc0949509f5eff8eee962457d80d750de4af86aeb4e828f5",
-    "integration_test": "af4d8dda8c6cf2e6aff95626bf112f43766d02a295fb491701bb6f52b747dcf3"
+    "integration_test": "f008cf84560ea10b3189feaaccf7a5f84dae40514738eb9c1be247ef4f13e6a8"
   },
   "input_paths": {
     "scenario_fixture": "validation/fixtures/FI-UI-PREVIEW-PARITY-003.json",

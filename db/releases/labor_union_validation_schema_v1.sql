@@ -11710,7 +11710,7 @@ ALTER TABLE anomaly_workflow_events
     MODIFY COLUMN idempotency_key VARCHAR(320) NOT NULL;
 -- END SOURCE: db/schema_parts/165_anomaly_workflow_event_idempotency_widen.sql
 
--- BEGIN SOURCE: db/schema_parts/165_provisional_registration_case_issue.sql
+-- BEGIN SOURCE: db/schema_parts/184_provisional_registration_case_issue.sql
 CREATE TABLE IF NOT EXISTS provisional_registration_case_issue_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     registration_id BIGINT NOT NULL,
@@ -11744,7 +11744,7 @@ ALTER TABLE case_import_receipts
     ADD CONSTRAINT fk_case_import_receipt_provisional_issue_event
         FOREIGN KEY (provisional_case_issue_event_id) REFERENCES provisional_registration_case_issue_events(id)
         ON DELETE RESTRICT;
--- END SOURCE: db/schema_parts/165_provisional_registration_case_issue.sql
+-- END SOURCE: db/schema_parts/184_provisional_registration_case_issue.sql
 
 -- BEGIN SOURCE: db/schema_parts/166_contract_signing_workflow.sql
 -- 166_contract_signing_workflow.sql

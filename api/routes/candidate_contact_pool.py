@@ -1,4 +1,4 @@
-﻿"""Candidate-contact pool endpoints."""
+"""Candidate-contact pool endpoints."""
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException

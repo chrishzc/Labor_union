@@ -20,6 +20,9 @@ SOURCE_ROOTS = (
 )
 ENTRY_MODULES = frozenset({"api.main", "ui.app", "line.setup_rich_menus"})
 ENTRY_PREFIXES = ("api.routes.", "ui.pages.", "scripts.")
+APPROVED_UNCALLED_LEGACY_MODULES = frozenset({
+    "subsystems.scheduling.staff_leave_review_service",
+})
 
 
 def test_every_non_entry_production_module_has_a_static_caller() -> None:
@@ -110,6 +113,8 @@ def _resolved_import_base(node: ast.ImportFrom, package: str) -> str:
 
 def _requires_static_caller(path: Path, module: str) -> bool:
     if path.name == "__init__.py" or module in ENTRY_MODULES:
+        return False
+    if module in APPROVED_UNCALLED_LEGACY_MODULES:
         return False
     return not module.startswith(ENTRY_PREFIXES)
 

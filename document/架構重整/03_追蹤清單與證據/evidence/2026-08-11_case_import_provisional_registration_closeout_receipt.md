@@ -34,7 +34,7 @@ The disposable MySQL suite used the locally configured `lu_test_*` database and 
 | `domains/case_import/case_import.py` | `7bcef83ecf84e64c18d640cc1f94a324e14368c8b9928f49e1a363e5a569475f` |
 | `subsystems/case_import/case_import_workflow.py` | `f23df774b58df6c20cae0ed84cca813667cab68d50786d91de5c64aba5c3eeaf` |
 | `infrastructure/mysql/case_import_repository.py` | `5e8c6560fd2a3d01c5d760659f007d6bfadad895c59b061de96fe6ddcaf59ea6` |
-| `db/schema_parts/165_provisional_registration_case_issue.sql` | `517c43e8ae428a3cf44c861e857dfaf3dd2812b14db40ef5af61737fb254f6ca` |
+| `db/schema_parts/184_provisional_registration_case_issue.sql` | `517c43e8ae428a3cf44c861e857dfaf3dd2812b14db40ef5af61737fb254f6ca` |
 | `tests/test_case_import_workflow.py` | `89da714c423b192a3470aad561eb31223d0c5fa173873461e3b1b58b10200871` |
 | `tests/test_case_import_disposable_mysql_e2e.py` | `a2031ca38ff8f7a8428cc2440e07b52819d8a06805eb27701e1821a80d32cdd9` |
 

@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "ORD-AUTO-COMPLETION-002",
-  "scenario_digest": "433a1be20e83342b08f6fbcbf0cd10258e30ca15468ad273e7d49b164a4a80dc",
+  "scenario_digest": "d45a916737f60b0300c1aed83b9ce16fee67d8225d4f7ae9767af3749a6b00df",
   "result": "passed",
   "assertion_count": 13,
   "runner": [
@@ -16,7 +16,7 @@
     "scenario_fixture": "9a31757c3185f9dabccc0fa183211f4e95be3a60b208dfa18879ef8956818e5f",
     "expected_manifest": "eb62325de382bc8203eb02934ecd77db75ea56f8d371aed5e5d98407467ebb81",
     "integration_test": "0b102fad50035f2cb76f0499cc9390fa5c7fe24ea2ec94b6c5c6cc086814255e",
-    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+    "validation_schema_manifest": "48f9f520812f86f6eac0a9ee01d2874b0a5c6a75f46430a4ad29a8de2305c7cd"
   },
   "input_paths": {
     "scenario_fixture": "validation/fixtures/ORD-AUTO-COMPLETION-002.json",

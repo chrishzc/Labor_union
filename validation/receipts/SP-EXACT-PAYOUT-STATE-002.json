@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "SP-EXACT-PAYOUT-STATE-002",
-  "scenario_digest": "b84f2a3edbf6b8ae4e41d96678cbbc57153d96219a3907250176a533f2d3db9e",
+  "scenario_digest": "aa53c0b0860544a6d3a25877eb9f00b793a98f5dab0a42320f0486d251409350",
   "result": "passed",
   "assertion_count": 4,
   "runner": [

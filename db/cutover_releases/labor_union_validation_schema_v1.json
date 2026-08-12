@@ -11,7 +11,7 @@
     "selection": "all_sql_files",
     "order": "numeric_prefix_then_letter_suffix_then_filename",
     "expected_count": 105,
-    "ordered_digest_sha256": "6a7f3018374b42a6af2c57289e8b5a44498db6b09e64a352c7ce1dbb1eae3900",
+    "ordered_digest_sha256": "a6055c09b1e0a2fc605f8682f0b9608c75daefa351461c0305a385f2c6f4090a",
     "terminal_artifact": "999_v_order_details_view.sql"
   },
   "full_release": {

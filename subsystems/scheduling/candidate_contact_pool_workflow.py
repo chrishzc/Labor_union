@@ -1,4 +1,4 @@
-﻿"""Candidate-contact pool workflow; it never creates a formal assignment."""
+"""Candidate-contact pool workflow; it never creates a formal assignment."""
 from __future__ import annotations
 
 import json

@@ -222,7 +222,7 @@ def _apply_state_key(case_no: str) -> str:
 
 def _apply_command(case_no, preview, segments, reason, state) -> dict:
     existing = state.get(_apply_state_key(case_no))
-    if isinstance(existing, dict):
+    if isinstance(existing, dict) and not existing.get("terminal"):
         return existing
     identity = _command_id("assignment-plan-apply", case_no)
     command = {

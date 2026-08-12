@@ -1,7 +1,7 @@
 {
   "contract": "labor-union-verification-receipt/v1",
   "scenario_id": "PAY-ASSIGNMENT-RECONCILIATION-002",
-  "scenario_digest": "c93919c60de735f67c4434703ffdaf1a1869c759d35e9b37ae9a5a7bed75af06",
+  "scenario_digest": "f55cc13793a4a34946436a43f40e5e1d77bad4ab0b78d72b1eb3cb18ccfdb7a0",
   "result": "passed",
   "assertion_count": 39,
   "runner": [
