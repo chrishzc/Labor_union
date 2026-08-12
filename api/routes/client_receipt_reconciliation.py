@@ -132,7 +132,64 @@ def apply_receipt(
     )
 
 
-def _selection(case_no, body) -> ReconciliationSelection:
+@router.post(
+    "/overage/preview",
+    response_model=BaseResponse[ClientReceiptPreviewView],
+)
+def preview_receipt_overage(
+    body: ClientReceiptPreviewBody,
+    case_no: str = Path(..., min_length=1, max_length=191),
+    correlation_id: _CorrelationHeader = "client-receipt-overage-preview",
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: ClientReceiptReconciliationApplication = Depends(
+        get_client_receipt_reconciliation_application
+    ),
+):
+    del principal
+    correlation = CorrelationId(correlation_id)
+    return _call(
+        lambda: _preview_payload(
+            application.preview(_selection(case_no, body, allow_overage_disposition=True))
+        ),
+        "成功產生客戶超收處置預覽",
+        correlation,
+    )
+
+
+@router.post(
+    "/overage/apply",
+    response_model=BaseResponse[ClientReceiptReceiptView],
+)
+def apply_receipt_overage(
+    body: ClientReceiptApplyBody,
+    case_no: str = Path(..., min_length=1, max_length=191),
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: ClientReceiptReconciliationApplication = Depends(
+        get_client_receipt_reconciliation_application
+    ),
+):
+    correlation = CorrelationId(correlation_id)
+    return _call(
+        lambda: _materialize(
+            application.apply(
+                _apply_request(
+                    case_no,
+                    body,
+                    idempotency_key,
+                    correlation,
+                    principal,
+                    allow_overage_disposition=True,
+                )
+            )
+        ),
+        "已確認實收並建立客戶退款應付",
+        correlation,
+    )
+
+
+def _selection(case_no, body, *, allow_overage_disposition=False) -> ReconciliationSelection:
     row_ids = tuple(str(value) for value in body.finance_import_row_ids)
     obligations = tuple(value.strip() for value in body.obligation_identities)
     _require_unique(row_ids)
@@ -144,13 +201,22 @@ def _selection(case_no, body) -> ReconciliationSelection:
         PaymentStage(body.payment_stage),
         tuple(sorted(row_ids, key=int)),
         tuple(sorted(obligations)),
+        allow_overage_disposition,
     )
 
 
-def _apply_request(case_no, body, key, correlation, principal):
+def _apply_request(
+    case_no,
+    body,
+    key,
+    correlation,
+    principal,
+    *,
+    allow_overage_disposition=False,
+):
     actor_id = str(principal.username or "").strip()
     return ClientReconciliationApplyRequest(
-        _selection(case_no, body),
+        _selection(case_no, body, allow_overage_disposition=allow_overage_disposition),
         ExpectedVersion(body.expected_account_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),

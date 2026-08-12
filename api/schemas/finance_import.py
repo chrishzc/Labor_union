@@ -208,6 +208,9 @@ class FinanceImportCorrectionSelectionBody(_StrictModel):
     ]
     target_obligation_identities: list[str] = Field(min_length=1)
     refund_ledger_entry_identity: str | None = Field(default=None, min_length=1, max_length=191)
+    allow_partial_refund_recovery: bool = False
+    allow_refund_overage_recovery: bool = False
+    allow_client_receipt_overage: bool = False
     reason: str = Field(min_length=1, max_length=500)
     evidence: list[str] = Field(min_length=1)
 
@@ -234,6 +237,9 @@ class FinanceImportCorrectionCandidateView(_StrictModel):
     reason: str
     evidence: list[str]
     refund_ledger_entry_identity: str | None = None
+    allow_partial_refund_recovery: bool = False
+    allow_refund_overage_recovery: bool = False
+    allow_client_receipt_overage: bool = False
     candidate_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 

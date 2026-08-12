@@ -29,6 +29,7 @@ from api.routes import (
     client_deposit_reversal,
     client_receipt_reconciliation,
     client_refund_reversal,
+    contract_signing,
     client_payments,
     clients,
     contracts,
@@ -171,6 +172,7 @@ app.include_router(orders.router)
 app.include_router(case_architecture_bootstrap.router)
 app.include_router(order_terms.router)
 app.include_router(order_contract_completion.router)
+app.include_router(contract_signing.router)
 app.include_router(order_actual_start.router)
 app.include_router(order_auto_completion.router)
 app.include_router(order_cancellation.router)

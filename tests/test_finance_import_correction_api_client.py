@@ -72,3 +72,51 @@ def test_refund_return_preview_and_apply_preserve_immutable_ledger_target():
     assert session.calls[0][2]["json"]["refund_ledger_entry_identity"] == "41"
     assert session.calls[1][2]["json"]["refund_ledger_entry_identity"] == "41"
     assert session.calls[1][2]["headers"]["Idempotency-Key"] == "correction-key"
+
+
+def test_partial_refund_recovery_flag_is_preserved_between_preview_and_apply():
+    preview_payload = {
+        "candidate": {
+            "row_identity": "bank-row-2",
+            "batch_identity": "batch-2",
+            "classification_type": "client_refund",
+            "owning_domain": "client_finance",
+            "bank_amount_ntd": 300,
+            "allocations": [{"obligation_identity": "refund:C-2", "amount_ntd": 300}],
+            "reason": "已核對實際匯少款項",
+            "evidence": ["bank-statement:line-2"],
+            "allow_partial_refund_recovery": True,
+            "candidate_fingerprint": "c" * 64,
+        },
+        "batch_version": 3,
+        "canonical_fact_version": 4,
+        "alert_version": 5,
+        "preview_fingerprint": "d" * 64,
+    }
+    session = _Session([
+        _Response(preview_payload),
+        _Response({"job_id": "job-2", "status_url": "/api/v1/jobs/job-2"}),
+    ])
+    client = FinanceImportApiClient(
+        base_url="https://api.example",
+        headers={"X-Internal-API-Key": "test"},
+        session=session,
+    )
+
+    preview = client.preview_correction(
+        "bank-row-2",
+        "client_refund",
+        ["refund:C-2"],
+        "已核對實際匯少款項",
+        ["bank-statement:line-2"],
+        "correlation-preview",
+        allow_partial_refund_recovery=True,
+    )
+    client.apply_correction(
+        preview,
+        idempotency_key="correction-key-2",
+        correlation_id="correlation-apply",
+    )
+
+    assert session.calls[0][2]["json"]["allow_partial_refund_recovery"] is True
+    assert session.calls[1][2]["json"]["allow_partial_refund_recovery"] is True

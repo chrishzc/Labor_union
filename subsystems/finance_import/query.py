@@ -219,46 +219,46 @@ class FinanceImportQueryService:
         with self._connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT row.id AS row_id, row.transaction_date, row.direction,
-                       row.debit, row.credit, row.reconciliation_status,
-                       row.created_at, event.classification_type,
+                SELECT finance_row.id AS row_id, finance_row.transaction_date, finance_row.direction,
+                       finance_row.debit, finance_row.credit, finance_row.reconciliation_status,
+                       finance_row.created_at, event.classification_type,
                        event.disposition, event.available_actions,
                        (SELECT occurrence.sheet_name
                           FROM finance_import_occurrences occurrence
                          WHERE occurrence.batch_id=contract.batch_id
-                           AND occurrence.finance_import_row_id=row.id
+                           AND occurrence.finance_import_row_id=finance_row.id
                          ORDER BY occurrence.id DESC LIMIT 1) AS source_sheet,
                        (SELECT occurrence.source_row
                           FROM finance_import_occurrences occurrence
                          WHERE occurrence.batch_id=contract.batch_id
-                           AND occurrence.finance_import_row_id=row.id
+                           AND occurrence.finance_import_row_id=finance_row.id
                          ORDER BY occurrence.id DESC LIMIT 1) AS source_row,
                        (SELECT COUNT(*)
                           FROM finance_import_occurrences occurrence
                          WHERE occurrence.batch_id=contract.batch_id
-                           AND occurrence.finance_import_row_id=row.id)
+                           AND occurrence.finance_import_row_id=finance_row.id)
                            AS occurrence_count
                 FROM finance_import_batch_contracts contract
-                JOIN finance_import_rows row
+                JOIN finance_import_rows finance_row
                   ON EXISTS (
                       SELECT 1 FROM finance_import_occurrences occurrence
                        WHERE occurrence.batch_id=contract.batch_id
-                         AND occurrence.finance_import_row_id=row.id
+                         AND occurrence.finance_import_row_id=finance_row.id
                   )
                 JOIN finance_import_classification_events event
                   ON event.id=(
                       SELECT latest.id
                         FROM finance_import_classification_events latest
-                       WHERE latest.batch_id=contract.batch_id
-                         AND latest.finance_import_row_id=row.id
+                         WHERE latest.batch_id=contract.batch_id
+                           AND latest.finance_import_row_id=finance_row.id
                        ORDER BY latest.classification_version DESC,
                                 latest.id DESC
                        LIMIT 1
                   )
                 WHERE contract.batch_identity=%s
-                  AND (%s IS NULL OR row.id>%s)
+                  AND (%s IS NULL OR finance_row.id>%s)
                   AND event.disposition IN (%s,%s,%s)
-                ORDER BY row.id ASC
+                ORDER BY finance_row.id ASC
                 LIMIT %s
                 """,
                 params,

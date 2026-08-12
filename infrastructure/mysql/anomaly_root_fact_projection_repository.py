@@ -333,7 +333,7 @@ def _projector_event_key(candidate, action):
 
 
 def _root_snapshot(row) -> dict[str, object]:
-    return {
+    snapshot = {
         "finance_import_row_id": int(row["finance_import_row_id"]),
         "finance_import_batch_id": int(row["finance_import_batch_id"]),
         "occurred_at": row["source_occurred_at"].isoformat(),
@@ -350,6 +350,11 @@ def _root_snapshot(row) -> dict[str, object]:
         "integrity_blocker_active": bool(row["integrity_blocker_active"]),
         "source_version": int(row["snapshot_source_version"]),
     }
+    current_snapshot = _json_object(row["current_display_snapshot"])
+    recovery_bindings = current_snapshot.get("recovery_bindings")
+    if isinstance(recovery_bindings, dict):
+        snapshot["recovery_bindings"] = recovery_bindings
+    return snapshot
 
 
 def _load_occurrences(cursor, row):
@@ -501,7 +506,8 @@ _WORKFLOW_EVENT_INSERT_SQL = (
 _RECOVERY_SELECT_SQL = (
     "SELECT current.fingerprint,current.definition_code,current.source_identity,"
     "current.source_version,current.predicate_active,current.workflow_status,"
-    "current.workflow_version,snapshot.source_version AS snapshot_source_version,"
+    "current.workflow_version,current.display_snapshot AS current_display_snapshot,"
+    "snapshot.source_version AS snapshot_source_version,"
     "snapshot.source_occurred_at,snapshot.root_condition_active,"
     "snapshot.integrity_blocker_active,snapshot.amount_delta_ntd,"
     "snapshot.finance_import_row_id,"

@@ -857,7 +857,7 @@ _CLIENT_OBLIGATIONS_SQL = (
 )
 _STAFF_OBLIGATIONS_SQL = (
     "SELECT obligation_identity,balance_ntd AS remaining_amount_ntd "
-    "FROM staff_payable_projections WHERE status='payable' "
+    "FROM staff_payable_projections WHERE status IN ('payable','partially_paid') "
     "AND obligation_identity IN ({}) ORDER BY obligation_identity"
 )
 _GOVERNMENT_SUBSIDY_OBLIGATIONS_SQL = (

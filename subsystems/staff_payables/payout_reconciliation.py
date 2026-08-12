@@ -10,11 +10,13 @@ from domains.staff_payables.reconciliation import (
     StaffPayableFacts,
     StaffPayableStatus,
     StaffPayoutCandidate,
+    StaffPayoutDifferenceMode,
     StaffPayoutEventType,
     StaffPayoutReopenCandidate,
     StaffPayoutReopenFact,
     StaffPrimaryBankAccount,
     build_staff_payout_candidate,
+    build_staff_payout_difference_candidate,
     build_staff_payout_reopen_candidate,
 )
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -34,6 +36,7 @@ class StaffPayoutSelection:
     bank_fact_identities: tuple[str, ...]
     obligation_identities: tuple[str, ...]
     reopen_fact_identity: str | None = None
+    difference_mode: StaffPayoutDifferenceMode | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.event_type, StaffPayoutEventType):
@@ -94,6 +97,9 @@ class StaffPayoutReceipt:
     event_count: int
     obligation_link_count: int
     preview_fingerprint: PreviewFingerprint
+    difference_mode: StaffPayoutDifferenceMode | None = None
+    recovery_identity: str | None = None
+    recovery_amount_ntd: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +113,7 @@ class StaffPayoutReconciliationRepository(Protocol):
     def find_receipt(self, key: IdempotencyKey) -> StoredStaffPayoutReceipt | None: ...
     def append_events(self, candidate: StaffPayoutFormalCandidate) -> None: ...
     def append_obligation_links(self, candidate: StaffPayoutFormalCandidate) -> None: ...
+    def append_overpayment_recovery(self, candidate: StaffPayoutFormalCandidate) -> None: ...
     def update_payable_projection(self, selection: StaffPayoutSelection, resulting_version: int, resulting_status: StaffPayableStatus) -> None: ...
     def append_outbox(self, candidate: StaffPayoutFormalCandidate) -> None: ...
     def save_receipt(self, key: IdempotencyKey, stored_receipt: StoredStaffPayoutReceipt) -> None: ...
@@ -173,6 +180,8 @@ class StaffPayoutReconciliationWorkflow:
         candidate = preview.candidate
         self._repository.append_events(candidate)
         self._repository.append_obligation_links(candidate)
+        if isinstance(candidate, StaffPayoutCandidate) and candidate.recovery is not None:
+            self._repository.append_overpayment_recovery(candidate)
         self._repository.update_payable_projection(request.selection, receipt.staff_payables_version, receipt.resulting_status)
         self._repository.append_outbox(candidate)
         self._repository.save_receipt(request.idempotency_key, StoredStaffPayoutReceipt(command_fingerprint, receipt))
@@ -200,6 +209,13 @@ def _build_preview(selection, facts):
 
 def _build_candidate(selection, facts):
     if selection.event_type is StaffPayoutEventType.PAYOUT:
+        if selection.difference_mode is not None:
+            return build_staff_payout_difference_candidate(
+                facts.bank_facts, facts.obligations, selection.difference_mode,
+                bank_accounts=facts.bank_accounts,
+                blocking_anomalies=facts.blocking_anomalies,
+                require_primary_account_owner=True,
+            )
         return build_staff_payout_candidate(facts.bank_facts, facts.obligations, bank_accounts=facts.bank_accounts, blocking_anomalies=facts.blocking_anomalies, require_primary_account_owner=True)
     if facts.reopen_fact is None:
         raise ValueError("staff_payout_reversal_invalid")
@@ -234,7 +250,16 @@ def _validate_expected_versions(request, facts) -> None:
 
 def _build_receipt(request, preview) -> StaffPayoutReceipt:
     candidate = preview.candidate
-    return StaffPayoutReceipt(request.selection.event_type, candidate.staff_id, preview.staff_payables_version + 1, preview.bank_facts_version, candidate.resulting_status, len(_candidate_events(candidate)), len(candidate.obligation_links), preview.fingerprint)
+    recovery = candidate.recovery if isinstance(candidate, StaffPayoutCandidate) else None
+    return StaffPayoutReceipt(
+        request.selection.event_type, candidate.staff_id,
+        preview.staff_payables_version + 1, preview.bank_facts_version,
+        candidate.resulting_status, len(_candidate_events(candidate)),
+        len(candidate.obligation_links), preview.fingerprint,
+        request.selection.difference_mode,
+        None if recovery is None else recovery.identity,
+        0 if recovery is None else recovery.original_amount.amount,
+    )
 
 
 def _candidate_events(candidate):
@@ -253,7 +278,7 @@ def _command_fingerprint(request) -> PreviewFingerprint:
 
 
 def _selection_payload(selection):
-    return {"event_type": selection.event_type.value, "bank_fact_identities": selection.bank_fact_identities, "obligation_identities": selection.obligation_identities, "reopen_fact_identity": selection.reopen_fact_identity}
+    return {"event_type": selection.event_type.value, "bank_fact_identities": selection.bank_fact_identities, "obligation_identities": selection.obligation_identities, "reopen_fact_identity": selection.reopen_fact_identity, "difference_mode": None if selection.difference_mode is None else selection.difference_mode.value}
 
 
 def _root_facts_payload(facts):
@@ -334,6 +359,8 @@ def _validate_payout_selection(selection) -> None:
     _validate_identity_tuple(selection.bank_fact_identities, "outgoing bank facts", required=True)
     if selection.reopen_fact_identity is not None:
         raise ValueError("invalid_staff_payout_intent")
+    if selection.difference_mode is not None and not isinstance(selection.difference_mode, StaffPayoutDifferenceMode):
+        raise TypeError("staff payout difference mode is invalid")
 
 
 def _validate_reopen_selection(selection) -> None:
@@ -343,6 +370,8 @@ def _validate_reopen_selection(selection) -> None:
     if selection.reopen_fact_identity is None:
         raise ValueError("staff_payout_reversal_invalid")
     require_canonical_text(selection.reopen_fact_identity, "payout reopen fact", _IDENTITY_MAXIMUM_LENGTH)
+    if selection.difference_mode is not None:
+        raise ValueError("invalid_staff_payout_intent")
 
 
 def _validate_identity_tuple(values, field_name, *, required) -> None:

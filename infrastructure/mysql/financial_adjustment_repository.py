@@ -293,6 +293,10 @@ def _insert_client_obligation(cursor, request, preview) -> None:
             preview.client_account_version + 1,
         ),
     )
+    if candidate.client_direction.value == "payable_to_client":
+        _insert_refund_recipient_snapshot(
+            cursor, candidate.client_obligation_identity, candidate.case_no, "financial_adjustment"
+        )
 
 
 def _insert_payroll_adjustment(cursor, request, preview):
@@ -662,6 +666,24 @@ _CLIENT_OBLIGATION_INSERT_SQL = (
     "source_obligation_identity,amount_due_ntd,due_date,status,"
     "current_event_id,projection_version) "
     "VALUES (%s,%s,'adjustment',%s,NULL,%s,NULL,'open',%s,%s)"
+)
+
+
+def _insert_refund_recipient_snapshot(cursor, obligation_identity, case_no, source_kind):
+    cursor.execute(
+        _REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL,
+        (obligation_identity, source_kind, case_no),
+    )
+    if cursor.rowcount != 1:
+        raise ValueError("client_refund_recipient_snapshot_missing")
+
+
+_REFUND_RECIPIENT_SNAPSHOT_INSERT_SQL = (
+    "INSERT INTO client_refund_recipient_snapshots "
+    "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
+    "SELECT %s,query_no,refund_bank_code,refund_account_no,%s FROM beclass_records "
+    "WHERE query_no=%s AND CHAR_LENGTH(TRIM(refund_bank_code))>0 "
+    "AND CHAR_LENGTH(TRIM(refund_account_no))>0"
 )
 _PAYROLL_ADJUSTMENT_INSERT_SQL = (
     "INSERT INTO payroll_adjustment_events "

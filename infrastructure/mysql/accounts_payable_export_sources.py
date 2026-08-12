@@ -9,6 +9,7 @@ from domains.staff_payables.reconciliation import StaffPayableStatus
 from shared_kernel.money import MoneyNTD
 from subsystems.staff_payables.accounts_payable_export import (
     ClientRefundExportFact,
+    GovernmentOverpaymentReturnExportFact,
     StaffPayableExportFact,
 )
 
@@ -59,6 +60,19 @@ class MySqlClientRefundExportSource:
         return tuple(_refund_fact(row) for row in rows)
 
 
+class MySqlGovernmentOverpaymentReturnExportSource:
+    def __init__(self, connection) -> None:
+        self._connection = connection
+
+    def load(
+        self, target_payment_date: date
+    ) -> tuple[GovernmentOverpaymentReturnExportFact, ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_GOVERNMENT_RETURNS_SQL, (target_payment_date,))
+            rows = tuple(cursor.fetchall())
+        return tuple(_government_return_fact(row) for row in rows)
+
+
 def _staff_fact(row) -> StaffPayableExportFact:
     status = _staff_status(row)
     bank_code = _canonical_bank_value(row.get("bank_code"), status)
@@ -70,7 +84,7 @@ def _staff_fact(row) -> StaffPayableExportFact:
         recipient_name=_clean_text(row.get("recipient_name")) or "missing",
         bank_code=bank_code,
         bank_account=bank_account,
-        amount=MoneyNTD(_integer(row["amount_due_ntd"], "staff payable")),
+        amount=MoneyNTD(_integer(row["export_amount_ntd"], "staff payable")),
         payment_date=_date_value(row["due_date"]),
         status=status,
         recipient_identity_card=_clean_text(row.get("identity_card")),
@@ -79,7 +93,7 @@ def _staff_fact(row) -> StaffPayableExportFact:
 
 def _staff_status(row) -> StaffPayableStatus:
     projected_status = StaffPayableStatus(str(row["payout_status"]))
-    if projected_status is not StaffPayableStatus.PAYABLE:
+    if projected_status not in {StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID}:
         return projected_status
     if _integer(row["primary_account_count"], "primary account count") != 1:
         return StaffPayableStatus.ANOMALY
@@ -89,7 +103,7 @@ def _staff_status(row) -> StaffPayableStatus:
         return StaffPayableStatus.ANOMALY
     if not _clean_text(row.get("account_no")):
         return StaffPayableStatus.ANOMALY
-    return StaffPayableStatus.PAYABLE
+    return projected_status
 
 
 # One row is materialized cohesively so payable/anomaly cannot use different facts.
@@ -114,12 +128,22 @@ def _refund_fact(row) -> ClientRefundExportFact:
         bank_account=bank_account or "missing",
         amount=MoneyNTD(amount_due),
         payment_date=_date_value(row["due_date"]),
-        payable=net_refunded == 0 and not anomaly,
+        payable=not anomaly,
         anomaly=anomaly,
         refund_type=_export_refund_type(row["obligation_type"]),
     )
 
 
+def _government_return_fact(row) -> GovernmentOverpaymentReturnExportFact:
+    return GovernmentOverpaymentReturnExportFact(
+        payable_identity=str(row["payable_identity"]),
+        overpayment_identity=str(row["overpayment_identity"]),
+        recipient_name=_clean_text(row["agency_name"]),
+        bank_code=_clean_text(row["bank_code"]),
+        bank_account=_clean_text(row["account_display"]),
+        amount=MoneyNTD(_integer(row["remaining_amount_ntd"], "government return")),
+        payment_date=_date_value(row["due_date"]),
+    )
 def _refund_has_anomaly(
     amount_due: int,
     net_refunded: int,
@@ -129,7 +153,9 @@ def _refund_has_anomaly(
 ) -> bool:
     if not recipient_name or not bank_code or not bank_account:
         return True
-    return net_refunded not in (0, amount_due)
+    # The projection stores the remaining amount.  A prior canonical partial
+    # refund is therefore valid and the remaining amount must reappear next month.
+    return net_refunded < 0
 
 
 def _export_refund_type(obligation_type: object) -> str:
@@ -176,6 +202,7 @@ SELECT obligations.obligation_identity,
        staff.name AS recipient_name,
        staff.identity_card,
        obligations.amount_due_ntd,
+       COALESCE(projection.balance_ntd, obligations.amount_due_ntd) AS export_amount_ntd,
        obligations.due_date,
        COALESCE(projection.status, 'payable') AS payout_status,
        COUNT(bank_accounts.id) AS primary_account_count,
@@ -192,6 +219,7 @@ WHERE obligations.due_date = %s
   AND obligations.direction = 'payable_to_staff'
   AND obligations.status <> 'cancelled'
   AND obligations.amount_due_ntd > 0
+  AND COALESCE(projection.status, 'payable') IN ('payable', 'partially_paid')
 GROUP BY obligations.obligation_identity,
          obligations.case_no,
          obligations.staff_id,
@@ -210,8 +238,8 @@ SELECT obligations.obligation_identity,
        clients.name AS recipient_name,
        obligations.amount_due_ntd,
        obligations.due_date,
-       beclass.refund_bank_code,
-       beclass.refund_account_no,
+       snapshot.bank_code AS refund_bank_code,
+       snapshot.bank_account AS refund_account_no,
        COALESCE(
            SUM(
                CASE
@@ -229,8 +257,8 @@ SELECT obligations.obligation_identity,
        ) AS net_refunded_ntd
 FROM client_obligations obligations
 JOIN clients ON clients.case_no = obligations.case_no
-LEFT JOIN beclass_records beclass
-  ON beclass.query_no = obligations.case_no
+LEFT JOIN client_refund_recipient_snapshots snapshot
+  ON snapshot.refund_obligation_identity = obligations.obligation_identity
 LEFT JOIN client_ledger_obligation_allocations allocations
   ON allocations.obligation_identity = obligations.obligation_identity
 LEFT JOIN client_ledger_entries ledger
@@ -245,14 +273,26 @@ GROUP BY obligations.obligation_identity,
          clients.name,
          obligations.amount_due_ntd,
          obligations.due_date,
-         beclass.refund_bank_code,
-         beclass.refund_account_no
+         snapshot.bank_code,
+         snapshot.bank_account
 ORDER BY obligations.case_no, obligations.obligation_identity
+"""
+
+
+_GOVERNMENT_RETURNS_SQL = """
+SELECT payable_identity,overpayment_identity,agency_name,bank_code,account_display,
+       remaining_amount_ntd,due_date
+FROM government_overpayment_return_payables
+WHERE due_date = %s
+  AND status = 'payable'
+  AND remaining_amount_ntd > 0
+ORDER BY due_date,payable_identity
 """
 
 
 __all__ = [
     "MySqlClientRefundExportSource",
+    "MySqlGovernmentOverpaymentReturnExportSource",
     "MySqlReadOnlySnapshot",
     "MySqlStaffPayableExportSource",
 ]

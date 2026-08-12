@@ -424,7 +424,7 @@ def staff_payout_apply_handler(payload: dict[str, Any]) -> tuple[dict[str, Any],
 
 
 def _staff_payout_request(payload: dict[str, Any]):
-    from domains.staff_payables.reconciliation import StaffPayoutEventType
+    from domains.staff_payables.reconciliation import StaffPayoutDifferenceMode, StaffPayoutEventType
     from shared_kernel.fingerprints import PreviewFingerprint
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
     from subsystems.staff_payables.payout_reconciliation import StaffPayoutApplyRequest, StaffPayoutSelection
@@ -436,6 +436,7 @@ def _staff_payout_request(payload: dict[str, Any]):
             tuple(selection["bank_fact_identities"]),
             tuple(selection["obligation_identities"]),
             selection["reopen_fact_identity"],
+            None if selection.get("difference_mode") is None else StaffPayoutDifferenceMode(selection["difference_mode"]),
         ),
         ExpectedVersion(payload["expected_staff_payables_version"]),
         ExpectedVersion(payload["expected_bank_facts_version"]),
@@ -539,6 +540,7 @@ def finance_import_correction_apply_handler(payload: dict[str, Any]) -> tuple[di
             payload["reason"],
             tuple(payload["evidence"]),
             payload.get("refund_ledger_entry_identity"),
+            bool(payload.get("allow_partial_refund_recovery", False)),
         )
         request = FinanceImportCorrectionApplyRequest(
             selection,

@@ -21,6 +21,7 @@ def test_correction_apply_persists_a_durable_command_without_api_background_task
         classification_type="client_refund_return",
         target_obligation_identities=["refund:C-1"],
         refund_ledger_entry_identity="41",
+        allow_partial_refund_recovery=False,
         reason="銀行退匯已核對",
         evidence=["bank-return-notice"],
         expected_batch_version=3,
@@ -41,4 +42,5 @@ def test_correction_apply_persists_a_durable_command_without_api_background_task
     assert repository.command.command_type == "finance_import_correction_apply"
     assert repository.command.command_identity == "correction-key"
     assert repository.command.payload["refund_ledger_entry_identity"] == "41"
+    assert repository.command.payload["allow_partial_refund_recovery"] is False
     assert repository.command.payload["target_obligation_identities"] == ["refund:C-1"]

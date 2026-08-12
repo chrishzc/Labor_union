@@ -15,7 +15,9 @@ _IDENTITY_MAXIMUM_LENGTH = 191
 
 class StaffPayableStatus(StrEnum):
     PAYABLE = "payable"
+    PARTIALLY_PAID = "partially_paid"
     COMPLETED = "completed"
+    RECOVERY_REQUIRED = "recovery_required"
     ANOMALY = "anomaly"
 
 
@@ -32,6 +34,11 @@ class BankTransactionDirection(StrEnum):
 
 class StaffPayoutEventStatus(StrEnum):
     SUCCEEDED = "succeeded"
+
+
+class StaffPayoutDifferenceMode(StrEnum):
+    UNDERPAYMENT = "underpayment"
+    OVERPAYMENT = "overpayment"
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +195,24 @@ class StaffPayoutCandidate:
     events: tuple[StaffPayoutLedgerEventCandidate, ...] = ()
     obligation_links: tuple[StaffPayoutObligationLinkCandidate, ...] = ()
     resulting_status: StaffPayableStatus = StaffPayableStatus.COMPLETED
+    difference_mode: StaffPayoutDifferenceMode | None = None
+    recovery: "StaffOverpaymentRecoveryCandidate | None" = None
+
+
+@dataclass(frozen=True, slots=True)
+class StaffOverpaymentRecoveryCandidate:
+    identity: str
+    staff_id: int
+    original_amount: MoneyNTD
+    source_bank_fact_identities: tuple[str, ...]
+    source_obligation_identities: tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        _validate_identity(self.identity, "staff overpayment recovery identity")
+        require_positive_integer(self.staff_id, "staff overpayment recovery staff id")
+        _require_positive_money(self.original_amount, "staff overpayment recovery amount")
+        _validate_identity_tuple(self.source_bank_fact_identities, "recovery bank facts")
+        _validate_identity_tuple(self.source_obligation_identities, "recovery obligations")
 
 
 @dataclass(frozen=True, slots=True)
@@ -260,6 +285,24 @@ def build_staff_payout_candidate(
     )
 
 
+def build_staff_payout_difference_candidate(
+    bank_facts: tuple[OutgoingBankFact, ...],
+    payable_facts: tuple[StaffPayableFacts, ...],
+    mode: StaffPayoutDifferenceMode,
+    *,
+    bank_accounts: tuple[StaffPrimaryBankAccount, ...] = (),
+    blocking_anomalies: tuple[str, ...] = (),
+    require_primary_account_owner: bool = False,
+) -> StaffPayoutCandidate:
+    if not isinstance(mode, StaffPayoutDifferenceMode):
+        raise TypeError("staff payout difference mode is invalid")
+    staff_id = _validate_difference_inputs(bank_facts, payable_facts, blocking_anomalies)
+    _validate_primary_account_owners(bank_facts, bank_accounts, staff_id, require_primary_account_owner)
+    ordered_banks = tuple(sorted(bank_facts, key=lambda item: item.identity))
+    ordered_payables = tuple(sorted(payable_facts, key=lambda item: item.obligation_identity))
+    return _build_difference_payout(staff_id, ordered_banks, ordered_payables, mode)
+
+
 def _build_owned_payout(
     staff_id,
     bank_facts,
@@ -310,6 +353,42 @@ def _build_exact_payout(staff_id, ordered_banks, ordered_payables):
     )
 
 
+def _build_difference_payout(staff_id, ordered_banks, ordered_payables, mode):
+    bank_total = MoneyNTD(sum(item.amount.amount for item in ordered_banks))
+    remaining_total = MoneyNTD(sum(project_staff_payable(item).balance.amount for item in ordered_payables))
+    _validate_difference_mode(mode, bank_total, remaining_total)
+    allocations = _allocate(ordered_banks, ordered_payables, use_remaining_balance=True)
+    events = tuple(_payout_event(bank_fact) for bank_fact in ordered_banks)
+    links = _payout_links(events, allocations)
+    recovery = _overpayment_recovery(staff_id, ordered_banks, ordered_payables, bank_total, remaining_total, mode)
+    resulting_status = StaffPayableStatus.PARTIALLY_PAID if mode is StaffPayoutDifferenceMode.UNDERPAYMENT else StaffPayableStatus.RECOVERY_REQUIRED
+    return StaffPayoutCandidate(
+        staff_id, bank_total, remaining_total, allocations,
+        fingerprint_payload(_candidate_payload(staff_id, allocations, events, mode, recovery)),
+        events, links, resulting_status, mode, recovery,
+    )
+
+
+def _validate_difference_mode(mode, bank_total, remaining_total) -> None:
+    if mode is StaffPayoutDifferenceMode.UNDERPAYMENT and bank_total.amount < remaining_total.amount:
+        return
+    if mode is StaffPayoutDifferenceMode.OVERPAYMENT and bank_total.amount > remaining_total.amount:
+        return
+    raise ValueError("staff_payout_difference_mode_invalid")
+
+
+def _overpayment_recovery(staff_id, banks, payables, bank_total, remaining_total, mode):
+    if mode is not StaffPayoutDifferenceMode.OVERPAYMENT:
+        return None
+    amount = bank_total - remaining_total
+    identity = _derived_recovery_identity(tuple(item.identity for item in banks))
+    return StaffOverpaymentRecoveryCandidate(
+        identity, staff_id, amount,
+        tuple(item.identity for item in banks),
+        tuple(item.obligation_identity for item in payables),
+    )
+
+
 def _payout_candidate(
     staff_id,
     bank_total,
@@ -345,6 +424,18 @@ def _validate_payout_inputs(
     if len(staff_ids) != 1:
         raise ValueError("cross_staff_allocation_forbidden")
     _validate_payable_statuses(payable_facts)
+    return next(iter(staff_ids))
+
+
+def _validate_difference_inputs(bank_facts, payable_facts, blocking_anomalies) -> int:
+    if not bank_facts or not payable_facts:
+        raise ValueError("invalid_staff_payout_intent")
+    _raise_if_bank_facts_ineligible(bank_facts, blocking_anomalies)
+    staff_ids = {*(item.staff_id for item in bank_facts), *(item.staff_id for item in payable_facts)}
+    if len(staff_ids) != 1:
+        raise ValueError("cross_staff_allocation_forbidden")
+    if any(project_staff_payable(item).status not in (StaffPayableStatus.PAYABLE, StaffPayableStatus.PARTIALLY_PAID) for item in payable_facts):
+        raise ValueError("staff_obligation_not_exactly_settled")
     return next(iter(staff_ids))
 
 
@@ -407,16 +498,22 @@ def _is_matching_primary_account(account, account_identity) -> bool:
     )
 
 
-def _allocate(bank_facts, payable_facts) -> tuple[StaffPayoutAllocation, ...]:
+def _allocate(bank_facts, payable_facts, *, use_remaining_balance=False) -> tuple[StaffPayoutAllocation, ...]:
     allocations: list[StaffPayoutAllocation] = []
     remaining_banks = [[item, item.amount.amount] for item in bank_facts]
-    remaining_payables = [[item, item.amount_due.amount] for item in payable_facts]
-    while remaining_banks:
+    remaining_payables = [[item, _allocatable_amount(item, use_remaining_balance)] for item in payable_facts]
+    while remaining_banks and remaining_payables:
         allocation, amount = _next_allocation(remaining_banks, remaining_payables)
         allocations.append(allocation)
         _consume_front(remaining_banks, amount)
         _consume_front(remaining_payables, amount)
     return tuple(allocations)
+
+
+def _allocatable_amount(payable, use_remaining_balance) -> int:
+    if use_remaining_balance:
+        return project_staff_payable(payable).balance.amount
+    return payable.amount_due.amount
 
 
 def _next_allocation(remaining_banks, remaining_payables):
@@ -471,7 +568,7 @@ def _payable_status(amount_due: MoneyNTD, net_paid: MoneyNTD):
         return StaffPayableStatus.PAYABLE
     if net_paid == amount_due:
         return StaffPayableStatus.COMPLETED
-    return StaffPayableStatus.ANOMALY
+    return StaffPayableStatus.PARTIALLY_PAID
 
 
 def _signed_amount(event: StaffPayoutEvent) -> int:
@@ -581,12 +678,17 @@ def _reopen_candidate(reopen_fact, links) -> StaffPayoutReopenCandidate:
     )
 
 
-def _candidate_payload(staff_id, allocations, events) -> dict[str, object]:
+def _candidate_payload(staff_id, allocations, events, difference_mode=None, recovery=None) -> dict[str, object]:
     return {
         "staff_id": staff_id,
         "event_type": StaffPayoutEventType.PAYOUT.value,
         "events": tuple(_event_payload(item) for item in events),
         "allocations": tuple(_allocation_payload(item) for item in allocations),
+        "difference_mode": None if difference_mode is None else difference_mode.value,
+        "recovery": None if recovery is None else {
+            "identity": recovery.identity,
+            "amount_ntd": recovery.original_amount.amount,
+        },
     }
 
 
@@ -632,6 +734,11 @@ def _derived_event_identity(event_type, source_identity) -> str:
     return f"{event_type.value}:{digest.value}"
 
 
+def _derived_recovery_identity(bank_fact_identities: tuple[str, ...]) -> str:
+    digest = fingerprint_payload({"bank_fact_identities": bank_fact_identities})
+    return f"staff-overpayment-recovery:{digest.value}"
+
+
 def _require_positive_money(value: MoneyNTD, field_name: str) -> None:
     if not isinstance(value, MoneyNTD):
         raise TypeError(f"{field_name} must be MoneyNTD")
@@ -640,6 +747,15 @@ def _require_positive_money(value: MoneyNTD, field_name: str) -> None:
 
 def _validate_identity(value: str, field_name: str) -> None:
     require_canonical_text(value, field_name, _IDENTITY_MAXIMUM_LENGTH)
+
+
+def _validate_identity_tuple(values: tuple[str, ...], field_name: str) -> None:
+    if not isinstance(values, tuple) or not values:
+        raise ValueError(f"{field_name} must be nonempty")
+    for value in values:
+        _validate_identity(value, field_name)
+    if values != tuple(sorted(set(values))):
+        raise ValueError(f"{field_name} must be sorted and unique")
 
 
 def _validate_optional_identity(value: str | None, field_name: str) -> None:

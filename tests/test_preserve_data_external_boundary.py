@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_preserve_data_package_retired_target_host_acceptance() -> None:
     package = (
         ROOT
-        / "document/架構重整/02_決策與退役執行記錄"
+        / "document/架構重整/04_已完成與上線封存/work_packages"
         / "51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md"
     ).read_text(encoding="utf-8")
 

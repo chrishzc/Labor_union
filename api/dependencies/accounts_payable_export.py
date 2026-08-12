@@ -9,6 +9,7 @@ from pathlib import Path
 from infrastructure.archive.accounts_payable import LocalAccountsPayableArchive
 from infrastructure.mysql.accounts_payable_export_sources import (
     MySqlClientRefundExportSource,
+    MySqlGovernmentOverpaymentReturnExportSource,
     MySqlReadOnlySnapshot,
     MySqlStaffPayableExportSource,
 )
@@ -40,6 +41,7 @@ def get_accounts_payable_export_application():
     workflow = AccountsPayableExportWorkflow(
         MySqlStaffPayableExportSource(connection),
         MySqlClientRefundExportSource(connection),
+        MySqlGovernmentOverpaymentReturnExportSource(connection),
         LocalAccountsPayableArchive(_REPOSITORY_ROOT),
         lambda: MySqlReadOnlySnapshot(connection),
         current_business_instant,

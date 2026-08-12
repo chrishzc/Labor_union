@@ -23,7 +23,13 @@ def test_confirmed_refund_return_review_creates_a_distinct_blocking_anomaly() ->
         "finance_import_row_id": "71",
         "original_refund_ledger_entry_id": "41",
     }
-    assert candidate.available_actions[0].action_code == "correct_refund_return"
+    action = candidate.available_actions[0]
+    assert action.action_key == "classify_client_refund_return"
+    assert action.form_schema_key == "finance_import.correction.v1"
+    assert action.source_bindings == {
+        "finance_import_row_identity": "finance-import-refund-return:71:41",
+        "source_version": 12,
+    }
     assert candidate.occurrence is not None
 
 

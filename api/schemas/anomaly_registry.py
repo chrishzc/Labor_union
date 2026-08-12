@@ -21,10 +21,27 @@ class ResolveAnomalyBody(_StrictModel):
 
 
 class DomainActionView(_StrictModel):
-    action_code: str
+    action_key: str
+    label: str
     owning_domain: str
-    command_name: str
+    form_schema_key: str
+    source_binding_keys: list[str]
+    source_bindings: dict[str, str | int] | None = None
+    required_operator_inputs: list[str]
+    preview_operation: str
+    apply_operation: str | None = None
+    required_capability: str | None = None
+    completion_predicate: str
+    action_contract_version: int = Field(ge=1)
     requires_preview: bool
+
+    @property
+    def action_code(self) -> str:
+        return self.action_key
+
+    @property
+    def command_name(self) -> str:
+        return self.preview_operation
 
 
 class StaffCalendarNavigationView(_StrictModel):
