@@ -41,9 +41,11 @@ def _one(cursor: Any, message: str) -> dict[str, Any]:
 
 def _rows(cursor: Any, message: str) -> list[dict[str, Any]]:
     rows = cursor.fetchall()
-    if not isinstance(rows, list) or any(not isinstance(row, dict) for row in rows):
+    if not isinstance(rows, (list, tuple)) or any(
+        not isinstance(row, dict) for row in rows
+    ):
         raise ValueError(message)
-    return rows
+    return list(rows)
 
 
 def _canonical_snapshot(
@@ -57,8 +59,8 @@ def _canonical_snapshot(
         raise ValueError("invalid order row")
     if order_row["case_no"] != case_no:
         raise ValueError("order case_no does not match request")
-    if order_row["status"] != "洽談中":
-        raise ValueError("case is not in negotiation stage")
+    if order_row["status"] not in {"洽談中", "訂單成立"}:
+        raise ValueError("case is not eligible for pre-execution availability lock")
     if set(plan_row) != {"id", "case_no", "status", "is_active", "start_date", "end_date"}:
         raise ValueError("invalid matching plan row")
     if plan_row["start_date"] != order_row["start_date"] or plan_row["end_date"] != order_row["end_date"]:
@@ -113,6 +115,43 @@ def _require_customer_matching_acceptance(cursor: Any, plan_id: int) -> None:
     row = cursor.fetchone()
     if not isinstance(row, dict) or row.get("response_value") != "accepted":
         raise ValueError("customer has not accepted the matching plan")
+
+
+def _require_active_precontract_commitment(cursor: Any, plan_id: int) -> None:
+    """A lock may reserve a signed commitment, never an unsigned proposal."""
+    cursor.execute(
+        "SELECT commitment.id FROM precontract_service_commitments commitment "
+        "LEFT JOIN precontract_service_commitment_events terminal "
+        "ON terminal.commitment_id=commitment.id "
+        "WHERE commitment.matching_plan_id=%s AND terminal.id IS NULL FOR UPDATE",
+        (plan_id,),
+    )
+    if not isinstance(cursor.fetchone(), dict):
+        raise ValueError("active staff service commitment is required")
+
+
+def _has_client_signed_contract(cursor: Any, case_no: str, plan_id: int) -> bool:
+    cursor.execute(
+        "SELECT event.id FROM contract_signing_events event "
+        "INNER JOIN contract_document_versions document ON document.id=event.document_version_id "
+        "WHERE event.case_no=%s AND event.matching_plan_id=%s "
+        "AND event.event_type='signed_received' "
+        "AND document.document_scope='client_contract' "
+        "ORDER BY event.id DESC LIMIT 1 FOR UPDATE",
+        (case_no, plan_id),
+    )
+    return isinstance(cursor.fetchone(), dict)
+
+
+def _require_customer_pre_execution_commitment(
+    cursor: Any,
+    case_no: str,
+    plan_id: int,
+) -> None:
+    """Client signature supersedes the older matching-card acceptance gate."""
+    if _has_client_signed_contract(cursor, case_no, plan_id):
+        return
+    _require_customer_matching_acceptance(cursor, plan_id)
 
 
 def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any]) -> list[dict[str, Any]]:
@@ -450,7 +489,10 @@ def acquire_caregiver_availability_lock(
             raise ValueError("staff mutex result does not match matching plan")
         order_row, locked_plan, locked_segments = _lock_snapshot(cursor, request["case_no"], request["plan_id"])
         locked_snapshot = _canonical_snapshot(request["case_no"], request["plan_id"], order_row, locked_plan, locked_segments)
-        _require_customer_matching_acceptance(cursor, request["plan_id"])
+        _require_active_precontract_commitment(cursor, request["plan_id"])
+        _require_customer_pre_execution_commitment(
+            cursor, request["case_no"], request["plan_id"],
+        )
         if locked_snapshot != preliminary_snapshot:
             raise ValueError("matching plan changed while acquiring lock")
         conflicts = _occupancy_conflicts(cursor, locked_snapshot)
@@ -562,7 +604,10 @@ def preview_caregiver_availability_lock(
         )
         if plan["status"] != "proposed" or plan["is_active"] != 1:
             raise ValueError("matching plan is not an active proposed plan")
-        _require_customer_matching_acceptance(cursor, request["plan_id"])
+        _require_active_precontract_commitment(cursor, request["plan_id"])
+        _require_customer_pre_execution_commitment(
+            cursor, request["case_no"], request["plan_id"],
+        )
         conflicts = _occupancy_conflicts(cursor, snapshot)
         return _build_acquire_preview(snapshot, conflicts)
     finally:

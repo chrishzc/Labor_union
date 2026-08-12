@@ -20,13 +20,13 @@ def test_staff_summary_route_uses_database_bounded_cursor_query():
     assert "SELECT id, name, phone FROM staff" in source
 
 
-def test_orders_page_uses_typed_bounded_staff_summary_query():
-    source = (ROOT / "ui/pages/02_orders.py").read_text(encoding="utf-8")
+def test_finance_page_uses_typed_bounded_staff_summary_query():
+    source = (ROOT / "ui/pages/04_finance.py").read_text(encoding="utf-8")
 
     assert "StaffSummaryApiClient" in source
     assert '"/api/v1/staff"' not in source
-    assert "_render_order_summary_pagination" in source
-    assert "orders_summary_after_case_no" in source
+    assert "_load_order_summaries" in source
+    assert "page_size=200" in source
 
 
 def test_scheduling_page_uses_order_summary_cursor_pagination():

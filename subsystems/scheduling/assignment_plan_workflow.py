@@ -17,6 +17,7 @@ from domains.scheduling.assignment_plan import (
     build_assignment_plan_candidate,
     impacted_staff_ids,
 )
+from domains.scheduling.commitment_execution import CommitmentExecutionMismatch
 from domains.scheduling.generation import SchedulingGenerationCandidate
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -188,6 +189,13 @@ class AssignmentPlanWorkflow:
             return self._apply_transaction(request)
         except AssignmentPlanWorkflowError:
             raise
+        except CommitmentExecutionMismatch as exception:
+            raise _workflow_error(
+                request.correlation_id,
+                ErrorCategory.DOMAIN_BLOCKED,
+                str(exception),
+                "The commitment does not exactly match the execution candidate.",
+            ) from exception
         except Exception as exception:
             raise _workflow_error(request.correlation_id, ErrorCategory.INTERNAL, "transaction_failed", "The Assignment Plan transaction failed and was rolled back.") from exception
 
