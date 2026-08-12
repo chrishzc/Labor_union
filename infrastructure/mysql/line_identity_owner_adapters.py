@@ -50,6 +50,15 @@ class MySqlCustomerIdentityOwnerAdapter:
             cursor.execute(_CUSTOMER_BIND_SQL, (line_user_id.value, customer_id))
             _upsert_legacy_role(cursor, line_user_id, "customer")
 
+    def clear_customer(self, subject_reference, line_user_id) -> None:
+        _clear_owner_line_user(
+            self._connection,
+            "clients",
+            "line_user_id",
+            subject_reference,
+            line_user_id,
+        )
+
 
 class MySqlStaffIdentityOwnerAdapter:
     def __init__(self, connection: Any) -> None:
@@ -89,6 +98,15 @@ class MySqlStaffIdentityOwnerAdapter:
             cursor.execute(_STAFF_BIND_SQL, (line_user_id.value, staff_id))
             _upsert_legacy_role(cursor, line_user_id, "staff")
 
+    def clear_staff(self, subject_reference, line_user_id) -> None:
+        _clear_owner_line_user(
+            self._connection,
+            "staff",
+            "line_user_id",
+            subject_reference,
+            line_user_id,
+        )
+
 
 class MySqlAdminIdentityOwnerAdapter:
     def __init__(self, connection: Any) -> None:
@@ -127,6 +145,15 @@ class MySqlAdminIdentityOwnerAdapter:
                 raise RuntimeError("admin_identity_binding_conflict")
             _upsert_legacy_role(cursor, line_user_id, "union_staff")
             cursor.execute(_ADMIN_BIND_SQL, (line_user_id.value, admin_id))
+
+    def clear_admin(self, subject_reference, line_user_id) -> None:
+        _clear_owner_line_user(
+            self._connection,
+            "admin_users",
+            "linked_line_user_id",
+            subject_reference,
+            line_user_id,
+        )
 
     def get_linked_admin(self, line_user_id: LineUserId) -> LinkedLineAdmin | None:
         with self._connection.cursor() as cursor:
@@ -176,6 +203,25 @@ def _upsert_legacy_role(cursor, line_user_id, role):
     cursor.execute(_LEGACY_ROLE_UPSERT_SQL, (line_user_id.value, role))
 
 
+def _clear_owner_line_user(
+    connection,
+    table: str,
+    column: str,
+    subject_reference: str,
+    line_user_id: LineUserId,
+) -> None:
+    owner_id = _numeric_subject_reference(subject_reference, table)
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f"UPDATE {table} SET {column}=NULL WHERE id=%s AND {column}=%s",
+            (owner_id, line_user_id.value),
+        )
+        if cursor.rowcount != 1:
+            raise RuntimeError("line_identity_owner_projection_conflict")
+        # Legacy publication still reads this projection; downgrade prevents future relinking.
+        _upsert_legacy_role(cursor, line_user_id, "customer")
+
+
 _CUSTOMER_RESOLVE_SQL = (
     "SELECT id,line_user_id FROM clients WHERE name=%s AND "
     "REPLACE(REPLACE(phone,'-',''),' ','')=%s ORDER BY id LIMIT 2"
@@ -206,8 +252,11 @@ _ADMIN_LINE_COLLISION_SQL = (
 )
 _ADMIN_BIND_SQL = "UPDATE admin_users SET linked_line_user_id=%s WHERE id=%s"
 _ADMIN_LINKED_SQL = (
-    "SELECT id,display_name,role FROM admin_users "
-    "WHERE linked_line_user_id=%s AND enabled=1 LIMIT 1"
+    "SELECT a.id,a.display_name,a.role FROM admin_users a "
+    "JOIN line_identity_bindings b ON b.line_user_id=a.linked_line_user_id "
+    "AND b.subject_type='admin' AND b.subject_reference=CAST(a.id AS CHAR) "
+    "AND b.binding_status='bound' "
+    "WHERE a.linked_line_user_id=%s AND a.enabled=1 LIMIT 1"
 )
 _LEGACY_ROLE_UPSERT_SQL = (
     "INSERT INTO line_users (line_user_id,role,status,last_event_at) "

@@ -41,6 +41,10 @@ from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
 from subsystems.line.runtime_cutover import validate_line_worker_runtime
 from subsystems.line.rich_menu_worker import LineRichMenuWorker
+from subsystems.line.rich_menu_binding import (
+    LineRichMenuBindingWorker,
+    RICH_MENU_BINDING_INTENT,
+)
 from subsystems.line.webhook_event_consumer import LineWebhookEventConsumer
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 from subsystems.line.matching_postback_application import (
@@ -49,6 +53,12 @@ from subsystems.line.matching_postback_application import (
 from subsystems.line.knowledge_question_application import (
     enqueue_line_knowledge_question,
 )
+from subsystems.line.service_help_application import LineServiceHelpApplication
+from subsystems.line.menu_command_application import LineMenuCommandApplication
+from subsystems.line.identity_management_application import (
+    IDENTITY_MENU_RESET_INTENT,
+)
+from subsystems.line.identity_revocation_worker import LineIdentityRevocationWorker
 from subsystems.scheduling.matching_notification_application import (
     MatchingNotificationApplication,
 )
@@ -157,6 +167,8 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
                     MatchingNotificationApplication(open_line_unit_of_work, now)
                 ),
                 knowledge_question_scheduler=enqueue_line_knowledge_question,
+                service_help_application=LineServiceHelpApplication(now, _identity_flow_url),
+                menu_command_application=LineMenuCommandApplication(),
             ).registry()
         ),
         worker_identity,
@@ -169,10 +181,26 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
         now,
     )
     rich_menu_images = FileSystemRichMenuImageStore(_media_storage_root())
+    rich_menu_provider = LineRichMenuApiAdapter(
+        _required_access_token(),
+        rich_menu_images.load,
+    )
     rich_menu_worker = LineRichMenuWorker(
         open_line_unit_of_work,
-        LineRichMenuApiAdapter(_required_access_token(), rich_menu_images.load),
+        rich_menu_provider,
         rich_menu_images.materialize,
+        worker_identity,
+        now,
+    )
+    rich_menu_binding_worker = LineRichMenuBindingWorker(
+        open_line_unit_of_work,
+        rich_menu_provider,
+        worker_identity,
+        now,
+    )
+    identity_revocation_worker = LineIdentityRevocationWorker(
+        open_line_unit_of_work,
+        rich_menu_provider,
         worker_identity,
         now,
     )
@@ -207,6 +235,8 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
         {
             "media_archives": media_worker,
             "rich_menu_publications": rich_menu_worker,
+            "rich_menu_bindings": rich_menu_binding_worker,
+            "identity_revocations": identity_revocation_worker,
         },
     )
 
@@ -218,6 +248,8 @@ def _next_due_at():
             unit_of_work.delivery_tasks.next_due_at(),
             unit_of_work.rich_menu_publications.next_due_at(),
             unit_of_work.outbox.next_due_at(),
+            unit_of_work.outbox.next_due_at(RICH_MENU_BINDING_INTENT),
+            unit_of_work.outbox.next_due_at(IDENTITY_MENU_RESET_INTENT),
         )
         unit_of_work.commit()
     available = tuple(due_at for due_at in due_times if due_at is not None)
@@ -277,7 +309,7 @@ def _identity_flow_url(purpose: str, flow_id: str) -> str:
     query = urlencode({"purpose": purpose, "flow_id": flow_id})
     liff_id = os.getenv("LINE_LIFF_ID", "").strip()
     if liff_id and liff_id != "your_liff_id_here":
-        return f"https://liff.line.me/{liff_id}?{query}"
+        return f"https://liff.line.me/{liff_id}/?{query}"
     base_url = _configured_public_base_url()
     if base_url:
         return f"{base_url}/line-identity?{query}"
@@ -314,7 +346,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         choices=tuple(mode.value for mode in LineRuntimeMode),
-        default=os.getenv("LINE_WORKER_RUNTIME_MODE", "legacy"),
+        default=os.getenv("LINE_WORKER_RUNTIME_MODE", "canonical"),
     )
     parser.add_argument("--worker-id", default="")
     parser.add_argument("--poll-seconds", type=float, default=60.0)

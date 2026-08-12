@@ -74,6 +74,12 @@ commitment `converted` terminal event、outbox 與 receipt 同一交易提交。
 
 多日請假為一次 Preview、一個 fingerprint、一次 Apply transaction；每一天保存 immutable outcome。正式結果只允許順延或指定代班。代班建立獨立 assignment；取消或更正以反向／替代事件處理。
 
+2026-08-12 人工裁決：月嫂請假審核的 API、typed client 與管理入口由 Scheduling 擁有，
+不得掛在 LINE identity review route 或 `LineAdminApiClient`。LINE 只提供 verified identity、
+delivery intent 與通知結果。現有依賴已退役 `services.*` 的 review service 是 `live-drift`，
+在 canonical repository／outer UoW、capability、typed result 與 entrypoint replacement 完成前
+不得掛入 FastAPI。
+
 Batch replay：
 
 - `batch_key` 是一次多日操作的冪等 identity，並綁定 canonical request snapshot、

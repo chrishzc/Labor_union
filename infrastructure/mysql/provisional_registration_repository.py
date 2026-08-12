@@ -5,16 +5,25 @@ from __future__ import annotations
 import json
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Iterator, Mapping
+from typing import Callable, Iterator, Mapping
 
 from pymysql.err import IntegrityError, OperationalError
 
 from domains.case_import.provisional_registration import ProvisionalRegistrationCandidate
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import (
+    LineDeliveryRequest,
+    LineMessageKind,
+    LineRecipient,
+    LineRecipientType,
+)
+from domains.line.identities import LineUserId
+from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
+from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.case_import.provisional_registration_types import (
     ProvisionalRegistrationConflict,
     ProvisionalRegistrationReceipt,
 )
-from subsystems.line.delivery_task_workflow import enqueue_line_task
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 
 
@@ -31,8 +40,14 @@ class ProvisionalRegistrationMySqlUnitOfWork(MySqlUnitOfWork):
 
 
 class MySqlProvisionalRegistrationRepository:
-    def __init__(self, connection) -> None:
+    def __init__(
+        self,
+        connection,
+        now: Callable[[], datetime] | None = None,
+    ) -> None:
         self._connection = connection
+        self._now = now or (lambda: datetime.now(timezone.utc))
+        self._delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
 
     def apply(self, candidate) -> ProvisionalRegistrationReceipt | ProvisionalRegistrationConflict:
         with _cursor(self._connection) as cursor:
@@ -43,12 +58,17 @@ class MySqlProvisionalRegistrationRepository:
                 return _receipt(record, candidate, replayed=True)
             client_id = _insert_client(cursor, candidate)
             beclass_record_id = _insert_beclass_record(cursor, candidate)
-            _enqueue_confirmation(cursor, candidate, int(record["id"]))
+            self._enqueue_confirmation(candidate, int(record["id"]))
             _complete_registration(cursor, int(record["id"]), client_id, beclass_record_id)
             return ProvisionalRegistrationReceipt(
                 int(record["id"]), client_id, beclass_record_id,
                 str(candidate.client_payload["name"]), False, True,
             )
+
+    def _enqueue_confirmation(self, candidate, registration_id) -> None:
+        self._delivery_tasks.enqueue(
+            _confirmation_request(candidate, registration_id, self._now())
+        )
 
 
 @contextmanager
@@ -124,17 +144,27 @@ def _insert_beclass_record(cursor, candidate) -> int:
     return _last_insert_id(cursor, "provisional_registration_beclass_insert_failed")
 
 
-def _enqueue_confirmation(cursor, candidate, registration_id) -> None:
-    name = str(candidate.client_payload["name"])
-    enqueue_line_task(
-        cursor,
-        to_user_id=candidate.line_user_id,
-        message_content=(
-            f"【系統通知】\n服務登記與綁定成功！您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n"
-            "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
-            "工會行政專員將於上班時間透過 LINE 與您聯繫確認服務細節，請您耐心等候！"
+def _confirmation_request(candidate, registration_id, scheduled_at):
+    return LineDeliveryRequest(
+        LineRecipient(LineRecipientType.USER, LineUserId(candidate.line_user_id)),
+        LineMessageKind.TEXT,
+        canonical_line_payload_json(
+            {"type": "text", "text": _confirmation_message(candidate)}
         ),
-        idempotency_key=f"line-registration:{registration_id}",
+        scheduled_at,
+        IdempotencyKey(f"line-registration:{registration_id}"),
+        CorrelationId(f"line-registration:{registration_id}"),
+        "provisional_registration",
+        str(registration_id),
+    )
+
+
+def _confirmation_message(candidate) -> str:
+    name = str(candidate.client_payload["name"])
+    return (
+        f"【系統通知】\n服務登記與綁定成功！您的 LINE 帳號已連結至客戶「{name}」的專屬資料庫。\n"
+        "您的案件編號尚待行政核發；完成核對後將主動通知您。\n"
+        "工會行政專員將於上班時間透過 LINE 與您聯繫確認服務細節，請您耐心等候！"
     )
 
 

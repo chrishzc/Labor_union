@@ -8,7 +8,7 @@
 - Owner：Contract Signing Integration
 - 跨域協作者：Orders、Assignments／Scheduling、Client Finance、LINE Integration
 - 歷史來源：`document/架構重整/04_已完成與上線封存/superseded_specs/契約整合與正常測試資料鏈_決策草案.md`
-- 執行範圍：`02_決策與退役執行記錄/56_Contract_Signing_and_UI_Validation_Work_Package.md`
+- 已完成執行範圍：[`56_Contract_Signing_and_UI_Validation_Work_Package.md`](../04_已完成與上線封存/work_packages/56_Contract_Signing_and_UI_Validation_Work_Package.md)
 
 本規格是第 `01`、`02`、`04`、`07`、`10`、`15`、`17` 份正式規格的契約簽署補充裁決。
 若舊條款仍把「客戶簽回」「契約完成」「訂金核銷」「訂單成立」視為同一事件，或要求先建立

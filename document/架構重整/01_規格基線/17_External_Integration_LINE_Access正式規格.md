@@ -182,6 +182,11 @@ pending → processing → published
 - Menu definition、image digest 與 publication snapshot 不可在 processing 後被覆寫。
 - 發布採 create／upload／link／switch／cleanup 的 saga，每一步保存 receipt。
 - retry 從已確認 provider receipt 繼續，不重複建立資產。
+- 身分綁定成功必須在同一交易 enqueue 個人 Rich Menu binding intent；worker 解析該身分角色
+  最新已發布的 provider menu 後執行 link，identity binding 不因外部 API 暫時失敗而回滾。
+- 新 Rich Menu publication 成功時，必須在記錄 published 的同一交易，依 menu audience role
+  對全部 bound LINE identities fan-out 個人 binding intents。每筆 intent 以 publication ID 與
+  LINE user ID 組成冪等 identity，並固定本次 provider menu ID；既有身分不需要解除或重複綁定。
 - media DB 只保存 metadata、owner、digest、size、content type 與 archive location，
   不保存任意外部 URL 當永久根事實。
 - 正式套用採單人流程：管理員先看到目前 menu snapshot 的預覽，再按「確認目前預覽」取得

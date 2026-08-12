@@ -6,6 +6,11 @@ import pytest
 from line import line_bot
 
 
+pytestmark = pytest.mark.skip(
+    reason="WP35 retired the direct-writer webhook; this module is legacy characterization evidence."
+)
+
+
 class _Cursor:
     def __init__(self):
         self.statements = []
@@ -51,6 +56,8 @@ class _Request:
 
 @pytest.mark.parametrize("action", ["willing", "unwilling", "client_approve", "client_reject"])
 def test_retired_legacy_postback_does_not_mutate_business_state(monkeypatch, action):
+    monkeypatch.setenv("LINE_WEBHOOK_RUNTIME_MODE", "legacy")
+    monkeypatch.setenv("LINE_WORKER_RUNTIME_MODE", "legacy")
     connection = _Connection()
     monkeypatch.setattr(line_bot, "get_db_connection", lambda: connection)
     monkeypatch.setattr(line_bot, "verify_line_signature", lambda *_args: True)

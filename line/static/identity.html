@@ -7,14 +7,18 @@
   <title>LINE 身分確認</title>
   <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
   <style>
-    body { margin: 0; background: #f4f6f8; color: #18212b; font-family: sans-serif; }
-    main { max-width: 480px; margin: 0 auto; padding: 24px 18px; }
-    section { background: white; border-radius: 16px; padding: 22px; box-shadow: 0 8px 24px #00000012; }
+    body { margin: 0; min-height: 100vh; background: linear-gradient(135deg,#eef2f7,#d9e2ec); color: #334e68; font-family: 'Noto Sans TC',sans-serif; }
+    main { max-width: 480px; margin: 0 auto; padding: 28px 18px; }
+    section { position: relative; overflow: hidden; background: #ffffffd9; border: 1px solid #ffffff80; border-radius: 20px; padding: 28px; box-shadow: 0 8px 32px #1f268715; }
+    section::before { content: ''; position: absolute; inset: 0 0 auto; height: 6px; background: linear-gradient(90deg,#4a90e2,#63e6be); }
     h1 { margin-top: 0; font-size: 24px; }
     label { display: block; margin: 16px 0 6px; font-weight: 700; }
     input { box-sizing: border-box; width: 100%; padding: 12px; border: 1px solid #c9d1d9; border-radius: 9px; font-size: 16px; }
     button { width: 100%; margin-top: 22px; padding: 13px; border: 0; border-radius: 9px; background: #06c755; color: white; font-size: 17px; font-weight: 700; }
     button:disabled { opacity: .55; }
+    #customer-choice button { margin-top: 14px; text-align: left; padding: 18px; border: 1px solid #d9e2ec; background: #fff; color: #334e68; box-shadow: 0 4px 15px #00000008; }
+    #customer-choice button strong { display: block; font-size: 17px; margin-bottom: 5px; }
+    #customer-choice button span { display: block; color: #627d98; font-size: 13px; line-height: 1.5; }
     #message { margin-top: 16px; white-space: pre-wrap; line-height: 1.5; }
     .error { color: #b42318; }
   </style>
@@ -23,13 +27,14 @@
 <main><section>
   <h1 id="title">LINE 身分確認</h1>
   <p id="description">正在確認登入狀態…</p>
+  <div id="customer-choice" hidden>
+    <button id="bind-existing" type="button"><strong>📝 已登記服務／補助</strong><span>我已填寫 BeClass 或政府補助資料，要直接綁定並查詢進度。</span></button>
+    <button id="register-new" type="button"><strong>✨ 尚未填寫登記表單</strong><span>我是新客戶，要填寫完整資料並建立服務檔案。</span></button>
+  </div>
   <form id="form" hidden></form>
   <div id="message" role="status"></div>
 </section></main>
 <script>
-const parameters = new URLSearchParams(location.search);
-const flowId = parameters.get("flow_id") || "";
-const purpose = parameters.get("purpose") || "";
 const definitions = {
   customer_binding: {
     title: "客戶資料綁定",
@@ -51,6 +56,7 @@ const definitions = {
   }
 };
 let idToken = "";
+let flowId = "";
 
 function showMessage(text, isError = false) {
   const target = document.getElementById("message");
@@ -76,8 +82,28 @@ function buildForm(definition) {
   button.type = "submit";
   button.textContent = "送出確認";
   form.append(button);
-  form.hidden = false;
   form.addEventListener("submit", event => submitForm(event, definition, button));
+}
+
+function showIdentityEntry(definition, purpose) {
+  buildForm(definition);
+  if (purpose !== "customer_binding") {
+    document.getElementById("form").hidden = false;
+    return;
+  }
+  document.getElementById("description").textContent = "請選擇您是否已填寫過工會基本資料表單。";
+  document.getElementById("customer-choice").hidden = false;
+}
+
+function configureCustomerChoice(definition) {
+  document.getElementById("bind-existing").addEventListener("click", () => {
+    document.getElementById("customer-choice").hidden = true;
+    document.getElementById("description").textContent = definition.description;
+    document.getElementById("form").hidden = false;
+  });
+  document.getElementById("register-new").addEventListener("click", () => {
+    location.assign(`/line-registration?flow_id=${encodeURIComponent(flowId)}`);
+  });
 }
 
 async function submitForm(event, definition, button) {
@@ -101,19 +127,74 @@ async function submitForm(event, definition, button) {
   }
 }
 
-async function initialize() {
+async function loadLiffId() {
+  const response = await fetch("/api/v1/line/identity/runtime-config");
+  const result = await response.json();
+  if (!response.ok || !result.data?.liff_id) {
+    throw new Error("LIFF 尚未完成設定，請聯絡工會人員。");
+  }
+  return result.data.liff_id;
+}
+
+function liffStateParameters(parameters) {
+  const rawState = parameters.get("liff.state") || "";
+  const queryStart = rawState.indexOf("?");
+  const stateQuery = queryStart >= 0 ? rawState.slice(queryStart + 1) : rawState.replace(/^\//, "");
+  return new URLSearchParams(stateQuery);
+}
+
+function identityFlowParameters() {
+  const parameters = new URLSearchParams(location.search);
+  if (parameters.get("purpose") && parameters.get("flow_id")) return parameters;
+  return liffStateParameters(parameters);
+}
+
+function readIdentityFlowContext() {
+  const parameters = identityFlowParameters();
+  const purpose = parameters.get("purpose") || "";
   const definition = definitions[purpose];
-  if (!flowId || !definition) throw new Error("連結無效，請回到 LINE 重新取得入口。");
+  flowId = parameters.get("flow_id") || "";
+  if (!flowId || !definition) {
+    throw new Error("連結無效，請回到 LINE 重新取得入口。");
+  }
+  return {definition, purpose};
+}
+
+function requestedStaffPage() {
+  const parameters = new URLSearchParams(location.search);
+  const target = parameters.get("target") || liffStateParameters(parameters).get("target");
+  return {staff_order_search: "/line-staff-orders", staff_schedule: "/line-staff-schedule"}[target] || "";
+}
+
+async function validateIdentityFlow(purpose) {
+  const response = await fetch("/api/v1/line/identity/flow/validate", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({flow_id: flowId, purpose, line_id_token: idToken})
+  });
+  if (response.ok) return;
+  const result = await response.json();
+  if (response.status === 410) {
+    throw new Error("此連結已失效，請回到 LINE 重新取得連結。");
+  }
+  const detail = typeof result.detail === "string" ? result.detail : result.detail?.message;
+  throw new Error(detail || "目前無法驗證連結，請稍後再試。");
+}
+
+async function initialize() {
+  const liffId = await loadLiffId();
+  await liff.init({liffId});
+  if (!liff.isLoggedIn()) { liff.login(); return; }
+  const staffPage = requestedStaffPage();
+  if (staffPage) { location.replace(staffPage); return; }
+  const {definition, purpose} = readIdentityFlowContext();
   document.getElementById("title").textContent = definition.title;
   document.getElementById("description").textContent = definition.description;
-  const configResponse = await fetch("/api/v1/line/identity/runtime-config");
-  const config = await configResponse.json();
-  if (!configResponse.ok || !config.data?.liff_id) throw new Error("LIFF 尚未完成設定，請聯絡工會人員。");
-  await liff.init({liffId: config.data.liff_id});
-  if (!liff.isLoggedIn()) { liff.login(); return; }
   idToken = liff.getIDToken() || "";
   if (!idToken) throw new Error("無法取得 LINE 登入憑證，請重新開啟此頁。");
-  buildForm(definition);
+  await validateIdentityFlow(purpose);
+  configureCustomerChoice(definition);
+  showIdentityEntry(definition, purpose);
 }
 
 initialize().catch(error => showMessage(error.message || "頁面初始化失敗。", true));

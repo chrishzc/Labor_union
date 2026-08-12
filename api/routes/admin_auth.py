@@ -20,6 +20,8 @@ from api.schemas.admin_auth import (
 from api.schemas.base import BaseResponse
 from subsystems.access.authentication_session import (
     AdminPrincipal,
+    AdminSessionSchemaError,
+    AdminSessionStorageError,
     authenticate_admin,
     record_admin_audit,
     renew_admin_session,
@@ -28,6 +30,7 @@ from subsystems.access.authentication_session import (
 
 
 router = APIRouter(prefix="/api/v1/admin/auth", tags=["Admin Auth"])
+
 
 def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
@@ -39,26 +42,50 @@ async def login(
     request: Request,
     _: None = Depends(require_internal_service),
 ):
-    result = await asyncio.to_thread(
-        authenticate_admin,
-        payload.username,
-        payload.password,
-        session_minutes=30,
-    )
+    result = await _authenticate(payload)
     if result is None:
-        await asyncio.to_thread(
-            record_admin_audit,
-            principal=None,
-            action="admin.login.failed",
-            request_path=str(request.url.path),
-            http_method=request.method,
-            result_status=status.HTTP_401_UNAUTHORIZED,
-            ip_address=_client_ip(request),
-            details={"username": payload.username.strip().lower()},
-        )
-        raise HTTPException(status_code=401, detail="帳號或密碼錯誤")
-
+        await _reject_invalid_login(payload, request)
     token, expires_at, principal = result
+    await _record_login_success(principal, request)
+    return _login_response(token, expires_at, principal)
+
+
+async def _authenticate(payload: AdminLoginRequest):
+    try:
+        return await asyncio.to_thread(
+            authenticate_admin,
+            payload.username,
+            payload.password,
+            session_minutes=30,
+        )
+    except AdminSessionSchemaError as error:
+        raise _login_unavailable("admin_session_schema_not_ready", str(error)) from error
+    except AdminSessionStorageError as error:
+        raise _login_unavailable("admin_session_storage_unavailable", str(error)) from error
+
+
+async def _reject_invalid_login(payload, request) -> None:
+    await asyncio.to_thread(
+        record_admin_audit,
+        principal=None,
+        action="admin.login.failed",
+        request_path=str(request.url.path),
+        http_method=request.method,
+        result_status=status.HTTP_401_UNAUTHORIZED,
+        ip_address=_client_ip(request),
+        details={"username": payload.username.strip().lower()},
+    )
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={
+            "code": "admin_credentials_invalid",
+            "message": "帳號或密碼錯誤",
+            "retryable": False,
+        },
+    )
+
+
+async def _record_login_success(principal, request) -> None:
     await asyncio.to_thread(
         record_admin_audit,
         principal=principal,
@@ -68,6 +95,9 @@ async def login(
         result_status=200,
         ip_address=_client_ip(request),
     )
+
+
+def _login_response(token, expires_at, principal):
     return BaseResponse(
         data=AdminSessionResponse(
             access_token=token,
@@ -75,6 +105,13 @@ async def login(
             admin=AdminPublic(**principal.as_dict()),
         ),
         message="登入成功",
+    )
+
+
+def _login_unavailable(code: str, message: str) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail={"code": code, "message": message, "retryable": True},
     )
 
 
@@ -89,11 +126,14 @@ async def refresh(
     principal: AdminPrincipal = Depends(require_admin),
 ):
     token = get_bearer_token(authorization)
-    expires_at = await asyncio.to_thread(
-        renew_admin_session,
-        token,
-        session_minutes=30,
-    )
+    try:
+        expires_at = await asyncio.to_thread(
+            renew_admin_session,
+            token,
+            session_minutes=30,
+        )
+    except AdminSessionStorageError as error:
+        raise _login_unavailable("admin_session_storage_unavailable", str(error)) from error
     if expires_at is None:
         raise HTTPException(status_code=401, detail="管理員 Session 已失效")
     return BaseResponse(
@@ -108,5 +148,8 @@ async def logout(
     principal: AdminPrincipal = Depends(require_admin),
 ):
     token = get_bearer_token(authorization)
-    await asyncio.to_thread(revoke_admin_session, token)
+    try:
+        await asyncio.to_thread(revoke_admin_session, token)
+    except AdminSessionStorageError as error:
+        raise _login_unavailable("admin_session_storage_unavailable", str(error)) from error
     return BaseResponse(data={"logged_out": True}, message=f"{principal.display_name} 已登出")

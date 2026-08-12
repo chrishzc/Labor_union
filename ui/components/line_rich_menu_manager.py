@@ -39,11 +39,18 @@ ACTION_LABELS = {
     "postback": "執行系統功能",
 }
 PUBLICATION_STATUS_LABELS = {
-    "pending": "等待發布",
-    "processing": "發布中",
+    "draft": "草稿",
+    "queued": "等待發布",
+    "publishing": "發布中",
     "published": "已發布",
+    "publish_retryable_failed": "發布暫時失敗",
     "failed": "發布失敗",
-    "cancelled": "已取消",
+    "rollback_queued": "等待回復",
+    "delete_queued": "等待刪除",
+    "rollback_retryable_failed": "回復暫時失敗",
+    "delete_retryable_failed": "刪除暫時失敗",
+    "rolled_back": "已回復",
+    "deleted": "已刪除",
 }
 
 
@@ -155,6 +162,25 @@ def _replace_menu(config: dict[str, Any], updated: dict[str, Any]) -> dict[str, 
     return result
 
 
+def _save_menu_configuration(
+    client: LineAdminApiClient,
+    token: str | None,
+    definition: dict[str, Any],
+    revision: int,
+    operation: str,
+) -> None:
+    identity = operation_headers(operation, definition)
+    client.update_line_menus(
+        token,
+        definition,
+        revision=revision,
+        reason="管理員儲存 Rich Menu 設定",
+        idempotency_key=identity["Idempotency-Key"],
+        correlation_id=identity["X-Correlation-ID"],
+    )
+    complete_operation(operation)
+
+
 def _taipei_time(value: Any) -> str:
     if not value:
         return "-"
@@ -176,6 +202,8 @@ def render_rich_menu_manager(
         st.success(flash)
     can_edit = has_capability(profile, "line.config.manage")
     can_publish = has_capability(profile, "line.menu.publish")
+    if profile.get("id") is None and not can_publish:
+        st.info("開發模式可編輯與預覽；套用到真實 LINE 需要啟用管理員登入。")
 
     try:
         state = client.line_menu_state(token)
@@ -305,10 +333,12 @@ def render_rich_menu_manager(
             st.session_state[PREVIEW_KEY] = preview
             if save_clicked:
                 try:
-                    client.update_line_menus(
+                    _save_menu_configuration(
+                        client,
                         token,
                         _replace_menu(config, draft),
-                        revision=state["revision"],
+                        state["revision"],
+                        f"rich-menu-config-save:{selected_id}",
                     )
                 except LineAdminApiError as exc:
                     st.error(f"儲存失敗：{exc}")
@@ -342,10 +372,12 @@ def render_rich_menu_manager(
             updated = deepcopy(selected_menu)
             updated["appearance"]["image_mode"] = "uploaded"
             updated["appearance"]["image_asset_id"] = asset["id"]
-            client.update_line_menus(
+            _save_menu_configuration(
+                client,
                 token,
                 _replace_menu(config, updated),
-                revision=state["revision"],
+                state["revision"],
+                f"rich-menu-image-save:{selected_id}",
             )
         except LineAdminApiError as exc:
             st.error(f"圖片上傳失敗：{exc}")
@@ -423,21 +455,20 @@ def render_rich_menu_manager(
     table = [
         {
             "狀態": PUBLICATION_STATUS_LABELS.get(item["status"], item["status"]),
-            "目前版本": "是" if item["is_current"] else "否",
-            "開始時間": _taipei_time(item.get("created_at")),
-            "完成時間": _taipei_time(item.get("published_at")),
-            "說明": "請重新套用" if item.get("error_code") else "",
+            "設定版本": item["configuration_revision"],
+            "工作編號": item["id"],
         }
         for item in history["items"]
     ]
     st.dataframe(pd.DataFrame(table), width="stretch", hide_index=True)
-    failed = [item for item in history["items"] if item["status"] == "failed"]
+    retryable_statuses = {"failed", "publish_retryable_failed"}
+    failed = [item for item in history["items"] if item["status"] in retryable_statuses]
     if failed and can_publish:
         retry_id = st.selectbox(
             "選擇要重新套用的紀錄",
             [item["id"] for item in failed],
             format_func=lambda value: next(
-                _taipei_time(item.get("created_at"))
+                f"工作 {item['id']}（設定版本 {item['configuration_revision']}）"
                 for item in failed
                 if item["id"] == value
             ),

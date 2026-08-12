@@ -1,6 +1,6 @@
 ---
 doc_type: contract
-declared_status: decision-complete-implementation-deferred
+declared_status: completed
 date: 2026-08-08
 ---
 
@@ -120,6 +120,7 @@ transaction: a committed Domain receipt plus a durable task is the boundary.
 This contract changes the future development path, not the existing LINE
 behavior. Production migration requires a separate approved implementation
 package and must stop for any UI change.
+
 
 ## Legacy postback retirement decision
 

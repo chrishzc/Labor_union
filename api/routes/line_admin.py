@@ -19,8 +19,6 @@ from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
 from subsystems.line.runtime_health import classify_line_worker_health
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.access.integration_capabilities import integration_capabilities_for_role
-from subsystems.line.capabilities import line_capabilities_for_role
 
 
 router = APIRouter(
@@ -98,12 +96,7 @@ def line_admin_capabilities(
     return BaseResponse(
         data={
             "stage": "9",
-            "effective_capabilities": sorted(
-                {
-                    *line_capabilities_for_role(principal.role),
-                    *integration_capabilities_for_role(principal.role),
-                }
-            ),
+            "effective_capabilities": sorted(principal.effective_capabilities()),
             "features": {
                 "health_overview": True,
                 "message_template_api": True,

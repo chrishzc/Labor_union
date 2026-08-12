@@ -20,4 +20,9 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [Finance Amendment validation closeout receipt（封存）](../04_已完成與上線封存/receipts/2026-08-11_finance_amendment_release_preflight_receipt.md) | Finance Amendment isolated-test schema、UI Preview／Apply 與 focused regression 的結案收據。 |
 | [evidence/2026-08-11_ui_navigation_convergence_receipt.md](evidence/2026-08-11_ui_navigation_convergence_receipt.md) | 單一業務導覽、lazy page registry、訂單／帳務拆分的 focused regression 與 browser smoke。 |
 | [evidence/2026-08-11_active_package_closeout_receipt.md](evidence/2026-08-11_active_package_closeout_receipt.md) | 25／28／32／43／45 收尾，以及 26／46／49 收斂的 fresh focused validation 與逐項裁決。 |
+| [evidence/2026-08-12_line_ingress_phase_1_service_help_receipt.md](evidence/2026-08-12_line_ingress_phase_1_service_help_receipt.md) | LINE ingress Phase 1：canonical Service Help 委派至 Customer Service owning workflow 的 focused regression。 |
+| [LINE ingress Phase 2 receipt（封存）](../04_已完成與上線封存/receipts/2026-08-12_line_ingress_phase_2_rulebook_reconciliation_receipt.md) | 規則書對齊與 union-menu／`esc` characterization 已驗收；未授權的 canonical behavior 留待人工裁決。 |
+| [evidence/2026-08-12_line_menu_command_canonical_replacement_receipt.md](evidence/2026-08-12_line_menu_command_canonical_replacement_receipt.md) | 已裁決的 union menu／`esc` canonical identity gate、outbox replacement 與 focused regression。 |
+| [65 LINE canonical cutover receipt](../02_決策與退役執行記錄/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
+| [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |
 | [evidence/](evidence/) | 上述決策包／收據對應的原始 evidence 產物（JSON／SQL／receipt）。 |

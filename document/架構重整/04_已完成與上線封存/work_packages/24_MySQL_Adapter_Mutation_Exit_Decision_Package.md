@@ -1,17 +1,29 @@
 ---
 doc_type: decision-package
-declared_status: "decision-ready; no code removal in this package"
+declared_status: completed
 ---
 
 # MySQL Adapter Mutation Exit Decision Package
 
 ## Scope and evidence
 
-- Status: `decision-ready; no code removal in this package`.
+- Status: `completed`.
 - Source: `infrastructure/mysql/mysql_adapter.py`
-- Fresh SHA-256: `159865EA0FD3A246A0387FBB57C8CE4E78C6F950BF5AE48733C671617CD9E76F`
-- Inventory v3: 29 mutation findings, all `blocked` and `migrate_then_remove_candidate`.
+- Fresh SHA-256: `1397a020a127635d7307cf17b7142002271dfb20efee2e2a6964b354c808b062`
+- 2026-08-12 fresh static scan: zero `mysql_adapter.py` mutation findings, zero mutation-SQL tokens, zero `.commit()` calls, and zero callers for every retired adapter mutation symbol.
+- Focused replacement regressions pass (`5 passed`); see [WP24 fresh reconciliation receipt](../receipts/2026-08-12_wp24_mysql_adapter_mutation_exit_reconciliation_receipt.md).
+- Inventory v3 reconciliation is current: the fresh candidate has 1,047 findings / 1,028 identities and
+  the reviewed disposition has all 1,028 identities. 347 merge-introduced or unclassified identities are
+  explicitly `needs_decision`; they have no inferred owner and no removal authority.
 - The adapter remains a live query/connection dependency. This package covers only its mutation functions.
+
+## Completed outcome and separated follow-up
+
+The adapter-specific exit is proven and the global reviewed-disposition layer is reconciled against the fresh
+candidate set. The 347 `needs_decision` records are carried by
+`63_Global_Writer_Inventory_v3_Owner_Review_Work_Package.md`; they are an explicit global owner-review queue,
+not a hidden blocker or an adapter-mutation removal authorization. No removal authority is created by this
+package.
 
 ## Caller disposition
 
@@ -37,5 +49,6 @@ declared_status: "decision-ready; no code removal in this package"
 
 - No direct `mysql_adapter` mutation call remains outside its migration slice.
 - Every migrated command has one outer UoW owner, actor/capability, idempotency and typed error path.
-- New source, focused tests and full pytest pass; Inventory v3 may only lose the approved exact findings.
+- Fresh source, focused replacement tests, disposition validator and inventory pytest pass; Inventory v3 may
+  only lose the approved exact findings.
 - No schema/data/deployment mutation belongs to this decision package.

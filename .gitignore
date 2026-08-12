@@ -45,7 +45,8 @@ TASK_INDEX_FILE
 task_index.json
 
 # System generated agent logs & planning
-history/
+history/refactor_line_bot
+git_push.md
 task-*.md
 PROJECT_SPEC.md
 scratch/
@@ -59,6 +60,13 @@ scratch/
 
 # Local backups and generated database snapshots
 backups/
+.codex_db_migration/
+
+# Personal local startup scripts
+*.local.sh
+*.mac.local.sh
+
+# Personal presentation files
 
 # Local test, coverage, type-check and runtime artifacts
 .pytest_cache/

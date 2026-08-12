@@ -19,9 +19,11 @@ import pymysql
 import requests
 
 from api.schemas.line_config import LineMenusConfig, RichMenuDefinition
+from domains.line.configuration import LineConfigurationKind
 from infrastructure.mysql.mysql_adapter import get_connection
-from subsystems.line.configuration_store import config_revision, read_config
+from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from subsystems.line.delivery_task_workflow import enqueue_line_task
+from subsystems.line.message_configuration import configuration_definition
 from subsystems.line.media_archive import (
     MediaValidationError,
     get_media_asset,
@@ -40,7 +42,14 @@ class RichMenuPublicationNotFoundError(LookupError):
 
 
 class RichMenuPublicationConflictError(RuntimeError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "rich_menu_publication_conflict",
+    ) -> None:
+        super().__init__(message)
+        self.code = code
 
 
 class RichMenuPublishError(RuntimeError):
@@ -54,8 +63,19 @@ def _decode_json(value: Any) -> Any:
     return json.loads(value) if isinstance(value, str) else value
 
 
+def _current_menu_configuration() -> tuple[LineMenusConfig, str]:
+    with open_line_unit_of_work() as unit_of_work:
+        configuration_snapshot = unit_of_work.configurations.get(
+            LineConfigurationKind.RICH_MENUS
+        )
+    configuration = LineMenusConfig.model_validate(
+        configuration_definition(configuration_snapshot)
+    )
+    return configuration, str(configuration_snapshot.revision.value)
+
+
 def _current_menu_snapshot(menu_id: str) -> tuple[RichMenuDefinition, str, str]:
-    config = read_config("line_menus", LineMenusConfig)
+    config, revision = _current_menu_configuration()
     menu = next((item for item in config.menus if item.id == menu_id), None)
     if not menu:
         raise RichMenuPublicationNotFoundError(f"找不到 Rich Menu {menu_id}")
@@ -70,16 +90,19 @@ def _current_menu_snapshot(menu_id: str) -> tuple[RichMenuDefinition, str, str]:
             menu.size.height,
         ):
             raise RichMenuPublicationConflictError("圖片尺寸與 Rich Menu 尺寸不一致")
-    snapshot = menu.model_dump(mode="json")
+    menu_snapshot = menu.model_dump(mode="json")
     fingerprint = hashlib.sha256(
-        json.dumps(snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        json.dumps(menu_snapshot, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
-    return menu, config_revision("line_menus"), fingerprint
+    return menu, revision, fingerprint
 
 
 def create_publication_preview(menu_id: str, previewed_by_admin_user_id: int | None) -> dict[str, Any]:
     if previewed_by_admin_user_id is None:
-        raise RichMenuPublicationConflictError("發布預覽需要已登入的管理員")
+        raise RichMenuPublicationConflictError(
+            "發布預覽需要已登入的管理員",
+            code="authenticated_admin_required",
+        )
     menu, revision, fingerprint = _current_menu_snapshot(menu_id)
     conn = get_connection()
     try:
@@ -107,7 +130,10 @@ def validate_publication_preview(
     previewed_by_admin_user_id: int | None,
 ) -> dict[str, Any]:
     if previewed_by_admin_user_id is None:
-        raise RichMenuPublicationConflictError("發布需要已登入的管理員")
+        raise RichMenuPublicationConflictError(
+            "發布需要已登入的管理員",
+            code="authenticated_admin_required",
+        )
     _, revision, fingerprint = _current_menu_snapshot(menu_id)
     conn = get_connection()
     try:
@@ -127,7 +153,8 @@ def validate_publication_preview(
             )
             if cursor.fetchone() is None:
                 raise RichMenuPublicationConflictError(
-                    "請先預覽目前版本的 Rich Menu，再確認套用"
+                    "請先預覽目前版本的 Rich Menu，再確認套用",
+                    code="rich_menu_preview_stale",
                 )
         return {
             "preview_id": preview_id,
@@ -145,7 +172,10 @@ def create_publication_job(
     preview_id: int,
 ) -> dict[str, Any]:
     if requested_by_admin_user_id is None:
-        raise RichMenuPublicationConflictError("發布需要已登入的管理員")
+        raise RichMenuPublicationConflictError(
+            "發布需要已登入的管理員",
+            code="authenticated_admin_required",
+        )
     menu, revision, fingerprint = _current_menu_snapshot(menu_id)
 
     conn = get_connection()
@@ -163,7 +193,10 @@ def create_publication_job(
                 (preview_id, menu_id, revision, fingerprint, requested_by_admin_user_id),
             )
             if not cursor.fetchone():
-                raise RichMenuPublicationConflictError("請先預覽目前版本的 Rich Menu，再確認套用")
+                raise RichMenuPublicationConflictError(
+                    "請先預覽目前版本的 Rich Menu，再確認套用",
+                    code="rich_menu_preview_stale",
+                )
             cursor.execute(
                 """
                 SELECT id FROM line_rich_menu_publications
@@ -347,8 +380,7 @@ def import_legacy_rich_menu_ids() -> int:
         legacy = json.loads(LEGACY_IDS_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return 0
-    config = read_config("line_menus", LineMenusConfig)
-    revision = config_revision("line_menus")
+    config, revision = _current_menu_configuration()
     key_by_role = {
         "customer": "default_rich_menu_id",
         "staff": "staff_rich_menu_id",

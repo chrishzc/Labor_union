@@ -117,11 +117,14 @@ def _legacy_line_bot_review(symbol: str) -> tuple[str, str, str, str]:
             "api/main.py mounts line.line_bot.router",
             f"retain_canonical:{replacements[symbol]}",
         )
+    replacement = replacements.get(symbol)
+    if replacement is None:
+        return _needs_decision_review("line/line_bot.py")
     return (
         "line_integration",
         "LINE transport route",
         "api/main.py mounts line.line_bot.router",
-        f"retain_canonical:{replacements[symbol]}",
+        f"retain_canonical:{replacement}",
     )
 
 
@@ -146,7 +149,7 @@ def _typed_line_review(path: str) -> tuple[str, str, str, str]:
         "subsystems/line/webhook_inbox.py": ("line_ingress", "caller-owned idempotent webhook-inbox transaction", "typed LINE ingress workflow", "retain_canonical:webhook inbox owner"),
         "subsystems/case_import/provisional_registration_application.py": ("case_import", "typed provisional-registration Apply transaction", "line.line_bot.line_register", "retain_canonical:single active registration with replay/conflict receipt"),
     }
-    return metadata[path]
+    return metadata.get(path) or _needs_decision_review(path)
 
 
 def _service_review(path: str) -> tuple[str, str, str, str]:
@@ -156,7 +159,16 @@ def _service_review(path: str) -> tuple[str, str, str, str]:
         "services/finance_import_reprocessing.py": ("finance_import", "retired legacy reprocess transaction", "no production apply caller; CLI rejects --apply", "migrate_then_remove:typed Historical Reprocess API is the replacement"),
         "services/system_alert_service.py": ("anomalies", "legacy operational alert projection transaction", "legacy finance-import application", "migrate_then_remove:subsystems.anomalies.system_alert_projection"),
     }
-    return metadata[path]
+    return metadata.get(path) or _needs_decision_review(path)
+
+
+def _needs_decision_review(path: str) -> tuple[str, str, str, str]:
+    return (
+        "owner_review_required",
+        "unclassified writer boundary; no automatic owner assignment",
+        f"manual review required for {path}",
+        "needs_decision:merge-introduced writer requires explicit owner, caller, and transaction-boundary review",
+    )
 
 
 def _disposition(candidate: dict[str, object]) -> dict[str, object]:

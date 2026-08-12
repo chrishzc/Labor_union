@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>月嫂訂單查詢</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Microsoft JhengHei", "Noto Sans TC", sans-serif; background: #fff7f8; color: #27272a; }
+    main { max-width: 720px; margin: 0 auto; padding: 24px 16px 40px; }
+    h1 { margin: 0 0 8px; font-size: 28px; }
+    p { color: #71717a; line-height: 1.6; }
+    .panel { background: #fff; border: 1px solid #fecdd3; border-radius: 8px; padding: 16px; margin-top: 16px; }
+    label { display: block; font-weight: 700; margin-bottom: 8px; }
+    input { width: 100%; border: 1px solid #d4d4d8; border-radius: 6px; padding: 12px; font-size: 16px; }
+    button { width: 100%; border: 0; border-radius: 6px; padding: 13px 16px; font-size: 16px; font-weight: 700; color: #fff; background: #be123c; margin-top: 12px; }
+    button.secondary { background: #52525b; }
+    .message { margin-top: 16px; padding: 12px; border-radius: 6px; background: #f4f4f5; color: #3f3f46; }
+    .error { background: #fee2e2; color: #b91c1c; }
+    .order { background: #fff; border: 1px solid #e4e4e7; border-radius: 8px; padding: 16px; margin-top: 14px; }
+    .order h2 { margin: 0 0 10px; font-size: 20px; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+    .item { border-bottom: 1px solid #f4f4f5; padding: 8px 0; }
+    .item b { display: block; color: #52525b; font-size: 13px; margin-bottom: 3px; }
+    details { margin-top: 12px; }
+    summary { cursor: pointer; font-weight: 700; color: #be123c; }
+    @media (min-width: 640px) { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>訂單查詢</h1>
+  <p>請輸入一般用戶的案件編號或客戶姓名，系統會顯示您已被指派案件的服務登記內容。</p>
+  <section class="panel">
+    <label for="keyword">案件編號或客戶姓名</label>
+    <input id="keyword" autocomplete="off" placeholder="例如：115000035 或 王小美">
+    <button id="searchBtn">查詢訂單資訊</button>
+    <div id="status" class="message" style="display:none;"></div>
+  </section>
+  <section id="results"></section>
+</main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+let lineIdToken = "";
+
+function showStatus(text, isError = false) {
+  const box = document.getElementById("status");
+  box.textContent = text;
+  box.className = "message" + (isError ? " error" : "");
+  box.style.display = "block";
+}
+
+function valueText(value) {
+  return value === null || value === undefined || value === "" ? "未填寫" : String(value);
+}
+
+function renderResults(items) {
+  const root = document.getElementById("results");
+  root.innerHTML = "";
+  if (!items.length) {
+    showStatus("查無可檢視的訂單。請確認案件編號/姓名是否正確，且該案件已指派給您。", true);
+    return;
+  }
+  showStatus(`共找到 ${items.length} 筆訂單。`);
+  for (const item of items) {
+    const rows = [
+      ["案件編號", item.case_no],
+      ["客戶姓名", item.client_name],
+      ["客戶電話", item.client_phone],
+      ["服務地址", `${valueText(item.city)} ${valueText(item.address)}`],
+      ["案件狀態", item.order_status],
+      ["服務期間", `${valueText(item.start_date)} 至 ${valueText(item.end_date)}`],
+      ["服務天數", item.service_days],
+      ["每日時數", item.service_hours_per_day],
+      ["預產期/預計月份", item.due_month],
+      ["預計服務日期", item.service_start_date],
+      ["服務時間", item.service_time],
+      ["居住型態", item.residence_type],
+      ["生產方式", item.delivery_type],
+      ["服務方式", item.service_type],
+      ["寶寶資訊", item.baby_info],
+      ["其他事項", item.notes],
+    ];
+    const card = document.createElement("article");
+    card.className = "order";
+    card.innerHTML = `<h2>${valueText(item.client_name)}｜${valueText(item.case_no)}</h2>
+      <div class="grid">${rows.map(([k, v]) => `<div class="item"><b>${k}</b>${valueText(v)}</div>`).join("")}</div>`;
+    if (item.survey_rows && item.survey_rows.length) {
+      const details = document.createElement("details");
+      details.innerHTML = `<summary>查看完整表單填寫內容</summary>
+        <div class="grid">${item.survey_rows.map(row => `<div class="item"><b>${row.label}</b>${valueText(row.value)}</div>`).join("")}</div>`;
+      card.appendChild(details);
+    }
+    root.appendChild(card);
+  }
+}
+
+async function init() {
+  try {
+    const config = await fetch("/api/line/config").then(r => r.json());
+    if (config.liff_id) {
+      await liff.init({ liffId: config.liff_id });
+      if (!liff.isLoggedIn()) {
+        liff.login({ redirectUri: location.href });
+        return;
+      }
+      try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+    }
+  } catch (err) {
+    showStatus("LIFF 初始化失敗，請重新開啟頁面。", true);
+  }
+}
+
+document.getElementById("searchBtn").addEventListener("click", async () => {
+  const keyword = document.getElementById("keyword").value.trim();
+  if (!keyword) {
+    showStatus("請先輸入案件編號或客戶姓名。", true);
+    return;
+  }
+  showStatus("查詢中...");
+  const response = await fetch("/api/v1/line/staff-self-service/orders", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ keyword, line_id_token: lineIdToken })
+  });
+  const data = await response.json();
+  if (!response.ok || !data.success) {
+    showStatus(data.message || data.detail?.message || "查詢失敗", true);
+    document.getElementById("results").innerHTML = "";
+    return;
+  }
+  renderResults(data.data?.items || []);
+});
+
+init();
+</script>
+</body>
+</html>

@@ -9,7 +9,7 @@
 - 核准日期：2026-08-10
 - 目的：在既有 UI 工作區驗收業務事件的計算、狀態、異常與修正結果；pytest／DB verifier 是證據，不是 UI 的替代品。
 - 正式依據：[`21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`](../架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)
-- 執行範圍：[`56_Contract_Signing_and_UI_Validation_Work_Package.md`](../架構重整/02_決策與退役執行記錄/56_Contract_Signing_and_UI_Validation_Work_Package.md)
+- 已完成執行範圍：[`56_Contract_Signing_and_UI_Validation_Work_Package.md`](../架構重整/04_已完成與上線封存/work_packages/56_Contract_Signing_and_UI_Validation_Work_Package.md)
 
 本文件只擁有 UI 驗收情境 backlog，不再定義契約簽署、服務承諾、訂金、Contract
 Completion 或 execution conversion 的架構語意。架構衝突一律以上述正式規格為準。

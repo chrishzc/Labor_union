@@ -20,6 +20,7 @@ from domains.line.identity_binding import (
     LineIdentityBindingStatus,
 )
 from domains.line.identity_flow import (
+    LineIdentityFlowConflict,
     LineIdentityFlowPurpose,
     LineIdentityFlowSnapshot,
     LineIdentityFlowStatus,
@@ -40,7 +41,10 @@ from subsystems.line.identity_contracts import (
     OpenLineIdentityFlowResult,
     StaffIdentityProof,
 )
-from subsystems.line.identity_review_application import LineIdentityReviewApplication
+from subsystems.line.identity_review_application import (
+    LineIdentityReviewApplication,
+    LineReviewDataConflictError,
+)
 from subsystems.line.review_contracts import (
     CreateLineReviewResult,
     DecideLineReviewCommand,
@@ -100,6 +104,34 @@ def test_staff_command_only_opens_flow_and_queues_liff_link() -> None:
     assert not hasattr(uow, "identities")
 
 
+@pytest.mark.parametrize(
+    ("message", "purpose"),
+    [
+        ("綁定", "customer_binding"),
+        ("綁定訂單", "customer_binding"),
+        ("訂單查詢", "customer_binding"),
+        ("綁定工會帳號", "admin_binding"),
+        ("綁定後台帳號", "admin_binding"),
+        ("綁定system_admin", "admin_binding"),
+    ],
+)
+def test_identity_commands_resolve_to_exact_flow(message, purpose) -> None:
+    deliveries = RecordingRepository()
+    uow = FakeUow(
+        platform_users=SimpleNamespace(apply_friend_event=lambda _: None),
+        identity_flows=SimpleNamespace(open=lambda command: _opened_flow(command)),
+        delivery_tasks=deliveries,
+    )
+    handler = LineWebhookIdentityHandlers(
+        lambda: NOW,
+        lambda flow_purpose, flow_id: f"https://example.test/{flow_purpose}/{flow_id}",
+    )
+
+    handler.handle_message(_message_inbox(message), uow)
+
+    assert purpose in deliveries.items[0].payload_json
+
+
 def test_staff_apply_creates_manual_review_without_binding_owner() -> None:
     flow = _active_staff_flow()
     identities = PendingIdentityRepository()
@@ -129,6 +161,28 @@ def test_staff_apply_creates_manual_review_without_binding_owner() -> None:
     assert len(deliveries.items) == 1
 
 
+def test_validate_flow_rejects_expired_link_before_identity_form_is_shown() -> None:
+    expired_flow = LineIdentityFlowSnapshot(
+        LineIdentityFlowId("flow-expired"),
+        LineIdentityFlowPurpose.STAFF_VERIFICATION,
+        LineUserId("U-staff"),
+        LineIdentityFlowStatus.ACTIVE,
+        NOW,
+        "staff-flow:expired",
+    )
+    application = LineIdentityApplication(
+        lambda: FakeUow(identity_flows=FlowRepository(expired_flow)),
+        lambda: NOW,
+    )
+
+    with pytest.raises(LineIdentityFlowConflict, match="expired"):
+        application.validate_flow(
+            expired_flow.flow_id,
+            expired_flow.purpose,
+            expired_flow.line_user_id,
+        )
+
+
 def test_review_approval_requires_capability_and_binds_in_one_uow() -> None:
     snapshot = _pending_staff_review()
     identities = ApprovalIdentityRepository(snapshot)
@@ -144,6 +198,7 @@ def test_review_approval_requires_capability_and_binds_in_one_uow() -> None:
         receipts=receipts,
         audit=RecordingRepository(),
         delivery_tasks=RecordingRepository(),
+        outbox=RecordingRepository(),
     )
     application = LineIdentityReviewApplication(lambda: uow, lambda: NOW)
     command = _approve_command(LineCapability.IDENTITY_REVIEW.value)
@@ -160,6 +215,29 @@ def test_review_approval_requires_capability_and_binds_in_one_uow() -> None:
     denied = _approve_command()
     with pytest.raises(LineCapabilityDeniedError):
         application.decide(denied)
+
+
+def test_review_owner_drift_returns_specific_typed_conflict() -> None:
+    snapshot = _pending_staff_review()
+    uow = FakeUow(
+        reviews=ReviewDecisionRepository(snapshot),
+        identities=ApprovalIdentityRepository(snapshot),
+        staff=ConflictingStaffOwnerRepository(),
+        customers=SimpleNamespace(),
+        admins=SimpleNamespace(),
+        receipts=ReceiptRepository(),
+        audit=RecordingRepository(),
+        delivery_tasks=RecordingRepository(),
+        outbox=RecordingRepository(),
+    )
+    application = LineIdentityReviewApplication(lambda: uow, lambda: NOW)
+
+    with pytest.raises(LineReviewDataConflictError) as captured:
+        application.decide(_approve_command(LineCapability.IDENTITY_REVIEW.value))
+
+    assert captured.value.code == "staff_identity_binding_conflict"
+    assert "月嫂目前綁定" in str(captured.value)
+    assert uow.committed is False
 
 
 class FlowRepository:
@@ -210,6 +288,11 @@ class StaffOwnerRepository:
         self.bind_calls.append((subject_reference, line_user_id, old_line_user_id))
 
 
+class ConflictingStaffOwnerRepository(StaffOwnerRepository):
+    def bind_staff(self, *_):
+        raise RuntimeError("staff_identity_binding_conflict")
+
+
 class ReviewCreationRepository:
     def create(self, command):
         snapshot = LineReviewSnapshot(
@@ -246,7 +329,13 @@ class ApprovalIdentityRepository:
     def bind(self, claim, expected_version, *_):
         assert expected_version == ExpectedVersion(1)
         self.bound = True
-        return self.pending
+        return LineIdentityBindingSnapshot(
+            claim.line_user_id,
+            LineIdentityBindingStatus.BOUND,
+            ExpectedVersion(2),
+            claim.subject_type,
+            claim.subject_reference,
+        )
 
 
 class ReviewDecisionRepository:
