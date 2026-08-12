@@ -1,0 +1,38 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "CS-CONTRACT-SIGNING-001",
+  "track": "A",
+  "suite_id": "CS",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["domain_root_data", "external_input_fixture", "subsystem_state_machine", "typed_query_view", "expected_manifest"],
+  "coverage_ids": ["CSM-01", "CSM-02", "CSM-03", "CSM-04", "CSM-05", "CSM-06", "CSM-07", "CSM-08", "CSM-09"],
+  "source_refs": [
+    "document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#Contract Signing"
+  ],
+  "root_facts": [
+    "Approved staff-service and client-contract template artifacts with content and mapping digests.",
+    "Matching-plan segments, immutable generated document bytes, returned signed-document bytes and typed send/sign commands.",
+    "Exact deposit bank receipt, customer-signature command and execution-conversion command with fixed clock and idempotency identities."
+  ],
+  "forbidden_direct_seed": [
+    "contract signing status, contract identity, order status, execution assignment or effective schedule",
+    "client-receivable summaries, payroll, subsidy, calendar, alert, outbox or command receipt projections",
+    "document overwrite, deletion, mutable template mapping or arbitrary local file as generated contract"
+  ],
+  "commands": [
+    "Generate each staff contract from an approved template, send it, archive signed return and record the staff signature.",
+    "Create the exact pre-contract service commitment only after all staff signatures, then generate, send and record the client contract return.",
+    "Reconcile the exact deposit before client signing, then test customer signing, replay, stale document and execution-conversion guards."
+  ],
+  "expected": [
+    "Each generated or returned document is immutable, digest-linked and auditable; invalid/expired inputs leave no partial signing event.",
+    "Deposit settlement can produce Orders=訂單成立 while Contract=等待客戶簽回 and no execution schedule exists.",
+    "Only the combined commitment, client-signature and settled-deposit roots allow execution conversion; API and UI expose every normal, blocker and repair state.",
+    "Preview and query perform zero business writes; exact replay returns one receipt and changed idempotency payload conflicts.",
+    "Archive failure, stale document version and staff/client order violations leave document, event, finance and schedule projections unchanged."
+  ],
+  "receipt_requirements": [
+    "template/document/input digests", "event/commitment/receipt row deltas", "orders and contract status snapshots", "typed API/UI blocker and repair snapshots", "replay, stale-version and rollback evidence"
+  ]
+}

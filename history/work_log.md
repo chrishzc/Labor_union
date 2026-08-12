@@ -1,5 +1,4 @@
 # Work Log
-
 ## [2026-07-12]
 - 刪除 `.env` 中未使用的環境變數 `END_POINT`。
 - 更新 `.env.example` 中的 `DB_PORT` 預設值為 `3307`，以與 `docker-compose.yml` 保持一致。
@@ -598,4 +597,3 @@
   本機 `.venv` 後為 `0`。
 - `git diff --check` 與異動檔 strict UTF-8、無 BOM 驗證通過；未修改 schema、migration、
   正式資料庫、LINE provider 或專案相依檔，也未建立或遺留一次性程式檔案。
-

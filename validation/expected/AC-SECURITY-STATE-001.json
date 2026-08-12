@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"AC-SECURITY-STATE-001","assertions":["Disable and credential rotation revoke sessions atomically.","Final active system admin cannot be disabled or downgraded.","Expired/revoked sessions do not revive and UI/API enforce actor scope."]}

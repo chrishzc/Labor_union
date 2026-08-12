@@ -20,8 +20,8 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 
 _STAFF_COMMAND = "我是月嫂"
-_ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號"}
-_CUSTOMER_COMMANDS = {"綁定", "查詢訂單"}
+_ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
+_CUSTOMER_COMMANDS = {"綁定", "查詢訂單", "綁定訂單", "訂單查詢"}
 _SERVICE_HELP_COMMAND = "服務說明"
 _SERVICE_HELP_CATEGORIES = {
     "服務流程": (
@@ -79,6 +79,7 @@ class LineWebhookIdentityHandlers:
         matching_postback_application: object | None = None,
         knowledge_question_scheduler: Callable[[object, object, object, str], object] | None = None,
         service_help_application: object | None = None,
+        menu_command_application: object | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
@@ -89,6 +90,7 @@ class LineWebhookIdentityHandlers:
         self._matching_postback_application = matching_postback_application
         self._knowledge_question_scheduler = knowledge_question_scheduler
         self._service_help_application = service_help_application
+        self._menu_command_application = menu_command_application
 
     def registry(self):
         return {
@@ -139,12 +141,15 @@ class LineWebhookIdentityHandlers:
             return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
-            if _handle_service_help_text(
+            if self._menu_command_application is not None and self._menu_command_application.handle(
+                inbox, unit_of_work, line_user_id, text
+            ):
+                return
+            if self._handle_service_help(
                 inbox,
                 unit_of_work,
                 line_user_id,
                 text,
-                self._now(),
             ):
                 return
             if self._knowledge_question_scheduler is not None:
@@ -154,6 +159,22 @@ class LineWebhookIdentityHandlers:
         if source_type is not None and source_type.value != "user":
             return
         self._open_and_notify(inbox, unit_of_work, line_user_id, purpose)
+
+    def _handle_service_help(self, inbox, unit_of_work, line_user_id, text) -> bool:
+        if self._service_help_application is not None:
+            return self._service_help_application.handle(
+                inbox,
+                unit_of_work,
+                line_user_id,
+                text,
+            )
+        return _handle_service_help_text(
+            inbox,
+            unit_of_work,
+            line_user_id,
+            text,
+            self._now(),
+        )
 
     def handle_group_membership(self, inbox, unit_of_work):
         if self._group_application is not None:

@@ -1,0 +1,48 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "ORD-DETAIL-TYPED-QUERY-004",
+  "track": "A",
+  "suite_id": "ORD",
+  "status": "bound",
+  "requires_database": false,
+  "coverage_scope": "supplemental",
+  "test_kinds": ["typed_query_view", "expected_manifest"],
+  "coverage_ids": ["ORD-QRY-01"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ORD-QRY-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#4.2"
+  ],
+  "root_facts": [
+    "A read-only repository projection harness with one declared selected-order row and a separate selected-case identity.",
+    "A synthetic HTTP success or malformed response envelope used only to exercise the typed client boundary."
+  ],
+  "forbidden_direct_seed": [
+    "editor input dictionary before typed OrderDetailView validation",
+    "query-side order mutation, lifecycle event, receipt, alert or state transition"
+  ],
+  "commands": [
+    "Query one selected case through the declared repository projection service.",
+    "Validate the HTTP payload as OrderDetailView, then render the editor from that validated view.",
+    "Submit a malformed success envelope to the client boundary."
+  ],
+  "expected": [
+    "The repository projection accepts only declared canonical fields and rejects missing, unexpected or noncanonical values.",
+    "The UI client returns a typed OrderDetailView; the overview converts only that validated view to the editor JSON shape.",
+    "A malformed successful response is reported as a typed client error and never reaches the editor."
+  ],
+  "receipt_requirements": [
+    "query-harness and expected-manifest digests",
+    "declared-field and canonical-type assertions",
+    "typed client success, malformed response and editor-boundary assertions"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_order_detail_query.py tests\\test_order_detail_query_repository.py tests\\test_order_detail_ui_client_boundary.py"
+    ],
+    "test_paths": [
+      "tests/test_order_detail_query.py",
+      "tests/test_order_detail_query_repository.py",
+      "tests/test_order_detail_ui_client_boundary.py"
+    ]
+  }
+}

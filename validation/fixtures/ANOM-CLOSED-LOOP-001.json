@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "ANOM-CLOSED-LOOP-001",
+  "test_kind": "domain_root_data",
+  "root_inputs": ["versioned order/schedule inconsistency roots", "authorized claim actors", "owning Domain correction command", "reintroduced root inconsistency"],
+  "seed_fields": ["schedule_root.assignment_id", "schedule_root.work_date", "schedule_root.conflicting_owner", "claim_command.actor_id", "correction_command.expected_version"],
+  "derived_fields": ["anomaly_current_alert.status", "anomaly_current_alert.available_actions", "anomaly_event.timeline", "alert_workflow.claimed_by", "ui_alert_projection"],
+  "expected_manifest_path": "validation/expected/ANOM-CLOSED-LOOP-001.json"
+}

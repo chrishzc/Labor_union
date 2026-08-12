@@ -2,7 +2,7 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Protocol
-from domains.client_finance.client_refund_reversal import (ClientFinanceCorrectionType,ClientRefundBankFact,ClientRefundObligation,ClientRefundPurpose,ClientRefundReturnBankFact,ClientRefundReversalCandidate,ClientReversalTarget,build_client_refund_candidate,build_client_refund_return_candidate,build_client_reversal_candidate)
+from domains.client_finance.client_refund_reversal import (ClientFinanceCorrectionType,ClientRefundBankFact,ClientRefundObligation,ClientRefundPurpose,ClientRefundReturnBankFact,ClientRefundReversalCandidate,ClientReversalTarget,build_client_refund_candidate,build_client_refund_overage_candidate,build_client_refund_return_candidate,build_client_reversal_candidate)
 from shared_kernel.errors import ErrorCategory,TypedError
 from shared_kernel.fingerprints import PreviewFingerprint,fingerprint_payload
 from shared_kernel.identities import ActorContext,CorrelationId,ExpectedVersion,IdempotencyKey
@@ -10,7 +10,7 @@ from shared_kernel.validation import require_canonical_text,require_nonnegative_
 CLIENT_FINANCE_CANDIDATE_STALE="client_finance_candidate_stale"; CLIENT_FINANCE_IDEMPOTENCY_CONFLICT="client_finance_idempotency_conflict"
 @dataclass(frozen=True,slots=True)
 class ClientRefundReversalSelection:
- case_no:str; correction_type:ClientFinanceCorrectionType; refund_purpose:ClientRefundPurpose=ClientRefundPurpose.CUSTOMER_REFUND; bank_fact_identities:tuple[str,...]=(); obligation_identities:tuple[str,...]=(); reversal_target_identities:tuple[str,...]=(); reversal_occurred_on:str|None=None
+ case_no:str; correction_type:ClientFinanceCorrectionType; refund_purpose:ClientRefundPurpose=ClientRefundPurpose.CUSTOMER_REFUND; bank_fact_identities:tuple[str,...]=(); obligation_identities:tuple[str,...]=(); reversal_target_identities:tuple[str,...]=(); reversal_occurred_on:str|None=None; allow_partial_refund_recovery:bool=False
  def __post_init__(self): require_canonical_text(self.case_no,"case number",191); _selection_shape(self)
 @dataclass(frozen=True,slots=True)
 class ClientRefundReversalFacts:
@@ -36,6 +36,7 @@ class ClientRefundReversalRepository(Protocol):
  def append_ledger_entries(self,candidate): ...
  def append_allocations(self,candidate): ...
  def update_projection(self,candidate,resulting_version): ...
+ def establish_over_refund_recovery(self,candidate,resulting_version): ...
  def append_outbox(self,candidate,resulting_version): ...
  def save_receipt(self,key,stored_receipt): ...
 class ClientRefundReversalWorkflow:
@@ -54,29 +55,34 @@ class ClientRefundReversalWorkflow:
     preview=_preview(request.selection,self._repository.load(request.selection,for_update=True))
     if preview.account_version!=request.expected_account_version.value or preview.fingerprint!=request.preview_fingerprint: raise _error(request.correlation_id,ErrorCategory.CONFLICT,CLIENT_FINANCE_CANDIDATE_STALE,current=preview.account_version)
     receipt=ClientRefundReversalReceipt(request.selection.case_no,preview.candidate.correction_type,preview.account_version+1,preview.candidate.fingerprint,len(preview.candidate.entries),len(preview.candidate.allocations),preview.candidate.affected_obligations)
-    self._repository.append_ledger_entries(preview.candidate);self._repository.append_allocations(preview.candidate);self._repository.update_projection(preview.candidate,receipt.account_version);self._repository.append_outbox(preview.candidate,receipt.account_version);self._repository.save_receipt(request.idempotency_key,StoredClientRefundReversalReceipt(command,receipt));unit.commit();return receipt
+    self._repository.append_ledger_entries(preview.candidate);self._repository.append_allocations(preview.candidate);self._repository.update_projection(preview.candidate,receipt.account_version)
+    if preview.candidate.correction_type is ClientFinanceCorrectionType.REFUND_OVERAGE:self._repository.establish_over_refund_recovery(preview.candidate,receipt.account_version)
+    self._repository.append_outbox(preview.candidate,receipt.account_version);self._repository.save_receipt(request.idempotency_key,StoredClientRefundReversalReceipt(command,receipt));unit.commit();return receipt
   except ClientRefundReversalError:raise
   except ClientRefundReversalStorageError as e:raise _error(request.correlation_id,ErrorCategory.UNAVAILABLE if e.retryable else ErrorCategory.INTERNAL,"transaction_failed",retryable=e.retryable) from e
   except Exception as e:raise _error(request.correlation_id,ErrorCategory.INTERNAL,"transaction_failed") from e
 def _preview(s,f):
  _facts(s,f)
- if s.correction_type is ClientFinanceCorrectionType.REFUND:c=build_client_refund_candidate(s.case_no,f.bank_facts,f.obligations,s.refund_purpose)
+ if s.correction_type is ClientFinanceCorrectionType.REFUND:c=build_client_refund_candidate(s.case_no,f.bank_facts,f.obligations,s.refund_purpose,allow_partial_refund_recovery=s.allow_partial_refund_recovery)
+ elif s.correction_type is ClientFinanceCorrectionType.REFUND_OVERAGE:c=build_client_refund_overage_candidate(s.case_no,f.bank_facts,f.obligations)
  elif s.correction_type is ClientFinanceCorrectionType.REFUND_RETURN:c=build_client_refund_return_candidate(s.case_no,f.refund_return_bank_facts[0],f.reversal_targets[0])
  else:c=build_client_reversal_candidate(s.case_no,f.reversal_targets)
  return ClientRefundReversalPreview(c,f.account_version,fingerprint_payload({"selection":_payload(s),"version":f.account_version,"candidate":c.fingerprint.value}))
 def _selection_shape(s):
- refund=s.correction_type is ClientFinanceCorrectionType.REFUND
+ refund=s.correction_type in {ClientFinanceCorrectionType.REFUND,ClientFinanceCorrectionType.REFUND_OVERAGE}
  refund_return=s.correction_type is ClientFinanceCorrectionType.REFUND_RETURN
  active=(s.bank_fact_identities,s.obligation_identities) if refund else ((s.bank_fact_identities,s.reversal_target_identities) if refund_return else (s.reversal_target_identities,))
  if not all(active) or any(not isinstance(xs,tuple) or xs!=tuple(sorted(set(xs))) for xs in active):raise ValueError("invalid_client_finance_intent")
  if refund and (s.reversal_target_identities or s.reversal_occurred_on is not None):raise ValueError("invalid_client_finance_intent")
+ if not isinstance(s.allow_partial_refund_recovery,bool):raise ValueError("invalid_client_finance_intent")
+ if s.allow_partial_refund_recovery and (s.correction_type is not ClientFinanceCorrectionType.REFUND or s.refund_purpose is not ClientRefundPurpose.CUSTOMER_REFUND):raise ValueError("invalid_client_finance_intent")
  if refund_return and (s.obligation_identities or s.reversal_occurred_on is not None or len(s.bank_fact_identities)!=1 or len(s.reversal_target_identities)!=1):raise ValueError("invalid_client_finance_intent")
  if not refund and not refund_return and (s.bank_fact_identities or s.obligation_identities or s.reversal_occurred_on is None):raise ValueError("invalid_client_finance_intent")
 def _facts(s,f):
- if s.correction_type is ClientFinanceCorrectionType.REFUND and (any(x.case_no!=s.case_no for x in (*f.bank_facts,*f.obligations)) or not f.bank_facts or not f.obligations):raise ValueError("invalid_client_finance_intent")
+ if s.correction_type in {ClientFinanceCorrectionType.REFUND,ClientFinanceCorrectionType.REFUND_OVERAGE} and (any(x.case_no!=s.case_no for x in (*f.bank_facts,*f.obligations)) or not f.bank_facts or not f.obligations):raise ValueError("invalid_client_finance_intent")
  if s.correction_type is ClientFinanceCorrectionType.REFUND_RETURN and (len(f.refund_return_bank_facts)!=1 or len(f.reversal_targets)!=1 or f.refund_return_bank_facts[0].case_no!=s.case_no or f.reversal_targets[0].case_no!=s.case_no):raise ValueError("invalid_client_finance_intent")
  if s.correction_type is ClientFinanceCorrectionType.REVERSAL and (not f.reversal_targets or any(x.case_no!=s.case_no for x in f.reversal_targets)):raise ValueError("invalid_client_finance_intent")
-def _payload(s):return {"case_no":s.case_no,"type":s.correction_type.value,"purpose":s.refund_purpose.value,"bank":s.bank_fact_identities,"obligation":s.obligation_identities,"target":s.reversal_target_identities,"occurred_on":s.reversal_occurred_on}
+def _payload(s):return {"case_no":s.case_no,"type":s.correction_type.value,"purpose":s.refund_purpose.value,"bank":s.bank_fact_identities,"obligation":s.obligation_identities,"target":s.reversal_target_identities,"occurred_on":s.reversal_occurred_on,"allow_partial_refund_recovery":s.allow_partial_refund_recovery}
 def _command(r):return fingerprint_payload({"selection":_payload(r.selection),"expected":r.expected_account_version.value,"preview":r.preview_fingerprint.value,"actor":r.actor.actor_id,"reason":r.reason})
 def _error(c,category,code,retryable=False,current=None):return ClientRefundReversalError(TypedError(category,code or "transaction_failed","Client refund/reversal failed.",c,retryable=retryable,current_version=None if current is None else ExpectedVersion(current)))
 __all__=[name for name in globals() if name.startswith("Client") or name.startswith("Stored")]

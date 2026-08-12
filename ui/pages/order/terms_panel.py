@@ -21,7 +21,9 @@ def render_order_terms_panel(case_no: str, client: OrderTermsApiClient) -> None:
         st.info("服務資料已鎖定，不能變更正式條款。")
         return
     proposed_terms = _form(case_no, facts.terms.model_dump(mode="json"))
-    preview = _preview(case_no, client, proposed_terms)
+    preview = _stored_preview(case_no, proposed_terms)
+    if st.button("產生條款 Preview", key=f"terms_preview_request_{case_no}"):
+        preview = _request_preview(case_no, client, proposed_terms)
     if preview is None:
         return
     st.caption(f"預覽服務日：{preview.after.planned_start_date} 起，共 {preview.after.service_days} 日")
@@ -47,15 +49,23 @@ def _read_time(value, default):
     return time.fromisoformat(value) if value else default
 
 
-def _preview(case_no, client, proposed_terms):
-    state_key = f"terms_preview_{case_no}_{hash(str(proposed_terms))}"
-    if state_key not in st.session_state:
-        try:
-            st.session_state[state_key] = client.preview(case_no, proposed_terms, correlation_id=str(uuid4()))
-        except OrderTermsApiError as error:
-            st.error(f"無法產生條款預覽：{error}")
-            return None
-    return st.session_state[state_key]
+def _stored_preview(case_no, proposed_terms):
+    return st.session_state.get(_preview_state_key(case_no, proposed_terms))
+
+
+def _request_preview(case_no, client, proposed_terms):
+    state_key = _preview_state_key(case_no, proposed_terms)
+    try:
+        preview = client.preview(case_no, proposed_terms, correlation_id=str(uuid4()))
+    except OrderTermsApiError as error:
+        st.warning(f"目前無法產生條款 Preview：{error}")
+        return None
+    st.session_state[state_key] = preview
+    return preview
+
+
+def _preview_state_key(case_no, proposed_terms):
+    return f"terms_preview_{case_no}_{hash(str(proposed_terms))}"
 
 
 def _apply(case_no, client, proposed_terms, preview, reason):

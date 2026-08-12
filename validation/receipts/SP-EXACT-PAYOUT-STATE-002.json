@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "SP-EXACT-PAYOUT-STATE-002",
+  "scenario_digest": "b84f2a3edbf6b8ae4e41d96678cbbc57153d96219a3907250176a533f2d3db9e",
+  "result": "passed",
+  "assertion_count": 4,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_staff_payout_reconciliation_workflow.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "Staff Payables exact-payout state-machine workflow"
+  },
+  "input_digests": {
+    "scenario_fixture": "b83828ed1696daa12d88ff2f994bd4c619d325ca207e7f82db29f2793f2d1474",
+    "expected_manifest": "6f251b3114ccb7365138d0ca427ecb19f1c926ae120dc0df70cd0b38e4e592a7",
+    "workflow_test": "4a7d57444d5fed7c433d6d60070b0c4341f90f314f443314b71fc312d7e2d223"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/SP-EXACT-PAYOUT-STATE-002.json",
+    "expected_manifest": "validation/expected/SP-EXACT-PAYOUT-STATE-002.json",
+    "workflow_test": "tests/test_staff_payout_reconciliation_workflow.py"
+  }
+}

@@ -495,7 +495,7 @@
     let runtimePage = null;
     let refundPolicyAccepted = false;
     const developmentLineUserId = new URLSearchParams(location.search).get("userId") || "";
-  
+
     async function initializeLiff() {
         try {
             const configRes = await fetch('/api/config/liff/runtime?page=registration');

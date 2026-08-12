@@ -1,0 +1,23 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "JOB-QUEUE-LIFECYCLE-002",
+  "scenario_digest": "0028a71b3ed3e76d7c94ea7e1c5cd93010a5f93cdf03018c7deb121b97f85ea4",
+  "result": "passed",
+  "assertion_count": 15,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_durable_job_disposable_mysql_e2e.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "disposable MySQL durable command queue lifecycle"
+  },
+  "input_digests": {
+    "integration_test": "1581ae12537dec9f5f05e332131a4994c5b8e82d67d57ba08e38f9273b52d4e4",
+    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+  },
+  "input_paths": {
+    "integration_test": "tests/test_durable_job_disposable_mysql_e2e.py",
+    "validation_schema_manifest": "db/cutover_releases/labor_union_validation_schema_v1.json"
+  }
+}

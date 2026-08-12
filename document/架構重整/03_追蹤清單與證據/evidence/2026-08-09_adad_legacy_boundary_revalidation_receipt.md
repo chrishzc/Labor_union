@@ -31,9 +31,8 @@ records=658 approved_to_remove=0
   to an independent script and tests rather than a retired workflow.
 - Disposable schema names used by Finance Import recovery and preserved-database cutover
   are neutral operational names; they do not encode a retired process.
-- `docs/ui_api_db_migration_implementation_plan.md` now explicitly records that it is a
-  historical draft and replaces its obsolete workflow instructions with the current
-  baseline-and-evidence procedure.
+- 當時的 UI API／DB migration 歷史草案已於文件整併時刪除；它不是現行實作 gate，現行
+  UI／API 邊界以正式基線與 active Work Package 為準。
 
 ```text
 pytest legacy boundary / frozen generator / Finance Import recovery / preserved cutover

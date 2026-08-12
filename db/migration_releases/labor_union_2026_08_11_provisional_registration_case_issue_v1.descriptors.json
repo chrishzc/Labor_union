@@ -1,0 +1,22 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "165_provisional_registration_case_issue.sql": {
+      "tables": {
+        "provisional_registration_case_issue_events": [
+          "id",
+          "registration_id",
+          "case_no",
+          "client_id",
+          "beclass_record_id",
+          "case_import_event_id",
+          "idempotency_key",
+          "actor",
+          "correlation_id",
+          "created_at"
+        ]
+      },
+      "triggers": []
+    }
+  }
+}

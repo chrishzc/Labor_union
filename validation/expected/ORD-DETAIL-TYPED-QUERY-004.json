@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "ORD-DETAIL-TYPED-QUERY-004",
+  "assertions": [
+    "A selected-order query accepts only its declared canonical projection fields.",
+    "The UI client validates a successful response as OrderDetailView before it can reach editor rendering.",
+    "Malformed successful responses become a client error with zero editor call and zero business mutation."
+  ]
+}

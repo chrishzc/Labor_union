@@ -228,6 +228,8 @@ Logs 必須具 correlation ID、service、release version、operation 與 typed 
   → evidence matrix／獨立核對
   → 人工 release／external-side-effect approval
   → deployment／migration
+  → post-start verification／release receipt
+  → 不再 active 的執行文件通過 archive gate 後低頻封存
 ```
 
 目前 activation 只到 `Writer Inventory v2` 的唯讀盤點、語意分類、digest 與 evidence
@@ -271,7 +273,7 @@ system map 都不具現行 authority。
 - deterministic formatting／generated artifact sync；
 - read-only verification。
 
-## 10. Legacy 文件處理
+## 10. Legacy 與已完成文件處理
 
 - `document/文件整併工作區` 保留為來源與追溯，不再使用 ADAD 授權語彙。
 - `system_map*.md`／`system_map*.yaml` 只供歷史比對。
@@ -280,6 +282,27 @@ system map 都不具現行 authority。
   deployment SSOT。
 - `04_部署架構_無損合併稿.md` 的方案比較保留，但本文件的 logical topology、
   profile recommended-candidate 與人工選擇規則優先。
+
+### 10.1 Current SSOT 與低頻封存
+
+- `01_規格基線/` 只保存仍約束 current production 的精簡正式規格；完成實作或上線不會降低
+  規格權威，也不是搬入 archive 的理由。
+- `02_決策與退役執行記錄/` 與 `03_追蹤清單與證據/` 優先保存 active、blocked、awaiting
+  execution／release、current recovery 與最近驗收所需文件。
+- `04_已完成與上線封存/` 保存不再 active 的 completed Work Package、已有 successor 的
+  superseded 舊規格，以及 closed release／receipt。其內容不是 current SSOT 或新 mutation 授權。
+- Agent 日常開工禁止遞迴讀取 archive；只有歷史追溯、incident／rollback、migration/cutover、
+  舊 release 重現、稽核或 current SSOT 明確引用時，才精準搜尋 manifest 並讀單一文件。
+
+### 10.2 Archive gate
+
+搬移前必須同時具備 final status、completion evidence、deployment/release identity（如適用）、
+current successor（如適用）、完整 inbound-link 更新、content SHA-256、archive manifest entry 與
+restore triggers。仍有 blocker、待辦、人工操作入口、rollback 責任或 awaiting execution 的文件
+不得封存。無法唯一判定時留在原位並進人工 review，不得自動搬移或刪除。
+
+封存後 active index 只保留一行 archive pointer 或分類摘要；不得以減少上下文為由刪除 Git
+history、validation assets、release artifacts 或 current recovery evidence。
 
 ## 11. 分層驗收
 
@@ -314,7 +337,7 @@ system map 都不具現行 authority。
 - `online.bat`
 - `start_fastapi_ngrok.py`
 - `scripts/bootstrap_admin_dev_env.ps1`
-- `53_Deployment_Profile_and_Target_Host_Acceptance_Retirement.md`
+- `../04_已完成與上線封存/release_records/53_Deployment_Profile_and_Target_Host_Acceptance_Retirement.md`
 - 根目錄 `AGENTS.md`
 
 live 啟動腳本僅作現況證據；正式 release 仍須依本文件 preserve-data manifest 驗證，

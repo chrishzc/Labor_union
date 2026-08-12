@@ -1,0 +1,31 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "CS-CONTRACT-SIGNING-001",
+  "test_kind": "domain_root_data",
+  "root_inputs": [
+    "approved staff-service and client-contract template artifacts",
+    "matching-plan segments and exact pre-contract commitment dates",
+    "returned signed-document bytes, exact bank receipt and typed signing commands"
+  ],
+  "seed_fields": [
+    "template_artifact.staff_service_sha256",
+    "template_artifact.client_contract_sha256",
+    "matching_plan_segment.staff_id",
+    "commitment_input.service_date",
+    "returned_document_bytes.sha256",
+    "bank_receipt.amount",
+    "signing_command.idempotency_key"
+  ],
+  "derived_fields": [
+    "contract_document_versions",
+    "contract_signing_events",
+    "precontract_service_commitments",
+    "orders.status",
+    "orders.contract_identity",
+    "case_staff_assignments",
+    "staff_schedule",
+    "client_payment_projection",
+    "contract_signing_receipt"
+  ],
+  "expected_manifest_path": "validation/expected/CS-CONTRACT-SIGNING-001.json"
+}

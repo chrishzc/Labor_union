@@ -1,0 +1,65 @@
+{
+  "contract": "labor-union-field-authority-legacy-name-audit/v1",
+  "source_refs": [
+    "document/文件整併工作區/06_欄位權威性與計算邏輯盤點.md#文件狀態",
+    "document/架構重整/03_追蹤清單與證據/evidence/field_authority_live_audit_20260810.md#orders.contract_id"
+  ],
+  "scan_roots": ["api", "domains", "infrastructure", "subsystems", "ui", "db", "scripts", "document", "tests"],
+  "scan_extensions": [".py", ".sql", ".md", ".json"],
+  "excluded_paths": [
+    "document/架構重整/03_追蹤清單與證據/evidence/"
+  ],
+  "mappings": [
+    {
+      "mapping_id": "orders-contract-identity-v1",
+      "legacy_token": "contract_id",
+      "canonical_token": "contract_identity",
+      "required_canonical_paths": [
+        "db/schema.sql",
+        "db/schema_parts/999_v_order_details_view.sql",
+        "infrastructure/mysql/order_detail_query_repository.py",
+        "document/文件整併工作區/06_欄位權威性與計算邏輯盤點/01_客戶與訂單生命週期/orders.md",
+        "document/管理端UI/系統異常警示中心規格書.md"
+      ],
+      "allowed_legacy_paths": [
+        "scripts/migrate_order_contract_identity.py",
+        "tests/test_migrate_order_contract_identity.py",
+        "tests/test_field_authority_legacy_name_audit.py",
+        "tests/test_plan_legacy_ui_dataset_integration.py",
+        "document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md",
+        "document/架構重整/03_追蹤清單與證據/evidence/"
+      ]
+    },
+    {
+      "mapping_id": "orders-subsidy-eligibility-v1",
+      "legacy_token": "subsidy_eligibility",
+      "canonical_token": "identity_status",
+      "required_canonical_paths": [
+        "db/schema.sql",
+        "document/文件整併工作區/06_欄位權威性與計算邏輯盤點/01_客戶與訂單生命週期/clients.md",
+        "scripts/generate_fake_data.py"
+      ],
+      "allowed_legacy_paths": [
+        "scripts/generate_fake_data.py",
+        "tests/test_client_identity_status_source_migration.py",
+        "document/架構重整/03_追蹤清單與證據/evidence/"
+      ],
+      "retention_note": "generate_fake_data.py exits before legacy code can run and is retained only as a frozen historical fake-data reference."
+    },
+    {
+      "mapping_id": "financial-adjustment-integer-delta-v1",
+      "legacy_token": "amount_delta",
+      "canonical_token": "amount_delta_ntd",
+      "scan_roots": ["document"],
+      "required_canonical_paths": [
+        "db/schema_parts/133_financial_adjustments.sql",
+        "document/文件整併工作區/06_欄位權威性與計算邏輯盤點/04_客戶收款與交易/financial_adjustments.md",
+        "document/文件整併工作區/06_欄位權威性與計算邏輯盤點/05_服務人員薪資月結與匯款/financial_adjustment_staff_allocations.md"
+      ],
+      "allowed_legacy_paths": [
+        "document/架構重整/03_追蹤清單與證據/evidence/"
+      ],
+      "retention_note": "The Domain MoneyNTD value-object property may remain amount_delta; this table-qualified audit only governs persisted schema and active documentation."
+    }
+  ]
+}

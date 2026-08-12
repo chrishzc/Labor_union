@@ -41,7 +41,6 @@
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-let lineUserId = "";
 let lineIdToken = "";
 
 function showStatus(text, isError = false) {
@@ -97,8 +96,6 @@ function renderResults(items) {
 }
 
 async function init() {
-  const params = new URLSearchParams(location.search);
-  lineUserId = params.get("userId") || "";
   try {
     const config = await fetch("/api/line/config").then(r => r.json());
     if (config.liff_id) {
@@ -107,8 +104,6 @@ async function init() {
         liff.login({ redirectUri: location.href });
         return;
       }
-      const profile = await liff.getProfile();
-      lineUserId = profile.userId;
       try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
     }
   } catch (err) {
@@ -123,18 +118,18 @@ document.getElementById("searchBtn").addEventListener("click", async () => {
     return;
   }
   showStatus("查詢中...");
-  const response = await fetch("/api/line/staff/order-search", {
+  const response = await fetch("/api/v1/line/staff-self-service/orders", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ keyword, line_user_id: lineUserId, line_id_token: lineIdToken })
+    body: JSON.stringify({ keyword, line_id_token: lineIdToken })
   });
   const data = await response.json();
-  if (data.status !== "success") {
-    showStatus(data.message || "查詢失敗", true);
+  if (!response.ok || !data.success) {
+    showStatus(data.message || data.detail?.message || "查詢失敗", true);
     document.getElementById("results").innerHTML = "";
     return;
   }
-  renderResults(data.items || []);
+  renderResults(data.data?.items || []);
 });
 
 init();

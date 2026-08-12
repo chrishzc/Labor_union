@@ -1,0 +1,11 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "CS-CONTRACT-SIGNING-001",
+  "assertions": [
+    "Only approved template artifacts generate the initial case document version; every generated or returned document has a SHA-256 and immutable lineage.",
+    "A client document cannot be generated or sent until every staff segment has a returned signature and an exact commitment exists.",
+    "An exact deposit may make the order established before client signing, while contract state remains waiting-for-client-signature and no execution schedule exists.",
+    "Customer signing creates the contract identity exactly once and never duplicates the settled deposit obligation.",
+    "Execution conversion requires exact commitment coverage, customer contract completion and settled deposit; all failed guards have zero formal row delta."
+  ]
+}

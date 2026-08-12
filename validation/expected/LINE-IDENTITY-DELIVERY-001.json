@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"LINE-IDENTITY-DELIVERY-001","assertions":["Webhook replay has one inbox/business intent and invalid signature has no Domain mutation.","Cross-role LINE identity is allowed; only role-local ambiguity enters review.","Provider failure updates attempt state only and UI/API shows typed recovery context."]}

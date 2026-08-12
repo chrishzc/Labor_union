@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "SCH-WAITING-LOCK-RELEASE-002",
+  "assertions": [
+    "Valid lock release changes only the canonical plan/lock aggregate and records one release event.",
+    "Exact event replay has no additional writes.",
+    "Mismatches and injected persistence faults fail closed with rollback."
+  ]
+}

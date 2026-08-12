@@ -132,12 +132,12 @@ def query_recovery_context(
 
 
 @router.get(
-    "/{fingerprint}/actions/{action_code}",
+    "/{fingerprint}/actions/{action_key}",
     response_model=BaseResponse[RecoveryActionView],
 )
 def query_recovery_preview_link(
     fingerprint: str = Path(..., pattern=r"^[0-9a-f]{64}$"),
-    action_code: str = Path(..., min_length=1, max_length=191),
+    action_key: str = Path(..., min_length=1, max_length=191),
     principal: AdminPrincipal = Depends(require_system_admin),
     application: RootFactProjectionApplication = Depends(
         get_anomaly_recovery_application
@@ -149,7 +149,7 @@ def query_recovery_preview_link(
         lambda: _materialize(
             application.query_recovery_preview_link(
                 PreviewFingerprint(fingerprint),
-                action_code,
+                action_key,
                 correlation_id,
             )
         ),

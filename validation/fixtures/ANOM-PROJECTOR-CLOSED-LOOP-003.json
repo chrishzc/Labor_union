@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "ANOM-PROJECTOR-CLOSED-LOOP-003",
+  "test_kind": "external_input_fixture",
+  "root_inputs": [
+    "detector desired alert identity and bounded safe detail payload",
+    "authorized operator identity for claim and resolve",
+    "owning-domain repaired absence result"
+  ],
+  "seed_fields": [
+    "detector_desired.alert_code",
+    "detector_desired.source_domain",
+    "detector_desired.case_key",
+    "detector_desired.safe_details",
+    "operator.actor_id",
+    "detector_absence.owning_root_repaired"
+  ],
+  "derived_fields": [
+    "system_alert.current_status",
+    "system_alert.claimed_by",
+    "system_alert.resolved_by",
+    "system_alert.display_snapshot"
+  ],
+  "expected_manifest_path": "validation/expected/ANOM-PROJECTOR-CLOSED-LOOP-003.json"
+}

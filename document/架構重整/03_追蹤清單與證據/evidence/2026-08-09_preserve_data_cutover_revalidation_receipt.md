@@ -9,7 +9,7 @@ verified_at: 2026-08-09
 ## 追溯依據
 
 - 規格基線：`01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
-- 核准 work package：`51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md`
+- 核准 work package：`../../04_已完成與上線封存/work_packages/51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md`
 - 既有 preserve-data rehearsal evidence：`evidence/preserve_data_rehearsal_*`
 
 ## 本次修復

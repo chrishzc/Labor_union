@@ -1,0 +1,27 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "CI-CANONICAL-ROOTS-002",
+  "scenario_digest": "425e8544227886670d059f642d56f551bf03c833cbfb887d6d6419fd5372dadb",
+  "result": "passed",
+  "assertion_count": 10,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_case_import_disposable_mysql_e2e.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "root-payload Case Import and architecture bootstrap"
+  },
+  "input_digests": {
+    "scenario_fixture": "406c7c3f1ea46fdf9360d5e1ff0e43f08b1669e8a4692a58b7542fb529a27d22",
+    "expected_manifest": "66ae8695f6a5a5dad9b1d0d1cc24828e1fa0805864a09ab9b483d70e64a04bc2",
+    "integration_test": "8c571628db1aad17fd68fdf54a1681997658a39ceed006b4aaf5b018e1e70f4f",
+    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/CI-CANONICAL-ROOTS-002.json",
+    "expected_manifest": "validation/expected/CI-CANONICAL-ROOTS-002.json",
+    "integration_test": "tests/test_case_import_disposable_mysql_e2e.py",
+    "validation_schema_manifest": "db/cutover_releases/labor_union_validation_schema_v1.json"
+  }
+}

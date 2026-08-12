@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "ANOM-SCHEDULING-CLOSED-LOOP-002",
+  "test_kind": "domain_root_data",
+  "root_inputs": [
+    "effective completed scheduling generation",
+    "assignment-owned official service dates",
+    "operator workflow commands",
+    "successive owner-root source versions"
+  ],
+  "seed_fields": [
+    "scheduling_generation.effective_marker",
+    "official_service_day.assignment_id",
+    "anomaly_command.actor_id",
+    "anomaly_command.idempotency_key"
+  ],
+  "derived_fields": [
+    "anomaly_current_alert.predicate_active",
+    "anomaly_current_alert.workflow_status",
+    "anomaly_workflow_event.action",
+    "anomaly_detail.display_snapshot"
+  ],
+  "expected_manifest_path": "validation/expected/ANOM-SCHEDULING-CLOSED-LOOP-002.json"
+}

@@ -8,6 +8,7 @@ import requests
 from pydantic import ValidationError
 
 from api.schemas.base import BaseResponse
+from api.schemas.order_detail import OrderDetailView
 
 
 class OrderDetailApiClient:
@@ -15,7 +16,7 @@ class OrderDetailApiClient:
         self._base_url = base_url.rstrip("/")
         self._headers = dict(headers)
 
-    def query(self, case_no: str) -> dict[str, object]:
+    def query(self, case_no: str) -> OrderDetailView:
         try:
             response = requests.get(
                 f"{self._base_url}/api/v1/orders/{case_no}",
@@ -28,4 +29,7 @@ class OrderDetailApiClient:
             raise RuntimeError("無法取得案件完整資料。") from error
         if not envelope.success or envelope.data is None:
             raise RuntimeError("案件完整資料回應狀態不正確。")
-        return envelope.data
+        try:
+            return OrderDetailView.model_validate(envelope.data)
+        except ValidationError as error:
+            raise RuntimeError("案件完整資料回應格式不正確。") from error

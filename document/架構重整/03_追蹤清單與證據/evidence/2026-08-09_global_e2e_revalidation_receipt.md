@@ -1,7 +1,7 @@
 # Global E2E Revalidation Receipt
 
 - Observed: 2026-08-09
-- Decision contract: `02_決策與退役執行記錄/28_Global_E2E_Acceptance_Gap_Package.md`
+- Decision contract: `04_已完成與上線封存/work_packages/28_Global_E2E_Acceptance_Gap_Package.md`
 - Specification: `01_規格基線/00_Global_共同契約.md`
 - Isolation: fresh local `mysql:8.4` disposable container bound only to
   `127.0.0.1:33306`; every test target used the `lu_test_global_e2e` schema.

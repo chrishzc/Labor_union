@@ -1,0 +1,21 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "REL-PREFLIGHT-FAIL-CLOSED-002",
+  "scenario_digest": "f251b2221be33fa7f726d842de8f5a8915afd744b5d839638735ab3ebe1b46c6",
+  "result": "passed",
+  "assertion_count": 11,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_preserved_database_additive_upgrade_cutover.py::test_database_identity_guards_fail_closed tests\\test_preserved_database_additive_upgrade_cutover.py::test_plan_artifact_and_fingerprint_staleness_fail_closed tests\\test_preserved_database_additive_upgrade_cutover.py::test_switch_identity_config_staleness_and_quoted_round_trip"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "temporary release preflight and switch-config harness; no deployment target"
+  },
+  "input_digests": {
+    "release_preflight_test": "fcd8997c76c31e461fdbfe007c43380d39048525493d76836b073f4e2d27f662"
+  },
+  "input_paths": {
+    "release_preflight_test": "tests/test_preserved_database_additive_upgrade_cutover.py"
+  }
+}

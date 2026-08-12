@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-ui-readonly-reobserve-replay-receipt/v1",
+  "receipt_id": "UI-ORD-BLOCK-001-UI-044",
+  "work_package": "WP56",
+  "scenario_id": "UI-ORD-BLOCK-001",
+  "database": "lu_test_dataset_contract_signing_v4",
+  "case_no": "DSV1-CASE-0001",
+  "date": "2026-08-12",
+  "ui": {"surface": "Streamlit 8501 / 訂單管理 / 契約簽署流程", "first_observation": {"staff_signed": "0/0", "commitment_created": false, "client_signed": false, "document_versions": 0, "contract_completed": false, "lifecycle_status": "洽談中"}, "reobserve_equal": true},
+  "typed_blockers": ["contract_identity_missing", "official_service_dates_incomplete"],
+  "db_oracle": {"source": "captured database observation", "contract_document_versions": 0, "contract_signing_events": 0, "precontract_service_commitments": 0},
+  "result": "verified"
+}

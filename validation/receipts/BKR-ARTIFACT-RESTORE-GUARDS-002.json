@@ -1,0 +1,21 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "BKR-ARTIFACT-RESTORE-GUARDS-002",
+  "scenario_digest": "ced4ae2aff6a0aba4569bf20308eb37954f31f07de9956bb1fe508621aedef7f",
+  "result": "passed",
+  "assertion_count": 42,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_preserved_database_additive_upgrade_cutover.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "Backup/restore artifact and failure harness using temporary files and isolated fake adapters",
+    "skipped": "One optional live-environment test was intentionally skipped because it is not configured in this receipt."
+  },
+  "input_digests": {
+    "backup_restore_harness_test": "fcd8997c76c31e461fdbfe007c43380d39048525493d76836b073f4e2d27f662"
+  },
+  "input_paths": {
+    "backup_restore_harness_test": "tests/test_preserved_database_additive_upgrade_cutover.py"
+  }
+}

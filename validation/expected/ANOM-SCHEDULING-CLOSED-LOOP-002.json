@@ -1,0 +1,10 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "ANOM-SCHEDULING-CLOSED-LOOP-002",
+  "assertions": [
+    "One active scheduling-coverage root creates one open SCHEDULE-006 alert and exact replay preserves that row.",
+    "The stale competing claim returns anomaly_version_conflict.",
+    "A changed active root reopens a manual resolution; an inactive root auto-resolves it; a later active root reopens it.",
+    "Typed detail retains the case display snapshot and the claim, resolve, reopen, auto_resolve, reopen timeline."
+  ]
+}

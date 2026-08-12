@@ -1,0 +1,28 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "CI-CANONICAL-ROOTS-002",
+  "test_kind": "external_input_fixture",
+  "root_inputs": [
+    "case number",
+    "client identity and contact source attributes",
+    "contracted dates/hours",
+    "client-payment and payroll policy references",
+    "Apply idempotency identity"
+  ],
+  "seed_fields": [
+    "case_import.case_no",
+    "client_source.identity_status",
+    "contracted_service.start_date",
+    "policy_reference.payroll_version",
+    "apply_command.idempotency_key"
+  ],
+  "derived_fields": [
+    "clients.id",
+    "orders.status",
+    "orders.lifecycle_version",
+    "case_architecture_bootstrap_events.id",
+    "case_import_events.id",
+    "case_import_receipts.result_snapshot"
+  ],
+  "expected_manifest_path": "validation/expected/CI-CANONICAL-ROOTS-002.json"
+}

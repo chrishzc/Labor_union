@@ -1,0 +1,110 @@
+{
+  "contract": "labor-union-validation-dataset/v1",
+  "dataset_id": "lu-test-dataset-v1-foundation",
+  "database_name_pattern": "lu_test_dataset_[a-z0-9_]+",
+  "seed_boundary": "CaseImportWorkflow only; derived rows must be produced by the workflow.",
+  "root_case": {
+    "case_no": "DSV1-CASE-0001",
+    "client_attributes": {
+      "case_no": "DSV1-CASE-0001",
+      "created_at": "2026-07-01T09:00:00",
+      "identity_status": "一般市民",
+      "name": "測試資料基礎案例客戶",
+      "phone": "0900000001",
+      "service_time": "09:00-17:00"
+    },
+    "order_root_facts": {
+      "service_days": 5,
+      "service_hours_per_day": 8,
+      "planned_start_date": "2026-08-01",
+      "planned_end_date": "2026-08-05",
+      "service_start_time": "09:00:00",
+      "service_end_time": "17:00:00",
+      "service_end_day_offset": 0
+    },
+    "client_payment_terms": {
+      "policy_version": "client-policy-v1",
+      "client_hourly_rate_ntd": 400,
+      "deposit_service_days": 5,
+      "deposit_due_date": "2026-07-20",
+      "first_payment_due_date": "2026-08-01",
+      "second_payment_due_date": null
+    },
+    "payroll_policy_version": "approved-rates-v1"
+  },
+  "expected_after_apply": {
+    "anomaly_scenario": {
+      "definition_code": "SCHEDULE-006",
+      "workflow_status": "open",
+      "predicate_active": 1,
+      "timeline_actions": ["claim", "resolve", "reopen", "auto_resolve", "reopen"]
+    },
+    "finance_manual_review": {
+      "ingestion_idempotency_key": "validation-dataset-v1-finance-manual-review",
+      "classification_type": "non_business_review",
+      "disposition": "manual_review",
+      "workflow_status": "open",
+      "predicate_active": 1
+    },
+    "beclass_review_repair": {
+      "query_no": "DSV1-BECLASS-0001",
+      "review_version": 1,
+      "workflow_status": "resolved",
+      "predicate_active": 0,
+      "beclass_record_count": 1
+    },
+    "beclass_review_open": {
+      "query_no": "DSV1-BECLASS-0002",
+      "review_version": 0,
+      "workflow_status": "open",
+      "predicate_active": 1,
+      "beclass_record_count": 0
+    },
+    "contract_completion_completed": false,
+    "contract_completion_blockers": [
+      "contract_identity_missing",
+      "official_service_dates_incomplete"
+    ],
+    "order": {
+      "status": "洽談中",
+      "lifecycle_version": 0,
+      "service_days": 5,
+      "service_hours_per_day": 8
+    },
+    "aggregate_versions": {
+      "client_finance": 0,
+      "payroll": 0,
+      "scheduling": 0,
+      "scheduling_generation": 0
+    },
+    "case_row_counts": {
+      "clients": 1,
+      "orders": 1,
+      "client_finance_accounts": 1,
+      "client_payment_terms": 1,
+      "client_payment_terms_events": 1,
+      "payroll_case_accounts": 1,
+      "case_payroll_rate_policy_snapshots": 1,
+      "scheduling_aggregates": 1,
+      "case_architecture_bootstrap_events": 1,
+      "case_import_events": 1,
+      "case_import_receipts": 1,
+      "order_contract_flow_events": 0,
+      "order_contract_completion_apply_receipts": 0
+    },
+    "case_command_claim_counts": {
+      "case_import": 1,
+      "orders_contract_completion": 0
+    },
+    "non_seeded_outputs": [
+      "orders.status",
+      "orders.lifecycle_version",
+      "client_finance_accounts.aggregate_version",
+      "payroll_case_accounts.aggregate_version",
+      "scheduling_aggregates.aggregate_version",
+      "case_import_events",
+      "case_import_receipts",
+      "application_command_claims"
+    ]
+  }
+}

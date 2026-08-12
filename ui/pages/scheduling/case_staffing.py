@@ -30,7 +30,8 @@ def render_case_staffing(
     staff = staff if staff is not None else []
     if orders is None or staff is None:
         return
-    selectable_orders = _selectable_orders(orders)
+    pending_case_no = st.session_state.get("pending_scheduling_case_no")
+    selectable_orders = _selectable_orders(orders, pending_case_no=pending_case_no)
     if not selectable_orders:
         st.info("目前沒有可設定正式人力的案件。")
         return
@@ -48,7 +49,8 @@ def render_case_staffing(
         base_url=base_url,
         headers=headers,
     )
-    if not ensure_case_architecture_ready(case_no, bootstrap_client):
+    is_anomaly_repair_case = case_no == pending_case_no
+    if not is_anomaly_repair_case and not ensure_case_architecture_ready(case_no, bootstrap_client):
         st.info("案件根狀態與正式服務時間完成後，才會開放 Assignment Plan。")
         return
     client = AssignmentPlanApiClient(
@@ -65,7 +67,7 @@ def render_case_staffing(
 def _apply_pending_case_selection(
     selectable_orders: dict[str, dict[str, Any]],
 ) -> None:
-    pending_case_no = st.session_state.pop(
+    pending_case_no = st.session_state.get(
         "pending_scheduling_case_no",
         None,
     )
@@ -83,12 +85,17 @@ def _apply_pending_case_selection(
 
 def _selectable_orders(
     orders: list[dict[str, Any]],
+    *,
+    pending_case_no: object = None,
 ) -> dict[str, dict[str, Any]]:
     return {
         _order_label(order): order
         for order in orders
-        if order.get("order_status") in {"訂單成立", "服務中"}
-        and order.get("case_no")
+        if order.get("case_no")
+        and (
+            order.get("order_status") in {"訂單成立", "服務中"}
+            or str(order.get("case_no")) == pending_case_no
+        )
     }
 
 

@@ -51,6 +51,7 @@ class FakeRepository:
         self.claim = CaseImportClaimState.CREATED
         self.stored = None
         self.saved = None
+        self.consumed = None
 
     def load(self, intent, *, for_update):
         return self.facts
@@ -69,6 +70,10 @@ class FakeRepository:
 
     def append_import_event(self, command, candidate, client_id, bootstrap_event_id):
         return 56
+
+    def consume_provisional_registration(self, command, candidate, client_id, import_event_id):
+        self.consumed = (candidate.provisional_registration.registration_id, client_id, import_event_id)
+        return 78
 
     def save_receipt(self, key, stored):
         self.saved = stored
@@ -122,6 +127,22 @@ def test_apply_rejects_changed_case_existence(monkeypatch):
         workflow.apply(_command(candidate))
 
 
+def test_apply_consumes_selected_provisional_registration(monkeypatch):
+    candidate = _candidate("case-004")
+    candidate.provisional_registration = SimpleNamespace(registration_id=91)
+    repository = FakeRepository(candidate)
+    monkeypatch.setattr(
+        "subsystems.case_import.case_import_workflow.build_case_import_candidate",
+        lambda facts, intent: candidate,
+    )
+
+    receipt = CaseImportWorkflow(repository, FakeUnitOfWork).apply(_command(candidate))
+
+    assert repository.consumed == (91, 12, 56)
+    assert receipt.provisional_registration_id == 91
+    assert receipt.provisional_case_issue_event_id == 78
+
+
 def _candidate(case_no):
     fingerprint = fingerprint_payload({"case_no": case_no})
     return SimpleNamespace(
@@ -136,7 +157,7 @@ def _command(candidate):
         {"import_version": 0, "candidate_fingerprint": candidate.fingerprint.value}
     )
     return ApplyCaseImport(
-        SimpleNamespace(case_no=candidate.case_no),
+        SimpleNamespace(case_no=candidate.case_no, provisional_registration_id=None),
         ExpectedVersion(0),
         preview_fingerprint,
         IdempotencyKey(f"key-{candidate.case_no}"),

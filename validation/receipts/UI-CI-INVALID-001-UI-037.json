@@ -1,0 +1,53 @@
+{
+  "receipt_id": "UI-CI-INVALID-001-UI-037",
+  "work_package": "WP56",
+  "scenario_id": "UI-CI-INVALID-001",
+  "result": "verified",
+  "executed_on": "2026-08-12",
+  "environment": {
+    "ui": "http://127.0.0.1:8501",
+    "api": "http://127.0.0.1:8000",
+    "dataset": "lu_test_dataset_contract_signing_v4",
+    "browser": "Chrome"
+  },
+  "review": {
+    "review_identity": "beclass-review:6e765a8abc3e109cccdfe2ddfd09032a466659d33fa1a3adf72ae3d3d9742a57",
+    "source_kind": "client",
+    "initial_status": "open",
+    "initial_version": 0,
+    "issue_codes": ["phone_invalid"],
+    "repair": {
+      "owning_record_identity": "DSV1-BECLASS-0002",
+      "corrected_phone": "0912345678",
+      "resulting_version": 1,
+      "review_event_id": 3,
+      "outbox_id": 6,
+      "receipt_id": 3,
+      "preview_fingerprint": "4b48bdc8001f5fc1fc747c4ccb034ae63d14f4626354e9be60d108445ca79eef"
+    }
+  },
+  "ui_flow": [
+    "Chrome loaded the open phone_invalid review and its source/effective payload.",
+    "The UI changed only phone from invalid-phone to 0912345678, retained every other root field, and produced a typed Preview.",
+    "The UI Apply command returned review version 1, event 3, and outbox 6.",
+    "Without changing the Preview, fields, reason, or command state, Chrome resubmitted Apply and received the same event 3 and outbox 6."
+  ],
+  "replay_assertions": {
+    "same_command_identity_reused": true,
+    "resolution_event_count": 1,
+    "resolution_outbox_count": 1,
+    "receipt_count": 1,
+    "new_owning_record_created_by_replay": false,
+    "new_resolution_event_created_by_replay": false,
+    "new_outbox_created_by_replay": false
+  },
+  "evidence": {
+    "prior_oracle": "captured database observation",
+    "visual_artifact_status": "retired; typed replay assertions and narrative are canonical",
+    "narrative": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_ci_invalid_001_v6.md"
+  },
+  "scope": {
+    "included": ["typed preview", "Chrome repair", "Chrome same-command replay", "database receipt/outbox re-observation"],
+    "excluded": ["production deployment", "formal LINE delivery", "cutover"]
+  }
+}

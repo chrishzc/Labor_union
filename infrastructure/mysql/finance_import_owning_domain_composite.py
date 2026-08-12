@@ -533,6 +533,7 @@ def _client_selection(connection, candidate):
         stage,
         (_row_id(candidate.row_identity),),
         targets,
+        candidate.allow_client_receipt_overage,
     )
 
 
@@ -620,10 +621,15 @@ def _client_refund_selection(connection, candidate):
     case_no = _single_client_refund_scope(rows, targets)
     return ClientRefundReversalSelection(
         case_no,
-        ClientFinanceCorrectionType.REFUND,
+        (
+            ClientFinanceCorrectionType.REFUND_OVERAGE
+            if candidate.allow_refund_overage_recovery
+            else ClientFinanceCorrectionType.REFUND
+        ),
         ClientRefundPurpose.CUSTOMER_REFUND,
         bank_fact_identities=(_row_id(candidate.row_identity),),
         obligation_identities=targets,
+        allow_partial_refund_recovery=candidate.allow_partial_refund_recovery,
     )
 
 

@@ -10,12 +10,12 @@ verified_at: 2026-08-09
 
 - 規格基線：`01_規格基線/06_Anomalies_Domain.md`
 - 決策／退役記錄：
-  - `21_Legacy_Retirement_Wave_2B_Anomalies_Caller_Migration_Decision_Package.md`
-  - `22_Legacy_Retirement_Wave_2B_1_Anomalies_Caller_Exit_Receipt.md`
-  - `23_Legacy_Retirement_Wave_2B_2_Finance_Alert_Module_Removal_Receipt.md`
-  - `31_Finance_Alert_Orphan_Route_Retirement_Receipt.md`
-  - `32_Client_Refund_Return_Anomaly_Package.md`
-  - `43_Writer_Inventory_Scope_and_Legacy_Reprocess_Shutdown_Work_Package.md`
+  - `../../04_已完成與上線封存/superseded_specs/21_Legacy_Retirement_Wave_2B_Anomalies_Caller_Migration_Decision_Package.md`
+  - `../../04_已完成與上線封存/receipts/22_Legacy_Retirement_Wave_2B_1_Anomalies_Caller_Exit_Receipt.md`
+  - `../../04_已完成與上線封存/receipts/23_Legacy_Retirement_Wave_2B_2_Finance_Alert_Module_Removal_Receipt.md`
+  - `../../04_已完成與上線封存/receipts/31_Finance_Alert_Orphan_Route_Retirement_Receipt.md`
+  - `../../04_已完成與上線封存/work_packages/32_Client_Refund_Return_Anomaly_Package.md`
+  - `../../04_已完成與上線封存/work_packages/43_Writer_Inventory_Scope_and_Legacy_Reprocess_Shutdown_Work_Package.md`
 
 ## 本次落地與邊界收斂
 

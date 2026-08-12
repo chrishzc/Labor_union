@@ -1,0 +1,27 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "CF-EXPLICIT-REFUND-RECOVERY-002",
+  "scenario_digest": "20337362dc93958c3f1fd0503a29ab1bdc9811ff535543497cf0bd09f75ca393",
+  "result": "passed",
+  "assertion_count": 15,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_client_refund_recovery_disposable_mysql_e2e.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "Client Finance isolated underpayment-recovery correction boundary"
+  },
+  "input_digests": {
+    "scenario_fixture": "5f283c43f124cf3cd2fb26fa5a58dc15448c62d9013173433a7fda1978433623",
+    "expected_manifest": "bca34dd08ead39742fdd73549fb6f905d316a1387236f21eb9564e8958932a39",
+    "integration_test": "a0c60e8008faf0cb0f5b39ae665f6420ed79fdd7fd2b33e37d2e49795fe220c5",
+    "validation_schema_manifest": "863cc70b655aa0f575725e7432759b9c35121db03ddb3e930f24ec2c017cc0ba"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/CF-EXPLICIT-REFUND-RECOVERY-002.json",
+    "expected_manifest": "validation/expected/CF-EXPLICIT-REFUND-RECOVERY-002.json",
+    "integration_test": "tests/test_client_refund_recovery_disposable_mysql_e2e.py",
+    "validation_schema_manifest": "db/cutover_releases/labor_union_validation_schema_v1.json"
+  }
+}

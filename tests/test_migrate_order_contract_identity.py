@@ -52,6 +52,16 @@ def test_renames_only_the_legacy_provider_contract_column() -> None:
     assert cursor.statements[-1].endswith("contract_id TO contract_identity")
 
 
+def test_migration_rebuilds_the_dependent_order_details_view_after_rename() -> None:
+    cursor = _Cursor({"case_no", "contract_id", "lifecycle_version"})
+    connection = _Connection(cursor)
+
+    migrate(connection)
+
+    assert "CREATE OR REPLACE VIEW v_order_details AS" in cursor.statements[-1]
+    assert "o.contract_identity" in cursor.statements[-1]
+
+
 def test_replay_is_idempotent_after_the_legacy_column_is_retired() -> None:
     cursor = _Cursor({"case_no", CANONICAL_COLUMN})
     connection = _Connection(cursor)

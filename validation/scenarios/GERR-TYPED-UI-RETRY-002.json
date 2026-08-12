@@ -1,0 +1,46 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "GERR-TYPED-UI-RETRY-002",
+  "track": "B",
+  "suite_id": "GERR",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["GERR-01", "GERR-02", "GERR-03", "GERR-05"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "Typed HTTP responses for unauthorized, forbidden, conflict and unavailable outcomes.",
+    "A lost-response unavailable error, an idempotency identity and a durable job status response."
+  ],
+  "forbidden_direct_seed": [
+    "UI decision, typed transport category, retry identity or completed job display"
+  ],
+  "commands": [
+    "Map typed server errors through the UI transport client.",
+    "Retry an unavailable apply with unchanged operation state and refresh the durable job status.",
+    "Map a database contention and stale version error through the order API boundary."
+  ],
+  "expected": [
+    "Typed clients preserve category, code and correlation identity without branching on human message text.",
+    "Unavailable retry reuses the original idempotency key; changed UI input does not silently alter the retry command.",
+    "The UI displays queued work before it displays completion, while contention is HTTP 503 and stale version is HTTP 409."
+  ],
+  "receipt_requirements": [
+    "typed transport assertions",
+    "idempotency-key replay evidence",
+    "queued-to-succeeded UI state assertions",
+    "409/503 mapping assertions"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_historical_reprocess_ui.py tests\\test_order_auto_completion_api.py tests\\test_line_management_stage9.py"
+    ],
+    "test_paths": [
+      "tests/test_finance_import_historical_reprocess_ui.py",
+      "tests/test_order_auto_completion_api.py",
+      "tests/test_line_management_stage9.py"
+    ]
+  }
+}

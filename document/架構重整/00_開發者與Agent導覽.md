@@ -8,9 +8,10 @@
 1. 根目錄 `AGENTS.md`：工作區規則、dirty worktree 與驗證方式。
 2. 根目錄 `README.md`：執行入口、目錄與安全界線。
 3. `01_規格基線/00_Global_共同契約.md`：跨領域共同不變量。
-4. `15_正式規格索引與裁決總表.md`、對應 Domain 規格及 `16`～`20` 中與任務相關的最新補充裁決。
-5. 對應的 `02_決策與退役執行記錄/` Work Package 與 `03_追蹤清單與證據/` evidence。
-6. 最後才讀 live schema、route、subsystem、repository 與既有測試，確認規格和現況是否漂移。
+4. `15_正式規格索引與裁決總表.md`、對應 Domain 規格及 `16`～`21` 中與任務相關的最新補充裁決。
+5. 只讀對應且 active 的 `02_決策與退役執行記錄/` Work Package 與 `03_追蹤清單與證據/` evidence，不整目錄載入。
+6. `04_已完成與上線封存/` 平常不讀；只有歷史追溯、incident／rollback、migration/cutover、舊 release 重現或稽核時，才精準搜尋 manifest 並讀單一命中文件。
+7. 最後才讀 live schema、route、subsystem、repository 與既有測試，確認規格和現況是否漂移。
 
 歷史 `system_map*.md`、`system_map*.yaml` 和 ADAD 產物僅供追溯，均不是 SSOT 或實作 gate。
 
@@ -62,7 +63,7 @@ flowchart LR
 | Access／LINE／Jobs | `subsystems/access/`、`subsystems/line/`、`subsystems/jobs/` | 管理員身分與 capability、LINE inbox／delivery、durable worker supervision |
 
 完整 Domain ownership、SSOT 與跨域關係請讀
-`01_規格基線/15_正式規格索引與裁決總表.md`；其中的圖、`16`～`20` 補充裁決與權威順序
+`01_規格基線/15_正式規格索引與裁決總表.md`；其中的圖、`16`～`21` 補充裁決與權威順序
 優先於本摘要。銀行流水、帳務異常及管理端處置另以
 `20_銀行流水匯入與帳務異常處理正式規格.md` 的最新明確裁決為準。
 
@@ -80,10 +81,11 @@ flowchart LR
 
 ## 文件地圖
 
-- `01_規格基線/`：正式 Global／Domain／Application 契約；`15` 是規格收斂入口，目前正式範圍為 `15`～`20`。`16`～`18` 補足帳務衝突、外部整合／權限與部署治理，`19` 管理 entry point，`20` 裁決銀行流水與帳務異常處置。
+- `01_規格基線/`：現行正式 Global／Domain／Application 契約；`15` 是規格收斂入口，目前正式範圍為 `15`～`21`。`16`～`18` 補足帳務衝突、外部整合／權限與部署治理，`19` 管理 entry point，`20` 裁決銀行流水與帳務異常處置，`21` 裁決 Contract Signing 與簽約前服務承諾。
 - `02_決策與退役執行記錄/`：已核准的 Work Package、退役、驗收與部署決策；先確認 `declared_status`，不要把草案當授權。
 - `03_追蹤清單與證據/`：legacy inventory、evidence、收據；是現況證據，不自動構成業務規格或刪檔權限。
 - `03_追蹤清單與證據/evidence/global_e2e_manifest.json`：目前 Global E2E 驗收宣告與證據索引。
+- `04_已完成與上線封存/`：低頻歷史區，只放不再 active 的完成 Work Package、superseded 舊規格與 closed release／receipt。日常任務不全文讀取；仍約束 production 的規格即使已上線也留在 `01`。
 
 ## 開發與驗證安全界線
 
@@ -92,6 +94,40 @@ flowchart LR
 - snapshot、golden artifact、`tests/fixtures/` 與 `validation/` 資料都是受保護測試資產；未經明確授權不得刪除、重產或套用到正式資料庫。
 - `db/schema_parts/` 與 migration release 必須 additive、可驗證；`online.bat` 不會自動套 schema。
 - Streamlit 只顯示 typed API result；正式資料庫、candidate、fixture 和測試資料必須隔離。
+
+## 穩定開發指南
+
+### 通用技術 ADR 最小範本
+
+只適用於不改變業務 owner、SSOT、交易或部署契約的技術決策；需要裁決這些邊界時，依
+`02_決策與退役執行記錄/` 的 Work Package／architecture-decision 格式建立文件。
+
+```markdown
+# ADR-NNN: <決策標題>
+
+## 狀態
+
+Draft / Proposed / Approved / Rejected / Deprecated
+
+## 脈絡 (Context)
+
+說明背景、問題、需求與限制。
+
+## 決策 (Decision)
+
+說明採用方案及其理由。
+
+## 後果 (Consequences)
+
+列出優點、缺點、副作用及連帶調整。
+```
+
+### Pure Function 模式
+
+適用於可由輸入完全決定結果的 Domain calculation、normalization 或 validator。輸入必須視為
+immutable，不得修改傳入參數；返回值只能由輸入決定，不得存取外部全域狀態，也不得進行 I/O、
+DB 或 network side effect。需要讀取根事實、時鐘、repository 或外部服務的邏輯，應留在
+Subsystem／adapter，或以 typed port 明確注入。
 
 ## 交付前自查
 

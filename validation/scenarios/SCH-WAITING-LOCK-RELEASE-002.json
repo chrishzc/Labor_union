@@ -1,0 +1,44 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "SCH-WAITING-LOCK-RELEASE-002",
+  "track": "A",
+  "suite_id": "SCH",
+  "status": "bound",
+  "requires_database": false,
+  "coverage_scope": "supplemental",
+  "test_kinds": ["subsystem_state_machine", "expected_manifest"],
+  "coverage_ids": ["SSM-05"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#SSM-05",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#5.7"
+  ],
+  "root_facts": [
+    "An authoritative read snapshot of an accepted matching plan, active availability lock rows and a canonical zero-net deposit projection.",
+    "A typed release request with lock/event identity, actor and reason."
+  ],
+  "forbidden_direct_seed": [
+    "released lock projection, released lock-day rows, lock-release event or plan proposed state",
+    "deposit settlement state, cancellation or assignment projection"
+  ],
+  "commands": [
+    "Release an active waiting-deposit lock for one through four segments.",
+    "Replay an existing release event and submit mismatched event or lock state requests.",
+    "Inject nonzero/missing deposit projections and persistence failures."
+  ],
+  "expected": [
+    "A valid release unlocks every matching lock day, changes the lock/plan state and records one canonical release event.",
+    "Exact replay returns the existing result with zero additional writes.",
+    "Plan, lock, event, deposit or mutex mismatches fail closed and roll back the harness transaction."
+  ],
+  "receipt_requirements": [
+    "state-machine snapshot and expected-manifest digests",
+    "created/replay/fail-closed state and write assertions",
+    "rollback and close assertions for injected persistence failures"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_caregiver_availability_lock_release_service.py"
+    ],
+    "test_paths": ["tests/test_caregiver_availability_lock_release_service.py"]
+  }
+}

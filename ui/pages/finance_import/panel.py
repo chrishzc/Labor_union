@@ -16,6 +16,7 @@ from ui.api_clients.finance_import_api_client import (
     FinanceImportApiClient,
     FinanceImportApiError,
 )
+from ui import nav_helper
 
 
 _BATCH_APPLY_STATE_KEY = "finance_import_batch_apply_state"
@@ -25,12 +26,58 @@ _JOB_STATUS_POLL_INTERVAL_SECONDS = 5
 
 
 def render_finance_import_panel(client: FinanceImportApiClient) -> None:
-    st.subheader("銀行流水匯入與帳務修正")
-    st.caption("銀行資料先入庫，再由後端 Preview／Apply；UI 不計算或直接寫入帳務。")
+    st.subheader("銀行流水匯入")
+    st.caption("上傳正常銀行資料並執行批次 Preview／Apply；待人工處理項目請至異常警示中心。")
+    _render_pending_review_summary(client)
     _render_ingestion(client)
     _render_batch_preview_and_apply(client)
-    _render_historical_reprocess(client)
-    _render_manual_correction(client)
+
+
+def _render_pending_review_summary(client: FinanceImportApiClient) -> None:
+    with st.expander("待人工處理的銀行列", expanded=True):
+        batches = _query_batches(client)
+        if not batches:
+            st.info("目前沒有已建立的銀行匯入批次。")
+            return
+        batch_identity = _select_review_batch(batches)
+        if batch_identity is None:
+            st.info("目前沒有可讀取的正式銀行匯入批次。")
+            return
+        _render_review_rows(client, batch_identity)
+
+
+def _query_batches(client: FinanceImportApiClient):
+    try:
+        return tuple(client.list_batches())
+    except FinanceImportApiError as error:
+        _show_api_error(error)
+        return ()
+
+
+def _select_review_batch(batches) -> str | None:
+    identities = tuple(
+        batch.batch_identity
+        for batch in batches
+        if batch.batch_identity is not None
+    )
+    if not identities:
+        return None
+    return st.selectbox("已建立批次", identities, key="finance_import_review_batch")
+
+
+def _render_review_rows(client: FinanceImportApiClient, batch_identity: str) -> None:
+    try:
+        rows = client.list_review_rows(batch_identity).items
+    except FinanceImportApiError as error:
+        _show_api_error(error)
+        return
+    if not rows:
+        st.success("此批次沒有待人工確認的銀行列。")
+        return
+    st.dataframe([row.model_dump() for row in rows], hide_index=True)
+    st.warning(f"此批次有 {len(rows)} 筆需人工處理；請在異常警示中心依異常類型處置。")
+    if st.button("前往帳務異常中心", key="finance_import_go_to_alerts"):
+        nav_helper.navigate_to("異常警示中心")
 
 
 def _render_ingestion(client: FinanceImportApiClient) -> None:
@@ -296,8 +343,36 @@ def _refresh_historical_reprocess_status(client, command) -> None:
     st.json(status.error_payload)
 
 
-def _render_manual_correction(client: FinanceImportApiClient) -> None:
-    with st.expander("4. 待確認銀行列人工帳務修正", expanded=False):
+def render_finance_import_correction_panel(
+    client: FinanceImportApiClient,
+    *,
+    row_identity: str,
+    action_label: str,
+) -> None:
+    """Render the only manual correction form from an anomaly-owned bank row."""
+
+    _prepare_anomaly_correction(row_identity)
+    st.markdown(f"#### {action_label}")
+    st.caption("系統已帶入異常來源銀行列；請補足必要證據並先產生 Preview。")
+    _render_manual_correction(client, expanded=True)
+
+
+def _prepare_anomaly_correction(row_identity: str) -> None:
+    current_row = st.session_state.get("finance_import_correction_row")
+    if current_row == row_identity:
+        return
+    st.session_state["finance_import_correction_row"] = row_identity
+    st.session_state["finance_import_correction_row_identity"] = row_identity
+    st.session_state.pop("finance_import_correction_preview", None)
+    st.session_state.pop(_CORRECTION_APPLY_STATE_KEY, None)
+
+
+def _render_manual_correction(
+    client: FinanceImportApiClient,
+    *,
+    expanded: bool,
+) -> None:
+    with st.expander("銀行列人工帳務修正", expanded=expanded):
         st.caption(
             "先固定不可變銀行列，再明示 obligation 與證據。退款、補助退還與退匯皆不可由案件頁直接配對。"
         )
@@ -309,6 +384,7 @@ def _render_manual_correction(client: FinanceImportApiClient) -> None:
         classification = st.selectbox(
             "帳務類型",
             (
+                "client_receipt",
                 "client_refund",
                 "client_subsidy_return",
                 "client_refund_return",
@@ -321,13 +397,16 @@ def _render_manual_correction(client: FinanceImportApiClient) -> None:
             "義務 identity（每行一筆）",
             key="finance_import_correction_targets",
         )
+        allow_partial_refund_recovery = _partial_refund_recovery_input(classification)
+        allow_refund_overage_recovery = _refund_overage_recovery_input(classification)
+        allow_client_receipt_overage = _client_receipt_overage_input(classification)
         refund_ledger = _refund_ledger_input(classification)
         reason = st.text_input("修正原因", key="finance_import_correction_reason")
         evidence = st.text_area(
             "人工證據（每行一項）",
             key="finance_import_correction_evidence",
         )
-        if st.button("產生人工修正 Preview", key="finance_import_correction_preview"):
+        if st.button("產生人工修正 Preview", key="finance_import_correction_preview_button"):
             _preview_correction(
                 client,
                 row_identity,
@@ -336,6 +415,9 @@ def _render_manual_correction(client: FinanceImportApiClient) -> None:
                 refund_ledger,
                 reason,
                 evidence,
+                allow_partial_refund_recovery,
+                allow_refund_overage_recovery,
+                allow_client_receipt_overage,
             )
         _render_correction_apply_status(client)
 
@@ -349,7 +431,45 @@ def _refund_ledger_input(classification: str) -> str | None:
     )
 
 
-def _preview_correction(client, row_identity, classification, targets, ledger, reason, evidence) -> None:
+def _partial_refund_recovery_input(classification: str) -> bool:
+    if classification != "client_refund":
+        return False
+    return st.checkbox(
+        "此筆已實際匯少，改走部分退款補救流程",
+        key="finance_import_correction_partial_refund_recovery",
+    )
+
+
+def _refund_overage_recovery_input(classification: str) -> bool:
+    if classification != "client_refund":
+        return False
+    return st.checkbox(
+        "此筆實際多匯，建立客戶追償應收",
+        key="finance_import_correction_refund_overage_recovery",
+    )
+
+
+def _client_receipt_overage_input(classification: str) -> bool:
+    if classification != "client_receipt":
+        return False
+    return st.checkbox(
+        "此筆客戶實收超額，建立退款應付",
+        key="finance_import_correction_client_receipt_overage",
+    )
+
+
+def _preview_correction(
+    client,
+    row_identity,
+    classification,
+    targets,
+    ledger,
+    reason,
+    evidence,
+    allow_partial_refund_recovery,
+    allow_refund_overage_recovery,
+    allow_client_receipt_overage,
+) -> None:
     try:
         preview = client.preview_correction(
             row_identity,
@@ -359,6 +479,9 @@ def _preview_correction(client, row_identity, classification, targets, ledger, r
             _line_items(evidence),
             _new_key("finance-import-correction-preview"),
             ledger,
+            allow_partial_refund_recovery,
+            allow_refund_overage_recovery,
+            allow_client_receipt_overage,
         )
     except (FinanceImportApiError, ValueError) as error:
         _show_api_error(error)
@@ -407,11 +530,18 @@ def _submit_correction(client, preview, command) -> None:
         _show_api_error(error)
         return
     command["job_id"] = job.job_id
+    command["terminal"] = False
     st.info(f"人工修正工作已受理：{job.job_id}")
 
 
 def _render_correction_job_status(client, command) -> None:
     if command.get("terminal"):
+        _render_correction_terminal_result(command)
+        st.caption("已保留 immutable Preview command；重送只會查回同一個工作。")
+        if st.button("重送相同人工修正請求", key="finance_import_correction_replay"):
+            preview = st.session_state.get("finance_import_correction_preview")
+            if preview is not None:
+                _submit_correction(client, preview, command)
         return
     if not command.get("job_id"):
         st.warning("人工修正結果尚未確認；可安全重送同一命令。")
@@ -436,12 +566,25 @@ def _refresh_correction_status(client, command) -> None:
         st.info(f"人工修正仍在處理：{status.status}")
         return
     command["terminal"] = True
+    command["status"] = status.status
+    command["receipt_payload"] = status.receipt_payload
+    command["error_payload"] = status.error_payload
     if status.status == "succeeded":
         st.success("人工修正已完成。")
         st.json(status.receipt_payload)
         return
     st.error(f"人工修正未完成：{status.status}")
     st.json(status.error_payload)
+
+
+def _render_correction_terminal_result(command) -> None:
+    if command.get("status") == "succeeded":
+        st.success("人工修正已完成。")
+        st.json(command.get("receipt_payload"))
+        return
+    if command.get("status"):
+        st.error(f"人工修正未完成：{command['status']}")
+        st.json(command.get("error_payload"))
 
 
 def _line_items(value: str) -> list[str]:

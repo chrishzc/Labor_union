@@ -1,0 +1,45 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "LEGACY-RETIREMENT-001",
+  "track": "B",
+  "suite_id": "LEGACY",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["metadata_fixture", "process_network_harness"],
+  "coverage_ids": ["LEGACY-01", "LEGACY-02", "LEGACY-03", "LEGACY-04"],
+  "source_refs": ["document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"],
+  "root_facts": [
+    "A checked-in legacy entry and writer inventory represented by retired routes, CLI diagnostics and module paths.",
+    "Canonical replacement metadata for each retained HTTP endpoint."
+  ],
+  "forbidden_direct_seed": [
+    "typed retirement result, legacy-writer scan result or route replacement metadata"
+  ],
+  "commands": [
+    "Invoke retained legacy HTTP and CLI entry points and inspect their typed refusal before any domain connection.",
+    "Scan retired module paths and finance-import sources for prohibited legacy writers."
+  ],
+  "expected": [
+    "Retained legacy HTTP paths return typed 410 responses with the canonical replacement.",
+    "Retired CLI and diagnostic entries reject apply before opening a service connection.",
+    "The legacy receipt, staff-transfer and subsidy-reconciliation writers are absent from current runtime paths."
+  ],
+  "receipt_requirements": [
+    "retirement-test source digests",
+    "typed HTTP/CLI rejection output",
+    "retired module and writer-boundary evidence"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_legacy_client_receipt_dispatch_retirement.py tests\\test_legacy_finance_import_reprocess_retirement.py tests\\test_legacy_leave_resolution_retirement.py tests\\test_legacy_order_full_list_retired.py tests\\test_legacy_staff_transfer_reconciliation_retirement.py tests\\test_legacy_government_subsidy_receipt_reconciliation_retirement.py"
+    ],
+    "test_paths": [
+      "tests/test_legacy_client_receipt_dispatch_retirement.py",
+      "tests/test_legacy_finance_import_reprocess_retirement.py",
+      "tests/test_legacy_leave_resolution_retirement.py",
+      "tests/test_legacy_order_full_list_retired.py",
+      "tests/test_legacy_staff_transfer_reconciliation_retirement.py",
+      "tests/test_legacy_government_subsidy_receipt_reconciliation_retirement.py"
+    ]
+  }
+}

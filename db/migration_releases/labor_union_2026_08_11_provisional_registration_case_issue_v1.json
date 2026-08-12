@@ -1,0 +1,35 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-2026-08-11-provisional-registration-case-issue-v1",
+  "release_metadata": {
+    "release_name": "Provisional LINE registration Case Import issue evidence",
+    "application_version": "case-import-provisional-registration-v1",
+    "description": "Add append-only issuance evidence and replay receipt links for Case Import consumption",
+    "published_at": "2026-08-11"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"]
+  },
+  "artifacts": [
+    {
+      "name": "165_provisional_registration_case_issue.sql",
+      "relative_path": "db/schema_parts/165_provisional_registration_case_issue.sql",
+      "dependencies": [
+        "129_case_import.sql",
+        "146_provisional_client_registrations.sql"
+      ],
+      "data_effect": "schema_only",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-append-only-issuance-evidence",
+      "sha256": "517c43e8ae428a3cf44c861e857dfaf3dd2812b14db40ef5af61737fb254f6ca"
+    }
+  ],
+  "backfills": [],
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_11_provisional_registration_case_issue_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_11_provisional_registration_case_issue_v1.descriptors.json"
+  }
+}

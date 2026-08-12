@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "PAY-ASSIGNMENT-RECONCILIATION-002",
+  "scenario_digest": "c93919c60de735f67c4434703ffdaf1a1869c759d35e9b37ae9a5a7bed75af06",
+  "result": "passed",
+  "assertion_count": 39,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_assignment_payroll_reconciliation_service.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "Payroll read-only assignment reconciliation and independent amount oracle"
+  },
+  "input_digests": {
+    "scenario_fixture": "df6cb72d0e6309c0bc26a47d43bf9250ec9d76083f3d64f0ebda6d8c0b0a313b",
+    "expected_manifest": "d41545a3c2b41e6864ceac5607d7924441937cf9e1efff67fcf80c9e034cb2f8",
+    "reconciliation_test": "9dc8236aafebba7b8bb01a4d6f53bcddf357a7b274be62f7620d6758f7eb5ad2"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/PAY-ASSIGNMENT-RECONCILIATION-002.json",
+    "expected_manifest": "validation/expected/PAY-ASSIGNMENT-RECONCILIATION-002.json",
+    "reconciliation_test": "tests/test_assignment_payroll_reconciliation_service.py"
+  }
+}

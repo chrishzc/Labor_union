@@ -10,8 +10,8 @@ verified_at: 2026-08-09
 
 - 規格基線：`01_規格基線/05_Staff_Payables_Export_Domain.md`
 - 決策／退役記錄：
-  - `39_Durable_Job_Staff_Payout_Work_Package.md`
-  - `47_Scheduling_Payroll_Legacy_Writer_Exit_Inventory_Receipt.md`
+  - `../../04_已完成與上線封存/work_packages/39_Durable_Job_Staff_Payout_Work_Package.md`
+  - `../../04_已完成與上線封存/receipts/47_Scheduling_Payroll_Legacy_Writer_Exit_Inventory_Receipt.md`
 - 既有 durable payout MySQL E2E 證據：
   `evidence/2026-08-09_payroll_domain_revalidation_receipt.md`
 

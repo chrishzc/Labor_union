@@ -1,0 +1,36 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "MIG-CUTOVER-001",
+  "track": "B",
+  "suite_id": "MIG",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["metadata_fixture", "filesystem_artifact", "process_network_harness"],
+  "coverage_ids": ["MIG-01", "MIG-02", "MIG-03", "MIG-04", "MIG-05", "MIG-06", "MIG-07", "MIG-08", "MIG-09", "MIG-10"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "Disposable source and candidate databases, migration manifest, tool identity and config-byte fixtures.",
+    "Digest-mismatch, missing-part, DDL crash-window and stale-backfill fault fixtures.",
+    "A pre-existing read-only source baseline and a separately named recovery candidate."
+  ],
+  "forbidden_direct_seed": [
+    "cutover completed status, journal success, recovery receipt or schema verification result",
+    "an in-place source rewrite or a candidate name outside lu_test_*",
+    "manual modification of result digests to match expected evidence"
+  ],
+  "commands": [
+    "Run preflight, backup, restore, schema application, backfill and postcheck using fault injection at every persistence seam.",
+    "Exercise resume, rollback-to-source and recovery paths after interruption.",
+    "Compare schema objects, fingerprints, config bytes and restart/read-smoke outcome."
+  ],
+  "expected": [
+    "Source remains read-only; every candidate and recovery target is disposable and independently named.",
+    "Drift, missing approval or unknown partial DDL fail closed and cannot report cutover complete.",
+    "Only matching evidence can produce a recovery or release receipt; rollback never deletes the source or masks a failed smoke test."
+  ],
+  "receipt_requirements": [
+    "manifest/source/candidate/config digests", "tool and process identity", "journal and fault-injection evidence", "postcheck object/fingerprint report", "recovery or rollback receipt"
+  ]
+}

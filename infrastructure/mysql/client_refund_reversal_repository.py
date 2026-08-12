@@ -72,7 +72,10 @@ class MySqlClientRefundReversalRepository:
                 selection.case_no,
                 lock=for_update,
             )
-            if selection.correction_type is ClientFinanceCorrectionType.REFUND:
+            if selection.correction_type in {
+                ClientFinanceCorrectionType.REFUND,
+                ClientFinanceCorrectionType.REFUND_OVERAGE,
+            }:
                 facts = self._load_refund(cursor, selection, for_update)
             elif selection.correction_type is ClientFinanceCorrectionType.REFUND_RETURN:
                 facts = self._load_refund_return(cursor, selection, for_update)
@@ -106,13 +109,61 @@ class MySqlClientRefundReversalRepository:
         request = self._require_request()
         with _mysql_cursor(self._connection) as cursor:
             totals = _persisted_allocation_totals(cursor, candidate)
-            if candidate.correction_type is ClientFinanceCorrectionType.REFUND:
+            if candidate.correction_type in {
+                ClientFinanceCorrectionType.REFUND,
+                ClientFinanceCorrectionType.REFUND_OVERAGE,
+            }:
                 _settle_refund_obligations(cursor, candidate, totals, resulting_version)
+                _persist_underpayment_source(
+                    cursor, request, candidate, resulting_version, self._refund_row_metadata
+                )
             elif candidate.reversal_entry_type in {"refund", "subsidy_return"}:
                 _reopen_payable_obligations(cursor, candidate, totals, resulting_version)
             else:
                 _reopen_receivable_obligations(cursor, candidate, totals, resulting_version)
             _advance_account_version(cursor, request, resulting_version)
+
+    def establish_over_refund_recovery(self, candidate, resulting_version) -> None:
+        if candidate.correction_type is not ClientFinanceCorrectionType.REFUND_OVERAGE:
+            return
+        if len(candidate.entries) != 1 or len(candidate.affected_obligations) != 1:
+            raise RuntimeError("client_refund_overage_requires_one_bank_and_obligation")
+        request = self._require_request()
+        entry_identity = candidate.entries[0].identity
+        ledger_entry_id = self._entry_ids.get(entry_identity)
+        if ledger_entry_id is None:
+            raise RuntimeError("client_refund_overage_ledger_missing")
+        recovery_identity = _over_refund_recovery_identity(candidate.fingerprint.value)
+        refund_identity = candidate.affected_obligations[0]
+        bank_row_id, _ = self._refund_row_metadata[
+            candidate.entries[0].finance_import_row_identity
+        ]
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute(
+                _OVER_REFUND_RECOVERY_INSERT_SQL,
+                (
+                    recovery_identity,
+                    candidate.case_no,
+                    bank_row_id,
+                    ledger_entry_id,
+                    refund_identity,
+                    candidate.recovery_amount.amount,
+                    _child_key(request, "over-refund-recovery", 1),
+                    request.actor.actor_id,
+                    request.reason,
+                    resulting_version,
+                ),
+            )
+            cursor.execute(
+                _OVER_REFUND_RECOVERY_EVENT_INSERT_SQL,
+                (
+                    recovery_identity,
+                    candidate.recovery_amount.amount,
+                    _child_key(request, "over-refund-recovery-event", 1),
+                    request.actor.actor_id,
+                    request.reason,
+                ),
+            )
 
     def append_outbox(self, candidate, resulting_version) -> None:
         request = self._require_request()
@@ -132,6 +183,11 @@ class MySqlClientRefundReversalRepository:
                     _canonical_json(payload),
                 ),
             )
+            if request.selection.allow_partial_refund_recovery:
+                cursor.execute(
+                    _UNDERPAYMENT_OUTBOX_INSERT_SQL,
+                    (candidate.case_no, _child_key(request, "refund-underpayment-outbox", 1), _canonical_json({"underpayment_identity": f"client-refund-underpayment:{candidate.fingerprint.value}"})),
+                )
 
     def save_receipt(self, key, stored_receipt) -> None:
         request = self._require_request()
@@ -183,12 +239,14 @@ class MySqlClientRefundReversalRepository:
             lock,
         )
         obligation_rows = _load_refund_obligation_rows(cursor, selection, lock)
+        recipient_account = _single_refund_recipient_account(obligation_rows)
         self._refund_row_metadata = _refund_metadata(bank_rows)
         return {
             "bank_facts": _refund_bank_facts(
                 bank_rows,
                 selection.case_no,
                 selection.refund_purpose,
+                recipient_account,
             ),
             "obligations": _refund_obligations(obligation_rows),
         }
@@ -215,6 +273,7 @@ class MySqlClientRefundReversalRepository:
     def _claim_refund_row(self, cursor, candidate, entry) -> None:
         if candidate.correction_type not in {
             ClientFinanceCorrectionType.REFUND,
+            ClientFinanceCorrectionType.REFUND_OVERAGE,
             ClientFinanceCorrectionType.REFUND_RETURN,
         }:
             return
@@ -290,7 +349,7 @@ def _load_refund_bank_rows(cursor, identities, lock):
         "SELECT fir.id,fir.transaction_date,fir.debit,fir.credit,fir.direction,"
         "fir.currency,COALESCE(classification.classification_type,"
         "fir.classification_type) AS effective_classification_type,"
-        "fir.reconciliation_status,"
+        "fir.reconciliation_status,fir.resolved_counterparty_account,"
         "fir.bank_references,ledger.id AS ledger_entry_id "
         "FROM finance_import_rows fir LEFT JOIN client_ledger_entries ledger "
         "ON ledger.finance_import_row_id=fir.id "
@@ -327,12 +386,15 @@ def _load_refund_return_bank_rows(cursor, identities, lock):
 def _load_refund_obligation_rows(cursor, selection, lock):
     suffix = " FOR UPDATE" if lock else ""
     cursor.execute(
-        "SELECT obligation_identity,case_no,obligation_type,amount_due_ntd "
-        "FROM client_obligations "
-        f"WHERE obligation_identity IN ({_placeholders(selection.obligation_identities)}) "
-        "AND case_no=%s AND direction='payable_to_client' AND status='open' "
-        "AND amount_due_ntd>0 AND obligation_type IN ('refund','subsidy_return') "
-        f"ORDER BY obligation_identity{suffix}",
+        "SELECT obligation.obligation_identity,obligation.case_no,obligation.obligation_type,"
+        "obligation.amount_due_ntd,snapshot.bank_account "
+        "FROM client_obligations obligation "
+        "JOIN client_refund_recipient_snapshots snapshot "
+        "ON snapshot.refund_obligation_identity=obligation.obligation_identity "
+        f"WHERE obligation.obligation_identity IN ({_placeholders(selection.obligation_identities)}) "
+        "AND obligation.case_no=%s AND obligation.direction='payable_to_client' AND obligation.status='open' "
+        "AND obligation.amount_due_ntd>0 AND obligation.obligation_type IN ('refund','subsidy_return') "
+        f"ORDER BY obligation.obligation_identity{suffix}",
         (*selection.obligation_identities, selection.case_no),
     )
     return tuple(cursor.fetchall())
@@ -346,7 +408,7 @@ def _refund_metadata(rows):
     }
 
 
-def _refund_bank_facts(rows, case_no, refund_purpose):
+def _refund_bank_facts(rows, case_no, refund_purpose, recipient_account):
     expected_classification = _classification_for_purpose(refund_purpose)
     return tuple(
         ClientRefundBankFact(
@@ -354,7 +416,7 @@ def _refund_bank_facts(rows, case_no, refund_purpose):
             case_no,
             _integer_money(row.get("debit")),
             _date_text(row.get("transaction_date")),
-            _refund_row_is_eligible(row, case_no, expected_classification),
+            _refund_row_is_eligible(row, case_no, expected_classification, recipient_account),
         )
         for row in rows
         if _is_positive_integer_money(row.get("debit"))
@@ -375,7 +437,7 @@ def _refund_return_bank_facts(rows, case_no):
     )
 
 
-def _refund_row_is_eligible(row, case_no, expected_classification):
+def _refund_row_is_eligible(row, case_no, expected_classification, recipient_account):
     del case_no
     return (
         row.get("direction") == "outgoing"
@@ -383,6 +445,7 @@ def _refund_row_is_eligible(row, case_no, expected_classification):
         and row.get("effective_classification_type") == expected_classification
         and row.get("reconciliation_status") == "pending"
         and row.get("transaction_date") is not None
+        and row.get("resolved_counterparty_account") == recipient_account
         and row.get("ledger_entry_id") is None
         and _is_twd(row.get("currency"))
     )
@@ -410,6 +473,13 @@ def _refund_obligations(rows):
         )
         for row in rows
     )
+
+
+def _single_refund_recipient_account(rows):
+    accounts = {str(row["bank_account"]).strip() for row in rows if row.get("bank_account")}
+    if len(accounts) != 1:
+        raise ValueError("client_refund_recipient_account_ambiguous")
+    return accounts.pop()
 
 
 def _load_reversal_target_rows(cursor, selection, lock):
@@ -566,6 +636,35 @@ def _settle_refund_obligations(cursor, candidate, totals, version):
             raise RuntimeError("allocation_exceeds_obligation")
 
 
+def _persist_underpayment_source(cursor, request, candidate, resulting_version, row_metadata):
+    if not request.selection.allow_partial_refund_recovery:
+        return
+    remaining = _refund_remaining_total(cursor, candidate)
+    if remaining <= 0:
+        return
+    identity = f"client-refund-underpayment:{candidate.fingerprint.value}"
+    bank_total = sum(entry.amount.amount for entry in candidate.entries)
+    cursor.execute(_UNDERPAYMENT_SOURCE_INSERT_SQL, (identity, candidate.case_no, bank_total, remaining, resulting_version, _child_key(request, "refund-underpayment", 1), request.actor.actor_id, request.reason))
+    for ordinal, entry in enumerate(candidate.entries, start=1):
+        row_id, _ = row_metadata[entry.finance_import_row_identity]
+        cursor.execute(_UNDERPAYMENT_SOURCE_ROW_INSERT_SQL, (identity, row_id, ordinal))
+    for obligation_identity, amount in _refund_remaining_amounts(cursor, candidate).items():
+        cursor.execute(_UNDERPAYMENT_SOURCE_OBLIGATION_INSERT_SQL, (identity, obligation_identity, amount))
+
+
+def _refund_remaining_amounts(cursor, candidate):
+    identities = tuple(candidate.affected_obligations)
+    cursor.execute(
+        f"SELECT obligation_identity,amount_due_ntd FROM client_obligations WHERE obligation_identity IN ({_placeholders(identities)})",
+        identities,
+    )
+    return {str(row["obligation_identity"]): int(row["amount_due_ntd"]) for row in cursor.fetchall() if int(row["amount_due_ntd"]) > 0}
+
+
+def _refund_remaining_total(cursor, candidate):
+    return sum(_refund_remaining_amounts(cursor, candidate).values())
+
+
 def _reopen_receivable_obligations(cursor, candidate, totals, version):
     for identity in candidate.affected_obligations:
         amount = totals.get(identity, 0)
@@ -674,6 +773,10 @@ def _receipt_payload(receipt):
     }
 
 
+def _over_refund_recovery_identity(correction_identity: str) -> str:
+    return f"client-over-refund-recovery:{correction_identity[:48]}"
+
+
 def _stored_receipt(row):
     payload = _json_object(row["result_snapshot"])
     receipt = ClientRefundReversalReceipt(
@@ -758,6 +861,18 @@ _LEDGER_INSERT_SQL = (
     "reconciliation_reference,reversal_of_entry_id,idempotency_key,actor,reason) "
     "VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
+_OVER_REFUND_RECOVERY_INSERT_SQL = (
+    "INSERT INTO client_over_refund_recoveries "
+    "(recovery_identity,case_no,finance_import_row_id,refund_ledger_entry_id,"
+    "refund_obligation_identity,amount_due_ntd,status,idempotency_key,actor,reason,projection_version) "
+    "VALUES (%s,%s,%s,%s,%s,%s,'open',%s,%s,%s,%s)"
+)
+_OVER_REFUND_RECOVERY_EVENT_INSERT_SQL = (
+    "INSERT INTO client_over_refund_recovery_events "
+    "(recovery_identity,event_type,finance_import_row_id,receipt_ledger_entry_id,"
+    "before_amount_ntd,after_amount_ntd,idempotency_key,actor,reason) "
+    "VALUES (%s,'established',NULL,NULL,0,%s,%s,%s,%s)"
+)
 _ALLOCATION_INSERT_SQL = (
     "INSERT INTO client_ledger_obligation_allocations "
     "(ledger_entry_id,obligation_identity,amount_ntd,allocation_ordinal) "
@@ -768,6 +883,10 @@ _OUTBOX_INSERT_SQL = (
     "(case_no,intent_type,intent_key,payload_snapshot) "
     "VALUES (%s,'projection_refresh',%s,%s)"
 )
+_UNDERPAYMENT_SOURCE_INSERT_SQL = "INSERT INTO client_refund_underpayment_sources (underpayment_identity,case_no,bank_total_ntd,remaining_after_ntd,resulting_account_version,idempotency_key,actor,reason) VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
+_UNDERPAYMENT_SOURCE_ROW_INSERT_SQL = "INSERT INTO client_refund_underpayment_source_bank_rows (underpayment_identity,finance_import_row_id,ordinal) VALUES (%s,%s,%s)"
+_UNDERPAYMENT_SOURCE_OBLIGATION_INSERT_SQL = "INSERT INTO client_refund_underpayment_source_obligations (underpayment_identity,refund_obligation_identity,remaining_after_ntd) VALUES (%s,%s,%s)"
+_UNDERPAYMENT_OUTBOX_INSERT_SQL = "INSERT INTO client_finance_outbox (case_no,intent_type,intent_key,payload_snapshot) VALUES (%s,'client_refund_underpayment_required',%s,%s)"
 _RECEIPT_INSERT_SQL = (
     "INSERT INTO client_refund_reversal_apply_receipts "
     "(idempotency_key,correction_type,command_fingerprint,preview_fingerprint,"

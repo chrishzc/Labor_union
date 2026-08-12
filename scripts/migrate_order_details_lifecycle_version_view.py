@@ -168,8 +168,8 @@ def _columns(cursor: Any) -> list[str]:
         (VIEW_NAME,),
     )
     rows = cursor.fetchall()
-    if not isinstance(rows, list):
-        raise RuntimeError("view column metadata must be a list")
+    if not isinstance(rows, (list, tuple)):
+        raise RuntimeError("view column metadata must be a row sequence")
     columns = []
     for row in rows:
         value = _metadata_value(row, "column_name")

@@ -198,6 +198,7 @@ class GovernmentBankFact:
     amount_ntd: MoneyNTD
     occurred_on: date
     existing_transaction_id: int | None = None
+    counterparty_account: str = ""
 
     # Kept cohesive so one constructor enforces the complete bank-root contract.
     def __post_init__(self) -> None:
@@ -226,6 +227,8 @@ class GovernmentBankFact:
                 self.existing_transaction_id,
                 "existing transaction id",
             )
+        if not isinstance(self.counterparty_account, str):
+            raise TypeError("government subsidy counterparty account is invalid")
 
 
 @dataclass(frozen=True, slots=True)

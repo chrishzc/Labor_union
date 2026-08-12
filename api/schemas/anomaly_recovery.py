@@ -12,14 +12,23 @@ class _StrictModel(BaseModel):
 
 
 class RecoveryActionView(_StrictModel):
-    action_code: str
+    action_key: str
+    label: str
     owning_domain: str
-    command_name: str
-    preview_endpoint: str
-    subject_identity: str
-    subject_version: int = Field(ge=0)
-    required_inputs: list[str]
+    form_schema_key: str
+    source_binding_keys: list[str]
+    source_bindings: dict[str, str | int]
+    required_operator_inputs: list[str]
+    preview_operation: str
+    apply_operation: str | None = None
+    required_capability: str | None = None
+    completion_predicate: str
+    action_contract_version: int = Field(ge=1)
     requires_preview: bool
+
+    @property
+    def action_code(self) -> str:
+        return self.action_key
 
 
 class FinanceOccurrenceView(_StrictModel):

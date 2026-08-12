@@ -76,6 +76,7 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 logs/
+runtime_data/
 *.log
 *.pid
 *.tmp

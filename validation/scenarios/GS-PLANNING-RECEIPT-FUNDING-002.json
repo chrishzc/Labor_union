@@ -1,0 +1,53 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "GS-PLANNING-RECEIPT-FUNDING-002",
+  "track": "A",
+  "suite_id": "GS",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["GS-01", "GS-02", "GS-03", "GSM-04", "GSM-06", "GSM-07", "GSM-08"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GS-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GS-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GS-03",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GSM-04",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#GSM-06"
+  ],
+  "root_facts": [
+    "Eligibility-qualified official assignment service facts and a frozen subsidy unit-price policy.",
+    "An approved claim-item snapshot and immutable incoming government-bank receipt.",
+    "Client self-pay, government allocation, staff due date and union-advance facts used by the funding reducer."
+  ],
+  "forbidden_direct_seed": [
+    "claim batch requested or outstanding total",
+    "government receipt allocation or batch paid state",
+    "staff-payout funding projection or union advance work item"
+  ],
+  "commands": [
+    "Preview/Apply claim planning and replay the exact command.",
+    "Preview/Apply an exact approved-batch government receipt and replay the exact command.",
+    "Evaluate funding state at the due date for client-receipt, government-funded, union-advance and review cases."
+  ],
+  "expected": [
+    "Claim planning derives a TWD 5,600 draft from sixteen official hours at its frozen TWD 350 unit price and replays without a duplicate batch.",
+    "An exact TWD 5,600 government receipt records immutable transaction/allocation/projection/outbox/receipt effects and projects the approved batch as paid.",
+    "Funding remains client-receipt-required when self-pay exists; only exact government funding reaches government-funded, while absent, partial or excess facts select union-advance or review rather than auto-netting."
+  ],
+  "receipt_requirements": [
+    "root fixture and expected-manifest digests",
+    "claim and receipt formal write sequence with exact replay evidence",
+    "funding-state oracle assertions for exact, absent, partial and excess inputs"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_government_subsidy_claim_workflow.py tests\\test_government_subsidy_ledger_workflow.py tests\\test_staff_payout_funding.py"
+    ],
+    "test_paths": [
+      "tests/test_government_subsidy_claim_workflow.py",
+      "tests/test_government_subsidy_ledger_workflow.py",
+      "tests/test_staff_payout_funding.py"
+    ]
+  }
+}

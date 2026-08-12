@@ -1,0 +1,11 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "LINE-IDENTITY-DELIVERY-002",
+  "assertions": [
+    "Equivalent webhook payloads use one deterministic event identity and a changed payload does not collide.",
+    "Identity-flow and pending-review state machines reject expiry, replay, stale versions and missing capability before a role-local binding is made.",
+    "Delivery retries have bounded backoff and provider calls occur only after a committed claim.",
+    "Timeout and rate-limit provider responses remain retryable typed outcomes; an accepted retry key is one successful provider result.",
+    "This scenario does not verify the separate cross-role shared LINE identity decision; that remains in LINE-IDENTITY-DELIVERY-001."
+  ]
+}

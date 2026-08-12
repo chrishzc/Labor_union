@@ -1,0 +1,26 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "SP-EXACT-PAYOUT-STATE-002",
+  "test_kind": "external_input_fixture",
+  "root_inputs": [
+    "an immutable classified outgoing-bank fact",
+    "a staff primary-bank-account root",
+    "an open staff payable obligation root",
+    "operator selection, idempotency key, expected versions and correlation identity"
+  ],
+  "seed_fields": [
+    "outgoing_bank_fact.amount",
+    "outgoing_bank_fact.counterparty_account",
+    "staff_primary_bank_account.identity",
+    "staff_payable.remaining_amount",
+    "payout_apply_command.idempotency_key"
+  ],
+  "derived_fields": [
+    "staff_payout_ledger_event",
+    "staff_payout_obligation_link",
+    "staff_payable_projection.status",
+    "staff_payables_outbox_intent",
+    "staff_payables_apply_receipt"
+  ],
+  "expected_manifest_path": "validation/expected/SP-EXACT-PAYOUT-STATE-002.json"
+}

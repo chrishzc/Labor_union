@@ -20,6 +20,7 @@ from domains.case_import.case_import import (
     CaseImportDomainError,
     CaseImportFacts,
     CaseImportIssue,
+    ProvisionalRegistrationFacts,
 )
 from infrastructure.mysql.case_architecture_bootstrap_repository import (
     MySqlCaseArchitectureBootstrapRepository,
@@ -66,7 +67,8 @@ class MySqlCaseImportRepository:
         with _mysql_cursor(self._connection) as cursor:
             exists = _case_exists(cursor, intent.case_no, lock=for_update)
             policy = _load_rate_policy(cursor, intent, lock=for_update)
-        return CaseImportFacts(exists, policy)
+            registration = _load_provisional_registration(cursor, intent, lock=for_update)
+        return CaseImportFacts(exists, policy, registration)
 
     def claim_command(self, command, command_fingerprint):
         with _mysql_cursor(self._connection) as cursor:
@@ -92,9 +94,35 @@ class MySqlCaseImportRepository:
 
     def insert_case_roots(self, candidate) -> int:
         with _mysql_cursor(self._connection) as cursor:
-            client_id = _insert_client(cursor, candidate)
+            client_id = _upsert_case_client(cursor, candidate)
             _insert_order(cursor, candidate, client_id)
         return client_id
+
+    def consume_provisional_registration(self, command, candidate, client_id, import_event_id):
+        registration = candidate.provisional_registration
+        with _mysql_cursor(self._connection) as cursor:
+            cursor.execute(
+                "UPDATE beclass_records SET query_no=%s WHERE id=%s AND query_no IS NULL",
+                (candidate.case_no, registration.beclass_record_id),
+            )
+            if int(cursor.rowcount) != 1:
+                raise CaseImportStorageError("Provisional BeClass record changed.", retryable=False)
+            cursor.execute(
+                _PROVISIONAL_ISSUE_EVENT_INSERT_SQL,
+                (registration.registration_id, candidate.case_no, client_id, registration.beclass_record_id,
+                 import_event_id, command.idempotency_key.value, command.actor.actor_id, command.correlation_id.value),
+            )
+            event_id = int(cursor.lastrowid or 0)
+            cursor.execute(
+                "UPDATE provisional_client_registrations SET status='case_issued',active_line_user_id=NULL "
+                "WHERE id=%s AND status='submitted' AND active_line_user_id=%s",
+                (registration.registration_id, registration.line_user_id),
+            )
+            if int(cursor.rowcount) != 1:
+                raise CaseImportStorageError("Provisional registration changed.", retryable=False)
+        if event_id <= 0:
+            raise CaseImportStorageError("Provisional issue event missing.", retryable=False)
+        return event_id
 
     def create_architecture_bootstrap(self, command, candidate) -> int:
         return self._bootstrap.create_bootstrap(command, candidate.bootstrap)
@@ -148,6 +176,8 @@ class MySqlCaseImportRepository:
                     receipt.payroll_version,
                     receipt.scheduling_version,
                     receipt.scheduling_generation,
+                    receipt.provisional_registration_id,
+                    receipt.provisional_case_issue_event_id,
                     _canonical_json(_receipt_payload(receipt)),
                 ),
             )
@@ -184,6 +214,31 @@ def _case_exists(cursor, case_no, *, lock):
     return client_exists or cursor.fetchone() is not None
 
 
+def _load_provisional_registration(cursor, intent, *, lock):
+    if intent.provisional_registration_id is None:
+        return None
+    suffix = " FOR UPDATE" if lock else ""
+    cursor.execute(
+        "SELECT registration.id,registration.line_user_id,registration.status,registration.client_id,"
+        "registration.beclass_record_id,record.query_no,"
+        "EXISTS(SELECT 1 FROM provisional_registration_conflicts conflict "
+        "WHERE conflict.registration_id=registration.id AND conflict.status='open') AS has_open_conflict "
+        "FROM provisional_client_registrations registration "
+        "LEFT JOIN beclass_records record ON record.id=registration.beclass_record_id "
+        "WHERE registration.id=%s" + suffix,
+        (intent.provisional_registration_id,),
+    )
+    row = cursor.fetchone()
+    if not isinstance(row, Mapping):
+        return None
+    return ProvisionalRegistrationFacts(
+        int(row["id"]), str(row["line_user_id"]), str(row["status"]),
+        None if row["client_id"] is None else int(row["client_id"]),
+        None if row["beclass_record_id"] is None else int(row["beclass_record_id"]),
+        None if row["query_no"] is None else str(row["query_no"]), bool(row["has_open_conflict"]),
+    )
+
+
 def _load_rate_policy(cursor, intent, *, lock):
     identity = str(_client_attribute(intent, "identity_status"))
     try:
@@ -213,6 +268,20 @@ def _rate_policy(row):
         row["effective_from"],
         row["effective_until"],
     )
+
+
+def _upsert_case_client(cursor, candidate):
+    registration = candidate.provisional_registration
+    if registration is None:
+        return _insert_client(cursor, candidate)
+    assignments = ",".join(f"`{item.name}`=%s" for item in candidate.client_attributes)
+    cursor.execute(
+        f"UPDATE clients SET {assignments} WHERE id=%s AND case_no IS NULL AND line_user_id=%s",
+        tuple(item.value for item in candidate.client_attributes) + (registration.client_id, registration.line_user_id),
+    )
+    if int(cursor.rowcount) != 1:
+        raise CaseImportStorageError("Provisional client changed.", retryable=False)
+    return registration.client_id
 
 
 def _insert_client(cursor, candidate):
@@ -280,6 +349,8 @@ def _stored_receipt(row):
         int(row["bootstrap_event_id"]),
         PreviewFingerprint(str(row["source_fingerprint"])),
         PreviewFingerprint(str(row["preview_fingerprint"])),
+        None if row["provisional_registration_id"] is None else int(row["provisional_registration_id"]),
+        None if row["provisional_case_issue_event_id"] is None else int(row["provisional_case_issue_event_id"]),
     )
     if _json_object(row["result_snapshot"]) != _receipt_payload(receipt):
         raise RuntimeError("case_import_receipt_corrupt")
@@ -300,6 +371,8 @@ def _receipt_payload(receipt):
         "payroll_version": receipt.payroll_version,
         "scheduling_generation": receipt.scheduling_generation,
         "scheduling_version": receipt.scheduling_version,
+        "provisional_registration_id": receipt.provisional_registration_id,
+        "provisional_case_issue_event_id": receipt.provisional_case_issue_event_id,
     }
 
 
@@ -376,7 +449,7 @@ _RECEIPT_SELECT_SQL = (
     "SELECT command_fingerprint,source_fingerprint,preview_fingerprint,"
     "case_no,client_id,import_event_id,bootstrap_event_id,order_version,"
     "client_finance_version,payroll_version,scheduling_version,"
-    "scheduling_generation,result_snapshot FROM case_import_receipts "
+    "scheduling_generation,provisional_registration_id,provisional_case_issue_event_id,result_snapshot FROM case_import_receipts "
     "WHERE idempotency_key=%s FOR UPDATE"
 )
 _RECEIPT_INSERT_SQL = (
@@ -384,8 +457,13 @@ _RECEIPT_INSERT_SQL = (
     "(idempotency_key,command_fingerprint,source_fingerprint,"
     "preview_fingerprint,case_no,client_id,import_event_id,"
     "bootstrap_event_id,order_version,client_finance_version,"
-    "payroll_version,scheduling_version,scheduling_generation,"
-    "result_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+    "payroll_version,scheduling_version,scheduling_generation,provisional_registration_id,"
+    "provisional_case_issue_event_id,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)"
+)
+_PROVISIONAL_ISSUE_EVENT_INSERT_SQL = (
+    "INSERT INTO provisional_registration_case_issue_events "
+    "(registration_id,case_no,client_id,beclass_record_id,case_import_event_id,idempotency_key,actor,correlation_id) "
+    "VALUES (%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 
 __all__ = ["CaseImportMySqlUnitOfWork", "MySqlCaseImportRepository"]

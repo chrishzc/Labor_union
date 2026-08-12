@@ -25,6 +25,7 @@ from subsystems.case_import.beclass_import_review_workflow import (
 
 _CLIENT_COLUMNS = frozenset({"admin_notes", "address", "birth_date", "city", "created_at", "email", "ext", "name", "phone", "query_no", "refund_account_no", "refund_bank_code", "seq_num", "survey_details", "tel", "zip_code"})
 _STAFF_COLUMNS = frozenset({"address", "birthday", "care_babies", "city", "email", "has_massage_cert", "identity_card", "ip_address", "name", "phone", "registered_at", "service_regions", "special_skills", "status", "tel", "tel_ext", "weekly_rest_days", "zip_code"})
+_REVIEW_METADATA_FIELDS = frozenset({"validation_marker"})
 
 
 @dataclass(frozen=True)
@@ -47,7 +48,7 @@ class MySqlBeClassImportReviewWriter:
 
     def apply_corrected_row(self, candidate):
         table_name, identity_field, identity_length, allowed_columns = _target(candidate.source_kind)
-        payload = dict(candidate.corrected_payload)
+        payload = _owning_payload(candidate.corrected_payload)
         _validate_payload(payload, candidate.source_kind, allowed_columns)
         identity = require_canonical_text(payload[identity_field], identity_field, identity_length)
         try:
@@ -88,6 +89,14 @@ def _validate_payload(payload, source_kind, allowed_columns) -> None:
         _validate_staff_business_fields(payload)
         return
     _validate_client_business_fields(payload)
+
+
+def _owning_payload(candidate_payload) -> dict[str, object]:
+    return {
+        field: value
+        for field, value in candidate_payload.items()
+        if field not in _REVIEW_METADATA_FIELDS
+    }
 
 
 def _validate_client_business_fields(payload) -> None:

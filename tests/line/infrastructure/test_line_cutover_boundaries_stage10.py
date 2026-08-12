@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+import asyncio
+
+from line import line_bot
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -48,3 +51,20 @@ def test_canonical_worker_entrypoint_does_not_import_legacy_worker_eagerly() -> 
     import_prefix = source.split("def main", 1)[0]
 
     assert "from line.worker import" not in import_prefix
+
+
+def test_public_webhook_uses_canonical_boundary_even_with_legacy_environment(monkeypatch) -> None:
+    called = []
+
+    async def canonical(_request):
+        called.append(True)
+        return {"status": "canonical"}
+
+    monkeypatch.setenv("LINE_WEBHOOK_RUNTIME_MODE", "legacy")
+    monkeypatch.setenv("LINE_WORKER_RUNTIME_MODE", "legacy")
+    monkeypatch.setattr(line_bot, "canonical_line_webhook", canonical)
+
+    result = asyncio.run(line_bot.line_webhook(object()))
+
+    assert result == {"status": "canonical"}
+    assert called == [True]

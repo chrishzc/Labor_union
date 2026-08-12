@@ -149,8 +149,26 @@ actor、reason、evidence 與可選的 selected disposition target。狀態機�
 ```text
 pending_review
   ├─ authorized offset decision ─> offset_reserved ─> offset_applied
-  └─ authorized return decision ─> return_payable ─> partially_returned ─> returned
+  └─ authorized return decision ─> return_payable ──canonical outgoing bank fact reconciled──> partially_returned／returned
 ```
+
+#### Government payer 與退款帳戶主檔（2026-08-11 裁決）
+
+目前唯一合法付款方固定為 `hccg`／「新竹市政府」。Finance Import 對台新入款 memo 含
+「新竹市政府」時，分類為 Government Subsidy 並指向此 payer identity；一般補助入款不需要
+政府退款帳戶。
+
+`government_payers` 是 singleton master；`government_payer_receiving_accounts` 是其有效期間
+帳戶歷程。退款帳戶可長期不存在。只有人員在 `GOVSUB-006` 選擇「建立退還政府應付」而無有效
+帳戶時，異常中心的同一 typed form 才能讓具 system-admin 權限者新增／更新帳戶。
+
+- 不建立日常「資料維護」分頁；不在一般銀行匯入、補助申請或應付清冊中編輯此主檔；
+- 新增帳戶必填 bank code、account number、account name、effective date、reason、evidence；
+  舊資料不得原地覆寫，改以關閉舊有效期間後新增版本；
+- `ApplyGovernmentSubsidyOverpaymentReturn` fresh-read 取得唯一 active account，並將完整帳戶
+  fingerprint 與遮罩 display 值 snapshot 到政府退還應付；帳戶空白時 Preview fail closed，回
+  `government_subsidy_recipient_account_missing`；
+- offset 一律使用 fixed payer identity `hccg`，因此不再依 UI 或自由文字猜測付款方。
 
 #### Offset 規則
 
@@ -171,11 +189,22 @@ agency identity/name、bank code、account number masked/display value、account
 date、due date、法源／核准 evidence reference。Apply 建立獨立
 `government_overpayment_return` payable obligation；不得使用 client refund 或 staff payable 表示。
 
-該 obligation 可進每月 5 日會計師清冊，列型別固定為
+該 obligation 是系統唯一可交會計的「政府退款單」，可進下一期應付明細，列型別固定為
 `government_overpayment_return`，輸出 remaining、government recipient snapshot、來源
-overpayment/receipt identity 與 due date。清冊不改付款狀態。後續 canonical outgoing bank fact
-經 `Preview／ApplyGovernmentOverpaymentReturnPayout` 才 append payout allocation；實際少匯時
-保留 remaining，實際多匯時停止並建立新的 outbound amount anomaly，不得增加原 obligation。
+overpayment/receipt identity 與 due date。清冊是唯讀交辦資料，不命令、執行或推定會計已匯款。
+
+會計可因緊急情況在清冊日期前先行於系統外匯款；系統只在後續匯入 canonical outgoing bank
+fact 後，以退款對象的 canonical 收款帳戶與金額對回既有退款單，經
+`Preview／ApplyGovernmentOverpaymentReturnReconciliation` 追加不可變對帳紀錄並更新 remaining。
+退款單的 due date／明細產生日期不是配對條件；例如 7/15 退款單可由 7/1 的實際出款列核對。
+若同一對象與金額有多筆合法退款單，Preview 必須要求人員選定唯一退款單；實際多匯不得增加
+原 obligation，少匯保留 remaining。系統不得把「清冊生成」或「會計排程」視為付款事實。
+
+若 canonical outgoing bank fact 已解析為政府收款帳戶、可唯一對應尚未結清的政府退款單，且
+實際金額大於該退款單 remaining，Government Subsidy 必須投影 state-only `GOVSUB-007`。
+它只保留實際出款、原退款單、超額與來源版本的不可變證據；不得部分核銷、不得自動建立新的
+政府退款單、不得抵扣其他補助或 claim。人員仍由既有 Finance Import manual review 依另行核准的
+命令處理；沒有這項命令時 alert 保持 active。
 
 #### Disposition command contract
 

@@ -1,0 +1,21 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "DEP-LOCAL-TOPOLOGY-002",
+  "track": "B",
+  "suite_id": "DEP",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["metadata_fixture"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["DEP-01"],
+  "source_refs": ["document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"],
+  "root_facts": ["Version-controlled local docker-compose topology."],
+  "forbidden_direct_seed": ["network reachability, target-host acceptance or deployment health result"],
+  "commands": ["Inspect stateful service port bindings in the local container topology."],
+  "expected": ["Redis and MySQL bind only to loopback addresses; this static configuration check does not claim target-host edge or TLS acceptance."],
+  "receipt_requirements": ["compose artifact digest", "topology guard test digest"],
+  "execution": {
+    "runner": [".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_docker_compose_local_security.py"],
+    "test_paths": ["tests/test_docker_compose_local_security.py"]
+  }
+}

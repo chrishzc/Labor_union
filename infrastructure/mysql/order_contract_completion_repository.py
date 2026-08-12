@@ -75,6 +75,19 @@ class MySqlOrderContractCompletionRepository:
             return None
         return _stored_receipt(row)
 
+    def record_contract_identity(self, case_no: str, identity: str) -> None:
+        """Record the Orders-owned identity before appending completion."""
+        with self._connection.cursor() as cursor:
+            order = _select_order(cursor, case_no, lock=True)
+            existing = _optional_text(order.get("contract_identity"))
+            if existing is not None and existing != identity:
+                raise ValueError("contract_identity_already_recorded")
+            if existing is None:
+                cursor.execute(
+                    "UPDATE orders SET contract_identity=%s WHERE case_no=%s",
+                    (identity, case_no),
+                )
+
     def append_contract_completion_event(
         self,
         request: ContractCompletionApplyRequest,

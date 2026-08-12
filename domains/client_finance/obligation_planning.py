@@ -163,6 +163,19 @@ class ClientFinanceTermsCandidate:
 
 
 @dataclass(frozen=True, slots=True)
+class PrecontractDepositCandidate:
+    """The sole receivable that may exist before the client signs."""
+
+    case_no: str
+    expected_account_version: int
+    resulting_account_version: int
+    deposit_stage: ClientStagePlan
+    deposit_action: ClientObligationAction
+    mutates: bool
+    fingerprint: PreviewFingerprint
+
+
+@dataclass(frozen=True, slots=True)
 class ClientSettlementProjection:
     deposit_settled: bool
     all_formal_obligations_settled: bool
@@ -188,6 +201,65 @@ def build_client_finance_terms_candidate(
         for stage_plan in stage_plans
     )
     return _candidate(facts, stage_plans, actions)
+
+
+def build_precontract_deposit_candidate(
+    facts: ClientFinanceTermsFacts,
+    commitment_identity: str,
+) -> PrecontractDepositCandidate:
+    """Create only the deposit obligation from signed precontract service days."""
+
+    full_candidate = build_client_finance_terms_candidate(
+        facts, commitment_identity,
+    )
+    deposit_stage = _required_deposit_stage(full_candidate.stage_plans)
+    deposit_action = _required_deposit_action(full_candidate.actions)
+    _validate_precontract_deposit_action(deposit_action)
+    mutates = deposit_action.action is ClientObligationActionKind.CREATE_STAGE
+    resulting_version = facts.account_version + 1 if mutates else facts.account_version
+    return PrecontractDepositCandidate(
+        facts.case_no,
+        facts.account_version,
+        resulting_version,
+        deposit_stage,
+        deposit_action,
+        mutates,
+        fingerprint_payload(
+            {
+                "case_no": facts.case_no,
+                "commitment_identity": commitment_identity,
+                "account_version": facts.account_version,
+                "deposit_action": _action_payload(deposit_action),
+                "mutates": mutates,
+            }
+        ),
+    )
+
+
+def precontract_deposit_terms_impact(
+    candidate: PrecontractDepositCandidate,
+) -> ClientFinanceTermsCandidate:
+    """Adapt the single permitted precontract action for the canonical writer."""
+
+    return ClientFinanceTermsCandidate(
+        candidate.case_no,
+        candidate.expected_account_version,
+        candidate.resulting_account_version,
+        (candidate.deposit_stage,),
+        (candidate.deposit_action,),
+        ClientSettlementProjection(
+            False,
+            False,
+            fingerprint_payload(
+                {
+                    "deposit_settled": False,
+                    "all_formal_obligations_settled": False,
+                }
+            ),
+        ),
+        (),
+        candidate.fingerprint,
+    )
 
 
 def build_client_finance_terms_impact(
@@ -291,6 +363,31 @@ def _build_stage_plans(
         _stage_plan(facts, PaymentStage.FIRST, first_days, MoneyNTD(0)),
         _stage_plan(facts, PaymentStage.SECOND, second_days, MoneyNTD(0)),
     )
+
+
+def _required_deposit_stage(
+    stage_plans: tuple[ClientStagePlan, ...],
+) -> ClientStagePlan:
+    return next(
+        item for item in stage_plans if item.payment_stage is PaymentStage.DEPOSIT
+    )
+
+
+def _required_deposit_action(
+    actions: tuple[ClientObligationAction, ...],
+) -> ClientObligationAction:
+    return next(
+        item for item in actions if item.payment_stage is PaymentStage.DEPOSIT
+    )
+
+
+def _validate_precontract_deposit_action(action: ClientObligationAction) -> None:
+    allowed = {
+        ClientObligationActionKind.CREATE_STAGE,
+        ClientObligationActionKind.UNCHANGED,
+    }
+    if action.action not in allowed:
+        raise ValueError("precontract_deposit_obligation_conflict")
 
 
 def _split_charge_days(facts):

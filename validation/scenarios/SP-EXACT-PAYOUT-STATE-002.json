@@ -1,0 +1,44 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "SP-EXACT-PAYOUT-STATE-002",
+  "track": "A",
+  "suite_id": "SP",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["SP-01", "PSM-01"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#SP-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#PSM-01"
+  ],
+  "root_facts": [
+    "A staff-owned open payable obligation, its unique active bank-account root and the relevant staff-payables aggregate version.",
+    "A classified immutable outgoing-bank fact whose amount exactly equals the selected obligation."
+  ],
+  "forbidden_direct_seed": [
+    "staff payout ledger event or obligation link",
+    "staff payable completed status or aggregate version",
+    "outbox intent or Apply receipt"
+  ],
+  "commands": [
+    "Preview and Apply an exact payout against the selected bank fact and obligation.",
+    "Replay the exact command, then submit a stale-version and same-key-different-command variant."
+  ],
+  "expected": [
+    "An exact payout advances the staff-payables version and projects the selected obligation as completed.",
+    "The formal result appends one payout event, one obligation link, one outbox intent and one receipt in a single unit of work.",
+    "Exact replay performs no new write; stale and idempotency-mismatched commands return typed conflict results before persistence."
+  ],
+  "receipt_requirements": [
+    "root fixture and expected-manifest digests",
+    "exact-payout formal write sequence and resulting state assertion",
+    "replay, stale-version and idempotency-mismatch evidence"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_staff_payout_reconciliation_workflow.py"
+    ],
+    "test_paths": ["tests/test_staff_payout_reconciliation_workflow.py"]
+  }
+}

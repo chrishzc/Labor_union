@@ -1,0 +1,12 @@
+{
+  "contract": "labor-union-validation-staff-master/v1",
+  "staff": {
+    "name": "測試月嫂一號",
+    "identity_card": "T100000001",
+    "phone": "0911000001",
+    "birthday": "1988-01-15",
+    "city": "新竹市",
+    "status": "active",
+    "care_babies": 1
+  }
+}

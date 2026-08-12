@@ -574,8 +574,10 @@ async def line_webhook_get():
 @router.post("/webhook")
 @router.post("/webhook/")
 async def line_webhook(request: Request):
-    if line_webhook_runtime_mode() is LineRuntimeMode.CANONICAL:
-        return await canonical_line_webhook(request)
+    """The public webhook has one canonical inbox boundary after WP35 cutover."""
+    return await canonical_line_webhook(request)
+
+    '''Retired direct-writer webhook source retained only until history extraction.
     raw_body = await request.body()
     signature = request.headers.get("x-line-signature", "")
     channel_secret = os.getenv("LINE_CHANNEL_SECRET", "")
@@ -797,3 +799,4 @@ async def line_webhook(request: Request):
         conn.close()
         
     return {"status": "ok"}
+    '''

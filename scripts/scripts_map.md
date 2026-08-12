@@ -13,7 +13,7 @@
 - Todo:
   - [x] 在 clients 表新增 line_user_id (VARCHAR(100))
   - [x] 在 staff 表新增 line_user_id (VARCHAR(100)), weekly_rest_days (JSON), service_regions (JSON), special_skills (JSON)
-  - [x] 新增 orders 表 (包含 status, client_id, staff_id, cancel_reason, line_group_id, actual_start_date, contract_id 等欄位)
+  - [x] 新增 orders 表 (包含 status, client_id, staff_id, cancel_reason, line_group_id, actual_start_date, contract_identity 等欄位)
   - [x] 新增 matching_records 中介表 (包含 order_id, staff_id, caregiver_accepted, sent_at 等欄位)
   - [x] 在 db/schema.sql 新增帳務相關資料表 (以對照 帳務.xlsx 的收支與月嫂轉帳紀錄)
   - [x] 【架構重構】在 schema.sql 中標註未來將移除 case_no，並全面改用「查詢序號(案件編號)」作為關聯主鍵

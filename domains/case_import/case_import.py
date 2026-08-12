@@ -56,6 +56,9 @@ class CaseImportIssue(StrEnum):
     INVALID_ROOT_FACTS = "invalid_case_import_root_facts"
     DUPLICATE_CASE = "case_import_duplicate"
     BOOTSTRAP_BLOCKED = "case_import_bootstrap_blocked"
+    PROVISIONAL_REGISTRATION_NOT_FOUND = "provisional_registration_not_found"
+    PROVISIONAL_REGISTRATION_NOT_SUBMITTED = "provisional_registration_not_submitted"
+    PROVISIONAL_REGISTRATION_IDENTITY_MISMATCH = "provisional_registration_identity_mismatch"
 
 
 class CaseImportDomainError(ValueError):
@@ -120,6 +123,7 @@ class CaseImportIntent:
     client_attributes: tuple[ClientImportAttribute, ...]
     order: ImportedOrderRootFacts
     bootstrap: CaseArchitectureBootstrapIntent
+    provisional_registration_id: int | None = None
 
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
@@ -130,12 +134,26 @@ class CaseImportIntent:
             _raise_invalid("order root facts belong to another case")
         if self.bootstrap.case_no != self.case_no:
             _raise_invalid("bootstrap intent belongs to another case")
+        if self.provisional_registration_id is not None:
+            require_positive_integer(self.provisional_registration_id, "provisional registration id")
+
+
+@dataclass(frozen=True, slots=True)
+class ProvisionalRegistrationFacts:
+    registration_id: int
+    line_user_id: str
+    status: str
+    client_id: int | None
+    beclass_record_id: int | None
+    beclass_query_no: str | None
+    has_open_conflict: bool
 
 
 @dataclass(frozen=True, slots=True)
 class CaseImportFacts:
     case_exists: bool
     payroll_rate_policy: RatePolicyFacts | None
+    provisional_registration: ProvisionalRegistrationFacts | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.case_exists, bool):
@@ -150,6 +168,7 @@ class CaseImportCandidate:
     bootstrap: CaseArchitectureBootstrapCandidate
     source_fingerprint: PreviewFingerprint
     fingerprint: PreviewFingerprint
+    provisional_registration: ProvisionalRegistrationFacts | None = None
 
 
 # Kept cohesive so source and bootstrap fingerprints describe one candidate.
@@ -163,6 +182,7 @@ def build_case_import_candidate(
             "The case already exists and cannot be imported again.",
         )
     bootstrap = _build_bootstrap_candidate(facts, intent)
+    _validate_provisional_registration(facts.provisional_registration, intent)
     source_fingerprint = fingerprint_payload(_source_payload(intent))
     fingerprint = fingerprint_payload(
         {
@@ -177,7 +197,21 @@ def build_case_import_candidate(
         bootstrap,
         source_fingerprint,
         fingerprint,
+        facts.provisional_registration,
     )
+
+
+def _validate_provisional_registration(registration, intent) -> None:
+    if intent.provisional_registration_id is None:
+        return
+    if registration is None or registration.registration_id != intent.provisional_registration_id:
+        raise CaseImportDomainError(CaseImportIssue.PROVISIONAL_REGISTRATION_NOT_FOUND, "Provisional registration was not found.")
+    if registration.status != "submitted":
+        raise CaseImportDomainError(CaseImportIssue.PROVISIONAL_REGISTRATION_NOT_SUBMITTED, "Provisional registration is not submitted.")
+    if registration.client_id is None or registration.beclass_record_id is None or registration.beclass_query_no is not None or registration.has_open_conflict:
+        raise CaseImportDomainError(CaseImportIssue.PROVISIONAL_REGISTRATION_IDENTITY_MISMATCH, "Provisional registration cannot be safely issued.")
+    if _required_attribute(intent.client_attributes, "line_id") != registration.line_user_id:
+        raise CaseImportDomainError(CaseImportIssue.PROVISIONAL_REGISTRATION_IDENTITY_MISMATCH, "Case import LINE identity differs from provisional registration.")
 
 
 # Kept cohesive so the synthetic version-zero root cannot drift across helpers.
@@ -236,6 +270,7 @@ def _source_payload(intent):
         ),
         "order": _order_payload(intent.order),
         "bootstrap": _bootstrap_payload(intent.bootstrap),
+        "provisional_registration_id": intent.provisional_registration_id,
     }
 
 
@@ -294,5 +329,6 @@ __all__ = [
     "CaseImportIssue",
     "ClientImportAttribute",
     "ImportedOrderRootFacts",
+    "ProvisionalRegistrationFacts",
     "build_case_import_candidate",
 ]

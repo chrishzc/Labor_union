@@ -76,6 +76,7 @@ def render_client_receipt_reconciliation_panel(case_no: str, client: object) -> 
             preview = client.preview(case_no, preview_body)
             st.session_state[f"cr_preview_{case_no}"] = preview
             st.session_state[f"cr_preview_body_{case_no}"] = preview_body
+            st.session_state[f"cr_preview_operation_{case_no}"] = "normal"
             st.success("✅ 預覽成功產生！請在下方確認並送出。")
         except HTTPError as e:
             try:
@@ -91,9 +92,26 @@ def render_client_receipt_reconciliation_panel(case_no: str, client: object) -> 
     if preview_key in st.session_state:
         preview = st.session_state[preview_key]
         preview_body = st.session_state[f"cr_preview_body_{case_no}"]
+        operation_key = f"cr_preview_operation_{case_no}"
+        operation = st.session_state.get(operation_key, "normal")
         
         st.markdown("### 核銷預覽確認")
         st.json(preview.candidate)
+        if (
+            preview.candidate.get("status") == "review_required"
+            and "client_receipt_overpaid" in preview.candidate.get("blockers", [])
+        ):
+            st.warning("此筆實收超過應收；請建立客戶退款應付，不能以一般核銷直接套用。")
+            if st.button("產生超收退款應付預覽", key=f"cr_overage_preview_{case_no}"):
+                try:
+                    overage_preview = client.preview_overage(case_no, preview_body)
+                except HTTPError as error:
+                    st.error(f"超收處置預覽失敗: {error}")
+                else:
+                    st.session_state[preview_key] = overage_preview
+                    st.session_state[operation_key] = "overage"
+                    st.rerun()
+            return
         
         with st.form(f"cr_apply_form_{case_no}"):
             reason = st.text_input("核銷備註 (必填)", max_chars=500)
@@ -114,14 +132,13 @@ def render_client_receipt_reconciliation_panel(case_no: str, client: object) -> 
                     )
                     
                     try:
-                        result = client.apply(
-                            case_no=case_no, 
-                            body=apply_body, 
-                            idempotency_key=str(uuid.uuid4())
-                        )
-                        st.success(f"核銷成功！(結算 ID: {result.settlement_identity})")
+                        apply = client.apply_overage if operation == "overage" else client.apply
+                        result = apply(case_no, apply_body, str(uuid.uuid4()))
+                        message = "已建立客戶退款應付" if operation == "overage" else "核銷成功"
+                        st.success(f"{message}！(結算 ID: {result.settlement_identity})")
                         del st.session_state[preview_key]
                         del st.session_state[f"cr_preview_body_{case_no}"]
+                        st.session_state.pop(operation_key, None)
                         st.rerun()
                     except HTTPError as e:
                         try:

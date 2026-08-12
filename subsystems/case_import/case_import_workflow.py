@@ -72,6 +72,8 @@ class CaseImportReceipt:
     bootstrap_event_id: int
     source_fingerprint: PreviewFingerprint
     preview_fingerprint: PreviewFingerprint
+    provisional_registration_id: int | None = None
+    provisional_case_issue_event_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +117,10 @@ class CaseImportRepository(Protocol):
         candidate: CaseImportCandidate,
         client_id: int,
         bootstrap_event_id: int,
+    ) -> int: ...
+
+    def consume_provisional_registration(
+        self, command: ApplyCaseImport, candidate: CaseImportCandidate, client_id: int, import_event_id: int
     ) -> int: ...
 
     def save_receipt(
@@ -205,7 +211,10 @@ class CaseImportWorkflow:
             client_id,
             bootstrap_event_id,
         )
-        receipt = _receipt(candidate, client_id, import_event_id, bootstrap_event_id)
+        provisional_event_id = _consume_provisional_registration(
+            self._repository, command, candidate, client_id, import_event_id
+        )
+        receipt = _receipt(candidate, client_id, import_event_id, bootstrap_event_id, provisional_event_id)
         self._repository.save_receipt(
             command.idempotency_key,
             StoredCaseImportReceipt(command_fingerprint, receipt),
@@ -247,7 +256,13 @@ def _validate_preview(command, candidate) -> None:
     )
 
 
-def _receipt(candidate, client_id, import_event_id, bootstrap_event_id):
+def _consume_provisional_registration(repository, command, candidate, client_id, import_event_id):
+    if getattr(candidate, "provisional_registration", None) is None:
+        return None
+    return repository.consume_provisional_registration(command, candidate, client_id, import_event_id)
+
+
+def _receipt(candidate, client_id, import_event_id, bootstrap_event_id, provisional_event_id):
     return CaseImportReceipt(
         candidate.case_no,
         client_id,
@@ -260,6 +275,8 @@ def _receipt(candidate, client_id, import_event_id, bootstrap_event_id):
         bootstrap_event_id,
         candidate.source_fingerprint,
         _preview(candidate).fingerprint,
+        None if getattr(candidate, "provisional_registration", None) is None else candidate.provisional_registration.registration_id,
+        provisional_event_id,
     )
 
 
@@ -271,6 +288,7 @@ def _command_fingerprint(command) -> PreviewFingerprint:
             "preview_fingerprint": command.preview_fingerprint.value,
             "actor": command.actor.actor_id,
             "reason": command.reason,
+            "provisional_registration_id": command.intent.provisional_registration_id,
         }
     )
 

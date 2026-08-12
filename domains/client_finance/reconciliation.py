@@ -23,6 +23,7 @@ class PaymentStage(StrEnum):
 
 class ReconciliationStatus(StrEnum):
     EXACT = "exact"
+    OVERAGE = "overage"
     REVIEW_REQUIRED = "review_required"
 
 
@@ -63,6 +64,7 @@ class ClientReconciliationCandidate:
     payment_stage: PaymentStage
     bank_total: MoneyNTD
     obligation_total: MoneyNTD
+    overage_amount: MoneyNTD
     allocations: tuple[ReconciliationAllocation, ...]
     blockers: tuple[str, ...]
     settlement_identity: PreviewFingerprint
@@ -71,6 +73,8 @@ class ClientReconciliationCandidate:
 def build_reconciliation_candidate(
     bank_facts: tuple[IncomingBankFact, ...],
     obligations: tuple[ClientObligation, ...],
+    *,
+    allow_overage_disposition: bool = False,
 ) -> ClientReconciliationCandidate:
     payment_stage = _validate_inputs(bank_facts, obligations)
     bank_facts = tuple(sorted(bank_facts, key=lambda item: item.identity))
@@ -78,19 +82,37 @@ def build_reconciliation_candidate(
     bank_total = _sum_bank_facts(bank_facts)
     obligation_total = _sum_obligations(obligations)
     blocker = _amount_blocker(bank_total, obligation_total)
-    allocations = () if blocker else _allocate_exactly(bank_facts, obligations)
+    has_overage = blocker == "client_receipt_overpaid"
+    can_dispose_overage = has_overage and allow_overage_disposition
+    allocations = (
+        _allocate_to_obligations(bank_facts, obligations)
+        if not blocker or can_dispose_overage
+        else ()
+    )
     return ClientReconciliationCandidate(
-        status=_candidate_status(blocker),
+        status=_candidate_status(blocker, can_dispose_overage),
         payment_stage=payment_stage,
         bank_total=bank_total,
         obligation_total=obligation_total,
+        overage_amount=MoneyNTD(
+            bank_total.amount - obligation_total.amount if can_dispose_overage else 0
+        ),
         allocations=allocations,
         blockers=(blocker,) if blocker else (),
-        settlement_identity=_settlement_identity(bank_facts, obligations),
+        settlement_identity=_settlement_identity(
+            bank_facts,
+            obligations,
+            allow_overage_disposition=allow_overage_disposition,
+        ),
     )
 
 
-def _candidate_status(blocker: str | None) -> ReconciliationStatus:
+def _candidate_status(
+    blocker: str | None,
+    can_dispose_overage: bool,
+) -> ReconciliationStatus:
+    if can_dispose_overage:
+        return ReconciliationStatus.OVERAGE
     if blocker:
         return ReconciliationStatus.REVIEW_REQUIRED
     return ReconciliationStatus.EXACT
@@ -129,7 +151,7 @@ def _amount_blocker(bank_total: MoneyNTD, obligation_total: MoneyNTD) -> str | N
     return None
 
 
-def _allocate_exactly(
+def _allocate_to_obligations(
     bank_facts: tuple[IncomingBankFact, ...],
     obligations: tuple[ClientObligation, ...],
 ) -> tuple[ReconciliationAllocation, ...]:
@@ -137,7 +159,7 @@ def _allocate_exactly(
     bank_index = obligation_index = 0
     bank_remaining = bank_facts[0].amount.amount
     obligation_remaining = obligations[0].amount_due.amount
-    while bank_index < len(bank_facts):
+    while bank_index < len(bank_facts) and obligation_index < len(obligations):
         amount = min(bank_remaining, obligation_remaining)
         allocations.append(_allocation(bank_facts, obligations, bank_index, obligation_index, amount))
         bank_remaining -= amount
@@ -183,7 +205,12 @@ def _advance_obligation(obligations, index: int, remaining: int) -> tuple[int, i
     return next_index, next_amount
 
 
-def _settlement_identity(bank_facts, obligations) -> PreviewFingerprint:
+def _settlement_identity(
+    bank_facts,
+    obligations,
+    *,
+    allow_overage_disposition: bool,
+) -> PreviewFingerprint:
     return fingerprint_payload(
         {
             "bank_facts": tuple(
@@ -199,6 +226,7 @@ def _settlement_identity(bank_facts, obligations) -> PreviewFingerprint:
                 }
                 for item in obligations
             ),
+            "allow_overage_disposition": allow_overage_disposition,
         }
     )
 

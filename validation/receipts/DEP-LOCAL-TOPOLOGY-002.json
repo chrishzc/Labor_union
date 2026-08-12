@@ -1,0 +1,20 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "DEP-LOCAL-TOPOLOGY-002",
+  "scenario_digest": "5f66776b5a920cb64ea8f2d6c9f16c937c87a1fe19b9378fb170b121c042f2b5",
+  "result": "passed",
+  "assertion_count": 1,
+  "runner": [".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_docker_compose_local_security.py"],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "Version-controlled local container topology only"
+  },
+  "input_digests": {
+    "docker_compose": "e8c256a481bae0f7e8c75d0eb9a9da3d05a72847ab56088cb8991548d46603f3",
+    "topology_guard_test": "4c04a5b92071c3eacd1369ac31f6f166a7c24e985149d12ed1172f349d532665"
+  },
+  "input_paths": {
+    "docker_compose": "docker-compose.yml",
+    "topology_guard_test": "tests/test_docker_compose_local_security.py"
+  }
+}

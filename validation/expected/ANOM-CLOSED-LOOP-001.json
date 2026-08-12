@@ -1,0 +1,5 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "ANOM-CLOSED-LOOP-001",
+  "assertions": ["Detector creates one active alert identity from roots; replay has no duplicate occurrence.", "Claim race permits one actor and returns typed conflict to the other.", "Manual resolve cannot erase an active Domain defect.", "Owning correction auto-resolves; reintroduced root reopens with preserved history and typed UI repair context."]
+}

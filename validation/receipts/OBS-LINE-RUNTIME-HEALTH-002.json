@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "OBS-LINE-RUNTIME-HEALTH-002",
+  "scenario_digest": "8f6d8b7738b1f0ae700343ba47c6ec994a57f1bc55e28d4de2ce0cc92c5b923e",
+  "result": "passed",
+  "assertion_count": 18,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\line\\subsystems\\test_line_runtime_stage3.py tests\\line\\subsystems\\test_line_runtime_cutover_stage10.py tests\\line\\infrastructure\\test_line_schema_stage6.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "injected LINE runtime heartbeat, production-readiness and supervisor-boundary harness"
+  },
+  "input_digests": {
+    "runtime_worker_tests": "0ac8b052150f86298a971dae829abcde9736acbd109c10d387664209978a6fea",
+    "cutover_readiness_tests": "63d28b387e93fbe8201ffe53dd1090f0f732d75e1542291344e50b15674d33b0",
+    "supervisor_boundary_tests": "37f069073acccecec91f2a94c438617b8e672b0224386f42925a6f4fe35ce81c"
+  },
+  "input_paths": {
+    "runtime_worker_tests": "tests/line/subsystems/test_line_runtime_stage3.py",
+    "cutover_readiness_tests": "tests/line/subsystems/test_line_runtime_cutover_stage10.py",
+    "supervisor_boundary_tests": "tests/line/infrastructure/test_line_schema_stage6.py"
+  }
+}

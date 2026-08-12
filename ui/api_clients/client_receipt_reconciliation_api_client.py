@@ -68,3 +68,54 @@ class ClientReceiptReconciliationApiClient:
         response.raise_for_status()
         envelope = BaseResponse[ClientReceiptReceiptView].model_validate(response.json())
         return envelope.data
+
+    def preview_overage(
+        self,
+        case_no: str,
+        body: ClientReceiptPreviewBody,
+    ) -> ClientReceiptPreviewView:
+        return self._preview_at(case_no, body, "overage/preview")
+
+    def apply_overage(
+        self,
+        case_no: str,
+        body: ClientReceiptApplyBody,
+        idempotency_key: str,
+    ) -> ClientReceiptReceiptView:
+        return self._apply_at(case_no, body, idempotency_key, "overage/apply")
+
+    def _preview_at(
+        self,
+        case_no: str,
+        body: ClientReceiptPreviewBody,
+        suffix: str,
+    ) -> ClientReceiptPreviewView:
+        headers = dict(self._headers)
+        headers["X-Correlation-ID"] = "preview"
+        response = self._session.post(
+            f"{self._base_url}/api/v1/orders/{case_no}/client-finance/receipt-reconciliation/{suffix}",
+            json=body.model_dump(mode="json"),
+            headers=headers,
+            timeout=self._timeout,
+        )
+        response.raise_for_status()
+        return BaseResponse[ClientReceiptPreviewView].model_validate(response.json()).data
+
+    def _apply_at(
+        self,
+        case_no: str,
+        body: ClientReceiptApplyBody,
+        idempotency_key: str,
+        suffix: str,
+    ) -> ClientReceiptReceiptView:
+        headers = dict(self._headers)
+        headers["X-Correlation-ID"] = "apply"
+        headers["Idempotency-Key"] = idempotency_key
+        response = self._session.post(
+            f"{self._base_url}/api/v1/orders/{case_no}/client-finance/receipt-reconciliation/{suffix}",
+            json=body.model_dump(mode="json"),
+            headers=headers,
+            timeout=self._timeout,
+        )
+        response.raise_for_status()
+        return BaseResponse[ClientReceiptReceiptView].model_validate(response.json()).data

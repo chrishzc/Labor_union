@@ -1,0 +1,41 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "FI-CANONICAL-STAGING-003",
+  "track": "A",
+  "suite_id": "FI",
+  "status": "bound",
+  "requires_database": true,
+  "database_execution_mode": "persistent_append_only",
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["FI-01", "FSM-02", "FSM-03"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-03"
+  ],
+  "root_facts": [
+    "Two append-only normalized source occurrences with the same deterministic bank-content fingerprint and no matching account identity."
+  ],
+  "forbidden_direct_seed": [
+    "canonical finance-import row, fingerprint, classification, reconciliation state, occurrence or formal ledger row"
+  ],
+  "commands": [
+    "Stage each source occurrence through the canonical Finance Import staging service against the explicitly confirmed lu_test database."
+  ],
+  "expected": [
+    "The first source occurrence creates one canonical row; the second creates only a second occurrence for the same fingerprint.",
+    "Classification is non_business_review and reconciliation stays pending, with no client ledger, staff payout or government-subsidy transaction delta."
+  ],
+  "receipt_requirements": [
+    "root fixture and expected-manifest digests",
+    "canonical row/occurrence count assertion",
+    "classification/reconciliation and zero-formal-ledger delta assertion"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_staging_persistent_mysql_e2e.py"
+    ],
+    "test_paths": ["tests/test_finance_import_staging_persistent_mysql_e2e.py"]
+  }
+}

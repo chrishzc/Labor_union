@@ -1,0 +1,44 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "MIG-FAIL-CLOSED-REPLAY-003",
+  "track": "B",
+  "suite_id": "MIG",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["metadata_fixture", "filesystem_artifact", "process_network_harness"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["MIG-01", "MIG-04", "MIG-05", "MIG-06", "MIG-09"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "Temporary schema-part artifacts, source/candidate identity metadata and immutable plan/operation receipt files.",
+    "Injected SQL interruption, partial/drift object-state and exact-replay observations exposed through a fake isolated adapter."
+  ],
+  "forbidden_direct_seed": [
+    "schema exact result after a partial statement",
+    "cutover completed status or recovery success receipt",
+    "source database mutation or destructive candidate cleanup"
+  ],
+  "commands": [
+    "Apply schema parts with injected statement interruption and inspect the operation journal.",
+    "Attempt partial/drift replay, exact replay and resumable partial-schema continuation.",
+    "Validate source/candidate naming guards and receipt content across the simulated upgrade boundary."
+  ],
+  "expected": [
+    "An interrupted statement is journalled as failed or pending-part-completion and cannot be represented as an exact completed schema part.",
+    "Partial and drift states fail closed before replay, while an already exact part is safely skipped and a verifiable partial sequence may resume to exact.",
+    "All evidence uses temporary metadata/artifacts and a fake isolated connection; no live source or candidate database is mutated."
+  ],
+  "receipt_requirements": [
+    "scenario/source-aware digest",
+    "temporary artifact and fault-injection test digest",
+    "partial/drift/replay journal assertions"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_preserved_database_additive_upgrade_cutover.py"
+    ],
+    "test_paths": ["tests/test_preserved_database_additive_upgrade_cutover.py"]
+  }
+}
