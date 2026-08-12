@@ -17,7 +17,7 @@ from ui.api_clients.waiting_deposit_lock_api_client import (
 from ui.pages.scheduling.assignment_plan_panel import (
     render_assignment_plan_panel,
 )
-from ui.pages.scheduling.navigation_state import apply_one_time_default
+from ui.pages.scheduling.navigation_state import apply_one_time_default, staff_option_label
 from ui.pages.shared import (
     admin_auth_is_bypassed,
     build_admin_headers,
@@ -363,6 +363,11 @@ def _render_multi_segment_matching(
 ) -> None:
     """Render the multi-caregiver fallback for one negotiation-stage order."""
     case_no = order["case_no"]
+    staff_labels = {
+        staff_option_label(item): int(item["id"])
+        for item in staff
+        if item.get("id") is not None
+    }
     active_state_key = f"matching_active_state_{case_no}"
     active_state = {}
     if not preview_only:

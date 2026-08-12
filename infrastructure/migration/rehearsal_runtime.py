@@ -183,6 +183,10 @@ def _runtime_environment(database_environment):
     return environment
 
 
+def _read_smoke_headers():
+    return {}
+
+
 def _require_no_active_jobs(database_config, candidate_database):
     connection = database_config.connect(candidate_database)
     try:
