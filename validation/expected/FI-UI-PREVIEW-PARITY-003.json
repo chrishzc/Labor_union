@@ -1,0 +1,8 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "FI-UI-PREVIEW-PARITY-003",
+  "assertions": [
+    "The typed UI client and panel expose exactly the authoritative Preview's version, fingerprint, blockers and counts.",
+    "The Preview path has zero formal finance ledger, staff payout and government-subsidy transaction delta."
+  ]
+}

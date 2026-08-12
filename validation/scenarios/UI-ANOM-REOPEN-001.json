@@ -1,0 +1,22 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "track": "B",
+  "suite_id": "PERF",
+  "scenario_id": "UI-ANOM-REOPEN-001",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["PERF-UI-ANOM-REOPEN-001"],
+  "source_refs": ["document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#Contract Signing"],
+  "root_facts": ["One active scheduling root fact that can open, resolve and recur as an anomaly."],
+  "forbidden_direct_seed": ["Direct alert-state mutation outside the anomaly owner workflow."],
+  "commands": ["Open, owner-repair, and recur the scheduling root through the anomaly workflow."],
+  "receipt_requirements": ["The receipt records the same alert identity across open, resolve and reopen transitions."],
+  "fixture_runner": "scripts/seed_validation_anomaly_scenario.py",
+  "verifier": "scripts/verify_anomaly_reopen_scenario.py",
+  "expected": [
+    "An active scheduling root opens an anomaly.",
+    "Manual resolve cannot erase a still-active root; owner repair auto-resolves it.",
+    "A recurrent root reopens the same alert with preserved timeline."
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "ORD-LIFECYCLE-001",
+  "test_kind": "domain_root_data",
+  "root_inputs": ["versioned service terms", "contract completion command", "exact deposit and reversal bank facts", "assignment intent", "actual-start and cancellation commands"],
+  "seed_fields": ["order_terms.service_days", "order_terms.planned_start", "contract_completion.command_id", "bank_receipt.amount", "assignment_intent.staff_id", "cancellation.reason"],
+  "derived_fields": ["orders.status", "orders.end_date", "orders.actual_end_date", "orders.lifecycle_version", "service_day_projection", "order_lifecycle_receipt", "outbox.status"],
+  "expected_manifest_path": "validation/expected/ORD-LIFECYCLE-001.json"
+}

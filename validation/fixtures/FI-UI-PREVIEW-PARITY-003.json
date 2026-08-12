@@ -1,0 +1,23 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "FI-UI-PREVIEW-PARITY-003",
+  "test_kind": "external_input_fixture",
+  "root_inputs": [
+    "unique Taishin workbook bytes and immutable ingress identity",
+    "typed API authentication headers for the isolated test app",
+    "explicit lu_test_validation_v1 target configuration"
+  ],
+  "seed_fields": [
+    "workbook.source_rows",
+    "workbook.debit_amount",
+    "ingest_command.idempotency_key",
+    "ingest_command.correlation_id"
+  ],
+  "derived_fields": [
+    "finance_import_batch.preview_fingerprint",
+    "finance_import_batch.preview_counts",
+    "ui.finance_import_batch_preview",
+    "formal_finance_ledger_entry"
+  ],
+  "expected_manifest_path": "validation/expected/FI-UI-PREVIEW-PARITY-003.json"
+}

@@ -1,0 +1,12 @@
+{
+  "contract": "labor-union-verification-scenario/v1", "scenario_id": "KN-KNOWLEDGE-LIFECYCLE-001", "track": "A", "suite_id": "KN", "status": "bound", "requires_database": true, "database_execution_mode": "persistent_append_only",
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["KNOW-01", "KSM-01", "KSM-02", "KSM-03"],
+  "source_refs": ["document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#KSM-01"],
+  "root_facts": ["Versioned knowledge-source bytes, separate author/reviewer identities and a temporary capability grant."],
+  "forbidden_direct_seed": ["review/publication state, citations, retrieval answer or authoritative flag"],
+  "commands": ["Grant capability, ingest, review, publish, then issue a retrieval query."],
+  "expected": ["A temporary capability grant revokes the target session.", "A separately reviewed draft becomes published and is retrieved as a non-authoritative answer with its source citation."],
+  "receipt_requirements": ["source/version digest", "grant/session and lifecycle state deltas", "citation/query result"],
+  "execution": {"runner": [".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_access_knowledge_disposable_mysql_e2e.py"], "test_paths": ["tests/test_access_knowledge_disposable_mysql_e2e.py"]}
+}

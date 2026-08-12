@@ -1,0 +1,43 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "ANOM-PROJECTOR-CLOSED-LOOP-003",
+  "track": "A",
+  "suite_id": "ANOM",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["ASM-01", "ASM-02"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ASM-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ASM-02"
+  ],
+  "root_facts": [
+    "A detector's bounded desired alert state: code, source domain, case key, reason and safe display details.",
+    "An authorized claim/resolve actor and a later detector absence result produced by the owning-domain repair."
+  ],
+  "forbidden_direct_seed": [
+    "current alert status, claim/resolve workflow metadata or UI detail row"
+  ],
+  "commands": [
+    "Project the detector desired state, claim and manually resolve it.",
+    "Replay the still-active desired state, then project absence after the owning root has been repaired.",
+    "Read alert detail and list projection without mutation."
+  ],
+  "expected": [
+    "The detector desired state creates the alert; claim and manual resolve act only on that projection.",
+    "A remaining active root reopens the manual resolution, while a later absent root auto-resolves the open projection.",
+    "List/detail reads return bounded safe data and do not mutate alert state."
+  ],
+  "receipt_requirements": [
+    "root fixture and expected-manifest digests",
+    "claim/resolve/reopen/auto-resolve state assertions",
+    "read-only list/detail assertion"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_system_alert_service.py"
+    ],
+    "test_paths": ["tests/test_system_alert_service.py"]
+  }
+}

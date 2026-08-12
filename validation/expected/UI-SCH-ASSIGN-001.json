@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-ui-validation-expected/v1",
+  "scenario_id": "UI-SCH-ASSIGN-001",
+  "assertions": [
+    "One effective commitment has one exact conversion.",
+    "The conversion creates exactly one assignment and five schedule days.",
+    "No pre-conversion schedule is accepted as execution evidence."
+  ]
+}

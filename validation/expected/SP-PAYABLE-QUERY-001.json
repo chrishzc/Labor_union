@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"SP-PAYABLE-QUERY-001","assertions":["Payable identity remains source-level while same staff/month is query-only aggregate.","Exact payout, mismatch and reversal preserve money/source trace.","Read/export preparation has zero business mutation."]}

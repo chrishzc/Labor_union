@@ -1,0 +1,30 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "track": "B",
+  "suite_id": "PERF",
+  "scenario_id": "UI-ORD-CONTRACT-001",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["PERF-UI-ORD-CONTRACT-001"],
+  "source_refs": ["document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#Contract Signing"],
+  "fixture_runner": "scripts/run_contract_signing_normal_chain.py",
+  "verifier": "scripts/verify_contract_signing_normal_chain.py",
+  "root_facts": [
+    "Case Import root, approved staff and client templates, immutable archives, LINE identities and matching plan.",
+    "Staff signatures create an exact precontract commitment; deposit reconciliation remains independent from client signing.",
+    "Client signed return atomically records contract identity, contract completion and remaining obligations before exact execution conversion."
+  ],
+  "forbidden_direct_seed": [
+    "contract identity, signing events, commitment, obligation settlement, assignment, schedule or derived projections"
+  ],
+  "commands": [
+    "Case Import, staff/client contract send and signed-return applications, Finance Import correction, Orders outbox consumer, availability lock and Assignment Plan Apply."
+  ],
+  "expected": [
+    "The normal chain completes only through canonical Case Import, Contract Signing, Commitment and execution ownership boundaries."
+  ],
+  "receipt_requirements": [
+    "runner command lineage", "database verifier JSON", "typed API/UI state evidence", "same-key replay evidence"
+  ]
+}

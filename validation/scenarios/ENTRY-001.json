@@ -1,0 +1,43 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "ENTRY-001",
+  "track": "B",
+  "suite_id": "ENTRY",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["metadata_fixture"],
+  "coverage_ids": ["ENTRY-01", "ENTRY-02", "ENTRY-03"],
+  "source_refs": [
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#2",
+    "document/架構重整/01_規格基線/19_Global_Entry_Point_Governance.md#4"
+  ],
+  "root_facts": [
+    "The versioned entry-point review queue.",
+    "Static discovery output from FastAPI routes, Streamlit pages and CLI __main__ entry points."
+  ],
+  "forbidden_direct_seed": [
+    "runtime invocation counts",
+    "business payloads or personnel identities",
+    "a synthetic active status without its operator, scenario and canonical owner"
+  ],
+  "commands": [
+    "Run the entry-point discovery and queue validator.",
+    "Run focused regression for each retired_410, operator_only and removed entry selected by the fixture."
+  ],
+  "expected": [
+    "Every discovered entry has exactly one queue item.",
+    "active entries include business scenario, operator, canonical owner and public or operator contract.",
+    "retired_410 is HTTP-only and returns typed 410; operator_only is CLI-only.",
+    "review_required is never treated as active and removed source paths are unreachable."
+  ],
+  "receipt_requirements": [
+    "discovery digest",
+    "queue validation result",
+    "focused regression output",
+    "entry identifiers only; no runtime telemetry or personal data"
+  ],
+  "execution": {
+    "runner": [".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_entrypoint_review_queue.py"],
+    "test_paths": ["tests/test_entrypoint_review_queue.py"]
+  }
+}

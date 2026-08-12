@@ -1,0 +1,38 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "ORD-LIFECYCLE-001",
+  "track": "A",
+  "suite_id": "ORD",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["ORD-01", "ORD-02", "ORD-03", "ORD-04", "ORD-05", "OSM-01", "OSM-02", "OSM-03", "OSM-04", "OSM-05", "OSM-06", "OSM-07", "OSM-08"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ORD-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#OSM-01"
+  ],
+  "root_facts": [
+    "Client terms, fixed clock, contract-completion command and idempotency identity.",
+    "Exact bank receipt and later reversal roots, assignment intents and actual-start confirmation.",
+    "Cancellation command plus the official service-day roots that exist at that instant."
+  ],
+  "forbidden_direct_seed": [
+    "orders.status, end_date, actual_end_date or lifecycle version",
+    "client receivable summaries, payroll projections or service-day projections",
+    "order history, locking state, outbox or lifecycle receipts"
+  ],
+  "commands": [
+    "Preview and Apply terms, then complete the contract once and replay the identical command.",
+    "Reconcile the exact deposit, confirm actual start, and project official service days.",
+    "Exercise cancellation, reopen guards, pre-service reversal, in-service reversal and completion locking."
+  ],
+  "expected": [
+    "Preview has zero write delta; Apply creates one coherent formal transaction and replay returns its receipt.",
+    "Every lifecycle transition is derived from roots and guards; caller-supplied target status is rejected.",
+    "Cancellation after full service, stale confirmation and invalid reopen leave state and row deltas unchanged.",
+    "API and UI expose negotiation, established, active, completed, cancelled and locked states without hidden mutation."
+  ],
+  "receipt_requirements": [
+    "root and expected-manifest digests", "event/projection/outbox row deltas", "state and version history", "typed API/UI snapshots", "replay, reversal and rollback evidence"
+  ]
+}

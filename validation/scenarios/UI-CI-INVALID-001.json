@@ -1,0 +1,18 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "track": "B",
+  "suite_id": "PERF",
+  "scenario_id": "UI-CI-INVALID-001",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["PERF-UI-CI-INVALID-001"],
+  "source_refs": ["document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#Contract Signing"],
+  "forbidden_direct_seed": ["Direct insertion of Client, Order or Client Finance roots for an invalid source."],
+  "database_mode": "append-only",
+  "root_facts": ["One privacy-safe invalid client import source row."],
+  "commands": ["Record the invalid source through Case Import intake, replay it, then submit a changed-payload conflict."],
+  "expected": ["One open review root and review-opened outbox intent exist.", "The stored identifier and payload are privacy-safe.", "No Client, Orders, or Client Finance root is created by the invalid source."],
+  "receipt_requirements": ["The receipt records the review root, exact replay result, changed-payload conflict and unchanged protected-root counts."],
+  "limitations": ["UI screenshot/manual operation evidence remains required."]
+}

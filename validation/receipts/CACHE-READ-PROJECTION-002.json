@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "CACHE-READ-PROJECTION-002",
+  "scenario_digest": "1106582cfd436942b737aff2e058d29ec53f4508fac76d122eea2d3a20a3a92e",
+  "result": "passed",
+  "assertion_count": 8,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_holiday_query_cache_boundary.py tests\\test_g15_cache_boundary_contract.py tests\\test_performance_policies.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "read-only cache projection and formal-workflow cache boundary"
+  },
+  "input_digests": {
+    "holiday_cache_tests": "7c70e322443f1d0edbd532ff0f6dc672fbb33d290e05788673aa6bb1e0b7d374",
+    "cache_boundary_tests": "e48ff1aa2bf38b39aaaa997df622334f8b3ed1ed1e17f8f281139d849acc0547",
+    "performance_policy_tests": "14144b004784becbee6f90aed447f3328dac83e13dce83a61f207ae1dae103b3"
+  },
+  "input_paths": {
+    "holiday_cache_tests": "tests/test_holiday_query_cache_boundary.py",
+    "cache_boundary_tests": "tests/test_g15_cache_boundary_contract.py",
+    "performance_policy_tests": "tests/test_performance_policies.py"
+  }
+}

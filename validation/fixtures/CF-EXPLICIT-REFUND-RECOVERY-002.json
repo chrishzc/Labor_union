@@ -1,0 +1,28 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "CF-EXPLICIT-REFUND-RECOVERY-002",
+  "test_kind": "domain_root_data",
+  "root_inputs": [
+    "disposable cancelled-case precondition for the isolated correction boundary",
+    "immutable TWD 300 and TWD 200 outgoing bank facts",
+    "explicit operator underpayment-recovery confirmation",
+    "Apply idempotency and correlation identities"
+  ],
+  "seed_fields": [
+    "refund_obligation.established_event",
+    "bank_outflow.amount",
+    "bank_outflow.classification_type",
+    "recovery_command.allow_partial_refund_recovery",
+    "apply_command.idempotency_key"
+  ],
+  "derived_fields": [
+    "client_ledger_entry.id",
+    "client_ledger_obligation_allocation.amount",
+    "client_obligation.amount_due_ntd",
+    "client_obligation.status",
+    "finance_import_row.reconciliation_status",
+    "client_refund_reversal_apply_receipt"
+  ],
+  "permitted_same_named_input_fields": ["bank_outflow.amount"],
+  "expected_manifest_path": "validation/expected/CF-EXPLICIT-REFUND-RECOVERY-002.json"
+}

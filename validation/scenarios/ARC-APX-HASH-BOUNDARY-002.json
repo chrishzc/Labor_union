@@ -1,0 +1,41 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "ARC-APX-HASH-BOUNDARY-002",
+  "track": "B",
+  "suite_id": "ARC",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["filesystem_artifact", "process_network_harness"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["ARC-01", "ARC-02"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "Typed payable/refund source views, a fixed export clock and an isolated archive-adapter result.",
+    "Archive-adapter hash-match and hash-mismatch outcomes."
+  ],
+  "forbidden_direct_seed": [
+    "workbook bytes, content digest, archive path or export success receipt"
+  ],
+  "commands": [
+    "Build the payable workbook under a read snapshot, calculate its digest and save it through the archive adapter.",
+    "Inject a returned archive digest mismatch."
+  ],
+  "expected": [
+    "The successful receipt exposes workbook bytes whose SHA-256 equals the archive adapter's confirmed digest.",
+    "A mismatched archive digest raises accounts_payable_archive_failed and does not return a forged export success.",
+    "This harness does not prove retention policy, capacity behavior or a live filesystem publish."
+  ],
+  "receipt_requirements": [
+    "scenario/source-aware digest",
+    "export/archive harness digest",
+    "matching-hash and fail-closed mismatch assertions"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_accounts_payable_export_workflow.py"
+    ],
+    "test_paths": ["tests/test_accounts_payable_export_workflow.py"]
+  }
+}

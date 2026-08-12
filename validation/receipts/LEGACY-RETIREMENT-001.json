@@ -1,0 +1,31 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "LEGACY-RETIREMENT-001",
+  "scenario_digest": "a8292f5f30b7b23652c7c8c0ac2301fc407406271a09eafefaea401493c5636a",
+  "result": "passed",
+  "assertion_count": 14,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_legacy_client_receipt_dispatch_retirement.py tests\\test_legacy_finance_import_reprocess_retirement.py tests\\test_legacy_leave_resolution_retirement.py tests\\test_legacy_order_full_list_retired.py tests\\test_legacy_staff_transfer_reconciliation_retirement.py tests\\test_legacy_government_subsidy_receipt_reconciliation_retirement.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "static legacy entry-point and writer retirement boundaries"
+  },
+  "input_digests": {
+    "legacy_client_receipt_tests": "586320a2d09ef2f569ad3468e954de29881a32f28df8e4c0d301c80fa8acf9ab",
+    "legacy_finance_import_tests": "7547d3feb7395c69edcfd895ab33e560c54b3d0d94db8ee6072529ab36ff55cf",
+    "legacy_leave_tests": "88a46e0e7ece8da3e7cb191035ecc5a4bd5a75e8ae88be3328b5bcb9aea4fe31",
+    "legacy_order_tests": "60b1dad149c1c7fb97afc3158a172ba9234f3a05bc17b7e1694f14347f213e74",
+    "legacy_staff_transfer_tests": "3a3fad0d320bdc3332fb24f7b1df30ca8f662cd9e8e152256c2319fc5153fdcb",
+    "legacy_subsidy_tests": "13eb1417fe95dbdb2cbd7ea4891761bf02ae52cb30c39f8fb2f496f269526d46"
+  },
+  "input_paths": {
+    "legacy_client_receipt_tests": "tests/test_legacy_client_receipt_dispatch_retirement.py",
+    "legacy_finance_import_tests": "tests/test_legacy_finance_import_reprocess_retirement.py",
+    "legacy_leave_tests": "tests/test_legacy_leave_resolution_retirement.py",
+    "legacy_order_tests": "tests/test_legacy_order_full_list_retired.py",
+    "legacy_staff_transfer_tests": "tests/test_legacy_staff_transfer_reconciliation_retirement.py",
+    "legacy_subsidy_tests": "tests/test_legacy_government_subsidy_receipt_reconciliation_retirement.py"
+  }
+}

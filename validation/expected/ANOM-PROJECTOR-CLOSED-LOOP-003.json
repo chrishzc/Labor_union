@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "ANOM-PROJECTOR-CLOSED-LOOP-003",
+  "assertions": [
+    "A desired detector state creates the current alert without seeding it directly.",
+    "Manual resolve is reopened when the source predicate remains true and auto-resolved only after detector absence represents owning-root repair.",
+    "Alert list and detail reads are bounded and have zero state mutation."
+  ]
+}

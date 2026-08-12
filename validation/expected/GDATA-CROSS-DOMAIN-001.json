@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"GDATA-CROSS-DOMAIN-001","assertions":["Exact retry returns one receipt; mismatched retry conflicts.","Any persistence seam failure rolls back formal effects across Domains.","Post-commit side effect failure cannot forge business success or duplicate event."]}

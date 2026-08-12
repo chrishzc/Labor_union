@@ -1,0 +1,10 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "CF-EXPLICIT-REFUND-RECOVERY-002",
+  "assertions": [
+    "A TWD 300 customer-refund outflow against a TWD 500 obligation is rejected with refund_requires_exact_settlement unless recovery is explicitly confirmed.",
+    "The rejected normal path has zero ledger, allocation and receipt row delta.",
+    "The explicit underpayment recovery records TWD 300, leaves TWD 200 open and returns the stored receipt on exact replay.",
+    "A later TWD 200 exact outflow settles the remaining obligation without requiring recovery mode."
+  ]
+}

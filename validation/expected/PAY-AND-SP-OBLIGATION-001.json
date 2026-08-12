@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"PAY-AND-SP-OBLIGATION-001","assertions":["Assignment components sum to independently calculated payable obligation.","Only exact selected payout completes; partial/overpaid/mismatch is anomaly.","Reversal is append-only and restores remaining payable without deleting evidence."]}

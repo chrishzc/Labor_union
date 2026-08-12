@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "CI-CANONICAL-ROOTS-002",
+  "assertions": [
+    "One root payload creates one canonical client and one negotiated order with lifecycle version zero.",
+    "The same transaction creates exactly one architecture bootstrap event, import event and import receipt.",
+    "Replaying the same Apply identity returns the original receipt without duplicating any canonical row."
+  ]
+}

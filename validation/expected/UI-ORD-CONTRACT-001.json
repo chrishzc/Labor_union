@@ -1,0 +1,10 @@
+{
+  "contract": "labor-union-ui-validation-expected/v1",
+  "scenario_id": "UI-ORD-CONTRACT-001",
+  "assertions": [
+    "Every signed document is archive-digest linked.",
+    "The staff and client signed events, one effective commitment and one converted terminal event exist for the case.",
+    "The deposit is settled without being recreated by client signing, and contract_identity is present exactly once.",
+    "Execution contains one assignment and the exact five scheduled service days only after commitment conversion."
+  ]
+}

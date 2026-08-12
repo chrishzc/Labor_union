@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-ui-validation-expected/v1",
+  "scenario_id": "UI-GS-CLAIM-001",
+  "assertions": [
+    "Government Subsidy planning derives one draft batch from official service facts.",
+    "The twelve item amounts conserve the requested batch total.",
+    "Apply persists one outbox and receipt; exact replay returns the stored receipt."
+  ]
+}

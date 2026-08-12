@@ -1,0 +1,32 @@
+{
+  "contract": "labor-union-validation-schema/v1",
+  "release_id": "labor-union-validation-schema-2026-08-10-v1",
+  "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
+  "base_schema": {
+    "path": "db/schema.sql",
+    "sha256": "bc00526f7f7af488a080503afe71b0348a58c68551024d5a94d86bca983593b0"
+  },
+  "schema_parts": {
+    "directory": "db/schema_parts",
+    "selection": "all_sql_files",
+    "order": "numeric_prefix_then_letter_suffix_then_filename",
+    "expected_count": 96,
+    "ordered_digest_sha256": "20a40a7ffec27b7fb92b2e18985b3f388c5c077a61167309d8d2477995fd0575",
+    "terminal_artifact": "999_v_order_details_view.sql"
+  },
+  "full_release": {
+    "path": "db/releases/labor_union_validation_schema_v1.sql",
+    "database_token": "__LU_TEST_DATABASE__",
+    "generation": "base_schema_then_ordered_schema_parts"
+  },
+  "postcheck": {
+    "required_views": ["v_order_details"],
+    "minimum_trigger_count": 203,
+    "require_no_missing_versioned_tables": true
+  },
+  "database_safety": {
+    "accepted_database_pattern": "^lu_test_[a-z0-9_]+$",
+    "confirmation_must_equal_database": true,
+    "old_candidate_database_is_read_only": "union_db_candidate_20260803_v5"
+  }
+}

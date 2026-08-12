@@ -1,0 +1,10 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "APX-PAYABLE-VIEWMODEL-002",
+  "assertions": [
+    "Eligible payables aggregate deterministically and preserve source obligation identities.",
+    "Completed/anomalous/non-payable data is excluded and inconsistent transfer identity is rejected.",
+    "XLSX output has stable transfer columns and only a hash-verified archive adapter receipt can report export success.",
+    "The UI client uses canonical Finance Reports query, export and archive routes."
+  ]
+}

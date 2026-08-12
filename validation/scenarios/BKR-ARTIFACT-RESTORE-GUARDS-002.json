@@ -1,0 +1,44 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "BKR-ARTIFACT-RESTORE-GUARDS-002",
+  "track": "B",
+  "suite_id": "BKR",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["filesystem_artifact", "process_network_harness"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["BKR-01", "BKR-02", "BKR-03", "BKR-05"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "Temporary mysqldump-shaped artifact bytes, source identity metadata and backup receipt metadata.",
+    "Isolated restore adapter outcomes that model artifact mismatch, restored-data mismatch and program-evidence mismatch."
+  ],
+  "forbidden_direct_seed": [
+    "successful restore receipt",
+    "matching artifact digest after corruption",
+    "source overwrite or production-target identity"
+  ],
+  "commands": [
+    "Validate a backup artifact against its source and receipt digest before restore.",
+    "Attempt restore into an isolated candidate adapter with corrupted or mismatched data/program evidence.",
+    "Inspect partial restore receipts and source/candidate identity guards."
+  ],
+  "expected": [
+    "A mismatched or malformed backup stops before restore and cannot claim a valid recovery artifact.",
+    "Restored data or program evidence mismatch retains a partial candidate receipt and fails closed instead of overwriting source state.",
+    "The harness uses only temporary artifacts and fake isolated adapters; it does not exercise or assert success for a live database restore."
+  ],
+  "receipt_requirements": [
+    "scenario/source-aware digest",
+    "temporary backup/restore harness digest",
+    "artifact validation and restore-failure evidence"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_preserved_database_additive_upgrade_cutover.py"
+    ],
+    "test_paths": ["tests/test_preserved_database_additive_upgrade_cutover.py"]
+  }
+}

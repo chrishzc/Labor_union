@@ -1,0 +1,49 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "MIG-VALIDATION-SCHEMA-002",
+  "track": "B",
+  "suite_id": "MIG",
+  "status": "bound",
+  "requires_database": true,
+  "database_execution_mode": "read_only_existing_database",
+  "test_kinds": ["metadata_fixture", "filesystem_artifact", "process_network_harness"],
+  "coverage_ids": ["MIG-01", "MIG-04", "MIG-07"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"
+  ],
+  "root_facts": [
+    "Versioned base-schema and ordered schema-part artifacts with an immutable release manifest.",
+    "An explicitly named existing lu_test_validation_v1 database."
+  ],
+  "forbidden_direct_seed": [
+    "schema verification result, object postcheck result or database-overwrite approval"
+  ],
+  "commands": [
+    "Verify base and ordered-part digests against the manifest.",
+    "Read-only postcheck the existing disposable database against declared tables, views and triggers.",
+    "Attempt bootstrap preflight against an existing database and verify it refuses overwrite."
+  ],
+  "expected": [
+    "Release text is reproducible from the manifest and its declared object set includes orders, v_order_details and lifecycle triggers.",
+    "The test database has contract_identity, queryable v_order_details and at least the declared trigger minimum.",
+    "Bootstrap refuses to overwrite an existing lu_test_* database."
+  ],
+  "receipt_requirements": [
+    "manifest and release artifacts",
+    "read-only database postcheck output",
+    "reproducibility and overwrite-refusal tests"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe scripts\\verify_validation_schema_manifest.py",
+      ".\\.venv\\Scripts\\python.exe scripts\\verify_validation_database.py --database lu_test_validation_v1",
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_verify_validation_schema_manifest.py tests\\test_bootstrap_disposable_mysql_schema.py"
+    ],
+    "test_paths": [
+      "scripts/verify_validation_schema_manifest.py",
+      "scripts/verify_validation_database.py",
+      "tests/test_verify_validation_schema_manifest.py",
+      "tests/test_bootstrap_disposable_mysql_schema.py"
+    ]
+  }
+}

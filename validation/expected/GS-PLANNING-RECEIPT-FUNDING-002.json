@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "GS-PLANNING-RECEIPT-FUNDING-002",
+  "assertions": [
+    "Sixteen eligible official hours at TWD 350 produce a TWD 5,600 draft claim without seeding a claim total.",
+    "One matching TWD 5,600 incoming government receipt settles the approved batch through formal ledger and allocation effects; exact replay is read-only.",
+    "Due-date funding states distinguish client self-pay, exact government funding, absent funding and non-exact funding without inventing a second payout."
+  ]
+}

@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"GS-CLAIM-FUNDING-001","assertions":["Claim hours/money use official assignment roots and frozen price.","Short/excess/ambiguous receipt cannot over-allocate and enters typed review.","Full-subsidy due date creates government-funded or advance work item, never duplicate payout."]}

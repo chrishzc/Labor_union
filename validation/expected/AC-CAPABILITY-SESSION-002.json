@@ -1,0 +1,10 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "AC-CAPABILITY-SESSION-002",
+  "assertions": [
+    "A successful temporary capability grant revokes the target's existing active session.",
+    "Editor, reviewer and publisher actions require their independently granted capabilities.",
+    "The workflow records authorization effects as outputs rather than accepting a pre-revoked session or an effective capability result as fixture data.",
+    "Account disablement, credential rotation and final-system-administrator protection are deliberately outside this supplemental scenario."
+  ]
+}

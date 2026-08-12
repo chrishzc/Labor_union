@@ -1,0 +1,23 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "ORD-CANCELLATION-WORKFLOW-003",
+  "test_kind": "subsystem_state_machine",
+  "harness_input_prefixes": ["read_snapshot", "confirmed_service_day", "cancellation_command"],
+  "root_inputs": [
+    "authoritative read snapshot for order, terms, scheduling, finance, payroll and lifecycle aggregates",
+    "confirmed service-day command, expected versions, fixed clock, actor, correlation and idempotency key"
+  ],
+  "seed_fields": [
+    "read_snapshot.order.aggregate_version",
+    "read_snapshot.lifecycle.current_status",
+    "confirmed_service_day.date",
+    "cancellation_command.idempotency_key"
+  ],
+  "derived_fields": [
+    "cancellation.lifecycle_status",
+    "cancellation.persistence_chain",
+    "cancellation.stored_receipt",
+    "cancellation.replay_write_count"
+  ],
+  "expected_manifest_path": "validation/expected/ORD-CANCELLATION-WORKFLOW-003.json"
+}

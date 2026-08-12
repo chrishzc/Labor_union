@@ -1,0 +1,18 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "track": "B",
+  "suite_id": "PERF",
+  "scenario_id": "UI-SP-PAYABLE-001",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["PERF-UI-SP-PAYABLE-001"],
+  "source_refs": ["document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#Contract Signing"],
+  "forbidden_direct_seed": ["Direct payment creation, payable archive writes or obligation mutation during the query."],
+  "database_mode": "read-only-oracle",
+  "root_facts": ["Open Payroll staff obligations due on 2026-08-15 with one primary staff bank account per recipient."],
+  "commands": ["Query the canonical Accounts Payable workflow for 2026-08-15."],
+  "expected": ["Eligible immutable staff obligations aggregate into the read-only payable list.", "The query performs no archive or payment mutation."],
+  "receipt_requirements": ["The receipt records eligible obligation count, payable total and the read-only workflow outcome."],
+  "limitations": ["UI screenshot/manual operation evidence remains required."]
+}

@@ -1,0 +1,38 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "ANOM-CLOSED-LOOP-001",
+  "track": "A",
+  "suite_id": "ANOM",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["ANOM-01", "ANOM-02", "ASM-01", "ASM-02", "ORDER-001", "ORDER-002", "ORDER-003", "ORDER-004", "SCHEDULE-001", "SCHEDULE-002", "SCHEDULE-003", "SCHEDULE-005", "SCHEDULE-006"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ANOM-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#ASM-01"
+  ],
+  "root_facts": [
+    "Versioned order and scheduling roots that make a detector predicate true.",
+    "Two distinct authorized actors and a correction command owned by the source Domain.",
+    "A subsequent reintroduction of the original inconsistency."
+  ],
+  "forbidden_direct_seed": [
+    "current alert, alert event, workflow status, reason or available action rows",
+    "a resolved status without correcting the owning Domain root",
+    "UI alert display data"
+  ],
+  "commands": [
+    "Project alert desired state from each root inconsistency and query summary/detail through the API.",
+    "Race two claim commands, then attempt a manual resolve while the root defect remains.",
+    "Apply the owning Domain correction, replay the detector, and reintroduce the defect."
+  ],
+  "expected": [
+    "A matching root creates one active/open alert identity; detector replay does not duplicate it.",
+    "Only one actor can claim; manual resolution cannot erase a still-active business defect.",
+    "The owning correction auto-resolves the alert, while reintroduction reopens it with preserved history.",
+    "API/UI shows safe snapshots, typed actions and repair navigation rather than a seeded alert row."
+  ],
+  "receipt_requirements": [
+    "root defect digest", "detector/projector checkpoints", "alert and workflow event deltas", "claim conflict result", "API/UI state snapshots", "repair/resolve/reopen history"
+  ]
+}

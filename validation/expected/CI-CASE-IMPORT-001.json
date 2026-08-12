@@ -1,0 +1,1 @@
+{"contract":"labor-union-verification-expected/v1","scenario_id":"CI-CASE-IMPORT-001","assertions":["Invalid source creates privacy-safe failure with zero Domain row delta.","Review acceptance is required before canonical roots exist.","Apply failure rolls back complete Client/Orders/Finance graph; payload conflict is typed."]}

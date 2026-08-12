@@ -1,0 +1,18 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "track": "B",
+  "suite_id": "PERF",
+  "scenario_id": "UI-SCH-ASSIGN-001",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["PERF-UI-SCH-ASSIGN-001"],
+  "source_refs": ["document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#Contract Signing"],
+  "forbidden_direct_seed": ["Direct insertion of execution assignments or schedule days."],
+  "database_mode": "read-only-oracle",
+  "root_facts": ["A completed Contract Signing normal-chain case with one effective service commitment."],
+  "commands": ["Query the Contract Signing normal-chain oracle after execution conversion."],
+  "expected": ["Exactly one effective commitment is converted once.", "Exactly one execution assignment owns five schedule days.", "The normal-chain oracle also proves archive, signatures, deposit settlement and contract identity."],
+  "receipt_requirements": ["The receipt records commitment conversion, assignment ownership and schedule-day counts for the normal-chain case."],
+  "limitations": ["UI screenshot/manual operation evidence remains required."]
+}

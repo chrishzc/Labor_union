@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "GERR-TYPED-UI-RETRY-002",
+  "scenario_digest": "ad8939dcc1325b519e4eb7e54594618c7ee8330f1d51039bbab7d803e0f9b3fa",
+  "result": "passed",
+  "assertion_count": 21,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_historical_reprocess_ui.py tests\\test_order_auto_completion_api.py tests\\test_line_management_stage9.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "typed API error mapping and UI retry state"
+  },
+  "input_digests": {
+    "finance_ui_tests": "0a2feccf43a2bcbde56ba203877a3c2c0678bb2927760430a51fa3bef68a2b8d",
+    "order_api_tests": "4bddb13be671f51b8f62b318d84909817add088cf3b52e378d0e6fb5a82e79fe",
+    "line_ui_transport_tests": "7bae7bfdc2f205f556276f283dee080028a62594ff4d26fc8f82becf83e44a6b"
+  },
+  "input_paths": {
+    "finance_ui_tests": "tests/test_finance_import_historical_reprocess_ui.py",
+    "order_api_tests": "tests/test_order_auto_completion_api.py",
+    "line_ui_transport_tests": "tests/test_line_management_stage9.py"
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "CI-CANONICAL-ROOTS-002",
+  "track": "A",
+  "suite_id": "CI",
+  "status": "bound",
+  "requires_database": true,
+  "database_execution_mode": "persistent_append_only",
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["CASE-01", "CISM-01"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#CISM-01"
+  ],
+  "root_facts": [
+    "A unique external case payload with client identity, contracted service terms and approved policy references.",
+    "A Preview/Apply command with stable idempotency and correlation identities."
+  ],
+  "forbidden_direct_seed": [
+    "client or order canonical row, order status, architecture bootstrap event, import event or import receipt"
+  ],
+  "commands": [
+    "Preview the root payload and Apply it twice with the identical command identity."
+  ],
+  "expected": [
+    "The first Apply creates one client, negotiated order, architecture bootstrap event, import event and import receipt.",
+    "The order status and lifecycle version are derived by the importer rather than supplied by the payload.",
+    "The identical replay returns the stored receipt without duplicate rows."
+  ],
+  "receipt_requirements": [
+    "root fixture and expected-manifest digests",
+    "canonical client/order assertions",
+    "bootstrap/import/receipt row counts",
+    "replay equality"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_case_import_disposable_mysql_e2e.py"
+    ],
+    "test_paths": ["tests/test_case_import_disposable_mysql_e2e.py"]
+  }
+}

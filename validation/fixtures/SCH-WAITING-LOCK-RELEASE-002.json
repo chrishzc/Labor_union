@@ -1,0 +1,23 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "SCH-WAITING-LOCK-RELEASE-002",
+  "test_kind": "subsystem_state_machine",
+  "harness_input_prefixes": ["read_snapshot", "lock_release_request"],
+  "root_inputs": [
+    "accepted plan/segment and active lock read snapshot",
+    "canonical deposit settlement read snapshot and typed lock-release request"
+  ],
+  "seed_fields": [
+    "read_snapshot.plan_identity",
+    "read_snapshot.active_lock_identity",
+    "read_snapshot.deposit_settlement_evidence",
+    "lock_release_request.event_key"
+  ],
+  "derived_fields": [
+    "lock_release.lock_status",
+    "lock_release.plan_status",
+    "lock_release.event",
+    "lock_release.replay_write_count"
+  ],
+  "expected_manifest_path": "validation/expected/SCH-WAITING-LOCK-RELEASE-002.json"
+}

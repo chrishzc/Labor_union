@@ -1,0 +1,46 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "CF-REFUND-RECOVERY-001",
+  "track": "A",
+  "suite_id": "CF",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["CF-01", "CF-02", "CF-03", "RSM-01", "RSM-02", "RSM-03", "RSM-04", "RSM-05", "RSM-06", "RSM-07", "RECEIVABLE-001", "CLIENTPAYABLE-001", "CLIENTREFUND-001", "RETURN-001"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#CF-03",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#RSM-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#RSM-05"
+  ],
+  "root_facts": [
+    "A cancelled case with an effective refund obligation of TWD 1000.",
+    "A valid bank outgoing fact of TWD 600, followed by a valid bank outgoing fact of TWD 400.",
+    "A separate valid refund reversal root for the fully refunded state."
+  ],
+  "forbidden_direct_seed": [
+    "refund progress or review state",
+    "refund transaction, allocation, summary or alert rows",
+    "orders status derived by the cancellation reducer"
+  ],
+  "commands": [
+    "Run refund preview for the TWD 600 outgoing fact.",
+    "Apply the TWD 600 outgoing fact through the owning Client Finance workflow.",
+    "Apply the TWD 400 recovery outgoing fact through the same workflow.",
+    "Apply the valid reversal through the owning Client Finance workflow."
+  ],
+  "expected": [
+    "Preview defaults to one exact remaining settlement and identifies TWD 600 as an underpayment exception.",
+    "The first Apply produces partially_refunded with remaining TWD 400; it is a recovery state, not a planned instalment state.",
+    "The second Apply produces refunded with remaining TWD 0 and preserves both immutable bank facts.",
+    "The reversal reopens the progress state from effective remaining money without deleting history.",
+    "Every Apply has typed API and UI expectations plus row-delta, replay and anomaly assertions."
+  ],
+  "receipt_requirements": [
+    "root fixture digest",
+    "expected manifest digest",
+    "ledger and allocation row deltas",
+    "refund progress and review state transitions",
+    "typed API and UI result snapshots",
+    "replay and reversal result"
+  ]
+}

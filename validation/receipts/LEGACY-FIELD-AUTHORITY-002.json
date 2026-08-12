@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "LEGACY-FIELD-AUTHORITY-002",
+  "scenario_digest": "db7a6f0bcd942fbb13a116f830645a56b325e2e760c44531cff85186c2f47e7a",
+  "result": "passed",
+  "assertion_count": 5,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_field_authority_legacy_name_audit.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "active source/schema/document retired-field scan with explicit migration and evidence exceptions"
+  },
+  "input_digests": {
+    "audit_manifest": "4a2e28e8994f000dd586b5d08773c4dfd8969614b95fc246d6e979f6d4153478",
+    "audit_validator": "8e553efff6cdb020ae3a9c056c6fc2d743f9e689205bd7c06bfcea75ca853866",
+    "audit_tests": "2b441c795f1cb8cbf53a1c3b5aad0b766c9b54cebd5972405d89907d97d67be2"
+  },
+  "input_paths": {
+    "audit_manifest": "validation/field_authority_legacy_name_audit_v1.json",
+    "audit_validator": "scripts/verify_field_authority_legacy_names.py",
+    "audit_tests": "tests/test_field_authority_legacy_name_audit.py"
+  }
+}

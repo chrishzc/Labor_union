@@ -1,0 +1,19 @@
+{
+  "contract": "labor-union-ui-validation-receipt/v1",
+  "scenario_id": "UI-GS-CLAIM-001",
+  "database": "lu_test_dataset_contract_signing_v4",
+  "batch_id": 1,
+  "observed": {
+    "status": "draft",
+    "item_count": 12,
+    "item_requested_total_ntd": 433200,
+    "batch_requested_amount_ntd": 433200,
+    "approved_amount_ntd": 0,
+    "paid_amount_ntd": 0,
+    "outbox_count": 1,
+    "receipt_count": 1,
+    "exact_replay_matches": true
+  },
+  "result": "valid",
+  "limitations": ["UI screenshot/manual operation evidence remains required."]
+}

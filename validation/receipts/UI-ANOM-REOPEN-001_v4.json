@@ -1,0 +1,12 @@
+{
+  "contract": "labor-union-ui-validation-receipt/v1",
+  "scenario_id": "UI-ANOM-REOPEN-001",
+  "database": "lu_test_dataset_contract_signing_v4",
+  "case_no": "DSV1-CASE-0001",
+  "observed": {
+    "status": "open",
+    "timeline_actions": ["claim", "resolve", "reopen", "auto_resolve", "reopen"]
+  },
+  "result": "valid",
+  "limitations": ["UI screenshot/manual operation evidence remains required."]
+}

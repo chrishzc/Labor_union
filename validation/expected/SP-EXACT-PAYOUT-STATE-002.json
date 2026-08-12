@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "SP-EXACT-PAYOUT-STATE-002",
+  "assertions": [
+    "A uniquely owned TWD 500 outgoing fact exactly settles its TWD 500 open payable obligation.",
+    "Successful Apply advances the projection to completed and records formal event, link, outbox and receipt effects.",
+    "Exact replay is read-only, while stale versions and reused idempotency keys for a different command fail before persistence."
+  ]
+}

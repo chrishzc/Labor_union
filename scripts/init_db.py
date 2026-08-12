@@ -1,5 +1,6 @@
 import sys
 import os
+import re
 from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
@@ -38,11 +39,11 @@ def load_schema_parts(cursor, schema_parts_dir):
     return loaded_parts
 
 
-def _schema_part_sort_key(path: Path) -> tuple[int, str]:
-    prefix = path.name.partition("_")[0]
-    if prefix.isdigit():
-        return int(prefix), path.name
-    return 10**9, path.name
+def _schema_part_sort_key(path: Path) -> tuple[int, str, str]:
+    match = re.match(r"^(\d+)([a-z]*)_", path.name, re.IGNORECASE)
+    if match:
+        return int(match.group(1)), match.group(2).lower(), path.name
+    return 10**9, "", path.name
 
 def main():
     schema_path = r'db/schema.sql'

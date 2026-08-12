@@ -1,0 +1,5 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "ORD-LIFECYCLE-001",
+  "assertions": ["Terms Preview has zero business write delta.", "Identical Apply replays one receipt; changed payload conflicts.", "Status transitions require their root facts and guards, never a caller-provided target status.", "Invalid cancellation/reopen/reversal paths preserve state, version and formal row deltas.", "Query and UI render are zero mutation and expose typed lifecycle state."]
+}

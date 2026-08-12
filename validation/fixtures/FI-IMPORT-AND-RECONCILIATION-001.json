@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "FI-IMPORT-AND-RECONCILIATION-001",
+  "test_kind": "external_input_fixture",
+  "root_inputs": ["bank workbook source bytes", "sheet/row occurrences", "raw debit/credit/value-date fields", "human classification command", "owning finance reconciliation command"],
+  "seed_fields": ["bank_file.digest", "bank_occurrence.sheet", "bank_occurrence.row", "bank_raw.credit", "bank_raw.debit", "classification_command.actor", "reconciliation_command.idempotency_key"],
+  "derived_fields": ["finance_import.fingerprint", "finance_import.direction", "finance_import.classification", "finance_import.reconciliation_status", "client_ledger.allocation", "finance_alert.current_state"],
+  "expected_manifest_path": "validation/expected/FI-IMPORT-AND-RECONCILIATION-001.json"
+}

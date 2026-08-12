@@ -1,0 +1,18 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "track": "B",
+  "suite_id": "PERF",
+  "scenario_id": "UI-GS-CLAIM-001",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["PERF-UI-GS-CLAIM-001"],
+  "source_refs": ["document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#Contract Signing"],
+  "forbidden_direct_seed": ["Direct insertion of government subsidy batches, items, receipts or outbox intents."],
+  "database_mode": "append-only",
+  "root_facts": ["Twelve official assignment service facts eligible for 2026 Q3 government subsidy planning."],
+  "commands": ["Preview and Apply one Government Subsidy claim plan, then replay the exact command."],
+  "expected": ["One draft batch contains the exact eligible claim items and requested total.", "The claim plan has one outbox intent and immutable receipt; exact replay adds no second batch."],
+  "receipt_requirements": ["The receipt records the batch identity, item count, requested total, outbox intent and exact replay result."],
+  "limitations": ["UI screenshot/manual operation evidence remains required."]
+}

@@ -1,0 +1,10 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "CF-REFUND-RECOVERY-001",
+  "assertions": [
+    "TWD 600 outflow changes progress to partially_refunded with TWD 400 remaining only when an operator explicitly confirms an actual underpayment recovery.",
+    "TWD 400 recovery outflow changes progress to refunded with TWD 0 remaining.",
+    "A reversal reopens the reducer result without deleting immutable bank facts.",
+    "Preview and failed overpayment attempts have zero formal ledger/allocation row delta."
+  ]
+}

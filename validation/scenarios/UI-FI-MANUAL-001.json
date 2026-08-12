@@ -1,0 +1,22 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "track": "B",
+  "suite_id": "PERF",
+  "scenario_id": "UI-FI-MANUAL-001",
+  "status": "specified",
+  "requires_database": true,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["PERF-UI-FI-MANUAL-001"],
+  "source_refs": ["document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md#Contract Signing"],
+  "root_facts": ["One unresolved canonical bank fact requiring Finance-owned manual review."],
+  "forbidden_direct_seed": ["Direct insertion of a resolved client receipt or allocation outside the Finance correction workflow."],
+  "commands": ["Run the Finance manual correction with an exact idempotent correction key, then replay it."],
+  "receipt_requirements": ["The receipt records one resolution and one replay without duplicate allocation."],
+  "fixture_runner": "scripts/run_contract_signing_normal_chain.py --scenario-id UI-FI-MANUAL-001",
+  "verifier": "scripts/verify_finance_manual_review_scenario.py",
+  "expected": [
+    "An unresolved bank fact projects finance_import_manual_review.",
+    "Only owning Finance correction turns it into client_receipt and resolves the alert.",
+    "The same correction key replays one identical receipt without duplicate allocation."
+  ]
+}

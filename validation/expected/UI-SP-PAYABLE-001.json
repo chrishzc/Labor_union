@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-ui-validation-expected/v1",
+  "scenario_id": "UI-SP-PAYABLE-001",
+  "assertions": [
+    "One payable row aggregates two eligible immutable Staff Payables obligations.",
+    "The payable query returns the formal staff_payable type and total amount without a payment write.",
+    "Archive/export is not used as evidence for the read-only query."
+  ]
+}

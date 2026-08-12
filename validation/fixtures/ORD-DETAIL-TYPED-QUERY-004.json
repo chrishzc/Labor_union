@@ -1,0 +1,21 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "ORD-DETAIL-TYPED-QUERY-004",
+  "test_kind": "typed_query_view",
+  "harness_input_prefixes": ["query_harness", "http_harness"],
+  "root_inputs": [
+    "declared repository projection values and selected case identity",
+    "synthetic HTTP response envelope for the typed client boundary"
+  ],
+  "seed_fields": [
+    "query_harness.selected_case_identity",
+    "query_harness.declared_column_values",
+    "http_harness.response_envelope"
+  ],
+  "derived_fields": [
+    "order_detail.typed_view",
+    "editor.validated_json_view",
+    "client_error"
+  ],
+  "expected_manifest_path": "validation/expected/ORD-DETAIL-TYPED-QUERY-004.json"
+}

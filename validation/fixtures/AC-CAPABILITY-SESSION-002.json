@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "AC-CAPABILITY-SESSION-002",
+  "test_kind": "domain_root_data",
+  "root_inputs": [
+    "unique administrator identity attributes",
+    "one issued active session credential record",
+    "temporary capability-grant command with expiry, expected authorization version and idempotency identity",
+    "separate editor and reviewer capability roots"
+  ],
+  "seed_fields": [
+    "admin_user.username",
+    "admin_session.session_token_hash",
+    "capability_grant.expected_authorization_version",
+    "capability_grant.idempotency_key"
+  ],
+  "derived_fields": [
+    "admin_session.revoked_at",
+    "admin_capability_grant_event.event_type",
+    "effective_principal.capabilities",
+    "knowledge_authorization.result"
+  ],
+  "expected_manifest_path": "validation/expected/AC-CAPABILITY-SESSION-002.json"
+}

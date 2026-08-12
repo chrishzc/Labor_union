@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-ui-validation-receipt/v1",
+  "scenario_id": "UI-CI-INVALID-001",
+  "database": "lu_test_dataset_contract_signing_v4",
+  "review_identity": "beclass-review:6bcbc432b58e2de198e0276fe4d3b6f7d94b70039134677237c3629cbca04b24",
+  "observed": {
+    "canonical_root_counts_before": {
+      "client_finance_accounts": 8,
+      "clients": 57,
+      "orders": 57
+    },
+    "canonical_root_counts_after": {
+      "client_finance_accounts": 8,
+      "clients": 57,
+      "orders": 57
+    },
+    "payload_conflict": "beclass_import_review_source_conflict",
+    "review_opened_outbox_count": 1,
+    "review_issue_codes": ["missing_query_no"],
+    "review_identifier_masked": true
+  },
+  "result": "valid",
+  "limitations": ["UI screenshot/manual operation evidence remains required."]
+}

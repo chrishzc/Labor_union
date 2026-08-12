@@ -1,0 +1,25 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "FI-CANONICAL-STAGING-003",
+  "scenario_digest": "d31f475d1f06f343d7558b0434ec0d9c3c8429b77adf899554fd1407d6553e98",
+  "result": "passed",
+  "assertion_count": 1,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_staging_persistent_mysql_e2e.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "lu_test_validation_v1",
+    "execution_scope": "Finance Import append-only canonical staging and duplicate occurrence boundary"
+  },
+  "input_digests": {
+    "scenario_fixture": "8fc7e8f16eca4b6177d65ba60c1f081eaeddb272a8ebffb95ba122f7f2701db4",
+    "expected_manifest": "5e42848f0a53bebfd103388b02a09a9dbdf93ff03810d8a216f567c2cc94926b",
+    "integration_test": "98f691d5589da1ed65c2b7ff63f5ff58086766964d89be919c6d2564840c5b6c"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/FI-CANONICAL-STAGING-003.json",
+    "expected_manifest": "validation/expected/FI-CANONICAL-STAGING-003.json",
+    "integration_test": "tests/test_finance_import_staging_persistent_mysql_e2e.py"
+  }
+}

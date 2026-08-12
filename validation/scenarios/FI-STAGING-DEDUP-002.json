@@ -1,0 +1,51 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "FI-STAGING-DEDUP-002",
+  "track": "A",
+  "suite_id": "FI",
+  "status": "bound",
+  "requires_database": false,
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["FI-01", "FI-02", "FSM-01", "FSM-02", "FSM-03"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FI-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-01",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#FSM-03"
+  ],
+  "root_facts": [
+    "Normalized bank-source rows containing source occurrence identity, date/time, debit or credit, account evidence and raw source payload.",
+    "External identity maps used solely to classify an already-staged canonical bank fact."
+  ],
+  "forbidden_direct_seed": [
+    "dedup fingerprint or canonical row identity",
+    "classification, reconciliation status or formal accounting ledger",
+    "batch completed status or finance-alert projection"
+  ],
+  "commands": [
+    "Stage normalized source rows, classify only after raw persistence and record source occurrences.",
+    "Re-import same-fingerprint rows and execute normal, dry-run and downstream-failure batch flows."
+  ],
+  "expected": [
+    "One fingerprint produces one canonical raw bank row and every source occurrence remains recorded; a duplicate never rewrites its existing classification or reconciliation state.",
+    "Classification follows canonical row validation and identity ambiguity guards, while remaining independent of reconciliation.",
+    "Dry-run and downstream failure roll back the batch transaction and never report a completed batch."
+  ],
+  "receipt_requirements": [
+    "raw source fixture and expected-manifest digests",
+    "canonical-row/occurrence dedup assertions",
+    "classification and rollback state assertions"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_finance_import_staging.py tests\\test_finance_import_orchestrator.py tests\\test_finance_transaction_classifier.py"
+    ],
+    "test_paths": [
+      "tests/test_finance_import_staging.py",
+      "tests/test_finance_import_orchestrator.py",
+      "tests/test_finance_transaction_classifier.py"
+    ]
+  }
+}

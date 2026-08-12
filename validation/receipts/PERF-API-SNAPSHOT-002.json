@@ -1,0 +1,31 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "PERF-API-SNAPSHOT-002",
+  "scenario_digest": "441bcc55312ada8a47825a241fe5ee02a34ee49b6791d3f6b7efcbacc3739b2c",
+  "result": "passed",
+  "assertion_count": 13,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_api_performance_middleware.py tests\\test_performance_snapshot.py tests\\test_system_status_ui.py tests\\test_system_status_router.py tests\\test_system_status_api_client.py tests\\test_performance_policies.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "database": "none",
+    "execution_scope": "in-process API timing aggregate and typed System Status UI client"
+  },
+  "input_digests": {
+    "middleware_tests": "93430a557f48ddbd2598254cc0e545921678fac11275916ff98b0b013c816ee4",
+    "snapshot_tests": "927ed8f57eb384cf5f41abe8c78541dbee731be4cd03b7dc0b1edba733ff6852",
+    "system_status_ui_tests": "af6a834d74fd29eb3610b3443736976219ef0dc99708b3891170e63b0386f3f9",
+    "system_status_router_tests": "289a990bd58b600159ba2eec9799ca92748224283161c35f34e64802ddf41e81",
+    "system_status_client_tests": "d2cb9a840c261fda3ad1dea28f3722f0f6e5af6e81e05f4caefa745361ac5ce5",
+    "performance_policy_tests": "14144b004784becbee6f90aed447f3328dac83e13dce83a61f207ae1dae103b3"
+  },
+  "input_paths": {
+    "middleware_tests": "tests/test_api_performance_middleware.py",
+    "snapshot_tests": "tests/test_performance_snapshot.py",
+    "system_status_ui_tests": "tests/test_system_status_ui.py",
+    "system_status_router_tests": "tests/test_system_status_router.py",
+    "system_status_client_tests": "tests/test_system_status_api_client.py",
+    "performance_policy_tests": "tests/test_performance_policies.py"
+  }
+}

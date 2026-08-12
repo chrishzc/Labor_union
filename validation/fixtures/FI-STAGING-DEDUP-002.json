@@ -1,0 +1,26 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "FI-STAGING-DEDUP-002",
+  "test_kind": "external_input_fixture",
+  "root_inputs": [
+    "normalized bank source rows with raw payload and source occurrence identity",
+    "source debit/credit, date/time, balance and counterparty-account evidence",
+    "identity maps for classification and a dry-run or failure injection"
+  ],
+  "seed_fields": [
+    "normalized_bank_row.source_row",
+    "normalized_bank_row.transaction_date",
+    "normalized_bank_row.debit",
+    "normalized_bank_row.credit",
+    "normalized_bank_row.raw_payload",
+    "classification_identity_map.account"
+  ],
+  "derived_fields": [
+    "finance_import_row.dedup_fingerprint",
+    "finance_import_row.classification_type",
+    "finance_import_row.reconciliation_status",
+    "finance_import_occurrence.id",
+    "finance_import_batch.status"
+  ],
+  "expected_manifest_path": "validation/expected/FI-STAGING-DEDUP-002.json"
+}

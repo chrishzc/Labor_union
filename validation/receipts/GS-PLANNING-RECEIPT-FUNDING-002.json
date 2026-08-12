@@ -1,0 +1,28 @@
+{
+  "contract": "labor-union-verification-receipt/v1",
+  "scenario_id": "GS-PLANNING-RECEIPT-FUNDING-002",
+  "scenario_digest": "1980283a1e914abeff5c6fc0be5e0d07a1c24aac65886bfb67bc62066784965b",
+  "result": "passed",
+  "assertion_count": 8,
+  "runner": [
+    ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_government_subsidy_claim_workflow.py tests\\test_government_subsidy_ledger_workflow.py tests\\test_staff_payout_funding.py"
+  ],
+  "environment": {
+    "python": "3.14.2",
+    "execution_scope": "Government Subsidy claim, exact receipt and due-date funding state-machine workflows"
+  },
+  "input_digests": {
+    "scenario_fixture": "0b09252fddf0eb8c76356f28ff81d3e33c56050f13cce2af9ed22a5836e67dc8",
+    "expected_manifest": "526535a05b1c93699422bf20c4949cf8460ef11e949ff3943b8860b8b3cf7f5a",
+    "claim_workflow_test": "34a320128e0acdb671e2a63527a4bf3adc901470ec0177d04eeda464d609c365",
+    "ledger_workflow_test": "35cac70a15717cdee30d38a919718570ef7e53c18fd2c9809d005c4a311ef4a4",
+    "funding_state_test": "5f3b30b9744183721b711688aacc75ec51dc56f8eedc442cb0c544cd29f60028"
+  },
+  "input_paths": {
+    "scenario_fixture": "validation/fixtures/GS-PLANNING-RECEIPT-FUNDING-002.json",
+    "expected_manifest": "validation/expected/GS-PLANNING-RECEIPT-FUNDING-002.json",
+    "claim_workflow_test": "tests/test_government_subsidy_claim_workflow.py",
+    "ledger_workflow_test": "tests/test_government_subsidy_ledger_workflow.py",
+    "funding_state_test": "tests/test_staff_payout_funding.py"
+  }
+}

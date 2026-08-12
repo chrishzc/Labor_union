@@ -1,0 +1,48 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "CF-EXPLICIT-REFUND-RECOVERY-002",
+  "track": "A",
+  "suite_id": "CF",
+  "status": "bound",
+  "requires_database": true,
+  "database_execution_mode": "persistent_append_only",
+  "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"],
+  "coverage_scope": "supplemental",
+  "coverage_ids": ["CF-03"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#CF-03",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#RSM-02",
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#RSM-03"
+  ],
+  "root_facts": [
+    "A disposable cancellation/refund precondition and immutable outgoing-bank facts, scoped only to the Client Finance correction boundary.",
+    "An operator's explicit underpayment-recovery choice, idempotency key and correlation identity."
+  ],
+  "forbidden_direct_seed": [
+    "client ledger entry or allocation",
+    "refund obligation remaining amount or settlement status",
+    "bank reconciliation status, refund receipt or client-finance outbox"
+  ],
+  "commands": [
+    "Preview a TWD 300 underpayment without recovery confirmation.",
+    "Preview and Apply the same bank fact with explicit recovery confirmation, then replay the exact Apply request.",
+    "Apply the remaining TWD 200 bank fact without recovery confirmation."
+  ],
+  "expected": [
+    "The unconfirmed TWD 300 underpayment returns refund_requires_exact_settlement and has zero ledger, allocation and receipt row delta.",
+    "The explicit recovery creates one immutable TWD 300 refund ledger/allocation, preserves an open TWD 200 remainder and returns the same receipt on replay.",
+    "The remaining exact TWD 200 settlement closes the obligation with two ledger entries, two allocations and two receipts total."
+  ],
+  "receipt_requirements": [
+    "root fixture and expected-manifest digests",
+    "typed normal-flow blocker and zero-write snapshot",
+    "partial-recovery and exact-settlement row/state assertions",
+    "idempotency replay equality"
+  ],
+  "execution": {
+    "runner": [
+      ".\\.venv\\Scripts\\python.exe -m pytest -W error tests\\test_client_refund_recovery_disposable_mysql_e2e.py"
+    ],
+    "test_paths": ["tests/test_client_refund_recovery_disposable_mysql_e2e.py"]
+  }
+}
