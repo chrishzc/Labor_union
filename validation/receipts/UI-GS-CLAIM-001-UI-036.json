@@ -1,0 +1,94 @@
+{
+  "receipt_id": "UI-GS-CLAIM-001-UI-036",
+  "work_package": "WP56",
+  "scenario_id": "UI-GS-CLAIM-001",
+  "result": "verified",
+  "executed_on": "2026-08-12",
+  "environment": {
+    "ui": "http://127.0.0.1:8501",
+    "api": "http://127.0.0.1:8000",
+    "dataset": "lu_test_dataset_contract_signing_v4",
+    "browser": "Chrome"
+  },
+  "root_data": {
+    "append_only_normal_chain_scenario": "UI-GS-CLAIM-001-UI-034",
+    "case_no": "WP56-7B82E214D8E8",
+    "assignment_id": 355,
+    "official_service_dates": [
+      "2026-07-01",
+      "2026-07-02",
+      "2026-07-03",
+      "2026-07-04",
+      "2026-07-05",
+      "2026-07-06",
+      "2026-07-07",
+      "2026-07-08",
+      "2026-07-09",
+      "2026-07-10",
+      "2026-07-11",
+      "2026-07-12"
+    ]
+  },
+  "typed_api": {
+    "preview": {
+      "application_year": 2026,
+      "quarter": 3,
+      "revision": 2,
+      "batch_identity": "2026:Q3:R2",
+      "batch_id": 2,
+      "item_count": 13,
+      "total_ntd": 462000,
+      "preview_fingerprint": "13671baae7588d8e2c12d3de6b4f70ba73e9dd5e03a381452aa986972aa7f4fe"
+    },
+    "durable_job": {
+      "job_id": "9b7cd883-6b18-417d-93fd-63b918139a25",
+      "job_type": "government_subsidy_apply",
+      "status": "succeeded",
+      "attempt_count": 1,
+      "result_reference": "government_subsidy:2",
+      "receipt": {
+        "kind": "plan",
+        "status": "draft",
+        "batch_id": 2,
+        "item_count": 13,
+        "total_ntd": 462000,
+        "batch_version": 1,
+        "preview_fingerprint": "13671baae7588d8e2c12d3de6b4f70ba73e9dd5e03a381452aa986972aa7f4fe"
+      }
+    }
+  },
+  "ui_flow": [
+    "Chrome opened Finance > 補助核銷清冊 > 政府補助申請批次.",
+    "The UI previewed 2026 Q3 revision 2 and rendered the typed candidate and preview fingerprint.",
+    "The UI Apply command was submitted with an explicit planning reason and returned the durable job id.",
+    "The official durable worker completed that job once; typed API re-observation returned succeeded.",
+    "After UI rerun, Chrome resubmitted the retained Preview command and displayed the same durable job id."
+  ],
+  "replay_assertions": {
+    "same_command_identity_reused": true,
+    "replayed_job_id": "9b7cd883-6b18-417d-93fd-63b918139a25",
+    "new_job_created": false,
+    "new_batch_created": false,
+    "candidate_or_preview_fingerprint_changed": false
+  },
+  "evidence": {
+    "prior_oracle": "validation/receipts/UI-GS-CLAIM-001_v4.json",
+    "apply_reobserve_screenshot": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_gs_claim_apply_reobserve_036.png",
+    "replay_reobserve_screenshot": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_gs_claim_replay_reobserve_036.png",
+    "narrative": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_gs_claim_001_v6.md"
+  },
+  "scope": {
+    "included": [
+      "typed preview",
+      "Chrome Apply",
+      "durable job completion",
+      "typed re-observation",
+      "same-command UI replay"
+    ],
+    "excluded": [
+      "production deployment",
+      "formal LINE delivery",
+      "cutover"
+    ]
+  }
+}

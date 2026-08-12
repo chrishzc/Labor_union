@@ -1,0 +1,33 @@
+{
+  "contract": "labor-union-ui-repair-reobserve-replay-receipt/v1",
+  "receipt_id": "UI-SCH-ASSIGN-001-UI-042",
+  "work_package": "WP56",
+  "scenario_id": "UI-SCH-ASSIGN-001",
+  "database": "lu_test_dataset_contract_signing_v4",
+  "case_no": "WP56-7E8BEB213973",
+  "date": "2026-08-12",
+  "ui": {
+    "surface": "Streamlit 8501 / 異常警示中心 / 服務人員 / 案件人力配置",
+    "repair_trigger": "SCHEDULE-006 的「前往正式人力配置」",
+    "segments": [{"staff_id": 8892, "start": "2031-10-13", "end": "2031-10-17"}],
+    "steps": [
+      "Chrome selected the SCHEDULE-006 alert for the scenario case.",
+      "Chrome followed the formal staffing repair action and generated Assignment Plan Preview.",
+      "Chrome submitted one confirmed Apply command and observed durable job dfcdd774-510f-4ecb-8f25-21e7f365ce76.",
+      "The durable worker completed the job; Chrome re-observed generation 1 and assignment key WP56-7E8BEB213973:g1:a1.",
+      "Chrome rendered and invoked the terminal-state replay control; the same terminal receipt remained visible."
+    ]
+  },
+  "typed_api": {
+    "preview_fingerprint": "b3aa5b6a92885a4204e6c71e56cc205d463e90c0040d5a9b15c896c5fa327831",
+    "job_id": "dfcdd774-510f-4ecb-8f25-21e7f365ce76",
+    "reobserve": {"scheduling_generation": 1, "scheduling_version": 1, "order_version": 3, "payroll_version": 1, "client_finance_version": 4, "created_assignment_keys": ["WP56-7E8BEB213973:g1:a1"]},
+    "replay": {"same_job_id": "dfcdd774-510f-4ecb-8f25-21e7f365ce76", "same_generation": 1, "new_assignment_count": 0}
+  },
+  "db_oracle": {
+    "verifier": "scripts/verify_contract_signing_normal_chain.py",
+    "valid": true,
+    "observed": {"archive_digest_count": 4, "staff_signed_count": 1, "client_signed_count": 1, "commitment_count": 1, "converted_commitment_count": 1, "settled_deposit_count": 1, "assignment_count": 1, "schedule_day_count": 5}
+  },
+  "result": "verified"
+}

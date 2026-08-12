@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-wp56-preconversion-isolation-receipt/v1",
+  "scenario_id": "WP56-V5-OCCUPANCY-PAIR-9",
+  "database": "lu_test_dataset_contract_signing_v5_preserve",
+  "case_no": "WP56-73DD276298F0",
+  "oracle": "scripts/verify_contract_signing_preconversion_isolation.py",
+  "observed": {
+    "commitment_count": 1,
+    "converted_commitment_count": 0,
+    "assignment_count": 0,
+    "calendar_schedule_count": 0,
+    "payroll_execution_count": 0,
+    "subsidy_claim_item_count": 0
+  },
+  "result": "valid",
+  "test_evidence": "tests/test_verify_contract_signing_preconversion_isolation.py"
+}

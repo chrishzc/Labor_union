@@ -12,6 +12,7 @@ from domains.client_finance.obligation_planning import (
     ClientFinanceTermsFacts,
     build_client_finance_terms_candidate,
 )
+from domains.client_finance.reconciliation import PaymentStage
 from domains.orders.contract_completion import (
     ContractCompletionBlocker,
     ContractCompletionCandidate,
@@ -268,9 +269,16 @@ def _workflow_blockers(facts):
     blockers = list(contract_completion_blockers(facts.order))
     if len(facts.client_finance.charge_days) != facts.contracted_service_day_count:
         blockers.append(ContractCompletionBlocker.OFFICIAL_SERVICE_DATES_INCOMPLETE)
-    if facts.client_finance.existing_obligations:
+    if _has_incompatible_obligation_history(facts.client_finance):
         blockers.append(ContractCompletionBlocker.CLIENT_OBLIGATION_HISTORY_CONFLICT)
     return tuple(sorted(set(blockers), key=lambda blocker: blocker.value))
+
+
+def _has_incompatible_obligation_history(client_finance) -> bool:
+    """A precontract deposit is deliberately carried into contract completion."""
+
+    stages = tuple(item.payment_stage for item in client_finance.existing_obligations)
+    return any(stage is not PaymentStage.DEPOSIT for stage in stages) or len(stages) > 1
 
 
 def _established_obligation_count(candidate):

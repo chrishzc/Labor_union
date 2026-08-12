@@ -1,0 +1,66 @@
+{
+  "receipt_id": "UI-FI-MANUAL-001-UI-039",
+  "work_package": "WP56",
+  "scenario_id": "UI-FI-MANUAL-001",
+  "result": "verified",
+  "executed_on": "2026-08-12",
+  "environment": {
+    "ui": "http://127.0.0.1:8501",
+    "api": "http://127.0.0.1:8000",
+    "dataset": "lu_test_dataset_contract_signing_v4",
+    "browser": "Chrome"
+  },
+  "root_data": {
+    "seed_scenario": "UI-FI-MANUAL-001-UI-039",
+    "batch_identity": "finance-import-batch:33",
+    "row_identity": "finance-import-row:87",
+    "initial_classification": "non_business_review",
+    "initial_disposition": "manual_review",
+    "bank_amount_ntd": 16000
+  },
+  "repair": {
+    "classification_type": "client_receipt",
+    "target_obligation_identity": "client-obligation:WP56-20DF22A30D53:deposit",
+    "allocation_ntd": 16000,
+    "candidate_fingerprint": "23922db52a2594569fd47f0843d822b34b81758b6fb75d6c278801acc0ab84fb",
+    "preview_fingerprint": "f1c703464ec847ea6bca73fc37e985c32ca9e037df382a16e09c19600baa4e0f",
+    "job_id": "c35a1a2e-2ade-4751-b0a9-a5b3b0caaf39",
+    "job_status": "succeeded",
+    "job_attempt_count": 1,
+    "result_reference": "finance_import_correction:finance-import-row:87"
+  },
+  "ui_flow": [
+    "Chrome selected the open finance_import_manual_review alert for row 87 and opened its anomaly-owned correction form.",
+    "The UI entered one exact client deposit obligation, two ordered manual evidence references, and a correction reason before producing a typed Preview.",
+    "Chrome submitted Apply, the official durable worker processed its one job, and UI status transitioned terminal.",
+    "Chrome used the terminal same-command replay control without changing the Preview, fields, reason, or command key; it displayed the same job id."
+  ],
+  "database_reobservation": {
+    "classification_event_count": 2,
+    "formal_correction_event_count": 1,
+    "reconciliation_receipt_count": 1,
+    "correction_receipt_count": 1,
+    "durable_job_count": 1,
+    "manual_review_alert": {
+      "workflow_status": "resolved",
+      "predicate_active": 0
+    }
+  },
+  "replay_assertions": {
+    "same_command_identity_reused": true,
+    "replayed_job_id": "c35a1a2e-2ade-4751-b0a9-a5b3b0caaf39",
+    "new_job_created": false,
+    "new_ledger_entry_created": false,
+    "new_reconciliation_receipt_created": false,
+    "new_correction_receipt_created": false
+  },
+  "evidence": {
+    "prior_oracle": "validation/receipts/UI-FI-MANUAL-001_v4.json",
+    "replay_reobserve_screenshot": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_fi_manual_replay_reobserve_039.png",
+    "narrative": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_fi_manual_001_v6.md"
+  },
+  "scope": {
+    "included": ["canonical ingestion", "anomaly-owned typed Preview", "Chrome Apply", "durable worker", "same-command UI replay", "database re-observation"],
+    "excluded": ["production deployment", "formal LINE delivery", "cutover"]
+  }
+}

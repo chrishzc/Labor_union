@@ -1,0 +1,42 @@
+{
+  "contract": "labor-union-legacy-ui-preservation/v1",
+  "receipt_id": "WP56-PRESERVE-MIGRATION-v5",
+  "executed_at": "2026-08-11",
+  "source_database": "union_db_candidate_20260803_v5",
+  "target_database": "lu_test_dataset_contract_signing_v5_preserve",
+  "strategy": "conservative-preserved-roots-only",
+  "copied_tables": 6,
+  "copied_rows": 161,
+  "preserved_root_tables": [
+    "clients",
+    "staff",
+    "media_assets",
+    "orders",
+    "caregiver_matching_plans",
+    "caregiver_matching_plan_segments"
+  ],
+  "source_root_digest": "8d51d22cdb53200b6e940f6b926b66d63a27718027738a516a9994f1168c2691",
+  "target_root_digest": "8d51d22cdb53200b6e940f6b926b66d63a27718027738a516a9994f1168c2691",
+  "projection_rebuild": {
+    "verified": true,
+    "source": "preserved_roots_only",
+    "counts_before": {
+      "anomaly_current_alerts": 0,
+      "client_deposit_settlement_projection": 0,
+      "scheduling_effective_occupancy": 0
+    },
+    "counts_after": {
+      "anomaly_current_alerts": 0,
+      "client_deposit_settlement_projection": 0,
+      "scheduling_effective_occupancy": 0
+    },
+    "digest": "020730ac24021407c498dbb3af5f19fffb2c0f37664f4e9103494fa27d1bf469"
+  },
+  "not_copied": [
+    "financial records",
+    "contract signing records",
+    "scheduling records",
+    "background jobs",
+    "derived projections"
+  ]
+}

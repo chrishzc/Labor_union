@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-wp56-ui-repair-receipt/v1",
+  "scenario_id": "WP56-V4-UI-STALE-020",
+  "database": "lu_test_dataset_contract_signing_v4",
+  "case_no": "WP56-FD32A3DB20D6",
+  "arrange": {
+    "initial_client_sent_document_version_id": 32,
+    "replacement_client_sent_document_version_id": 33
+  },
+  "observed_database_state": {
+    "sent_event_count": 3,
+    "signed_received_event_count": 2,
+    "contract_identity_present": true
+  },
+  "browser": {
+    "ui": "http://127.0.0.1:8511",
+    "stale_screenshot": "wp56_ui_contract_stale_020_v4.png",
+    "repair_screenshot": "wp56_ui_contract_repair_020_v4.png",
+    "automation_result": "timed_out_after_final_command",
+    "stale_code_visual_assertion": "not_verified"
+  },
+  "result": "partial",
+  "remaining_requirement": "Capture a browser-visible contract_document_version_stale result before refresh, then a browser-visible successful refreshed repair receipt."
+}

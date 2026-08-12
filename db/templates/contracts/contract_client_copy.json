@@ -11,8 +11,8 @@
     },
     "B7": {
       "label": "簽約日期 (B7)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "actual_start_date"
+      "db_table": "contract_signing (客戶簽約命令)",
+      "db_key": "contract_signed_date"
     },
     "B8": {
       "label": "客戶名稱 (B8)",
@@ -30,14 +30,14 @@
       "db_key": "staff_name"
     },
     "B24": {
-      "label": "開始日期 (B24)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "actual_start_date"
+      "label": "預定服務開始日期 (B24)",
+      "db_table": "precontract_service_commitments (簽約前服務承諾)",
+      "db_key": "committed_service_start_date"
     },
     "D24": {
-      "label": "結束日期 (D24)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "actual_end_date"
+      "label": "預定服務結束日期 (D24)",
+      "db_table": "precontract_service_commitments (簽約前服務承諾)",
+      "db_key": "committed_service_end_date"
     },
     "F24": {
       "label": "希望服務天數 (F24)",
@@ -221,8 +221,8 @@
     },
     "B185": {
       "label": "立約簽署日期 (B185)",
-      "db_table": "orders (訂單主表 - 36 大業務與金額 calculations)",
-      "db_key": "actual_start_date"
+      "db_table": "contract_signing (客戶簽約命令)",
+      "db_key": "contract_signed_date"
     },
     "E39": {
       "label": "每日服務時數 (E39)",

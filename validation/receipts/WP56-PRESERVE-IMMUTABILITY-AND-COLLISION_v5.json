@@ -1,0 +1,27 @@
+{
+  "contract": "labor-union-legacy-ui-preservation-immutability/v1",
+  "receipt_id": "WP56-PRESERVE-IMMUTABILITY-AND-COLLISION-v5",
+  "executed_at": "2026-08-11",
+  "source_database": "union_db_candidate_20260803_v5",
+  "target_database": "lu_test_dataset_contract_signing_v5_preserve",
+  "collision_preflight": {
+    "valid_fail_closed": true,
+    "execution_blockers": [
+      "target contains data and must be explicitly rebuilt",
+      "source and target case numbers collide"
+    ],
+    "overlapping_case_count": 53,
+    "migration_permitted": false
+  },
+  "immutability_verifier": {
+    "valid": true,
+    "tables": [
+      {"table": "clients", "source_row_count": 53, "target_matched_row_count": 53, "digest": "ed5822805a7eb9ac502a85b969b3f52d44adf471323c5eab090e37fbc9ee3f56"},
+      {"table": "staff", "source_row_count": 53, "target_matched_row_count": 53, "digest": "dd55bb908e20dfe7be227bafcee51587639658cd98149fc273afbddd65963c02"},
+      {"table": "media_assets", "source_row_count": 0, "target_matched_row_count": 0, "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"},
+      {"table": "orders", "source_row_count": 53, "target_matched_row_count": 53, "digest": "95d2f9bf6518908785cc07293c600c27e1483b12619fafbf83a46ea173432f38"},
+      {"table": "caregiver_matching_plans", "source_row_count": 1, "target_matched_row_count": 1, "digest": "71097ef2a7b44f4c2b8a7932c177c4f6bcbeb633ad30d7e20885ac7a6b40de38"},
+      {"table": "caregiver_matching_plan_segments", "source_row_count": 1, "target_matched_row_count": 1, "digest": "dee0c53272c7804e9a5596608b6d13e98942cfb45d09b1d797e032786a6a5b14"}
+    ]
+  }
+}

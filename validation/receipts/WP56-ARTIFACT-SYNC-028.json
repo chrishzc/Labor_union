@@ -1,0 +1,31 @@
+{
+  "receipt_id": "WP56-ARTIFACT-SYNC-028",
+  "work_package": "WP56",
+  "entrypoints": [
+    {
+      "kind": "api",
+      "entrypoint": "api.main:app",
+      "contract_route": "api/routes/contract_signing.py"
+    },
+    {
+      "kind": "ui",
+      "entrypoint": "ui/app.py",
+      "contract_panel": "ui/pages/order/contract_match_panel.py",
+      "typed_client": "ui/api_clients/contract_signing_api_client.py"
+    },
+    {
+      "kind": "validation",
+      "runner": "scripts/run_contract_signing_normal_chain.py",
+      "baseline_verifier": "scripts/verify_contract_signing_dataset.py"
+    }
+  ],
+  "formal_documents": [
+    "document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md",
+    "document/架構重整/02_決策與退役執行記錄/56_Contract_Signing_and_UI_Validation_Work_Package.md"
+  ],
+  "focused_regression": {
+    "command": ".venv\\Scripts\\python.exe -m pytest tests\\test_contract_signing_api_client.py tests\\test_contract_match_panel.py -q",
+    "result": "7 passed"
+  },
+  "result": "verified"
+}

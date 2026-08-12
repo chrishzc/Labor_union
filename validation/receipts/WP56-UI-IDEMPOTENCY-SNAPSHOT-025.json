@@ -1,0 +1,16 @@
+{
+  "receipt_id": "WP56-UI-IDEMPOTENCY-SNAPSHOT-025",
+  "work_package": "WP56",
+  "scope": "contract signing UI signed-return retry snapshot",
+  "observed": {
+    "same_upload_snapshot_reuses_document_version": true,
+    "same_upload_snapshot_reuses_idempotency_key": true,
+    "file_replacement_creates_new_idempotency_key": true,
+    "stale_cleanup_creates_new_document_version_snapshot": true
+  },
+  "focused_regression": {
+    "command": ".venv\\Scripts\\python.exe -m pytest tests\\test_contract_signing_api_client.py tests\\test_contract_match_panel.py -q",
+    "result": "7 passed"
+  },
+  "result": "verified"
+}

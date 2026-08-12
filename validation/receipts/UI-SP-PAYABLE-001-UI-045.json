@@ -1,0 +1,11 @@
+{
+  "contract": "labor-union-ui-readonly-reobserve-replay-receipt/v1",
+  "receipt_id": "UI-SP-PAYABLE-001-UI-045",
+  "work_package": "WP56",
+  "scenario_id": "UI-SP-PAYABLE-001",
+  "database": "lu_test_dataset_contract_signing_v4",
+  "date": "2026-08-12",
+  "ui": {"surface": "Streamlit 8501 / 帳務作業中心 / 應付帳款查詢／輸出", "query": {"year": 2026, "month": 8}, "first_observation": {"row_count": 1, "total_amount_ntd": 7200}, "reobserve_equal": true, "export_or_archive_invoked": false},
+  "db_oracle": {"source": "UI-SP-PAYABLE-001_v4.json", "row_count": 1, "payment_types": ["staff_payable"], "obligation_counts": [2], "total_amount_ntd": 7200, "archive_called": false},
+  "result": "verified"
+}

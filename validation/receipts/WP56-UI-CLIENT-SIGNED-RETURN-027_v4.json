@@ -1,0 +1,23 @@
+{
+  "receipt_id": "WP56-UI-CLIENT-SIGNED-RETURN-027_v4",
+  "work_package": "WP56",
+  "scenario": "operator browser client signed return and atomic Contract Completion",
+  "dataset": "lu_test_dataset_contract_signing_v4",
+  "case_no": "WP56-7C9CF2503A5B",
+  "observed": {
+    "ui_receipt": {
+      "document_version_id": 60,
+      "signing_event_id": 57,
+      "contract_completion_visible": true
+    },
+    "database": {
+      "contract_identity_exists": true,
+      "order_status": "洽談中",
+      "signed_received_count": 2,
+      "document_version_count": 4,
+      "client_obligation_count": 1
+    }
+  },
+  "artifact": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_client_signed_return_027.png",
+  "result": "verified"
+}
