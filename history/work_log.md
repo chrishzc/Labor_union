@@ -599,3 +599,21 @@
 - `git diff --check` 與異動檔 strict UTF-8、無 BOM 驗證通過；未修改 schema、migration、
   正式資料庫、LINE provider 或專案相依檔，也未建立或遺留一次性程式檔案。
 
+## [2026-08-12] LINE 身分解除回復 canonical 用戶選單
+
+- 修復月嫂身分解除後仍讀取 legacy `line_rich_menu_publications`，因而切回「訂單查詢／
+  尋找專員」舊版用戶選單的 live-drift；新解除請求改選
+  `line_rich_menu_publication_tasks` 最新 published `default_menu`。
+- 新增 additive schema part 168 與 LINE stage 13 release manifest／descriptor；新解除 request
+  保存 canonical publication FK，stage 12 以前的 legacy request 保持可讀且不回填、不改寫。
+- 新增 repository、schema 與 release hash 回歸測試；聚焦測試 13 項、擴大 LINE 回歸 29 項、
+  schema loader／bootstrap／release 回歸 8 項通過。
+- 以 disposable MySQL 驗證完整 bootstrap、legacy/canonical publication 並存、新 request
+  canonical FK 寫入及既有 legacy request 讀取；測試資料庫於驗證後刪除。
+- 經使用者授權，在本機 `union_db` 套用 stage 13 前建立全庫備份並實際還原驗證；來源與還原庫
+  222 張 base table 的逐表 row count 完全一致，migration 後 3 筆既有解除歷史保持不變。
+- 啟動同版 FastAPI、canonical LINE worker 與 Streamlit；API／UI HTTP 200、worker heartbeat
+  無錯誤。最新 completed revocation request 3 已重新 link canonical publication 5，LINE provider
+  readback 確認實際 Rich Menu 一致。
+- 備份僅保存在 Git ignored `scratch/line-identity-stage13-deploy-20260812/`，不得提交或外傳；
+  完整驗收見 `2026-08-12_line_identity_canonical_default_menu_repair_receipt.md`。

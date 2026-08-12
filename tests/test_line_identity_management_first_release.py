@@ -23,6 +23,11 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.migration_release import load_migration_release_manifest
+from infrastructure.mysql.line_identity_management_repository import (
+    MySqlLineIdentityManagementRepository,
+    _REQUEST_INSERT_SQL,
+    _REQUEST_SELECT_SQL,
+)
 from subsystems.line.capabilities import LineCapability
 from subsystems.line.identity_management_application import (
     IDENTITY_MENU_RESET_INTENT,
@@ -286,6 +291,61 @@ def test_stage12_schema_preserves_history_and_requires_menu_first_saga() -> None
     assert "ON DELETE RESTRICT" in schema
 
 
+class _DefaultMenuCursor:
+    def __init__(self) -> None:
+        self.statement = ""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_arguments):
+        return False
+
+    def execute(self, statement, _parameters=None):
+        self.statement = statement
+
+    def fetchone(self):
+        return {"id": 5, "line_rich_menu_id": "richmenu-canonical-default"}
+
+
+class _DefaultMenuConnection:
+    def __init__(self) -> None:
+        self.cursor_instance = _DefaultMenuCursor()
+
+    def cursor(self):
+        return self.cursor_instance
+
+
+def test_revocation_repository_selects_canonical_published_default_menu() -> None:
+    connection = _DefaultMenuConnection()
+    repository = MySqlLineIdentityManagementRepository(connection)
+
+    publication = repository.default_menu_publication()
+
+    assert publication == {
+        "id": 5,
+        "line_rich_menu_id": "richmenu-canonical-default",
+    }
+    assert "FROM line_rich_menu_publication_tasks" in connection.cursor_instance.statement
+    assert "menu_definition_id='default_menu'" in connection.cursor_instance.statement
+    assert "publication_status='published'" in connection.cursor_instance.statement
+    assert "line_rich_menu_publications" not in connection.cursor_instance.statement
+
+
+def test_stage13_schema_preserves_legacy_requests_and_owns_new_canonical_fk() -> None:
+    schema = (
+        PROJECT_ROOT
+        / "db/schema_parts/168_line_identity_canonical_menu_publication.sql"
+    ).read_text(encoding="utf-8")
+
+    assert "MODIFY COLUMN default_menu_publication_id BIGINT NULL" in schema
+    assert "canonical_default_menu_publication_id BIGINT UNSIGNED NULL" in schema
+    assert "REFERENCES line_rich_menu_publication_tasks(id)" in schema
+    assert "chk_line_identity_revocation_publication_source" in schema
+    assert "canonical_default_menu_publication_id" in _REQUEST_INSERT_SQL
+    assert "COALESCE(canonical_default_menu_publication_id" in _REQUEST_SELECT_SQL
+
+
 def test_stage12_manifest_hashes_and_loads_all_owned_objects() -> None:
     path = PROJECT_ROOT / "db/migration_releases/labor_union_2026_08_11_line_stage12_v1.json"
     raw = json.loads(path.read_text(encoding="utf-8"))
@@ -295,6 +355,21 @@ def test_stage12_manifest_hashes_and_loads_all_owned_objects() -> None:
     manifest = load_migration_release_manifest(path, PROJECT_ROOT)
     assert [item.artifact.name for item in manifest.schema_artifacts] == [
         "167_line_identity_management.sql"
+    ]
+
+
+def test_stage13_manifest_hashes_and_loads_canonical_publication_fk() -> None:
+    path = (
+        PROJECT_ROOT
+        / "db/migration_releases/labor_union_2026_08_12_line_stage13_v1.json"
+    )
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    for artifact in [*raw["artifacts"], raw["descriptor_artifact"]]:
+        content = (PROJECT_ROOT / artifact["relative_path"]).read_bytes()
+        assert hashlib.sha256(content).hexdigest() == artifact["sha256"]
+    manifest = load_migration_release_manifest(path, PROJECT_ROOT)
+    assert [item.artifact.name for item in manifest.schema_artifacts] == [
+        "168_line_identity_canonical_menu_publication.sql"
     ]
 
 

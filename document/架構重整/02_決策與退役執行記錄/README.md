@@ -31,7 +31,8 @@
 | [38_Form_Management_Legacy_List_Caller_Migration_Receipt.md](38_Form_Management_Legacy_List_Caller_Migration_Receipt.md) | receipt | `completed` | Form Management 已改用 bounded Orders Summary、全域統計與單案 context typed Query，不再讀全量 Orders／Clients。 |
 | [39_Durable_Job_Staff_Payout_Work_Package.md](39_Durable_Job_Staff_Payout_Work_Package.md) | gap-package | `proven` | Payout、Return、Reversal 已遷移至 server-side durable queue，三種完整根事實鏈皆具隔離 MySQL crash/replay 證據。 |
 | [40_Durable_Job_Government_Subsidy_Work_Package.md](40_Durable_Job_Government_Subsidy_Work_Package.md) | gap-package | `proven` | 五種 Government Subsidy Apply 已遷移至 server-side durable queue，claim、receipt、reversal 根事實鏈均有隔離 MySQL crash/replay 證據。 |
+| [55_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md](55_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md) | work-package | `completed-local-deployed` | 已修正身分解除仍讀 legacy Rich Menu publication 的 live-drift，並完成本機 stage 13、restart、health 與受影響帳號修正。 |
 
 > `29_` 原本被三份文件重複使用（無明確時間序，只能靠檔名區分），2026-08-07
 > 已重新編號為 `32`～`34`（依原檔名字母序指派，不代表已還原真實時間序）。
-> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `36`）。
+> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `55`）。
