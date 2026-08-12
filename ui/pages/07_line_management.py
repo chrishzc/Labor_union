@@ -239,7 +239,7 @@ def show() -> None:
 
     if bypassed:
         st.warning(
-            "開發模式：已略過管理員登入。內部 API 金鑰仍在驗證；正式環境會強制恢復登入。"
+            "開發模式：已略過管理員登入；正式環境會強制恢復登入與權限驗證。"
         )
 
     header_left, header_right = st.columns([4, 1])
