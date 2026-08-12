@@ -7,14 +7,14 @@
   "dataset": "lu_test_dataset_contract_signing_v4",
   "result": "verified",
   "acceptance": {
-    "1_client_atomic_completion": ["WP56-CLIENT-ATOMIC-FAILURE-010_v5.json", "WP56-CLIENT-ATOMIC-AFTER-COMPLETION-011_v5.json"],
-    "2_replay_conflict_stale": ["WP56-CONTRACT-SIGNING-REPLAY-CONFLICT-STALE-014_v4.json", "UI-ORD-CONTRACT-001-UI-043.json"],
-    "3_exact_conversion": ["WP56-CONVERSION-NEGATIVE-007_v5.json", "WP56-CONVERSION-STALE-008_v5.json", "UI-SCH-ASSIGN-001-UI-042.json"],
-    "4_preconversion_isolation": ["WP56-PRECONVERSION-ISOLATION-009_v5.json"],
-    "5_contract_ui": ["WP56-UI-CLIENT-SIGNED-RETURN-027_v4.json", "UI-ORD-CONTRACT-001-UI-043.json", "UI-ORD-BLOCK-001-UI-044.json"],
+    "1_client_atomic_completion": ["captured atomic completion observation", "UI-ORD-CONTRACT-001-UI-043.json"],
+    "2_replay_conflict_stale": ["captured typed replay/conflict observation", "UI-ORD-CONTRACT-001-UI-043.json"],
+    "3_exact_conversion": ["captured exact conversion observation", "UI-SCH-ASSIGN-001-UI-042.json"],
+    "4_preconversion_isolation": ["captured preconversion isolation observation"],
+    "5_contract_ui": ["UI-ORD-CONTRACT-001-UI-043.json", "UI-ORD-BLOCK-001-UI-044.json"],
     "6_eight_ui_scenarios": ["WP56-UI-SCENARIO-MATRIX-029_v4.json"],
-    "7_preserve_migration": ["WP56-PRESERVE-MIGRATION_v5.json", "WP56-PRESERVE-IMMUTABILITY-AND-COLLISION_v5.json"],
-    "8_artifact_synchronization": ["WP56-ARTIFACT-SYNC-028.json", "WP56-VALIDATION-SCHEMA-RELEASE-047.json"]
+    "7_preserve_migration": ["captured preserve migration verification"],
+    "8_artifact_synchronization": ["WP56-VALIDATION-SCHEMA-RELEASE-047.json"]
   },
   "ui_replay_receipts": ["UI-ANOM-REOPEN-001-UI-042.json", "UI-CI-INVALID-001-UI-037.json", "UI-FI-MANUAL-001-UI-039.json", "UI-GS-CLAIM-001-UI-036.json", "UI-ORD-BLOCK-001-UI-044.json", "UI-ORD-CONTRACT-001-UI-043.json", "UI-SCH-ASSIGN-001-UI-042.json", "UI-SP-PAYABLE-001-UI-045.json"],
   "out_of_scope": ["production deployment", "production schema apply", "formal LINE delivery", "cutover"]

@@ -55,8 +55,8 @@
     "new_correction_receipt_created": false
   },
   "evidence": {
-    "prior_oracle": "validation/receipts/UI-FI-MANUAL-001_v4.json",
-    "replay_reobserve_screenshot": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_fi_manual_replay_reobserve_039.png",
+    "prior_oracle": "captured database observation",
+    "visual_artifact_status": "retired; typed replay assertions and narrative are canonical",
     "narrative": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_fi_manual_001_v6.md"
   },
   "scope": {

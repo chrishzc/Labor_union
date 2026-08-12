@@ -8,6 +8,6 @@
   "date": "2026-08-12",
   "ui": {"surface": "Streamlit 8501 / 訂單管理 / 契約簽署流程", "first_observation": {"staff_signed": "0/0", "commitment_created": false, "client_signed": false, "document_versions": 0, "contract_completed": false, "lifecycle_status": "洽談中"}, "reobserve_equal": true},
   "typed_blockers": ["contract_identity_missing", "official_service_dates_incomplete"],
-  "db_oracle": {"source": "UI-ORD-BLOCK-001_v4.json", "contract_document_versions": 0, "contract_signing_events": 0, "precontract_service_commitments": 0},
+  "db_oracle": {"source": "captured database observation", "contract_document_versions": 0, "contract_signing_events": 0, "precontract_service_commitments": 0},
   "result": "verified"
 }

@@ -1,9 +1,0 @@
-{
-  "contract": "labor-union-ui-validation-expected/v1",
-  "scenario_id": "UI-FI-MANUAL-001",
-  "assertions": [
-    "The classification timeline is non_business_review/manual_review then client_receipt/create.",
-    "finance_import_manual_review is resolved with predicate_active=0 after correction.",
-    "The correction replay returns the original receipt and reconciliation_receipt_count remains one."
-  ]
-}

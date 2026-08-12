@@ -25,10 +25,6 @@ After a Streamlit rerun, Chrome submitted the retained Preview command again.
 The UI displayed the same job id, rather than creating a second job or a second
 claim batch. This is the scenario's concrete UI repair/re-observe/replay chain.
 
-- Apply/re-observe screenshot:
-  `wp56_ui_gs_claim_apply_reobserve_036.png`
-- Replay/re-observe screenshot:
-  `wp56_ui_gs_claim_replay_reobserve_036.png`
 - Machine-readable receipt:
   `validation/receipts/UI-GS-CLAIM-001-UI-036.json`
-- Previous DB oracle: `validation/receipts/UI-GS-CLAIM-001_v4.json`
+- Database oracle: captured in the machine-readable receipt.

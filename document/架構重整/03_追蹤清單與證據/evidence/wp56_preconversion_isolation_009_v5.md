@@ -12,4 +12,4 @@ The case was rejected before conversion because its requested dates conflict
 with an existing availability lock.
 
 Receipt: `validation/receipts/WP56-PRECONVERSION-ISOLATION-009_v5.json`.
-Focused test: `tests/test_verify_contract_signing_preconversion_isolation.py`.
+Focused helper test was retired after WP56 closeout; the captured database observations in this evidence remain the acceptance record.

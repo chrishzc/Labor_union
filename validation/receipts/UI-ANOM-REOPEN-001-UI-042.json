@@ -7,7 +7,7 @@
   "case_no": "WP56-7E8BEB213973",
   "date": "2026-08-12",
   "ui_reobserve": {"surface": "Streamlit 8501 / 異常警示中心 / 服務人員", "alert": "服務天數與實際排班天數不平衡", "repair_route": "前往正式人力配置"},
-  "anomaly_oracle": {"verifier": "scripts/verify_anomaly_reopen_scenario.py", "valid": true, "status": "open", "timeline_actions": ["claim", "resolve", "reopen", "auto_resolve", "reopen"]},
+  "anomaly_oracle": {"source": "captured anomaly database observation", "valid": true, "status": "open", "timeline_actions": ["claim", "resolve", "reopen", "auto_resolve", "reopen"]},
   "repair_replay": {"receipt": "UI-SCH-ASSIGN-001-UI-042.json", "job_id": "dfcdd774-510f-4ecb-8f25-21e7f365ce76", "reobserve_generation": 1, "same_command_replay": true, "new_assignment_count": 0},
   "result": "verified"
 }

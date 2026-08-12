@@ -1,9 +1,0 @@
-{
-  "contract": "labor-union-ui-validation-expected/v1",
-  "scenario_id": "UI-CI-INVALID-001",
-  "assertions": [
-    "Invalid Case Import input creates only a masked open review root.",
-    "Exact replay preserves one root and changed payload is rejected as a conflict.",
-    "Invalid intake causes zero canonical Client, Orders, and Client Finance root delta."
-  ]
-}

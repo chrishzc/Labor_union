@@ -72,9 +72,8 @@
     "candidate_or_preview_fingerprint_changed": false
   },
   "evidence": {
-    "prior_oracle": "validation/receipts/UI-GS-CLAIM-001_v4.json",
-    "apply_reobserve_screenshot": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_gs_claim_apply_reobserve_036.png",
-    "replay_reobserve_screenshot": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_gs_claim_replay_reobserve_036.png",
+    "prior_oracle": "captured database observation",
+    "visual_artifact_status": "retired; typed replay assertions and narrative are canonical",
     "narrative": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_gs_claim_001_v6.md"
   },
   "scope": {

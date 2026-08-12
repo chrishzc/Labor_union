@@ -136,14 +136,14 @@ scenario receipt 與 disposable-MySQL evidence；production deployment、正式 
 
 | # | Acceptance | Current evidence | Status | Required closure evidence |
 |---|---|---|---|---|
-| 1 | 客戶簽回原子完成 | v4 normal chain 證明成功鏈；v5 `WP56-CLIENT-ATOMIC-FAILURE-010_v5.json` 證明 Contract Completion 入口 failure rollback；`WP56-CLIENT-ATOMIC-AFTER-COMPLETION-011_v5.json` 證明 completion/remaining writes 後 failure rollback。 | `verified` | N/A. |
-| 2 | replay 與 typed conflict | `WP56-CONTRACT-SIGNING-REPLAY-CONFLICT-STALE-014_v4.json` 已實證 staff/client signed-return 的 same-key/same-bytes replay、changed bytes typed `409 contract_signature_idempotency_conflict`，以及 stale sent-document version typed `409 contract_document_version_stale`，兩次 stale 前後 documents/events 均為 4/4。`WP56-UI-STALE-024_v4.json` 已由 browser 實證 stale typed error 不新增 client signed-return，且以 current-version UI state 成功完成 Contract Completion；`WP56-UI-IDEMPOTENCY-SNAPSHOT-025.json` 證明 UI 對相同上傳快照重用 key，focused regression 為 7 passed。 | `verified` | API 層負責 changed-payload conflict；正常 UI 不製造同 key/不同 payload，僅驗收使用者可遇到的 replay、stale、blocker 與 recovery。 |
-| 3 | commitment exact conversion 唯一 | v4 normal conversion；v5 mismatch、stale、occupancy conflict 都已實證零 partial write。occupancy pair receipt 證明 17 個衝突不會建立 rejected case execution roots；API mapper regression 證明對外為 typed `409 waiting_lock_conflict`。 | `verified` | N/A. |
-| 4 | conversion 前隔離 | `WP56-PRECONVERSION-ISOLATION-009_v5.json` 對一個有效但未 converted 的 commitment 證明 Calendar schedule、formal Assignment、assignment-linked Payroll service pay 與 Government Subsidy claim item 皆為零；focused verifier tests 通過。 | `verified` | N/A. |
-| 5 | Contract UI 完整性 | Orders editor／contract panel 與 UI matrix existing integration mapping 已定義 canonical surface。`WP56-UI-CLIENT-SIGNED-RETURN-027_v4.json` 已實證既有客戶簽回上傳、受控提交、Contract Completion 顯示與 DB atomic roots；`WP56-UI-STALE-024_v4.json` 證明 stale/recovery，API receipt 證明 typed conflict，pre-state screenshot 證明版本、blocker 與可操作控制。 | `verified` | N/A. |
-| 6 | 八個 UI scenarios | 八個 versioned scenario、expected 與 v4 DB oracle receipt 已存在；八個既有 UI surface 均有 v5 browser evidence。`WP56-UI-SCENARIO-MATRIX-029_v4.json` 逐一索引八個獨立 oracle/evidence pair。 | `verified` | N/A. |
-| 7 | preserve migration 正確性 | v5 allowlist migration receipt 有 6 roots、161 rows、matching digest 與 verified projection rebuild；新增 case `WP56-E702D40C40B3` 的 target scenario replay、normal-chain verifier 與 integrated UI dataset verifier 均通過；source-key subset digest immutability verifier 通過，53 個 root case collision 會 fail closed。 | `verified` | N/A. |
-| 8 | artifact synchronization | validation schema manifest/release 已同步；WP、matrix、v4/v5 receipts 已互連。`WP56-ARTIFACT-SYNC-028.json` 記錄 public API、既有 UI、runner/verifier 與 formal documents，focused UI regressions 為 7 passed。 | `verified` | N/A. |
+| 1 | 客戶簽回原子完成 | `WP56-CLOSEOUT-046.json` 收斂已捕捉的原子完成觀測與 Contract UI replay receipt。 | `verified` | N/A. |
+| 2 | replay 與 typed conflict | Closeout 收斂 typed replay/conflict 觀測；`UI-ORD-CONTRACT-001-UI-043.json` 留存完整 UI replay。 | `verified` | 正常 UI 只驗收使用者可遇到的 replay、stale、blocker 與 recovery。 |
+| 3 | commitment exact conversion 唯一 | Closeout 收斂 exact conversion 資料庫觀測；`UI-SCH-ASSIGN-001-UI-042.json` 留存 UI repair/replay。 | `verified` | N/A. |
+| 4 | conversion 前隔離 | Closeout 收斂 preconversion isolation 資料庫觀測。 | `verified` | N/A. |
+| 5 | Contract UI 完整性 | `UI-ORD-CONTRACT-001-UI-043.json` 與 `UI-ORD-BLOCK-001-UI-044.json` 留存完整 UI 操作鏈。 | `verified` | N/A. |
+| 6 | 八個 UI scenarios | `WP56-UI-SCENARIO-MATRIX-029_v4.json` 唯一索引八個 replay/re-observe receipts。 | `verified` | N/A. |
+| 7 | preserve migration 正確性 | Closeout 收斂已捕捉的 preserve migration verification。 | `verified` | N/A. |
+| 8 | artifact synchronization | `WP56-VALIDATION-SCHEMA-RELEASE-047.json` 留存 validation schema release。 | `verified` | N/A. |
 
 完成後將 `declared_status` 改為 `completed` 並連結驗收 evidence；不得另建「完成版」副本。
 
@@ -158,29 +158,9 @@ scenario receipt 與 disposable-MySQL evidence；production deployment、正式 
 - Decision SSOT：`01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
 - UI backlog：`document/功能開發計畫/UI工作區測試資料情境矩陣_草案.md`
 - Closeout receipt：`validation/receipts/WP56-CLOSEOUT-046.json`；本 receipt 是 §9 八項 acceptance 與八個 UI scenario 的唯一套件層完成判讀。validation schema release：`WP56-VALIDATION-SCHEMA-RELEASE-047.json`。
-- v4 DB oracle receipts：`validation/receipts/UI-ORD-CONTRACT-001_v4.json`、
-  `UI-ORD-BLOCK-001_v4.json`、`UI-FI-MANUAL-001_v4.json`、
-  `UI-ANOM-REOPEN-001_v4.json`、`UI-CI-INVALID-001_v4.json`、
-  `UI-SCH-ASSIGN-001_v4.json`、`UI-SP-PAYABLE-001_v4.json`、
-  `UI-GS-CLAIM-001_v4.json`。這些僅證明資料庫 oracle，不取代 UI evidence。
-- Preserve migration receipt：`validation/receipts/WP56-PRESERVE-MIGRATION_v5.json`，以及
-  `03_追蹤清單與證據/evidence/wp56_preserve_migration_v5.md`。
-- v5 append-only normal-chain receipt：`validation/receipts/WP56-V5-PRESERVE-002-normal-chain.json`，以及
-  `03_追蹤清單與證據/evidence/wp56_v5_preserve_normal_chain_002.md`。
-- v5 preserve immutability/collision receipt：`validation/receipts/WP56-PRESERVE-IMMUTABILITY-AND-COLLISION_v5.json`，以及
-  `03_追蹤清單與證據/evidence/wp56_preserve_immutability_and_collision_v5.md`。
-- v5 conversion negative receipt：`validation/receipts/WP56-CONVERSION-NEGATIVE-007_v5.json`，以及
-  `03_追蹤清單與證據/evidence/wp56_conversion_negative_007_v5.md`。
-- v5 conversion stale receipt：`validation/receipts/WP56-CONVERSION-STALE-008_v5.json`，以及
-  `03_追蹤清單與證據/evidence/wp56_conversion_stale_008_v5.md`。
-- v5 occupancy conflict receipt：`validation/receipts/WP56-OCCUPANCY-CONFLICT-PAIR_v5.json`，以及
-  `03_追蹤清單與證據/evidence/wp56_occupancy_conflict_pair_v5.md`。
-- v5 client atomic failure receipt：`validation/receipts/WP56-CLIENT-ATOMIC-FAILURE-010_v5.json`，以及
-  `03_追蹤清單與證據/evidence/wp56_client_atomic_failure_010_v5.md`。
-- v5 client atomic after-completion receipt：`validation/receipts/WP56-CLIENT-ATOMIC-AFTER-COMPLETION-011_v5.json`，以及
-  `03_追蹤清單與證據/evidence/wp56_client_atomic_after_completion_011_v5.md`。
-- UI visual evidence：`03_追蹤清單與證據/evidence/wp56_ui_ord_contract_001_v4.md` 與
-  `03_追蹤清單與證據/evidence/wp56_ui_ord_block_001_v4.md`。
+- Canonical validation contract：`validation/expected/CS-CONTRACT-SIGNING-001.json`、
+  `validation/fixtures/CS-CONTRACT-SIGNING-001.json` 與
+  `validation/scenarios/CS-CONTRACT-SIGNING-001.json`。
 - UI v6/replay receipts：`UI-ANOM-REOPEN-001-UI-042.json`、`UI-CI-INVALID-001-UI-037.json`、
   `UI-FI-MANUAL-001-UI-039.json`、`UI-GS-CLAIM-001-UI-036.json`、
   `UI-ORD-BLOCK-001-UI-044.json`、`UI-ORD-CONTRACT-001-UI-043.json`、

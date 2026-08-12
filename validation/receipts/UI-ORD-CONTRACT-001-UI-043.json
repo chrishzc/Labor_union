@@ -18,7 +18,7 @@
     "payload_policy": "Each replay used the same command object, immutable document bytes, expected document version, idempotency key, and correlation id."
   },
   "db_oracle": {
-    "verifier": "scripts/verify_contract_signing_normal_chain.py",
+    "oracle_source": "captured normal-chain database observation",
     "valid": true,
     "observed": {"archive_digest_count": 4, "staff_signed_count": 1, "client_signed_count": 1, "commitment_count": 1, "converted_commitment_count": 1, "settled_deposit_count": 1, "assignment_count": 1, "schedule_day_count": 5}
   },

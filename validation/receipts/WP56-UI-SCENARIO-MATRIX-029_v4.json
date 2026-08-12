@@ -3,14 +3,14 @@
   "work_package": "WP56",
   "dataset": "lu_test_dataset_contract_signing_v4",
   "scenarios": [
-    {"id": "UI-ANOM-REOPEN-001", "oracle": "UI-ANOM-REOPEN-001_v4.json", "ui_evidence": "wp56_ui_anom_reopen_001_v6.md", "ui_api_replay_receipt": "UI-ANOM-REOPEN-001-UI-042.json"},
-    {"id": "UI-CI-INVALID-001", "oracle": "UI-CI-INVALID-001_v4.json", "ui_evidence": "wp56_ui_ci_invalid_001_v6.md", "ui_api_replay_receipt": "UI-CI-INVALID-001-UI-037.json"},
-    {"id": "UI-FI-MANUAL-001", "oracle": "UI-FI-MANUAL-001_v4.json", "ui_evidence": "wp56_ui_fi_manual_001_v6.md", "ui_api_replay_receipt": "UI-FI-MANUAL-001-UI-039.json"},
-    {"id": "UI-GS-CLAIM-001", "oracle": "UI-GS-CLAIM-001_v4.json", "ui_evidence": "wp56_ui_gs_claim_001_v6.md", "ui_api_replay_receipt": "UI-GS-CLAIM-001-UI-036.json"},
-    {"id": "UI-ORD-BLOCK-001", "oracle": "UI-ORD-BLOCK-001_v4.json", "ui_evidence": "wp56_ui_ord_block_001_v6.md", "ui_api_replay_receipt": "UI-ORD-BLOCK-001-UI-044.json"},
-    {"id": "UI-ORD-CONTRACT-001", "oracle": "UI-ORD-CONTRACT-001_v4.json", "ui_evidence": "wp56_ui_ord_contract_001_v6.md", "ui_api_replay_receipt": "UI-ORD-CONTRACT-001-UI-043.json"},
-    {"id": "UI-SCH-ASSIGN-001", "oracle": "UI-SCH-ASSIGN-001_v4.json", "ui_evidence": "wp56_ui_sch_assign_001_v6.md", "ui_api_replay_receipt": "UI-SCH-ASSIGN-001-UI-042.json"},
-    {"id": "UI-SP-PAYABLE-001", "oracle": "UI-SP-PAYABLE-001_v4.json", "ui_evidence": "wp56_ui_sp_payable_001_v6.md", "ui_api_replay_receipt": "UI-SP-PAYABLE-001-UI-045.json"}
+    {"id": "UI-ANOM-REOPEN-001", "oracle": "captured database observation", "ui_evidence": "wp56_ui_anom_reopen_001_v6.md", "ui_api_replay_receipt": "UI-ANOM-REOPEN-001-UI-042.json"},
+    {"id": "UI-CI-INVALID-001", "oracle": "captured database observation", "ui_evidence": "wp56_ui_ci_invalid_001_v6.md", "ui_api_replay_receipt": "UI-CI-INVALID-001-UI-037.json"},
+    {"id": "UI-FI-MANUAL-001", "oracle": "captured database observation", "ui_evidence": "wp56_ui_fi_manual_001_v6.md", "ui_api_replay_receipt": "UI-FI-MANUAL-001-UI-039.json"},
+    {"id": "UI-GS-CLAIM-001", "oracle": "captured database observation", "ui_evidence": "wp56_ui_gs_claim_001_v6.md", "ui_api_replay_receipt": "UI-GS-CLAIM-001-UI-036.json"},
+    {"id": "UI-ORD-BLOCK-001", "oracle": "captured database observation", "ui_evidence": "wp56_ui_ord_block_001_v6.md", "ui_api_replay_receipt": "UI-ORD-BLOCK-001-UI-044.json"},
+    {"id": "UI-ORD-CONTRACT-001", "oracle": "captured database observation", "ui_evidence": "wp56_ui_ord_contract_001_v6.md", "ui_api_replay_receipt": "UI-ORD-CONTRACT-001-UI-043.json"},
+    {"id": "UI-SCH-ASSIGN-001", "oracle": "captured database observation", "ui_evidence": "wp56_ui_sch_assign_001_v6.md", "ui_api_replay_receipt": "UI-SCH-ASSIGN-001-UI-042.json"},
+    {"id": "UI-SP-PAYABLE-001", "oracle": "captured database observation", "ui_evidence": "wp56_ui_sp_payable_001_v6.md", "ui_api_replay_receipt": "UI-SP-PAYABLE-001-UI-045.json"}
   ],
   "result": "verified"
 }

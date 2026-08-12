@@ -23,8 +23,6 @@ Database re-observation confirmed exactly one resolution event, one resolution
 outbox intent, and one command receipt for this review. Thus replay neither
 created an additional owning record nor duplicated the resolution chain.
 
-- Replay/re-observe screenshot:
-  `wp56_ui_ci_invalid_replay_reobserve_037.png`
 - Machine-readable receipt:
   `validation/receipts/UI-CI-INVALID-001-UI-037.json`
-- Previous DB oracle: `validation/receipts/UI-CI-INVALID-001_v4.json`
+- Database oracle: captured in the machine-readable receipt.

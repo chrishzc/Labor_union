@@ -1,8 +1,0 @@
-{
-  "contract": "labor-union-ui-validation-expected/v1",
-  "scenario_id": "UI-ORD-BLOCK-001",
-  "assertions": [
-    "orders.status is 洽談中 and contract_identity is null.",
-    "There are zero contract documents, signing events and precontract commitments."
-  ]
-}

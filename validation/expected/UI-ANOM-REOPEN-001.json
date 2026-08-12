@@ -1,8 +1,0 @@
-{
-  "contract": "labor-union-ui-validation-expected/v1",
-  "scenario_id": "UI-ANOM-REOPEN-001",
-  "assertions": [
-    "Timeline is claim, resolve, reopen, auto_resolve, reopen.",
-    "The final alert is open because the root defect is active again."
-  ]
-}

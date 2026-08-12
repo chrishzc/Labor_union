@@ -42,8 +42,8 @@
     "new_outbox_created_by_replay": false
   },
   "evidence": {
-    "prior_oracle": "validation/receipts/UI-CI-INVALID-001_v4.json",
-    "replay_reobserve_screenshot": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_ci_invalid_replay_reobserve_037.png",
+    "prior_oracle": "captured database observation",
+    "visual_artifact_status": "retired; typed replay assertions and narrative are canonical",
     "narrative": "document/架構重整/03_追蹤清單與證據/evidence/wp56_ui_ci_invalid_001_v6.md"
   },
   "scope": {

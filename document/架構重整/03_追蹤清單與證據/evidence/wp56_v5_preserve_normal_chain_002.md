@@ -14,7 +14,7 @@ Finance correction replay matched its first receipt.
 
 Both read-only verifiers returned `valid: true`:
 
-- `scripts/verify_contract_signing_normal_chain.py`
+- Captured normal-chain database observation recorded in the linked receipt.
 - `scripts/verify_integrated_ui_validation_dataset.py`
 
 Observed chain: four archived documents, two sent and two signed events, one

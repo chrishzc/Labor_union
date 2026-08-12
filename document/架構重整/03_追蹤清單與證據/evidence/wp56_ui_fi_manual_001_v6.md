@@ -25,8 +25,6 @@ Database re-observation found one formal correction event, one ledger/reconcilia
 receipt chain, one correction receipt, and one durable job; the manual-review
 alert was resolved. Replay added none of those records.
 
-- Replay/re-observe screenshot:
-  `wp56_ui_fi_manual_replay_reobserve_039.png`
 - Machine-readable receipt:
   `validation/receipts/UI-FI-MANUAL-001-UI-039.json`
-- Previous DB oracle: `validation/receipts/UI-FI-MANUAL-001_v4.json`
+- Database oracle: captured in the machine-readable receipt.
