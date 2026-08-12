@@ -5,6 +5,9 @@ from ui.pages.order.editor import render_editor
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 
+ORDER_SELECTION_WIDGET_KEY = "tab1_order_select_v2"
+
+
 def _render_tab1_overview(orders_data):
     st.subheader("訂單資訊總覽")
     if not orders_data:
@@ -16,6 +19,9 @@ def _render_tab1_overview(orders_data):
         return
     st.write(f"共 {len(filtered_orders)} 筆訂單，請直接在下拉式選單中選擇要編輯的訂單。")
     selected_case_no = _select_case_number(filtered_orders)
+    if selected_case_no is None:
+        st.info("請先選擇案件，再載入完整資料。")
+        return
     selected_order = _find_order(filtered_orders, selected_case_no)
     if selected_order is None:
         st.warning("目前無法定位到該筆訂單資料，請重新整理頁面。")
@@ -47,8 +53,12 @@ def _select_case_number(filtered_orders):
     selected_label = st.selectbox(
         "選擇要編輯的訂單",
         options=list(order_options.keys()),
-        key="tab1_order_select",
+        index=None,
+        placeholder="請選擇案件",
+        key=ORDER_SELECTION_WIDGET_KEY,
     )
+    if selected_label is None:
+        return None
     return order_options[selected_label]
 
 
@@ -84,7 +94,7 @@ def _render_selected_order(selected_case_no):
             return
         render_editor(
             target_case_no=selected_case_no,
-            orders_data=[selected_order],
+            orders_data=[selected_order.model_dump(mode="json")],
             payments_raw=[],
             key_prefix=f"tab1_acc_{selected_case_no}",
         )
