@@ -11,7 +11,7 @@ from scripts.seed_validation_dataset import (
     require_dataset_database,
 )
 from scripts.seed_ui_validation_dataset import _configure_runtime_database
-from scripts.seed_validation_finance_manual_review import _INGESTION_KEY
+from scripts.seed_validation_finance_manual_review import _ingestion_key
 
 
 def test_foundation_dataset_builds_a_canonical_case_import_intent():
@@ -91,4 +91,6 @@ def test_integrated_dataset_replay_requires_the_same_root_case() -> None:
 
 
 def test_finance_manual_review_uses_a_stable_scenario_command_identity() -> None:
-    assert _INGESTION_KEY == "validation-dataset-v1-finance-manual-review"
+    assert _ingestion_key("finance-manual-review") == (
+        "validation-dataset-v1-finance-manual-review:finance-manual-review"
+    )

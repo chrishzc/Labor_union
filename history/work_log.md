@@ -634,3 +634,14 @@
   啟動，需另案補齊 upstream 漏檔／測試契約後才能恢復直接測試。
 - `git diff --check` 所列 trailing whitespace 均可在純 upstream diff 重現；本次衝突解析檔無
   新增 whitespace 錯誤。`history/git_push.md` 仍由 `.gitignore` 排除，本次未執行 remote push。
+
+## [2026-08-12] 更新 upstream/main 合約封存修復
+
+- 確認 upstream/main `e9de8b7015ab1ef1a77c639e0723e98e32fc2f64` 已補回缺少的
+  `infrastructure/archive/contract_documents.py`，解除 `api.main` 載入時的模組阻塞。
+- 上游同步將驗證資料種子測試從不存在的 `_INGESTION_KEY` 改為正式
+  `_ingestion_key(...)` 契約，原先兩個完整測試收集阻塞均已修復。
+- 以 `--no-commit --no-ff` 合併最新 upstream/main，過程沒有衝突；保留本地 LINE 修復與
+  Contract Signing router 的既有防護提交，未執行遠端 push。
+- 驗證 `api.main` 可成功載入；合約封存與驗證資料集聚焦測試 `13 passed`；完整 pytest
+  成功收集 `1902` 項測試。
