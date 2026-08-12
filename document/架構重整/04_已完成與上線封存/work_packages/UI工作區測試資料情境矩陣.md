@@ -1,11 +1,11 @@
 # UI 工作區測試資料情境矩陣
 
-- 狀態：`in-progress`
+- 狀態：`completed`
 - Priority：`P0`
 - Owner：UI validation／各 owning Domain
 - Domain／Subsystem：Case Import、Orders、Contract Signing、Client Finance、Scheduling、Staff
   Payables、Government Subsidy、Anomalies／Validation Dataset
-- 更新日期：2026-08-11
+- 更新日期：2026-08-12
 - 核准日期：2026-08-10
 - 目的：在既有 UI 工作區驗收業務事件的計算、狀態、異常與修正結果；pytest／DB verifier 是證據，不是 UI 的替代品。
 - 正式依據：[`21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`](../架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md)
@@ -109,3 +109,22 @@ owning surface；不能因目前導航選單、預設年月或可見資料不同
 
 完成條件是八個 scenario 均滿足強制六階段與四類證據；全部完成後只在本文件改為
 `completed` 並連結 evidence，不建立另一份「完成版」。
+
+## 完成與封存裁決（2026-08-12）
+
+- 八個 UI scenario 均已取得結果為 `verified` 的獨立 UI replay receipt。
+- `validation/receipts/WP56-CLOSEOUT-046.json` 已確認 WP56 驗收條件 1～8 完成，其中第 6 項明確涵蓋全部八個 UI scenario。
+- 完整矩陣證據為 `validation/receipts/WP56-UI-SCENARIO-MATRIX-029_v4.json`。
+- 本矩陣的 backlog 已完成，不再構成 active 功能開發計畫；正式契約仍由規格 21 擁有。
+- production deployment、production schema apply、正式 LINE delivery 與 cutover 仍屬 WP56 out of scope，不得由本次封存推論為已完成或已授權。
+
+| Scenario | 完成證據 | 結果 |
+|---|---|---|
+| `UI-ORD-BLOCK-001` | `validation/receipts/UI-ORD-BLOCK-001-UI-044.json` | `verified` |
+| `UI-CI-INVALID-001` | `validation/receipts/UI-CI-INVALID-001-UI-037.json` | `verified` |
+| `UI-FI-MANUAL-001` | `validation/receipts/UI-FI-MANUAL-001-UI-039.json` | `verified` |
+| `UI-ANOM-REOPEN-001` | `validation/receipts/UI-ANOM-REOPEN-001-UI-042.json` | `verified` |
+| `UI-ORD-CONTRACT-001` | `validation/receipts/UI-ORD-CONTRACT-001-UI-043.json` | `verified` |
+| `UI-SCH-ASSIGN-001` | `validation/receipts/UI-SCH-ASSIGN-001-UI-042.json` | `verified` |
+| `UI-SP-PAYABLE-001` | `validation/receipts/UI-SP-PAYABLE-001-UI-045.json` | `verified` |
+| `UI-GS-CLAIM-001` | `validation/receipts/UI-GS-CLAIM-001-UI-036.json` | `verified` |

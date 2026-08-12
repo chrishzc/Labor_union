@@ -42,7 +42,7 @@ def test_client_uses_distinct_subsidy_return_apply_path_and_idempotency_header()
         _response({"account_version": 2, "candidate": {}, "preview_fingerprint": "a" * 64}),
         _response({"case_no": "C-1", "correction_type": "refund", "account_version": 3, "correction_identity": "b" * 64, "ledger_entry_count": 1, "allocation_count": 1, "affected_obligations": ["subsidy:C-1"]}),
     ])
-    client = ClientRefundReversalApiClient(base_url="https://api.example", headers={"X-Internal-API-Key": "test"}, session=session)
+    client = ClientRefundReversalApiClient(base_url="https://api.example", headers={"X-Legacy-Shared-Key": "test"}, session=session)
 
     assert client.query("C-1").account_version == 2
     preview_body = ClientRefundPreviewBody(finance_import_row_ids=[4], obligation_identities=["subsidy:C-1"])
@@ -67,7 +67,7 @@ def test_query_rejects_unowned_pending_bank_rows():
     ])
     client = ClientRefundReversalApiClient(
         base_url="https://api.example",
-        headers={"X-Internal-API-Key": "test"},
+        headers={"X-Legacy-Shared-Key": "test"},
         session=session,
     )
 

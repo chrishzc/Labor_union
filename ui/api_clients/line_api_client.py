@@ -13,7 +13,7 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from ui.pages.shared import resolve_api_base_url, resolve_internal_api_key
+from ui.pages.shared import resolve_api_base_url
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -94,13 +94,6 @@ class LineAdminApiClient:
         pass
 
     @property
-    def configured(self) -> bool:
-        try:
-            return bool(resolve_internal_api_key())
-        except RuntimeError:
-            return False
-
-    @property
     def admin_auth_bypassed(self) -> bool:
         app_env = os.getenv("APP_ENV", "development").strip().lower()
         enabled = os.getenv("ENABLE_ADMIN_AUTH", "true").strip().lower()
@@ -112,7 +105,7 @@ class LineAdminApiClient:
         }
 
     def _request_headers(self, token: str | None) -> dict[str, str]:
-        headers = {"X-Internal-API-Key": resolve_internal_api_key()}
+        headers: dict[str, str] = {}
         if token:
             headers["Authorization"] = f"Bearer {token}"
         return headers

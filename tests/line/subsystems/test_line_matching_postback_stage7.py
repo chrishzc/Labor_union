@@ -19,6 +19,19 @@ class _MatchingApplicationSpy:
         self.calls.append((unit_of_work, arguments))
 
 
+class _ScheduleConfirmationSpy:
+    def __init__(self) -> None:
+        self.reason_calls = []
+        self.postback_calls = []
+
+    def confirm_line_postback(self, token, decision, line_user_id, event_key):
+        self.postback_calls.append((token, decision, line_user_id, event_key))
+
+    def confirm_line_rejection_reason(self, line_user_id, reason, event_key):
+        self.reason_calls.append((line_user_id, reason, event_key))
+        return True
+
+
 def _inbox(data: str, *, source_type=LineSourceType.USER):
     event = SimpleNamespace(
         event_id=SimpleNamespace(value="webhook-event-1"),
@@ -63,3 +76,45 @@ def test_non_matching_or_non_user_postback_is_ignored() -> None:
     )
 
     assert spy.calls == []
+
+
+def test_schedule_rejection_reason_message_uses_the_durable_event_identity() -> None:
+    handler = LineMatchingPostbackApplication(_MatchingApplicationSpy())
+    schedule_spy = _ScheduleConfirmationSpy()
+    unit_of_work = SimpleNamespace(matching_schedule_confirmations=schedule_spy)
+
+    handled = handler.handle_message(
+        _inbox("other-action"),
+        unit_of_work,
+        LineUserId("U-caregiver"),
+        "家中已有安排",
+    )
+
+    assert handled is True
+    assert schedule_spy.reason_calls == [
+        (
+            LineUserId("U-caregiver"),
+            "家中已有安排",
+            "matching-schedule-rejection-reason:webhook-event-1",
+        )
+    ]
+
+
+def test_schedule_rejection_postback_uses_the_bound_line_user_and_event_identity() -> None:
+    handler = LineMatchingPostbackApplication(_MatchingApplicationSpy())
+    schedule_spy = _ScheduleConfirmationSpy()
+    unit_of_work = SimpleNamespace(matching_schedule_confirmations=schedule_spy)
+
+    handler.handle(
+        _inbox("schedule:safe-token-12345678901234567890:rejected"),
+        unit_of_work,
+    )
+
+    assert schedule_spy.postback_calls == [
+        (
+            "safe-token-12345678901234567890",
+            "rejected",
+            LineUserId("U-caregiver"),
+            "matching-schedule-postback:webhook-event-1",
+        )
+    ]

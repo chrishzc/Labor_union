@@ -22,7 +22,7 @@ pytestmark = pytest.mark.skipif(
 def test_typed_ui_preview_matches_authoritative_preview_without_formal_posting(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
-    monkeypatch.setenv("INTERNAL_API_KEY", "lu-test-finance-import-ui")
+    monkeypatch.setenv("LEGACY_SHARED_KEY", "lu-test-finance-import-ui")
     workbook = _write_workbook(tmp_path, uuid4().hex)
     before = _formal_output_counts()
     ui_preview = _ui_preview(workbook, monkeypatch)
@@ -60,7 +60,7 @@ def _ui_preview(workbook, monkeypatch):
     with TestClient(application) as http_client:
         client = FinanceImportApiClient(
             base_url="http://lu-test-finance-import-ui",
-            headers={"X-Internal-API-Key": "lu-test-finance-import-ui"},
+            headers={"X-Legacy-Shared-Key": "lu-test-finance-import-ui"},
             session=_TestClientSession(http_client),
         )
         receipt = client.ingest_workbook(

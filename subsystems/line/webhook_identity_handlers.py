@@ -139,6 +139,13 @@ class LineWebhookIdentityHandlers:
         text = _message_text(inbox)
         if text is None:
             return
+        if self._matching_postback_application is not None and self._matching_postback_application.handle_message(
+            inbox,
+            unit_of_work,
+            line_user_id,
+            text,
+        ):
+            return
         purpose = _identity_purpose_for_text(text)
         if purpose is None:
             if self._menu_command_application is not None and self._menu_command_application.handle(

@@ -180,6 +180,9 @@ def _render_common_workflows(case_no, clients, headers):
         clients["terms"],
     )
 
+    from ui.pages.order.service_date_confirmation_panel import render_service_date_confirmation_panel
+    render_service_date_confirmation_panel(case_no, resolve_api_base_url(), headers)
+
     render_actual_start_panel(
         case_no,
         clients["actual_start"],

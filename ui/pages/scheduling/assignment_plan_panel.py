@@ -28,10 +28,10 @@ def render_assignment_plan_panel(
         current = client.query(case_no)
     except AssignmentPlanApiError as error:
         st.error(f"正式人力配置載入失敗 [{error.error.code}]：{error}")
-        return
+        return None
     if not staff_choices:
         st.warning("目前沒有可指派的月嫂。")
-        return
+        return current
     st.caption(
         f"合約服務 {current.contracted_service_days} 日｜"
         f"每天 {current.service_hours_per_day} 小時｜"
@@ -40,6 +40,7 @@ def render_assignment_plan_panel(
     _render_existing_assignments(current)
     segments = _segment_form(case_no, staff_choices, draft_segments)
     _preview_controls(case_no, client, segments)
+    return current
 
 
 def _render_existing_assignments(current) -> None:

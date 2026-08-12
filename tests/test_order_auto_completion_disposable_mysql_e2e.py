@@ -161,6 +161,7 @@ def _leave_workflow():
     from subsystems.scheduling.leave_substitution_workflow import (
         LeaveSubstitutionWorkflow,
     )
+    from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
 
     connection = get_connection()
     return (
@@ -172,6 +173,7 @@ def _leave_workflow():
                 connection,
                 FixedBusinessClock(datetime(2026, 8, 4, 9, tzinfo=TAIPEI_TIME_ZONE)),
             ),
+            MySqlSchedulingHolidayQuery(connection),
             lambda: MySqlUnitOfWork(connection),
         ),
         connection,

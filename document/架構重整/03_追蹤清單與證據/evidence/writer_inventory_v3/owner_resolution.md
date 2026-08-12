@@ -54,3 +54,27 @@ fixture data; and nine active Holiday, order-details, and Data Browser rows are
 `needs_decision`. One generic Data Browser UPDATE appears twice in the source
 candidate with the same identity and fingerprint, so one disposition correctly
 covers both candidate rows. No row is approved for removal.
+
+## WP63 full owner-review completion
+
+2026-08-12 已完成 merge-introduced owner review queue 的逐 source-path 裁決。Reconciler 使用明確
+exact-path registry，不以目錄前綴自動推論 owner；每筆 record 保存 candidate identity、fingerprint、
+owner、outer transaction boundary、runtime caller、replacement evidence 與 final disposition。
+
+| Disposition | Count | Meaning |
+|---|---:|---|
+| `retain_canonical` | 745 | typed owning Domain／Global workflow、repository、receipt 或 outbox boundary |
+| `retain_restricted` | 278 | worker claim、heartbeat、query、migration、validation 或受限 compatibility boundary |
+| `migrate_then_remove` | 4 | replacement direction 已存在，但 code removal 尚未獲授權 |
+| `needs_decision` | 0 | owner review queue 已清空 |
+| `approved_to_remove=true` | 0 | 本 review 不授權移除任何 writer |
+
+四筆 `migrate_then_remove` 分屬：
+
+- `api/routes/clients.py::update_client_identity_status` 的 commit／UPDATE：typed LINE identity workflow
+  是 canonical replacement；仍須另立 entrypoint retirement package。
+- `subsystems/scheduling/staff_leave_review_service.py::decide_staff_leave_review` 的 commit／UPDATE：
+  無 canonical route，後續由已確認的 Scheduling LINE request evidence 計畫承接；實作與退役仍需
+  獨立核准。
+
+完成證據：`../2026-08-12_writer_inventory_v3_owner_review_completion_receipt.md`。

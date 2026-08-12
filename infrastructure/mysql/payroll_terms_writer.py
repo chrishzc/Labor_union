@@ -12,12 +12,19 @@ from subsystems.payroll.terms_impact import PayrollTermsActionKind
 def persist_payroll_terms_impact(cursor, command) -> None:
     _insert_carried_rate_snapshots(cursor, command)
     for ordinal, action in enumerate(command.candidate.actions, start=1):
-        if action.action is PayrollTermsActionKind.KEEP_FROZEN:
+        if not _action_requires_event(action):
             continue
         event_id = _append_obligation_event(cursor, command, action, ordinal)
         _persist_projection(cursor, command, action, event_id)
     _advance_payroll_version(cursor, command)
     _append_outbox(cursor, command)
+
+
+def _action_requires_event(action) -> bool:
+    return (
+        action.action is not PayrollTermsActionKind.KEEP_FROZEN
+        and action.amount.amount != 0
+    )
 
 
 def _insert_carried_rate_snapshots(cursor, command):

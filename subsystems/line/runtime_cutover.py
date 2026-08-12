@@ -92,7 +92,6 @@ def validate_line_api_runtime(environment: Mapping[str, str]) -> LineRuntimeSele
         return selection
     _require_enabled(environment, "ENABLE_ADMIN_AUTH")
     _require_enabled(environment, "LIFF_REQUIRE_ID_TOKEN")
-    _require_secret(environment, "INTERNAL_API_KEY")
     _require_secret(environment, "LINE_CHANNEL_SECRET")
     _require_secret(environment, "LINE_LOGIN_CHANNEL_ID")
     _require_liff_entrypoint(environment)

@@ -49,7 +49,7 @@ def test_refund_return_preview_and_apply_preserve_immutable_ledger_target():
     ])
     client = FinanceImportApiClient(
         base_url="https://api.example",
-        headers={"X-Internal-API-Key": "test"},
+        headers={"X-Legacy-Shared-Key": "test"},
         session=session,
     )
 
@@ -99,7 +99,7 @@ def test_partial_refund_recovery_flag_is_preserved_between_preview_and_apply():
     ])
     client = FinanceImportApiClient(
         base_url="https://api.example",
-        headers={"X-Internal-API-Key": "test"},
+        headers={"X-Legacy-Shared-Key": "test"},
         session=session,
     )
 

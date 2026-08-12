@@ -2,6 +2,8 @@
 doc_type: architecture-decision
 decision_date: 2026-08-08
 status: human-confirmed
+implementation_status: completed
+implementation_completed_at: 2026-08-12
 ---
 
 # Client Finance 銀行根事實與逾期提醒裁決
@@ -48,3 +50,24 @@ fact 委派 Client Finance。唯一且符合 eligibility 的事實可被記錄�
 來源從 legacy `client_payments` projection 遷移為 canonical obligation／ledger read model，
 並提供 bounded reminder queue 與人工核對入口。它不包含銀行 API、付款指令或付款失敗
 狀態機。
+
+## 6. 實作完成與證據
+
+2026-08-12 依 live architecture 與既有驗收證據收斂為 `implementation-completed`；本文件的
+銀行根事實與提醒政策仍為 current，不因實作完成而失效。
+
+- `infrastructure/mysql/process_reminder_anomaly_source.py` 從 canonical
+  `client_obligations`、政府補助 allocation 與既有 active alert candidate universe 建立
+  `RECEIVABLE-001`、`CLIENTPAYABLE-001`、`RETURN-001`、`SUBSIDYADVANCE-001` 投影，未使用
+  legacy `client_payments` 作為 reminder 根事實。
+- `ui/pages/06_finance_alerts.py` 提供 bounded 帳務逾期提醒與人工核對入口；提醒不執行付款、
+  不改寫 obligation／ledger／allocation。
+- `tests/test_client_finance_canonical_overdue_reminders.py` 驗證 canonical obligation 來源、四類
+  reminder、未結清開啟及不符合條件時解除。
+- `tests/test_client_finance_overdue_reminder_ui.py` 驗證異常中心暴露完整人工核對提醒。
+- `../03_追蹤清單與證據/evidence/2026-08-09_client_finance_domain_revalidation_receipt.md`
+  與 `../03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md` 保存既有 focused、
+  disposable-MySQL 與 Canonical Overdue Reminder Work Package completion evidence。
+
+legacy `client_payments` read compatibility 或 entry point 的保留／退役不屬於本裁決；若要移除，
+仍須依 Global Entry Point Governance 另行確認 caller、replacement 與退役 Work Package。

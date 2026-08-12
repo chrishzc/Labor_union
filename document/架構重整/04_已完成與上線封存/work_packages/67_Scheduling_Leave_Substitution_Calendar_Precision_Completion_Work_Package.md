@@ -1,16 +1,37 @@
-# 休假代班天數精算與行事曆差異預覽修復計畫
+---
+doc_type: work-package
+declared_status: completed
+date: 2026-08-12
+owner: Assignments / Scheduling Domain
+scope: Leave/substitution calendar precision, typed Preview, and Apply readiness
+write_set: [subsystems/scheduling, api/schemas/leave_substitution.py, api/routes/leave_substitution.py, api/routes/multi_caregiver_case_assignments.py, ui/pages/03_calendar.py, ui/pages/scheduling/leave_substitution_panel.py]
+acceptance: Calendar Preview is zero-write, explains exact service-day changes, and blocks Apply only through typed readiness.
+out_of_scope: Holiday source administration and cross-Domain bootstrap operator entries; Holiday Query integration depends on WP69.
+---
+
+# 67 Scheduling Leave/Substitution Calendar Precision Completion Work Package
 
 ## 文件狀態
 
-- 文件類型：新功能改善計畫；不屬於架構重整文件。
-- 狀態：`proposed`
-- 實作狀態：`not-started`
+- 文件類型：`work-package`；由功能開發計畫轉入正式架構執行記錄。
+- 狀態：`blocked`
+- 實作狀態：`partial-implementation`
 - 優先級：`P0／與「月嫂配對中心改善」並列目前最高優先`
 - Owner：`Assignments／Scheduling Domain`
 - 協作 Domain：`Orders`、`Payroll`、`Client Finance`
 - 主要 Subsystem：`Leave／Substitution Preview & Apply`、`Calendar Read`
-- 更新日期：2026-08-11
-- 實作授權：`not-authorized-before-formal-contract-update`
+- 更新日期：2026-08-12
+- 實作授權：`authorized-by-2026-08-12-user-direction`
+- 依賴：[WP69 Scheduling Canonical Holiday Query Contract](69_Scheduling_Canonical_Holiday_Query_Contract_Work_Package.md)；完整假日／固定排休驗收在其落地前維持 blocked。
+
+### 2026-08-12 封存阻塞
+
+- `LABOR_UNION_TEST_MYSQL_HOST`、`PORT`、`USER`、`PASSWORD`、`DATABASE` 均未設定；
+  disposable-MySQL E2E 因此依設計跳過。
+- 在明確指定的 disposable `lu_test_*` database 可用前，不能證明 Apply 的 fresh check、
+  rollback、concurrency、idempotency 與跨 Domain transaction，也不得建立 archive receipt 或封存。
+- 已通過的 module／route／UI-client evidence 不可替代此 E2E gate。解除條件是設定完整的
+  `LABOR_UNION_TEST_MYSQL_*` 環境並執行本文件列出的 disposable-MySQL 測試。
 
 本文件承接 2026-08-11 人工確認的業務目標：使用者加入休假或代班項目後，必須先在
 行事曆直接看見排班變化；只有按下「儲存修改」後，系統才可以重新讀取最新事實、檢查
@@ -116,6 +137,7 @@ Apply 必須：
 ### 4.4 Module／Adapter
 
 - FastAPI 回傳 typed Preview view，不以 raw `dict` 讓 UI 自行猜日期語意。
+- Calendar 選案以單一批次正式 assignment read 取得 case 集合；Orders 摘要僅提供顯示與 lifecycle 資訊，不能取代 Scheduling owner。
 - API client 必須驗證完整 view；transport、schema 與 business blocker 分類顯示。
 - Streamlit 只 render `calendar_candidate`、天數摘要、假日清單及 readiness，不自行重算。
 - 行事曆 renderer 接受 before／after day-cell ViewModel，不直接從 assignments／outcomes 拼顏色。
@@ -258,6 +280,7 @@ Preview 或 Streamlit 直接補資料。
 
 - [ ] 更新 Scheduling 正式規格：Preview 回傳 calendar candidate 與獨立 Apply readiness。
 - [ ] 更新 Calendar Read ViewModel，納入 before／after day cells、假日與日數摘要。
+- [x] Calendar 選案改以單一批次 formal-assignment Query，移除逐案 fallback 與摘要 owner 判定。
 - [ ] 確認 Client Finance／Payroll bootstrap blocker 的核准人工入口。
 - [ ] 更新 public API schema、typed error 與 entry-point evidence。
 
@@ -335,7 +358,7 @@ Preview 或 Streamlit 直接補資料。
 - Scheduling 正式規格的 Preview／Apply、Calendar Read 與 leave／substitution 契約更新。
 - Orders lifecycle `actual_end_date` projection 與 G05 鎖序契約。
 - Payroll、Client Finance impact port 與 bootstrap／freeze 人工處理入口。
-- canonical Holiday Query 可用性與版本／快取失效契約。
+- [WP69 Canonical Holiday Query](69_Scheduling_Canonical_Holiday_Query_Contract_Work_Package.md) 的可用性、版本與快取失效契約。
 - 管理者 authentication／capability，不在本功能內另建登入機制。
 
 ## 13. Future write set
@@ -377,9 +400,36 @@ Preview 或 Streamlit 直接補資料。
 - `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md`
 - `document/架構重整/01_規格基線/01_Orders_Domain.md`
 - `document/架構重整/01_規格基線/03_Payroll_Domain.md`
-- `document/架構重整/02_決策與退役執行記錄/33_G05_服務完成時刻與請假代班競爭契約.md`
+- `document/架構重整/01_規格基線/01_Orders_Domain.md`
+- `document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md`
+- 歷史契約：`document/架構重整/04_已完成與上線封存/work_packages/33_G05_服務完成時刻與請假代班競爭契約.md`
 - `ui/pages/scheduling/leave_substitution_panel.py`
 - `ui/pages/03_calendar.py`
 - `subsystems/scheduling/leave_substitution_workflow.py`
 - `infrastructure/mysql/order_terms_read_model.py`
 - 2026-08-11 使用者提供之天數精算與 Preview 失敗畫面（只作需求證據，不提交含個資的圖片副本）。
+
+## 2026-08-12 受控寫入驗收紀錄
+
+- status: in-progress
+- 測試環境裁決：目前資料庫已由人工確認為測試用途；本次僅透過正式 API 與 migration script 寫入，未重建、清空或以 SQL 旁路業務 command。
+- bootstrap 驗收：案件 `115000028` 採用既有 Scheduling aggregate 後成功建立 Client Finance、Payroll 與 bootstrap event；receipt 保留 Scheduling `version=1`、`generation=1`。
+- 請假 Apply 驗收：案件 `115000051`、assignment `351` 對 `2026-08-13` 執行 `defer_following_assignments`。Preview 為 ready，服務日由 8/13 移除並順延至 8/15，總服務日維持 5。
+- Apply receipt：order `3 -> 4`、scheduling `1 -> 2`、client finance `4 -> 5`、payroll `1 -> 2`；同一 Idempotency-Key replay 回傳相同 receipt，未重複寫入。
+- 正式 Calendar data source：replacement assignment `358` 的服務日為 `2026-08-10, 08-11, 08-12, 08-14, 08-15`，不含請假日 8/13 並包含順延日 8/15。
+- 未完成驗收：內建 Browser connector 對本機 Streamlit URL 僅開啟 `about:blank`，無法執行人工選擇 UI 的 click-flow；須由可連到 `http://127.0.0.1:8501/03_calendar` 的瀏覽器完成最後畫面驗收後才能封存。
+## 2026-08-12 補充驗收結果
+
+- controlled DB write：案件 `115000051` 的 manual leave Preview/Apply/replay 已通過。`2026-08-13` 由服務日移除、`2026-08-15` 補回，正式 assignment `358` 回讀一致。
+- Calendar UI automation：Chrome 已能載入本機 Streamlit，但首頁的自訂多月嫂排班 radio 無法被 browser connector 觸發，直接深連結會回首頁；已保留 handoff tab 供人工於 UI 依序選擇「多月嫂排班 → 行事曆」、月嫂 `8892`、2026 年 8 月確認。
+- archive gate：未通過。唯一剩餘項目為上述人工 UI click-flow；不得把 API／資料源驗收冒充為 UI 視覺驗收。
+
+## 2026-08-12 封存 gate 完成紀錄
+
+- 最終狀態：`completed`；受控測試資料庫完成 Preview、Apply、same actor/key replay 與 cross-actor/key idempotency conflict 驗收。
+- 寫入驗收：案件 `115000051` 的人工請假代班 Apply 成功；Holiday-only Apply 產生零 item receipt 並保持一致的 scheduling、finance、payroll 版本推進。
+- UI 驗收：Chrome 以月嫂 `#8892`、2026 年 8 月、案件 `115000051` 操作；8/10 至 8/12、8/15 至 8/16 顯示服務工作日，8/13 顯示可接案，8/14 僅顯示 Holiday 與可接案，不再顯示已取消排班的舊服務工作日。
+- 回歸：受影響的 Calendar、Leave/Substitution、Payroll 與 Bootstrap focused suite 共 `23 passed`。
+- current successor：`document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md`；本 Work Package 不再作為 current 行為授權。
+- release identity：本次為使用者授權的本機測試資料庫受控驗收，無 production deployment release。
+- restore triggers：Calendar 歷史服務日回歸、請假／代班 Preview-Apply 不一致、或 Holiday 查詢版本／重放稽核。

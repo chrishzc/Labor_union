@@ -12,7 +12,7 @@ verified_at: 2026-08-09
 - 決策／執行依據：
   - `../../04_已完成與上線封存/superseded_specs/27_Finance_Import_Historical_Reprocess_Completion_Decision_Package.md`
   - `../../04_已完成與上線封存/receipts/30_Finance_Import_Legacy_Import_Path_Repair_Receipt.md`
-  - `44_Finance_Import_CLI_Test_Adapter_Work_Package.md`
+  - `../../04_已完成與上線封存/superseded_specs/44_Finance_Import_CLI_Test_Adapter_Work_Package.md`
   - `../../04_已完成與上線封存/work_packages/51_Preserve_Data_and_Historical_Reprocess_Closure_Work_Package.md`
 
 ## 本次實作與修復

@@ -1,15 +1,27 @@
-# 月嫂配對中心：單月嫂預設與預計服務日期表傳送改善計畫
+---
+doc_type: work-package
+declared_status: in-progress
+date: 2026-08-12
+owner: Orders / Assignments / Scheduling / Matching / LINE Integration
+scope: Single-caregiver default matching, typed candidate coverage, confirmed service dates, customer and caregiver schedule delivery and confirmation, and formal-assignment gate
+write_set: [document/架構重整/01_規格基線/01_Orders_Domain.md, document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md, document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md, domains/orders/, domains/scheduling/, subsystems/orders/, subsystems/scheduling/, subsystems/line/, api/, ui/pages/order/, ui/pages/scheduling/, infrastructure/mysql/, db/schema_parts/, db/migration_releases/, tests/]
+acceptance: Single-caregiver is the default, multi-caregiver remains an explicit fallback, candidate coverage is typed, confirmed service dates produce versioned customer and caregiver schedule snapshots, and formal assignment is blocked until both required confirmations pass.
+out_of_scope: Automatic schedule delivery, automatic reminders or expiry escalation, payroll or finance formula changes, and removal of multi-caregiver capability.
+---
+
+# 68 Matching Center Single-Caregiver Default Work Package
 
 ## 文件狀態
 
-- 功能狀態：`Proposed`
-- 實作狀態：`not-started`
+- 文件類型：`work-package`；由功能開發計畫轉入正式架構執行記錄。
+- 功能狀態：`In-progress`
+- 實作狀態：`partial-implementation`
 - 優先級：`P0／與「休假代班天數精算與行事曆差異預覽修復」並列目前最高優先`
 - 建立日期：2026-08-10
-- 更新日期：2026-08-11
-- Owner：`Assignments／Scheduling Domain`
-- 主要 Subsystem：`Matching Candidate Query`、`Matching Plan／Contact State`、`Multi-caregiver Fallback`
-- 實作授權：`not-authorized-before-human-confirmation`
+- 更新日期：2026-08-12
+- Owner：`Orders／Assignments／Scheduling／Matching／LINE Integration`
+- 主要 Subsystem：`Matching Candidate Query`、`Matching Plan／Contact State`、`Confirmed Service Dates`、`Schedule Confirmation`、`Reliable LINE Delivery`、`Multi-caregiver Fallback`
+- 實作授權：`authorized-by-2026-08-12-user-direction`；第 14 節所列業務裁決均已確認。
 
 本計畫是獨立功能開發計畫，不屬於 Import ADR。production code、schema 與 pytest 必須在本文件的
 Global → Domain → Subsystem → Module、資料來源、週次定義與傳送語意取得人工確認後才能開始。
@@ -24,7 +36,7 @@ Global → Domain → Subsystem → Module、資料來源、週次定義與傳�
 6. 新增「傳送預計服務日期表」按鈕，傳送訂單預計服務日期的週表。
 7. 週表至少顯示總週數、每週日期與每週服務天數。
 8. 表格由後端正式 Orders／Scheduling facts 產生；Streamlit 不自行計算日期、週數或工作日。
-9. 確認實際服務開始日期後，系統只提醒人員手動傳送日期表，不自動發送 LINE。
+9. 已確認的正式服務日期 projection 產生後，系統只提醒人員手動傳送日期表，不自動發送 LINE。
 10. 日期建立、修改或重算都不得直接發送；人員必須檢視最新內容並按下按鈕。
 11. 移除沒有獨立操作價值的「檢視案件詳情」配對子頁；必要案件摘要固定顯示在配對工作區頂端。
 12. 多月嫂備案不再顯示 raw「最新檔期」表格；候選選項直接顯示該月嫂在本案服務期間內可支援的日期。
@@ -70,7 +82,7 @@ Global 不變量：
 - 寄送紀錄、意願、customer decision 與 waiting-deposit lock 都綁定同一 active matching plan version；
 - 日期表傳送失敗不改變月嫂意願、訂單狀態、指派或檔期；
 - stale plan／stale schedule 不得發送過期日期表；
-- actual start confirmation 只產生 internal `manual_send_required` decision，不建立 LINE delivery task；
+- confirmed planned-service-date projection 只產生 internal `manual_send_required` decision，不建立 LINE delivery task；
 - 日期建立、修改、重算或重新確認均不得直接產生 outward message；
 - 單月嫂 UX 調整不得破壞未來正式多月嫂 assignment ownership；
 - 移除「檢視案件詳情」只退役重複的 Presentation 入口，不刪除 Orders／Matching Query 或案件根事實；
@@ -127,10 +139,14 @@ Global 不變量：
 → 查詢可完整承接的單一月嫂
 → 選擇一位月嫂
 → 建立單月嫂 matching plan（一個 segment）
-→ 發送訂單資訊／預計服務日期表
+→ 發送訂單資訊並收集配對意願
 → 顯示寄送紀錄與月嫂意願
 → 願意後發送履歷給客戶
 → 客戶接受後進 waiting-deposit lock
+→ 訂單管理確認正式服務日期
+→ Preview 並人工發送客戶完整日期表與月嫂 segment 日期表
+→ 客戶與目標月嫂確認 current snapshot
+→ 建立正式指派／正式排班
 ```
 
 初始畫面不得出現：
@@ -292,8 +308,8 @@ Matching UI 的處理規則：
 
 ### 5.1 業務目的
 
-月嫂在回覆意願前，需要清楚知道整張訂單預計涵蓋幾週、各週日期與各週實際預計服務天數，避免只看
-一個起訖日期而誤判休假、工作密度或可承接性。
+客戶與月嫂在正式指派前，需要確認已由訂單管理確認的服務日期。客戶查看整張訂單，月嫂查看自己的
+segment，避免只看起訖日期而誤判休假、工作密度或正式承接內容。
 
 日期表是配對溝通 snapshot，不是正式 assignment／staff schedule，也不會鎖定檔期。後續 order terms
 變更時舊訊息保留為歷史；重新發送必須產生新 snapshot／intent。
@@ -312,7 +328,7 @@ Matching UI 的處理規則：
 
 - UI 以 `start + service_days - 1` 猜出的日期；
 - `clients.due_month`；
-- 尚未確認的 actual start；
+- 未完成確認的 planned service-date projection；
 - 月嫂個人 UI 暫存草稿；
 - 已取消或 stale matching plan；
 - `orders.staff_id` legacy convenience field。
@@ -353,32 +369,31 @@ total_service_days
 weeks[].service_dates 必須排序、互斥且都落在該週 period 內。
 ```
 
-### 5.4 週次定義（待確認）
+### 5.4 週次定義（已確認）
 
-推薦採「服務週」：第 1 週從預計服務開始日算起，每 7 個 calendar days 為一週；最後一週可不足 7 日。
-這比 ISO 週一～週日更貼近月嫂從案件開始日起理解第幾週，也不會因星期日跨週把第一週切成短週。
+採 calendar week：每週星期日開始、星期六結束。日期表第一週與最後一週可不足七日，但每個
+service date 只能屬於一個週次，週次順序依 period start 升冪排列。
 
 範例：預計開始日為 2026-08-05，則：
 
 | 週次 | 週期 | 本週預計服務日期 | 本週服務天數 |
 |---|---|---|---|
-| 第 1 週 | 08/05～08/11 | 08/05、08/06、08/07、08/08、08/10、08/11 | 6 |
-| 第 2 週 | 08/12～08/18 | 由 planned service dates 列出 | N |
+| 第 1 週 | 08/02～08/08 | 由 confirmed service dates 列出 | N |
+| 第 2 週 | 08/09～08/15 | 由 confirmed service dates 列出 | N |
 
-另一選項是 calendar week（週一～週日）。週次政策會改變表格與 fingerprint，production 前必須人工確認，
-且一旦發送不可無版本地改義。
+`week_grouping_policy` 固定版本化為 `calendar_week_sunday_to_saturday_v1`，並納入 snapshot fingerprint。
 
 ### 5.5 傳送按鈕與流程
 
 按鈕名稱固定為：`傳送預計服務日期表`。
 
-放在該月嫂 contact container，與「發送訂單資訊-1／2」並列。實際服務開始日期尚未完成正式確認時，
+放在該月嫂 contact container，與「發送訂單資訊-1／2」並列。正式服務日期 projection 尚未完成確認時，
 按鈕 disabled 並說明缺少的前置條件；確認完成後，顯示「日期表待人工傳送」提醒並啟用按鈕。
 
 提醒與發送必須分離：
 
 ```text
-actual_service_start_confirmed
+confirmed_planned_service_dates
 → 建立／更新 internal manual-send-required decision
 → UI 顯示待辦提醒與最新日期表 Preview
 → 不建立 notification intent
@@ -408,9 +423,12 @@ fresh-read active matching plan／segment／order terms／planned dates
 - 人員未按下按鈕：不論修改幾次，都不得建立新的 outward delivery；
 - 重送必須產生新 snapshot／intent，舊訊息與舊 delivery receipt 保留為歷史。
 
-新增 notification kind：`caregiver_expected_service_schedule`。
+新增 notification kinds：
 
-它是 segment-level notification：
+- `customer_expected_service_schedule`：order-level 完整日期表；
+- `caregiver_expected_service_schedule`：segment-level 月嫂日期表。
+
+月嫂日期表是 segment-level notification：
 
 - recipient 必須是該 segment 的月嫂 LINE identity；
 - 不建立 willingness interaction token，也不自動改變月嫂意願；
@@ -418,6 +436,10 @@ fresh-read active matching plan／segment／order terms／planned dates
 - 同一 schedule fingerprint＋同一 plan version＋同一 idempotency key replay 回原 intent；
 - schedule／plan stale 時拒絕；管理員 fresh preview 後可發新版本；
 - delivery failure 只影響本次日期表寄送狀態，不回滾 matching plan 或其他已送訊息。
+
+客戶日期表是 order-level notification；recipient 必須是該訂單目前有效客戶 LINE identity，內容包含
+全部 segments。客戶 delivery 與各月嫂 delivery 各自保存 intent、task、attempt 與 receipt，任一方
+發送失敗不得偽造成另一方成功。
 
 日期表人工傳送 readiness 至少包含：
 
@@ -429,7 +451,22 @@ sent_outdated
 blocked
 ```
 
-上述狀態是後端依 actual-start confirmation、schedule fingerprint 與最後成功傳送 snapshot 衍生的 typed
+每個 recipient confirmation state 至少包含：
+
+```text
+pending
+confirmed
+rejected
+invalidated
+manually_confirmed
+manually_revoked
+```
+
+order-level gate 只有在客戶完整日期表為 confirmed／manually_confirmed，且目標正式 assignment 所屬
+月嫂的 segment 日期表為 confirmed／manually_confirmed，並全部指向 current confirmed service-date
+version 與同一 snapshot lineage 時才是 `passed`；其他狀態一律為 `blocked`。
+
+上述狀態是後端依已確認的正式服務日期 projection、schedule fingerprint 與最後成功傳送 snapshot 衍生的 typed
 view；Streamlit 不得自行比較日期或 session state 來推導。
 
 ### 5.6 訊息內容
@@ -457,7 +494,7 @@ LINE 訊息至少顯示：
 - 新增的預計服務日期表 delivery status；
 - 月嫂意願：pending／willing／unwilling；
 - LINE 回覆或人工補登來源；
-- 人工補登原因；
+- 人工補登原因；拒絕時必填，確認、撤回或一般修正時可選填；
 - plan communication version。
 
 UI 重整不得清空或搬移既有 matching notification intents、delivery tasks、response events 或 legacy
@@ -473,6 +510,14 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 
 ## 7. 交易、idempotency、retry 與 conflict
 
+- `ConfirmServiceDates` 由 Orders outer Unit of Work 擁有；它透過 borrowed Scheduling port 產生／驗證
+  planned service-date candidate，追加 confirmed service-date event／version、audit、outbox 與 receipt 後單次 commit。
+- 日期表 Preview 是唯讀 Query；Send command 由 Matching communication outer Unit of Work 擁有，原子寫入
+  parent snapshot、recipient snapshot、notification intents、delivery tasks 與 receipt。
+- 客戶／月嫂 LINE confirmation 由 canonical inbox consumer 呼叫 Matching confirmation command；每一筆回覆
+  append immutable confirmation event，再更新 current projection，不直接寫 assignment 或 schedule。
+- 正式 assignment Apply 仍由 Scheduling outer Unit of Work 擁有；鎖定 current confirmed service-date version、
+  parent／recipient snapshot 與 confirmation projection 後驗證 gate，失敗零寫入。
 - notification intent、payload snapshot、interaction（若有）、delivery task、projection 在單一 outer UoW commit；
 - 日期表不開 willingness interaction，因此不新增可回覆 token；
 - provider/network failure 由 delivery task bounded retry，不重新建立 intent；
@@ -482,6 +527,25 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 - active plan 被取消、訂單不再洽談中或月嫂已不屬於 segment 時禁止發送；
 - UI timeout 後 query intent／delivery status，不換 idempotency key重送。
 
+### 7.1 Snapshot lineage
+
+- 一次 Send 建立一個 order-level parent snapshot，identity 至少包含 case、confirmed service-date version、
+  order／schedule／matching-plan versions、完整 service dates、week policy 與 fingerprint。
+- 客戶 snapshot 引用 parent 並包含完整日期表；每個月嫂 snapshot 引用同一 parent、segment identity 與該
+  segment service dates。所有子 snapshot 的日期聯集必須等於 parent dates，且不同 segment 不得重複 ownership。
+- confirmation event 必須引用 recipient snapshot identity，不接受只帶 case number、plan id 或 UI 顯示版本的回覆。
+- 日期、Terms、plan、segment、recipient binding 或 schedule version 改變時，舊 parent 及全部子 snapshot
+  保留歷史但 current projection 改為 `invalidated`；不得把舊確認搬到新 snapshot。
+
+### 7.2 拒絕與人工調整
+
+- LINE 使用者選擇拒絕後，interaction 進入 `awaiting_rejection_reason`；收到非空白文字才追加正式 rejected event。
+- interaction timeout、取消或無效文字不產生 rejected event，current confirmation 維持 pending 並顯示待補理由。
+- 工會人工補登拒絕同樣必填非空白理由；人工確認／撤回原因可選填。
+- 人工確認可在保留原 rejected event 的前提下，使 current projection 成為 `manually_confirmed`；後續同一
+  snapshot 的有效 LINE 回覆仍追加事件，最後一筆合法事件決定 current projection。
+- 撤回人工確認追加 `manually_revoked` event，結果為 gate blocked；不得刪除或恢復覆寫前事件。
+
 ## 8. Typed errors
 
 | Code | 行為 |
@@ -489,11 +553,15 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 | `single_caregiver_full_coverage_unavailable` | 顯示沒有單人可完整承接，提供多月嫂備案入口 |
 | `planned_service_schedule_unavailable` | 缺正式 planned dates；按鈕 disabled，導向 terms／schedule補正 |
 | `planned_service_schedule_invariant_failed` | 日期數量／重複／範圍不守恆；阻擋發送並告警 |
-| `actual_service_start_confirmation_required` | 實際服務開始日期尚未正式確認；只顯示前置條件，不允許傳送 |
+| `planned_service_date_confirmation_required` | 正式服務日期 projection 尚未確認；只顯示前置條件，不允許傳送 |
 | `matching_plan_stale` | 409；重讀 active plan |
 | `planned_service_schedule_stale` | 409；重新取得日期表 Preview |
 | `matching_segment_recipient_mismatch` | 403／409；不得發給其他 LINE identity |
 | `caregiver_line_binding_required` | 422；顯示需先完成 LINE 綁定 |
+| `customer_line_binding_required` | 422；顯示需先完成客戶 LINE 綁定；仍允許人工補登確認 |
+| `schedule_confirmation_rejection_reason_required` | 422；拒絕理由為空白，維持 pending |
+| `schedule_confirmation_snapshot_stale` | 409；回覆或人工調整指向非 current snapshot |
+| `schedule_confirmation_gate_required` | 409；客戶或目標月嫂尚未確認 current snapshot，正式指派零寫入 |
 | `matching_schedule_delivery_unavailable` | intent 已 commit則查 delivery／retry，不重建 plan |
 | `matching_schedule_idempotency_conflict` | 409；同 key 不同 snapshot |
 
@@ -502,15 +570,21 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 需要 additive migration／contract update：
 
 - `MatchingNotificationKind` 新增 `caregiver_expected_service_schedule`；
+- `MatchingNotificationKind` 新增 `customer_expected_service_schedule`；
 - `matching_notification_intents.notification_kind` enum／target CHECK 接受新 segment-level kind；
+- notification target CHECK 接受 customer order-level 與 caregiver segment-level targets；
+- 新增 versioned confirmed service-date event／receipt、parent／recipient schedule snapshots、append-only
+  confirmation events 與 current confirmation projection；
 - contact state typed segment view 增加 schedule notification delivery status；
 - contact state typed view 增加 `manual_send_required`／`sent_current`／`sent_outdated` readiness；
-- actual-start confirmation consumer 只更新 internal reminder/readiness，不 enqueue LINE task；
+- confirmed planned-service-date projection consumer 只更新 internal reminder/readiness，不 enqueue LINE task；
 - API 新增 schedule Preview Query 與 send Command，或在既有 information endpoint 以新 typed kind 擴充；
 - candidate Query view 增加月嫂 display name、required／supported service dates、display ranges、coverage count、
   uncovered dates、Scheduling version 與 coverage fingerprint；
 - UI 必須透過 dedicated Matching API client，不再在 render function 散落 raw `_request`／dict；
 - LINE card builder 與 payload snapshot masking／size contract；
+- LINE confirmation interaction 支援 confirm／reject→reason，並綁定 recipient snapshot identity；
+- Orders 確認服務日期 Preview／Apply，以及 Scheduling formal-assignment Apply gate；
 - release manifest、candidate schema verifier、preserved-data rehearsal。
 
 不修改／不重建既有 notification intents；migration 只擴充 enum／projection，歷史 rows 保留。
@@ -544,12 +618,14 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 
 ### P1：預計服務日期表 Query
 
+- [ ] `MATCH-P1-00` 在訂單管理新增確認服務日期 Preview／Apply，允許工會增刪或調整 candidate dates；
+  Apply 保存 versioned confirmed service-date projection／receipt，不建立 assignment 或 staff schedule。
 - [ ] `MATCH-P1-01` 定義 Planned Service Schedule SSOT 與 typed Query port；
 - [ ] `MATCH-P1-02` 實作 `ServiceWeekGrouper` 與週／日守恆 validator；
 - [ ] `MATCH-P1-03` 實作 `ExpectedServiceScheduleView`／fingerprint／version；
 - [ ] `MATCH-P1-04` 缺日期、stale、重複或 day-count mismatch 時 fail closed，不由 UI fallback；
 - [ ] `MATCH-P1-05` 建立不同開始星期、休假模式、跨月／跨年、最後不足一週的 Module tests。
-- [ ] `MATCH-P1-06` 建立 actual-start-confirmed→manual-send-required readiness policy；不得建立 delivery task。
+- [ ] `MATCH-P1-06` 建立 confirmed-planned-service-dates→manual-send-required readiness policy；不得建立 delivery task。
 
 ### P2：可靠傳送
 
@@ -560,6 +636,9 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 - [ ] `MATCH-P2-05` contact state 加入日期表 queued／sent／failed 狀態；
 - [ ] `MATCH-P2-06` 驗證 replay、different-payload conflict、stale plan／schedule、recipient mismatch、retry。
 - [ ] `MATCH-P2-07` 驗證日期修改只產生 `sent_outdated`／待辦提醒，不自動建立新 intent 或 task。
+- [ ] `MATCH-P2-08` 建立 customer parent snapshot、caregiver segment child snapshots 與 lineage 守恆 validator。
+- [ ] `MATCH-P2-09` 建立客戶／月嫂 confirm、reject→reason、人工確認／撤回的 append-only commands 與 projections。
+- [ ] `MATCH-P2-10` 將 current 雙方確認 gate 接入 Scheduling 正式 assignment／schedule Apply。
 
 ### P3：UI 與整合驗收
 
@@ -569,8 +648,10 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 - [ ] `MATCH-P3-04` 顯示日期表 delivery status，與 info-1／info-2／willingness 分欄；
 - [ ] `MATCH-P3-05` Streamlit rerender／double-click／timeout 不重複發送；
 - [ ] `MATCH-P3-06` 完成單月嫂 happy path、無完整候選、多月嫂 fallback、LINE 無綁定與 provider retry E2E。
-- [ ] `MATCH-P3-07` 實際開始日期確認後顯示手動傳送提醒；未確認前按鈕 disabled。
+- [ ] `MATCH-P3-07` 正式服務日期確認後顯示手動傳送提醒；未確認前按鈕 disabled。
 - [ ] `MATCH-P3-08` 已送後改期顯示「舊日期表已過期」，由人員選擇是否重送。
+- [ ] `MATCH-P3-09` 訂單管理可調整並確認服務日期；任何異動使舊日期表及雙方確認顯示失效／未確認。
+- [ ] `MATCH-P3-10` 管理 UI 分別顯示客戶完整表與各月嫂 segment 的 delivery、confirmation、拒絕理由與人工事件。
 
 ## 11. 分層驗收
 
@@ -595,7 +676,7 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 10. provider failure 重試只產生一個 intent，成功後 UI 顯示 sent；
 11. 取消方案後寄送與意願歷史仍存在；
 12. 多月嫂備案仍能建立 2～4 segments，但不出現在單月嫂初始頁。
-13. 確認實際服務開始日期只建立內部提醒，LINE delivery task 數量仍為零；
+13. 確認正式服務日期 projection 只建立內部提醒，LINE delivery task 數量仍為零；
 14. 連續修改日期多次皆不自動發送，只有最後一次人工按鈕操作建立一個新 intent；
 15. 已成功傳送後修改日期，舊 snapshot 保留且 readiness 顯示 `sent_outdated`。
 16. 配對中心不再出現「檢視案件詳情」子頁，但兩個配對流程頂端均有必要案件摘要；
@@ -609,6 +690,14 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 24. 缺 root 的歷史案件不進入一般配對清單，並在異常／operator recovery 入口具有來源證據與合法修復命令；
 25. 直接以 deep link 開啟缺 root 案件時回 typed blocker，沒有 Finance／Payroll／Scheduling 部分寫入；
 26. Matching UI 移除 bootstrap 後，其他核准 operator caller 與 API 的 disposition 有 entry-point evidence。
+27. 訂單管理調整任一服務日期後，舊 confirmed service-date version 保留歷史但 current 失效，客戶與全部
+    受影響月嫂狀態回到未確認；未重新 Preview、Send 並確認前，正式 assignment Apply 回 gate blocker。
+28. 客戶確認完整 parent snapshot、每位月嫂只確認自己的 child snapshot；部分月嫂未確認時，只阻擋該
+    月嫂對應的正式 assignment，不把其他人的確認推導為完成。
+29. 客戶或月嫂拒絕必須完成理由輸入才形成 rejected event；空白、逾時或取消維持 pending。
+30. 工會人工確認可覆蓋 current projection但保留拒絕事件；人工撤回與後續 LINE 回覆均追加事件並依最後
+    一筆合法事件決定 current state。
+31. 直接呼叫正式 assignment／schedule API 也必須驗證 current 雙方確認，不得只依 UI disabled 防守。
 
 ## 12. 完成定義
 
@@ -622,6 +711,8 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 - 原寄送紀錄、月嫂意願、履歷與 waiting-lock 流程通過回歸；
 - 日期表使用正式 planned service dates，週／日守恆；
 - 日期表 notification 有 immutable intent、snapshot、delivery task、retry 與 UI status；
+- 訂單管理確認服務日期、客戶 parent snapshot、月嫂 segment snapshots、雙方確認與正式 assignment gate
+  具有完整 version、lineage、replay、stale、拒絕與人工調整證據；
 - 多月嫂仍是獨立可用備案；
 - Module／Subsystem／Domain／Global 證據可重跑且 `.venv\Scripts\python.exe -m pytest -W error` 通過。
 
@@ -634,22 +725,16 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 - 不在本項目修改薪資、補助、付款公式；
 - 不恢復 legacy `/matches/{id}/send-*` writers；
 - 不把預計日期表當成正式出勤或 assignment ownership。
-- 不把 actual-start confirmation、日期修改或排程重算當成自動發送指令。
+- 不把正式服務日期 projection 確認、日期修改或排程重算當成自動發送指令。
 - 不刪除正式訂單詳情頁或 Orders root facts；只移除配對中心內重複且無操作價值的子頁。
 - 不把「可支援日期」當成月嫂意願、正式 assignment、檔期鎖定或承諾接案。
 - 不讓 Streamlit 從 raw `segment_candidates` 計算 coverage ranges 或缺口。
 - 不因移除 Matching UI bootstrap 就未經 caller inventory 刪除 operator API、歷史 receipt 或 migration evidence。
 - 不把缺 root 的歷史案件靜默忽略；它們必須有 anomaly／operator recovery 追蹤，但不在一般配對頁修復。
 
-## 14. 待人工確認
+## 14. 人工裁決紀錄
 
-1. 是否確認週次採「從預計服務開始日起每 7 個 calendar days」而非週一～週日？
-2. 多月嫂備案是否只在查無完整承接單月嫂時顯示，或管理員可隨時從次要操作開啟？
-3. 「傳送預計服務日期表」是否只傳給目前選定月嫂；未來多月嫂時是否每位只看自己的 segment？
-4. 日期表已裁決為實際服務開始日期確認後，由管理 UI Preview 再手動傳送；不允許自動發送。
-5. 除實際服務開始日期已確認外，日期表是否還需資訊-1／資訊-2或月嫂意願作為前置條件？
-
-第 1、2、3、5 項確認前，不開始相關 production code、schema 或 pytest 修改；第 4 項已完成裁決。
+本節已完整記錄日期表及多月嫂流程的人工裁決；後續 production code、schema 與 pytest 以本節為準。
 
 ### 14.1 2026-08-11 已確認事項
 
@@ -658,7 +743,87 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
 - 「正式根狀態／確認建立正式案件架構」屬內部 legacy adoption，不得出現在月嫂配對中心。
 - 上述三項與單月嫂預設、寄送紀錄、月嫂意願及日期表手動傳送改善合併執行，彼此不衝突。
 
+### 14.2 2026-08-12 日期表確認裁決
+
+本節優先於前文所有將日期表視為單向月嫂通知、或以月嫂意願取代日期表確認的描述。
+
+- `配對意願` 只表示月嫂是否有承接意願；它是提供工會人員判斷的資訊，不是正式 gate。工會人員可人工補登、修正或撤回，並須保留 actor、時間與來源；補登無意願時理由必填，其他調整原因可選填。
+- `日期表確認` 是獨立的正式 gate。日期表的同一 immutable snapshot／fingerprint 必須同時取得客戶與該 active matching plan segment 月嫂的確認，才可通過 gate。
+- 日期表發送對象為客戶與月嫂；兩者各有獨立 confirmation state、來源、時間與人工 override audit，不得共用或由其中一方的確認推導另一方已確認。
+- 工會人員可依既有管理 command 手動標記、修正或撤回任一方確認；不新增角色權限 gate。補登拒絕時理由必填，確認、撤回或其他修正原因可選填，且不得覆寫原始客戶／月嫂確認事件。
+- order terms、planned service dates、matching plan、recipient binding 或 schedule fingerprint 任一改變時，既有日期表確認固定失效；必須產生新 snapshot，重新取得客戶與月嫂確認。
+- 日期表發送仍沿用既有 `Preview → 人員明確 Send command` 原則；已確認的正式服務日期 projection 是產生／送出日期表的前置條件，不授權日期建立、修改或重算時自動外送。此確認不等同於既有 `actual_start` Apply，後者會建立正式 assignment／排班，必須在日期表雙方確認 gate 通過後才可執行。
+- 正式 gate 通過與否不得改寫月嫂配對意願、matching plan、訂單狀態或 waiting-deposit lock；gate 已裁決接入正式 assignment／staff schedule Apply，未通過時零寫入。
+
+### 14.3 2026-08-12 執行政策裁決
+
+- 日期表週次採 calendar week：每週星期日開始、星期六結束；跨週的日期表 snapshot 依此分組。
+- 多月嫂備案只有在查無可完整承接的單月嫂時主動提示；管理員仍可從明確的次要入口手動開啟備案流程。
+- 日期表雙方確認 gate 只阻擋「建立正式指派／正式排班」的 transition。
+- gate 未通過時，仍可建立與調整 matching plan、向其他月嫂發送訂單資訊、收集或人工調整月嫂配對意願，以及建立或維持 waiting-deposit lock。
+- 不得把日期表 gate 未通過解讀為禁止配對搜尋、候選聯繫或多月嫂備案；它只表示尚不可把任何候選轉為正式 assignment／staff schedule。
+
+### 14.4 2026-08-12 日期表流程裁決
+
+- 服務日期已確認後，工會人員必須先看日期表 Preview，再以明確 Send command 發送；不因日期確認、建立、修改或重算自動外送。
+- 客戶與月嫂都透過各自的 LINE confirmation button 回覆；工會人員可在管理 UI 補登或調整確認結果。
+- 日期表 Preview 直接讀取最新已確認的正式服務日期；不新增第二次「確認服務日期」按鈕或中介 command。
+- 客戶或月嫂缺少 LINE 綁定時，日期表 Send command 必須 fail closed 並顯示 typed blocker；工會人員仍可人工補登該方確認。
+- 初版只顯示未確認／已確認／已失效等狀態，不建立自動催辦、逾期或升級通知。
+- 日期表所依的 terms、planned service dates、matching plan、recipient binding 或 fingerprint 改變時，客戶與月嫂確認一律失效；必須 Preview 並人工 Send 新版本後重新確認。
+- 多月嫂方案中，客戶確認整張訂單的完整日期表；每位月嫂只確認自己 segment 的日期表。正式 assignment gate 必須檢查客戶確認與該 assignment 所屬月嫂的 segment confirmation 都對應同一 current snapshot lineage。
+- 人工確認、撤回或修正不新增額外角色權限，也不強制填寫原因；仍記錄既有 actor、時間、來源與 snapshot identity。
+
+### 14.5 2026-08-12 拒絕理由裁決
+
+- 月嫂在配對意願回覆「無意願」時，LINE interaction 必須要求填寫拒絕理由；理由連同原始回覆事件保存，工會人工補登無意願時也必須提供理由。
+- 客戶或月嫂在日期表確認回覆「拒絕」時，LINE interaction 必須要求填寫拒絕理由；工會人工補登拒絕時也必須提供理由。
+- 日期表任一方拒絕時，該 current snapshot 不通過雙方確認 gate，正式指派／正式排班維持阻擋；工會可依理由調整日期後 Preview、Send 新版本，或以人工確認覆寫 current version。
+- 拒絕理由是業務溝通與稽核資料，不得覆寫既有配對意願或日期表 snapshot；應保留 actor／recipient、時間、來源與對應 plan／segment／snapshot identity。
+
+### 14.6 2026-08-12 服務日期確認 Owner 裁決
+
+- 「確認服務日期」是訂單管理的新增 command，由 Orders owning workflow 擁有；月嫂配對中心不得自行確認、計算或建立日期表來源。
+- command 對最新有效 Order Terms 與 Scheduling planned service-date projection 執行 Preview／Apply，確認後保存版本化的 confirmed service-date projection／receipt。
+- 訂單管理的 Preview 先顯示系統依正式 Terms 與 Scheduling policy 產生的 candidate dates；工會人員可在
+  該畫面直接增刪或調整日期。Apply 必須驗證日期唯一、排序、落在合法範圍、服務日數守恆及 occupancy
+  規則，再保存 confirmed version。
+- 確認服務日期只建立日期表可讀取的正式日期版本，不建立正式 assignment、staff schedule、Payroll impact 或 availability conversion。
+- Matching UI 只可讀取該 confirmed version 產生日期表 Preview，並由人員明確 Send 給客戶與月嫂；若 dates、Terms 或 schedule version 改變，confirmed version 與所有對應確認均失效，必須回訂單管理重新確認服務日期。
+- 正式 assignment／正式排班的 Apply 必須驗證目前 confirmed service-date version 存在，且客戶與所屬月嫂對同一 current snapshot lineage 均已確認；未通過時回 typed gate blocker 並零寫入。
+- 工會修改任何已確認日期後，舊 confirmed version、parent／recipient snapshots 與雙方確認事件保留歷史，
+  current confirmation projection 一律回到未確認／invalidated；必須重新 Preview、人工 Send 並取得客戶與
+  月嫂對新版本的確認，才可再次通過正式 assignment／排班 gate。
+
 ## 15. 本次新增來源追溯（2026-08-11）
+
+## 16. 實作追蹤與未完成阻塞（2026-08-12）
+
+- 已落地：Orders confirmed-service-date Preview/Apply、版本化日期／receipt、日期修改使 current
+  schedule snapshot 失效、後端 typed coverage、單月嫂預設 UI、日期表 snapshot／recipient event
+  模型、管理端人工確認／拒絕、assignment server-side gate，以及缺 LINE binding 的 Send fail-closed。
+- 已驗證 composition：canonical LINE worker 在 `scripts/run_line_worker.py` 將
+  `LineMatchingPostbackApplication` 注入 `LineWebhookIdentityHandlers`；日期表 postback 與後續文字
+  理由會透過同一 Unit of Work 進入 schedule-confirmation repository。
+- 已完成 focused regression：confirmed dates、typed schedule client、snapshot enqueue、LINE
+  postback／拒絕理由、target-segment assignment gate、typed coverage 與 canonical worker boundary
+  均以 `-W error` 驗證（`30 passed`）；確認查詢另回傳最後事件的來源、UTC 時間與拒絕理由，管理 UI
+  不再只能顯示狀態。
+- 2026-08-12 內建瀏覽器驗證補正：單月嫂 UI 的 coverage view 已與 availability API schema 對齊；
+  `coverage_day_count` 由正式 service dates 計算。development bypass 的 matching-plan command 使用
+  canonical actor，且 UI 不傳 workflow 自行衍生的 `segment_order`。未確認服務日期時，日期表面板
+  顯示具體 blocker，而非 Streamlit traceback 或泛用請求失敗。
+- 尚未完成：matching-center schedule panel 的 Chrome UI 驗收、full-suite 既有失敗的獨立
+  reconciliation，以及 archive gate。`declared_status` 維持 `in-progress`，本 Work Package 不可封存。
+- 內建瀏覽器已補足 matching-center UI 驗收，但用同一新建測試方案繼續訂單管理日期確認時，既有
+  operator bootstrap flow 未產生 receipt／error，無法建立 roots；此 `live-drift` 不在本 WP write set，
+  但使同一案件無法完成 Send UI continuation。
+
+### 16.1 Focused receipt
+
+- `../03_追蹤清單與證據/evidence/2026-08-12_wp68_matching_schedule_confirmation_receipt.md`
+  記錄 Chrome Order Management 服務日期 Preview／Apply、current version `2 → 3`、日期表 Send、
+  recipient snapshot、雙方確認與 server-side assignment gate 的本機測試資料證據。
 
 - `ui/pages/scheduling/matching_center.py`：目前三個子頁、raw summary renderer、多月嫂候選標籤、
   「重新查詢最新檔期」與 `segment_candidates` dataframe 的 live 證據。
@@ -674,3 +839,13 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
   bootstrap event 與 receipt，證明它不是一般唯讀案件提示。
 - 2026-08-11 使用者提供之配對中心與最新檔期畫面；圖片只作需求證據，不提交可能含個資的副本。
 - 2026-08-11 使用者提供之「正式根狀態／確認建立正式案件架構」畫面及人工裁決。
+
+## 17. 2026-08-12 Candidate Contact Pool 補充裁決
+
+單月嫂智慧配對可一次選擇多位「完整承接候選人」加入 case-owned Candidate Contact Pool。候選人不是正式 matching plan segment，不占用檔期，也不因被選取而成為日期表或正式指派的確認對象。
+
+- 候選聯繫池逐人保存完整 coverage evidence、資訊-1／資訊-2 的 append-only 發送事件、發送時間、可靠 delivery 狀態、接案意願、拒絕理由與人工補登 actor／時間。
+- 資訊-1／資訊-2 即為詢問配對意願的動作；移除沒有獨立資料效果的「聯繫與確認意願」按鈕。
+- 加入候選及每次發送均 fresh-read availability；候選池不保證或鎖定檔期。
+- 管理員只能從 `willing` 候選人選定一位，重新驗證 availability 後建立一個 segment 的正式單月嫂 plan。多人共同服務時才使用既有多月嫂備案 plan。
+- 候選選定、撤回、plan supersede 或取消均不得刪除候選聯繫與意願歷史。日期表、客戶／月嫂雙方確認及正式指派 gate 只適用於正式 plan recipients。

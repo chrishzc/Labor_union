@@ -31,7 +31,7 @@ class _Session:
 def test_current_projection_query_uses_typed_bounded_endpoint() -> None:
     session = _Session()
     client = SchedulingCurrentApiClient(
-        base_url="http://api.test", headers={"X-Internal-API-Key": "test"}, session=session
+        base_url="http://api.test", headers={"X-Legacy-Shared-Key": "test"}, session=session
     )
 
     result = client.query(5, date(2026, 8, 1), date(2026, 8, 2))

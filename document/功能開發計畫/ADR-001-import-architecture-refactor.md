@@ -55,6 +55,21 @@ production code 或 pytest 來默認改變業務語意。
 
 不得把局部單元測試 PASS 或模組可 import 誤報為本 ADR 已完成。
 
+### 2.1 Finance Import CLI 測試 Adapter 整併邊界
+
+原 `44_Finance_Import_CLI_Test_Adapter_Work_Package.md` 於 2026-08-12 整併至本 ADR。現行
+`scripts/imports/import_finance_excel.py` 只定位為測試／受控維運期 adapter：
+
+- 正常模式只能呼叫 typed `subsystems.finance_import.ingestion`，使用固定
+  `finance-import-cli-test` actor 及由檔案內容衍生的穩定 idempotency key；
+- `--dry-run` 只做格式偵測、normalization 與列數摘要，必須零資料庫寫入；
+- 不得 import、復活或呼叫 legacy `services.finance_import_application`；
+- 不得被視為正式人工操作入口，也不得與 authenticated Web upload 形成雙 active writer。
+
+目前 Finance Web upload、Preview／Apply 與 typed API 已存在，replacement 條件已成立；但 CLI
+仍由 `scripts/file_watcher.py` 引用，移除前必須完成 caller replacement、entrypoint review、focused
+regression 與 validator。這項整併不直接授權刪除 CLI 或變更 File Watcher。
+
 ## 3. Global → Domain → Subsystem → Module
 
 ### 3.1 Global
@@ -1048,6 +1063,9 @@ idempotency key。使用者重新整理頁面後，仍可由 server query 恢復
 - [ ] `IMP-P7-13` 建立 unauthorized、oversize、wrong-magic、crash、rollback、delete failure、restart、replay 與 orphan scan E2E；
 - [ ] `IMP-P7-14` 完成 File Watcher writer retirement／quarantine migration，避免網站與 watcher 雙重匯入同一檔案。
 - [ ] `IMP-P7-15` 將第 10.8.6 節每個業務場景做成 upload lifecycle／cleanup acceptance tests。
+- [ ] `IMP-P7-16` 完成 Finance CLI／File Watcher caller replacement、entrypoint review 與 focused
+  regression 後，退役 `scripts/imports/import_finance_excel.py` 的 active adapter 身分；退役前維持
+  typed ingestion、stable idempotency 與 dry-run 零寫入邊界。
 
 ### P8：管理端「匯入資料」分頁
 

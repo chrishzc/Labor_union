@@ -211,11 +211,6 @@ def _render_selected_workspace(
 def show() -> None:
     st.title(title)
     client = LineAdminApiClient()
-    if not client.configured:
-        st.error("尚未設定 INTERNAL_API_KEY，LINE 管理中心已拒絕啟用。")
-        st.code("請在 .env 設定 INTERNAL_API_KEY，或使用 start.bat 共同啟動前後端。")
-        return
-
     bypassed = client.admin_auth_bypassed
     token = st.session_state.get(TOKEN_KEY)
     if not bypassed and not token:

@@ -95,7 +95,7 @@
 - 修改 `line/worker.py`：使用 transaction 與 `FOR UPDATE SKIP LOCKED` 領取任務；加入卡住任務恢復、LINE Retry Key、暫時錯誤指數退避及永久失敗狀態。
 - 修改 `config/message_templates.json`：啟用 D+1 並新增 D+2、D+3、月嫂驗證提示與失敗文案。
 - 修改 `api/schemas/line_config.py`、`api/routes/line_system_config.py`、`services/json_config_service.py`：新增排程 JSON 驗證與 GET／PUT 前端預留接口。
-- 修改 `.env.example`：新增 `INTERNAL_API_KEY` 範例。
+- 修改 `.env.example`：新增 `LEGACY_SHARED_KEY` 範例。
 
 ### 第四階段功能
 - Webhook 無有效 LINE 簽章時回 401，不寫 DB、不建立任務。
@@ -112,7 +112,7 @@
 - 建立 `customer`、`caregiver`、`union_staff` 三種 LINE 角色。
 - 修改 `config/line_menu.json`，新增工會人員客服選單，預留客服系統與月嫂驗證管理入口。
 - 「我是月嫂」不再直接升級身分；改為密碼學安全隨機六位數驗證碼、10 分鐘期限、最多 5 次嘗試，成功後才切換角色與選單。
-- 月嫂驗證碼查詢及角色設定接口必須帶 `X-Internal-API-Key`，避免公開取得驗證碼或任意升級角色。
+- 月嫂驗證碼查詢及角色設定接口必須帶 `X-Legacy-Shared-Key`，避免公開取得驗證碼或任意升級角色。
 
 ### 資料庫與驗證
 - 已執行 `scripts/init_db.py` 重建開發資料庫，成功執行 35 個 schema statement；本次資料為開發資料。
@@ -161,7 +161,7 @@
 
 - 修改 `line/line_bot.py`，新增 `GET /api/line/staff/review-requests`，統一彙整 `client_rebind` 與 `caregiver_verification` 待處理事項。
 - 新增統一 approve／reject API；客戶重新綁定沿用既有核准與拒絕邏輯，月嫂核准時才向工作人員回傳驗證碼，拒絕時取消驗證碼並建立通知任務。
-- 既有重新綁定 GET／approve／reject 接口保留相容性，但補上 `X-Internal-API-Key` 驗證。
+- 既有重新綁定 GET／approve／reject 接口保留相容性，但補上 `X-Legacy-Shared-Key` 驗證。
 - 修改 `line/start_line_bot.py`，新增非阻塞重新綁定審核器；不阻塞 FastAPI／LIFF 請求，也能持續監控 ngrok 與 FastAPI。
 - 新增 `ENABLE_REBIND_CONSOLE_REVIEW` 開關；開發終端輸入 `y` 呼叫正式核准 API、輸入 `n` 呼叫正式拒絕 API，`APP_ENV=production` 時強制停用。
 - 修改 `config/message_templates.json`，新增月嫂驗證申請被拒絕時的通知文字。
@@ -202,9 +202,9 @@
 - LINE 月嫂角色由 `caregiver` 統一改為 `staff`，與既有 `staff` 主表、`staff_id`、排班及媒合API命名一致；`union_staff` 保留表示工會人員。
 - `line_confirmation_requests.request_type` 由 `caregiver_verification` 改為 `staff_verification`，並移除六位數驗證碼、期限及嘗試次數欄位。
 - 使用者輸入「我是月嫂」後只建立待審請求，不再產生或接受驗證碼；工會人員核准後，系統在同一交易內將角色改為 `staff`、完成請求並排入月嫂Rich Menu綁定任務。
-- 統一待審API保留給正式Web/UI串接：`GET /api/line/staff/review-requests` 及對應approve／reject接口，持續以 `X-Internal-API-Key` 保護。
+- 統一待審API保留給正式Web/UI串接：`GET /api/line/staff/review-requests` 及對應approve／reject接口，持續以 `X-Legacy-Shared-Key` 保護。
 - 開發啟動器改為同時顯示月嫂身分與客戶重新綁定待審項目，接受終端 `y/n`；由 `ENABLE_LINE_REVIEW_CONSOLE` 控制，正式環境強制停用。
-- 開發環境未設定 `INTERNAL_API_KEY` 時，啟動器會建立只存在本次程序生命週期的隨機內部金鑰，FastAPI子程序共用但不寫入檔案。
+- 開發環境未設定 `LEGACY_SHARED_KEY` 時，啟動器會建立只存在本次程序生命週期的隨機內部金鑰，FastAPI子程序共用但不寫入檔案。
 - Rich Menu、訊息範本、圖片檔、SOP、設定說明、階段報告及資料字典同步改用 `staff` 命名。
 - 已以 `scripts/init_db.py` 重建開發Schema；整合測試通過有效簽章「我是月嫂」→待審→核准→`role=staff`→`status=approved`，測試資料已清除，未建立一次性Python檔案。
 
@@ -212,7 +212,7 @@
 
 - 移除`start_line_bot.py`每3秒呼叫`GET /api/line/staff/review-requests`的固定輪詢。
 - 啟動器新增只綁定`127.0.0.1`與隨機Port的臨時通知入口；URL只透過子程序環境變數`DEV_REVIEW_NOTIFY_URL`傳給FastAPI。
-- Webhook或LIFF成功提交`staff_verification`／`client_rebind`後，以`X-Internal-API-Key`向本機入口推送一次通知，終端立即顯示`y/n`。
+- Webhook或LIFF成功提交`staff_verification`／`client_rebind`後，以`X-Legacy-Shared-Key`向本機入口推送一次通知，終端立即顯示`y/n`。
 - 啟動器只在每次啟動完成時掃描一次既有待審資料，作為服務中斷期間通知遺失的恢復機制。
 - 通知失敗不影響Webhook或LIFF成功回應，確認請求仍保存在MySQL並可由正式Web/UI處理。
 - Python語法及單筆通知測試通過：通知佇列只收到一筆`staff_verification`事件，沒有建立一次性Python檔案。
@@ -241,7 +241,7 @@
 
 - 新增 `ENABLE_ADMIN_AUTH` 開關；開發環境設為 `false` 時使用暫時的 `system_admin` 開發身分，不要求輸入帳密。
 - `APP_ENV=production` 強制啟用管理員 Session，無法透過開關略過。
-- `X-Internal-API-Key` 在開發略過模式仍為必要條件，不會把內部金鑰交給瀏覽器。
+- `X-Legacy-Shared-Key` 在開發略過模式仍為必要條件，不會把內部金鑰交給瀏覽器。
 - Streamlit LINE 管理中心在略過模式直接進入並顯示醒目警告，不顯示登入／登出控制。
 - 稽核紀錄支援沒有 DB 帳號 ID 的開發身分，避免外鍵錯誤。
 - 開發 `.env` 已設為 `ENABLE_ADMIN_AUTH=false`；`.env.example` 維持安全預設 `true`。
@@ -310,7 +310,7 @@
 - 新增客戶重新綁定核准／拒絕訊息範本及 5.6 整合測試；5.1～5.6 LINE 回歸共 43 項通過。
 - 未建立任何一次性 Python 檔案。
 
-## [2026-07-24] 修復第五階段啟動器 INTERNAL_API_KEY 載入失敗
+## [2026-07-24] 修復第五階段啟動器 LEGACY_SHARED_KEY 載入失敗
 
 - 修正 `start.bat` 在 Windows `cmd` 中無法接收 Python dotenv 輸出的問題；開發啟動時會優先沿用既有環境變數，其次讀取 `.env`，仍無設定時建立本次程序專用的臨時金鑰。
 - 同步修正第五階段曾修改的 `online.bat`；正式啟動會優先沿用既有環境變數，其次讀取 `.env`，兩者皆無金鑰時維持拒絕啟動。
@@ -442,7 +442,7 @@
 - 訊息內容管理新增「傳給媽媽」、「傳給月嫂」及「群組工具說明」三種工會快捷分類與排序；設定仍保存在 `config/message_templates.json`，不新增另一份範本來源。
 - 工會人員在一對一官方帳號點選快捷分類後，Webhook 會驗證 `line_users.role='union_staff'`，再以可靠任務送出 Quick Reply；未綁定身分不可使用。
 - Worker 新增 `line_push_messages` 任務，可發送文字與 Quick Reply 等 1～5 個 LINE 訊息物件，沿用既有任務鎖、重試及執行紀錄。
-- 新增工會人員 LIFF 手機入口及 Session API，以 LINE ID Token 與 `admin_users.linked_line_user_id` 驗證身分；瀏覽器不持有 `X-Internal-API-Key`。目前完成狀態、訂單、排休、待確認及訊息功能的安全入口與導覽，詳細查詢／異動仍列為後續逐項串接。
+- 新增工會人員 LIFF 手機入口及 Session API，以 LINE ID Token 與 `admin_users.linked_line_user_id` 驗證身分；瀏覽器不持有 `X-Legacy-Shared-Key`。目前完成狀態、訂單、排休、待確認及訊息功能的安全入口與導覽，詳細查詢／異動仍列為後續逐項串接。
 - 修正 LIFF 導覽頁使用網址參數組合 HTML 的風險，改以 `textContent` 建立畫面，避免手動竄改網址造成前端注入。
 - 更新設定規格、檔案功能說明及 Rich Menu／訊息／LIFF 回歸測試；目標 31 項通過，擴大回歸 65 項通過。另 1 項既有監督器測試因本機保留正常關機標記而顯示 maintenance，與本次功能無關，未刪除使用者的執行狀態檔。
 - 本次未修改資料庫 Schema、未重建資料庫，也未建立或遺留一次性 Python 檔案。

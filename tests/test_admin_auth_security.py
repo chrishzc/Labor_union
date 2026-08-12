@@ -59,12 +59,12 @@ def test_line_config_keeps_public_liff_read_but_protects_management_routes():
     assert "dependencies=[Depends(require_line_manager)]" in source
 
 
-def test_streamlit_line_client_keeps_internal_key_server_side():
+def test_streamlit_line_client_uses_session_transport():
     source = (ROOT / "ui/api_clients/line_api_client.py").read_text(encoding="utf-8")
     page = (ROOT / "ui/pages/07_line_management.py").read_text(encoding="utf-8")
 
-    assert 'headers = {"X-Internal-API-Key": resolve_internal_api_key()}' in source
-    assert "self.internal_api_key" not in source
+    assert 'headers: dict[str, str] = {}' in source
+    assert 'headers["Authorization"] = f"Bearer {token}"' in source
     assert "os.getenv" not in page
 
 

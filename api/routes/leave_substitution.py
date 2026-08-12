@@ -19,6 +19,7 @@ from api.dependencies.leave_substitution import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.leave_substitution import (
+    LeaveAssignmentSummaryView,
     LeaveSubstitutionPreviewView,
     LeaveSubstitutionReceiptView,
 )
@@ -47,6 +48,33 @@ router = APIRouter(prefix="/api/v1/orders", tags=["Leave Substitution"])
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 
 
+@router.get(
+    "/{case_no}/leave-substitution/assignments",
+    response_model=BaseResponse[list[LeaveAssignmentSummaryView]],
+)
+def list_leave_assignments(
+    case_no: str = Path(..., min_length=1, max_length=50),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: LeaveSubstitutionApplication = Depends(
+        get_leave_substitution_application
+    ),
+):
+    del principal
+    assignments = application.list_effective_assignments(case_no)
+    return BaseResponse(
+        data=[
+            {
+                "assignment_id": row["id"],
+                "staff_id": row["staff_id"],
+                "assigned_start_date": row["assigned_start_date"],
+                "assigned_end_date": row["assigned_end_date"],
+            }
+            for row in assignments
+        ],
+        message="成功取得請假與代班正式服務指派",
+    )
+
+
 class LeaveSubstitutionItemInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -70,7 +98,7 @@ class LeaveSubstitutionPreviewBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     original_assignment_id: int = Field(gt=0)
-    items: tuple[LeaveSubstitutionItemInput, ...] = Field(min_length=1)
+    items: tuple[LeaveSubstitutionItemInput, ...] = ()
 
     def to_intent(self) -> LeaveSubstitutionBatchIntent:
         return LeaveSubstitutionBatchIntent(
@@ -204,6 +232,8 @@ def _preview_payload(preview):
         "client_finance_impact": _materialize(preview.client_finance_impact),
         "payroll_impact": _materialize(preview.payroll_impact),
         "orders_impact": _materialize(preview.orders_impact),
+        "calendar_candidate": _materialize(preview.calendar_candidate),
+        "apply_readiness": _materialize(preview.apply_readiness),
         "preview_fingerprint": preview.fingerprint.value,
     }
 

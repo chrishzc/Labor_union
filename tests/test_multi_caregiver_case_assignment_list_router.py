@@ -19,6 +19,20 @@ def test_list_route_delegates_only_case_no(monkeypatch):
     assert response.data == {"assignments": [{"id": 21}]}
 
 
+def test_staff_list_route_delegates_only_staff_id(monkeypatch):
+    received = []
+    monkeypatch.setattr(
+        router_module,
+        "list_staff_case_schedule_assignments_service",
+        lambda staff_id: received.append(staff_id) or {"assignments": [{"id": 21}]},
+    )
+
+    response = router_module.list_staff_schedule_assignments(31)
+
+    assert received == [31]
+    assert response.success is True
+
+
 def test_list_route_maps_validation_to_bad_request(monkeypatch):
     monkeypatch.setattr(
         router_module,

@@ -64,7 +64,7 @@ def test_release_apply_sends_fingerprint_reason_and_command_identity() -> None:
 def _client(session: _Session) -> WaitingDepositLockApiClient:
     return WaitingDepositLockApiClient(
         base_url="http://api.test",
-        headers={"X-Internal-API-Key": "test"},
+        headers={"X-Legacy-Shared-Key": "test"},
         session=session,
     )
 

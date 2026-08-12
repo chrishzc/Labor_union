@@ -41,7 +41,7 @@ def test_anomaly_selection_drives_government_return_preview_then_apply(monkeypat
     _seed_payer_account()
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
-    monkeypatch.setenv("INTERNAL_API_KEY", "finance-alert-ui-key")
+    monkeypatch.setenv("LEGACY_SHARED_KEY", "finance-alert-ui-key")
 
     from api.routes.government_subsidy import router
     from api.schemas.anomaly_recovery import RecoveryActionView
@@ -56,7 +56,7 @@ def test_anomaly_selection_drives_government_return_preview_then_apply(monkeypat
         monkeypatch.setattr(admin_auth, "has_required_capability", lambda *_args: True)
         monkeypatch.setattr(panel, "st", display)
         session = _Session(http_client)
-        monkeypatch.setattr(panel, "GovernmentSubsidyApiClient", lambda **_kwargs: GovernmentSubsidyApiClient(base_url="http://finance-alert.test", headers={"X-Internal-API-Key": "finance-alert-ui-key"}, session=session))
+        monkeypatch.setattr(panel, "GovernmentSubsidyApiClient", lambda **_kwargs: GovernmentSubsidyApiClient(base_url="http://finance-alert.test", headers={"X-Legacy-Shared-Key": "finance-alert-ui-key"}, session=session))
         panel._select_recovery(_summary(), RecoveryActionView(
             action_key="dispose_government_subsidy_overpayment",
             label="處置政府補助溢撥",

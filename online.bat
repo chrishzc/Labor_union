@@ -27,19 +27,6 @@ if not exist .venv\Scripts\python.exe (
 )
 set "PY=%CD%\.venv\Scripts\python.exe"
 
-:: Local development still requires the configured internal API key.
-if defined INTERNAL_API_KEY goto internal_api_key_ready
-for /f "tokens=1,* delims==" %%A in ('findstr /R /B /I "^INTERNAL_API_KEY=" "%CD%\\.env"') do (
-    if /I "%%A"=="INTERNAL_API_KEY" set "INTERNAL_API_KEY=%%B"
-)
-
-:internal_api_key_ready
-if not defined INTERNAL_API_KEY (
-    echo [Error] INTERNAL_API_KEY is missing. Configure it in .env before online startup.
-    pause
-    exit /b 1
-)
-
 :: 3. Wait for database
 echo [Step 3] Waiting for MySQL database to become ready...
 "%PY%" scripts/wait_for_db.py

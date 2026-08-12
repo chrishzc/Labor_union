@@ -1203,7 +1203,7 @@ def test_real_mysql_preserved_source_candidate_cutover(tmp_path: Path) -> None:
             f"DB_USER={config.user}",
             f"DB_PASSWORD={config.password}",
             f"DB_DATABASE={disposable_source}",
-            f"INTERNAL_API_KEY={credential_marker}",
+            f"LEGACY_SHARED_KEY={credential_marker}",
             "CUTOVER_TEST_SETTING=preserved",
         ]
         temporary_environment.write_text(

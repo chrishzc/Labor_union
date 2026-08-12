@@ -54,6 +54,9 @@ from infrastructure.mysql.customer_service_repository import (
 from infrastructure.mysql.line_identity_management_repository import (
     MySqlLineIdentityManagementRepository,
 )
+from infrastructure.mysql.matching_schedule_confirmation_repository import (
+    MySqlMatchingScheduleConfirmationRepository,
+)
 
 
 class LineMySqlUnitOfWork(MySqlUnitOfWork):
@@ -78,6 +81,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.audit = MySqlLineAuditRepository(connection)
         self.outbox = MySqlLineOutboxWriter(connection)
         self.matching_notifications = MySqlMatchingNotificationRepository(connection)
+        self.matching_schedule_confirmations = MySqlMatchingScheduleConfirmationRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
         self.customer_service = MySqlCustomerServiceRepository(connection)
         self.identity_management = MySqlLineIdentityManagementRepository(connection)

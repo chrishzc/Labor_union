@@ -116,6 +116,40 @@ class CaregiverSegmentCandidate(BaseModel):
     end_date: date
 
 
+class CaregiverAvailabilityRange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    start_date: date
+    end_date: date
+
+
+class CaregiverSupportedRange(CaregiverAvailabilityRange):
+    service_day_count: int = Field(ge=1)
+
+
+class CaregiverCandidateOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    segment_index: int
+    staff_id: int
+    staff_name: str
+    coverage_day_count: int = Field(ge=1)
+    available_ranges: list[CaregiverAvailabilityRange]
+    case_period_start: date
+    case_period_end: date
+    required_service_dates: list[date]
+    supported_service_dates: list[date]
+    supported_ranges: list[CaregiverSupportedRange]
+    supported_day_count: int = Field(ge=0)
+    required_day_count: int = Field(ge=1)
+    full_case_coverage: bool
+    selected_segment_start: date
+    selected_segment_end: date
+    full_selected_segment_coverage: bool
+    uncovered_segment_dates: list[date]
+    source_scheduling_version: int = Field(ge=0)
+
+
 class CaregiverConflict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -134,6 +168,7 @@ class CaregiverSegmentAvailabilityResponse(BaseModel):
     feasibility: Literal["complete", "partial"]
     complete_combinations: list[list[CaregiverSegmentCandidate]]
     segment_candidates: list[CaregiverSegmentCandidate]
+    candidate_options: list[CaregiverCandidateOption] = Field(default_factory=list)
     conflicts: list[CaregiverConflict]
 
 

@@ -53,9 +53,6 @@ def show() -> None:
     st.title(title)
     client = LineAdminApiClient()
     status_client = SystemStatusApiClient(client)
-    if not client.configured:
-        st.error("尚未設定 INTERNAL_API_KEY，無法讀取系統狀態。")
-        return
     token = st.session_state.get(TOKEN_KEY)
     if not client.admin_auth_bypassed and not token:
         _login(client)

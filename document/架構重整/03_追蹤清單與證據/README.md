@@ -23,6 +23,7 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [evidence/2026-08-12_line_ingress_phase_1_service_help_receipt.md](evidence/2026-08-12_line_ingress_phase_1_service_help_receipt.md) | LINE ingress Phase 1：canonical Service Help 委派至 Customer Service owning workflow 的 focused regression。 |
 | [LINE ingress Phase 2 receipt（封存）](../04_已完成與上線封存/receipts/2026-08-12_line_ingress_phase_2_rulebook_reconciliation_receipt.md) | 規則書對齊與 union-menu／`esc` characterization 已驗收；未授權的 canonical behavior 留待人工裁決。 |
 | [evidence/2026-08-12_line_menu_command_canonical_replacement_receipt.md](evidence/2026-08-12_line_menu_command_canonical_replacement_receipt.md) | 已裁決的 union menu／`esc` canonical identity gate、outbox replacement 與 focused regression。 |
-| [65 LINE canonical cutover receipt](../02_決策與退役執行記錄/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
+| [evidence/2026-08-12_wp68_matching_schedule_confirmation_receipt.md](evidence/2026-08-12_wp68_matching_schedule_confirmation_receipt.md) | WP68 confirmed service dates、日期表 snapshot、雙方確認與 assignment gate 的 focused API／Chrome 證據；尚未結案。 |
+| [65 LINE canonical cutover receipt（封存）](../04_已完成與上線封存/receipts/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
 | [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |
 | [evidence/](evidence/) | 上述決策包／收據對應的原始 evidence 產物（JSON／SQL／receipt）。 |

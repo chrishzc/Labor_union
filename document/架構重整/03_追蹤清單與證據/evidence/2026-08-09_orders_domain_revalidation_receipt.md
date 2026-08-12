@@ -9,7 +9,8 @@ verified_at: 2026-08-09
 ## 追溯依據
 
 - 規格基線：`01_規格基線/01_Orders_Domain.md`
-- 決策：`02_決策與退役執行記錄/33_G05_服務完成時刻與請假代班競爭契約.md`
+- 正式 successor：`01_規格基線/01_Orders_Domain.md`、`01_規格基線/02_Assignments_Scheduling_Domain.md`
+- 歷史契約：`04_已完成與上線封存/work_packages/33_G05_服務完成時刻與請假代班競爭契約.md`
 - 既有 UI/API 收據：`evidence/2026-08-08_g01_g02_orders_ui_api_e2e_receipt.md`
 
 Decision 33 的事實來源維持為 Orders AutoComplete；服務完成與請假代班都以

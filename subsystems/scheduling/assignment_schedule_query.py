@@ -115,6 +115,37 @@ def _validate_case_no(case_no: Any) -> str:
     return case_no.strip()
 
 
+def _validate_staff_id(staff_id: Any) -> int:
+    if isinstance(staff_id, bool) or not isinstance(staff_id, int) or staff_id < 1:
+        raise ValueError("staff_id must be a positive integer")
+    return staff_id
+
+
+def list_staff_case_schedule_assignments(staff_id: int) -> dict[str, Any]:
+    """List a staff member's non-cancelled formal assignments in one read."""
+
+    staff_id = _validate_staff_id(staff_id)
+    connection = get_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """SELECT a.id, a.case_no, a.staff_id, a.status,
+                          a.assigned_start_date, a.assigned_end_date,
+                          o.status AS order_status, o.actual_start_date,
+                          o.actual_end_date, s.name AS staff_name
+                     FROM case_staff_assignments a
+                     JOIN orders o ON o.case_no = a.case_no
+                     JOIN staff s ON s.id = a.staff_id
+                    WHERE a.staff_id = %s AND a.status <> 'cancelled'
+                    ORDER BY a.assigned_start_date ASC, a.id ASC""",
+                (staff_id,),
+            )
+            assignments = cursor.fetchall() or []
+        return {"assignments": assignments}
+    finally:
+        connection.close()
+
+
 def _as_date(value: Any) -> date:
     if isinstance(value, datetime):
         return value.date()

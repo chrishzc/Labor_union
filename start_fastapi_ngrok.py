@@ -28,18 +28,6 @@ os.chdir(PROJECT_ROOT)
 load_dotenv(PROJECT_ROOT / ".env")
 
 
-def _prepare_development_review_auth() -> None:
-    """Create a process-local internal key for the dev reviewer when absent."""
-    app_env = os.getenv("APP_ENV", "development").strip().lower()
-    if app_env not in {"development", "dev", "local", "test"}:
-        return
-    if not os.getenv("INTERNAL_API_KEY", "").strip():
-        os.environ["INTERNAL_API_KEY"] = secrets.token_urlsafe(32)
-        print("[REVIEW] 已建立本次開發程序專用的內部API金鑰。")
-
-
-_prepare_development_review_auth()
-
 
 def _resolve_ngrok() -> str:
     executable = shutil.which("ngrok")
@@ -207,7 +195,6 @@ class DevLineConsoleReviewer:
             app_env in {"development", "dev", "local", "test"}
             and flag in {"1", "true", "yes", "on"}
         )
-        self.api_key = os.getenv("INTERNAL_API_KEY", "").strip()
         self.current: dict | None = None
         self.notifications: queue.Queue[dict] = queue.Queue()
         self._warned = False
@@ -216,14 +203,6 @@ class DevLineConsoleReviewer:
         if self.enabled and os.name != "nt":
             print("[REVIEW] 終端 y/n 審核目前只支援 Windows，已停用。")
             self.enabled = False
-        if self.enabled and not self.api_key:
-            print("[REVIEW] 缺少 INTERNAL_API_KEY，LINE 終端審核已停用。")
-            self.enabled = False
-
-    @property
-    def headers(self) -> dict[str, str]:
-        return {"X-Internal-API-Key": self.api_key}
-
     def enqueue(self, notification: dict) -> None:
         if self.enabled:
             self.notifications.put(notification)
@@ -352,16 +331,10 @@ class DevReviewNotificationServer:
         if not self.reviewer.enabled:
             return
         reviewer = self.reviewer
-        api_key = self.reviewer.api_key
-
         class NotificationHandler(BaseHTTPRequestHandler):
             def do_POST(self) -> None:
                 if self.path != "/notify":
                     self.send_error(404)
-                    return
-                received_key = self.headers.get("X-Internal-API-Key", "")
-                if not secrets.compare_digest(received_key, api_key):
-                    self.send_error(401)
                     return
                 try:
                     content_length = min(int(self.headers.get("Content-Length", "0")), 4096)

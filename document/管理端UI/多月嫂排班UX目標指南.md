@@ -239,3 +239,7 @@
 - `deviation`：在保留原目標前提下更正歸一化方式或術語，需明確記錄為已知偏差。  
 - `new_requirement`：出現未在 MCSUX-G-001~009 中描述的新需求時，需停止本節點修正與實作，提交架構澄清。  
 - `responsibility_change`：出現責任歸屬、權責邊界改變（含目標 owner 或 owner/owner-split）時，需停止本節點修正與實作，走 Checkpoint 與責任說明流程。  
+
+## 2026-08-12 Candidate Contact Pool 補充裁決
+
+候選聯繫可一次複選多位完整覆蓋月嫂；每人各自保存資訊-1／2 發送時間、狀態、意願、拒絕理由與人工補登。候選聯繫不建立正式服務 segment 或檔期鎖；最終從 willing 候選人選定一位才建立單月嫂正式 plan。

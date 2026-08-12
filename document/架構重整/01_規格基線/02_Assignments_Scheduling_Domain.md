@@ -12,6 +12,7 @@
 |---|---|
 | assignment 歸屬與區段歷史 | `case_staff_assignments` 的版本化有效紀錄 |
 | 每日正式服務 owner | effective `staff_schedule.assignment_id` |
+| completed assignment 的歷史區段 | `case_staff_assignments.status=completed` 與其正式起訖日 |
 | assignment 檔期占用 | 有效 assignment 的完整連續區間，包含排休與請假日 |
 | actual hours | 正式服務日數 × Orders 每日服務時數 |
 | assignment status | 第一／最後正式服務時刻與 Global Clock |
@@ -66,6 +67,26 @@ matching plan/version、staff 與精確日期集合完全相同；不同時回
 commitment `converted` terminal event、outbox 與 receipt 同一交易提交。Calendar Read、Payroll
 與 Government Subsidy 在 conversion 前不得讀取 commitment days。
 
+#### Matching Schedule Confirmation Gate (2026-08-12)
+
+Formal Assignment Plan Preview and Apply must fail closed unless a current schedule snapshot is
+bound to the current Orders confirmed-service-date version. The customer must have confirmed the
+parent schedule and every caregiver segment selected for formal conversion must have confirmed
+its own child schedule from that same lineage. The gate blocks only formal assignment/scheduling;
+candidate search, matching communication, willingness, and waiting-deposit lock remain available.
+Any terms, confirmed-date, matching-plan, recipient-binding, or schedule-fingerprint change
+invalidates the lineage. The server enforces this gate for direct API callers as well as the UI.
+
+#### Matching Schedule Confirmation Gate (2026-08-12)
+
+Formal Assignment Plan Preview and Apply must fail closed unless a current schedule snapshot is
+bound to the current Orders confirmed-service-date version. The customer must have confirmed the
+parent schedule and every caregiver segment selected for formal conversion must have confirmed
+its own child schedule from that same lineage. The gate blocks only formal assignment/scheduling;
+candidate search, matching communication, willingness, and waiting-deposit lock remain available.
+Any terms, confirmed-date, matching-plan, recipient-binding, or schedule-fingerprint change
+invalidates the lineage. The server enforces this gate for direct API callers as well as the UI.
+
 ### Schedule Projection
 
 由 assignment segment、排休規則及正式 leave outcome 產生完整 assignment-owned 日曆。禁止單日 CRUD、獨立 Generate 或 UI 直接切換 `is_work_day`。
@@ -93,6 +114,20 @@ Batch replay：
 - batch header、逐日 events、assignment／schedule replacement、payroll impacts、outbox
   與 receipt 必須同一 transaction；rollback 後不得留下可被誤認為成功的 partial batch。
 
+與 Orders AutoComplete 的競爭契約：
+
+- leave-substitution Apply 與 AutoComplete 必須先鎖定同一 Orders lifecycle aggregate，並驗證同一
+  expected Orders lifecycle version；不得各自只鎖 Scheduling 或 Orders projection。
+- AutoComplete 先提交時，舊 leave Preview 必須以 typed `stale_version`／version conflict 失敗；
+  Scheduling generation、assignment／schedule、Client Finance、Payroll、leave outcome、receipt 與
+  outbox 全部零寫入。
+- leave-substitution 先提交時，必須在同一 transaction 更新正式服務日與 Orders lifecycle version；
+  舊 AutoComplete command 必須以 `order_version_conflict` 失敗且零寫入。只有重新讀取新 effective
+  generation、official service days 與新 completion instant 後，才能再次判斷完成。
+- LINE leave request evidence 或管理員受理狀態不參與此競爭；只有 canonical leave-substitution
+  Apply 會取得鎖並改變正式根事實。
+- 任一 stale／conflict 路徑不得留下 partial batch，也不得以「先完成後補請假」掩蓋競爭。
+
 ### Assignment Lifecycle Projection
 
 `planned`、`active`、`completed` 由正式服務時刻推導；中間休假仍 active。`cancelled` 只由命令產生；`replaced` 只作 legacy 相容。
@@ -100,6 +135,27 @@ Batch replay：
 ### Calendar Read
 
 逐日顯示 waiting lock、buffer、assignment interval、正式工作日與休假。只組合 typed ViewModel，不在 Query 或 render 時轉移狀態。
+
+Calendar 的「可進行出勤精算案件」必須先以 Scheduling 的單一批次 read
+`staff/{staff_id}/assignment-schedules` 取得該月嫂未取消的正式 assignment `case_no` 集合，
+再與 Orders 摘要相交。不得以 `orders.staff_id`、`orders.staff_name` 或逐案
+`cases/{case_no}/assignment-schedules` fallback 作為 formal-assignment 判定；前兩者可能是投影
+漂移，後者會形成 N+1 read。此 query 只授權 Calendar 選案，不授權 Preview 或 Apply 寫入。
+
+#### Completed assignment historical projection（2026-08-12）
+
+完成訂單與 `completed` assignment 一律可在 Calendar 唯讀查閱，完成狀態只禁止
+leave／substitution 等 mutation，不得使歷史區段消失。Query 優先顯示
+assignment-owned `staff_schedule.assignment_id` 的正式每日 ownership；若 historical／legacy
+資料缺少該 daily ownership，但 `case_staff_assignments` 保有 completed assignment 的正式起訖日，
+Calendar 必須以該區段顯示 `historical_assignment`／「歷史正式指派」。此 fallback 是歷史占用
+view，不能宣稱為正式工作日、不能重算 actual hours、不能產生薪資、不能變更 availability
+current projection，也不能授權任何 Apply。
+
+同一天若同時存在 assignment-owned daily schedule、waiting lock、buffer 或其他 current fact，
+該 current fact 優先；historical fallback 只填補沒有較高權威逐日事實的日期。Calendar 不得使用
+`orders.actual_start_date`、`orders.staff_id`、legacy 無 `assignment_id` 的 `staff_schedule` 或 UI
+自行推算，將完成案歷史誤標為「可接案」或「服務工作日」。
 
 ## 5. Modules
 
@@ -180,6 +236,8 @@ Subsystem 使用隔離 MySQL 驗證 Preview 零寫入、cancel/create、exact ba
 batch-key payload mismatch、partial replay corruption、鎖後 impacted-staff set 擴張、
 相反 staff 順序的並行命令、stale、占用衝突及 rollback。Domain 覆蓋單／多月嫂、
 waiting deposit、全案條款重建、局部請假、順延、代班、buffer 釋放與完整履約取消拒絕。
+Calendar Query 必須驗證 completed assignment 在缺少 assignment-owned daily schedule 時仍回傳
+唯讀 `historical_assignment`，且不覆蓋同日的 current ownership／lock／buffer，也不顯示為可接案。
 
 ## 9. Typed Commands／Ports／Errors
 
@@ -227,6 +285,17 @@ Stable errors：
 
 ## 10. Live writer 退出
 
+### 休假／代班 Calendar Preview 補充裁決（2026-08-12）
+
+- Preview 必須回傳零寫入的 before／after day-cell candidate 與獨立 `apply_readiness`。
+- Client Finance、Payroll 或 Orders blocker 不得遮蔽已成立的 Scheduling candidate；UI 必須停用 Apply。
+- 代班只替換同一服務日 owner；順延才移動服務日期。兩者都必須維持合約服務日數守恆。
+- Apply 必須 fresh rebuild 並重新檢查 blocker、versions、fingerprint 與 occupancy，禁止信任 UI snapshot。
+- `SchedulingHolidayQuery` 是 Preview／Apply 共用的版本化、fail-closed read port；國定假日預設為休假、扣除服務日並順延。Holiday facts 必須納入 Preview fingerprint，Apply 必須 fresh-read 並鎖定同一 planning horizon；無法讀取時回 `holiday_calendar_unavailable`。
+- Leave／substitution Calendar Preview 的 API view、UI client 與 route payload 必須以同一
+  `LeaveSubstitutionPreviewView` 驗證；成功 envelope 的 nullable `error` 不得被 UI 誤判為
+  失敗。UI 只 render typed candidate、holiday rows 與 apply readiness。
+
 - `services/assignment_schedule_rest_date_service.py` 的 canonical batch replay、event 與純
   transition 可吸收；直接 UPDATE／DELETE assignment 或 schedule 的 mutation 必須移入
   Scheduling persistence adapter。
@@ -240,3 +309,14 @@ Stable errors：
   legacy adjustment 僅供異常 recovery。
 - final writer scan 必須證明 effective assignment、schedule、waiting lock、buffer、
   rebuild event 與 Scheduling version 都只有本 Domain persistence adapters 可寫。
+
+## Candidate Contact Pool（2026-08-12）
+
+Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候選月嫂聯繫事實：候選人、完整 coverage evidence、資訊-1／資訊-2 發送事件與 delivery 狀態、月嫂意願、拒絕理由、人工補登 actor／時間。它不是 `caregiver_matching_plans` 或 `caregiver_matching_plan_segments`，不得建立 availability lock、正式 assignment、staff schedule、日期表 snapshot、客戶履歷傳送或正式指派資格。
+
+- 一次可加入多位對目前預計服務日期有完整 coverage 的候選人；加入與每次資訊發送皆須 fresh-read availability。
+- 發送資訊-1／資訊-2 是詢問接案意願的唯一聯繫動作；不得另建沒有資料效果的「聯繫與確認意願」命令。
+- 每位候選人的意願及兩種資訊寄送紀錄獨立、append-only 且以 candidate entry／event key 冪等；不得由同案其他候選人覆蓋。
+- 管理員僅能從 `willing` 候選人選定一位，重新檢查可用性後建立一個 segment 的正式 matching plan。
+- 多位月嫂共同服務仍是顯式 multi-caregiver fallback plan，不能由候選聯繫池直接轉換。
+- 選定、撤回或取消不得刪除候選聯繫歷史。正式 plan 後的日期表、客戶與月嫂雙方確認及 assignment gate 僅針對該正式 plan recipients。

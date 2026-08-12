@@ -86,7 +86,6 @@ def test_line_task_client_forwards_stable_operation_identity(monkeypatch) -> Non
         captured.update({"method": method, "url": url, **kwargs})
         return _Response(200, {"data": {"task_id": 9}})
 
-    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setattr("ui.api_clients.line_api_client.requests.request", request)
 
     result = LineAdminApiClient().line_task_action(
@@ -115,7 +114,6 @@ def test_rich_menu_client_reads_and_writes_canonical_configuration(monkeypatch) 
             {"data": {"revision": 4, "definition": definition}},
         )
 
-    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setattr("ui.api_clients.line_api_client.requests.request", request)
     client = LineAdminApiClient()
 
@@ -150,7 +148,6 @@ def test_line_transport_preserves_typed_error_semantics(
     category: str,
     message: str,
 ) -> None:
-    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setattr(
         "ui.api_clients.line_api_client.requests.request",
         lambda *args, **kwargs: _Response(
@@ -170,7 +167,6 @@ def test_line_transport_preserves_typed_error_semantics(
 
 
 def test_line_transport_displays_typed_conflict_message(monkeypatch) -> None:
-    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setattr(
         "ui.api_clients.line_api_client.requests.request",
         lambda *args, **kwargs: _Response(

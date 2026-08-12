@@ -161,6 +161,20 @@ def test_returns_empty_list_when_selected_case_has_no_active_assignments(monkeyp
     assert connection.closed is True
 
 
+def test_lists_staff_assignments_in_one_read(monkeypatch):
+    row = assignment(order_status="服務中")
+    connection = FakeConnection([row])
+    monkeypatch.setattr(service, "get_connection", lambda: connection)
+
+    assert service.list_staff_case_schedule_assignments(8) == {"assignments": [row]}
+
+    sql, params = connection.cursor_obj.executed[0]
+    assert params == (8,)
+    assert "a.staff_id = %s" in sql
+    assert "a.status <> 'cancelled'" in sql
+    _assert_only_select_no_transaction(connection)
+
+
 @pytest.mark.parametrize(
     "bad_row,match",
     [

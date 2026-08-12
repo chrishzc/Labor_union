@@ -14,8 +14,6 @@ from infrastructure.migration.rehearsal_runtime import (
     CandidateReadSmokePort,
     CandidateRuntimeConfig,
     EphemeralCandidateRestartPort,
-    REHEARSAL_INTERNAL_API_KEY,
-    _read_smoke_headers,
 )
 from scripts import migrate_preserved_database_additive_schema as runner
 
@@ -208,12 +206,6 @@ def test_rehearsal_worker_starts_as_project_module(tmp_path) -> None:
     command = EphemeralCandidateRestartPort(config)._worker_command()
 
     assert command[1:3] == ["-m", "scripts.run_durable_job_worker"]
-
-
-def test_rehearsal_read_smoke_uses_its_internal_service_key() -> None:
-    assert _read_smoke_headers() == {
-        "X-Internal-API-Key": REHEARSAL_INTERNAL_API_KEY,
-    }
 
 
 def test_empty_dataset_is_an_explicit_scheduling_and_payroll_smoke_case(tmp_path) -> None:

@@ -788,3 +788,7 @@
 6. API：新 schemas、routes、錯誤契約及原子操作入口。
 7. UI：三分頁、舊入口移除、月曆與人力配置升級。
 8. 測試：DB migration、Service transaction、API contract、Streamlit AppTest 及薪資回歸。
+
+## 2026-08-12 Candidate Contact Pool 裁決
+
+已確認：洽談中可一次加入多位完整承接候選人；每人各自發送訂單資訊-1／2、保留各次發送時間與狀態、記錄接案意願與拒絕理由。這些候選人不是共同服務的正式 segments；管理員從 willing 候選人選定一位後，才建立單月嫂正式 matching plan。原「聯繫與確認意願」按鈕沒有獨立資料效果，應移除。

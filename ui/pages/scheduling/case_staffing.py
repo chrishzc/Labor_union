@@ -16,6 +16,12 @@ from ui.pages.order.case_architecture_bootstrap_panel import (
 from ui.pages.scheduling.assignment_plan_panel import (
     render_assignment_plan_panel,
 )
+from ui.pages.scheduling.leave_substitution_panel import (
+    render_leave_substitution_panel,
+)
+from ui.api_clients.leave_substitution_api_client import (
+    LeaveSubstitutionApiClient,
+)
 from ui.pages.shared import build_admin_headers, resolve_api_base_url
 
 
@@ -50,6 +56,9 @@ def render_case_staffing(
         headers=headers,
     )
     is_anomaly_repair_case = case_no == pending_case_no
+    leave_client = LeaveSubstitutionApiClient(base_url=base_url, headers=headers)
+    if _render_existing_leave_preview(case_no, leave_client):
+        return
     if not is_anomaly_repair_case and not ensure_case_architecture_ready(case_no, bootstrap_client):
         st.info("案件根狀態與正式服務時間完成後，才會開放 Assignment Plan。")
         return
@@ -57,10 +66,62 @@ def render_case_staffing(
         base_url=base_url,
         headers=headers,
     )
-    render_assignment_plan_panel(
+    current = render_assignment_plan_panel(
         case_no,
         client,
         staff_choices=_staff_choices(staff),
+    )
+    _render_leave_substitution_workspace(case_no, current, base_url, headers)
+
+
+def _render_existing_leave_preview(case_no, client) -> bool:
+    try:
+        assignments = client.assignments(case_no)
+    except Exception as error:
+        st.warning(f"無法載入請假／代班正式服務指派：{error}")
+        return False
+    if not assignments:
+        return False
+    options = {
+        f"#{item.assignment_id}｜月嫂 {item.staff_id}｜{item.assigned_start_date} ～ {item.assigned_end_date}": item.assignment_id
+        for item in assignments
+    }
+    st.divider()
+    st.subheader("請假／代班排班預覽")
+    selected = st.selectbox("正式服務指派", list(options), key=f"leave_assignment_{case_no}")
+    render_leave_substitution_panel(case_no, client, original_assignment_id=options[selected])
+    return True
+
+
+def _render_leave_substitution_workspace(case_no, current, base_url, headers) -> None:
+    assignments = tuple(
+        item for item in getattr(current, "assignments", ())
+        if item.assignment_id is not None
+    )
+    if not assignments:
+        return
+    assignment_options = {
+        _assignment_label(item): int(item.assignment_id)
+        for item in assignments
+    }
+    st.divider()
+    st.subheader("請假／代班排班預覽")
+    selected_label = st.selectbox(
+        "正式服務指派",
+        list(assignment_options),
+        key=f"leave_assignment_{case_no}",
+    )
+    render_leave_substitution_panel(
+        case_no,
+        LeaveSubstitutionApiClient(base_url=base_url, headers=headers),
+        original_assignment_id=assignment_options[selected_label],
+    )
+
+
+def _assignment_label(assignment) -> str:
+    return (
+        f"#{assignment.assignment_id}｜月嫂 {assignment.staff_id}｜"
+        f"{assignment.assigned_start_date} ～ {assignment.assigned_end_date}"
     )
 
 

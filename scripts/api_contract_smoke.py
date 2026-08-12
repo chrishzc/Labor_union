@@ -320,7 +320,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=os.getenv("API_BASE_URL", "http://127.0.0.1:8000"))
     parser.add_argument("--profile", choices=("public", "admin"), default="public")
-    parser.add_argument("--api-key-env", default="INTERNAL_API_KEY")
     parser.add_argument("--bearer-env", default="ADMIN_ACCESS_TOKEN")
     parser.add_argument("--fixtures")
     parser.add_argument("--only", action="append", default=[])
@@ -346,9 +345,8 @@ def _write_json_report(output_path: str, report: dict[str, Any]) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     base_url = args.base_url.rstrip("/")
-    api_key = os.getenv(args.api_key_env, "").strip()
     bearer = os.getenv(args.bearer_env, "").strip()
-    secrets = [api_key, bearer]
+    secrets = [bearer]
     try:
         fixtures = _load_fixtures(args.fixtures)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
@@ -357,8 +355,6 @@ def main(argv: list[str] | None = None) -> int:
 
     session = requests.Session()
     session.headers.update({"User-Agent": "labor-union-api-contract-smoke/1.0"})
-    if api_key:
-        session.headers["X-Internal-API-Key"] = api_key
     if bearer:
         session.headers["Authorization"] = f"Bearer {bearer}"
 

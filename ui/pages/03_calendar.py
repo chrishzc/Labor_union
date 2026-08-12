@@ -475,15 +475,69 @@ def _render_attendance_selection_guidance(action_mode, filtered_orders):
     )
 
 
-def _filter_attendance_orders(all_orders, cal_staff_name):
+def _filter_attendance_orders(
+    all_orders,
+    cal_staff_id,
+    cal_staff_name,
+    *,
+    formal_case_nos=(),
+):
     allowed_statuses = {"訂單成立", "服務中", "訂單完成"}
+    formal_case_nos = set(formal_case_nos)
     return [
         order
         for order in all_orders
-        if (cal_staff_name is None or order.get("staff_name") == cal_staff_name)
-        and (bool(order.get("actual_start_date")) or bool(order.get("start_date")))
-        and order.get("order_status") in allowed_statuses
+        if order.get("order_status") in allowed_statuses
+        and (
+            _has_attendance_preview_entry_facts(order)
+            or str(order.get("case_no") or "") in formal_case_nos
+        )
+        and _attendance_order_belongs_to_staff(
+            order,
+            cal_staff_id,
+            cal_staff_name,
+            formal_case_nos,
+        )
     ]
+
+
+def _attendance_order_belongs_to_staff(
+    order,
+    staff_id,
+    staff_name,
+    formal_case_nos,
+):
+    if _order_belongs_to_calendar_staff(order, staff_id, staff_name):
+        return True
+    return str(order.get("case_no") or "") in set(formal_case_nos)
+
+
+def _staff_formal_case_nos(staff_id):
+    assignment_data = _multi_caregiver_request(
+        f"/api/v1/staff/{staff_id}/assignment-schedules"
+    )
+    return {
+        str(row.get("case_no") or "")
+        for row in assignment_data.get("assignments", [])
+        if isinstance(row, dict) and str(row.get("case_no") or "")
+    }
+
+
+def _has_attendance_preview_entry_facts(order):
+    if order.get("actual_start_date"):
+        return True
+    return order.get("order_status") in {"服務中", "訂單完成"}
+
+
+def _order_belongs_to_calendar_staff(order, staff_id, staff_name):
+    if safe_int(order.get("staff_id")) == staff_id:
+        return True
+    names = {
+        item.strip()
+        for item in str(order.get("staff_name") or "").replace("、", ",").split(",")
+        if item.strip()
+    }
+    return staff_name in names
 
 
 def _request_attendance_preview(payload, headers):
@@ -724,7 +778,7 @@ def _render_staff_calendar():
 
         # 3. 兩階段操作選單
         try:
-            all_orders, _ = _load_matching_order_summaries(
+            all_orders = _load_all_matching_order_summaries(
                 resolve_api_base_url(),
                 tuple(sorted(admin_headers.items())),
             )
@@ -736,10 +790,12 @@ def _render_staff_calendar():
         
         col_op1, col_op2 = st.columns([1, 2])
         with col_op1:
+            action_modes = ["訂單匹配", "出勤天數精算"]
+            if st.session_state.get("calendar_action_mode") not in action_modes:
+                st.session_state["calendar_action_mode"] = "出勤天數精算"
             action_mode = st.radio(
                 "1. 執行操作",
-                ["訂單匹配", "出勤天數精算"],
-                index=0,
+                action_modes,
                 key="calendar_action_mode"
             )
             
@@ -752,7 +808,12 @@ def _render_staff_calendar():
                     if order.get("order_status") == "洽談中"
                 ]
             elif action_mode == "出勤天數精算":
-                filtered_orders = _filter_attendance_orders(all_orders, cal_staff_name)
+                filtered_orders = _filter_attendance_orders(
+                    all_orders,
+                    cal_staff_id,
+                    cal_staff_name,
+                    formal_case_nos=_staff_formal_case_nos(cal_staff_id),
+                )
             else:
                 filtered_orders = []
             _render_attendance_selection_guidance(action_mode, filtered_orders)
@@ -769,12 +830,15 @@ def _render_staff_calendar():
                 label = f"訂單 #{o['case_no']} {o['client_name']} {o['order_status']} ({st_str} ~ {ed_str})"
                 order_menu_opts[label] = o['case_no']
                 
+            order_selection_key = f"order_select_{action_mode}_{cal_staff_id}"
+            if st.session_state.get(order_selection_key) not in order_menu_opts:
+                st.session_state[order_selection_key] = next(iter(order_menu_opts))
             selected_order_label = st.selectbox(
                 "2. 訂單選擇", 
                 list(order_menu_opts.keys()), 
                 index=0,
                 disabled=(action_mode == "不連動，單純看行事曆"),
-                key=f"order_select_{action_mode}"
+                key=order_selection_key
             )
             calc_case_no = order_menu_opts[selected_order_label]
             calc_assignment_id = None
@@ -895,9 +959,8 @@ def _render_staff_calendar():
                 )
             elif reconfirmation_blocks_assignment_writes:
                 st.info(
-                    "💡 提示：請先在上方確認『實際開工日』。在完成開工確認前，無法設定排休、順延或代班，以下僅提供純文字沙盤推演。"
+                    "請先在上方確認『實際開工日』。完成確認後，才能產生正式的休假／代班 Preview。"
                 )
-                _render_attendance_calculation(target_order, admin_headers)
             elif calc_assignment_id:
                 _render_assignment_leave_resolution(
                     calc_case_no,
@@ -906,8 +969,7 @@ def _render_staff_calendar():
                     read_only=False,
                 )
             else:
-                st.info("尚未產生正式服務指派，無法設定排休、順延或代班，以下僅提供純文字沙盤推演。")
-                _render_attendance_calculation(target_order, admin_headers)
+                st.info("尚未產生正式服務指派，無法產生休假／代班 Preview。")
 
     except Exception as e_step2:
         st.error(f"資料庫與選單加載失敗: {e_step2}")
@@ -918,61 +980,27 @@ def _render_staff_calendar():
         if action_mode == "出勤天數精算" and calc_case_no:
             # 1. First check if there is a formal leave batch preview
             formal_preview = st.session_state.get(f"attendance_preview_formal_{calc_case_no}")
-            if formal_preview is not None and hasattr(formal_preview, 'assignments'):
-                # Extract the previewed assignments and convert to day_by_day format for coloring
+            if formal_preview is not None and hasattr(formal_preview, 'calendar_candidate'):
                 preview_client_name = target_order.get("client_name", "") + " (Preview)" if target_order else ""
-                for assignment in formal_preview.assignments:
-                    for d in assignment.official_service_dates:
-                        if d.year == cal_year and d.month == cal_month:
-                            monthly_schedules[d.day] = {
-                                "status": "red",
-                                "client_name": preview_client_name
-                            }
-                            monthly_schedule_rows.pop(d.day, None)
-                            
-                # For outcomes, mark any deferred or substitute as green
-                for outcome in formal_preview.outcomes:
-                    try:
-                        d_obj = outcome.original_work_date
-                        if d_obj and d_obj.year == cal_year and d_obj.month == cal_month:
-                            monthly_schedules[d_obj.day] = {
-                                "status": "green",
-                                "client_name": preview_client_name
-                            }
-                            monthly_schedule_rows.pop(d_obj.day, None)
-                    except Exception:
-                        pass
-                        
-            # 2. Otherwise check the old mathematical sandbox preview
-            else:
-                state_key = f"attendance_preview_{calc_case_no}"
-                stored = st.session_state.get(state_key)
-                if isinstance(stored, dict) and "preview" in stored:
-                    preview_data = stored["preview"]
-                    day_by_day = preview_data.get("day_by_day", [])
-                    preview_client_name = ""
-                    if target_order:
-                        preview_client_name = target_order.get("client_name", "") + " (Preview)"
-                        
-                    for d_info in day_by_day:
-                        date_str = str(d_info.get("date", ""))
-                        d_obj = safe_date(date_str)
-                    if d_obj and d_obj.year == cal_year and d_obj.month == cal_month:
-                        is_work = d_info.get("is_work_day", False)
-                        is_rest = d_info.get("is_rest_day", False)
-                        if is_work:
-                            status = "red"
-                        elif is_rest:
-                            status = "green"
-                        else:
-                            status = "white"
-                        
-                        if status != "white":
-                            monthly_schedules[d_obj.day] = {
-                                "status": status,
-                                "client_name": preview_client_name
-                            }
-                            monthly_schedule_rows.pop(d_obj.day, None)
+                for cell in formal_preview.calendar_candidate.day_cells:
+                    d_obj = cell.calendar_date
+                    if d_obj.year != cal_year or d_obj.month != cal_month or cell.change_kind == "unchanged":
+                        continue
+                    if cell.change_kind == "substitute":
+                        status = "preview_substitute"
+                        description = "代班服務日"
+                    elif cell.after_kind == "none":
+                        status = "preview_holiday"
+                        description = "休假日（扣除服務日並順延）"
+                    else:
+                        status = "preview_deferred"
+                        description = "順延後服務日"
+                    owner = f"月嫂 {cell.before_staff_id or '-'} → {cell.after_staff_id or '-'}"
+                    monthly_schedules[d_obj.day] = {
+                        "status": status,
+                        "client_name": f"{preview_client_name}｜{description}｜{owner}",
+                    }
+                    monthly_schedule_rows.pop(d_obj.day, None)
 
         # 6. 繪製四色 HTML 月曆表格 (即時反映 ⚪白 / 🟡黃 / 🔴紅 / 🟢綠底)
         first_weekday, num_days = calendar.monthrange(cal_year, cal_month)
@@ -989,10 +1017,16 @@ def _render_staff_calendar():
 .status-yellow { background-color: #fef08a; color: #854d0e; }
 .status-red { background-color: #fca5a5; color: #991b1b; }
 .status-green { background-color: #bbf7d0; color: #166534; }
+.status-preview-holiday { background-color: #dbeafe; color: #1e3a8a; }
+.status-preview-deferred { background-color: #ffedd5; color: #9a3412; }
+.status-preview-substitute { background-color: #fce7f3; color: #9d174d; }
 .status-label-white { color: #10b981; font-weight: bold; }
 .status-label-yellow { color: #b45309; font-weight: bold; }
 .status-label-red { color: #b91c1c; font-weight: bold; }
 .status-label-green { color: #15803d; font-weight: bold; }
+.status-label-preview-holiday { color: #1d4ed8; font-weight: bold; }
+.status-label-preview-deferred { color: #c2410c; font-weight: bold; }
+.status-label-preview-substitute { color: #be185d; font-weight: bold; }
 .client-text { font-size: 0.9em; margin-top: 4px; display: block; }
 </style>
 <table class="cal-table"><thead><tr><th>星期日</th><th>星期一</th><th>星期二</th><th>星期三</th><th>星期四</th><th>星期五</th><th>星期六</th></tr></thead><tbody>"""
@@ -1027,8 +1061,24 @@ def _render_staff_calendar():
                             bg_class = "status-red"
                             status_label = "<span class='status-label-red'>🔴 服務工作日</span>"
                             client_text = f"<span class='client-text'><b>客戶: {day_client_name}</b></span>"
+                        elif day_info['status'] == 'historical':
+                            bg_class = "status-yellow"
+                            status_label = "<span class='status-label-yellow'>📜 歷史正式指派</span>"
+                            client_text = f"<span class='client-text'><b>客戶: {day_client_name}</b></span>"
+                        elif day_info['status'] == 'preview_holiday':
+                            bg_class = "status-preview-holiday"
+                            status_label = "<span class='status-label-preview-holiday'>🌴 Preview 國定假日休假</span>"
+                            client_text = f"<span class='client-text'><b>{day_client_name}</b></span>"
+                        elif day_info['status'] == 'preview_deferred':
+                            bg_class = "status-preview-deferred"
+                            status_label = "<span class='status-label-preview-deferred'>➡ Preview 順延後服務日</span>"
+                            client_text = f"<span class='client-text'><b>{day_client_name}</b></span>"
+                        elif day_info['status'] == 'preview_substitute':
+                            bg_class = "status-preview-substitute"
+                            status_label = "<span class='status-label-preview-substitute'>🔁 Preview 代班服務日</span>"
+                            client_text = f"<span class='client-text'><b>{day_client_name}</b></span>"
 
-                    if day_rows:
+                    if day_rows and not day_info:
                         client_text = "".join(
                             "<span class='client-text'><b>"
                             + f"{row.get('client_name') or '-'}｜{row.get('order_status') or '-'}｜{row.get('staff_name') or '-'}"
@@ -1096,6 +1146,21 @@ def _load_matching_order_summaries(
         [item.model_dump(mode="json") for item in result.page.items],
         result.page.next_cursor,
     )
+
+
+def _load_all_matching_order_summaries(base_url, header_items):
+    all_orders = []
+    after_case_no = None
+    while True:
+        page, next_cursor = _load_matching_order_summaries(
+            base_url,
+            header_items,
+            after_case_no,
+        )
+        all_orders.extend(page)
+        if next_cursor is None:
+            return all_orders
+        after_case_no = next_cursor
 
 
 @st.cache_data(

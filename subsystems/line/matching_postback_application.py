@@ -17,6 +17,9 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 _MATCHING_POSTBACK = re.compile(
     r"^matching:([A-Za-z0-9_-]{20,191}):(willing|unwilling|accepted|declined|contact_requested)$"
 )
+_SCHEDULE_POSTBACK = re.compile(
+    r"^schedule:([A-Za-z0-9_-]{20,191}):(confirmed|rejected)$"
+)
 
 
 class LineMatchingPostbackApplication:
@@ -32,8 +35,34 @@ class LineMatchingPostbackApplication:
             return
         postback_data = _postback_data(inbox)
         match = _MATCHING_POSTBACK.fullmatch(postback_data)
-        if match is None:
+        if match is not None:
+            self._handle_matching_postback(match, line_user_id, event, unit_of_work)
             return
+        schedule_match = _SCHEDULE_POSTBACK.fullmatch(postback_data)
+        if schedule_match is None:
+            return
+        try:
+            unit_of_work.matching_schedule_confirmations.confirm_line_postback(
+                schedule_match.group(1), schedule_match.group(2), line_user_id,
+                f"matching-schedule-postback:{event.event_id.value}",
+            )
+        except (LookupError, ValueError):
+            return
+
+    def handle_message(self, inbox, unit_of_work, line_user_id, text) -> bool:
+        event_key = f"matching-schedule-rejection-reason:{inbox.event.event_id.value}"
+        try:
+            return bool(
+                unit_of_work.matching_schedule_confirmations.confirm_line_rejection_reason(
+                    line_user_id,
+                    text,
+                    event_key,
+                )
+            )
+        except (LookupError, ValueError):
+            return False
+
+    def _handle_matching_postback(self, match, line_user_id, event, unit_of_work):
         event_identity = event.event_id.value
         try:
             self._matching_application.record_line_response_in_unit_of_work(

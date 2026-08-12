@@ -93,7 +93,6 @@ def _run_data_browser_page(
 def test_data_browser_show_calls_admin_metadata_with_auth_header(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
-    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setenv("API_BASE_URL", "http://localhost:8000")
 
     requests_calls: list[tuple[str, dict]] = []
@@ -107,7 +106,6 @@ def test_data_browser_show_calls_admin_metadata_with_auth_header(monkeypatch):
     assert not app.exception
     assert any(
         "/api/v1/admin/data-browser/" in url
-        and headers.get("X-Internal-API-Key") == "internal-test-key"
         and headers.get("Authorization") == "Bearer session-token"
         and "X-Auth-Context" not in headers
         for url, headers in observed_calls
@@ -117,7 +115,6 @@ def test_data_browser_show_calls_admin_metadata_with_auth_header(monkeypatch):
 def test_data_browser_show_fails_fast_when_admin_session_missing(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
-    monkeypatch.setenv("INTERNAL_API_KEY", "internal-test-key")
     monkeypatch.setenv("API_BASE_URL", "http://localhost:8000")
 
     requests_calls: list[tuple[str, dict]] = []

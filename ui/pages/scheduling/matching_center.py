@@ -10,28 +10,30 @@ import requests
 import streamlit as st
 
 from ui.api_clients.assignment_plan_api_client import AssignmentPlanApiClient
-from ui.api_clients.case_architecture_bootstrap_api_client import (
-    CaseArchitectureBootstrapApiClient,
-)
 from ui.api_clients.waiting_deposit_lock_api_client import (
     WaitingDepositLockApiClient,
     WaitingDepositLockApiError,
-)
-from ui.pages.order.case_architecture_bootstrap_panel import (
-    ensure_case_architecture_ready,
 )
 from ui.pages.scheduling.assignment_plan_panel import (
     render_assignment_plan_panel,
 )
 from ui.pages.scheduling.navigation_state import apply_one_time_default
-from ui.pages.shared import build_admin_headers, resolve_api_base_url
+from ui.pages.shared import (
+    admin_auth_is_bypassed,
+    build_admin_headers,
+    resolve_api_base_url,
+)
 
 
-def _request(path: str, *, method: str = "GET", payload: Any = None):
+def _request(path: str, *, method: str = "GET", payload: Any = None,
+             idempotency_key: str | None = None):
+    headers = build_admin_headers()
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
     response = requests.request(
         method,
         f"{resolve_api_base_url()}{path}",
-        headers=build_admin_headers(),
+        headers=headers,
         json=payload,
         timeout=15,
     )
@@ -46,6 +48,8 @@ def _as_date(value: Any) -> date:
 
 
 def _actor() -> str:
+    if admin_auth_is_bypassed():
+        return "development-bypass"
     profile = st.session_state.get("line_admin_profile") or {}
     return str(
         profile.get("username") if isinstance(profile, dict) else ""
@@ -355,6 +359,7 @@ def _render_multi_segment_matching(
     staff: list[dict[str, Any]],
     *,
     preview_only: bool = False,
+    fixed_segment_count: int | None = None,
 ) -> None:
     """Render the multi-caregiver fallback for one negotiation-stage order."""
     case_no = order["case_no"]
@@ -386,13 +391,9 @@ def _render_multi_segment_matching(
         st.markdown("#### 多月嫂配對測試預覽")
     else:
         st.caption("單一與多月嫂皆使用同一份版本化配對方案與聯繫歷史。")
-    count = st.selectbox(
-        "服務分段數", [1, 2, 3, 4], key=f"matching_segment_count_{case_no}"
+    count = fixed_segment_count or st.selectbox(
+        "服務分段數", [2, 3, 4], key=f"matching_segment_count_{case_no}"
     )
-    staff_labels = {
-        f"#{row['id']}｜{row.get('name', '')}": row["id"]
-        for row in staff if isinstance(row.get("id"), int)
-    }
     span = max((planned_end - planned_start).days + 1, count)
     state_key = f"matching_availability_{case_no}_{count}"
     default_drafts = []
@@ -425,7 +426,7 @@ def _render_multi_segment_matching(
             st.warning(f"初始檔期查詢失敗：{error}")
 
     availability = st.session_state.get(state_key) or {}
-    cached_candidates = availability.get("segment_candidates") or []
+    candidate_options = availability.get("candidate_options") or []
     drafts = []
     for index in range(count):
         default_start = planned_start + timedelta(days=(span * index) // count)
@@ -441,37 +442,45 @@ def _render_multi_segment_matching(
         selected_staff_ids = {
             row["staff_id"] for row in drafts if row.get("staff_id") is not None
         }
-        eligible_ids = {
-            item.get("staff_id")
-            for item in cached_candidates
-            if item.get("segment_index") == index
-            and _as_date(item.get("start_date")) <= current_start
-            and _as_date(item.get("end_date")) >= current_end
-        }
-        candidate_labels = [
-            label
-            for label, staff_id in staff_labels.items()
-            if staff_id in eligible_ids and staff_id not in selected_staff_ids
+        eligible_options = [
+            option
+            for option in candidate_options
+            if option.get("segment_index") == index
+            and option.get("staff_id") not in selected_staff_ids
+            and option.get("full_selected_segment_coverage")
         ]
-        columns = st.columns(3)
-        label = columns[0].selectbox(
-            f"第 {index + 1} 段月嫂",
-            ["尚未選擇", *candidate_labels],
-            key=f"matching_staff_{case_no}_{index}",
-        )
-        start = columns[1].date_input(
-            f"第 {index + 1} 段開始日",
-            value=default_start,
-            key=start_key,
-        )
-        end = columns[2].date_input(
-            f"第 {index + 1} 段結束日",
-            value=default_end,
-            key=end_key,
-        )
+        candidate_labels = {
+            _candidate_option_label(option): int(option["staff_id"])
+            for option in eligible_options
+        }
+        if fixed_segment_count:
+            st.caption(f"服務期間：{default_start.isoformat()} ～ {default_end.isoformat()}")
+            label = st.selectbox(
+                "選擇月嫂",
+                ["尚未選擇", *candidate_labels],
+                key=f"matching_staff_{case_no}_{index}",
+            )
+            start, end = default_start, default_end
+        else:
+            columns = st.columns(3)
+            label = columns[0].selectbox(
+                f"第 {index + 1} 段月嫂",
+                ["尚未選擇", *candidate_labels],
+                key=f"matching_staff_{case_no}_{index}",
+            )
+            start = columns[1].date_input(
+                f"第 {index + 1} 段開始日",
+                value=default_start,
+                key=start_key,
+            )
+            end = columns[2].date_input(
+                f"第 {index + 1} 段結束日",
+                value=default_end,
+                key=end_key,
+            )
         draft = {"start_date": start.isoformat(), "end_date": end.isoformat()}
         if label != "尚未選擇":
-            draft["staff_id"] = staff_labels[label]
+            draft["staff_id"] = candidate_labels[label]
         drafts.append(draft)
 
     if st.button("重新查詢最新檔期", key=f"matching_refresh_{case_no}"):
@@ -491,21 +500,13 @@ def _render_multi_segment_matching(
     availability = st.session_state.get(state_key)
     if availability:
         if availability.get("feasibility") == "partial":
-            covered = {
-                day
-                for item in availability.get("segment_candidates", [])
-                for day in (
-                    _as_date(item["start_date"]) + timedelta(days=offset)
-                    for offset in range(
-                        (_as_date(item["end_date"]) - _as_date(item["start_date"])).days + 1
-                    )
-                )
-            }
-            uncovered = [
-                (planned_start + timedelta(days=offset)).isoformat()
-                for offset in range((planned_end - planned_start).days + 1)
-                if planned_start + timedelta(days=offset) not in covered
-            ]
+            uncovered = sorted(
+                {
+                    str(item.get("work_date"))
+                    for item in availability.get("conflicts", [])
+                    if item.get("reason_code") == "coverage_gap"
+                }
+            )
             st.warning("目前只有部分可行人力；未覆蓋日期：" + "、".join(uncovered))
         conflicts = availability.get("conflicts") or []
         if conflicts:
@@ -516,9 +517,6 @@ def _render_multi_segment_matching(
                     for item in conflicts
                 )
             )
-        candidates = availability.get("segment_candidates") or []
-        if candidates:
-            st.dataframe(candidates, hide_index=True, width="stretch")
 
     selected_segments = [row for row in drafts if row.get("staff_id")]
     if st.button(
@@ -755,6 +753,8 @@ def _render_multi_segment_matching(
         )
 
     if plan_id and lock_id:
+        from ui.pages.scheduling.matching_schedule_confirmation_panel import render_matching_schedule_confirmation
+        schedule_gate_passed = render_matching_schedule_confirmation(case_no, plan_id, _request)
         st.caption("解除 Preview 會由後端確認案件狀態、有效鎖與訂金淨額。")
         _render_waiting_lock_release(
             case_no,
@@ -769,15 +769,10 @@ def _render_multi_segment_matching(
             "配對區段只作預填；正式服務日必須逐段勾選。"
             "後端 Preview 會驗證訂金並重算排班、薪資、帳務與訂單影響。"
         )
-        headers = build_admin_headers()
-        bootstrap_client = CaseArchitectureBootstrapApiClient(
-            base_url=resolve_api_base_url(),
-            headers=headers,
-        )
-        if ensure_case_architecture_ready(case_no, bootstrap_client):
+        if schedule_gate_passed:
             assignment_client = AssignmentPlanApiClient(
                 base_url=resolve_api_base_url(),
-                headers=headers,
+                headers=build_admin_headers(),
             )
             render_assignment_plan_panel(
                 case_no,
@@ -786,7 +781,7 @@ def _render_multi_segment_matching(
                 draft_segments=_assignment_plan_drafts(contact_segments),
             )
         else:
-            st.info("案件根狀態完成後，才會開放 Assignment Plan。")
+            st.info("客戶與月嫂確認目前日期表後，才會開放正式指派。")
 
     if plan_id:
         st.markdown("#### 傳送履歷給客戶")
@@ -850,7 +845,7 @@ def _customer_decision_label(decision: str) -> str:
     }.get(decision, "狀態未知")
 
 
-_MATCHING_SUB_NAV_OPTIONS = ("👁️ 檢視案件詳情", "⚡ 智慧配對與指派", "🧩 多月嫂配對方案(備案)")
+_MATCHING_SUB_NAV_OPTIONS = ("⚡ 單月嫂智慧配對", "🧩 多月嫂配對方案(備案)")
 _PLAN_SUB_NAV = "🧩 多月嫂配對方案(備案)"
 
 
@@ -879,19 +874,7 @@ def render_matching_center(
         preferred_case_no,
     )
 
-    from ui.pages.shared import resolve_api_base_url, build_admin_headers
-    bootstrap_client = CaseArchitectureBootstrapApiClient(
-        base_url=resolve_api_base_url(),
-        headers=build_admin_headers(),
-    )
-    # 只呼叫一次：這個函式會用 case_no 當 widget key 畫初始化表單，
-    # 底下每個子頁籤都會在同一次 script run 裡渲染，兩處各叫一次
-    # 會建立兩個相同 key 的 widget，導致 Streamlit 直接報錯。
-    ensure_case_architecture_ready(selected_order["case_no"], bootstrap_client)
-
-    # 用 st.radio 取代 st.tabs：st.tabs 無法用程式控制預設顯示哪一頁，
-    # 但從異常警示中心「訂單配對／補發送資訊」點「前往配對」過來時，
-    # 需要直接落在「多月嫂配對方案(備案)」，故改用可預先選定的 radio。
+    _render_matching_order_summary(selected_order)
     _apply_one_time_plan_default(default_to_plan)
     sub_nav = st.radio(
         "配對子頁籤",
@@ -901,9 +884,7 @@ def render_matching_center(
         key="matching_center_sub_nav",
     )
     st.divider()
-    if sub_nav == "👁️ 檢視案件詳情":
-        _render_matching_order_summary(selected_order)
-    elif sub_nav == "⚡ 智慧配對與指派":
+    if sub_nav == "⚡ 單月嫂智慧配對":
         _render_single_caregiver_matching(selected_order, staff)
     else:
         _render_multi_segment_matching(selected_order, staff)
@@ -963,9 +944,203 @@ def _single_caregiver_covers_service_period(order):
 def _render_single_caregiver_matching(target_order, staff_list):
     target_case_no = target_order["case_no"]
     st.markdown(f"#### ⚡ 智慧配對與指派 (案件 #{target_case_no})")
-    st.caption("此頁已切換為新的配對方案流程，採用方案版本＋區段對齊發送邏輯。")
-    st.markdown("請用下方流程補齊「訂單資訊-1/2」與意願狀態記錄。")
-    _render_multi_segment_matching(target_order, staff_list)
+    st.caption("先尋找一位可完整承接服務期間的月嫂；多月嫂僅作備案。")
+    start_date = _as_date(target_order.get("actual_start_date") or target_order.get("start_date"))
+    end_date = _as_date(target_order.get("actual_end_date") or target_order.get("end_date"))
+    result = _request(
+        f"/api/v1/orders/{target_case_no}/caregiver-segment-availability/search",
+        method="POST",
+        payload={"segment_count": 1, "segment_drafts": [{"start_date": start_date.isoformat(), "end_date": end_date.isoformat()}], "as_of": date.today().isoformat()},
+    )
+    candidates = [item for item in result.get("candidate_options", [])
+                  if item.get("segment_index") == 0 and item.get("full_case_coverage")]
+    if not candidates:
+        st.warning("目前沒有月嫂能完整承接本案服務日期。請改至「多月嫂配對方案（備案）」。")
+        return
+    labels = {_candidate_option_label(item): item for item in candidates}
+    selected_label = st.selectbox("選擇可完整承接的月嫂", list(labels), key=f"single_matching_staff_{target_case_no}")
+    selected = labels[selected_label]
+    st.caption(f"服務日期：{selected['case_period_start']} ～ {selected['case_period_end']}，共 {selected['required_day_count']} 天")
+    if st.button("聯繫與確認意願", key=f"single_matching_contact_{target_case_no}"):
+        try:
+            plan = _request(f"/api/v1/orders/{target_case_no}/matching-plans", method="POST", payload={"segments": [{"staff_id": selected["staff_id"], "start_date": selected["case_period_start"], "end_date": selected["case_period_end"]}], "created_by": _actor(), "as_of": date.today().isoformat()})
+            st.session_state[f"matching_plan_{target_case_no}"] = plan
+            st.success("單月嫂配對方案已建立，可進行聯繫。")
+        except Exception as error:
+            st.error(f"建立方案失敗：{error}")
+    _render_single_caregiver_contact(target_case_no)
+
+
+def _render_single_caregiver_contact(case_no):
+    plan = _current_matching_plan(case_no)
+    plan_id = plan.get("plan_id") or plan.get("id")
+    if not plan_id:
+        return
+    try:
+        state = _request(f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/contact-state")
+    except Exception as error:
+        st.warning(f"聯繫紀錄讀取失敗：{error}")
+        return
+    segments = state.get("segments") or []
+    if len(segments) != 1:
+        st.error("單月嫂方案必須恰有一個服務區段。")
+        return
+    segment = segments[0]
+    version = int((state.get("plan") or {}).get("communication_version") or 0)
+    st.markdown("#### 聯繫、意願與日期表")
+    st.write(
+        f"{segment.get('staff_name') or '月嫂'}｜"
+        f"{segment.get('assigned_start_date')}～{segment.get('assigned_end_date')}"
+    )
+    _render_single_information_actions(case_no, plan_id, segment, version)
+    _render_single_willingness_action(case_no, plan_id, segment, version)
+    customer_decision = _render_single_customer_decision(case_no, plan_id, version, state)
+    _render_single_resume_delivery(case_no, plan_id, version, state)
+    _render_waiting_lock_acquisition(
+        case_no,
+        plan_id,
+        f"single_matching_lock_{case_no}",
+        enabled=customer_decision == "accepted",
+    )
+    from ui.pages.scheduling.matching_schedule_confirmation_panel import (
+        render_matching_schedule_confirmation,
+    )
+    from ui.api_clients.matching_schedule_confirmation_api_client import (
+        MatchingScheduleConfirmationApiClient,
+    )
+    render_matching_schedule_confirmation(
+        case_no,
+        plan_id,
+        MatchingScheduleConfirmationApiClient(
+            base_url=resolve_api_base_url(),
+            headers=build_admin_headers(),
+        ),
+    )
+
+
+def _current_matching_plan(case_no):
+    session_plan = st.session_state.get(f"matching_plan_{case_no}")
+    if isinstance(session_plan, dict):
+        return session_plan
+    try:
+        active_state = _request(
+            f"/api/v1/orders/{case_no}/matching-plans/active"
+        )
+    except ValueError:
+        return {}
+    plan = active_state.get("plan") if isinstance(active_state, dict) else None
+    return plan if isinstance(plan, dict) else {}
+
+
+def _render_single_information_actions(case_no, plan_id, segment, version):
+    columns = st.columns(2)
+    for column, info_type in zip(columns, (1, 2)):
+        if column.button(f"發送訂單資訊-{info_type}", key=f"single_info_{info_type}_{case_no}"):
+            try:
+                _request(
+                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/segments/{segment['segment_id']}/information",
+                    method="POST",
+                    payload={
+                        "info_type": info_type,
+                        "expected_version": version,
+                        "event_key": f"single-info-{info_type}-{uuid.uuid4().hex}",
+                        "actor": _actor(),
+                    },
+                )
+                st.success(f"訂單資訊-{info_type} 已排入可靠發送佇列。")
+            except Exception as error:
+                st.error(f"發送失敗：{error}")
+    st.caption(
+        "資訊-1：" + _delivery_status_label(segment.get("info_1_status"))
+        + "｜資訊-2：" + _delivery_status_label(segment.get("info_2_status"))
+    )
+
+
+def _render_single_willingness_action(case_no, plan_id, segment, version):
+    willingness_label = {
+        "pending": "待回覆",
+        "willing": "願意",
+        "unwilling": "無意願",
+    }.get(segment.get("willingness"), "未知")
+    st.write("月嫂意願：" + willingness_label)
+    with st.expander("人工補登月嫂意願"):
+        choice = st.selectbox("補登意願", ("willing", "unwilling"), key=f"single_willingness_{case_no}")
+        reason = st.text_input("拒絕理由（無意願時必填）", key=f"single_willingness_reason_{case_no}")
+        if st.button("更新月嫂意願", key=f"single_willingness_apply_{case_no}"):
+            if choice == "unwilling" and not reason.strip():
+                st.error("月嫂無意願時必須填寫拒絕理由。")
+                return
+            try:
+                _request(
+                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/segments/{segment['segment_id']}/willingness",
+                    method="PUT",
+                    payload={
+                        "willingness": choice,
+                        "expected_version": version,
+                        "reason": reason.strip() or "人工補登願意",
+                        "event_key": f"single-willingness-{uuid.uuid4().hex}",
+                        "actor": _actor(),
+                    },
+                )
+                st.success("月嫂意願已更新。")
+            except Exception as error:
+                st.error(f"意願更新失敗：{error}")
+
+
+def _render_single_customer_decision(case_no, plan_id, version, state):
+    decision = str(state.get("customer_decision") or "pending")
+    st.write("客戶配對回覆：" + _customer_decision_label(decision))
+    with st.expander("人工補登客戶配對回覆"):
+        choice = st.selectbox(
+            "客戶回覆",
+            ("accepted", "contact_requested", "declined"),
+            key=f"single_customer_decision_{case_no}",
+        )
+        reason = st.text_input("補登說明", key=f"single_customer_reason_{case_no}")
+        if st.button("更新客戶配對回覆", key=f"single_customer_apply_{case_no}"):
+            try:
+                _request(
+                    f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/customer-decision",
+                    method="PUT",
+                    payload={
+                        "decision": choice,
+                        "expected_version": version,
+                        "reason": reason.strip() or "人工補登客戶配對回覆",
+                        "event_key": f"single-customer-{uuid.uuid4().hex}",
+                        "actor": _actor(),
+                    },
+                )
+                st.success("客戶配對回覆已更新。")
+            except Exception as error:
+                st.error(f"客戶回覆更新失敗：{error}")
+    return decision
+
+
+def _render_single_resume_delivery(case_no, plan_id, version, state):
+    st.markdown("#### 傳送履歷給客戶")
+    note = st.text_area("履歷訊息備註", key=f"single_resume_note_{case_no}")
+    if not st.button("傳送履歷", key=f"single_resume_{case_no}"):
+        return
+    if not state.get("all_willing"):
+        st.error("月嫂尚未表示願意承接，不能傳送履歷。")
+        return
+    if not note.strip():
+        st.error("請填寫履歷訊息備註。")
+        return
+    try:
+        _request(
+            f"/api/v1/orders/{case_no}/matching-plans/{plan_id}/resumes",
+            method="POST",
+            payload={
+                "event_key": f"single-resume-{uuid.uuid4().hex}",
+                "actor": _actor(),
+                "note": note.strip(),
+                "expected_version": version,
+            },
+        )
+        st.success("履歷已排入可靠發送佇列。")
+    except Exception as error:
+        st.error(f"履歷發送失敗：{error}")
 
 def _render_single_caregiver_assignment_plan(order, staff_id, start_date, end_date):
     case_no = order["case_no"]
@@ -1046,11 +1221,19 @@ def _matching_order_label(order):
 def _render_matching_order_summary(order):
     service_start = order.get("actual_start_date") or order.get("start_date")
     service_end = order.get("actual_end_date") or order.get("end_date")
-    st.write(
-        {
-            "案件編號": order.get("case_no"),
-            "客戶": order.get("client_name"),
-            "服務期間": f"{service_start} ～ {service_end}",
-            "身分資格": order.get("identity_status") or "未設定",
-        }
+    with st.container(border=True):
+        st.caption(
+            f"案件 #{order.get('case_no')}｜{order.get('client_name') or '未提供客戶'}｜"
+            f"服務期間 {service_start} ～ {service_end}｜"
+            f"{order.get('service_days') or 0} 天｜"
+            f"{order.get('identity_status') or '身分未設定'}"
+        )
+
+
+def _candidate_option_label(option):
+    ranges = "、".join(
+        f"{item['start_date']}～{item['end_date']}"
+        for item in option.get("supported_ranges") or []
     )
+    name = option.get("staff_name") or f"月嫂 #{option['staff_id']}"
+    return f"{name}｜本案可支援 {ranges}（{option.get('supported_day_count', 0)}／{option.get('required_day_count', 0)} 天）"

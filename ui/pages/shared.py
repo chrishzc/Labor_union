@@ -10,11 +10,10 @@ from dotenv import load_dotenv
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-load_dotenv(PROJECT_ROOT / ".env", override=True)
+load_dotenv(PROJECT_ROOT / ".env")
 
 API_BASE_URL_ENV = "API_BASE_URL"
 API_BASE_URL_DEFAULT = "http://localhost:8000"
-INTERNAL_API_KEY_ENV = "INTERNAL_API_KEY"
 ADMIN_ACCESS_TOKEN_KEY = "line_admin_access_token"
 DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test"}
 
@@ -32,13 +31,6 @@ def admin_auth_is_bypassed() -> bool:
     return app_env in DEVELOPMENT_ENVIRONMENTS and enabled in {"0", "false", "no", "off"}
 
 
-def resolve_internal_api_key() -> str:
-    value = (os.getenv(INTERNAL_API_KEY_ENV, "") or "").strip()
-    if not value:
-        raise RuntimeError("缺少 INTERNAL_API_KEY，無法呼叫管理員 API。")
-    return value
-
-
 def resolve_admin_access_token() -> str:
     try:
         value = st.session_state.get(ADMIN_ACCESS_TOKEN_KEY)
@@ -50,7 +42,7 @@ def resolve_admin_access_token() -> str:
 
 
 def build_admin_headers() -> dict[str, str]:
-    headers = {"X-Internal-API-Key": resolve_internal_api_key()}
+    headers: dict[str, str] = {}
     if not admin_auth_is_bypassed():
         headers["Authorization"] = f"Bearer {resolve_admin_access_token()}"
     return headers

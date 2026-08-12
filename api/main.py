@@ -54,7 +54,7 @@ from api.routes import (
     line_tasks,
     knowledge_retrieval,
     match_records,
-    matches,
+    matches,`r`n    candidate_contact_pool,
     multi_caregiver_case_assignments,
     multi_caregiver_schedule,
     multi_caregiver_schedule_read,
@@ -67,6 +67,8 @@ from api.routes import (
     order_contract_completion,
     order_reopen,
     order_schedule_calculation,
+    service_date_confirmation,
+    matching_schedule_confirmation,
     order_terms,
     orders,
     payroll,
@@ -186,16 +188,19 @@ app.include_router(order_reopen.router)
 app.include_router(assignment_plan.router)
 app.include_router(leave_substitution.router)
 app.include_router(order_schedule_calculation.router)
+app.include_router(service_date_confirmation.router)
+app.include_router(matching_schedule_confirmation.router)
 app.include_router(assignment_schedule_rest_dates.router)
 
 
-app.include_router(matches.router)
+app.include_router(matches.router)`r`napp.include_router(candidate_contact_pool.router)
 app.include_router(match_records.router)
 
 app.include_router(schedule.router)
 app.include_router(jobs.router)
 app.include_router(scheduling_current.router)
 app.include_router(multi_caregiver_case_assignments.router)
+app.include_router(multi_caregiver_case_assignments.staff_router)
 app.include_router(multi_caregiver_schedule.router)
 app.include_router(multi_caregiver_schedule_read.router)
 app.include_router(caregiver_segment_availability.router)
