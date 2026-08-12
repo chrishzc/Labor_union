@@ -22,7 +22,7 @@ def consume_staff_overpayment_recovery_anomaly_events(connection, maximum_events
         try:
             payload = _payload(event["payload_snapshot"])
             source = _source(connection, payload)
-            RootFactProjectionApplication(default_anomaly_registry(), MySqlRootFactProjectionRepository(connection), BorrowedProjectionUnitOfWork).project(_fact(event, source, active=_active(event, payload)), CorrelationId(f"staff-recovery-matching:{event['id']}"))
+            RootFactProjectionApplication(default_anomaly_registry(), MySqlRootFactProjectionRepository(connection), BorrowedProjectionUnitOfWork).project(build_staff_overpayment_recovery_root_fact(event, source, active=_active(event, payload)), CorrelationId(f"staff-recovery-matching:{event['id']}"))
             _delivered(connection, event["id"]); connection.commit(); delivered += 1
         except Exception:
             connection.rollback(); _failed(connection, event["id"]); failed += 1
