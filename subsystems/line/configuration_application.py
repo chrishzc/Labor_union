@@ -1,4 +1,7 @@
-"""Canonical preview/apply service for versioned LINE configuration."""
+"""
+File: configuration_application.py
+Description: 協調版本化 LINE 設定的查詢、套用與受控初始化修復。
+"""
 
 from __future__ import annotations
 
@@ -144,6 +147,39 @@ class LineConfigurationApplication:
                 results.append(result)
             unit_of_work.commit()
         return tuple(results)
+
+    def repair_empty_rich_menu_configuration(
+        self,
+        definition: Mapping[str, object],
+        actor: ActorContext,
+        *,
+        correlation_id: CorrelationId,
+    ):
+        """Append a repair revision only when the current canonical value is `{}`."""
+        require_line_capability(actor, LineCapability.CONFIG_MANAGE)
+        with self._unit_of_work_factory() as unit_of_work:
+            current = unit_of_work.configurations.get(LineConfigurationKind.RICH_MENUS)
+            if current.revision.value == 0 or current.definition_json != "{}":
+                return None
+            candidate = build_configuration_candidate(
+                kind=LineConfigurationKind.RICH_MENUS,
+                current_revision=current.revision,
+                expected_revision=current.revision,
+                definition=definition,
+            )
+            result = unit_of_work.configurations.apply(
+                ApplyLineConfigurationCommand(
+                    candidate, actor, "repair exact empty Rich Menu configuration",
+                    IdempotencyKey("line-config-repair:rich-menus-empty:v1"),
+                    correlation_id,
+                )
+            )
+            unit_of_work.audit.append(LineAuditIntent(
+                "line.configuration.repair_empty_rich_menus", actor.actor_id,
+                "line_configuration", f"rich_menus:{result.snapshot.revision.value}",
+            ))
+            unit_of_work.commit()
+        return result
 
     def _validate(self, unit_of_work, kind, definition):
         if kind is LineConfigurationKind.MESSAGE_TEMPLATES:

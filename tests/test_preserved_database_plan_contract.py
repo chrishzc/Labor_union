@@ -261,19 +261,43 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_release_catalog_includes_line_runtime_recovery_through_wp72() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-8:] == (
+    assert artifact_names[-10:] == (
         "165_anomaly_workflow_event_idempotency_widen.sql",
-        "179_line_identity_canonical_menu_publication.sql",
         "181_matching_service_date_confirmation.sql",
         "182_candidate_contact_pool.sql",
         "184_provisional_registration_case_issue.sql",
         "185_customer_service_runtime.sql",
         "186_line_identity_management.sql",
+        "179_line_identity_canonical_menu_publication.sql",
         "188_matching_preferences_and_staff_availability.sql",
+        "189_client_refund_recipient_snapshot_local_upgrade.sql",
+        "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
     )
     assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
-    assert runner.RELEASE_MANIFEST.release_id == "labor-union-wp72-2026-08-13-v1"
+    assert runner.RELEASE_MANIFEST.release_id == (
+        "labor-union-government-overpayment-2026-08-14-v1"
+    )
+
+
+def test_client_refund_snapshot_successor_descriptor_is_complete() -> None:
+    part = "189_client_refund_recipient_snapshot_local_upgrade.sql"
+    descriptor = runner.RELEASE_MANIFEST.descriptors[part]
+
+    assert descriptor["tables"] == {
+        "client_refund_recipient_snapshots": [
+            "refund_obligation_identity",
+            "case_no",
+            "bank_code",
+            "bank_account",
+            "source_kind",
+            "created_at",
+        ]
+    }
+    assert set(descriptor["triggers"]) == {
+        "trg_client_refund_recipient_snapshots_before_update",
+        "trg_client_refund_recipient_snapshots_before_delete",
+    }
     assert runner._descriptor_presence_state(
         {"tables": {"knowledge_items": ["id", "version"]}, "triggers": []},
         {"knowledge_items": {"id", "version"}},

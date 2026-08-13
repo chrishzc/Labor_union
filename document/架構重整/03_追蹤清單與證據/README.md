@@ -28,8 +28,13 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [WP74 developer-local DB receipt（封存）](../04_已完成與上線封存/receipts/2026-08-13_developer_local_database_maintenance_receipt.md) | 空 schema 升級與目前 DB 備份副本升級均完成真實 MySQL 驗收；來源 DB 未修改。 |
 | [WP75 launcher receipt（封存）](../04_已完成與上線封存/receipts/2026-08-13_startup_launcher_convergence_receipt.md) | Windows canonical launcher 實跑、LINE optional credential gate、PID／port cleanup 與 focused regression 已完成。 |
 | [evidence/2026-08-13_wp76_migration_release_integrity_readiness_receipt.md](evidence/2026-08-13_wp76_migration_release_integrity_readiness_receipt.md) | WP76 full-chain hash、part 61／153、disposable source→candidate 與目標主機 launcher readiness 驗收均已通過。 |
+| [evidence/2026-08-13_wp73_import_development_test_handoff.md](evidence/2026-08-13_wp73_import_development_test_handoff.md) | 無 Git 開發主機的 Import 唯讀／apply／replay 測試順序、指令、停止條件與交接包邊界。 |
+| [evidence/2026-08-13_wp77_staff_adoption_hcm_review_receipt.md](evidence/2026-08-13_wp77_staff_adoption_hcm_review_receipt.md) | Staff歷史保守採納與HCM Case Import own review的focused/static release證據、DB gate與目標主機待驗項目。 |
 | [evidence/2026-08-13_wp78_knowledge_partial_local_database_recovery_receipt.md](evidence/2026-08-13_wp78_knowledge_partial_local_database_recovery_receipt.md) | Knowledge 148／163 partial recovery 的 focused、disposable MySQL 與待開發者驗收 DB gate。 |
 | [evidence/2026-08-13_wp79_line_runtime_release_catalog_recovery_receipt.md](evidence/2026-08-13_wp79_line_runtime_release_catalog_recovery_receipt.md) | LINE 179／184／185／186 catalog 恢復、hash 驗證與待 engine／開發者驗收 DB gate。 |
+| [evidence/2026-08-13_wp78_wp81_legacy_compatibility_receipt.md](evidence/2026-08-13_wp78_wp81_legacy_compatibility_receipt.md) | Knowledge unsigned legacy FK 相容與 Rich Menu 精確空設定修復的 focused evidence、DB gate 與 operator 邊界。 |
 | [65 LINE canonical cutover receipt（封存）](../04_已完成與上線封存/receipts/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
 | [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |
 | [evidence/](evidence/) | 上述決策包／收據對應的原始 evidence 產物（JSON／SQL／receipt）。 |
+| [evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md](evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md) | exact 且全空的歷史 Knowledge schema 在 candidate 重建之 Docker engine evidence 與 fail-closed 邊界。 |
+| [evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md](evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md) | part 189／190 successor releases、兩次同名 replacement 與應付帳款 query smoke 的本機驗收證據。 |

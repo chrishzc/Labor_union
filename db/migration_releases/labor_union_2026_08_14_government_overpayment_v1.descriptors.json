@@ -1,0 +1,21 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "190_government_subsidy_overpayment_disposition_local_upgrade.sql": {
+      "tables": {
+        "government_payers": ["payer_identity", "payer_name", "incoming_memo_match", "is_active", "created_at", "updated_at"],
+        "government_payer_receiving_accounts": ["id", "payer_identity", "bank_code", "account_number", "account_name", "effective_from", "effective_until", "reason", "evidence_reference", "created_by", "created_at"],
+        "government_subsidy_overpayments": ["overpayment_identity", "source_finance_import_row_id", "source_transaction_id", "payer_identity", "original_amount_ntd", "remaining_amount_ntd", "status", "projection_version", "actor", "reason", "evidence_reference", "created_at", "updated_at"],
+        "government_subsidy_overpayment_events": ["id", "overpayment_identity", "event_type", "before_remaining_ntd", "after_remaining_ntd", "resulting_status", "expected_version", "resulting_version", "preview_fingerprint", "idempotency_key", "actor", "reason", "evidence_reference", "created_at"],
+        "government_subsidy_overpayment_offsets": ["id", "overpayment_event_id", "overpayment_identity", "claim_batch_id", "claim_item_id", "allocated_amount_ntd", "created_at"],
+        "government_subsidy_overpayment_target_projection_events": ["id", "overpayment_event_id", "batch_id", "before_net_allocated_ntd", "after_net_allocated_ntd", "outstanding_ntd", "expected_batch_version", "resulting_batch_version", "preview_fingerprint", "actor", "reason", "created_at"],
+        "government_overpayment_return_payables": ["payable_identity", "overpayment_identity", "amount_due_ntd", "remaining_amount_ntd", "status", "agency_identity", "agency_name", "bank_code", "account_display", "account_fingerprint", "effective_date", "due_date", "evidence_reference", "projection_version", "created_at", "updated_at"],
+        "government_overpayment_return_payouts": ["id", "overpayment_event_id", "payable_identity", "finance_import_row_id", "amount_ntd", "preview_fingerprint", "idempotency_key", "actor", "reason", "evidence_reference", "created_at"]
+      },
+      "triggers": [
+        "trg_government_subsidy_overpayment_events_before_update",
+        "trg_government_subsidy_overpayment_events_before_delete"
+      ]
+    }
+  }
+}
