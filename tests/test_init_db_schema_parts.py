@@ -52,6 +52,19 @@ def test_schema_parts_sort_by_numeric_prefix_not_lexicographic_name(tmp_path):
     ]
 
 
+def test_line_stage13_replays_after_its_stage12_root(tmp_path):
+    paths = [
+        tmp_path / "179_line_identity_canonical_menu_publication.sql",
+        tmp_path / "186_line_identity_management.sql",
+        tmp_path / "187_case_architecture_bootstrap_receipt_version_contract.sql",
+    ]
+
+    assert [path.name for path in sorted(paths, key=_schema_part_sort_key)] == [
+        "186_line_identity_management.sql",
+        "179_line_identity_canonical_menu_publication.sql",
+        "187_case_architecture_bootstrap_receipt_version_contract.sql",
+    ]
+
 def test_release_managed_schema_part_prefixes_are_unique() -> None:
     repository_root = Path(__file__).resolve().parents[1]
     prefixes = [

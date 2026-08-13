@@ -664,6 +664,11 @@ def _order_facts(row: Mapping[str, Any]) -> OrderAggregateFacts:
             _mysql_time(row.get("service_end_time")),
             row.get("service_end_day_offset"),
         ),
+        requires_cooking=(
+            None
+            if row.get("requires_cooking") is None
+            else bool(row["requires_cooking"])
+        ),
     )
     return OrderAggregateFacts(
         str(row["case_no"]),
@@ -694,7 +699,7 @@ def _mysql_time(value: Any) -> time | None:
 
 _ORDER_SQL = (
     "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,o.service_days,"
-    "o.service_hours_per_day,o.floor_fee,o.service_start_time,"
+    "o.service_hours_per_day,o.requires_cooking,o.floor_fee,o.service_start_time,"
     "o.service_end_time,o.service_end_day_offset,o.actual_start_date,"
     "o.staff_payment_due_date,clients.identity_status AS client_identity_status,"
     "EXISTS(SELECT 1 FROM order_service_data_locks l "

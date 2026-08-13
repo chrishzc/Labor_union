@@ -34,12 +34,17 @@ evidence 為準；不要以本 README 的文字代替實際驗收。
 [`2026-08-09_line_merge_candidate_acceptance_receipt.md`](document/架構重整/03_追蹤清單與證據/evidence/2026-08-09_line_merge_candidate_acceptance_receipt.md)，
 版本摘要見 [`CHANGELOG.md`](CHANGELOG.md)。
 
-## 2026-08-13 開發者 DB 與啟動入口更新
+## 2026-08-13 開發者 DB、月嫂配對與啟動入口更新
 
 本次修正開發者更新 `main` 後，程式與本機 MySQL schema 不同步所造成的 API 500、runtime
 heartbeat／outbox worker 缺表問題。新增保留資料的 candidate upgrade workflow，並將所有專案
 operator-facing launcher 集中到 [`scripts/launchers/`](scripts/launchers/)。完整變更與已知限制見
 [`CHANGELOG.md`](CHANGELOG.md#2026-08-13--開發者本機資料庫維護與啟動腳本收斂)。
+
+此版本也加入月嫂配對偏好、長假／暫停接案的 typed API 與管理 UI；配對中心與 Calendar 讀取同一
+份 current facts。資料庫升級會納入 release 188 的新增欄位與資料表。HCM 日常匯入收斂至受驗證的
+Web upload；BeClass scripts 僅保留為受控的 historical import，不再是一般 Web／File Watcher
+寫入入口。
 
 更新程式後先執行唯讀檢查；確認 ready 後，再停止 API、UI、monitor、workers 並執行實際 DB
 更新：
@@ -48,7 +53,12 @@ operator-facing launcher 集中到 [`scripts/launchers/`](scripts/launchers/)。
 .\scripts\launchers\start_local_development.bat --dry-run
 .\scripts\launchers\update_local_database.bat --dry-run
 .\scripts\launchers\update_local_database.bat
+.\scripts\launchers\start_local_development.bat --smoke-test
 ```
+
+Windows smoke 會實際檢查 MySQL、API、Streamlit、monitor、file watcher 與 durable worker，結束時
+終止本次建立的應用程序。LINE worker 只有在本機 runtime 設定與 access token 有效時才啟動；未設定
+LINE 的開發者會看到 skipped 提示，不影響其餘服務。
 
 需要捨棄資料並回到模板測試 DB 時使用 `scripts/launchers/reset_DB.bat`，但目前模板 fixture 尚未
 重建，因此 `--dry-run` 會正確回傳 blocked；本版本不會因此刪除現有資料庫。
@@ -120,7 +130,8 @@ document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 e
 
 完整 ownership、SSOT、狀態機與跨域不變量請以
 [`15_正式規格索引與裁決總表.md`](document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md)
-及各 Domain 規格為準。
+及各 Domain 規格為準。尚在規劃、待授權及已封存功能計畫的路由見
+[`document/功能開發計畫/README.md`](document/功能開發計畫/README.md)。
 
 ## 本機開發
 

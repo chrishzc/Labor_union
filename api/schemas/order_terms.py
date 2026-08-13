@@ -22,6 +22,7 @@ class OrderTermsView(BaseModel):
     planned_start_date: date
     service_days: int = Field(gt=0)
     service_hours_per_day: int = Field(gt=0)
+    requires_cooking: bool | None
     floor_fee_ntd: int = Field(ge=0)
     service_time: ServiceTimeTermsView
 

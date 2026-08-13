@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: Global Migration / Developer Experience
 priority: P0
@@ -43,19 +43,24 @@ target，不得互為相容別名。
 
 ## 4. Acceptance
 
-1. candidate 依 versioned release order 套用 parts／backfill，並驗證必要 tables／view 與資料保留。
-2. 先建立舊 source rollback dump 與已升級 candidate dump；candidate exact 且 source 未 stale 後，才刪除並以相同名稱重建 `union_db`。
+2026-08-13 人工最終裁決把真實 MySQL 驗收拆成兩個隔離方向，不直接修改 `union_db`：
+
+1. 空的 `lu_test_wp74_schema_*` 從 part 187 基線直接套用 WP72，驗證新增欄位與資料表，不複製資料。
+2. 目前設定的 `lu_test_*` DB 維持唯讀，full dump 還原至 `lu_test_wp74_data_*` 後執行 WP72
+   migration／verify，驗證既有 row count、primary-key fingerprint 與欄位級投影保留。
 3. 除明確 allowlist 的 part 181 partial 外，其他 partial／drift、remote host、production environment、非 `union_db` destructive target 與錯誤確認字串皆 fail closed。
 4. focused pytest、strict UTF-8 與 `git diff --check` 通過。
-5. 真實 MySQL 本機 smoke 成功前維持 `in-progress`，不得宣稱已替任何開發者套用或完成 cutover。
+5. 兩個真實 MySQL 方向都成功且自動清除 disposable DB；不得宣稱已替任何開發者修改其
+   `union_db`，operator 仍須自行執行 launcher 並保留 receipt。
 
 ## 5. Out of scope／rollback
 
 - 不自動更新 production、shared staging 或遠端資料庫。
 - source replacement 失敗時以第一份 full dump 自動重建並驗證 rollback；candidate 與 receipts 保留供人工診斷。
 - 不替開發者猜測或合併 drift schema；遇到 drift 應保留 receipt，改採人工判讀或固定 fixture 重建。
-- 本任務只交付工具，不啟動服務、不執行 migration、不刪除任何現有資料庫。
+- 本任務不啟動服務、不修改任何現有來源資料庫；只允許建立並在成功後刪除 `lu_test_wp74_*`
+  disposable DB。
 
 ## 6. Evidence
 
-- [`2026-08-13_developer_local_database_maintenance_receipt.md`](../03_追蹤清單與證據/evidence/2026-08-13_developer_local_database_maintenance_receipt.md)
+- [`2026-08-13_developer_local_database_maintenance_receipt.md`](../receipts/2026-08-13_developer_local_database_maintenance_receipt.md)

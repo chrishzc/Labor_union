@@ -8,6 +8,13 @@ import json
 from pathlib import Path
 import shutil
 
+from dotenv import dotenv_values
+
+from subsystems.line.runtime_cutover import (
+    LineRuntimeCutoverError,
+    validate_line_worker_runtime,
+)
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -15,7 +22,7 @@ PROFILE_REQUIREMENTS = {
     "local-windows": {
         "commands": ("docker-compose",),
         "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui/app.py"),
-        "modules": ("uvicorn", "streamlit", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker"),
+        "modules": ("uvicorn", "streamlit", "scripts.run_line_worker", "scripts.run_service_monitor", "scripts.run_durable_job_worker", "scripts.smoke_local_development_launcher"),
     },
     "local-unix": {
         "commands": ("docker", "lsof"),
@@ -36,6 +43,7 @@ PROFILE_REQUIREMENTS = {
         "files": (".env", "ui/app.py"),
         "modules": ("uvicorn", "streamlit", "scripts.run_line_worker", "scripts.run_service_monitor"),
     },
+    "line-worker": {"files": (".env",), "modules": ("scripts.run_line_worker",)},
 }
 
 
@@ -43,6 +51,19 @@ def _command_exists(command: str) -> bool:
     if command == "ngrok" and (PROJECT_ROOT / ".venv/Scripts/ngrok.exe").exists():
         return True
     return shutil.which(command) is not None
+
+
+def _configuration_issues(profile: str) -> list[str]:
+    if profile != "line-worker":
+        return []
+    environment = {
+        key: value or "" for key, value in dotenv_values(PROJECT_ROOT / ".env").items()
+    }
+    try:
+        validate_line_worker_runtime(environment)
+    except LineRuntimeCutoverError:
+        return ["LINE worker credentials or runtime selection"]
+    return []
 
 
 def inspect_profile(profile: str) -> dict[str, object]:
@@ -54,6 +75,7 @@ def inspect_profile(profile: str) -> dict[str, object]:
         "commands": missing_commands,
         "files": missing_files,
         "modules": missing_modules,
+        "configuration": _configuration_issues(profile),
     }
     return {
         "status": "ready" if not any(issues.values()) else "blocked",

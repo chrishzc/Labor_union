@@ -25,7 +25,7 @@ DB_CONFIG = {
 
 
 def load_schema_parts(cursor, schema_parts_dir):
-    """Execute UTF-8 schema fragments in lexical filename order."""
+    """Execute UTF-8 schema fragments in stable dependency order."""
     parts_dir = Path(schema_parts_dir)
     assert parts_dir.name == "schema_parts" or parts_dir.exists()
     loaded_parts = []
@@ -41,6 +41,10 @@ def load_schema_parts(cursor, schema_parts_dir):
 
 
 def _schema_part_sort_key(path: Path) -> tuple[int, str, str]:
+    if path.name == "179_line_identity_canonical_menu_publication.sql":
+        # Stage 13 was numbered before its stage-12 root; preserve release names,
+        # but replay the additive repair immediately after part 186.
+        return 186, "z", path.name
     match = re.match(r"^(\d+)([a-z]*)_", path.name, re.IGNORECASE)
     if match:
         return int(match.group(1)), match.group(2).lower(), path.name

@@ -14,7 +14,7 @@ def _source(name: str) -> str:
 
 
 def test_profiles_report_no_side_effects() -> None:
-    for profile in ("local-windows", "local-unix", "admin-no-auth", "database-update", "database-reset", "ngrok-development"):
+    for profile in ("local-windows", "local-unix", "admin-no-auth", "database-update", "database-reset", "ngrok-development", "line-worker"):
         assert inspect_profile(profile)["side_effects"] == "none"
 
 
@@ -40,6 +40,25 @@ def test_batch_dry_run_propagates_a_blocked_preflight() -> None:
         dry_run_block = _source(name).split('=="--dry-run"', maxsplit=1)[1]
         assert 'set "DRY_RUN_EXIT=!ERRORLEVEL!"' in dry_run_block
         assert "exit /b !DRY_RUN_EXIT!" in dry_run_block
+
+
+def test_windows_launcher_exposes_controlled_smoke_test() -> None:
+    source = _source("start_local_development.bat")
+
+    assert 'if /I "%~1"=="--smoke-test" goto :SMOKE_TEST' in source
+    smoke_block = source.split(":SMOKE_TEST", maxsplit=1)[1]
+    assert smoke_block.index("docker-compose up -d") < smoke_block.index("scripts/wait_for_db.py")
+    assert smoke_block.index("scripts/wait_for_db.py") < smoke_block.index(
+        "scripts.smoke_local_development_launcher"
+    )
+    assert "exit /b !ERRORLEVEL!" in smoke_block
+
+
+def test_windows_launcher_guards_optional_line_worker_configuration() -> None:
+    source = _source("start_local_development.bat")
+
+    assert "scripts.launcher_preflight --profile line-worker" in source
+    assert "Skipping LINE Worker" in source
 
 
 def test_configuration_and_scheduler_scripts_have_non_mutating_dry_run() -> None:

@@ -44,7 +44,7 @@ def _recommendation_request(
     return RecommendationRequest(
         service_dates,
         _district(facts.get("city"), facts.get("address")),
-        "雙胞胎" in str(facts.get("baby_info") or ""),
+        _requires_multiple_birth_care(facts),
         str(facts.get("service_time") or ""),
         filters,
     )
@@ -68,3 +68,9 @@ def _district(city: object, address: object) -> str:
         "尖石鄉", "五峰鄉", "頭份市", "竹南鎮",
     )
     return next((item for item in districts if item in text), str(city or ""))
+
+
+def _requires_multiple_birth_care(facts: Mapping[str, object]) -> bool:
+    """Only a future canonical Orders term may enable the optional preference."""
+    birth_count = facts.get("required_baby_count")
+    return isinstance(birth_count, int) and not isinstance(birth_count, bool) and birth_count >= 2

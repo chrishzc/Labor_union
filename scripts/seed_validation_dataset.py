@@ -95,6 +95,7 @@ def build_intent(dataset: dict[str, object]) -> CaseImportIntent:
             _date(order["planned_start_date"]), _date(order["planned_end_date"]),
             _time(order["service_start_time"]), _time(order["service_end_time"]),
             int(order["service_end_day_offset"]),
+            bool(order.get("requires_cooking", False)),
         ),
         CaseArchitectureBootstrapIntent(
             case_no,

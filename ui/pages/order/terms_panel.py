@@ -40,6 +40,11 @@ def _form(case_no, terms):
         "planned_start_date": st.date_input("預計開始日", value=date.fromisoformat(terms["planned_start_date"]), key=f"terms_start_{case_no}").isoformat(),
         "service_days": int(st.number_input("服務天數", min_value=1, value=terms["service_days"], key=f"terms_days_{case_no}")),
         "service_hours_per_day": int(st.number_input("每日服務時數", min_value=1, value=terms["service_hours_per_day"], key=f"terms_hours_{case_no}")),
+        "requires_cooking": st.checkbox(
+            "需要月嫂下廚",
+            value=bool(terms.get("requires_cooking")),
+            key=f"terms_requires_cooking_{case_no}",
+        ),
         "floor_fee_ntd": int(st.number_input("樓層費（元）", min_value=0, value=terms["floor_fee_ntd"], key=f"terms_floor_{case_no}")),
         "service_time": {"start_time": st.time_input("服務開始時間", value=start_time, key=f"terms_time_start_{case_no}").isoformat(), "end_time": st.time_input("服務結束時間", value=end_time, key=f"terms_time_end_{case_no}").isoformat(), "end_day_offset": int(st.selectbox("跨日", [0, 1], index=service_time.get("end_day_offset") or 0, key=f"terms_cross_day_{case_no}"))},
     }

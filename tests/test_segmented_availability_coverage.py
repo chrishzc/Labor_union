@@ -35,6 +35,12 @@ def test_candidate_coverage_uses_confirmed_service_dates_and_backend_ranges():
         [{"start_date": "2026-08-02", "end_date": "2026-08-04"}],
         "2026-08-01",
         _Facts(),
+        filter_policy={
+            "region": False,
+            "preferred_service_days": False,
+            "cooking": False,
+            "daily_service_hours": False,
+        },
     )
 
     candidate = result["candidate_options"][0]

@@ -6,6 +6,7 @@
 - 人工核准日期：2026-08-03
 - LINE ownership：`consolidated-decision`
 - Access Control：`consolidated-decision`
+- 2026-08-13 Case Import／LIFF entry split：`approved-by-IMPORT-ENTRY-02`
 - 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 integration、Access、schema、
   pytest 與 legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
 
@@ -343,6 +344,19 @@ Case Import 擁有：
 - accepted source→internal identity mapping；
 - case bootstrap command receipt。
 
+入口裁決 `IMPORT-ENTRY-02`：
+
+- HCM 日常來源以 authenticated Web upload 進入 Case Import Source Intake；其 adapter 應沿用
+  Finance Web upload 的 bounded upload、ephemeral cleanup、typed receipt 與 replay 邊界；
+- Client BeClass 現行資料由 LIFF 驗證身分後呼叫 typed registration／profile API；LINE 只擁有
+  platform identity 與驗證 evidence，正式資料仍由各 owning Domain command 寫入；
+- Staff profile 的核准目標同樣為 LIFF → typed API，不得由 browser 直接 SQL；live 目前只有
+  Staff identity binding 與 orders／schedule Query，尚無 profile writer。Staff profile owner、root
+  fields、version 與 UoW 另行裁決，不能因入口位於 LINE 而把 root ownership 移給 LINE；
+- Client／Staff BeClass scripts 保留為 `restricted_historical_import`，只能處理明確 historical
+  source，不能掛入一般 File Watcher、一般 Web upload registry，亦不得覆寫已由 LIFF／人工命令
+  更新的 current facts。
+
 不擁有 Client、Orders、Scheduling、Finance 或 Payroll 的正式根事實。正式 case 只能由
 typed `ApplyCaseImport`／`ApplyBeClassReview` 委派各 owning Domain，在單一 outer
 Unit of Work 建立。
@@ -379,6 +393,10 @@ Modules：
 
 File Watcher 只建立 durable import job；CLI／Adapter 不直接寫正式 Client／Order。
 invalid row 必須保存 privacy-safe root fact 並投影 canonical anomaly。
+
+HCM validation 失敗時不得用 fabricated default 建立正式 Client／Order；必須形成 durable
+`review_required` outcome。Client／Staff historical import 必須另走 HistoricalAdoption Preview／Apply
+及 no-impact gate，不得重用 current LIFF command 假裝一般資料更新。
 
 Typed operations：
 

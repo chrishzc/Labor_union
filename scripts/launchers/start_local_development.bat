@@ -16,6 +16,7 @@ if /I "%~1"=="--dry-run" (
     set "DRY_RUN_EXIT=!ERRORLEVEL!"
     exit /b !DRY_RUN_EXIT!
 )
+if /I "%~1"=="--smoke-test" goto :SMOKE_TEST
 echo ==========================================
 echo Labor Union Local Development Startup Script
 echo ==========================================
@@ -55,8 +56,13 @@ echo [Notice] Production readiness validation is intentionally not run by this d
 echo [Step 4] Launching FastAPI server...
 start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
 
-echo [Step 5] Launching independent LINE Worker...
-start "LINE Worker" cmd /k ""%PY%" -m scripts.run_line_worker"
+"%PY%" -m scripts.launcher_preflight --profile line-worker >nul 2>&1
+if !ERRORLEVEL! equ 0 (
+    echo [Step 5] Launching independent LINE Worker...
+    start "LINE Worker" cmd /k ""%PY%" -m scripts.run_line_worker"
+) else (
+    echo [Step 5] Skipping LINE Worker: local LINE credentials or runtime configuration are unavailable.
+)
 
 echo [Step 6] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
@@ -87,3 +93,12 @@ echo - Durable Background Worker: independently processes background jobs
 echo ==========================================
 pause
 exit /b 0
+
+:SMOKE_TEST
+echo [Smoke] Launching Docker Compose and waiting for MySQL...
+docker-compose up -d
+if errorlevel 1 exit /b !ERRORLEVEL!
+"%PY%" scripts/wait_for_db.py
+if errorlevel 1 exit /b !ERRORLEVEL!
+"%PY%" -m scripts.smoke_local_development_launcher
+exit /b !ERRORLEVEL!

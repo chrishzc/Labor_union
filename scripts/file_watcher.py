@@ -36,9 +36,6 @@ class WatchedImport:
 
 
 WATCHED_IMPORTS = (
-    WatchedImport("downloads/hcm", "scripts/imports/import_client_hcm.py"),
-    WatchedImport("downloads/client_beclass", "scripts/imports/import_client_beclass.py"),
-    WatchedImport("downloads/staff_beclass", "scripts/imports/import_staff_beclass.py"),
     WatchedImport(
         "downloads/bank",
         "scripts/imports/import_finance_excel.py",

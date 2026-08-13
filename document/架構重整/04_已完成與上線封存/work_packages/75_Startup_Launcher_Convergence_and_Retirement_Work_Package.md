@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: Global Deployment / Developer Experience
 priority: P1
@@ -36,23 +36,33 @@ priority: P1
 - 根目錄及 `scripts/` 既有 launcher 的搬移／退役。
 - `scripts/launchers/README.md`、launcher path regression tests。
 - 本 Work Package、正式 deployment 路徑說明、開發者導覽與 evidence receipt。
-- 不啟動服務、不安裝／移除排程任務、不修改任何資料庫或 production configuration。
+- 依 2026-08-13 人工追加授權執行受控 Windows local smoke；不安裝／移除排程任務、不套用 schema、
+  不修改 production configuration，測試結束只清理本次建立的應用程序 PID。
 
 ## 4. Acceptance
 
 1. 所有現行 operator launcher 位於 `scripts/launchers/`，實際 process modules 不被誤搬。
 2. README 能清楚區分 active、development-only、recovery-only、moved 與 retired。
-3. 模板 reset 先 preflight、再要求 `RESET`，fixture 缺失時不刪 DB。
+3. 模板 reset 先 preflight、再要求 `RESET`，fixture 缺失時不刪 DB；fixture 重建與真實 reset 依人工
+   裁決不在本 Work Package 範圍。
 4. 舊重複／誤導入口有唯一 replacement，且 regression test 防止舊路徑回歸。
-5. focused pytest、strict UTF-8 與 `git diff --check` 通過；真實 launcher／DB smoke 未執行前維持
-   `in-progress`。
+5. focused pytest、strict UTF-8 與 `git diff --check` 通過。
 6. 每支 active／recovery launcher 提供零副作用 dry run；不得啟動 process、修改 `.env`、連線 DB、
    查詢／修改排程任務或將缺少依賴誤報為 ready。
+7. Windows canonical launcher 實際等待 MySQL，啟動並驗證 API、Streamlit、runtime monitor、file
+   watcher 與 durable worker；LINE worker 缺少有效個人憑證時安全 skipped；結束後不得殘留本次
+   建立的應用程序或 8000／8501 listener。
 
 模板 fixture 已於既有歷史裁決退役且目前不在 HEAD；2026-08-13 人工明確裁決其重建不屬本次
 任務。`reset_DB.bat` 保留 canonical entrypoint 與 fail-closed preflight，但在新 fixture 核准並建立前
 不得宣稱模板 reset 可用，也不得直接復活舊 v3 snapshot。
 
-## 5. Evidence
+## 5. 完成結果與 Evidence
 
-- [`2026-08-13_startup_launcher_convergence_receipt.md`](../03_追蹤清單與證據/evidence/2026-08-13_startup_launcher_convergence_receipt.md)
+2026-08-13 Windows `--smoke-test` 實跑通過：MySQL ready、API `/health` 與 Streamlit
+`/_stcore/health` 均回傳 200，五個必要應用程序在觀察窗內持續存活，結束後 PID 與 8000／8501
+listener 均不存在。第一次實跑亦揭露 LINE token 為 placeholder 時 worker 立即退出；launcher 已改為
+共用唯讀 preflight，未配置 LINE 的開發者會收到 skipped，而不是錯誤視窗。ngrok 與 Unix／WSL
+屬未安裝工具／本機權限限制，未被誤報為已驗證。
+
+- [`2026-08-13_startup_launcher_convergence_receipt.md`](../receipts/2026-08-13_startup_launcher_convergence_receipt.md)

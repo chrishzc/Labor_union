@@ -1,0 +1,55 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-wp72-2026-08-13-v1",
+  "release_metadata": {
+    "release_name": "Labor Union WP72 matching preferences and staff availability",
+    "application_version": "wp72-matching-preferences-staff-availability-v1",
+    "published_at": "2026-08-13",
+    "description": "Add Orders cooking requirement, staff matching preferences, and canonical staff unavailability blocks"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "wp72-pre-release"
+  },
+  "artifacts": [
+    {
+      "name": "188_matching_preferences_and_staff_availability.sql",
+      "relative_path": "db/schema_parts/188_matching_preferences_and_staff_availability.sql",
+      "sha256": "d886d5d089fe1fbc5a0b4bd25ffb5ad14f893431b21a32c3c94dde511525fde2",
+      "dependencies": [],
+      "data_effect": "schema_and_system_definition_seed",
+      "rollback_policy": "code-rollback-preserve-preference-and-availability-history",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {"verification_id": "wp72-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["orders-cooking-requirement-v1", "staff-matching-preferences-v1", "staff-unavailability-v1"],
+    "required_restart_targets": ["api", "streamlit-ui"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["case-import-cooking-requirement", "staff-preference-preview-apply", "staff-unavailability-preview-apply", "matching-default-filters"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_13_wp72_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_13_wp72_v1.descriptors.json",
+    "sha256": "ce2e573b41bb426bdcc8ef105f7ed3be5a0f1c0caf30cf014390c3c37b7ae8da",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

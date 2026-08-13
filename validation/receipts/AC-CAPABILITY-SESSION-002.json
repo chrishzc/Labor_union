@@ -16,7 +16,7 @@
     "scenario_fixture": "da47d04ff9b55041c82b5aabf2c485aa39c3253e65511a454992b211b3a9ef2d",
     "expected_manifest": "c0e9cf30c3f8e5af8c8c42204acff8555eec8dc73f0148cc4201d2333fa36605",
     "integration_test": "4049ea4ca54dcdafe67d57d576b929556700cb4772cbac508d68cdcb3dc6d1d9",
-    "validation_schema_manifest": "48f9f520812f86f6eac0a9ee01d2874b0a5c6a75f46430a4ad29a8de2305c7cd"
+    "validation_schema_manifest": "f71456c9aaef958ced891d19dbd6998f4747442c8912795be58470a90c636194"
   },
   "input_paths": {
     "scenario_fixture": "validation/fixtures/AC-CAPABILITY-SESSION-002.json",

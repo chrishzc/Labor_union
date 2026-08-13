@@ -82,6 +82,7 @@ def search_segmented_caregiver_availability(
     segment_drafts: List[dict],
     as_of: Any,
     facts_port: SegmentedAvailabilityFactsPort | None = None,
+    filter_policy: dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Search for segmented caregiver availability for a single case."""
     if not case_no:
@@ -107,8 +108,20 @@ def search_segmented_caregiver_availability(
     planned_end = _as_optional_date(order_row["end_date"], "planned_end_date")
     if planned_start > planned_end:
         raise ValueError("planned_start_date cannot be after planned_end_date")
+    if (planned_end - planned_start).days + 1 > 60:
+        raise ValueError("service period cannot exceed 60 days")
 
+    policy = _filter_policy(filter_policy)
     candidate_rows = loaded_facts["staff_rows"]
+    filter_results = {
+        int(row["id"]): _staff_filter_results(row, order_row, policy)
+        for row in candidate_rows
+    }
+    candidate_rows = [
+        row
+        for row in candidate_rows
+        if _passes_enabled_filters(filter_results[int(row["id"])], policy)
+    ]
     candidate_staff_ids = [row["id"] for row in candidate_rows if row is not None and "id" in row]
     assignments = loaded_facts["assignments"]
 
@@ -142,6 +155,10 @@ def search_segmented_caregiver_availability(
                 ).isoformat(),
                 "reason_code": "assignment",
             }
+        )
+    for row in loaded_facts.get("staff_unavailability_rows") or []:
+        assignment_schedule_days.extend(
+            _expand_staff_unavailability_days(row, planned_start, planned_end)
         )
 
     active_lock_days = [
@@ -181,7 +198,8 @@ def search_segmented_caregiver_availability(
         "segment_candidates": result["segment_candidates"],
         "candidate_options": _candidate_options(result["segment_candidates"], candidate_rows,
                                                   required_service_dates, segment_drafts,
-                                                  int(order_row.get("scheduling_version") or 0)),
+                                                  int(order_row.get("scheduling_version") or 0),
+                                                  filter_results),
         "conflicts": result["conflicts"],
     }
 
@@ -193,8 +211,33 @@ def _required_service_dates(confirmed_rows, planned_start, planned_end):
                  for offset in range((planned_end - planned_start).days + 1))
 
 
+def _expand_staff_unavailability_days(row, window_start, window_end):
+    start = max(
+        _as_optional_date(row["start_date"], "staff_unavailability.start_date"),
+        window_start,
+    )
+    raw_end = row.get("end_date")
+    end = min(
+        window_end
+        if raw_end is None
+        else _as_optional_date(raw_end, "staff_unavailability.end_date"),
+        window_end,
+    )
+    if start > end:
+        return []
+    return [
+        {
+            "availability_block_id": int(row["id"]),
+            "staff_id": int(row["staff_id"]),
+            "work_date": (start + timedelta(days=offset)).isoformat(),
+            "reason_code": "staff_unavailability",
+        }
+        for offset in range((end - start).days + 1)
+    ]
+
+
 def _candidate_options(candidate_rows, staff_rows, required_service_dates, segment_drafts,
-                       scheduling_version):
+                       scheduling_version, filter_results):
     staff_names = {
         int(row["id"]): str(row.get("name") or "")
         for row in staff_rows
@@ -211,6 +254,7 @@ def _candidate_options(candidate_rows, staff_rows, required_service_dates, segme
                 "staff_name": staff_names.get(key[1], ""),
                 "coverage_day_count": 0,
                 "available_ranges": [],
+                "filter_results": filter_results.get(key[1], {}),
             },
         )
         start_date = _as_optional_date(candidate["start_date"], "candidate.start_date")
@@ -220,6 +264,94 @@ def _candidate_options(candidate_rows, staff_rows, required_service_dates, segme
         )
     return [_coverage_view(options[key], required_service_dates, segment_drafts,
                            scheduling_version) for key in sorted(options)]
+
+
+def _filter_policy(raw):
+    values = dict(raw or {})
+    return {
+        "schedule": bool(values.get("schedule", True)),
+        "region": bool(values.get("region", True)),
+        "preferred_service_days": bool(values.get("preferred_service_days", True)),
+        "cooking": bool(values.get("cooking", True)),
+        "daily_service_hours": bool(values.get("daily_service_hours", True)),
+        "preferred_service_days_tolerance": int(
+            values.get("preferred_service_days_tolerance", 0)
+        ),
+        "enabled_preference_keys": tuple(
+            str(item) for item in values.get("enabled_preference_keys", ())
+        ),
+    }
+
+
+def _staff_filter_results(staff, order, policy):
+    preferences = staff.get("matching_preferences") or {}
+    enabled_keys = set(policy["enabled_preference_keys"])
+    enabled_keys.update(
+        key
+        for key in ("preferred_service_days", "daily_service_hours")
+        if policy[key]
+    )
+    preference_results = {
+        key: _preference_matches(
+            fact,
+            order,
+            policy["preferred_service_days_tolerance"],
+        )
+        for key, fact in preferences.items()
+        if key in enabled_keys
+    }
+    for key in enabled_keys:
+        preference_results.setdefault(key, False)
+    location = " ".join(
+        str(order.get(key) or "").strip() for key in ("city", "address")
+    ).strip()
+    regions = tuple(str(item) for item in staff.get("regions") or ())
+    return {
+        "region": bool(
+            location
+            and any(item in location or location in item for item in regions)
+        ),
+        "cooking": _cooking_matches(order, staff),
+        **preference_results,
+    }
+
+
+def _preference_matches(fact, order, tolerance):
+    required = order.get(fact.get("order_fact_key"))
+    if isinstance(required, bool) or not isinstance(required, int) or required <= 0:
+        return False
+    value = fact.get("value") or {}
+    if fact.get("comparison_operator") == "range_with_tolerance":
+        minimum, maximum = value.get("minimum"), value.get("maximum")
+        return (
+            isinstance(minimum, int)
+            and isinstance(maximum, int)
+            and minimum - tolerance <= required <= maximum + tolerance
+        )
+    if fact.get("comparison_operator") == "contains_integer":
+        return required in (value.get("values") or ())
+    return False
+
+
+def _passes_enabled_filters(results, policy):
+    if policy["region"] and not results["region"]:
+        return False
+    if policy["cooking"] and not results["cooking"]:
+        return False
+    keys = set(policy["enabled_preference_keys"])
+    keys.update(
+        key
+        for key in ("preferred_service_days", "daily_service_hours")
+        if policy[key]
+    )
+    return all(results.get(key, False) for key in keys)
+
+
+def _cooking_matches(order, staff):
+    requirement = order.get("requires_cooking")
+    if requirement is None:
+        return False
+    return not requirement or bool(staff.get("cooking_skills"))
 
 
 def _coverage_view(option, required_service_dates, segment_drafts, scheduling_version):

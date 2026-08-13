@@ -77,7 +77,9 @@ from api.routes import (
     schedule,
     jobs,
     scheduling_current,
+    staff_matching_preferences,
     staff,
+    staff_availability,
     staff_monthly_schedule,
     staff_payout,
     staff_payments,
@@ -201,6 +203,7 @@ app.include_router(match_records.router)
 app.include_router(schedule.router)
 app.include_router(jobs.router)
 app.include_router(scheduling_current.router)
+app.include_router(staff_matching_preferences.router)
 app.include_router(multi_caregiver_case_assignments.router)
 app.include_router(multi_caregiver_case_assignments.staff_router)
 app.include_router(multi_caregiver_schedule.router)
@@ -209,6 +212,7 @@ app.include_router(caregiver_segment_availability.router)
 app.include_router(caregiver_availability_locks.router)
 app.include_router(clients.router)
 app.include_router(staff.router)
+app.include_router(staff_availability.router)
 app.include_router(staff_monthly_schedule.router)
 
 app.include_router(holidays.router)

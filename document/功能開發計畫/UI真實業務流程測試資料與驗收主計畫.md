@@ -68,7 +68,7 @@ schema、seed、pytest 或資料庫 mutation。
 - Global 契約：`document/架構重整/01_規格基線/00_Global_共同契約.md`
 - 正式規格索引：`document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md`
 - Contract Signing：`21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
-- 銀行流水及帳務異常：`20_銀行流水匯入與帳務異常處理正式規格.md`
+- 銀行流水及帳務異常：`22_銀行流水匯入與帳務異常處理正式規格.md`
 - Import 相鄰計畫：`document/功能開發計畫/ADR-001-import-architecture-refactor.md`
 - WP56 只作歷史驗收與本輪 inventory 證據，不授權直接沿用其資料作為 current SSOT。
 

@@ -328,7 +328,15 @@ def process_import(excel_path):
     return _result(inserted=inserted, skipped_existing=skipped_existing, review_required=review_required)
 
 if __name__ == "__main__":
-    excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/資料庫、資料處理/假資料_模板.xlsx"
-    process_import(excel_arg)
+    from scripts.imports.historical_import_guard import authorize_historical_apply
 
+    try:
+        excel_arg = authorize_historical_apply(
+            sys.argv[1:],
+            str(DB_CONFIG["database"]),
+        )
+    except RuntimeError as error:
+        print(f"歷史匯入已阻擋：{error}")
+        raise SystemExit(2) from error
+    process_import(excel_arg)
 

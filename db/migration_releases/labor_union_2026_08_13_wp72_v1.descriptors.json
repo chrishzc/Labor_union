@@ -1,0 +1,21 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "188_matching_preferences_and_staff_availability.sql": {
+      "tables": {
+        "orders": ["requires_cooking"],
+        "staff_matching_preference_definitions": ["id", "preference_key", "display_name", "value_kind", "is_filterable", "order_fact_key", "comparison_operator", "status", "version", "created_by", "updated_by", "created_at", "updated_at"],
+        "staff_matching_preference_profiles": ["staff_id", "version", "created_by", "updated_by", "updated_at"],
+        "staff_matching_preference_values": ["staff_id", "definition_id", "value_json", "profile_version", "updated_by", "updated_at"],
+        "staff_matching_preference_events": ["id", "event_type", "aggregate_identity", "resulting_version", "actor", "reason", "correlation_id", "idempotency_key", "before_json", "after_json", "created_at"],
+        "staff_matching_preference_receipts": ["idempotency_key", "command_family", "aggregate_identity", "command_fingerprint", "preview_fingerprint", "result_json", "created_at"],
+        "staff_matching_preference_migration_reviews": ["id", "staff_id", "source_kind", "source_value", "issue_code", "status", "created_at", "resolved_at"],
+        "scheduling_staff_availability_aggregates": ["staff_id", "aggregate_version", "updated_at"],
+        "scheduling_staff_unavailability_blocks": ["id", "staff_id", "block_kind", "start_date", "end_date", "status", "reason", "source_block_id", "created_by", "created_at", "ended_by", "ended_at", "cancelled_by", "cancelled_at"],
+        "scheduling_staff_availability_events": ["event_key", "staff_id", "aggregate_version", "block_id", "event_type", "before_snapshot", "after_snapshot", "actor", "reason", "correlation_id", "occurred_at"],
+        "scheduling_staff_availability_apply_receipts": ["idempotency_key", "request_fingerprint", "preview_fingerprint", "staff_id", "aggregate_version", "block_id", "action", "result_snapshot", "actor", "reason", "correlation_id", "created_at"]
+      },
+      "triggers": []
+    }
+  }
+}

@@ -66,6 +66,15 @@ monitor 與 workers，且只能操作本機 `union_db`，禁止用於 production
 
 macOS／Unix 另執行 `./scripts/launchers/start_local_development.sh --dry-run`。
 
+Windows launcher 只在本機 LINE runtime 設定與 access token 通過唯讀檢查時啟動 LINE worker；未設定
+LINE 的開發者會看到 `skipped` 提示，其餘本機服務仍正常啟動。這不會自動切換 runtime mode，也不會
+把 placeholder credential 當成有效設定。維護者可用下列受控 smoke 實際啟動並檢查服務；完成或失敗
+時只終止本次 smoke 建立的 PID：
+
+```powershell
+.\scripts\launchers\start_local_development.bat --smoke-test
+```
+
 ## 已搬移或退役
 
 | 舊入口 | 裁決 | 現行替代 |

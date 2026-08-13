@@ -15,6 +15,10 @@
   統一記錄在該目錄的 `README.md`。
 - 現行 launcher 提供零副作用 dry run：Batch／shell／Python 使用 `--dry-run`，PowerShell 使用
   `-DryRun`；只驗證路徑、module 與 executable，不啟動服務、不改 `.env`、DB 或排程任務。
+- 新增 release 188：月嫂配對偏好定義／值與長假、暫停接案資料，由 typed API 與管理 UI 維護，
+  配對中心與 Calendar 讀取同一份 current facts。
+- HCM 日常匯入採 authenticated Web upload；Client／Staff BeClass scripts 改為受限 historical
+  import lane，避免一般 Web UI 或 File Watcher 旁路寫入 current profile。
 
 ### 修正
 
@@ -24,6 +28,11 @@
   update workflow 的相容別名。
 - 修正 Windows Batch dry-run 在括號區塊內未正確傳遞 `%ERRORLEVEL%`，blocked preflight 現在會
   回傳非零 exit code。
+- 新增 Windows `--smoke-test`：實際等待 MySQL、啟動 API／UI／monitor／file watcher／durable
+  worker、驗證 health 後清理本次 PID。LINE worker 缺少有效本機憑證時改為明確 skipped，不再開啟
+  立即失敗的程序視窗。
+- MySQL release chain 納入 WP72 artifact 188，並補強 preserved-data migration 在 `TIME` 欄位的
+  canonical fingerprint 表示，避免備份副本升級時因 Python 時間型別造成 verifier 失敗。
 
 ### 搬移與退役
 
@@ -42,8 +51,9 @@
   fail closed，不會刪除 DB。
 - ngrok launcher 需要另外安裝 `ngrok`；Unix launcher 需要 `lsof`。缺少依賴時 dry run 回傳
   `blocked`，不會嘗試安裝或啟動。
-- focused regression：`33 passed`；strict UTF-8 與 `git diff --check` 通過。真實 MySQL
-  dump／restore／same-name replacement 與模板 reset smoke 尚未執行。
+- WP74 兩方向真實 MySQL 驗收已通過：空 schema 套用欄位／資料表升級，以及目前 DB 完整備份副本
+  還原後升級與資料保存。WP75 Windows launcher smoke 已通過；API 與 Streamlit health 為 200，所有
+  本次建立的應用程序與 8000／8501 監聽均已清理。模板 fixture reset 依人工裁決不在本次範圍。
 
 ## 2026-08-10 — 架構重整與遺留退役 Release Candidate
 

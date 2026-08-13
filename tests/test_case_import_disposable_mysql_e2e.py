@@ -178,6 +178,7 @@ def _import_intent(
             time(9),
             time(17),
             0,
+            False,
         ),
         CaseArchitectureBootstrapIntent(case_no, terms, "approved-rates-v1"),
         provisional_registration_id,

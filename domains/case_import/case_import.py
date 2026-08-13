@@ -99,6 +99,7 @@ class ImportedOrderRootFacts:
     service_start_time: time
     service_end_time: time
     service_end_day_offset: int
+    requires_cooking: bool
 
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
@@ -113,6 +114,8 @@ class ImportedOrderRootFacts:
         _require_exact_type(self.service_end_time, time, "service end time")
         if self.service_end_day_offset not in {0, 1}:
             _raise_invalid("service end day offset must be zero or one")
+        if not isinstance(self.requires_cooking, bool):
+            _raise_invalid("requires cooking must be bool")
         if self.planned_end_date < self.planned_start_date:
             _raise_invalid("planned service interval is inverted")
 
@@ -283,6 +286,7 @@ def _order_payload(order):
         "service_start_time": order.service_start_time.isoformat(),
         "service_end_time": order.service_end_time.isoformat(),
         "service_end_day_offset": order.service_end_day_offset,
+        "requires_cooking": order.requires_cooking,
     }
 
 

@@ -3,7 +3,8 @@
 import json
 import hashlib
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from domains.orders.service_date_confirmation import group_service_dates_by_calendar_week
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineUserId
@@ -19,13 +20,22 @@ class MySqlMatchingScheduleConfirmationRepository:
 
     def query(self, case_no, plan_id):
         with self.connection.cursor() as cursor:
-            cursor.execute("SELECT v.version,s.id snapshot_id,s.status FROM confirmed_service_date_versions v LEFT JOIN matching_schedule_snapshots s ON s.confirmed_version_id=v.id AND s.plan_id=%s AND s.current_marker=1 WHERE v.case_no=%s AND v.is_current=1", (plan_id, case_no))
+            cursor.execute("SELECT id,version FROM confirmed_service_date_versions WHERE case_no=%s AND is_current=1", (case_no,))
             root = cursor.fetchone()
             if not root:
                 raise ValueError("confirmed_service_dates_required")
-            recipients = self._recipients(cursor, root["snapshot_id"]) if root["snapshot_id"] else []
+            preview = self._preview(cursor, case_no, plan_id, root["id"])
+            snapshot = self._latest_snapshot(cursor, case_no, plan_id)
+            status = _snapshot_status(root["id"], snapshot)
+            is_current = status == "sent"
+            recipients = self._recipients(cursor, snapshot["id"]) if snapshot and is_current else []
+            outdated_preview = (
+                self._preview(cursor, case_no, plan_id, snapshot["confirmed_version_id"])
+                if snapshot and status == "sent_outdated"
+                else None
+            )
         passed = bool(recipients) and all(r["confirmation_status"] in ("confirmed", "manually_confirmed") for r in recipients)
-        return {"case_no": case_no, "plan_id": plan_id, "confirmed_service_date_version": root["version"], "snapshot_id": root["snapshot_id"], "snapshot_status": root["status"] or "not_sent", "recipients": recipients, "gate_passed": passed}
+        return {"case_no": case_no, "plan_id": plan_id, "confirmed_service_date_version": root["version"], "snapshot_id": snapshot["id"] if snapshot else None, "snapshot_status": status, "schedule_preview": preview, "outdated_schedule_preview": outdated_preview, "recipients": recipients, "gate_passed": passed}
 
     def send(self, case_no, plan_id, actor, key):
         with self.connection.cursor() as cursor:
@@ -149,12 +159,34 @@ class MySqlMatchingScheduleConfirmationRepository:
         dates = [r["service_date"].isoformat() for r in cursor.fetchall()]
         cursor.execute("SELECT c.line_user_id FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s", (case_no,))
         client = cursor.fetchone()
-        result = [{"audience": "customer", "key": "customer", "segment_id": None, "line_user_id": client["line_user_id"], "dates": dates}]
+        result = [_schedule_payload("customer", "customer", None, client["line_user_id"], dates)]
         cursor.execute("SELECT s.id,s.assigned_start_date,s.assigned_end_date,st.line_user_id FROM caregiver_matching_plan_segments s JOIN staff st ON st.id=s.staff_id WHERE s.plan_id=%s ORDER BY s.segment_order", (plan_id,))
         for row in cursor.fetchall():
             own = [d for d in dates if row["assigned_start_date"].isoformat() <= d <= row["assigned_end_date"].isoformat()]
-            result.append({"audience": "caregiver", "key": f"caregiver:{row['id']}", "segment_id": row["id"], "line_user_id": row["line_user_id"], "dates": own})
+            result.append(_schedule_payload("caregiver", f"caregiver:{row['id']}", row["id"], row["line_user_id"], own))
         return result
+
+    @staticmethod
+    def _latest_snapshot(cursor, case_no, plan_id):
+        cursor.execute(
+            "SELECT id,confirmed_version_id,status,current_marker FROM matching_schedule_snapshots "
+            "WHERE case_no=%s AND plan_id=%s ORDER BY id DESC LIMIT 1",
+            (case_no, plan_id),
+        )
+        return cursor.fetchone()
+
+    @classmethod
+    def _preview(cls, cursor, case_no, plan_id, version_id):
+        payloads = cls._payloads(cursor, case_no, plan_id, version_id)
+        return {
+            "week_grouping_policy": "calendar_week_sunday_to_saturday_v1",
+            "total_service_days": payloads[0]["total_service_days"],
+            "total_weeks": payloads[0]["total_weeks"],
+            "weeks": payloads[0]["weeks"],
+            "recipient_schedules": [
+                _recipient_schedule(payload) for payload in payloads
+            ],
+        }
 
     @staticmethod
     def _store_recipient(cursor, snapshot_id, payload):
@@ -204,18 +236,70 @@ def _delivery_status(row):
     return row["delivery_status"]
 
 
+def _snapshot_status(current_version_id, snapshot):
+    if snapshot is None:
+        return "not_sent"
+    if snapshot["confirmed_version_id"] != current_version_id:
+        return "sent_outdated"
+    if snapshot["current_marker"] != 1:
+        return "not_sent"
+    return snapshot["status"]
+
+
+def _schedule_payload(audience, key, segment_id, line_user_id, dates):
+    weeks = _calendar_weeks(dates)
+    return {
+        "audience": audience,
+        "key": key,
+        "segment_id": segment_id,
+        "line_user_id": line_user_id,
+        "dates": dates,
+        "week_grouping_policy": "calendar_week_sunday_to_saturday_v1",
+        "total_service_days": len(dates),
+        "total_weeks": len(weeks),
+        "weeks": weeks,
+    }
+
+
+def _calendar_weeks(dates):
+    return list(
+        group_service_dates_by_calendar_week(tuple(date.fromisoformat(value) for value in dates))
+    )
+
+
+def _recipient_schedule(payload):
+    return {
+        "audience_type": payload["audience"],
+        "segment_id": payload["segment_id"],
+        "total_service_days": payload["total_service_days"],
+        "total_weeks": payload["total_weeks"],
+        "weeks": payload["weeks"],
+    }
+
+
 def _schedule_confirmation_card(payload, token):
     audience = "客戶" if payload["audience"] == "customer" else "月嫂"
-    dates = "、".join(payload["dates"]) or "此區段沒有服務日期"
+    weekly_schedule = _weekly_schedule_text(payload["weeks"])
     return canonical_line_payload_json({
         "type": "flex", "altText": "服務日期表確認",
         "contents": {"type": "bubble", "body": {"type": "box", "layout": "vertical", "contents": [
             {"type": "text", "text": "服務日期表確認", "weight": "bold", "size": "xl"},
             {"type": "text", "text": f"對象：{audience}", "margin": "md"},
-            {"type": "text", "text": dates, "wrap": True, "margin": "md"},
+            {"type": "text", "text": f"共 {payload['total_service_days']} 個服務日／{payload['total_weeks']} 週", "wrap": True, "margin": "md"},
+            {"type": "text", "text": weekly_schedule, "wrap": True, "margin": "md"},
             {"type": "text", "text": "請確認目前日期表；若拒絕，工會將向您索取原因。", "wrap": True, "size": "sm", "margin": "md"},
         ]}, "footer": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": [
             {"type": "button", "style": "primary", "color": "#06C755", "action": {"type": "postback", "label": "確認日期表", "data": f"schedule:{token}:confirmed", "displayText": "我確認日期表"}},
             {"type": "button", "style": "secondary", "action": {"type": "postback", "label": "拒絕日期表", "data": f"schedule:{token}:rejected", "displayText": "我拒絕日期表，請聯絡我"}},
         ]}},
     })
+
+
+def _weekly_schedule_text(weeks):
+    if not weeks:
+        return "此區段沒有服務日期"
+    return "\n".join(
+        f"第{week['week_number']}週 {week['period_start']}～{week['period_end']}"
+        f"（{week['service_day_count']}日）：{'、'.join(week['service_dates'])}"
+        for week in weeks
+    )

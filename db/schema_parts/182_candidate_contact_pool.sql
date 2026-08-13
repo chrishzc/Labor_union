@@ -1,4 +1,4 @@
-﻿-- 182. Candidate Contact Pool: negotiation contacts, never formal service segments.
+-- 182. Candidate Contact Pool: negotiation contacts, never formal service segments.
 CREATE TABLE IF NOT EXISTS caregiver_candidate_contact_pools (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     case_no VARCHAR(50) NOT NULL,

@@ -215,6 +215,7 @@ def _order_update_values(command) -> tuple[object, ...]:
         command.planned_end_date,
         terms.service_days,
         terms.service_hours_per_day,
+        terms.requires_cooking,
         terms.floor_fee.amount,
         terms.service_time.start_time,
         terms.service_time.end_time,
@@ -420,7 +421,7 @@ def _mysql_error_code(error: IntegrityError) -> int | None:
 
 _ORDER_UPDATE_SQL = (
     "UPDATE orders SET start_date=%s,end_date=%s,service_days=%s,"
-    "service_hours_per_day=%s,floor_fee=%s,service_start_time=%s,"
+    "service_hours_per_day=%s,requires_cooking=%s,floor_fee=%s,service_start_time=%s,"
     "service_end_time=%s,service_end_day_offset=%s,actual_end_date=%s,"
     "status=%s,lifecycle_version=%s "
     "WHERE case_no=%s AND lifecycle_version=%s"

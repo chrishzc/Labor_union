@@ -61,6 +61,9 @@ from ui.pages.scheduling.leave_substitution_panel import (
 )
 from ui.pages.scheduling.matching_center import render_matching_center
 from ui.pages.scheduling.holiday_management import render_holiday_management
+from ui.pages.scheduling.staff_matching_profile_panel import (
+    render_staff_matching_profile_panel,
+)
 from ui.request_state import accept_request_result, begin_request, request_snapshot
 
 title = "多月嫂排班"
@@ -70,6 +73,7 @@ _SCHEDULING_WORKSPACES = (
     "國定假日管理",
     "月嫂配對中心",
     "案件人力配置",
+    "月嫂配對資料管理",
 )
 _REFERENCE_DATA_CACHE_SECONDS = 15
 
@@ -209,6 +213,42 @@ def _normalise_calendar_schedule_map(value):
                 normalised_row["client_name"] = str(row.get("client_name") or "")
             normalised[day] = normalised_row
     return normalised
+
+
+def _current_projection_schedule_map(projection):
+    schedule_map = {}
+    for day in projection.days:
+        if not day.entries:
+            continue
+        status, description = _calendar_status_for_entries(day.entries)
+        schedule_map[day.calendar_date.day] = {
+            "status": status,
+            "client_name": description,
+        }
+    return schedule_map
+
+
+def _calendar_status_for_entries(entries):
+    kinds = {entry.occupancy_kind.value for entry in entries}
+    if "staff_unavailability" in kinds:
+        labels = {
+            "long_leave": "長假",
+            "paused_service": "暫停接案",
+        }
+        reasons = sorted(
+            {labels.get(entry.unavailability_kind, "不可服務") for entry in entries}
+        )
+        return "unavailable", "／".join(reasons)
+    if "official_workday" in kinds:
+        return "red", _calendar_case_labels(entries)
+    if "assignment_rest" in kinds:
+        return "green", _calendar_case_labels(entries)
+    return "yellow", _calendar_case_labels(entries)
+
+
+def _calendar_case_labels(entries):
+    case_numbers = sorted({entry.case_no for entry in entries if entry.case_no})
+    return "、".join(case_numbers) or "檔期保留"
 
 
 def _multi_caregiver_request(path, *, method="GET", payload=None):
@@ -736,26 +776,15 @@ def _render_staff_calendar():
             
         # 2. 獲取該月嫂當月的排班狀態與國定假日
         try:
-            resp_sched = requests.get(
-                f"{resolve_api_base_url()}/api/v1/staff/{cal_staff_id}/monthly-schedule",
-                headers=admin_headers,
-                params={"year": cal_year, "month": cal_month},
-                timeout=10,
+            month_start = date(cal_year, cal_month, 1)
+            month_end = date(
+                cal_year, cal_month, calendar.monthrange(cal_year, cal_month)[1]
             )
-            resp_sched.raise_for_status()
-            sched_payload = resp_sched.json()
-            sched_data = sched_payload.get("data") or {}
-            monthly_schedules = _normalise_calendar_schedule_map(
-                sched_data.get("schedule_map")
-            )
+            current_projection = SchedulingCurrentApiClient(
+                base_url=resolve_api_base_url(), headers=admin_headers
+            ).query(cal_staff_id, month_start, month_end)
+            monthly_schedules = _current_projection_schedule_map(current_projection)
             monthly_schedule_rows = {}
-            for row in sched_data.get("days") or []:
-                work_date = safe_date(row.get("work_date"))
-                if work_date and (
-                    row.get("assignment_id") is not None
-                    or row.get("status") == "waiting_deposit_lock"
-                ) and row.get("order_status") != "訂單取消":
-                    monthly_schedule_rows.setdefault(work_date.day, []).append(row)
         except Exception as err_sched:
             st.warning(f"⚠️ 月度排班資料 API 讀取失敗: {err_sched}")
             monthly_schedules = {}
@@ -1020,6 +1049,7 @@ def _render_staff_calendar():
 .status-preview-holiday { background-color: #dbeafe; color: #1e3a8a; }
 .status-preview-deferred { background-color: #ffedd5; color: #9a3412; }
 .status-preview-substitute { background-color: #fce7f3; color: #9d174d; }
+.status-unavailable { background-color: #e9d5ff; color: #6b21a8; }
 .status-label-white { color: #10b981; font-weight: bold; }
 .status-label-yellow { color: #b45309; font-weight: bold; }
 .status-label-red { color: #b91c1c; font-weight: bold; }
@@ -1027,6 +1057,7 @@ def _render_staff_calendar():
 .status-label-preview-holiday { color: #1d4ed8; font-weight: bold; }
 .status-label-preview-deferred { color: #c2410c; font-weight: bold; }
 .status-label-preview-substitute { color: #be185d; font-weight: bold; }
+.status-label-unavailable { color: #7e22ce; font-weight: bold; }
 .client-text { font-size: 0.9em; margin-top: 4px; display: block; }
 </style>
 <table class="cal-table"><thead><tr><th>星期日</th><th>星期一</th><th>星期二</th><th>星期三</th><th>星期四</th><th>星期五</th><th>星期六</th></tr></thead><tbody>"""
@@ -1065,6 +1096,10 @@ def _render_staff_calendar():
                             bg_class = "status-yellow"
                             status_label = "<span class='status-label-yellow'>📜 歷史正式指派</span>"
                             client_text = f"<span class='client-text'><b>客戶: {day_client_name}</b></span>"
+                        elif day_info['status'] == 'unavailable':
+                            bg_class = "status-unavailable"
+                            status_label = "<span class='status-label-unavailable'>🟣 不可服務</span>"
+                            client_text = f"<span class='client-text'><b>{day_client_name}</b></span>"
                         elif day_info['status'] == 'preview_holiday':
                             bg_class = "status-preview-holiday"
                             status_label = "<span class='status-label-preview-holiday'>🌴 Preview 國定假日休假</span>"
@@ -1233,6 +1268,10 @@ def _render_scheduling_workspace(workspace: str) -> None:
 
     if workspace == "案件人力配置":
         _render_case_staffing_workspace()
+        return
+
+    if workspace == "月嫂配對資料管理":
+        render_staff_matching_profile_panel()
         return
 
     st.error("未知的排班工作區。")

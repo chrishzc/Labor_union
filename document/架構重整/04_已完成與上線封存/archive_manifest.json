@@ -1,6 +1,6 @@
 {
     "schema":  "labor-union-document-archive/v1",
-    "updated_at":  "2026-08-12",
+    "updated_at":  "2026-08-13",
     "entries":  [
                     {
                         "archive_id":  "ARCH-20260811-001",
@@ -278,9 +278,9 @@
                         "release_identity":  null,
                         "successor_path":  "document/架構重整/01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md",
                         "evidence_paths":  [
-                                               "document/架構重整/02_決策與退役執行記錄/56_Contract_Signing_and_UI_Validation_Work_Package.md"
+                                               "document/架構重整/04_已完成與上線封存/work_packages/56_Contract_Signing_and_UI_Validation_Work_Package.md"
                                            ],
-                        "content_sha256":  "bf50c099e58e4072f382ba7e5ad8714981958d7fd3414584d6c35ec11a933dcd",
+                        "content_sha256":  "b6ee6ccaba13e29a1f58154c9db2cde1754a5ea48f5b1ca7954ac80b662d3fce",
                         "archived_at":  "2026-08-11",
                         "archived_by":  "Codex on user request",
                         "reason":  "Human decisions were consolidated into formal specification 21 and executable Work Package 56.",
@@ -460,7 +460,7 @@
                                                "document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_finance_amendment_focused_regression_receipt.md",
                                                "document/架構重整/04_已完成與上線封存/receipts/2026-08-11_finance_amendment_release_preflight_receipt.md"
                                            ],
-                        "content_sha256":  "515e0ce46b43f1a513b514edff33e8f5f9ea8c4336159a673b965152064bee3b",
+                        "content_sha256":  "602192c417b620465fc5e8b74d25995ebe97bc098ed4ab1b13886643ddfc435c",
                         "archived_at":  "2026-08-11",
                         "archived_by":  "Codex on user request",
                         "reason":  "The user accepted the isolated-test UI validation closeout and excluded production deployment from this package.",
@@ -736,7 +736,7 @@
                                                "validation/receipts/WP56-VALIDATION-SCHEMA-RELEASE-047.json",
                                                "validation/receipts/WP56-UI-SCENARIO-MATRIX-029_v4.json"
                                            ],
-                        "content_sha256":  "ee13a7cf959e8d5c98b7b027a020279c95bf947c27e2a6119c662a1eef7ab961",
+                        "content_sha256":  "851baf1b966c0e650dd5dbdd39e81c209578ab12299536f4f26ee8e9fa77c36a",
                         "archived_at":  "2026-08-12",
                         "archived_by":  "Codex on user request",
                         "reason":  "WP56 completed all eight acceptance items and UI validation scenarios; current contract semantics remain in formal specification 21.",
@@ -756,7 +756,7 @@
                         "completed_at":  "2026-08-12",
                         "deployed_at":  null,
                         "release_identity":  null,
-                        "successor_path":  "document/架構重整/02_決策與退役執行記錄/63_Global_Writer_Inventory_v3_Owner_Review_Work_Package.md",
+                        "successor_path":  "document/架構重整/04_已完成與上線封存/work_packages/63_Global_Writer_Inventory_v3_Owner_Review_Work_Package.md",
                         "evidence_paths":  [
                                                "document/架構重整/04_已完成與上線封存/receipts/2026-08-12_wp24_mysql_adapter_mutation_exit_reconciliation_receipt.md",
                                                "document/架構重整/03_追蹤清單與證據/evidence/writer_inventory_v3/writer_inventory_v3_disposition.manifest.json"
@@ -826,7 +826,7 @@
                         "completed_at":  "2026-08-12",
                         "deployed_at":  null,
                         "release_identity":  null,
-                        "successor_path":  "document/架構重整/01_規格基線/20_銀行流水匯入與帳務異常處理正式規格.md",
+                        "successor_path":  "document/架構重整/01_規格基線/22_銀行流水匯入與帳務異常處理正式規格.md",
                         "evidence_paths":  [
                                                "document/架構重整/03_追蹤清單與證據/evidence/2026-08-09_client_finance_domain_revalidation_receipt.md",
                                                "document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_active_package_closeout_receipt.md"
@@ -972,7 +972,7 @@
                                                "document/架構重整/03_追蹤清單與證據/evidence/2026-08-11_finance_amendment_focused_regression_receipt.md",
                                                "document/架構重整/04_已完成與上線封存/work_packages/57_Finance_Amendment_Production_Release_Readiness.md"
                                            ],
-                        "content_sha256":  "40d6bcd2a052a3debee3001ed7c915a45dc6b5573c936a2855be99838221409a",
+                        "content_sha256":  "fe13526294aa1449435121fe4486a296d71e1a3e466c77ea282becff1d12bb23",
                         "archived_at":  "2026-08-12",
                         "archived_by":  "Codex on user request",
                         "reason":  "Formal specifications 06, 14, 16 and 20 plus the current index carry the finance amendment contracts; focused and validation-closeout evidence proves the completed implementation scope.",
@@ -1210,6 +1210,344 @@
                             "deployed machine caller requires the retired secret boundary",
                             "Admin Session or capability access regression",
                             "LINE signature validation regression"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260812-053",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/68_Matching_Center_Single_Caregiver_Default_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/68_Matching_Center_Single_Caregiver_Default_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed",
+                        "completed_at": "2026-08-12",
+                        "deployed_at": null,
+                        "release_identity": "labor_union_2026_08_12_wp68_v1",
+                        "successor_path": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/receipts/2026-08-12_wp68_matching_schedule_confirmation_receipt.md",
+                            "tests/test_candidate_contact_pool_workflow.py",
+                            "tests/test_matching_schedule_confirmation.py",
+                            "tests/test_matching_schedule_confirmation_panel.py"
+                        ],
+                        "content_sha256": "3451bdb5bfc58cbc7779acbba953ecaab154d4acd881401158aaa2bc63c09459",
+                        "archived_at": "2026-08-12",
+                        "archived_by": "Codex on user request",
+                        "reason": "Single-caregiver default, Candidate Contact Pool, schedule confirmation, full regression, and Chrome UI acceptance are complete without a LINE provider send.",
+                        "restore_triggers": [
+                            "matching-center single-caregiver regression",
+                            "candidate-contact-pool audit",
+                            "schedule-confirmation UI or assignment-gate investigation"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260812-054",
+                        "source_path": "document/架構重整/03_追蹤清單與證據/evidence/2026-08-12_wp68_matching_schedule_confirmation_receipt.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/receipts/2026-08-12_wp68_matching_schedule_confirmation_receipt.md",
+                        "doc_type": "completion-receipt",
+                        "final_status": "completed",
+                        "completed_at": "2026-08-12",
+                        "deployed_at": null,
+                        "release_identity": "labor_union_2026_08_12_wp68_v1",
+                        "successor_path": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/work_packages/68_Matching_Center_Single_Caregiver_Default_Work_Package.md"
+                        ],
+                        "content_sha256": "28e06565a133ee796235309f3b9a5a9403fba410792e357fc86ca8edcb450956",
+                        "archived_at": "2026-08-12",
+                        "archived_by": "Codex on user request",
+                        "reason": "The receipt is completed historical evidence; current semantics remain in the formal specifications.",
+                        "restore_triggers": [
+                            "WP68 acceptance audit",
+                            "Chrome UI acceptance investigation"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-055",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/60_Scheduling_Leave_Review_and_LINE_Command_Ownership_Decision.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/60_Scheduling_Leave_Review_and_LINE_Command_Ownership_Decision.md",
+                        "doc_type": "architecture-decision",
+                        "final_status": "human-confirmed-superseded-by-feature-plan",
+                        "completed_at": "2026-08-12",
+                        "deployed_at": null,
+                        "release_identity": null,
+                        "successor_path": "document/功能開發計畫/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md",
+                        "evidence_paths": [
+                            "tests/test_scheduling_staff_leave_review_boundary.py",
+                            "tests/line/subsystems/test_line_identity_stage4.py"
+                        ],
+                        "content_sha256": "879a36c530520a982e2a490a02ccf86b314bbffb1405ce6fa8ebc6a13ff22cd5",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "The ownership decision is complete; its remaining Scheduling leave-request implementation scope and blocker are fully carried by the approved feature plan without granting implementation.",
+                        "restore_triggers": [
+                            "Scheduling versus LINE ownership dispute",
+                            "legacy staff-leave review boundary audit",
+                            "LINE binding command regression"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-056",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/66_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/66_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed-local-deployed",
+                        "completed_at": "2026-08-12",
+                        "deployed_at": "2026-08-12",
+                        "release_identity": "labor_union_2026_08_12_line_stage13_v1",
+                        "successor_path": "document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md",
+                        "evidence_paths": [
+                            "document/架構重整/03_追蹤清單與證據/evidence/2026-08-12_line_identity_canonical_default_menu_repair_receipt.md",
+                            "tests/test_line_identity_management_first_release.py"
+                        ],
+                        "content_sha256": "ca6105a876f7104f3dc418cb6b1f343972e8875df6e3c446359241c9415e872b",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "Canonical default-menu selection, additive stage 13 schema, local deployment, provider relink and live smoke are complete; formal specification 23 owns the enduring contract.",
+                        "restore_triggers": [
+                            "LINE identity revocation menu regression",
+                            "stage 13 deployment audit",
+                            "canonical versus legacy publication investigation"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-057",
+                        "source_path": "document/功能開發計畫/00_P0_最高優先_休假代班天數精算與行事曆差異預覽修復計畫.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/superseded_specs/00_P0_最高優先_休假代班天數精算與行事曆差異預覽修復計畫.md",
+                        "doc_type": "feature-plan",
+                        "final_status": "superseded-core-completed-residual-tracked",
+                        "completed_at": "2026-08-12",
+                        "deployed_at": null,
+                        "release_identity": null,
+                        "successor_path": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/work_packages/66_Scheduling_Leave_Substitution_Calendar_Preview_Work_Package.md",
+                            "document/架構重整/04_已完成與上線封存/work_packages/67_Scheduling_Leave_Substitution_Calendar_Precision_Completion_Work_Package.md",
+                            "document/架構重整/04_已完成與上線封存/work_packages/69_Scheduling_Canonical_Holiday_Query_Contract_Work_Package.md",
+                            "document/架構重整/04_已完成與上線封存/work_packages/70_Scheduling_Calendar_Action_Mode_Persistence_Fix_Work_Package.md",
+                            "document/架構重整/02_決策與退役執行記錄/58_未實作_未落地_未上線規格總表.md"
+                        ],
+                        "content_sha256": "f72117dc726ee0fdb0f6de9f3085a4cc583b670fa56392a0e4a033510b10d59f",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "The Calendar Preview, typed readiness, Holiday Query, day conservation, fresh Apply, cross-Domain transaction and Chrome UI scope are complete and owned by the Scheduling baseline; the remaining bootstrap recovery entry is explicitly tracked in gap register 58.",
+                        "restore_triggers": [
+                            "leave-substitution Calendar Preview regression",
+                            "service-day conservation or Holiday Query incident",
+                            "bootstrap blocker recovery ownership dispute"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-058",
+                        "source_path": "document/功能開發計畫/00_P0_月嫂配對中心_單月嫂預設與預計服務日期表傳送改善計畫.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/superseded_specs/00_P0_月嫂配對中心_單月嫂預設與預計服務日期表傳送改善計畫.md",
+                        "doc_type": "feature-plan",
+                        "final_status": "superseded-by-completed-wp68-and-residual-plan",
+                        "completed_at": "2026-08-12",
+                        "deployed_at": null,
+                        "release_identity": null,
+                        "successor_path": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/work_packages/68_Matching_Center_Single_Caregiver_Default_Work_Package.md",
+                            "document/架構重整/04_已完成與上線封存/receipts/2026-08-12_wp68_matching_schedule_confirmation_receipt.md",
+                            "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md"
+                        ],
+                        "content_sha256": "904ece901622326af4bb5af552b230b524523e23b6aa2e3f4d5a9c1b77320253",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "WP68 owns the completed Candidate Contact Pool, single-caregiver plan and schedule-confirmation scope; the later residual plan completed the five filters, buffer distinction, unavailable-period integration, UI cleanup and sent_outdated/manual-resend work.",
+                        "restore_triggers": [
+                            "WP68 scope or acceptance audit",
+                            "matching residual scope dispute",
+                            "schedule-confirmation lineage regression"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-059",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed-local-validated",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": "labor-union-wp72-2026-08-13-v1",
+                        "successor_path": "document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_wp72_matching_preferences_staff_availability_receipt.md",
+                            "db/migration_releases/labor_union_2026_08_13_wp72_v1.json"
+                        ],
+                        "content_sha256": "48e303eb457f7eaa331a9b5719c66954ece03bccea27d3cfffe483d3db62c3de",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "WP72 preference, imported cooking requirement, canonical staff availability, Matching and Calendar integration, disposable DB replay, focused regression and Browser acceptance are complete; formal specification 24 owns the enduring contract.",
+                        "restore_triggers": [
+                            "staff matching preference regression",
+                            "staff availability or Calendar projection incident",
+                            "WP72 migration or release audit"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-060",
+                        "source_path": "document/功能開發計畫/00_P0_月嫂配對中心_剩餘功能收斂計畫.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/superseded_specs/00_P0_月嫂配對中心_剩餘功能收斂計畫.md",
+                        "doc_type": "feature-plan",
+                        "final_status": "completed-local-validated",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": "labor-union-wp72-2026-08-13-v1",
+                        "successor_path": "document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_wp72_matching_preferences_staff_availability_receipt.md",
+                            "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_matching_residual_closeout_receipt.md"
+                        ],
+                        "content_sha256": "3f30a6a3d11abecda668aafe72c81f9814d2a623f7ccb953ca76120fbe82b428",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "The residual plan completed its approved scope; the final human decision makes multi-birth matching a cancellable preference, not a hard eligibility, without inferring facts from free text.",
+                        "restore_triggers": [
+                            "matching preference semantics dispute",
+                            "five-filter or Calendar regression",
+                            "future canonical multi-birth terms design"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-061",
+                        "source_path": "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_wp72_matching_preferences_staff_availability_receipt.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_wp72_matching_preferences_staff_availability_receipt.md",
+                        "doc_type": "completion-receipt",
+                        "final_status": "completed-local-validated",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": "labor-union-wp72-2026-08-13-v1",
+                        "successor_path": "document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/work_packages/72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md",
+                            "db/migration_releases/labor_union_2026_08_13_wp72_v1.json"
+                        ],
+                        "content_sha256": "26499cd9dd632fbf5cf86e9236b3702ed15e508b42f501f5aadf6dc7d3e966a7",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "WP72 completion receipt has no remaining active gate responsibility after the final Browser stale-preview regression and cancellation/recovery loop closed successfully.",
+                        "restore_triggers": [
+                            "staff matching preference regression",
+                            "staff availability or Calendar projection incident",
+                            "WP72 migration or release audit"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-062",
+                        "source_path": "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_matching_residual_closeout_receipt.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_matching_residual_closeout_receipt.md",
+                        "doc_type": "completion-receipt",
+                        "final_status": "completed-local-validated",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": "labor-union-wp72-2026-08-13-v1",
+                        "successor_path": "document/架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/superseded_specs/00_P0_月嫂配對中心_剩餘功能收斂計畫.md",
+                            "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_wp72_matching_preferences_staff_availability_receipt.md"
+                        ],
+                        "content_sha256": "9718f31dde6fd4d7c753e98131773ea8a6a4c9898b3c1089bf582fc0ca35a247",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "The matching residual closeout receipt has no remaining active gate responsibility; multi-birth semantics are settled as a cancellable preference and the plan is archived.",
+                        "restore_triggers": [
+                            "matching preference semantics dispute",
+                            "five-filter or Calendar regression",
+                            "future canonical multi-birth terms design"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-063",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/74_Developer_Local_Database_Update_and_Rebuild_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/74_Developer_Local_Database_Update_and_Rebuild_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed-local-mysql-validated",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": "labor-union-wp72-2026-08-13-v1",
+                        "successor_path": "document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_developer_local_database_maintenance_receipt.md",
+                            "tests/test_wp74_local_database_upgrade_mysql.py"
+                        ],
+                        "content_sha256": "91a1c83158865eb342b753ec7f0ac95ab9726282a723edc80a5f61f9d92cfe62",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "Developer-local schema upgrade and preserve-data copy upgrade both passed real MySQL validation; enduring migration safety remains in formal specification 10.",
+                        "restore_triggers": [
+                            "developer local database upgrade regression",
+                            "preserve-data verifier incident",
+                            "WP74 acceptance audit"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-064",
+                        "source_path": "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_developer_local_database_maintenance_receipt.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_developer_local_database_maintenance_receipt.md",
+                        "doc_type": "completion-receipt",
+                        "final_status": "completed-local-mysql-validated",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": "labor-union-wp72-2026-08-13-v1",
+                        "successor_path": "document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/work_packages/74_Developer_Local_Database_Update_and_Rebuild_Work_Package.md",
+                            "tests/test_wp74_local_database_upgrade_mysql.py"
+                        ],
+                        "content_sha256": "41f1ee49d1244ee4712743946055240a26702544ba944416b605d1391530f1bc",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "The receipt records the completed two-direction MySQL acceptance and no longer owns an active release gate.",
+                        "restore_triggers": [
+                            "WP74 MySQL evidence audit",
+                            "backup restore preservation regression"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-065",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/75_Startup_Launcher_Convergence_and_Retirement_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/75_Startup_Launcher_Convergence_and_Retirement_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed-local-windows-validated",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": null,
+                        "successor_path": "document/架構重整/00_開發者與Agent導覽.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_startup_launcher_convergence_receipt.md",
+                            "tests/test_local_development_launcher_smoke.py"
+                        ],
+                        "content_sha256": "b2f55d6b49577db7ec7bff78b709a32b78cdf24ca85b6765baed3c13f1006883",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "The canonical Windows launcher passed real MySQL readiness, API and UI health, worker liveness, and owned-process cleanup; enduring developer guidance remains active.",
+                        "restore_triggers": [
+                            "Windows local launcher regression",
+                            "operator entrypoint governance audit",
+                            "LINE worker startup incident"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-066",
+                        "source_path": "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_startup_launcher_convergence_receipt.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/receipts/2026-08-13_startup_launcher_convergence_receipt.md",
+                        "doc_type": "completion-receipt",
+                        "final_status": "completed-local-windows-validated",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": null,
+                        "successor_path": "document/架構重整/00_開發者與Agent導覽.md",
+                        "evidence_paths": [
+                            "document/架構重整/04_已完成與上線封存/work_packages/75_Startup_Launcher_Convergence_and_Retirement_Work_Package.md",
+                            "scripts/launchers/README.md"
+                        ],
+                        "content_sha256": "dfdd053747edad97c1e9e8ef8393fba4dfae6bd1f8a7f3686b42d9ea57f9b8c3",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "The receipt records the completed controlled Windows launcher smoke and no longer owns an active acceptance gate.",
+                        "restore_triggers": [
+                            "WP75 evidence audit",
+                            "launcher smoke cleanup regression"
                         ]
                     }
                 ]

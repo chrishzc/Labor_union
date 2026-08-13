@@ -15,8 +15,8 @@
   "input_digests": {
     "scenario_fixture": "406c7c3f1ea46fdf9360d5e1ff0e43f08b1669e8a4692a58b7542fb529a27d22",
     "expected_manifest": "66ae8695f6a5a5dad9b1d0d1cc24828e1fa0805864a09ab9b483d70e64a04bc2",
-    "integration_test": "a2031ca38ff8f7a8428cc2440e07b52819d8a06805eb27701e1821a80d32cdd9",
-    "validation_schema_manifest": "48f9f520812f86f6eac0a9ee01d2874b0a5c6a75f46430a4ad29a8de2305c7cd"
+    "integration_test": "c714def379a392215897cf3b93a57a2b4f091faa5fb92c072a12ec3a854f5a3b",
+    "validation_schema_manifest": "f71456c9aaef958ced891d19dbd6998f4747442c8912795be58470a90c636194"
   },
   "input_paths": {
     "scenario_fixture": "validation/fixtures/CI-CANONICAL-ROOTS-002.json",

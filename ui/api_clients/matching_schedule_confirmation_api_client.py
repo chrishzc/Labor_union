@@ -23,12 +23,38 @@ class ScheduleConfirmationRecipientView(BaseModel):
     confirmation_occurred_at_utc: datetime | None
 
 
+class ExpectedServiceScheduleWeekView(BaseModel):
+    week_number: int
+    period_start: str
+    period_end: str
+    service_dates: list[str]
+    service_day_count: int
+
+
+class ScheduleConfirmationRecipientScheduleView(BaseModel):
+    audience_type: str
+    segment_id: int | None
+    total_service_days: int
+    total_weeks: int
+    weeks: list[ExpectedServiceScheduleWeekView]
+
+
+class ExpectedServiceSchedulePreviewView(BaseModel):
+    week_grouping_policy: str
+    total_service_days: int
+    total_weeks: int
+    weeks: list[ExpectedServiceScheduleWeekView]
+    recipient_schedules: list[ScheduleConfirmationRecipientScheduleView]
+
+
 class MatchingScheduleConfirmationView(BaseModel):
     case_no: str
     plan_id: int
     confirmed_service_date_version: int
     snapshot_id: int | None
     snapshot_status: str
+    schedule_preview: ExpectedServiceSchedulePreviewView
+    outdated_schedule_preview: ExpectedServiceSchedulePreviewView | None = None
     recipients: list[ScheduleConfirmationRecipientView]
     gate_passed: bool
 

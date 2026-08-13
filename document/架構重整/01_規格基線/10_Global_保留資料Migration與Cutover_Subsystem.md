@@ -63,6 +63,11 @@ Manifest 定義 release id、支援的 source baseline、ordered schema parts、
 verification queries、application compatibility、artifact hashes 與 dependencies。
 程式內硬編碼固定 schema part 清單不得成為長期 SSOT。
 
+Canonical release chain／catalog 必須明確列出所有允許交付的 release，不得以容易漏掉命名變體的
+檔名 glob 或目錄排序推導目前版本。新增 schema part、altered parent column 或 seed／backfill 時，
+同一變更必須更新 chain、manifest、descriptor、fresh-bootstrap manifest、開發者操作文件與驗證測試；
+任一入口無法辨識最新 artifact 時，該 release 仍是 `live-drift`，不得標記 completed 或封存。
+
 ### 4.2 Preflight／Identity
 
 Modules：
@@ -109,6 +114,10 @@ Modules：
 每個 schema part 必須列出自己擁有的 columns、indexes、constraints、triggers 與 views。
 「table 已存在」不等於 exact。
 
+Descriptor 亦必須明列既有 parent table 被新增或修改的欄位，並驗證 column type、nullability、default、
+generated expression、index、foreign key 與 check constraint。分類器忽略 `altered_tables`、只檢查新表，
+或只確認 required column name 是 subset，都不得宣稱 `exact`。
+
 ### 4.5 Additive Migration Runner
 
 Modules：
@@ -145,6 +154,12 @@ Modules：
 Backfill 必須先 dry-run，綁定 candidate identity、source facts、expected affected rows 與
 before／after fingerprint。Apply 使用單一或明確 bounded transaction，exact replay
 回原 receipt；不得在 DDL runner 內隱藏資料補猜。
+
+System definition seed 可與 schema release 同版，但必須在 metadata 中獨立標示；從既有業務資料
+建立新 root／profile／event／review row 屬 backfill，不得偽裝成 schema-only 或 system seed。
+無法唯一轉換的 row 必須進 bounded unresolved review，且 migration completion receipt 必須記錄
+converted、unresolved、skipped 與 replay counts。開發者本機 backfill 授權不等於 production data
+migration 授權。
 
 ### 4.7 Candidate Data Validation
 
@@ -262,6 +277,11 @@ metadata 證明零新增效果時，才可 bounded retry；DDL 中斷必須先�
 - Candidate exact 且完整通過後才可 switch。
 - 測試只能使用明確 disposable source/candidate database；不得使用正式 `union_db`。
 - Mock PASS 不能取代真實 mysqldump、restore、DDL、metadata 與 switch 驗收。
+- 每個 schema release 必須同時通過：(a) 空白 disposable DB 的 fresh bootstrap；(b) 含上一支援版
+  schema 與代表性舊資料的 source → dump → candidate → latest release → verify。`update_local_database`
+  的唯讀 migration plan 必須列出最新 release id、待套 artifact 與任何 blocked partial／drift；
+  launcher `--dry-run` 只驗證入口 wiring 與依賴，不構成 DB plan，啟動腳本成功也不構成 schema
+  compatibility 證據。
 
 ## 8. 現況吸收與退出
 

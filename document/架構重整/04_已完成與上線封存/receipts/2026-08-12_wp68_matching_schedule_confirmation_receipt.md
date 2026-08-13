@@ -64,11 +64,66 @@ Result: `26 passed`.
     `not ready`; no direct database bypass was used. This is an existing Order bootstrap live-drift
     outside WP68's Matching UI write set, so it blocks only the same-case end-to-end UI continuation.
 
-## Remaining evidence required before WP68 archive
+## Additional automated evidence
 
-- Chrome validation of the matching-center schedule-confirmation panel, including Send status and
-  staff manual override controls. The Chrome connector session was able to validate Order
-  Management but could not navigate a newly-created blank tab to the local Streamlit URL.
-- Broader repository regression failures outside WP68 must be separately reconciled before a full
-  `pytest -W error` closeout can be claimed; the focused WP68 command above is green.
-- Archive-gate manifest update after those remaining evidence items are closed.
+13. Candidate Contact Pool now owns pre-plan candidate contact: the single-caregiver UI permits
+    multiple full-coverage candidates, uses its typed API for information-1／information-2 delivery
+    and willingness history, and only permits a `willing` candidate to enter the existing fresh
+    formal-plan workflow. Candidates neither lock availability nor become schedule-confirmation
+    recipients before that formal plan exists.
+14. Schedule-confirmation Query, recipient snapshot and LINE card now share a Sunday-to-Saturday
+    weekly Preview contract. The management panel renders total service days, total weeks and each
+    week before its explicit Send control. A Streamlit render test exercises this without creating
+    a delivery task or contacting LINE.
+15. Closeout focused command, including the new panel regression:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -W error `
+  tests/test_service_date_confirmation.py `
+  tests/test_matching_schedule_confirmation.py `
+  tests/test_matching_schedule_confirmation_api_client.py `
+  tests/test_matching_schedule_confirmation_panel.py `
+  tests/test_matching_center_no_bootstrap.py `
+  tests/test_matching_center_actor.py `
+  tests/test_segmented_availability_coverage.py `
+  tests/test_assignment_plan_workflow.py `
+  tests/line/subsystems/test_line_matching_postback_stage7.py `
+  tests/line/subsystems/test_line_runtime_stage3.py -q
+```
+
+Result: `35 passed` under `-W error`.
+
+16. Full closeout command:
+
+```powershell
+.venv\Scripts\python.exe -m pytest -W error -q --basetemp .pytest_tmp\wp68-full-closeout
+```
+
+Result: `1849 passed, 87 skipped` in 64.35s. The prior `26`／`30 passed` entries are historical
+intermediate evidence; this result closes the repository regression concern but not the UI acceptance gate.
+
+17. The local FastAPI and Streamlit services both returned HTTP 200. The in-app Browser service
+policy refused localhost navigation, so no additional Chrome interaction was claimed. The focused
+typed API and Streamlit render tests above are supporting evidence only and do not replace the required UI acceptance.
+
+## Chrome UI acceptance and archive closeout
+
+18. Chrome operated the local Streamlit Matching Center against disposable database
+    `lu_test_dataset_contract_signing_v4`. It selected complete-coverage candidates one at a time into the Candidate
+    Contact Pool, leaving two candidate entries visible. Each entry rendered information-1／information-2 actions and
+    the manual willingness control. No information action was pressed because it would enqueue a LINE delivery task.
+19. Chrome recorded one candidate as `willing`, then exposed and used the formal single-caregiver-plan action. The UI
+    showed the success message after its fresh availability check; a one-segment active plan was created locally.
+20. Chrome rendered the Sunday-to-Saturday Preview before the explicit Send control: 15 service days across three
+    weeks, including the segment-specific weekly preview. Send remained unpressed, so no external LINE provider
+    delivery was requested.
+21. A local-only recipient snapshot fixture made the management override visible without sending LINE. Chrome changed
+    the customer confirmation from `manually_confirmed` to `manually_revoked`; after reload it showed the revoke event
+    and the blocked two-party gate. This proves the UI reads the current immutable event projection rather than
+    treating a previous confirmation as permanent.
+22. Final focused regression: `19 passed` under `-W error`. Final full regression:
+    `.venv\Scripts\python.exe -m pytest -W error -q --basetemp .pytest_tmp\wp68-final-full-green` →
+    `1851 passed, 87 skipped`.
+
+Archive gate: passed. Current business semantics remain in the formal Orders, Scheduling and LINE specifications;
+this Work Package and its receipt are historical implementation evidence only.

@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-12
 owner: Orders / Assignments / Scheduling / Matching / LINE Integration
 scope: Single-caregiver default matching, typed candidate coverage, confirmed service dates, customer and caregiver schedule delivery and confirmation, and formal-assignment gate
@@ -14,8 +14,8 @@ out_of_scope: Automatic schedule delivery, automatic reminders or expiry escalat
 ## 文件狀態
 
 - 文件類型：`work-package`；由功能開發計畫轉入正式架構執行記錄。
-- 功能狀態：`In-progress`
-- 實作狀態：`partial-implementation`
+- 功能狀態：`Completed`
+- 實作狀態：`implemented-and-ui-accepted`
 - 優先級：`P0／與「休假代班天數精算與行事曆差異預覽修復」並列目前最高優先`
 - 建立日期：2026-08-10
 - 更新日期：2026-08-12
@@ -806,24 +806,30 @@ UI 重整不得清空或搬移既有 matching notification intents、delivery ta
   `LineMatchingPostbackApplication` 注入 `LineWebhookIdentityHandlers`；日期表 postback 與後續文字
   理由會透過同一 Unit of Work 進入 schedule-confirmation repository。
 - 已完成 focused regression：confirmed dates、typed schedule client、snapshot enqueue、LINE
-  postback／拒絕理由、target-segment assignment gate、typed coverage 與 canonical worker boundary
-  均以 `-W error` 驗證（`30 passed`）；確認查詢另回傳最後事件的來源、UTC 時間與拒絕理由，管理 UI
-  不再只能顯示狀態。
-- 2026-08-12 內建瀏覽器驗證補正：單月嫂 UI 的 coverage view 已與 availability API schema 對齊；
-  `coverage_day_count` 由正式 service dates 計算。development bypass 的 matching-plan command 使用
-  canonical actor，且 UI 不傳 workflow 自行衍生的 `segment_order`。未確認服務日期時，日期表面板
-  顯示具體 blocker，而非 Streamlit traceback 或泛用請求失敗。
-- 尚未完成：matching-center schedule panel 的 Chrome UI 驗收、full-suite 既有失敗的獨立
-  reconciliation，以及 archive gate。`declared_status` 維持 `in-progress`，本 Work Package 不可封存。
-- 內建瀏覽器已補足 matching-center UI 驗收，但用同一新建測試方案繼續訂單管理日期確認時，既有
-  operator bootstrap flow 未產生 receipt／error，無法建立 roots；此 `live-drift` 不在本 WP write set，
-  但使同一案件無法完成 Send UI continuation。
+  postback／拒絕理由、target-segment assignment gate、typed coverage、candidate contact pool 與 canonical
+  worker boundary 均以 `-W error` 驗證。2026-08-12 closeout focused command 結果為 `34 passed`。
+- Candidate Contact Pool 已接入單月嫂 UI：可多選完整覆蓋候選、逐人發送資訊-1／2、保存意願與理由；僅
+  `willing` 候選可經 fresh availability check 建立一段正式 plan。候選不佔用檔期，也不成為日期表 recipient。
+- 日期表 Query、immutable recipient snapshot、LINE card 與 Streamlit panel 使用同一週日到週六 typed Preview，
+  顯示總服務日、總週數與每週日期／服務日數；面板的可重跑 Streamlit render test 驗證 Preview 在 Send 前顯示。
+- 全套 regression：`.venv\\Scripts\\python.exe -m pytest -W error -q --basetemp .pytest_tmp\\wp68-full-closeout`
+  結果為 `1849 passed, 87 skipped`。先前記錄的 full-suite failure 與 focused `30 passed` 計數已由此結果取代。
+- Chrome UI acceptance completed on a disposable `lu_test_*` database: Candidate Contact Pool added two complete-coverage
+  candidates, displayed per-candidate information actions and willingness state, and exposed formal-plan creation only
+  after a candidate was marked `willing`. The formal single-caregiver plan was then created through the UI.
+- Chrome also rendered the Sunday-to-Saturday date Preview before Send and verified the recipient override control by
+  changing a local customer recipient from `manually_confirmed` to `manually_revoked`; after reload the UI showed the
+  current revoked status and blocked the formal-assignment gate. No LINE Send button was pressed and no provider worker
+  was run.
+- Full regression after the schema release/receipt manifest reconciliation:
+  `.venv\Scripts\python.exe -m pytest -W error -q --basetemp .pytest_tmp\wp68-final-full-green` →
+  `1851 passed, 87 skipped`.
 
 ### 16.1 Focused receipt
 
-- `../03_追蹤清單與證據/evidence/2026-08-12_wp68_matching_schedule_confirmation_receipt.md`
-  記錄 Chrome Order Management 服務日期 Preview／Apply、current version `2 → 3`、日期表 Send、
-  recipient snapshot、雙方確認與 server-side assignment gate 的本機測試資料證據。
+- `../receipts/2026-08-12_wp68_matching_schedule_confirmation_receipt.md`
+  記錄服務日期 Preview／Apply、日期表 Send、recipient snapshot、雙方確認、candidate contact pool、
+  server-side assignment gate、candidate contact pool、週表 Preview、Chrome UI acceptance 與 full-suite regression。
 
 - `ui/pages/scheduling/matching_center.py`：目前三個子頁、raw summary renderer、多月嫂候選標籤、
   「重新查詢最新檔期」與 `segment_candidates` dataframe 的 live 證據。

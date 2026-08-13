@@ -15,7 +15,7 @@
   "input_digests": {
     "runtime_worker_tests": "0ac8b052150f86298a971dae829abcde9736acbd109c10d387664209978a6fea",
     "cutover_readiness_tests": "965bad8457988b198461d1fe6dd884536bae1cf23c95919e1fc7838c6ffe3217",
-    "supervisor_boundary_tests": "37f069073acccecec91f2a94c438617b8e672b0224386f42925a6f4fe35ce81c"
+    "supervisor_boundary_tests": "9fbcdf6b893b49c4df9ac3e4da459d9492decc966b5fb730026a0f424c08eb65"
   },
   "input_paths": {
     "runtime_worker_tests": "tests/line/subsystems/test_line_runtime_stage3.py",

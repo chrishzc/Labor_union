@@ -67,12 +67,26 @@ class CaregiverSegmentDraft(BaseModel):
         return _as_iso_date(value, "end_date")
 
 
+class CaregiverMatchingFilterPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schedule: bool = True
+    region: bool = True
+    preferred_service_days: bool = True
+    cooking: bool = True
+    daily_service_hours: bool = True
+    preferred_service_days_tolerance: int = Field(default=0, ge=0, le=60)
+    enabled_preference_keys: list[str] = Field(default_factory=list)
+
 class CaregiverSegmentAvailabilitySearchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     segment_count: Literal[1, 2, 3, 4] = Field(...)
     segment_drafts: list[CaregiverSegmentDraft] = Field(...)
     as_of: date = Field(...)
+    filters: CaregiverMatchingFilterPolicy = Field(
+        default_factory=CaregiverMatchingFilterPolicy
+    )
 
     @field_validator("as_of", mode="before")
     @classmethod
@@ -148,6 +162,7 @@ class CaregiverCandidateOption(BaseModel):
     full_selected_segment_coverage: bool
     uncovered_segment_dates: list[date]
     source_scheduling_version: int = Field(ge=0)
+    filter_results: dict[str, bool] = Field(default_factory=dict)
 
 
 class CaregiverConflict(BaseModel):
@@ -284,6 +299,7 @@ def search_caregiver_segment_availability(
             segment_count=request.segment_count,
             segment_drafts=[draft.model_dump(mode="json", exclude_none=True) for draft in request.segment_drafts],
             as_of=request.as_of,
+            filter_policy=request.filters.model_dump(),
         )
         return _response_from_service(
             service_result,

@@ -22,7 +22,7 @@ authorized_by: user
 「服務登記／服務說明」，但 `MySqlLineIdentityManagementRepository` 仍從
 `line_rich_menu_publications` 選出 2026-08-09 的「訂單查詢／尋找專員」。解除 worker 因而
 成功套用錯誤的舊 provider menu。這違反
-`01_規格基線/21_LINE身分管理與解除正式規格.md` 第 5、6、8 節。
+`01_規格基線/23_LINE身分管理與解除正式規格.md` 第 5、6、8 節。
 
 ## Scope 與 write set
 
@@ -34,7 +34,7 @@ authorized_by: user
   - `db/schema_parts/179_line_identity_canonical_menu_publication.sql`
   - `db/migration_releases/labor_union_2026_08_12_line_stage13_v1*.json`
   - `tests/test_line_identity_management_first_release.py`
-  - `document/架構重整/01_規格基線/21_LINE身分管理與解除正式規格.md`
+  - `document/架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md`
   - 本 Work Package、索引與對應 evidence receipt。
 
 ## Out of scope

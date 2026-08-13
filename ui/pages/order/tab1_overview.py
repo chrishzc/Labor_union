@@ -50,6 +50,14 @@ def _select_case_number(filtered_orders):
         _order_label(order): str(order.get("case_no"))
         for order in filtered_orders
     }
+    session_state = getattr(st, "session_state", {})
+    preferred_case_no = session_state.pop("orders_preferred_case_no", None)
+    preferred_label = next(
+        (label for label, case_no in order_options.items() if case_no == preferred_case_no),
+        None,
+    )
+    if preferred_label is not None:
+        session_state[ORDER_SELECTION_WIDGET_KEY] = preferred_label
     selected_label = st.selectbox(
         "選擇要編輯的訂單",
         options=list(order_options.keys()),
