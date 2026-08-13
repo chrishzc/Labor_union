@@ -1,6 +1,6 @@
 """
 File: migrate_preserved_database_additive_schema.py
-Description: 驗證 release chain，並以唯讀來源、隔離候選及 durable receipt 執行 MySQL 升級。
+Description: 驗證 release chain，並在隔離候選中安全升級 MySQL schema。
 """
 
 from __future__ import annotations
@@ -148,6 +148,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_11_line_stage11_v1.json",
     "labor_union_2026_08_11_line_stage12_v1.json",
     "labor_union_2026_08_13_wp72_v1.json",
+    "labor_union_2026_08_13_wp77_v1.json",
+    "labor_union_2026_08_13_wp80_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -533,6 +535,7 @@ def _load_release_chain() -> ReleaseManifest:
         fingerprints.append(_sha256_file(manifest_path))
         final_compatibility = payload.get("application_compatibility") or {}
         final_contracts = tuple(payload.get("verification_contracts") or ())
+    artifacts = _dependency_ordered_artifacts(artifacts)
     fingerprint = _sha256_bytes(json.dumps(
         {"manifests": fingerprints, "artifacts": artifacts},
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -544,6 +547,35 @@ def _load_release_chain() -> ReleaseManifest:
         final_contracts,
         descriptors,
     )
+
+
+def _dependency_ordered_artifacts(
+    artifacts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_name = {str(artifact["name"]): artifact for artifact in artifacts}
+    original_position = {name: index for index, name in enumerate(by_name)}
+    ranks: dict[str, float] = {}
+
+    def rank(name: str, visiting: set[str]) -> float:
+        if name in ranks:
+            return ranks[name]
+        if name in visiting:
+            raise UpgradeBlocked("release artifact dependencies are cyclic")
+        artifact = by_name.get(name)
+        if artifact is None:
+            raise UpgradeBlocked(f"release artifact dependency is unavailable: {name}")
+        dependency_ranks = [
+            rank(str(dependency), visiting | {name})
+            for dependency in artifact.get("dependencies") or ()
+            if str(dependency) in by_name
+        ]
+        ranks[name] = max([
+            float(original_position[name]),
+            *(item + 0.5 for item in dependency_ranks),
+        ])
+        return ranks[name]
+
+    return sorted(artifacts, key=lambda artifact: rank(str(artifact["name"]), set()))
 
 
 RELEASE_MANIFEST = _load_release_chain()
@@ -2556,6 +2588,7 @@ def _canonical_artifact_metadata_state(
     defer_missing_triggers: bool = False,
 ) -> str:
     descriptor = _canonical_artifact_descriptor(part_name)
+    _apply_legacy_knowledge_identifier_contract(descriptor, snapshot, part_name)
     columns_by_table: dict[str, dict[str, Mapping[str, Any]]] = {}
     for row in snapshot["columns"]:
         columns_by_table.setdefault(row["table_name"], {})[
@@ -2699,6 +2732,23 @@ def _canonical_artifact_metadata_state(
     return "exact"
 
 
+def _apply_legacy_knowledge_identifier_contract(
+    descriptor: dict[str, Any],
+    snapshot: Mapping[str, Any],
+    part_name: str,
+) -> None:
+    if part_name not in {"148_knowledge_retrieval.sql", "163_knowledge_runtime.sql"}:
+        return
+    identifier_type = _knowledge_item_identifier_type(snapshot)
+    if identifier_type != "bigint unsigned":
+        return
+    if part_name == "148_knowledge_retrieval.sql":
+        descriptor["tables"]["knowledge_items"]["id"]["column_type"] = identifier_type
+        descriptor["tables"]["knowledge_item_events"]["knowledge_item_id"]["column_type"] = identifier_type
+    else:
+        descriptor["tables"]["knowledge_item_versions"]["item_id"]["column_type"] = identifier_type
+
+
 def _allowed_later_artifact_columns(
     part_name: str,
     table: str,
@@ -2760,12 +2810,21 @@ def schema_statements_for_state(
     snapshot: Mapping[str, Any],
 ) -> list[str]:
     statements = split_sql(part.read_text(encoding="utf-8"))
+    if part.name == "148_knowledge_retrieval.sql" and state == "partial":
+        return _knowledge_retrieval_recovery_statements(statements, snapshot)
     if part.name != "163_knowledge_runtime.sql" or state != "partial":
         if part.name == "186_line_identity_management.sql" and state == "partial":
             if not _is_recoverable_line_identity_legacy_state(snapshot):
                 raise UpgradeBlocked("line identity management partial state is not resumable")
         return statements
     return _knowledge_runtime_recovery_statements(statements, snapshot)
+
+
+def _knowledge_retrieval_recovery_statements(
+    statements: list[str],
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    return _knowledge_foreign_key_compatible_statements(statements, snapshot)
 
 
 def _knowledge_runtime_recovery_statements(
@@ -2788,6 +2847,7 @@ def _knowledge_runtime_recovery_statements(
         raise UpgradeBlocked(
             "knowledge runtime index exists without source_identity"
         )
+    statements = _knowledge_foreign_key_compatible_statements(statements, snapshot)
     if not source_column:
         return statements
     remaining = statements[1:]
@@ -2798,6 +2858,43 @@ def _knowledge_runtime_recovery_statements(
         "ADD UNIQUE KEY uq_knowledge_source_identity (source_identity)"
     )
     return [add_index, *remaining]
+
+
+def _knowledge_foreign_key_compatible_statements(
+    statements: list[str],
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    identifier_type = _knowledge_item_identifier_type(snapshot)
+    if identifier_type == "bigint":
+        return statements
+    replacements = (
+        ("knowledge_item_id BIGINT NOT NULL", "knowledge_item_id BIGINT UNSIGNED NOT NULL"),
+        ("item_id BIGINT NOT NULL", "item_id BIGINT UNSIGNED NOT NULL"),
+    )
+    return [_replace_statement_types(statement, replacements) for statement in statements]
+
+
+def _knowledge_item_identifier_type(snapshot: Mapping[str, Any]) -> str:
+    columns = {
+        (str(row.get("table_name")), str(row.get("column_name"))): row
+        for row in snapshot.get("columns", ())
+    }
+    row = columns.get(("knowledge_items", "id"))
+    if row is None:
+        return "bigint"
+    column_type = _normalize_column_type_contract(row.get("column_type"))
+    if column_type in {"bigint", "bigint unsigned"}:
+        return column_type
+    raise UpgradeBlocked("knowledge_items.id type is not a supported legacy shape")
+
+
+def _replace_statement_types(
+    statement: str,
+    replacements: tuple[tuple[str, str], ...],
+) -> str:
+    for source, target in replacements:
+        statement = statement.replace(source, target)
+    return statement
 
 
 def apply_schema(
@@ -3019,6 +3116,8 @@ def _run_project_python(
             "DB_USER": config.user,
             "DB_PASSWORD": config.password,
             "DB_DATABASE": database,
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
         }
     )
     completed = subprocess.run(
@@ -3027,17 +3126,19 @@ def _run_project_python(
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
         check=False,
     )
     if completed.returncode != 0:
         raise UpgradeBlocked(
             f"candidate migration failed: {Path(arguments[0]).name}"
         )
+    try:
+        stdout_text = completed.stdout.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise UpgradeBlocked("candidate migration stdout is not UTF-8") from error
     last_line = next(
         (
-            line for line in reversed(completed.stdout.splitlines())
+            line for line in reversed(stdout_text.splitlines())
             if line.strip().startswith("{")
         ),
         "",
@@ -3045,11 +3146,11 @@ def _run_project_python(
     try:
         payload = json.loads(last_line)
     except json.JSONDecodeError:
-        payload = {"stdout_sha256": _sha256_bytes(completed.stdout.encode())}
+        payload = {"stdout_sha256": _sha256_bytes(completed.stdout)}
     return {
         "exit_code": completed.returncode,
         "result": payload,
-        "stderr_sha256": _sha256_bytes(completed.stderr.encode()),
+        "stderr_sha256": _sha256_bytes(completed.stderr),
     }
 
 
@@ -3624,7 +3725,13 @@ def verify_candidate(
             and not has_knowledge_identity_backfill
             and actual.get("checksum") != evidence.get("checksum")
         ):
-            raise UpgradeBlocked(f"preserved table checksum changed: {table}")
+            # ALTER TABLE can legitimately change MySQL's physical checksum without
+            # changing a preserved row (for example, an enum extension).
+            additive_projection_preservation[table] = (
+                _verify_source_column_projection_preserved(
+                    config, source, candidate, table, source_snapshot
+                )
+            )
     system_alert_preservation = (
         _verify_legacy_system_alert_rows(config, source, candidate)
         if source_alert_state == "absent"

@@ -21,7 +21,9 @@
   },
   "artifacts": [
     {
-      "dependencies": [],
+      "dependencies": [
+        "186_line_identity_management.sql"
+      ],
       "data_effect": "schema_only",
       "name": "179_line_identity_canonical_menu_publication.sql",
       "relative_path": "db/schema_parts/179_line_identity_canonical_menu_publication.sql",

@@ -56,6 +56,10 @@ Web upload；BeClass scripts 僅保留為受控的 historical import，不再是
 .\scripts\launchers\start_local_development.bat --smoke-test
 ```
 
+若本機未安裝 `mysql`／`mysqldump`，而 MySQL 是在 Docker 容器中執行，請在個人的 `.env`
+設定 `MYSQL_CONTAINER=<docker ps 顯示的容器名稱>`（例如 `mysql_db`）。更新工具會在該容器內
+執行 MySQL CLI；容器名稱是每位開發者的本機設定，請勿寫死在程式或提交 `.env`。
+
 Windows smoke 會實際檢查 MySQL、API、Streamlit、monitor、file watcher 與 durable worker，結束時
 終止本次建立的應用程序。LINE worker 只有在本機 runtime 設定與 access token 有效時才啟動；未設定
 LINE 的開發者會看到 skipped 提示，不影響其餘服務。
@@ -188,6 +192,8 @@ Worker，但**不會**自動套用資料庫 schema。所有 operator-facing 腳�
 `scripts/launchers/update_local_database.bat`。流程會先完整備份舊 `union_db`，還原到暫存
 candidate，對 candidate 套用 versioned migration／backfill 並驗證；只有全部通過且 source 未在
 過程中改變，才以相同名稱替換 DB，最終驗證失敗則使用第一份 dump 嘗試 rollback。
+若 MySQL 在 Docker，於 `.env` 設定 `MYSQL_CONTAINER`；工具會使用該容器中的 MySQL CLI，
+不需要每位開發者在 Windows 安裝額外的 client。
 
 若要捨棄現有資料並恢復成版本庫模板測試資料，執行 `scripts/launchers/reset_DB.bat`。它會先驗證
 `fixtures/db_snapshot_v2/v3`，預檢成功且使用者輸入 `RESET` 後，才刪除 `union_db`、建立新 DB 並

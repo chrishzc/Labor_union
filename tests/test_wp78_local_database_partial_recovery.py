@@ -17,15 +17,17 @@ from scripts import update_local_database as update
 
 ROOT = Path(__file__).resolve().parents[1]
 KNOWLEDGE_RUNTIME = ROOT / "db/schema_parts/163_knowledge_runtime.sql"
+KNOWLEDGE_RETRIEVAL = ROOT / "db/schema_parts/148_knowledge_retrieval.sql"
 LINE_IDENTITY_MANAGEMENT = ROOT / "db/schema_parts/186_line_identity_management.sql"
 
 
 def _knowledge_runtime_snapshot(*, source_column: bool, source_index: bool) -> dict:
     return {
-        "columns": ([{
-            "table_name": "knowledge_items",
-            "column_name": "source_identity",
-        }] if source_column else []),
+        "columns": ([
+            {"table_name": "knowledge_items", "column_name": "id", "column_type": "bigint unsigned", "is_nullable": "NO", "column_default": None, "extra": "auto_increment"},
+            {"table_name": "knowledge_items", "column_name": "source_identity"},
+        ] if source_column else [{
+            "table_name": "knowledge_items", "column_name": "id", "column_type": "bigint unsigned", "is_nullable": "NO", "column_default": None, "extra": "auto_increment"},]),
         "indexes": ([{
             "table_name": "knowledge_items",
             "index_name": "uq_knowledge_source_identity",
@@ -94,6 +96,46 @@ def test_runtime_partial_recovery_rejects_an_impossible_index_boundary() -> None
             "partial",
             _knowledge_runtime_snapshot(source_column=False, source_index=True),
         )
+
+
+def test_knowledge_recovery_matches_a_legacy_unsigned_parent_identifier() -> None:
+    statements = migration.schema_statements_for_state(
+        KNOWLEDGE_RUNTIME,
+        "partial",
+        _knowledge_runtime_snapshot(source_column=False, source_index=False),
+    )
+
+    assert "item_id BIGINT UNSIGNED NOT NULL" in "\n".join(statements)
+
+
+def test_knowledge_retrieval_recovery_matches_a_legacy_unsigned_parent_identifier() -> None:
+    statements = migration.schema_statements_for_state(
+        KNOWLEDGE_RETRIEVAL,
+        "partial",
+        _knowledge_runtime_snapshot(source_column=False, source_index=False),
+    )
+
+    assert "knowledge_item_id BIGINT UNSIGNED NOT NULL" in "\n".join(statements)
+
+
+def test_knowledge_descriptor_accepts_only_the_known_unsigned_identifier_variant() -> None:
+    snapshot = _knowledge_runtime_snapshot(source_column=False, source_index=False)
+    descriptor = migration._canonical_artifact_descriptor("148_knowledge_retrieval.sql")
+
+    migration._apply_legacy_knowledge_identifier_contract(
+        descriptor, snapshot, "148_knowledge_retrieval.sql"
+    )
+
+    assert descriptor["tables"]["knowledge_items"]["id"]["column_type"] == "bigint unsigned"
+    assert descriptor["tables"]["knowledge_item_events"]["knowledge_item_id"]["column_type"] == "bigint unsigned"
+
+
+def test_knowledge_recovery_rejects_an_unknown_parent_identifier_type() -> None:
+    snapshot = _knowledge_runtime_snapshot(source_column=False, source_index=False)
+    snapshot["columns"][0]["column_type"] = "int unsigned"
+
+    with pytest.raises(migration.UpgradeBlocked, match="supported legacy shape"):
+        migration.schema_statements_for_state(KNOWLEDGE_RUNTIME, "partial", snapshot)
 
 
 def test_local_update_allows_only_reviewed_partial_artifacts() -> None:

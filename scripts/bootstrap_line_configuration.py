@@ -1,4 +1,7 @@
-"""Validate or seed canonical LINE configuration revisions from bootstrap JSON files."""
+"""
+File: bootstrap_line_configuration.py
+Description: 驗證、初始化或受控修復 MySQL 中的 canonical LINE 設定。
+"""
 
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from domains.line.configuration import LineConfigurationKind
+from api.schemas.line_config import LineMenusConfig
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from shared_kernel.identities import ActorContext, CorrelationId
 from subsystems.line.capabilities import LineCapability
@@ -39,6 +43,11 @@ def main() -> int:
         action="store_true",
         help="Write only missing revision-0 LINE configuration into MySQL.",
     )
+    parser.add_argument(
+        "--repair-empty-rich-menus",
+        action="store_true",
+        help="Append a repair revision only when canonical Rich Menu configuration is exactly {}.",
+    )
     arguments = parser.parse_args()
     definitions = _definitions()
     validate_message_templates(definitions[LineConfigurationKind.MESSAGE_TEMPLATES])
@@ -46,6 +55,9 @@ def main() -> int:
         definitions[LineConfigurationKind.MESSAGE_SCHEDULES],
         definitions[LineConfigurationKind.MESSAGE_TEMPLATES],
     )
+    LineMenusConfig.model_validate(definitions[LineConfigurationKind.RICH_MENUS])
+    if arguments.repair_empty_rich_menus and not arguments.apply:
+        parser.error("--repair-empty-rich-menus requires --apply")
     if not arguments.apply:
         print("LINE configuration bootstrap JSON validation passed; no DB write performed.")
         return 0
@@ -61,6 +73,12 @@ def main() -> int:
         correlation_id=CorrelationId("line-config-bootstrap:v1"),
     )
     print(f"Applied {len(results)} missing canonical LINE configuration revision(s).")
+    if arguments.repair_empty_rich_menus:
+        repair = LineConfigurationApplication(open_line_unit_of_work).repair_empty_rich_menu_configuration(
+            definitions[LineConfigurationKind.RICH_MENUS], actor,
+            correlation_id=CorrelationId("line-config-repair:rich-menus-empty:v1"),
+        )
+        print("Repaired exact empty Rich Menu configuration." if repair else "Rich Menu configuration was not exactly empty; no repair applied.")
     return 0
 
 

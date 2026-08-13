@@ -1,3 +1,4 @@
+<!-- File: gateway.html | Description: 依 LIFF target 導向客戶登記、資料異動與月嫂服務頁。 -->
 <!DOCTYPE html>
 <html lang="zh-Hant-TW">
 <head>
@@ -174,6 +175,7 @@
     const urlUserId = urlParams.get('userId');
     const targetPage = urlParams.get('target') || liffStateParams.get('target');
     const targetPaths = {
+        registration: '/line-registration',
         profile_update: '/profile-update-page',
         staff_order_search: '/staff-order-search-page',
         staff_schedule: '/staff-schedule-page'
