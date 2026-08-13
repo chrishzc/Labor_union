@@ -142,7 +142,11 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_09_v7.json",
     "labor_union_2026_08_09_v8.json",
     "labor_union_2026_08_09_v9.json",
+    "labor_union_2026_08_12_line_stage13_v1.json",
     "labor_union_2026_08_12_wp68_v1.json",
+    "labor_union_2026_08_11_provisional_registration_case_issue_v1.json",
+    "labor_union_2026_08_11_line_stage11_v1.json",
+    "labor_union_2026_08_11_line_stage12_v1.json",
     "labor_union_2026_08_13_wp72_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
@@ -1442,7 +1446,13 @@ def _owned_classification(
             "104_order_lifecycle_state_history.sql",
             "105_order_service_time_terms.sql",
             "106_order_lifecycle_control_facts.sql",
+            "148_knowledge_retrieval.sql",
+            "163_knowledge_runtime.sql",
+            "186_line_identity_management.sql",
         }:
+            if part == "186_line_identity_management.sql":
+                result[part] = _line_identity_management_state(snapshot)
+                continue
             result[part] = _canonical_artifact_metadata_state(
                 snapshot, part, defer_missing_triggers=defer_missing_triggers
             )
@@ -2163,6 +2173,8 @@ def _parse_column_definition(definition: str) -> tuple[str, dict[str, Any]]:
         token = default_match.group(1)
         if token.upper() != "NULL":
             default = token.strip("'\"").casefold()
+            if default in {"false", "true"}:
+                default = "0" if default == "false" else "1"
     extra_parts: list[str] = []
     if (
         default is not None
@@ -2221,7 +2233,8 @@ def _normalize_column_type_contract(value: Any) -> str:
                 normalized.append(" ")
             pending_space = False
             normalized.append(char.casefold())
-    return "".join(normalized).strip()
+    contract = "".join(normalized).strip()
+    return "tinyint(1)" if contract in {"bool", "boolean"} else contract
 
 
 def _parse_index_columns(value: str) -> tuple[str, ...]:
@@ -2417,6 +2430,48 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "extra": "",
             }
         }
+    if part_name == "163_knowledge_runtime.sql":
+        descriptor["parent_columns"]["knowledge_items"] = {
+            "source_identity": {
+                "column_type": "varchar(191)",
+                "is_nullable": "YES",
+                "column_default": None,
+                "extra": "",
+            }
+        }
+        descriptor["indexes"][(
+            "knowledge_items",
+            "uq_knowledge_source_identity",
+        )] = {
+            "non_unique": 0,
+            "columns": ("source_identity",),
+        }
+    if part_name == "186_line_identity_management.sql":
+        descriptor["tables"]["line_identity_revocation_requests"][
+            "active_marker"
+        ]["extra"] = "stored generated"
+        descriptor["parent_columns"]["line_identity_bindings"] = {
+            "binding_status": {
+                "column_type": "enum('unbound','pending_review','bound','revocation_pending','revoked')",
+                "is_nullable": "NO",
+                "column_default": "unbound",
+                "extra": "",
+            },
+            "active_subject_key": {
+                "column_type": "varchar(400)",
+                "is_nullable": "YES",
+                "column_default": None,
+                "extra": "stored generated",
+            },
+        }
+        descriptor["parent_columns"]["line_identity_binding_events"] = {
+            "action": {
+                "column_type": "enum('claim_submitted','bound','revocation_requested','revoked','rebound','legacy_imported')",
+                "is_nullable": "NO",
+                "column_default": None,
+                "extra": "",
+            }
+        }
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -2475,6 +2530,25 @@ def _show_create_check_clauses(
     return checks
 
 
+def _normalize_foreign_key_rule(value: Any) -> str:
+    rule = re.sub(r"\s+", " ", str(value or "")).upper()
+    return "RESTRICT" if rule == "NO ACTION" else rule
+
+
+def _normalize_check_contract(value: Any) -> str:
+    raw = str(value or "")
+    normalized = (
+        raw
+        if re.match(r"^(?:atom|and|or|not)\(", raw)
+        else _normalize_sql_contract(raw)
+    )
+    previous = None
+    while normalized != previous:
+        previous = normalized
+        normalized = re.sub(r"([=<>])\(([^()]*)\)", r"\1\2", normalized)
+    return normalized.replace("=false", "=0").replace("=true", "=1")
+
+
 def _canonical_artifact_metadata_state(
     snapshot: Mapping[str, Any],
     part_name: str,
@@ -2513,8 +2587,11 @@ def _canonical_artifact_metadata_state(
                 or actual_extra != expected["extra"]
             ):
                 return "drift"
+        allowed_extra_columns = _allowed_later_artifact_columns(
+            part_name, table
+        )
         if table in required_tables and actual:
-            if set(actual) != set(expected_columns):
+            if set(actual) != set(expected_columns) | allowed_extra_columns:
                 return "drift"
     indexes = {
         (row["table_name"], row["index_name"]): {
@@ -2564,8 +2641,12 @@ def _canonical_artifact_metadata_state(
                 str(item["referenced_column_name"]).casefold()
                 for item in columns
             ),
-            "update_rule": str(rules.get("update_rule") or "").upper(),
-            "delete_rule": str(rules.get("delete_rule") or "").upper(),
+            "update_rule": _normalize_foreign_key_rule(
+                rules.get("update_rule")
+            ),
+            "delete_rule": _normalize_foreign_key_rule(
+                rules.get("delete_rule")
+            ),
         }
         if row["constraint_type"] != "FOREIGN KEY" or actual != expected:
             return "drift"
@@ -2580,8 +2661,8 @@ def _canonical_artifact_metadata_state(
             or str(row.get("enforced") or "YES").upper() != "YES"
             or (
                 actual_clause != expected_clause
-                and _normalize_sql_contract(actual_clause)
-                != expected_clause
+                and _normalize_check_contract(actual_clause)
+                != _normalize_check_contract(expected_clause)
             )
         ):
             return "drift"
@@ -2616,6 +2697,107 @@ def _canonical_artifact_metadata_state(
     if not all(owned_presence):
         return "partial"
     return "exact"
+
+
+def _allowed_later_artifact_columns(
+    part_name: str,
+    table: str,
+) -> set[str]:
+    if (
+        part_name == "148_knowledge_retrieval.sql"
+        and table == "knowledge_items"
+    ):
+        return {"source_identity"}
+    return set()
+
+
+def _line_identity_management_state(snapshot: Mapping[str, Any]) -> str:
+    canonical_state = _canonical_artifact_metadata_state(
+        snapshot, "186_line_identity_management.sql"
+    )
+    if canonical_state == "exact":
+        return "exact"
+    if _is_recoverable_line_identity_legacy_state(snapshot):
+        return "partial"
+    return "drift"
+
+
+# Kept cohesive because this is one released legacy metadata fingerprint.
+def _is_recoverable_line_identity_legacy_state(
+    snapshot: Mapping[str, Any],
+) -> bool:
+    columns = {
+        (row["table_name"], row["column_name"]): row
+        for row in snapshot.get("columns", ())
+    }
+    if any(
+        table == "line_identity_revocation_requests"
+        for table, _column in columns
+    ):
+        return False
+    allowed_types = {
+        ("line_identity_bindings", "binding_status"): {
+            "enum('unbound','pending_review','bound','revoked')",
+            "enum('unbound','pending_review','bound','revocation_pending','revoked')",
+        },
+        ("line_identity_bindings", "active_subject_key"): {"varchar(400)"},
+        ("line_identity_binding_events", "action"): {
+            "enum('claim_submitted','bound','revoked','rebound','legacy_imported')",
+            "enum('claim_submitted','bound','revocation_requested','revoked','rebound','legacy_imported')",
+        },
+    }
+    for key, expected_types in allowed_types.items():
+        row = columns.get(key)
+        if row is None or row["column_type"] not in expected_types:
+            return False
+    active_key = columns[("line_identity_bindings", "active_subject_key")]
+    return "generated" in str(active_key.get("extra") or "").casefold()
+
+
+def schema_statements_for_state(
+    part: Path,
+    state: str,
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    statements = split_sql(part.read_text(encoding="utf-8"))
+    if part.name != "163_knowledge_runtime.sql" or state != "partial":
+        if part.name == "186_line_identity_management.sql" and state == "partial":
+            if not _is_recoverable_line_identity_legacy_state(snapshot):
+                raise UpgradeBlocked("line identity management partial state is not resumable")
+        return statements
+    return _knowledge_runtime_recovery_statements(statements, snapshot)
+
+
+def _knowledge_runtime_recovery_statements(
+    statements: list[str],
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    columns = {
+        (row["table_name"], row["column_name"])
+        for row in snapshot.get("columns", ())
+    }
+    indexes = {
+        (row["table_name"], row["index_name"])
+        for row in snapshot.get("indexes", ())
+    }
+    source_column = ("knowledge_items", "source_identity") in columns
+    source_index = (
+        "knowledge_items", "uq_knowledge_source_identity"
+    ) in indexes
+    if source_index and not source_column:
+        raise UpgradeBlocked(
+            "knowledge runtime index exists without source_identity"
+        )
+    if not source_column:
+        return statements
+    remaining = statements[1:]
+    if source_index:
+        return remaining
+    add_index = (
+        "ALTER TABLE knowledge_items "
+        "ADD UNIQUE KEY uq_knowledge_source_identity (source_identity)"
+    )
+    return [add_index, *remaining]
 
 
 def apply_schema(
@@ -2696,7 +2878,9 @@ def apply_schema(
             if cursor.fetchone()["db"] != candidate:
                 raise UpgradeBlocked("mutation connection is not candidate")
             for part in SCHEMA_PARTS:
-                statements = split_sql(part.read_text(encoding="utf-8"))
+                statements = schema_statements_for_state(
+                    part, states.get(part.name, "absent"), before
+                )
                 if states.get(part.name) == "exact":
                     steps.append(
                         {
@@ -3327,6 +3511,55 @@ def _verify_orders_preservation(
     return after
 
 
+def _verify_knowledge_source_identity_backfill(
+    config: DatabaseConfig,
+    source: str,
+    candidate: str,
+    source_snapshot: Mapping[str, Any],
+) -> dict[str, Any]:
+    source_columns = [
+        name for name in _table_columns(source_snapshot, "knowledge_items")
+        if name not in {"source_identity", "updated_at"}
+    ]
+    before = _table_projection_evidence(
+        config, source, "knowledge_items", source_columns
+    )
+    after = _table_projection_evidence(
+        config, candidate, "knowledge_items", source_columns
+    )
+    if after != before:
+        raise UpgradeBlocked("knowledge_items facts changed during backfill")
+    source_rows = _knowledge_source_identity_rows(config, source)
+    candidate_rows = _knowledge_source_identity_rows(config, candidate)
+    expected = [
+        {
+            "id": row["id"],
+            "source_identity": (
+                row["source_identity"] or f"knowledge:{row['id']}"
+            ),
+        }
+        for row in source_rows
+    ]
+    if candidate_rows != expected:
+        raise UpgradeBlocked("knowledge source identity backfill is invalid")
+    return {"projection": after, "rows": len(candidate_rows)}
+
+
+def _knowledge_source_identity_rows(
+    config: DatabaseConfig,
+    database: str,
+) -> list[dict[str, Any]]:
+    connection = config.connect(database)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id, source_identity FROM knowledge_items ORDER BY id"
+            )
+            return [dict(row) for row in cursor.fetchall()]
+    finally:
+        connection.close()
+
+
 def verify_candidate(
     config: DatabaseConfig,
     source: str,
@@ -3337,6 +3570,9 @@ def verify_candidate(
     if receipt.get("status") not in VERIFYABLE_CANDIDATE_STATUSES:
         raise UpgradeBlocked("candidate has not completed schema/backfill")
     source_snapshot = _schema_snapshot(config, source)
+    source_objects = _owned_classification(
+        source_snapshot, defer_missing_triggers=True
+    )
     source_alert_state = _system_alert_projection_state(source_snapshot)
     source_resume_state = _matching_records_resume_delivery_state(
         source_snapshot
@@ -3358,6 +3594,10 @@ def verify_candidate(
         source_columns = _table_columns(source_snapshot, table)
         candidate_columns = _table_columns(candidate_snapshot, table)
         has_additive_columns = source_columns != candidate_columns
+        has_knowledge_identity_backfill = (
+            table == "knowledge_items"
+            and source_objects.get("163_knowledge_runtime.sql") == "partial"
+        )
         if has_additive_columns:
             additive_projection_preservation[table] = (
                 _verify_source_column_projection_preserved(
@@ -3368,6 +3608,12 @@ def verify_candidate(
                     source_snapshot,
                 )
             )
+        elif has_knowledge_identity_backfill:
+            additive_projection_preservation[table] = (
+                _verify_knowledge_source_identity_backfill(
+                    config, source, candidate, source_snapshot
+                )
+            )
         if (
             table not in {"orders", "matching_records"}
             and not (
@@ -3375,6 +3621,7 @@ def verify_candidate(
                 and source_alert_state == "absent"
             )
             and not has_additive_columns
+            and not has_knowledge_identity_backfill
             and actual.get("checksum") != evidence.get("checksum")
         ):
             raise UpgradeBlocked(f"preserved table checksum changed: {table}")

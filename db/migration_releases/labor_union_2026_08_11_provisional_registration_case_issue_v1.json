@@ -30,6 +30,7 @@
   "backfills": [],
   "descriptor_artifact": {
     "name": "labor_union_2026_08_11_provisional_registration_case_issue_v1.descriptors.json",
-    "relative_path": "db/migration_releases/labor_union_2026_08_11_provisional_registration_case_issue_v1.descriptors.json"
+    "relative_path": "db/migration_releases/labor_union_2026_08_11_provisional_registration_case_issue_v1.descriptors.json",
+    "sha256": "b70edeeb69da0ee57b74373f6c1d7eb84828481fbc15a94efa0ab58c0c54d92e"
   }
 }

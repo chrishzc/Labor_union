@@ -13,6 +13,10 @@ from pathlib import Path
 import subprocess
 import sys
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 try:
     from scripts import migrate_preserved_database_additive_schema as migration
 except Exception as migration_import_error:  # Catalog corruption must remain an operator-facing error.
@@ -22,13 +26,15 @@ else:
     MIGRATION_IMPORT_ERROR = None
 
 
-ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENVIRONMENT_FILE = ROOT / ".env"
 DEFAULT_RECEIPT_ROOT = ROOT / "scratch/local_database_updates"
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 MYSQL_IDENTIFIER_MAX_LENGTH = 64
 LOCAL_RESUMABLE_PARTIAL_ARTIFACTS = frozenset({
+    "148_knowledge_retrieval.sql",
+    "163_knowledge_runtime.sql",
     "181_matching_service_date_confirmation.sql",
+    "186_line_identity_management.sql",
 })
 
 
@@ -294,7 +300,16 @@ def update_local_database(
         confirm_database = source
     if confirm_database != source:
         raise LocalDatabaseUpdateError(f"apply requires --confirm-database {source}")
-    return apply_update(config, environment_path, preview, Path(receipt_root))
+    try:
+        return apply_update(
+            config, environment_path, preview, Path(receipt_root)
+        )
+    except LocalDatabaseUpdateError:
+        raise
+    except migration.UpgradeBlocked as error:
+        raise LocalDatabaseUpdateError(str(error)) from error
+    except Exception as error:
+        raise LocalDatabaseUpdateError("database update execution failed") from error
 
 
 def parser() -> argparse.ArgumentParser:
