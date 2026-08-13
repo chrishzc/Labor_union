@@ -1,6 +1,6 @@
 """
 File: test_wp78_local_database_partial_recovery.py
-Description: 驗證 Knowledge schema partial recovery 與本機 DB 更新器的兩種啟動入口。
+Description: 驗證已審核 schema partial recovery 與本機 DB 更新器的啟動入口。
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ ROOT = Path(__file__).resolve().parents[1]
 KNOWLEDGE_RUNTIME = ROOT / "db/schema_parts/163_knowledge_runtime.sql"
 KNOWLEDGE_RETRIEVAL = ROOT / "db/schema_parts/148_knowledge_retrieval.sql"
 LINE_IDENTITY_MANAGEMENT = ROOT / "db/schema_parts/186_line_identity_management.sql"
+CUSTOMER_SERVICE_RUNTIME = ROOT / "db/schema_parts/185_customer_service_runtime.sql"
 
 
 def _knowledge_runtime_snapshot(*, source_column: bool, source_index: bool) -> dict:
@@ -143,8 +144,89 @@ def test_local_update_allows_only_reviewed_partial_artifacts() -> None:
         "148_knowledge_retrieval.sql",
         "163_knowledge_runtime.sql",
         "181_matching_service_date_confirmation.sql",
+        "185_customer_service_runtime.sql",
         "186_line_identity_management.sql",
     })
+
+
+def _exact_customer_service_ticket_snapshot() -> dict:
+    descriptor = migration._canonical_artifact_descriptor(
+        "185_customer_service_runtime.sql"
+    )
+    ticket = "customer_service_tickets"
+    columns = [
+        {"table_name": ticket, "column_name": name, **contract}
+        for name, contract in descriptor["tables"][ticket].items()
+    ]
+    indexes = [
+        {
+            "table_name": table,
+            "index_name": name,
+            "non_unique": contract["non_unique"],
+            "columns": ",".join(contract["columns"]),
+        }
+        for (table, name), contract in descriptor["indexes"].items()
+        if table == ticket
+    ]
+    constraints = []
+    key_columns = []
+    foreign_keys = []
+    for (table, name), contract in descriptor["foreign_keys"].items():
+        if table != ticket:
+            continue
+        constraints.append({
+            "table_name": table,
+            "constraint_name": name,
+            "constraint_type": "FOREIGN KEY",
+        })
+        foreign_keys.append({
+            "table_name": table,
+            "constraint_name": name,
+            "update_rule": contract["update_rule"],
+            "delete_rule": contract["delete_rule"],
+        })
+        key_columns.extend({
+            "table_name": table,
+            "constraint_name": name,
+            "column_name": local,
+            "referenced_table_name": contract["referenced_table"],
+            "referenced_column_name": remote,
+        } for local, remote in zip(
+            contract["columns"], contract["referenced_columns"], strict=True
+        ))
+    return {
+        "columns": columns,
+        "indexes": indexes,
+        "constraints": constraints,
+        "key_columns": key_columns,
+        "foreign_keys": foreign_keys,
+        "show_create_tables": {},
+        "triggers": [],
+    }
+
+
+def test_customer_service_partial_recovery_creates_only_missing_events() -> None:
+    statements = migration.schema_statements_for_state(
+        CUSTOMER_SERVICE_RUNTIME,
+        "partial",
+        _exact_customer_service_ticket_snapshot(),
+    )
+
+    assert len(statements) == 1
+    assert "CREATE TABLE IF NOT EXISTS customer_service_ticket_events" in statements[0]
+
+
+def test_customer_service_unknown_partial_shape_remains_blocked() -> None:
+    snapshot = _exact_customer_service_ticket_snapshot()
+    snapshot["columns"][0]["column_type"] = "int"
+
+    with pytest.raises(
+        migration.UpgradeBlocked,
+        match="customer service runtime partial state is not resumable",
+    ):
+        migration.schema_statements_for_state(
+            CUSTOMER_SERVICE_RUNTIME, "partial", snapshot
+        )
 
 
 def _line_identity_legacy_snapshot(*, malformed: bool = False) -> dict:
@@ -201,7 +283,7 @@ def test_apply_failure_is_reported_without_a_raw_traceback(
     monkeypatch.setattr(
         update,
         "apply_update",
-        lambda *_args: (_ for _ in ()).throw(
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
             migration.UpgradeBlocked("source backup validation failed")
         ),
     )
@@ -215,4 +297,5 @@ def test_apply_failure_is_reported_without_a_raw_traceback(
             receipt_root=tmp_path,
             apply=True,
             confirm_configured_database=True,
+            mysql_container="mysql_db",
         )

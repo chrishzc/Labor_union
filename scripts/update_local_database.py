@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -30,16 +31,62 @@ DEFAULT_ENVIRONMENT_FILE = ROOT / ".env"
 DEFAULT_RECEIPT_ROOT = ROOT / "scratch/local_database_updates"
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 MYSQL_IDENTIFIER_MAX_LENGTH = 64
+DEFAULT_DOCKER_MYSQL_CONTAINER = "mysql_db"
 LOCAL_RESUMABLE_PARTIAL_ARTIFACTS = frozenset({
     "148_knowledge_retrieval.sql",
     "163_knowledge_runtime.sql",
     "181_matching_service_date_confirmation.sql",
+    "185_customer_service_runtime.sql",
     "186_line_identity_management.sql",
 })
 
 
 class LocalDatabaseUpdateError(RuntimeError):
     pass
+
+
+def resolve_mysql_container(configured_container=None) -> str | None:
+    if configured_container:
+        return str(configured_container)
+    if shutil.which("mysql") and shutil.which("mysqldump"):
+        return None
+    return (
+        DEFAULT_DOCKER_MYSQL_CONTAINER
+        if _default_docker_mysql_is_running()
+        else None
+    )
+
+
+def _default_docker_mysql_is_running() -> bool:
+    try:
+        inspection = subprocess.run(
+            [
+                "docker",
+                "inspect",
+                "--format",
+                "{{.State.Running}}",
+                DEFAULT_DOCKER_MYSQL_CONTAINER,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            text=True,
+        )
+    except OSError:
+        return False
+    return inspection.returncode == 0 and inspection.stdout.strip() == "true"
+
+
+def require_mysql_clients(mysql_container: str | None) -> None:
+    if mysql_container:
+        return
+    missing = [name for name in ("mysql", "mysqldump") if not shutil.which(name)]
+    if missing:
+        names = ", ".join(missing)
+        raise LocalDatabaseUpdateError(
+            f"required MySQL client is unavailable: {names}; "
+            "start Docker container mysql_db or set MYSQL_CONTAINER"
+        )
 
 
 def validate_local_source(config, source: str, environment=None) -> None:
@@ -114,8 +161,12 @@ def artifact_paths(receipt_root: Path, candidate: str) -> dict[str, Path]:
     }
 
 
-def restore_dump(config, database: str, dump_path: Path) -> None:
-    command = migration._mysql_base(config, "mysql") + [database]
+def restore_dump(
+    config, database: str, dump_path: Path, *, mysql_container=None
+) -> None:
+    command = migration._mysql_base(
+        config, "mysql", container=mysql_container
+    ) + [database]
     with dump_path.open("rb") as source:
         completed = subprocess.run(
             command,
@@ -183,9 +234,13 @@ def rollback_source(
     dump_path: Path,
     expected_data,
     expected_schema_sha256: str,
+    *,
+    mysql_container=None,
 ) -> None:
     recreate_database(config, source)
-    restore_dump(config, source, dump_path)
+    restore_dump(
+        config, source, dump_path, mysql_container=mysql_container
+    )
     if migration._table_evidence(config, source) != expected_data:
         raise LocalDatabaseUpdateError("automatic rollback data verification failed")
     actual_schema = migration._schema_snapshot(config, source)["sha256"]
@@ -194,7 +249,14 @@ def rollback_source(
 
 
 # Kept together so the destructive replacement and its mandatory rollback remain one visible boundary.
-def replace_source_database(config, source: str, candidate: str, paths: dict[str, Path]) -> dict[str, object]:
+def replace_source_database(
+    config,
+    source: str,
+    candidate: str,
+    paths: dict[str, Path],
+    *,
+    mysql_container=None,
+) -> dict[str, object]:
     verified = migration.read_receipt(paths["operation"])
     plan = migration.read_receipt(paths["plan"])
     expected_source_data = verified.get("source_data")
@@ -213,7 +275,12 @@ def replace_source_database(config, source: str, candidate: str, paths: dict[str
     migration.write_receipt(paths["replacement"], receipt)
     try:
         recreate_database(config, source)
-        restore_dump(config, source, paths["candidate_dump"])
+        restore_dump(
+            config,
+            source,
+            paths["candidate_dump"],
+            mysql_container=mysql_container,
+        )
         verification = verify_replacement(config, source, candidate)
     except Exception:
         rollback_source(
@@ -222,6 +289,7 @@ def replace_source_database(config, source: str, candidate: str, paths: dict[str
             paths["dump"],
             expected_source_data,
             expected_schema_sha256,
+            mysql_container=mysql_container,
         )
         receipt.update(status="rolled_back")
         migration.write_receipt(paths["replacement"], receipt)
@@ -232,20 +300,42 @@ def replace_source_database(config, source: str, candidate: str, paths: dict[str
 
 
 # Kept together because this is the operator-facing phase order and contains no lower-level SQL details.
-def apply_update(config, environment_file: Path, preview: dict[str, object], receipt_root: Path) -> dict[str, object]:
+def apply_update(
+    config,
+    environment_file: Path,
+    preview: dict[str, object],
+    receipt_root: Path,
+    *,
+    mysql_container=None,
+) -> dict[str, object]:
     source = str(preview["source_database"])
     candidate = str(preview["candidate_database"])
     paths = artifact_paths(receipt_root, candidate)
     paths["directory"].mkdir(parents=True, exist_ok=False)
     migration.write_receipt(paths["plan"], preview["plan"])
-    migration.create_source_dump(config, source, paths["dump"], paths["backup"])
-    migration.restore_candidate(config, source, candidate, paths["dump"], paths["backup"], paths["operation"])
+    migration.create_source_dump(
+        config,
+        source,
+        paths["dump"],
+        paths["backup"],
+        mysql_container=mysql_container,
+    )
+    migration.restore_candidate(
+        config,
+        source,
+        candidate,
+        paths["dump"],
+        paths["backup"],
+        paths["operation"],
+        mysql_container=mysql_container,
+    )
     migration.apply_schema(
         config,
         source,
         candidate,
         paths["plan"],
         paths["operation"],
+        mysql_container=mysql_container,
         allowed_partial_artifacts=LOCAL_RESUMABLE_PARTIAL_ARTIFACTS,
     )
     migration.verify_candidate(config, source, candidate, paths["operation"])
@@ -254,8 +344,15 @@ def apply_update(config, environment_file: Path, preview: dict[str, object], rec
         candidate,
         paths["candidate_dump"],
         paths["candidate_backup"],
+        mysql_container=mysql_container,
     )
-    replacement = replace_source_database(config, source, candidate, paths)
+    replacement = replace_source_database(
+        config,
+        source,
+        candidate,
+        paths,
+        mysql_container=mysql_container,
+    )
     return {
         "status": "completed",
         "source_database": source,
@@ -277,11 +374,22 @@ def update_local_database(
     require_current=False,
     confirm_database=None,
     confirm_configured_database=False,
+    mysql_container=None,
 ) -> dict[str, object]:
     if migration is None:
         raise LocalDatabaseUpdateError(f"migration catalog unavailable: {MIGRATION_IMPORT_ERROR}")
     environment_path = Path(environment_file)
     try:
+        environment_values = {}
+        if environment_path.is_file():
+            _, environment_values = migration._read_env_bytes(environment_path)
+        mysql_container = (
+            mysql_container
+            or environment_values.get("MYSQL_CONTAINER")
+            or os.getenv("MYSQL_CONTAINER")
+            or None
+        )
+        mysql_container = resolve_mysql_container(mysql_container)
         config, source = migration.config_from_env(environment_path)
         validate_local_source(config, source)
         target = candidate or candidate_name(source)
@@ -300,10 +408,12 @@ def update_local_database(
         confirm_database = source
     if confirm_database != source:
         raise LocalDatabaseUpdateError(f"apply requires --confirm-database {source}")
+    require_mysql_clients(mysql_container)
     try:
-        return apply_update(
-            config, environment_path, preview, Path(receipt_root)
-        )
+        arguments = (config, environment_path, preview, Path(receipt_root))
+        if mysql_container is None:
+            return apply_update(*arguments)
+        return apply_update(*arguments, mysql_container=mysql_container)
     except LocalDatabaseUpdateError:
         raise
     except migration.UpgradeBlocked as error:
@@ -321,6 +431,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--require-current", action="store_true")
     command.add_argument("--confirm-database")
     command.add_argument("--confirm-configured-database", action="store_true")
+    command.add_argument("--mysql-container")
     return command
 
 
@@ -335,6 +446,7 @@ def main() -> int:
             require_current=arguments.require_current,
             confirm_database=arguments.confirm_database,
             confirm_configured_database=arguments.confirm_configured_database,
+            mysql_container=arguments.mysql_container,
         )
     except LocalDatabaseUpdateError as error:
         payload = {"status": "blocked", "error": str(error)}
