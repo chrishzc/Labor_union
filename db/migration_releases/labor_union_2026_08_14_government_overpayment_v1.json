@@ -1,0 +1,55 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-government-overpayment-2026-08-14-v1",
+  "release_metadata": {
+    "release_name": "Government overpayment local upgrade",
+    "application_version": "government-overpayment-disposition-v1",
+    "published_at": "2026-08-14",
+    "description": "Connect canonical part 169 to the preserve-data migration chain"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "client-refund-snapshot-v1-or-later"
+  },
+  "artifacts": [
+    {
+      "name": "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
+      "relative_path": "db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql",
+      "sha256": "7974f8ee90cfd48bf1c9d02d168c9f65eeca70f7d14c5c253cf3251ab067d0d7",
+      "dependencies": [],
+      "data_effect": "schema_and_system_definition_seed",
+      "rollback_policy": "restore-source-dump-before-same-name-replacement",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {"verification_id": "government-overpayment-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["accounts-payable-export-v1", "government-overpayment-disposition-v1"],
+    "required_restart_targets": ["api", "streamlit-ui"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["accounts-payable-query"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_14_government_overpayment_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_14_government_overpayment_v1.descriptors.json",
+    "sha256": "746e9f0d3a1021841d490b909c89289a2bd281c88ff38e266043896a69a0f663",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}
