@@ -99,13 +99,21 @@ def _save_client_name(case_no, client_name, headers):
     except (requests.RequestException, ValueError) as error:
         st.error(f"客戶姓名預覽失敗：{error}")
         return
-    data = preview.get("data") or {}
+    data = preview or {}
+    preview_fingerprint = data.get("preview_fingerprint")
+    if not preview_fingerprint:
+        st.error("客戶姓名預覽失敗：後端未回傳確認指紋，請重新整理後再試。")
+        return
     st.session_state[f"client_name_preview_{case_no}"] = {"name": normalized_name, "fingerprint": data.get("preview_fingerprint"), "before": data.get("before_client_name")}
 
 
 def _apply_client_name(case_no, headers, preview, reason):
     if not reason.strip():
         st.error("請填寫客戶姓名異動原因。")
+        return
+    if not preview.get("fingerprint"):
+        st.error("缺少客戶姓名預覽確認指紋，請先重新按「儲存訂單基本資料」產生預覽。")
+        st.session_state.pop(f"client_name_preview_{case_no}", None)
         return
     try:
         apply_headers = {**headers, "Idempotency-Key": str(uuid4())}

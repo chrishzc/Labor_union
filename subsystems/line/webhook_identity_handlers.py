@@ -21,7 +21,7 @@ from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 
 _STAFF_COMMAND = "我是月嫂"
 _ADMIN_COMMANDS = {"綁定system_admin", "綁定工會帳號", "綁定後台帳號"}
-_CUSTOMER_COMMANDS = {"綁定", "查詢訂單", "綁定訂單", "訂單查詢"}
+_CUSTOMER_COMMANDS = {"服務登記", "綁定", "查詢訂單", "綁定訂單", "訂單查詢"}
 _SERVICE_HELP_COMMAND = "服務說明"
 _SERVICE_HELP_CATEGORIES = {
     "服務流程": (

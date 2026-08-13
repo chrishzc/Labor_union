@@ -505,9 +505,8 @@ async def root_post(payload: dict, request: Request):
 @router.get("/liff-page")
 @router.get("/gateway")
 async def serve_gateway_page():
-    """前導選擇頁面 (自動相容舊版 LIFF 設定)"""
-    _require_legacy_line_surface("/line-identity")
-    return FileResponse("line/static/gateway.html")
+    """Compatibility entry for older LIFF endpoint URLs."""
+    return FileResponse("line/static/identity.html")
 
 @router.get("/bind-page")
 async def serve_bind_page():

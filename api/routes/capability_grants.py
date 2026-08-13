@@ -8,13 +8,25 @@ from api.schemas.capability_grants import CapabilityGrantApplyBody, CapabilityGr
 from infrastructure.mysql.admin_capability_grant_repository import (
     CapabilityGrantCommand,
     CapabilityGrantError,
+    access_policy_overview,
     apply_capability_grant,
+    list_admin_access_accounts,
     list_active_capability_grants,
 )
 from subsystems.access.authentication_session import AdminPrincipal
 
 
 router = APIRouter(prefix="/api/v1/admin/capability-grants", tags=["Capability Grants"])
+
+
+@router.get("/policy/overview", response_model=BaseResponse[dict])
+def policy_overview(_: AdminPrincipal = Depends(require_system_admin)):
+    return BaseResponse(data=access_policy_overview())
+
+
+@router.get("/accounts/list", response_model=BaseResponse[list[dict]])
+def list_accounts(_: AdminPrincipal = Depends(require_system_admin)):
+    return BaseResponse(data=list_admin_access_accounts())
 
 
 @router.get("/{admin_user_id}", response_model=BaseResponse[list[dict]])

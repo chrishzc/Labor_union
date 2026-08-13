@@ -41,7 +41,23 @@
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
+let lineUserId = "";
 let lineIdToken = "";
+let flowId = "";
+let identityReady = false;
+
+async function captureLineIdentity() {
+  try {
+    const context = liff.getContext && liff.getContext();
+    if (context?.userId) lineUserId = context.userId;
+  } catch (_) {}
+  try {
+    const profile = await liff.getProfile();
+    if (profile?.userId) lineUserId = profile.userId;
+  } catch (_) {}
+  try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+  identityReady = Boolean(lineUserId || lineIdToken);
+}
 
 function showStatus(text, isError = false) {
   const box = document.getElementById("status");
@@ -96,18 +112,35 @@ function renderResults(items) {
 }
 
 async function init() {
+  const searchButton = document.getElementById("searchBtn");
+  searchButton.disabled = true;
+  searchButton.textContent = "正在確認 LINE 身分...";
+  const params = new URLSearchParams(location.search);
+  lineUserId = params.get("userId") || "";
+  flowId = params.get("flow_id") || "";
   try {
-    const config = await fetch("/api/line/config").then(r => r.json());
+    const result = await fetch("/api/v1/line/identity/runtime-config").then(r => r.json());
+    const config = result.data || {};
     if (config.liff_id) {
       await liff.init({ liffId: config.liff_id });
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: location.href });
+        if (flowId || lineUserId) {
+          identityReady = true;
+          return;
+        }
+        liff.login();
         return;
       }
-      try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+      await captureLineIdentity();
+    }
+    if (!identityReady && !flowId) {
+      showStatus("無法取得 LINE 身分，請關閉此頁後從 LINE 圖文選單重新開啟。", true);
     }
   } catch (err) {
     showStatus("LIFF 初始化失敗，請重新開啟頁面。", true);
+  } finally {
+    searchButton.disabled = false;
+    searchButton.textContent = "查詢訂單資訊";
   }
 }
 
@@ -117,11 +150,15 @@ document.getElementById("searchBtn").addEventListener("click", async () => {
     showStatus("請先輸入案件編號或客戶姓名。", true);
     return;
   }
+  if (!identityReady && !flowId && !lineUserId && !lineIdToken) {
+    showStatus("LINE 身分尚未載入完成，請稍候再查詢；若仍失敗，請關閉此頁後從 LINE 圖文選單重新開啟。", true);
+    return;
+  }
   showStatus("查詢中...");
   const response = await fetch("/api/v1/line/staff-self-service/orders", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ keyword, line_id_token: lineIdToken })
+    body: JSON.stringify({ keyword, flow_id: flowId, line_id_token: lineIdToken, development_line_user_id: lineUserId })
   });
   const data = await response.json();
   if (!response.ok || !data.success) {

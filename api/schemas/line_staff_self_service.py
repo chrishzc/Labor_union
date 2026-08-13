@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class StaffLiffRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    flow_id: str = Field(default="", max_length=191)
     line_id_token: str = Field(default="", max_length=4096)
     development_line_user_id: str = Field(default="", max_length=191)
 
@@ -68,3 +69,20 @@ class StaffScheduleView(BaseModel):
     year: int
     month: int
     days: list[StaffScheduleDayView]
+
+
+class StaffLeaveRequestCreate(StaffLiffRequest):
+    leave_start_date: date
+    leave_end_date: date
+    leave_reason: str = Field(default="", max_length=1000)
+    substitute_found: bool = False
+    substitute_name: str = Field(default="", max_length=100)
+    substitute_phone: str = Field(default="", max_length=30)
+    substitute_note: str = Field(default="", max_length=1000)
+
+
+class StaffLeaveRequestCreateResponse(BaseModel):
+    request_id: int
+    status: str
+    staff_id: int
+    staff_name: str

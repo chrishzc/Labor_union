@@ -16,6 +16,7 @@ class AdminPublic(BaseModel):
     display_name: str
     role: str
     linked_line_user_id: str | None = None
+    capabilities: list[str] = Field(default_factory=list)
 
 
 class AdminSessionResponse(BaseModel):
