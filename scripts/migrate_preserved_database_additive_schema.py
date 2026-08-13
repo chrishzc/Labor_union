@@ -153,6 +153,28 @@ MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
     {"schema_applied", "backfilled", "verified"}
 )
+LEGACY_KNOWLEDGE_TABLES = frozenset({
+    "knowledge_items",
+    "knowledge_item_events",
+    "knowledge_apply_receipts",
+    "knowledge_item_versions",
+    "knowledge_answer_requests",
+    "knowledge_jobs",
+    "knowledge_indexes",
+    "knowledge_answer_receipts",
+    "knowledge_answer_sources",
+})
+LEGACY_KNOWLEDGE_DROP_ORDER = (
+    "knowledge_answer_sources",
+    "knowledge_answer_receipts",
+    "knowledge_jobs",
+    "knowledge_answer_requests",
+    "knowledge_indexes",
+    "knowledge_item_events",
+    "knowledge_apply_receipts",
+    "knowledge_item_versions",
+    "knowledge_items",
+)
 MANIFEST_DRIVEN_RELEASE = False
 
 OWNED_OBJECTS: dict[str, dict[str, Any]] = {
@@ -1463,8 +1485,22 @@ def _owned_classification(
             row["column_name"]
         )
     present_triggers = {row["trigger_name"] for row in snapshot["triggers"]}
+    legacy_knowledge_state = _legacy_knowledge_schema_state(snapshot)
     result: dict[str, str] = {}
     for part, expected in OWNED_OBJECTS.items():
+        if (
+            part in {
+                "148_knowledge_retrieval.sql",
+                "163_knowledge_runtime.sql",
+            }
+            and legacy_knowledge_state is not None
+        ):
+            result[part] = (
+                "partial"
+                if legacy_knowledge_state == "exact"
+                else "drift"
+            )
+            continue
         if part == "107_system_alert_current_projection.sql":
             result[part] = _system_alert_projection_state(snapshot)
             continue
@@ -1593,6 +1629,9 @@ def build_plan(
         )
     candidate_exists = database_exists(config, candidate)
     source_data = _table_evidence(config, source)
+    legacy_knowledge_rebuild = _legacy_knowledge_rebuild_plan(
+        source_snapshot, source_data
+    )
     candidate_data = (
         _table_evidence(config, candidate) if candidate_exists else None
     )
@@ -1615,6 +1654,7 @@ def build_plan(
         "source_schema_sha256": source_snapshot["sha256"],
         "source_objects": source_objects,
         "source_data": source_data,
+        "legacy_knowledge_empty_rebuild": legacy_knowledge_rebuild,
         "phase_order": [path.name for path in SCHEMA_PARTS],
         "status": (
             "blocked"
@@ -1624,6 +1664,46 @@ def build_plan(
     }
     plan["plan_fingerprint"] = _sha256_bytes(_canonical_json(plan))
     return plan
+
+
+# 保持單一 preflight，讓空表、外部 FK 與 fingerprint 共同決定資格。
+def _legacy_knowledge_rebuild_plan(
+    snapshot: Mapping[str, Any],
+    source_data: Mapping[str, Any],
+) -> dict[str, Any]:
+    if _legacy_knowledge_schema_state(snapshot) != "exact":
+        return {"eligible": False}
+    nonempty = sorted(
+        table for table in LEGACY_KNOWLEDGE_TABLES
+        if int((source_data.get(table) or {}).get("count", 0)) != 0
+    )
+    if nonempty:
+        raise UpgradeBlocked(
+            "legacy Knowledge tables are not empty: " + ", ".join(nonempty)
+        )
+    inbound = _external_knowledge_inbound_foreign_keys(snapshot)
+    if inbound:
+        raise UpgradeBlocked(
+            "legacy Knowledge tables have external inbound foreign keys: "
+            + ", ".join(inbound)
+        )
+    return {
+        "eligible": True,
+        "contract": "legacy-knowledge-stage8-empty-rebuild/v1",
+        "tables": sorted(LEGACY_KNOWLEDGE_TABLES),
+        "source_schema_sha256": snapshot["sha256"],
+    }
+
+
+def _external_knowledge_inbound_foreign_keys(
+    snapshot: Mapping[str, Any],
+) -> tuple[str, ...]:
+    return tuple(sorted({
+        f"{row['table_name']}.{row['constraint_name']}"
+        for row in snapshot.get("key_columns", ())
+        if str(row.get("referenced_table_name")) in LEGACY_KNOWLEDGE_TABLES
+        and str(row["table_name"]) not in LEGACY_KNOWLEDGE_TABLES
+    }))
 
 
 def _blocking_schema_states(
@@ -2533,6 +2613,88 @@ def _remove_retired_reclassification_audit_contract(
             descriptor["triggers"].pop(trigger_name)
 
 
+# Kept as one declarative block so the historical metadata fingerprint is auditable.
+def _legacy_knowledge_stage8_descriptor() -> dict[str, Any]:
+    descriptor = _canonical_artifact_descriptor(
+        "163_knowledge_runtime.sql"
+    )
+    descriptor["parent_columns"] = {}
+    descriptor["tables"]["knowledge_items"] = {
+        "id": _column_contract("bigint unsigned", "NO", None, "auto_increment"),
+        "source_identity": _column_contract("varchar(191)", "NO"),
+        "title": _column_contract("varchar(500)", "NO"),
+        "lifecycle_status": _column_contract(
+            "enum('draft','reviewed','published','retired')", "NO", "draft"
+        ),
+        "current_version": _column_contract("int unsigned", "NO", "1"),
+        "source_digest": _column_contract("char(64)", "NO"),
+        "source_uri": _column_contract("varchar(1000)", "YES"),
+        "created_by_actor_id": _column_contract("varchar(191)", "NO"),
+        "created_at_utc": _column_contract(
+            "datetime(6)", "NO", "current_timestamp(6)", "default_generated"
+        ),
+        "updated_at_utc": _column_contract(
+            "datetime(6)",
+            "NO",
+            "current_timestamp(6)",
+            "default_generated on update current_timestamp(6)",
+        ),
+    }
+    descriptor["tables"]["knowledge_item_versions"] = {
+        "id": _column_contract("bigint unsigned", "NO", None, "auto_increment"),
+        "item_id": _column_contract("bigint unsigned", "NO"),
+        "item_version": _column_contract("int unsigned", "NO"),
+        "content": _column_contract("mediumtext", "NO"),
+        "source_digest": _column_contract("char(64)", "NO"),
+        "event_type": _column_contract(
+            "enum('ingested','reviewed','published','retired')", "NO"
+        ),
+        "actor_id": _column_contract("varchar(191)", "NO"),
+        "reason": _column_contract("varchar(500)", "YES"),
+        "idempotency_key": _column_contract("varchar(191)", "NO"),
+        "recorded_at_utc": _column_contract(
+            "datetime(6)", "NO", "current_timestamp(6)", "default_generated"
+        ),
+    }
+    descriptor["tables"]["knowledge_answer_sources"][
+        "source_version"
+    ]["column_type"] = "int unsigned"
+    descriptor["indexes"].update({
+        ("knowledge_items", "PRIMARY"): {
+            "non_unique": 0, "columns": ("id",),
+        },
+        ("knowledge_items", "uq_knowledge_source_identity"): {
+            "non_unique": 0, "columns": ("source_identity",),
+        },
+        ("knowledge_items", "idx_knowledge_lifecycle"): {
+            "non_unique": 1, "columns": ("lifecycle_status", "id"),
+        },
+    })
+    descriptor["foreign_keys"].pop(
+        ("knowledge_item_versions", "fk_knowledge_version_actor"), None
+    )
+    descriptor["checks"][(
+        "knowledge_items", "chk_knowledge_source_digest"
+    )] = _normalize_sql_contract(
+        "source_digest REGEXP '^[0-9a-f]{64}$'"
+    )
+    return descriptor
+
+
+def _column_contract(
+    column_type: str,
+    is_nullable: str,
+    column_default: Any = None,
+    extra: str = "",
+) -> dict[str, Any]:
+    return {
+        "column_type": column_type,
+        "is_nullable": is_nullable,
+        "column_default": column_default,
+        "extra": extra,
+    }
+
+
 def _show_create_check_clauses(
     create_sql: str,
 ) -> dict[tuple[str, str], str]:
@@ -2592,6 +2754,24 @@ def _canonical_artifact_metadata_state(
 ) -> str:
     descriptor = _canonical_artifact_descriptor(part_name)
     _apply_legacy_knowledge_identifier_contract(descriptor, snapshot, part_name)
+    return _artifact_metadata_state(
+        snapshot,
+        descriptor,
+        part_name,
+        defer_missing_triggers=defer_missing_triggers,
+        owned_tables=owned_tables,
+    )
+
+
+# 保持單一 metadata comparator，避免 canonical 與 compatibility 契約判讀分叉。
+def _artifact_metadata_state(
+    snapshot: Mapping[str, Any],
+    descriptor: dict[str, Any],
+    part_name: str,
+    *,
+    defer_missing_triggers: bool = False,
+    owned_tables: frozenset[str] | None = None,
+) -> str:
     if owned_tables is not None:
         _limit_descriptor_to_owned_tables(descriptor, owned_tables)
     columns_by_table: dict[str, dict[str, Mapping[str, Any]]] = {}
@@ -2757,6 +2937,96 @@ def _limit_descriptor_to_owned_tables(
         for name, contract in descriptor["triggers"].items()
         if contract["event_object_table"] in owned_tables
     }
+
+
+# 保持單一 fingerprint gate，完整核對 legacy 主體、可選 148 子表與 triggers。
+def _legacy_knowledge_schema_state(
+    snapshot: Mapping[str, Any],
+) -> str | None:
+    columns = {
+        (str(row["table_name"]), str(row["column_name"]))
+        for row in snapshot.get("columns", ())
+    }
+    signatures = {
+        ("knowledge_items", "current_version"),
+        ("knowledge_items", "lifecycle_status"),
+        ("knowledge_item_versions", "actor_id"),
+    }
+    if not signatures.intersection(columns):
+        return None
+    legacy_descriptor = _legacy_knowledge_stage8_descriptor()
+    state = _artifact_metadata_state(
+        snapshot, legacy_descriptor, "legacy_knowledge_stage8"
+    )
+    if state != "exact" or not _owned_metadata_names_are_exact(
+        snapshot, legacy_descriptor
+    ):
+        return "drift"
+    child_tables = frozenset({
+        "knowledge_item_events", "knowledge_apply_receipts",
+    })
+    child_descriptor = _canonical_artifact_descriptor(
+        "148_knowledge_retrieval.sql"
+    )
+    _apply_legacy_knowledge_identifier_contract(
+        child_descriptor, snapshot, "148_knowledge_retrieval.sql"
+    )
+    _limit_descriptor_to_owned_tables(child_descriptor, child_tables)
+    child_state = _canonical_artifact_metadata_state(
+        snapshot,
+        "148_knowledge_retrieval.sql",
+        owned_tables=child_tables,
+    )
+    if child_state not in {"absent", "exact"}:
+        return "drift"
+    if child_state == "exact" and not _owned_metadata_names_are_exact(
+        snapshot, child_descriptor
+    ):
+        return "drift"
+    expected_triggers = {
+        "trg_knowledge_item_versions_before_update",
+        "trg_knowledge_item_versions_before_delete",
+    }
+    actual_triggers = {
+        str(row["trigger_name"])
+        for row in snapshot.get("triggers", ())
+        if str(row["event_object_table"]) in LEGACY_KNOWLEDGE_TABLES
+    }
+    return "exact" if actual_triggers == expected_triggers else "drift"
+
+
+# 保持 indexes 與 constraints 同步核對，避免各自接受不一致的額外 object。
+def _owned_metadata_names_are_exact(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+) -> bool:
+    tables = set(descriptor["tables"])
+    expected_indexes = set(descriptor["indexes"])
+    expected_foreign_keys = set(descriptor["foreign_keys"])
+    allowed_indexes = expected_indexes | expected_foreign_keys
+    actual_indexes = {
+        (str(row["table_name"]), str(row["index_name"]))
+        for row in snapshot.get("indexes", ())
+        if str(row["table_name"]) in tables
+    }
+    expected_constraints = (
+        {(table, "PRIMARY") for table in tables}
+        | {
+            key for key, contract in descriptor["indexes"].items()
+            if int(contract["non_unique"]) == 0
+        }
+        | expected_foreign_keys
+        | set(descriptor["checks"])
+    )
+    actual_constraints = {
+        (str(row["table_name"]), str(row["constraint_name"]))
+        for row in snapshot.get("constraints", ())
+        if str(row["table_name"]) in tables
+    }
+    return (
+        expected_indexes <= actual_indexes <= allowed_indexes
+        and actual_constraints == expected_constraints
+    )
 
 
 def _apply_legacy_knowledge_identifier_contract(
@@ -3009,6 +3279,11 @@ def apply_schema(
     candidate_identity = server_identity(config, candidate)
     if candidate_identity["server"] != plan["source"]["server"]:
         raise UpgradeBlocked("candidate is on a different server")
+    rebuild_plan = plan.get("legacy_knowledge_empty_rebuild") or {}
+    if rebuild_plan.get("eligible") is True:
+        _rebuild_empty_legacy_knowledge_candidate(
+            config, candidate, existing_receipt, operation_receipt_path
+        )
     before = _schema_snapshot(config, candidate)
     states = _owned_classification(before)
     preapply_states = _owned_classification(
@@ -3157,6 +3432,89 @@ def apply_schema(
         config, source, candidate, operation_receipt_path,
         mysql_container=mysql_container,
     )
+
+
+# Kept together so the destructive candidate-only rebuild and receipt stay atomic to audit.
+def _rebuild_empty_legacy_knowledge_candidate(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    candidate: str,
+    receipt: dict[str, Any],
+    receipt_path: Path,
+) -> None:
+    snapshot = _schema_snapshot(config, candidate)
+    if _legacy_knowledge_schema_state(snapshot) != "exact":
+        states = _owned_classification(snapshot)
+        if all(
+            states.get(part) == "exact"
+            for part in (
+                "148_knowledge_retrieval.sql",
+                "163_knowledge_runtime.sql",
+            )
+        ):
+            receipt["legacy_knowledge_empty_rebuild"] = {
+                "status": "exact_replay",
+                "candidate_schema_sha256": snapshot["sha256"],
+            }
+            write_receipt(receipt_path, receipt)
+            return
+        raise UpgradeBlocked(
+            "candidate legacy Knowledge fingerprint changed before rebuild"
+        )
+    evidence = _table_evidence(config, candidate)
+    _legacy_knowledge_rebuild_plan(snapshot, evidence)
+    parts = {
+        path.name: path
+        for path in SCHEMA_PARTS
+        if path.name in {
+            "148_knowledge_retrieval.sql", "163_knowledge_runtime.sql",
+        }
+    }
+    if set(parts) != {
+        "148_knowledge_retrieval.sql", "163_knowledge_runtime.sql",
+    }:
+        raise UpgradeBlocked("canonical Knowledge schema parts are unavailable")
+    rebuild = {
+        "status": "prepared",
+        "contract": "legacy-knowledge-stage8-empty-rebuild/v1",
+        "before_schema_sha256": snapshot["sha256"],
+        "tables": list(LEGACY_KNOWLEDGE_DROP_ORDER),
+        "prepared_at": _now(),
+    }
+    receipt.update(status="partial", phase="legacy_knowledge_rebuild")
+    receipt["legacy_knowledge_empty_rebuild"] = rebuild
+    write_receipt(receipt_path, receipt)
+    connection = config.connect(candidate)
+    try:
+        with connection.cursor() as cursor:
+            for table in LEGACY_KNOWLEDGE_DROP_ORDER:
+                cursor.execute(f"DROP TABLE IF EXISTS `{table}`")
+            for part_name in (
+                "148_knowledge_retrieval.sql",
+                "163_knowledge_runtime.sql",
+            ):
+                for statement in split_sql(
+                    parts[part_name].read_text(encoding="utf-8")
+                ):
+                    cursor.execute(statement)
+    finally:
+        connection.close()
+    after = _schema_snapshot(config, candidate)
+    states = _owned_classification(after)
+    if any(
+        states.get(part) != "exact"
+        for part in (
+            "148_knowledge_retrieval.sql", "163_knowledge_runtime.sql",
+        )
+    ):
+        rebuild.update(status="failed", owned_objects=states)
+        write_receipt(receipt_path, receipt)
+        raise UpgradeBlocked("rebuilt Knowledge schema is not exact")
+    rebuild.update(
+        status="completed",
+        after_schema_sha256=after["sha256"],
+        completed_at=_now(),
+    )
+    write_receipt(receipt_path, receipt)
 
 
 def _run_project_python(
@@ -3738,6 +4096,10 @@ def verify_candidate(
     source_data = _table_evidence(config, source)
     candidate_snapshot = _schema_snapshot(config, candidate)
     candidate_data = _table_evidence(config, candidate)
+    legacy_rebuild = receipt.get("legacy_knowledge_empty_rebuild") or {}
+    rebuilt_empty_knowledge = legacy_rebuild.get("status") in {
+        "completed", "exact_replay",
+    }
     additive_projection_preservation: dict[str, Any] = {}
     for table, evidence in source_data.items():
         actual = candidate_data.get(table)
@@ -3749,6 +4111,16 @@ def verify_candidate(
             != evidence.get("primary_key_sha256")
         ):
             raise UpgradeBlocked(f"preserved table changed: {table}")
+        if rebuilt_empty_knowledge and table in LEGACY_KNOWLEDGE_TABLES:
+            if int(evidence.get("count", 0)) != 0:
+                raise UpgradeBlocked(
+                    "legacy Knowledge rebuild receipt contains nonempty data"
+                )
+            additive_projection_preservation[table] = {
+                "mode": "reviewed_empty_schema_rebuild",
+                "row_count": 0,
+            }
+            continue
         source_columns = _table_columns(source_snapshot, table)
         candidate_columns = _table_columns(candidate_snapshot, table)
         has_additive_columns = source_columns != candidate_columns
