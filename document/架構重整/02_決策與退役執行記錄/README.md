@@ -48,3 +48,4 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 2026-08-12 人工選定 Scheduling 請假方案三；`60` ownership 裁決已封存，後續功能範圍移至
 [`document/功能開發計畫/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md`](../../功能開發計畫/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md)。
 LINE 申請只建立待辦 evidence，正式排班仍由既有 leave-substitution Preview／Apply 擁有；目前尚未授權實作。
+| [84_Legacy_Knowledge_Empty_Schema_Recovery_Work_Package.md](84_Legacy_Knowledge_Empty_Schema_Recovery_Work_Package.md) | work-package | `in-progress` | exact 且九張 owned tables 全空的歷史 Knowledge schema，只在隔離 candidate 重建為 canonical 148／163。 |
