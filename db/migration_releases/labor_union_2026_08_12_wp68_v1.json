@@ -63,7 +63,7 @@
                           "rollback_policy": "code-rollback-preserve-candidate-contact-history",
                           "name": "182_candidate_contact_pool.sql",
                           "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
-                          "sha256": "0c41c6a939dd595f31de46ae34e91002fb84d42e32e835a3d82de4eddc93c350",
+                          "sha256": "ee11eead910dc45ed3165cb19759ac8391d457f71b753d41b87f780e0aee503d",
                           "dependencies": [
                               "181_matching_service_date_confirmation.sql"
                           ],
@@ -95,7 +95,7 @@
     "descriptor_artifact":  {
                                 "relative_path":  "db/migration_releases/labor_union_2026_08_12_wp68_v1.descriptors.json",
                                 "name":  "labor_union_2026_08_12_wp68_v1.descriptors.json",
-                                "sha256":  "9606c44ec9cb65208d8040e05ff407d02357f3304d844dd26499c111c2e92d5d",
+                                "sha256":  "ca19903610dee57b75afb33f64025591f7c793bd2810f8eeb38faec881152571",
                                 "dependencies":  [
 
                                                  ]

@@ -1,7 +1,6 @@
-"""Preserve-first MySQL candidate upgrade runner.
-
-The live source database is read-only.  Every schema/data mutation is guarded
-by an explicit, different candidate database identity and a durable receipt.
+"""
+File: migrate_preserved_database_additive_schema.py
+Description: 驗證 release chain，並以唯讀來源、隔離候選及 durable receipt 執行 MySQL 升級。
 """
 
 from __future__ import annotations
@@ -508,9 +507,8 @@ def _load_release_chain() -> ReleaseManifest:
             name = str(artifact.get("name") or "")
             if not artifact_path.is_file():
                 raise UpgradeBlocked(f"release artifact is missing: {name}")
-            verify_hash = manifest_path.name in DEFAULT_RELEASE_MANIFESTS[-2:]
             hash_mismatch = _sha256_file(artifact_path) != artifact.get("sha256")
-            if verify_hash and hash_mismatch:
+            if hash_mismatch:
                 raise UpgradeBlocked(f"release artifact hash mismatch: {artifact.get('name')}")
             if name in seen_names:
                 raise UpgradeBlocked(f"duplicate release artifact: {name}")

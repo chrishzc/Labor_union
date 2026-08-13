@@ -128,6 +128,8 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 
 ## 8. AI Agent Clean Code 守則
 
+每次實作、修復、重構或 review production code、schema、migration、script 或測試前，必須先載入並套用 `$coding-rule`（`coding-rule/SKILL.md`）。任務需先建立可驗證的 Task Charter，依公開契約與風險選擇最小且完整的設計，修復 defect 時優先保留 fail-before-fix 證據，並在最後相關編輯後重跑對應驗證。若執行環境沒有該 skill，不得假裝已套用；必須明確回報，並仍遵守本節 Rule 1～5 與專案其他 gate。
+
 每次生成或修改程式碼時，依序執行：
 
 `寫程式碼 → 自我檢查 Rule 1～5 → 發現違反就自行修正 → 交付`

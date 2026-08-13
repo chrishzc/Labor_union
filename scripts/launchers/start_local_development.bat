@@ -1,3 +1,5 @@
+@REM File: start_local_development.bat
+@REM Description: 驗證本機 DB readiness 後啟動 API、UI、monitor、watcher 與 workers。
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
@@ -46,39 +48,48 @@ if %errorlevel% neq 0 (
     exit /b %errorlevel%
 )
 
+echo [Step 4] Verifying the local database schema release...
+"%PY%" -m scripts.update_local_database --require-current
+set "READINESS_EXIT=!ERRORLEVEL!"
+if !READINESS_EXIT! neq 0 (
+    echo [Error] Local database schema is not current. Run scripts\launchers\update_local_database.bat first.
+    pause
+    exit /b !READINESS_EXIT!
+)
+
 echo ==========================================
-echo Database connection ready! Starting services...
+echo Database connection and schema ready! Starting services...
 echo ==========================================
 echo [Notice] start_local_development.bat is for local development only; it is not a production deployment entrypoint.
 echo [Notice] Production readiness validation is intentionally not run by this development launcher.
 
 :: 4. Launch servers concurrently
-echo [Step 4] Launching FastAPI server...
+echo [Step 5] Launching FastAPI server...
 start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
 
 "%PY%" -m scripts.launcher_preflight --profile line-worker >nul 2>&1
 if !ERRORLEVEL! equ 0 (
-    echo [Step 5] Launching independent LINE Worker...
+    echo [Step 6] Launching independent LINE Worker...
     start "LINE Worker" cmd /k ""%PY%" -m scripts.run_line_worker"
 ) else (
-    echo [Step 5] Skipping LINE Worker: local LINE credentials or runtime configuration are unavailable.
+    echo [Step 6] Skipping LINE Worker: local LINE credentials or runtime configuration are unavailable.
 )
 
-echo [Step 6] Launching Streamlit interface...
+echo [Step 7] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
 
-echo [Step 7] Launching active runtime monitor...
+echo [Step 8] Launching active runtime monitor...
 start "Runtime Monitor" cmd /k ""%PY%" -m scripts.run_service_monitor"
 
-echo [Step 8] Launching File Watcher Service...
+echo [Step 9] Launching File Watcher Service...
 start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
 
-echo [Step 9] Launching Durable Background Worker...
+echo [Step 10] Launching Durable Background Worker...
 start "Durable Background Worker" cmd /k ""%PY%" -m scripts.run_durable_job_worker"
 
 findstr /R /B /I "^KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true" "%CD%\.env" >nul
 if %errorlevel% equ 0 (
-    echo [Step 10] Launching Knowledge Retrieval Worker...
+    echo [Step 11] Launching Knowledge Retrieval Worker...
     start "Knowledge Retrieval Worker" cmd /k ""%PY%" -m scripts.run_knowledge_worker"
 )
 
@@ -99,6 +110,8 @@ echo [Smoke] Launching Docker Compose and waiting for MySQL...
 docker-compose up -d
 if errorlevel 1 exit /b !ERRORLEVEL!
 "%PY%" scripts/wait_for_db.py
+if errorlevel 1 exit /b !ERRORLEVEL!
+"%PY%" -m scripts.update_local_database --require-current
 if errorlevel 1 exit /b !ERRORLEVEL!
 "%PY%" -m scripts.smoke_local_development_launcher
 exit /b !ERRORLEVEL!

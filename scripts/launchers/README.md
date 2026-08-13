@@ -15,11 +15,11 @@ module（例如 `scripts/run_service_monitor.py`、`scripts/run_durable_job_work
 
 | 腳本 | 狀態 | 用途與安全邊界 |
 |---|---|---|
-| `start_local_development.bat` | active | Windows 本機開發：啟動 MySQL、API、UI、monitor 與 workers；不套用 schema，禁止作為 production deployment。 |
+| `start_local_development.bat` | active | Windows 本機開發：連線後先唯讀確認 schema 為 current，再啟動 API、UI、monitor 與 workers；不套用 schema，禁止作為 production deployment。 |
 | `start_local_development.sh` | active | macOS／Unix 的本機開發入口；責任與 Windows 版相同。 |
 | `start_local_development_no_auth.bat` | active, local-only | 先停用本機 Admin 認證再啟動全部服務；只供隔離開發機，禁止 shared staging／production。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | active, local-only | 只調整本機 `.env` 的 Admin 開發認證設定，不啟動服務。 |
-| `update_local_database.bat` | active | 保留現有資料：備份 source → 建立 candidate → 套用 migration／backfill → 驗證 → 同名替換；失敗保留診斷資料並嘗試 rollback。 |
+| `update_local_database.bat` | active | 保留 `.env` 指定的本機資料庫：備份 source → 建立 candidate → 套用 migration／backfill → 驗證 → 同名替換；失敗保留診斷資料並嘗試 rollback。 |
 | `reset_DB.bat` | active, destructive | 不保留現有資料：預檢版本化模板 fixture，要求輸入 `RESET` 後刪除 `union_db`、重建並載入模板測試資料。 |
 | `start_fastapi_ngrok.py` | active, development-only | 本機 FastAPI/ngrok supervisor；production 明確禁止 ngrok。 |
 | `get_durable_job_worker_task_status.ps1` | recovery-only | 唯讀查詢既有 Windows 排程任務；不安裝、不啟動任務。 |
@@ -27,7 +27,7 @@ module（例如 `scripts/run_service_monitor.py`、`scripts/run_durable_job_work
 
 ## 常用流程
 
-保留開發者目前資料並升級 schema：
+保留 `.env` 指定之本機資料庫的目前資料並升級 schema：
 
 ```powershell
 .\scripts\launchers\update_local_database.bat
@@ -42,7 +42,7 @@ module（例如 `scripts/run_service_monitor.py`、`scripts/run_durable_job_work
 `reset_DB.bat` 需要 `fixtures/db_snapshot_v2/v3/manifest.json` 及其完整 fixture。預檢未通過時不會
 刪除資料庫。目前版本庫未提供該模板 fixture，因此 reset 入口會安全停止；fixture 重建是另一個
 待核准工作，不得直接復活已退役的舊 v3 snapshot。兩種資料庫流程執行前都必須停止 API、UI、
-monitor 與 workers，且只能操作本機 `union_db`，禁止用於 production 或 shared staging。
+monitor 與 workers；保留資料更新只接受 `.env` 指定的本機非 production DB，模板重設仍只操作 `union_db`。
 
 資料庫完成後啟動 Windows 本機環境：
 

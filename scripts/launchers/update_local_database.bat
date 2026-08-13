@@ -1,3 +1,5 @@
+rem File: update_local_database.bat
+rem Description: Upgrades the configured local database through a verified candidate.
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
@@ -26,14 +28,14 @@ if errorlevel 1 (
 )
 echo.
 echo Stop API, UI, monitor, and workers before continuing.
-echo A backup and verified candidate are created before union_db is replaced under the same name.
+echo A backup and verified candidate are created before the .env database is replaced under the same name.
 set /p "UPDATE_CONFIRM=Type UPDATE to continue: "
 if /I not "!UPDATE_CONFIRM!"=="UPDATE" (
   echo Cancelled. No database changes were requested.
   exit /b 0
 )
-"%PYTHON%" -m scripts.update_local_database --apply --confirm-database union_db
+"%PYTHON%" -m scripts.update_local_database --apply --confirm-configured-database
 set "UPDATE_EXIT=!ERRORLEVEL!"
-if not "!UPDATE_EXIT!"=="0" (echo [ERROR] Database update failed with exit code !UPDATE_EXIT!.) else (echo Database update completed. Restart local services; union_db now contains the verified upgraded data.)
+if not "!UPDATE_EXIT!"=="0" (echo [ERROR] Database update failed with exit code !UPDATE_EXIT!.) else (echo Database update completed. Restart local services; the configured database now contains the verified upgraded data.)
 pause
 exit /b !UPDATE_EXIT!

@@ -27,6 +27,7 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [WP72 matching receipts（封存）](../04_已完成與上線封存/receipts/2026-08-13_wp72_matching_preferences_staff_availability_receipt.md) / [residual closeout（封存）](../04_已完成與上線封存/receipts/2026-08-13_matching_residual_closeout_receipt.md) | WP72 與月嫂配對 residual plan 已完成 local Browser／regression 驗收；正式行為仍由規格 24 擁有。 |
 | [WP74 developer-local DB receipt（封存）](../04_已完成與上線封存/receipts/2026-08-13_developer_local_database_maintenance_receipt.md) | 空 schema 升級與目前 DB 備份副本升級均完成真實 MySQL 驗收；來源 DB 未修改。 |
 | [WP75 launcher receipt（封存）](../04_已完成與上線封存/receipts/2026-08-13_startup_launcher_convergence_receipt.md) | Windows canonical launcher 實跑、LINE optional credential gate、PID／port cleanup 與 focused regression 已完成。 |
+| [evidence/2026-08-13_wp76_migration_release_integrity_readiness_receipt.md](evidence/2026-08-13_wp76_migration_release_integrity_readiness_receipt.md) | WP76 full-chain hash、part 61／153、disposable source→candidate 與目標主機 launcher readiness 驗收均已通過。 |
 | [65 LINE canonical cutover receipt（封存）](../04_已完成與上線封存/receipts/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
 | [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |
 | [evidence/](evidence/) | 上述決策包／收據對應的原始 evidence 產物（JSON／SQL／receipt）。 |

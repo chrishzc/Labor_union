@@ -1149,6 +1149,57 @@ CREATE TABLE IF NOT EXISTS finance_import_reprocess_runs (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 
+-- One event exists for each canonical row whose classification tuple changed.
+CREATE TABLE IF NOT EXISTS finance_import_reclassification_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    run_id BIGINT NOT NULL,
+    finance_import_row_id BIGINT NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    before_classification_type VARCHAR(100) NOT NULL,
+    before_classification_reason VARCHAR(255) NULL,
+    before_matched_identity_ids JSON NOT NULL,
+    before_resolved_counterparty_account VARCHAR(191) NULL,
+    after_classification_type VARCHAR(100) NOT NULL,
+    after_classification_reason VARCHAR(255) NULL,
+    after_matched_identity_ids JSON NOT NULL,
+    after_resolved_counterparty_account VARCHAR(191) NULL,
+    dispatch_result VARCHAR(100) NOT NULL,
+    dispatch_reason VARCHAR(255) NULL,
+    dispatch_references JSON NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    UNIQUE KEY uq_finance_import_reclassification_event_row (
+        run_id,
+        finance_import_row_id
+    ),
+    INDEX idx_finance_import_reclassification_event_row (
+        finance_import_row_id,
+        created_at
+    ),
+
+    CONSTRAINT fk_finance_import_reclassification_event_run
+        FOREIGN KEY (run_id)
+        REFERENCES finance_import_reprocess_runs(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_finance_import_reclassification_event_row
+        FOREIGN KEY (finance_import_row_id)
+        REFERENCES finance_import_rows(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_finance_import_reclassification_event_actor CHECK (
+        CHAR_LENGTH(TRIM(actor)) > 0
+    ),
+    CONSTRAINT chk_finance_import_reclassification_event_changed CHECK (
+        NOT (
+            before_classification_type <=> after_classification_type
+            AND before_classification_reason <=> after_classification_reason
+            AND before_matched_identity_ids <=> after_matched_identity_ids
+            AND before_resolved_counterparty_account
+                <=> after_resolved_counterparty_account
+        )
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+
 DROP TRIGGER IF EXISTS trg_finance_import_reprocess_runs_before_update;
 CREATE TRIGGER trg_finance_import_reprocess_runs_before_update
 BEFORE UPDATE ON finance_import_reprocess_runs
@@ -1162,6 +1213,20 @@ BEFORE DELETE ON finance_import_reprocess_runs
 FOR EACH ROW
 SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_import_reprocess_runs records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_finance_import_reclassification_events_before_update;
+CREATE TRIGGER trg_finance_import_reclassification_events_before_update
+BEFORE UPDATE ON finance_import_reclassification_events
+FOR EACH ROW
+SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'finance_import_reclassification_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_finance_import_reclassification_events_before_delete;
+CREATE TRIGGER trg_finance_import_reclassification_events_before_delete
+BEFORE DELETE ON finance_import_reclassification_events
+FOR EACH ROW
+SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'finance_import_reclassification_events records cannot be deleted';
 -- END SOURCE: db/schema_parts/61_finance_import_reprocessing.sql
 
 -- BEGIN SOURCE: db/schema_parts/65_client_payment_finance_link.sql
@@ -13827,12 +13892,18 @@ ON DUPLICATE KEY UPDATE staff_id=VALUES(staff_id);
 
 INSERT INTO staff_matching_preference_migration_reviews
     (staff_id,source_kind,source_value,issue_code)
-SELECT staff_id,'staff_time_slot',slot_name,'source_not_ready'
+SELECT staff_id,'staff_time_slot',
+       LEFT(CASE
+           WHEN custom_slot_detail IS NULL OR TRIM(custom_slot_detail)='' THEN slot_name
+           ELSE CONCAT(slot_name,':',custom_slot_detail)
+       END,100),
+       'source_not_ready'
 FROM staff_time_slots
 WHERE slot_name NOT IN (
     '4小時_上午','4小時_下午','4小時(上午8:30-12:30)',
     '4小時(下午13:00-17:00)','8小時','24小時'
 )
+   OR (custom_slot_detail IS NOT NULL AND TRIM(custom_slot_detail)<>'')
 ON DUPLICATE KEY UPDATE id=id;
 -- END SOURCE: db/schema_parts/188_matching_preferences_and_staff_availability.sql
 
