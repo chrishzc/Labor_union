@@ -2502,6 +2502,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "extra": "",
             }
         }
+    if part_name == "185_customer_service_runtime.sql":
+        descriptor["tables"]["customer_service_tickets"][
+            "active_marker"
+        ]["extra"] = "stored generated"
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -2584,9 +2588,12 @@ def _canonical_artifact_metadata_state(
     part_name: str,
     *,
     defer_missing_triggers: bool = False,
+    owned_tables: frozenset[str] | None = None,
 ) -> str:
     descriptor = _canonical_artifact_descriptor(part_name)
     _apply_legacy_knowledge_identifier_contract(descriptor, snapshot, part_name)
+    if owned_tables is not None:
+        _limit_descriptor_to_owned_tables(descriptor, owned_tables)
     columns_by_table: dict[str, dict[str, Mapping[str, Any]]] = {}
     for row in snapshot["columns"]:
         columns_by_table.setdefault(row["table_name"], {})[
@@ -2730,6 +2737,28 @@ def _canonical_artifact_metadata_state(
     return "exact"
 
 
+def _limit_descriptor_to_owned_tables(
+    descriptor: dict[str, Any], owned_tables: frozenset[str]
+) -> None:
+    for contract_kind in ("tables", "parent_columns"):
+        descriptor[contract_kind] = {
+            table: contract
+            for table, contract in descriptor[contract_kind].items()
+            if table in owned_tables
+        }
+    for contract_kind in ("indexes", "foreign_keys", "checks"):
+        descriptor[contract_kind] = {
+            key: contract
+            for key, contract in descriptor[contract_kind].items()
+            if key[0] in owned_tables
+        }
+    descriptor["triggers"] = {
+        name: contract
+        for name, contract in descriptor["triggers"].items()
+        if contract["event_object_table"] in owned_tables
+    }
+
+
 def _apply_legacy_knowledge_identifier_contract(
     descriptor: dict[str, Any],
     snapshot: Mapping[str, Any],
@@ -2810,12 +2839,42 @@ def schema_statements_for_state(
     statements = split_sql(part.read_text(encoding="utf-8"))
     if part.name == "148_knowledge_retrieval.sql" and state == "partial":
         return _knowledge_retrieval_recovery_statements(statements, snapshot)
+    if part.name == "185_customer_service_runtime.sql" and state == "partial":
+        return _customer_service_runtime_recovery_statements(
+            statements, snapshot
+        )
     if part.name != "163_knowledge_runtime.sql" or state != "partial":
         if part.name == "186_line_identity_management.sql" and state == "partial":
             if not _is_recoverable_line_identity_legacy_state(snapshot):
                 raise UpgradeBlocked("line identity management partial state is not resumable")
         return statements
     return _knowledge_runtime_recovery_statements(statements, snapshot)
+
+
+def _customer_service_runtime_recovery_statements(
+    statements: list[str],
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    present_tables = {
+        str(row["table_name"]) for row in snapshot.get("columns", ())
+    }
+    tickets = "customer_service_tickets"
+    events = "customer_service_ticket_events"
+    ticket_state = _canonical_artifact_metadata_state(
+        snapshot,
+        "185_customer_service_runtime.sql",
+        owned_tables=frozenset({tickets}),
+    )
+    if (
+        len(statements) == 2
+        and tickets in present_tables
+        and events not in present_tables
+        and ticket_state == "exact"
+    ):
+        return [statements[1]]
+    raise UpgradeBlocked(
+        "customer service runtime partial state is not resumable"
+    )
 
 
 def _knowledge_retrieval_recovery_statements(
