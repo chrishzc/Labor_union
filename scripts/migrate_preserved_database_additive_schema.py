@@ -1,4 +1,4 @@
-﻿"""
+"""
 File: migrate_preserved_database_additive_schema.py
 Description: 驗證 release chain，並以唯讀來源、隔離候選及 durable receipt 執行 MySQL 升級。
 """
@@ -142,7 +142,11 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_09_v7.json",
     "labor_union_2026_08_09_v8.json",
     "labor_union_2026_08_09_v9.json",
+    "labor_union_2026_08_12_line_stage13_v1.json",
     "labor_union_2026_08_12_wp68_v1.json",
+    "labor_union_2026_08_11_provisional_registration_case_issue_v1.json",
+    "labor_union_2026_08_11_line_stage11_v1.json",
+    "labor_union_2026_08_11_line_stage12_v1.json",
     "labor_union_2026_08_13_wp72_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
@@ -1444,7 +1448,11 @@ def _owned_classification(
             "106_order_lifecycle_control_facts.sql",
             "148_knowledge_retrieval.sql",
             "163_knowledge_runtime.sql",
+            "186_line_identity_management.sql",
         }:
+            if part == "186_line_identity_management.sql":
+                result[part] = _line_identity_management_state(snapshot)
+                continue
             result[part] = _canonical_artifact_metadata_state(
                 snapshot, part, defer_missing_triggers=defer_missing_triggers
             )
@@ -2438,6 +2446,32 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
             "non_unique": 0,
             "columns": ("source_identity",),
         }
+    if part_name == "186_line_identity_management.sql":
+        descriptor["tables"]["line_identity_revocation_requests"][
+            "active_marker"
+        ]["extra"] = "stored generated"
+        descriptor["parent_columns"]["line_identity_bindings"] = {
+            "binding_status": {
+                "column_type": "enum('unbound','pending_review','bound','revocation_pending','revoked')",
+                "is_nullable": "NO",
+                "column_default": "unbound",
+                "extra": "",
+            },
+            "active_subject_key": {
+                "column_type": "varchar(400)",
+                "is_nullable": "YES",
+                "column_default": None,
+                "extra": "stored generated",
+            },
+        }
+        descriptor["parent_columns"]["line_identity_binding_events"] = {
+            "action": {
+                "column_type": "enum('claim_submitted','bound','revocation_requested','revoked','rebound','legacy_imported')",
+                "is_nullable": "NO",
+                "column_default": None,
+                "extra": "",
+            }
+        }
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -2677,6 +2711,49 @@ def _allowed_later_artifact_columns(
     return set()
 
 
+def _line_identity_management_state(snapshot: Mapping[str, Any]) -> str:
+    canonical_state = _canonical_artifact_metadata_state(
+        snapshot, "186_line_identity_management.sql"
+    )
+    if canonical_state == "exact":
+        return "exact"
+    if _is_recoverable_line_identity_legacy_state(snapshot):
+        return "partial"
+    return "drift"
+
+
+# Kept cohesive because this is one released legacy metadata fingerprint.
+def _is_recoverable_line_identity_legacy_state(
+    snapshot: Mapping[str, Any],
+) -> bool:
+    columns = {
+        (row["table_name"], row["column_name"]): row
+        for row in snapshot.get("columns", ())
+    }
+    if any(
+        table == "line_identity_revocation_requests"
+        for table, _column in columns
+    ):
+        return False
+    allowed_types = {
+        ("line_identity_bindings", "binding_status"): {
+            "enum('unbound','pending_review','bound','revoked')",
+            "enum('unbound','pending_review','bound','revocation_pending','revoked')",
+        },
+        ("line_identity_bindings", "active_subject_key"): {"varchar(400)"},
+        ("line_identity_binding_events", "action"): {
+            "enum('claim_submitted','bound','revoked','rebound','legacy_imported')",
+            "enum('claim_submitted','bound','revocation_requested','revoked','rebound','legacy_imported')",
+        },
+    }
+    for key, expected_types in allowed_types.items():
+        row = columns.get(key)
+        if row is None or row["column_type"] not in expected_types:
+            return False
+    active_key = columns[("line_identity_bindings", "active_subject_key")]
+    return "generated" in str(active_key.get("extra") or "").casefold()
+
+
 def schema_statements_for_state(
     part: Path,
     state: str,
@@ -2684,6 +2761,9 @@ def schema_statements_for_state(
 ) -> list[str]:
     statements = split_sql(part.read_text(encoding="utf-8"))
     if part.name != "163_knowledge_runtime.sql" or state != "partial":
+        if part.name == "186_line_identity_management.sql" and state == "partial":
+            if not _is_recoverable_line_identity_legacy_state(snapshot):
+                raise UpgradeBlocked("line identity management partial state is not resumable")
         return statements
     return _knowledge_runtime_recovery_statements(statements, snapshot)
 

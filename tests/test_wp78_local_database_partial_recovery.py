@@ -17,6 +17,7 @@ from scripts import update_local_database as update
 
 ROOT = Path(__file__).resolve().parents[1]
 KNOWLEDGE_RUNTIME = ROOT / "db/schema_parts/163_knowledge_runtime.sql"
+LINE_IDENTITY_MANAGEMENT = ROOT / "db/schema_parts/186_line_identity_management.sql"
 
 
 def _knowledge_runtime_snapshot(*, source_column: bool, source_index: bool) -> dict:
@@ -100,7 +101,43 @@ def test_local_update_allows_only_reviewed_partial_artifacts() -> None:
         "148_knowledge_retrieval.sql",
         "163_knowledge_runtime.sql",
         "181_matching_service_date_confirmation.sql",
+        "186_line_identity_management.sql",
     })
+
+
+def _line_identity_legacy_snapshot(*, malformed: bool = False) -> dict:
+    binding_type = "varchar(20)" if malformed else "enum('unbound','pending_review','bound','revoked')"
+    return {
+        "columns": [
+            {"table_name": "line_identity_bindings", "column_name": "binding_status", "column_type": binding_type, "extra": ""},
+            {"table_name": "line_identity_bindings", "column_name": "active_subject_key", "column_type": "varchar(400)", "extra": "STORED GENERATED"},
+            {"table_name": "line_identity_binding_events", "column_name": "action", "column_type": "enum('claim_submitted','bound','revoked','rebound','legacy_imported')", "extra": ""},
+        ],
+        "indexes": [],
+    }
+
+
+def test_line_identity_legacy_shape_resumes_the_full_published_release() -> None:
+    statements = migration.schema_statements_for_state(
+        LINE_IDENTITY_MANAGEMENT,
+        "partial",
+        _line_identity_legacy_snapshot(),
+    )
+
+    assert statements[0].startswith("ALTER TABLE line_identity_bindings")
+    assert statements[-1].startswith("CREATE TABLE IF NOT EXISTS line_identity_revocation_requests")
+
+
+def test_line_identity_unknown_partial_shape_remains_blocked() -> None:
+    with pytest.raises(
+        migration.UpgradeBlocked,
+        match="partial state is not resumable",
+    ):
+        migration.schema_statements_for_state(
+            LINE_IDENTITY_MANAGEMENT,
+            "partial",
+            _line_identity_legacy_snapshot(malformed=True),
+        )
 
 
 def test_apply_failure_is_reported_without_a_raw_traceback(

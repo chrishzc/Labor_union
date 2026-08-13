@@ -34,6 +34,7 @@ LOCAL_RESUMABLE_PARTIAL_ARTIFACTS = frozenset({
     "148_knowledge_retrieval.sql",
     "163_knowledge_runtime.sql",
     "181_matching_service_date_confirmation.sql",
+    "186_line_identity_management.sql",
 })
 
 

@@ -22,6 +22,17 @@ from infrastructure.migration.rehearsal_runtime import (
 from scripts import migrate_preserved_database_additive_schema as runner
 
 
+def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
+    required_manifests = {
+        "labor_union_2026_08_12_line_stage13_v1.json",
+        "labor_union_2026_08_11_provisional_registration_case_issue_v1.json",
+        "labor_union_2026_08_11_line_stage11_v1.json",
+        "labor_union_2026_08_11_line_stage12_v1.json",
+    }
+
+    assert required_manifests <= set(runner.DEFAULT_RELEASE_MANIFESTS)
+
+
 def test_every_catalog_descriptor_and_schema_artifact_has_exact_hash() -> None:
     release_root = Path(__file__).resolve().parents[1]
 
@@ -247,13 +258,17 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
 
 
-def test_release_catalog_drives_schema_artifacts_through_wp72() -> None:
+def test_release_catalog_includes_line_runtime_recovery_through_wp72() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-4:] == (
+    assert artifact_names[-8:] == (
         "165_anomaly_workflow_event_idempotency_widen.sql",
+        "179_line_identity_canonical_menu_publication.sql",
         "181_matching_service_date_confirmation.sql",
         "182_candidate_contact_pool.sql",
+        "184_provisional_registration_case_issue.sql",
+        "185_customer_service_runtime.sql",
+        "186_line_identity_management.sql",
         "188_matching_preferences_and_staff_availability.sql",
     )
     assert len(artifact_names) == len(set(artifact_names))

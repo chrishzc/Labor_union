@@ -23,6 +23,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 | [WP75（封存）](../04_已完成與上線封存/work_packages/75_Startup_Launcher_Convergence_and_Retirement_Work_Package.md) | work-package | `completed` | Windows canonical launcher 實跑與 PID／port cleanup 通過；LINE 缺個人憑證時安全略過，長期入口規則由開發者導覽承接。 |
 | [76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md](76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md) | work-package | `completed` | full-chain、part 61／153、disposable engine 與無 Git 目標主機 readiness／API／UI 驗收均已通過。 |
 | [78_Knowledge_Partial_Local_Database_Recovery_Work_Package.md](78_Knowledge_Partial_Local_Database_Recovery_Work_Package.md) | work-package | `in-progress` | 安全恢復舊本機 DB 的 Knowledge 148/163 partial statement boundary，未知 drift 仍 fail closed。 |
+| [79_LINE_Runtime_Release_Catalog_Recovery_Work_Package.md](79_LINE_Runtime_Release_Catalog_Recovery_Work_Package.md) | work-package | `in-progress` | 恢復 preserve-data catalog 遺漏的 LINE 179／184／185／186 runtime release，修正客服與身分管理缺表 500。 |
 
 所有 completed／superseded 歷史文件統一由
 [`archive_manifest.json`](../04_已完成與上線封存/archive_manifest.json) 依 archive identity 查找；
@@ -30,7 +31,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 
 > `29_` 原本被三份文件重複使用（無明確時間序，只能靠檔名區分），2026-08-07
 > 已重新編號為 `32`～`34`（依原檔名字母序指派，不代表已還原真實時間序）。
-> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `78`，下一個為 `79`）。
+> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `79`，下一個為 `80`）。
 
 > 注意：本表不是只保留字面上的 `in-progress`。仍需實作、等待 release／migration、保留人工操作
 > 邊界、缺少 completion evidence，或仍約束現行操作的文件都屬 active working set。作為目前缺口
