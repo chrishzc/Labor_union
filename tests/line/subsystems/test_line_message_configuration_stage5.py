@@ -1,4 +1,7 @@
-"""Stage 5 contracts for templates, D+N schedules, and versioned config."""
+"""
+File: test_line_message_configuration_stage5.py
+Description: 驗證 LINE 範本、排程與版本化設定的契約。
+"""
 
 from __future__ import annotations
 
@@ -159,3 +162,40 @@ def test_configuration_apply_requires_capability_and_commits_revision() -> None:
     assert result.snapshot.revision == LineConfigurationRevision(1)
     assert uow.committed is True
     assert audit.items[0].action == "line.configuration.apply"
+
+
+def test_exact_empty_rich_menu_configuration_is_repaired_once() -> None:
+    repository = ConfigurationRepository({
+        LineConfigurationKind.RICH_MENUS: LineConfigurationSnapshot(
+            LineConfigurationKind.RICH_MENUS, LineConfigurationRevision(4), "{}",
+        )
+    })
+    audit = RecordingRepository()
+    uow = FakeUow(configurations=repository, audit=audit)
+    application = LineConfigurationApplication(lambda: uow)
+
+    result = application.repair_empty_rich_menu_configuration(
+        _definition("line_menu"), ActorContext("system:repair", ("line.config.manage",)),
+        correlation_id=CorrelationId("repair-empty-rich-menu"),
+    )
+
+    assert result.snapshot.revision == LineConfigurationRevision(5)
+    assert audit.items[0].action == "line.configuration.repair_empty_rich_menus"
+    assert uow.committed is True
+
+
+def test_nonempty_rich_menu_configuration_is_never_repaired_by_bootstrap() -> None:
+    repository = ConfigurationRepository({
+        LineConfigurationKind.RICH_MENUS: _snapshot(
+            LineConfigurationKind.RICH_MENUS, "line_menu"
+        )
+    })
+    uow = FakeUow(configurations=repository, audit=RecordingRepository())
+
+    result = LineConfigurationApplication(lambda: uow).repair_empty_rich_menu_configuration(
+        _definition("line_menu"), ActorContext("system:repair", ("line.config.manage",)),
+        correlation_id=CorrelationId("repair-nonempty-rich-menu"),
+    )
+
+    assert result is None
+    assert repository.applied == []

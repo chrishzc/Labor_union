@@ -21,7 +21,7 @@
       },
       "buttons": [
         {
-          "id": "order_query",
+          "id": "service_registration",
           "label": "服務登記",
           "text_color": "#FFFFFF",
           "background_color": "#1E3A8A",
@@ -32,10 +32,10 @@
             "height": 843
           },
           "action": {
-            "type": "message",
-            "text": "服務登記",
-            "uri": null,
-            "uri_source": "literal",
+            "type": "uri",
+            "text": null,
+            "uri": "?target=registration",
+            "uri_source": "liff",
             "data": null
           }
         },

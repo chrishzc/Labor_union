@@ -258,22 +258,23 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
 
 
-def test_release_catalog_includes_line_runtime_recovery_through_wp72() -> None:
+def test_release_catalog_drives_schema_artifacts_through_wp80() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-8:] == (
-        "165_anomaly_workflow_event_idempotency_widen.sql",
-        "179_line_identity_canonical_menu_publication.sql",
+    assert artifact_names[-9:] == (
         "181_matching_service_date_confirmation.sql",
         "182_candidate_contact_pool.sql",
         "184_provisional_registration_case_issue.sql",
         "185_customer_service_runtime.sql",
         "186_line_identity_management.sql",
+        "179_line_identity_canonical_menu_publication.sql",
         "188_matching_preferences_and_staff_availability.sql",
+        "189_staff_historical_adoption_hcm_review.sql",
+        "190_historical_order_adoption.sql",
     )
     assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
-    assert runner.RELEASE_MANIFEST.release_id == "labor-union-wp72-2026-08-13-v1"
+    assert runner.RELEASE_MANIFEST.release_id == "labor-union-wp80-2026-08-13-v1"
     assert runner._descriptor_presence_state(
         {"tables": {"knowledge_items": ["id", "version"]}, "triggers": []},
         {"knowledge_items": {"id", "version"}},
@@ -299,6 +300,38 @@ def test_wp72_parent_column_is_required_by_descriptor() -> None:
         {**new_tables, "orders": {"case_no", "requires_cooking"}},
         set(),
     ) == "exact"
+
+
+def test_wp77_descriptor_requires_all_three_tables_and_immutability_triggers() -> None:
+    descriptor = runner.RELEASE_MANIFEST.descriptors[
+        "189_staff_historical_adoption_hcm_review.sql"
+    ]
+    exact_tables = {table: set(columns) for table, columns in descriptor["tables"].items()}
+    exact_triggers = set(descriptor["triggers"])
+
+    assert runner._descriptor_presence_state(descriptor, exact_tables, exact_triggers) == "exact"
+    partial_tables = dict(exact_tables)
+    partial_tables.pop("case_import_hcm_review_outbox")
+    assert runner._descriptor_presence_state(descriptor, partial_tables, exact_triggers) == "partial"
+
+
+def test_wp80_descriptor_requires_receipt_review_pairing_outbox_and_triggers() -> None:
+    descriptor = runner.RELEASE_MANIFEST.descriptors[
+        "190_historical_order_adoption.sql"
+    ]
+    exact_tables = {
+        table: set(columns) for table, columns in descriptor["tables"].items()
+    }
+    exact_triggers = set(descriptor["triggers"])
+
+    assert runner._descriptor_presence_state(
+        descriptor, exact_tables, exact_triggers
+    ) == "exact"
+    partial_tables = dict(exact_tables)
+    partial_tables.pop("historical_order_pairing_evidence")
+    assert runner._descriptor_presence_state(
+        descriptor, partial_tables, exact_triggers
+    ) == "partial"
 
 
 def test_preflight_requires_live_read_only_principal_and_bound_token(

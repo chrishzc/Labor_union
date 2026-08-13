@@ -1,6 +1,6 @@
 ---
 doc_type: evidence-receipt
-declared_status: awaiting-engine-and-developer-acceptance
+declared_status: program-fix-completed
 date: 2026-08-13
 owner: Global Migration / LINE
 work_package: ../../02_決策與退役執行記錄/79_LINE_Runtime_Release_Catalog_Recovery_Work_Package.md
@@ -27,6 +27,7 @@ work_package: ../../02_決策與退役執行記錄/79_LINE_Runtime_Release_Catal
 | Descriptor | PASS | 179／184／185／186 descriptor hash 載入成功 |
 | Read-only plan | PASS | `parts_to_resume` 包含 186；185 列入 `parts_to_apply` |
 | Engine verification | PASS | disposable MySQL 8.4：`1 passed` |
-| Developer acceptance | NOT_RUN | 尚未操作開發者目標 DB |
+| Developer acceptance | PASS | Docker MySQL 8.0：source dump → candidate → verify → same-name replacement；receipt `scratch/local_database_updates/lu_test_dataset_contract_signing_v4_local_20260813133057/replacement.receipt.json` |
 
-總結：`DB_CHANGE_NOT_READY`，仍需在開發者環境執行 updater 並保存實際 replacement receipt。
+程式修復結案：使用者已於 2026-08-13 明確核准以程式修復與遠端發布為準。
+DB 操作狀態為 `PASS`。來源備份與 candidate dump 保留於 receipt 目錄；日後其他開發者仍須在其個人 Docker 容器設定 `MYSQL_CONTAINER` 後，各自執行 updater。
