@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from typing import Any
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from infrastructure.mysql.mysql_adapter import get_connection
 from scripts.migrate_order_details_lifecycle_version_view import canonical_view_statement

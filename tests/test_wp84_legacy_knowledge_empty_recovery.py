@@ -57,7 +57,13 @@ def _configure_release(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 # 保持 fixture 建立在同一 helper，確保每個拒絕案例都源自同一歷史契約。
-def _create_legacy_source(config, database: str, *, with_row: bool) -> None:
+def _create_legacy_source(
+    config,
+    database: str,
+    *,
+    with_row: bool,
+    with_request_job_rows: bool = False,
+) -> None:
     connection = config.connect()
     try:
         with connection.cursor() as cursor:
@@ -82,6 +88,19 @@ def _create_legacy_source(config, database: str, *, with_row: bool) -> None:
                     "(source_identity,title,source_digest,created_by_actor_id) "
                     "VALUES ('legacy:1','legacy',%s,'admin:legacy')",
                     ("a" * 64,),
+                )
+            if with_request_job_rows:
+                cursor.execute(
+                    "INSERT INTO knowledge_answer_requests "
+                    "(question,request_status,idempotency_key,correlation_id) "
+                    "VALUES ('legacy question','pending','request:legacy','correlation:legacy')"
+                )
+                cursor.execute(
+                    "INSERT INTO knowledge_jobs "
+                    "(job_type,processing_status,answer_request_id,question,"
+                    "idempotency_key,created_by_actor_id) "
+                    "VALUES ('answer','pending',LAST_INSERT_ID(),'legacy question',"
+                    "'job:legacy','admin:legacy')"
                 )
     finally:
         connection.close()
@@ -170,6 +189,70 @@ def test_nonempty_legacy_knowledge_is_blocked_during_read_only_plan(
         ):
             migration.build_plan(config, source, candidate, RECOVERABLE)
         assert migration._schema_snapshot(config, source)["sha256"] == source_before
+    finally:
+        _drop(config, candidate, source)
+
+
+@pytest.mark.integration
+def test_canonical_request_and_job_rows_survive_candidate_rebuild(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = _config()
+    container = os.environ["MYSQL_TEST_CONTAINER"]
+    suffix = uuid.uuid4().hex[:10]
+    source = f"lu_test_wp84_preserved_{suffix}"
+    candidate = f"lu_test_wp84_candidate_{suffix}"
+    _configure_release(monkeypatch)
+    try:
+        _create_legacy_source(
+            config,
+            source,
+            with_row=False,
+            with_request_job_rows=True,
+        )
+        plan = migration.build_plan(config, source, candidate, RECOVERABLE)
+        assert plan["legacy_knowledge_empty_rebuild"]["eligible"] is True
+        assert plan["legacy_knowledge_empty_rebuild"]["preserved_tables"] == [
+            "knowledge_answer_requests",
+            "knowledge_jobs",
+        ]
+        paths = {
+            name: tmp_path / name
+            for name in ("plan", "dump", "backup", "operation")
+        }
+        migration.write_receipt(paths["plan"], plan)
+        migration.create_source_dump(
+            config,
+            source,
+            paths["dump"],
+            paths["backup"],
+            mysql_container=container,
+        )
+        migration.restore_candidate(
+            config,
+            source,
+            candidate,
+            paths["dump"],
+            paths["backup"],
+            paths["operation"],
+            mysql_container=container,
+        )
+        migration.apply_schema(
+            config,
+            source,
+            candidate,
+            paths["plan"],
+            paths["operation"],
+            mysql_container=container,
+            allowed_partial_artifacts=RECOVERABLE,
+        )
+        migration.verify_candidate(config, source, candidate, paths["operation"])
+
+        source_data = migration._table_evidence(config, source)
+        candidate_data = migration._table_evidence(config, candidate)
+        for table in ("knowledge_answer_requests", "knowledge_jobs"):
+            assert candidate_data[table] == source_data[table]
     finally:
         _drop(config, candidate, source)
 

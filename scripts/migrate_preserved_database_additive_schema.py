@@ -164,6 +164,13 @@ LEGACY_KNOWLEDGE_TABLES = frozenset({
     "knowledge_answer_receipts",
     "knowledge_answer_sources",
 })
+LEGACY_KNOWLEDGE_PRESERVED_TABLES = frozenset({
+    "knowledge_answer_requests",
+    "knowledge_jobs",
+})
+LEGACY_KNOWLEDGE_REBUILD_TABLES = (
+    LEGACY_KNOWLEDGE_TABLES - LEGACY_KNOWLEDGE_PRESERVED_TABLES
+)
 LEGACY_KNOWLEDGE_DROP_ORDER = (
     "knowledge_answer_sources",
     "knowledge_answer_receipts",
@@ -603,6 +610,13 @@ SCHEMA_PARTS = tuple(ROOT / artifact["relative_path"] for artifact in RELEASE_MA
 VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "backfilled", "verified"})
 PURE_RETIREMENT_ARTIFACTS = frozenset({
     "153_retire_empty_legacy_field_inventory.sql",
+})
+INTENTIONALLY_RETIRED_EMPTY_TABLES = frozenset({
+    "finance_import_reclassification_events",
+})
+DECLARED_LIFECYCLE_BACKFILL_TABLES = frozenset({
+    "order_lifecycle_control_events",
+    "order_lifecycle_control_state",
 })
 
 
@@ -1629,6 +1643,15 @@ def build_plan(
         )
     candidate_exists = database_exists(config, candidate)
     source_data = _table_evidence(config, source)
+    retired_nonempty = sorted(
+        table
+        for table in INTENTIONALLY_RETIRED_EMPTY_TABLES
+        if int((source_data.get(table) or {}).get("count", 0)) != 0
+    )
+    if retired_nonempty:
+        raise UpgradeBlocked(
+            "retired tables are not empty: " + ", ".join(retired_nonempty)
+        )
     legacy_knowledge_rebuild = _legacy_knowledge_rebuild_plan(
         source_snapshot, source_data
     )
@@ -1674,12 +1697,21 @@ def _legacy_knowledge_rebuild_plan(
     if _legacy_knowledge_schema_state(snapshot) != "exact":
         return {"eligible": False}
     nonempty = sorted(
-        table for table in LEGACY_KNOWLEDGE_TABLES
+        table for table in LEGACY_KNOWLEDGE_REBUILD_TABLES
         if int((source_data.get(table) or {}).get("count", 0)) != 0
     )
     if nonempty:
         raise UpgradeBlocked(
             "legacy Knowledge tables are not empty: " + ", ".join(nonempty)
+        )
+    preserved_state = _canonical_artifact_metadata_state(
+        snapshot,
+        "163_knowledge_runtime.sql",
+        owned_tables=LEGACY_KNOWLEDGE_PRESERVED_TABLES,
+    )
+    if preserved_state != "exact":
+        raise UpgradeBlocked(
+            "preserved Knowledge request/job tables are not canonical-exact"
         )
     inbound = _external_knowledge_inbound_foreign_keys(snapshot)
     if inbound:
@@ -1689,8 +1721,10 @@ def _legacy_knowledge_rebuild_plan(
         )
     return {
         "eligible": True,
-        "contract": "legacy-knowledge-stage8-empty-rebuild/v1",
+        "contract": "legacy-knowledge-stage8-preserved-queue-rebuild/v2",
         "tables": sorted(LEGACY_KNOWLEDGE_TABLES),
+        "preserved_tables": sorted(LEGACY_KNOWLEDGE_PRESERVED_TABLES),
+        "rebuild_tables": sorted(LEGACY_KNOWLEDGE_REBUILD_TABLES),
         "source_schema_sha256": snapshot["sha256"],
     }
 
@@ -3461,7 +3495,11 @@ def _rebuild_empty_legacy_knowledge_candidate(
             "candidate legacy Knowledge fingerprint changed before rebuild"
         )
     evidence = _table_evidence(config, candidate)
-    _legacy_knowledge_rebuild_plan(snapshot, evidence)
+    rebuild_plan = _legacy_knowledge_rebuild_plan(snapshot, evidence)
+    preserved_before = {
+        table: evidence[table]
+        for table in sorted(LEGACY_KNOWLEDGE_PRESERVED_TABLES)
+    }
     parts = {
         path.name: path
         for path in SCHEMA_PARTS
@@ -3475,9 +3513,11 @@ def _rebuild_empty_legacy_knowledge_candidate(
         raise UpgradeBlocked("canonical Knowledge schema parts are unavailable")
     rebuild = {
         "status": "prepared",
-        "contract": "legacy-knowledge-stage8-empty-rebuild/v1",
+        "contract": rebuild_plan["contract"],
         "before_schema_sha256": snapshot["sha256"],
         "tables": list(LEGACY_KNOWLEDGE_DROP_ORDER),
+        "preserved_tables": sorted(LEGACY_KNOWLEDGE_PRESERVED_TABLES),
+        "preserved_before": preserved_before,
         "prepared_at": _now(),
     }
     receipt.update(status="partial", phase="legacy_knowledge_rebuild")
@@ -3487,6 +3527,8 @@ def _rebuild_empty_legacy_knowledge_candidate(
     try:
         with connection.cursor() as cursor:
             for table in LEGACY_KNOWLEDGE_DROP_ORDER:
+                if table in LEGACY_KNOWLEDGE_PRESERVED_TABLES:
+                    continue
                 cursor.execute(f"DROP TABLE IF EXISTS `{table}`")
             for part_name in (
                 "148_knowledge_retrieval.sql",
@@ -3509,9 +3551,18 @@ def _rebuild_empty_legacy_knowledge_candidate(
         rebuild.update(status="failed", owned_objects=states)
         write_receipt(receipt_path, receipt)
         raise UpgradeBlocked("rebuilt Knowledge schema is not exact")
+    preserved_after = {
+        table: _table_evidence(config, candidate)[table]
+        for table in sorted(LEGACY_KNOWLEDGE_PRESERVED_TABLES)
+    }
+    if preserved_after != preserved_before:
+        rebuild.update(status="failed", preserved_after=preserved_after)
+        write_receipt(receipt_path, receipt)
+        raise UpgradeBlocked("preserved Knowledge request/job data changed")
     rebuild.update(
         status="completed",
         after_schema_sha256=after["sha256"],
+        preserved_after=preserved_after,
         completed_at=_now(),
     )
     write_receipt(receipt_path, receipt)
@@ -3660,6 +3711,10 @@ def run_candidate_post_schema(
         config=candidate_config,
         database=candidate,
     )
+    contract_migration = "scripts/migrate_order_contract_identity.py"
+    contract_apply = _run_project_python(
+        [contract_migration], config=candidate_config, database=candidate
+    )
     view_migration = "scripts/migrate_order_details_lifecycle_version_view.py"
     view_dry = _run_project_python(
         [view_migration], config=candidate_config, database=candidate
@@ -3678,6 +3733,7 @@ def run_candidate_post_schema(
             "plan_sha256": _sha256_file(plan),
             "receipt_sha256": _sha256_file(backfill_receipt),
         },
+        contract_identity=contract_apply,
         view={"dry_run": view_dry, "apply": view_apply},
     )
     write_receipt(operation_receipt_path, receipt)
@@ -3882,11 +3938,19 @@ def _table_projection_evidence(
     database: str,
     table: str,
     columns: list[str],
+    *,
+    column_sources: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    sources = dict(column_sources or {})
     if (
         not IDENTIFIER.fullmatch(table)
         or not columns
         or any(not IDENTIFIER.fullmatch(name) for name in columns)
+        or any(
+            not IDENTIFIER.fullmatch(name)
+            for name in (*sources.keys(), *sources.values())
+        )
+        or not set(sources).issubset(columns)
     ):
         raise UpgradeBlocked("preserved table projection is invalid")
     connection = config.connect(database)
@@ -3901,13 +3965,17 @@ def _table_projection_evidence(
                 _normalized_row(row)["column_name"]
                 for row in cursor.fetchall()
             }
-            missing = set(columns) - available
+            actual_columns = [sources.get(name, name) for name in columns]
+            missing = set(actual_columns) - available
             if missing:
                 raise UpgradeBlocked(
                     f"candidate {table} lost legacy columns: "
                     + ",".join(sorted(missing))
                 )
-            projection = ",".join(f"`{name}`" for name in columns)
+            projection = ",".join(
+                f"`{sources.get(name, name)}` AS `{name}`"
+                for name in columns
+            )
             cursor.execute(
                 "SELECT column_name FROM information_schema.key_column_usage "
                 "WHERE table_schema=%s AND table_name=%s "
@@ -4019,9 +4087,23 @@ def _verify_orders_preservation(
     before = _table_projection_evidence(
         config, source, "orders", source_columns
     )
-    after = _table_projection_evidence(
-        config, candidate, "orders", source_columns
+    renamed_columns = (
+        {"contract_id": "contract_identity"}
+        if "contract_id" in source_columns
+        else None
     )
+    if renamed_columns is None:
+        after = _table_projection_evidence(
+            config, candidate, "orders", source_columns
+        )
+    else:
+        after = _table_projection_evidence(
+            config,
+            candidate,
+            "orders",
+            source_columns,
+            column_sources=renamed_columns,
+        )
     if after != before:
         raise UpgradeBlocked("orders legacy data changed")
     return after
@@ -4100,18 +4182,47 @@ def verify_candidate(
     rebuilt_empty_knowledge = legacy_rebuild.get("status") in {
         "completed", "exact_replay",
     }
+    backfill_verify = ((receipt.get("backfill") or {}).get("verify") or {})
+    backfill_result = backfill_verify.get("result") or {}
+    verified_lifecycle_backfill = (
+        backfill_verify.get("exit_code") == 0
+        and backfill_result.get("mode") == "verify"
+        and int(backfill_result.get("review_required", -1)) == 0
+    )
     additive_projection_preservation: dict[str, Any] = {}
     for table, evidence in source_data.items():
         actual = candidate_data.get(table)
         if not actual:
+            if (
+                table in INTENTIONALLY_RETIRED_EMPTY_TABLES
+                and int(evidence.get("count", 0)) == 0
+            ):
+                additive_projection_preservation[table] = {
+                    "mode": "reviewed_empty_table_retirement",
+                    "row_count": 0,
+                }
+                continue
             raise UpgradeBlocked(f"preserved table is missing: {table}")
         if (
             actual.get("count") != evidence.get("count")
             or actual.get("primary_key_sha256")
             != evidence.get("primary_key_sha256")
         ):
-            raise UpgradeBlocked(f"preserved table changed: {table}")
-        if rebuilt_empty_knowledge and table in LEGACY_KNOWLEDGE_TABLES:
+            if not (
+                verified_lifecycle_backfill
+                and table in DECLARED_LIFECYCLE_BACKFILL_TABLES
+            ):
+                raise UpgradeBlocked(f"preserved table changed: {table}")
+            additive_projection_preservation[table] = {
+                "mode": "verified_declared_lifecycle_backfill",
+                "source": evidence,
+                "candidate": actual,
+            }
+            continue
+        if (
+            rebuilt_empty_knowledge
+            and table in LEGACY_KNOWLEDGE_REBUILD_TABLES
+        ):
             if int(evidence.get("count", 0)) != 0:
                 raise UpgradeBlocked(
                     "legacy Knowledge rebuild receipt contains nonempty data"
@@ -4121,14 +4232,34 @@ def verify_candidate(
                 "row_count": 0,
             }
             continue
+        if (
+            rebuilt_empty_knowledge
+            and table in LEGACY_KNOWLEDGE_PRESERVED_TABLES
+            and actual != evidence
+        ):
+            raise UpgradeBlocked(
+                f"preserved Knowledge request/job data changed: {table}"
+            )
         source_columns = _table_columns(source_snapshot, table)
         candidate_columns = _table_columns(candidate_snapshot, table)
         has_additive_columns = source_columns != candidate_columns
+        has_contract_identity_rename = (
+            table == "orders"
+            and "contract_id" in source_columns
+            and "contract_identity" in candidate_columns
+        )
         has_knowledge_identity_backfill = (
             table == "knowledge_items"
             and source_objects.get("163_knowledge_runtime.sql") == "partial"
         )
-        if has_additive_columns:
+        has_legacy_system_alert_migration = (
+            table == "system_alerts" and source_alert_state == "absent"
+        )
+        if (
+            has_additive_columns
+            and not has_contract_identity_rename
+            and not has_legacy_system_alert_migration
+        ):
             additive_projection_preservation[table] = (
                 _verify_source_column_projection_preserved(
                     config,
