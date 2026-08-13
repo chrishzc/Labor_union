@@ -34,6 +34,25 @@ evidence 為準；不要以本 README 的文字代替實際驗收。
 [`2026-08-09_line_merge_candidate_acceptance_receipt.md`](document/架構重整/03_追蹤清單與證據/evidence/2026-08-09_line_merge_candidate_acceptance_receipt.md)，
 版本摘要見 [`CHANGELOG.md`](CHANGELOG.md)。
 
+## 2026-08-13 開發者 DB 與啟動入口更新
+
+本次修正開發者更新 `main` 後，程式與本機 MySQL schema 不同步所造成的 API 500、runtime
+heartbeat／outbox worker 缺表問題。新增保留資料的 candidate upgrade workflow，並將所有專案
+operator-facing launcher 集中到 [`scripts/launchers/`](scripts/launchers/)。完整變更與已知限制見
+[`CHANGELOG.md`](CHANGELOG.md#2026-08-13--開發者本機資料庫維護與啟動腳本收斂)。
+
+更新程式後先執行唯讀檢查；確認 ready 後，再停止 API、UI、monitor、workers 並執行實際 DB
+更新：
+
+```powershell
+.\scripts\launchers\start_local_development.bat --dry-run
+.\scripts\launchers\update_local_database.bat --dry-run
+.\scripts\launchers\update_local_database.bat
+```
+
+需要捨棄資料並回到模板測試 DB 時使用 `scripts/launchers/reset_DB.bat`，但目前模板 fixture 尚未
+重建，因此 `--dry-run` 會正確回傳 blocked；本版本不會因此刪除現有資料庫。
+
 ## 給開發者與 Agent 的開始方式
 
 1. 先讀 [`AGENTS.md`](AGENTS.md)：工作區、dirty worktree、測試與 Git 規則。
@@ -76,10 +95,11 @@ infrastructure/      MySQL 與外部 provider 的 typed-port 實作
 shared_kernel/       共用 command、durable job、typed error 等 Global primitives
 db/schema_parts/     依序套用的 additive schema parts
 db/migration_releases/  release manifest 與 migration descriptors
-scripts/             匯入、migration、維運與 worker 入口
+scripts/             匯入、migration、維運 helper 與 worker process modules
+scripts/launchers/   開發者／維運人員直接執行的本機入口與 dry-run 說明
 line/                LINE adapter、Webhook 和執行程序
 tests/               Module、Subsystem、Domain、Global 層級驗證
-fixtures/            僅供測試的版本化快照，禁止任意刪除或套用至正式資料
+fixtures/            經核准的版本化測試資產；不得直接復活退役 fixture 或套用至正式資料
 document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 evidence
 ```
 
@@ -150,7 +170,7 @@ Worker，但**不會**自動套用資料庫 schema。所有 operator-facing 腳�
 - Schema 調整先新增 `db/schema_parts/`，再同步 `db/schema.sql` 與對應的 migration release metadata。
 - 保留資料升級、cutover、回復與目標主機操作必須依 Work Package／runbook 執行，不可自行套用 migration。
 - `scripts/launchers/start_local_development.bat` 不初始化、不重建也不假資料化資料庫；它只用於本機開發，禁止當作正式部署入口。
-- `fixtures/db_snapshot_v2/v3` 是測試快照；只能在隔離的測試／本機資料庫流程使用，禁止自行刪除、整理或用於正式資料庫。
+- `fixtures/` 只允許版本化、去敏且經核准的測試資產；目前舊 `db_snapshot_v2/v3` 已退役且尚未重建，不得從歷史版本直接復活或用於正式資料庫。
 - 銀行檔、LINE webhook、BeClass／HCM 與其他外部輸入先進 inbox／import workflow，再由 owning Domain 寫入正式事實。
 
 開發者更新 `main` 後，若要保留現有資料，執行
