@@ -1,0 +1,21 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "189_client_refund_recipient_snapshot_local_upgrade.sql": {
+      "tables": {
+        "client_refund_recipient_snapshots": [
+          "refund_obligation_identity",
+          "case_no",
+          "bank_code",
+          "bank_account",
+          "source_kind",
+          "created_at"
+        ]
+      },
+      "triggers": [
+        "trg_client_refund_recipient_snapshots_before_update",
+        "trg_client_refund_recipient_snapshots_before_delete"
+      ]
+    }
+  }
+}

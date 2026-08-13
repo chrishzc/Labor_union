@@ -148,6 +148,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_11_line_stage11_v1.json",
     "labor_union_2026_08_11_line_stage12_v1.json",
     "labor_union_2026_08_13_wp72_v1.json",
+    "labor_union_2026_08_14_client_refund_snapshot_v1.json",
+    "labor_union_2026_08_14_government_overpayment_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
