@@ -1,9 +1,17 @@
 [CmdletBinding(SupportsShouldProcess)]
+# Recovery-only removal remains available while new task installation is retired.
 param(
-    [string]$TaskName = "LaborUnionDurableJobWorker"
+    [string]$TaskName = "LaborUnionDurableJobWorker",
+    [switch]$DryRun
 )
 
 $ErrorActionPreference = "Stop"
+if ($DryRun) {
+    Get-Command Get-ScheduledTask -ErrorAction Stop | Out-Null
+    Get-Command Unregister-ScheduledTask -ErrorAction Stop | Out-Null
+    Write-Host "[DRY-RUN] Scheduled-task uninstall launcher is available; no task was queried or removed."
+    exit 0
+}
 $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 if ($null -eq $task) {
     Write-Host "Scheduled task is not installed: $TaskName"

@@ -516,7 +516,7 @@ def _load_release_chain() -> ReleaseManifest:
 
 RELEASE_MANIFEST = _load_release_chain()
 SCHEMA_PARTS = tuple(ROOT / artifact["relative_path"] for artifact in RELEASE_MANIFEST.artifacts)
-VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "verified"})
+VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "backfilled", "verified"})
 PURE_RETIREMENT_ARTIFACTS = frozenset({
     "153_retire_empty_legacy_field_inventory.sql",
 })
@@ -1497,7 +1497,10 @@ def schema_artifacts() -> list[dict[str, Any]]:
 
 
 def build_plan(
-    config: DatabaseConfig, source: str, candidate: str
+    config: DatabaseConfig,
+    source: str,
+    candidate: str,
+    allowed_partial_artifacts: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
     source_identity = server_identity(config, source)
@@ -1505,9 +1508,12 @@ def build_plan(
     source_objects = _owned_classification(
         source_snapshot, defer_missing_triggers=True
     )
-    if any(state in {"partial", "drift"} for state in source_objects.values()):
+    blocking_states = _blocking_schema_states(
+        source_objects, allowed_partial_artifacts
+    )
+    if blocking_states:
         raise UpgradeBlocked(
-            f"source contains partial/drift owned objects: {source_objects}"
+            f"source contains partial/drift owned objects: {blocking_states}"
         )
     candidate_exists = database_exists(config, candidate)
     source_data = _table_evidence(config, source)
@@ -1542,6 +1548,18 @@ def build_plan(
     }
     plan["plan_fingerprint"] = _sha256_bytes(_canonical_json(plan))
     return plan
+
+
+def _blocking_schema_states(
+    states: Mapping[str, str],
+    allowed_partial_artifacts: frozenset[str],
+) -> dict[str, str]:
+    return {
+        name: state
+        for name, state in states.items()
+        if state == "drift"
+        or (state == "partial" and name not in allowed_partial_artifacts)
+    }
 
 
 def _candidate_preserves_source_data(
@@ -2572,6 +2590,7 @@ def apply_schema(
     operation_receipt_path: Path,
     *,
     mysql_container: str | None = None,
+    allowed_partial_artifacts: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
     operation_receipt = read_receipt(operation_receipt_path)
@@ -2594,7 +2613,11 @@ def apply_schema(
             config, source, candidate, operation_receipt_path,
             mysql_container=mysql_container,
         )
-    fresh = build_plan(config, source, candidate)
+    fresh = (
+        build_plan(config, source, candidate, allowed_partial_artifacts)
+        if allowed_partial_artifacts
+        else build_plan(config, source, candidate)
+    )
     _validate_plan_integrity(plan, fresh)
     if fresh["source_schema_sha256"] != plan.get("source_schema_sha256"):
         raise UpgradeBlocked("source schema changed after planning")
@@ -2619,8 +2642,13 @@ def apply_schema(
     preapply_states = _owned_classification(
         before, defer_missing_triggers=True
     )
-    if any(state in {"partial", "drift"} for state in preapply_states.values()):
-        raise UpgradeBlocked(f"candidate schema is partial/drift: {states}")
+    blocking_states = _blocking_schema_states(
+        preapply_states, allowed_partial_artifacts
+    )
+    if blocking_states:
+        raise UpgradeBlocked(
+            f"candidate schema is partial/drift: {blocking_states}"
+        )
     receipt = existing_receipt
     if receipt.get("candidate_database") != candidate:
         raise UpgradeBlocked("operation receipt targets another candidate")

@@ -18,7 +18,7 @@
 1. MySQL 只存在於 private data zone，不公開 Port 3306。
 2. public edge 只暴露必要 HTTPS endpoint；管理後台預設只允許 LAN／VPN／受控 access。
 3. TLS 在受管理的 edge／reverse proxy 終止，edge 到 application 的信任邊界必須明確。
-4. production 禁止 ngrok；`start_fastapi_ngrok.py` 只屬 development tool。
+4. production 禁止 ngrok；`scripts/launchers/start_fastapi_ngrok.py` 只屬 development tool。
 5. FastAPI、Worker、Streamlit、File Watcher 與 migration runner 使用最小權限、
    分離 credential 與明確 health check。
 6. File Watcher 只建立 durable ingestion job，不直接正式入帳或改 Domain 狀態。
@@ -277,9 +277,12 @@ system map 都不具現行 authority。
 
 - `document/文件整併工作區` 保留為來源與追溯，不再使用 ADAD 授權語彙。
 - `system_map*.md`／`system_map*.yaml` 只供歷史比對。
-- `start_fastapi_ngrok.py` 只屬 development。
-- `online.bat`／`online.sh`／`start.bat` 是本機開發 launcher，不得用於 production deployment，也不構成
-  deployment SSOT。
+- `scripts/launchers/start_fastapi_ngrok.py` 只屬 development。
+- `scripts/launchers/start_local_development.bat`／`.sh` 是本機開發 launcher，不得用於 production
+  deployment，也不構成 deployment SSOT；舊 `online.bat`／`online.sh` 已搬移，重複的 `start.bat`
+  已退役。
+- operator-facing launcher 集中在 `scripts/launchers/`；實際 worker／monitor process module 留在
+  `scripts/`，不得因目錄收斂改變 owner、交易或 external side-effect 契約。
 - `04_部署架構_無損合併稿.md` 的方案比較保留，但本文件的 logical topology、
   profile recommended-candidate 與人工選擇規則優先。
 
@@ -333,11 +336,11 @@ history、validation assets、release artifacts 或 current recovery evidence。
 - `12_Global_效能與UX體感架構.md`
 - `document/文件整併工作區/04_部署架構_無損合併稿.md`
 - `README.md`
-- `start.bat`
-- `online.bat`
-- `online.sh`
-- `start_fastapi_ngrok.py`
-- `scripts/bootstrap_admin_dev_env.ps1`
+- `scripts/launchers/README.md`
+- `scripts/launchers/start_local_development.bat`
+- `scripts/launchers/start_local_development.sh`
+- `scripts/launchers/start_fastapi_ngrok.py`
+- `scripts/launchers/configure_local_admin_no_auth.ps1`
 - `../04_已完成與上線封存/release_records/53_Deployment_Profile_and_Target_Host_Acceptance_Retirement.md`
 - 根目錄 `AGENTS.md`
 

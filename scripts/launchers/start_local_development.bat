@@ -1,10 +1,21 @@
 @echo off
-setlocal
-cd /d "%~dp0"
+setlocal EnableExtensions EnableDelayedExpansion
+for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
+cd /d "%PROJECT_ROOT%"
 set "PYTHONPATH=%CD%"
 chcp 65001 >nul
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
+set "PY=%CD%\.venv\Scripts\python.exe"
+if /I "%~1"=="--dry-run" (
+    if not exist "%PY%" (
+        echo [ERROR] Virtual environment .venv not found.
+        exit /b 1
+    )
+    "%PY%" -m scripts.launcher_preflight --profile local-windows
+    set "DRY_RUN_EXIT=!ERRORLEVEL!"
+    exit /b !DRY_RUN_EXIT!
+)
 echo ==========================================
 echo Labor Union Local Development Startup Script
 echo ==========================================
@@ -25,8 +36,6 @@ if not exist .venv\Scripts\python.exe (
     pause
     exit /b 1
 )
-set "PY=%CD%\.venv\Scripts\python.exe"
-
 :: 3. Wait for database
 echo [Step 3] Waiting for MySQL database to become ready...
 "%PY%" scripts/wait_for_db.py
@@ -39,7 +48,7 @@ if %errorlevel% neq 0 (
 echo ==========================================
 echo Database connection ready! Starting services...
 echo ==========================================
-echo [Notice] online.bat is for local development only; it is not a production deployment entrypoint.
+echo [Notice] start_local_development.bat is for local development only; it is not a production deployment entrypoint.
 echo [Notice] Production readiness validation is intentionally not run by this development launcher.
 
 :: 4. Launch servers concurrently

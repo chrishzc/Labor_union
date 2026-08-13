@@ -134,22 +134,38 @@ docker compose up -d
 .\.venv\Scripts\python.exe scripts/run_durable_job_worker.py
 ```
 
-[`online.bat`](online.bat) 是本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控與互動式
-Durable Job Worker，但**不會**自動套用資料庫 schema。它不是正式部署入口；正式 24/7 部署使用
-已核准的 deployment release workflow 與 Windows Task Scheduler 監督 worker：
+[`scripts/launchers/start_local_development.bat`](scripts/launchers/start_local_development.bat)
+是 Windows 本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控與互動式 Durable Job
+Worker，但**不會**自動套用資料庫 schema。所有 operator-facing 腳本、用途與退役對照見
+[`scripts/launchers/README.md`](scripts/launchers/README.md)。Durable Job Worker 主機 supervision 目前依
+人工裁決暫緩；只保留既有排程任務的 recovery 查詢與解除安裝：
 
 ```powershell
-.\scripts\install_durable_job_worker_task.ps1 -StartNow
-.\scripts\get_durable_job_worker_task_status.ps1
+.\scripts\launchers\get_durable_job_worker_task_status.ps1
+.\scripts\launchers\uninstall_durable_job_worker_task.ps1 -WhatIf
 ```
 
 ## 資料庫與資料安全
 
 - Schema 調整先新增 `db/schema_parts/`，再同步 `db/schema.sql` 與對應的 migration release metadata。
 - 保留資料升級、cutover、回復與目標主機操作必須依 Work Package／runbook 執行，不可自行套用 migration。
-- `online.bat` 不初始化、不重建也不假資料化資料庫；它只用於本機開發，禁止當作正式部署入口。
+- `scripts/launchers/start_local_development.bat` 不初始化、不重建也不假資料化資料庫；它只用於本機開發，禁止當作正式部署入口。
 - `fixtures/db_snapshot_v2/v3` 是測試快照；只能在隔離的測試／本機資料庫流程使用，禁止自行刪除、整理或用於正式資料庫。
 - 銀行檔、LINE webhook、BeClass／HCM 與其他外部輸入先進 inbox／import workflow，再由 owning Domain 寫入正式事實。
+
+開發者更新 `main` 後，若要保留現有資料，執行
+`scripts/launchers/update_local_database.bat`。流程會先完整備份舊 `union_db`，還原到暫存
+candidate，對 candidate 套用 versioned migration／backfill 並驗證；只有全部通過且 source 未在
+過程中改變，才以相同名稱替換 DB，最終驗證失敗則使用第一份 dump 嘗試 rollback。
+
+若要捨棄現有資料並恢復成版本庫模板測試資料，執行 `scripts/launchers/reset_DB.bat`。它會先驗證
+`fixtures/db_snapshot_v2/v3`，預檢成功且使用者輸入 `RESET` 後，才刪除 `union_db`、建立新 DB 並
+載入模板；這不是保留資料更新的相容別名。目前版本庫尚未重建該模板 fixture，所以此入口會在
+預檢安全停止，fixture 重建另案處理。
+
+執行前必須停止 API、UI、monitor 與 workers，完成後再重啟。兩個入口都只供本機開發，禁止用於
+production／shared staging；任何 partial／drift 都會停止，不會猜測修復，candidate 與 receipts
+會保留在 `scratch/local_database_updates/` 供診斷。
 
 ## 驗證
 

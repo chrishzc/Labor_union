@@ -23,7 +23,12 @@ if hasattr(sys.stdout, "reconfigure"):
 if hasattr(sys.stderr, "reconfigure"):
     sys.stderr.reconfigure(encoding="utf-8")
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.launcher_preflight import run_profile
+
 os.chdir(PROJECT_ROOT)
 load_dotenv(PROJECT_ROOT / ".env")
 
@@ -551,6 +556,8 @@ def _run_supervised_session() -> None:
 
 
 def main() -> int:
+    if sys.argv[1:] == ["--dry-run"]:
+        return run_profile("ngrok-development")
     while True:
         try:
             _run_supervised_session()

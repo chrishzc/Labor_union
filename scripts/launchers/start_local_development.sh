@@ -1,7 +1,21 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
+cd "$SCRIPT_DIR/../.."
+
+if [[ "${1:-}" == "--dry-run" ]]; then
+  if [[ -x .venv/bin/python ]]; then
+    PY="$PWD/.venv/bin/python"
+  elif [[ -x .venv/Scripts/python.exe ]]; then
+    PY="$PWD/.venv/Scripts/python.exe"
+  else
+    echo "Missing project virtual-environment Python."
+    exit 1
+  fi
+  "$PY" -m scripts.launcher_preflight --profile local-unix
+  exit $?
+fi
 
 if [[ ! -x .venv/bin/python ]]; then
   echo "Missing .venv/bin/python. Create the development virtual environment first."

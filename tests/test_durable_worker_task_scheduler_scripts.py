@@ -4,21 +4,16 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LAUNCHER_ROOT = ROOT / "scripts" / "launchers"
 
 
 def _script(name: str) -> str:
-    return (ROOT / "scripts" / name).read_text(encoding="utf-8")
+    return (LAUNCHER_ROOT / name).read_text(encoding="utf-8")
 
 
-def test_install_script_registers_a_supervised_system_worker() -> None:
-    source = _script("install_durable_job_worker_task.ps1")
-
-    assert "run_durable_job_worker.py" in source
-    assert "New-ScheduledTaskTrigger -AtStartup" in source
-    assert '-UserId "SYSTEM"' in source
-    assert "-RestartCount 3" in source
-    assert "-RestartInterval (New-TimeSpan -Minutes 1)" in source
-    assert "[switch]$StartNow" in source
+def test_deferred_supervision_has_no_install_entrypoint() -> None:
+    assert not (LAUNCHER_ROOT / "install_durable_job_worker_task.ps1").exists()
+    assert not (ROOT / "scripts" / "install_durable_job_worker_task.ps1").exists()
 
 
 def test_uninstall_and_status_scripts_are_safe_and_read_only() -> None:

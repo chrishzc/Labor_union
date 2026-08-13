@@ -1,8 +1,22 @@
+[CmdletBinding()]
+param(
+    [switch]$DryRun
+)
+
 $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
-$root = Split-Path -Parent $scriptRoot
+$root = Split-Path -Parent (Split-Path -Parent $scriptRoot)
 $envFile = Join-Path $root ".env"
+
+if ($DryRun) {
+    $python = Join-Path $root ".venv\Scripts\python.exe"
+    if (-not (Test-Path -LiteralPath $python)) {
+        throw "Project Python is missing: $python"
+    }
+    & $python -m scripts.launcher_preflight --profile admin-no-auth
+    exit $LASTEXITCODE
+}
 
 $desired = [ordered]@{
     APP_ENV = "development"
