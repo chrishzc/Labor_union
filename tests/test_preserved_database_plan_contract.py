@@ -1,9 +1,13 @@
-"""Safety contract tests for the preserve-data rehearsal plan."""
+"""
+File: test_preserved_database_plan_contract.py
+Description: 驗證 preserve-data plan、release catalog 與候選升級的安全契約。
+"""
 
 from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+import hashlib
 import json
 from pathlib import Path
 
@@ -16,6 +20,19 @@ from infrastructure.migration.rehearsal_runtime import (
     EphemeralCandidateRestartPort,
 )
 from scripts import migrate_preserved_database_additive_schema as runner
+
+
+def test_every_catalog_descriptor_and_schema_artifact_has_exact_hash() -> None:
+    release_root = Path(__file__).resolve().parents[1]
+
+    for manifest_name in runner.DEFAULT_RELEASE_MANIFESTS:
+        manifest_path = release_root / "db" / "migration_releases" / manifest_name
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        artifacts = [manifest["descriptor_artifact"], *manifest["artifacts"]]
+        for artifact in artifacts:
+            artifact_path = release_root / artifact["relative_path"]
+            actual_hash = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+            assert actual_hash == artifact["sha256"], artifact["name"]
 
 
 def test_mysql_time_value_has_a_stable_canonical_representation() -> None:

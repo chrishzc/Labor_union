@@ -1,7 +1,14 @@
+"""
+File: test_local_database_maintenance.py
+Description: 驗證本機保留資料升級的來源選擇、候選替換與失敗保護。
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -18,15 +25,71 @@ def test_local_update_rejects_remote_or_production_targets() -> None:
         )
 
 
-def test_candidate_name_is_stable_and_managed() -> None:
+def test_candidate_name_is_stable_and_scoped_to_the_configured_source() -> None:
     now = datetime(2026, 8, 13, 1, 2, 3, tzinfo=timezone.utc)
 
-    assert update.candidate_name(now) == "union_db_local_20260813010203"
+    assert update.candidate_name("lu_test_dataset", now) == (
+        "lu_test_dataset_local_20260813010203"
+    )
+    assert len(update.candidate_name("a" * 64, now)) == 64
 
 
-def test_destructive_recreate_rejects_noncanonical_database() -> None:
-    with pytest.raises(update.LocalDatabaseUpdateError, match="must be union_db"):
-        update.recreate_database(object(), "candidate")
+def test_local_update_accepts_the_configured_local_database_name() -> None:
+    update.validate_local_source(
+        SimpleNamespace(host="127.0.0.1"), "lu_test_dataset", {}
+    )
+
+
+def test_apply_confirms_the_database_configured_in_the_environment(
+    tmp_path, monkeypatch
+) -> None:
+    config = SimpleNamespace(host="127.0.0.1")
+    preview = {
+        "source_database": "lu_test_dataset",
+        "candidate_database": "lu_test_dataset_local_20260813010203",
+        "plan": {"status": "ready"},
+    }
+    captured = {}
+    monkeypatch.setattr(
+        update.migration,
+        "config_from_env",
+        lambda _path: (config, "lu_test_dataset"),
+    )
+    monkeypatch.setattr(update, "candidate_name", lambda source: preview["candidate_database"])
+    monkeypatch.setattr(update, "build_preview", lambda *_: preview)
+    monkeypatch.setattr(
+        update,
+        "apply_update",
+        lambda _config, _environment, received, _receipt_root: captured.update(received) or {"status": "completed"},
+    )
+
+    result = update.update_local_database(
+        environment_file=tmp_path / ".env",
+        apply=True,
+        confirm_configured_database=True,
+    )
+
+    assert result == {"status": "completed"}
+    assert captured["source_database"] == "lu_test_dataset"
+
+
+def test_preview_connection_failure_is_reported_as_a_bounded_error(
+    tmp_path, monkeypatch
+) -> None:
+    config = SimpleNamespace(host="127.0.0.1")
+    monkeypatch.setattr(
+        update.migration,
+        "config_from_env",
+        lambda _path: (config, "lu_test_dataset"),
+    )
+    monkeypatch.setattr(
+        update,
+        "build_preview",
+        lambda *_: (_ for _ in ()).throw(RuntimeError("connection failed")),
+    )
+
+    with pytest.raises(update.LocalDatabaseUpdateError, match="preview failed"):
+        update.update_local_database(environment_file=tmp_path / ".env")
 
 
 def test_only_known_idempotent_partials_are_resumable() -> None:
@@ -85,6 +148,43 @@ def test_apply_update_rebuilds_source_only_after_verified_candidate(tmp_path, mo
 
 def test_backfilled_candidate_is_eligible_for_verification() -> None:
     assert "backfilled" in update.migration.VERIFYABLE_CANDIDATE_STATUSES
+
+
+def test_require_current_accepts_only_an_exact_source() -> None:
+    exact = {"parts_to_apply": [], "parts_to_resume": []}
+
+    assert update.require_current_database(exact)["status"] == "current"
+
+    with pytest.raises(update.LocalDatabaseUpdateError, match="schema update required"):
+        update.require_current_database({
+            "parts_to_apply": ["161_runtime_monitoring_line_alerts.sql"],
+            "parts_to_resume": [],
+        })
+
+
+def test_preview_treats_an_absent_pure_retirement_as_complete(monkeypatch) -> None:
+    monkeypatch.setattr(update.migration, "PURE_RETIREMENT_ARTIFACTS", frozenset({"153.sql"}))
+    monkeypatch.setattr(update.migration, "build_plan", lambda *_args, **_kwargs: {
+        "release_id": "release",
+        "source_objects": {"153.sql": "absent", "161.sql": "absent"},
+    })
+
+    preview = update.build_preview(object(), "union_db", "candidate")
+
+    assert preview["parts_to_apply"] == ["161.sql"]
+    assert preview["exact_parts"] == ["153.sql"]
+
+
+def test_cli_reports_a_bounded_blocked_error(monkeypatch, capsys) -> None:
+    def blocked_update(**_arguments):
+        raise update.LocalDatabaseUpdateError("catalog mismatch")
+
+    monkeypatch.setattr(update, "update_local_database", blocked_update)
+    monkeypatch.setattr(sys, "argv", ["update_local_database"])
+
+    assert update.main() == 2
+    error = json.loads(capsys.readouterr().err)
+    assert error == {"status": "blocked", "error": "catalog mismatch"}
 
 
 def test_replace_refuses_source_changes_before_drop(tmp_path, monkeypatch) -> None:

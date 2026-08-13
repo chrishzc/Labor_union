@@ -21,6 +21,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 | [73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package.md](73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package.md) | work-package | `in-progress` | HCM 收斂為 authenticated Web upload；Client／Staff BeClass current entry 改走 LIFF typed API，scripts 保留為 historical-only。 |
 | [WP74（封存）](../04_已完成與上線封存/work_packages/74_Developer_Local_Database_Update_and_Rebuild_Work_Package.md) | work-package | `completed` | 開發者本機 DB 更新工具與兩方向真實 MySQL 驗收完成；來源 DB 維持唯讀，operator update 仍需明確確認。 |
 | [WP75（封存）](../04_已完成與上線封存/work_packages/75_Startup_Launcher_Convergence_and_Retirement_Work_Package.md) | work-package | `completed` | Windows canonical launcher 實跑與 PID／port cleanup 通過；LINE 缺個人憑證時安全略過，長期入口規則由開發者導覽承接。 |
+| [76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md](76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md) | work-package | `completed` | full-chain、part 61／153、disposable engine 與無 Git 目標主機 readiness／API／UI 驗收均已通過。 |
 
 所有 completed／superseded 歷史文件統一由
 [`archive_manifest.json`](../04_已完成與上線封存/archive_manifest.json) 依 archive identity 查找；
@@ -28,7 +29,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 
 > `29_` 原本被三份文件重複使用（無明確時間序，只能靠檔名區分），2026-08-07
 > 已重新編號為 `32`～`34`（依原檔名字母序指派，不代表已還原真實時間序）。
-> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `75`，下一個為 `76`）。
+> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `76`，下一個為 `77`）。
 
 > 注意：本表不是只保留字面上的 `in-progress`。仍需實作、等待 release／migration、保留人工操作
 > 邊界、缺少 completion evidence，或仍約束現行操作的文件都屬 active working set。作為目前缺口

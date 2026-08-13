@@ -1,4 +1,7 @@
-"""Read-only preflight contracts for every operator launcher."""
+"""
+File: test_launcher_dry_run.py
+Description: 驗證各操作 launcher 的唯讀 preflight 與服務啟動前 readiness 邊界。
+"""
 
 from pathlib import Path
 
@@ -49,6 +52,9 @@ def test_windows_launcher_exposes_controlled_smoke_test() -> None:
     smoke_block = source.split(":SMOKE_TEST", maxsplit=1)[1]
     assert smoke_block.index("docker-compose up -d") < smoke_block.index("scripts/wait_for_db.py")
     assert smoke_block.index("scripts/wait_for_db.py") < smoke_block.index(
+        "scripts.update_local_database --require-current"
+    )
+    assert smoke_block.index("scripts.update_local_database --require-current") < smoke_block.index(
         "scripts.smoke_local_development_launcher"
     )
     assert "exit /b !ERRORLEVEL!" in smoke_block
@@ -59,6 +65,14 @@ def test_windows_launcher_guards_optional_line_worker_configuration() -> None:
 
     assert "scripts.launcher_preflight --profile line-worker" in source
     assert "Skipping LINE Worker" in source
+
+
+def test_windows_launcher_requires_current_schema_before_starting_services() -> None:
+    source = _source("start_local_development.bat")
+    readiness = '"%PY%" -m scripts.update_local_database --require-current'
+
+    assert readiness in source
+    assert source.index(readiness) < source.index('start "FastAPI Server"')
 
 
 def test_configuration_and_scheduler_scripts_have_non_mutating_dry_run() -> None:

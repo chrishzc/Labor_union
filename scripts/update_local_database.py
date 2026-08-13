@@ -1,4 +1,7 @@
-"""Preserve and update a developer-local database through a verified candidate."""
+"""
+File: update_local_database.py
+Description: 依 .env 指定的本機資料庫建立候選升級、驗證並安全同名替換。
+"""
 
 from __future__ import annotations
 
@@ -7,17 +10,23 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
-import re
 import subprocess
+import sys
 
-from scripts import migrate_preserved_database_additive_schema as migration
+try:
+    from scripts import migrate_preserved_database_additive_schema as migration
+except Exception as migration_import_error:  # Catalog corruption must remain an operator-facing error.
+    migration = None
+    MIGRATION_IMPORT_ERROR = migration_import_error
+else:
+    MIGRATION_IMPORT_ERROR = None
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_ENVIRONMENT_FILE = ROOT / ".env"
 DEFAULT_RECEIPT_ROOT = ROOT / "scratch/local_database_updates"
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
-LOCAL_DATABASE = re.compile(r"^union_db$")
+MYSQL_IDENTIFIER_MAX_LENGTH = 64
 LOCAL_RESUMABLE_PARTIAL_ARTIFACTS = frozenset({
     "181_matching_service_date_confirmation.sql",
 })
@@ -31,15 +40,16 @@ def validate_local_source(config, source: str, environment=None) -> None:
     values = environment if environment is not None else os.environ
     if config.host.casefold() not in LOCAL_HOSTS:
         raise LocalDatabaseUpdateError("developer update only accepts local MySQL")
-    if not LOCAL_DATABASE.fullmatch(source):
-        raise LocalDatabaseUpdateError("source must be union_db")
+    if not isinstance(source, str) or not migration.IDENTIFIER.fullmatch(source):
+        raise LocalDatabaseUpdateError("source database name is invalid")
     if any("prod" in str(values.get(key, "")).casefold() for key in ("APP_ENV", "ENV", "FLASK_ENV")):
         raise LocalDatabaseUpdateError("production environment refused")
 
 
-def candidate_name(now=None) -> str:
+def candidate_name(source: str, now=None) -> str:
     timestamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d%H%M%S")
-    return f"union_db_local_{timestamp}"
+    suffix = f"_local_{timestamp}"
+    return f"{source[:MYSQL_IDENTIFIER_MAX_LENGTH - len(suffix)]}{suffix}"
 
 
 def build_preview(config, source: str, candidate: str) -> dict[str, object]:
@@ -50,16 +60,37 @@ def build_preview(config, source: str, candidate: str) -> dict[str, object]:
         LOCAL_RESUMABLE_PARTIAL_ARTIFACTS,
     )
     states = plan["source_objects"]
+    completed_retirements = migration.PURE_RETIREMENT_ARTIFACTS
     return {
         "status": "preview",
         "source_database": source,
         "candidate_database": candidate,
         "release_id": plan["release_id"],
-        "parts_to_apply": [name for name, state in states.items() if state == "absent"],
+        "parts_to_apply": [
+            name for name, state in states.items()
+            if state == "absent" and name not in completed_retirements
+        ],
         "parts_to_resume": [name for name, state in states.items() if state == "partial"],
-        "exact_parts": [name for name, state in states.items() if state == "exact"],
+        "exact_parts": [
+            name for name, state in states.items()
+            if state == "exact" or (
+                state == "absent" and name in completed_retirements
+            )
+        ],
         "source_policy": "no_ddl_before_verified_same_name_replacement",
         "plan": plan,
+    }
+
+
+def require_current_database(preview: dict[str, object]) -> dict[str, object]:
+    pending = [*preview["parts_to_apply"], *preview["parts_to_resume"]]
+    if pending:
+        names = ", ".join(str(name) for name in pending)
+        raise LocalDatabaseUpdateError(f"schema update required: {names}")
+    return {
+        "status": "current",
+        "source_database": preview.get("source_database"),
+        "release_id": preview.get("release_id"),
     }
 
 
@@ -93,8 +124,8 @@ def restore_dump(config, database: str, dump_path: Path) -> None:
 
 
 def recreate_database(config, database: str) -> None:
-    if database != "union_db":
-        raise LocalDatabaseUpdateError("destructive rebuild target must be union_db")
+    if not migration.IDENTIFIER.fullmatch(database):
+        raise LocalDatabaseUpdateError("destructive rebuild target is invalid")
     connection = config.connect()
     try:
         with connection.cursor() as cursor:
@@ -237,15 +268,30 @@ def update_local_database(
     receipt_root=DEFAULT_RECEIPT_ROOT,
     candidate=None,
     apply=False,
+    require_current=False,
     confirm_database=None,
+    confirm_configured_database=False,
 ) -> dict[str, object]:
+    if migration is None:
+        raise LocalDatabaseUpdateError(f"migration catalog unavailable: {MIGRATION_IMPORT_ERROR}")
     environment_path = Path(environment_file)
-    config, source = migration.config_from_env(environment_path)
-    validate_local_source(config, source)
-    target = candidate or candidate_name()
-    preview = build_preview(config, source, target)
+    try:
+        config, source = migration.config_from_env(environment_path)
+        validate_local_source(config, source)
+        target = candidate or candidate_name(source)
+        preview = build_preview(config, source, target)
+    except migration.UpgradeBlocked as error:
+        raise LocalDatabaseUpdateError(str(error)) from error
+    except Exception as error:
+        raise LocalDatabaseUpdateError("database update preview failed") from error
+    if require_current:
+        if apply:
+            raise LocalDatabaseUpdateError("--require-current cannot be combined with --apply")
+        return require_current_database(preview)
     if not apply:
         return {key: value for key, value in preview.items() if key != "plan"}
+    if confirm_configured_database:
+        confirm_database = source
     if confirm_database != source:
         raise LocalDatabaseUpdateError(f"apply requires --confirm-database {source}")
     return apply_update(config, environment_path, preview, Path(receipt_root))
@@ -257,19 +303,28 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--receipt-root", type=Path, default=DEFAULT_RECEIPT_ROOT)
     command.add_argument("--candidate-database")
     command.add_argument("--apply", action="store_true")
+    command.add_argument("--require-current", action="store_true")
     command.add_argument("--confirm-database")
+    command.add_argument("--confirm-configured-database", action="store_true")
     return command
 
 
 def main() -> int:
     arguments = parser().parse_args()
-    result = update_local_database(
-        environment_file=arguments.environment_file,
-        receipt_root=arguments.receipt_root,
-        candidate=arguments.candidate_database,
-        apply=arguments.apply,
-        confirm_database=arguments.confirm_database,
-    )
+    try:
+        result = update_local_database(
+            environment_file=arguments.environment_file,
+            receipt_root=arguments.receipt_root,
+            candidate=arguments.candidate_database,
+            apply=arguments.apply,
+            require_current=arguments.require_current,
+            confirm_database=arguments.confirm_database,
+            confirm_configured_database=arguments.confirm_configured_database,
+        )
+    except LocalDatabaseUpdateError as error:
+        payload = {"status": "blocked", "error": str(error)}
+        print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
+        return 2
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
