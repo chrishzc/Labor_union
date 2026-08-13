@@ -451,8 +451,24 @@ Published 發現問題只能建立新 revision 並 supersede，不能原地修�
   完成。單月嫂依正式規格允許對已選月嫂個別補寄履歷。
 - 每次實際發送前重新查詢最新檔期及完整方案；若出現衝突，不發送，並在 UI 顯示月嫂與衝突日期。
 - 重新聯繫、修改意願、取消組合或重新配對不得刪除既有資訊發送、意願、拒絕理由及履歷歷程。
-- LINE／Email 使用測試 Adapter；Browser 驗證 UI 互動與顯示結果，provider retry／idempotency／failure
-  由 pytest 驗證。
+- LINE 自動回歸使用測試 Adapter 驗證後台狀態，另以專用真人測試帳號及實際 LINE App 完成人工驗收，
+  核對實際收到的文字、按鈕、Flex／LIFF／Rich Menu 介面、點擊與回覆後的後台同步。Email 若無另行
+  裁決仍使用測試 Adapter；provider retry／idempotency／failure 由 pytest 驗證。
+
+#### 月嫂契約、客戶契約與 Contract Completion
+
+- Matching plan 完成後，每個月嫂 segment 分別產生／寄送月嫂契約。Browser 驗證範本、文件版本、
+  寄送狀態、簽回狀態，以及實際選擇簽回檔後執行「記錄月嫂簽回」。
+- 任一月嫂 segment 尚未簽回時，UI 應指出缺少項目，不建立完整 Commitment，也不允許寄送客戶契約。
+  最後一段月嫂簽回後，UI 顯示全段完成，並呈現簽約前服務承諾及訂金義務已形成的適用結果。
+- 全部月嫂契約完成後，才可產生／寄送客戶契約。Browser 實際選擇客戶簽回檔並操作「記錄客戶簽回
+  並完成合約」，驗證客戶已簽回、Contract Completion 及剩餘期款的使用者可見結果。
+- 訂金核銷、客戶簽回、Contract Completion 與 execution conversion 是分離事實。客戶簽回前即使
+  Orders 已成立，也不得顯示正式 Assignment 或正式行事曆服務班表。
+- 文件版本變更後提交舊簽回資料時，UI 應要求重新確認，不得套用錯誤版本。未選檔、缺少可簽版本或
+  前置條件不足時，顯示可理解的 blocker 與修復方式。
+- Browser 聚焦檔案選擇、按鈕、文件版本、狀態與跨工作區阻擋；digest、stale version、原子交易、
+  Commitment 精確日期守恆、冪等及零 partial write 由 pytest／專用 verifier 驗證。
 
 ## 6. 時間契約
 
@@ -572,14 +588,18 @@ digest；但先審核既有資料是否已涵蓋。只有缺少必要年度、�
 - 外部服務認證、SystemPrincipal 命令 allowlist、資料庫 target、production safety、secret 與
   Preview／Confirm／Apply 仍是獨立安全門禁，不因內部使用者同權限而取消。
 
-### 6.8 Browser 自動化為唯一正式 UI 驗收路線
+### 6.8 Browser 自動化與 LINE 真人介面驗收
 
 - 所有可由網頁完成且 UI 證據為 `required` 的業務操作，都由 Browser 自動化實際點擊、輸入、送出、
   重新整理並觀察畫面；不得以直接呼叫 API 代替 UI 操作。
 - Browser 驗收聚焦使用者可見的欄位、按鈕、提示、狀態轉換、錯誤引導、列表／月曆內容及實際上下載。
   API／DB oracle 只有在 applicability matrix 判定必要時由 pytest／專用 verifier 另外執行，不綁進每個
   Browser script。
-- 人工操作瀏覽器只用於腳本除錯、觀察或補充確認，不另形成 manual-only 流程或競爭 receipt。
+- 一般後台 UI 仍以 Browser 自動化為正式可重跑路線。人工操作瀏覽器只用於腳本除錯、觀察或補充
+  確認，不另形成 manual-only 流程或競爭 receipt。
+- LINE client 是明確例外：須由真人以專用測試 LINE 帳號操作實際 App，逐項確認訊息內容、版面、
+  按鈕、LIFF／Rich Menu 導向與回覆。人工驗收只在 checklist 記錄日期、測試帳號代號、訊息／模板
+  版本及 pass／fail，不要求保存 LINE 截圖或影片，也不得使用一般客戶／月嫂正式帳號。
 - 各 Part 的 UI execution mode 只能是 `browser-required`、`browser-file-dialog-assisted`、
   `browser-blocked` 或 `not-applicable`。
 - 上傳一律使用 canonical fixture；Browser 可直接指定檔案時不開啟 OS 選檔視窗。只有原生檔案／
@@ -856,12 +876,28 @@ Reset DB
 
 ### 7.3 External adapters
 
-- LINE、email/SMS、電子簽章 provider、實際銀行付款及政府正式送件使用明確 validation adapter，
-  不得觸及真人、正式帳戶或正式政府系統。
+- LINE 自動化使用 validation adapter，且另以專用真人測試帳號連接實際 LINE provider 做介面與訊息
+  驗收；不得傳送給一般客戶／月嫂或使用正式業務群組。email/SMS、電子簽章 provider、實際銀行
+  付款及政府正式送件仍使用明確 validation adapter，不得觸及真人、正式帳戶或正式政府系統。
 - validation adapter 保存去敏 recipient identity、payload digest、intent、attempt、acknowledgement、
   success/failure/timeout、retry 及 outbox/job linkage，不得把測試成功冒充 production 成功。
 - Excel／銀行對帳單匯入、合約文件產生、測試 archive、下載／預覽及 XLSX 清冊實際執行。
 - provider timeout、duplicate acknowledgement 及 worker retry 仍透過 committed outbox/durable job 驗證。
+
+### 7.3.1 LINE 管理中心與訂單狀態自動推送
+
+- LINE Part 的主要目標是確認 LINE 管理中心的訊息模板、預覽、啟用／停用、測試發送、delivery
+  task／attempt、失敗重試、Rich Menu、LIFF、身分綁定、客服回覆與操作紀錄功能實際有效。
+- 每個管理中心功能先以 Browser 操作，再由專用真人測試帳號確認 LINE App 實際結果；只驗後台顯示
+  「已發送」不足以通過。LINE App 的文字、變數代入、按鈕、版面、連結及回覆結果都須逐項確認。
+- 未來新增「依訂單狀態自動推送」前，須先核准 machine-readable mapping：明確的 owning Domain
+  事件／狀態轉換、recipient role、固定 template identity＋revision、變數契約、觸發時機、去重 identity、
+  不發送條件及 supersession。不得依 UI 中文狀態、輪詢畫面或自由文字猜測推送。
+- 驗收矩陣必須逐一覆蓋所有核准的狀態／事件 mapping：建立正確且唯一的 delivery task、綁定正確
+  收件人與固定訊息版本，真人收到的內容正確；不適用狀態不發送，重播不重複，狀態快速連續變更
+  依正式 supersession 規則處理。
+- 訊息模板修改須形成新版本；既有 delivery／歷史訊息仍指向當時版本。停用或缺少 mapping 時 fail
+  closed 並產生可操作警示，不得退回任意預設文字。
 
 ### 7.4 銀行對帳單與帳務核銷驗收
 
@@ -873,6 +909,14 @@ Reset DB
   正式核銷，不由 Finance Import 自行改狀態。
 - 少匯、溢匯、重複、格式錯誤、identity 歧義、退匯及 reversal 使用髒資料／邊界 fixture 驗證，
   並證明一元不消失、不重複及 alert 只在根因消失後解除。
+- 銀行不會提供更正版對帳單；後續只會匯入下一期對帳單。已匯入流水的原始金額、日期、方向、
+  摘要及來源 identity 不得覆寫，新一期流水也不得取代舊流水。
+- 無法自動判斷時由人員在 UI 選擇案件、帳款類別及應收項目，經 Preview／確認後手動銷帳；能辨識為
+  非業務流水時，選擇正式存在的非業務分類，不強迫配到案件。
+- 暫時無法判斷的流水保持待處理並出現在警示中心。人工銷帳完成後，應收餘額更新且警示正常消失；
+  已銷錯帳時必須先走正式沖正，再重新核銷至正確項目，不能直接改寫原 allocation／ledger。
+- Browser 至少驗證待人工處理→手動銷帳→警示消失、錯帳沖正→重新核銷、無法判斷持續待處理，以及
+  下一期匯入後舊流水與處理歷程仍完整存在。精確 ledger 守恆與事件不可變由 pytest 驗證。
 
 ### 7.5 月嫂每月應付驗收
 
@@ -882,10 +926,43 @@ Reset DB
 - 跨月服務、多 assignment、多月嫂、取消、雙薪、少匯 remaining、補發、退匯及 recovery 都要證明
   只出現在正確月份，且 original／remaining 不重複列入。
 - 清冊下載不改變付款狀態；後續只有測試銀行結果的正式核銷可改變支付 projection。
+- Browser 不只檢查待核銷與餘額歸零，也要從月份摘要進入已核銷歷程，核對月嫂、付款日期、銀行
+  流水、核銷金額、應付款、案件／assignment、備註及核銷後剩餘金額。
+- 一筆付款分配多筆應付款時，各 allocation 顯示加總等於付款金額；多筆付款清償一筆應付款時，各次
+  allocation 加總等於已付金額。畫面須能核對 `原應付＝有效已核銷＋未付餘額`，正式 adjustment／
+  reversal 另列，不得藏入一般付款總額。
+- 少匯與後續補匯各自保留核銷歷程；退匯／沖正後原紀錄仍顯示失效或已沖正，不得從歷史消失。
+  月份摘要分列應付總額、已核銷總額、未付餘額及調整／沖正金額，且依正式歸屬月份顯示，不因操作
+  核銷日期任意移月。
+- 客戶收款及政府補助撥款使用相同原則：不能只驗證「核銷成功」，也要核對已核銷明細、allocation、
+  有效／失效歷程、剩餘餘額與期間摘要。精確跨事件守恆由 pytest／專用 verifier 驗證。
+
+### 7.5.1 服務開始、服務日期異動與訂單完成驗收
+
+- 正式指派成立後，才能在「服務開始確認」輸入「實際服務開始日」並走 Preview／Apply；尚未正式
+  指派時必須顯示可理解的阻擋原因，不能由 UI 直接建立服務事實。
+- 套用服務開始後，服務日期、正式指派與月曆必須同步顯示最新結果；重新整理後結果仍一致。
+- 「確認服務日期」所確認的日期筆數必須等於「希望服務天數」。日期異動後，既有日期表必須重新
+  發送並由客戶與月嫂重新確認，不能沿用異動前的確認狀態。
+- 使用代表案件操作請假、代班與順延，核對服務日期、當日服務月嫂、月曆及後續月嫂應付款月份同步
+  更新；服務總天數不得因異動遺失或重複。
+- 全部正式服務日完成且沒有 blocker 前，訂單維持「服務中」；符合完成條件後才由正式自動完成流程
+  進入「訂單完成」。完成案件仍保留於行事曆供唯讀查閱，且不得再取消。
+- 若服務日期異動改變 `orders.actual_end_date`，後續月嫂應付款月份及政府補助歸屬季度必須分別依
+  owning Domain 正式規則重新呈現；UI 不自行計算月份或季度。
+- Browser 驗證可見狀態、Preview／Apply、重新確認、月曆連動與阻擋訊息；精確日期集合、總天數、
+  completion instant、assignment／Payroll 重建及跨 Domain 不變量由 pytest 驗證。
 
 ### 7.6 政府補助季別名冊驗收
 
 - 不對政府正式送件，但使用正式 planning/query workflow 產生季度／年度候選與 XLSX 名冊。
+- 案件核銷季別以服務開始後最終確認的實際服務結束日期 `orders.actual_end_date` 判定：1～3 月為 Q1、
+  4～6 月為 Q2、7～9 月為 Q3、10～12 月為 Q4。不得使用建檔日、預計開始日期、申請／送件日、
+  核准日或政府撥款日改變案件所屬季別。
+- Browser 必須使用接近季末／季初的代表案件，核對 UI 清單與下載 XLSX 都只出現在
+  `actual_end_date` 對應季度；跨季服務依實際結束日歸入單一季度，不得在兩季重複列入。
+- 政府撥款跨年度或晚於申請季度時，仍保留原案件的服務結束季別與 claim identity；入款日期只作
+  receipt／會計期間事實，不回寫名冊歸屬。
 - 逐季驗證 eligible cases、排除案件、assignment／official service facts、補助金額、item count、
   total amount、revision 及每案來源 identity，確保無遺漏、無重複、無跨季誤列。
 - 案件跨季、資格不符、取消、服務未完成、補助 short/over payment、reversal 及工會墊付使用獨立
@@ -894,12 +971,21 @@ Reset DB
 
 ### 7.7 文件產生、封存與下載驗收
 
-- 實際產生測試合約／清冊文件，寫入隔離的 validation archive，並從 UI／typed API 實際下載。
-- 驗證產生、archive 及下載 bytes 的 SHA-256、MIME、size、document version、access grant 與 security audit
-  一致；archive failure 不得顯示成功或提供不存在的下載。
-- 測試 artifact 暫時仍必須位於 workspace／validation 的隔離位置，不得寫 production archive。
-- 長期固定儲存資料夾／artifact storage 尚未設定，標記 `human-decision-required`；Part 06／Part 13
-  在實作前必須提出候選位置、容量、retention、權限、備份與清理政策供人工確認，Part 00 不猜路徑。
+- 「使用者下載」與「系統封存」是不同責任。後台可由不同裝置登入；Browser 驗收只要求檔案能透過
+  瀏覽器成功下載到當次操作裝置，並核對檔名、格式與必要內容，不規定或保存使用者端下載路徑。
+- Browser 自動化使用測試執行器的暫存下載資料夾，驗證完成即可清理；不得把使用者端下載資料夾
+  當成系統 archive，也不要求保留截圖、影片或下載測試產物供人工觀看。
+- 只有具有持久業務證據語意的文件才要求系統封存，例如月嫂／客戶回傳契約及正式規格明定的不可
+  變輸出快照。純查詢匯出若正式規格未要求封存，不得因測試方便自行升格為永久文件。
+- 對必須封存的文件，驗證產生、archive 及下載 bytes 的 SHA-256、MIME、size、document version、
+  actor 與 security audit 一致；archive failure 不得顯示成功或提供不存在的下載。
+- 測試封存必須指向隔離的 validation storage，不得寫 production archive。測試 artifact 的保存與
+  DB baseline／reset 契約分開；reset 不得誤刪正式或歷史封存文件。
+- 系統 archive 必須透過可設定的 storage port 使用穩定 storage key，不能讓 Domain／UI 依賴某台
+  裝置的絕對路徑。本機部署可使用指定資料夾；雲端部署可改接 persistent volume／object storage，
+  並維持相同 digest、不可覆寫、讀回驗證及 audit 契約。
+- 正式部署的 storage provider／root、容量、retention、備份、還原、加密及 orphan cleanup 尚未裁決，
+  標記 `human-decision-required`；Part 06／Part 13 實作前提出選項供人工確認，Part 00 不猜正式路徑。
 
 ## 8. Seed、runner、projection 與 oracle 邊界
 
@@ -1074,6 +1160,20 @@ Package，並將 schema release、receipt contract、inventory 與 runner 的 wr
 | P00-G42 | 月嫂請長假／無法提供服務的行事曆紀錄功能尚未實作 | Staff／Scheduling＋Calendar UI | 正式功能規格與獨立核准 Work Package | 長期不可服務作為檔期顯示；配對候選正確排除／註記；不新增獨立在職 filter；Browser＋pytest 通過 |
 | P00-G43 | 單人完整候選、Candidate Contact Pool、多月嫂分段與 lock→assignment UI 鏈尚未形成可重跑清單 | Staff Matching／Scheduling UI | G25、G29、G41 與配對正式規格 | 候選聯繫不形成占用；單人優先；多段完整性；全員 willing gate；等待訂金與正式行事曆分離 |
 | P00-G44 | 配對資訊-1／2、意願／拒絕理由、履歷 gate 與歷史保留尚未形成 Browser checklist | Staff Matching＋LINE test adapter | G25、G29、G43 | 分項發送狀態正確；willing gate；發送前重查檔期；歷史不刪；無真實外部傳送 |
+| P00-G45 | 月嫂分段契約、客戶契約、文件版本與 Contract Completion UI 鏈尚未形成可重跑清單 | Contract Signing＋Orders／Finance／Scheduling UI | G25、G29、G43、G44 | 全段月嫂簽回 gate；客戶契約後置；實際上傳；訂金／簽回／completion／conversion 分離 |
+| P00-G46 | 銀行流水人工分類／手動銷帳、錯帳沖正重核及跨期歷程尚未形成 Browser checklist | Finance Import＋Client Finance＋Anomalies UI | G25、G29、G36、G45 | 不假設銀行更正版；原流水不覆寫；人工銷帳；錯帳先沖正；警示與餘額同步；跨期歷程保留 |
+| P00-G47 | 月嫂付款、客戶收款與補助撥款的已核銷明細／allocation／期間摘要尚未納入 UI 驗收 | Client Finance＋Staff Payables＋Subsidy UI | G23、G29、G33、G46 | 已核銷金額與來源正確；原額＝有效核銷＋餘額；沖正歷程保留；月份／季別摘要一致 |
+| P00-G48 | 政府補助案件依實際服務結束日期歸屬季度的 UI／XLSX 邊界資料尚未驗收 | Government Subsidy UI | G20、G29、G47 | `actual_end_date` 唯一決定 Q1～Q4；季末／季初與跨季案件不重複、不遺漏；撥款日不改歸屬 |
+| P00-G49 | 服務開始、服務日期異動、請假／代班／順延與自動完成的跨域 UI 鏈尚未形成可重跑清單 | Orders＋Scheduling＋Payroll UI | G29、G35、G38、G41、G47、G48 | 正式指派 gate；日期數等於希望服務天數；異動後重發重確認；月曆／應付月份／補助季別連動；完成後唯讀且不得取消 |
+| P00-G50 | 月嫂每月應付清冊到實際銀行付款的 Browser 主流程與補救入口尚未完整 | Staff Payables＋Accounts Payable Export＋Finance Import UI | G25、G29、G33、G46、G47、G49 | 正確月份與同月嫂跨案彙總；XLSX 明細及合計；下載不改付款狀態；銀行出款核銷；少匯 remaining／補匯、超額追償、退匯／沖正歷程；警示隨根因解除 |
+| P00-G51 | 使用者端下載與系統持久封存尚未形成一致的跨部署 storage 契約 | Contract Signing＋Reporting／Export＋Infrastructure | G10、G25、G29、G45、G50 | 任一登入裝置可下載；不規定 client 路徑；只封存正式業務證據；local／cloud provider 可替換；stable key、digest、不可覆寫、audit、backup／restore 與 orphan cleanup 明確 |
+| P00-G52 | Browser 第一登入 gate、帳號安全設定、TOTP 與獨立操作紀錄 UI 尚未完整 | Access＋Admin UI | G11、G25、G29、G31、G51 | 帳密成功／失敗為首測；TOTP 第二步；修改帳號／密碼；綁定／解除／重綁；credential 變更撤銷其他 session；操作紀錄可查且敏感資料遮罩；不建立角色差異 |
+| P00-G53 | 多位內部使用者同時操作的 stale conflict、重複提交與檔期競爭尚未形成 Browser 驗收 | Global＋Orders／Scheduling／Finance／Contract UI | G25、G27、G29、G38、G41、G52 | 舊畫面零覆寫；提示重新載入與重新 Preview；同 key replay 不重複；月嫂重疊檔期僅一方成功；成功／衝突／重試 actor 可追溯 |
+| P00-G54 | 長時間背景作業的 pending／terminal／結果未知、worker 恢復與 DB reset 隔離尚未形成一致 UI 契約 | Global Durable Jobs＋Import／Scheduling／Payroll／Subsidy／LINE UI | G12、G25、G26、G29、G36、G53 | 未收 receipt 不顯示成功；job 可重查；逾時不盲目重送；同 identity 不重複；worker 恢復可續跑；terminal failure 有人工入口；reset 後無舊 job 污染 |
+| P00-G55 | 可完成全流程的共用主檔 baseline、缺漏修復與主檔版本對下游影響尚未逐項驗收 | Access＋Staff／Scheduling／Staff Payables／Subsidy／Contract Settings UI | G20、G29、G36、G41、G47、G52、G54 | reset 含正常共用主檔；少量缺漏案例；正式 UI 修復；警示解除；新版本不改歷史；敏感欄位遮罩；無 UI 維護入口者列 infrastructure gap |
+| P00-G56 | LINE 管理中心缺真人 App 驗收，訂單狀態／事件到固定訊息版本的自動推送契約尚未建立 | LINE Integration＋Orders／各來源 Domain | G25、G29、G35、G44、G45、G52、G54、G55 | 後台 Browser＋專用真人 LINE 帳號雙驗；管理功能逐項有效；核准 mapping 全覆蓋；正確 recipient／template revision；不適用不送；replay 不重複；歷史版本可追溯 |
+| P00-G57 | 跨年／月／季時間邊界的整套 UI 尚未能由 baseline 固定 BusinessClock 重播 | Global Clock＋Orders／Payroll／Subsidy／Anomalies／LINE／Export | G12、G20、G29、G48、G49、G50、G54、G56 | Asia/Taipei 固定時間隨 reset 還原；不改裝置時間；到期前／當下／後、月底、季底、年底正確；正式 UI 無任意改時入口；直接 system clock caller 收斂 |
+| P00-G58 | 真實歷史資料量下的分頁、篩選、跨頁摘要與完整匯出尚未形成 UI 驗收 | Orders＋Staff／Calendar／Finance／Anomalies／LINE／Audit／Documents UI | G18、G20、G29、G37、G47、G55、G57 | 優先用去敏歷史 baseline；bounded query；跨頁不漏不重；搜尋可定位；摘要不只算當頁；匯出含完整範圍；載入／失敗可辨識；必要時才補 volume fixture |
 
 不得把以上全部合併成單一大型 mutation。G01～G03 可先作 metadata／唯讀治理；G04 是獨立 schema
 release；G05～G07 依後續 Part 的正式契約逐步啟用；G08 由 Scheduling owner 裁決。

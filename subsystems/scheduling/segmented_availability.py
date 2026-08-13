@@ -115,17 +115,30 @@ def _extract_blocked_days(
             raise ValueError("assignment_schedule_days.item must use work_date, not lock_date")
         _ensure_no_unknown_fields(
             row,
-            {"assignment_id", "staff_id", "work_date", "reason_code"},
+            {
+                "assignment_id",
+                "availability_block_id",
+                "staff_id",
+                "work_date",
+                "reason_code",
+            },
             "assignment_schedule_days item",
         )
         staff_id_int = _as_positive_int(row.get("staff_id"), "assignment_schedule_days.staff_id")
         work_date = _as_strict_date(row.get("work_date"), "assignment_schedule_days.work_date")
         assignment_id = row.get("assignment_id")
         reason_code = row.get("reason_code", "schedule")
-        if reason_code not in {"assignment", "schedule"}:
-            raise ValueError("assignment_schedule_days.reason_code must be assignment or schedule")
+        if reason_code not in {"assignment", "schedule", "staff_unavailability"}:
+            raise ValueError("assignment_schedule_days.reason_code is invalid")
 
-        if assignment_id is None:
+        availability_block_id = row.get("availability_block_id")
+        if availability_block_id is not None:
+            _as_positive_int(
+                availability_block_id,
+                "assignment_schedule_days.availability_block_id",
+            )
+            reason_code = "staff_unavailability"
+        elif assignment_id is None:
             reason_code = "requires_review"
         else:
             _as_positive_int(assignment_id, "assignment_schedule_days.assignment_id")
@@ -622,5 +635,4 @@ def derive_segment_availability(
         ),
         "conflicts": _normalise_conflict_set(conflicts),
     }
-
 

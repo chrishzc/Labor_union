@@ -18,6 +18,14 @@ from infrastructure.migration.rehearsal_runtime import (
 from scripts import migrate_preserved_database_additive_schema as runner
 
 
+def test_mysql_time_value_has_a_stable_canonical_representation() -> None:
+    payload = runner._canonical_json({"service_end_time": timedelta(hours=17)})
+
+    assert json.loads(payload) == {
+        "service_end_time": {"timedelta_microseconds": 61_200_000_000}
+    }
+
+
 def test_plan_remains_ready_after_restore_candidate_exists(monkeypatch) -> None:
     monkeypatch.setattr(runner, "server_identity", lambda *_: {"server": "test"})
     monkeypatch.setattr(runner, "_schema_snapshot", lambda *_: {"sha256": "schema"})
@@ -222,28 +230,41 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
 
 
-def test_release_chain_drives_schema_artifacts_and_v9_descriptor_presence() -> None:
+def test_release_catalog_drives_schema_artifacts_through_wp72() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-12:] == (
-        "154_line_integration_inbox_delivery.sql",
-        "155_line_identity_review_configuration.sql",
-        "156_line_publication_media_order_group.sql",
-        "157_line_runtime_control.sql",
-        "158_line_identity_runtime.sql",
-        "159_line_messaging_publication_runtime.sql",
-        "160_line_order_group_runtime.sql",
-        "161_runtime_monitoring_line_alerts.sql",
-        "162_matching_line_communication.sql",
-        "163_knowledge_runtime.sql",
-        "164_line_rich_menu_preview_bridge.sql",
+    assert artifact_names[-4:] == (
         "165_anomaly_workflow_event_idempotency_widen.sql",
+        "181_matching_service_date_confirmation.sql",
+        "182_candidate_contact_pool.sql",
+        "188_matching_preferences_and_staff_availability.sql",
     )
+    assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
-    assert runner.RELEASE_MANIFEST.release_id == "labor-union-2026-08-09-v9"
+    assert runner.RELEASE_MANIFEST.release_id == "labor-union-wp72-2026-08-13-v1"
     assert runner._descriptor_presence_state(
         {"tables": {"knowledge_items": ["id", "version"]}, "triggers": []},
         {"knowledge_items": {"id", "version"}},
+        set(),
+    ) == "exact"
+
+
+def test_wp72_parent_column_is_required_by_descriptor() -> None:
+    descriptor = runner.RELEASE_MANIFEST.descriptors[
+        "188_matching_preferences_and_staff_availability.sql"
+    ]
+    new_tables = {
+        table: set(columns)
+        for table, columns in descriptor["tables"].items()
+        if table != "orders"
+    }
+
+    assert runner._descriptor_presence_state(
+        descriptor, {**new_tables, "orders": {"case_no"}}, set()
+    ) == "partial"
+    assert runner._descriptor_presence_state(
+        descriptor,
+        {**new_tables, "orders": {"case_no", "requires_cooking"}},
         set(),
     ) == "exact"
 

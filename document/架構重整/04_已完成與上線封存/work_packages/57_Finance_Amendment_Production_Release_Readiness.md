@@ -10,7 +10,7 @@ owner: finance-architecture
 ## Purpose and boundary
 
 This records the completed test-environment validation of the finance-amendment slice in formal
-specifications `06`, `14`, `16`, and `20`. It is not a production-release, deployment, or payment
+specifications `06`, `14`, `16`, and `22`. It is not a production-release, deployment, or payment
 execution record.
 
 ## Approved validation scope

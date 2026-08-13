@@ -23,7 +23,9 @@ def test_stage6_schema_owns_group_monitor_and_alert_runtime() -> None:
 def test_stage6_invitation_privacy_and_active_monitor_are_wired() -> None:
     delivery = (ROOT / "infrastructure/mysql/line_delivery_task_repository.py").read_text(encoding="utf-8")
     monitor = (ROOT / "scripts/run_service_monitor.py").read_text(encoding="utf-8")
-    supervisor = (ROOT / "start_fastapi_ngrok.py").read_text(encoding="utf-8")
+    supervisor = (
+        ROOT / "scripts/launchers/start_fastapi_ngrok.py"
+    ).read_text(encoding="utf-8")
     assert "[REDACTED]" in delivery
     assert "line_group_invitation_requires_new_command" in delivery
     assert "RuntimeHealthObservation" in monitor

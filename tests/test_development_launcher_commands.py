@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import start_fastapi_ngrok as launcher
+from scripts.launchers import start_fastapi_ngrok as launcher
 
 
 class _ProcessStub:

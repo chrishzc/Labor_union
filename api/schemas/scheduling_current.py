@@ -14,7 +14,7 @@ class SchedulingCurrentAssignmentView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     assignment_id: int = Field(gt=0)
-    case_no: str
+    case_no: str | None = None
     generation_id: int = Field(gt=0)
     scheduling_version: int = Field(ge=0)
     staff_id: int = Field(gt=0)
@@ -31,11 +31,13 @@ class SchedulingCurrentDayEntryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     occupancy_kind: SchedulingOccupancyKind
-    case_no: str
+    case_no: str | None = None
     assignment_id: int | None = Field(default=None, gt=0)
     assignment_status: AssignmentLifecycleStatus | None = None
     lock_id: int | None = Field(default=None, gt=0)
     segment_id: int | None = Field(default=None, gt=0)
+    availability_block_id: int | None = Field(default=None, gt=0)
+    unavailability_kind: str | None = None
 
 
 class SchedulingCurrentDayView(BaseModel):

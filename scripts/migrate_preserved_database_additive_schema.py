@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import asdict, dataclass
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
 import hashlib
 import json
@@ -133,8 +133,18 @@ LEGACY_SCHEMA_PARTS = (
 )
 SCHEMA_PARTS = LEGACY_SCHEMA_PARTS
 IDENTIFIER = re.compile(r"^[A-Za-z0-9_]+$")
-DEFAULT_RELEASE_MANIFEST_NAME = re.compile(
-    r"^labor_union_\d{4}_\d{2}_\d{2}_v\d+\.json$"
+DEFAULT_RELEASE_MANIFESTS = (
+    "labor_union_2026_08_02_v1.json",
+    "labor_union_2026_08_08_v2.json",
+    "labor_union_2026_08_09_v3.json",
+    "labor_union_2026_08_09_v4.json",
+    "labor_union_2026_08_09_v5.json",
+    "labor_union_2026_08_09_v6.json",
+    "labor_union_2026_08_09_v7.json",
+    "labor_union_2026_08_09_v8.json",
+    "labor_union_2026_08_09_v9.json",
+    "labor_union_2026_08_12_wp68_v1.json",
+    "labor_union_2026_08_13_wp72_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -462,25 +472,28 @@ class ReleaseManifest:
 
 def _load_release_chain() -> ReleaseManifest:
     release_directory = ROOT / "db" / "migration_releases"
-    manifests = sorted(
-        path for path in release_directory.glob("labor_union_*_v*.json")
-        if DEFAULT_RELEASE_MANIFEST_NAME.fullmatch(path.name)
+    manifests = tuple(
+        release_directory / name for name in DEFAULT_RELEASE_MANIFESTS
     )
     if not manifests:
         raise UpgradeBlocked("no migration release manifests are available")
     artifacts: list[dict[str, Any]] = []
-    predecessor: str | None = None
+    release_id = ""
     fingerprints: list[str] = []
     final_compatibility: Mapping[str, Any] = {}
     final_contracts: tuple[dict[str, Any], ...] = ()
     descriptors: dict[str, Mapping[str, Any]] = {}
-    current_manifest_path = manifests[-1]
+    seen_names: set[str] = set()
+    previous_max_ordinal = 0
     for manifest_path in manifests:
+        if not manifest_path.is_file():
+            raise UpgradeBlocked(f"catalog manifest is missing: {manifest_path}")
         payload = json.loads(manifest_path.read_text(encoding="utf-8"))
         if payload.get("contract") != "migration-release-manifest/v1":
             raise UpgradeBlocked(f"invalid release manifest: {manifest_path.name}")
-        if predecessor is not None and payload.get("predecessor_release_id") != predecessor:
-            raise UpgradeBlocked(f"release predecessor mismatch: {manifest_path.name}")
+        release_id = str(payload.get("release_id") or "")
+        if not release_id:
+            raise UpgradeBlocked(f"release id is missing: {manifest_path.name}")
         descriptor = payload.get("descriptor_artifact") or {}
         descriptor_path = ROOT / str(descriptor.get("relative_path", ""))
         if not descriptor_path.is_file() or _sha256_file(descriptor_path) != descriptor.get("sha256"):
@@ -489,15 +502,32 @@ def _load_release_chain() -> ReleaseManifest:
         if descriptor_payload.get("contract") != "migration-owned-object-descriptors/v1":
             raise UpgradeBlocked(f"invalid release descriptors: {descriptor_path.name}")
         descriptors.update(descriptor_payload.get("descriptors") or {})
+        release_ordinals: list[int] = []
         for artifact in payload.get("artifacts", []):
             artifact_path = ROOT / str(artifact.get("relative_path", ""))
-            if not artifact_path.is_file() or (
-                manifest_path == current_manifest_path
-                and _sha256_file(artifact_path) != artifact.get("sha256")
-            ):
+            name = str(artifact.get("name") or "")
+            if not artifact_path.is_file():
+                raise UpgradeBlocked(f"release artifact is missing: {name}")
+            verify_hash = manifest_path.name in DEFAULT_RELEASE_MANIFESTS[-2:]
+            hash_mismatch = _sha256_file(artifact_path) != artifact.get("sha256")
+            if verify_hash and hash_mismatch:
                 raise UpgradeBlocked(f"release artifact hash mismatch: {artifact.get('name')}")
+            if name in seen_names:
+                raise UpgradeBlocked(f"duplicate release artifact: {name}")
+            match = re.match(r"^(\d+)_", name)
+            if match is None:
+                raise UpgradeBlocked(f"artifact ordinal is missing: {name}")
+            release_ordinals.append(int(match.group(1)))
+            for dependency in artifact.get("dependencies") or ():
+                dependency_path = ROOT / "db" / "schema_parts" / str(dependency)
+                if not dependency_path.is_file():
+                    raise UpgradeBlocked(f"artifact dependency is missing: {dependency}")
+            seen_names.add(name)
             artifacts.append({**artifact, "release_id": payload["release_id"]})
-        predecessor = str(payload["release_id"])
+        if release_ordinals and min(release_ordinals) <= previous_max_ordinal:
+            raise UpgradeBlocked(f"release artifact ordinal regression: {manifest_path.name}")
+        if release_ordinals:
+            previous_max_ordinal = max(release_ordinals)
         fingerprints.append(_sha256_file(manifest_path))
         final_compatibility = payload.get("application_compatibility") or {}
         final_contracts = tuple(payload.get("verification_contracts") or ())
@@ -506,7 +536,7 @@ def _load_release_chain() -> ReleaseManifest:
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8"))
     return ReleaseManifest(
-        predecessor or "", fingerprint, tuple(artifacts),
+        release_id, fingerprint, tuple(artifacts),
         tuple(final_compatibility.get("required_restart_targets") or ()),
         tuple(final_compatibility.get("post_cutover_smoke_ids") or ()),
         final_contracts,
@@ -516,7 +546,7 @@ def _load_release_chain() -> ReleaseManifest:
 
 RELEASE_MANIFEST = _load_release_chain()
 SCHEMA_PARTS = tuple(ROOT / artifact["relative_path"] for artifact in RELEASE_MANIFEST.artifacts)
-VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "verified"})
+VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "backfilled", "verified"})
 PURE_RETIREMENT_ARTIFACTS = frozenset({
     "153_retire_empty_legacy_field_inventory.sql",
 })
@@ -530,6 +560,14 @@ def _canonical_json(value: Any) -> bytes:
             return str(item)
         if isinstance(item, bytes):
             return {"bytes_hex": item.hex()}
+        if isinstance(item, timedelta):
+            return {
+                "timedelta_microseconds": (
+                    item.days * 86_400_000_000
+                    + item.seconds * 1_000_000
+                    + item.microseconds
+                )
+            }
         raise TypeError(f"unsupported canonical JSON type: {type(item).__name__}")
 
     return json.dumps(
@@ -1497,7 +1535,10 @@ def schema_artifacts() -> list[dict[str, Any]]:
 
 
 def build_plan(
-    config: DatabaseConfig, source: str, candidate: str
+    config: DatabaseConfig,
+    source: str,
+    candidate: str,
+    allowed_partial_artifacts: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
     source_identity = server_identity(config, source)
@@ -1505,9 +1546,12 @@ def build_plan(
     source_objects = _owned_classification(
         source_snapshot, defer_missing_triggers=True
     )
-    if any(state in {"partial", "drift"} for state in source_objects.values()):
+    blocking_states = _blocking_schema_states(
+        source_objects, allowed_partial_artifacts
+    )
+    if blocking_states:
         raise UpgradeBlocked(
-            f"source contains partial/drift owned objects: {source_objects}"
+            f"source contains partial/drift owned objects: {blocking_states}"
         )
     candidate_exists = database_exists(config, candidate)
     source_data = _table_evidence(config, source)
@@ -1542,6 +1586,18 @@ def build_plan(
     }
     plan["plan_fingerprint"] = _sha256_bytes(_canonical_json(plan))
     return plan
+
+
+def _blocking_schema_states(
+    states: Mapping[str, str],
+    allowed_partial_artifacts: frozenset[str],
+) -> dict[str, str]:
+    return {
+        name: state
+        for name, state in states.items()
+        if state == "drift"
+        or (state == "partial" and name not in allowed_partial_artifacts)
+    }
 
 
 def _candidate_preserves_source_data(
@@ -2572,6 +2628,7 @@ def apply_schema(
     operation_receipt_path: Path,
     *,
     mysql_container: str | None = None,
+    allowed_partial_artifacts: frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     validate_database_names(source, candidate)
     operation_receipt = read_receipt(operation_receipt_path)
@@ -2594,7 +2651,11 @@ def apply_schema(
             config, source, candidate, operation_receipt_path,
             mysql_container=mysql_container,
         )
-    fresh = build_plan(config, source, candidate)
+    fresh = (
+        build_plan(config, source, candidate, allowed_partial_artifacts)
+        if allowed_partial_artifacts
+        else build_plan(config, source, candidate)
+    )
     _validate_plan_integrity(plan, fresh)
     if fresh["source_schema_sha256"] != plan.get("source_schema_sha256"):
         raise UpgradeBlocked("source schema changed after planning")
@@ -2619,8 +2680,13 @@ def apply_schema(
     preapply_states = _owned_classification(
         before, defer_missing_triggers=True
     )
-    if any(state in {"partial", "drift"} for state in preapply_states.values()):
-        raise UpgradeBlocked(f"candidate schema is partial/drift: {states}")
+    blocking_states = _blocking_schema_states(
+        preapply_states, allowed_partial_artifacts
+    )
+    if blocking_states:
+        raise UpgradeBlocked(
+            f"candidate schema is partial/drift: {blocking_states}"
+        )
     receipt = existing_receipt
     if receipt.get("candidate_database") != candidate:
         raise UpgradeBlocked("operation receipt targets another candidate")

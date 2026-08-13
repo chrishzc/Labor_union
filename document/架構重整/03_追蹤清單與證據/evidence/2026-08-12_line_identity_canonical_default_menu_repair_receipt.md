@@ -2,7 +2,7 @@
 scope: LINE Identity Management canonical default menu repair
 status: implementation-complete-local-deployed-live-proven
 verified_at: 2026-08-12
-work_package: 66_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md
+work_package: document/架構重整/04_已完成與上線封存/work_packages/66_LINE_Identity_Canonical_Default_Menu_Repair_Work_Package.md
 ---
 
 # LINE 身分解除 canonical default menu 修復驗收收據

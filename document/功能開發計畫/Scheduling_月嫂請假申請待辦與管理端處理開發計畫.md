@@ -148,7 +148,7 @@ schema migration 與既有資料 disposition；不得直接重建或破壞 `staf
 - `綁定訂單`、`訂單查詢` 維持 customer binding。
 - `綁定後台帳號` 維持 admin binding。
 - `LineAdminApiClient` 不擁有 Scheduling leave-review methods。
-- `online.sh` 不屬於 Windows merge 驗收。
+- `scripts/launchers/start_local_development.sh` 不屬於 Windows merge 驗收。
 
 以上 alias 與 ownership focused regression 已完成，不是本計畫的待辦。
 

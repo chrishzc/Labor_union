@@ -445,7 +445,7 @@ CREATE TABLE IF NOT EXISTS staff_schedule (
 CREATE TABLE IF NOT EXISTS line_tasks (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     to_user_id VARCHAR(100) NOT NULL COMMENT '接收訊息的 LINE 用戶唯一識別碼',
-    task_type VARCHAR(50) NOT NULL DEFAULT 'line_push' COMMENT 'line_push/rag_reply/rich_menu_link/rich_menu_unlink',
+    task_type VARCHAR(50) NOT NULL DEFAULT 'line_push' COMMENT 'line_push/line_push_message/rag_reply/rich_menu_link/rich_menu_unlink',
     message_content TEXT NULL COMMENT '文字推播內容',
     payload_json JSON NULL COMMENT '非純文字任務參數',
     status ENUM('pending','processing','sent','failed','cancelled') NOT NULL DEFAULT 'pending',
@@ -2274,6 +2274,124 @@ CREATE TRIGGER trg_caregiver_matching_plan_segments_before_update BEFORE UPDATE 
 DROP TRIGGER IF EXISTS trg_caregiver_matching_plan_segments_before_delete;
 CREATE TRIGGER trg_caregiver_matching_plan_segments_before_delete BEFORE DELETE ON caregiver_matching_plan_segments FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_segments records cannot be deleted';
 -- END SOURCE: db/schema_parts/98_caregiver_matching_plans.sql
+
+-- BEGIN SOURCE: db/schema_parts/98_customer_service_tickets.sql
+CREATE TABLE IF NOT EXISTS customer_service_tickets (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    line_user_id VARCHAR(100) NOT NULL COMMENT '提出需求的 LINE 用戶',
+    client_id INT NULL COMMENT '已綁定客戶時連結 clients.id',
+    case_no VARCHAR(50) NULL COMMENT '已綁定案件時連結 orders.case_no',
+    category ENUM(
+        'service_flow',
+        'payment_subsidy',
+        'service_progress',
+        'profile_update',
+        'contact_union',
+        'other'
+    ) NOT NULL,
+    message TEXT NOT NULL COMMENT '用戶原始問題或系統分類內容',
+    status ENUM('waiting','handling','resolved') NOT NULL DEFAULT 'waiting',
+    assigned_to_admin_user_id BIGINT NULL COMMENT '目前處理人員',
+    internal_note TEXT NULL COMMENT '工會內部備註',
+    last_reply TEXT NULL COMMENT '最近一次回覆客戶內容',
+    last_replied_at DATETIME NULL,
+    resolved_at DATETIME NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_customer_service_status_time (status, created_at),
+    INDEX idx_customer_service_line_user (line_user_id, status),
+    INDEX idx_customer_service_client (client_id, created_at),
+    INDEX idx_customer_service_case_no (case_no),
+    CONSTRAINT fk_customer_service_client
+        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
+    CONSTRAINT fk_customer_service_order
+        FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_customer_service_assigned_admin
+        FOREIGN KEY (assigned_to_admin_user_id) REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS client_profile_change_requests (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    line_user_id VARCHAR(100) NOT NULL COMMENT '提出異動申請的 LINE 用戶',
+    client_id INT NOT NULL COMMENT '欲異動的客戶資料',
+    case_no VARCHAR(50) NULL COMMENT '申請當下的案件編號',
+    ticket_id BIGINT NULL COMMENT '關聯客服單',
+    status ENUM('pending','approved','partially_approved','rejected','reverted') NOT NULL DEFAULT 'pending',
+    requested_changes_json JSON NOT NULL COMMENT '用戶送出的欄位異動內容',
+    old_values_json JSON NOT NULL COMMENT '送出當下 DB 原始值快照',
+    applied_values_json JSON NULL COMMENT '審核通過後實際套用的新值',
+    rejection_reason TEXT NULL,
+    reviewed_by_name VARCHAR(100) NULL COMMENT '審核人員姓名快照',
+    reviewed_by_admin_user_id BIGINT NULL COMMENT '審核工會人員',
+    reviewed_at DATETIME NULL COMMENT '審核時間',
+    reverted_by_name VARCHAR(100) NULL COMMENT '回復人員姓名快照',
+    reverted_by_admin_user_id BIGINT NULL COMMENT '回復工會人員',
+    reverted_at DATETIME NULL COMMENT '回復時間',
+    revert_reason TEXT NULL,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_client_profile_change_status_time (status, created_at),
+    INDEX idx_client_profile_change_line_user (line_user_id, created_at),
+    INDEX idx_client_profile_change_client (client_id, created_at),
+    INDEX idx_client_profile_change_ticket (ticket_id),
+    CONSTRAINT fk_client_profile_change_client
+        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_client_profile_change_ticket
+        FOREIGN KEY (ticket_id) REFERENCES customer_service_tickets(id) ON DELETE SET NULL,
+    CONSTRAINT fk_client_profile_change_reviewer
+        FOREIGN KEY (reviewed_by_admin_user_id) REFERENCES admin_users(id) ON DELETE SET NULL,
+    CONSTRAINT fk_client_profile_change_reverter
+        FOREIGN KEY (reverted_by_admin_user_id) REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET @profile_change_reviewed_by_name_exists = (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'client_profile_change_requests'
+      AND COLUMN_NAME = 'reviewed_by_name'
+);
+SET @profile_change_reviewed_by_name_sql = IF(
+    @profile_change_reviewed_by_name_exists = 0,
+    'ALTER TABLE client_profile_change_requests ADD COLUMN reviewed_by_name VARCHAR(100) NULL COMMENT ''審核人員姓名快照'' AFTER rejection_reason',
+    'SELECT 1'
+);
+PREPARE profile_change_reviewed_by_name_stmt FROM @profile_change_reviewed_by_name_sql;
+EXECUTE profile_change_reviewed_by_name_stmt;
+DEALLOCATE PREPARE profile_change_reviewed_by_name_stmt;
+
+SET @profile_change_reverted_by_name_exists = (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'client_profile_change_requests'
+      AND COLUMN_NAME = 'reverted_by_name'
+);
+SET @profile_change_reverted_by_name_sql = IF(
+    @profile_change_reverted_by_name_exists = 0,
+    'ALTER TABLE client_profile_change_requests ADD COLUMN reverted_by_name VARCHAR(100) NULL COMMENT ''回復人員姓名快照'' AFTER reviewed_at',
+    'SELECT 1'
+);
+PREPARE profile_change_reverted_by_name_stmt FROM @profile_change_reverted_by_name_sql;
+EXECUTE profile_change_reverted_by_name_stmt;
+DEALLOCATE PREPARE profile_change_reverted_by_name_stmt;
+
+SET @profile_change_status_type = (
+    SELECT COLUMN_TYPE
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'client_profile_change_requests'
+      AND COLUMN_NAME = 'status'
+);
+SET @profile_change_status_sql = IF(
+    @profile_change_status_type NOT LIKE '%partially_approved%',
+    'ALTER TABLE client_profile_change_requests MODIFY COLUMN status ENUM(''pending'',''approved'',''partially_approved'',''rejected'',''reverted'') NOT NULL DEFAULT ''pending''',
+    'SELECT 1'
+);
+PREPARE profile_change_status_stmt FROM @profile_change_status_sql;
+EXECUTE profile_change_status_stmt;
+DEALLOCATE PREPARE profile_change_status_stmt;
+-- END SOURCE: db/schema_parts/98_customer_service_tickets.sql
 
 -- BEGIN SOURCE: db/schema_parts/99_caregiver_matching_plan_events.sql
 -- 99_caregiver_matching_plan_events.sql
@@ -11710,42 +11828,6 @@ ALTER TABLE anomaly_workflow_events
     MODIFY COLUMN idempotency_key VARCHAR(320) NOT NULL;
 -- END SOURCE: db/schema_parts/165_anomaly_workflow_event_idempotency_widen.sql
 
--- BEGIN SOURCE: db/schema_parts/184_provisional_registration_case_issue.sql
-CREATE TABLE IF NOT EXISTS provisional_registration_case_issue_events (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    registration_id BIGINT NOT NULL,
-    case_no VARCHAR(50) NOT NULL,
-    client_id INT NOT NULL,
-    beclass_record_id INT NOT NULL,
-    case_import_event_id BIGINT NOT NULL,
-    idempotency_key VARCHAR(191) NOT NULL,
-    actor VARCHAR(100) NOT NULL,
-    correlation_id VARCHAR(191) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_provisional_case_issue_registration (registration_id),
-    UNIQUE KEY uq_provisional_case_issue_case (case_no),
-    UNIQUE KEY uq_provisional_case_issue_idempotency (idempotency_key),
-    CONSTRAINT fk_provisional_case_issue_registration FOREIGN KEY (registration_id)
-        REFERENCES provisional_client_registrations(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_provisional_case_issue_client FOREIGN KEY (client_id)
-        REFERENCES clients(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_provisional_case_issue_beclass FOREIGN KEY (beclass_record_id)
-        REFERENCES beclass_records(id) ON DELETE RESTRICT,
-    CONSTRAINT fk_provisional_case_issue_import_event FOREIGN KEY (case_import_event_id)
-        REFERENCES case_import_events(id) ON DELETE RESTRICT
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-ALTER TABLE case_import_receipts
-    ADD COLUMN provisional_registration_id BIGINT NULL,
-    ADD COLUMN provisional_case_issue_event_id BIGINT NULL,
-    ADD CONSTRAINT fk_case_import_receipt_provisional_registration
-        FOREIGN KEY (provisional_registration_id) REFERENCES provisional_client_registrations(id)
-        ON DELETE RESTRICT,
-    ADD CONSTRAINT fk_case_import_receipt_provisional_issue_event
-        FOREIGN KEY (provisional_case_issue_event_id) REFERENCES provisional_registration_case_issue_events(id)
-        ON DELETE RESTRICT;
--- END SOURCE: db/schema_parts/184_provisional_registration_case_issue.sql
-
 -- BEGIN SOURCE: db/schema_parts/166_contract_signing_workflow.sql
 -- 166_contract_signing_workflow.sql
 -- 案件契約文件、月嫂／客戶簽署事件與簽約前服務承諾。
@@ -13080,6 +13162,679 @@ BEFORE DELETE ON government_subsidy_overpayment_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government_subsidy_overpayment_apply_receipts records cannot be deleted';
 -- END SOURCE: db/schema_parts/178_government_subsidy_overpayment_apply_receipts.sql
+
+-- BEGIN SOURCE: db/schema_parts/180_leave_substitution_holiday_only_batch_contract.sql
+-- Holiday Query can produce an approved Scheduling change without a manual
+-- leave item. Preview fingerprint and fresh-fact checks remain the Apply gate.
+ALTER TABLE scheduling_leave_substitution_batches
+    DROP CHECK chk_scheduling_leave_batch_identity;
+
+ALTER TABLE scheduling_leave_substitution_batches
+    ADD CONSTRAINT chk_scheduling_leave_batch_identity
+    CHECK (
+        item_count >= 0
+        AND CHAR_LENGTH(TRIM(batch_key)) > 0
+        AND CHAR_LENGTH(TRIM(actor)) > 0
+        AND CHAR_LENGTH(TRIM(reason)) > 0
+        AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+    );
+-- END SOURCE: db/schema_parts/180_leave_substitution_holiday_only_batch_contract.sql
+
+-- BEGIN SOURCE: db/schema_parts/181_matching_service_date_confirmation.sql
+-- WP68 confirmed service dates, schedule snapshots and confirmation events.
+
+CREATE TABLE IF NOT EXISTS confirmed_service_date_versions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    version INT UNSIGNED NOT NULL,
+    order_version INT UNSIGNED NOT NULL,
+    scheduling_version INT UNSIGNED NOT NULL,
+    service_day_count INT UNSIGNED NOT NULL,
+    service_date_fingerprint CHAR(64) NOT NULL,
+    is_current TINYINT NULL,
+    confirmed_by_actor_id VARCHAR(191) NOT NULL,
+    reason VARCHAR(500) NULL,
+    confirmed_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    invalidated_at_utc DATETIME(6) NULL,
+    UNIQUE KEY uq_confirmed_service_date_version (case_no,version),
+    UNIQUE KEY uq_confirmed_service_date_current (case_no,is_current),
+    CONSTRAINT fk_confirmed_service_date_case FOREIGN KEY (case_no) REFERENCES orders(case_no),
+    CONSTRAINT chk_confirmed_service_date_fingerprint CHECK (service_date_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_confirmed_service_date_current CHECK (is_current IS NULL OR is_current=1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS confirmed_service_date_days (
+    confirmed_version_id BIGINT UNSIGNED NOT NULL,
+    ordinal INT UNSIGNED NOT NULL,
+    service_date DATE NOT NULL,
+    PRIMARY KEY (confirmed_version_id,ordinal),
+    UNIQUE KEY uq_confirmed_service_date_day (confirmed_version_id,service_date),
+    CONSTRAINT fk_confirmed_service_date_day_version FOREIGN KEY (confirmed_version_id)
+        REFERENCES confirmed_service_date_versions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS confirmed_service_date_receipts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) NOT NULL,
+    confirmed_version_id BIGINT UNSIGNED NOT NULL,
+    actor_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_confirmed_service_date_receipt_key (idempotency_key),
+    CONSTRAINT fk_confirmed_service_date_receipt_version FOREIGN KEY (confirmed_version_id)
+        REFERENCES confirmed_service_date_versions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS matching_schedule_snapshots (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    plan_id BIGINT NOT NULL,
+    confirmed_version_id BIGINT UNSIGNED NOT NULL,
+    snapshot_fingerprint CHAR(64) NOT NULL,
+    status ENUM('draft','sent','invalidated') NOT NULL DEFAULT 'draft',
+    current_marker TINYINT NULL,
+    created_by_actor_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    invalidated_at_utc DATETIME(6) NULL,
+    UNIQUE KEY uq_matching_schedule_current (case_no,current_marker),
+    CONSTRAINT fk_matching_schedule_case FOREIGN KEY (case_no) REFERENCES orders(case_no),
+    CONSTRAINT fk_matching_schedule_plan FOREIGN KEY (plan_id) REFERENCES caregiver_matching_plans(id),
+    CONSTRAINT fk_matching_schedule_version FOREIGN KEY (confirmed_version_id)
+        REFERENCES confirmed_service_date_versions(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS matching_schedule_recipient_snapshots (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    parent_snapshot_id BIGINT UNSIGNED NOT NULL,
+    audience_type ENUM('customer','caregiver') NOT NULL,
+    recipient_key VARCHAR(191) NOT NULL,
+    segment_id BIGINT NULL,
+    recipient_line_user_id VARCHAR(191) NULL,
+    payload_snapshot JSON NOT NULL,
+    payload_fingerprint CHAR(64) NOT NULL,
+    delivery_status ENUM('pending','queued','sent','failed','blocked') NOT NULL DEFAULT 'pending',
+    UNIQUE KEY uq_matching_schedule_recipient (parent_snapshot_id,recipient_key),
+    CONSTRAINT fk_matching_schedule_recipient_parent FOREIGN KEY (parent_snapshot_id)
+        REFERENCES matching_schedule_snapshots(id),
+    CONSTRAINT fk_matching_schedule_recipient_segment FOREIGN KEY (segment_id)
+        REFERENCES caregiver_matching_plan_segments(id),
+    CONSTRAINT chk_matching_schedule_recipient_target CHECK (
+        (audience_type='customer' AND segment_id IS NULL) OR
+        (audience_type='caregiver' AND segment_id IS NOT NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS matching_schedule_confirmation_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    recipient_snapshot_id BIGINT UNSIGNED NOT NULL,
+    confirmation_value ENUM('confirmed','rejected','manually_confirmed','manually_revoked') NOT NULL,
+    source ENUM('line','admin') NOT NULL,
+    actor_id VARCHAR(191) NOT NULL,
+    reason VARCHAR(500) NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    occurred_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_matching_schedule_confirmation_key (idempotency_key),
+    CONSTRAINT fk_matching_schedule_confirmation_recipient FOREIGN KEY (recipient_snapshot_id)
+        REFERENCES matching_schedule_recipient_snapshots(id),
+    CONSTRAINT chk_matching_schedule_rejection_reason CHECK (
+        confirmation_value<>'rejected' OR CHAR_LENGTH(TRIM(reason))>0
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS matching_schedule_line_interactions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    recipient_snapshot_id BIGINT UNSIGNED NOT NULL,
+    token_hash CHAR(64) NOT NULL,
+    interaction_status ENUM('active','awaiting_rejection_reason','consumed','invalidated') NOT NULL DEFAULT 'active',
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    consumed_at_utc DATETIME(6) NULL,
+    UNIQUE KEY uq_matching_schedule_line_token (token_hash),
+    UNIQUE KEY uq_matching_schedule_recipient_interaction (recipient_snapshot_id),
+    CONSTRAINT fk_matching_schedule_interaction_recipient FOREIGN KEY (recipient_snapshot_id)
+        REFERENCES matching_schedule_recipient_snapshots(id),
+    CONSTRAINT chk_matching_schedule_line_token CHECK (token_hash REGEXP '^[0-9a-f]{64}$')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/181_matching_service_date_confirmation.sql
+
+-- BEGIN SOURCE: db/schema_parts/182_candidate_contact_pool.sql
+-- 182. Candidate Contact Pool: negotiation contacts, never formal service segments.
+CREATE TABLE IF NOT EXISTS caregiver_candidate_contact_pools (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_candidate_contact_pool_case (case_no),
+    CONSTRAINT fk_candidate_contact_pool_case FOREIGN KEY (case_no) REFERENCES orders(case_no)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS caregiver_candidate_contact_entries (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    pool_id BIGINT UNSIGNED NOT NULL,
+    staff_id INT NOT NULL,
+    service_start_date DATE NOT NULL,
+    service_end_date DATE NOT NULL,
+    coverage_fingerprint CHAR(64) NOT NULL,
+    status ENUM('active','selected','withdrawn') NOT NULL DEFAULT 'active',
+    active_marker TINYINT NULL DEFAULT 1,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_candidate_contact_active_staff (pool_id,staff_id,active_marker),
+    CONSTRAINT fk_candidate_contact_entry_pool FOREIGN KEY (pool_id) REFERENCES caregiver_candidate_contact_pools(id),
+    CONSTRAINT fk_candidate_contact_entry_staff FOREIGN KEY (staff_id) REFERENCES staff(id),
+    CONSTRAINT chk_candidate_contact_dates CHECK (service_start_date<=service_end_date),
+    CONSTRAINT chk_candidate_contact_active CHECK (active_marker IS NULL OR active_marker=1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS caregiver_candidate_contact_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    pool_id BIGINT UNSIGNED NOT NULL,
+    candidate_id BIGINT UNSIGNED NULL,
+    event_type ENUM('candidates_added','info_1_sent','info_2_sent','willingness_changed','candidate_selected','candidate_withdrawn') NOT NULL,
+    event_key VARCHAR(100) NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    payload JSON NOT NULL,
+    occurred_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_candidate_contact_event_key (event_key),
+    KEY idx_candidate_contact_event_candidate (candidate_id,occurred_at),
+    CONSTRAINT fk_candidate_contact_event_pool FOREIGN KEY (pool_id) REFERENCES caregiver_candidate_contact_pools(id),
+    CONSTRAINT fk_candidate_contact_event_candidate FOREIGN KEY (candidate_id) REFERENCES caregiver_candidate_contact_entries(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/182_candidate_contact_pool.sql
+
+-- BEGIN SOURCE: db/schema_parts/183_staff_leave_requests.sql
+CREATE TABLE IF NOT EXISTS staff_leave_requests (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL COMMENT '提出請假的月嫂',
+    line_user_id VARCHAR(100) NOT NULL COMMENT '提出申請的 LINE 用戶',
+    leave_start_date DATE NOT NULL COMMENT '請假開始日期',
+    leave_end_date DATE NOT NULL COMMENT '請假結束日期',
+    leave_reason TEXT NULL COMMENT '請假原因',
+    substitute_found BOOLEAN NOT NULL DEFAULT FALSE COMMENT '是否已找到代班人員',
+    substitute_name VARCHAR(100) NULL COMMENT '代班人員姓名',
+    substitute_phone VARCHAR(30) NULL COMMENT '代班人員電話',
+    substitute_note TEXT NULL COMMENT '代班補充資訊',
+    status ENUM('pending','approved','rejected','cancelled') NOT NULL DEFAULT 'pending',
+    reviewed_by_admin_user_id BIGINT NULL COMMENT '審核工會人員',
+    reviewed_at DATETIME NULL COMMENT '審核時間',
+    review_note TEXT NULL COMMENT '審核備註',
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_staff_leave_staff_status (staff_id, status, leave_start_date),
+    INDEX idx_staff_leave_line_user (line_user_id, created_at),
+    CONSTRAINT fk_staff_leave_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_leave_reviewer
+        FOREIGN KEY (reviewed_by_admin_user_id) REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/183_staff_leave_requests.sql
+
+-- BEGIN SOURCE: db/schema_parts/184_provisional_registration_case_issue.sql
+CREATE TABLE IF NOT EXISTS provisional_registration_case_issue_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    registration_id BIGINT NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    client_id INT NOT NULL,
+    beclass_record_id INT NOT NULL,
+    case_import_event_id BIGINT NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_provisional_case_issue_registration (registration_id),
+    UNIQUE KEY uq_provisional_case_issue_case (case_no),
+    UNIQUE KEY uq_provisional_case_issue_idempotency (idempotency_key),
+    CONSTRAINT fk_provisional_case_issue_registration FOREIGN KEY (registration_id)
+        REFERENCES provisional_client_registrations(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_provisional_case_issue_client FOREIGN KEY (client_id)
+        REFERENCES clients(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_provisional_case_issue_beclass FOREIGN KEY (beclass_record_id)
+        REFERENCES beclass_records(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_provisional_case_issue_import_event FOREIGN KEY (case_import_event_id)
+        REFERENCES case_import_events(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE case_import_receipts
+    ADD COLUMN provisional_registration_id BIGINT NULL,
+    ADD COLUMN provisional_case_issue_event_id BIGINT NULL,
+    ADD CONSTRAINT fk_case_import_receipt_provisional_registration
+        FOREIGN KEY (provisional_registration_id) REFERENCES provisional_client_registrations(id)
+        ON DELETE RESTRICT,
+    ADD CONSTRAINT fk_case_import_receipt_provisional_issue_event
+        FOREIGN KEY (provisional_case_issue_event_id) REFERENCES provisional_registration_case_issue_events(id)
+        ON DELETE RESTRICT;
+-- END SOURCE: db/schema_parts/184_provisional_registration_case_issue.sql
+
+-- BEGIN SOURCE: db/schema_parts/185_customer_service_runtime.sql
+CREATE TABLE IF NOT EXISTS customer_service_tickets (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    line_user_id VARCHAR(100) NOT NULL,
+    client_id INT NULL,
+    case_no VARCHAR(50) NULL,
+    category ENUM('service_flow','payment_subsidy','service_progress','profile_update','contact_union','other') NOT NULL,
+    status ENUM('waiting','handling','resolved') NOT NULL DEFAULT 'waiting',
+    assigned_to_admin_user_id BIGINT NULL,
+    internal_note TEXT NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    resolved_at_utc DATETIME NULL,
+    created_at_utc DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at_utc DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    active_marker TINYINT GENERATED ALWAYS AS (
+        CASE WHEN status IN ('waiting','handling') THEN 1 ELSE NULL END
+    ) STORED,
+    UNIQUE KEY uq_customer_service_active_category (line_user_id, category, active_marker),
+    INDEX idx_customer_service_status_time (status, created_at_utc),
+    INDEX idx_customer_service_client (client_id, created_at_utc),
+    INDEX idx_customer_service_case (case_no, created_at_utc),
+    CONSTRAINT fk_customer_service_client FOREIGN KEY (client_id)
+        REFERENCES clients(id) ON UPDATE RESTRICT ON DELETE SET NULL,
+    CONSTRAINT fk_customer_service_order FOREIGN KEY (case_no)
+        REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_customer_service_admin FOREIGN KEY (assigned_to_admin_user_id)
+        REFERENCES admin_users(id) ON UPDATE RESTRICT ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS customer_service_ticket_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id BIGINT NOT NULL,
+    event_key VARCHAR(191) NOT NULL,
+    event_type ENUM('customer_message','agent_reply','status_changed','internal_note') NOT NULL,
+    message_text TEXT NULL,
+    actor_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_customer_service_event_key (event_key),
+    INDEX idx_customer_service_ticket_events (ticket_id, id),
+    CONSTRAINT fk_customer_service_event_ticket FOREIGN KEY (ticket_id)
+        REFERENCES customer_service_tickets(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/185_customer_service_runtime.sql
+
+-- BEGIN SOURCE: db/schema_parts/186_line_identity_management.sql
+ALTER TABLE line_identity_bindings
+    MODIFY COLUMN binding_status ENUM(
+        'unbound','pending_review','bound','revocation_pending','revoked'
+    ) NOT NULL DEFAULT 'unbound';
+
+ALTER TABLE line_identity_bindings
+    MODIFY COLUMN active_subject_key VARCHAR(400)
+    GENERATED ALWAYS AS (
+        CASE
+            WHEN binding_status IN ('pending_review','bound','revocation_pending')
+            THEN CONCAT(subject_type, ':', subject_reference)
+            ELSE NULL
+        END
+    ) STORED;
+
+ALTER TABLE line_identity_binding_events
+    MODIFY COLUMN action ENUM(
+        'claim_submitted','bound','revocation_requested','revoked','rebound',
+        'legacy_imported'
+    ) NOT NULL;
+
+CREATE TABLE IF NOT EXISTS line_identity_revocation_requests (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    line_user_id VARCHAR(191) NOT NULL,
+    subject_type ENUM('customer','staff','admin') NOT NULL,
+    subject_reference VARCHAR(191) NOT NULL,
+    request_status ENUM(
+        'pending_menu_reset','menu_reset_failed','completed','manual_completed'
+    ) NOT NULL DEFAULT 'pending_menu_reset',
+    requested_binding_version BIGINT UNSIGNED NOT NULL,
+    pending_binding_version BIGINT UNSIGNED NOT NULL,
+    completed_binding_version BIGINT UNSIGNED NULL,
+    default_menu_publication_id BIGINT NOT NULL,
+    provider_menu_id VARCHAR(191) NOT NULL,
+    requested_by_actor_id VARCHAR(191) NOT NULL,
+    request_reason VARCHAR(1000) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    last_error_code VARCHAR(191) NULL,
+    last_error_message VARCHAR(1000) NULL,
+    requested_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    menu_reset_at_utc DATETIME(6) NULL,
+    completed_at_utc DATETIME(6) NULL,
+    completed_by_actor_id VARCHAR(191) NULL,
+    completion_reason VARCHAR(1000) NULL,
+    active_marker TINYINT GENERATED ALWAYS AS (
+        CASE
+            WHEN request_status IN ('pending_menu_reset','menu_reset_failed')
+            THEN 1
+            ELSE NULL
+        END
+    ) STORED,
+    UNIQUE KEY uq_line_identity_revocation_idempotency (idempotency_key),
+    UNIQUE KEY uq_line_identity_active_revocation (line_user_id, active_marker),
+    INDEX idx_line_identity_revocation_status (request_status, requested_at_utc),
+    CONSTRAINT fk_line_identity_revocation_binding FOREIGN KEY (line_user_id)
+        REFERENCES line_identity_bindings(line_user_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_line_identity_revocation_publication
+        FOREIGN KEY (default_menu_publication_id)
+        REFERENCES line_rich_menu_publications(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_identity_revocation_version CHECK (
+        pending_binding_version = requested_binding_version + 1
+        AND (
+            completed_binding_version IS NULL
+            OR completed_binding_version = pending_binding_version + 1
+        )
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/186_line_identity_management.sql
+
+-- BEGIN SOURCE: db/schema_parts/179_line_identity_canonical_menu_publication.sql
+ALTER TABLE line_identity_revocation_requests
+    MODIFY COLUMN default_menu_publication_id BIGINT NULL,
+    ADD COLUMN canonical_default_menu_publication_id BIGINT UNSIGNED NULL
+        AFTER default_menu_publication_id,
+    ADD INDEX idx_line_identity_revocation_canonical_publication (
+        canonical_default_menu_publication_id
+    ),
+    ADD CONSTRAINT fk_line_identity_revocation_canonical_publication
+        FOREIGN KEY (canonical_default_menu_publication_id)
+        REFERENCES line_rich_menu_publication_tasks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    ADD CONSTRAINT chk_line_identity_revocation_publication_source CHECK (
+        (default_menu_publication_id IS NULL)
+        <> (canonical_default_menu_publication_id IS NULL)
+    );
+-- END SOURCE: db/schema_parts/179_line_identity_canonical_menu_publication.sql
+
+-- BEGIN SOURCE: db/schema_parts/187_case_architecture_bootstrap_receipt_version_contract.sql
+-- Bootstrap may adopt an already-versioned Scheduling aggregate. Finance and
+-- Payroll roots are still created at version zero by this transaction.
+ALTER TABLE case_architecture_bootstrap_receipts
+    DROP CHECK chk_case_architecture_receipt_initial_versions;
+
+ALTER TABLE case_architecture_bootstrap_receipts
+    ADD CONSTRAINT chk_case_architecture_receipt_bootstrap_versions
+    CHECK (
+        client_finance_version = 0
+        AND payroll_version = 0
+    );
+-- END SOURCE: db/schema_parts/187_case_architecture_bootstrap_receipt_version_contract.sql
+
+-- BEGIN SOURCE: db/schema_parts/188_matching_preferences_and_staff_availability.sql
+-- WP72 additive Staff Matching Profile and Scheduling availability roots.
+
+ALTER TABLE orders
+    ADD COLUMN requires_cooking TINYINT(1) NULL
+        COMMENT '是否需要月嫂下廚；NULL 只允許 legacy/待人工補正',
+    ADD CONSTRAINT chk_orders_requires_cooking
+        CHECK (requires_cooking IS NULL OR requires_cooking IN (0, 1));
+
+CREATE TABLE IF NOT EXISTS staff_matching_preference_definitions (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    preference_key VARCHAR(100) NOT NULL,
+    display_name VARCHAR(100) NOT NULL,
+    value_kind ENUM('integer_range','integer_set') NOT NULL,
+    is_filterable TINYINT(1) NOT NULL DEFAULT 0,
+    order_fact_key ENUM('service_days','service_hours_per_day') NULL,
+    comparison_operator ENUM('range_with_tolerance','contains_integer') NOT NULL,
+    status ENUM('active','inactive') NOT NULL DEFAULT 'active',
+    version BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_staff_matching_preference_key (preference_key),
+    CONSTRAINT chk_staff_matching_preference_definition_text CHECK (
+        CHAR_LENGTH(TRIM(preference_key)) > 0
+        AND CHAR_LENGTH(TRIM(display_name)) > 0
+        AND CHAR_LENGTH(TRIM(created_by)) > 0
+        AND CHAR_LENGTH(TRIM(updated_by)) > 0
+    ),
+    CONSTRAINT chk_staff_matching_preference_filter_source CHECK (
+        (is_filterable=0 AND order_fact_key IS NULL)
+        OR (is_filterable=1 AND order_fact_key IS NOT NULL)
+    ),
+    CONSTRAINT chk_staff_matching_preference_comparison CHECK (
+        (value_kind='integer_range' AND comparison_operator='range_with_tolerance')
+        OR (value_kind='integer_set' AND comparison_operator='contains_integer')
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_matching_preference_profiles (
+    staff_id INT PRIMARY KEY,
+    version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    created_by VARCHAR(100) NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_staff_matching_preference_profile_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_staff_matching_preference_profile_actor
+        CHECK (CHAR_LENGTH(TRIM(updated_by)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_matching_preference_values (
+    staff_id INT NOT NULL,
+    definition_id BIGINT NOT NULL,
+    value_json JSON NOT NULL,
+    profile_version BIGINT UNSIGNED NOT NULL,
+    updated_by VARCHAR(100) NOT NULL,
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (staff_id,definition_id),
+    CONSTRAINT fk_staff_matching_preference_value_profile
+        FOREIGN KEY (staff_id) REFERENCES staff_matching_preference_profiles(staff_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_matching_preference_value_definition
+        FOREIGN KEY (definition_id) REFERENCES staff_matching_preference_definitions(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_staff_matching_preference_value_json
+        CHECK (JSON_TYPE(value_json)='OBJECT'),
+    CONSTRAINT chk_staff_matching_preference_value_actor
+        CHECK (CHAR_LENGTH(TRIM(updated_by)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_matching_preference_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_type VARCHAR(100) NOT NULL,
+    aggregate_identity VARCHAR(191) NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    before_json JSON NOT NULL,
+    after_json JSON NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_staff_matching_preference_event_key (idempotency_key),
+    CONSTRAINT chk_staff_matching_preference_event_snapshots CHECK (
+        resulting_version>0
+        AND JSON_TYPE(before_json)='OBJECT'
+        AND JSON_TYPE(after_json)='OBJECT'
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_matching_preference_receipts (
+    idempotency_key VARCHAR(191) PRIMARY KEY,
+    command_family VARCHAR(100) NOT NULL,
+    aggregate_identity VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) NOT NULL,
+    preview_fingerprint CHAR(64) NOT NULL,
+    result_json JSON NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT chk_staff_matching_preference_receipt_fingerprints CHECK (
+        command_fingerprint REGEXP '^[0-9a-f]{64}$'
+        AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT chk_staff_matching_preference_receipt_snapshot
+        CHECK (JSON_TYPE(result_json)='OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_matching_preference_migration_reviews (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    source_kind ENUM('staff_time_slot') NOT NULL,
+    source_value VARCHAR(100) NOT NULL,
+    issue_code ENUM('source_not_ready') NOT NULL,
+    status ENUM('open','resolved') NOT NULL DEFAULT 'open',
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    resolved_at DATETIME(6) NULL,
+    UNIQUE KEY uq_staff_matching_preference_migration_review
+        (staff_id,source_kind,source_value,issue_code),
+    CONSTRAINT fk_staff_matching_preference_migration_review_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_staff_availability_aggregates (
+    staff_id INT PRIMARY KEY,
+    aggregate_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+        ON UPDATE CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_scheduling_staff_availability_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_staff_unavailability_blocks (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    block_kind ENUM('long_leave','paused_service') NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE NULL,
+    status ENUM('effective','cancelled') NOT NULL DEFAULT 'effective',
+    reason VARCHAR(500) NOT NULL,
+    source_block_id BIGINT NULL,
+    created_by VARCHAR(100) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    ended_by VARCHAR(100) NULL,
+    ended_at DATETIME(6) NULL,
+    cancelled_by VARCHAR(100) NULL,
+    cancelled_at DATETIME(6) NULL,
+    CONSTRAINT fk_scheduling_staff_unavailability_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_staff_unavailability_source
+        FOREIGN KEY (source_block_id) REFERENCES scheduling_staff_unavailability_blocks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_scheduling_staff_unavailability_dates CHECK (
+        (block_kind='long_leave' AND end_date IS NOT NULL AND end_date>=start_date)
+        OR (block_kind='paused_service' AND (end_date IS NULL OR end_date>=start_date))
+    ),
+    CONSTRAINT chk_scheduling_staff_unavailability_reason
+        CHECK (CHAR_LENGTH(TRIM(reason))>0 AND CHAR_LENGTH(TRIM(created_by))>0),
+    INDEX idx_scheduling_staff_unavailability_current
+        (staff_id,status,start_date,end_date)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_staff_availability_events (
+    event_key VARCHAR(191) PRIMARY KEY,
+    staff_id INT NOT NULL,
+    aggregate_version BIGINT UNSIGNED NOT NULL,
+    block_id BIGINT NOT NULL,
+    event_type ENUM('created','pause_ended','cancelled') NOT NULL,
+    before_snapshot JSON NOT NULL,
+    after_snapshot JSON NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    occurred_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_scheduling_staff_availability_event_staff
+        FOREIGN KEY (staff_id) REFERENCES scheduling_staff_availability_aggregates(staff_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_staff_availability_event_block
+        FOREIGN KEY (block_id) REFERENCES scheduling_staff_unavailability_blocks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_scheduling_staff_availability_event_snapshots CHECK (
+        aggregate_version>0
+        AND JSON_TYPE(before_snapshot)='OBJECT'
+        AND JSON_TYPE(after_snapshot)='OBJECT'
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_staff_availability_apply_receipts (
+    idempotency_key VARCHAR(191) PRIMARY KEY,
+    request_fingerprint CHAR(64) NOT NULL,
+    preview_fingerprint CHAR(64) NOT NULL,
+    staff_id INT NOT NULL,
+    aggregate_version BIGINT UNSIGNED NOT NULL,
+    block_id BIGINT NOT NULL,
+    action ENUM('create_long_leave','create_pause','end_pause','cancel') NOT NULL,
+    result_snapshot JSON NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_scheduling_staff_availability_receipt_staff
+        FOREIGN KEY (staff_id) REFERENCES scheduling_staff_availability_aggregates(staff_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_staff_availability_receipt_block
+        FOREIGN KEY (block_id) REFERENCES scheduling_staff_unavailability_blocks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_scheduling_staff_availability_receipt_fingerprints CHECK (
+        request_fingerprint REGEXP '^[0-9a-f]{64}$'
+        AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+    ),
+    CONSTRAINT chk_scheduling_staff_availability_receipt_snapshot
+        CHECK (JSON_TYPE(result_snapshot)='OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO staff_matching_preference_definitions
+    (preference_key,display_name,value_kind,is_filterable,order_fact_key,
+     comparison_operator,status,version,created_by,updated_by)
+VALUES
+    ('preferred_service_days','可承接服務天數','integer_range',1,
+     'service_days','range_with_tolerance','active',1,'wp72','wp72'),
+    ('daily_service_hours','可承接每日服務時數','integer_set',1,
+     'service_hours_per_day','contains_integer','active',1,'wp72','wp72')
+ON DUPLICATE KEY UPDATE preference_key=VALUES(preference_key);
+
+INSERT INTO staff_matching_preference_profiles
+    (staff_id,version,created_by,updated_by)
+SELECT DISTINCT staff_id,1,'wp72-time-slot-backfill','wp72-time-slot-backfill'
+FROM staff_time_slots
+WHERE slot_name IN (
+    '4小時_上午','4小時_下午','4小時(上午8:30-12:30)',
+    '4小時(下午13:00-17:00)','8小時','24小時'
+)
+ON DUPLICATE KEY UPDATE staff_id=VALUES(staff_id);
+
+INSERT INTO staff_matching_preference_values
+    (staff_id,definition_id,value_json,profile_version,updated_by)
+SELECT normalized.staff_id,definition.id,
+       JSON_OBJECT(
+           'values',
+           CAST(CONCAT('[',GROUP_CONCAT(
+               normalized.hours ORDER BY normalized.hours SEPARATOR ','
+           ),']') AS JSON)
+       ),1,
+       'wp72-time-slot-backfill'
+FROM (
+    SELECT DISTINCT staff_id,
+        CASE
+            WHEN slot_name IN (
+                '4小時_上午','4小時_下午','4小時(上午8:30-12:30)',
+                '4小時(下午13:00-17:00)'
+            ) THEN 4
+            WHEN slot_name='8小時' THEN 8
+            WHEN slot_name='24小時' THEN 24
+        END AS hours
+    FROM staff_time_slots
+    WHERE slot_name IN (
+        '4小時_上午','4小時_下午','4小時(上午8:30-12:30)',
+        '4小時(下午13:00-17:00)','8小時','24小時'
+    )
+) normalized
+JOIN staff_matching_preference_definitions definition
+  ON definition.preference_key='daily_service_hours'
+GROUP BY normalized.staff_id,definition.id
+ON DUPLICATE KEY UPDATE staff_id=VALUES(staff_id);
+
+INSERT INTO staff_matching_preference_migration_reviews
+    (staff_id,source_kind,source_value,issue_code)
+SELECT staff_id,'staff_time_slot',slot_name,'source_not_ready'
+FROM staff_time_slots
+WHERE slot_name NOT IN (
+    '4小時_上午','4小時_下午','4小時(上午8:30-12:30)',
+    '4小時(下午13:00-17:00)','8小時','24小時'
+)
+ON DUPLICATE KEY UPDATE id=id;
+-- END SOURCE: db/schema_parts/188_matching_preferences_and_staff_availability.sql
 
 -- BEGIN SOURCE: db/schema_parts/999_v_order_details_view.sql
 -- 25. 訂單與帳務整合檢視表 (獨立拆分訂金與樓層費，並提供首筆應付加總)

@@ -185,7 +185,18 @@ def test_search_segmented_filters_candidates_to_active_staff_only(monkeypatch):
     monkeypatch.setattr(service, "get_connection", lambda: connection)
     monkeypatch.setattr(service, "derive_segment_availability", fake_derive_segment_availability)
 
-    service.search_segmented_caregiver_availability("115000001", 2, [], "2026-07-10")
+    service.search_segmented_caregiver_availability(
+        "115000001",
+        2,
+        [],
+        "2026-07-10",
+        filter_policy={
+            "region": False,
+            "preferred_service_days": False,
+            "cooking": False,
+            "daily_service_hours": False,
+        },
+    )
 
     assert captured["candidate_staff_ids"] == [10, 20]
     assert connection.closed

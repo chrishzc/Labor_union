@@ -10,6 +10,7 @@ from domains.orders.terms import ServiceTimeTerms
 from domains.scheduling.current_projection import (
     EffectiveAssignmentCurrentFact,
     SchedulingCurrentFacts,
+    StaffUnavailabilityCurrentFact,
     StoredEffectiveOccupancyFact,
     WaitingDepositLockCurrentFact,
 )
@@ -32,12 +33,36 @@ class MySqlSchedulingCurrentProjectionRepository:
             assignments = _assignments(cursor, assignment_rows)
             occupancy = _stored_occupancy(cursor, assignments)
             waiting_locks = _waiting_locks(cursor, query)
+            unavailability_blocks = _unavailability_blocks(cursor, query)
         return SchedulingCurrentFacts(
             query.staff_id,
             assignments,
             occupancy,
             waiting_locks,
+            unavailability_blocks,
         )
+
+
+def _unavailability_blocks(cursor, query):
+    cursor.execute(
+        "SELECT id,staff_id,block_kind,start_date,end_date FROM "
+        "scheduling_staff_unavailability_blocks WHERE staff_id=%s "
+        "AND status='effective' AND start_date<=%s "
+        "AND (end_date IS NULL OR end_date>=%s) ORDER BY start_date,id",
+        (query.staff_id, query.range_end, query.range_start),
+    )
+    return tuple(
+        StaffUnavailabilityCurrentFact(
+            int(row["id"]),
+            int(row["staff_id"]),
+            str(row["block_kind"]),
+            _as_date(row["start_date"], "availability start date"),
+            None
+            if row["end_date"] is None
+            else _as_date(row["end_date"], "availability end date"),
+        )
+        for row in _mapping_rows(cursor.fetchall(), "staff unavailability")
+    )
 
 
 def _require_staff(cursor, staff_id):

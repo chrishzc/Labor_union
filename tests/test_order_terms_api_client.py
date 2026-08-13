@@ -18,7 +18,7 @@ class FakeSession:
 def _response(data): return FakeResponse({"success": True, "data": data})
 
 
-def _terms(): return {"planned_start_date": "2026-08-01", "service_days": 30, "service_hours_per_day": 8, "floor_fee_ntd": 0, "service_time": {"start_time": "09:00:00", "end_time": "17:00:00", "end_day_offset": 0}}
+def _terms(): return {"planned_start_date": "2026-08-01", "service_days": 30, "service_hours_per_day": 8, "requires_cooking": True, "floor_fee_ntd": 0, "service_time": {"start_time": "09:00:00", "end_time": "17:00:00", "end_day_offset": 0}}
 
 
 def test_terms_client_carries_preview_versions_into_apply():

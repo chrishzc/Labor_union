@@ -23,7 +23,10 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [evidence/2026-08-12_line_ingress_phase_1_service_help_receipt.md](evidence/2026-08-12_line_ingress_phase_1_service_help_receipt.md) | LINE ingress Phase 1：canonical Service Help 委派至 Customer Service owning workflow 的 focused regression。 |
 | [LINE ingress Phase 2 receipt（封存）](../04_已完成與上線封存/receipts/2026-08-12_line_ingress_phase_2_rulebook_reconciliation_receipt.md) | 規則書對齊與 union-menu／`esc` characterization 已驗收；未授權的 canonical behavior 留待人工裁決。 |
 | [evidence/2026-08-12_line_menu_command_canonical_replacement_receipt.md](evidence/2026-08-12_line_menu_command_canonical_replacement_receipt.md) | 已裁決的 union menu／`esc` canonical identity gate、outbox replacement 與 focused regression。 |
-| [evidence/2026-08-12_wp68_matching_schedule_confirmation_receipt.md](evidence/2026-08-12_wp68_matching_schedule_confirmation_receipt.md) | WP68 confirmed service dates、日期表 snapshot、雙方確認與 assignment gate 的 focused API／Chrome 證據；尚未結案。 |
+| [WP68 matching-center receipt（封存）](../04_已完成與上線封存/receipts/2026-08-12_wp68_matching_schedule_confirmation_receipt.md) | Candidate Contact Pool、日期表 Preview／人工覆核與正式方案建立已完成 Chrome UI 驗收；未觸發 LINE 外送。 |
+| [WP72 matching receipts（封存）](../04_已完成與上線封存/receipts/2026-08-13_wp72_matching_preferences_staff_availability_receipt.md) / [residual closeout（封存）](../04_已完成與上線封存/receipts/2026-08-13_matching_residual_closeout_receipt.md) | WP72 與月嫂配對 residual plan 已完成 local Browser／regression 驗收；正式行為仍由規格 24 擁有。 |
+| [WP74 developer-local DB receipt（封存）](../04_已完成與上線封存/receipts/2026-08-13_developer_local_database_maintenance_receipt.md) | 空 schema 升級與目前 DB 備份副本升級均完成真實 MySQL 驗收；來源 DB 未修改。 |
+| [WP75 launcher receipt（封存）](../04_已完成與上線封存/receipts/2026-08-13_startup_launcher_convergence_receipt.md) | Windows canonical launcher 實跑、LINE optional credential gate、PID／port cleanup 與 focused regression 已完成。 |
 | [65 LINE canonical cutover receipt（封存）](../04_已完成與上線封存/receipts/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
 | [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |
 | [evidence/](evidence/) | 上述決策包／收據對應的原始 evidence 產物（JSON／SQL／receipt）。 |

@@ -5,7 +5,7 @@
 Orders 擁有：
 
 - `case_no` 訂單識別；
-- Order Terms：`start_date`、`service_days`、`service_hours_per_day`、`floor_fee`、統一服務時段三欄；
+- Order Terms：`start_date`、`service_days`、`service_hours_per_day`、`requires_cooking`、`floor_fee`、統一服務時段三欄；
 - `actual_start_date` 的首次確認與更正事件；
 - Terms change、cancellation、controlled reopen、lifecycle transition 等不可變事件；
 - aggregate version、命令冪等 receipt；
@@ -24,6 +24,7 @@ Orders 不擁有：
 | 資料 | 類型 | 唯一權威 |
 |---|---|---|
 | Order Terms | root_fact | 最新有效 Terms event 及 Orders aggregate |
+| 下廚需求 | root_fact | Case Import 明確正規化結果或後續 Orders Terms event；不得於 Matching 重新解析問卷 |
 | 每日服務時間 | root_fact | `service_start_time`、`service_end_time`、`service_end_day_offset` 三欄完整 tuple |
 | actual start | root_fact | Confirm／Correct Actual Start event |
 | planned end | derived_projection | 凍結的 planned start、目前 Terms 與規劃服務日 |
@@ -83,6 +84,14 @@ Apply：
   或其他帳務義務，因此不得把它誤判為簽約或收款。
 - Terms Apply 改變任一時間欄時，與其他 Terms 一樣重建 Scheduling candidate、完成時刻、
   未核銷帳務／薪資日期與 lifecycle impact；服務資料鎖形成後不得修改。
+
+下廚需求契約：
+
+- `requires_cooking` 是 Orders boolean root，Case Import 只能從明確 yes／no source 建立；
+- BeClass 問卷空白、矛盾或自由文字無法唯一判定時，Import 必須進 Review，固定回
+  `case_import_cooking_requirement_ambiguous`，不得預設為否；
+- 原始 `survey_details` 保留為來源 evidence，但 Matching 只讀 Orders root；
+- 服務資料鎖形成後不得修改。
 
 ### 3.2.1 Contract Completion Preview／Apply
 

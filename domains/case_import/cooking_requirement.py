@@ -1,0 +1,77 @@
+"""Pure normalization rules for the BeClass cooking requirement answer."""
+
+from __future__ import annotations
+
+from enum import StrEnum
+from typing import Mapping
+
+
+class CookingRequirementIssue(StrEnum):
+    MISSING = "case_import_cooking_requirement_missing"
+    AMBIGUOUS = "case_import_cooking_requirement_ambiguous"
+
+
+class CookingRequirementDomainError(ValueError):
+    def __init__(self, issue: CookingRequirementIssue, message: str) -> None:
+        super().__init__(message)
+        self.issue = issue
+
+
+_QUESTION_ALIASES = (
+    "月子餐點調理喜好/飲食習慣：",
+    "月子餐點調理喜好/飲食習慣:",
+    "月子餐點調理喜好/飲食習慣",
+)
+_ANSWER_VALUES = {
+    "葷食": True,
+    "素食": True,
+    "不用料理/訂月餐": False,
+}
+
+
+def normalize_cooking_requirement(survey_details: Mapping[str, object]) -> bool:
+    """Return the canonical requirement from controlled BeClass fields only."""
+    if not isinstance(survey_details, Mapping):
+        raise _missing()
+    answers = _controlled_answers(survey_details)
+    resolved_values = {_ANSWER_VALUES[answer] for answer in answers if answer in _ANSWER_VALUES}
+    unrecognized_answers = answers - _ANSWER_VALUES.keys()
+    if len(resolved_values) > 1 or (resolved_values and unrecognized_answers):
+        raise _ambiguous()
+    if not resolved_values:
+        raise _missing()
+    return resolved_values.pop()
+
+
+def _controlled_answers(survey_details: Mapping[str, object]) -> set[str]:
+    answers: set[str] = set()
+    for question in _QUESTION_ALIASES:
+        if question not in survey_details:
+            continue
+        answer = survey_details[question]
+        if isinstance(answer, str) and answer.strip():
+            answers.add(answer.strip())
+            continue
+        answers.add("")
+    return answers
+
+
+def _missing() -> CookingRequirementDomainError:
+    return CookingRequirementDomainError(
+        CookingRequirementIssue.MISSING,
+        "The BeClass cooking requirement answer is missing or unsupported.",
+    )
+
+
+def _ambiguous() -> CookingRequirementDomainError:
+    return CookingRequirementDomainError(
+        CookingRequirementIssue.AMBIGUOUS,
+        "The BeClass cooking requirement answers conflict.",
+    )
+
+
+__all__ = [
+    "CookingRequirementDomainError",
+    "CookingRequirementIssue",
+    "normalize_cooking_requirement",
+]

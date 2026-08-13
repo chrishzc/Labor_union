@@ -58,6 +58,7 @@ class OrderTerms:
     service_hours_per_day: int
     floor_fee: MoneyNTD
     service_time: ServiceTimeTerms
+    requires_cooking: bool | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.planned_start_date, date):
@@ -71,6 +72,10 @@ class OrderTerms:
             raise TypeError("floor fee must be MoneyNTD")
         if not isinstance(self.service_time, ServiceTimeTerms):
             raise TypeError("service time must be ServiceTimeTerms")
+        if self.requires_cooking is not None and not isinstance(
+            self.requires_cooking, bool
+        ):
+            raise TypeError("requires cooking must be bool or None")
 
     def canonical_payload(self) -> dict[str, object]:
         return {
@@ -78,6 +83,7 @@ class OrderTerms:
             "planned_start_date": self.planned_start_date.isoformat(),
             "service_days": self.service_days,
             "service_hours_per_day": self.service_hours_per_day,
+            "requires_cooking": self.requires_cooking,
             "service_time": self.service_time.canonical_payload(),
         }
 

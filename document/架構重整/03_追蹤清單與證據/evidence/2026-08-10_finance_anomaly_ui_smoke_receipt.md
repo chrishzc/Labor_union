@@ -46,6 +46,6 @@
 - 新 action 的 Preview／Apply、DB row delta、idempotency、timeout／retry 與異常自動解除
   Domain／Global E2E 驗收。
 
-以上項目仍依 `20_銀行流水匯入與帳務異常處理正式規格.md` 的實作順序進行，未達成前不得宣稱
+以上項目仍依 `22_銀行流水匯入與帳務異常處理正式規格.md` 的實作順序進行，未達成前不得宣稱
 所有帳務異常已可直接處理。
 

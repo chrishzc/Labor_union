@@ -34,7 +34,7 @@ updated_date: 2026-08-12
 
 - 本計畫不授權在任何主機註冊、啟動或移除排程。
 - 不變更 durable queue、lease、idempotency、receipt 或 Domain workflow。
-- `online.bat` 仍只作本機開發入口，不因此升格為正式 supervisor。
+- `scripts/launchers/start_local_development.bat` 仍只作本機開發入口，不因此升格為正式 supervisor。
 
 ## Dependencies
 
@@ -44,9 +44,9 @@ updated_date: 2026-08-12
 
 ## Write set（重新核准後）
 
-- `scripts/install_durable_job_worker_task.ps1`
-- `scripts/get_durable_job_worker_task_status.ps1`
-- `scripts/uninstall_durable_job_worker_task.ps1`
+- `scripts/launchers/install_durable_job_worker_task.ps1`（目前不存在，重新核准後才可建立）
+- `scripts/launchers/get_durable_job_worker_task_status.ps1`
+- `scripts/launchers/uninstall_durable_job_worker_task.ps1`
 - 對應 deployment receipt 與操作文件
 
 ## Acceptance

@@ -32,6 +32,7 @@ class SchedulingOccupancyKind(StrEnum):
     ASSIGNMENT_BUFFER = "assignment_buffer"
     WAITING_DEPOSIT_SERVICE = "waiting_deposit_service"
     WAITING_DEPOSIT_BUFFER = "waiting_deposit_buffer"
+    STAFF_UNAVAILABILITY = "staff_unavailability"
 
 
 class SchedulingCurrentErrorCode(StrEnum):
@@ -116,6 +117,7 @@ class SchedulingCurrentFacts:
     assignments: tuple[EffectiveAssignmentCurrentFact, ...]
     stored_occupancy: tuple[StoredEffectiveOccupancyFact, ...]
     waiting_locks: tuple[WaitingDepositLockCurrentFact, ...]
+    unavailability_blocks: tuple["StaffUnavailabilityCurrentFact", ...] = ()
 
     def __post_init__(self) -> None:
         require_positive_integer(self.staff_id, "staff id")
@@ -133,6 +135,11 @@ class SchedulingCurrentFacts:
             self.waiting_locks,
             WaitingDepositLockCurrentFact,
             "waiting locks",
+        )
+        _validate_fact_tuple(
+            self.unavailability_blocks,
+            StaffUnavailabilityCurrentFact,
+            "staff unavailability blocks",
         )
         _validate_staff_ownership(self)
 
@@ -156,11 +163,33 @@ class AssignmentCurrentProjection:
 @dataclass(frozen=True, slots=True)
 class SchedulingDayEntry:
     occupancy_kind: SchedulingOccupancyKind
-    case_no: str
+    case_no: str | None = None
     assignment_id: int | None = None
     assignment_status: AssignmentLifecycleStatus | None = None
     lock_id: int | None = None
     segment_id: int | None = None
+    availability_block_id: int | None = None
+    unavailability_kind: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class StaffUnavailabilityCurrentFact:
+    block_id: int
+    staff_id: int
+    kind: str
+    start_date: date
+    end_date: date | None
+
+    def __post_init__(self) -> None:
+        require_positive_integer(self.block_id, "availability block id")
+        require_positive_integer(self.staff_id, "availability staff id")
+        if self.kind not in {"long_leave", "paused_service"}:
+            raise ValueError("staff unavailability kind is invalid")
+        _require_date(self.start_date, "availability start date")
+        if self.end_date is not None:
+            _require_date(self.end_date, "availability end date")
+            if self.end_date < self.start_date:
+                raise ValueError("staff unavailability interval is inverted")
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,7 +263,7 @@ def _project_days(facts, assignments, query_dates):
     status_by_assignment = {
         item.assignment_id: item.status for item in assignments
     }
-    entries_by_date = _build_entries(facts, status_by_assignment)
+    entries_by_date = _build_entries(facts, status_by_assignment, query_dates)
     return tuple(
         SchedulingCurrentDay(
             calendar_date=value,
@@ -286,7 +315,7 @@ def _project_assignment(assignment, evaluated_at):
     )
 
 
-def _build_entries(facts, status_by_assignment):
+def _build_entries(facts, status_by_assignment, query_dates):
     entries: dict[date, list[SchedulingDayEntry]] = {}
     occupied_dates: dict[date, SchedulingDayEntry] = {}
     for assignment in facts.assignments:
@@ -298,6 +327,10 @@ def _build_entries(facts, status_by_assignment):
         )
     for waiting_lock in facts.waiting_locks:
         _append_waiting_lock_entries(entries, occupied_dates, waiting_lock)
+    for block in facts.unavailability_blocks:
+        _append_staff_unavailability_entries(
+            entries, occupied_dates, block, query_dates[0], query_dates[-1]
+        )
     return {
         key: tuple(sorted(value, key=_entry_sort_key))
         for key, value in entries.items()
@@ -420,14 +453,30 @@ def _append_waiting_lock_entries(entries, occupied_dates, waiting_lock):
         _claim_entry(entries, occupied_dates, buffer_date, entry)
 
 
+def _append_staff_unavailability_entries(
+    entries, occupied_dates, block, range_start, range_end
+):
+    start_date = max(block.start_date, range_start)
+    end_date = min(block.end_date or range_end, range_end)
+    if start_date > end_date:
+        return
+    for blocked_date in _inclusive_dates(start_date, end_date):
+        entry = SchedulingDayEntry(
+            SchedulingOccupancyKind.STAFF_UNAVAILABILITY,
+            availability_block_id=block.block_id,
+            unavailability_kind=block.kind,
+        )
+        _claim_entry(entries, occupied_dates, blocked_date, entry)
+
+
 def _claim_entry(entries, occupied_dates, occupied_date, entry):
     existing = occupied_dates.get(occupied_date)
     if existing is not None:
         blockers = tuple(
             sorted(
                 {
-                    f"{existing.case_no}:{existing.occupancy_kind.value}",
-                    f"{entry.case_no}:{entry.occupancy_kind.value}",
+                    f"{existing.case_no or 'staff'}:{existing.occupancy_kind.value}",
+                    f"{entry.case_no or 'staff'}:{entry.occupancy_kind.value}",
                 }
             )
         )
@@ -556,6 +605,8 @@ def _day_payload(item):
                 ),
                 "lock_id": entry.lock_id,
                 "segment_id": entry.segment_id,
+                "availability_block_id": entry.availability_block_id,
+                "unavailability_kind": entry.unavailability_kind,
             }
             for entry in item.entries
         ),
@@ -656,7 +707,12 @@ def _validate_waiting_lock_dates(waiting_lock):
 def _validate_staff_ownership(facts):
     staff_ids = {
         item.staff_id
-        for item in (*facts.assignments, *facts.stored_occupancy, *facts.waiting_locks)
+        for item in (
+            *facts.assignments,
+            *facts.stored_occupancy,
+            *facts.waiting_locks,
+            *facts.unavailability_blocks,
+        )
     }
     if staff_ids and staff_ids != {facts.staff_id}:
         raise ValueError("current scheduling facts mix staff identities")
@@ -726,7 +782,7 @@ def _inclusive_dates(start_date, end_date):
 def _entry_sort_key(entry):
     return (
         entry.occupancy_kind.value,
-        entry.case_no,
+        entry.case_no or "",
         entry.assignment_id or 0,
         entry.lock_id or 0,
     )
@@ -749,6 +805,7 @@ __all__ = [
     "SchedulingDayEntry",
     "SchedulingOccupancyKind",
     "StoredEffectiveOccupancyFact",
+    "StaffUnavailabilityCurrentFact",
     "WaitingDepositLockCurrentFact",
     "build_scheduling_current_projection",
     "project_assignment_status",

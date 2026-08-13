@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from domains.scheduling.current_projection import SchedulingCurrentFacts
+from domains.scheduling.current_projection import (
+    SchedulingCurrentFacts,
+    SchedulingOccupancyKind,
+    StaffUnavailabilityCurrentFact,
+)
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from subsystems.scheduling.current_projection_workflow import (
     SchedulingCurrentProjectionWorkflow,
@@ -44,3 +48,24 @@ def test_current_projection_query_uses_repository_facts_and_business_clock():
 def test_current_projection_query_rejects_datetime_range_boundary():
     with pytest.raises(TypeError, match="range start must be a date"):
         SchedulingCurrentQuery(1, datetime(2026, 8, 3), date(2026, 8, 4))
+
+
+def test_current_projection_marks_long_leave_as_unavailable():
+    class Repository:
+        def load_current_facts(self, request):
+            block = StaffUnavailabilityCurrentFact(
+                9, request.staff_id, "long_leave", date(2026, 8, 3), date(2026, 8, 4)
+            )
+            return SchedulingCurrentFacts(request.staff_id, (), (), (), (block,))
+
+    workflow = SchedulingCurrentProjectionWorkflow(
+        Repository(),
+        FixedBusinessClock(datetime(2026, 8, 3, 9, 0, tzinfo=TAIPEI_TIME_ZONE)),
+    )
+    result = workflow.query(
+        SchedulingCurrentQuery(1, date(2026, 8, 3), date(2026, 8, 5))
+    )
+
+    assert result.days[0].available is False
+    assert result.days[0].entries[0].occupancy_kind is SchedulingOccupancyKind.STAFF_UNAVAILABILITY
+    assert result.days[2].available is True

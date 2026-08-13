@@ -312,6 +312,7 @@ def _insert_order(cursor, candidate, client_id) -> None:
             order.service_start_time,
             order.service_end_time,
             order.service_end_day_offset,
+            int(order.requires_cooking),
         ),
     )
     if int(cursor.rowcount) != 1:
@@ -390,6 +391,7 @@ def _source_snapshot(candidate):
             "service_end_day_offset": candidate.order.service_end_day_offset,
             "service_end_time": candidate.order.service_end_time.isoformat(),
             "service_hours_per_day": candidate.order.service_hours_per_day,
+            "requires_cooking": candidate.order.requires_cooking,
             "service_start_time": candidate.order.service_start_time.isoformat(),
         },
     }
@@ -436,8 +438,8 @@ _ORDER_INSERT_SQL = (
     "INSERT INTO orders "
     "(case_no,client_id,status,lifecycle_version,service_days,"
     "service_hours_per_day,start_date,end_date,service_start_time,"
-    "service_end_time,service_end_day_offset) "
-    "VALUES (%s,%s,'洽談中',0,%s,%s,%s,%s,%s,%s,%s)"
+    "service_end_time,service_end_day_offset,requires_cooking) "
+    "VALUES (%s,%s,'洽談中',0,%s,%s,%s,%s,%s,%s,%s,%s)"
 )
 _IMPORT_EVENT_INSERT_SQL = (
     "INSERT INTO case_import_events "

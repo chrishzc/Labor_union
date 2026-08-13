@@ -11,12 +11,11 @@ from datetime import date, datetime, timedelta
 
 import pymysql
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime
 import json
 from api.dependencies.anomaly_registry import get_anomaly_application
 from domains.anomalies.registry import DesiredAlertState
 from subsystems.anomalies.alert_workflow import ProjectAlertRequest
-from domains.case_import.client_import_validation import EXCEL_TO_DB_COLUMN
 from dotenv import load_dotenv
 
 # 確保中文輸出編碼正確
@@ -34,7 +33,17 @@ if ROOT not in sys.path:
 from domains.case_import.client_import_validation import (
     validate_hcm_row,
 )
+from domains.case_import.beclass_import_review import BeClassImportSourceKind
+from domains.case_import.cooking_requirement import (
+    CookingRequirementDomainError,
+    normalize_cooking_requirement,
+)
 from subsystems.case_import.application import build_case_import_application
+from subsystems.case_import.beclass_review_intake import (
+    fingerprint_workbook,
+    masked_review_identifier,
+    record_invalid_beclass_row,
+)
 from subsystems.case_import.hcm_adapter import build_hcm_case_import_intent
 from shared_kernel.identities import (
     ActorContext,
@@ -47,18 +56,10 @@ from subsystems.case_import.case_import_workflow import (
     CaseImportWorkflowError,
 )
 
-# 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
+# Local operator compatibility only. Missing database settings fail closed.
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
-# 資料庫連線配置
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', '127.0.0.1'),
-    'port': int(os.getenv('DB_PORT', 3306)),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', '1234'),
-    'database': os.getenv('DB_DATABASE', 'union_db'),
-    'charset': 'utf8mb4'
-}
+_REQUIRED_DATABASE_SETTINGS = ("DB_HOST", "DB_USER", "DB_PASSWORD", "DB_DATABASE")
 
 # 欄位映射關係 (與舊 import_excel.py 一致，但移除 案件狀態 映射以免覆寫 status)
 CLIENTS_FIELD_MAPPING = {
@@ -274,6 +275,7 @@ def _load_hcm_frame(excel_path):
         print("未找到包含 'HCM' 或 '市府' 關鍵字的工作表。跳過此檔案。")
         return None
     frame = workbook.parse(target_sheet)
+    frame.attrs["source_sheet"] = target_sheet
     print(f"找到匹配工作表：'{target_sheet}'，共有 {len(frame)} 筆資料，準備匯入...")
     return frame
 
@@ -286,7 +288,7 @@ def _is_hcm_sheet_name(name):
 def _connect_database():
     try:
         connection = pymysql.connect(
-            **DB_CONFIG,
+            **_database_config(),
             cursorclass=pymysql.cursors.DictCursor,
         )
         cursor = connection.cursor()
@@ -298,11 +300,35 @@ def _connect_database():
         return None
 
 
+def _database_config():
+    missing = [name for name in _REQUIRED_DATABASE_SETTINGS if not os.getenv(name, "").strip()]
+    if missing:
+        raise RuntimeError(f"hcm_import_database_config_missing:{','.join(missing)}")
+    database = os.environ["DB_DATABASE"].strip()
+    allowed = {
+        item.strip()
+        for item in os.getenv("IMPORT_ALLOWED_DATABASES", "").split(",")
+        if item.strip()
+    }
+    if not allowed or database not in allowed:
+        raise RuntimeError("hcm_import_database_target_not_allowed")
+    return {
+        "host": os.environ["DB_HOST"].strip(),
+        "port": int(os.getenv("DB_PORT", "3306")),
+        "user": os.environ["DB_USER"].strip(),
+        "password": os.environ["DB_PASSWORD"],
+        "database": database,
+        "charset": "utf8mb4",
+    }
+
+
 # Kept cohesive because it owns the one batch-level rollback and result tally.
 def _process_import_rows(frame, connection, excel_path):
     counts = _result()
     application = build_case_import_application(connection)
     cursor = connection.cursor()
+    source_digest = fingerprint_workbook(excel_path)
+    source_sheet = str(frame.attrs.get("source_sheet") or "HCM")
     try:
         for ordinal, (_, row) in enumerate(frame.iterrows(), start=1):
             outcome = _import_row(
@@ -311,6 +337,9 @@ def _process_import_rows(frame, connection, excel_path):
                 cursor,
                 application,
                 excel_path,
+                connection=connection,
+                source_digest=source_digest,
+                source_sheet=source_sheet,
             )
             counts[outcome] += 1
     except Exception as error:
@@ -323,11 +352,30 @@ def _process_import_rows(frame, connection, excel_path):
 
 
 # Kept cohesive because every row gate must resolve to one observable outcome.
-def _import_row(row, ordinal, cursor, application, excel_path):
+def _import_row(
+    row,
+    ordinal,
+    cursor,
+    application,
+    excel_path,
+    *,
+    connection=None,
+    source_digest=None,
+    source_sheet="HCM",
+):
     raw_row = row.to_dict()
     record = _normalized_record(row)
     case_no = record.get("case_no")
     if not case_no:
+        _persist_hcm_review(
+            connection,
+            source_digest,
+            source_sheet,
+            ordinal,
+            raw_row,
+            None,
+            {"查詢序號(案件編號)": "case_import_case_no_required"},
+        )
         return "review_required"
     validation_errors = validate_hcm_row(raw_row)
     if not isinstance(record.get("created_at"), datetime):
@@ -339,7 +387,17 @@ def _import_row(row, ordinal, cursor, application, excel_path):
             validation_errors,
         )
     if validation_errors:
-        _sanitize_hcm_record(record, validation_errors)
+        _persist_hcm_review(
+            connection,
+            source_digest,
+            source_sheet,
+            ordinal,
+            raw_row,
+            case_no,
+            validation_errors,
+        )
+        _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors)
+        return "review_required"
     try:
         intent = _case_import_intent(cursor, record)
         correlation = CorrelationId(f"hcm-case-import:{case_no}:{ordinal}")
@@ -351,15 +409,69 @@ def _import_row(row, ordinal, cursor, application, excel_path):
         return "inserted"
     except CaseImportWorkflowError as error:
         return _workflow_error_outcome(error)
-    except Exception as e:
+    except CookingRequirementDomainError as error:
+        cooking_errors = {
+            "月子餐點調理喜好/飲食習慣": error.issue.value,
+        }
+        _persist_hcm_review(
+            connection,
+            source_digest,
+            source_sheet,
+            ordinal,
+            raw_row,
+            case_no,
+            cooking_errors,
+        )
+        _emit_hcm_validation_anomaly(
+            case_no,
+            ordinal,
+            cooking_errors,
+        )
+        return "review_required"
+    except Exception as error:
         if not hasattr(_import_row, "exception_printed_count"):
             _import_row.exception_printed_count = 0
         if _import_row.exception_printed_count < 3:
             import traceback
+
             traceback.print_exc()
-            print(f"[除錯] 第 {ordinal} 列發生異常: {type(e).__name__}: {e}")
+            print(
+                f"[除錯] 第 {ordinal} 列發生異常: "
+                f"{type(error).__name__}: {error}"
+            )
             _import_row.exception_printed_count += 1
         return "review_required"
+
+
+def _persist_hcm_review(
+    connection,
+    source_digest,
+    source_sheet,
+    ordinal,
+    raw_row,
+    case_no,
+    validation_errors,
+):
+    if connection is None or source_digest is None:
+        return None
+    identity = record_invalid_beclass_row(
+        connection,
+        source_kind=BeClassImportSourceKind.HCM,
+        source_content_digest=source_digest,
+        source_sheet=source_sheet,
+        source_row=ordinal,
+        masked_identifier=masked_review_identifier(
+            BeClassImportSourceKind.HCM,
+            case_no,
+            ordinal,
+        ),
+        source_payload=raw_row,
+        issue_codes=tuple(
+            f"hcm_field_invalid:{field}" for field in sorted(validation_errors)
+        ),
+    )
+    connection.commit()
+    return identity
 
 
 def _workflow_error_outcome(error):
@@ -436,7 +548,27 @@ def _case_import_intent(cursor, record):
     )
     if end_date is None:
         raise ValueError("case_import_planned_end_date_required")
-    return build_hcm_case_import_intent(record, end_date)
+    requires_cooking = _load_cooking_requirement(cursor, str(record["case_no"]))
+    return build_hcm_case_import_intent(
+        record,
+        end_date,
+        requires_cooking=requires_cooking,
+    )
+
+
+def _load_cooking_requirement(cursor, case_no):
+    cursor.execute(
+        "SELECT survey_details FROM beclass_records WHERE query_no=%s "
+        "ORDER BY id DESC LIMIT 2",
+        (case_no,),
+    )
+    rows = cursor.fetchall()
+    if len(rows) != 1:
+        return normalize_cooking_requirement({})
+    survey = rows[0].get("survey_details")
+    if isinstance(survey, str):
+        survey = json.loads(survey)
+    return normalize_cooking_requirement(survey)
 
 
 def _apply_command(intent, preview, correlation, source_file):
@@ -450,31 +582,6 @@ def _apply_command(intent, preview, correlation, source_file):
         correlation,
     )
 
-
-def _sanitize_hcm_record(record, validation_errors):
-    for excel_field in validation_errors:
-        db_field = EXCEL_TO_DB_COLUMN.get(excel_field)
-        if not db_field:
-            continue
-        if db_field == "identity_status":
-            record[db_field] = "一般市民"
-        elif db_field == "service_time":
-            record[db_field] = "9 小時 08:00 17:00"
-        elif db_field == "service_type":
-            record[db_field] = "連續服務"
-        elif db_field == "service_days":
-            record[db_field] = 1
-        elif db_field in ("service_start_date", "due_month"):
-            record[db_field] = datetime(2000, 1, 1).date()
-        elif db_field == "created_at":
-            record[db_field] = datetime(2000, 1, 1, tzinfo=timezone.utc)
-        else:
-            record[db_field] = None
-
-
-# Keep compatibility with any external callers that use the non-prefixed name.
-def sanitize_hcm_record(record, validation_errors):
-    return _sanitize_hcm_record(record, validation_errors)
 
 def _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors):
     app_gen = get_anomaly_application()

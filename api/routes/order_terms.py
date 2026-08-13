@@ -54,6 +54,7 @@ class OrderTermsInput(BaseModel):
     planned_start_date: date
     service_days: int = Field(gt=0)
     service_hours_per_day: int = Field(gt=0)
+    requires_cooking: bool
     floor_fee_ntd: int = Field(ge=0)
     service_time: ServiceTimeTermsInput
 
@@ -69,6 +70,7 @@ class OrderTermsInput(BaseModel):
                 service_time.end_time,
                 service_time.end_day_offset,
             ),
+            self.requires_cooking,
         )
 
 

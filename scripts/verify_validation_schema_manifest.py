@@ -20,6 +20,8 @@ def load_manifest(manifest_path: Path = DEFAULT_MANIFEST_PATH) -> dict[str, obje
 
 
 def schema_part_sort_key(path: Path) -> tuple[int, str, str]:
+    if path.name == "179_line_identity_canonical_menu_publication.sql":
+        return 186, "z", path.name
     match = re.match(r"^(\d+)([a-z]*)_", path.name, re.IGNORECASE)
     if match:
         return int(match.group(1)), match.group(2).lower(), path.name

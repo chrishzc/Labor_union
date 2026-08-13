@@ -36,6 +36,16 @@ def _success_body():
             "confirmed_service_date_version": 2,
             "snapshot_id": 4,
             "snapshot_status": "sent",
+            "schedule_preview": {
+                "week_grouping_policy": "calendar_week_sunday_to_saturday_v1",
+                "total_service_days": 2,
+                "total_weeks": 2,
+                "weeks": [
+                    {"week_number": 1, "period_start": "2026-08-02", "period_end": "2026-08-08", "service_dates": ["2026-08-08"], "service_day_count": 1},
+                    {"week_number": 2, "period_start": "2026-08-09", "period_end": "2026-08-15", "service_dates": ["2026-08-09"], "service_day_count": 1},
+                ],
+                "recipient_schedules": [],
+            },
             "recipients": [
                 {
                     "recipient_snapshot_id": 8,
@@ -65,6 +75,8 @@ def test_schedule_confirmation_client_validates_the_response_view():
 
     assert state.recipients[0].audience_type == "customer"
     assert state.recipients[0].confirmation_reason == "服務時段不合適"
+    assert state.schedule_preview.weeks[0].period_start == "2026-08-02"
+    assert state.schedule_preview.total_service_days == 2
     assert state.recipients[0].confirmation_occurred_at_utc.isoformat() == "2026-08-12T09:30:00+00:00"
     assert session.calls[0][0] == ("GET", "http://api.test/api/v1/orders/CASE-68/matching-plans/18/schedule-confirmation")
 

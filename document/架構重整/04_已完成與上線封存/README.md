@@ -29,7 +29,7 @@ Agent 平常不得遞迴讀取本目錄，也不得把本目錄加入一般任�
 - `draft`、`proposed`、`approved`、`in-progress`、`blocked` 的功能計畫或 Work Package。
 - awaiting execution／release／migration／rollback 的 readiness 文件。
 - 尚未建立 receipt、仍含未結 blocker、仍是人工操作入口或 current runbook 的文件。
-- `validation/scenarios`、canonical fixtures、目前 release manifest、正式 schema 或 production code。
+- `validation/scenarios`、canonical fixtures、目前 release manifest、正式 schema 或 production code。這類可驗證資產不做「封存搬移」；如需歷史追溯，保留對應 evidence／receipt 的鏈接與必要 digest，由現行索引管理其存取。
 
 ## 封存 gate
 
@@ -74,3 +74,10 @@ source path、archive id、release identity 或 Domain 精準搜尋。每筆 ent
 2026-08-11 已完成兩輪保守封存：共 29 份 completed／proven／superseded／retired 文件通過
 逐份 inventory、successor、evidence 與 inbound-link gate 後移入本目錄。完整清單與 digest 只查
 `archive_manifest.json`；本 README 不重複列出每份歷史文件，避免再次形成高頻長索引。
+
+2026-08-13 WP74 與 completion receipt 在兩方向真實 MySQL 驗收通過後封存；current migration
+規範仍由正式規格 10 與開發者導覽擁有。
+
+2026-08-13 WP75 與 completion receipt 在 Windows canonical launcher 實跑、健康檢查及 PID／port
+cleanup 通過後封存；current operator entry 與個人 LINE credential 邊界由開發者導覽及
+`scripts/launchers/README.md` 擁有。

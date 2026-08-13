@@ -34,6 +34,35 @@ evidence 為準；不要以本 README 的文字代替實際驗收。
 [`2026-08-09_line_merge_candidate_acceptance_receipt.md`](document/架構重整/03_追蹤清單與證據/evidence/2026-08-09_line_merge_candidate_acceptance_receipt.md)，
 版本摘要見 [`CHANGELOG.md`](CHANGELOG.md)。
 
+## 2026-08-13 開發者 DB、月嫂配對與啟動入口更新
+
+本次修正開發者更新 `main` 後，程式與本機 MySQL schema 不同步所造成的 API 500、runtime
+heartbeat／outbox worker 缺表問題。新增保留資料的 candidate upgrade workflow，並將所有專案
+operator-facing launcher 集中到 [`scripts/launchers/`](scripts/launchers/)。完整變更與已知限制見
+[`CHANGELOG.md`](CHANGELOG.md#2026-08-13--開發者本機資料庫維護與啟動腳本收斂)。
+
+此版本也加入月嫂配對偏好、長假／暫停接案的 typed API 與管理 UI；配對中心與 Calendar 讀取同一
+份 current facts。資料庫升級會納入 release 188 的新增欄位與資料表。HCM 日常匯入收斂至受驗證的
+Web upload；BeClass scripts 僅保留為受控的 historical import，不再是一般 Web／File Watcher
+寫入入口。
+
+更新程式後先執行唯讀檢查；確認 ready 後，再停止 API、UI、monitor、workers 並執行實際 DB
+更新：
+
+```powershell
+.\scripts\launchers\start_local_development.bat --dry-run
+.\scripts\launchers\update_local_database.bat --dry-run
+.\scripts\launchers\update_local_database.bat
+.\scripts\launchers\start_local_development.bat --smoke-test
+```
+
+Windows smoke 會實際檢查 MySQL、API、Streamlit、monitor、file watcher 與 durable worker，結束時
+終止本次建立的應用程序。LINE worker 只有在本機 runtime 設定與 access token 有效時才啟動；未設定
+LINE 的開發者會看到 skipped 提示，不影響其餘服務。
+
+需要捨棄資料並回到模板測試 DB 時使用 `scripts/launchers/reset_DB.bat`，但目前模板 fixture 尚未
+重建，因此 `--dry-run` 會正確回傳 blocked；本版本不會因此刪除現有資料庫。
+
 ## 給開發者與 Agent 的開始方式
 
 1. 先讀 [`AGENTS.md`](AGENTS.md)：工作區、dirty worktree、測試與 Git 規則。
@@ -76,10 +105,11 @@ infrastructure/      MySQL 與外部 provider 的 typed-port 實作
 shared_kernel/       共用 command、durable job、typed error 等 Global primitives
 db/schema_parts/     依序套用的 additive schema parts
 db/migration_releases/  release manifest 與 migration descriptors
-scripts/             匯入、migration、維運與 worker 入口
+scripts/             匯入、migration、維運 helper 與 worker process modules
+scripts/launchers/   開發者／維運人員直接執行的本機入口與 dry-run 說明
 line/                LINE adapter、Webhook 和執行程序
 tests/               Module、Subsystem、Domain、Global 層級驗證
-fixtures/            僅供測試的版本化快照，禁止任意刪除或套用至正式資料
+fixtures/            經核准的版本化測試資產；不得直接復活退役 fixture 或套用至正式資料
 document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 evidence
 ```
 
@@ -100,7 +130,8 @@ document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 e
 
 完整 ownership、SSOT、狀態機與跨域不變量請以
 [`15_正式規格索引與裁決總表.md`](document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md)
-及各 Domain 規格為準。
+及各 Domain 規格為準。尚在規劃、待授權及已封存功能計畫的路由見
+[`document/功能開發計畫/README.md`](document/功能開發計畫/README.md)。
 
 ## 本機開發
 
@@ -134,22 +165,38 @@ docker compose up -d
 .\.venv\Scripts\python.exe scripts/run_durable_job_worker.py
 ```
 
-[`online.bat`](online.bat) 是本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控與互動式
-Durable Job Worker，但**不會**自動套用資料庫 schema。它不是正式部署入口；正式 24/7 部署使用
-已核准的 deployment release workflow 與 Windows Task Scheduler 監督 worker：
+[`scripts/launchers/start_local_development.bat`](scripts/launchers/start_local_development.bat)
+是 Windows 本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控與互動式 Durable Job
+Worker，但**不會**自動套用資料庫 schema。所有 operator-facing 腳本、用途與退役對照見
+[`scripts/launchers/README.md`](scripts/launchers/README.md)。Durable Job Worker 主機 supervision 目前依
+人工裁決暫緩；只保留既有排程任務的 recovery 查詢與解除安裝：
 
 ```powershell
-.\scripts\install_durable_job_worker_task.ps1 -StartNow
-.\scripts\get_durable_job_worker_task_status.ps1
+.\scripts\launchers\get_durable_job_worker_task_status.ps1
+.\scripts\launchers\uninstall_durable_job_worker_task.ps1 -WhatIf
 ```
 
 ## 資料庫與資料安全
 
 - Schema 調整先新增 `db/schema_parts/`，再同步 `db/schema.sql` 與對應的 migration release metadata。
 - 保留資料升級、cutover、回復與目標主機操作必須依 Work Package／runbook 執行，不可自行套用 migration。
-- `online.bat` 不初始化、不重建也不假資料化資料庫；它只用於本機開發，禁止當作正式部署入口。
-- `fixtures/db_snapshot_v2/v3` 是測試快照；只能在隔離的測試／本機資料庫流程使用，禁止自行刪除、整理或用於正式資料庫。
+- `scripts/launchers/start_local_development.bat` 不初始化、不重建也不假資料化資料庫；它只用於本機開發，禁止當作正式部署入口。
+- `fixtures/` 只允許版本化、去敏且經核准的測試資產；目前舊 `db_snapshot_v2/v3` 已退役且尚未重建，不得從歷史版本直接復活或用於正式資料庫。
 - 銀行檔、LINE webhook、BeClass／HCM 與其他外部輸入先進 inbox／import workflow，再由 owning Domain 寫入正式事實。
+
+開發者更新 `main` 後，若要保留現有資料，執行
+`scripts/launchers/update_local_database.bat`。流程會先完整備份舊 `union_db`，還原到暫存
+candidate，對 candidate 套用 versioned migration／backfill 並驗證；只有全部通過且 source 未在
+過程中改變，才以相同名稱替換 DB，最終驗證失敗則使用第一份 dump 嘗試 rollback。
+
+若要捨棄現有資料並恢復成版本庫模板測試資料，執行 `scripts/launchers/reset_DB.bat`。它會先驗證
+`fixtures/db_snapshot_v2/v3`，預檢成功且使用者輸入 `RESET` 後，才刪除 `union_db`、建立新 DB 並
+載入模板；這不是保留資料更新的相容別名。目前版本庫尚未重建該模板 fixture，所以此入口會在
+預檢安全停止，fixture 重建另案處理。
+
+執行前必須停止 API、UI、monitor 與 workers，完成後再重啟。兩個入口都只供本機開發，禁止用於
+production／shared staging；任何 partial／drift 都會停止，不會猜測修復，candidate 與 receipts
+會保留在 `scratch/local_database_updates/` 供診斷。
 
 ## 驗證
 

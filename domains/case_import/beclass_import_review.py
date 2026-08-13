@@ -22,6 +22,7 @@ _IDENTITY_CONFLICT_MARKERS = ("conflict", "dedup", "duplicate", "mismatch")
 class BeClassImportSourceKind(StrEnum):
     CLIENT = "client"
     STAFF = "staff"
+    HCM = "hcm"
 
 
 class BeClassImportReviewStatus(StrEnum):

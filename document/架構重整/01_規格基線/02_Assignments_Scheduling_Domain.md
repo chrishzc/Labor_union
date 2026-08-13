@@ -20,6 +20,7 @@
 | waiting-deposit lock | lock header、days 與 events |
 | 七日 buffer | 獨立 buffer facts；不混入服務日或薪資 |
 | 可接案結果 | 上述占用事實的 Query projection |
+| 長假／暫停接案 | versioned staff unavailability period 與 append-only cancel event |
 | 重建原因與 old/new lineage | 通用 assignment rebuild event |
 
 `orders.staff_id`、`planned_hours`、`actual_hours_adjustments`、`replaced_assignment_id` 及 `original_assigned_*` 不得成為新架構依賴。
@@ -43,6 +44,11 @@
 ### Availability Query
 
 從 assignment interval、waiting lock、buffer 及其他案件占用推導可用日期。Staff holiday preference 只作排序，不是硬性淘汰；Query 不寫入。
+
+依第 `24` 份正式規格，Availability Query 亦讀取 current `long_leave`／
+`temporarily_unavailable` 期間。與服務需求日期重疊時屬 actual conflict；七日 buffer 必須獨立回傳
+`requires_manual_confirmation`，不得與不可服務期間或正式占用混成同一 hard block。不可服務期間
+由 Scheduling 的 versioned Query 同時供 Matching 與 Calendar 使用。
 
 ### Matching Segment Plan
 
@@ -77,15 +83,12 @@ candidate search, matching communication, willingness, and waiting-deposit lock 
 Any terms, confirmed-date, matching-plan, recipient-binding, or schedule-fingerprint change
 invalidates the lineage. The server enforces this gate for direct API callers as well as the UI.
 
-#### Matching Schedule Confirmation Gate (2026-08-12)
-
-Formal Assignment Plan Preview and Apply must fail closed unless a current schedule snapshot is
-bound to the current Orders confirmed-service-date version. The customer must have confirmed the
-parent schedule and every caregiver segment selected for formal conversion must have confirmed
-its own child schedule from that same lineage. The gate blocks only formal assignment/scheduling;
-candidate search, matching communication, willingness, and waiting-deposit lock remain available.
-Any terms, confirmed-date, matching-plan, recipient-binding, or schedule-fingerprint change
-invalidates the lineage. The server enforces this gate for direct API callers as well as the UI.
+When confirmed service dates change, the previous snapshot, delivery task and confirmation events
+remain immutable historical evidence, but the current schedule-confirmation Query projects that
+lineage as `sent_outdated`. The change itself creates neither a new snapshot nor an outbound
+delivery intent. The UI must show the current date table and its difference from the previous sent
+table; only an explicit human resend may create a new snapshot and durable delivery task. Previous
+confirmations never satisfy the new version's Assignment Plan gate.
 
 ### Schedule Projection
 
@@ -135,6 +138,9 @@ Batch replay：
 ### Calendar Read
 
 逐日顯示 waiting lock、buffer、assignment interval、正式工作日與休假。只組合 typed ViewModel，不在 Query 或 render 時轉移狀態。
+
+Calendar 亦顯示 current 長假／暫停接案的日期、kind 與原因。這些日期不可標為可接案、正式服務日、
+assignment leave outcome 或七日 buffer；取消後保留歷史但不再出現在 current availability projection。
 
 Calendar 的「可進行出勤精算案件」必須先以 Scheduling 的單一批次 read
 `staff/{staff_id}/assignment-schedules` 取得該月嫂未取消的正式 assignment `case_no` 集合，

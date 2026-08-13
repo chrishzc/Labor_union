@@ -156,7 +156,7 @@ scenario receipt 與 disposable-MySQL evidence；production deployment、正式 
 ## 11. Decision／evidence links
 
 - Decision SSOT：`01_規格基線/21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
-- UI backlog：`document/功能開發計畫/UI工作區測試資料情境矩陣_草案.md`
+- UI historical matrix：`document/架構重整/04_已完成與上線封存/work_packages/UI工作區測試資料情境矩陣.md`
 - Closeout receipt：`validation/receipts/WP56-CLOSEOUT-046.json`；本 receipt 是 §9 八項 acceptance 與八個 UI scenario 的唯一套件層完成判讀。validation schema release：`WP56-VALIDATION-SCHEMA-RELEASE-047.json`。
 - Canonical validation contract：`validation/expected/CS-CONTRACT-SIGNING-001.json`、
   `validation/fixtures/CS-CONTRACT-SIGNING-001.json` 與

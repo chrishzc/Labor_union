@@ -1,4 +1,4 @@
-﻿{
+{
     "descriptors":  {
                         "181_matching_service_date_confirmation.sql":  {
                                                                            "tables":  {
@@ -74,7 +74,15 @@
                                                                            "triggers":  [
 
                                                                                         ]
-                                                                       }
+                                                                       },
+                        "182_candidate_contact_pool.sql": {
+                            "tables": {
+                                "caregiver_candidate_contact_pools": ["id", "case_no", "created_by", "created_at"],
+                                "caregiver_candidate_contact_entries": ["id", "pool_id", "staff_id", "service_start_date", "service_end_date", "coverage_fingerprint", "status", "active_marker", "created_at"],
+                                "caregiver_candidate_contact_events": ["id", "pool_id", "candidate_id", "event_type", "event_key", "actor", "payload", "occurred_at"]
+                            },
+                            "triggers": []
+                        }
                     },
     "contract":  "migration-owned-object-descriptors/v1"
 }

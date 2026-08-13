@@ -6,6 +6,7 @@ from datetime import date
 from typing import Any, Mapping
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from shared_kernel.fingerprints import fingerprint_payload
 from subsystems.line.delivery_task_workflow import enqueue_line_task
 from subsystems.scheduling.segmented_availability_query import (
     search_segmented_caregiver_availability,
@@ -46,6 +47,21 @@ def _require_full_coverage(case_no: str, staff_id: int, start_date: str, end_dat
     return dict(candidate)
 
 
+def _coverage_fingerprint(case_no: str, candidate: Mapping[str, Any]) -> str:
+    """Bind the saved contact candidate to the availability facts just rechecked."""
+    return fingerprint_payload(
+        {
+            "case_no": case_no,
+            "staff_id": candidate["staff_id"],
+            "case_period_start": candidate["case_period_start"],
+            "case_period_end": candidate["case_period_end"],
+            "required_service_dates": candidate["required_service_dates"],
+            "supported_service_dates": candidate["supported_service_dates"],
+            "source_scheduling_version": candidate["source_scheduling_version"],
+        }
+    ).value
+
+
 def _event_payload(value: Any) -> dict[str, Any]:
     parsed = json.loads(value) if isinstance(value, str) else value
     if not isinstance(parsed, Mapping):
@@ -70,7 +86,9 @@ def add_candidates(case_no: Any, candidates: Any, actor: Any, event_key: Any) ->
         seen.add(staff_id)
         start_date = _required_text(item.get("start_date"), "start_date", 10)
         end_date = _required_text(item.get("end_date"), "end_date", 10)
-        validated.append(_require_full_coverage(case_no, staff_id, start_date, end_date))
+        candidate = _require_full_coverage(case_no, staff_id, start_date, end_date)
+        candidate["coverage_fingerprint"] = _coverage_fingerprint(case_no, candidate)
+        validated.append(candidate)
     connection = cursor = None
     try:
         connection = get_connection()
@@ -128,14 +146,9 @@ def query_pool(case_no: Any) -> dict[str, Any]:
                 by_candidate.setdefault(candidate_id, []).append(event)
         candidates = []
         for entry in entries:
-            willingness, reason = "pending", None
-            information: dict[str, dict[str, Any] | None] = {"1": None, "2": None}
-            for event in by_candidate.get(entry["id"], []):
-                payload = _event_payload(event["payload"])
-                if event["event_type"] == "willingness_changed":
-                    willingness, reason = payload["willingness"], payload.get("reason")
-                if event["event_type"] in {"info_1_sent", "info_2_sent"}:
-                    information[event["event_type"][5]] = {"status": payload["delivery_status"], "sent_at": event["occurred_at"].isoformat()}
+            willingness, reason, information = _candidate_projection(
+                by_candidate.get(entry["id"], [])
+            )
             candidates.append({**entry, "willingness": willingness, "reason": reason, "information": information})
         return {"pool_id": pool_id, "case_no": case_no, "candidates": candidates}
     finally:
@@ -195,3 +208,22 @@ def record_willingness(case_no: Any, candidate_id: Any, willingness: Any, reason
         raise
     finally:
         _close(cursor); _close(connection)
+
+
+def _candidate_projection(events: list[dict[str, Any]]):
+    willingness, reason = "pending", None
+    information: dict[str, dict[str, Any] | None] = {"1": None, "2": None}
+    relevant_types = {"willingness_changed", "info_1_sent", "info_2_sent"}
+    for event in events:
+        event_type = event["event_type"]
+        if event_type not in relevant_types:
+            continue
+        payload = _event_payload(event["payload"])
+        if event_type == "willingness_changed":
+            willingness, reason = payload["willingness"], payload.get("reason")
+            continue
+        information[event_type[5]] = {
+            "status": payload["delivery_status"],
+            "sent_at": event["occurred_at"].isoformat(),
+        }
+    return willingness, reason, information

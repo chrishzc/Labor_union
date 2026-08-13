@@ -13,7 +13,7 @@ Administrators must record an actual bank amount exactly once when a client refu
 
 ## Approved scope
 
-This package implements the four approved contracts in formal specifications `06`, `14`, `16`, and `20`: client over-refund recovery collection and authorized adjustment; staff payout difference and staff recovery; government overpayment offset, return payable, and bank-statement reconciliation; and the typed Anomalies action registry/UI dispatchers.
+This package implements the four approved contracts in formal specifications `06`, `14`, `16`, and `22`: client over-refund recovery collection and authorized adjustment; staff payout difference and staff recovery; government overpayment offset, return payable, and bank-statement reconciliation; and the typed Anomalies action registry/UI dispatchers.
 
 ## SSOT and invariants
 
@@ -40,7 +40,7 @@ No production database deployment, external payment execution, automatic deducti
 
 ## Current gap
 
-2026-08-11 的逐條稽核結果如下；此表描述 live implementation，不改寫 `06`、`14`、`16`、`20` 的核准語意。
+2026-08-11 的逐條稽核結果如下；此表描述 live implementation，不改寫 `06`、`14`、`16`、`22` 的核准語意。
 
 | Contract | Current evidence | Gap / live-drift |
 |---|---|---|

@@ -27,20 +27,24 @@ _CLOCK_PATTERN = re.compile(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)")
 
 
 def build_hcm_case_import_intent(
-    record: Mapping[str, object], planned_end_date: date
+    record: Mapping[str, object], planned_end_date: date, *, requires_cooking: bool
 ) -> CaseImportIntent:
     case_no = _required_text(record, "case_no")
     identity_status = _required_text(record, "identity_status")
     planned_start_date = _required_date(record, "service_start_date")
     created_at = _required_created_at(record.get("created_at"))
-    order = _order_root_facts(record, case_no, planned_end_date)
+    order = _order_root_facts(
+        record, case_no, planned_end_date, requires_cooking=requires_cooking
+    )
     bootstrap = build_approved_case_architecture_bootstrap_intent(
         case_no, identity_status, created_at, planned_start_date
     )
     return CaseImportIntent(case_no, _client_attributes(record), order, bootstrap)
 
 
-def _order_root_facts(record, case_no, planned_end_date) -> ImportedOrderRootFacts:
+def _order_root_facts(
+    record, case_no, planned_end_date, *, requires_cooking
+) -> ImportedOrderRootFacts:
     service_hours, start_time, end_time, end_offset = _service_time_facts(
         _required_text(record, "service_time")
     )
@@ -53,6 +57,7 @@ def _order_root_facts(record, case_no, planned_end_date) -> ImportedOrderRootFac
         start_time,
         end_time,
         end_offset,
+        requires_cooking,
     )
 
 

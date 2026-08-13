@@ -8,6 +8,21 @@
 - 修訂日期：2026-08-10
 - 實作授權：`not-authorized-before-human-confirmation`
 
+2026-08-13 人工裁決 `IMPORT-ENTRY-02` 已確認下列入口分流，並只授權由
+`../架構重整/02_決策與退役執行記錄/73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package.md`
+定義的第一階段實作範圍：
+
+- HCM 是目前唯一需依 Finance Web upload 模式收斂的日常檔案匯入；
+- Client BeClass 現行登記已有 LIFF 驗證身分後呼叫 typed API，再由 owning Domain 寫入 DB；
+  Staff profile 採相同 target architecture，但目前只有身分綁定與唯讀查詢，須待 Staff profile
+  owner／root contract 裁決後另包實作；LIFF browser code 不直接持有 DB credential、不直接 SQL；
+- Client BeClass 與 Staff BeClass import scripts 不刪除，改定位為受限 historical import lane，
+  不得由一般 Web UI 或日常 File Watcher 當成 current-state writer；
+- 本裁決不推定 Staff profile 的 Domain owner，也不授權 historical script 覆寫 current profile。
+
+本 ADR 其餘未確認項目仍維持 `not-authorized-before-human-confirmation`；上述授權不得擴張為
+Staff owner、歷史配對政策、production schema migration、File Watcher 全面退役或 production cutover。
+
 本文件原版提出欄位級 partial write 與 `system_alerts` 投影。後續正式架構已建立獨立的
 Finance Import、Case Import 與 Anomalies Domain，因此原版模組名稱與部分交易語意已過時。
 本修正版保留「匯入結果可追溯、可對帳、錯誤可處理」的業務目標，改以目前正式架構重新定義。
@@ -298,6 +313,11 @@ import，就顯示幾列說明，每列各自有選檔與上傳按鈕，點擊�
 capability、endpoint、format profile、size budget 與 UI 文案；UI 只顯示 typed registry view。新增第六種
 import 必須先新增規格、owner、endpoint、權限與驗收，不能只把腳本丟進目錄。
 
+2026-08-13 人工確認 `IMPORT-ENTRY-02`：五種原規劃入口不再都視為日常 file upload。
+日常 HCM 檔案匯入保留為 authenticated Web upload；Client BeClass 現行登記走既有
+LIFF → typed API → owning Domain，Staff profile 同路徑是已核准但尚未實作的目標。兩支 BeClass scripts 保留為 historical-only operator
+入口，不出現在一般 import registry，也不得被 Web process 直接執行。
+
 ## 5. 修正版資料契約
 
 ### 5.1 `ImportFieldIssue`
@@ -490,6 +510,12 @@ failure 可沿用相同 command identity bounded retry。
 | Client BeClass | 完整 validation release 下 beclass_records 欄名相符；找第一個非空 sheet、query no mapping、birth date／電話／銀行分行 validation、invalid-row review | review／outbox 與 anomaly 依賴額外 schema parts，舊 candidate 會在 invalid path 才失敗；可能把說明頁或題號列當資料；錯一欄目前整列 `continue`；仍 direct SQL；numeric 帳號可能產生 `.0` 或已遺失前導 0 |
 | Staff BeClass | 完整 validation release 下 staff、bank 與 relation 欄名相符；找第一個非空 sheet、兩種銀行分行表頭別名、identity/name conflict review、部分欄位 omission | review／anomaly schema 無 preflight；仍 direct SQL 寫多表且整檔尾端才 commit；dynamic table／column 無 typed allowlist；合併生日 validation 與 parser 不一致；自由文字長度／strict SQL mode、unique race 與 row receipt 尚未驗證 |
 | Finance Excel | 完整 validation release 下 ingestion 欄名相符；不依檔名，掃所有 sheet 前 40 列；legacy／Taishin／Sinopac adapter、typed normalization、fingerprint／occurrence／receipt | 正式 File Watcher 未帶 dry-run，卻以 test actor／`test_ingestion` mode 寫入；至少依賴 Finance staging／classification／receipt／attempt schema parts，無 preflight；DECIMAL schema 與 application 正整數 NTD policy 要明定；新 layout、多 sheet 與 invalid amount 策略仍需裁決 |
+
+`IMPORT-ENTRY-02` 的 target disposition：HCM 為 `current_web_upload`；Client BeClass 現行 entry
+為 `liff_typed_api`；Staff profile 為 `liff_typed_api_target_owner_pending`；兩支 BeClass scripts為
+`restricted_historical_import`。historical
+scripts 仍必須保存 Preview／Apply、target allowlist、identity evidence、no-impact verifier 與 receipt，
+不得因「保留腳本」而保留日常 direct writer 權限。
 
 `scripts/imports/imports_map.md` 是歷史說明，不是現行 runtime SSOT。其中「雙列表頭自動探針」與
 目前 HCM／BeClass 實作不一致；「動態過濾不存在 DB 欄位」依第 4.7 節退役；Finance 仍直接寫
@@ -964,6 +990,8 @@ idempotency key。使用者重新整理頁面後，仍可由 server query 恢復
 - [ ] `IMP-P0-12` 修正 Finance File Watcher 正式 writer 的 test actor／mode 漂移；
 - [ ] `IMP-P0-13` 移除未具直接 dependency／fixture 的 `.xls` 支援宣告，或正式加入並驗收 `xlrd`；
 - [ ] `IMP-P0-14` 禁止 import DB 設定 fallback 到預設帳密／未知 database，加入 environment＋target allowlist。
+- [x] `IMP-P0-15` 人工確認 `IMPORT-ENTRY-02`：HCM 日常 Web upload；Client BeClass／Staff
+  現行 LIFF typed API；BeClass scripts historical-only。
 
 ### P1：共用 typed contract
 
@@ -990,6 +1018,10 @@ idempotency key。使用者重新整理頁面後，仍可由 server query 恢復
 - [ ] `IMP-P2-10` 裁決 HCM timezone-aware source 寫 MySQL DATETIME 的 canonical time contract；
 - [ ] `IMP-P2-11` 裁決 clients legacy date snapshots 與 orders typed terms 的 ownership，停止未定義雙寫；
 - [ ] `IMP-P2-12` Staff dynamic relation writer 加 typed table／column allowlist、長度與 strict-mode validation。
+- [ ] `IMP-P2-13` HCM authenticated Web upload 使用 typed Case Import application，完成 ephemeral
+  cleanup、bounded receipt、replay 與 invalid-row review；不得再填 fabricated defaults。
+- [ ] `IMP-P2-14` Client BeClass／Staff BeClass scripts 加 historical-only operator guard，移出日常
+  File Watcher writer 集合；保留歷史匯入能力但不得覆寫 current LIFF facts。
 
 ### P3：Anomalies 單一路徑
 
@@ -1171,3 +1203,8 @@ materialization 後自動刪除，DB 不保存 workbook BLOB。
 已確認決策 `IMPORT-UI-01`：新增管理端「匯入資料」分頁，固定列出五種核准檔案匯入，每列有說明、
 選檔與上傳按鈕；正式觸發 typed endpoint／job，不直接執行 filesystem script。以上二十三項其餘
 決策確認前，不開始 production code、schema 或 pytest 修改。
+
+已確認決策 `IMPORT-ENTRY-02`：`IMPORT-UI-01` 的五列規劃由本裁決修正。日常檔案 upload
+只保留已核准的 HCM／Finance 等 file-based entry；Client BeClass 與 Staff 現行資料走 LIFF typed
+API，原 scripts 保留為 historical-only，不在一般 UI 顯示。WP73 範圍內可開始 production code
+與 pytest；其他二十三項未確認裁決仍不得施工。

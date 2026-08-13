@@ -15,9 +15,9 @@
     "execution_scope": "versioned validation schema reproducibility and read-only postcheck"
   },
   "input_digests": {
-    "validation_schema_manifest": "48f9f520812f86f6eac0a9ee01d2874b0a5c6a75f46430a4ad29a8de2305c7cd",
-    "validation_schema_release": "c9d4dce542842dacbe4b78c9bbf19c3e6a03c0c2d21e9213b40f1738230ded7f",
-    "manifest_verifier": "fa16e874ed133af82079870d263bd8cc918f5aba22c7045847955ad046e5c1be",
+    "validation_schema_manifest": "f71456c9aaef958ced891d19dbd6998f4747442c8912795be58470a90c636194",
+    "validation_schema_release": "c2688530a1bc2518f013b229d487c76402b24575d86a770057a608c2f5d5ce72",
+    "manifest_verifier": "8c3e09900a3ad8896dad5fd20e871c5b5dedc1a922ecb118b3f604c2afe40dd7",
     "database_verifier": "b64cd56c8a8d0e44b4a5118c0a5282a2ae2abf6710d4e921ab632b32305baeef",
     "manifest_tests": "cacad06fbae2dbcbd53da37df0752179014f4f324f0320168b37d1b1917623a8",
     "bootstrap_tests": "833d8f5a1ebd02ffb118c19d59a1048e4dcf07d63e61ad4c29d9fc0994f18dd9"
