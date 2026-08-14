@@ -95,6 +95,13 @@ Apply：
 - 原始 `survey_details` 保留為來源 evidence，但 Matching 只讀 Orders root；
 - 服務資料鎖形成後不得修改。
 
+### 歷史訂單待確認與警示投影（2026-08-14，已人工確認）
+
+歷史訂單採納列若已唯一匹配既有 Order、但 status、月嫂或其他來源欄位仍有 issue，安全可採納欄位
+照既有規則保存，同時建立 immutable review evidence；不因 review 回滾同列合法 status／日期或配對
+evidence。Orders outbox 將 review 投影為 `HISTORICAL-ORDER-001`，identity 為 review identity，僅顯示
+遮罩案件識別與 issue codes。`case_no + client_name` 未匹配列固定不寫 Orders、review、outbox 或 anomaly。
+
 ### 3.2.1 Contract Completion Preview／Apply
 
 正式契約完成是 Orders 根事實，但客戶應收義務由 Client Finance 擁有。依第 `21` 份正式

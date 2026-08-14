@@ -40,24 +40,33 @@ def test_hcm_sheet_selection_blocks_multiple_matching_sheets(tmp_path, capsys):
     assert "多個工作表符合 HCM 必要欄位契約" in capsys.readouterr().out
 
 
-class _ApplicationMustNotRun:
+class _PartialCaseApplication:
+    def __init__(self):
+        self.applied = []
+
     def case_exists(self, case_no):
         return False
 
     def preview(self, intent, correlation):
-        raise AssertionError("invalid HCM row must not reach Preview")
+        return type("Preview", (), {"import_version": 0, "fingerprint": object()})()
 
     def apply(self, command):
-        raise AssertionError("invalid HCM row must not reach Apply")
+        self.applied.append(command)
+
+    def resolve_hcm_identity(self, case_no, ip_address, client_name):
+        return import_client_hcm.HcmIdentityResolution.NEW
 
 
-def test_invalid_hcm_row_is_review_required_without_fabricated_root(monkeypatch):
+def test_invalid_hcm_row_with_case_number_creates_partial_formal_case(monkeypatch):
     recorded = []
+    application = _PartialCaseApplication()
     monkeypatch.setattr(
         import_client_hcm,
         "_normalized_record",
         lambda row: {"case_no": "HCM-001", "created_at": object()},
     )
+    monkeypatch.setattr(import_client_hcm, "_apply_command", lambda *args: object())
+    monkeypatch.setattr(import_client_hcm, "_reconcile_without_rolling_back_hcm", lambda *args: None)
     monkeypatch.setattr(
         import_client_hcm,
         "validate_hcm_row",
@@ -73,20 +82,43 @@ def test_invalid_hcm_row_is_review_required_without_fabricated_root(monkeypatch)
         pd.Series({"查詢序號(案件編號)": "HCM-001"}),
         7,
         object(),
-        _ApplicationMustNotRun(),
+        application,
         "hcm.xlsx",
         connection=object(),
         source_digest="a" * 64,
         source_sheet="HCM資料",
     )
 
-    assert outcome == "review_required"
+    assert outcome == "inserted_with_warning"
+    assert len(application.applied) == 1
     assert recorded[0]["case_identity"] == "HCM-001"
     assert recorded[0]["source_row"] == 7
     assert recorded[0]["issue_codes"] == (
         "hcm_field_invalid:報名時間(建檔)",
         "hcm_field_invalid:服務時間",
     )
+
+
+def test_partial_hcm_intent_keeps_parseable_values_and_nulls_invalid_fields():
+    record = {
+        "case_no": "HCM-002",
+        "name": "王小明",
+        "gender": "未知",
+        "phone": "0912345678",
+    }
+
+    intent = import_client_hcm._hcm_import_intent(
+        object(),
+        record,
+        {"性別": "值不在允許範圍內", "行動電話": "格式錯誤"},
+    )
+    attributes = {attribute.name: attribute.value for attribute in intent.client_attributes}
+
+    assert intent.is_complete is False
+    assert attributes["case_no"] == "HCM-002"
+    assert attributes["name"] == "王小明"
+    assert attributes["gender"] is None
+    assert attributes["phone"] is None
 
 
 def test_hcm_database_config_has_no_default_credentials(monkeypatch):
@@ -149,3 +181,80 @@ def test_hcm_review_codes_only_describe_hcm_source_validation():
     assert import_client_hcm._hcm_review_issue_codes(errors) == (
         "hcm_field_invalid:服務時間",
     )
+
+
+def test_historical_hcm_overwrite_preserves_orders_status_and_nulls_invalid_field():
+    class Cursor:
+        def __init__(self):
+            self.calls = []
+
+        def execute(self, statement, parameters=()):
+            self.calls.append((statement, parameters))
+
+        def fetchall(self):
+            return []
+
+    cursor = Cursor()
+    import_client_hcm._overwrite_historical_hcm_case(
+        cursor,
+        {
+            "case_no": "HCM-HISTORY-001",
+            "created_at": import_client_hcm.datetime(2026, 8, 14),
+            "name": "測試客戶",
+            "service_days": 10,
+            "service_start_date": import_client_hcm.date(2026, 9, 1),
+        },
+        {"姓名": "格式錯誤"},
+    )
+
+    client_statement, client_parameters = cursor.calls[0]
+    order_statement, order_parameters = cursor.calls[-1]
+    assert "`name`=%s" in client_statement
+    assert client_parameters[1] is None
+    assert client_parameters[-1] == "HCM-HISTORY-001"
+    assert "status" not in order_statement.lower()
+    assert order_parameters == (
+        10, None, import_client_hcm.date(2026, 9, 1), import_client_hcm.date(2026, 9, 10),
+        None, None, None, "HCM-HISTORY-001",
+    )
+
+
+def test_historical_hcm_rows_are_processed_from_old_to_new_source_time(monkeypatch):
+    monkeypatch.setattr(
+        import_client_hcm,
+        "_normalized_record",
+        lambda row: {"created_at": row["created_at"]},
+    )
+    older = import_client_hcm.datetime(2025, 1, 1)
+    newer = import_client_hcm.datetime(2026, 1, 1)
+
+    ordered = import_client_hcm._historical_rows_in_source_time_order(
+        pd.DataFrame([{"created_at": newer}, {"created_at": older}]),
+    )
+
+    assert [ordinal for ordinal, _ in ordered] == [2, 1]
+
+
+@pytest.mark.parametrize("identity_status", ("低收入戶", "中低收入戶"))
+def test_hcm_subsidized_identity_statuses_are_accepted(identity_status):
+    row = {
+        "案件狀態": "洽談中",
+        "查詢序號(案件編號)": "HCM-SUBSIDY-001",
+        "報名時間(建檔)": "2026/08/14",
+        "IP位址": "192.0.2.30",
+        "姓名": "合成補助客戶",
+        "性別": "女",
+        "行動電話": "0912345678",
+        "縣市": "新竹市",
+        "身分資格": identity_status,
+        "服務時間": "8 小時 09:00 17:00",
+        "預產期/預計服務開始月份": "2026/09/01",
+        "預計服務日期": "2026/09/10",
+        "希望服務天數": 5,
+        "居住型態": "大樓",
+        "生產方式": "自然產",
+        "服務方式": "週休2日",
+        "寶寶資訊": "合成資料",
+    }
+
+    assert import_client_hcm.validate_hcm_row(row) == {}

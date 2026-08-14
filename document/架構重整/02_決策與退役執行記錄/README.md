@@ -22,7 +22,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 | [WP74（封存）](../04_已完成與上線封存/work_packages/74_Developer_Local_Database_Update_and_Rebuild_Work_Package.md) | work-package | `completed` | 開發者本機 DB 更新工具與兩方向真實 MySQL 驗收完成；來源 DB 維持唯讀，operator update 仍需明確確認。 |
 | [WP75（封存）](../04_已完成與上線封存/work_packages/75_Startup_Launcher_Convergence_and_Retirement_Work_Package.md) | work-package | `completed` | Windows canonical launcher 實跑與 PID／port cleanup 通過；LINE 缺個人憑證時安全略過，長期入口規則由開發者導覽承接。 |
 | [WP76（封存）](../04_已完成與上線封存/work_packages/76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md) | work-package | `completed` | full-chain、part 61／153、disposable engine 與無 Git 目標主機 readiness／API／UI 驗收均已通過。 |
-| [77_Staff_Historical_Adoption_and_HCM_Review_Work_Package.md](77_Staff_Historical_Adoption_and_HCM_Review_Work_Package.md) | work-package | `in-progress` | Staff 歷史來源依較新報名時間刷新可更新 scalar、銀行／關聯保守合併；HCM／Client BeClass獨立匯入，缺對方投影警示，唯一配對後再綁定與補料理條款。 |
+| [77_Staff_Historical_Adoption_and_HCM_Review_Work_Package.md](77_Staff_Historical_Adoption_and_HCM_Review_Work_Package.md) | work-package | `in-progress` | Staff 歷史來源依較新報名時間可覆寫姓名、銀行帳戶與關聯集合；HCM／Client BeClass獨立匯入，缺對方投影時建立 partial formal case 並標記 warning。 |
 | [WP78（封存）](../04_已完成與上線封存/work_packages/78_Knowledge_Partial_Local_Database_Recovery_Work_Package.md) | work-package | `completed` | 安全恢復舊本機 DB 的 Knowledge 148/163 partial statement boundary，驗收與備份復原通過。 |
 | [WP79（封存）](../04_已完成與上線封存/work_packages/79_LINE_Runtime_Release_Catalog_Recovery_Work_Package.md) | work-package | `completed` | candidate 實證 179 需在 186 後；Docker MySQL preserve-data 驗證與同名替換已完成。 |
 | [80_Historical_Order_Adoption_Work_Package.md](80_Historical_Order_Adoption_Work_Package.md) | work-package | `in-progress` | 已完成 parser／Preview 與 release metadata；待 disposable Apply／replay／rollback 及資料匯入中心 API/UI 驗收。 |
@@ -35,6 +35,10 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 | [87_Cloud_Ready_Runtime_Supervision_Work_Package.md](87_Cloud_Ready_Runtime_Supervision_Work_Package.md) | work-package | `in-progress` | Cloud-ready runtime supervision 與 service identity 的操作收斂。 |
 | [88_LINE_Staff_Self_Service_Merge_Repair_Work_Package.md](88_LINE_Staff_Self_Service_Merge_Repair_Work_Package.md) | work-package | `in-progress` | LINE staff self-service identity flow 的 merge repair 與驗收。 |
 | [89_Historical_Order_Status_and_Caregiver_Evidence_Web_Transition_Work_Package.md](89_Historical_Order_Status_and_Caregiver_Evidence_Web_Transition_Work_Package.md) | work-package | `approved` | 訂單狀態、月嫂歷史配對 evidence 與可空實際服務日期，先以 Orders typed API 接入資料匯入中心；舊 historical_orders 僅保留來源追溯。 |
+| [90_Import_Review_External_Confirmation_Work_Package.md](90_Import_Review_External_Confirmation_Work_Package.md) | work-package | `approved` | 匯入異常採外部確認、去敏狀態追蹤與受驗證重新提交。 |
+| [91_Staff_Retirement_Work_Package.md](91_Staff_Retirement_Work_Package.md) | work-package | `proposed` | 保留退役月嫂歷史資料，停止其新 Matching 流程；細節待裁決。 |
+| [92_Import_Warning_Tracking_and_Lane_Recovery_Work_Package.md](92_Import_Warning_Tracking_and_Lane_Recovery_Work_Package.md) | work-package | `in-progress` | 欄位級匯入警示與追蹤基礎，後續延伸至各 lane recovery。 |
+| [93_Schema_Assembly_and_Migration_Archive_Retirement_Work_Package.md](93_Schema_Assembly_and_Migration_Archive_Retirement_Work_Package.md) | work-package | `approved` | schema assembly 與 archive 退役規則，不改寫已發布 artifact。 |
 
 所有 completed／superseded 歷史文件統一由
 [`archive_manifest.json`](../04_已完成與上線封存/archive_manifest.json) 依 archive identity 查找；
@@ -42,7 +46,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 
 > `29_` 原本被三份文件重複使用（無明確時間序，只能靠檔名區分），2026-08-07
 > 已重新編號為 `32`～`34`（依原檔名字母序指派，不代表已還原真實時間序）。
-> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `89`，下一個為 `90`）。
+> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `93`，下一個為 `94`）。
 
 > 注意：本表不是只保留字面上的 `in-progress`。仍需實作、等待 release／migration、保留人工操作
 > 邊界、缺少 completion evidence，或仍約束現行操作的文件都屬 active working set。作為目前缺口

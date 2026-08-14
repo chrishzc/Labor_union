@@ -27,6 +27,7 @@ from api.routes import (
     assignment_plan,
     assignment_schedule_rest_dates,
     beclass_import_review,
+    client_beclass_import,
     case_architecture_bootstrap,
     client_deposit_reversal,
     client_receipt_reconciliation,
@@ -38,6 +39,8 @@ from api.routes import (
     data_browser_admin,
     finance_import,
     hcm_import,
+    historical_order_adoption,
+    staff_historical_workbook,
     finance_reports,
     financial_adjustment,
     government_subsidy,
@@ -212,6 +215,9 @@ app.include_router(staff_payments.router)
 app.include_router(contracts.router)
 app.include_router(finance_import.router)
 app.include_router(hcm_import.router)
+app.include_router(client_beclass_import.router)
+app.include_router(historical_order_adoption.router)
+app.include_router(staff_historical_workbook.router)
 app.include_router(beclass_import_review.router)
 app.include_router(finance_reports.router)
 app.include_router(government_subsidy.router)

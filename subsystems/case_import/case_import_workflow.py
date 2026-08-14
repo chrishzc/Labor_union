@@ -69,7 +69,7 @@ class CaseImportReceipt:
     scheduling_version: int
     scheduling_generation: int
     import_event_id: int
-    bootstrap_event_id: int
+    bootstrap_event_id: int | None
     source_fingerprint: PreviewFingerprint
     preview_fingerprint: PreviewFingerprint
     provisional_registration_id: int | None = None
@@ -116,7 +116,7 @@ class CaseImportRepository(Protocol):
         command: ApplyCaseImport,
         candidate: CaseImportCandidate,
         client_id: int,
-        bootstrap_event_id: int,
+        bootstrap_event_id: int | None,
     ) -> int: ...
 
     def consume_provisional_registration(
@@ -201,9 +201,8 @@ class CaseImportWorkflow:
         candidate = build_case_import_candidate(facts, command.intent)
         _validate_preview(command, candidate)
         client_id = self._repository.insert_case_roots(candidate)
-        bootstrap_event_id = self._repository.create_architecture_bootstrap(
-            command,
-            candidate,
+        bootstrap_event_id = _create_bootstrap_if_complete(
+            self._repository, command, candidate
         )
         import_event_id = self._repository.append_import_event(
             command,
@@ -260,6 +259,12 @@ def _consume_provisional_registration(repository, command, candidate, client_id,
     if getattr(candidate, "provisional_registration", None) is None:
         return None
     return repository.consume_provisional_registration(command, candidate, client_id, import_event_id)
+
+
+def _create_bootstrap_if_complete(repository, command, candidate):
+    if getattr(candidate, "bootstrap", object()) is None:
+        return None
+    return repository.create_architecture_bootstrap(command, candidate)
 
 
 def _receipt(candidate, client_id, import_event_id, bootstrap_event_id, provisional_event_id):

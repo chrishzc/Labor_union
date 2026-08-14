@@ -1,4 +1,7 @@
-"""Bounded read facts for the Orders lifecycle-control projection."""
+"""
+File: subsystems/orders/lifecycle_control_read_facts.py
+Description: 唯讀載入訂單生命週期控制事實，接受待補件但不賦予後續流程資格。
+"""
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
@@ -7,7 +10,7 @@ from datetime import date, datetime
 import json
 from typing import Any, Literal
 
-_CANONICAL_STATUSES = frozenset({"洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"})
+_CANONICAL_STATUSES = frozenset({"待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"})
 
 
 class OrderLifecycleControlReadNotFoundError(LookupError):

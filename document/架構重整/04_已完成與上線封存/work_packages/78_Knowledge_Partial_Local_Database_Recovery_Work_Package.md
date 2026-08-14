@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: blocked
 date: 2026-08-13
 owner: Global Migration / Developer Experience
 priority: P0
@@ -39,3 +39,10 @@ priority: P0
 3. 已完成 ALTER 不重跑；缺 index 只補 index；不可能邊界與缺欄位 table 仍阻擋。
 4. 資料列數、PK 與非 163 backfill 根事實保留。
 5. 目標開發者 DB 實際驗收後才可標記 completed。
+
+## 封存撤回（2026-08-14）
+
+`2026-08-13_wp78_wp81_legacy_compatibility_receipt.md` 已確認程式修復與 focused regression，
+但 read-only plan、disposable MySQL engine verification 與 developer acceptance 均為 `NOT_RUN`。
+依 archive gate，本文件不得視為完成封存；已由 active 索引恢復為 `blocked`，待安全目標 DB
+完成 source backup → candidate → apply → verify 後，再補 receipt 與封存裁決。

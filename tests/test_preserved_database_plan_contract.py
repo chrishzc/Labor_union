@@ -287,7 +287,7 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-7:] == (
+    assert artifact_names[-11:] == (
         "188_matching_preferences_and_staff_availability.sql",
         "189_client_refund_recipient_snapshot_local_upgrade.sql",
         "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
@@ -295,13 +295,17 @@ def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
         "192_government_subsidy_outbox_intent_type_repair.sql",
         "193_staff_historical_adoption_hcm_review.sql",
         "194_historical_order_adoption.sql",
+        "195_import_warning_tracking.sql",
+        "196_case_import_partial_formal_case.sql",
+        "197_client_beclass_transition_binding.sql",
+        "198_case_import_pending_completion_status.sql",
     )
     ordinals = tuple(int(name.split("_", 1)[0]) for name in artifact_names)
     assert ordinals == tuple(sorted(ordinals))
     assert len(ordinals) == len(set(ordinals))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     assert runner.RELEASE_MANIFEST.release_id == (
-        "labor-union-wp80-2026-08-14-v2"
+        "labor-union-wp93-2026-08-14-v1"
     )
 
 
@@ -341,6 +345,10 @@ def test_default_release_selection_aggregates_successor_requirements() -> None:
         "government-outbox-intent-type-repair",
         "wp77-owned-objects",
         "wp80-owned-objects",
+        "wp90-owned-objects",
+        "wp91-partial-case-columns",
+        "wp92-client-beclass-binding-columns",
+        "wp93-pending-completion-order-status",
     } <= verification_ids
     assert {"api", "architecture-outbox-worker", "line-worker", "streamlit-ui"} <= set(
         runner.RELEASE_MANIFEST.required_restart_targets
@@ -351,6 +359,9 @@ def test_default_release_selection_aggregates_successor_requirements() -> None:
         "historical-order-adoption-preview",
         "accounts-payable-query",
         "line-staff-self-service-verified-binding",
+        "import-warning-tracking-preview",
+        "hcm-partial-formal-case",
+        "client-beclass-unique-case-binding",
     } <= set(runner.RELEASE_MANIFEST.post_cutover_smoke_ids)
 
 

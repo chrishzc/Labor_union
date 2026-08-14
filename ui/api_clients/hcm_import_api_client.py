@@ -1,6 +1,6 @@
 """
 File: hcm_import_api_client.py
-Description: 呼叫 HCM workbook upload API 並驗證 strict typed receipt。
+Description: 呼叫 HCM workbook Preview／Apply API 並驗證 strict typed result。
 """
 
 from collections.abc import Mapping
@@ -9,7 +9,7 @@ import requests
 from pydantic import ValidationError
 
 from api.schemas.base import BaseResponse
-from api.schemas.hcm_import import HcmWorkbookReceiptView
+from api.schemas.hcm_import import HcmWorkbookPreviewView, HcmWorkbookReceiptView
 
 
 class HcmImportApiError(RuntimeError):
@@ -26,10 +26,42 @@ class HcmImportApiClient:
         self._session = session or requests.Session()
 
     def ingest_workbook(self, filename: str, content: bytes, *, idempotency_key: str, correlation_id: str) -> HcmWorkbookReceiptView:
+        headers = {"Idempotency-Key": idempotency_key, "X-Correlation-ID": correlation_id}
+        return self._upload("ingest", filename, content, HcmWorkbookReceiptView, headers)
+
+    def preview_workbook(self, filename: str, content: bytes) -> HcmWorkbookPreviewView:
+        return self._upload("preview", filename, content, HcmWorkbookPreviewView, {})
+
+    def apply_workbook(
+        self, filename: str, content: bytes, *, preview_fingerprint: str,
+        idempotency_key: str, correlation_id: str,
+    ) -> HcmWorkbookReceiptView:
+        headers = {
+            "Idempotency-Key": idempotency_key,
+            "X-Correlation-ID": correlation_id,
+            "X-Preview-Fingerprint": preview_fingerprint,
+        }
+        return self._upload("apply", filename, content, HcmWorkbookReceiptView, headers)
+
+    def preview_historical_workbook(self, filename: str, content: bytes) -> HcmWorkbookPreviewView:
+        return self._upload("historical-workbooks/preview", filename, content, HcmWorkbookPreviewView, {})
+
+    def apply_historical_workbook(
+        self, filename: str, content: bytes, *, preview_fingerprint: str,
+        idempotency_key: str, correlation_id: str,
+    ) -> HcmWorkbookReceiptView:
+        headers = {
+            "Idempotency-Key": idempotency_key,
+            "X-Correlation-ID": correlation_id,
+            "X-Preview-Fingerprint": preview_fingerprint,
+        }
+        return self._upload("historical-workbooks/apply", filename, content, HcmWorkbookReceiptView, headers)
+
+    def _upload(self, operation, filename, content, view_type, command_headers):
         try:
             response = self._session.request(
-                "POST", f"{self._base_url}/api/v1/case-import/hcm/workbooks/ingest",
-                headers={**self._headers, "Idempotency-Key": idempotency_key, "X-Correlation-ID": correlation_id},
+                "POST", f"{self._base_url}/api/v1/case-import/hcm/workbooks/{operation}",
+                headers={**self._headers, **command_headers},
                 files={"workbook": (filename, content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
                 timeout=30,
             )
@@ -38,7 +70,7 @@ class HcmImportApiClient:
         if not response.ok:
             raise HcmImportApiError(response.status_code, _error_code(response))
         try:
-            return BaseResponse[HcmWorkbookReceiptView].model_validate(response.json()).data
+            return BaseResponse[view_type].model_validate(response.json()).data
         except (ValidationError, ValueError) as error:
             raise HcmImportApiError(response.status_code, "hcm_import_response_invalid") from error
 

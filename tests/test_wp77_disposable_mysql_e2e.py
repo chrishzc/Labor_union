@@ -78,6 +78,36 @@ def test_staff_existing_identity_fills_blank_and_replays_receipt():
         connection.close()
 
 
+def test_newer_staff_snapshot_replaces_name_bank_relations_and_keeps_old_replay():
+    token = uuid4().hex
+    identity_card = f"B{int(token[:9], 16) % 1_000_000_000:09d}"
+    old_digest = hashlib.sha256(f"old:{token}".encode()).hexdigest()
+    new_digest = hashlib.sha256(f"new:{token}".encode()).hexdigest()
+    old_bank = ("001", "0001", f"1{token[:11]}", True)
+    new_bank = ("002", "0002", f"2{token[:11]}", True)
+    old_record = _staff_snapshot(identity_card, "舊姓名", "2026-08-01 09:00:00")
+    new_record = _staff_snapshot(identity_card, "新姓名", "2026-08-02 09:00:00")
+    connection = get_connection()
+    try:
+        staff_id = _seed_staff_snapshot(connection, old_record, old_bank)
+        old_result = _adopt_snapshot(
+            connection, old_digest, 2, old_record, old_bank, "舊地區"
+        )
+        new_result = _adopt_snapshot(
+            connection, new_digest, 3, new_record, new_bank, "新地區"
+        )
+        old_replay = _adopt_snapshot(
+            connection, old_digest, 2, old_record, old_bank, "舊地區"
+        )
+
+        assert old_result.outcome == "adopted_existing"
+        assert new_result.changed_fields == ("name", "registered_at")
+        assert old_replay.replayed is True
+        _assert_replaced_staff_snapshot(connection, staff_id, new_bank)
+    finally:
+        connection.close()
+
+
 def test_hcm_invalid_row_creates_root_and_outbox_then_exactly_replays():
     digest = hashlib.sha256(uuid4().bytes).hexdigest()
     arguments = {
@@ -175,3 +205,70 @@ def _assert_staff_adoption_rows(connection, staff_id):
         receipt = cursor.fetchone()
         assert receipt["outcome"] == "adopted_existing"
         assert "phone" in str(receipt["changed_fields"])
+
+
+def _staff_snapshot(identity_card, name, registered_at):
+    return {
+        "identity_card": identity_card,
+        "name": name,
+        "registered_at": registered_at,
+        "status": "active",
+    }
+
+
+def _seed_staff_snapshot(connection, record, bank):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT INTO staff (name,identity_card,registered_at,status) "
+            "VALUES (%s,%s,%s,'active')",
+            (record["name"], record["identity_card"], record["registered_at"]),
+        )
+        staff_id = int(cursor.lastrowid)
+        cursor.execute(
+            "INSERT INTO staff_bank_accounts "
+            "(staff_id,bank_code,branch_code,account_no,is_primary) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            (staff_id, *bank),
+        )
+        cursor.execute(
+            "INSERT INTO staff_regions (staff_id,region_name) VALUES (%s,'舊地區')",
+            (staff_id,),
+        )
+    connection.commit()
+    return staff_id
+
+
+def _adopt_snapshot(connection, digest, row, record, bank, region):
+    return adopt_existing_staff(
+        connection,
+        source_content_digest=digest,
+        source_row=row,
+        identity_card=record["identity_card"],
+        historical_record=record,
+        source_sheet="任意資料頁",
+        review_payload={"has_identity_card": True},
+        bank_accounts=(bank,),
+        relations={"staff_regions": ((region, None),)},
+    )
+
+
+def _assert_replaced_staff_snapshot(connection, staff_id, expected_bank):
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT name FROM staff WHERE id=%s", (staff_id,))
+        assert cursor.fetchone() == {"name": "新姓名"}
+        cursor.execute(
+            "SELECT bank_code,branch_code,account_no,is_primary "
+            "FROM staff_bank_accounts WHERE staff_id=%s",
+            (staff_id,),
+        )
+        assert tuple(cursor.fetchone().values()) == expected_bank
+        cursor.execute(
+            "SELECT region_name FROM staff_regions WHERE staff_id=%s",
+            (staff_id,),
+        )
+        assert cursor.fetchall() == [{"region_name": "新地區"}]
+        cursor.execute(
+            "SELECT issue_codes FROM beclass_import_review_rows "
+            "WHERE source_kind='staff' ORDER BY id DESC LIMIT 1"
+        )
+        assert "historical_name_changed" in str(cursor.fetchone()["issue_codes"])

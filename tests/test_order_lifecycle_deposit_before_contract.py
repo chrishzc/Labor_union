@@ -1,3 +1,8 @@
+"""
+File: tests/test_order_lifecycle_deposit_before_contract.py
+Description: 驗證訂金與契約條件的生命週期轉換，待補件不得自動前進。
+"""
+
 from __future__ import annotations
 
 from datetime import date, datetime, timezone
@@ -9,9 +14,14 @@ from domains.orders.lifecycle import (
 )
 
 
-def _facts(*, contract_completed: bool, actual_start_date: date | None):
+def _facts(
+    *,
+    contract_completed: bool,
+    actual_start_date: date | None,
+    current_status=OrderLifecycleStatus.DISCUSSION,
+):
     return SimpleNamespace(
-        current_status=OrderLifecycleStatus.DISCUSSION,
+        current_status=current_status,
         cancellation_effective=False,
         actual_start_date=actual_start_date,
         actual_start_reconfirmed=True,
@@ -54,3 +64,18 @@ def test_completed_customer_contract_allows_normal_enter_service_rule():
     )
 
     assert status is OrderLifecycleStatus.IN_SERVICE
+
+
+def test_pending_completion_order_never_advances_from_lifecycle_evaluation():
+    status = _lifecycle_status(
+        _facts(
+            contract_completed=True,
+            actual_start_date=date(2026, 8, 9),
+            current_status=OrderLifecycleStatus.PENDING_COMPLETION,
+        ),
+        _settlement(),
+        completion_reached=False,
+        evaluation_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+    )
+
+    assert status is OrderLifecycleStatus.PENDING_COMPLETION

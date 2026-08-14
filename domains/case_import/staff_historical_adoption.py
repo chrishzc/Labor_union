@@ -23,6 +23,7 @@ class StaffScalarMerge:
     patch: Mapping[str, object]
     conflict_fields: tuple[str, ...]
     preview_fingerprint: PreviewFingerprint
+    source_is_newer: bool
 
 
 def plan_staff_scalar_merge(existing: Mapping[str, object], historical: Mapping[str, object]) -> StaffScalarMerge:
@@ -50,7 +51,12 @@ def plan_staff_scalar_merge(existing: Mapping[str, object], historical: Mapping[
             "historical": {field: _canonical(value) for field, value in sorted(historical.items())},
         }
     )
-    return StaffScalarMerge(patch, tuple(sorted(conflicts)), preview)
+    return StaffScalarMerge(
+        patch,
+        tuple(sorted(conflicts)),
+        preview,
+        source_is_newer,
+    )
 
 
 def _fill_blank_field(existing, patch, field, incoming) -> None:

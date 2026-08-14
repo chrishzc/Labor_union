@@ -9,6 +9,10 @@ from dataclasses import dataclass
 import hashlib
 from typing import Mapping
 
+from domains.anomalies.import_warning_tracking import (
+    ImportWarningOccurrence,
+    build_import_warning_occurrence,
+)
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 
 
@@ -78,6 +82,43 @@ def opened_anomaly_snapshot(root: HcmImportReviewRoot) -> dict[str, object]:
     }
 
 
+def build_hcm_warning_occurrences(
+    root: HcmImportReviewRoot,
+) -> tuple[ImportWarningOccurrence, ...]:
+    return tuple(
+        build_import_warning_occurrence(
+            owning_lane="hcm",
+            source_event_identity=root.source_event_identity,
+            logical_code=_hcm_logical_code(issue_code),
+            field_path=_hcm_field_path(issue_code),
+            masked_subject=root.masked_case_identity,
+            issue_codes=(issue_code,),
+        )
+        for issue_code in root.issue_codes
+    )
+
+
+def _hcm_logical_code(issue_code: str) -> str:
+    if issue_code.startswith("hcm_case_import:"):
+        return "HCM-CASE-001"
+    if issue_code.startswith("hcm_field_missing:"):
+        return "HCM-FIELD-001"
+    if issue_code == "hcm_identity:hcm_unique_candidate":
+        return "HCM-LINK-001"
+    if issue_code.startswith("hcm_identity:"):
+        return "HCM-LINK-002"
+    return "HCM-FIELD-002"
+
+
+def _hcm_field_path(issue_code: str) -> str:
+    if issue_code.startswith("hcm_case_import:"):
+        return "查詢序號(案件編號)"
+    if issue_code.startswith("hcm_identity:"):
+        return "$client_link"
+    _, separator, field_path = issue_code.partition(":")
+    return field_path if separator and field_path else "$source_row"
+
+
 def _bounded_evidence(snapshot: Mapping[str, object]) -> dict[str, object]:
     if not isinstance(snapshot, Mapping):
         raise TypeError("evidence snapshot must be a mapping")
@@ -106,4 +147,9 @@ def _sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-__all__ = ["HcmImportReviewRoot", "build_hcm_import_review_root", "opened_anomaly_snapshot"]
+__all__ = [
+    "HcmImportReviewRoot",
+    "build_hcm_import_review_root",
+    "build_hcm_warning_occurrences",
+    "opened_anomaly_snapshot",
+]

@@ -63,6 +63,13 @@ from subsystems.case_import.staff_historical_adoption import (
     record_staff_adoption_outcome,
 )
 from shared_kernel.fingerprints import fingerprint_payload
+from infrastructure.mysql.staff_historical_workbook_repository import (
+    MySqlStaffHistoricalWorkbookRepository,
+)
+from subsystems.case_import.staff_historical_workbook_adoption import (
+    StaffHistoricalWorkbookConflict,
+    StaffHistoricalWorkbookService,
+)
 
 load_dotenv(str(PROJECT_ROOT / ".env"))
 
@@ -164,6 +171,38 @@ def _privacy_safe_staff_review_payload(record):
     }
 
 
+def _typed_historical_import(excel_path: str, source_revision: str | None):
+    connection = pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
+    try:
+        service = StaffHistoricalWorkbookService(
+            connection, MySqlStaffHistoricalWorkbookRepository(connection)
+        )
+        preview = service.preview(excel_path, source_revision)
+        digest = _staff_source_content_digest(excel_path, source_revision)
+        receipt = service.apply(
+            excel_path,
+            source_revision,
+            preview.preview_fingerprint,
+            f"staff-beclass-historical:{digest}",
+            "restricted-historical-staff-beclass",
+            f"staff-beclass-historical:{digest}",
+        )
+        return _result(
+            inserted=receipt.created_count,
+            adopted_existing=receipt.adopted_existing_count,
+            exact_replay=receipt.exact_replay_count,
+            blocked_identity=receipt.blocked_identity_count,
+            identity_conflict=receipt.identity_conflict_count,
+            review_required=receipt.review_required_count,
+        )
+    except StaffHistoricalWorkbookConflict:
+        return _result(review_required=1)
+    except Exception:
+        return _result(failed=1)
+    finally:
+        connection.close()
+
+
 def import_checkbox_options(cursor, staff_id, row, options_list, target_table, value_col, detail_col=None, excel_detail_col=None):
     # Delete-and-insert strategy for option tables
     cursor.execute(f"DELETE FROM {target_table} WHERE staff_id = %s", (staff_id,))
@@ -229,6 +268,13 @@ def _historical_relations(row):
 
 
 def process_import(excel_path, source_revision: str | None = None):
+    if not os.path.exists(excel_path):
+        print(f"錯誤：找不到 Excel 檔案：{excel_path}")
+        return _result(review_required=1)
+    return _typed_historical_import(excel_path, source_revision)
+
+
+def _legacy_process_import_not_used(excel_path, source_revision: str | None = None):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
         return _result(review_required=1)

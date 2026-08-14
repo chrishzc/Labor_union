@@ -59,7 +59,13 @@ _MATCHING_PAGE_TITLE = "多月嫂排班"
 _MATCHING_QUEUE_TARGET_KEY = "multi_caregiver_matching_case_picker"
 _FINANCE_RECOVERY_SELECTION_KEY = "finance_anomaly_recovery_selection"
 
-_IMPORT_CODES = {"IMPORT-001", "IMPORT-003", "IMPORT-004", "IMPORT-006"}
+_IMPORT_CODES = {
+    "HISTORICAL-ORDER-001",
+    "IMPORT-001",
+    "IMPORT-003",
+    "IMPORT-004",
+    "IMPORT-006",
+}
 _ORDER_MATCH_CODES = {"ORDER-001", "ORDER-002", "ORDER-003", "ORDER-004"}
 _MISSING_DATA_CODES = {"BECLASS-001"}
 _DOC_SEND_CODES = {"DOC-SEND-001"}
@@ -103,6 +109,7 @@ _ALERT_CODE_LABELS = {
     "IMPORT-003": "跨表整合去重/關聯衝突",
     "IMPORT-004": "HCM 匯入欄位驗證失敗",
     "IMPORT-006": "銀行對帳匯入完整性異常",
+    "HISTORICAL-ORDER-001": "歷史訂單匯入待人工確認",
     "RECEIVABLE-001": "客戶應收帳款逾期未收齊",
     "CLIENTPAYABLE-001": "應付客戶款項逾期未付",
     "SUBSIDYADVANCE-001": "政府補助墊付款項待核對",
@@ -1292,7 +1299,7 @@ def show() -> None:
 def _render_import_tab(items: tuple[AnomalySummaryView, ...]) -> None:
     _render_table_only(
         "資料匯入異常",
-        "HCM／BeClass 欄位驗證、身分衝突、銀行對帳匯入完整性。",
+        "HCM／BeClass／歷史訂單欄位驗證與待確認、身分衝突、銀行對帳匯入完整性。",
         _filter(items, _IMPORT_CODES),
     )
     _render_beclass_review_workspace(_beclass_review_items(items))

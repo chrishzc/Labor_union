@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-wp90-2026-08-14-v1",
+  "release_metadata": {
+    "release_name": "Labor Union WP90 Import Warning Tracking Phase 1",
+    "application_version": "wp90-import-warning-tracking-v1",
+    "published_at": "2026-08-14",
+    "description": "Add immutable import warning occurrences and tracking projections"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "wp80-v2-or-later"
+  },
+  "artifacts": [
+    {
+      "name": "195_import_warning_tracking.sql",
+      "relative_path": "db/schema_parts/195_import_warning_tracking.sql",
+      "sha256": "f11e7c3bf0c1ff8db096ddbf5edd04c39eee924a335b69da171d8119ea36afce",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "code-rollback-preserve-warning-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "wp90-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["import-warning-tracking-v1"],
+    "required_restart_targets": ["api", "architecture-outbox-worker"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["import-warning-tracking-preview"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_14_wp90_import_warning_tracking_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_14_wp90_import_warning_tracking_v1.descriptors.json",
+    "sha256": "0f090c109fa2246ff91900e9a4160f70f6686c7ac838b52a379a4370d727ad28",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

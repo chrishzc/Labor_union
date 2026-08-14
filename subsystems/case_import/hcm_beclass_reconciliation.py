@@ -47,15 +47,17 @@ def _load_pair_facts(connection, case_no):
     with connection.cursor() as cursor:
         cursor.execute(
             "SELECT (SELECT COUNT(*) FROM orders WHERE case_no=%s) AS hcm_count,"
-            "(SELECT COUNT(*) FROM beclass_records WHERE query_no=%s) AS beclass_count",
-            (case_no, case_no),
+            "(SELECT COUNT(*) FROM beclass_records WHERE bound_case_no=%s "
+            "OR (bound_case_no IS NULL AND query_no=%s)) AS beclass_count",
+            (case_no, case_no, case_no),
         )
         counts = cursor.fetchone()
         if int(counts["hcm_count"]) != 1 or int(counts["beclass_count"]) != 1:
             return counts
         cursor.execute(
             "SELECT o.requires_cooking,b.id AS beclass_id,b.survey_details "
-            "FROM orders o JOIN beclass_records b ON b.query_no=o.case_no WHERE o.case_no=%s",
+            "FROM orders o JOIN beclass_records b ON (b.bound_case_no=o.case_no "
+            "OR (b.bound_case_no IS NULL AND b.query_no=o.case_no)) WHERE o.case_no=%s",
             (case_no,),
         )
         return {**counts, **cursor.fetchone()}

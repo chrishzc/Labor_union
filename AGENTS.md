@@ -126,6 +126,14 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 - 所有文字檔使用 strict UTF-8，預設無 BOM；不得用 replacement 或 ignore 隱藏解碼錯誤。
 - secret、token、internal key、完整銀行帳號、raw webhook secret 與完整個資不得寫入 Git、規格、log、command argument、UI 或 receipt。證據只保留驗收所需的最小去敏內容。
 
+### 多人協作與合併裁決
+
+- 任務以人可讀的 Work Package／issue／標題，加上 owner、scope、write set 與 base ref 識別。commit SHA 可作為證據，但不得要求或使用內容 hash／fingerprint 作為任務身分、worktree 或 branch 名稱、協作鎖、進度紀錄或衝突裁決依據。
+- hash 只用於既有契約明確要求的不可變、可重現 artifact 完整性，例如 migration SQL、release／descriptor metadata、generated validation release、已核准 snapshot／golden artifact 與其 receipt。hash 不代表 owner、業務授權、任務狀態，也不能決定哪一側變更應保留。
+- 合併或共同編輯前，先建立最小衝突盤點：path、各方意圖與 owner、語意分類、建議處置（`keep both`、`ours`、`theirs`、`successor`、`defer`）。非純文字格式衝突不得自行定案；須由相關 owner 或人工確認處置。
+- 相同 ordinal、檔名、Work Package ID、release ID 或索引列都是語意碰撞訊號，不是刪除其中一方的理由。先保留不同業務 lane；由 canonical catalog 分配 successor ID／ordinal。不得覆寫、改號或改 hash 已套用／已發布 release 的 bytes；若兩側確實表達同一行為，須先比較實際行為與驗收證據，才可移除較差或重複的實作。
+- 合併協調者只整合已確認的 shared catalog、index 與 manifest order；平行開發者維持獨立 worktree 或明確不重疊的 write set。每次協調完成都要記錄保留、取代、延後項目及仍待驗證的 gate。
+
 ## 8. AI Agent Clean Code 守則
 
 每次實作、修復、重構或 review production code、schema、migration、script 或測試前，必須先載入並套用 `$coding-rule`（`coding-rule/SKILL.md`）。任務需先建立可驗證的 Task Charter，依公開契約與風險選擇最小且完整的設計，修復 defect 時優先保留 fail-before-fix 證據，並在最後相關編輯後重跑對應驗證。若執行環境沒有該 skill，不得假裝已套用；必須明確回報，並仍遵守本節 Rule 1～5 與專案其他 gate。

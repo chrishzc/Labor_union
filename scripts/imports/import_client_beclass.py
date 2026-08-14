@@ -58,6 +58,13 @@ from subsystems.case_import.beclass_review_intake import (
 from subsystems.case_import.hcm_beclass_reconciliation import (
     reconcile_hcm_beclass_cooking,
 )
+from infrastructure.mysql.client_beclass_workbook_import_repository import (
+    ClientBeClassWorkbookImportRepository,
+)
+from subsystems.case_import.client_beclass_workbook_import import (
+    ClientBeClassWorkbookConflict,
+    ClientBeClassWorkbookImportService,
+)
 
 # 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
 load_dotenv(str(PROJECT_ROOT / ".env"))
@@ -156,6 +163,34 @@ def _result(inserted=0, skipped_existing=0, review_required=0, failed=0):
     }
 
 
+def _typed_historical_import(excel_path):
+    connection = pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
+    try:
+        service = ClientBeClassWorkbookImportService(
+            ClientBeClassWorkbookImportRepository(connection)
+        )
+        preview = service.preview(excel_path)
+        digest = fingerprint_workbook(excel_path)
+        receipt = service.apply(
+            excel_path,
+            f"client-beclass-historical:{digest}",
+            preview.preview_fingerprint,
+            "restricted-historical-client-beclass",
+            f"client-beclass-historical:{digest}",
+        )
+        return _result(
+            inserted=receipt.created_count,
+            skipped_existing=receipt.exact_replay_count + receipt.existing_source_count,
+            review_required=receipt.review_required_count + receipt.existing_conflict_count,
+        )
+    except ClientBeClassWorkbookConflict:
+        return _result(review_required=1)
+    except Exception:
+        return _result(failed=1)
+    finally:
+        connection.close()
+
+
 def _privacy_safe_client_review_payload(record):
     return {
         "source_field_count": len(record),
@@ -167,6 +202,13 @@ def _privacy_safe_client_review_payload(record):
 
 
 def process_import(excel_path):
+    if not os.path.exists(excel_path):
+        print(f"錯誤：找不到 Excel 檔案：{excel_path}")
+        return _result(review_required=1)
+    return _typed_historical_import(excel_path)
+
+
+def _legacy_process_import_not_used(excel_path):
     if not os.path.exists(excel_path):
         print(f"\u932f\u8aa4\uff1a\u627e\u4e0d\u5230 Excel \u6a94\u6848\uff1a{excel_path}")
         return _result(review_required=1)

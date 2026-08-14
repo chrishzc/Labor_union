@@ -50,12 +50,33 @@ class _Intake:
 
     def import_rows(self, frame, source_path):
         self._repository.intake_calls += 1
-        return {"inserted": len(frame), "exact_replay": 0, "review_required": 0, "failed": 0}
+        return {
+            "inserted": len(frame), "inserted_with_warning": 0, "exact_replay": 0,
+            "review_required": 0, "failed": 0,
+        }
+
+    def preview_rows(self, frame, source_path):
+        return {"ready": len(frame), "ready_with_warning": 0, "review_required": 0}
 
 
 class _IncompleteIntake(_Intake):
     def import_rows(self, frame, source_path):
-        return {"inserted": 1, "exact_replay": 0, "review_required": 0, "failed": 0}
+        return {
+            "inserted": 1, "inserted_with_warning": 0, "exact_replay": 0,
+            "review_required": 0, "failed": 0,
+        }
+
+
+class _WarningIntake(_Intake):
+    def import_rows(self, frame, source_path):
+        self._repository.intake_calls += 1
+        return {
+            "inserted": 0, "inserted_with_warning": len(frame), "exact_replay": 0,
+            "review_required": 0, "failed": 0,
+        }
+
+    def preview_rows(self, frame, source_path):
+        return {"ready": 0, "ready_with_warning": len(frame), "review_required": 0}
 
 
 def test_same_key_and_digest_returns_terminal_workbook_receipt(tmp_path):
@@ -71,6 +92,59 @@ def test_same_key_and_digest_returns_terminal_workbook_receipt(tmp_path):
     assert replay.replayed_workbook is True
     assert repository.intake_calls == 1
     assert repository.locked == []
+
+
+def test_preview_is_zero_write_and_apply_requires_matching_fingerprint(tmp_path):
+    workbook = tmp_path / "hcm.xlsx"
+    workbook.write_bytes(b"previewed workbook")
+    repository = _Repository()
+    service = HcmWorkbookImportService(repository, _Intake(repository))
+    frame = pd.DataFrame({"案件": ["A"]})
+
+    preview = service.preview(frame, str(workbook))
+
+    assert preview.ready_count == 1
+    assert repository.claims == {}
+    assert repository.receipts == {}
+    receipt = service.apply(
+        frame, str(workbook), preview.preview_fingerprint,
+        "key-1", "operator", "corr-1",
+    )
+    assert receipt.inserted_count == 1
+
+
+def test_partial_formal_cases_are_explicit_in_preview_and_terminal_receipt(tmp_path):
+    workbook = tmp_path / "hcm.xlsx"
+    workbook.write_bytes(b"partial formal cases")
+    repository = _Repository()
+    service = HcmWorkbookImportService(repository, _WarningIntake(repository))
+    frame = pd.DataFrame({"案件": ["A", "B"]})
+
+    preview = service.preview(frame, str(workbook))
+    receipt = service.apply(
+        frame, str(workbook), preview.preview_fingerprint,
+        "key-1", "operator", "corr-1",
+    )
+
+    assert preview.ready_count == 0
+    assert preview.ready_with_warning_count == 2
+    assert receipt.inserted_with_warning_count == 2
+
+
+def test_apply_rejects_stale_preview_before_row_intake(tmp_path):
+    workbook = tmp_path / "hcm.xlsx"
+    workbook.write_bytes(b"stale workbook")
+    repository = _Repository()
+    service = HcmWorkbookImportService(repository, _Intake(repository))
+
+    with pytest.raises(HcmWorkbookConflict, match="hcm_workbook_preview_stale"):
+        service.apply(
+            pd.DataFrame({"案件": ["A"]}), str(workbook), "0" * 64,
+            "key-1", "operator", "corr-1",
+        )
+
+    assert repository.intake_calls == 0
+    assert repository.claims == {}
 
 
 def test_same_key_and_different_digest_conflicts_before_row_intake(tmp_path):

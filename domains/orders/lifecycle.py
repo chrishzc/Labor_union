@@ -1,4 +1,7 @@
-"""Pure Orders lifecycle projection from typed cross-Domain roots."""
+"""
+File: domains/orders/lifecycle.py
+Description: 定義訂單生命週期投影，待補件案件不得自動進入服務或帳務狀態。
+"""
 
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ _CASE_NUMBER_MAXIMUM_LENGTH = 50
 
 
 class OrderLifecycleStatus(StrEnum):
+    PENDING_COMPLETION = "待補件"
     DISCUSSION = "洽談中"
     ESTABLISHED = "訂單成立"
     IN_SERVICE = "服務中"
@@ -136,6 +140,8 @@ def _lifecycle_status(
     completion_reached,
     evaluation_at,
 ):
+    if root_facts.current_status is OrderLifecycleStatus.PENDING_COMPLETION:
+        return OrderLifecycleStatus.PENDING_COMPLETION
     if root_facts.current_status is OrderLifecycleStatus.COMPLETED:
         return OrderLifecycleStatus.COMPLETED
     if root_facts.cancellation_effective and not completion_reached:

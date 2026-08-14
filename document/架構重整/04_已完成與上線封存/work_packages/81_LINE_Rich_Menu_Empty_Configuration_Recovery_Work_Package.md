@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: LINE Integration / Developer Experience
 priority: P0
@@ -37,3 +37,10 @@ priority: P0
 3. 缺少 `--apply` 時 command 零寫入；stale／idempotency conflict 維持 fail closed。
 4. legacy CLI 不讀 JSON、不建立 publication，並導向 authenticated Preview／Apply。
 5. focused unit／CLI contract regression 通過；任何實際 DB repair 仍由 operator 另行確認與保存 receipt。
+
+## 結案裁決
+
+2026-08-13 已完成受控修復程式、legacy CLI fail-closed replacement 與 focused regression。
+實際 Rich Menu 資料修復本來就屬 operator-only command，未隨本包自動操作任何既有資料庫；其日後
+執行仍須保存獨立 operator receipt，不構成本 Work Package 的 active blocker。證據見
+`2026-08-13_wp78_wp81_legacy_compatibility_receipt.md`。

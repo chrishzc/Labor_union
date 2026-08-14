@@ -154,6 +154,10 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_14_government_outbox_intent_type_repair_v1.json",
     "labor_union_2026_08_14_wp77_v2.json",
     "labor_union_2026_08_14_wp80_v2.json",
+    "labor_union_2026_08_14_wp90_import_warning_tracking_v1.json",
+    "labor_union_2026_08_14_wp91_hcm_partial_formal_case_v1.json",
+    "labor_union_2026_08_14_wp92_client_beclass_transition_binding_v1.json",
+    "labor_union_2026_08_14_wp93_pending_completion_status_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(

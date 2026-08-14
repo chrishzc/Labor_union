@@ -37,6 +37,8 @@ from subsystems.anomalies.process_reminder_anomaly_source import (
 )
 from subsystems.case_import import hcm_beclass_reconciliation as reconciliation
 from subsystems.case_import import staff_historical_adoption as staff_adoption
+from subsystems.case_import import staff_historical_workbook_adoption as staff_workbook_adoption
+from subsystems.case_import.staff_historical_workbook import StaffHistoricalWorkbookRow
 from subsystems.case_import import beclass_review_intake
 
 
@@ -45,7 +47,7 @@ from subsystems.case_import import beclass_review_intake
     (
         (HcmIdentityFacts((), (), False), HcmIdentityResolution.NEW),
         (HcmIdentityFacts((7,), (7,), True), HcmIdentityResolution.EXISTING_MATCH),
-        (HcmIdentityFacts((), (7,), False), HcmIdentityResolution.CONFLICT),
+        (HcmIdentityFacts((), (7,), False), HcmIdentityResolution.UNIQUE_CANDIDATE),
         (HcmIdentityFacts((7,), (), True), HcmIdentityResolution.CONFLICT),
         (HcmIdentityFacts((), (7, 8), False), HcmIdentityResolution.AMBIGUOUS),
     ),
@@ -116,6 +118,56 @@ def test_staff_historical_merge_newer_source_overwrites_mutable_scalars():
         "registered_at": "2026-08-02 09:00:00",
     }
     assert result.conflict_fields == ()
+
+
+def test_staff_historical_merge_newer_source_updates_name_for_traceable_change():
+    existing = {
+        "registered_at": "2026-08-01 09:00:00",
+        "name": "舊姓名",
+    }
+    historical = {
+        "registered_at": "2026-08-02 09:00:00",
+        "name": "新姓名",
+    }
+
+    result = plan_staff_scalar_merge(existing, historical)
+
+    assert result.source_is_newer is True
+    assert result.patch == {
+        "name": "新姓名",
+        "registered_at": "2026-08-02 09:00:00",
+    }
+    assert result.conflict_fields == ()
+
+
+def test_staff_workbook_preview_treats_newer_name_change_as_adoption(monkeypatch):
+    existing = {
+        "registered_at": "2026-08-01 09:00:00",
+        "name": "舊姓名",
+    }
+    row = StaffHistoricalWorkbookRow(
+        source_row=2,
+        record={
+            "identity_card": "A123456789",
+            "registered_at": "2026-08-02 09:00:00",
+            "name": "新姓名",
+        },
+        errors=(),
+        bank_accounts=(),
+        relations={},
+    )
+    repository = SimpleNamespace(load_staff=lambda identity, for_update: [existing])
+    monkeypatch.setattr(
+        staff_workbook_adoption,
+        "MySqlStaffHistoricalAdoptionRepository",
+        lambda connection: repository,
+    )
+    service = staff_workbook_adoption.StaffHistoricalWorkbookService(None, None)
+
+    outcome, reviewed = service._preview_row(row)
+
+    assert outcome == "adopted_existing"
+    assert reviewed is True
 
 
 def test_hcm_review_identity_replays_exact_source_and_never_contains_raw_case_number():

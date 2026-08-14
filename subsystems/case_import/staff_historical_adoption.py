@@ -85,6 +85,7 @@ def record_staff_adoption_outcome(
     return False
 
 
+# 此函式刻意維持單列 identity、review、receipt 的同一 outer UoW，拆開會模糊 commit owner。
 def adopt_existing_staff(
     connection,
     *,
@@ -100,7 +101,12 @@ def adopt_existing_staff(
 ) -> StaffHistoricalAdoptionResult:
     repository = MySqlStaffHistoricalAdoptionRepository(connection)
     source_identity = f"staff-workbook:{source_content_digest}:row:{source_row}"
-    source_fingerprint = fingerprint_payload(historical_record).value
+    normalized_relations = relations or {}
+    source_fingerprint = fingerprint_payload({
+        "historical_record": historical_record,
+        "bank_accounts": bank_accounts,
+        "relations": normalized_relations,
+    }).value
     key = f"staff-historical-adoption:{source_content_digest}:row:{source_row}"
     command_fingerprint = fingerprint_payload(
         {"source_identity": source_identity, "source_fingerprint": source_fingerprint}
@@ -130,24 +136,38 @@ def adopt_existing_staff(
             raise RuntimeError("staff_historical_adoption_identity_ambiguous")
         existing = rows[0]
         merge = plan_staff_scalar_merge(existing, historical_record)
-        if str(existing.get("name") or "").strip() != str(historical_record.get("name") or "").strip():
-            raise RuntimeError("staff_historical_adoption_identity_name_conflict")
+        name_changed = (
+            str(existing.get("name") or "").strip()
+            != str(historical_record.get("name") or "").strip()
+        )
         changed_groups: list[str] = []
         relation_conflicts: list[str] = []
         bank_changed, bank_conflict = repository.merge_bank_accounts(
-            int(existing["id"]), bank_accounts
+            int(existing["id"]),
+            bank_accounts,
+            replace_existing=merge.source_is_newer,
         )
         if bank_changed:
             changed_groups.append("bank_accounts")
         if bank_conflict:
             relation_conflicts.append("bank_accounts")
-        for table_name, incoming in sorted((relations or {}).items()):
-            changed, conflict = repository.merge_relation(int(existing["id"]), table_name, incoming)
+        for table_name, incoming in sorted(normalized_relations.items()):
+            changed, conflict = repository.merge_relation(
+                int(existing["id"]),
+                table_name,
+                incoming,
+                replace_existing=merge.source_is_newer,
+            )
             if changed:
                 changed_groups.append(table_name)
             if conflict:
                 relation_conflicts.append(table_name)
-        review_issues = tuple(sorted(set(validation_issue_codes + tuple(
+        traceability_issues = (
+            ("historical_name_changed",)
+            if name_changed and merge.source_is_newer
+            else ()
+        )
+        review_issues = tuple(sorted(set(validation_issue_codes + traceability_issues + tuple(
             f"historical_nonempty_conflict:{field}" for field in merge.conflict_fields
         ) + tuple(f"historical_nonempty_conflict:{field}" for field in relation_conflicts))))
         review_identity = None
@@ -190,16 +210,12 @@ def adopt_existing_staff(
 
 def _require_matching_replay_root(repository, receipt, historical_record) -> None:
     identity_card = str(historical_record.get("identity_card") or "").strip().upper()
-    expected_name = str(historical_record.get("name") or "").strip()
     rows = repository.load_staff(identity_card, for_update=True) if identity_card else ()
     if len(rows) != 1:
         raise RuntimeError("staff_historical_adoption_replay_root_drift")
     current = rows[0]
     stored_staff_id = receipt.get("staff_id")
-    current_name = str(current.get("name") or "").strip()
     if stored_staff_id is None or int(current["id"]) != int(stored_staff_id):
-        raise RuntimeError("staff_historical_adoption_replay_root_drift")
-    if not expected_name or current_name != expected_name:
         raise RuntimeError("staff_historical_adoption_replay_root_drift")
 
 

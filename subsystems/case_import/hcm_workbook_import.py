@@ -21,12 +21,35 @@ class HcmRowIntake(Protocol):
 
     def import_rows(self, frame: pd.DataFrame, source_path: str) -> dict[str, int]: ...
 
+    def preview_rows(self, frame: pd.DataFrame, source_path: str) -> dict[str, int]: ...
+
+
+@dataclass(frozen=True)
+class HcmWorkbookPreview:
+    source_content_digest: str
+    source_row_count: int
+    ready_count: int
+    ready_with_warning_count: int
+    review_required_count: int
+    preview_fingerprint: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "source_content_digest": self.source_content_digest,
+            "source_row_count": self.source_row_count,
+            "ready_count": self.ready_count,
+            "ready_with_warning_count": self.ready_with_warning_count,
+            "review_required_count": self.review_required_count,
+            "preview_fingerprint": self.preview_fingerprint,
+        }
+
 
 @dataclass(frozen=True)
 class HcmWorkbookReceipt:
     source_content_digest: str
     source_row_count: int
     inserted_count: int
+    inserted_with_warning_count: int
     exact_replay_count: int
     review_required_count: int
     failed_count: int
@@ -37,6 +60,7 @@ class HcmWorkbookReceipt:
             "source_content_digest": self.source_content_digest,
             "source_row_count": self.source_row_count,
             "inserted_count": self.inserted_count,
+            "inserted_with_warning_count": self.inserted_with_warning_count,
             "exact_replay_count": self.exact_replay_count,
             "review_required_count": self.review_required_count,
             "failed_count": self.failed_count,
@@ -76,6 +100,35 @@ class HcmWorkbookImportService:
         finally:
             self._repository.release_lock(key)
 
+    def preview(self, frame: pd.DataFrame, source_path: str) -> HcmWorkbookPreview:
+        digest = _workbook_digest(source_path)
+        outcomes = self._intake.preview_rows(frame, source_path)
+        ready_count = int(outcomes.get("ready", 0))
+        ready_with_warning_count = int(outcomes.get("ready_with_warning", 0))
+        review_count = int(outcomes.get("review_required", 0))
+        if ready_count + ready_with_warning_count + review_count != len(frame):
+            raise ValueError("hcm_preview_row_outcomes_not_conserved")
+        fingerprint = _preview_fingerprint(
+            digest, len(frame), ready_count, ready_with_warning_count, review_count,
+        )
+        return HcmWorkbookPreview(
+            digest, len(frame), ready_count, ready_with_warning_count, review_count, fingerprint,
+        )
+
+    def apply(
+        self,
+        frame: pd.DataFrame,
+        source_path: str,
+        preview_fingerprint: str,
+        key: str,
+        actor: str,
+        correlation_id: str,
+    ) -> HcmWorkbookReceipt:
+        preview = self.preview(frame, source_path)
+        if preview.preview_fingerprint != preview_fingerprint:
+            raise HcmWorkbookConflict("hcm_workbook_preview_stale")
+        return self.ingest(frame, source_path, key, actor, correlation_id)
+
     def load_frame(self, source_path: str) -> pd.DataFrame | None:
         return self._intake.load_frame(source_path)
 
@@ -93,9 +146,24 @@ def _workbook_digest(source_path: str) -> str:
     return sha256(Path(source_path).read_bytes()).hexdigest()
 
 
+def _preview_fingerprint(
+    digest: str, source_rows: int, ready: int, ready_with_warning: int, review: int,
+) -> str:
+    payload = {
+        "ready_count": ready,
+        "ready_with_warning_count": ready_with_warning,
+        "review_required_count": review,
+        "source_content_digest": digest,
+        "source_row_count": source_rows,
+    }
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return sha256(encoded.encode("utf-8")).hexdigest()
+
+
 def _receipt(digest: str, source_rows: int, outcomes: dict[str, int], replayed: bool) -> HcmWorkbookReceipt:
     return HcmWorkbookReceipt(
-        digest, source_rows, int(outcomes.get("inserted", 0)), int(outcomes.get("exact_replay", 0)),
+        digest, source_rows, int(outcomes.get("inserted", 0)),
+        int(outcomes.get("inserted_with_warning", 0)), int(outcomes.get("exact_replay", 0)),
         int(outcomes.get("review_required", 0)), int(outcomes.get("failed", 0)), replayed,
     )
 
@@ -104,7 +172,7 @@ def _assert_terminal_row_outcomes(source_rows: int, outcomes: dict[str, int]) ->
     """A terminal workbook receipt is valid only when every source row has one outcome."""
     terminal_rows = sum(
         int(outcomes.get(name, 0))
-        for name in ("inserted", "exact_replay", "review_required", "failed")
+        for name in ("inserted", "inserted_with_warning", "exact_replay", "review_required", "failed")
     )
     if terminal_rows != source_rows:
         raise ValueError("hcm_import_row_outcomes_not_conserved")

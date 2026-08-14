@@ -31,6 +31,17 @@ class MySqlStaffHistoricalAdoptionRepository:
             rows = cursor.fetchall()
         return rows
 
+    def create_staff(self, record: dict[str, object]) -> int:
+        columns = tuple(sorted(record))
+        assignments = ",".join(f"`{column}`" for column in columns)
+        placeholders = ",".join("%s" for _ in columns)
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                f"INSERT INTO staff ({assignments}) VALUES ({placeholders})",
+                tuple(record[column] for column in columns),
+            )
+            return int(cursor.lastrowid)
+
     def apply_scalar_patch(self, staff_id: int, patch: dict[str, object]) -> None:
         if not patch:
             return
@@ -44,7 +55,14 @@ class MySqlStaffHistoricalAdoptionRepository:
             if int(cursor.rowcount) != 1:
                 raise RuntimeError("staff_historical_adoption_stale")
 
-    def merge_bank_accounts(self, staff_id: int, incoming: tuple[tuple[object, ...], ...]):
+    # 同一鎖定區段內完成快照比對、collision gate 與 replacement，避免集合半套寫入。
+    def merge_bank_accounts(
+        self,
+        staff_id: int,
+        incoming: tuple[tuple[object, ...], ...],
+        *,
+        replace_existing: bool = False,
+    ):
         with _cursor(self._connection) as cursor:
             cursor.execute(
                 "SELECT bank_code,branch_code,account_no,is_primary FROM staff_bank_accounts "
@@ -53,20 +71,37 @@ class MySqlStaffHistoricalAdoptionRepository:
             )
             existing = {_bank_tuple(row) for row in cursor.fetchall()}
             candidate = {tuple(value) for value in incoming}
-            if not candidate or candidate == existing:
+            if candidate == existing:
                 return False, False
-            if existing:
+            if not replace_existing and not candidate:
+                return False, False
+            if not replace_existing and existing:
                 return False, True
-            if _has_cross_staff_bank_collision(cursor, staff_id, candidate):
+            if candidate and _has_cross_staff_bank_collision(cursor, staff_id, candidate):
                 return False, True
-            cursor.executemany(
-                "INSERT INTO staff_bank_accounts "
-                "(staff_id,bank_code,branch_code,account_no,is_primary) VALUES (%s,%s,%s,%s,%s)",
-                [(staff_id, *value) for value in sorted(candidate, key=str)],
-            )
+            if replace_existing:
+                cursor.execute(
+                    "DELETE FROM staff_bank_accounts WHERE staff_id=%s",
+                    (staff_id,),
+                )
+            if candidate:
+                cursor.executemany(
+                    "INSERT INTO staff_bank_accounts "
+                    "(staff_id,bank_code,branch_code,account_no,is_primary) "
+                    "VALUES (%s,%s,%s,%s,%s)",
+                    [(staff_id, *value) for value in sorted(candidate, key=str)],
+                )
         return True, False
 
-    def merge_relation(self, staff_id: int, table_name: str, incoming):
+    # 關聯集合必須在同一 outer UoW 鎖定後整組替換，不能暴露中間狀態。
+    def merge_relation(
+        self,
+        staff_id: int,
+        table_name: str,
+        incoming,
+        *,
+        replace_existing: bool = False,
+    ):
         value_column, detail_column = RELATION_COLUMNS[table_name]
         selected_columns = value_column + (f",{detail_column}" if detail_column else "")
         with _cursor(self._connection) as cursor:
@@ -76,16 +111,24 @@ class MySqlStaffHistoricalAdoptionRepository:
             )
             existing = {_relation_tuple(row, value_column, detail_column) for row in cursor.fetchall()}
             candidate = {tuple(value) for value in incoming}
-            if not candidate or candidate == existing:
+            if candidate == existing:
                 return False, False
-            if existing:
+            if not replace_existing and not candidate:
+                return False, False
+            if not replace_existing and existing:
                 return False, True
+            if replace_existing:
+                cursor.execute(
+                    f"DELETE FROM {table_name} WHERE staff_id=%s",
+                    (staff_id,),
+                )
             columns = f"staff_id,{value_column}" + (f",{detail_column}" if detail_column else "")
             placeholders = ",".join(["%s"] * (2 + int(detail_column is not None)))
-            cursor.executemany(
-                f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
-                [(staff_id, *value) for value in sorted(candidate, key=str)],
-            )
+            if candidate:
+                cursor.executemany(
+                    f"INSERT INTO {table_name} ({columns}) VALUES ({placeholders})",
+                    [(staff_id, *value) for value in sorted(candidate, key=str)],
+                )
         return True, False
 
     def find_receipt(self, idempotency_key: str):

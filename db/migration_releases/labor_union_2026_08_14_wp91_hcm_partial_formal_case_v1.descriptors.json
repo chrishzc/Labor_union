@@ -1,0 +1,12 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "196_case_import_partial_formal_case.sql": {
+      "tables": {
+        "case_import_events": ["bootstrap_event_id"],
+        "case_import_receipts": ["bootstrap_event_id"]
+      },
+      "triggers": []
+    }
+  }
+}

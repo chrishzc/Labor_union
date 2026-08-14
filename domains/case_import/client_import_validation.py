@@ -12,7 +12,7 @@ from typing import Any
 import pandas as pd
 
 GENDER_VALUES = {"男", "女"}
-IDENTITY_STATUS_VALUES = {"一般市民", "補助市民", "非市民"}
+IDENTITY_STATUS_VALUES = {"一般市民", "補助市民", "低收入戶", "中低收入戶", "非市民"}
 RESIDENCE_TYPE_VALUES = {"公寓", "透天", "大樓", "公寓大廈"}
 DELIVERY_TYPE_VALUES = {"自然產", "剖腹產"}
 SERVICE_TYPE_VALUES = {"連續服務", "週休1日", "週休2日", "周休二日", "休周日"}
@@ -210,4 +210,3 @@ def fallback_case_key(name: Any, phone: Any) -> str:
     if not name_part and not phone_part:
         return f"error_row_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
     return f"error_{name_part}_{phone_part}"
-
