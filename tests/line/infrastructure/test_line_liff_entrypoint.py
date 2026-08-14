@@ -1,4 +1,7 @@
-"""Regression coverage for canonical LIFF identity entrypoints."""
+"""
+File: test_line_liff_entrypoint.py
+Description: 驗證 LIFF 身分入口與服務登記 Rich Menu URI 導向。
+"""
 
 from pathlib import Path
 
@@ -92,12 +95,14 @@ def test_flow_validation_route_translates_expired_flow_to_http_410(monkeypatch) 
     assert captured.value.status_code == 410
 
 
-def test_default_service_registration_menu_uses_canonical_message_action() -> None:
+def test_default_service_registration_menu_opens_the_registration_liff_page() -> None:
     source = (ROOT / "config" / "line_menu.json").read_text(encoding="utf-8")
+    gateway = (ROOT / "line" / "static" / "gateway.html").read_text(encoding="utf-8")
 
-    assert '"type": "message"' in source
-    assert '"text": "服務登記"' in source
-    assert '"text": "服務說明"' in source
+    assert '"id": "service_registration"' in source
+    assert '"uri": "?target=registration"' in source
+    assert '"uri_source": "liff"' in source
+    assert "registration: '/line-registration'" in gateway
 
 
 def test_registration_page_uses_only_canonical_identity_endpoints() -> None:

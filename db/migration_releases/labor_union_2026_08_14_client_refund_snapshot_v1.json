@@ -1,0 +1,55 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-client-refund-snapshot-2026-08-14-v1",
+  "release_metadata": {
+    "release_name": "Client refund recipient snapshot local upgrade",
+    "application_version": "client-refund-recipient-snapshot-v1",
+    "published_at": "2026-08-14",
+    "description": "Connect canonical part 176 to the preserve-data migration chain"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "wp72-or-later"
+  },
+  "artifacts": [
+    {
+      "name": "189_client_refund_recipient_snapshot_local_upgrade.sql",
+      "relative_path": "db/schema_parts/189_client_refund_recipient_snapshot_local_upgrade.sql",
+      "sha256": "1317a94fcbfcbcefb5290d6b291a71a721c23a0e46761e3b6b2a681a3de9de3b",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "restore-source-dump-before-same-name-replacement",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {"verification_id": "client-refund-snapshot-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["accounts-payable-export-v1", "client-refund-recipient-snapshot-v1"],
+    "required_restart_targets": ["api", "streamlit-ui"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["accounts-payable-query"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_14_client_refund_snapshot_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_14_client_refund_snapshot_v1.descriptors.json",
+    "sha256": "38423bae121260aefbcd7743c8294b76d1b987da54ec6d88b281b16e14049bdb",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

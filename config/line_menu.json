@@ -21,7 +21,7 @@
       },
       "buttons": [
         {
-          "id": "order_query",
+          "id": "service_registration",
           "label": "服務登記",
           "text_color": "#FFFFFF",
           "background_color": "#1E3A8A",
@@ -34,7 +34,7 @@
           "action": {
             "type": "uri",
             "text": null,
-            "uri": "?entry=registration",
+            "uri": "?target=registration",
             "uri_source": "liff",
             "data": null
           }

@@ -1,8 +1,12 @@
-"""Canonical LINE service-help intent handler."""
+"""
+File: service_help_application.py
+Description: 將客服文字指令轉為可稽核的 LINE 回覆與長效 LIFF 登記入口。
+"""
 
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import os
 from typing import Callable
 
 from domains.customer_service.ticket import CustomerServiceCategory
@@ -35,6 +39,15 @@ class LineServiceHelpApplication:
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         normalized = text.strip()
+        if normalized == "服務登記":
+            self._enqueue(
+                inbox,
+                unit_of_work,
+                line_user_id,
+                _text_payload(_registration_reply(_registration_liff_url())),
+                "registration",
+            )
+            return True
         if normalized == "服務說明":
             self._enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu")
             return True
@@ -120,6 +133,19 @@ def _unbound_progress_reply(identity_url):
         f"{identity_url}\n\n"
         "若您是新客戶，請點選下方「服務登記」完成資料填寫。"
     )
+
+
+def _registration_liff_url():
+    liff_id = os.getenv("LINE_LIFF_ID", "").strip()
+    if not liff_id or liff_id == "your_liff_id_here":
+        return None
+    return f"https://liff.line.me/{liff_id}?target=registration"
+
+
+def _registration_reply(registration_url):
+    if registration_url is None:
+        return "服務登記入口尚未完成設定，請聯絡工會人員協助。"
+    return f"請開啟以下服務登記頁面：\n\n{registration_url}"
 
 
 def _service_menu_payload():

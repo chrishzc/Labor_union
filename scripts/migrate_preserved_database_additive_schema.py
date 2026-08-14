@@ -1,6 +1,6 @@
 """
 File: migrate_preserved_database_additive_schema.py
-Description: 驗證 release chain，並以唯讀來源、隔離候選及 durable receipt 執行 MySQL 升級。
+Description: 驗證 release chain，並在隔離候選中安全升級 MySQL schema。
 """
 
 from __future__ import annotations
@@ -148,10 +148,41 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_11_line_stage11_v1.json",
     "labor_union_2026_08_11_line_stage12_v1.json",
     "labor_union_2026_08_13_wp72_v1.json",
+    "labor_union_2026_08_14_client_refund_snapshot_v1.json",
+    "labor_union_2026_08_14_government_overpayment_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
     {"schema_applied", "backfilled", "verified"}
+)
+LEGACY_KNOWLEDGE_TABLES = frozenset({
+    "knowledge_items",
+    "knowledge_item_events",
+    "knowledge_apply_receipts",
+    "knowledge_item_versions",
+    "knowledge_answer_requests",
+    "knowledge_jobs",
+    "knowledge_indexes",
+    "knowledge_answer_receipts",
+    "knowledge_answer_sources",
+})
+LEGACY_KNOWLEDGE_PRESERVED_TABLES = frozenset({
+    "knowledge_answer_requests",
+    "knowledge_jobs",
+})
+LEGACY_KNOWLEDGE_REBUILD_TABLES = (
+    LEGACY_KNOWLEDGE_TABLES - LEGACY_KNOWLEDGE_PRESERVED_TABLES
+)
+LEGACY_KNOWLEDGE_DROP_ORDER = (
+    "knowledge_answer_sources",
+    "knowledge_answer_receipts",
+    "knowledge_jobs",
+    "knowledge_answer_requests",
+    "knowledge_indexes",
+    "knowledge_item_events",
+    "knowledge_apply_receipts",
+    "knowledge_item_versions",
+    "knowledge_items",
 )
 MANIFEST_DRIVEN_RELEASE = False
 
@@ -533,6 +564,7 @@ def _load_release_chain() -> ReleaseManifest:
         fingerprints.append(_sha256_file(manifest_path))
         final_compatibility = payload.get("application_compatibility") or {}
         final_contracts = tuple(payload.get("verification_contracts") or ())
+    artifacts = _dependency_ordered_artifacts(artifacts)
     fingerprint = _sha256_bytes(json.dumps(
         {"manifests": fingerprints, "artifacts": artifacts},
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -546,11 +578,47 @@ def _load_release_chain() -> ReleaseManifest:
     )
 
 
+def _dependency_ordered_artifacts(
+    artifacts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    by_name = {str(artifact["name"]): artifact for artifact in artifacts}
+    original_position = {name: index for index, name in enumerate(by_name)}
+    ranks: dict[str, float] = {}
+
+    def rank(name: str, visiting: set[str]) -> float:
+        if name in ranks:
+            return ranks[name]
+        if name in visiting:
+            raise UpgradeBlocked("release artifact dependencies are cyclic")
+        artifact = by_name.get(name)
+        if artifact is None:
+            raise UpgradeBlocked(f"release artifact dependency is unavailable: {name}")
+        dependency_ranks = [
+            rank(str(dependency), visiting | {name})
+            for dependency in artifact.get("dependencies") or ()
+            if str(dependency) in by_name
+        ]
+        ranks[name] = max([
+            float(original_position[name]),
+            *(item + 0.5 for item in dependency_ranks),
+        ])
+        return ranks[name]
+
+    return sorted(artifacts, key=lambda artifact: rank(str(artifact["name"]), set()))
+
+
 RELEASE_MANIFEST = _load_release_chain()
 SCHEMA_PARTS = tuple(ROOT / artifact["relative_path"] for artifact in RELEASE_MANIFEST.artifacts)
 VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "backfilled", "verified"})
 PURE_RETIREMENT_ARTIFACTS = frozenset({
     "153_retire_empty_legacy_field_inventory.sql",
+})
+INTENTIONALLY_RETIRED_EMPTY_TABLES = frozenset({
+    "finance_import_reclassification_events",
+})
+DECLARED_LIFECYCLE_BACKFILL_TABLES = frozenset({
+    "order_lifecycle_control_events",
+    "order_lifecycle_control_state",
 })
 
 
@@ -1433,8 +1501,22 @@ def _owned_classification(
             row["column_name"]
         )
     present_triggers = {row["trigger_name"] for row in snapshot["triggers"]}
+    legacy_knowledge_state = _legacy_knowledge_schema_state(snapshot)
     result: dict[str, str] = {}
     for part, expected in OWNED_OBJECTS.items():
+        if (
+            part in {
+                "148_knowledge_retrieval.sql",
+                "163_knowledge_runtime.sql",
+            }
+            and legacy_knowledge_state is not None
+        ):
+            result[part] = (
+                "partial"
+                if legacy_knowledge_state == "exact"
+                else "drift"
+            )
+            continue
         if part == "107_system_alert_current_projection.sql":
             result[part] = _system_alert_projection_state(snapshot)
             continue
@@ -1563,6 +1645,18 @@ def build_plan(
         )
     candidate_exists = database_exists(config, candidate)
     source_data = _table_evidence(config, source)
+    retired_nonempty = sorted(
+        table
+        for table in INTENTIONALLY_RETIRED_EMPTY_TABLES
+        if int((source_data.get(table) or {}).get("count", 0)) != 0
+    )
+    if retired_nonempty:
+        raise UpgradeBlocked(
+            "retired tables are not empty: " + ", ".join(retired_nonempty)
+        )
+    legacy_knowledge_rebuild = _legacy_knowledge_rebuild_plan(
+        source_snapshot, source_data
+    )
     candidate_data = (
         _table_evidence(config, candidate) if candidate_exists else None
     )
@@ -1585,6 +1679,7 @@ def build_plan(
         "source_schema_sha256": source_snapshot["sha256"],
         "source_objects": source_objects,
         "source_data": source_data,
+        "legacy_knowledge_empty_rebuild": legacy_knowledge_rebuild,
         "phase_order": [path.name for path in SCHEMA_PARTS],
         "status": (
             "blocked"
@@ -1594,6 +1689,57 @@ def build_plan(
     }
     plan["plan_fingerprint"] = _sha256_bytes(_canonical_json(plan))
     return plan
+
+
+# 保持單一 preflight，讓空表、外部 FK 與 fingerprint 共同決定資格。
+def _legacy_knowledge_rebuild_plan(
+    snapshot: Mapping[str, Any],
+    source_data: Mapping[str, Any],
+) -> dict[str, Any]:
+    if _legacy_knowledge_schema_state(snapshot) != "exact":
+        return {"eligible": False}
+    nonempty = sorted(
+        table for table in LEGACY_KNOWLEDGE_REBUILD_TABLES
+        if int((source_data.get(table) or {}).get("count", 0)) != 0
+    )
+    if nonempty:
+        raise UpgradeBlocked(
+            "legacy Knowledge tables are not empty: " + ", ".join(nonempty)
+        )
+    preserved_state = _canonical_artifact_metadata_state(
+        snapshot,
+        "163_knowledge_runtime.sql",
+        owned_tables=LEGACY_KNOWLEDGE_PRESERVED_TABLES,
+    )
+    if preserved_state != "exact":
+        raise UpgradeBlocked(
+            "preserved Knowledge request/job tables are not canonical-exact"
+        )
+    inbound = _external_knowledge_inbound_foreign_keys(snapshot)
+    if inbound:
+        raise UpgradeBlocked(
+            "legacy Knowledge tables have external inbound foreign keys: "
+            + ", ".join(inbound)
+        )
+    return {
+        "eligible": True,
+        "contract": "legacy-knowledge-stage8-preserved-queue-rebuild/v2",
+        "tables": sorted(LEGACY_KNOWLEDGE_TABLES),
+        "preserved_tables": sorted(LEGACY_KNOWLEDGE_PRESERVED_TABLES),
+        "rebuild_tables": sorted(LEGACY_KNOWLEDGE_REBUILD_TABLES),
+        "source_schema_sha256": snapshot["sha256"],
+    }
+
+
+def _external_knowledge_inbound_foreign_keys(
+    snapshot: Mapping[str, Any],
+) -> tuple[str, ...]:
+    return tuple(sorted({
+        f"{row['table_name']}.{row['constraint_name']}"
+        for row in snapshot.get("key_columns", ())
+        if str(row.get("referenced_table_name")) in LEGACY_KNOWLEDGE_TABLES
+        and str(row["table_name"]) not in LEGACY_KNOWLEDGE_TABLES
+    }))
 
 
 def _blocking_schema_states(
@@ -2472,6 +2618,10 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
                 "extra": "",
             }
         }
+    if part_name == "185_customer_service_runtime.sql":
+        descriptor["tables"]["customer_service_tickets"][
+            "active_marker"
+        ]["extra"] = "stored generated"
     if part_name == "61_finance_import_reprocessing.sql":
         _remove_retired_reclassification_audit_contract(descriptor)
         descriptor["indexes"][(
@@ -2497,6 +2647,88 @@ def _remove_retired_reclassification_audit_contract(
     for trigger_name, trigger in list(descriptor["triggers"].items()):
         if trigger["event_object_table"] == retired_table:
             descriptor["triggers"].pop(trigger_name)
+
+
+# Kept as one declarative block so the historical metadata fingerprint is auditable.
+def _legacy_knowledge_stage8_descriptor() -> dict[str, Any]:
+    descriptor = _canonical_artifact_descriptor(
+        "163_knowledge_runtime.sql"
+    )
+    descriptor["parent_columns"] = {}
+    descriptor["tables"]["knowledge_items"] = {
+        "id": _column_contract("bigint unsigned", "NO", None, "auto_increment"),
+        "source_identity": _column_contract("varchar(191)", "NO"),
+        "title": _column_contract("varchar(500)", "NO"),
+        "lifecycle_status": _column_contract(
+            "enum('draft','reviewed','published','retired')", "NO", "draft"
+        ),
+        "current_version": _column_contract("int unsigned", "NO", "1"),
+        "source_digest": _column_contract("char(64)", "NO"),
+        "source_uri": _column_contract("varchar(1000)", "YES"),
+        "created_by_actor_id": _column_contract("varchar(191)", "NO"),
+        "created_at_utc": _column_contract(
+            "datetime(6)", "NO", "current_timestamp(6)", "default_generated"
+        ),
+        "updated_at_utc": _column_contract(
+            "datetime(6)",
+            "NO",
+            "current_timestamp(6)",
+            "default_generated on update current_timestamp(6)",
+        ),
+    }
+    descriptor["tables"]["knowledge_item_versions"] = {
+        "id": _column_contract("bigint unsigned", "NO", None, "auto_increment"),
+        "item_id": _column_contract("bigint unsigned", "NO"),
+        "item_version": _column_contract("int unsigned", "NO"),
+        "content": _column_contract("mediumtext", "NO"),
+        "source_digest": _column_contract("char(64)", "NO"),
+        "event_type": _column_contract(
+            "enum('ingested','reviewed','published','retired')", "NO"
+        ),
+        "actor_id": _column_contract("varchar(191)", "NO"),
+        "reason": _column_contract("varchar(500)", "YES"),
+        "idempotency_key": _column_contract("varchar(191)", "NO"),
+        "recorded_at_utc": _column_contract(
+            "datetime(6)", "NO", "current_timestamp(6)", "default_generated"
+        ),
+    }
+    descriptor["tables"]["knowledge_answer_sources"][
+        "source_version"
+    ]["column_type"] = "int unsigned"
+    descriptor["indexes"].update({
+        ("knowledge_items", "PRIMARY"): {
+            "non_unique": 0, "columns": ("id",),
+        },
+        ("knowledge_items", "uq_knowledge_source_identity"): {
+            "non_unique": 0, "columns": ("source_identity",),
+        },
+        ("knowledge_items", "idx_knowledge_lifecycle"): {
+            "non_unique": 1, "columns": ("lifecycle_status", "id"),
+        },
+    })
+    descriptor["foreign_keys"].pop(
+        ("knowledge_item_versions", "fk_knowledge_version_actor"), None
+    )
+    descriptor["checks"][(
+        "knowledge_items", "chk_knowledge_source_digest"
+    )] = _normalize_sql_contract(
+        "source_digest REGEXP '^[0-9a-f]{64}$'"
+    )
+    return descriptor
+
+
+def _column_contract(
+    column_type: str,
+    is_nullable: str,
+    column_default: Any = None,
+    extra: str = "",
+) -> dict[str, Any]:
+    return {
+        "column_type": column_type,
+        "is_nullable": is_nullable,
+        "column_default": column_default,
+        "extra": extra,
+    }
 
 
 def _show_create_check_clauses(
@@ -2554,8 +2786,30 @@ def _canonical_artifact_metadata_state(
     part_name: str,
     *,
     defer_missing_triggers: bool = False,
+    owned_tables: frozenset[str] | None = None,
 ) -> str:
     descriptor = _canonical_artifact_descriptor(part_name)
+    _apply_legacy_knowledge_identifier_contract(descriptor, snapshot, part_name)
+    return _artifact_metadata_state(
+        snapshot,
+        descriptor,
+        part_name,
+        defer_missing_triggers=defer_missing_triggers,
+        owned_tables=owned_tables,
+    )
+
+
+# 保持單一 metadata comparator，避免 canonical 與 compatibility 契約判讀分叉。
+def _artifact_metadata_state(
+    snapshot: Mapping[str, Any],
+    descriptor: dict[str, Any],
+    part_name: str,
+    *,
+    defer_missing_triggers: bool = False,
+    owned_tables: frozenset[str] | None = None,
+) -> str:
+    if owned_tables is not None:
+        _limit_descriptor_to_owned_tables(descriptor, owned_tables)
     columns_by_table: dict[str, dict[str, Mapping[str, Any]]] = {}
     for row in snapshot["columns"]:
         columns_by_table.setdefault(row["table_name"], {})[
@@ -2699,6 +2953,135 @@ def _canonical_artifact_metadata_state(
     return "exact"
 
 
+def _limit_descriptor_to_owned_tables(
+    descriptor: dict[str, Any], owned_tables: frozenset[str]
+) -> None:
+    for contract_kind in ("tables", "parent_columns"):
+        descriptor[contract_kind] = {
+            table: contract
+            for table, contract in descriptor[contract_kind].items()
+            if table in owned_tables
+        }
+    for contract_kind in ("indexes", "foreign_keys", "checks"):
+        descriptor[contract_kind] = {
+            key: contract
+            for key, contract in descriptor[contract_kind].items()
+            if key[0] in owned_tables
+        }
+    descriptor["triggers"] = {
+        name: contract
+        for name, contract in descriptor["triggers"].items()
+        if contract["event_object_table"] in owned_tables
+    }
+
+
+# 保持單一 fingerprint gate，完整核對 legacy 主體、可選 148 子表與 triggers。
+def _legacy_knowledge_schema_state(
+    snapshot: Mapping[str, Any],
+) -> str | None:
+    columns = {
+        (str(row["table_name"]), str(row["column_name"]))
+        for row in snapshot.get("columns", ())
+    }
+    signatures = {
+        ("knowledge_items", "current_version"),
+        ("knowledge_items", "lifecycle_status"),
+        ("knowledge_item_versions", "actor_id"),
+    }
+    if not signatures.intersection(columns):
+        return None
+    legacy_descriptor = _legacy_knowledge_stage8_descriptor()
+    state = _artifact_metadata_state(
+        snapshot, legacy_descriptor, "legacy_knowledge_stage8"
+    )
+    if state != "exact" or not _owned_metadata_names_are_exact(
+        snapshot, legacy_descriptor
+    ):
+        return "drift"
+    child_tables = frozenset({
+        "knowledge_item_events", "knowledge_apply_receipts",
+    })
+    child_descriptor = _canonical_artifact_descriptor(
+        "148_knowledge_retrieval.sql"
+    )
+    _apply_legacy_knowledge_identifier_contract(
+        child_descriptor, snapshot, "148_knowledge_retrieval.sql"
+    )
+    _limit_descriptor_to_owned_tables(child_descriptor, child_tables)
+    child_state = _canonical_artifact_metadata_state(
+        snapshot,
+        "148_knowledge_retrieval.sql",
+        owned_tables=child_tables,
+    )
+    if child_state not in {"absent", "exact"}:
+        return "drift"
+    if child_state == "exact" and not _owned_metadata_names_are_exact(
+        snapshot, child_descriptor
+    ):
+        return "drift"
+    expected_triggers = {
+        "trg_knowledge_item_versions_before_update",
+        "trg_knowledge_item_versions_before_delete",
+    }
+    actual_triggers = {
+        str(row["trigger_name"])
+        for row in snapshot.get("triggers", ())
+        if str(row["event_object_table"]) in LEGACY_KNOWLEDGE_TABLES
+    }
+    return "exact" if actual_triggers == expected_triggers else "drift"
+
+
+# 保持 indexes 與 constraints 同步核對，避免各自接受不一致的額外 object。
+def _owned_metadata_names_are_exact(
+    snapshot: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+) -> bool:
+    tables = set(descriptor["tables"])
+    expected_indexes = set(descriptor["indexes"])
+    expected_foreign_keys = set(descriptor["foreign_keys"])
+    allowed_indexes = expected_indexes | expected_foreign_keys
+    actual_indexes = {
+        (str(row["table_name"]), str(row["index_name"]))
+        for row in snapshot.get("indexes", ())
+        if str(row["table_name"]) in tables
+    }
+    expected_constraints = (
+        {(table, "PRIMARY") for table in tables}
+        | {
+            key for key, contract in descriptor["indexes"].items()
+            if int(contract["non_unique"]) == 0
+        }
+        | expected_foreign_keys
+        | set(descriptor["checks"])
+    )
+    actual_constraints = {
+        (str(row["table_name"]), str(row["constraint_name"]))
+        for row in snapshot.get("constraints", ())
+        if str(row["table_name"]) in tables
+    }
+    return (
+        expected_indexes <= actual_indexes <= allowed_indexes
+        and actual_constraints == expected_constraints
+    )
+
+
+def _apply_legacy_knowledge_identifier_contract(
+    descriptor: dict[str, Any],
+    snapshot: Mapping[str, Any],
+    part_name: str,
+) -> None:
+    if part_name not in {"148_knowledge_retrieval.sql", "163_knowledge_runtime.sql"}:
+        return
+    identifier_type = _knowledge_item_identifier_type(snapshot)
+    if identifier_type != "bigint unsigned":
+        return
+    if part_name == "148_knowledge_retrieval.sql":
+        descriptor["tables"]["knowledge_items"]["id"]["column_type"] = identifier_type
+        descriptor["tables"]["knowledge_item_events"]["knowledge_item_id"]["column_type"] = identifier_type
+    else:
+        descriptor["tables"]["knowledge_item_versions"]["item_id"]["column_type"] = identifier_type
+
+
 def _allowed_later_artifact_columns(
     part_name: str,
     table: str,
@@ -2760,12 +3143,51 @@ def schema_statements_for_state(
     snapshot: Mapping[str, Any],
 ) -> list[str]:
     statements = split_sql(part.read_text(encoding="utf-8"))
+    if part.name == "148_knowledge_retrieval.sql" and state == "partial":
+        return _knowledge_retrieval_recovery_statements(statements, snapshot)
+    if part.name == "185_customer_service_runtime.sql" and state == "partial":
+        return _customer_service_runtime_recovery_statements(
+            statements, snapshot
+        )
     if part.name != "163_knowledge_runtime.sql" or state != "partial":
         if part.name == "186_line_identity_management.sql" and state == "partial":
             if not _is_recoverable_line_identity_legacy_state(snapshot):
                 raise UpgradeBlocked("line identity management partial state is not resumable")
         return statements
     return _knowledge_runtime_recovery_statements(statements, snapshot)
+
+
+def _customer_service_runtime_recovery_statements(
+    statements: list[str],
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    present_tables = {
+        str(row["table_name"]) for row in snapshot.get("columns", ())
+    }
+    tickets = "customer_service_tickets"
+    events = "customer_service_ticket_events"
+    ticket_state = _canonical_artifact_metadata_state(
+        snapshot,
+        "185_customer_service_runtime.sql",
+        owned_tables=frozenset({tickets}),
+    )
+    if (
+        len(statements) == 2
+        and tickets in present_tables
+        and events not in present_tables
+        and ticket_state == "exact"
+    ):
+        return [statements[1]]
+    raise UpgradeBlocked(
+        "customer service runtime partial state is not resumable"
+    )
+
+
+def _knowledge_retrieval_recovery_statements(
+    statements: list[str],
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    return _knowledge_foreign_key_compatible_statements(statements, snapshot)
 
 
 def _knowledge_runtime_recovery_statements(
@@ -2788,6 +3210,7 @@ def _knowledge_runtime_recovery_statements(
         raise UpgradeBlocked(
             "knowledge runtime index exists without source_identity"
         )
+    statements = _knowledge_foreign_key_compatible_statements(statements, snapshot)
     if not source_column:
         return statements
     remaining = statements[1:]
@@ -2798,6 +3221,43 @@ def _knowledge_runtime_recovery_statements(
         "ADD UNIQUE KEY uq_knowledge_source_identity (source_identity)"
     )
     return [add_index, *remaining]
+
+
+def _knowledge_foreign_key_compatible_statements(
+    statements: list[str],
+    snapshot: Mapping[str, Any],
+) -> list[str]:
+    identifier_type = _knowledge_item_identifier_type(snapshot)
+    if identifier_type == "bigint":
+        return statements
+    replacements = (
+        ("knowledge_item_id BIGINT NOT NULL", "knowledge_item_id BIGINT UNSIGNED NOT NULL"),
+        ("item_id BIGINT NOT NULL", "item_id BIGINT UNSIGNED NOT NULL"),
+    )
+    return [_replace_statement_types(statement, replacements) for statement in statements]
+
+
+def _knowledge_item_identifier_type(snapshot: Mapping[str, Any]) -> str:
+    columns = {
+        (str(row.get("table_name")), str(row.get("column_name"))): row
+        for row in snapshot.get("columns", ())
+    }
+    row = columns.get(("knowledge_items", "id"))
+    if row is None:
+        return "bigint"
+    column_type = _normalize_column_type_contract(row.get("column_type"))
+    if column_type in {"bigint", "bigint unsigned"}:
+        return column_type
+    raise UpgradeBlocked("knowledge_items.id type is not a supported legacy shape")
+
+
+def _replace_statement_types(
+    statement: str,
+    replacements: tuple[tuple[str, str], ...],
+) -> str:
+    for source, target in replacements:
+        statement = statement.replace(source, target)
+    return statement
 
 
 def apply_schema(
@@ -2855,6 +3315,11 @@ def apply_schema(
     candidate_identity = server_identity(config, candidate)
     if candidate_identity["server"] != plan["source"]["server"]:
         raise UpgradeBlocked("candidate is on a different server")
+    rebuild_plan = plan.get("legacy_knowledge_empty_rebuild") or {}
+    if rebuild_plan.get("eligible") is True:
+        _rebuild_empty_legacy_knowledge_candidate(
+            config, candidate, existing_receipt, operation_receipt_path
+        )
     before = _schema_snapshot(config, candidate)
     states = _owned_classification(before)
     preapply_states = _owned_classification(
@@ -3005,6 +3470,106 @@ def apply_schema(
     )
 
 
+# Kept together so the destructive candidate-only rebuild and receipt stay atomic to audit.
+def _rebuild_empty_legacy_knowledge_candidate(
+    config: DatabaseConfig | SeparateDatabaseConfig,
+    candidate: str,
+    receipt: dict[str, Any],
+    receipt_path: Path,
+) -> None:
+    snapshot = _schema_snapshot(config, candidate)
+    if _legacy_knowledge_schema_state(snapshot) != "exact":
+        states = _owned_classification(snapshot)
+        if all(
+            states.get(part) == "exact"
+            for part in (
+                "148_knowledge_retrieval.sql",
+                "163_knowledge_runtime.sql",
+            )
+        ):
+            receipt["legacy_knowledge_empty_rebuild"] = {
+                "status": "exact_replay",
+                "candidate_schema_sha256": snapshot["sha256"],
+            }
+            write_receipt(receipt_path, receipt)
+            return
+        raise UpgradeBlocked(
+            "candidate legacy Knowledge fingerprint changed before rebuild"
+        )
+    evidence = _table_evidence(config, candidate)
+    rebuild_plan = _legacy_knowledge_rebuild_plan(snapshot, evidence)
+    preserved_before = {
+        table: evidence[table]
+        for table in sorted(LEGACY_KNOWLEDGE_PRESERVED_TABLES)
+    }
+    parts = {
+        path.name: path
+        for path in SCHEMA_PARTS
+        if path.name in {
+            "148_knowledge_retrieval.sql", "163_knowledge_runtime.sql",
+        }
+    }
+    if set(parts) != {
+        "148_knowledge_retrieval.sql", "163_knowledge_runtime.sql",
+    }:
+        raise UpgradeBlocked("canonical Knowledge schema parts are unavailable")
+    rebuild = {
+        "status": "prepared",
+        "contract": rebuild_plan["contract"],
+        "before_schema_sha256": snapshot["sha256"],
+        "tables": list(LEGACY_KNOWLEDGE_DROP_ORDER),
+        "preserved_tables": sorted(LEGACY_KNOWLEDGE_PRESERVED_TABLES),
+        "preserved_before": preserved_before,
+        "prepared_at": _now(),
+    }
+    receipt.update(status="partial", phase="legacy_knowledge_rebuild")
+    receipt["legacy_knowledge_empty_rebuild"] = rebuild
+    write_receipt(receipt_path, receipt)
+    connection = config.connect(candidate)
+    try:
+        with connection.cursor() as cursor:
+            for table in LEGACY_KNOWLEDGE_DROP_ORDER:
+                if table in LEGACY_KNOWLEDGE_PRESERVED_TABLES:
+                    continue
+                cursor.execute(f"DROP TABLE IF EXISTS `{table}`")
+            for part_name in (
+                "148_knowledge_retrieval.sql",
+                "163_knowledge_runtime.sql",
+            ):
+                for statement in split_sql(
+                    parts[part_name].read_text(encoding="utf-8")
+                ):
+                    cursor.execute(statement)
+    finally:
+        connection.close()
+    after = _schema_snapshot(config, candidate)
+    states = _owned_classification(after)
+    if any(
+        states.get(part) != "exact"
+        for part in (
+            "148_knowledge_retrieval.sql", "163_knowledge_runtime.sql",
+        )
+    ):
+        rebuild.update(status="failed", owned_objects=states)
+        write_receipt(receipt_path, receipt)
+        raise UpgradeBlocked("rebuilt Knowledge schema is not exact")
+    preserved_after = {
+        table: _table_evidence(config, candidate)[table]
+        for table in sorted(LEGACY_KNOWLEDGE_PRESERVED_TABLES)
+    }
+    if preserved_after != preserved_before:
+        rebuild.update(status="failed", preserved_after=preserved_after)
+        write_receipt(receipt_path, receipt)
+        raise UpgradeBlocked("preserved Knowledge request/job data changed")
+    rebuild.update(
+        status="completed",
+        after_schema_sha256=after["sha256"],
+        preserved_after=preserved_after,
+        completed_at=_now(),
+    )
+    write_receipt(receipt_path, receipt)
+
+
 def _run_project_python(
     arguments: list[str],
     *,
@@ -3019,6 +3584,8 @@ def _run_project_python(
             "DB_USER": config.user,
             "DB_PASSWORD": config.password,
             "DB_DATABASE": database,
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONUTF8": "1",
         }
     )
     completed = subprocess.run(
@@ -3027,17 +3594,19 @@ def _run_project_python(
         env=environment,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
         check=False,
     )
     if completed.returncode != 0:
         raise UpgradeBlocked(
             f"candidate migration failed: {Path(arguments[0]).name}"
         )
+    try:
+        stdout_text = completed.stdout.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise UpgradeBlocked("candidate migration stdout is not UTF-8") from error
     last_line = next(
         (
-            line for line in reversed(completed.stdout.splitlines())
+            line for line in reversed(stdout_text.splitlines())
             if line.strip().startswith("{")
         ),
         "",
@@ -3045,11 +3614,11 @@ def _run_project_python(
     try:
         payload = json.loads(last_line)
     except json.JSONDecodeError:
-        payload = {"stdout_sha256": _sha256_bytes(completed.stdout.encode())}
+        payload = {"stdout_sha256": _sha256_bytes(completed.stdout)}
     return {
         "exit_code": completed.returncode,
         "result": payload,
-        "stderr_sha256": _sha256_bytes(completed.stderr.encode()),
+        "stderr_sha256": _sha256_bytes(completed.stderr),
     }
 
 
@@ -3144,6 +3713,10 @@ def run_candidate_post_schema(
         config=candidate_config,
         database=candidate,
     )
+    contract_migration = "scripts/migrate_order_contract_identity.py"
+    contract_apply = _run_project_python(
+        [contract_migration], config=candidate_config, database=candidate
+    )
     view_migration = "scripts/migrate_order_details_lifecycle_version_view.py"
     view_dry = _run_project_python(
         [view_migration], config=candidate_config, database=candidate
@@ -3162,6 +3735,7 @@ def run_candidate_post_schema(
             "plan_sha256": _sha256_file(plan),
             "receipt_sha256": _sha256_file(backfill_receipt),
         },
+        contract_identity=contract_apply,
         view={"dry_run": view_dry, "apply": view_apply},
     )
     write_receipt(operation_receipt_path, receipt)
@@ -3366,11 +3940,19 @@ def _table_projection_evidence(
     database: str,
     table: str,
     columns: list[str],
+    *,
+    column_sources: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    sources = dict(column_sources or {})
     if (
         not IDENTIFIER.fullmatch(table)
         or not columns
         or any(not IDENTIFIER.fullmatch(name) for name in columns)
+        or any(
+            not IDENTIFIER.fullmatch(name)
+            for name in (*sources.keys(), *sources.values())
+        )
+        or not set(sources).issubset(columns)
     ):
         raise UpgradeBlocked("preserved table projection is invalid")
     connection = config.connect(database)
@@ -3385,13 +3967,17 @@ def _table_projection_evidence(
                 _normalized_row(row)["column_name"]
                 for row in cursor.fetchall()
             }
-            missing = set(columns) - available
+            actual_columns = [sources.get(name, name) for name in columns]
+            missing = set(actual_columns) - available
             if missing:
                 raise UpgradeBlocked(
                     f"candidate {table} lost legacy columns: "
                     + ",".join(sorted(missing))
                 )
-            projection = ",".join(f"`{name}`" for name in columns)
+            projection = ",".join(
+                f"`{sources.get(name, name)}` AS `{name}`"
+                for name in columns
+            )
             cursor.execute(
                 "SELECT column_name FROM information_schema.key_column_usage "
                 "WHERE table_schema=%s AND table_name=%s "
@@ -3503,9 +4089,23 @@ def _verify_orders_preservation(
     before = _table_projection_evidence(
         config, source, "orders", source_columns
     )
-    after = _table_projection_evidence(
-        config, candidate, "orders", source_columns
+    renamed_columns = (
+        {"contract_id": "contract_identity"}
+        if "contract_id" in source_columns
+        else None
     )
+    if renamed_columns is None:
+        after = _table_projection_evidence(
+            config, candidate, "orders", source_columns
+        )
+    else:
+        after = _table_projection_evidence(
+            config,
+            candidate,
+            "orders",
+            source_columns,
+            column_sources=renamed_columns,
+        )
     if after != before:
         raise UpgradeBlocked("orders legacy data changed")
     return after
@@ -3580,25 +4180,88 @@ def verify_candidate(
     source_data = _table_evidence(config, source)
     candidate_snapshot = _schema_snapshot(config, candidate)
     candidate_data = _table_evidence(config, candidate)
+    legacy_rebuild = receipt.get("legacy_knowledge_empty_rebuild") or {}
+    rebuilt_empty_knowledge = legacy_rebuild.get("status") in {
+        "completed", "exact_replay",
+    }
+    backfill_verify = ((receipt.get("backfill") or {}).get("verify") or {})
+    backfill_result = backfill_verify.get("result") or {}
+    verified_lifecycle_backfill = (
+        backfill_verify.get("exit_code") == 0
+        and backfill_result.get("mode") == "verify"
+        and int(backfill_result.get("review_required", -1)) == 0
+    )
     additive_projection_preservation: dict[str, Any] = {}
     for table, evidence in source_data.items():
         actual = candidate_data.get(table)
         if not actual:
+            if (
+                table in INTENTIONALLY_RETIRED_EMPTY_TABLES
+                and int(evidence.get("count", 0)) == 0
+            ):
+                additive_projection_preservation[table] = {
+                    "mode": "reviewed_empty_table_retirement",
+                    "row_count": 0,
+                }
+                continue
             raise UpgradeBlocked(f"preserved table is missing: {table}")
         if (
             actual.get("count") != evidence.get("count")
             or actual.get("primary_key_sha256")
             != evidence.get("primary_key_sha256")
         ):
-            raise UpgradeBlocked(f"preserved table changed: {table}")
+            if not (
+                verified_lifecycle_backfill
+                and table in DECLARED_LIFECYCLE_BACKFILL_TABLES
+            ):
+                raise UpgradeBlocked(f"preserved table changed: {table}")
+            additive_projection_preservation[table] = {
+                "mode": "verified_declared_lifecycle_backfill",
+                "source": evidence,
+                "candidate": actual,
+            }
+            continue
+        if (
+            rebuilt_empty_knowledge
+            and table in LEGACY_KNOWLEDGE_REBUILD_TABLES
+        ):
+            if int(evidence.get("count", 0)) != 0:
+                raise UpgradeBlocked(
+                    "legacy Knowledge rebuild receipt contains nonempty data"
+                )
+            additive_projection_preservation[table] = {
+                "mode": "reviewed_empty_schema_rebuild",
+                "row_count": 0,
+            }
+            continue
+        if (
+            rebuilt_empty_knowledge
+            and table in LEGACY_KNOWLEDGE_PRESERVED_TABLES
+            and actual != evidence
+        ):
+            raise UpgradeBlocked(
+                f"preserved Knowledge request/job data changed: {table}"
+            )
         source_columns = _table_columns(source_snapshot, table)
         candidate_columns = _table_columns(candidate_snapshot, table)
         has_additive_columns = source_columns != candidate_columns
+        has_contract_identity_rename = (
+            table == "orders"
+            and "contract_id" in source_columns
+            and "contract_identity" in candidate_columns
+        )
         has_knowledge_identity_backfill = (
             table == "knowledge_items"
             and source_objects.get("163_knowledge_runtime.sql") == "partial"
         )
-        if has_additive_columns:
+        has_legacy_system_alert_migration = (
+            table == "system_alerts" and source_alert_state == "absent"
+        )
+        if (
+            has_additive_columns
+            and not has_contract_identity_rename
+            and not has_legacy_system_alert_migration
+        ):
             additive_projection_preservation[table] = (
                 _verify_source_column_projection_preserved(
                     config,
@@ -3624,7 +4287,13 @@ def verify_candidate(
             and not has_knowledge_identity_backfill
             and actual.get("checksum") != evidence.get("checksum")
         ):
-            raise UpgradeBlocked(f"preserved table checksum changed: {table}")
+            # ALTER TABLE can legitimately change MySQL's physical checksum without
+            # changing a preserved row (for example, an enum extension).
+            additive_projection_preservation[table] = (
+                _verify_source_column_projection_preserved(
+                    config, source, candidate, table, source_snapshot
+                )
+            )
     system_alert_preservation = (
         _verify_legacy_system_alert_rows(config, source, candidate)
         if source_alert_state == "absent"

@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: Global Migration / LINE
 priority: P0
@@ -38,3 +38,24 @@ priority: P0
 3. disposable MySQL 能建立 185 客服與 186 身分管理物件。
 4. 開發者更新後，兩個 API 不再因缺表回 HTTP 500。
 5. 代表性舊 DB 將 186 列為 resumable；未知欄位型別仍 fail closed。
+
+## 結案裁決
+
+2026-08-13 使用者明確指定以「程式修復與遠端發布」作為本 Work Package 的結案條件。
+commit `4b15934d` 已推送至 `main`，focused regression 與 disposable MySQL 候選升級均通過。
+實際開發者 DB 更新仍未執行，維持獨立 operator acceptance，不構成此程式修復結案的阻塞條件。
+
+## 2026-08-13 本機 candidate 實證補充
+
+本機 preserve-data candidate 顯示 catalog 曾將 stage13 的 179 排在 stage12 的 186 之前；179 需要
+`line_identity_revocation_requests`，但該 table 是 186 才建立，MySQL 因 table 不存在 fail closed。
+本 Work Package 重新開啟，將 canonical manifest 順序修正為 `186 → 179`，再完成新的 candidate engine evidence。
+
+186 擴充既有事件 enum 時，MySQL `CHECKSUM TABLE` 會因實體表重建而改變，即使既有列完全不變。
+驗證器遇此情形改以 source-column projection、列數與 primary key hash 驗證資料不變；projection 不同仍 fail closed。
+
+## 2026-08-13 開發者驗收完成
+
+Docker MySQL 8.0 的 `lu_test_dataset_contract_signing_v4` 已完成 source dump → candidate → schema／backfill
+→ preserved-data verify → 同名替換。replacement receipt 與 rollback dump 位於
+`scratch/local_database_updates/lu_test_dataset_contract_signing_v4_local_20260813133057/`。

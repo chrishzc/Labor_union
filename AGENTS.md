@@ -2,6 +2,15 @@
 
 本檔案是本專案所有 AI Agent 與自動化程式修改工作的根層規範。所有 Agent 進入工作區後都必須先讀本檔，再讀任務範圍內的正式規格與相鄰文件。
 
+每個新任務讀完本檔後，必須再完整讀取 `.agents/AGENTS.md`，其中保存使用者個人的互動、
+計畫與 Git 操作習慣，不得把其內容合併回本檔。若該檔不存在或無法以 strict UTF-8 解碼，
+必須先告知使用者，不得靜默略過。同一任務內若檔案內容及 HEAD 均未改變，不必重複載入；
+切換分支、更新 HEAD 或檔案變更後必須重讀。
+
+`.agents/`、`history/git_PR.md`、`history/git_PR.md.example` 及其他已被 Git 忽略的個人檔案屬
+使用者本機成果。不得 stage、commit、push、覆蓋、搬移、清理或刪除；fetch、pull、merge 與
+分支操作也必須保留這些檔案。
+
 本專案不使用 ADAD Task、Checkpoint、Source Lock、system map gate 或 ADAD 工具。legacy `system_map*.md`、`system_map*.yaml`、`scripts_map.md`、`checkpoints/` 與 `history/` 僅供歷史追溯，不是 SSOT、代辦系統、授權或實作 gate。
 
 ## 1. 開工順序與權威來源

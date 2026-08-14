@@ -1,3 +1,8 @@
+"""
+File: test_line_customer_service_first_release.py
+Description: 驗證客服首版與 Rich Menu 的 canonical LIFF 入口契約。
+"""
+
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -109,6 +114,17 @@ def test_service_help_accepts_rulebook_progress_alias_and_uses_approved_copy():
     assert "實際金額以工會確認結果為準" in unit_of_work.delivery_tasks.requests[1].payload_json
 
 
+def test_service_registration_text_returns_the_non_expiring_liff_entrypoint(monkeypatch):
+    monkeypatch.setenv("LINE_LIFF_ID", "1234567890-AbCdEf")
+    unit_of_work = _unit_of_work()
+    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
+
+    handled = application.handle(_inbox("event-registration"), unit_of_work, LineUserId("U123456789"), "服務登記")
+
+    assert handled is True
+    assert "https://liff.line.me/1234567890-AbCdEf?target=registration" in unit_of_work.delivery_tasks.requests[0].payload_json
+
+
 def test_unbound_progress_creates_a_canonical_customer_binding_flow():
     unit_of_work = _unit_of_work()
     unit_of_work.identity_flows = _IdentityFlows()
@@ -209,7 +225,7 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     menu = (PROJECT_ROOT / "config/line_menu.json").read_text(encoding="utf-8")
     identity = (PROJECT_ROOT / "line/static/identity.html").read_text(encoding="utf-8")
     staff_orders = (PROJECT_ROOT / "line/static/staff_order_search.html").read_text(encoding="utf-8")
-    assert '"text": "服務登記"' in menu
+    assert '"uri": "?target=registration"' in menu
     assert '"text": "服務說明"' in menu
     assert "?target=staff_order_search" in menu
     assert "?target=staff_schedule" in menu
