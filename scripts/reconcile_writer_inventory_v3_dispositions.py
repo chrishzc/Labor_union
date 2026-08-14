@@ -13,6 +13,9 @@ EVIDENCE = ROOT / "document" / "架構重整" / "03_追蹤清單與證據" / "ev
 CANDIDATE = EVIDENCE / "writer_inventory_v3_candidate.findings.jsonl"
 RECORDS = EVIDENCE / "writer_inventory_v3_disposition.records.jsonl"
 MANIFEST = EVIDENCE / "writer_inventory_v3_disposition.manifest.json"
+REVIEW_REFRESH_PATHS = frozenset(
+    {"infrastructure/mysql/admin_capability_grant_repository.py"}
+)
 
 
 def _load(path: Path) -> list[dict[str, object]]:
@@ -43,8 +46,9 @@ def _review(record: dict[str, object]) -> tuple[str, str, str, str]:
 def _current_runtime_review(path: str) -> tuple[str, str, str, str] | None:
     metadata = {
         "infrastructure/mysql/admin_capability_grant_repository.py": (
-            "access_control", "typed capability-grant Apply transaction",
-            "api/routes/capability_grants.py", "retain_canonical:grant event, session revocation, receipt, and authorization version share one Access Control transaction",
+            "access_control", "retired legacy capability-grant transaction",
+            "no runtime caller; capability-grant routes return HTTP 410",
+            "migrate_then_remove:equal business access no longer consumes per-user grants; physical schema retirement requires a separate approved migration",
         ),
         "infrastructure/mysql/anomaly_registry_repository.py": (
             "anomalies", "typed anomaly workflow transaction",
@@ -305,6 +309,7 @@ def main() -> int:
         if (
             identity not in existing
             or existing[identity].get("final_disposition") == "needs_decision"
+            or str(candidate["relative_path"]) in REVIEW_REFRESH_PATHS
             or identity.startswith(("services/", "line/line_bot.py:"))
         ):
             existing[identity] = _disposition(candidate)

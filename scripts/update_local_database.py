@@ -239,7 +239,7 @@ def rollback_source(
 ) -> None:
     recreate_database(config, source)
     restore_dump(
-        config, source, dump_path, mysql_container=mysql_container
+        config, source, dump_path, **_container_argument(mysql_container)
     )
     if migration._table_evidence(config, source) != expected_data:
         raise LocalDatabaseUpdateError("automatic rollback data verification failed")
@@ -279,7 +279,7 @@ def replace_source_database(
             config,
             source,
             paths["candidate_dump"],
-            mysql_container=mysql_container,
+            **_container_argument(mysql_container),
         )
         verification = verify_replacement(config, source, candidate)
     except Exception:
@@ -289,7 +289,7 @@ def replace_source_database(
             paths["dump"],
             expected_source_data,
             expected_schema_sha256,
-            mysql_container=mysql_container,
+            **_container_argument(mysql_container),
         )
         receipt.update(status="rolled_back")
         migration.write_receipt(paths["replacement"], receipt)
@@ -318,7 +318,7 @@ def apply_update(
         source,
         paths["dump"],
         paths["backup"],
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
     )
     migration.restore_candidate(
         config,
@@ -327,7 +327,7 @@ def apply_update(
         paths["dump"],
         paths["backup"],
         paths["operation"],
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
     )
     migration.apply_schema(
         config,
@@ -335,7 +335,7 @@ def apply_update(
         candidate,
         paths["plan"],
         paths["operation"],
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
         allowed_partial_artifacts=LOCAL_RESUMABLE_PARTIAL_ARTIFACTS,
     )
     migration.verify_candidate(config, source, candidate, paths["operation"])
@@ -344,14 +344,14 @@ def apply_update(
         candidate,
         paths["candidate_dump"],
         paths["candidate_backup"],
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
     )
     replacement = replace_source_database(
         config,
         source,
         candidate,
         paths,
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
     )
     return {
         "status": "completed",
@@ -363,6 +363,12 @@ def apply_update(
         "environment_file_unchanged": str(environment_file),
         "restart_required": True,
     }
+
+
+def _container_argument(mysql_container: str | None) -> dict[str, str]:
+    if mysql_container is None:
+        return {}
+    return {"mysql_container": mysql_container}
 
 
 def update_local_database(

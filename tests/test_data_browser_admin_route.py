@@ -36,7 +36,7 @@ def test_admin_router_get_without_session_returns_401(monkeypatch):
     assert response.json()["detail"] == "缺少有效的管理員 Session"
 
 
-def test_admin_router_rejects_insufficient_formal_role(monkeypatch):
+def test_admin_router_allows_any_authenticated_enabled_internal_role(monkeypatch):
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
     monkeypatch.setattr(admin_auth, "get_admin_session", lambda _token: _principal("line_manager"))
@@ -46,8 +46,7 @@ def test_admin_router_rejects_insufficient_formal_role(monkeypatch):
         headers=_headers(),
     )
 
-    assert response.status_code == 403
-    assert response.json()["detail"] == "缺少必要能力：system.administration"
+    assert response.status_code == 200
 
 
 def test_patch_is_retired_and_redirects_to_owning_domain():

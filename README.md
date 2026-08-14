@@ -147,6 +147,9 @@ document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 e
 APP_ENV=development
 ENABLE_ADMIN_AUTH=false
 LEGACY_SHARED_KEY=<本機專用的長隨機字串>
+# 手動分別啟動 API／Worker 時，各 process 必須共用；用 launcher 時會自動產生且不寫檔。
+INTERNAL_SERVICE_SHARED_KEY=<至少 32 字元的本機專用隨機字串>
+INTERNAL_API_BASE_URL=http://127.0.0.1:8000
 ```
 
 `ENABLE_ADMIN_AUTH=false` 只適用於 development／dev／local／test；`LEGACY_SHARED_KEY` 仍會驗證。
@@ -167,11 +170,37 @@ docker compose up -d
 
 # Durable Job Worker
 .\.venv\Scripts\python.exe scripts/run_durable_job_worker.py
+
+# Incident／anomaly／audit-retention Worker
+.\.venv\Scripts\python.exe scripts/run_incident_worker.py
+
+# Runtime Monitor
+.\.venv\Scripts\python.exe scripts/run_service_monitor.py
 ```
 
+Worker 與 Monitor 都只呼叫 authenticated Private Operations API；啟動後會主動移除從父 process
+繼承的 DB credential。MySQL 連線只存在 FastAPI process。Private endpoints 不列入 OpenAPI。
+local/test 使用至少 32 字元 shared key；production 固定使用 Google-signed OIDC ID token，並精確
+驗證 Private API audience、caller service name 與 service-account allowlist，不接受 shared-key fallback。
+Worker 會上報自身 instance／PID／hostname／release，API 不會用自己的 process identity 冒充 Worker。
+
+Cloud Run 環境至少設定：
+
+```env
+APP_ENV=production
+INTERNAL_SERVICE_AUTH_MODE=google_oidc
+INTERNAL_API_BASE_URL=https://<private-api-service-url>
+INTERNAL_SERVICE_OIDC_AUDIENCE=https://<private-api-service-url>
+INTERNAL_SERVICE_OIDC_ALLOWED_CALLERS=durable-job-worker=<durable-sa>,incident-worker=<incident-sa>,line-worker=<line-sa>,runtime-monitor=<monitor-sa>
+INTERNAL_API_MAX_ATTEMPTS=3
+```
+
+各 caller service account 仍須由部署者只授予目標 Private API 的 Cloud Run Invoker；本輪只交付程式
+契約，不建立 IAM、Cloud Run、網路、Dockerfile 或 image。
+
 [`scripts/launchers/start_local_development.bat`](scripts/launchers/start_local_development.bat)
-是 Windows 本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控與互動式 Durable Job
-Worker，但**不會**自動套用資料庫 schema。所有 operator-facing 腳本、用途與退役對照見
+是 Windows 本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控、Durable Job Worker
+與 Incident Worker，但**不會**自動套用資料庫 schema。所有 operator-facing 腳本、用途與退役對照見
 [`scripts/launchers/README.md`](scripts/launchers/README.md)。Durable Job Worker 主機 supervision 目前依
 人工裁決暫緩；只保留既有排程任務的 recovery 查詢與解除安裝：
 

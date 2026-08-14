@@ -5,50 +5,35 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from api.dependencies.admin_auth import require_system_admin
 from api.schemas.base import BaseResponse
 from api.schemas.capability_grants import CapabilityGrantApplyBody, CapabilityGrantReceiptView
-from infrastructure.mysql.admin_capability_grant_repository import (
-    CapabilityGrantCommand,
-    CapabilityGrantError,
-    access_policy_overview,
-    apply_capability_grant,
-    list_admin_access_accounts,
-    list_active_capability_grants,
-)
 from subsystems.access.authentication_session import AdminPrincipal
 
 
 router = APIRouter(prefix="/api/v1/admin/capability-grants", tags=["Capability Grants"])
 
 
-@router.get("/policy/overview", response_model=BaseResponse[dict])
-def policy_overview(_: AdminPrincipal = Depends(require_system_admin)):
-    return BaseResponse(data=access_policy_overview())
-
-
-@router.get("/accounts/list", response_model=BaseResponse[list[dict]])
-def list_accounts(_: AdminPrincipal = Depends(require_system_admin)):
-    return BaseResponse(data=list_admin_access_accounts())
-
-
 @router.get("/{admin_user_id}", response_model=BaseResponse[list[dict]])
 def list_grants(admin_user_id: int, _: AdminPrincipal = Depends(require_system_admin)):
-    return BaseResponse(data=list_active_capability_grants(admin_user_id))
+    del admin_user_id
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "capability_grants_retired",
+            "replacement": "All authenticated enabled internal users have equal business access.",
+        },
+    )
 
 
 @router.post("/apply", response_model=BaseResponse[CapabilityGrantReceiptView])
-def apply_grant(body: CapabilityGrantApplyBody, request: Request, actor: AdminPrincipal = Depends(require_system_admin)):
-    try:
-        receipt = apply_capability_grant(CapabilityGrantCommand(**body.model_dump()), actor)
-    except CapabilityGrantError as error:
-        raise HTTPException(status_code=_status_for(error.code), detail=error.code) from error
-    request.state.audit_action = f"access.capability.{body.action}"
-    request.state.audit_resource_type = "admin_capability_grant"
-    request.state.audit_resource_id = str(body.target_admin_user_id)
-    return BaseResponse(data=CapabilityGrantReceiptView(**receipt))
-
-
-def _status_for(code: str) -> int:
-    if code in {"admin_version_conflict", "idempotency_conflict", "last_system_admin_protected", "capability_grant_not_active"}:
-        return 409
-    if code in {"unknown_capability", "grant_command_invalid", "grant_expiry_required"}:
-        return 422
-    return 404 if code == "admin_user_not_active" else 403
+def apply_grant(
+    body: CapabilityGrantApplyBody,
+    request: Request,
+    actor: AdminPrincipal = Depends(require_system_admin),
+):
+    del body, request, actor
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "capability_grants_retired",
+            "replacement": "All authenticated enabled internal users have equal business access.",
+        },
+    )

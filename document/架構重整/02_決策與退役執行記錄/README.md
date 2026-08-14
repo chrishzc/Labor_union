@@ -35,7 +35,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 
 > `29_` 原本被三份文件重複使用（無明確時間序，只能靠檔名區分），2026-08-07
 > 已重新編號為 `32`～`34`（依原檔名字母序指派，不代表已還原真實時間序）。
-> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `82`，下一個為 `83`）。
+> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `88`，下一個為 `89`）。
 
 > 注意：本表不是只保留字面上的 `in-progress`。仍需實作、等待 release／migration、保留人工操作
 > 邊界、缺少 completion evidence，或仍約束現行操作的文件都屬 active working set。作為目前缺口
@@ -50,3 +50,6 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 LINE 申請只建立待辦 evidence，正式排班仍由既有 leave-substitution Preview／Apply 擁有；目前尚未授權實作。
 | [84_Legacy_Knowledge_Empty_Schema_Recovery_Work_Package.md](84_Legacy_Knowledge_Empty_Schema_Recovery_Work_Package.md) | work-package | `in-progress` | exact 且九張 owned tables 全空的歷史 Knowledge schema，只在隔離 candidate 重建為 canonical 148／163。 |
 | [85_Client_Refund_Recipient_Snapshot_Local_Upgrade_Work_Package.md](85_Client_Refund_Recipient_Snapshot_Local_Upgrade_Work_Package.md) | work-package | `in-progress` | 將既有 canonical part 176 接入 successor release，修復本機 preserve-data DB 缺少退款 recipient snapshot schema。 |
+| [86_API_Only_DB_Runtime_Local_Readiness_Work_Package.md](86_API_Only_DB_Runtime_Local_Readiness_Work_Package.md) | work-package | `in-progress` | Worker／Monitor 改走 Private Operations API，MySQL 只允許 FastAPI process 接觸，先完成地端服務驗收。 |
+| [87_Cloud_Ready_Runtime_Supervision_Work_Package.md](87_Cloud_Ready_Runtime_Supervision_Work_Package.md) | work-package | `in-progress` | 補齊 Google OIDC service identity、caller heartbeat、API-side readiness 與 typed bounded retry；不建立 Dockerfile 或雲端資源。 |
+| [88_LINE_Staff_Self_Service_Merge_Repair_Work_Package.md](88_LINE_Staff_Self_Service_Merge_Repair_Work_Package.md) | work-package | `completed` | 合併 LINE 身分與月嫂自助功能，維持 API-only DB、durable delivery，並將 additive identity purpose 接入 canonical migration chain。 |

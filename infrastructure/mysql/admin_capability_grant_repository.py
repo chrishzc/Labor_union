@@ -11,11 +11,8 @@ from typing import Any, Literal
 from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.access.authentication_session import (
     CAPABILITY_REGISTRY,
-    ROLE_CAPABILITIES,
     AdminPrincipal,
-    capability_catalog,
     has_required_capability,
-    role_policy_matrix,
 )
 
 
@@ -74,55 +71,6 @@ def list_active_capability_grants(admin_user_id: int) -> list[dict[str, Any]]:
             return list(cursor.fetchall())
     finally:
         connection.close()
-
-
-def access_policy_overview() -> dict[str, Any]:
-    return {
-        "roles": role_policy_matrix(),
-        "capabilities": capability_catalog(),
-    }
-
-
-def list_admin_access_accounts() -> list[dict[str, Any]]:
-    connection = get_connection()
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT id, username, display_name, role, enabled,
-                       linked_line_user_id, authorization_version,
-                       last_login_at, created_at
-                FROM admin_users
-                ORDER BY enabled DESC, role DESC, id
-                """
-            )
-            accounts = [dict(row) for row in cursor.fetchall()]
-            cursor.execute(
-                """
-                SELECT admin_user_id, capability, effective_from, expires_at,
-                       granted_by_admin_user_id, reason
-                FROM admin_capability_grants
-                WHERE revoked_at IS NULL
-                  AND effective_from <= UTC_TIMESTAMP()
-                  AND (expires_at IS NULL OR expires_at > UTC_TIMESTAMP())
-                ORDER BY admin_user_id, capability
-                """
-            )
-            grants_by_user: dict[int, list[dict[str, Any]]] = {}
-            for row in cursor.fetchall():
-                grants_by_user.setdefault(int(row["admin_user_id"]), []).append(dict(row))
-    finally:
-        connection.close()
-
-    for account in accounts:
-        role = str(account["role"])
-        base = set(ROLE_CAPABILITIES.get(role, frozenset()))
-        grants = grants_by_user.get(int(account["id"]), [])
-        extras = {str(item["capability"]) for item in grants}
-        account["role_capabilities"] = sorted(base)
-        account["extra_grants"] = grants
-        account["effective_capabilities"] = sorted(base | extras)
-    return accounts
 
 
 def _validate_command(command: CapabilityGrantCommand, actor: AdminPrincipal) -> None:

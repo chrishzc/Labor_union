@@ -6,8 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from subsystems.access.integration_capabilities import integration_capabilities_for_role
-from subsystems.line.capabilities import line_capabilities_for_role
+from subsystems.access.authentication_session import AdminPrincipal
 from ui.api_clients.knowledge_retrieval_api_client import KnowledgeRetrievalApiClient
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 from ui.api_clients.runtime_health_api_client import RuntimeHealthApiClient
@@ -45,19 +44,15 @@ class _Response:
         return self._payload
 
 
-def test_effective_capabilities_keep_viewer_and_manager_scopes_distinct() -> None:
-    viewer = set(line_capabilities_for_role("line_viewer")) | set(
-        integration_capabilities_for_role("line_viewer")
-    )
-    manager = set(line_capabilities_for_role("line_manager")) | set(
-        integration_capabilities_for_role("line_manager")
-    )
+def test_effective_capabilities_are_equal_for_enabled_internal_users() -> None:
+    viewer = AdminPrincipal(1, "viewer", "Viewer", "line_viewer")
+    manager = AdminPrincipal(2, "manager", "Manager", "line_manager")
 
-    assert "line.monitor.read" in viewer
-    assert "knowledge.read" in viewer
-    assert "line.audit.read" not in viewer
-    assert "line.audit.read" in manager
-    assert "contract.evidence.manage" in manager
+    assert viewer.effective_capabilities() == manager.effective_capabilities()
+    assert "line.monitor.read" in viewer.effective_capabilities()
+    assert "knowledge.read" in viewer.effective_capabilities()
+    assert "line.audit.read" in viewer.effective_capabilities()
+    assert "contract.evidence.manage" in viewer.effective_capabilities()
 
 
 def test_domain_clients_use_bounded_api_routes_and_forward_operation_headers() -> None:

@@ -31,6 +31,15 @@ async def _run_retention_loop() -> None:
         await asyncio.sleep(_ARCHIVE_INTERVAL_SECONDS)
 
 
+def archive_due_security_audits_once() -> int:
+    """Archive all currently due pages and return the moved row count."""
+    archived_count = 0
+    while True:
+        moved_count = archive_expired_admin_audits()
+        archived_count += moved_count
+        if moved_count <= 0:
+            return archived_count
+
+
 def _archive_all_due_records() -> None:
-    while archive_expired_admin_audits() > 0:
-        pass
+    archive_due_security_audits_once()

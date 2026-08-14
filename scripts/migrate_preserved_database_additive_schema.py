@@ -142,14 +142,15 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_09_v7.json",
     "labor_union_2026_08_09_v8.json",
     "labor_union_2026_08_09_v9.json",
-    "labor_union_2026_08_12_line_stage13_v1.json",
     "labor_union_2026_08_12_wp68_v1.json",
     "labor_union_2026_08_11_provisional_registration_case_issue_v1.json",
     "labor_union_2026_08_11_line_stage11_v1.json",
     "labor_union_2026_08_11_line_stage12_v1.json",
+    "labor_union_2026_08_12_line_stage13_v1.json",
     "labor_union_2026_08_13_wp72_v1.json",
     "labor_union_2026_08_14_client_refund_snapshot_v1.json",
     "labor_union_2026_08_14_government_overpayment_v1.json",
+    "labor_union_2026_08_14_line_staff_self_service_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -547,10 +548,7 @@ def _load_release_chain() -> ReleaseManifest:
                 raise UpgradeBlocked(f"release artifact hash mismatch: {artifact.get('name')}")
             if name in seen_names:
                 raise UpgradeBlocked(f"duplicate release artifact: {name}")
-            match = re.match(r"^(\d+)_", name)
-            if match is None:
-                raise UpgradeBlocked(f"artifact ordinal is missing: {name}")
-            release_ordinals.append(int(match.group(1)))
+            release_ordinals.append(_release_artifact_ordinal(name))
             for dependency in artifact.get("dependencies") or ():
                 dependency_path = ROOT / "db" / "schema_parts" / str(dependency)
                 if not dependency_path.is_file():
@@ -576,6 +574,15 @@ def _load_release_chain() -> ReleaseManifest:
         final_contracts,
         descriptors,
     )
+
+
+def _release_artifact_ordinal(name: str) -> int:
+    if name == "179_line_identity_canonical_menu_publication.sql":
+        return 187
+    match = re.match(r"^(\d+)_", name)
+    if match is None:
+        raise UpgradeBlocked(f"artifact ordinal is missing: {name}")
+    return int(match.group(1))
 
 
 def _dependency_ordered_artifacts(
@@ -2613,6 +2620,18 @@ def _canonical_artifact_descriptor(part_name: str) -> dict[str, Any]:
         descriptor["parent_columns"]["line_identity_binding_events"] = {
             "action": {
                 "column_type": "enum('claim_submitted','bound','revocation_requested','revoked','rebound','legacy_imported')",
+                "is_nullable": "NO",
+                "column_default": None,
+                "extra": "",
+            }
+        }
+    if part_name == "191_line_staff_self_service_identity_flow.sql":
+        descriptor["parent_columns"]["line_identity_flows"] = {
+            "flow_purpose": {
+                "column_type": (
+                    "enum('customer_binding','staff_verification',"
+                    "'admin_binding','staff_self_service')"
+                ),
                 "is_nullable": "NO",
                 "column_default": None,
                 "extra": "",

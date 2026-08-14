@@ -1,0 +1,13 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "191_line_staff_self_service_identity_flow.sql": {
+      "tables": {
+        "line_identity_flows": [
+          "flow_purpose"
+        ]
+      },
+      "triggers": []
+    }
+  }
+}

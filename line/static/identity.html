@@ -128,11 +128,15 @@ async function openStaffPage(path) {
 
 async function openIdentityFlow(purpose) {
   await ensureLineIdToken();
+  const storageKey = `line-flow-idempotency:${purpose}`;
+  const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+  sessionStorage.setItem(storageKey, idempotencyKey);
   const response = await fetch("/api/v1/line/identity/flow/open", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       purpose,
+      idempotency_key: idempotencyKey,
       line_id_token: idToken,
       development_line_user_id: developmentLineUserId
     })
