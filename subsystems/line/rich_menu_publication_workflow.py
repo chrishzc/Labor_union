@@ -514,7 +514,9 @@ def build_line_action(action: dict[str, Any]) -> dict[str, str]:
             )
         suffix = (action.get("uri") or "").strip()
         uri = f"https://liff.line.me/{liff_id}"
-        if suffix.startswith(("?", "#")):
+        if suffix.startswith("?"):
+            uri += f"/{suffix}"
+        elif suffix.startswith("#"):
             uri += suffix
         return {"type": "uri", "uri": uri}
     return {"type": "uri", "uri": action["uri"]}

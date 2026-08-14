@@ -730,3 +730,20 @@
   與 authenticated `/internal/v1/runtime/check` 均成功，程序與測試 log 已停止／清除。
 - 本次未新增或修改任何 Dockerfile，未操作 schema、migration、既有 `union_db`／NAS DB，未建立或
   修改 Cloud Run、IAM、network 或其他雲端資源；待使用者地端測試後再進 Docker 封裝階段。
+
+## [2026-08-14] 合併 upstream/main 並修復 LINE 自助服務正式架構
+
+- 將 `upstream/main` `75e51b946f93f7fd091dae78757bf5a3714ba52c` 合併至 `cloud_run`，保留
+  本地 API-only DB runtime，並接入遠端 LINE staff self-service identity purpose、查單與班表功能。
+- 移除 `LineServiceHelpApplication` transaction 內直接呼叫 LINE Reply API 的路徑；所有回覆只先
+  建立 durable delivery task，由獨立 LINE Worker 在 commit 後透過 Private Operations API 消費。
+- 移除未經正式規格核准的 staff leave mutation／UI；identity flow open 改用 caller-provided
+  idempotency key。遠端新增的 per-user capability management 以 HTTP 410 退役，已驗證且啟用的
+  內部使用者維持相同 business access，development bypass 仍禁止 LINE provider publication。
+- 新增 additive schema part 191 與 successor release/descriptor；real MySQL preserve-data candidate
+  `1 passed`，本機 `union_db --require-current` 回報 release exact，故未執行 DB mutation。
+- 聚焦回歸 `68 passed`、`35 passed`、runtime boundary `15 passed`、writer inventory/boundary
+  `7 passed`；正式 launcher dry-run `ready`，受控全服務 smoke `passed`。
+- 完整 non-integration 為 `1992 passed, 81 skipped, 17 deselected, 4 failed`；剩餘四項是合併前
+  HEAD 已存在的 BreezeSign legacy-name audit 與受保護 validation receipt digest drift，未擅自
+  重產 protected validation assets。未 push、未建立 PR、未部署外部資源。

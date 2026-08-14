@@ -11,6 +11,7 @@ from api.routes import admin_auth, line_admin, line_rich_menus
 from api.schemas.admin_auth import AdminLoginRequest
 from subsystems.access import authentication_session
 from subsystems.access.authentication_session import (
+    CAPABILITY_REGISTRY,
     AdminPrincipal,
     AdminSessionSchemaError,
     authenticate_admin,
@@ -81,18 +82,18 @@ def test_development_bypass_cannot_publish_to_line(monkeypatch):
     assert "line.rich_menu.publish" not in principal.effective_capabilities()
 
 
-def test_capability_projection_uses_actual_principal_capabilities():
+def test_capability_projection_ignores_legacy_persisted_subsets():
     principal = AdminPrincipal(
-        None,
-        "development-bypass",
-        "開發模式管理員",
+        7,
+        "authenticated-user",
+        "已驗證內部使用者",
         "system_admin",
         capabilities=frozenset({"line.config.read"}),
     )
 
     response = line_admin.line_admin_capabilities(principal)
 
-    assert response.data["effective_capabilities"] == ["line.config.read"]
+    assert response.data["effective_capabilities"] == sorted(CAPABILITY_REGISTRY)
 
 
 def test_rich_menu_stale_preview_returns_typed_conflict():

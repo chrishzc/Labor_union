@@ -293,7 +293,13 @@ _PLATFORM_USER_SELECT_SQL = (
 _PLATFORM_USER_INSERT_SQL = (
     "INSERT INTO line_platform_users (line_user_id,friend_status,first_followed_at_utc,"
     "last_followed_at_utc,blocked_at_utc,last_event_at_utc,aggregate_version) "
-    "VALUES (%s,%s,%s,%s,%s,%s,%s)"
+    "VALUES (%s,%s,%s,%s,%s,%s,%s) "
+    "ON DUPLICATE KEY UPDATE friend_status=VALUES(friend_status),"
+    "first_followed_at_utc=VALUES(first_followed_at_utc),"
+    "last_followed_at_utc=VALUES(last_followed_at_utc),"
+    "blocked_at_utc=VALUES(blocked_at_utc),"
+    "last_event_at_utc=VALUES(last_event_at_utc),"
+    "aggregate_version=VALUES(aggregate_version)"
 )
 _PLATFORM_USER_UPDATE_SQL = (
     "UPDATE line_platform_users SET friend_status=%s,first_followed_at_utc=%s,"

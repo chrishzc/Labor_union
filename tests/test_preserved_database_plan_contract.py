@@ -28,6 +28,7 @@ def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
         "labor_union_2026_08_11_provisional_registration_case_issue_v1.json",
         "labor_union_2026_08_11_line_stage11_v1.json",
         "labor_union_2026_08_11_line_stage12_v1.json",
+        "labor_union_2026_08_14_line_staff_self_service_v1.json",
     }
 
     assert required_manifests <= set(runner.DEFAULT_RELEASE_MANIFESTS)
@@ -258,10 +259,10 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
 
 
-def test_release_catalog_includes_line_runtime_recovery_through_wp72() -> None:
+def test_release_catalog_includes_line_runtime_recovery_through_wp88() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-10:] == (
+    assert artifact_names[-11:] == (
         "165_anomaly_workflow_event_idempotency_widen.sql",
         "181_matching_service_date_confirmation.sql",
         "182_candidate_contact_pool.sql",
@@ -272,12 +273,33 @@ def test_release_catalog_includes_line_runtime_recovery_through_wp72() -> None:
         "188_matching_preferences_and_staff_availability.sql",
         "189_client_refund_recipient_snapshot_local_upgrade.sql",
         "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
+        "191_line_staff_self_service_identity_flow.sql",
     )
     assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     assert runner.RELEASE_MANIFEST.release_id == (
-        "labor-union-government-overpayment-2026-08-14-v1"
+        "labor-union-line-staff-self-service-2026-08-14-v1"
     )
+
+
+def test_line_staff_self_service_enum_uses_exact_parent_column_descriptor() -> None:
+    part = "191_line_staff_self_service_identity_flow.sql"
+    descriptor = runner._canonical_artifact_descriptor(part)
+
+    assert descriptor["tables"] == {}
+    assert descriptor["parent_columns"] == {
+        "line_identity_flows": {
+            "flow_purpose": {
+                "column_type": (
+                    "enum('customer_binding','staff_verification',"
+                    "'admin_binding','staff_self_service')"
+                ),
+                "is_nullable": "NO",
+                "column_default": None,
+                "extra": "",
+            }
+        }
+    }
 
 
 def test_client_refund_snapshot_successor_descriptor_is_complete() -> None:

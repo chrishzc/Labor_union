@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 class StaffLiffRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    flow_id: str = Field(default="", max_length=191)
     line_id_token: str = Field(default="", max_length=4096)
     development_line_user_id: str = Field(default="", max_length=191)
 

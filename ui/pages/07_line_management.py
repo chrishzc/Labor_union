@@ -56,9 +56,10 @@ def _login(client: LineAdminApiClient) -> None:
 
 
 ROLE_LABELS = {
-    "line_agent": "服務人員",
-    "line_manager": "LINE 主管",
-    "system_admin": "系統管理員",
+    "line_viewer": "只讀人員",
+    "line_agent": "一般職員",
+    "line_manager": "主管",
+    "system_admin": "老闆／系統管理者",
 }
 
 

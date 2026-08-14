@@ -496,8 +496,29 @@
     let refundPolicyAccepted = false;
     const developmentLineUserId = new URLSearchParams(location.search).get("userId") || "";
 
+    function liffStateParameters(parameters) {
+        const rawState = parameters.get("liff.state") || "";
+        const queryStart = rawState.indexOf("?");
+        const stateQuery = queryStart >= 0 ? rawState.slice(queryStart + 1) : rawState.replace(/^\//, "");
+        return new URLSearchParams(stateQuery);
+    }
+
+    function redirectIdentityEntryIfNeeded() {
+        const parameters = new URLSearchParams(location.search);
+        const stateParameters = liffStateParameters(parameters);
+        const purpose = parameters.get("purpose") || stateParameters.get("purpose") || "";
+        const flowId = parameters.get("flow_id") || stateParameters.get("flow_id") || "";
+        if (purpose !== "customer_binding" || !flowId) return false;
+        const target = new URL("/line-identity", location.origin);
+        target.searchParams.set("purpose", purpose);
+        target.searchParams.set("flow_id", flowId);
+        location.replace(target.toString());
+        return true;
+    }
+
     async function initializeLiff() {
         try {
+            if (redirectIdentityEntryIfNeeded()) return;
             const configRes = await fetch('/api/config/liff/runtime?page=registration');
             if (!configRes.ok) throw new Error('無法取得 LIFF 頁面設定');
             const appConfig = await configRes.json();

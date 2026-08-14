@@ -26,9 +26,6 @@ from infrastructure.http.private_operations_client import (
 )
 from subsystems.line.runtime_monitoring import RuntimeHealthObservation, RuntimeHealthStatus
 
-
-
-
 def main() -> int:
     discard_database_credentials()
     arguments = _arguments()

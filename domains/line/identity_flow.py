@@ -13,6 +13,7 @@ class LineIdentityFlowPurpose(StrEnum):
     CUSTOMER_BINDING = "customer_binding"
     STAFF_VERIFICATION = "staff_verification"
     ADMIN_BINDING = "admin_binding"
+    STAFF_SELF_SERVICE = "staff_self_service"
 
 
 class LineIdentityFlowStatus(StrEnum):
