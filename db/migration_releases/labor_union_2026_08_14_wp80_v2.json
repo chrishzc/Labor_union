@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-wp80-2026-08-14-v2",
+  "release_metadata": {
+    "release_name": "Labor Union WP80 Historical Order Adoption",
+    "application_version": "wp80-historical-order-adoption-v2",
+    "published_at": "2026-08-14",
+    "description": "Add immutable Historical Order Adoption receipts, pairing evidence, reviews and outbox"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "wp77-v2-or-later"
+  },
+  "artifacts": [
+    {
+      "name": "193_historical_order_adoption.sql",
+      "relative_path": "db/schema_parts/193_historical_order_adoption.sql",
+      "sha256": "e57c97dd6a0f14b28e6b9d2549ce2f8155aae2ff4321cb2ec23222e9c3855efb",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "code-rollback-preserve-historical-adoption-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "wp80-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["orders-historical-adoption-v1"],
+    "required_restart_targets": [],
+    "watcher_worker_compatibility": "not-applicable",
+    "post_cutover_smoke_ids": ["historical-order-adoption-preview"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_14_wp80_v2.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_14_wp80_v2.descriptors.json",
+    "sha256": "5f7b0b55808e3f00832ec26abadc28ee57e5cfc85e44d3890e9afd13b193b74b",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

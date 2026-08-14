@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-government-outbox-intent-type-repair-2026-08-14-v1",
+  "release_metadata": {
+    "release_name": "Government subsidy outbox intent type repair",
+    "application_version": "government-outbox-intent-type-repair-v1",
+    "published_at": "2026-08-14",
+    "description": "Restore the canonical government subsidy overpayment intent enum omitted by the applied bridge"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "government-overpayment-v1-or-later"
+  },
+  "artifacts": [
+    {
+      "name": "191_government_subsidy_outbox_intent_type_repair.sql",
+      "relative_path": "db/schema_parts/191_government_subsidy_outbox_intent_type_repair.sql",
+      "sha256": "ff1aa55b0758832d2c5941490fcdd0718afbe38d4db1708d54c7df964aab4f82",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "code-rollback-preserve-outbox-intent-values",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "government-outbox-intent-type-repair",
+      "phase": "post-schema",
+      "policy": "candidate-column-type-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["government-overpayment-v1"],
+    "required_restart_targets": [],
+    "watcher_worker_compatibility": "same-release-compatible",
+    "post_cutover_smoke_ids": ["accounts-payable-query"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_14_government_outbox_intent_type_repair_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_14_government_outbox_intent_type_repair_v1.descriptors.json",
+    "sha256": "442e4ba53d4cdb50075d7ba6de5337bf173be3b3c392af939494dfa46ae7e424",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: completed
+declared_status: in-progress
 date: 2026-08-14
 owner: Global Migration / Client Finance
 priority: P0
@@ -55,3 +55,11 @@ priority: P0
 ## Evidence
 
 - `../03_追蹤清單與證據/evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md`
+
+## 2026-08-14 integration successor repair
+
+原 part 189／190 release 與已套用 receipt 保持不可變。跨開發者合併確認 canonical part 169 的
+`government_subsidy_outbox.intent_type` ALTER 未包含在 part 190 bridge，因此另立 part 191 typed
+repair；舊 4-value enum 為待升級、目標 8-value enum 為 exact、其他型態固定 drift。WP77／WP80
+分別使用新的 part 192／193 與 v2 release identity，完成 engine 與 developer acceptance gate 前，
+本工作包重新標記為 `in-progress`，不得改寫原 completion receipt。
