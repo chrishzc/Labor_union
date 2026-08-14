@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from api.dependencies import internal_service_auth
 from api.dependencies import private_operations as private_operation_dependencies
 from api.dependencies.line_worker_operation import _heartbeat_from_caller
-from api.schemas.private_operations import WorkerRuntimeIdentity
+from api.schemas.private_operations import MonitorCycleRequest, WorkerRuntimeIdentity
 from api.routes import private_operations
 from infrastructure.http.private_operations_client import (
     PrivateOperationError,
@@ -447,6 +447,50 @@ def test_monitor_does_not_probe_api_internal_redis_or_storage() -> None:
     assert "MEDIA_STORAGE_ROOT" not in monitor_source
     assert "REDIS_URL" in api_source
     assert "MEDIA_STORAGE_ROOT" in api_source
+
+
+# Kept cohesive so the full transaction call order remains visible in one regression.
+def test_monitor_cycle_reuses_canonical_heartbeat_writer(monkeypatch) -> None:
+    calls = []
+    connection = SimpleNamespace(
+        begin=lambda: calls.append("begin"),
+        commit=lambda: calls.append("commit"),
+        rollback=lambda: calls.append("rollback"),
+        close=lambda: calls.append("close"),
+    )
+    monkeypatch.setattr(private_operation_dependencies, "get_connection", lambda: connection)
+    monkeypatch.setattr(
+        private_operation_dependencies,
+        "write_runtime_heartbeat",
+        lambda active_connection, identity, processed: calls.append(
+            (active_connection, identity.service_name, processed)
+        ),
+    )
+    monkeypatch.setattr(
+        private_operation_dependencies,
+        "MySqlRuntimeMonitorRepository",
+        lambda _connection: object(),
+    )
+    monkeypatch.setattr(private_operation_dependencies, "_redis_observation", lambda _now: object())
+    monkeypatch.setattr(private_operation_dependencies, "_media_storage_observation", lambda _now: object())
+    monkeypatch.setattr(private_operation_dependencies, "_database_observations", lambda *_args: [])
+    monkeypatch.setattr(private_operation_dependencies, "_record_observations", lambda *_args: 0)
+    request = MonitorCycleRequest(
+        runtime_identity=WorkerRuntimeIdentity.model_validate(
+            _runtime_identity("runtime-monitor")
+        ),
+        observations=(),
+    )
+
+    result = private_operation_dependencies.record_monitor_cycle(request)
+
+    assert result == (2, 0)
+    assert calls == [
+        "begin",
+        (connection, "runtime-monitor", 0),
+        "commit",
+        "close",
+    ]
 
 
 def test_api_media_readiness_does_not_create_missing_storage(monkeypatch, tmp_path) -> None:

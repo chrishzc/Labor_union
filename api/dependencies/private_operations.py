@@ -77,16 +77,8 @@ def record_monitor_cycle(request: MonitorCycleRequest) -> tuple[int, int]:
         now = datetime.now(timezone.utc)
         application_checks = (_redis_observation(now), _media_storage_observation(now))
         connection.begin()
+        write_runtime_heartbeat(connection, request.runtime_identity, 0)
         repository = MySqlRuntimeMonitorRepository(connection)
-        repository.record_heartbeat(
-            request.runtime_identity.service_name,
-            request.runtime_identity.instance_id,
-            request.runtime_identity.process_id,
-            request.runtime_identity.hostname,
-            "running",
-            _heartbeat_details(request.runtime_identity, 0),
-            now,
-        )
         observations = [
             *_external_observations(request),
             *_database_observations(connection, now),

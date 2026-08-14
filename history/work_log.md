@@ -747,3 +747,14 @@
 - 完整 non-integration 為 `1992 passed, 81 skipped, 17 deselected, 4 failed`；剩餘四項是合併前
   HEAD 已存在的 BreezeSign legacy-name audit 與受保護 validation receipt digest drift，未擅自
   重產 protected validation assets。未 push、未建立 PR、未部署外部資源。
+
+## [2026-08-14] Private Operations heartbeat CI lint 修復
+
+- 重現 GitHub Actions `Lint with flake8` 的 `F821 undefined name '_heartbeat_details'`；根因是
+  `record_monitor_cycle()` 在合併後直接呼叫另一模組的 private helper，卻未匯入。
+- Monitor cycle 改為呼叫 canonical `write_runtime_heartbeat()`，沿用同一 API-owned MySQL connection
+  與 outer transaction，不複製 heartbeat payload 規則，也不改變 Worker／Monitor API-only DB 邊界。
+- 新增 transaction call-order 回歸，修復後 `tests/test_private_runtime_operations.py` 為 `25 passed`；
+  CI blocking flake8 原命令回報 `0`，相關 Global runtime regression 為 `36 passed`，
+  `compileall` 與 `git diff --check` 通過。
+- 無 schema、migration、seed、backfill、DB 操作或外部服務 mutation。
