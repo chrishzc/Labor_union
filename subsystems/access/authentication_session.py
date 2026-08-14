@@ -40,6 +40,18 @@ ROLE_LEVELS = {
     "line_manager": 30,
     "system_admin": 40,
 }
+ROLE_DISPLAY_NAMES = {
+    "system_admin": "老闆／系統管理者",
+    "line_manager": "主管",
+    "line_agent": "一般職員",
+    "line_viewer": "只讀人員",
+}
+ROLE_DESCRIPTIONS = {
+    "system_admin": "所有頁面與功能皆可操作，可管理員工帳號、系統設定與高風險審核。",
+    "line_manager": "可處理多數營運與 LINE 管理工作，可審核資料異動與月嫂相關申請。",
+    "line_agent": "可處理日常客服、查詢資料與送出待審核作業，不可發布系統設定。",
+    "line_viewer": "僅可查詢與檢視，不可新增、修改、刪除或審核。",
+}
 
 CAPABILITY_REGISTRY = frozenset(
     {
@@ -92,6 +104,43 @@ CAPABILITY_REGISTRY = frozenset(
         "knowledge.answer.query",
     }
 )
+CAPABILITY_DISPLAY_NAMES = {
+    "line.identity.read": "LINE 身分檢視",
+    "line.identity.review": "LINE 身分審核",
+    "line.review.read": "待確認申請檢視",
+    "line.review.decide": "待確認申請決策",
+    "line.task.read": "LINE 任務檢視",
+    "line.task.control": "LINE 任務控制",
+    "line.menu.publish": "Rich Menu 發布",
+    "line.config.read": "LINE 設定檢視",
+    "line.config.manage": "LINE 設定管理",
+    "line.order_group.read": "訂單群組檢視",
+    "line.order_group.bind": "訂單群組綁定",
+    "line.monitor.read": "LINE 監控檢視",
+    "line.alert.manage": "LINE 警示管理",
+    "line.audit.read": "LINE 操作紀錄檢視",
+    "line.matching.read": "媒合檢視",
+    "line.matching.send": "媒合通知發送",
+    "line.matching.override": "媒合人工覆核",
+    "line.customer_service.read": "客服案件檢視",
+    "line.customer_service.handle": "客服案件處理",
+    "line.identity.binding.read": "LINE 綁定檢視",
+    "line.identity.binding.manage": "LINE 綁定管理",
+    "line.identity.binding.override": "LINE 綁定覆核",
+    "contract.evidence.read": "契約證據檢視",
+    "contract.evidence.manage": "契約證據管理",
+    "knowledge.read": "知識內容檢視",
+    "knowledge.manage": "知識內容管理",
+    "knowledge.publish": "知識內容發布",
+    "knowledge.reindex": "知識索引重建",
+    "admin.user.manage": "員工帳號管理",
+    "admin.session.revoke": "員工 Session 撤銷",
+    "admin.audit.read": "管理稽核檢視",
+    "data_browser.read": "資料表檢視",
+    "data_browser.write": "資料表修改",
+    "system.configuration.manage": "系統設定管理",
+    "system.administration": "最高系統權限",
+}
 
 LINE_VIEWER_CAPABILITIES = frozenset(
     {
@@ -126,6 +175,33 @@ ROLE_CAPABILITIES = {
     "line_manager": LINE_MANAGER_CAPABILITIES,
     "system_admin": CAPABILITY_REGISTRY,
 }
+
+
+def role_policy_matrix() -> list[dict[str, Any]]:
+    return [
+        {
+            "role": role,
+            "label": ROLE_DISPLAY_NAMES.get(role, role),
+            "level": ROLE_LEVELS[role],
+            "description": ROLE_DESCRIPTIONS.get(role, ""),
+            "capabilities": sorted(capabilities),
+        }
+        for role, capabilities in sorted(
+            ROLE_CAPABILITIES.items(),
+            key=lambda item: ROLE_LEVELS[item[0]],
+            reverse=True,
+        )
+    ]
+
+
+def capability_catalog() -> list[dict[str, str]]:
+    return [
+        {
+            "capability": capability,
+            "label": CAPABILITY_DISPLAY_NAMES.get(capability, capability),
+        }
+        for capability in sorted(CAPABILITY_REGISTRY)
+    ]
 
 
 class AdminSessionSchemaError(RuntimeError):

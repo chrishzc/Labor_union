@@ -5,6 +5,7 @@ Description: 將客服文字指令轉為可稽核的 LINE 回覆與長效 LIFF �
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 import os
 from typing import Callable
@@ -15,6 +16,7 @@ from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineReci
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
+from subsystems.line.delivery_contracts import LineProviderOutcomeType
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 
 
@@ -33,9 +35,11 @@ class LineServiceHelpApplication:
         self,
         now: Callable[[], datetime],
         identity_url: Callable[[str, str], str] | None = None,
+        reply_provider: object | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
+        self._reply_provider = reply_provider
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         normalized = text.strip()
@@ -49,7 +53,7 @@ class LineServiceHelpApplication:
             )
             return True
         if normalized == "服務說明":
-            self._enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu")
+            self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu")
             return True
         category = _category_for_text(normalized)
         if category is None:
@@ -70,7 +74,7 @@ class LineServiceHelpApplication:
             )
             payload = _text_payload(_TICKET_ACKNOWLEDGEMENTS[category])
             unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
-        self._enqueue(inbox, unit_of_work, line_user_id, payload, category.value)
+        self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, category.value)
 
     def _progress_payload(self, inbox, unit_of_work, line_user_id):
         context = unit_of_work.customer_service.latest_client_case(line_user_id.value)
@@ -101,6 +105,25 @@ class LineServiceHelpApplication:
             )
         )
 
+    def _reply_or_enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix):
+        reply_token = _reply_token(inbox)
+        if reply_token and self._reply_provider is not None:
+            outcome = self._reply_provider.reply(reply_token, payload)
+            if outcome.outcome_type is LineProviderOutcomeType.SUCCESS:
+                unit_of_work.audit.append(
+                    _reply_audit(
+                        suffix,
+                        line_user_id.value,
+                        outcome.provider_message_id.value if outcome.provider_message_id else "",
+                    )
+                )
+                return
+            unit_of_work.audit.append(
+                _reply_audit(suffix, line_user_id.value, outcome.error_code or "reply_failed")
+            )
+            return
+        self._enqueue(inbox, unit_of_work, line_user_id, payload, suffix)
+
 
 def _category_for_text(text):
     return next((category for category, aliases in _CATEGORY_ALIASES.items() if text in aliases), None)
@@ -113,6 +136,20 @@ def _event_key(inbox, suffix):
 def _ticket_audit(ticket_id, line_user_id):
     from subsystems.line.ports import LineAuditIntent
     return LineAuditIntent("customer_service.message.received", f"line:{line_user_id}", "customer_service_ticket", str(ticket_id))
+
+
+def _reply_audit(suffix, line_user_id, provider_message_id):
+    from subsystems.line.ports import LineAuditIntent
+    return LineAuditIntent("line.webhook.reply.sent", f"line:{line_user_id}", "line_reply", f"{suffix}:{provider_message_id or 'accepted'}")
+
+
+def _reply_token(inbox) -> str:
+    try:
+        payload = json.loads(inbox.event.payload_json)
+    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
+        return ""
+    token = payload.get("replyToken") if isinstance(payload, dict) else ""
+    return token.strip() if isinstance(token, str) else ""
 
 
 def _text_payload(text):
@@ -149,9 +186,80 @@ def _registration_reply(registration_url):
 
 
 def _service_menu_payload():
-    labels = ("服務流程", "收費與補助", "查詢服務進度", "修改登記資料", "聯絡工會人員", "其他問題")
-    buttons = [{"type": "button", "action": {"type": "message", "label": label, "text": label}, "style": "secondary", "height": "sm"} for label in labels]
-    return {"type": "flex", "altText": "請選擇服務說明項目", "contents": {"type": "bubble", "body": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": [{"type": "text", "text": "服務說明", "weight": "bold", "size": "xl"}, {"type": "text", "text": "請選擇想了解或需要協助的項目", "wrap": True, "color": "#627D98"}, *buttons]}}}
+    cards = (
+        ("服務流程", "了解登記、資料確認、月嫂媒合到簽約的完整流程。", "#1E3A8A"),
+        ("收費與補助", "查看服務費用、樓層費與補助資格的初步說明。", "#0F766E"),
+        ("查詢服務進度", "查詢已綁定案件的最新狀態與服務期間。", "#7C3AED"),
+        ("修改登記資料", "申請修正姓名、電話、地址、日期等登記內容。", "#BE123C"),
+        ("聯絡工會人員", "需要人工協助時，建立工會服務人員回覆需求。", "#B45309"),
+        ("其他問題", "不是以上分類時，留下問題讓工會人員協助確認。", "#475569"),
+    )
+    return {
+        "type": "flex",
+        "altText": "請選擇服務說明項目",
+        "contents": {
+            "type": "carousel",
+            "contents": [_service_help_card(*card) for card in cards],
+        },
+    }
+
+
+def _service_help_card(label, description, color):
+    return {
+        "type": "bubble",
+        "size": "micro",
+        "hero": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": color,
+            "height": "76px",
+            "justifyContent": "center",
+            "alignItems": "center",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": label,
+                    "weight": "bold",
+                    "size": "lg",
+                    "color": "#FFFFFF",
+                    "align": "center",
+                    "wrap": True,
+                }
+            ],
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": description,
+                    "size": "sm",
+                    "color": "#334155",
+                    "wrap": True,
+                    "maxLines": 4,
+                }
+            ],
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "height": "sm",
+                    "color": color,
+                    "action": {
+                        "type": "message",
+                        "label": "選擇",
+                        "text": label,
+                    },
+                }
+            ],
+        },
+    }
 
 
 _SERVICE_FLOW_REPLY = "服務流程如下：\n1. 完成服務登記。\n2. 工會確認資料與服務期程。\n3. 系統篩選可配合的月嫂。\n4. 月嫂同意接案後，工會提供資料給您確認。\n5. 雙方確認後，進入媒合與簽約流程。\n\n如您尚未登記，請點選下方「服務登記」。"

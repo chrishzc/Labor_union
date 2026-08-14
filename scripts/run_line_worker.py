@@ -167,7 +167,11 @@ def _canonical_runtime(worker_identity: str, poll_seconds: float):
                     MatchingNotificationApplication(open_line_unit_of_work, now)
                 ),
                 knowledge_question_scheduler=enqueue_line_knowledge_question,
-                service_help_application=LineServiceHelpApplication(now, _identity_flow_url),
+                service_help_application=LineServiceHelpApplication(
+                    now,
+                    _identity_flow_url,
+                    LineMessagingApiAdapter(_required_access_token()),
+                ),
                 menu_command_application=LineMenuCommandApplication(),
             ).registry()
         ),

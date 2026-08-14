@@ -42,6 +42,13 @@
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
 let lineIdToken = "";
+let flowId = "";
+let identityReady = false;
+
+async function captureLineIdentity() {
+  try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+  identityReady = Boolean(lineIdToken);
+}
 
 function showStatus(text, isError = false) {
   const box = document.getElementById("status");
@@ -96,18 +103,34 @@ function renderResults(items) {
 }
 
 async function init() {
+  const searchButton = document.getElementById("searchBtn");
+  searchButton.disabled = true;
+  searchButton.textContent = "正在確認 LINE 身分...";
+  const params = new URLSearchParams(location.search);
+  flowId = params.get("flow_id") || "";
   try {
-    const config = await fetch("/api/line/config").then(r => r.json());
+    const result = await fetch("/api/v1/line/identity/runtime-config").then(r => r.json());
+    const config = result.data || {};
     if (config.liff_id) {
       await liff.init({ liffId: config.liff_id });
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: location.href });
+        if (flowId) {
+          identityReady = true;
+          return;
+        }
+        liff.login();
         return;
       }
-      try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+      await captureLineIdentity();
+    }
+    if (!identityReady && !flowId) {
+      showStatus("無法取得 LINE 身分，請關閉此頁後從 LINE 圖文選單重新開啟。", true);
     }
   } catch (err) {
     showStatus("LIFF 初始化失敗，請重新開啟頁面。", true);
+  } finally {
+    searchButton.disabled = false;
+    searchButton.textContent = "查詢訂單資訊";
   }
 }
 
@@ -117,11 +140,15 @@ document.getElementById("searchBtn").addEventListener("click", async () => {
     showStatus("請先輸入案件編號或客戶姓名。", true);
     return;
   }
+  if (!identityReady && !flowId && !lineIdToken) {
+    showStatus("LINE 身分尚未載入完成，請稍候再查詢；若仍失敗，請關閉此頁後從 LINE 圖文選單重新開啟。", true);
+    return;
+  }
   showStatus("查詢中...");
   const response = await fetch("/api/v1/line/staff-self-service/orders", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({ keyword, line_id_token: lineIdToken })
+    body: JSON.stringify({ keyword, flow_id: flowId, line_id_token: lineIdToken })
   });
   const data = await response.json();
   if (!response.ok || !data.success) {

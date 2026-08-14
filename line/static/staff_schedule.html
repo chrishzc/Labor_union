@@ -87,6 +87,19 @@
 <script>
 let lineUserId = "";
 let lineIdToken = "";
+let flowId = "";
+
+async function captureLineIdentity() {
+  try {
+    const context = liff.getContext && liff.getContext();
+    if (context?.userId) lineUserId = context.userId;
+  } catch (_) {}
+  try {
+    const profile = await liff.getProfile();
+    if (profile?.userId) lineUserId = profile.userId;
+  } catch (_) {}
+  try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+}
 
 function show(id, text, isError = false) {
   const box = document.getElementById(id);
@@ -96,7 +109,7 @@ function show(id, text, isError = false) {
 }
 
 function identityPayload() {
-  return { line_user_id: lineUserId, line_id_token: lineIdToken };
+  return { flow_id: flowId, line_id_token: lineIdToken };
 }
 
 function switchTab(tab) {
@@ -141,18 +154,18 @@ async function loadSchedule() {
   }
   const [year, month] = value.split("-").map(Number);
   show("calendarStatus", "班表查詢中...");
-  const response = await fetch(`/api/line/staff/monthly-schedule?year=${year}&month=${month}`, {
+  const response = await fetch(`/api/v1/line/staff-self-service/schedule?year=${year}&month=${month}`, {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(identityPayload())
   });
   const data = await response.json();
-  if (data.status !== "success") {
-    show("calendarStatus", data.message || "查詢失敗", true);
+  if (!response.ok || data.success === false || !data.data) {
+    show("calendarStatus", data.message || data.detail?.message || "查詢失敗", true);
     return;
   }
-  show("calendarStatus", `${data.staff.name} 的 ${year} 年 ${month} 月排班`);
-  renderCalendar(data.schedule);
+  show("calendarStatus", `${data.data.staff_name} 的 ${year} 年 ${month} 月排班`);
+  renderCalendar(data.data);
 }
 
 async function submitLeave() {
@@ -172,13 +185,13 @@ async function submitLeave() {
     return;
   }
   show("leaveStatus", "送出中...");
-  const response = await fetch("/api/line/staff/leave-requests", {
+  const response = await fetch("/api/v1/line/staff-self-service/leave-requests", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload)
   });
   const data = await response.json();
-  show("leaveStatus", data.message || "已送出", data.status !== "success");
+  show("leaveStatus", data.message || data.detail?.message || "已送出", !response.ok || data.success === false);
 }
 
 async function init() {
@@ -186,17 +199,18 @@ async function init() {
   document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const params = new URLSearchParams(location.search);
   lineUserId = params.get("userId") || "";
+  flowId = params.get("flow_id") || "";
   try {
-    const config = await fetch("/api/line/config").then(r => r.json());
+    const result = await fetch("/api/v1/line/identity/runtime-config").then(r => r.json());
+    const config = result.data || {};
     if (config.liff_id) {
       await liff.init({ liffId: config.liff_id });
       if (!liff.isLoggedIn()) {
-        liff.login({ redirectUri: location.href });
+        if (flowId || lineUserId) return;
+        liff.login();
         return;
       }
-      const profile = await liff.getProfile();
-      lineUserId = profile.userId;
-      try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
+      await captureLineIdentity();
     }
   } catch (_) {
     show("calendarStatus", "LIFF 初始化失敗，請重新開啟頁面。", true);
