@@ -1,12 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Import staff BeClass Excel and write into:
-staff + related option tables.
-Insert-only behavior:
-  - dedupe only by identity_card
-  - existing identity_card -> skipped_existing
-  - missing identity_card -> review_required
+File: import_staff_beclass.py
+Description: 依 Staff BeClass 核心與替代欄位契約選表，驗證並匯入歷史人員資料。
 """
+import argparse
 import os
 import re
 import sys
@@ -40,7 +37,8 @@ if cwd_str not in sys.path:
 try:
     from domains.case_import.staff_import_validation import (
         EXCEL_TO_DB_COLUMN,
-        fallback_case_key,
+        matches_staff_beclass_headers,
+        staff_bank_branch_value,
         validate_staff_row,
     )
 except ModuleNotFoundError as e:
@@ -53,17 +51,18 @@ except ModuleNotFoundError as e:
     except Exception as ex:
         print(f"3. 無法列出該目錄內容: {ex}")
     raise e
-from subsystems.anomalies.system_alert_projection import (
-    delete_system_alert,
-    resolve_if_exists,
-    upsert_system_alert,
-)
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from subsystems.case_import.beclass_review_intake import (
     fingerprint_workbook,
     masked_review_identifier,
     record_invalid_beclass_row,
 )
+from subsystems.case_import.staff_historical_adoption import (
+    adopt_existing_staff,
+    record_created_staff_adoption,
+    record_staff_adoption_outcome,
+)
+from shared_kernel.fingerprints import fingerprint_payload
 
 load_dotenv(str(PROJECT_ROOT / ".env"))
 
@@ -135,12 +134,33 @@ def clean_data(val, col_name):
     return str(val).strip()
 
 
-def _result(inserted=0, skipped_existing=0, review_required=0, failed=0):
+def _result(
+    inserted=0,
+    adopted_existing=0,
+    exact_replay=0,
+    blocked_identity=0,
+    identity_conflict=0,
+    review_required=0,
+    failed=0,
+):
     return {
         "inserted": inserted,
-        "skipped_existing": skipped_existing,
+        "adopted_existing": adopted_existing,
+        "exact_replay": exact_replay,
+        "blocked_identity": blocked_identity,
+        "identity_conflict": identity_conflict,
         "review_required": review_required,
         "failed": failed,
+    }
+
+
+def _privacy_safe_staff_review_payload(record):
+    return {
+        "source_field_count": len(record),
+        "has_identity_card": bool(str(record.get("identity_card") or "").strip()),
+        "has_name": bool(str(record.get("name") or "").strip()),
+        "has_phone": bool(str(record.get("phone") or "").strip()),
+        "has_address": bool(str(record.get("address") or "").strip()),
     }
 
 
@@ -168,33 +188,57 @@ def import_checkbox_options(cursor, staff_id, row, options_list, target_table, v
             )
 
 
-def process_import(excel_path):
+def _historical_bank_accounts(row, errors):
+    account = clean_data(row.get('銀行帳號'), 'account_no')
+    if not account or "銀行代3碼+分行代號4碼" in errors:
+        return ()
+    branch_raw = staff_bank_branch_value(row)
+    branch = clean_data(branch_raw, 'bank_branch')
+    bank_code = branch[:3] if branch and len(branch) >= 3 else None
+    branch_code = branch[3:] if branch and len(branch) > 3 else None
+    accounts = [(bank_code, branch_code, account, True)]
+    additional = row.get('若有其它同銀行帳號，請一併提供。(永豐或台新)')
+    if pd.notna(additional):
+        digits = re.sub(r'\D', '', str(additional))
+        if len(digits) >= 8:
+            accounts.append((None, None, digits, False))
+    return tuple(accounts)
+
+
+def _historical_relations(row):
+    specs = (
+        ('staff_regions', ('北區', '東區', '香山區', '新竹縣', '苗栗縣'), '[其它].1'),
+        ('staff_time_slots', ('4小時(上午8:30-12:30)', '4小時(下午13:00-17:00)', '8小時', '24小時'), '[其它].2'),
+        ('staff_cooking_skills', ('葷食', '素食'), '[其它]'),
+        ('staff_transportation', ('機車', '轎車'), None),
+        ('staff_holiday_availability', ('年節農曆過年初一', '年節農曆過年初二', '年節農曆過年初三', '端午節', '中秋節', '國定假日必休'), '[其它].5'),
+        ('staff_weekly_rest', ('連續服務', '週休1日', '週休2日'), '[其它].3'),
+        ('staff_baby_types', ('單胞胎', '雙胞胎'), '[其它].4'),
+    )
+    relations = {}
+    for table_name, options, other_column in specs:
+        values = [(option, None) for option in options if row.get(option) == 'Y']
+        if other_column:
+            other = row.get(other_column)
+            if pd.notna(other) and str(other).strip():
+                values.append(('其他', str(other).strip()))
+        if table_name == 'staff_transportation':
+            values = [(value[0],) for value in values]
+        relations[table_name] = tuple(values)
+    return relations
+
+
+def process_import(excel_path, source_revision: str | None = None):
     if not os.path.exists(excel_path):
         print(f"錯誤：找不到 Excel 檔案：{excel_path}")
         return _result(review_required=1)
 
-    print(f"解析 Excel 檔案：{excel_path} ...")
-    xl = pd.ExcelFile(excel_path)
-
-    target_sheet = xl.sheet_names[0] if xl.sheet_names else None
-    if target_sheet is None:
-        print("未找到任何工作表，跳過此檔案。")
+    selected = _load_staff_beclass_frame(excel_path)
+    if selected is None:
         return _result(review_required=1)
-
-    df = xl.parse(target_sheet)
-    if df.empty:
-        for sheet_name in xl.sheet_names[1:]:
-            candidate = xl.parse(sheet_name)
-            if not candidate.empty:
-                target_sheet = sheet_name
-                df = candidate
-                break
-
-    if df is None or df.empty:
-        print("未找到有資料的工作表，請確認檔案內容後重試。")
-        return _result(review_required=1)
-    source_content_digest = fingerprint_workbook(excel_path)
-    print(f"找到工作表：'{target_sheet}'，共有 {len(df)} 筆資料，準備匯入...")
+    target_sheet, df = selected
+    source_content_digest = _staff_source_content_digest(excel_path, source_revision)
+    print(f"已依欄位契約選取工作表，共有 {len(df)} 筆資料，準備匯入...")
 
     try:
         conn = pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
@@ -206,7 +250,10 @@ def process_import(excel_path):
         return _result(failed=1)
 
     inserted = 0
-    skipped_existing = 0
+    adopted_existing = 0
+    exact_replay = 0
+    blocked_identity = 0
+    identity_conflict = 0
     review_required = 0
 
     try:
@@ -219,11 +266,11 @@ def process_import(excel_path):
             name = clean_data(row.get('姓名'), 'name')
             identity_card = clean_data(row.get('身分證字號'), 'identity_card')
 
-            if not identity_card:
+            if not identity_card or "身分證字號" in errors:
                 review_required += 1
-                err_detail = f" - 欄位錯誤: {'、'.join(errors.keys()) if isinstance(errors, dict) else errors}" if errors else ""
-                print(f"[待確認警示] 第 {source_row} 列：查無身分證字號 (姓名: {name_for_alert or '未填'}, 電話: {phone_for_alert or '未填'}){err_detail}")
-                record_invalid_beclass_row(
+                issue_fields = "、".join(sorted(errors)) if isinstance(errors, dict) else "identity"
+                print(f"[待確認警示] 第 {source_row} 列：blocked identity；欄位={issue_fields}")
+                review_identity = record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
                     source_content_digest=source_content_digest,
@@ -234,30 +281,30 @@ def process_import(excel_path):
                         identity_card,
                         phone_for_alert,
                     ),
-                    source_payload={
-                        "identity_card": None,
-                        "name": clean_data(name_for_alert, "name"),
-                        "phone": clean_phone(phone_for_alert),
-                    },
+                    source_payload=_privacy_safe_staff_review_payload(
+                        {"identity_card": None, "name": name_for_alert, "phone": phone_for_alert}
+                    ),
                     issue_codes=tuple(errors),
                 )
-                if errors:
-                    error_keys_joined = "、".join(errors.keys())
-                    upsert_system_alert(
-                        cursor,
-                        alert_code="IMPORT-004",
-                        source_domain="IMPORT",
-                        case_key=fallback_case_key(name_for_alert, phone_for_alert),
-                        reason=f"服務人員匯入資料異常（查無身分證字號）：{error_keys_joined}",
-                        details=errors,
-                    )
+                replayed = record_staff_adoption_outcome(
+                    conn,
+                    source_content_digest=source_content_digest,
+                    source_row=source_row,
+                    staff_id=None,
+                    historical_record={"identity_card": None, "name": name, "phone": clean_phone(phone_for_alert)},
+                    review_identity=review_identity,
+                    outcome="blocked_identity",
+                )
+                exact_replay += int(replayed)
+                blocked_identity += int(not replayed)
+                conn.commit()
                 continue
 
-            if not name:
+            if not name or "姓名" in errors:
                 # staff.name 是 NOT NULL，缺姓名時無法建立資料，只能開警示提醒補件
                 review_required += 1
-                print(f"[待確認警示] 第 {source_row} 列：缺少姓名 (身分證: {identity_card}, 電話: {phone_for_alert or '未填'})")
-                record_invalid_beclass_row(
+                print(f"[待確認警示] 第 {source_row} 列：缺少姓名；識別={masked_review_identifier(BeClassImportSourceKind.STAFF, identity_card, source_row)}")
+                review_identity = record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
                     source_content_digest=source_content_digest,
@@ -268,21 +315,23 @@ def process_import(excel_path):
                         identity_card,
                         phone_for_alert,
                     ),
-                    source_payload={
-                        "identity_card": identity_card,
-                        "name": None,
-                        "phone": clean_phone(phone_for_alert),
-                    },
+                    source_payload=_privacy_safe_staff_review_payload(
+                        {"identity_card": identity_card, "name": None, "phone": phone_for_alert}
+                    ),
                     issue_codes=tuple(errors),
                 )
-                upsert_system_alert(
-                    cursor,
-                    alert_code="IMPORT-004",
-                    source_domain="IMPORT",
-                    case_key=identity_card,
-                    reason=f"服務人員 {identity_card} 缺少姓名，無法建立資料",
-                    details=errors,
+                replayed = record_staff_adoption_outcome(
+                    conn,
+                    source_content_digest=source_content_digest,
+                    source_row=source_row,
+                    staff_id=None,
+                    historical_record={"identity_card": identity_card, "name": None, "phone": clean_phone(phone_for_alert)},
+                    review_identity=review_identity,
+                    outcome="blocked_identity",
                 )
+                exact_replay += int(replayed)
+                blocked_identity += int(not replayed)
+                conn.commit()
                 continue
 
             ip_address = clean_data(row.get('IP位址'), 'ip_address')
@@ -343,46 +392,78 @@ def process_import(excel_path):
                 'status': 'active'
             }
 
+            if errors:
+                for excel_column, database_column in EXCEL_TO_DB_COLUMN.items():
+                    if excel_column in errors:
+                        record[database_column] = None
+
             cursor.execute(
-                "SELECT name FROM staff WHERE identity_card = %s",
+                "SELECT id,name FROM staff WHERE identity_card = %s",
                 (identity_card,)
             )
             existing_rows = cursor.fetchall()
             existing_cnt = len(existing_rows)
             if existing_cnt == 1:
-                skipped_existing += 1
                 existing_name = existing_rows[0]['name']
-                if not existing_name or not name or existing_name == name:
+                if existing_name and name and existing_name != name:
+                    review_required += 1
+                    review_identity = record_invalid_beclass_row(
+                        conn,
+                        source_kind=BeClassImportSourceKind.STAFF,
+                        source_content_digest=source_content_digest,
+                        source_sheet=target_sheet,
+                        source_row=source_row,
+                        masked_identifier=masked_review_identifier(
+                            BeClassImportSourceKind.STAFF, identity_card, phone_for_alert
+                        ),
+                        source_payload=_privacy_safe_staff_review_payload(record),
+                        issue_codes=("identity_name_mismatch",),
+                    )
+                    replayed = record_staff_adoption_outcome(
+                        conn,
+                        source_content_digest=source_content_digest,
+                        source_row=source_row,
+                        staff_id=int(existing_rows[0]["id"]),
+                        historical_record=record,
+                        review_identity=review_identity,
+                        outcome="identity_conflict",
+                    )
+                    exact_replay += int(replayed)
+                    identity_conflict += int(not replayed)
+                    conn.commit()
                     continue
-                review_required += 1
-                print(f"[待確認警示] 第 {source_row} 列：身分證字號 {identity_card} 重複，但姓名不一致 (資料庫已有: 「{existing_name}」，本次匯入: 「{name}」)")
-                record_invalid_beclass_row(
+                adoption = adopt_existing_staff(
                     conn,
-                    source_kind=BeClassImportSourceKind.STAFF,
                     source_content_digest=source_content_digest,
-                    source_sheet=target_sheet,
                     source_row=source_row,
-                    masked_identifier=masked_review_identifier(
-                        BeClassImportSourceKind.STAFF,
-                        identity_card,
-                        phone_for_alert,
+                    identity_card=identity_card,
+                    historical_record=record,
+                    source_sheet=target_sheet,
+                    review_payload=_privacy_safe_staff_review_payload(record),
+                    validation_issue_codes=tuple(
+                        f"staff_field_invalid:{field}" for field in sorted(errors)
                     ),
-                    source_payload=record,
-                    issue_codes=("identity_name_mismatch",),
+                    bank_accounts=_historical_bank_accounts(row, errors),
+                    relations=_historical_relations(row),
                 )
-                upsert_system_alert(
-                    cursor,
-                    alert_code="IMPORT-003",
-                    source_domain="IMPORT",
-                    case_key=identity_card,
-                    reason=f"身分證字號 {identity_card} 重複，但姓名不一致：已存「{existing_name}」，本次匯入「{name}」",
-                    details={"身分證字號": identity_card, "已存姓名": existing_name, "本次匯入姓名": name},
-                )
+                if adoption.replayed:
+                    exact_replay += 1
+                elif adoption.outcome == "adopted_existing":
+                    adopted_existing += 1
+                elif adoption.outcome == "blocked_identity":
+                    blocked_identity += 1
+                elif adoption.outcome == "identity_conflict":
+                    identity_conflict += 1
+                if errors or adoption.conflict_fields or adoption.outcome in {
+                    "blocked_identity",
+                    "identity_conflict",
+                }:
+                    review_required += 1
                 continue
             if existing_cnt > 1:
                 review_required += 1
-                print(f"[待確認警示] 第 {source_row} 列：身分證字號 {identity_card} 在資料庫中有多筆記錄 ({existing_cnt} 筆)")
-                record_invalid_beclass_row(
+                print(f"[待確認警示] 第 {source_row} 列：identity conflict ({existing_cnt} 筆)")
+                review_identity = record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
                     source_content_digest=source_content_digest,
@@ -393,15 +474,28 @@ def process_import(excel_path):
                         identity_card,
                         phone_for_alert,
                     ),
-                    source_payload=record,
+                    source_payload=_privacy_safe_staff_review_payload(record),
                     issue_codes=("duplicate_identity_card",),
                 )
+                replayed = record_staff_adoption_outcome(
+                    conn,
+                    source_content_digest=source_content_digest,
+                    source_row=source_row,
+                    staff_id=None,
+                    historical_record=record,
+                    review_identity=review_identity,
+                    outcome="identity_conflict",
+                )
+                exact_replay += int(replayed)
+                identity_conflict += int(not replayed)
+                conn.commit()
                 continue
+            row_review_identity = None
             if errors:
                 review_required += 1
-                err_msg = "、".join(errors.values()) if isinstance(errors, dict) else str(errors)
-                print(f"[欄位已阻擋] 第 {source_row} 列：服務人員 (身分證: {identity_card}, 姓名: {name}) 欄位驗證異常 - {err_msg}")
-                record_invalid_beclass_row(
+                issue_fields = "、".join(sorted(errors)) if isinstance(errors, dict) else "validation"
+                print(f"[待確認警示] 第 {source_row} 列：欄位驗證異常；欄位={issue_fields}")
+                row_review_identity = record_invalid_beclass_row(
                     conn,
                     source_kind=BeClassImportSourceKind.STAFF,
                     source_content_digest=source_content_digest,
@@ -412,21 +506,9 @@ def process_import(excel_path):
                         identity_card,
                         phone_for_alert,
                     ),
-                    source_payload=record,
+                    source_payload=_privacy_safe_staff_review_payload(record),
                     issue_codes=tuple(errors),
                 )
-                upsert_system_alert(
-                    cursor,
-                    alert_code="IMPORT-004",
-                    source_domain="IMPORT",
-                    case_key=identity_card,
-                    reason=f"服務人員 {identity_card} 匯入資料異常：{'、'.join(errors)}",
-                    details=errors,
-                )
-                for excel_column, database_column in EXCEL_TO_DB_COLUMN.items():
-                    if excel_column in errors:
-                        record[database_column] = None
-
             if existing_cnt == 0:
                 cols = ", ".join([f"`{k}`" for k in record.keys()])
                 places = ", ".join(["%s"] * len(record))
@@ -437,11 +519,7 @@ def process_import(excel_path):
 
                 bank_acc = clean_data(row.get('銀行帳號'), 'account_no')
                 if bank_acc and "銀行代3碼+分行代號4碼" not in errors:
-                    # 範例檔實際表頭是「銀行代3碼+分行代號4碼」(少一個「碼」字)，
-                    # 這裡兩種寫法都認，避免之後樣板又改回另一種寫法時又讀不到。
-                    bank_branch_raw = row.get('銀行代3碼+分行代號4碼')
-                    if pd.isna(bank_branch_raw):
-                        bank_branch_raw = row.get('銀行代碼3碼+分行代號4碼')
+                    bank_branch_raw = staff_bank_branch_value(row)
                     bank_branch = clean_data(bank_branch_raw, 'bank_branch')
                     bank_code = bank_branch[:3] if bank_branch and len(bank_branch) >= 3 else None
                     branch_code = bank_branch[3:] if bank_branch and len(bank_branch) > 3 else None
@@ -519,49 +597,107 @@ def process_import(excel_path):
                     excel_detail_col='[其它].4'
                 )
 
-                # 有身分證字號了：若先前用 error_姓名_電話 這個替代鍵記錄過，就把舊的清掉
-                fallback_key = fallback_case_key(name_for_alert, phone_for_alert)
-                if not fallback_key.startswith("error_row_"):
-                    delete_system_alert(cursor, alert_code="IMPORT-004", case_key=fallback_key)
-
-                resolve_if_exists(
-                    cursor,
-                    alert_code="IMPORT-004",
-                    case_key=identity_card,
-                    reason="系統重新匯入：欄位驗證通過，自動解除",
+                record_created_staff_adoption(
+                    conn,
+                    source_content_digest=source_content_digest,
+                    source_row=source_row,
+                    staff_id=staff_id,
+                    historical_record=record,
+                    review_identity=row_review_identity,
                 )
+
+                conn.commit()
 
         conn.commit()
         print(
-            f"匯入完成：新增 {inserted} 筆服務人員資料，"
-            f"略過既有 {skipped_existing} 筆、待確認 {review_required} 筆。"
+            f"匯入完成：source rows {len(df)}，新增 {inserted}，採納既有 {adopted_existing}，"
+            f"exact replay {exact_replay}，blocked identity {blocked_identity}，"
+            f"identity conflict {identity_conflict}，review required {review_required}。"
         )
     except Exception as err:
         conn.rollback()
         import traceback
         traceback.print_exc()
-        print(f"執行發生錯誤，已 Rollback：{err}")
+        print(f"目前來源列失敗並已回滾；先前已提交的 terminal rows 保留：{err}")
         return _result(
-            inserted=0,
-            skipped_existing=skipped_existing,
+            inserted=inserted,
+            adopted_existing=adopted_existing,
+            exact_replay=exact_replay,
+            blocked_identity=blocked_identity,
+            identity_conflict=identity_conflict,
             review_required=review_required,
             failed=1
         )
     finally:
         conn.close()
 
-    return _result(inserted=inserted, skipped_existing=skipped_existing, review_required=review_required)
+    return _result(
+        inserted=inserted,
+        adopted_existing=adopted_existing,
+        exact_replay=exact_replay,
+        blocked_identity=blocked_identity,
+        identity_conflict=identity_conflict,
+        review_required=review_required,
+    )
+
+
+def _staff_source_content_digest(excel_path: str, source_revision: str | None) -> str:
+    workbook_digest = fingerprint_workbook(excel_path)
+    if source_revision is None:
+        return workbook_digest
+    normalized_revision = _normalize_source_revision(source_revision)
+    return fingerprint_payload(
+        {"workbook_digest": workbook_digest, "source_revision": normalized_revision}
+    ).value
+
+
+def _normalize_source_revision(source_revision: str) -> str:
+    normalized_revision = str(source_revision).strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", normalized_revision):
+        raise ValueError("staff_historical_source_revision_invalid")
+    return normalized_revision
+
+
+def _parse_historical_staff_arguments(arguments: list[str]) -> tuple[str, str | None]:
+    parser = argparse.ArgumentParser(description="Staff BeClass 歷史資料受控匯入")
+    parser.add_argument("--historical-apply", action="store_true")
+    parser.add_argument("--source-revision")
+    parser.add_argument("workbook")
+    parsed = parser.parse_args(arguments)
+    from scripts.imports.historical_import_guard import authorize_historical_apply
+
+    apply_arguments = [parsed.workbook]
+    if parsed.historical_apply:
+        apply_arguments.insert(0, "--historical-apply")
+    workbook = authorize_historical_apply(apply_arguments, str(DB_CONFIG["database"]))
+    return workbook, parsed.source_revision
+
+
+def _load_staff_beclass_frame(excel_path):
+    print(f"解析 Excel 檔案：{excel_path} ...")
+    with pd.ExcelFile(excel_path) as workbook:
+        candidates = _staff_beclass_sheet_candidates(workbook)
+    if len(candidates) != 1:
+        reason = "沒有" if not candidates else "有多個"
+        print(f"{reason}工作表符合 Staff BeClass 必要欄位契約，無法安全匯入。")
+        return None
+    return candidates[0]
+
+
+def _staff_beclass_sheet_candidates(workbook):
+    candidates = []
+    for sheet_name in workbook.sheet_names:
+        frame = workbook.parse(sheet_name=sheet_name, dtype=object)
+        headers = {str(column).strip() for column in frame.columns}
+        if not frame.dropna(how="all").empty and matches_staff_beclass_headers(headers):
+            candidates.append((sheet_name, frame))
+    return candidates
 
 
 if __name__ == "__main__":
-    from scripts.imports.historical_import_guard import authorize_historical_apply
-
     try:
-        excel_arg = authorize_historical_apply(
-            sys.argv[1:],
-            str(DB_CONFIG["database"]),
-        )
+        excel_arg, source_revision_arg = _parse_historical_staff_arguments(sys.argv[1:])
     except RuntimeError as error:
         print(f"歷史匯入已阻擋：{error}")
         raise SystemExit(2) from error
-    process_import(excel_arg)
+    process_import(excel_arg, source_revision=source_revision_arg)

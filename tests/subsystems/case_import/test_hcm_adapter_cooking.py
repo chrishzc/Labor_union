@@ -3,7 +3,7 @@ from datetime import date, datetime
 from subsystems.case_import.hcm_adapter import build_hcm_case_import_intent
 
 
-def test_hcm_adapter_carries_cooking_requirement_into_order_root():
+def test_hcm_adapter_creates_unknown_cooking_requirement_without_beclass():
     intent = build_hcm_case_import_intent(
         {
             "case_no": "115000888",
@@ -15,8 +15,7 @@ def test_hcm_adapter_carries_cooking_requirement_into_order_root():
             "name": "測試客戶",
         },
         date(2026, 8, 24),
-        requires_cooking=True,
     )
 
-    assert intent.order.requires_cooking is True
+    assert intent.order.requires_cooking is None
     assert intent.order.case_no == "115000888"

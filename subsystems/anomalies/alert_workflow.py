@@ -1,4 +1,7 @@
-"""Canonical current-state anomaly query and workflow orchestration."""
+"""
+File: alert_workflow.py
+Description: 編排 canonical current-state anomaly 查詢、投影與人工工作流。
+"""
 
 from dataclasses import dataclass
 
@@ -91,10 +94,11 @@ class AnomalyApplication:
         definition = self._registry.require(request.desired.definition_code)
         fingerprint = self._registry.fingerprint(request.desired)
         with self._unit_of_work_factory() as unit_of_work:
-            if self._repository.checkpoint_matches(request):
-                current = self._repository.load_current(fingerprint, for_update=True)
-                return None if current is None else current[0]
             loaded = self._repository.load_current(fingerprint, for_update=True)
+            if self._repository.checkpoint_matches(request) and _projection_matches_desired(
+                loaded, request.desired
+            ):
+                return None if loaded is None else loaded[0]
             previous = None if loaded is None else loaded[0]
             resulting = reduce_current_alert(self._registry, request.desired, previous)
             self._repository.save_projection(
@@ -128,3 +132,16 @@ class AnomalyApplication:
 
 def _receipt(projection, action):
     return AnomalyWorkflowReceipt(projection.fingerprint, action, projection.workflow_version, projection.workflow_status)
+
+
+def _projection_matches_desired(loaded, desired) -> bool:
+    if loaded is None:
+        return not desired.active
+    current = loaded[0]
+    if current.source_version != desired.source_version:
+        return False
+    if current.predicate_active != desired.active:
+        return False
+    if desired.active:
+        return str(current.workflow_status) != "resolved"
+    return str(current.workflow_status) == "resolved"

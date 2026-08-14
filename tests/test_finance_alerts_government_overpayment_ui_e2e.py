@@ -1,4 +1,7 @@
-"""Streamlit finance-alert recovery selection and real HTTP Preview/Apply proof."""
+"""
+File: test_finance_alerts_government_overpayment_ui_e2e.py
+Description: 驗證異常警示UI與政府補助溢付Preview／Apply流程。
+"""
 
 from __future__ import annotations
 
@@ -117,6 +120,26 @@ def _summary():
     from api.schemas.anomaly_registry import AnomalySummaryView
 
     return AnomalySummaryView(fingerprint="a" * 64, definition_code="GOVSUB-006", source_domain="government_subsidy", source_identity="government-overpayment-ui", source_version=1, workflow_status="open", workflow_version=1, severity="warning", predicate_active=True)
+
+
+def test_hcm_duplicate_application_has_operator_facing_warning_label():
+    from api.schemas.anomaly_registry import AnomalySummaryView
+
+    panel = importlib.import_module("ui.pages.06_finance_alerts")
+    summary = AnomalySummaryView(
+        fingerprint="b" * 64,
+        definition_code="IMPORT-004",
+        source_domain="case_import",
+        source_identity="hcm-review:test",
+        source_version=1,
+        workflow_status="open",
+        workflow_version=1,
+        severity="warning",
+        predicate_active=True,
+        display_snapshot={"issue_codes": ["hcm_identity:hcm_duplicate_application"]},
+    )
+
+    assert panel._display_alert_label(summary) == "疑似重複申請，請公會人員確認"
 
 
 class _Session:

@@ -87,9 +87,11 @@ Apply：
 
 下廚需求契約：
 
-- `requires_cooking` 是 Orders boolean root，Case Import 只能從明確 yes／no source 建立；
-- BeClass 問卷空白、矛盾或自由文字無法唯一判定時，Import 必須進 Review，固定回
-  `case_import_cooking_requirement_ambiguous`，不得預設為否；
+- `requires_cooking` 是可為 unknown 的 Orders root；HCM 獨立匯入時若尚未唯一綁定 Client
+  BeClass，固定保存 `NULL`，不得預設為否，也不得因此阻擋 Client／Order 建立；
+- HCM 與 Client BeClass 唯一配對後，Case Import reconciliation 才可從明確 yes／no source
+  經 typed Orders command 補入 `requires_cooking`；問卷空白、矛盾或自由文字無法唯一判定時保留
+  `case_import_cooking_requirement_ambiguous` review，但不得回滾或刪除已匯入的 HCM roots；
 - 原始 `survey_details` 保留為來源 evidence，但 Matching 只讀 Orders root；
 - 服務資料鎖形成後不得修改。
 
@@ -201,6 +203,18 @@ AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Or
 - 追加 reopen event，不刪除 cancellation history。
 - 不恢復舊 assignment、schedule、lock 或 payment stage。
 - 受理後必須 fresh Preview；已有正式退款或結算時另建新訂單。
+
+### 3.7 Historical Order Adoption
+
+restricted historical source 只能補登既有 Order，不建立 Client／Order。唯一匹配鍵為
+`case_no + client_name` 精確相符；找不到固定為 `unmatched_case`，零 Domain mutation且不建立警示。
+source profile v1 只接受 0→取消、1→完成、2→洽談中；空白／其他值保存 review evidence。
+
+`actual_start_date`、`actual_end_date` 永遠允許 `NULL`。有效來源值只補目前空值，既有非空衝突
+保留 current fact並 review。來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立，
+但不得觸發現行通知、訂金、收付款或自動帳務；immutable lifecycle event／receipt 必須標示
+historical origin。既有非洽談狀態與來源不同時不得覆寫。Preview 零寫入，Apply 每列鎖定 fresh
+Order、驗證 version／fingerprint，並以單一 UoW 保存 projection、event、receipt、outbox及跨域 evidence。
 
 ## 4. Module
 

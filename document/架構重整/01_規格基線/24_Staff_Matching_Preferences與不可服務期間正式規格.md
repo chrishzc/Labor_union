@@ -83,11 +83,14 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 
 ## 4. 下廚需求
 
-- Case Import 邊界可將 BeClass 問卷轉成 Orders canonical `requires_cooking` 條款。
-- 只接受可明確判定的 yes／no source value；空白、矛盾、自由文字無法唯一判定時回
-  `case_import_cooking_requirement_ambiguous` 進 Import Review，不預設為否。
-- 原始 `survey_details` 保留為來源 evidence；正規化後布林值進 Case Import intent、candidate、fingerprint、
-  import event 與 Orders root。不得在 Matching Query 每次重新解析自由文字。
+- HCM 與 Client BeClass 是兩條獨立 intake lane；任一方缺少對方都不得阻擋來源資料落地。
+- HCM Client／Order 先建立但尚未唯一綁定 Client BeClass 時，Orders `requires_cooking` 保持
+  `NULL`；缺少對方由 current-state anomaly 顯示，不得預設為否。
+- 唯一配對後，Case Import reconciliation 才可將 BeClass 問卷的明確 yes／no source value透過
+  typed Orders command補入 canonical `requires_cooking`。空白、矛盾或自由文字無法唯一判定時回
+  `case_import_cooking_requirement_ambiguous` 進 Import Review，但不撤銷已建立的 HCM roots。
+- 原始 `survey_details` 保留為來源 evidence；正規化後布林值進 reconciliation fingerprint、event與
+  Orders root。不得在 Matching Query 每次重新解析自由文字。
 - 月嫂料理能力使用 `staff_cooking_skills`。案件不需要下廚時條件為 `not_applicable`；需要下廚時，
   至少有一筆有效料理能力才為 `matched`。
 

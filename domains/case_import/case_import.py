@@ -1,4 +1,7 @@
-"""Pure candidate rules for importing one negotiated case."""
+"""
+File: case_import.py
+Description: 定義 Case Import 根事實、來源指紋與候選不變量。
+"""
 
 from __future__ import annotations
 
@@ -61,6 +64,13 @@ class CaseImportIssue(StrEnum):
     PROVISIONAL_REGISTRATION_IDENTITY_MISMATCH = "provisional_registration_identity_mismatch"
 
 
+class HcmIdentityResolution(StrEnum):
+    NEW = "new"
+    EXISTING_MATCH = "existing_match"
+    CONFLICT = "conflict"
+    AMBIGUOUS = "ambiguous"
+
+
 class CaseImportDomainError(ValueError):
     def __init__(self, issue: CaseImportIssue, message: str) -> None:
         super().__init__(message)
@@ -99,7 +109,7 @@ class ImportedOrderRootFacts:
     service_start_time: time
     service_end_time: time
     service_end_day_offset: int
-    requires_cooking: bool
+    requires_cooking: bool | None
 
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
@@ -114,8 +124,10 @@ class ImportedOrderRootFacts:
         _require_exact_type(self.service_end_time, time, "service end time")
         if self.service_end_day_offset not in {0, 1}:
             _raise_invalid("service end day offset must be zero or one")
-        if not isinstance(self.requires_cooking, bool):
-            _raise_invalid("requires cooking must be bool")
+        if self.requires_cooking is not None and not isinstance(
+            self.requires_cooking, bool
+        ):
+            _raise_invalid("requires cooking must be bool or None")
         if self.planned_end_date < self.planned_start_date:
             _raise_invalid("planned service interval is inverted")
 
@@ -164,6 +176,25 @@ class CaseImportFacts:
 
 
 @dataclass(frozen=True, slots=True)
+class HcmIdentityFacts:
+    case_client_ids: tuple[int, ...]
+    ip_name_client_ids: tuple[int, ...]
+    order_exists: bool
+
+
+def resolve_hcm_identity(facts: HcmIdentityFacts) -> HcmIdentityResolution:
+    if len(facts.case_client_ids) > 1 or len(facts.ip_name_client_ids) > 1:
+        return HcmIdentityResolution.AMBIGUOUS
+    if not facts.case_client_ids and not facts.ip_name_client_ids and not facts.order_exists:
+        return HcmIdentityResolution.NEW
+    if facts.order_exists and not facts.case_client_ids:
+        return HcmIdentityResolution.CONFLICT
+    if facts.case_client_ids == facts.ip_name_client_ids:
+        return HcmIdentityResolution.EXISTING_MATCH
+    return HcmIdentityResolution.CONFLICT
+
+
+@dataclass(frozen=True, slots=True)
 class CaseImportCandidate:
     case_no: str
     client_attributes: tuple[ClientImportAttribute, ...]
@@ -186,7 +217,7 @@ def build_case_import_candidate(
         )
     bootstrap = _build_bootstrap_candidate(facts, intent)
     _validate_provisional_registration(facts.provisional_registration, intent)
-    source_fingerprint = fingerprint_payload(_source_payload(intent))
+    source_fingerprint = fingerprint_case_import_source(intent)
     fingerprint = fingerprint_payload(
         {
             "source_fingerprint": source_fingerprint.value,
@@ -202,6 +233,10 @@ def build_case_import_candidate(
         fingerprint,
         facts.provisional_registration,
     )
+
+
+def fingerprint_case_import_source(intent: CaseImportIntent) -> PreviewFingerprint:
+    return fingerprint_payload(_source_payload(intent))
 
 
 def _validate_provisional_registration(registration, intent) -> None:
@@ -333,6 +368,10 @@ __all__ = [
     "CaseImportIssue",
     "ClientImportAttribute",
     "ImportedOrderRootFacts",
+    "HcmIdentityFacts",
+    "HcmIdentityResolution",
     "ProvisionalRegistrationFacts",
     "build_case_import_candidate",
+    "fingerprint_case_import_source",
+    "resolve_hcm_identity",
 ]

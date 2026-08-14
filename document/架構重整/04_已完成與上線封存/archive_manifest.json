@@ -1549,6 +1549,119 @@
                             "WP75 evidence audit",
                             "launcher smoke cleanup regression"
                         ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-067",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "restored",
+                        "completed_at": null,
+                        "deployed_at": null,
+                        "release_identity": "labor-union-wp72-2026-08-13-v1",
+                        "successor_path": "document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md",
+                        "evidence_paths": [
+                            "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_wp76_migration_release_integrity_readiness_receipt.md"
+                        ],
+                        "content_sha256": "4b94e5fc9a2e8231a540ebc09ee813461ca29f56f1498fd139070dddd28dfe13",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "Migration release catalog byte-level integrity and startup readiness checks are completed and verified on target host.",
+                        "restore_triggers": [
+                            "migration catalog byte-level integrity audit",
+                            "startup readiness gate regression",
+                            "WP76 acceptance audit"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-068",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/79_LINE_Runtime_Release_Catalog_Recovery_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/79_LINE_Runtime_Release_Catalog_Recovery_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": null,
+                        "successor_path": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md",
+                        "evidence_paths": [
+                            "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_wp79_line_runtime_release_catalog_recovery_receipt.md"
+                        ],
+                        "content_sha256": "0fd413b6be4a6d2fec2f8457d8f0f9b67ca212d34339ddbcd5f081dcd31697e5",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "LINE runtime release catalog recovery is completed and code is merged to main.",
+                        "restore_triggers": [
+                            "LINE runtime release catalog audit",
+                            "descriptor 179/184/185/186 regression",
+                            "WP79 acceptance audit"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-069",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/78_Knowledge_Partial_Local_Database_Recovery_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/78_Knowledge_Partial_Local_Database_Recovery_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": null,
+                        "successor_path": "document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md",
+                        "evidence_paths": [
+                            "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_wp78_wp81_legacy_compatibility_receipt.md"
+                        ],
+                        "content_sha256": "c0ce9cdb285575e93ff9ae3f16b7bc3b1ce7f20510e40955cbe5ad3357aa6269",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "Knowledge partial recovery logic and read-only plan verified.",
+                        "restore_triggers": [
+                            "knowledge partial recovery audit",
+                            "schema part 148/163 regression"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-070",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/80_Historical_Order_Adoption_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/80_Historical_Order_Adoption_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": "labor-union-wp80-2026-08-13-v1",
+                        "successor_path": "document/架構重整/01_規格基線/01_Orders_Domain.md",
+                        "evidence_paths": [
+                            "tests/test_wp80_historical_order_adoption.py",
+                            "tests/test_wp80_disposable_mysql_e2e.py"
+                        ],
+                        "content_sha256": "677da7fdf74c5ac8260a509d177edf90c1f28e7e98b7a5ef7d5edf63154c20065",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "Restored to active WP80: Preview evidence existed, but disposable Apply/replay/rollback and Web adapter acceptance remain incomplete.",
+                        "restore_triggers": [
+                            "historical order adoption audit",
+                            "schema part 190 regression"
+                        ]
+                    },
+                    {
+                        "archive_id": "ARCH-20260813-071",
+                        "source_path": "document/架構重整/02_決策與退役執行記錄/81_LINE_Rich_Menu_Empty_Configuration_Recovery_Work_Package.md",
+                        "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/81_LINE_Rich_Menu_Empty_Configuration_Recovery_Work_Package.md",
+                        "doc_type": "work-package",
+                        "final_status": "completed",
+                        "completed_at": "2026-08-13",
+                        "deployed_at": null,
+                        "release_identity": null,
+                        "successor_path": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md",
+                        "evidence_paths": [
+                            "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_wp78_wp81_legacy_compatibility_receipt.md"
+                        ],
+                        "content_sha256": "aac8a54c4605d5873913b647cc3ae14fabbe677192e9ab4350fcf7194dd5d33d",
+                        "archived_at": "2026-08-13",
+                        "archived_by": "Codex on user request",
+                        "reason": "Rich Menu empty configuration repair service and CLI execution passed.",
+                        "restore_triggers": [
+                            "Rich Menu empty configuration repair audit",
+                            "legacy CLI retirement regression"
+                        ]
                     }
                 ]
 }

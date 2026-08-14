@@ -1,4 +1,7 @@
-"""Translate validated HCM root facts into the typed Case Import intent."""
+"""
+File: hcm_adapter.py
+Description: 將已驗證 HCM facts 轉成可保留未知料理條款的 typed Case Import intent。
+"""
 
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ _CLOCK_PATTERN = re.compile(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)")
 
 
 def build_hcm_case_import_intent(
-    record: Mapping[str, object], planned_end_date: date, *, requires_cooking: bool
+    record: Mapping[str, object], planned_end_date: date, *, requires_cooking: bool | None = None
 ) -> CaseImportIntent:
     case_no = _required_text(record, "case_no")
     identity_status = _required_text(record, "identity_status")

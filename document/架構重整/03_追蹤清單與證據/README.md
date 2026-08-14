@@ -33,8 +33,9 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [evidence/2026-08-13_wp78_knowledge_partial_local_database_recovery_receipt.md](evidence/2026-08-13_wp78_knowledge_partial_local_database_recovery_receipt.md) | Knowledge 148／163 partial recovery 的 focused、disposable MySQL 與待開發者驗收 DB gate。 |
 | [evidence/2026-08-13_wp79_line_runtime_release_catalog_recovery_receipt.md](evidence/2026-08-13_wp79_line_runtime_release_catalog_recovery_receipt.md) | LINE 179／184／185／186 catalog 恢復、hash 驗證與待 engine／開發者驗收 DB gate。 |
 | [evidence/2026-08-13_wp78_wp81_legacy_compatibility_receipt.md](evidence/2026-08-13_wp78_wp81_legacy_compatibility_receipt.md) | Knowledge unsigned legacy FK 相容與 Rich Menu 精確空設定修復的 focused evidence、DB gate 與 operator 邊界。 |
+| [evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md](evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md) | exact 且全空的歷史 Knowledge schema 在 candidate 重建之 Docker engine evidence 與 fail-closed 邊界。 |
+| [evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md](evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md) | part 189／190 successor releases、兩次同名 replacement 與應付帳款 query smoke 的本機驗收證據。 |
+| [evidence/2026-08-14_remote_merge_release_chain_reconciliation_receipt.md](evidence/2026-08-14_remote_merge_release_chain_reconciliation_receipt.md) | 跨開發者 release 衝突的 strict successors、191／192／193、WP86、靜態驗證與未完成 DB gates。 |
 | [65 LINE canonical cutover receipt（封存）](../04_已完成與上線封存/receipts/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
 | [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |
 | [evidence/](evidence/) | 上述決策包／收據對應的原始 evidence 產物（JSON／SQL／receipt）。 |
-| [evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md](evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md) | exact 且全空的歷史 Knowledge schema 在 candidate 重建之 Docker engine evidence 與 fail-closed 邊界。 |
-| [evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md](evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md) | part 189／190 successor releases、兩次同名 replacement 與應付帳款 query smoke 的本機驗收證據。 |

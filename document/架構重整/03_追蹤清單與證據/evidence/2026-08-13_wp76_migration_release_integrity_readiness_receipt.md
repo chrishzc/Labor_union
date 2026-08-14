@@ -1,7 +1,7 @@
 # WP76 Migration Release Integrity 與 Readiness 驗證收據
 
 - 日期：2026-08-13
-- Work Package：`76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md`
+- Work Package：[76 Work Package](../04_已完成與上線封存/work_packages/76_Migration_Release_Integrity_and_Local_Startup_Readiness_Repair_Work_Package.md)
 - target policy：實作驗證使用 `lu_test_*`／一次性 Docker MySQL；最終 Developer acceptance 由使用者
   在另一台無 Git 的本機開發主機執行，該主機確認無需保留業務資料後重建 `union_db`
 - release id：`labor-union-wp72-2026-08-13-v1`

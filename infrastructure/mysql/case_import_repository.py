@@ -1,4 +1,7 @@
-"""MySQL adapter for atomic case import and architecture bootstrap."""
+"""
+File: case_import_repository.py
+Description: 原子保存 Case Import roots、事件、bootstrap 與 replay receipt。
+"""
 
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ from domains.case_import.case_import import (
     CaseImportDomainError,
     CaseImportFacts,
     CaseImportIssue,
+    HcmIdentityFacts,
     ProvisionalRegistrationFacts,
 )
 from infrastructure.mysql.case_architecture_bootstrap_repository import (
@@ -62,6 +66,18 @@ class MySqlCaseImportRepository:
     def case_exists(self, case_no: str) -> bool:
         with _mysql_cursor(self._connection) as cursor:
             return _case_exists(cursor, case_no, lock=False)
+
+    def load_hcm_identity_facts(
+        self, case_no: str, ip_address: str, client_name: str
+    ) -> HcmIdentityFacts:
+        with _mysql_cursor(self._connection) as cursor:
+            case_client_ids = _client_ids_for_field(cursor, "case_no", case_no)
+            ip_name_client_ids = _client_ids_for_ip_and_name(
+                cursor, ip_address, client_name
+            )
+            cursor.execute("SELECT 1 FROM orders WHERE case_no=%s LIMIT 1", (case_no,))
+            order_exists = cursor.fetchone() is not None
+        return HcmIdentityFacts(case_client_ids, ip_name_client_ids, order_exists)
 
     def load(self, intent, *, for_update):
         with _mysql_cursor(self._connection) as cursor:
@@ -214,6 +230,24 @@ def _case_exists(cursor, case_no, *, lock):
     return client_exists or cursor.fetchone() is not None
 
 
+def _client_ids_for_field(cursor, field_name, value):
+    if field_name not in {"case_no", "ip_address"}:
+        raise ValueError("unsupported_hcm_identity_field")
+    cursor.execute(
+        f"SELECT id FROM clients WHERE `{field_name}`=%s ORDER BY id LIMIT 2",
+        (value,),
+    )
+    return tuple(int(row["id"]) for row in cursor.fetchall())
+
+
+def _client_ids_for_ip_and_name(cursor, ip_address, client_name):
+    cursor.execute(
+        "SELECT id FROM clients WHERE ip_address=%s AND name=%s ORDER BY id LIMIT 2",
+        (ip_address, client_name),
+    )
+    return tuple(int(row["id"]) for row in cursor.fetchall())
+
+
 def _load_provisional_registration(cursor, intent, *, lock):
     if intent.provisional_registration_id is None:
         return None
@@ -312,7 +346,7 @@ def _insert_order(cursor, candidate, client_id) -> None:
             order.service_start_time,
             order.service_end_time,
             order.service_end_day_offset,
-            int(order.requires_cooking),
+            None if order.requires_cooking is None else int(order.requires_cooking),
         ),
     )
     if int(cursor.rowcount) != 1:

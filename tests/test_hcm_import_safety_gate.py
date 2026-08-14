@@ -1,9 +1,43 @@
+"""
+File: test_hcm_import_safety_gate.py
+Description: 驗證 HCM 匯入目標、選表、異常資料與 durable review 的安全門。
+"""
+
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 
 from scripts.imports import import_client_hcm
+
+
+def _hcm_profile_row() -> dict[str, object]:
+    return {header: "測試值" for header in import_client_hcm.HCM_REQUIRED_HEADERS}
+
+
+def _write_workbook(path, sheets) -> None:
+    with pd.ExcelWriter(path, engine="openpyxl") as writer:
+        for sheet_name, rows in sheets.items():
+            pd.DataFrame(rows).to_excel(writer, sheet_name=sheet_name, index=False)
+
+
+def test_hcm_sheet_selection_uses_headers_instead_of_sheet_name(tmp_path):
+    workbook_path = tmp_path / "arbitrary.xlsx"
+    _write_workbook(workbook_path, {"工作表1": [_hcm_profile_row()]})
+
+    frame = import_client_hcm._load_hcm_frame(workbook_path)
+
+    assert frame is not None
+    assert frame.attrs["source_sheet"] == "工作表1"
+
+
+def test_hcm_sheet_selection_blocks_multiple_matching_sheets(tmp_path, capsys):
+    workbook_path = tmp_path / "ambiguous.xlsx"
+    row = _hcm_profile_row()
+    _write_workbook(workbook_path, {"資料一": [row], "資料二": [row]})
+
+    assert import_client_hcm._load_hcm_frame(workbook_path) is None
+    assert "多個工作表符合 HCM 必要欄位契約" in capsys.readouterr().out
 
 
 class _ApplicationMustNotRun:
@@ -18,7 +52,7 @@ class _ApplicationMustNotRun:
 
 
 def test_invalid_hcm_row_is_review_required_without_fabricated_root(monkeypatch):
-    emitted = []
+    recorded = []
     monkeypatch.setattr(
         import_client_hcm,
         "_normalized_record",
@@ -31,8 +65,8 @@ def test_invalid_hcm_row_is_review_required_without_fabricated_root(monkeypatch)
     )
     monkeypatch.setattr(
         import_client_hcm,
-        "_emit_hcm_validation_anomaly",
-        lambda case_no, ordinal, errors: emitted.append((case_no, ordinal, errors)),
+        "record_hcm_import_review",
+        lambda connection, **kwargs: recorded.append(kwargs) or "hcm-review:test",
     )
 
     outcome = import_client_hcm._import_row(
@@ -41,12 +75,18 @@ def test_invalid_hcm_row_is_review_required_without_fabricated_root(monkeypatch)
         object(),
         _ApplicationMustNotRun(),
         "hcm.xlsx",
+        connection=object(),
+        source_digest="a" * 64,
+        source_sheet="HCM資料",
     )
 
     assert outcome == "review_required"
-    assert emitted[0][0:2] == ("HCM-001", 7)
-    assert emitted[0][2]["服務時間"] == "invalid service time"
-    assert "報名時間(建檔)" in emitted[0][2]
+    assert recorded[0]["case_identity"] == "HCM-001"
+    assert recorded[0]["source_row"] == 7
+    assert recorded[0]["issue_codes"] == (
+        "hcm_field_invalid:報名時間(建檔)",
+        "hcm_field_invalid:服務時間",
+    )
 
 
 def test_hcm_database_config_has_no_default_credentials(monkeypatch):
@@ -76,11 +116,11 @@ def test_hcm_database_target_requires_explicit_allowlist(monkeypatch):
 
 def test_invalid_hcm_row_persists_review_before_returning(monkeypatch):
     recorded = []
-    connection = type("Connection", (), {"commit": lambda self: recorded.append("commit")})()
+    connection = object()
     monkeypatch.setattr(
         import_client_hcm,
-        "record_invalid_beclass_row",
-        lambda connection, **kwargs: recorded.append(kwargs) or "beclass-review:hcm",
+        "record_hcm_import_review",
+        lambda connection, **kwargs: recorded.append(kwargs) or "hcm-review:test",
     )
 
     identity = import_client_hcm._persist_hcm_review(
@@ -93,8 +133,19 @@ def test_invalid_hcm_row_persists_review_before_returning(monkeypatch):
         {"服務時間": "invalid"},
     )
 
-    assert identity == "beclass-review:hcm"
-    assert recorded[0]["source_kind"] is import_client_hcm.BeClassImportSourceKind.HCM
-    assert recorded[0]["masked_identifier"] == "hcm-***--003"
+    assert identity == "hcm-review:test"
+    assert recorded[0]["case_identity"] == "HCM-003"
     assert recorded[0]["issue_codes"] == ("hcm_field_invalid:服務時間",)
-    assert recorded[1] == "commit"
+    assert recorded[0]["evidence_snapshot"] == {
+        "has_case_identity": False,
+        "invalid_field_count": 1,
+        "source_field_count": 1,
+    }
+
+
+def test_hcm_review_codes_only_describe_hcm_source_validation():
+    errors = {"服務時間": "invalid"}
+
+    assert import_client_hcm._hcm_review_issue_codes(errors) == (
+        "hcm_field_invalid:服務時間",
+    )

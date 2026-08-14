@@ -352,10 +352,19 @@ Case Import 擁有：
   platform identity 與驗證 evidence，正式資料仍由各 owning Domain command 寫入；
 - Staff profile 的核准目標同樣為 LIFF → typed API，不得由 browser 直接 SQL；live 目前只有
   Staff identity binding 與 orders／schedule Query，尚無 profile writer。Staff profile owner、root
-  fields、version 與 UoW 另行裁決，不能因入口位於 LINE 而把 root ownership 移給 LINE；
+  fields、version 與 UoW 另行裁決，不能因入口位於 LINE 而把 root ownership 移給 LINE。WP77
+  只裁決 restricted historical source 的 borrowed Staff writer；同 identity、姓名的來源以較新報名時間
+  覆寫可更新 scalar，不擴張成 current profile owner；
 - Client／Staff BeClass scripts 保留為 `restricted_historical_import`，只能處理明確 historical
   source，不能掛入一般 File Watcher、一般 Web upload registry，亦不得覆寫已由 LIFF／人工命令
   更新的 current facts。
+
+2026-08-13 過渡例外：LIFF current registration／Staff profile writer 尚未完成 end-to-end 驗收前，
+管理端「資料匯入中心」可提供 Client／Staff BeClass 的 authenticated temporary Web upload。
+該入口只能呼叫各自 typed intake／HistoricalAdoption application，不得呼叫 browser SQL、File Watcher
+或 script 的 direct writer；每張卡必須區分 `current`／`historical` 意圖、Preview／Apply、review
+與 receipt。LIFF 對應 typed writer 已完成 API、UI、replay 與移除驗收後，temporary Web upload 必須
+從 navigation、entrypoint queue 與 API 移除。HCM 與銀行流水沒有此過渡例外，固定由 Web upload。
 
 不擁有 Client、Orders、Scheduling、Finance 或 Payroll 的正式根事實。正式 case 只能由
 typed `ApplyCaseImport`／`ApplyBeClassReview` 委派各 owning Domain，在單一 outer
@@ -370,7 +379,13 @@ received → normalized → ready → applied
 ```
 
 同一 source row identity＋相同 payload 是 replay；相同 identity＋不同 payload 是
-source conflict。已存在 internal identity 時不得 insert-or-update 覆寫，必須進 review。
+source conflict。歷史 Staff operator 若取得同內容但較新的已確認來源版本，可明示 bounded
+`source_revision`；它與 workbook digest 一起構成新的 source identity，且同 revision 固定 replay。
+一般 current intake遇到已存在 internal identity時不得 insert-or-update覆寫，必須進
+review。唯一例外是WP77核准的Staff HistoricalAdoption：identity與姓名一致且來源報名時間嚴格較新時，
+覆寫可更新 scalar 並將最新來源時間保存為 `registered_at`；來源空值及 identity、LINE、status、系統
+timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-only保守合併。Staff歷史來源的
+`IP位址`允許空值，空值以`NULL`保存且不建立review，不影響同列其他合法欄位落地。
 
 ### 5.3 Subsystems／Modules
 
@@ -397,6 +412,22 @@ invalid row 必須保存 privacy-safe root fact 並投影 canonical anomaly。
 HCM validation 失敗時不得用 fabricated default 建立正式 Client／Order；必須形成 durable
 `review_required` outcome。Client／Staff historical import 必須另走 HistoricalAdoption Preview／Apply
 及 no-impact gate，不得重用 current LIFF command 假裝一般資料更新。
+
+WP77最新裁決將HCM與Client BeClass定義為可獨立存在的兩條intake lane。HCM案件編號不得重複；
+新案件若IP位址與姓名同時命中既有Client，視為疑似同一客戶重複申請，必須停止該列、建立review
+並在警示中心通知公會人工確認。只有IP相同但姓名不同視為可能共用網路，不阻擋；Client BeClass尚未存在時仍可
+建立Client／Order，`requires_cooking`保持`NULL`。Client BeClass亦可先獨立落地，不得因HCM缺失失敗。
+
+兩方缺件屬可重建的current-state anomaly，不是匯入失敗：有HCM而無Client BeClass投影
+`BECLASS-001`；有Client BeClass而無HCM投影`IMPORT-003 / beclass_hcm_mismatch`。對方日後匯入時，
+reconciliation以案件編號及既有accepted mapping重新解析；唯一且一致才解除缺件
+警示，多筆候選或互相衝突則保留兩方來源並進review，不得以姓名或電話相似度自動綁定。
+
+只有唯一綁定後，reconciliation才可解析Client BeClass controlled cooking answer並透過typed Orders
+command補入`requires_cooking`。missing／malformed／ambiguous／unsupported cooking答案屬BeClass
+來源或配對後條款review，不得阻擋、回滾或刪除已建立的HCM Client／Order。`IMPORT-004`只保留給
+HCM來源列本身的驗證失敗；不得把「缺少Client BeClass」誤投影成HCM validation failure。第一階段
+不預建generic workbook manifest或尚未使用的Correct／Reject tables。
 
 Typed operations：
 

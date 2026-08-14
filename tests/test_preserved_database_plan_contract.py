@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -24,8 +25,8 @@ from scripts import migrate_preserved_database_additive_schema as runner
 
 def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
     required_manifests = {
-        "labor_union_2026_08_12_line_stage13_v1.json",
-        "labor_union_2026_08_11_provisional_registration_case_issue_v1.json",
+        "labor_union_2026_08_12_line_stage13_strict_v1.json",
+        "labor_union_2026_08_11_provisional_registration_case_issue_strict_v1.json",
         "labor_union_2026_08_11_line_stage11_v1.json",
         "labor_union_2026_08_11_line_stage12_v1.json",
     }
@@ -234,6 +235,31 @@ def test_schema_applied_receipt_resumes_post_schema_phase(tmp_path, monkeypatch)
     assert result == {"status": "backfilled"}
 
 
+def test_default_catalog_does_not_replay_historical_post_schema_backfills(
+    tmp_path, monkeypatch
+) -> None:
+    receipt_path = tmp_path / "operation.json"
+    runner.write_receipt(receipt_path, {
+        "status": "schema_applied", "candidate_database": "candidate",
+    })
+    monkeypatch.setattr(
+        runner, "server_identity", lambda *_: {"database": "candidate"}
+    )
+    monkeypatch.setattr(
+        runner,
+        "_candidate_preddl_dump",
+        lambda *_args, **_kwargs: pytest.fail("legacy backfill must not run"),
+    )
+
+    result = runner.run_candidate_post_schema(
+        runner.DatabaseConfig("host", 1, "user", "password"),
+        "source", "candidate", receipt_path,
+    )
+
+    assert result["status"] == "backfilled"
+    assert result["backfills"] == ()
+
+
 def test_rehearsal_worker_starts_as_project_module(tmp_path) -> None:
     config = CandidateRuntimeConfig(
         Path.cwd(), 18022, 18522, 30, {}, object(), "candidate", tmp_path,
@@ -258,26 +284,112 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
 
 
-def test_release_catalog_includes_line_runtime_recovery_through_wp72() -> None:
+def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-10:] == (
-        "165_anomaly_workflow_event_idempotency_widen.sql",
-        "181_matching_service_date_confirmation.sql",
-        "182_candidate_contact_pool.sql",
-        "184_provisional_registration_case_issue.sql",
-        "185_customer_service_runtime.sql",
-        "186_line_identity_management.sql",
-        "179_line_identity_canonical_menu_publication.sql",
+    assert artifact_names[-6:] == (
         "188_matching_preferences_and_staff_availability.sql",
         "189_client_refund_recipient_snapshot_local_upgrade.sql",
         "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
+        "191_government_subsidy_outbox_intent_type_repair.sql",
+        "192_staff_historical_adoption_hcm_review.sql",
+        "193_historical_order_adoption.sql",
     )
-    assert len(artifact_names) == len(set(artifact_names))
+    ordinals = tuple(int(name.split("_", 1)[0]) for name in artifact_names)
+    assert ordinals == tuple(sorted(ordinals))
+    assert len(ordinals) == len(set(ordinals))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     assert runner.RELEASE_MANIFEST.release_id == (
-        "labor-union-government-overpayment-2026-08-14-v1"
+        "labor-union-wp80-2026-08-14-v2"
     )
+
+
+@pytest.mark.parametrize(
+    ("manifest_name", "release_id"),
+    (
+        (
+            "labor_union_2026_08_14_wp77_v2.json",
+            "labor-union-wp77-2026-08-14-v2",
+        ),
+        (
+            "labor_union_2026_08_14_wp80_v2.json",
+            "labor-union-wp80-2026-08-14-v2",
+        ),
+    ),
+)
+def test_wp77_and_wp80_manifests_satisfy_strict_v1_loader_contract(
+    manifest_name: str, release_id: str,
+) -> None:
+    manifest_path = runner.ROOT / "db" / "migration_releases" / manifest_name
+
+    manifest = runner.load_migration_release_manifest(manifest_path, runner.ROOT)
+
+    assert manifest.release_id == release_id
+
+
+def test_default_release_selection_aggregates_successor_requirements() -> None:
+    verification_ids = {
+        contract.verification_id
+        for contract in runner.RELEASE_MANIFEST.verification_contracts
+    }
+
+    assert {
+        "client-refund-snapshot-owned-objects",
+        "government-overpayment-owned-objects",
+        "government-outbox-intent-type-repair",
+        "wp77-owned-objects",
+        "wp80-owned-objects",
+    } <= verification_ids
+    assert {"api", "architecture-outbox-worker", "streamlit-ui"} <= set(
+        runner.RELEASE_MANIFEST.required_restart_targets
+    )
+    assert {
+        "staff-historical-adoption",
+        "hcm-invalid-review-outbox",
+        "historical-order-adoption-preview",
+        "accounts-payable-query",
+    } <= set(runner.RELEASE_MANIFEST.post_cutover_smoke_ids)
+
+
+def test_government_outbox_intent_type_repair_is_typed_and_fail_closed() -> None:
+    def snapshot(column_type: str) -> dict[str, object]:
+        return {"columns": [{
+            "table_name": "government_subsidy_outbox",
+            "column_name": "intent_type",
+            "column_type": column_type,
+        }]}
+
+    old_type = runner._enum_column_type(
+        runner.GOVERNMENT_OUTBOX_INTENTS_BEFORE_REPAIR
+    )
+    target_type = runner._enum_column_type(
+        runner.GOVERNMENT_OUTBOX_INTENTS_AFTER_REPAIR
+    )
+    assert runner._government_outbox_intent_type_repair_state(
+        snapshot(old_type)
+    ) == "absent"
+    assert runner._government_outbox_intent_type_repair_state(
+        snapshot(target_type)
+    ) == "exact"
+    assert runner._government_outbox_intent_type_repair_state(
+        snapshot("enum('unexpected')")
+    ) == "drift"
+
+
+def test_release_chain_rejects_distinct_artifacts_with_duplicate_ordinals() -> None:
+    manifests = (
+        SimpleNamespace(
+            release_id="release-a",
+            schema_paths=lambda _root: (Path("189_a.sql"),),
+        ),
+        SimpleNamespace(
+            release_id="release-b",
+            schema_paths=lambda _root: (Path("189_b.sql"),),
+        ),
+    )
+
+    with pytest.raises(runner.UpgradeBlocked, match="unique and ordered"):
+        runner._validate_release_chain(manifests)
 
 
 def test_client_refund_snapshot_successor_descriptor_is_complete() -> None:
@@ -285,14 +397,14 @@ def test_client_refund_snapshot_successor_descriptor_is_complete() -> None:
     descriptor = runner.RELEASE_MANIFEST.descriptors[part]
 
     assert descriptor["tables"] == {
-        "client_refund_recipient_snapshots": [
+        "client_refund_recipient_snapshots": {
             "refund_obligation_identity",
             "case_no",
             "bank_code",
             "bank_account",
             "source_kind",
             "created_at",
-        ]
+        }
     }
     assert set(descriptor["triggers"]) == {
         "trg_client_refund_recipient_snapshots_before_update",

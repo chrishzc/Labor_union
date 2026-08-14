@@ -1,8 +1,6 @@
-"""HCM 匯入欄位層級驗證規則，供 scripts/imports/import_client_hcm.py 使用。
-
-規則來源：Grace 提供的「判斷異常資料邏輯」欄位對照表。這裡只負責「這一列有沒有
-問題」，回傳 {Excel 欄位名稱: 錯誤說明}；資料清洗/正規化仍留在
-import_client_hcm.py 原本的 clean_data/clean_phone 等函式裡，兩邊職責分開。
+"""
+File: client_import_validation.py
+Description: 定義 HCM 來源欄位契約與逐列驗證規則，供匯入及唯讀演練共用。
 """
 
 from __future__ import annotations
@@ -20,6 +18,11 @@ DELIVERY_TYPE_VALUES = {"自然產", "剖腹產"}
 SERVICE_TYPE_VALUES = {"連續服務", "週休1日", "週休2日", "周休二日", "休周日"}
 PHONE_PATTERN = re.compile(r"^09\d{8}$")
 DATE_PATTERN = re.compile(r"^\d{4}/\d{2}/\d{2}$")
+
+HCM_REQUIRED_HEADERS = frozenset({
+    "案件狀態", "查詢序號(案件編號)", "報名時間(建檔)", "姓名", "行動電話",
+    "身分資格", "服務時間", "預計服務日期", "希望服務天數", "服務方式",
+})
 
 VALID_CITIES = [
     "台北市", "新北市", "桃園市", "台中市", "台南市", "高雄市", "基隆市",
@@ -207,5 +210,4 @@ def fallback_case_key(name: Any, phone: Any) -> str:
     if not name_part and not phone_part:
         return f"error_row_{datetime.now().strftime('%Y%m%d%H%M%S%f')}"
     return f"error_{name_part}_{phone_part}"
-
 
