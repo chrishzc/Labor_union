@@ -50,3 +50,5 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 LINE 申請只建立待辦 evidence，正式排班仍由既有 leave-substitution Preview／Apply 擁有；目前尚未授權實作。
 | [84_Legacy_Knowledge_Empty_Schema_Recovery_Work_Package.md](84_Legacy_Knowledge_Empty_Schema_Recovery_Work_Package.md) | work-package | `in-progress` | exact 且九張 owned tables 全空的歷史 Knowledge schema，只在隔離 candidate 重建為 canonical 148／163。 |
 | [85_Client_Refund_Recipient_Snapshot_Local_Upgrade_Work_Package.md](85_Client_Refund_Recipient_Snapshot_Local_Upgrade_Work_Package.md) | work-package | `in-progress` | 將既有 canonical part 176 接入 successor release，修復本機 preserve-data DB 缺少退款 recipient snapshot schema。 |
+| [86_API_Only_DB_Runtime_Local_Readiness_Work_Package.md](86_API_Only_DB_Runtime_Local_Readiness_Work_Package.md) | work-package | `in-progress` | Worker／Monitor 改走 Private Operations API，MySQL 只允許 FastAPI process 接觸，先完成地端服務驗收。 |
+| [87_Cloud_Ready_Runtime_Supervision_Work_Package.md](87_Cloud_Ready_Runtime_Supervision_Work_Package.md) | work-package | `in-progress` | 補齊 Google OIDC service identity、caller heartbeat、API-side readiness 與 typed bounded retry；不建立 Dockerfile 或雲端資源。 |

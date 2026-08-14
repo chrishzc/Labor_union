@@ -645,3 +645,88 @@
   Contract Signing router 的既有防護提交，未執行遠端 push。
 - 驗證 `api.main` 可成功載入；合約封存與驗證資料集聚焦測試 `13 passed`；完整 pytest
   成功收集 `1902` 項測試。
+
+## [2026-08-14] 本機 preserve-data updater 修復與 DB 更新
+
+- 擴充 WP84：legacy Knowledge 的七張空 root/auxiliary tables 只在 candidate 重建，既有
+  `knowledge_answer_requests` 與 `knowledge_jobs` 各 20 筆原樣保留；count、PK hash 與
+  table checksum 更新前後完全一致。
+- 修復 updater 的三個後續缺口：contract identity migration 可由專案根目錄 subprocess 載入且
+  先於 canonical view；release 153 零筆退役表可被 verifier 辨識；已驗證 lifecycle backfill
+  只允許其宣告的 control events/state write set。
+- disposable MySQL WP84 `5 passed`；updater focused regression `71 passed, 1 skipped`，修補後相關
+  focused regression `45 passed, 6 skipped`；最終群組先為 `79 passed, 1 failed`，修正 legacy
+  system-alert 專用 verifier 的 generic projection 誤判後，唯一完整 cutover 案例重跑 `1 passed`。
+- 正式 updater receipt 位於 Git ignored
+  `scratch/local_database_updates/union_db_local_20260813162514/`；完成 source dump、candidate
+  apply/backfill/verify、candidate dump、同名 `union_db` replacement 與最終 equivalence 驗證。
+- `.venv\Scripts\python.exe -m scripts.update_local_database --require-current` 回報 `current`，release
+  為 `labor-union-wp72-2026-08-13-v1`；未執行 git add、commit、push、reset、clean 或 stash。
+
+## [2026-08-14] 應付帳款缺表 successor releases 與本機 DB 更新
+
+- 確認應付帳款 query 的 MySQL 1146 由 preserve release catalog 漏接 canonical parts 176、169
+  所致；新增有序 part 189／190 bridge 與兩個 successor manifests/descriptors，不改舊 published
+  release bytes，不推論或回填銀行／退款／政府溢付款業務資料。
+- focused manifest/runner 測試 `30 passed`，disposable MySQL full preserve/cutover `1 passed`；最終
+  schema/release/updater focused `24 passed`。
+- 本機 updater 兩次同名 replacement 均 completed，receipts 位於 Git ignored
+  `scratch/local_database_updates/union_db_local_20260813170752/` 與
+  `scratch/local_database_updates/union_db_local_20260813171330/`。
+- current release 為 `labor-union-government-overpayment-2026-08-14-v1`；2026-08 應付帳款 application
+  query 成功且為 0 rows，不再出現缺表錯誤。
+
+## [2026-08-14] API-only DB Runtime 地端可測版本
+
+- 依使用者核准的 Work Package 86 完成 Private Operations API、Monitor／Worker API client 化，
+  並移除 FastAPI lifespan 內嵌 anomaly outbox 與 security-audit retention threads。
+- Durable、LINE、Knowledge、Incident 四個 Worker 與 Runtime Monitor 均不再 import MySQL adapter；
+  process 啟動時主動清除可能繼承的 DB credential，MySQL composition 只存在 FastAPI process。
+- 原內嵌 anomaly outbox 與 audit retention 改由獨立 Incident Worker 觸發完整 one-shot API operation，
+  避免移除 thread 後功能靜默消失；既有 durable claim／handler／complete transaction 語意不變。
+- local/test Private API 使用至少 32 字元的 process-local shared key、constant-time comparison，且不列入
+  OpenAPI；production 與未明確設定 `APP_ENV` 時固定 fail closed，Google OIDC/IAM 留待後續部署案。
+- Windows／Unix launcher 會產生不落盤的隨機 local key；唯讀 launcher preflight 回報 `ready`，四個
+  既有 Worker／Monitor CLI 加 Incident Worker 的 direct `--help` 皆成功。
+- 最終 focused regression `57 passed`；另以臨時 FastAPI PID 在 `127.0.0.1:18080` 驗證 public
+  health 與 authenticated private health 都成功，完成後已停止該 PID；`git diff --check` 通過。
+- 30 個本次異動／新增文字檔皆通過 strict UTF-8、無 BOM 驗證；Worker DB 邊界靜態掃描通過。
+- 本次未修改 schema／migration／seed／backfill，未連線或操作既有 `union_db`／NAS DB，也未部署
+  Cloud Run；真正地端 DB 整合與完整 launcher smoke 依使用者指示留待人工測試後再進下一階段。
+
+## [2026-08-14] Windows Private API launcher 啟動回歸修復
+
+- 重現一般 launcher 無法啟動：batch `for /f` 內嵌 quoted Python command 被 `cmd.exe` 拆錯，
+  `INTERNAL_SERVICE_SHARED_KEY` 因而未產生；問題不是 MySQL、schema 或上一版 launcher readiness。
+- 金鑰改由共用 batch subroutine 使用 Windows PowerShell CSPRNG 產生，不輸出、不落盤；一般啟動
+  與 `--smoke-test` 走同一子程序，並加入 API／UI health 200 後才啟動 Worker／Monitor 的順序門禁。
+- launcher／Private API initial focused tests `24 passed`，加入防回歸 assertions 後最終 `28 passed`；
+  修復後受控全服務 smoke `passed`，API、UI、
+  Runtime Monitor、File Watcher、Durable、Incident、LINE Worker 均啟動，private operations 全回 200。
+- smoke logs 無 `not recognized`、ConnectionError、Traceback、401 或 503；測試完成後只停止本次
+  smoke 建立的 PID。未套 migration、未修改 DB 資料、未部署外部環境。
+
+## [2026-08-14] Cloud-ready Worker／Monitor Runtime 第二階段
+
+- 依使用者核准的 Work Package 87 補齊 cloud-ready runtime；Knowledge 啟用、Chroma readiness、
+  Agent 串接、Dockerfile／image、Cloud Run／IAM resource 與 DB outage Pub/Sub 均明確排除。
+- production Private Operations 改為 Google-signed OIDC ID token：精確驗證 audience、issuer、
+  service-account email allowlist 與 endpoint caller service；local/test shared key 保留，production
+  不接受 shared-key fallback。client 透過 ADC 取得約一小時有效的 ID token並依 `exp` 快取，server
+  使用 CacheControl 快取 Google verification certificates。
+- Worker request 新增 instance、process、hostname、started time 與 release version；Durable、LINE、
+  Knowledge、Incident heartbeat 均使用 authenticated caller identity，不再記錄 FastAPI PID／hostname。
+- Runtime Monitor 只探測 API／UI／public edge／LIFF；Redis、media storage、MySQL／schema 與 queue
+  readiness 改由 API process 使用同一份設定檢查，並新增 authenticated private readiness endpoint。
+- Private HTTP client 優先解析 typed `retryable`，只對 transient failure 做 bounded exponential
+  backoff＋jitter；所有 Worker／Monitor `--once` 的 retryable failure 回傳 1、永久失敗回傳 2。
+- canonical entrypoint queue 新增並人工裁決 7 個 private runtime API 與 Incident Worker CLI，維持
+  `review_required=0`；新增 `google-auth`、`cachecontrol` direct dependencies 並同步 `uv.lock`。
+- fail-before-fix 為 `12 failed, 7 passed`；最終直接相關 focused regression `53 passed`，compileall、
+  `git diff --check` 皆通過。完整非 integration 測試為 `1979 passed, 81 skipped, 17 deselected,
+  11 failed`；11 項均屬既有 dirty migration/validation hash、legacy audit 或 DB updater test stub
+  未接受既有 `mysql_container` keyword，與本次 write set 無重疊。
+- `start_local_development.bat --dry-run` 回報 `ready`；另以暫時 Uvicorn port 8765 驗證 `/health`
+  與 authenticated `/internal/v1/runtime/check` 均成功，程序與測試 log 已停止／清除。
+- 本次未新增或修改任何 Dockerfile，未操作 schema、migration、既有 `union_db`／NAS DB，未建立或
+  修改 Cloud Run、IAM、network 或其他雲端資源；待使用者地端測試後再進 Docker 封裝階段。

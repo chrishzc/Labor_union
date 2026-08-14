@@ -12,7 +12,7 @@ from api.routes import line_identity
 from api.schemas.line_identity import LineIdentityFlowValidationRequest
 from domains.line.identities import LineUserId
 from domains.line.identity_flow import LineIdentityFlowConflict
-from scripts import run_line_worker
+from api.dependencies import line_worker_operation
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -28,7 +28,7 @@ def test_identity_flow_url_uses_supported_liff_additional_information_format(
 ) -> None:
     monkeypatch.setenv("LINE_LIFF_ID", "1234567890-AbCdEf")
 
-    url = run_line_worker._identity_flow_url("admin_binding", "flow with spaces")
+    url = line_worker_operation._identity_flow_url("admin_binding", "flow with spaces")
 
     assert url == (
         "https://liff.line.me/1234567890-AbCdEf/"
