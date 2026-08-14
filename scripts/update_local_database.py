@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -213,11 +214,12 @@ def _verify_schema_equivalence(source_schema, candidate_schema, source: str, can
         "constraints",
         "key_columns",
         "foreign_keys",
-        "show_create_tables",
     )
     for key in structural_keys:
         if source_schema[key] != candidate_schema[key]:
             raise LocalDatabaseUpdateError(f"rebuilt union_db schema differs: {key}")
+    if not _show_create_tables_match(source_schema, candidate_schema):
+        raise LocalDatabaseUpdateError("rebuilt union_db schema differs: show_create_tables")
     source_programs = migration._restored_schema_program_evidence(
         source_schema, source, (candidate,)
     )
@@ -226,6 +228,26 @@ def _verify_schema_equivalence(source_schema, candidate_schema, source: str, can
     )
     if source_programs != candidate_programs:
         raise LocalDatabaseUpdateError("rebuilt union_db triggers or views differ")
+
+
+def _show_create_tables_match(source_schema, candidate_schema) -> bool:
+    return _stable_show_create_tables(source_schema) == _stable_show_create_tables(candidate_schema)
+
+
+def _stable_show_create_tables(schema) -> dict[str, str]:
+    tables = schema["show_create_tables"]
+    return {
+        table_name: _stable_show_create_table(create_sql)
+        for table_name, create_sql in tables.items()
+    }
+
+
+def _stable_show_create_table(create_sql: str) -> str:
+    without_dynamic_counter = re.sub(r" AUTO_INCREMENT=\d+", "", create_sql)
+    return without_dynamic_counter.replace(
+        " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+        " COLLATE utf8mb4_unicode_ci",
+    )
 
 
 def rollback_source(

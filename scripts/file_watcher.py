@@ -1,4 +1,7 @@
-"""Thin local XLSX watcher that invokes import application adapters."""
+"""
+File: file_watcher.py
+Description: 本機財務 XLSX 監看入口；僅觸發明確 dry-run，不能成為日常寫入來源。
+"""
 
 from __future__ import annotations
 
@@ -30,6 +33,7 @@ class WatchedImport:
         command = [sys.executable, str(PROJECT_ROOT / self.script_path)]
         if self.excel_argument:
             command.extend((self.excel_argument, event_path))
+            command.append("--dry-run")
             return command
         command.append(event_path)
         return command

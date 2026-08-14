@@ -1,0 +1,25 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "191_import_warning_tracking.sql": {
+      "tables": {
+        "import_warning_occurrences": ["id", "occurrence_identity", "owning_lane", "source_kind", "source_event_identity", "source_receipt_identity", "logical_code", "field_path", "masked_subject", "issue_codes", "evidence_snapshot", "created_at"],
+        "import_warning_tracking_events": ["id", "event_identity", "occurrence_id", "action", "before_status", "after_status", "expected_version", "resulting_version", "actor_kind", "actor_identity", "reason_code", "note", "evidence_reference", "command_fingerprint", "idempotency_key", "correlation_id", "created_at"],
+        "import_warning_current_tasks": ["occurrence_id", "tracking_status", "tracking_version", "replacement_occurrence_id", "last_event_id", "last_event_at", "updated_at"],
+        "import_warning_resubmission_associations": ["id", "association_identity", "prior_occurrence_id", "owning_lane", "prior_source_event_identity", "new_source_event_identity", "new_receipt_identity", "import_outcome", "replacement_occurrence_id", "created_at"],
+        "import_warning_tracking_receipts": ["id", "idempotency_key", "command_fingerprint", "occurrence_id", "tracking_event_id", "expected_version", "resulting_version", "result_snapshot", "created_at"],
+        "import_warning_tracking_outbox": ["id", "tracking_event_id", "intent_key", "bounded_snapshot", "published_at", "attempts", "last_error", "created_at"]
+      },
+      "triggers": [
+        "trg_import_warning_occurrences_before_update",
+        "trg_import_warning_occurrences_before_delete",
+        "trg_import_warning_tracking_events_before_update",
+        "trg_import_warning_tracking_events_before_delete",
+        "trg_import_warning_resubmission_associations_before_update",
+        "trg_import_warning_resubmission_associations_before_delete",
+        "trg_import_warning_tracking_receipts_before_update",
+        "trg_import_warning_tracking_receipts_before_delete"
+      ]
+    }
+  }
+}

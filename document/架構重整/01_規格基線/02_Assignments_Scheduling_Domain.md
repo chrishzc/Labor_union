@@ -326,3 +326,14 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
 - 管理員僅能從 `willing` 候選人選定一位，重新檢查可用性後建立一個 segment 的正式 matching plan。
 - 多位月嫂共同服務仍是顯式 multi-caregiver fallback plan，不能由候選聯繫池直接轉換。
 - 選定、撤回或取消不得刪除候選聯繫歷史。正式 plan 後的日期表、客戶與月嫂雙方確認及 assignment gate 僅針對該正式 plan recipients。
+
+## Historical pairing evidence（2026-08-13）
+
+Historical Order Adoption 可保存一或兩位來源月嫂的不可變配對 evidence。月嫂姓名空白、找不到或
+不唯一都不阻擋 Orders status adoption；只形成 bounded review。單一月嫂且共同起訖日可唯一視為
+該月嫂自己的歷史區間時，可由 purpose-specific Scheduling writer 建立 `completed`
+`case_staff_assignments`。兩位月嫂只有共同起訖日、沒有每人各自區間時，不建立正式 assignment、
+不猜測分段，也不寫 `orders.staff_id` 或 `staff_schedule`。
+
+歷史 assignment 即使有起訖日，仍不等於 assignment-owned official service days。缺少逐日 ownership
+與 rate snapshot 時 Payroll 固定回 blocker；不得按連續曆日猜算工時、薪資或應付義務。

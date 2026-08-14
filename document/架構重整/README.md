@@ -36,7 +36,7 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 本目錄依文件性質分為三類子資料夾；分類僅為整理排序，不改變任何文件的規格
 內容或權威順序：
 
-- `01_規格基線/` —— 定義目標架構的 `00`～`24` 規格文件；`15` 是正式索引與裁決入口。
+- `01_規格基線/` —— 定義 current Global／Domain 架構契約；`15` 是正式索引與裁決入口。
 - `02_決策與退役執行記錄/` —— 依時間序記錄已核准的退役／修復決策與其驗收證據
   （原 `19`～`30`）。
 - `03_追蹤清單與證據/` —— legacy finding 盤點清單、過期文件候選清單、可刪暫存
@@ -54,12 +54,9 @@ LINE、管理權限、部署與治理語彙集中到當時的 `15`～`18`；`19`
 - `01_規格基線/05_Staff_Payables_Export_Domain.md`
 - `01_規格基線/06_Anomalies_Domain.md`
 - `01_規格基線/07_跨Domain交易與pytest驗收架構.md`
-- `01_規格基線/08_ADAD卸載與Legacy資料邊界.md`
 - `01_規格基線/09_Finance_Import_Domain.md`
 - `01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md`
-- `01_規格基線/11_架構總審矩陣與實作切片.md`
 - `01_規格基線/12_Global_效能與UX體感架構.md`
-- `01_規格基線/13_規格實作完成度矩陣.md`
 - `01_規格基線/14_Government_Subsidy_Domain.md`
 - `01_規格基線/15_正式規格索引與裁決總表.md`
 - `01_規格基線/16_Staff_Payables與Client_Refund正式規格.md`
@@ -81,6 +78,12 @@ Deployment／治理，`19` 定義 API／Streamlit／CLI entry point 的逐項治
 `02_決策與退役執行記錄/` 與 `03_追蹤清單與證據/` 各自有獨立的 `README.md`
 索引（含一句話摘要，`02` 另附機器可讀 `doc_type`／`declared_status`）；本節僅
 列出規格基線，避免執行記錄的增修頻率拖累規格索引的穩定性。
+
+已完成且不再擁有 current contract 的歷史規格已封存：
+[`08 ADAD／Legacy 邊界`](04_已完成與上線封存/superseded_specs/08_ADAD卸載與Legacy資料邊界.md)、
+[`11 架構總審矩陣`](04_已完成與上線封存/superseded_specs/11_架構總審矩陣與實作切片.md)、
+[`13 規格實作完成度矩陣`](04_已完成與上線封存/superseded_specs/13_規格實作完成度矩陣.md)。
+現行語意由 `15`、個別 Domain／Global 規格、AGENTS.md 與 `03` 的 current evidence 承接。
 
 ## 實作門檻
 

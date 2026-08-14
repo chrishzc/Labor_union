@@ -331,7 +331,7 @@ history、validation assets、release artifacts 或 current recovery evidence。
 
 ## 12. 來源追溯
 
-- `08_ADAD卸載與Legacy資料邊界.md`
+- 根目錄 `AGENTS.md` 的 ADAD／legacy 邊界規則
 - `10_Global_保留資料Migration與Cutover_Subsystem.md`
 - `12_Global_效能與UX體感架構.md`
 - `document/文件整併工作區/04_部署架構_無損合併稿.md`

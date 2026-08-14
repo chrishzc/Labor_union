@@ -1,13 +1,7 @@
--- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-08-10-v1
--- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
--- Rebuild with: python scripts/build_validation_schema_release.py
-
--- BEGIN SOURCE: db/schema.sql
 -- 強制重建資料庫以確保 ENUM 編碼正確
-DROP DATABASE IF EXISTS __LU_TEST_DATABASE__;
-CREATE DATABASE __LU_TEST_DATABASE__ CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE __LU_TEST_DATABASE__;
+DROP DATABASE IF EXISTS union_db;
+CREATE DATABASE union_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE union_db;
 
 -- 1. 客戶資料表 (對應 欄位.xlsx 結構)
 CREATE TABLE IF NOT EXISTS clients (
@@ -43,7 +37,7 @@ CREATE TABLE IF NOT EXISTS clients (
     INDEX idx_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2. BeClass 報名紀錄表（主關聯欄位為 beclass_records.query_no <=> clients.case_no；案件識別一律以 clients.case_no 為準）
+-- 2. BeClass 報名紀錄表（舊版主關聯欄位為 query_no；後續 release 會加上 transition binding）
 CREATE TABLE IF NOT EXISTS beclass_records (
     id INT AUTO_INCREMENT PRIMARY KEY,
     seq_num INT COMMENT '項次',
@@ -675,9 +669,7 @@ CREATE TABLE IF NOT EXISTS line_rich_menu_publications (
     CONSTRAINT fk_rich_menu_publish_admin FOREIGN KEY (requested_by_admin_user_id)
         REFERENCES admin_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema.sql
 
--- BEGIN SOURCE: db/schema_parts/20_staff_monthly_settlements.sql
 -- 服務人員月結摘要：每位服務人員、每個薪資歸屬月、每個修訂版一筆。
 -- settlement_month 是薪資歸屬月份，不得由銀行交易日期回寫。
 CREATE TABLE IF NOT EXISTS staff_monthly_settlements (
@@ -718,9 +710,7 @@ CREATE TABLE IF NOT EXISTS staff_monthly_settlements (
             OR finalized_at IS NOT NULL
         )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/20_staff_monthly_settlements.sql
 
--- BEGIN SOURCE: db/schema_parts/30_staff_monthly_settlement_details.sql
 -- 服務人員月結明細：凍結逐案件、逐服務指派的應付構成。
 -- 實際銀行轉帳另由月結付款分配記錄，不得反寫本表的應付快照。
 CREATE TABLE IF NOT EXISTS staff_monthly_settlement_details (
@@ -786,9 +776,7 @@ CREATE TABLE IF NOT EXISTS staff_monthly_settlement_details (
             OR legacy_subsidy_status IN ('confirmed', 'review_required')
         )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/30_staff_monthly_settlement_details.sql
 
--- BEGIN SOURCE: db/schema_parts/40_staff_actual_transfers.sql
 -- 服務人員實際銀行轉帳事件。
 -- 每筆銀行流水只保存一次；跨訂單分配由獨立 allocation schema 負責。
 CREATE TABLE IF NOT EXISTS staff_actual_transfers (
@@ -843,9 +831,7 @@ CREATE TABLE IF NOT EXISTS staff_actual_transfers (
     CONSTRAINT chk_staff_actual_transfer_unknown_review
         CHECK (payment_phase <> 'unknown' OR review_status = 'pending')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/40_staff_actual_transfers.sql
 
--- BEGIN SOURCE: db/schema_parts/50_staff_transfer_allocations.sql
 CREATE TABLE IF NOT EXISTS staff_transfer_allocations (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     transfer_id BIGINT NOT NULL,
@@ -919,9 +905,7 @@ PREPARE staff_transfer_allocation_index_stmt
     FROM @staff_transfer_allocation_index_sql;
 EXECUTE staff_transfer_allocation_index_stmt;
 DEALLOCATE PREPARE staff_transfer_allocation_index_stmt;
--- END SOURCE: db/schema_parts/50_staff_transfer_allocations.sql
 
--- BEGIN SOURCE: db/schema_parts/60_finance_import_staging.sql
 -- 每次 Excel 正規化結果的匯入批次；欄位名稱與 staging service 契約一致。
 CREATE TABLE IF NOT EXISTS finance_import_batches (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -1069,9 +1053,7 @@ CREATE TABLE IF NOT EXISTS finance_import_occurrences (
         ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT chk_finance_import_occurrence_source_row CHECK (source_row >= 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/60_finance_import_staging.sql
 
--- BEGIN SOURCE: db/schema_parts/61_finance_import_reprocessing.sql
 -- Append-only audit for an explicitly requested historical finance reprocess.
 -- The application inserts the completed run and its changed-row events in one
 -- outer transaction. A dry run rolls that transaction back and leaves no IDs.
@@ -1227,9 +1209,7 @@ BEFORE DELETE ON finance_import_reclassification_events
 FOR EACH ROW
 SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_import_reclassification_events records cannot be deleted';
--- END SOURCE: db/schema_parts/61_finance_import_reprocessing.sql
 
--- BEGIN SOURCE: db/schema_parts/65_client_payment_finance_link.sql
 -- 讓客戶實際金流可追溯至 canonical 銀行流水。
 -- 既有與人工補登交易允許 NULL；使用 INFORMATION_SCHEMA 讓 migration 可重跑。
 SET @client_payment_finance_link_column_exists = (
@@ -1280,9 +1260,7 @@ SET @client_payment_finance_link_sql = IF(
 PREPARE client_payment_finance_link_stmt FROM @client_payment_finance_link_sql;
 EXECUTE client_payment_finance_link_stmt;
 DEALLOCATE PREPARE client_payment_finance_link_stmt;
--- END SOURCE: db/schema_parts/65_client_payment_finance_link.sql
 
--- BEGIN SOURCE: db/schema_parts/70_subsidy_claim_batches.sql
 -- 正式季度政府補助申請批次；revision 由建立流程明確提供。
 CREATE TABLE IF NOT EXISTS subsidy_claim_batches (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -1355,9 +1333,7 @@ CREATE TABLE IF NOT EXISTS subsidy_claim_batch_items (
         AND paid_amount >= 0
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/70_subsidy_claim_batches.sql
 
--- BEGIN SOURCE: db/schema_parts/80_government_subsidy_transactions.sql
 -- 已唯一匹配正式申請批次的政府補助銀行事件。
 -- 未唯一匹配的銀行流水只保留於 finance_import_rows，不建立本表資料。
 -- 複合 FK 需要 claim item 提供 id + batch_id 候選鍵；以名稱守門使 loader 可重跑。
@@ -1676,9 +1652,7 @@ CREATE TABLE IF NOT EXISTS government_subsidy_allocations (
     CONSTRAINT chk_government_subsidy_allocation_reversal_target
         CHECK (reversal_target_type = 'receipt')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/80_government_subsidy_transactions.sql
 
--- BEGIN SOURCE: db/schema_parts/90_finance_alerts.sql
 -- 財務邊界警示的目前人工處理狀態。
 -- 本表只保存例外案件與稽核快照，不建立或修改任何正式交易、分配或淨額。
 CREATE TABLE IF NOT EXISTS finance_alerts (
@@ -1791,9 +1765,7 @@ CREATE TABLE IF NOT EXISTS finance_alert_events (
         REFERENCES finance_alerts(id)
         ON UPDATE RESTRICT ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/90_finance_alerts.sql
 
--- BEGIN SOURCE: db/schema_parts/95_multi_caregiver_schedule.sql
 -- 將日層級排班連回正式服務指派。既有排班一律保留 NULL，不能由 migration 推測歸屬。
 -- 本 Schema Part 為可重跑 (idempotent)、純擴充 (additive-only) 的 DDL 守衛，嚴禁破壞性異動與寫入。
 -- 遇到表缺失、同名錯誤規格或異名等價 metadata 時，一律以 MySQL PREPARE 相容之固定 sentinel 語句執行 fail-closed。
@@ -2080,9 +2052,7 @@ SET @reviews_action_sql = IF(
 PREPARE stmt_reviews FROM @reviews_action_sql;
 EXECUTE stmt_reviews;
 DEALLOCATE PREPARE stmt_reviews;
--- END SOURCE: db/schema_parts/95_multi_caregiver_schedule.sql
 
--- BEGIN SOURCE: db/schema_parts/96_order_assignment_sync_audit.sql
 -- 保存已成功套用的訂單服務變更與正式月嫂指派配置；不可作為薪資或時數覆寫來源。
 CREATE TABLE IF NOT EXISTS order_assignment_change_audits (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -2098,9 +2068,7 @@ CREATE TABLE IF NOT EXISTS order_assignment_change_audits (
         FOREIGN KEY (case_no) REFERENCES orders(case_no)
         ON UPDATE RESTRICT ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/96_order_assignment_sync_audit.sql
 
--- BEGIN SOURCE: db/schema_parts/97_client_payment_subsidy_return_review.sql
 -- 既有客戶帳務表補上補助退款人工覆核欄位。
 -- 使用 INFORMATION_SCHEMA 逐欄檢查，確保 migration 可安全重跑且不改寫歷史資料。
 SET @subsidy_return_review_status_exists = (
@@ -2134,9 +2102,7 @@ SET @subsidy_return_review_sql = IF(
 PREPARE subsidy_return_review_stmt FROM @subsidy_return_review_sql;
 EXECUTE subsidy_return_review_stmt;
 DEALLOCATE PREPARE subsidy_return_review_stmt;
--- END SOURCE: db/schema_parts/97_client_payment_subsidy_return_review.sql
 
--- BEGIN SOURCE: db/schema_parts/97_line_confirmation_review.sql
 -- 第五階段 5.6：人工審查處理者、原因與查詢索引。
 -- 使用 INFORMATION_SCHEMA 守門，使既有開發資料庫可重複執行 init_db.py。
 SET @line_review_admin_column_exists = (
@@ -2219,9 +2185,7 @@ SET @line_review_schema_sql = IF(
 PREPARE line_review_schema_stmt FROM @line_review_schema_sql;
 EXECUTE line_review_schema_stmt;
 DEALLOCATE PREPARE line_review_schema_stmt;
--- END SOURCE: db/schema_parts/97_line_confirmation_review.sql
 
--- BEGIN SOURCE: db/schema_parts/98_caregiver_matching_plans.sql
 -- 98_caregiver_matching_plans.sql
 -- 建立洽談中訂單案件的配對方案 Header 表與連續服務區段 Detail 表。
 -- 支援版本控管、同一案件唯一有效版本、最多四個連續區段及同一月嫂在單一版本內唯一。
@@ -2338,9 +2302,7 @@ CREATE TRIGGER trg_caregiver_matching_plan_segments_before_update BEFORE UPDATE 
 
 DROP TRIGGER IF EXISTS trg_caregiver_matching_plan_segments_before_delete;
 CREATE TRIGGER trg_caregiver_matching_plan_segments_before_delete BEFORE DELETE ON caregiver_matching_plan_segments FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_segments records cannot be deleted';
--- END SOURCE: db/schema_parts/98_caregiver_matching_plans.sql
 
--- BEGIN SOURCE: db/schema_parts/98_customer_service_tickets.sql
 CREATE TABLE IF NOT EXISTS customer_service_tickets (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     line_user_id VARCHAR(100) NOT NULL COMMENT '提出需求的 LINE 用戶',
@@ -2456,9 +2418,7 @@ SET @profile_change_status_sql = IF(
 PREPARE profile_change_status_stmt FROM @profile_change_status_sql;
 EXECUTE profile_change_status_stmt;
 DEALLOCATE PREPARE profile_change_status_stmt;
--- END SOURCE: db/schema_parts/98_customer_service_tickets.sql
 
--- BEGIN SOURCE: db/schema_parts/99_caregiver_matching_plan_events.sql
 -- 99_caregiver_matching_plan_events.sql
 -- 建立 append-only 配對方案與區段的操作、意願與發送事實事件表。
 -- 包含事件型別與標的契約 CHECK 約束、payload JSON Object CHECK 約束、event_key 冪等全表唯一，
@@ -2499,9 +2459,7 @@ CREATE TRIGGER trg_caregiver_matching_plan_events_before_update BEFORE UPDATE ON
 
 DROP TRIGGER IF EXISTS trg_caregiver_matching_plan_events_before_delete;
 CREATE TRIGGER trg_caregiver_matching_plan_events_before_delete BEFORE DELETE ON caregiver_matching_plan_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_matching_plan_events records cannot be deleted';
--- END SOURCE: db/schema_parts/99_caregiver_matching_plan_events.sql
 
--- BEGIN SOURCE: db/schema_parts/99a_caregiver_availability_locks.sql
 -- 99a_caregiver_availability_locks.sql
 -- 建立等待訂金階段的配對方案鎖定批次 Header 表與逐月嫂逐日占用 Detail 表。
 -- 包含狀態生命週期 CHECK 約束 (要求 released_by trim 後非空)、TIMESTAMP 顯式 NOT NULL、
@@ -2572,9 +2530,7 @@ CREATE TRIGGER trg_caregiver_availability_lock_days_before_update BEFORE UPDATE 
 
 DROP TRIGGER IF EXISTS trg_caregiver_availability_lock_days_before_delete;
 CREATE TRIGGER trg_caregiver_availability_lock_days_before_delete BEFORE DELETE ON caregiver_availability_lock_days FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_lock_days records cannot be deleted';
--- END SOURCE: db/schema_parts/99a_caregiver_availability_locks.sql
 
--- BEGIN SOURCE: db/schema_parts/99b_caregiver_availability_lock_events.sql
 -- 99b_caregiver_availability_lock_events.sql
 -- 建立 append-only 鎖定生命週期稽核事件表。
 -- 包含事件型別與原因契約 CHECK 約束、payload JSON Object CHECK 約束、
@@ -2612,9 +2568,7 @@ CREATE TRIGGER trg_caregiver_availability_lock_events_before_update BEFORE UPDAT
 
 DROP TRIGGER IF EXISTS trg_caregiver_availability_lock_events_before_delete;
 CREATE TRIGGER trg_caregiver_availability_lock_events_before_delete BEFORE DELETE ON caregiver_availability_lock_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'caregiver_availability_lock_events records cannot be deleted';
--- END SOURCE: db/schema_parts/99b_caregiver_availability_lock_events.sql
 
--- BEGIN SOURCE: db/schema_parts/100_staff_schedule_allow_same_day_multiple_assignments.sql
 -- 退休舊版放寬同一月嫂同日多個排班的 schema part。
 -- 保留檔名 100_staff_schedule_allow_same_day_multiple_assignments.sql 以維護 lexical loader 相容性，
 -- 但轉改為 fail-closed、可重跑 (idempotent) 的 canonical staff-date (staff_id, work_date) 唯一鍵守衛。
@@ -2706,9 +2660,7 @@ SET @action_sql = IF(
 PREPARE staff_schedule_guard_stmt FROM @action_sql;
 EXECUTE staff_schedule_guard_stmt;
 DEALLOCATE PREPARE staff_schedule_guard_stmt;
--- END SOURCE: db/schema_parts/100_staff_schedule_allow_same_day_multiple_assignments.sql
 
--- BEGIN SOURCE: db/schema_parts/101_assignment_schedule_leave_substitution_events.sql
 -- 101_assignment_schedule_leave_substitution_events.sql
 -- 記錄正式服務指派在單日休假/順延/代班流程中的事件事實。
 -- 僅 append-only，無任何歷史修補與回填邏輯；欄位皆附上明確約束，
@@ -2767,9 +2719,7 @@ CREATE TRIGGER trg_assignment_schedule_leave_substitution_events_before_delete
 BEFORE DELETE ON assignment_schedule_leave_substitution_events
 FOR EACH ROW
 SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'assignment_schedule_leave_substitution_events records cannot be deleted';
--- END SOURCE: db/schema_parts/101_assignment_schedule_leave_substitution_events.sql
 
--- BEGIN SOURCE: db/schema_parts/102_assignment_schedule_leave_substitution_batches.sql
 -- 102_assignment_schedule_leave_substitution_batches.sql
 -- 為同一案件多日休假／順延／代班 Apply 建立 batch 聚合根，並保留既有事件的
 -- 可回填式欄位（預設 NULL，不做歷史回填或更新）。
@@ -3279,9 +3229,7 @@ SET @event_batch_linkage_check_action_sql = IF(
 PREPARE stmt_event_batch_linkage_check FROM @event_batch_linkage_check_action_sql;
 EXECUTE stmt_event_batch_linkage_check;
 DEALLOCATE PREPARE stmt_event_batch_linkage_check;
--- END SOURCE: db/schema_parts/102_assignment_schedule_leave_substitution_batches.sql
 
--- BEGIN SOURCE: db/schema_parts/103_assignment_original_service_period.sql
 -- 保存 assignment 初次建立的服務區段，讓調整前／調整後可被穩定查詢。
 SET @assignment_original_start_exists = (
     SELECT COUNT(*)
@@ -3333,9 +3281,7 @@ BEFORE UPDATE ON case_staff_assignments
 FOR EACH ROW
 SET NEW.original_assigned_start_date = OLD.original_assigned_start_date,
     NEW.original_assigned_end_date = OLD.original_assigned_end_date;
--- END SOURCE: db/schema_parts/103_assignment_original_service_period.sql
 
--- BEGIN SOURCE: db/schema_parts/104_order_lifecycle_state_history.sql
 -- 104_order_lifecycle_state_history.sql
 -- 記錄訂單生命週期的狀態轉移、明確維持或阻擋決策。
 -- 本 schema 僅新增 append-only 歷史結構，不回填或修改任何既有正式資料。
@@ -3407,9 +3353,7 @@ BEFORE DELETE ON order_lifecycle_state_events
 FOR EACH ROW
 SIGNAL SQLSTATE '45000'
     SET MESSAGE_TEXT = 'order_lifecycle_state_events records cannot be deleted';
--- END SOURCE: db/schema_parts/104_order_lifecycle_state_history.sql
 
--- BEGIN SOURCE: db/schema_parts/105_order_service_time_terms.sql
 -- Add canonical per-order service-time terms without interpreting legacy free text.
 -- Existing orders deliberately remain NULL and must be completed by an explicit command.
 
@@ -3646,9 +3590,7 @@ SET @order_service_terms_sql = IF(
 PREPARE order_service_terms_stmt FROM @order_service_terms_sql;
 EXECUTE order_service_terms_stmt;
 DEALLOCATE PREPARE order_service_terms_stmt;
--- END SOURCE: db/schema_parts/105_order_service_time_terms.sql
 
--- BEGIN SOURCE: db/schema_parts/106_order_lifecycle_control_facts.sql
 -- Canonical ORD-01 aggregate revision, explicit control facts and alert outbox.
 -- This migration is additive and never infers facts from existing order rows.
 
@@ -4809,9 +4751,7 @@ SET @olcf_outbox_metadata_sql = IF(
 PREPARE olcf_stmt FROM @olcf_outbox_metadata_sql;
 EXECUTE olcf_stmt;
 DEALLOCATE PREPARE olcf_stmt;
--- END SOURCE: db/schema_parts/106_order_lifecycle_control_facts.sql
 
--- BEGIN SOURCE: db/schema_parts/107_system_alert_current_projection.sql
 -- Preserve legacy system_alerts rows while installing the mutable current
 -- projection required by SystemAlertService. This migration is candidate-only.
 
@@ -5117,9 +5057,7 @@ SET @system_alert_sql = IF(
 PREPARE system_alert_stmt FROM @system_alert_sql;
 EXECUTE system_alert_stmt;
 DEALLOCATE PREPARE system_alert_stmt;
--- END SOURCE: db/schema_parts/107_system_alert_current_projection.sql
 
--- BEGIN SOURCE: db/schema_parts/108_matching_records_resume_delivery.sql
 -- Add the explicit resume-delivery fact used by resume commands and DOC-SEND-001.
 -- Existing matching rows deliberately remain NULL; no delivery is inferred.
 
@@ -5208,9 +5146,7 @@ SET @matching_resume_sql = IF(
 PREPARE matching_resume_stmt FROM @matching_resume_sql;
 EXECUTE matching_resume_stmt;
 DEALLOCATE PREPARE matching_resume_stmt;
--- END SOURCE: db/schema_parts/108_matching_records_resume_delivery.sql
 
--- BEGIN SOURCE: db/schema_parts/109_scheduling_generations.sql
 -- Additive Scheduling generation/effective metadata over the existing
 -- case_staff_assignments and staff_schedule SSOT tables.
 
@@ -5562,9 +5498,7 @@ CREATE TRIGGER trg_scheduling_bootstrap_review_events_before_delete
 BEFORE DELETE ON scheduling_bootstrap_review_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'scheduling_bootstrap_review_events records cannot be deleted';
--- END SOURCE: db/schema_parts/109_scheduling_generations.sql
 
--- BEGIN SOURCE: db/schema_parts/110_order_terms_workflow.sql
 -- Additive Orders Terms, contract-flow, and irreversible service-lock facts.
 
 ALTER TABLE orders
@@ -5780,9 +5714,7 @@ CREATE TRIGGER trg_order_terms_apply_receipts_before_delete
 BEFORE DELETE ON order_terms_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'order_terms_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/110_order_terms_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/111_client_finance_ledger.sql
 -- Additive Client Finance obligation, immutable ledger, and M:N allocation SSOT.
 
 CREATE TABLE IF NOT EXISTS client_finance_accounts (
@@ -6151,9 +6083,7 @@ CREATE TRIGGER trg_client_finance_receipts_before_delete
 BEFORE DELETE ON client_finance_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client_finance_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/111_client_finance_ledger.sql
 
--- BEGIN SOURCE: db/schema_parts/112_payroll_obligations.sql
 -- Additive Payroll rate snapshots, special-pay, and staff obligation SSOT.
 
 CREATE TABLE IF NOT EXISTS payroll_case_accounts (
@@ -6502,9 +6432,7 @@ CREATE TRIGGER trg_payroll_apply_receipts_before_delete
 BEFORE DELETE ON payroll_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'payroll_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/112_payroll_obligations.sql
 
--- BEGIN SOURCE: db/schema_parts/113_anomaly_registry_projection.sql
 -- Additive Anomalies registry projection, immutable workflow, and checkpoints.
 
 CREATE TABLE IF NOT EXISTS anomaly_current_alerts (
@@ -6655,9 +6583,7 @@ CREATE TRIGGER trg_finance_anomaly_occurrences_before_delete
 BEFORE DELETE ON finance_anomaly_occurrences
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_anomaly_occurrences records cannot be deleted';
--- END SOURCE: db/schema_parts/113_anomaly_registry_projection.sql
 
--- BEGIN SOURCE: db/schema_parts/114_staff_payout_ledger.sql
 -- Additive Staff Payables immutable payout/return/reversal ledger.
 
 CREATE TABLE IF NOT EXISTS staff_payout_events (
@@ -6881,9 +6807,7 @@ CREATE TRIGGER trg_staff_payables_receipts_before_delete
 BEFORE DELETE ON staff_payables_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'staff_payables_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/114_staff_payout_ledger.sql
 
--- BEGIN SOURCE: db/schema_parts/115_global_command_claims.sql
 -- Global transactional mutex for idempotent application commands.
 
 CREATE TABLE IF NOT EXISTS application_command_claims (
@@ -6914,9 +6838,7 @@ CREATE TRIGGER trg_application_command_claims_before_delete
 BEFORE DELETE ON application_command_claims
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'application_command_claims records cannot be deleted';
--- END SOURCE: db/schema_parts/115_global_command_claims.sql
 
--- BEGIN SOURCE: db/schema_parts/116_order_actual_start_workflow.sql
 -- Additive Actual Start root events and outer transaction receipts.
 
 CREATE TABLE IF NOT EXISTS order_actual_start_events (
@@ -7056,9 +6978,7 @@ CREATE TRIGGER trg_order_actual_start_receipts_before_delete
 BEFORE DELETE ON order_actual_start_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'order_actual_start_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/116_order_actual_start_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/117_client_deposit_settlement_projection.sql
 -- Additive Client Finance-owned current deposit settlement projection.
 
 CREATE TABLE IF NOT EXISTS client_deposit_settlement_projection (
@@ -7119,9 +7039,7 @@ CREATE TABLE IF NOT EXISTS client_deposit_settlement_projection (
             )
         )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/117_client_deposit_settlement_projection.sql
 
--- BEGIN SOURCE: db/schema_parts/118_order_cancellation_workflow.sql
 -- Additive Orders Cancellation root events and outer transaction receipts.
 
 CREATE TABLE IF NOT EXISTS order_cancellation_events (
@@ -7261,9 +7179,7 @@ CREATE TRIGGER trg_order_cancellation_receipts_before_delete
 BEFORE DELETE ON order_cancellation_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'order_cancellation_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/118_order_cancellation_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/119_assignment_plan_workflow.sql
 -- Append-only receipt for one cross-Domain Assignment Plan Apply.
 
 CREATE TABLE IF NOT EXISTS assignment_plan_apply_receipts (
@@ -7326,9 +7242,7 @@ CREATE TRIGGER trg_assignment_plan_receipts_before_delete
 BEFORE DELETE ON assignment_plan_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'assignment_plan_apply_receipts cannot be deleted';
--- END SOURCE: db/schema_parts/119_assignment_plan_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/120_leave_substitution_workflow.sql
 -- Typed leave/substitution batch, immutable outcomes, occupancy, and receipt.
 
 CREATE TABLE IF NOT EXISTS scheduling_leave_substitution_batches (
@@ -7552,9 +7466,7 @@ CREATE TRIGGER trg_scheduling_leave_receipts_before_delete
 BEFORE DELETE ON scheduling_leave_substitution_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'scheduling_leave_substitution_receipts cannot be deleted';
--- END SOURCE: db/schema_parts/120_leave_substitution_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/121_finance_import_preview_apply.sql
 -- Finance Import Preview/Apply control state and immutable audit.
 
 CREATE TABLE IF NOT EXISTS finance_import_batch_contracts (
@@ -7877,9 +7789,7 @@ CREATE TRIGGER trg_finance_import_correction_receipt_before_delete
 BEFORE DELETE ON finance_import_correction_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_import_correction_receipts cannot be deleted';
--- END SOURCE: db/schema_parts/121_finance_import_preview_apply.sql
 
--- BEGIN SOURCE: db/schema_parts/122_order_contract_completion_workflow.sql
 -- Additive immutable receipt for the Orders contract-completion workflow.
 
 CREATE TABLE IF NOT EXISTS order_contract_completion_apply_receipts (
@@ -7939,9 +7849,7 @@ CREATE TRIGGER trg_order_contract_completion_receipts_before_delete
 BEFORE DELETE ON order_contract_completion_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'order_contract_completion_apply_receipts cannot be deleted';
--- END SOURCE: db/schema_parts/122_order_contract_completion_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/123_order_reopen_workflow.sql
 -- Additive immutable events and receipts for controlled order reopening.
 
 CREATE TABLE IF NOT EXISTS order_reopen_events (
@@ -8079,9 +7987,7 @@ CREATE TRIGGER trg_order_reopen_receipts_before_delete
 BEFORE DELETE ON order_reopen_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'order_reopen_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/123_order_reopen_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/124_case_architecture_bootstrap.sql
 -- Canonical first-use bootstrap for Client Finance, Payroll, and Scheduling.
 
 -- The version is immutable so later rate changes create a new policy identity.
@@ -8286,9 +8192,7 @@ CREATE TRIGGER trg_case_architecture_bootstrap_receipts_before_delete
 BEFORE DELETE ON case_architecture_bootstrap_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'case_architecture_bootstrap_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/124_case_architecture_bootstrap.sql
 
--- BEGIN SOURCE: db/schema_parts/125_government_subsidy_domain.sql
 -- Additive Government Subsidy owner, immutable audit, and Apply receipts.
 
 CREATE TABLE IF NOT EXISTS government_subsidy_batch_accounts (
@@ -8523,9 +8427,7 @@ CREATE TRIGGER trg_government_subsidy_receipts_before_delete
 BEFORE DELETE ON government_subsidy_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government_subsidy_apply_receipts cannot be deleted';
--- END SOURCE: db/schema_parts/125_government_subsidy_domain.sql
 
--- BEGIN SOURCE: db/schema_parts/126_client_refund_reversal.sql
 -- Additive idempotency receipt SSOT for Client Refund and Client Reversal.
 
 CREATE TABLE IF NOT EXISTS client_refund_reversal_apply_receipts (
@@ -8567,9 +8469,7 @@ CREATE TRIGGER trg_client_refund_reversal_receipt_before_delete
 BEFORE DELETE ON client_refund_reversal_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client refund reversal receipts cannot be deleted';
--- END SOURCE: db/schema_parts/126_client_refund_reversal.sql
 
--- BEGIN SOURCE: db/schema_parts/127_anomaly_root_fact_projector.sql
 -- Additive root-fact projector receipts and recovery snapshots.
 
 CREATE TABLE IF NOT EXISTS anomaly_root_fact_projection_receipts (
@@ -8637,9 +8537,7 @@ CREATE TRIGGER trg_anomaly_root_receipts_before_delete
 BEFORE DELETE ON anomaly_root_fact_projection_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'anomaly root fact projection receipts cannot be deleted';
--- END SOURCE: db/schema_parts/127_anomaly_root_fact_projector.sql
 
--- BEGIN SOURCE: db/schema_parts/128_finance_import_ingestion.sql
 -- Atomic workbook ingestion receipts. Formal accounting remains Preview/Apply owned.
 
 CREATE TABLE IF NOT EXISTS finance_import_ingestion_receipts (
@@ -8674,9 +8572,7 @@ CREATE TRIGGER trg_finance_import_ingestion_receipt_before_delete
 BEFORE DELETE ON finance_import_ingestion_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_import_ingestion_receipts cannot be deleted';
--- END SOURCE: db/schema_parts/128_finance_import_ingestion.sql
 
--- BEGIN SOURCE: db/schema_parts/129_case_import.sql
 -- Immutable evidence and replay receipts for atomic negotiated-case import.
 
 CREATE TABLE IF NOT EXISTS case_import_events (
@@ -8793,9 +8689,7 @@ CREATE TRIGGER trg_case_import_receipts_before_delete
 BEFORE DELETE ON case_import_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'case_import_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/129_case_import.sql
 
--- BEGIN SOURCE: db/schema_parts/133_financial_adjustments.sql
 -- Additive cross-domain financial adjustment SSOT and idempotency receipts.
 
 CREATE TABLE IF NOT EXISTS financial_adjustments (
@@ -8931,9 +8825,7 @@ CREATE TRIGGER trg_financial_adjustment_receipt_before_delete
 BEFORE DELETE ON financial_adjustment_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'financial adjustment receipts cannot be deleted';
--- END SOURCE: db/schema_parts/133_financial_adjustments.sql
 
--- BEGIN SOURCE: db/schema_parts/134_government_subsidy_claim_workflow.sql
 -- Additive Government Subsidy claim planning, submission, and approval owner.
 
 CREATE TABLE IF NOT EXISTS government_subsidy_claim_submission_events (
@@ -9121,9 +9013,7 @@ CREATE TRIGGER trg_government_subsidy_claim_receipt_before_delete
 BEFORE DELETE ON government_subsidy_claim_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government subsidy claim receipt cannot be deleted';
--- END SOURCE: db/schema_parts/134_government_subsidy_claim_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/135_client_only_financial_adjustments.sql
 -- Add explicit client-only financial adjustments without payroll side effects.
 
 SET @financial_adjustment_scope_exists = (
@@ -9145,9 +9035,7 @@ DEALLOCATE PREPARE financial_adjustment_scope_statement;
 
 ALTER TABLE financial_adjustment_apply_receipts
     MODIFY COLUMN resulting_payroll_version BIGINT UNSIGNED NULL;
--- END SOURCE: db/schema_parts/135_client_only_financial_adjustments.sql
 
--- BEGIN SOURCE: db/schema_parts/136_beclass_import_review.sql
 -- Append-only invalid-row evidence and correction workflow for BeClass imports.
 
 CREATE TABLE IF NOT EXISTS beclass_import_review_rows (
@@ -9320,9 +9208,7 @@ CREATE TRIGGER trg_beclass_review_receipts_before_delete
 BEFORE DELETE ON beclass_import_review_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'beclass_import_review_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/136_beclass_import_review.sql
 
--- BEGIN SOURCE: db/schema_parts/137_background_jobs.sql
 CREATE TABLE `background_jobs` (
     `job_id` VARCHAR(191) NOT NULL,
     `command_identity` VARCHAR(191) NOT NULL,
@@ -9335,9 +9221,7 @@ CREATE TABLE `background_jobs` (
     UNIQUE KEY `uk_command_identity` (`command_identity`),
     INDEX `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/137_background_jobs.sql
 
--- BEGIN SOURCE: db/schema_parts/138_client_subsidy_advance_settlement.sql
 -- Additive settlement facts for a union-funded client subsidy advance.
 
 ALTER TABLE client_ledger_entries
@@ -9446,9 +9330,7 @@ CREATE TRIGGER trg_client_subsidy_return_claim_item_link_before_delete
 BEFORE DELETE ON client_subsidy_return_claim_item_links
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client_subsidy_return_claim_item_links cannot be deleted';
--- END SOURCE: db/schema_parts/138_client_subsidy_advance_settlement.sql
 
--- BEGIN SOURCE: db/schema_parts/139_finance_import_historical_reprocess.sql
 -- Additive contracts for typed historical Finance Import reprocess Apply.
 
 ALTER TABLE finance_import_classification_events
@@ -9557,9 +9439,7 @@ CREATE TRIGGER trg_finance_import_historical_reprocess_receipt_before_delete
 BEFORE DELETE ON finance_import_historical_reprocess_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_import_historical_reprocess_receipts cannot be deleted';
--- END SOURCE: db/schema_parts/139_finance_import_historical_reprocess.sql
 
--- BEGIN SOURCE: db/schema_parts/140_client_refund_return.sql
 -- Add the distinct idempotency receipt kind for a bank-backed client refund return.
 
 ALTER TABLE client_refund_reversal_apply_receipts
@@ -9592,9 +9472,7 @@ ALTER TABLE finance_import_classification_events
         'staff_payout',
         'non_business_review'
     ) NOT NULL;
--- END SOURCE: db/schema_parts/140_client_refund_return.sql
 
--- BEGIN SOURCE: db/schema_parts/141_durable_background_job_queue.sql
 -- Additive queue metadata.  Existing in-process jobs remain readable while
 -- newly submitted durable commands carry a complete replayable envelope.
 ALTER TABLE background_jobs
@@ -9617,9 +9495,7 @@ CREATE INDEX idx_background_jobs_queue
 
 CREATE INDEX idx_background_jobs_lease
     ON background_jobs (status, lease_expires_at);
--- END SOURCE: db/schema_parts/141_durable_background_job_queue.sql
 
--- BEGIN SOURCE: db/schema_parts/142_client_deposit_reversal.sql
 -- Append-only idempotency receipt for the canonical deposit reversal command.
 
 CREATE TABLE IF NOT EXISTS client_deposit_reversal_apply_receipts (
@@ -9655,9 +9531,7 @@ CREATE TRIGGER trg_client_deposit_reversal_receipts_before_delete
 BEFORE DELETE ON client_deposit_reversal_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client_deposit_reversal_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/142_client_deposit_reversal.sql
 
--- BEGIN SOURCE: db/schema_parts/143_client_refund_return_review.sql
 -- Immutable operator-confirmed review facts for an ambiguous returned client refund.
 -- Recognition is intentionally not inferred from bank memo, name, account, or amount.
 
@@ -9753,9 +9627,7 @@ CREATE TRIGGER trg_client_refund_return_review_receipt_before_delete
 BEFORE DELETE ON client_refund_return_review_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client refund return review receipts cannot be deleted';
--- END SOURCE: db/schema_parts/143_client_refund_return_review.sql
 
--- BEGIN SOURCE: db/schema_parts/144_order_auto_completion_workflow.sql
 -- Append-only receipt for the canonical Orders service auto-completion command.
 
 CREATE TABLE IF NOT EXISTS order_auto_completion_apply_receipts (
@@ -9795,9 +9667,7 @@ CREATE TRIGGER trg_order_auto_completion_receipts_before_delete
 BEFORE DELETE ON order_auto_completion_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'order_auto_completion_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/144_order_auto_completion_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/145_admin_command_receipts.sql
 CREATE TABLE IF NOT EXISTS admin_command_receipts (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     command_family VARCHAR(100) NOT NULL,
@@ -9814,9 +9684,7 @@ CREATE TABLE IF NOT EXISTS admin_command_receipts (
         AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/145_admin_command_receipts.sql
 
--- BEGIN SOURCE: db/schema_parts/146_provisional_client_registrations.sql
 CREATE TABLE IF NOT EXISTS provisional_client_registrations (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     line_user_id VARCHAR(100) NOT NULL,
@@ -9857,9 +9725,7 @@ CREATE TABLE IF NOT EXISTS provisional_registration_conflicts (
         FOREIGN KEY (registration_id) REFERENCES provisional_client_registrations(id)
         ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/146_provisional_client_registrations.sql
 
--- BEGIN SOURCE: db/schema_parts/147_access_capability_grants.sql
 -- Versioned per-admin capability grants; role bundles remain the baseline policy.
 
 CREATE TABLE IF NOT EXISTS admin_capability_grants (
@@ -9915,9 +9781,7 @@ CREATE TABLE IF NOT EXISTS access_control_apply_receipts (
     receipt_json JSON NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/147_access_capability_grants.sql
 
--- BEGIN SOURCE: db/schema_parts/148_knowledge_retrieval.sql
 -- Reviewed, published knowledge is independent from the retired legacy FAQ table.
 CREATE TABLE IF NOT EXISTS knowledge_items (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -9981,16 +9845,12 @@ CREATE TABLE IF NOT EXISTS knowledge_apply_receipts (
     receipt_json JSON NOT NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/148_knowledge_retrieval.sql
 
--- BEGIN SOURCE: db/schema_parts/149_admin_authorization_version.sql
 -- Additive authorization revision for release-managed dynamic capability grants.
 ALTER TABLE admin_users
     ADD COLUMN authorization_version BIGINT UNSIGNED NOT NULL DEFAULT 0
     COMMENT 'effective capability grant revision' AFTER enabled;
--- END SOURCE: db/schema_parts/149_admin_authorization_version.sql
 
--- BEGIN SOURCE: db/schema_parts/150_line_publication_confirmation_and_session_expiry.sql
 -- A session has a sliding idle window but can never outlive its original login.
 SET @admin_session_absolute_expiry_exists = (
     SELECT COUNT(*)
@@ -10029,9 +9889,7 @@ CREATE TABLE IF NOT EXISTS line_rich_menu_publish_previews (
     CONSTRAINT fk_line_menu_preview_publication FOREIGN KEY (publication_id)
         REFERENCES line_rich_menu_publications(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/150_line_publication_confirmation_and_session_expiry.sql
 
--- BEGIN SOURCE: db/schema_parts/151_admin_security_audit_retention.sql
 CREATE TABLE IF NOT EXISTS admin_audit_log_archive (
     source_audit_id BIGINT NOT NULL PRIMARY KEY,
     admin_user_id BIGINT NULL,
@@ -10048,9 +9906,7 @@ CREATE TABLE IF NOT EXISTS admin_audit_log_archive (
     INDEX idx_admin_audit_archive_created_at (created_at),
     INDEX idx_admin_audit_archive_actor_time (admin_user_id, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/151_admin_security_audit_retention.sql
 
--- BEGIN SOURCE: db/schema_parts/152_finance_import_ingestion_attempts.sql
 -- Append-only outcome ledger for every durable Finance Import ingestion command.
 
 CREATE TABLE IF NOT EXISTS finance_import_ingestion_attempts (
@@ -10093,15 +9949,11 @@ CREATE TRIGGER trg_finance_import_ingestion_attempt_before_delete
 BEFORE DELETE ON finance_import_ingestion_attempts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_import_ingestion_attempts cannot be deleted';
--- END SOURCE: db/schema_parts/152_finance_import_ingestion_attempts.sql
 
--- BEGIN SOURCE: db/schema_parts/153_retire_empty_legacy_field_inventory.sql
 -- Current local databases contain only fake data. Retire structures that no
 -- production caller owns so bootstrap and the active candidate cannot revive them.
 DROP TABLE IF EXISTS finance_import_reclassification_events;
--- END SOURCE: db/schema_parts/153_retire_empty_legacy_field_inventory.sql
 
--- BEGIN SOURCE: db/schema_parts/154_line_integration_inbox_delivery.sql
 -- Canonical LINE webhook inbox, delivery queue, receipts, outbox, and audit facts.
 -- Legacy LINE tables remain untouched until the runtime cutover stage.
 
@@ -10424,9 +10276,7 @@ CREATE TRIGGER trg_line_domain_audit_events_before_delete
 BEFORE DELETE ON line_domain_audit_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'line_domain_audit_events records cannot be deleted';
--- END SOURCE: db/schema_parts/154_line_integration_inbox_delivery.sql
 
--- BEGIN SOURCE: db/schema_parts/155_line_identity_review_configuration.sql
 -- Canonical LINE identity bindings, review facts, and versioned configuration.
 
 CREATE TABLE IF NOT EXISTS line_identity_bindings (
@@ -10737,9 +10587,7 @@ CREATE TRIGGER trg_line_configuration_revisions_before_delete
 BEFORE DELETE ON line_configuration_revisions
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'line_configuration_revisions records cannot be deleted';
--- END SOURCE: db/schema_parts/155_line_identity_review_configuration.sql
 
--- BEGIN SOURCE: db/schema_parts/156_line_publication_media_order_group.sql
 -- Canonical LINE Rich Menu publication, media metadata, and order-group binding.
 
 CREATE TABLE IF NOT EXISTS line_rich_menu_publication_tasks (
@@ -11014,9 +10862,7 @@ CREATE TRIGGER trg_line_order_group_binding_events_before_delete
 BEFORE DELETE ON line_order_group_binding_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'line_order_group_binding_events records cannot be deleted';
--- END SOURCE: db/schema_parts/156_line_publication_media_order_group.sql
 
--- BEGIN SOURCE: db/schema_parts/157_line_runtime_control.sql
 -- Canonical LINE runtime leases, worker heartbeat, and webhook security facts.
 -- This migration is additive and preserves every Stage 2 and legacy row.
 
@@ -11074,9 +10920,7 @@ CREATE TRIGGER trg_line_webhook_security_receipts_before_delete
 BEFORE DELETE ON line_webhook_security_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'line_webhook_security_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/157_line_runtime_control.sql
 
--- BEGIN SOURCE: db/schema_parts/158_line_identity_runtime.sql
 -- Canonical LINE platform friend state, LIFF identity flow, and review creation facts.
 -- Additive Stage 4 migration; legacy projections remain available until Stage 10.
 
@@ -11290,9 +11134,7 @@ CREATE TRIGGER trg_line_friend_state_events_before_delete
 BEFORE DELETE ON line_friend_state_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'line_friend_state_events records cannot be deleted';
--- END SOURCE: db/schema_parts/158_line_identity_runtime.sql
 
--- BEGIN SOURCE: db/schema_parts/159_line_messaging_publication_runtime.sql
 -- Stage 5 reliable LINE configuration, media-outbox, and Rich Menu publication runtime.
 
 SET @line_outbox_max_attempts_column_exists := (
@@ -11349,9 +11191,7 @@ CREATE TRIGGER trg_line_rich_menu_step_receipts_before_delete
 BEFORE DELETE ON line_rich_menu_publication_step_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'line_rich_menu_publication_step_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/159_line_messaging_publication_runtime.sql
 
--- BEGIN SOURCE: db/schema_parts/160_line_order_group_runtime.sql
 -- Canonical LINE order-group command, participant, and invitation runtime.
 
 ALTER TABLE line_order_group_bindings
@@ -11418,9 +11258,7 @@ CREATE TRIGGER trg_line_order_group_runtime_events_before_delete
 BEFORE DELETE ON line_order_group_runtime_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'line_order_group_runtime_events records cannot be deleted';
--- END SOURCE: db/schema_parts/160_line_order_group_runtime.sql
 
--- BEGIN SOURCE: db/schema_parts/161_runtime_monitoring_line_alerts.sql
 -- Runtime monitoring projections and canonical LINE alert notification targets.
 
 CREATE TABLE IF NOT EXISTS runtime_service_heartbeats (
@@ -11555,9 +11393,7 @@ CREATE TRIGGER trg_line_alert_delivery_intents_before_delete
 BEFORE DELETE ON line_alert_delivery_intents
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'line_alert_delivery_intents records cannot be deleted';
--- END SOURCE: db/schema_parts/161_runtime_monitoring_line_alerts.sql
 
--- BEGIN SOURCE: db/schema_parts/162_matching_line_communication.sql
 -- Canonical matching notification intents, one-time LINE actions, and responses.
 
 SET @matching_communication_version_exists = (
@@ -11737,9 +11573,7 @@ CREATE TRIGGER trg_matching_response_events_before_delete
 BEFORE DELETE ON matching_response_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'matching_response_events records cannot be deleted';
--- END SOURCE: db/schema_parts/162_matching_line_communication.sql
 
--- BEGIN SOURCE: db/schema_parts/163_knowledge_runtime.sql
 -- Durable indexing and cited-answer runtime for governed knowledge roots.
 
 ALTER TABLE knowledge_items
@@ -11868,9 +11702,7 @@ DROP TRIGGER IF EXISTS trg_knowledge_item_versions_before_delete;
 CREATE TRIGGER trg_knowledge_item_versions_before_delete
 BEFORE DELETE ON knowledge_item_versions FOR EACH ROW
 SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT='knowledge_item_versions records cannot be deleted';
--- END SOURCE: db/schema_parts/163_knowledge_runtime.sql
 
--- BEGIN SOURCE: db/schema_parts/164_line_rich_menu_preview_bridge.sql
 -- Bind the governed preview confirmation to the canonical publication task.
 ALTER TABLE line_rich_menu_publish_previews
     ADD COLUMN canonical_publication_task_id BIGINT UNSIGNED NULL
@@ -11882,18 +11714,14 @@ ALTER TABLE line_rich_menu_publish_previews
         FOREIGN KEY (canonical_publication_task_id)
         REFERENCES line_rich_menu_publication_tasks(id)
         ON UPDATE RESTRICT ON DELETE RESTRICT;
--- END SOURCE: db/schema_parts/164_line_rich_menu_preview_bridge.sql
 
--- BEGIN SOURCE: db/schema_parts/165_anomaly_workflow_event_idempotency_widen.sql
 -- Widen idempotency_key: VARCHAR(191) truncated content-hash dedupe keys,
 -- causing INSERT ... ON DUPLICATE KEY to fail with "Data too long for column
 -- 'idempotency_key'" and roll back the background anomaly-scan cycle.
 
 ALTER TABLE anomaly_workflow_events
     MODIFY COLUMN idempotency_key VARCHAR(320) NOT NULL;
--- END SOURCE: db/schema_parts/165_anomaly_workflow_event_idempotency_widen.sql
 
--- BEGIN SOURCE: db/schema_parts/166_contract_signing_workflow.sql
 -- 166_contract_signing_workflow.sql
 -- 案件契約文件、月嫂／客戶簽署事件與簽約前服務承諾。
 -- 文件與事件均 append-only；訂單 lifecycle、正式排班與金流各自維持既有 SSOT。
@@ -12175,9 +12003,7 @@ CREATE TRIGGER trg_precontract_service_commitment_events_before_update BEFORE UP
 
 DROP TRIGGER IF EXISTS trg_precontract_service_commitment_events_before_delete;
 CREATE TRIGGER trg_precontract_service_commitment_events_before_delete BEFORE DELETE ON precontract_service_commitment_events FOR EACH ROW SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'precontract_service_commitment_events records cannot be deleted';
--- END SOURCE: db/schema_parts/166_contract_signing_workflow.sql
 
--- BEGIN SOURCE: db/schema_parts/167_client_finance_overage_dispositions.sql
 -- Immutable lineage for actual client receipts that exceed one receivable.
 
 CREATE TABLE IF NOT EXISTS client_receipt_overage_dispositions (
@@ -12306,9 +12132,7 @@ CREATE TRIGGER trg_client_over_refund_recovery_events_before_delete
 BEFORE DELETE ON client_over_refund_recovery_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client_over_refund_recovery_events records cannot be deleted';
--- END SOURCE: db/schema_parts/167_client_finance_overage_dispositions.sql
 
--- BEGIN SOURCE: db/schema_parts/168_staff_payout_difference_recovery.sql
 -- Additive Staff Payables payout-difference projection and recovery root.
 
 ALTER TABLE staff_payable_projections
@@ -12421,9 +12245,7 @@ CREATE TRIGGER trg_staff_overpayment_recovery_events_before_delete
 BEFORE DELETE ON staff_overpayment_recovery_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'staff_overpayment_recovery_events records cannot be deleted';
--- END SOURCE: db/schema_parts/168_staff_payout_difference_recovery.sql
 
--- BEGIN SOURCE: db/schema_parts/169_government_subsidy_overpayment_disposition.sql
 -- Immutable root and disposition lineage for government subsidy overpayments.
 
 ALTER TABLE government_subsidy_outbox
@@ -12666,9 +12488,7 @@ CREATE TRIGGER trg_government_subsidy_overpayment_events_before_delete
 BEFORE DELETE ON government_subsidy_overpayment_events
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be deleted';
--- END SOURCE: db/schema_parts/169_government_subsidy_overpayment_disposition.sql
 
--- BEGIN SOURCE: db/schema_parts/170_client_over_refund_recovery_collection.sql
 -- Canonical incoming-bank settlement for a client refund overpayment recovery.
 
 ALTER TABLE client_over_refund_recoveries
@@ -12728,9 +12548,7 @@ CREATE TRIGGER trg_client_over_refund_recovery_receipts_before_delete
 BEFORE DELETE ON client_over_refund_recovery_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client over-refund recovery receipts cannot be deleted';
--- END SOURCE: db/schema_parts/170_client_over_refund_recovery_collection.sql
 
--- BEGIN SOURCE: db/schema_parts/171_client_over_refund_recovery_adjustment.sql
 -- Immutable authorized-adjustment evidence for client over-refund recovery.
 
 ALTER TABLE client_over_refund_recoveries
@@ -12807,9 +12625,7 @@ CREATE TRIGGER trg_client_over_refund_adjustment_receipts_before_delete
 BEFORE DELETE ON client_over_refund_recovery_adjustment_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client over-refund adjustment receipts cannot be deleted';
--- END SOURCE: db/schema_parts/171_client_over_refund_recovery_adjustment.sql
 
--- BEGIN SOURCE: db/schema_parts/172_client_over_refund_recovery_matching.sql
 -- Immutable human-confirmed matching; finance_import_rows remain canonical bank facts.
 
 ALTER TABLE client_finance_outbox
@@ -12891,9 +12707,7 @@ CREATE TRIGGER trg_client_recovery_matching_receipts_before_delete
 BEFORE DELETE ON client_over_refund_recovery_matching_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client over-refund recovery matching receipts cannot be deleted';
--- END SOURCE: db/schema_parts/172_client_over_refund_recovery_matching.sql
 
--- BEGIN SOURCE: db/schema_parts/173_staff_overpayment_recovery_matching.sql
 -- Immutable staff return matching; canonical bank facts retain no recovery target.
 
 ALTER TABLE staff_payables_outbox
@@ -12957,9 +12771,7 @@ CREATE TRIGGER trg_staff_recovery_matchings_before_delete
 BEFORE DELETE ON staff_overpayment_recovery_matchings
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'staff overpayment recovery matchings cannot be deleted';
--- END SOURCE: db/schema_parts/173_staff_overpayment_recovery_matching.sql
 
--- BEGIN SOURCE: db/schema_parts/174_staff_payout_difference_source.sql
 -- Immutable multi-bank source for a Staff Payables payout-difference action.
 
 CREATE TABLE IF NOT EXISTS staff_payout_difference_sources (
@@ -13051,9 +12863,7 @@ CREATE TRIGGER trg_staff_payout_difference_source_obligations_before_delete
 BEFORE DELETE ON staff_payout_difference_source_obligations
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'staff payout difference source obligations cannot be deleted';
--- END SOURCE: db/schema_parts/174_staff_payout_difference_source.sql
 
--- BEGIN SOURCE: db/schema_parts/175_government_overpayment_return_payout_immutability.sql
 -- Government return-payout receipts are immutable accounting evidence.
 
 DROP TRIGGER IF EXISTS trg_government_overpayment_return_payouts_before_update;
@@ -13067,9 +12877,7 @@ CREATE TRIGGER trg_government_overpayment_return_payouts_before_delete
 BEFORE DELETE ON government_overpayment_return_payouts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government_overpayment_return_payouts records cannot be deleted';
--- END SOURCE: db/schema_parts/175_government_overpayment_return_payout_immutability.sql
 
--- BEGIN SOURCE: db/schema_parts/176_client_refund_recipient_snapshot.sql
 -- Immutable recipient account selected when a client refund payable is created.
 CREATE TABLE IF NOT EXISTS client_refund_recipient_snapshots (
     refund_obligation_identity VARCHAR(191) PRIMARY KEY,
@@ -13099,9 +12907,7 @@ CREATE TRIGGER trg_client_refund_recipient_snapshots_before_delete
 BEFORE DELETE ON client_refund_recipient_snapshots
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client refund recipient snapshots cannot be deleted';
--- END SOURCE: db/schema_parts/176_client_refund_recipient_snapshot.sql
 
--- BEGIN SOURCE: db/schema_parts/177_client_refund_underpayment_source.sql
 ALTER TABLE client_finance_outbox
     MODIFY COLUMN intent_type ENUM(
         'orders_deposit_reconciled',
@@ -13189,9 +12995,7 @@ CREATE TRIGGER trg_client_refund_underpayment_source_obligations_before_delete
 BEFORE DELETE ON client_refund_underpayment_source_obligations
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'client refund underpayment source obligations cannot be deleted';
--- END SOURCE: db/schema_parts/177_client_refund_underpayment_source.sql
 
--- BEGIN SOURCE: db/schema_parts/178_government_subsidy_overpayment_apply_receipts.sql
 -- Durable idempotency receipts for every Government Subsidy overpayment disposition Apply.
 
 CREATE TABLE IF NOT EXISTS government_subsidy_overpayment_apply_receipts (
@@ -13226,9 +13030,7 @@ CREATE TRIGGER trg_government_overpayment_apply_receipts_before_delete
 BEFORE DELETE ON government_subsidy_overpayment_apply_receipts
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government_subsidy_overpayment_apply_receipts records cannot be deleted';
--- END SOURCE: db/schema_parts/178_government_subsidy_overpayment_apply_receipts.sql
 
--- BEGIN SOURCE: db/schema_parts/180_leave_substitution_holiday_only_batch_contract.sql
 -- Holiday Query can produce an approved Scheduling change without a manual
 -- leave item. Preview fingerprint and fresh-fact checks remain the Apply gate.
 ALTER TABLE scheduling_leave_substitution_batches
@@ -13243,9 +13045,7 @@ ALTER TABLE scheduling_leave_substitution_batches
         AND CHAR_LENGTH(TRIM(reason)) > 0
         AND CHAR_LENGTH(TRIM(correlation_id)) > 0
     );
--- END SOURCE: db/schema_parts/180_leave_substitution_holiday_only_batch_contract.sql
 
--- BEGIN SOURCE: db/schema_parts/181_matching_service_date_confirmation.sql
 -- WP68 confirmed service dates, schedule snapshots and confirmation events.
 
 CREATE TABLE IF NOT EXISTS confirmed_service_date_versions (
@@ -13359,9 +13159,7 @@ CREATE TABLE IF NOT EXISTS matching_schedule_line_interactions (
         REFERENCES matching_schedule_recipient_snapshots(id),
     CONSTRAINT chk_matching_schedule_line_token CHECK (token_hash REGEXP '^[0-9a-f]{64}$')
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/181_matching_service_date_confirmation.sql
 
--- BEGIN SOURCE: db/schema_parts/182_candidate_contact_pool.sql
 -- 182. Candidate Contact Pool: negotiation contacts, never formal service segments.
 CREATE TABLE IF NOT EXISTS caregiver_candidate_contact_pools (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -13403,9 +13201,7 @@ CREATE TABLE IF NOT EXISTS caregiver_candidate_contact_events (
     CONSTRAINT fk_candidate_contact_event_pool FOREIGN KEY (pool_id) REFERENCES caregiver_candidate_contact_pools(id),
     CONSTRAINT fk_candidate_contact_event_candidate FOREIGN KEY (candidate_id) REFERENCES caregiver_candidate_contact_entries(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/182_candidate_contact_pool.sql
 
--- BEGIN SOURCE: db/schema_parts/183_staff_leave_requests.sql
 CREATE TABLE IF NOT EXISTS staff_leave_requests (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     staff_id INT NOT NULL COMMENT '提出請假的月嫂',
@@ -13430,9 +13226,7 @@ CREATE TABLE IF NOT EXISTS staff_leave_requests (
     CONSTRAINT fk_staff_leave_reviewer
         FOREIGN KEY (reviewed_by_admin_user_id) REFERENCES admin_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/183_staff_leave_requests.sql
 
--- BEGIN SOURCE: db/schema_parts/184_provisional_registration_case_issue.sql
 CREATE TABLE IF NOT EXISTS provisional_registration_case_issue_events (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     registration_id BIGINT NOT NULL,
@@ -13466,9 +13260,7 @@ ALTER TABLE case_import_receipts
     ADD CONSTRAINT fk_case_import_receipt_provisional_issue_event
         FOREIGN KEY (provisional_case_issue_event_id) REFERENCES provisional_registration_case_issue_events(id)
         ON DELETE RESTRICT;
--- END SOURCE: db/schema_parts/184_provisional_registration_case_issue.sql
 
--- BEGIN SOURCE: db/schema_parts/185_customer_service_runtime.sql
 CREATE TABLE IF NOT EXISTS customer_service_tickets (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     line_user_id VARCHAR(100) NOT NULL,
@@ -13510,9 +13302,23 @@ CREATE TABLE IF NOT EXISTS customer_service_ticket_events (
     CONSTRAINT fk_customer_service_event_ticket FOREIGN KEY (ticket_id)
         REFERENCES customer_service_tickets(id) ON UPDATE RESTRICT ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/185_customer_service_runtime.sql
 
--- BEGIN SOURCE: db/schema_parts/186_line_identity_management.sql
+ALTER TABLE line_identity_revocation_requests
+    MODIFY COLUMN default_menu_publication_id BIGINT NULL,
+    ADD COLUMN canonical_default_menu_publication_id BIGINT UNSIGNED NULL
+        AFTER default_menu_publication_id,
+    ADD INDEX idx_line_identity_revocation_canonical_publication (
+        canonical_default_menu_publication_id
+    ),
+    ADD CONSTRAINT fk_line_identity_revocation_canonical_publication
+        FOREIGN KEY (canonical_default_menu_publication_id)
+        REFERENCES line_rich_menu_publication_tasks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    ADD CONSTRAINT chk_line_identity_revocation_publication_source CHECK (
+        (default_menu_publication_id IS NULL)
+        <> (canonical_default_menu_publication_id IS NULL)
+    );
+
 ALTER TABLE line_identity_bindings
     MODIFY COLUMN binding_status ENUM(
         'unbound','pending_review','bound','revocation_pending','revoked'
@@ -13584,27 +13390,7 @@ CREATE TABLE IF NOT EXISTS line_identity_revocation_requests (
         )
     )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
--- END SOURCE: db/schema_parts/186_line_identity_management.sql
 
--- BEGIN SOURCE: db/schema_parts/179_line_identity_canonical_menu_publication.sql
-ALTER TABLE line_identity_revocation_requests
-    MODIFY COLUMN default_menu_publication_id BIGINT NULL,
-    ADD COLUMN canonical_default_menu_publication_id BIGINT UNSIGNED NULL
-        AFTER default_menu_publication_id,
-    ADD INDEX idx_line_identity_revocation_canonical_publication (
-        canonical_default_menu_publication_id
-    ),
-    ADD CONSTRAINT fk_line_identity_revocation_canonical_publication
-        FOREIGN KEY (canonical_default_menu_publication_id)
-        REFERENCES line_rich_menu_publication_tasks(id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    ADD CONSTRAINT chk_line_identity_revocation_publication_source CHECK (
-        (default_menu_publication_id IS NULL)
-        <> (canonical_default_menu_publication_id IS NULL)
-    );
--- END SOURCE: db/schema_parts/179_line_identity_canonical_menu_publication.sql
-
--- BEGIN SOURCE: db/schema_parts/187_case_architecture_bootstrap_receipt_version_contract.sql
 -- Bootstrap may adopt an already-versioned Scheduling aggregate. Finance and
 -- Payroll roots are still created at version zero by this transaction.
 ALTER TABLE case_architecture_bootstrap_receipts
@@ -13616,9 +13402,7 @@ ALTER TABLE case_architecture_bootstrap_receipts
         client_finance_version = 0
         AND payroll_version = 0
     );
--- END SOURCE: db/schema_parts/187_case_architecture_bootstrap_receipt_version_contract.sql
 
--- BEGIN SOURCE: db/schema_parts/188_matching_preferences_and_staff_availability.sql
 -- WP72 additive Staff Matching Profile and Scheduling availability roots.
 
 ALTER TABLE orders
@@ -13905,9 +13689,504 @@ WHERE slot_name NOT IN (
 )
    OR (custom_slot_detail IS NOT NULL AND TRIM(custom_slot_detail)<>'')
 ON DUPLICATE KEY UPDATE id=id;
--- END SOURCE: db/schema_parts/188_matching_preferences_and_staff_availability.sql
 
--- BEGIN SOURCE: db/schema_parts/999_v_order_details_view.sql
+-- File: 189_staff_historical_adoption_hcm_review.sql
+-- Description: 新增 Staff 歷史採納 receipt 與 HCM Case Import review/outbox。
+
+CREATE TABLE IF NOT EXISTS staff_historical_adoption_receipts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    preview_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    staff_id INT NULL,
+    outcome ENUM(
+        'created', 'adopted_existing', 'blocked_identity',
+        'identity_conflict', 'failed_retryable'
+    ) NOT NULL,
+    changed_fields JSON NOT NULL,
+    review_identity VARCHAR(191) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_historical_adoption_key (idempotency_key),
+    UNIQUE KEY uq_staff_historical_adoption_source (source_event_identity),
+    CONSTRAINT fk_staff_historical_adoption_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_historical_adoption_review
+        FOREIGN KEY (review_identity) REFERENCES beclass_import_review_rows(review_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_staff_historical_adoption_fingerprints
+        CHECK (
+            command_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND source_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_staff_historical_adoption_changed_fields
+        CHECK (JSON_TYPE(changed_fields) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS case_import_hcm_review_rows (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    review_identity VARCHAR(191) NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_content_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    source_sheet_identity CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    source_row INT NOT NULL,
+    masked_case_identity VARCHAR(64) NOT NULL,
+    source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    issue_codes JSON NOT NULL,
+    evidence_snapshot JSON NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_case_import_hcm_review_identity (review_identity),
+    UNIQUE KEY uq_case_import_hcm_review_source (source_event_identity),
+    CONSTRAINT chk_case_import_hcm_review_digests
+        CHECK (
+            source_content_digest REGEXP '^[0-9a-f]{64}$'
+            AND source_sheet_identity REGEXP '^[0-9a-f]{64}$'
+            AND source_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_case_import_hcm_review_source_row CHECK (source_row > 0),
+    CONSTRAINT chk_case_import_hcm_review_payloads
+        CHECK (JSON_TYPE(issue_codes) = 'ARRAY' AND JSON_TYPE(evidence_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS case_import_hcm_review_outbox (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    review_row_id BIGINT NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    bounded_snapshot JSON NOT NULL,
+    published_at TIMESTAMP NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_case_import_hcm_review_outbox_intent (intent_key),
+    INDEX idx_case_import_hcm_review_outbox_pending (published_at, attempts, id),
+    CONSTRAINT fk_case_import_hcm_review_outbox_row
+        FOREIGN KEY (review_row_id) REFERENCES case_import_hcm_review_rows(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_case_import_hcm_review_outbox_snapshot
+        CHECK (JSON_TYPE(bounded_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_case_import_hcm_review_outbox_attempts CHECK (attempts >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_staff_historical_adoption_receipts_before_update;
+CREATE TRIGGER trg_staff_historical_adoption_receipts_before_update
+BEFORE UPDATE ON staff_historical_adoption_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'staff_historical_adoption_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_staff_historical_adoption_receipts_before_delete;
+CREATE TRIGGER trg_staff_historical_adoption_receipts_before_delete
+BEFORE DELETE ON staff_historical_adoption_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'staff_historical_adoption_receipts records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_case_import_hcm_review_rows_before_update;
+CREATE TRIGGER trg_case_import_hcm_review_rows_before_update
+BEFORE UPDATE ON case_import_hcm_review_rows
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'case_import_hcm_review_rows records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_case_import_hcm_review_rows_before_delete;
+CREATE TRIGGER trg_case_import_hcm_review_rows_before_delete
+BEFORE DELETE ON case_import_hcm_review_rows
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'case_import_hcm_review_rows records cannot be deleted';
+
+-- File: 190_historical_order_adoption.sql
+-- Description: 新增 Historical Order Adoption receipt、pairing evidence、review 與 outbox。
+
+CREATE TABLE IF NOT EXISTS historical_order_adoption_reviews (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    review_identity VARCHAR(191) NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    masked_case_identity VARCHAR(64) NOT NULL,
+    issue_codes JSON NOT NULL,
+    evidence_snapshot JSON NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_order_review_identity (review_identity),
+    UNIQUE KEY uq_historical_order_review_source (source_event_identity),
+    CONSTRAINT chk_historical_order_review_fingerprint
+        CHECK (source_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_historical_order_review_payloads
+        CHECK (JSON_TYPE(issue_codes) = 'ARRAY' AND JSON_TYPE(evidence_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_order_adoption_receipts (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    preview_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    case_no VARCHAR(50) NULL,
+    outcome ENUM('adopted','review_required','current_conflict','unmatched_case') NOT NULL,
+    expected_version BIGINT UNSIGNED NULL,
+    resulting_version BIGINT UNSIGNED NULL,
+    lifecycle_event_id BIGINT UNSIGNED NULL,
+    assignment_count INT UNSIGNED NOT NULL DEFAULT 0,
+    review_identity VARCHAR(191) NULL,
+    result_snapshot JSON NOT NULL,
+    actor VARCHAR(255) NOT NULL,
+    reason VARCHAR(500) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_order_adoption_key (idempotency_key),
+    UNIQUE KEY uq_historical_order_adoption_source (source_event_identity),
+    INDEX idx_historical_order_adoption_case (case_no, created_at),
+    CONSTRAINT fk_historical_order_adoption_case
+        FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_order_adoption_lifecycle_event
+        FOREIGN KEY (lifecycle_event_id) REFERENCES order_lifecycle_state_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_order_adoption_review
+        FOREIGN KEY (review_identity) REFERENCES historical_order_adoption_reviews(review_identity)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_order_adoption_fingerprints
+        CHECK (
+            command_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND source_fingerprint REGEXP '^[0-9a-f]{64}$'
+            AND preview_fingerprint REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_historical_order_adoption_snapshot
+        CHECK (JSON_TYPE(result_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_historical_order_adoption_shape
+        CHECK (
+            (outcome = 'unmatched_case' AND lifecycle_event_id IS NULL
+             AND expected_version IS NULL AND resulting_version IS NULL)
+            OR
+            (outcome = 'adopted' AND lifecycle_event_id IS NOT NULL
+             AND expected_version IS NOT NULL AND resulting_version = expected_version + 1
+             AND case_no IS NOT NULL)
+            OR
+            (outcome IN ('review_required','current_conflict') AND lifecycle_event_id IS NULL
+             AND expected_version IS NOT NULL AND resulting_version = expected_version
+             AND case_no IS NOT NULL)
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_order_pairing_evidence (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    receipt_id BIGINT UNSIGNED NOT NULL,
+    caregiver_ordinal INT UNSIGNED NOT NULL,
+    masked_staff_name VARCHAR(100) NOT NULL,
+    staff_id INT NULL,
+    resolution ENUM(
+        'blank','staff_missing','staff_ambiguous','evidence_only',
+        'assignment_candidate','assignment_conflict'
+    ) NOT NULL,
+    source_start_date DATE NULL,
+    source_end_date DATE NULL,
+    assignment_id BIGINT NULL,
+    issue_codes JSON NOT NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_order_pairing_ordinal (receipt_id, caregiver_ordinal),
+    INDEX idx_historical_order_pairing_staff (staff_id, created_at),
+    CONSTRAINT fk_historical_order_pairing_receipt
+        FOREIGN KEY (receipt_id) REFERENCES historical_order_adoption_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_order_pairing_staff
+        FOREIGN KEY (staff_id) REFERENCES staff(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_historical_order_pairing_assignment
+        FOREIGN KEY (assignment_id) REFERENCES case_staff_assignments(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_order_pairing_ordinal CHECK (caregiver_ordinal > 0),
+    CONSTRAINT chk_historical_order_pairing_issues CHECK (JSON_TYPE(issue_codes) = 'ARRAY'),
+    CONSTRAINT chk_historical_order_pairing_assignment_shape
+        CHECK (
+            (resolution = 'assignment_candidate' AND assignment_id IS NOT NULL AND staff_id IS NOT NULL)
+            OR (resolution <> 'assignment_candidate' AND assignment_id IS NULL)
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS historical_order_adoption_outbox (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    receipt_id BIGINT UNSIGNED NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    intent_type ENUM('historical_order_adopted','historical_order_review_required') NOT NULL,
+    bounded_snapshot JSON NOT NULL,
+    published_at TIMESTAMP(6) NULL,
+    attempts INT UNSIGNED NOT NULL DEFAULT 0,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_historical_order_adoption_outbox_intent (intent_key),
+    INDEX idx_historical_order_adoption_outbox_pending (published_at, attempts, id),
+    CONSTRAINT fk_historical_order_adoption_outbox_receipt
+        FOREIGN KEY (receipt_id) REFERENCES historical_order_adoption_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_historical_order_adoption_outbox_snapshot
+        CHECK (JSON_TYPE(bounded_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_historical_order_adoption_reviews_before_update;
+CREATE TRIGGER trg_historical_order_adoption_reviews_before_update
+BEFORE UPDATE ON historical_order_adoption_reviews
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_adoption_reviews records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_order_adoption_reviews_before_delete;
+CREATE TRIGGER trg_historical_order_adoption_reviews_before_delete
+BEFORE DELETE ON historical_order_adoption_reviews
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_adoption_reviews records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_historical_order_adoption_receipts_before_update;
+CREATE TRIGGER trg_historical_order_adoption_receipts_before_update
+BEFORE UPDATE ON historical_order_adoption_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_adoption_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_order_adoption_receipts_before_delete;
+CREATE TRIGGER trg_historical_order_adoption_receipts_before_delete
+BEFORE DELETE ON historical_order_adoption_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_adoption_receipts records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_historical_order_pairing_evidence_before_update;
+CREATE TRIGGER trg_historical_order_pairing_evidence_before_update
+BEFORE UPDATE ON historical_order_pairing_evidence
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_pairing_evidence records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_historical_order_pairing_evidence_before_delete;
+CREATE TRIGGER trg_historical_order_pairing_evidence_before_delete
+BEFORE DELETE ON historical_order_pairing_evidence
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'historical_order_pairing_evidence records cannot be deleted';
+
+-- File: 191_import_warning_tracking.sql
+-- Description: 新增 WP88 匯入欄位警示、追蹤事件、待辦投影、重送關聯、receipt 與 outbox。
+
+CREATE TABLE IF NOT EXISTS import_warning_occurrences (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    occurrence_identity VARCHAR(191) NOT NULL,
+    owning_lane VARCHAR(64) NOT NULL,
+    source_kind VARCHAR(64) NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_receipt_identity VARCHAR(191) NULL,
+    logical_code VARCHAR(96) NOT NULL,
+    field_path VARCHAR(191) NOT NULL,
+    masked_subject VARCHAR(191) NOT NULL,
+    issue_codes JSON NOT NULL,
+    evidence_snapshot JSON NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_import_warning_occurrence_identity (occurrence_identity),
+    UNIQUE KEY uq_import_warning_occurrence_source (
+        owning_lane, source_event_identity, logical_code, field_path
+    ),
+    INDEX idx_import_warning_occurrence_lane_subject (owning_lane, masked_subject),
+    CONSTRAINT chk_import_warning_occurrence_payload
+        CHECK (JSON_TYPE(issue_codes) = 'ARRAY' AND JSON_TYPE(evidence_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS import_warning_tracking_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    event_identity VARCHAR(191) NOT NULL,
+    occurrence_id BIGINT NOT NULL,
+    action ENUM(
+        'opened', 'awaiting_external_confirmation', 'response_recorded',
+        'reimport_requested', 'closed', 'auto_resolved'
+    ) NOT NULL,
+    before_status ENUM(
+        'open', 'awaiting_external_confirmation', 'response_recorded',
+        'reimport_requested', 'closed', 'auto_resolved'
+    ) NULL,
+    after_status ENUM(
+        'open', 'awaiting_external_confirmation', 'response_recorded',
+        'reimport_requested', 'closed', 'auto_resolved'
+    ) NOT NULL,
+    expected_version BIGINT UNSIGNED NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    actor_kind ENUM('union_operator', 'system') NOT NULL,
+    actor_identity VARCHAR(100) NOT NULL,
+    reason_code VARCHAR(100) NOT NULL,
+    note VARCHAR(500) NULL,
+    evidence_reference VARCHAR(191) NULL,
+    command_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_import_warning_tracking_event_identity (event_identity),
+    UNIQUE KEY uq_import_warning_tracking_event_key (idempotency_key),
+    INDEX idx_import_warning_tracking_event_occurrence (occurrence_id, resulting_version),
+    CONSTRAINT fk_import_warning_tracking_event_occurrence
+        FOREIGN KEY (occurrence_id) REFERENCES import_warning_occurrences(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_import_warning_tracking_event_version
+        CHECK (resulting_version = expected_version + 1),
+    CONSTRAINT chk_import_warning_tracking_event_fingerprint
+        CHECK (command_fingerprint REGEXP '^[0-9a-f]{64}$')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS import_warning_current_tasks (
+    occurrence_id BIGINT PRIMARY KEY,
+    tracking_status ENUM(
+        'open', 'awaiting_external_confirmation', 'response_recorded',
+        'reimport_requested', 'closed', 'auto_resolved'
+    ) NOT NULL,
+    tracking_version BIGINT UNSIGNED NOT NULL,
+    replacement_occurrence_id BIGINT NULL,
+    last_event_id BIGINT NOT NULL,
+    last_event_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_import_warning_current_active (tracking_status, last_event_at),
+    CONSTRAINT fk_import_warning_current_occurrence
+        FOREIGN KEY (occurrence_id) REFERENCES import_warning_occurrences(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_warning_current_replacement
+        FOREIGN KEY (replacement_occurrence_id) REFERENCES import_warning_occurrences(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_warning_current_event
+        FOREIGN KEY (last_event_id) REFERENCES import_warning_tracking_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_import_warning_current_version CHECK (tracking_version > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS import_warning_resubmission_associations (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    association_identity VARCHAR(191) NOT NULL,
+    prior_occurrence_id BIGINT NOT NULL,
+    owning_lane VARCHAR(64) NOT NULL,
+    prior_source_event_identity VARCHAR(191) NOT NULL,
+    new_source_event_identity VARCHAR(191) NOT NULL,
+    new_receipt_identity VARCHAR(191) NOT NULL,
+    import_outcome ENUM('failed', 'succeeded') NOT NULL,
+    replacement_occurrence_id BIGINT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_import_warning_resubmission_identity (association_identity),
+    UNIQUE KEY uq_import_warning_resubmission_new_source (owning_lane, new_source_event_identity),
+    CONSTRAINT fk_import_warning_resubmission_prior
+        FOREIGN KEY (prior_occurrence_id) REFERENCES import_warning_occurrences(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_warning_resubmission_replacement
+        FOREIGN KEY (replacement_occurrence_id) REFERENCES import_warning_occurrences(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_import_warning_resubmission_links
+        CHECK (
+            (import_outcome = 'failed' AND replacement_occurrence_id IS NOT NULL)
+            OR (import_outcome = 'succeeded' AND replacement_occurrence_id IS NULL)
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS import_warning_tracking_receipts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    occurrence_id BIGINT NOT NULL,
+    tracking_event_id BIGINT NOT NULL,
+    expected_version BIGINT UNSIGNED NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    result_snapshot JSON NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_import_warning_tracking_receipt_key (idempotency_key),
+    UNIQUE KEY uq_import_warning_tracking_receipt_event (tracking_event_id),
+    CONSTRAINT fk_import_warning_tracking_receipt_occurrence
+        FOREIGN KEY (occurrence_id) REFERENCES import_warning_occurrences(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_import_warning_tracking_receipt_event
+        FOREIGN KEY (tracking_event_id) REFERENCES import_warning_tracking_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_import_warning_tracking_receipt_fingerprint
+        CHECK (command_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_import_warning_tracking_receipt_snapshot
+        CHECK (JSON_TYPE(result_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS import_warning_tracking_outbox (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    tracking_event_id BIGINT NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    bounded_snapshot JSON NOT NULL,
+    published_at TIMESTAMP NULL,
+    attempts INT NOT NULL DEFAULT 0,
+    last_error VARCHAR(500) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_import_warning_tracking_outbox_intent (intent_key),
+    INDEX idx_import_warning_tracking_outbox_pending (published_at, attempts, id),
+    CONSTRAINT fk_import_warning_tracking_outbox_event
+        FOREIGN KEY (tracking_event_id) REFERENCES import_warning_tracking_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_import_warning_tracking_outbox_snapshot
+        CHECK (JSON_TYPE(bounded_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_import_warning_tracking_outbox_attempts CHECK (attempts >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_import_warning_occurrences_before_update;
+CREATE TRIGGER trg_import_warning_occurrences_before_update
+BEFORE UPDATE ON import_warning_occurrences
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'import_warning_occurrences records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_import_warning_occurrences_before_delete;
+CREATE TRIGGER trg_import_warning_occurrences_before_delete
+BEFORE DELETE ON import_warning_occurrences
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'import_warning_occurrences records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_import_warning_tracking_events_before_update;
+CREATE TRIGGER trg_import_warning_tracking_events_before_update
+BEFORE UPDATE ON import_warning_tracking_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'import_warning_tracking_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_import_warning_tracking_events_before_delete;
+CREATE TRIGGER trg_import_warning_tracking_events_before_delete
+BEFORE DELETE ON import_warning_tracking_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'import_warning_tracking_events records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_import_warning_resubmission_associations_before_update;
+CREATE TRIGGER trg_import_warning_resubmission_associations_before_update
+BEFORE UPDATE ON import_warning_resubmission_associations
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'import_warning_resubmission_associations records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_import_warning_resubmission_associations_before_delete;
+CREATE TRIGGER trg_import_warning_resubmission_associations_before_delete
+BEFORE DELETE ON import_warning_resubmission_associations
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'import_warning_resubmission_associations records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_import_warning_tracking_receipts_before_update;
+CREATE TRIGGER trg_import_warning_tracking_receipts_before_update
+BEFORE UPDATE ON import_warning_tracking_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'import_warning_tracking_receipts records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_import_warning_tracking_receipts_before_delete;
+CREATE TRIGGER trg_import_warning_tracking_receipts_before_delete
+BEFORE DELETE ON import_warning_tracking_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'import_warning_tracking_receipts records cannot be deleted';
+
+-- File: 192_case_import_partial_formal_case.sql
+-- Description: 允許 HCM partial formal case 保存完整來源列而延後建立 case architecture bootstrap。
+
+ALTER TABLE case_import_events
+    MODIFY COLUMN bootstrap_event_id BIGINT NULL;
+
+ALTER TABLE case_import_receipts
+    MODIFY COLUMN bootstrap_event_id BIGINT NULL;
+
+-- Client BeClass query_no is source provenance, not a Client or case identity.
+ALTER TABLE beclass_records
+    ADD COLUMN client_id INT NULL COMMENT '過渡期唯一比對後的 Client 綁定' AFTER query_no,
+    ADD COLUMN bound_case_no VARCHAR(50) NULL COMMENT '過渡期唯一比對後的案件編號' AFTER client_id,
+    ADD INDEX idx_beclass_client_case (client_id, bound_case_no),
+    ADD CONSTRAINT fk_beclass_client
+        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE RESTRICT;
+
+-- Partial HCM formal cases exist, but must not enter the service lifecycle before required fields are complete.
+ALTER TABLE orders
+    MODIFY COLUMN `status` ENUM('待補件', '洽談中', '訂單成立', '服務中', '訂單完成', '訂單取消')
+    NOT NULL DEFAULT '洽談中'
+    COMMENT '專案狀態；待補件案件不得進入服務生命週期';
+
 -- 25. 訂單與帳務整合檢視表 (獨立拆分訂金與樓層費，並提供首筆應付加總)
 CREATE OR REPLACE VIEW v_order_details AS
 SELECT 
@@ -14098,4 +14377,3 @@ SELECT
 FROM orders o
 JOIN clients c ON o.client_id = c.id
 LEFT JOIN staff s ON o.staff_id = s.id;
--- END SOURCE: db/schema_parts/999_v_order_details_view.sql

@@ -579,7 +579,7 @@ government return payable contract 在人工確認及相應 E2E 完成前，不�
 - `04_Client_Finance_Domain.md`
 - `05_Staff_Payables_Export_Domain.md`
 - `07_跨Domain交易與pytest驗收架構.md`
-- `13_規格實作完成度矩陣.md`
+- `../03_追蹤清單與證據/evidence/2026-08-09_implementation_matrix_revalidation_receipt.md`
 - `document/文件整併工作區/02_訂單帳務與資料處理_無損合併稿.md`
 - `document/文件整併工作區/05_潛在狀態機規則盤點.md`
 - `document/文件整併工作區/06_欄位權威性與計算邏輯盤點.md`

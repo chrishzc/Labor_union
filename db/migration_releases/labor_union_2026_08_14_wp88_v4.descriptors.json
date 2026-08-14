@@ -1,0 +1,18 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "194_case_import_pending_completion_status.sql": {
+      "altered_columns": {
+        "orders": {
+          "status": {"column_type": "enum('待補件','洽談中','訂單成立','服務中','訂單完成','訂單取消')", "is_nullable": "NO", "column_default": "洽談中", "extra": ""}
+        }
+      },
+      "predecessor_columns": {
+        "orders": {
+          "status": {"column_type": "enum('洽談中','訂單成立','服務中','訂單完成','訂單取消')", "is_nullable": "YES", "column_default": "洽談中", "extra": ""}
+        }
+      },
+      "triggers": []
+    }
+  }
+}

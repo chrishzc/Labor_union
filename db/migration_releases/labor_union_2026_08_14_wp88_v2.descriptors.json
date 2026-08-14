@@ -1,0 +1,24 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "192_case_import_partial_formal_case.sql": {
+      "altered_columns": {
+        "case_import_events": {
+          "bootstrap_event_id": {"column_type": "bigint", "is_nullable": "YES", "column_default": null, "extra": ""}
+        },
+        "case_import_receipts": {
+          "bootstrap_event_id": {"column_type": "bigint", "is_nullable": "YES", "column_default": null, "extra": ""}
+        }
+      },
+      "predecessor_columns": {
+        "case_import_events": {
+          "bootstrap_event_id": {"column_type": "bigint", "is_nullable": "NO", "column_default": null, "extra": ""}
+        },
+        "case_import_receipts": {
+          "bootstrap_event_id": {"column_type": "bigint", "is_nullable": "NO", "column_default": null, "extra": ""}
+        }
+      },
+      "triggers": []
+    }
+  }
+}

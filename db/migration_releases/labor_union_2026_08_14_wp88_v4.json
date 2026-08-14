@@ -1,0 +1,12 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-wp88-2026-08-14-v4",
+  "release_metadata": {"release_name": "Labor Union WP88 partial case pending-completion status", "application_version": "wp88-partial-case-status-v1", "published_at": "2026-08-14", "description": "Allow partial formal HCM cases to be stored as pending completion"},
+  "source_baseline": {"minimum_mysql_version": "8.0", "required_character_set": "utf8mb4", "allowed_owned_object_states": ["absent", "exact"], "forbidden_owned_object_states": ["partial", "drift"], "source_must_be_read_only": true, "maintenance_token_required": true, "baseline_id": "wp88-v3"},
+  "artifacts": [{"name": "194_case_import_pending_completion_status.sql", "relative_path": "db/schema_parts/194_case_import_pending_completion_status.sql", "sha256": "d71f903a531d0dcc9a40f84e909413f95d268cde28aa84f592c2420efc682917", "dependencies": ["192_case_import_partial_formal_case.sql"], "data_effect": "schema_only", "rollback_policy": "code-rollback-preserve-pending-completion-cases", "resumable_boundary_policy": "statement-sha256-with-durable-receipt"}],
+  "backfills": [],
+  "verification_contracts": [{"verification_id": "wp88-pending-completion-order-status", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}],
+  "application_compatibility": {"minimum_api_contract": "typed-api-v1", "compatible_contracts": ["case-import-partial-formal-case-v1"], "required_restart_targets": ["api"], "watcher_worker_compatibility": "same-release-required", "post_cutover_smoke_ids": ["hcm-partial-formal-case"]},
+  "descriptor_artifact": {"name": "labor_union_2026_08_14_wp88_v4.descriptors.json", "relative_path": "db/migration_releases/labor_union_2026_08_14_wp88_v4.descriptors.json", "sha256": "2eb28a24a888ed11d52e0589dad9a255b61fe4435096b797388eafd97244ccf5", "dependencies": []},
+  "tool_archive_policy": {"artifact_hash_algorithm": "sha256", "backup_archive_policy": "permanent-release-archive", "journal_archive_policy": "append-only-per-operation", "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"], "receipt_archive_policy": "permanent-release-archive", "restore_required_mode": "new-absent-candidate-only"}
+}

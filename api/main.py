@@ -1,8 +1,6 @@
 """
-================================================================================
-檔案名稱: api/main.py
-功能說明: FastAPI 主程序，掛載 LINE、LIFF、管理介面與其他後端 API；LINE Worker 由獨立程序管理
-================================================================================
+File: main.py
+Description: FastAPI 主程序，掛載管理 API、LINE 介面與受控 workbook upload routers。
 """
 
 import asyncio
@@ -25,6 +23,7 @@ from api.routes import (
     assignment_plan,
     assignment_schedule_rest_dates,
     beclass_import_review,
+    client_beclass_import,
     case_architecture_bootstrap,
     client_deposit_reversal,
     client_receipt_reconciliation,
@@ -35,6 +34,9 @@ from api.routes import (
     contracts,
     data_browser_admin,
     finance_import,
+    hcm_import,
+    historical_order_adoption,
+    staff_historical_workbook,
     finance_reports,
     financial_adjustment,
     government_subsidy,
@@ -229,6 +231,10 @@ app.include_router(payroll_rebuild.router)
 app.include_router(staff_payments.router)
 app.include_router(contracts.router)
 app.include_router(finance_import.router)
+app.include_router(hcm_import.router)
+app.include_router(client_beclass_import.router)
+app.include_router(historical_order_adoption.router)
+app.include_router(staff_historical_workbook.router)
 app.include_router(beclass_import_review.router)
 app.include_router(finance_reports.router)
 app.include_router(government_subsidy.router)

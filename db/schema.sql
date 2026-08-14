@@ -37,7 +37,7 @@ CREATE TABLE IF NOT EXISTS clients (
     INDEX idx_name (name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
--- 2. BeClass 報名紀錄表（主關聯欄位為 beclass_records.query_no <=> clients.case_no；案件識別一律以 clients.case_no 為準）
+-- 2. BeClass 報名紀錄表（舊版主關聯欄位為 query_no；後續 release 會加上 transition binding）
 CREATE TABLE IF NOT EXISTS beclass_records (
     id INT AUTO_INCREMENT PRIMARY KEY,
     seq_num INT COMMENT '項次',

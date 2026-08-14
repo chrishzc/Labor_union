@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-File: scripts/imports/import_client_beclass.py
-Description: \u89e3\u6790\u4e26\u6e05\u6d17\u5ba2\u6236 BeClass \u5831\u540d\u540d\u518a Excel\uff0c\u4ee5\u300c\u59d3\u540d+\u51fa\u751f\u5e74\u6708\u65e5\u300d\u7d44\u5408\u552f\u4e00\u9375\u53bb\u91cd\u66f4\u65b0\u5beb\u5165 beclass_records \u8cc7\u6599\u8868\u3002
-ponytail: 60+ \u500b\u554f\u5377\u6b04\u4f4d\u6253\u5305\u70ba JSON\uff0c\u907f\u514d\u70ba\u6bcf\u500b\u554f\u984c\u5efa\u6b04\u3002
+File: import_client_beclass.py
+Description: 依 Client BeClass 欄位契約選取工作表，驗證並匯入歷史報名資料。
 """
+import argparse
 import sys
 import os
 import re
@@ -35,7 +35,7 @@ if cwd_str not in sys.path:
 
 try:
     from domains.case_import.client_beclass_validation import (
-        fallback_case_key,
+        CLIENT_BECLASS_REQUIRED_HEADERS,
         validate_client_beclass_row,
     )
 except ModuleNotFoundError as e:
@@ -49,16 +49,21 @@ except ModuleNotFoundError as e:
         print(f"3. 無法列出該目錄內容: {ex}")
     raise e
 
-from subsystems.anomalies.system_alert_projection import (
-    delete_system_alert,
-    resolve_if_exists,
-    upsert_system_alert,
-)
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from subsystems.case_import.beclass_review_intake import (
     fingerprint_workbook,
     masked_review_identifier,
     record_invalid_beclass_row,
+)
+from subsystems.case_import.hcm_beclass_reconciliation import (
+    reconcile_hcm_beclass_cooking,
+)
+from infrastructure.mysql.client_beclass_workbook_import_repository import (
+    ClientBeClassWorkbookImportRepository,
+)
+from subsystems.case_import.client_beclass_workbook_import import (
+    ClientBeClassWorkbookConflict,
+    ClientBeClassWorkbookImportService,
 )
 
 # 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
@@ -158,33 +163,63 @@ def _result(inserted=0, skipped_existing=0, review_required=0, failed=0):
     }
 
 
+def _typed_historical_import(excel_path):
+    connection = pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
+    try:
+        service = ClientBeClassWorkbookImportService(
+            ClientBeClassWorkbookImportRepository(connection)
+        )
+        preview = service.preview(excel_path)
+        digest = fingerprint_workbook(excel_path)
+        receipt = service.apply(
+            excel_path,
+            f"client-beclass-historical:{digest}",
+            preview.preview_fingerprint,
+            "restricted-historical-client-beclass",
+            f"client-beclass-historical:{digest}",
+        )
+        return _result(
+            inserted=receipt.created_count,
+            skipped_existing=receipt.exact_replay_count + receipt.existing_source_count,
+            review_required=receipt.review_required_count + receipt.existing_conflict_count,
+        )
+    except ClientBeClassWorkbookConflict:
+        return _result(review_required=1)
+    except Exception:
+        return _result(failed=1)
+    finally:
+        connection.close()
+
+
+def _privacy_safe_client_review_payload(record):
+    return {
+        "source_field_count": len(record),
+        "has_query_no": bool(str(record.get("query_no") or "").strip()),
+        "has_name": bool(str(record.get("name") or "").strip()),
+        "has_phone": bool(str(record.get("phone") or "").strip()),
+        "has_address": bool(str(record.get("address") or "").strip()),
+    }
+
+
 def process_import(excel_path):
+    if not os.path.exists(excel_path):
+        print(f"錯誤：找不到 Excel 檔案：{excel_path}")
+        return _result(review_required=1)
+    return _typed_historical_import(excel_path)
+
+
+def _legacy_process_import_not_used(excel_path):
     if not os.path.exists(excel_path):
         print(f"\u932f\u8aa4\uff1a\u627e\u4e0d\u5230 Excel \u6a94\u6848\uff1a{excel_path}")
         return _result(review_required=1)
 
-    print(f"\u89e3\u6790 Excel \u6a94\u6848\uff1a{excel_path} ...")
-    xl = pd.ExcelFile(excel_path)
-    if not xl.sheet_names:
-        print("\u672a\u6b0a\u9ad4\u6a94\u6848\u6ca1\u6709\u53ef\u7528\u5de5\u4f5c\u8868\uff0c\u8df3\u904e\u6b64\u6a94\u6848\u3002")
+    selected = _load_client_beclass_frame(excel_path)
+    if selected is None:
         return _result(review_required=1)
-
-    target_sheet = xl.sheet_names[0]
-    df = xl.parse(target_sheet)
-    if df is None or df.empty:
-        for sheet_name in xl.sheet_names[1:]:
-            candidate = xl.parse(sheet_name)
-            if candidate is not None and not candidate.empty:
-                target_sheet = sheet_name
-                df = candidate
-                break
-
-    if df is None or df.empty:
-        print("\u6240\u6709\u5de5\u4f5c\u8868\u90fd\u70ba\u7a7a\uff0c\u7121\u6cd5\u9032\u884c\u532f\u5165\u3002")
-        return _result(review_required=1)
+    target_sheet, df = selected
 
     source_content_digest = fingerprint_workbook(excel_path)
-    print(f"\u627e\u5230\u5339\u914d\u5de5\u4f5c\u8868\uff1a'{target_sheet}'\uff0c\u5171\u6709 {len(df)} \u7b46\u8cc7\u6599\uff0c\u6e96\u5099\u532f\u5165...")
+    print(f"已依欄位契約選取工作表，共有 {len(df)} 筆資料，準備匯入...")
 
     try:
         conn = pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
@@ -203,7 +238,6 @@ def process_import(excel_path):
         for source_row, (_, row) in enumerate(df.iterrows(), start=2):
             raw_row = row.to_dict()
             errors = validate_client_beclass_row(raw_row)
-            name_for_alert = raw_row.get('\u59d3\u540d')
             phone_for_alert = raw_row.get('\u884c\u52d5\u96fb\u8a71')
 
             record = {}
@@ -245,6 +279,8 @@ def process_import(excel_path):
                 existing_cnt = int(existing['existing_cnt']) if existing and existing['existing_cnt'] is not None else 0
             if existing_cnt == 1:
                 skipped_existing += 1
+                conn.commit()
+                _reconcile_without_rolling_back_beclass(conn, query_no)
                 continue
             if existing_cnt > 1:
                 review_required += 1
@@ -259,9 +295,10 @@ def process_import(excel_path):
                         query_no,
                         phone_for_alert,
                     ),
-                    source_payload=record,
+                    source_payload=_privacy_safe_client_review_payload(record),
                     issue_codes=("duplicate_query_no",),
                 )
+                conn.commit()
                 continue
             if errors:
                 review_required += 1
@@ -276,18 +313,10 @@ def process_import(excel_path):
                         query_no,
                         phone_for_alert,
                     ),
-                    source_payload=record,
+                    source_payload=_privacy_safe_client_review_payload(record),
                     issue_codes=tuple(errors),
                 )
-                error_keys_joined = "\u3001".join(errors.keys())
-                upsert_system_alert(
-                    cursor,
-                    alert_code="IMPORT-005",
-                    source_domain="IMPORT",
-                    case_key=query_no or fallback_case_key(name_for_alert, phone_for_alert),
-                    reason=f"\u5ba2\u6236 BeClass \u532f\u5165\u8cc7\u6599\u7570\u5e38\uff1a{error_keys_joined}",
-                    details=errors,
-                )
+                conn.commit()
                 continue
 
             cols = ", ".join([f"`{k}`" for k in record.keys()])
@@ -295,16 +324,8 @@ def process_import(excel_path):
             sql = f"INSERT INTO beclass_records ({cols}) VALUES ({places})"
             cursor.execute(sql, tuple(record.values()))
             inserted += 1
-
-            fallback_key = fallback_case_key(name_for_alert, phone_for_alert)
-            if not fallback_key.startswith("error_row_"):
-                delete_system_alert(cursor, alert_code="IMPORT-005", case_key=fallback_key)
-            resolve_if_exists(
-                cursor,
-                alert_code="IMPORT-005",
-                case_key=query_no,
-                reason="\u7cfb\u7d71\u91cd\u65b0\u532f\u5165\uff1a\u6b04\u4f4d\u9a57\u8b49\u901a\u904e\uff0c\u81ea\u52d5\u89e3\u9664",
-            )
+            conn.commit()
+            _reconcile_without_rolling_back_beclass(conn, query_no)
 
         conn.commit()
         print(
@@ -327,16 +348,52 @@ def process_import(excel_path):
 
     return _result(inserted=inserted, skipped_existing=skipped_existing, review_required=review_required)
 
-if __name__ == "__main__":
-    from scripts.imports.historical_import_guard import authorize_historical_apply
 
+def _reconcile_without_rolling_back_beclass(connection, query_no):
+    if not query_no:
+        return "identity_conflict"
     try:
-        excel_arg = authorize_historical_apply(
-            sys.argv[1:],
-            str(DB_CONFIG["database"]),
-        )
+        result = reconcile_hcm_beclass_cooking(connection, str(query_no))
+    except Exception as error:
+        print(f"[配對待重試] BeClass root 已建立；reconciliation稍後重試：{type(error).__name__}")
+        return "failed_retryable"
+    print(f"[配對狀態] {result.status}")
+    return result.status
+
+
+def _load_client_beclass_frame(excel_path):
+    print(f"解析 Excel 檔案：{excel_path} ...")
+    with pd.ExcelFile(excel_path) as workbook:
+        candidates = _client_beclass_sheet_candidates(workbook)
+    if len(candidates) != 1:
+        reason = "沒有" if not candidates else "有多個"
+        print(f"{reason}工作表符合 Client BeClass 必要欄位契約，無法安全匯入。")
+        return None
+    return candidates[0]
+
+
+def _client_beclass_sheet_candidates(workbook):
+    candidates = []
+    for sheet_name in workbook.sheet_names:
+        frame = workbook.parse(sheet_name=sheet_name, dtype=object)
+        headers = {str(column).strip() for column in frame.columns}
+        if not frame.dropna(how="all").empty and CLIENT_BECLASS_REQUIRED_HEADERS <= headers:
+            candidates.append((sheet_name, frame))
+    return candidates
+
+if __name__ == "__main__":
+    try:
+        parser = argparse.ArgumentParser(description="Client BeClass 歷史資料受控匯入")
+        parser.add_argument("--historical-apply", action="store_true")
+        parser.add_argument("workbook")
+        parsed = parser.parse_args(sys.argv[1:])
+        from scripts.imports.historical_import_guard import authorize_historical_apply
+
+        apply_arguments = [parsed.workbook]
+        if parsed.historical_apply:
+            apply_arguments.insert(0, "--historical-apply")
+        excel_arg = authorize_historical_apply(apply_arguments, str(DB_CONFIG["database"]))
     except RuntimeError as error:
         print(f"歷史匯入已阻擋：{error}")
         raise SystemExit(2) from error
     process_import(excel_arg)
-

@@ -1,0 +1,51 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "189_staff_historical_adoption_hcm_review.sql": {
+      "tables": {
+        "staff_historical_adoption_receipts": [
+          "id",
+          "idempotency_key",
+          "command_fingerprint",
+          "source_event_identity",
+          "source_fingerprint",
+          "preview_fingerprint",
+          "staff_id",
+          "outcome",
+          "changed_fields",
+          "review_identity",
+          "created_at"
+        ],
+        "case_import_hcm_review_rows": [
+          "id",
+          "review_identity",
+          "source_event_identity",
+          "source_content_digest",
+          "source_sheet_identity",
+          "source_row",
+          "masked_case_identity",
+          "source_fingerprint",
+          "issue_codes",
+          "evidence_snapshot",
+          "created_at"
+        ],
+        "case_import_hcm_review_outbox": [
+          "id",
+          "review_row_id",
+          "intent_key",
+          "bounded_snapshot",
+          "published_at",
+          "attempts",
+          "last_error",
+          "created_at"
+        ]
+      },
+      "triggers": [
+        "trg_staff_historical_adoption_receipts_before_update",
+        "trg_staff_historical_adoption_receipts_before_delete",
+        "trg_case_import_hcm_review_rows_before_update",
+        "trg_case_import_hcm_review_rows_before_delete"
+      ]
+    }
+  }
+}

@@ -148,6 +148,12 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_11_line_stage11_v1.json",
     "labor_union_2026_08_11_line_stage12_v1.json",
     "labor_union_2026_08_13_wp72_v1.json",
+    "labor_union_2026_08_13_wp77_v1.json",
+    "labor_union_2026_08_13_wp80_v1.json",
+    "labor_union_2026_08_14_wp88_v1.json",
+    "labor_union_2026_08_14_wp88_v2.json",
+    "labor_union_2026_08_14_wp88_v3.json",
+    "labor_union_2026_08_14_wp88_v4.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -1480,10 +1486,14 @@ def _owned_classification(
     snapshot: Mapping[str, Any], *, defer_missing_triggers: bool = False
 ) -> dict[str, str]:
     present_columns: dict[str, set[str]] = {}
+    present_column_contracts: dict[str, dict[str, Mapping[str, Any]]] = {}
     for row in snapshot["columns"]:
         present_columns.setdefault(row["table_name"], set()).add(
             row["column_name"]
         )
+        present_column_contracts.setdefault(row["table_name"], {})[
+            row["column_name"]
+        ] = row
     present_triggers = {row["trigger_name"] for row in snapshot["triggers"]}
     legacy_knowledge_state = _legacy_knowledge_schema_state(snapshot)
     result: dict[str, str] = {}
@@ -1557,6 +1567,7 @@ def _owned_classification(
             raise UpgradeBlocked(f"missing descriptor for release artifact: {name}")
         result[name] = _descriptor_presence_state(
             descriptor, present_columns, present_triggers,
+            present_column_contracts=present_column_contracts,
             defer_missing_triggers=defer_missing_triggers,
         )
     return result
@@ -1567,6 +1578,7 @@ def _descriptor_presence_state(
     present_columns: Mapping[str, set[str]],
     present_triggers: set[str],
     *,
+    present_column_contracts: Mapping[str, Mapping[str, Mapping[str, Any]]] | None = None,
     defer_missing_triggers: bool = False,
 ) -> str:
     """Classify an append-only artifact by its released table/trigger names."""
@@ -1585,11 +1597,39 @@ def _descriptor_presence_state(
     for trigger in descriptor.get("triggers") or ():
         if not defer_missing_triggers or str(trigger) in present_triggers:
             states.append("exact" if str(trigger) in present_triggers else "absent")
+    for table, columns in (descriptor.get("altered_columns") or {}).items():
+        actual_columns = (present_column_contracts or {}).get(str(table), {})
+        predecessor_columns = (descriptor.get("predecessor_columns") or {}).get(str(table), {})
+        for column_name, expected in columns.items():
+            actual = actual_columns.get(str(column_name))
+            predecessor = predecessor_columns.get(str(column_name))
+            if actual is None:
+                states.append("absent")
+            elif _column_contract_matches(actual, expected):
+                states.append("exact")
+            elif predecessor is not None and _column_contract_matches(actual, predecessor):
+                states.append("absent")
+            else:
+                states.append("drift")
     if not states or all(state == "absent" for state in states):
         return "absent"
     if all(state == "exact" for state in states):
         return "exact"
     return "partial"
+
+
+def _column_contract_matches(actual, expected) -> bool:
+    default = actual.get("column_default")
+    if isinstance(default, str):
+        default = default.casefold()
+    return (
+        _normalize_column_type_contract(actual.get("column_type"))
+        == str(expected["column_type"]).casefold()
+        and actual.get("is_nullable") == expected["is_nullable"]
+        and default == expected.get("column_default")
+        and re.sub(r"\s+", " ", str(actual.get("extra") or "")).casefold()
+        == str(expected.get("extra") or "").casefold()
+    )
 
 
 def schema_artifacts() -> list[dict[str, Any]]:
@@ -3611,8 +3651,8 @@ def run_candidate_post_schema(
         raise UpgradeBlocked("post-schema phase requires schema_applied receipt")
     if server_identity(config, candidate)["database"] != candidate:
         raise UpgradeBlocked("post-schema target is not candidate")
-    if MANIFEST_DRIVEN_RELEASE:
-        if RELEASE_MANIFEST.backfills:
+    if _uses_catalog_post_schema_contract():
+        if getattr(RELEASE_MANIFEST, "backfills", ()):
             raise UpgradeBlocked(
                 "manifest backfill execution is not supported by this runner"
             )
@@ -3682,6 +3722,10 @@ def run_candidate_post_schema(
     )
     write_receipt(operation_receipt_path, receipt)
     return receipt
+
+
+def _uses_catalog_post_schema_contract() -> bool:
+    return MANIFEST_DRIVEN_RELEASE or isinstance(RELEASE_MANIFEST, ReleaseManifest)
 
 
 def _replace_database_setting(raw: bytes, before: str, after: str) -> bytes:
@@ -4076,6 +4120,49 @@ def _knowledge_source_identity_rows(
         connection.close()
 
 
+def _snapshot_has_view(snapshot: Mapping[str, Any], view_name: str) -> bool:
+    return any(
+        row.get("table_name") == view_name
+        for row in snapshot.get("views", ())
+    )
+
+
+def _verify_order_details_view_if_present(
+    config: DatabaseConfig,
+    candidate: str,
+    source_snapshot: Mapping[str, Any],
+    candidate_snapshot: Mapping[str, Any],
+) -> int | str:
+    source_has_view = _snapshot_has_view(source_snapshot, "v_order_details")
+    candidate_has_view = _snapshot_has_view(candidate_snapshot, "v_order_details")
+    if not source_has_view and not candidate_has_view:
+        return "not_applicable"
+    if source_has_view and not candidate_has_view:
+        raise UpgradeBlocked("preserved v_order_details view is missing")
+    mismatches = _order_details_view_mismatch_count(config, candidate)
+    if mismatches:
+        raise UpgradeBlocked("v_order_details lifecycle_version mismatch")
+    return 0
+
+
+def _order_details_view_mismatch_count(
+    config: DatabaseConfig,
+    candidate: str,
+) -> int:
+    connection = config.connect(candidate)
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS n FROM orders o "
+                "LEFT JOIN v_order_details v ON v.case_no=o.case_no "
+                "WHERE v.case_no IS NULL OR "
+                "v.lifecycle_version<>o.lifecycle_version"
+            )
+            return int(cursor.fetchone()["n"])
+    finally:
+        connection.close()
+
+
 def verify_candidate(
     config: DatabaseConfig,
     source: str,
@@ -4181,24 +4268,13 @@ def verify_candidate(
     states = _owned_classification(candidate_snapshot)
     if not _candidate_schema_is_exact(states):
         raise UpgradeBlocked(f"candidate owned schema not exact: {states}")
-    connection = config.connect(candidate)
-    try:
-        with connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) AS n FROM orders o "
-                "LEFT JOIN v_order_details v ON v.case_no=o.case_no "
-                "WHERE v.case_no IS NULL OR "
-                "v.lifecycle_version<>o.lifecycle_version"
-            )
-            view_mismatches = int(cursor.fetchone()["n"])
-    finally:
-        connection.close()
-    if view_mismatches:
-        raise UpgradeBlocked("v_order_details lifecycle_version mismatch")
+    view_mismatches = _verify_order_details_view_if_present(
+        config, candidate, source_snapshot, candidate_snapshot
+    )
     receipt.update(
         status="verified", verified_at=_now(), source_data=source_data,
         candidate_data=candidate_data, owned_objects=states,
-        view_mismatches=0,
+        view_mismatches=view_mismatches,
         system_alert_preservation=system_alert_preservation,
         matching_records_preservation=matching_records_preservation,
         orders_preservation=orders_preservation,

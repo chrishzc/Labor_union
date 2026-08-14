@@ -90,6 +90,8 @@ flowchart LR
 ## 開發與驗證安全界線
 
 - 先讀取 branch、HEAD、status 和相鄰檔案；既有 dirty path 一律視為使用者成果。
+- 協作任務以可讀的標題／Work Package、owner、write set 與 base ref 溝通；hash 僅用於既有 release、artifact 與測試資產的完整性驗證，不是任務身分、鎖定或衝突裁決依據。
+- 合併前先列出衝突 path、雙方意圖與建議處置；相同 ordinal、release ID 或索引列先視為語意碰撞。保留不同業務 lane，已套用或已發布 release 不得靜默改寫；刪除重複實作前要有行為比較與驗收證據。完整規則以根目錄 `AGENTS.md` 的「多人協作與合併裁決」為準。
 - 測試一律使用 `.venv\Scripts\python.exe -m pytest`，先跑受影響模組，再依 Domain／Global 層級擴大。
 - snapshot、golden artifact、`tests/fixtures/` 與 `validation/` 資料都是受保護測試資產；未經明確授權不得刪除、重產或套用到正式資料庫。
 - `db/schema_parts/` 與 migration release 必須 additive、可驗證；`scripts/launchers/start_local_development.bat` 不會自動套 schema。

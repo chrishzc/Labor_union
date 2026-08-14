@@ -1,12 +1,6 @@
-"""異常警示中心：5 個分頁（資料匯入異常／流程與系統警示／帳務異常／服務人員／
-Line），還原 2026-07-29 版本的資訊架構，但資料來源改為 canonical 異常註冊中心
-（/api/v1/anomalies，見 api/routes/anomaly_registry.py），取代已退役、未掛載的
-/api/v1/finance-alerts、/api/v1/system-alerts。
-
-ORDER-001~004（訂單配對）、DOC-SEND-001（補發送履歷）目前都導向「多月嫂排班」
-頁面的處理佇列（ui/nav_helper.py），不再走一鍵直接動作：舊版
-/api/v1/orders/{case_no}/send-resume 端點已標記為 retired writer，
-可靠的履歷發送已改為配對方案（matching plan）擁有。
+"""
+File: 06_finance_alerts.py
+Description: 顯示canonical異常警示，並提供已核准的人工處理入口。
 """
 
 from __future__ import annotations
@@ -65,7 +59,13 @@ _MATCHING_PAGE_TITLE = "多月嫂排班"
 _MATCHING_QUEUE_TARGET_KEY = "multi_caregiver_matching_case_picker"
 _FINANCE_RECOVERY_SELECTION_KEY = "finance_anomaly_recovery_selection"
 
-_IMPORT_CODES = {"IMPORT-001", "IMPORT-003", "IMPORT-004", "IMPORT-006"}
+_IMPORT_CODES = {
+    "HISTORICAL-ORDER-001",
+    "IMPORT-001",
+    "IMPORT-003",
+    "IMPORT-004",
+    "IMPORT-006",
+}
 _ORDER_MATCH_CODES = {"ORDER-001", "ORDER-002", "ORDER-003", "ORDER-004"}
 _MISSING_DATA_CODES = {"BECLASS-001"}
 _DOC_SEND_CODES = {"DOC-SEND-001"}
@@ -109,6 +109,7 @@ _ALERT_CODE_LABELS = {
     "IMPORT-003": "跨表整合去重/關聯衝突",
     "IMPORT-004": "HCM 匯入欄位驗證失敗",
     "IMPORT-006": "銀行對帳匯入完整性異常",
+    "HISTORICAL-ORDER-001": "歷史訂單匯入待人工確認",
     "RECEIVABLE-001": "客戶應收帳款逾期未收齊",
     "CLIENTPAYABLE-001": "應付客戶款項逾期未付",
     "SUBSIDYADVANCE-001": "政府補助墊付款項待核對",
@@ -243,7 +244,7 @@ def _render_summary_table(items: tuple[AnomalySummaryView, ...]) -> None:
     st.dataframe(
         [
             {
-                "警示類型": _alert_code_label(item.definition_code),
+                "警示類型": _display_alert_label(item),
                 "案件/識別": _case_no(item),
                 "狀態": _status_label(item.workflow_status),
             }
@@ -252,6 +253,15 @@ def _render_summary_table(items: tuple[AnomalySummaryView, ...]) -> None:
         hide_index=True,
         width="stretch",
     )
+
+
+def _display_alert_label(item: AnomalySummaryView) -> str:
+    issue_codes = _snapshot(item).get("issue_codes") or ()
+    if item.definition_code == "IMPORT-004" and any(
+        "hcm_duplicate_application" in str(code) for code in issue_codes
+    ):
+        return "疑似重複申請，請公會人員確認"
+    return _alert_code_label(item.definition_code)
 
 
 def _render_claim_resolve(
@@ -1289,10 +1299,14 @@ def show() -> None:
 def _render_import_tab(items: tuple[AnomalySummaryView, ...]) -> None:
     _render_table_only(
         "資料匯入異常",
-        "HCM／BeClass 欄位驗證、身分衝突、銀行對帳匯入完整性。",
+        "HCM／BeClass／歷史訂單欄位驗證與待確認、身分衝突、銀行對帳匯入完整性。",
         _filter(items, _IMPORT_CODES),
     )
-    _render_beclass_review_workspace(_filter(items, {"IMPORT-001"}))
+    _render_beclass_review_workspace(_beclass_review_items(items))
+
+
+def _beclass_review_items(items: tuple[AnomalySummaryView, ...]) -> tuple[AnomalySummaryView, ...]:
+    return _filter(items, {"IMPORT-001", "IMPORT-003"})
 
 
 def _render_beclass_review_workspace(items: tuple[AnomalySummaryView, ...]) -> None:

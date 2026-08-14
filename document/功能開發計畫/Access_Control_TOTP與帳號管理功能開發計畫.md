@@ -14,7 +14,8 @@
 3. 新增獨立的帳號管理頁，供授權管理員建立、停用、啟用、調整角色／能力、撤銷 Session、
    發起 TOTP 綁定或重設；
 4. 修復並驗收本機「實際登入模式」，使開發者可明確選擇 bypass 或完整驗證帳密＋TOTP；
-5. 保留所有安全決策的不可否認稽核、衝突保護與人工復原入口。
+5. 保留所有安全決策的不可否認稽核、衝突保護與人工復原入口；
+6. 在非開發模式（`ENABLE_ADMIN_AUTH=true`）下，系統載入時若未持有有效 Session，必須強制直接顯示全域登入畫面，未通過身份驗證前阻斷所有背景業務頁面與功能操作。
 
 「Google Authenticator」在此是使用者端 App；伺服器實作的是 vendor-neutral RFC 6238 TOTP，
 不得綁定 Google 帳號或依賴 Google API。相同 QR code 亦可由其他相容 TOTP App 使用。
@@ -61,6 +62,7 @@ development profile，再分辨帳號資料、schema、API envelope、UI session
 Global 責任是確保所有管理與業務 API 的 human actor 都來自有效 `AdminPrincipal`，且：
 
 - 正式環境不得使用 auth bypass 或 `LEGACY_SHARED_KEY`；
+- UI 主框架在非開發模式下必須具備 Global Initial Auth Guard，載入時未持有效 Session 立即鎖定於全域登入頁面，禁止初始化或洩漏背景業務選單與功能；
 - 未登入 public surface 只保留健康檢查、登入、TOTP enrollment challenge 所需的最小入口；
 - 每個受保護操作仍由 owning Domain 的 operation capability 作最終授權；
 - Streamlit 只保存短效 Session token、呼叫 typed API client、顯示 typed result；
@@ -174,7 +176,8 @@ password 正確但 TOTP 錯誤等資訊；內部 audit 保存 privacy-safe reaso
 
 ### 4.2 UI
 
-- 建立全域 Access Control 登入／登出入口，取代頁面各自重複登入；
+- 建立全域 Access Control 登入／登出入口（非開發模式下系統初始化預設直落登入頁面），取代頁面各自重複登入；
+- 在非開發模式下（`ENABLE_ADMIN_AUTH=true`），未登入前禁止渲染側邊欄選單、業務頁面與敏感組件，完成登入後始允許操作；
 - 建立獨立 `AccessControlApiClient`，不得把帳號管理 endpoint 加進 `LineAdminApiClient`；
 - client 將成功 payload 驗證成 Pydantic view，transport／schema error 轉為 typed client error；
 - 帳號管理頁至少提供清單、建立、啟停、角色／能力、撤銷 Session、發起 MFA reset、稽核摘要；
@@ -280,7 +283,7 @@ TOTP 可顯著提高帳密被竊後的防護，但不是 phishing-resistant；�
 - [ ] `AC-P4-01` 擴充 typed auth schemas，login 成功前強制 TOTP；
 - [ ] `AC-P4-02` 新增獨立 account administration router；
 - [ ] `AC-P4-03` 新增 `AccessControlApiClient` 與 Pydantic views／typed client errors；
-- [ ] `AC-P4-04` 建立全域 login／enrollment UI，移除 LINE 與系統狀態頁的重複登入；
+- [ ] `AC-P4-04` 建立全域 login／enrollment UI（包含非開發模式未登入全域 Guard 攔截與跳轉），移除 LINE 與系統狀態頁的重複登入；
 - [ ] `AC-P4-05` 建立帳號管理頁與 capability-based visibility；
 - [ ] `AC-P4-06` UI 驗證不得有 raw dict 穿透 render function，且 secret／QR 不持久化。
 

@@ -1,4 +1,7 @@
-"""Build and persist durable review roots for invalid BeClass rows."""
+"""
+File: beclass_review_intake.py
+Description: 保存 BeClass invalid-row review，並相容同來源的 privacy evidence升級 replay。
+"""
 
 from __future__ import annotations
 
@@ -60,9 +63,23 @@ def record_invalid_beclass_row(
     if existing is None:
         repository.append_invalid_row(root)
         return review_identity
-    if existing.root.source_fingerprint != root.source_fingerprint:
+    if (
+        existing.root.source_fingerprint != root.source_fingerprint
+        and not _same_source_issue(existing.root, root)
+    ):
         raise RuntimeError("beclass_import_review_source_conflict")
     return review_identity
+
+
+def _same_source_issue(existing, candidate) -> bool:
+    return (
+        existing.source_kind is candidate.source_kind
+        and existing.source_event_identity == candidate.source_event_identity
+        and existing.source_sheet == candidate.source_sheet
+        and existing.source_row == candidate.source_row
+        and existing.masked_identifier == candidate.masked_identifier
+        and existing.issue_codes == candidate.issue_codes
+    )
 
 
 def masked_review_identifier(source_kind, stable_identity, fallback) -> str:

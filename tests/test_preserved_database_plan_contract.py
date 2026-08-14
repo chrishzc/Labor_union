@@ -20,6 +20,21 @@ from infrastructure.migration.rehearsal_runtime import (
     EphemeralCandidateRestartPort,
 )
 from scripts import migrate_preserved_database_additive_schema as runner
+from shared_kernel.migration_release import load_migration_release_manifest
+
+
+WP80_PRE190_ASSEMBLY = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "migration_releases"
+    / "labor_union_2026_08_14_wp80_pre190_assembly_v1.json"
+)
+WP77_PRE189_ASSEMBLY = (
+    Path(__file__).resolve().parents[1]
+    / "db"
+    / "migration_releases"
+    / "labor_union_2026_08_14_wp77_pre189_assembly_v1.json"
+)
 
 
 def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
@@ -28,9 +43,57 @@ def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
         "labor_union_2026_08_11_provisional_registration_case_issue_v1.json",
         "labor_union_2026_08_11_line_stage11_v1.json",
         "labor_union_2026_08_11_line_stage12_v1.json",
+        "labor_union_2026_08_13_wp77_v1.json",
     }
 
     assert required_manifests <= set(runner.DEFAULT_RELEASE_MANIFESTS)
+
+
+def test_wp80_pre190_rehearsal_assembly_is_independently_loadable() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+
+    manifest = load_migration_release_manifest(
+        WP80_PRE190_ASSEMBLY,
+        repository_root,
+    )
+
+    assert manifest.release_id == "labor-union-wp80-pre190-assembly-2026-08-14-v1"
+    assert manifest.source_baseline_id == "wp80-pre-190-exact"
+    assert tuple(item.artifact.name for item in manifest.schema_artifacts) == (
+        "190_historical_order_adoption.sql",
+    )
+    assert manifest.schema_artifacts[0].artifact.dependencies == ()
+
+
+def test_wp77_pre189_rehearsal_assembly_is_independently_loadable() -> None:
+    repository_root = Path(__file__).resolve().parents[1]
+
+    manifest = load_migration_release_manifest(
+        WP77_PRE189_ASSEMBLY,
+        repository_root,
+    )
+
+    assert manifest.release_id == "labor-union-wp77-pre189-assembly-2026-08-14-v1"
+    assert manifest.source_baseline_id == "wp77-pre-189-exact"
+    assert tuple(item.artifact.name for item in manifest.schema_artifacts) == (
+        "189_staff_historical_adoption_hcm_review.sql",
+    )
+    assert manifest.schema_artifacts[0].artifact.dependencies == ()
+
+
+def test_isolated_release_verification_skips_absent_order_details_view() -> None:
+    class UnexpectedConnection:
+        def connect(self, _database):
+            pytest.fail("an unrelated absent view must not trigger a DB query")
+
+    result = runner._verify_order_details_view_if_present(
+        UnexpectedConnection(),
+        "candidate",
+        {"views": []},
+        {"views": []},
+    )
+
+    assert result == "not_applicable"
 
 
 def test_every_catalog_descriptor_and_schema_artifact_has_exact_hash() -> None:
@@ -234,6 +297,31 @@ def test_schema_applied_receipt_resumes_post_schema_phase(tmp_path, monkeypatch)
     assert result == {"status": "backfilled"}
 
 
+def test_default_catalog_skips_undeclared_legacy_post_schema_backfill(
+    tmp_path, monkeypatch
+) -> None:
+    receipt_path = tmp_path / "operation.json"
+    runner.write_receipt(receipt_path, {
+        "status": "schema_applied", "candidate_database": "candidate",
+    })
+    monkeypatch.setattr(
+        runner, "server_identity", lambda *_: {"database": "candidate"}
+    )
+    monkeypatch.setattr(
+        runner,
+        "_candidate_preddl_dump",
+        lambda *_args, **_kwargs: pytest.fail("legacy backfill must not run"),
+    )
+
+    result = runner.run_candidate_post_schema(
+        runner.DatabaseConfig("host", 1, "user", "password"),
+        "source", "candidate", receipt_path,
+    )
+
+    assert result["status"] == "backfilled"
+    assert result["backfills"] == ()
+
+
 def test_rehearsal_worker_starts_as_project_module(tmp_path) -> None:
     config = CandidateRuntimeConfig(
         Path.cwd(), 18022, 18522, 30, {}, object(), "candidate", tmp_path,
@@ -258,10 +346,10 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
     assert "verified" in runner.VERIFYABLE_CANDIDATE_STATUSES
 
 
-def test_release_catalog_includes_line_runtime_recovery_through_wp72() -> None:
+def test_release_catalog_includes_import_warning_tracking_through_wp88() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-8:] == (
+    assert artifact_names[-14:] == (
         "165_anomaly_workflow_event_idempotency_widen.sql",
         "181_matching_service_date_confirmation.sql",
         "182_candidate_contact_pool.sql",
@@ -270,10 +358,16 @@ def test_release_catalog_includes_line_runtime_recovery_through_wp72() -> None:
         "186_line_identity_management.sql",
         "179_line_identity_canonical_menu_publication.sql",
         "188_matching_preferences_and_staff_availability.sql",
+        "189_staff_historical_adoption_hcm_review.sql",
+        "190_historical_order_adoption.sql",
+        "191_import_warning_tracking.sql",
+        "192_case_import_partial_formal_case.sql",
+        "193_client_beclass_transition_binding.sql",
+        "194_case_import_pending_completion_status.sql",
     )
     assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
-    assert runner.RELEASE_MANIFEST.release_id == "labor-union-wp72-2026-08-13-v1"
+    assert runner.RELEASE_MANIFEST.release_id == "labor-union-wp88-2026-08-14-v4"
     assert runner._descriptor_presence_state(
         {"tables": {"knowledge_items": ["id", "version"]}, "triggers": []},
         {"knowledge_items": {"id", "version"}},

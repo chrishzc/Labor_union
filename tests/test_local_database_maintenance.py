@@ -57,6 +57,7 @@ def test_apply_confirms_the_database_configured_in_the_environment(
     )
     monkeypatch.setattr(update, "candidate_name", lambda source: preview["candidate_database"])
     monkeypatch.setattr(update, "build_preview", lambda *_: preview)
+    monkeypatch.setattr(update, "require_mysql_clients", lambda *_: None)
     monkeypatch.setattr(
         update,
         "apply_update",
@@ -116,8 +117,8 @@ def test_apply_update_rebuilds_source_only_after_verified_candidate(tmp_path, mo
         "plan": {"status": "ready"},
     }
     monkeypatch.setattr(update.migration, "write_receipt", lambda *_: calls.append("plan"))
-    monkeypatch.setattr(update.migration, "create_source_dump", lambda *_: calls.append("backup"))
-    monkeypatch.setattr(update.migration, "restore_candidate", lambda *_: calls.append("restore"))
+    monkeypatch.setattr(update.migration, "create_source_dump", lambda *_, **__: calls.append("backup"))
+    monkeypatch.setattr(update.migration, "restore_candidate", lambda *_, **__: calls.append("restore"))
     monkeypatch.setattr(
         update.migration,
         "apply_schema",
@@ -127,7 +128,7 @@ def test_apply_update_rebuilds_source_only_after_verified_candidate(tmp_path, mo
     monkeypatch.setattr(
         update,
         "replace_source_database",
-        lambda *_: calls.append("replace") or {"status": "completed"},
+        lambda *_, **__: calls.append("replace") or {"status": "completed"},
     )
 
     result = update.apply_update(config, tmp_path / ".env", preview, tmp_path / "receipts")
@@ -187,6 +188,27 @@ def test_cli_reports_a_bounded_blocked_error(monkeypatch, capsys) -> None:
     assert error == {"status": "blocked", "error": "catalog mismatch"}
 
 
+def test_show_create_table_comparison_ignores_dynamic_auto_increment_value() -> None:
+    source = {"show_create_tables": {"orders": "CREATE TABLE `orders` AUTO_INCREMENT=81"}}
+    candidate = {"show_create_tables": {"orders": "CREATE TABLE `orders` AUTO_INCREMENT=82"}}
+
+    assert update._show_create_tables_match(source, candidate) is True
+
+
+def test_show_create_table_comparison_ignores_mysql_utf8mb4_rendering_difference() -> None:
+    source = {"show_create_tables": {"orders": "`status` enum('待補件') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci"}}
+    candidate = {"show_create_tables": {"orders": "`status` enum('待補件') COLLATE utf8mb4_unicode_ci"}}
+
+    assert update._show_create_tables_match(source, candidate) is True
+
+
+def test_show_create_table_comparison_keeps_schema_difference_visible() -> None:
+    source = {"show_create_tables": {"orders": "CREATE TABLE `orders` (`status` varchar(8))"}}
+    candidate = {"show_create_tables": {"orders": "CREATE TABLE `orders` (`status` varchar(16))"}}
+
+    assert update._show_create_tables_match(source, candidate) is False
+
+
 def test_replace_refuses_source_changes_before_drop(tmp_path, monkeypatch) -> None:
     paths = update.artifact_paths(tmp_path, "union_db_local_20260813010203")
     monkeypatch.setattr(
@@ -228,9 +250,9 @@ def test_replace_rolls_back_old_dump_when_final_restore_fails(tmp_path, monkeypa
     monkeypatch.setattr(
         update,
         "restore_dump",
-        lambda *_: (_ for _ in ()).throw(update.LocalDatabaseUpdateError("restore failed")),
+        lambda *_, **__: (_ for _ in ()).throw(update.LocalDatabaseUpdateError("restore failed")),
     )
-    monkeypatch.setattr(update, "rollback_source", lambda *_: events.append("rollback"))
+    monkeypatch.setattr(update, "rollback_source", lambda *_, **__: events.append("rollback"))
 
     with pytest.raises(update.LocalDatabaseUpdateError, match="restore failed"):
         update.replace_source_database(object(), "union_db", "candidate", paths)

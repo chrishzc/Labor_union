@@ -1,0 +1,36 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "190_historical_order_adoption.sql": {
+      "tables": {
+        "historical_order_adoption_reviews": [
+          "id", "review_identity", "source_event_identity", "source_fingerprint",
+          "masked_case_identity", "issue_codes", "evidence_snapshot", "created_at"
+        ],
+        "historical_order_adoption_receipts": [
+          "id", "idempotency_key", "command_fingerprint", "source_event_identity",
+          "source_fingerprint", "preview_fingerprint", "case_no", "outcome",
+          "expected_version", "resulting_version", "lifecycle_event_id", "assignment_count",
+          "review_identity", "result_snapshot", "actor", "reason", "correlation_id", "created_at"
+        ],
+        "historical_order_pairing_evidence": [
+          "id", "receipt_id", "caregiver_ordinal", "masked_staff_name", "staff_id",
+          "resolution", "source_start_date", "source_end_date", "assignment_id",
+          "issue_codes", "created_at"
+        ],
+        "historical_order_adoption_outbox": [
+          "id", "receipt_id", "intent_key", "intent_type", "bounded_snapshot",
+          "published_at", "attempts", "last_error", "created_at"
+        ]
+      },
+      "triggers": [
+        "trg_historical_order_adoption_reviews_before_update",
+        "trg_historical_order_adoption_reviews_before_delete",
+        "trg_historical_order_adoption_receipts_before_update",
+        "trg_historical_order_adoption_receipts_before_delete",
+        "trg_historical_order_pairing_evidence_before_update",
+        "trg_historical_order_pairing_evidence_before_delete"
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "193_client_beclass_transition_binding.sql": {
+      "altered_columns": {
+        "beclass_records": {
+          "client_id": {"column_type": "int", "is_nullable": "YES", "column_default": null, "extra": ""},
+          "bound_case_no": {"column_type": "varchar(50)", "is_nullable": "YES", "column_default": null, "extra": ""}
+        }
+      },
+      "predecessor_columns": {
+        "beclass_records": {}
+      },
+      "triggers": []
+    }
+  }
+}

@@ -1,3 +1,8 @@
+"""
+File: test_finance_import_historical_reprocess_ui.py
+Description: 驗證 Finance Import UI 的 Preview／Apply、穩定上傳命令與重試行為。
+"""
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6,12 +11,33 @@ from ui.api_clients.finance_import_api_client import FinanceImportApiClient
 from ui.api_clients.finance_import_api_client import FinanceImportApiError
 from ui.pages.finance_import.panel import (
     _BATCH_APPLY_STATE_KEY,
+    _finance_ingestion_command,
     _historical_owner_selection_input,
     _submit_batch_apply_request,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_finance_ingestion_retry_reuses_key_for_the_same_workbook():
+    state = {}
+
+    first = _finance_ingestion_command(state, b"same workbook")
+    second = _finance_ingestion_command(state, b"same workbook")
+
+    assert first == second
+    assert first["source_content_digest"] == second["source_content_digest"]
+
+
+def test_finance_ingestion_new_workbook_gets_a_new_command_identity():
+    state = {}
+
+    first = _finance_ingestion_command(state, b"first workbook")
+    second = _finance_ingestion_command(state, b"second workbook")
+
+    assert first["idempotency_key"] != second["idempotency_key"]
+    assert first["source_content_digest"] != second["source_content_digest"]
 
 
 class _Response:
