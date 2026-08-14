@@ -139,6 +139,13 @@ def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None):
         connection.close()
 
 
+def consume_architecture_outbox_once(
+    source_scan_state: ArchitectureSourceScanState | None = None,
+) -> ArchitectureDeliveryResult:
+    """Run one complete API-owned delivery cycle without starting a background thread."""
+    return _consume_once(source_scan_state)
+
+
 def _consume_sources_if_due(connection, state):
     if state is None: return 0, 0
     now = time.monotonic()
@@ -256,4 +263,11 @@ async def stop_architecture_outbox_worker(task: asyncio.Task[None]) -> None:
         if _worker_task is task: _worker_task = None
 
 
-__all__ = ["ArchitectureSourceScanState", "start_architecture_outbox_worker", "stop_architecture_outbox_worker", "wake_architecture_outbox_worker"]
+__all__ = [
+    "ArchitectureDeliveryResult",
+    "ArchitectureSourceScanState",
+    "consume_architecture_outbox_once",
+    "start_architecture_outbox_worker",
+    "stop_architecture_outbox_worker",
+    "wake_architecture_outbox_worker",
+]

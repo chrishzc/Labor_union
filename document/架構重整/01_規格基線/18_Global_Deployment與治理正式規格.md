@@ -4,6 +4,8 @@
 
 - 狀態：`approved-architecture-baseline`
 - 人工核准日期：2026-08-03
+- API-only DB runtime 補充裁決：`approved-by-user-2026-08-14`
+- Cloud-ready runtime supervision 補充裁決：`approved-by-user-2026-08-14`
 - Logical deployment topology：`consolidated-decision`
 - Deployment profile／target-host acceptance：`retired-by-user-2026-08-09`
 - ADAD／Checkpoint／Source Lock／system map gate：`historical`
@@ -20,13 +22,17 @@
 3. TLS 在受管理的 edge／reverse proxy 終止，edge 到 application 的信任邊界必須明確。
 4. production 禁止 ngrok；`scripts/launchers/start_fastapi_ngrok.py` 只屬 development tool。
 5. FastAPI、Worker、Streamlit、File Watcher 與 migration runner 使用最小權限、
-   分離 credential 與明確 health check。
+   分離 credential 與明確 health check；Worker／Monitor 不持有 DB credential。
 6. File Watcher 只建立 durable ingestion job，不直接正式入帳或改 Domain 狀態。
 7. production secret 不進 Git、文件、log、process argument、UI 或 migration receipt。
 8. 所有 schema 變更走 preserve-data release manifest、backup、candidate、validation、
    config switch、restart/read-smoke 與 recovery receipt。
 9. release 未通過 post-start verification 時不得標示完成。
 10. 部署位置變更不得改變 Domain ownership、API contract、transaction 或資料語意。
+11. Private Operations API 的 production caller 必須使用 Google-signed OIDC ID token；audience、
+    issuer 與 service-account caller allowlist 必須精確驗證，local shared key 禁止 fallback 到 production。
+12. Worker heartbeat 必須記錄 authenticated caller 的 runtime identity，不得以 FastAPI process 的
+    PID、hostname 或 instance identity 冒充 Worker。
 
 ## 3. Logical topology
 
@@ -40,7 +46,7 @@ External Platforms / Approved Admin Client
       │ FastAPI / Worker / UI /    │
       │ Durable Ingestion Producer │
       └─────────────┬─────────────┘
-                    │ private authenticated connection
+                    │ FastAPI-only private authenticated DB connection
       ┌─────────────┴─────────────┐
       │         Data Zone          │
       │ MySQL / Archive / Backup   │
@@ -74,16 +80,24 @@ JSON／text 可以依共同效能契約壓縮，XLSX、圖片及已壓縮 artifa
 ### 3.2 Application Zone
 
 - FastAPI：唯一正式 HTTP business／integration boundary。
-- Worker：消費 committed outbox、LINE task、durable inbox 與 anomaly scan。
+- Worker：透過 authenticated Private Operations API 觸發 committed outbox、LINE task、durable
+  inbox 與 anomaly scan 的完整一次性 operation；不得直接連 MySQL。
 - Streamlit：薄 Presentation Adapter，只呼叫 FastAPI。
 - File Watcher：偵測來源檔並建立 durable import job；不持有正式 ledger writer。
 - Migration Runner：只在 maintenance window、專用 principal 與 maintenance token 下啟用。
 
-各 process 必須可獨立 restart；background worker failure 不得隱藏在 API health 200。
+各 process 必須可獨立 restart；background worker failure 不得隱藏在 API health 200。FastAPI
+lifespan 禁止內嵌啟動 background worker；同一 operation 不得因 API instance 數量而重複建立 thread。
+
+Private operation endpoint 必須固定允許的 caller service。Worker／Monitor 自報 service name 只作
+request binding，不能取代已驗證的 OIDC identity。local/test 可使用至少 32 字元 shared key；production
+只接受精確 audience 與 allowlist 通過的短效 OIDC token，缺少任一設定時 fail closed。
 
 ### 3.3 Data／Archive Zone
 
-- MySQL schema 使用 application、worker、migration、read-only rehearsal 等分離 principal。
+- MySQL schema 使用 application、migration、read-only rehearsal 等分離 principal；runtime production
+  connection 只有 FastAPI application composition 可取得。Worker／Monitor 只能持有 service identity，
+  經 Private Operations API 間接執行既有 transaction。
 - XLSX archive、evidence archive、DB backup 都保存 digest 與 retention metadata。
 - archive failure 不得使匯出／release receipt宣稱完整。
 - backup 必須可 restore 驗證；「檔案存在」不是可復原證據。
@@ -190,6 +204,15 @@ capability matrix、owner 與 recovery action；本次 release gate 有任一必
 - File Watcher durable job creation；
 - backup age、restore rehearsal age；
 - disk／archive capacity。
+
+Monitor process 只觀測其真正可見的 API／UI／public edge／LIFF transport。MySQL、Redis、queue 與
+media storage 必須由 FastAPI application composition 使用同一份 runtime 設定探測；不得讓外部
+Monitor 以預設值或不同 mount path 產生假健康或假故障。`/health` 只代表 process liveness，DB-aware
+dependency readiness 由 authenticated Private Operations API 提供。
+
+Private Operations client 必須依 typed `retryable` 決定是否重試；HTTP status 只能作缺少 typed
+envelope 時的保守 fallback。transient retry 必須有上限、exponential backoff 與 jitter；認證、設定、
+schema 或 contract failure 不得無限重試。一次性 CLI cycle 只要未成功即回傳非零。
 
 Logs 必須具 correlation ID、service、release version、operation 與 typed error code；
 禁止記錄 session token、internal key、bank account、raw webhook secret 或完整個資 payload。

@@ -18,9 +18,9 @@
   },
   "artifacts": [
     {
-      "name": "192_staff_historical_adoption_hcm_review.sql",
-      "relative_path": "db/schema_parts/192_staff_historical_adoption_hcm_review.sql",
-      "sha256": "7734c02a1cc482762630c591c223f82480f5eeeb79865fae7ece38927d6044ee",
+      "name": "193_staff_historical_adoption_hcm_review.sql",
+      "relative_path": "db/schema_parts/193_staff_historical_adoption_hcm_review.sql",
+      "sha256": "4aa159e9fd89d324cef192a2d493dda3b14aff81bd65e9ca15a5d730fe090ccb",
       "dependencies": [],
       "data_effect": "schema_only",
       "rollback_policy": "code-rollback-preserve-adoption-and-review-evidence",
@@ -47,7 +47,7 @@
   "descriptor_artifact": {
     "name": "labor_union_2026_08_14_wp77_v2.descriptors.json",
     "relative_path": "db/migration_releases/labor_union_2026_08_14_wp77_v2.descriptors.json",
-    "sha256": "24c351c75f4f5499b0c3f3437192ed2187e576611b9d490847f618a9d49b2d98",
+    "sha256": "2c7c16d6876f2494d660f85349f5834852914dfaf30c9279fd57db5e7d109975",
     "dependencies": []
   },
   "tool_archive_policy": {

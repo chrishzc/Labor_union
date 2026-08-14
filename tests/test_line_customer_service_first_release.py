@@ -10,7 +10,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
+from api.routes import line_identity
+from api.schemas.line_identity import LineIdentityFlowOpenRequest
 from domains.customer_service.ticket import (
     CustomerServiceCategory,
     CustomerServiceStatus,
@@ -85,6 +88,16 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
     assert request.message_kind.value == "flex"
     assert request.idempotency_key.value == "service-help:menu:event-1"
     assert "聯絡工會人員" in request.payload_json
+
+
+def test_service_help_never_calls_line_reply_api_inside_the_unit_of_work():
+    source = (
+        PROJECT_ROOT / "subsystems/line/service_help_application.py"
+    ).read_text(encoding="utf-8")
+
+    assert "reply_provider" not in source
+    assert ".reply(" not in source
+    assert "delivery_tasks.enqueue" in source
 
 
 def test_contact_union_creates_ticket_audit_and_delivery_in_one_uow_boundary():
@@ -232,6 +245,59 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     assert "flow_id=${encodeURIComponent(flowId)}" in identity
     assert "development_line_user_id" not in staff_orders
     assert "userId" not in staff_orders
+
+
+def test_staff_self_service_does_not_expose_unapproved_leave_mutation():
+    route = (
+        PROJECT_ROOT / "api/routes/line_staff_self_service.py"
+    ).read_text(encoding="utf-8")
+    schedule = (
+        PROJECT_ROOT / "line/static/staff_schedule.html"
+    ).read_text(encoding="utf-8")
+
+    assert "leave-requests" not in route
+    assert "._connection" not in route
+    assert "leave-requests" not in schedule
+
+
+def test_identity_flow_requires_and_forwards_client_idempotency_key(monkeypatch):
+    recorded = {}
+
+    class _IdentityApplication:
+        def open_flow(self, purpose, line_user_id, idempotency_key, correlation_id):
+            recorded.update(
+                purpose=purpose.value,
+                line_user_id=line_user_id.value,
+                idempotency_key=idempotency_key.value,
+                correlation_id=correlation_id.value,
+            )
+            return SimpleNamespace(
+                flow_id=SimpleNamespace(value="flow-1"),
+                purpose=purpose,
+                expires_at=datetime(2026, 8, 11, tzinfo=timezone.utc),
+            )
+
+    monkeypatch.setattr(
+        line_identity,
+        "_verified_line_user_id",
+        lambda _payload: LineUserId("U123456789"),
+    )
+    monkeypatch.setattr(
+        line_identity,
+        "get_line_identity_application",
+        lambda: _IdentityApplication(),
+    )
+    payload = LineIdentityFlowOpenRequest(
+        purpose="staff_self_service",
+        idempotency_key="staff-self-service:browser-session-1",
+    )
+
+    response = line_identity.open_identity_flow(payload)
+
+    assert response.data.flow_id == "flow-1"
+    assert recorded["idempotency_key"] == "staff-self-service:browser-session-1"
+    with pytest.raises(ValidationError):
+        LineIdentityFlowOpenRequest(purpose="staff_self_service")
 
 
 def test_deferred_history_records_legacy_paths_that_must_not_return():

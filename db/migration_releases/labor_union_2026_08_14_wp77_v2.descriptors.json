@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "192_staff_historical_adoption_hcm_review.sql": {
+    "193_staff_historical_adoption_hcm_review.sql": {
       "tables": {
         "staff_historical_adoption_receipts": [
           "id",

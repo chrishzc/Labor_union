@@ -33,7 +33,7 @@
           },
           "action": {
             "type": "uri",
-            "text": null,
+            "text": "服務登記",
             "uri": "?target=registration",
             "uri_source": "liff",
             "data": null

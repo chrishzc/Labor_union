@@ -9,7 +9,11 @@ import json
 from typing import Any, Literal
 
 from infrastructure.mysql.mysql_adapter import get_connection
-from subsystems.access.authentication_session import CAPABILITY_REGISTRY, AdminPrincipal, has_required_capability
+from subsystems.access.authentication_session import (
+    CAPABILITY_REGISTRY,
+    AdminPrincipal,
+    has_required_capability,
+)
 
 
 GrantAction = Literal["grant", "revoke"]

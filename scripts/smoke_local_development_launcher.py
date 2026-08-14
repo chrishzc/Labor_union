@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import secrets
 import socket
 import subprocess
 import sys
@@ -30,6 +32,7 @@ def _service_commands() -> dict[str, list[str]]:
         "runtime-monitor": [python, "-m", "scripts.run_service_monitor"],
         "file-watcher": [python, "scripts/file_watcher.py"],
         "durable-worker": [python, "-m", "scripts.run_durable_job_worker"],
+        "incident-worker": [python, "-m", "scripts.run_incident_worker"],
     }
     if inspect_profile("line-worker")["status"] == "ready":
         commands["line-worker"] = [python, "-m", "scripts.run_line_worker"]
@@ -60,13 +63,36 @@ def _start_services(
     processes: dict[str, subprocess.Popen[bytes]], handles: list[BinaryIO]
 ) -> None:
     LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    for name, command in _service_commands().items():
-        handle = (LOG_DIRECTORY / f"{name}.log").open("wb")
-        handles.append(handle)
-        processes[name] = subprocess.Popen(
-            command, cwd=ROOT, stdout=handle, stderr=subprocess.STDOUT,
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-        )
+    commands = _service_commands()
+    _start_service("api", commands.pop("api"), processes, handles)
+    _wait_for_service_url(processes["api"], READY_URLS["api"], 30)
+    _start_service("streamlit", commands.pop("streamlit"), processes, handles)
+    _wait_for_service_url(processes["streamlit"], READY_URLS["streamlit"], 30)
+    for name, command in commands.items():
+        _start_service(name, command, processes, handles)
+
+
+def _start_service(name, command, processes, handles) -> None:
+    handle = (LOG_DIRECTORY / f"{name}.log").open("wb")
+    handles.append(handle)
+    processes[name] = subprocess.Popen(
+        command,
+        cwd=ROOT,
+        stdout=handle,
+        stderr=subprocess.STDOUT,
+        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    )
+
+
+def _wait_for_service_url(process, url: str, timeout_seconds: int) -> None:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(f"local smoke service exited before readiness: {url}")
+        if _url_ready(url):
+            return
+        time.sleep(0.25)
+    raise RuntimeError(f"local smoke service readiness timed out: {url}")
 
 
 def _clear_previous_logs() -> None:
@@ -114,6 +140,8 @@ def _stop_processes(processes: dict[str, subprocess.Popen[bytes]]) -> None:
 
 
 def run_smoke(timeout_seconds: int = 45) -> dict[str, object]:
+    os.environ.setdefault("APP_ENV", "development")
+    os.environ.setdefault("INTERNAL_SERVICE_SHARED_KEY", secrets.token_urlsafe(32))
     for port in (8000, 8501):
         _require_free_port(port)
     _clear_previous_logs()

@@ -77,6 +77,7 @@ from api.routes import (
     orders,
     payroll,
     payroll_rebuild,
+    private_operations,
     schedule,
     jobs,
     scheduling_current,
@@ -98,14 +99,6 @@ from api.schemas.base import BaseResponse
 from api.dependencies.line_runtime import line_webhook_runtime_mode
 from line.line_bot import router as line_router
 from subsystems.access.authentication_session import record_admin_audit
-from subsystems.access.security_audit_retention_worker import (
-    start_security_audit_retention_worker,
-    stop_security_audit_retention_worker,
-)
-from subsystems.anomalies.outbox_worker import (
-    start_architecture_outbox_worker,
-    stop_architecture_outbox_worker,
-)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -119,24 +112,10 @@ def _allowed_origins() -> list[str]:
     return ["http://localhost:8501", "http://127.0.0.1:8501"]
 
 
-def _background_workers_enabled() -> bool:
-    read_only = os.getenv("PRESERVE_DATA_REHEARSAL_READ_ONLY", "false")
-    return read_only.strip().lower() != "true"
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     line_webhook_runtime_mode()
-    if not _background_workers_enabled():
-        yield
-        return
-    architecture_worker_task = start_architecture_outbox_worker()
-    security_audit_worker_task = start_security_audit_retention_worker()
-    try:
-        yield
-    finally:
-        await stop_security_audit_retention_worker(security_audit_worker_task)
-        await stop_architecture_outbox_worker(architecture_worker_task)
+    yield
 
 
 app = FastAPI(
@@ -241,6 +220,7 @@ app.include_router(anomaly_recovery.router)
 app.include_router(data_browser_admin.router)
 app.include_router(system_status.router)
 app.include_router(runtime_health.router)
+app.include_router(private_operations.router)
 
 
 

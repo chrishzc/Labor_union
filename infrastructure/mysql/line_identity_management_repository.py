@@ -149,7 +149,7 @@ class MySqlLineIdentityManagementRepository:
                 raise RuntimeError("line_identity_revocation_state_conflict")
 
 def _filters(query: LineIdentityBindingListQuery) -> tuple[list[str], tuple[Any, ...]]:
-    clauses = ["1=1"]
+    clauses = ["b.subject_type IS NOT NULL", "b.subject_reference IS NOT NULL"]
     parameters: list[Any] = []
     if query.status is not None:
         clauses.append("b.binding_status=%s")

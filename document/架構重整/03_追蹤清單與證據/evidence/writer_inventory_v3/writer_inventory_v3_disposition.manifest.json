@@ -1,16 +1,16 @@
 {
   "contract": "production-writer-inventory/v3-disposition",
   "candidate_contract": "production-writer-inventory/v3-candidate",
-  "candidate_evidence_sha256": "bee09b3873187dc6698ee1dbdaca63b0e856d72339a2ade63f16c2c9e3320ebd",
-  "candidate_unique_identity_count": 1087,
-  "record_count": 1087,
-  "covered_candidate_unresolved_count": 231,
+  "candidate_evidence_sha256": "ba519c244fa4b632ff3f43dbae51453902565d50f85f533866bccdf992572ff0",
+  "candidate_unique_identity_count": 1115,
+  "record_count": 1115,
+  "covered_candidate_unresolved_count": 256,
   "covered_candidate_migrate_then_remove_count": 0,
   "approved_to_remove_count": 0,
   "final_disposition_counts": {
-    "migrate_then_remove": 4,
-    "needs_decision": 67,
-    "retain_canonical": 762,
-    "retain_restricted": 254
+    "migrate_then_remove": 11,
+    "needs_decision": 97,
+    "retain_canonical": 756,
+    "retain_restricted": 251
   }
 }

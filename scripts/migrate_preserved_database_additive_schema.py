@@ -150,6 +150,7 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_13_wp72_v1.json",
     "labor_union_2026_08_14_client_refund_snapshot_v1.json",
     "labor_union_2026_08_14_government_overpayment_v1.json",
+    "labor_union_2026_08_14_line_staff_self_service_v1.json",
     "labor_union_2026_08_14_government_outbox_intent_type_repair_v1.json",
     "labor_union_2026_08_14_wp77_v2.json",
     "labor_union_2026_08_14_wp80_v2.json",
@@ -1393,7 +1394,7 @@ def _matching_records_resume_delivery_state(
 
 
 GOVERNMENT_OUTBOX_REPAIR_ARTIFACT = (
-    "191_government_subsidy_outbox_intent_type_repair.sql"
+    "192_government_subsidy_outbox_intent_type_repair.sql"
 )
 GOVERNMENT_OUTBOX_INTENTS_BEFORE_REPAIR = (
     "government_subsidy_receipt_applied",

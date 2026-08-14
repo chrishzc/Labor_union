@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "191_government_subsidy_outbox_intent_type_repair.sql": {
+    "192_government_subsidy_outbox_intent_type_repair.sql": {
       "tables": {
         "government_subsidy_outbox": ["intent_type"]
       },

@@ -10,8 +10,8 @@
     "directory": "db/schema_parts",
     "selection": "all_sql_files",
     "order": "numeric_prefix_then_letter_suffix_then_filename",
-    "expected_count": 111,
-    "ordered_digest_sha256": "0a3a9459069c724d4a7171355c6500dcb6d7b23ac7405daaede12c35c3ecb06e",
+    "expected_count": 112,
+    "ordered_digest_sha256": "c0dae7332adff0366877b26c9ab7c31162db433095cb5a9dfde53c33556ef623",
     "terminal_artifact": "999_v_order_details_view.sql"
   },
   "full_release": {

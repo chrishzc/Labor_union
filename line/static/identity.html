@@ -57,6 +57,8 @@ const definitions = {
 };
 let idToken = "";
 let flowId = "";
+let formBuilt = false;
+const developmentLineUserId = new URLSearchParams(location.search).get("userId") || "";
 
 function showMessage(text, isError = false) {
   const target = document.getElementById("message");
@@ -65,6 +67,7 @@ function showMessage(text, isError = false) {
 }
 
 function buildForm(definition) {
+  if (formBuilt) return;
   const form = document.getElementById("form");
   for (const [name, labelText, type] of definition.fields) {
     const label = document.createElement("label");
@@ -83,6 +86,7 @@ function buildForm(definition) {
   button.textContent = "送出確認";
   form.append(button);
   form.addEventListener("submit", event => submitForm(event, definition, button));
+  formBuilt = true;
 }
 
 function showIdentityEntry(definition, purpose) {
@@ -95,14 +99,80 @@ function showIdentityEntry(definition, purpose) {
   document.getElementById("customer-choice").hidden = false;
 }
 
+async function ensureLineIdToken() {
+  idToken = liff.getIDToken() || "";
+  if (!idToken && !developmentLineUserId) {
+    throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid 權限後重新開啟此頁。");
+  }
+  return idToken;
+}
+
+async function currentLineUserId() {
+  try {
+    const context = liff.getContext && liff.getContext();
+    if (context?.userId) return context.userId;
+  } catch (_) {}
+  try {
+    const profile = await liff.getProfile();
+    if (profile?.userId) return profile.userId;
+  } catch (_) {}
+  return developmentLineUserId;
+}
+
+async function openStaffPage(path) {
+  await openIdentityFlow("staff_self_service");
+  const target = new URL(path, location.origin);
+  target.searchParams.set("flow_id", flowId);
+  location.replace(target.toString());
+}
+
+async function openIdentityFlow(purpose) {
+  await ensureLineIdToken();
+  const storageKey = `line-flow-idempotency:${purpose}`;
+  const idempotencyKey = sessionStorage.getItem(storageKey) || crypto.randomUUID();
+  sessionStorage.setItem(storageKey, idempotencyKey);
+  const response = await fetch("/api/v1/line/identity/flow/open", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      purpose,
+      idempotency_key: idempotencyKey,
+      line_id_token: idToken,
+      development_line_user_id: developmentLineUserId
+    })
+  });
+  const result = await response.json();
+  if (!response.ok) {
+    const detail = typeof result.detail === "string" ? result.detail : result.detail?.message;
+    throw new Error(detail || "目前無法建立安全操作連結，請稍後再試。");
+  }
+  flowId = result.data.flow_id;
+  return result.data;
+}
+
 function configureCustomerChoice(definition) {
-  document.getElementById("bind-existing").addEventListener("click", () => {
+  document.getElementById("bind-existing").addEventListener("click", async () => {
+    try {
+      showMessage("正在建立安全綁定流程…");
+      await openIdentityFlow("customer_binding");
+      await validateIdentityFlow("customer_binding");
+      showMessage("");
+    } catch (error) {
+      showMessage(error.message || "目前無法建立安全綁定流程。", true);
+      return;
+    }
     document.getElementById("customer-choice").hidden = true;
     document.getElementById("description").textContent = definition.description;
     document.getElementById("form").hidden = false;
   });
-  document.getElementById("register-new").addEventListener("click", () => {
-    location.assign(`/line-registration?flow_id=${encodeURIComponent(flowId)}`);
+  document.getElementById("register-new").addEventListener("click", async () => {
+    try {
+      showMessage("正在建立安全登記流程…");
+      await openIdentityFlow("customer_binding");
+      location.assign(`/line-registration?flow_id=${encodeURIComponent(flowId)}`);
+    } catch (error) {
+      showMessage(error.message || "目前無法開啟服務登記表單。", true);
+    }
   });
 }
 
@@ -112,6 +182,7 @@ async function submitForm(event, definition, button) {
   showMessage("正在安全核對資料…");
   const values = Object.fromEntries(new FormData(event.target).entries());
   const payload = {flow_id: flowId, line_id_token: idToken, ...values};
+  if (developmentLineUserId) payload.development_line_user_id = developmentLineUserId;
   try {
     const response = await fetch(`/api/v1/line/identity/${definition.endpoint}/apply`, {
       method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(payload)
@@ -143,10 +214,16 @@ function liffStateParameters(parameters) {
   return new URLSearchParams(stateQuery);
 }
 
-function identityFlowParameters() {
+function combinedEntryParameters() {
   const parameters = new URLSearchParams(location.search);
+  const stateParameters = liffStateParameters(parameters);
+  return {parameters, stateParameters};
+}
+
+function identityFlowParameters() {
+  const {parameters, stateParameters} = combinedEntryParameters();
   if (parameters.get("purpose") && parameters.get("flow_id")) return parameters;
-  return liffStateParameters(parameters);
+  return stateParameters;
 }
 
 function readIdentityFlowContext() {
@@ -160,17 +237,39 @@ function readIdentityFlowContext() {
   return {definition, purpose};
 }
 
+function requestedRegistrationEntry() {
+  const {parameters, stateParameters} = combinedEntryParameters();
+  const entry = parameters.get("entry") || stateParameters.get("entry");
+  return entry === "registration";
+}
+
 function requestedStaffPage() {
-  const parameters = new URLSearchParams(location.search);
-  const target = parameters.get("target") || liffStateParameters(parameters).get("target");
+  const {parameters, stateParameters} = combinedEntryParameters();
+  const target = parameters.get("target") || stateParameters.get("target");
   return {staff_order_search: "/line-staff-orders", staff_schedule: "/line-staff-schedule"}[target] || "";
 }
 
+function hasSensitiveFlowContext() {
+  const parameters = identityFlowParameters();
+  return Boolean(parameters.get("purpose") || parameters.get("flow_id"));
+}
+
+function showRegistrationEntry() {
+  const definition = definitions.customer_binding;
+  document.getElementById("title").textContent = "服務登記";
+  document.getElementById("description").textContent = "請選擇您是否已填寫過工會基本資料表單。";
+  configureCustomerChoice(definition);
+  buildForm(definition);
+  document.getElementById("customer-choice").hidden = false;
+}
+
 async function validateIdentityFlow(purpose) {
+  const payload = {flow_id: flowId, purpose, line_id_token: idToken};
+  if (developmentLineUserId) payload.development_line_user_id = developmentLineUserId;
   const response = await fetch("/api/v1/line/identity/flow/validate", {
     method: "POST",
     headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({flow_id: flowId, purpose, line_id_token: idToken})
+    body: JSON.stringify(payload)
   });
   if (response.ok) return;
   const result = await response.json();
@@ -184,14 +283,17 @@ async function validateIdentityFlow(purpose) {
 async function initialize() {
   const liffId = await loadLiffId();
   await liff.init({liffId});
-  if (!liff.isLoggedIn()) { liff.login(); return; }
   const staffPage = requestedStaffPage();
-  if (staffPage) { location.replace(staffPage); return; }
+  if (!liff.isLoggedIn()) { liff.login(); return; }
+  if (staffPage) { await openStaffPage(staffPage); return; }
+  if (requestedRegistrationEntry() || !hasSensitiveFlowContext()) {
+    showRegistrationEntry();
+    return;
+  }
   const {definition, purpose} = readIdentityFlowContext();
   document.getElementById("title").textContent = definition.title;
   document.getElementById("description").textContent = definition.description;
-  idToken = liff.getIDToken() || "";
-  if (!idToken) throw new Error("無法取得 LINE 登入憑證，請重新開啟此頁。");
+  await ensureLineIdToken();
   await validateIdentityFlow(purpose);
   configureCustomerChoice(definition);
   showIdentityEntry(definition, purpose);

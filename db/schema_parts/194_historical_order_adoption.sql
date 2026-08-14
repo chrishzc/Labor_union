@@ -1,4 +1,4 @@
--- File: 193_historical_order_adoption.sql
+-- File: 194_historical_order_adoption.sql
 -- Description: 新增 Historical Order Adoption receipt、pairing evidence、review 與 outbox。
 
 CREATE TABLE IF NOT EXISTS historical_order_adoption_reviews (

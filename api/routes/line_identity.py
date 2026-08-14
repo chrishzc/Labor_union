@@ -34,6 +34,8 @@ from api.schemas.line_identity import (
     CustomerIdentityRequest,
     LineIdentityApplyResponse,
     LineIdentityCandidateResponse,
+    LineIdentityFlowOpenRequest,
+    LineIdentityFlowOpenResponse,
     LineIdentityFlowValidationRequest,
     LineIdentityFlowValidationResponse,
     LineIdentityPreviewResponse,
@@ -117,6 +119,28 @@ def identity_runtime_config():
     if not liff_id or liff_id == "your_liff_id_here":
         raise HTTPException(status_code=503, detail="LIFF 尚未完成設定")
     return BaseResponse(data=LineIdentityRuntimeConfigResponse(liff_id=liff_id))
+
+
+@public_router.post(
+    "/flow/open",
+    response_model=BaseResponse[LineIdentityFlowOpenResponse],
+)
+def open_identity_flow(payload: LineIdentityFlowOpenRequest):
+    line_user_id = _verified_line_user_id(payload)
+    purpose = LineIdentityFlowPurpose(payload.purpose)
+    result = get_line_identity_application().open_flow(
+        purpose,
+        line_user_id,
+        IdempotencyKey(payload.idempotency_key),
+        _correlation_id("flow-open"),
+    )
+    return BaseResponse(
+        data=LineIdentityFlowOpenResponse(
+            flow_id=result.flow_id.value,
+            purpose=result.purpose.value,
+            expires_at=result.expires_at,
+        )
+    )
 
 
 @public_router.post(

@@ -60,7 +60,7 @@ def test_apply_confirms_the_database_configured_in_the_environment(
     monkeypatch.setattr(
         update,
         "apply_update",
-        lambda _config, _environment, received, _receipt_root: captured.update(received) or {"status": "completed"},
+        lambda _config, _environment, received, _receipt_root, **_options: captured.update(received) or {"status": "completed"},
     )
 
     result = update.update_local_database(

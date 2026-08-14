@@ -1,4 +1,4 @@
--- File: 192_staff_historical_adoption_hcm_review.sql
+-- File: 193_staff_historical_adoption_hcm_review.sql
 -- Description: 新增 Staff 歷史採納 receipt 與 HCM Case Import review/outbox。
 
 CREATE TABLE IF NOT EXISTS staff_historical_adoption_receipts (

@@ -287,13 +287,14 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-6:] == (
+    assert artifact_names[-7:] == (
         "188_matching_preferences_and_staff_availability.sql",
         "189_client_refund_recipient_snapshot_local_upgrade.sql",
         "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
-        "191_government_subsidy_outbox_intent_type_repair.sql",
-        "192_staff_historical_adoption_hcm_review.sql",
-        "193_historical_order_adoption.sql",
+        "191_line_staff_self_service_identity_flow.sql",
+        "192_government_subsidy_outbox_intent_type_repair.sql",
+        "193_staff_historical_adoption_hcm_review.sql",
+        "194_historical_order_adoption.sql",
     )
     ordinals = tuple(int(name.split("_", 1)[0]) for name in artifact_names)
     assert ordinals == tuple(sorted(ordinals))
@@ -336,11 +337,12 @@ def test_default_release_selection_aggregates_successor_requirements() -> None:
     assert {
         "client-refund-snapshot-owned-objects",
         "government-overpayment-owned-objects",
+        "line-staff-self-service-identity-flow-owned-column",
         "government-outbox-intent-type-repair",
         "wp77-owned-objects",
         "wp80-owned-objects",
     } <= verification_ids
-    assert {"api", "architecture-outbox-worker", "streamlit-ui"} <= set(
+    assert {"api", "architecture-outbox-worker", "line-worker", "streamlit-ui"} <= set(
         runner.RELEASE_MANIFEST.required_restart_targets
     )
     assert {
@@ -348,6 +350,7 @@ def test_default_release_selection_aggregates_successor_requirements() -> None:
         "hcm-invalid-review-outbox",
         "historical-order-adoption-preview",
         "accounts-payable-query",
+        "line-staff-self-service-verified-binding",
     } <= set(runner.RELEASE_MANIFEST.post_cutover_smoke_ids)
 
 

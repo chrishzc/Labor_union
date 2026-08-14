@@ -65,7 +65,9 @@ def _provider_action(action):
             raise ValueError("LINE_LIFF_ID is required for LIFF Rich Menu actions")
         suffix = str(action.get("uri") or "").strip()
         uri = f"https://liff.line.me/{liff_id}"
-        if suffix.startswith(("?", "#")):
+        if suffix.startswith("?"):
+            uri += f"/{suffix}"
+        elif suffix.startswith("#"):
             uri += suffix
         return {"type": "uri", "uri": uri}
     return {"type": "uri", "uri": _text(action.get("uri"), "action URI")}

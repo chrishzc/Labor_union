@@ -29,7 +29,7 @@ card、API 與 entrypoint。歷史訂單只補既有 Order 的 historical status
 4. 將既有歷史訂單與 Finance Import typed API 接入卡片；Client／Staff temporary card 只能在
    後端已收斂為 typed application 後啟用。
 
-歷史訂單卡的實際 Web transition、歷史月嫂配對 evidence 與可空實際服務日期由 WP86 執行；
+歷史訂單卡的實際 Web transition、歷史月嫂配對 evidence 與可空實際服務日期由 WP89 執行；
 `historical_orders` 只作來源追溯，畫面名稱固定為「訂單狀態與月嫂歷史配對」。
 5. 完整 release 必須可由 `scripts/launchers/update_local_database.bat` 對本機既有資料庫安全
    升級；之後才以完整重建測試 DB 進行真實資料 UI 實測。

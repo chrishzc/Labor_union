@@ -31,7 +31,10 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 | [83_Data_Import_Center_and_Web_Apply_Work_Package.md](83_Data_Import_Center_and_Web_Apply_Work_Package.md) | work-package | `in-progress` | 單一資料匯入中心以各 Domain 獨立 typed card 收斂 HCM、BeClass 過渡入口、歷史訂單與銀行流水的 upload／Preview／Apply。 |
 | [84_Legacy_Knowledge_Empty_Schema_Recovery_Work_Package.md](84_Legacy_Knowledge_Empty_Schema_Recovery_Work_Package.md) | work-package | `in-progress` | exact 且九張 owned tables 全空的歷史 Knowledge schema，只在隔離 candidate 重建為 canonical 148／163。 |
 | [85_Client_Refund_Recipient_Snapshot_Local_Upgrade_Work_Package.md](85_Client_Refund_Recipient_Snapshot_Local_Upgrade_Work_Package.md) | work-package | `in-progress` | 將既有 canonical part 176 接入 successor release，修復本機 preserve-data DB 缺少退款 recipient snapshot schema。 |
-| [86_Historical_Order_Status_and_Caregiver_Evidence_Web_Transition_Work_Package.md](86_Historical_Order_Status_and_Caregiver_Evidence_Web_Transition_Work_Package.md) | work-package | `approved` | 訂單狀態、月嫂歷史配對 evidence 與可空實際服務日期，先以 Orders typed API 接入資料匯入中心；舊 historical_orders 僅保留來源追溯。 |
+| [86_API_Only_DB_Runtime_Local_Readiness_Work_Package.md](86_API_Only_DB_Runtime_Local_Readiness_Work_Package.md) | work-package | `in-progress` | API-only DB runtime 的本機 readiness 與安全操作邊界。 |
+| [87_Cloud_Ready_Runtime_Supervision_Work_Package.md](87_Cloud_Ready_Runtime_Supervision_Work_Package.md) | work-package | `in-progress` | Cloud-ready runtime supervision 與 service identity 的操作收斂。 |
+| [88_LINE_Staff_Self_Service_Merge_Repair_Work_Package.md](88_LINE_Staff_Self_Service_Merge_Repair_Work_Package.md) | work-package | `in-progress` | LINE staff self-service identity flow 的 merge repair 與驗收。 |
+| [89_Historical_Order_Status_and_Caregiver_Evidence_Web_Transition_Work_Package.md](89_Historical_Order_Status_and_Caregiver_Evidence_Web_Transition_Work_Package.md) | work-package | `approved` | 訂單狀態、月嫂歷史配對 evidence 與可空實際服務日期，先以 Orders typed API 接入資料匯入中心；舊 historical_orders 僅保留來源追溯。 |
 
 所有 completed／superseded 歷史文件統一由
 [`archive_manifest.json`](../04_已完成與上線封存/archive_manifest.json) 依 archive identity 查找；
@@ -39,7 +42,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 
 > `29_` 原本被三份文件重複使用（無明確時間序，只能靠檔名區分），2026-08-07
 > 已重新編號為 `32`～`34`（依原檔名字母序指派，不代表已還原真實時間序）。
-> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `86`，下一個為 `87`）。
+> 之後新增文件請直接使用下一個未用過的整數（目前最大為 `89`，下一個為 `90`）。
 
 > 注意：本表不是只保留字面上的 `in-progress`。仍需實作、等待 release／migration、保留人工操作
 > 邊界、缺少 completion evidence，或仍約束現行操作的文件都屬 active working set。作為目前缺口

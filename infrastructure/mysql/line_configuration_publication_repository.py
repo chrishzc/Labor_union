@@ -159,7 +159,7 @@ class MySqlLineRichMenuPublicationRepository:
 
     def published_provider_menu_id(self, menu_definition_id: str) -> str | None:
         with self._connection.cursor() as cursor:
-            cursor.execute(_MENU_PUBLISHED_PROVIDER_ID_SQL, (menu_definition_id,))
+            cursor.execute(_MENU_PUBLISHED_PROVIDER_ID_SQL, (menu_definition_id, menu_definition_id))
             row = optional_row(cursor.fetchone())
         if row is None or not row.get("provider_menu_id"):
             return None
@@ -511,9 +511,17 @@ _MENU_RETRY_SQL = (
 )
 _MENU_LIST_SQL = f"SELECT {_MENU_COLUMNS} FROM line_rich_menu_publication_tasks"
 _MENU_PUBLISHED_PROVIDER_ID_SQL = (
-    "SELECT provider_menu_id FROM line_rich_menu_publication_tasks "
+    "SELECT provider_menu_id FROM ("
+    "SELECT line_rich_menu_id AS provider_menu_id,2 AS priority,id "
+    "FROM line_rich_menu_publications "
+    "WHERE menu_config_id=%s AND status='published' AND is_current=TRUE "
+    "AND line_rich_menu_id IS NOT NULL "
+    "UNION ALL "
+    "SELECT provider_menu_id,1 AS priority,id "
+    "FROM line_rich_menu_publication_tasks "
     "WHERE menu_definition_id=%s AND publication_status='published' "
-    "AND provider_menu_id IS NOT NULL ORDER BY id DESC LIMIT 1"
+    "AND provider_menu_id IS NOT NULL"
+    ") published_menus ORDER BY priority DESC,id DESC LIMIT 1"
 )
 _MENU_CONFIGURATION_SELECT_SQL = (
     "SELECT definition_snapshot FROM line_configuration_revisions "

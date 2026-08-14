@@ -8,7 +8,7 @@
 - 保留遠端已發布 part 189／190 SQL、manifest、descriptor 與歷史 receipt bytes。
 - 新增 part 191 修復 `government_subsidy_outbox.intent_type`；舊 4-value enum 為待升級、目標
   8-value enum 為 exact，任何其他型態為 drift。
-- WP77／WP80 使用新 release identities 與 part 192／193；active Web transition 改為 WP86。
+- 遠端 LINE 使用已發布 part 191；WP77／WP80 與政府 repair 依序使用 part 193／194／192；active Web transition 改為 WP89。
 - 舊 manifest 保持不變；不同開發者留下的舊 shape、跨-release dependency 與 mutable backfill
   hash 由 strict successors、versioned archive、baseline 與 catalog order 收斂。
 - default catalog 不排程未重新授權的歷史 backfill；explicit manifest selection 仍保留其 backfill
@@ -28,7 +28,7 @@
 
 | Gate | 狀態 | 證據 |
 |---|---|---|
-| Scope gate | PASS | 使用者逐項核准 191／192／193、WP86、strict successors 與 dependency 語意 |
+| Scope gate | PASS | 使用者逐項核准遠端 191、local 192／193／194、WP89、strict successors 與 dependency 語意 |
 | Change inventory | PASS | 191／192／193 均為 schema-only；無新增 seed、business-row-backfill 或 destructive change |
 | Static release gate | PASS | 20 manifests strict PASS；default unique ordered chain；111-part validation manifest／full-SQL |
 | Descriptor gate | PASS | 191 typed enum classifier與192／193 owned descriptors；focused tests通過 |

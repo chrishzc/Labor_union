@@ -63,20 +63,27 @@ echo ==========================================
 echo [Notice] start_local_development.bat is for local development only; it is not a production deployment entrypoint.
 echo [Notice] Production readiness validation is intentionally not run by this development launcher.
 
+call :ENSURE_INTERNAL_SERVICE_KEY
+if errorlevel 1 exit /b !ERRORLEVEL!
+
 :: 4. Launch servers concurrently
 echo [Step 5] Launching FastAPI server...
 start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
+call :WAIT_FOR_HTTP "http://127.0.0.1:8000/health" "FastAPI"
+if errorlevel 1 exit /b !ERRORLEVEL!
+
+echo [Step 6] Launching Streamlit interface...
+start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
+call :WAIT_FOR_HTTP "http://127.0.0.1:8501/_stcore/health" "Streamlit"
+if errorlevel 1 exit /b !ERRORLEVEL!
 
 "%PY%" -m scripts.launcher_preflight --profile line-worker >nul 2>&1
 if !ERRORLEVEL! equ 0 (
-    echo [Step 6] Launching independent LINE Worker...
+    echo [Step 7] Launching independent LINE Worker...
     start "LINE Worker" cmd /k ""%PY%" -m scripts.run_line_worker"
 ) else (
-    echo [Step 6] Skipping LINE Worker: local LINE credentials or runtime configuration are unavailable.
+    echo [Step 7] Skipping LINE Worker: local LINE credentials or runtime configuration are unavailable.
 )
-
-echo [Step 7] Launching Streamlit interface...
-start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
 
 echo [Step 8] Launching active runtime monitor...
 start "Runtime Monitor" cmd /k ""%PY%" -m scripts.run_service_monitor"
@@ -87,9 +94,12 @@ start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
 echo [Step 10] Launching Durable Background Worker...
 start "Durable Background Worker" cmd /k ""%PY%" -m scripts.run_durable_job_worker"
 
+echo [Step 11] Launching Incident Maintenance Worker...
+start "Incident Maintenance Worker" cmd /k ""%PY%" -m scripts.run_incident_worker"
+
 findstr /R /B /I "^KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true" "%CD%\.env" >nul
 if %errorlevel% equ 0 (
-    echo [Step 11] Launching Knowledge Retrieval Worker...
+    echo [Step 12] Launching Knowledge Retrieval Worker...
     start "Knowledge Retrieval Worker" cmd /k ""%PY%" -m scripts.run_knowledge_worker"
 )
 
@@ -106,6 +116,8 @@ pause
 exit /b 0
 
 :SMOKE_TEST
+call :ENSURE_INTERNAL_SERVICE_KEY
+if errorlevel 1 exit /b !ERRORLEVEL!
 echo [Smoke] Launching Docker Compose and waiting for MySQL...
 docker-compose up -d
 if errorlevel 1 exit /b !ERRORLEVEL!
@@ -115,3 +127,25 @@ if errorlevel 1 exit /b !ERRORLEVEL!
 if errorlevel 1 exit /b !ERRORLEVEL!
 "%PY%" -m scripts.smoke_local_development_launcher
 exit /b !ERRORLEVEL!
+
+:ENSURE_INTERNAL_SERVICE_KEY
+if not defined APP_ENV set "APP_ENV=development"
+if defined INTERNAL_SERVICE_SHARED_KEY exit /b 0
+for /f "delims=" %%K in ('powershell.exe -NoProfile -NonInteractive -Command "$bytes = New-Object byte[] 32; $random = [Security.Cryptography.RandomNumberGenerator]::Create(); $random.GetBytes($bytes); $random.Dispose(); [Convert]::ToBase64String($bytes)"') do set "INTERNAL_SERVICE_SHARED_KEY=%%K"
+if defined INTERNAL_SERVICE_SHARED_KEY exit /b 0
+echo [Error] Failed to generate the local internal service key.
+exit /b 1
+
+:WAIT_FOR_HTTP
+set "WAIT_URL=%~1"
+set "WAIT_SERVICE=%~2"
+for /L %%A in (1,1,30) do (
+    "%PY%" -c "from urllib.request import urlopen; response = urlopen(__import__('sys').argv[1], timeout=2); raise SystemExit(0 if response.status == 200 else 1)" "!WAIT_URL!" >nul 2>&1
+    if !ERRORLEVEL! equ 0 (
+        echo [Ready] !WAIT_SERVICE! is accepting requests.
+        exit /b 0
+    )
+    timeout /t 1 /nobreak >nul
+)
+echo [Error] !WAIT_SERVICE! did not become ready: !WAIT_URL!
+exit /b 1

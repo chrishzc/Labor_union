@@ -1,4 +1,4 @@
--- File: 191_government_subsidy_outbox_intent_type_repair.sql
+-- File: 192_government_subsidy_outbox_intent_type_repair.sql
 -- Description: 補齊政府補助 outbox 的 overpayment disposition intent enum。
 
 ALTER TABLE government_subsidy_outbox

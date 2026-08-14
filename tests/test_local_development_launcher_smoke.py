@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
 from scripts import smoke_local_development_launcher as smoke
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 class _ProcessStub:
@@ -55,6 +59,7 @@ def test_service_commands_match_the_windows_launcher_modules(monkeypatch) -> Non
     assert commands["line-worker"][-1] == "scripts.run_line_worker"
     assert commands["runtime-monitor"][-1] == "scripts.run_service_monitor"
     assert commands["durable-worker"][-1] == "scripts.run_durable_job_worker"
+    assert commands["incident-worker"][-1] == "scripts.run_incident_worker"
     assert commands["file-watcher"][-1] == "scripts/file_watcher.py"
 
 
@@ -63,3 +68,28 @@ def test_service_commands_skip_unconfigured_line_worker(monkeypatch) -> None:
     monkeypatch.setattr(smoke, "inspect_profile", lambda profile: {"status": "blocked"})
 
     assert "line-worker" not in smoke._service_commands()
+
+
+def test_windows_launcher_generates_key_without_nested_python_quotes() -> None:
+    source = (ROOT / "scripts/launchers/start_local_development.bat").read_text(
+        encoding="utf-8"
+    )
+
+    assert "RandomNumberGenerator]::Create()" in source
+    assert "in ('\"%PY%\" -c \"import secrets" not in source
+
+
+def test_windows_launcher_waits_for_api_and_ui_before_workers() -> None:
+    source = (ROOT / "scripts/launchers/start_local_development.bat").read_text(
+        encoding="utf-8"
+    )
+
+    api_start = source.index('start "FastAPI Server"')
+    api_ready = source.index('call :WAIT_FOR_HTTP "http://127.0.0.1:8000/health"')
+    ui_start = source.index('start "Streamlit Client UI"')
+    ui_ready = source.index(
+        'call :WAIT_FOR_HTTP "http://127.0.0.1:8501/_stcore/health"'
+    )
+    first_worker = source.index('start "LINE Worker"')
+
+    assert api_start < api_ready < ui_start < ui_ready < first_worker

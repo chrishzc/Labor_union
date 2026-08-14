@@ -15,7 +15,20 @@ class LiffIdentityContext(BaseModel):
 
 
 class LineIdentityFlowValidationRequest(LiffIdentityContext):
-    purpose: Literal["customer_binding", "staff_verification", "admin_binding"]
+    purpose: Literal["customer_binding", "staff_verification", "admin_binding", "staff_self_service"]
+
+
+class LineIdentityFlowOpenRequest(BaseModel):
+    purpose: Literal["customer_binding", "staff_verification", "admin_binding", "staff_self_service"]
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    line_id_token: str = Field(default="", max_length=4096)
+    development_line_user_id: str = Field(default="", max_length=191)
+
+
+class LineIdentityFlowOpenResponse(BaseModel):
+    flow_id: str
+    purpose: str
+    expires_at: datetime
 
 
 class LineIdentityFlowValidationResponse(BaseModel):

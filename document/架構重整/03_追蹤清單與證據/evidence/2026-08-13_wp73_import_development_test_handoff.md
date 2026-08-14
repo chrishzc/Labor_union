@@ -42,7 +42,7 @@ artifact不是同一版。不得執行`--apply`或手改hash；先安裝r2 catal
 ```
 
 預期 chain 包含 `release_id=labor-union-wp77-2026-08-14-v2`，WP77 artifact為
-`192_staff_historical_adoption_hcm_review.sql`；命令仍報hash mismatch時停止，不連 DB。
+`193_staff_historical_adoption_hcm_review.sql`；命令仍報hash mismatch時停止，不連 DB。
 
 本輪建議使用獨立開發 DB：
 

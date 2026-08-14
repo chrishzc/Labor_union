@@ -1,7 +1,7 @@
 {
   "contract": "migration-owned-object-descriptors/v1",
   "descriptors": {
-    "193_historical_order_adoption.sql": {
+    "194_historical_order_adoption.sql": {
       "tables": {
         "historical_order_adoption_reviews": [
           "id", "review_identity", "source_event_identity", "source_fingerprint",

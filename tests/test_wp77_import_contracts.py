@@ -214,7 +214,7 @@ def test_hcm_outbox_projection_contains_only_masked_review_evidence():
 
 
 def test_wp77_schema_is_additive_and_keeps_receipt_and_review_roots_immutable():
-    sql = Path("db/schema_parts/192_staff_historical_adoption_hcm_review.sql").read_text(
+    sql = Path("db/schema_parts/193_staff_historical_adoption_hcm_review.sql").read_text(
         encoding="utf-8"
     )
 

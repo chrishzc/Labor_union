@@ -4,6 +4,11 @@
 module（例如 `scripts/run_service_monitor.py`、`scripts/run_durable_job_worker.py`）仍留在 `scripts/`。
 個人安裝工具與其 wrapper 不在本目錄的治理、搬移或退役範圍內，也不是其他開發者的必要依賴。
 
+Worker 與 Monitor 都是 Private Operations API client，不直接連 MySQL。Windows／Unix 本機 launcher
+會在目前 process tree 產生一次性的 `INTERNAL_SERVICE_SHARED_KEY`，API 與各 client 共用，但不寫回
+`.env`、log 或 Git。若手動分別啟動服務，必須先在同一 shell 設定至少 32 字元的 key；production
+不接受 shared key，須待後續部署工作接上 Google-signed OIDC/IAM 後才可啟用 private endpoints。
+
 所有命令都從專案根目錄執行。啟動服務不會自動更新 schema；拉取新版程式後，應先依資料需求選擇
 「保留資料更新」或「模板重設」，完成後再啟動服務。
 

@@ -40,7 +40,6 @@ ROLE_LEVELS = {
     "line_manager": 30,
     "system_admin": 40,
 }
-
 CAPABILITY_REGISTRY = frozenset(
     {
         "line.identity.read",
@@ -92,39 +91,9 @@ CAPABILITY_REGISTRY = frozenset(
         "knowledge.answer.query",
     }
 )
-
-LINE_VIEWER_CAPABILITIES = frozenset(
-    {
-        "line.identity.read",
-        "line.review.read",
-        "line.task.read",
-        "line.order_group.read",
-        "line.monitor.read",
-        "line.matching.read",
-        "line.customer_service.read",
-        "line.identity.binding.read",
-        "knowledge.read",
-    }
-)
-LINE_AGENT_CAPABILITIES = LINE_VIEWER_CAPABILITIES | frozenset(
-    {
-        "line.order_group.bind",
-        "line.matching.send",
-        "line.customer_service.handle",
-    }
-)
-LINE_MANAGER_CAPABILITIES = frozenset(
-    capability
-    for capability in CAPABILITY_REGISTRY
-    if capability.startswith(("line.", "contract.", "knowledge."))
-    and capability != "line.identity.binding.override"
-) | frozenset({"system.configuration.manage"})
-
 ROLE_CAPABILITIES = {
-    "line_viewer": LINE_VIEWER_CAPABILITIES,
-    "line_agent": LINE_AGENT_CAPABILITIES,
-    "line_manager": LINE_MANAGER_CAPABILITIES,
-    "system_admin": CAPABILITY_REGISTRY,
+    role: CAPABILITY_REGISTRY
+    for role in ROLE_LEVELS
 }
 
 
@@ -156,8 +125,8 @@ class AdminPrincipal:
         }
 
     def effective_capabilities(self) -> frozenset[str]:
-        if self.capabilities is not None:
-            return self.capabilities
+        if self.id is None and self.capabilities is not None:
+            return self.capabilities & CAPABILITY_REGISTRY
         return ROLE_CAPABILITIES.get(self.role, frozenset())
 
 
@@ -449,7 +418,7 @@ def _require_admin_session_schema(cursor: Any) -> None:
 
 
 def has_required_role(principal: AdminPrincipal, minimum_role: str) -> bool:
-    return ROLE_LEVELS.get(principal.role, 0) >= ROLE_LEVELS.get(minimum_role, 10**9)
+    return principal.role in ROLE_LEVELS and minimum_role in ROLE_LEVELS
 
 
 def has_required_capability(principal: AdminPrincipal, capability: str) -> bool:
@@ -458,23 +427,11 @@ def has_required_capability(principal: AdminPrincipal, capability: str) -> bool:
     return capability in principal.effective_capabilities()
 
 
-def _principal_from_row(cursor: Any, row: dict[str, Any]) -> AdminPrincipal:
+def _principal_from_row(_cursor: Any, row: dict[str, Any]) -> AdminPrincipal:
     role = str(row["role"])
-    capabilities = set(ROLE_CAPABILITIES.get(role, frozenset()))
-    cursor.execute(
-        """
-        SELECT capability FROM admin_capability_grants
-        WHERE admin_user_id=%s AND revoked_at IS NULL
-          AND effective_from <= UTC_TIMESTAMP()
-          AND (expires_at IS NULL OR expires_at > UTC_TIMESTAMP())
-        """,
-        (row["id"],),
-    )
-    capabilities.update(str(item["capability"]) for item in cursor.fetchall())
     return AdminPrincipal(
         id=int(row["id"]), username=row["username"], display_name=row["display_name"],
         role=role, linked_line_user_id=row.get("linked_line_user_id"),
-        capabilities=frozenset(capabilities),
     )
 
 

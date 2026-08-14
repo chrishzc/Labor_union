@@ -14172,8 +14172,18 @@ FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be deleted';
 -- END SOURCE: db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql
 
--- BEGIN SOURCE: db/schema_parts/191_government_subsidy_outbox_intent_type_repair.sql
--- File: 191_government_subsidy_outbox_intent_type_repair.sql
+-- BEGIN SOURCE: db/schema_parts/191_line_staff_self_service_identity_flow.sql
+ALTER TABLE line_identity_flows
+    MODIFY COLUMN flow_purpose ENUM(
+        'customer_binding',
+        'staff_verification',
+        'admin_binding',
+        'staff_self_service'
+    ) NOT NULL;
+-- END SOURCE: db/schema_parts/191_line_staff_self_service_identity_flow.sql
+
+-- BEGIN SOURCE: db/schema_parts/192_government_subsidy_outbox_intent_type_repair.sql
+-- File: 192_government_subsidy_outbox_intent_type_repair.sql
 -- Description: 補齊政府補助 outbox 的 overpayment disposition intent enum。
 
 ALTER TABLE government_subsidy_outbox
@@ -14187,10 +14197,10 @@ ALTER TABLE government_subsidy_outbox
         'government_overpayment_return_payable',
         'government_overpayment_return_payout'
     ) NOT NULL;
--- END SOURCE: db/schema_parts/191_government_subsidy_outbox_intent_type_repair.sql
+-- END SOURCE: db/schema_parts/192_government_subsidy_outbox_intent_type_repair.sql
 
--- BEGIN SOURCE: db/schema_parts/192_staff_historical_adoption_hcm_review.sql
--- File: 192_staff_historical_adoption_hcm_review.sql
+-- BEGIN SOURCE: db/schema_parts/193_staff_historical_adoption_hcm_review.sql
+-- File: 193_staff_historical_adoption_hcm_review.sql
 -- Description: 新增 Staff 歷史採納 receipt 與 HCM Case Import review/outbox。
 
 CREATE TABLE IF NOT EXISTS staff_historical_adoption_receipts (
@@ -14292,10 +14302,10 @@ CREATE TRIGGER trg_case_import_hcm_review_rows_before_delete
 BEFORE DELETE ON case_import_hcm_review_rows
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'case_import_hcm_review_rows records cannot be deleted';
--- END SOURCE: db/schema_parts/192_staff_historical_adoption_hcm_review.sql
+-- END SOURCE: db/schema_parts/193_staff_historical_adoption_hcm_review.sql
 
--- BEGIN SOURCE: db/schema_parts/193_historical_order_adoption.sql
--- File: 193_historical_order_adoption.sql
+-- BEGIN SOURCE: db/schema_parts/194_historical_order_adoption.sql
+-- File: 194_historical_order_adoption.sql
 -- Description: 新增 Historical Order Adoption receipt、pairing evidence、review 與 outbox。
 
 CREATE TABLE IF NOT EXISTS historical_order_adoption_reviews (
@@ -14460,7 +14470,7 @@ CREATE TRIGGER trg_historical_order_pairing_evidence_before_delete
 BEFORE DELETE ON historical_order_pairing_evidence
 FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'historical_order_pairing_evidence records cannot be deleted';
--- END SOURCE: db/schema_parts/193_historical_order_adoption.sql
+-- END SOURCE: db/schema_parts/194_historical_order_adoption.sql
 
 -- BEGIN SOURCE: db/schema_parts/999_v_order_details_view.sql
 -- 25. 訂單與帳務整合檢視表 (獨立拆分訂金與樓層費，並提供首筆應付加總)

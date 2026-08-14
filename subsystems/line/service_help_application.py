@@ -101,7 +101,6 @@ class LineServiceHelpApplication:
             )
         )
 
-
 def _category_for_text(text):
     return next((category for category, aliases in _CATEGORY_ALIASES.items() if text in aliases), None)
 
@@ -149,9 +148,80 @@ def _registration_reply(registration_url):
 
 
 def _service_menu_payload():
-    labels = ("服務流程", "收費與補助", "查詢服務進度", "修改登記資料", "聯絡工會人員", "其他問題")
-    buttons = [{"type": "button", "action": {"type": "message", "label": label, "text": label}, "style": "secondary", "height": "sm"} for label in labels]
-    return {"type": "flex", "altText": "請選擇服務說明項目", "contents": {"type": "bubble", "body": {"type": "box", "layout": "vertical", "spacing": "sm", "contents": [{"type": "text", "text": "服務說明", "weight": "bold", "size": "xl"}, {"type": "text", "text": "請選擇想了解或需要協助的項目", "wrap": True, "color": "#627D98"}, *buttons]}}}
+    cards = (
+        ("服務流程", "了解登記、資料確認、月嫂媒合到簽約的完整流程。", "#1E3A8A"),
+        ("收費與補助", "查看服務費用、樓層費與補助資格的初步說明。", "#0F766E"),
+        ("查詢服務進度", "查詢已綁定案件的最新狀態與服務期間。", "#7C3AED"),
+        ("修改登記資料", "申請修正姓名、電話、地址、日期等登記內容。", "#BE123C"),
+        ("聯絡工會人員", "需要人工協助時，建立工會服務人員回覆需求。", "#B45309"),
+        ("其他問題", "不是以上分類時，留下問題讓工會人員協助確認。", "#475569"),
+    )
+    return {
+        "type": "flex",
+        "altText": "請選擇服務說明項目",
+        "contents": {
+            "type": "carousel",
+            "contents": [_service_help_card(*card) for card in cards],
+        },
+    }
+
+
+def _service_help_card(label, description, color):
+    return {
+        "type": "bubble",
+        "size": "micro",
+        "hero": {
+            "type": "box",
+            "layout": "vertical",
+            "backgroundColor": color,
+            "height": "76px",
+            "justifyContent": "center",
+            "alignItems": "center",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": label,
+                    "weight": "bold",
+                    "size": "lg",
+                    "color": "#FFFFFF",
+                    "align": "center",
+                    "wrap": True,
+                }
+            ],
+        },
+        "body": {
+            "type": "box",
+            "layout": "vertical",
+            "spacing": "sm",
+            "contents": [
+                {
+                    "type": "text",
+                    "text": description,
+                    "size": "sm",
+                    "color": "#334155",
+                    "wrap": True,
+                    "maxLines": 4,
+                }
+            ],
+        },
+        "footer": {
+            "type": "box",
+            "layout": "vertical",
+            "contents": [
+                {
+                    "type": "button",
+                    "style": "primary",
+                    "height": "sm",
+                    "color": color,
+                    "action": {
+                        "type": "message",
+                        "label": "選擇",
+                        "text": label,
+                    },
+                }
+            ],
+        },
+    }
 
 
 _SERVICE_FLOW_REPLY = "服務流程如下：\n1. 完成服務登記。\n2. 工會確認資料與服務期程。\n3. 系統篩選可配合的月嫂。\n4. 月嫂同意接案後，工會提供資料給您確認。\n5. 雙方確認後，進入媒合與簽約流程。\n\n如您尚未登記，請點選下方「服務登記」。"

@@ -23,6 +23,8 @@ if [[ ! -x .venv/bin/python ]]; then
 fi
 
 PY="$PWD/.venv/bin/python"
+export APP_ENV="${APP_ENV:-development}"
+export INTERNAL_SERVICE_SHARED_KEY="${INTERNAL_SERVICE_SHARED_KEY:-$("${PY}" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
 
 choose_db_port() {
   if ! lsof -iTCP:3306 -sTCP:LISTEN >/dev/null 2>&1; then
@@ -41,6 +43,7 @@ docker compose up -d
 "$PY" -m scripts.run_line_worker &
 "$PY" -m scripts.run_service_monitor &
 "$PY" -m scripts.run_durable_job_worker &
+"$PY" -m scripts.run_incident_worker &
 "$PY" -m scripts.run_knowledge_worker &
 "$PY" scripts/file_watcher.py &
 wait
