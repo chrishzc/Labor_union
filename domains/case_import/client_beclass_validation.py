@@ -1,9 +1,6 @@
-"""客戶 BeClass 匯入欄位層級驗證規則，供
-scripts/imports/import_client_beclass.py 使用。
-
-沿用 client_import_validation.py 的通用小工具（縣市清單、電話正規化、查無
-識別碼時的替代鍵）。這支匯入腳本的 clean_city_and_address() 正規化成「台」，
-跟 HCM 那支一致，不用像服務人員那支額外容忍「臺」。
+"""
+File: client_beclass_validation.py
+Description: 定義 Client BeClass 來源欄位契約與逐列驗證規則。
 """
 
 from __future__ import annotations
@@ -21,6 +18,11 @@ from domains.case_import.client_import_validation import (
 
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 BANK_BRANCH_PATTERN = re.compile(r"^\d{7}$")
+
+CLIENT_BECLASS_REQUIRED_HEADERS = frozenset({
+    "查詢序號", "報名時間", "姓名", "Email", "出生年", "月", "日", "行動電話",
+    "補助款退款:銀行代號+分行代號", "銀行帳號",
+})
 
 # Excel 欄位名稱 -> beclass_records 資料表欄位名稱，驗證失敗時要把這個 DB 欄位存成 NULL。
 # 查詢序號不在這份清單裡：那是查無資料時整列不寫入的硬性條件，不是存 NULL 就好。
@@ -93,5 +95,4 @@ def validate_client_beclass_row(row: dict[str, Any]) -> dict[str, str]:
 
 
 __all__ = ["validate_client_beclass_row", "fallback_case_key", "EXCEL_TO_DB_COLUMN"]
-
 

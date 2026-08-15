@@ -30,6 +30,7 @@ from infrastructure.migration.cutover import (
     AppendOnlyCutoverJournal,
     reconcile_switch_state,
 )
+from scripts.schema_assembly import validate_schema_assembly
 from infrastructure.migration.maintenance import (
     MaintenanceWindowToken,
     SourcePrincipalEvidence,
@@ -133,23 +134,33 @@ LEGACY_SCHEMA_PARTS = (
 SCHEMA_PARTS = LEGACY_SCHEMA_PARTS
 IDENTIFIER = re.compile(r"^[A-Za-z0-9_]+$")
 DEFAULT_RELEASE_MANIFESTS = (
-    "labor_union_2026_08_02_v1.json",
-    "labor_union_2026_08_08_v2.json",
-    "labor_union_2026_08_09_v3.json",
-    "labor_union_2026_08_09_v4.json",
-    "labor_union_2026_08_09_v5.json",
-    "labor_union_2026_08_09_v6.json",
-    "labor_union_2026_08_09_v7.json",
-    "labor_union_2026_08_09_v8.json",
-    "labor_union_2026_08_09_v9.json",
-    "labor_union_2026_08_12_line_stage13_v1.json",
+    "labor_union_2026_08_02_v2.json",
+    "labor_union_2026_08_08_v2_strict_v1.json",
+    "labor_union_2026_08_09_v3_strict_v1.json",
+    "labor_union_2026_08_09_v4_strict_v1.json",
+    "labor_union_2026_08_09_v5_strict_v1.json",
+    "labor_union_2026_08_09_v6_strict_v1.json",
+    "labor_union_2026_08_09_v7_strict_v1.json",
+    "labor_union_2026_08_09_v8_strict_v1.json",
+    "labor_union_2026_08_09_v9_strict_v1.json",
+    "labor_union_2026_08_12_line_stage13_strict_v1.json",
     "labor_union_2026_08_12_wp68_v1.json",
-    "labor_union_2026_08_11_provisional_registration_case_issue_v1.json",
+    "labor_union_2026_08_11_provisional_registration_case_issue_strict_v1.json",
     "labor_union_2026_08_11_line_stage11_v1.json",
     "labor_union_2026_08_11_line_stage12_v1.json",
     "labor_union_2026_08_13_wp72_v1.json",
     "labor_union_2026_08_14_client_refund_snapshot_v1.json",
     "labor_union_2026_08_14_government_overpayment_v1.json",
+    "labor_union_2026_08_14_line_staff_self_service_v1.json",
+    "labor_union_2026_08_14_government_outbox_intent_type_repair_v1.json",
+    "labor_union_2026_08_14_wp77_v2.json",
+    "labor_union_2026_08_14_wp80_v2.json",
+    "labor_union_2026_08_14_wp90_import_warning_tracking_v1.json",
+    "labor_union_2026_08_14_wp91_hcm_partial_formal_case_v1.json",
+    "labor_union_2026_08_14_wp92_client_beclass_transition_binding_v1.json",
+    "labor_union_2026_08_14_wp93_pending_completion_status_v1.json",
+    "labor_union_2026_08_15_schema_assembly_v1.json",
+    "labor_union_2026_08_15_staff_retirement_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -315,7 +326,9 @@ def _legacy_release_selection() -> ReleaseSelection:
 RELEASE_MANIFEST = _legacy_release_selection()
 
 
-def configure_release_manifests(manifest_paths: Iterable[Path]) -> None:
+def configure_release_manifests(
+    manifest_paths: Iterable[Path], *, include_backfills: bool = True,
+) -> None:
     """Select a validated, ordered manifest chain for the current process."""
 
     paths = tuple(Path(path).expanduser().resolve() for path in manifest_paths)
@@ -335,15 +348,17 @@ def configure_release_manifests(manifest_paths: Iterable[Path]) -> None:
                 raise UpgradeBlocked(f"duplicate migration artifact: {name}")
             descriptors[name] = descriptor
     selection = ReleaseSelection(
-        release_id="+".join(item.release_id for item in manifests),
+        release_id=manifests[-1].release_id,
         source_baseline_id=manifests[0].source_baseline_id,
         fingerprint=_manifest_chain_fingerprint(manifests),
         manifests=manifests,
         schema_artifacts=tuple(
             item for manifest in manifests for item in manifest.schema_artifacts
         ),
-        backfills=tuple(
-            item for manifest in manifests for item in manifest.backfills
+        backfills=(
+            tuple(item for manifest in manifests for item in manifest.backfills)
+            if include_backfills
+            else ()
         ),
         verification_contracts=_unique_verification_contracts(manifests),
         required_restart_targets=_ordered_unique(
@@ -425,6 +440,20 @@ class UpgradeBlocked(RuntimeError):
     """Fail-closed safety or drift condition."""
 
 
+def _configure_default_release_manifests() -> None:
+    assembly_errors = validate_schema_assembly()
+    if assembly_errors:
+        raise UpgradeBlocked("schema assembly is invalid: " + "; ".join(assembly_errors))
+    release_directory = ROOT / "db" / "migration_releases"
+    configure_release_manifests(
+        (release_directory / name for name in DEFAULT_RELEASE_MANIFESTS),
+        include_backfills=False,
+    )
+
+
+_configure_default_release_manifests()
+
+
 def _normalized_row(row: Mapping[str, Any]) -> dict[str, Any]:
     return {str(key).casefold(): value for key, value in row.items()}
 
@@ -491,124 +520,6 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-@dataclass(frozen=True)
-class ReleaseManifest:
-    """Validated append-only release chain used by preserve-data operations."""
-
-    release_id: str
-    fingerprint: str
-    artifacts: tuple[dict[str, Any], ...]
-    required_restart_targets: tuple[str, ...]
-    post_cutover_smoke_ids: tuple[str, ...]
-    verification_contracts: tuple[dict[str, Any], ...]
-    descriptors: Mapping[str, Mapping[str, Any]]
-
-
-def _load_release_chain() -> ReleaseManifest:
-    release_directory = ROOT / "db" / "migration_releases"
-    manifests = tuple(
-        release_directory / name for name in DEFAULT_RELEASE_MANIFESTS
-    )
-    if not manifests:
-        raise UpgradeBlocked("no migration release manifests are available")
-    artifacts: list[dict[str, Any]] = []
-    release_id = ""
-    fingerprints: list[str] = []
-    final_compatibility: Mapping[str, Any] = {}
-    final_contracts: tuple[dict[str, Any], ...] = ()
-    descriptors: dict[str, Mapping[str, Any]] = {}
-    seen_names: set[str] = set()
-    previous_max_ordinal = 0
-    for manifest_path in manifests:
-        if not manifest_path.is_file():
-            raise UpgradeBlocked(f"catalog manifest is missing: {manifest_path}")
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if payload.get("contract") != "migration-release-manifest/v1":
-            raise UpgradeBlocked(f"invalid release manifest: {manifest_path.name}")
-        release_id = str(payload.get("release_id") or "")
-        if not release_id:
-            raise UpgradeBlocked(f"release id is missing: {manifest_path.name}")
-        descriptor = payload.get("descriptor_artifact") or {}
-        descriptor_path = ROOT / str(descriptor.get("relative_path", ""))
-        if not descriptor_path.is_file() or _sha256_file(descriptor_path) != descriptor.get("sha256"):
-            raise UpgradeBlocked(f"release descriptor hash mismatch: {manifest_path.name}")
-        descriptor_payload = json.loads(descriptor_path.read_text(encoding="utf-8"))
-        if descriptor_payload.get("contract") != "migration-owned-object-descriptors/v1":
-            raise UpgradeBlocked(f"invalid release descriptors: {descriptor_path.name}")
-        descriptors.update(descriptor_payload.get("descriptors") or {})
-        release_ordinals: list[int] = []
-        for artifact in payload.get("artifacts", []):
-            artifact_path = ROOT / str(artifact.get("relative_path", ""))
-            name = str(artifact.get("name") or "")
-            if not artifact_path.is_file():
-                raise UpgradeBlocked(f"release artifact is missing: {name}")
-            hash_mismatch = _sha256_file(artifact_path) != artifact.get("sha256")
-            if hash_mismatch:
-                raise UpgradeBlocked(f"release artifact hash mismatch: {artifact.get('name')}")
-            if name in seen_names:
-                raise UpgradeBlocked(f"duplicate release artifact: {name}")
-            match = re.match(r"^(\d+)_", name)
-            if match is None:
-                raise UpgradeBlocked(f"artifact ordinal is missing: {name}")
-            release_ordinals.append(int(match.group(1)))
-            for dependency in artifact.get("dependencies") or ():
-                dependency_path = ROOT / "db" / "schema_parts" / str(dependency)
-                if not dependency_path.is_file():
-                    raise UpgradeBlocked(f"artifact dependency is missing: {dependency}")
-            seen_names.add(name)
-            artifacts.append({**artifact, "release_id": payload["release_id"]})
-        if release_ordinals and min(release_ordinals) <= previous_max_ordinal:
-            raise UpgradeBlocked(f"release artifact ordinal regression: {manifest_path.name}")
-        if release_ordinals:
-            previous_max_ordinal = max(release_ordinals)
-        fingerprints.append(_sha256_file(manifest_path))
-        final_compatibility = payload.get("application_compatibility") or {}
-        final_contracts = tuple(payload.get("verification_contracts") or ())
-    artifacts = _dependency_ordered_artifacts(artifacts)
-    fingerprint = _sha256_bytes(json.dumps(
-        {"manifests": fingerprints, "artifacts": artifacts},
-        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ).encode("utf-8"))
-    return ReleaseManifest(
-        release_id, fingerprint, tuple(artifacts),
-        tuple(final_compatibility.get("required_restart_targets") or ()),
-        tuple(final_compatibility.get("post_cutover_smoke_ids") or ()),
-        final_contracts,
-        descriptors,
-    )
-
-
-def _dependency_ordered_artifacts(
-    artifacts: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    by_name = {str(artifact["name"]): artifact for artifact in artifacts}
-    original_position = {name: index for index, name in enumerate(by_name)}
-    ranks: dict[str, float] = {}
-
-    def rank(name: str, visiting: set[str]) -> float:
-        if name in ranks:
-            return ranks[name]
-        if name in visiting:
-            raise UpgradeBlocked("release artifact dependencies are cyclic")
-        artifact = by_name.get(name)
-        if artifact is None:
-            raise UpgradeBlocked(f"release artifact dependency is unavailable: {name}")
-        dependency_ranks = [
-            rank(str(dependency), visiting | {name})
-            for dependency in artifact.get("dependencies") or ()
-            if str(dependency) in by_name
-        ]
-        ranks[name] = max([
-            float(original_position[name]),
-            *(item + 0.5 for item in dependency_ranks),
-        ])
-        return ranks[name]
-
-    return sorted(artifacts, key=lambda artifact: rank(str(artifact["name"]), set()))
-
-
-RELEASE_MANIFEST = _load_release_chain()
-SCHEMA_PARTS = tuple(ROOT / artifact["relative_path"] for artifact in RELEASE_MANIFEST.artifacts)
 VERIFYABLE_CANDIDATE_STATUSES = frozenset({"schema_applied", "backfilled", "verified"})
 PURE_RETIREMENT_ARTIFACTS = frozenset({
     "153_retire_empty_legacy_field_inventory.sql",
@@ -1492,6 +1403,46 @@ def _matching_records_resume_delivery_state(
     return "drift"
 
 
+GOVERNMENT_OUTBOX_REPAIR_ARTIFACT = (
+    "192_government_subsidy_outbox_intent_type_repair.sql"
+)
+GOVERNMENT_OUTBOX_INTENTS_BEFORE_REPAIR = (
+    "government_subsidy_receipt_applied",
+    "government_subsidy_receipt_allocated",
+    "government_subsidy_reversal_applied",
+    "government_subsidy_anomaly_root_changed",
+)
+GOVERNMENT_OUTBOX_INTENTS_AFTER_REPAIR = (
+    *GOVERNMENT_OUTBOX_INTENTS_BEFORE_REPAIR,
+    "government_subsidy_overpayment_established",
+    "government_subsidy_overpayment_offset",
+    "government_overpayment_return_payable",
+    "government_overpayment_return_payout",
+)
+
+
+def _enum_column_type(values: Iterable[str]) -> str:
+    return "enum(" + ",".join(f"'{value}'" for value in values) + ")"
+
+
+def _government_outbox_intent_type_repair_state(
+    snapshot: Mapping[str, Any],
+) -> str:
+    column = next((
+        row for row in snapshot["columns"]
+        if row["table_name"] == "government_subsidy_outbox"
+        and row["column_name"] == "intent_type"
+    ), None)
+    if column is None:
+        return "drift"
+    actual = _normalize_column_type_contract(column["column_type"])
+    if actual == _enum_column_type(GOVERNMENT_OUTBOX_INTENTS_AFTER_REPAIR):
+        return "exact"
+    if actual == _enum_column_type(GOVERNMENT_OUTBOX_INTENTS_BEFORE_REPAIR):
+        return "absent"
+    return "drift"
+
+
 def _owned_classification(
     snapshot: Mapping[str, Any], *, defer_missing_triggers: bool = False
 ) -> dict[str, str]:
@@ -1504,6 +1455,24 @@ def _owned_classification(
     legacy_knowledge_state = _legacy_knowledge_schema_state(snapshot)
     result: dict[str, str] = {}
     for part, expected in OWNED_OBJECTS.items():
+        if part in PURE_RETIREMENT_ARTIFACTS:
+            has_retired_table = any(
+                table in present_columns for table in INTENTIONALLY_RETIRED_EMPTY_TABLES
+            )
+            has_retired_trigger = any(
+                "reclassification_events" in trigger for trigger in present_triggers
+            )
+            result[part] = "partial" if has_retired_table or has_retired_trigger else "absent"
+            continue
+        if expected.get("views"):
+            result[part] = _descriptor_presence_state(
+                expected,
+                present_columns,
+                present_triggers,
+                snapshot.get("views", ()),
+                defer_missing_triggers=defer_missing_triggers,
+            )
+            continue
         if (
             part in {
                 "148_knowledge_retrieval.sql",
@@ -1568,11 +1537,14 @@ def _owned_classification(
         name = str(artifact["name"])
         if name in result:
             continue
+        if name == GOVERNMENT_OUTBOX_REPAIR_ARTIFACT:
+            result[name] = _government_outbox_intent_type_repair_state(snapshot)
+            continue
         descriptor = RELEASE_MANIFEST.descriptors.get(name)
         if descriptor is None:
             raise UpgradeBlocked(f"missing descriptor for release artifact: {name}")
         result[name] = _descriptor_presence_state(
-            descriptor, present_columns, present_triggers,
+            descriptor, present_columns, present_triggers, snapshot.get("views", ()),
             defer_missing_triggers=defer_missing_triggers,
         )
     return result
@@ -1582,6 +1554,7 @@ def _descriptor_presence_state(
     descriptor: Mapping[str, Any],
     present_columns: Mapping[str, set[str]],
     present_triggers: set[str],
+    present_views: Iterable[Mapping[str, Any]] = (),
     *,
     defer_missing_triggers: bool = False,
 ) -> str:
@@ -1601,11 +1574,44 @@ def _descriptor_presence_state(
     for trigger in descriptor.get("triggers") or ():
         if not defer_missing_triggers or str(trigger) in present_triggers:
             states.append("exact" if str(trigger) in present_triggers else "absent")
+    states.extend(_owned_view_states(descriptor, present_views))
     if not states or all(state == "absent" for state in states):
         return "absent"
+    if "drift" in states:
+        return "drift"
     if all(state == "exact" for state in states):
         return "exact"
     return "partial"
+
+
+def _owned_view_states(
+    descriptor: Mapping[str, Any], present_views: Iterable[Mapping[str, Any]],
+) -> list[str]:
+    actual = {
+        str(view["table_name"]): _view_definition_digest(view["view_definition"])
+        for view in present_views
+    }
+    states: list[str] = []
+    for view_name, contract in (descriptor.get("views") or {}).items():
+        actual_digest = actual.get(str(view_name))
+        if actual_digest is None:
+            states.append("absent")
+        elif actual_digest == contract["definition_sha256"]:
+            states.append("exact")
+        else:
+            states.append("drift")
+    return states
+
+
+def _view_definition_digest(definition: Any) -> str:
+    without_database = re.sub(
+        r"(\b(?:from|join)\s*(?:\(\s*)*)`[^`]+`\.",
+        r"\1",
+        str(definition),
+        flags=re.IGNORECASE,
+    )
+    normalized = re.sub(r"\s+", " ", without_database.strip()).casefold()
+    return _sha256_bytes(normalized.encode("utf-8"))
 
 
 def schema_artifacts() -> list[dict[str, Any]]:
@@ -1750,7 +1756,11 @@ def _blocking_schema_states(
         name: state
         for name, state in states.items()
         if state == "drift"
-        or (state == "partial" and name not in allowed_partial_artifacts)
+        or (
+            state == "partial"
+            and name not in allowed_partial_artifacts
+            and name not in PURE_RETIREMENT_ARTIFACTS
+        )
     }
 
 
@@ -3100,9 +3110,41 @@ def _line_identity_management_state(snapshot: Mapping[str, Any]) -> str:
     )
     if canonical_state == "exact":
         return "exact"
+    if _is_line_identity_canonical_menu_successor_state(snapshot):
+        return "exact"
     if _is_recoverable_line_identity_legacy_state(snapshot):
         return "partial"
     return "drift"
+
+
+def _is_line_identity_canonical_menu_successor_state(
+    snapshot: Mapping[str, Any],
+) -> bool:
+    columns = {
+        (row["table_name"], row["column_name"]): row
+        for row in snapshot.get("columns", ())
+    }
+    canonical_column = columns.get(
+        ("line_identity_revocation_requests", "canonical_default_menu_publication_id")
+    )
+    default_column = columns.get(
+        ("line_identity_revocation_requests", "default_menu_publication_id")
+    )
+    if canonical_column is None or default_column is None:
+        return False
+    if canonical_column["column_type"] != "bigint unsigned":
+        return False
+    if str(default_column.get("is_nullable")) != "YES":
+        return False
+    constraints = {
+        row["constraint_name"]
+        for row in snapshot.get("constraints", ())
+        if row["table_name"] == "line_identity_revocation_requests"
+    }
+    return {
+        "fk_line_identity_revocation_canonical_publication",
+        "chk_line_identity_revocation_publication_source",
+    }.issubset(constraints)
 
 
 # Kept cohesive because this is one released legacy metadata fingerprint.
@@ -3664,8 +3706,8 @@ def run_candidate_post_schema(
         raise UpgradeBlocked("post-schema phase requires schema_applied receipt")
     if server_identity(config, candidate)["database"] != candidate:
         raise UpgradeBlocked("post-schema target is not candidate")
-    if MANIFEST_DRIVEN_RELEASE:
-        if RELEASE_MANIFEST.backfills:
+    if _uses_catalog_post_schema_contract():
+        if getattr(RELEASE_MANIFEST, "backfills", ()):
             raise UpgradeBlocked(
                 "manifest backfill execution is not supported by this runner"
             )
@@ -3740,6 +3782,10 @@ def run_candidate_post_schema(
     )
     write_receipt(operation_receipt_path, receipt)
     return receipt
+
+
+def _uses_catalog_post_schema_contract() -> bool:
+    return MANIFEST_DRIVEN_RELEASE
 
 
 def _replace_database_setting(raw: bytes, before: str, after: str) -> bytes:

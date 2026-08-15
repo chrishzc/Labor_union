@@ -1,0 +1,47 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-2026-08-09-v5-strict-v1",
+  "release_metadata": {
+    "release_name": "Labor Union privacy-safe administrator audit release v5",
+    "application_version": "global-architecture-v1",
+    "description": "Add two-year online audit retention archive",
+    "published_at": "2026-08-14"
+  },
+  "source_baseline": {
+    "baseline_id": "labor-union-2026-08-09-v4",
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "global-architecture-v4-or-later"
+  },
+  "artifacts": [{
+    "name": "151_admin_security_audit_retention.sql",
+    "relative_path": "db/schema_parts/151_admin_security_audit_retention.sql",
+    "sha256": "11cb28de26d6860c2d0aabd35c5f53c3e635db0095735737347c7282588a1c10",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+    "rollback_policy": "restore-candidate-from-pre-ddl-artifact"
+  }],
+  "backfills": [],
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_09_v5.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_09_v5.descriptors.json",
+    "sha256": "c8779abde83019f3441fb296d1eb9ad3fa09ef6fbedc987694b1381df4b610c7",
+    "dependencies": []
+  },
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["global-architecture-v1", "access-control-v1"],
+    "required_restart_targets": ["api", "streamlit", "background-worker"],
+    "post_cutover_smoke_ids": ["access-login", "admin-audit-list", "admin-audit-detail"],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "verification_contracts": [{"verification_id": "legacy-v5-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}],
+  "tool_archive_policy": {"artifact_hash_algorithm": "sha256", "backup_archive_policy": "permanent-release-archive", "journal_archive_policy": "append-only-per-operation", "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"], "receipt_archive_policy": "permanent-release-archive", "restore_required_mode": "new-absent-candidate-only"}
+}

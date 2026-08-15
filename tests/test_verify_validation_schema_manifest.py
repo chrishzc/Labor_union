@@ -1,3 +1,8 @@
+"""
+File: test_verify_validation_schema_manifest.py
+Description: 驗證 schema manifest、最終物件與可重建 full release。
+"""
+
 from pathlib import Path
 
 from scripts.build_validation_schema_release import (
@@ -42,6 +47,14 @@ def test_release_declares_the_order_detail_view_and_its_tables():
     assert "orders" in expected["tables"]
     assert "v_order_details" in expected["views"]
     assert "trg_order_lifecycle_control_events_before_update" in expected["triggers"]
+
+
+def test_release_final_objects_exclude_part_153_retirement_targets():
+    expected = expected_database_objects(load_manifest())
+
+    assert "finance_import_reclassification_events" not in expected["tables"]
+    assert "trg_finance_import_reclassification_events_before_update" not in expected["triggers"]
+    assert "trg_finance_import_reclassification_events_before_delete" not in expected["triggers"]
 
 
 def test_database_postcheck_reports_only_missing_declared_objects():

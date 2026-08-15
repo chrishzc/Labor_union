@@ -1,18 +1,20 @@
 {
   "contract": "labor-union-validation-schema/v1",
-  "release_id": "labor-union-validation-schema-2026-08-10-v1",
+  "release_id": "labor-union-validation-schema-2026-08-15-v3",
   "purpose": "Rebuild an isolated lu_test_* schema from version-controlled artifacts only.",
   "base_schema": {
     "path": "db/schema.sql",
-    "sha256": "0c0527de69f94ec8215eb9e5dc7a3029781c9410d6ebdffe741ad0d86643fd94"
+    "sha256": "05409adea31c2e5983df6e3b5bbdaef09b33b2b4c5389a872dcde87e64c80a53"
   },
   "schema_parts": {
-    "directory": "db/schema_parts",
-    "selection": "all_sql_files",
-    "order": "numeric_prefix_then_letter_suffix_then_filename",
-    "expected_count": 106,
-    "ordered_digest_sha256": "0dc2f862d939a23b483c33503a22f0dd5ea4eb8713d5786b88d3060350916dec",
-    "terminal_artifact": "999_v_order_details_view.sql"
+    "selection": "schema_assembly_active_bootstrap",
+    "expected_count": 115,
+    "ordered_digest_sha256": "1d5a4d12a03e696df08ddc1d8b6bf64e568b4aac02b9cc7c9f3837c7e8cc11a2",
+    "terminal_artifact": "1000_staff_retirement.sql"
+  },
+  "schema_assembly": {
+    "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
+    "sha256": "d666f4d5d7d2429f9639343a20e3d0f324d073442476994257fda7c525ccf138"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",
@@ -21,7 +23,7 @@
   },
   "postcheck": {
     "required_views": ["v_order_details"],
-    "minimum_trigger_count": 203,
+    "minimum_trigger_count": 209,
     "require_no_missing_versioned_tables": true
   },
   "database_safety": {

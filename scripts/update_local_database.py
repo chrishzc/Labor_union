@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -213,11 +214,12 @@ def _verify_schema_equivalence(source_schema, candidate_schema, source: str, can
         "constraints",
         "key_columns",
         "foreign_keys",
-        "show_create_tables",
     )
     for key in structural_keys:
         if source_schema[key] != candidate_schema[key]:
             raise LocalDatabaseUpdateError(f"rebuilt union_db schema differs: {key}")
+    if not _show_create_tables_match(source_schema, candidate_schema):
+        raise LocalDatabaseUpdateError("rebuilt union_db schema differs: show_create_tables")
     source_programs = migration._restored_schema_program_evidence(
         source_schema, source, (candidate,)
     )
@@ -226,6 +228,26 @@ def _verify_schema_equivalence(source_schema, candidate_schema, source: str, can
     )
     if source_programs != candidate_programs:
         raise LocalDatabaseUpdateError("rebuilt union_db triggers or views differ")
+
+
+def _show_create_tables_match(source_schema, candidate_schema) -> bool:
+    return _stable_show_create_tables(source_schema) == _stable_show_create_tables(candidate_schema)
+
+
+def _stable_show_create_tables(schema) -> dict[str, str]:
+    tables = schema["show_create_tables"]
+    return {
+        table_name: _stable_show_create_table(create_sql)
+        for table_name, create_sql in tables.items()
+    }
+
+
+def _stable_show_create_table(create_sql: str) -> str:
+    without_dynamic_counter = re.sub(r" AUTO_INCREMENT=\d+", "", create_sql)
+    return without_dynamic_counter.replace(
+        " CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+        " COLLATE utf8mb4_unicode_ci",
+    )
 
 
 def rollback_source(
@@ -239,7 +261,7 @@ def rollback_source(
 ) -> None:
     recreate_database(config, source)
     restore_dump(
-        config, source, dump_path, mysql_container=mysql_container
+        config, source, dump_path, **_container_argument(mysql_container)
     )
     if migration._table_evidence(config, source) != expected_data:
         raise LocalDatabaseUpdateError("automatic rollback data verification failed")
@@ -279,7 +301,7 @@ def replace_source_database(
             config,
             source,
             paths["candidate_dump"],
-            mysql_container=mysql_container,
+            **_container_argument(mysql_container),
         )
         verification = verify_replacement(config, source, candidate)
     except Exception:
@@ -289,7 +311,7 @@ def replace_source_database(
             paths["dump"],
             expected_source_data,
             expected_schema_sha256,
-            mysql_container=mysql_container,
+            **_container_argument(mysql_container),
         )
         receipt.update(status="rolled_back")
         migration.write_receipt(paths["replacement"], receipt)
@@ -318,7 +340,7 @@ def apply_update(
         source,
         paths["dump"],
         paths["backup"],
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
     )
     migration.restore_candidate(
         config,
@@ -327,7 +349,7 @@ def apply_update(
         paths["dump"],
         paths["backup"],
         paths["operation"],
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
     )
     migration.apply_schema(
         config,
@@ -335,7 +357,7 @@ def apply_update(
         candidate,
         paths["plan"],
         paths["operation"],
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
         allowed_partial_artifacts=LOCAL_RESUMABLE_PARTIAL_ARTIFACTS,
     )
     migration.verify_candidate(config, source, candidate, paths["operation"])
@@ -344,14 +366,14 @@ def apply_update(
         candidate,
         paths["candidate_dump"],
         paths["candidate_backup"],
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
     )
     replacement = replace_source_database(
         config,
         source,
         candidate,
         paths,
-        mysql_container=mysql_container,
+        **_container_argument(mysql_container),
     )
     return {
         "status": "completed",
@@ -363,6 +385,12 @@ def apply_update(
         "environment_file_unchanged": str(environment_file),
         "restart_required": True,
     }
+
+
+def _container_argument(mysql_container: str | None) -> dict[str, str]:
+    if mysql_container is None:
+        return {}
+    return {"mysql_container": mysql_container}
 
 
 def update_local_database(

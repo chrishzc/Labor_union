@@ -1,0 +1,47 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-2026-08-09-v6-strict-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Finance Import ingestion attempt release v6",
+    "application_version": "finance-import-v1",
+    "description": "Add append-only safe ingestion attempt audit",
+    "published_at": "2026-08-14"
+  },
+  "source_baseline": {
+    "baseline_id": "labor-union-2026-08-09-v5",
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "global-architecture-v5-or-later"
+  },
+  "artifacts": [{
+    "name": "152_finance_import_ingestion_attempts.sql",
+    "relative_path": "db/schema_parts/152_finance_import_ingestion_attempts.sql",
+    "sha256": "036dfc96c4732a3de42d57ef4fc0a36610013efb1cecbce5acf0d7ec25e4063f",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+    "rollback_policy": "restore-candidate-from-pre-ddl-artifact"
+  }],
+  "backfills": [],
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_09_v6.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_09_v6.descriptors.json",
+    "sha256": "5383cf853e41a703848df85100f742cc32a4f4207f51f35d1828c3dc6e5adc7e",
+    "dependencies": []
+  },
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["finance-import-v1", "global-architecture-v1"],
+    "required_restart_targets": ["api", "streamlit", "background-worker"],
+    "post_cutover_smoke_ids": ["finance-import-read"],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "verification_contracts": [{"verification_id": "legacy-v6-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}],
+  "tool_archive_policy": {"artifact_hash_algorithm": "sha256", "backup_archive_policy": "permanent-release-archive", "journal_archive_policy": "append-only-per-operation", "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"], "receipt_archive_policy": "permanent-release-archive", "restore_required_mode": "new-absent-candidate-only"}
+}

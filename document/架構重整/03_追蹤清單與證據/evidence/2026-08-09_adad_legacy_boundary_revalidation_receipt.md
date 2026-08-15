@@ -6,7 +6,7 @@ verified_at: 2026-08-09
 
 # ADAD 卸載與 Legacy 資料邊界驗證收據
 
-- 規格基線：`01_規格基線/08_ADAD卸載與Legacy資料邊界.md`
+- 封存規格：`../../04_已完成與上線封存/superseded_specs/08_ADAD卸載與Legacy資料邊界.md`
 - 追溯決策：19、20、43 號決策／Work Package。
 - `.agents/skills/adad-workflow` 不存在；Git hooks 只有 `.sample`，且 `.gitignore`
   忽略 `history/adad/`。legacy `system_map*` 保留為歷史檔案，production roots 沒有載入它們。

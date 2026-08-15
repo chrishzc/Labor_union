@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-2026-08-11-provisional-registration-case-issue-strict-v1",
+  "release_metadata": {
+    "release_name": "Provisional LINE registration Case Import issue evidence",
+    "application_version": "case-import-provisional-registration-v1",
+    "description": "Add append-only issuance evidence and replay receipt links for Case Import consumption",
+    "published_at": "2026-08-14"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "case-import-v1-or-later"
+  },
+  "artifacts": [
+    {
+      "name": "184_provisional_registration_case_issue.sql",
+      "relative_path": "db/schema_parts/184_provisional_registration_case_issue.sql",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+      "rollback_policy": "code-rollback-preserve-append-only-issuance-evidence",
+      "sha256": "517c43e8ae428a3cf44c861e857dfaf3dd2812b14db40ef5af61737fb254f6ca"
+    }
+  ],
+  "backfills": [],
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_11_provisional_registration_case_issue_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_11_provisional_registration_case_issue_v1.descriptors.json",
+    "sha256": "b70edeeb69da0ee57b74373f6c1d7eb84828481fbc15a94efa0ab58c0c54d92e",
+    "dependencies": []
+  },
+  "verification_contracts": [
+    {
+      "verification_id": "provisional-registration-case-issue-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["case-import-provisional-registration-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "same-release-compatible",
+    "post_cutover_smoke_ids": ["case-import-read"]
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

@@ -131,7 +131,7 @@ def open_identity_flow(payload: LineIdentityFlowOpenRequest):
     result = get_line_identity_application().open_flow(
         purpose,
         line_user_id,
-        IdempotencyKey(f"liff-open:{purpose.value}:{line_user_id.value}:{uuid4()}"),
+        IdempotencyKey(payload.idempotency_key),
         _correlation_id("flow-open"),
     )
     return BaseResponse(

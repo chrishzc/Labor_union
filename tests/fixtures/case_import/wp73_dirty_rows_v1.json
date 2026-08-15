@@ -1,0 +1,133 @@
+{
+  "fixture_id": "wp73-dirty-rows-v1",
+  "synthetic": true,
+  "derived_from_real_person_data": false,
+  "cases": [
+    {
+      "case_id": "hcm-missing-root-key",
+      "lane": "hcm",
+      "row": {
+        "案件狀態": "洽談中",
+        "查詢序號(案件編號)": "",
+        "報名時間(建檔)": "2026/08/01",
+        "IP位址": "192.0.2.10",
+        "姓名": "合成客戶甲",
+        "性別": "女",
+        "行動電話": "not-a-phone",
+        "縣市": "新竹市",
+        "身分資格": "一般市民",
+        "服務時間": "8 小時 09:00 17:00",
+        "預產期/預計服務開始月份": "2026/09/01",
+        "預計服務日期": "2026/09/10",
+        "希望服務天數": 5,
+        "居住型態": "大樓",
+        "生產方式": "自然產",
+        "服務方式": "週休2日",
+        "寶寶資訊": "合成資料"
+      },
+      "current_error_fields": [
+        "查詢序號(案件編號)",
+        "行動電話"
+      ],
+      "desired_issue_codes": [
+        "root_key_missing",
+        "phone_invalid"
+      ]
+    },
+    {
+      "case_id": "hcm-numeric-phone-leading-zero-loss",
+      "lane": "hcm",
+      "row": {
+        "案件狀態": "洽談中",
+        "查詢序號(案件編號)": "SYN-HCM-002",
+        "報名時間(建檔)": "2026/08/01",
+        "IP位址": "192.0.2.11",
+        "姓名": "合成客戶乙",
+        "性別": "女",
+        "行動電話": 912345678.0,
+        "縣市": "新竹市",
+        "身分資格": "一般市民",
+        "服務時間": "8 小時 09:00 17:00",
+        "預產期/預計服務開始月份": "2026/09/01",
+        "預計服務日期": "2026/09/10",
+        "希望服務天數": 5,
+        "居住型態": "大樓",
+        "生產方式": "自然產",
+        "服務方式": "週休2日",
+        "寶寶資訊": "合成資料"
+      },
+      "current_error_fields": [],
+      "desired_issue_codes": [
+        "numeric_identifier_leading_zero_irrecoverable"
+      ]
+    },
+    {
+      "case_id": "client-missing-query-number",
+      "lane": "client_beclass",
+      "row": {
+        "查詢序號": "",
+        "姓名": "合成客戶丙",
+        "報名時間": "2026-08-01 09:00:00",
+        "行動電話": "not-a-phone",
+        "Email": "synthetic@example.invalid",
+        "縣市": "新竹市",
+        "出生年": 90,
+        "月": 2,
+        "日": 3
+      },
+      "current_error_fields": [
+        "查詢序號",
+        "行動電話"
+      ],
+      "desired_issue_codes": [
+        "root_key_missing",
+        "phone_invalid"
+      ]
+    },
+    {
+      "case_id": "client-numeric-bank-account",
+      "lane": "client_beclass",
+      "row": {
+        "查詢序號": "SYN-BEC-002",
+        "姓名": "合成客戶丁",
+        "報名時間": "2026-08-01 09:00:00",
+        "行動電話": 912345678.0,
+        "Email": "synthetic@example.invalid",
+        "縣市": "新竹市",
+        "出生年": 90,
+        "月": 2,
+        "日": 3,
+        "補助款退款:銀行代號+分行代號": "8120001",
+        "銀行帳號": 123456789.0
+      },
+      "current_error_fields": [],
+      "desired_issue_codes": [
+        "numeric_identifier_leading_zero_irrecoverable",
+        "numeric_bank_account_representation_ambiguous"
+      ]
+    },
+    {
+      "case_id": "staff-missing-identity",
+      "lane": "staff_beclass",
+      "row": {
+        "姓名": "合成服務人員甲",
+        "身分證字號": "",
+        "IP位址": "192.0.2.20",
+        "報名時間": "2026-08-01 09:00:00",
+        "民國出生年月日": "not-a-date",
+        "行動電話": "not-a-phone",
+        "EMAIL": "synthetic@example.invalid",
+        "縣市": "新竹市"
+      },
+      "current_error_fields": [
+        "身分證字號",
+        "行動電話"
+      ],
+      "desired_issue_codes": [
+        "stable_identity_missing",
+        "combined_birth_date_invalid",
+        "phone_invalid"
+      ]
+    }
+  ]
+}

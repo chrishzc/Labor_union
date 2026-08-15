@@ -3,7 +3,7 @@ doc_type: evidence-receipt
 declared_status: program-fix-completed
 date: 2026-08-13
 owner: Global Migration / LINE
-work_package: ../../02_決策與退役執行記錄/79_LINE_Runtime_Release_Catalog_Recovery_Work_Package.md
+work_package: ../04_已完成與上線封存/work_packages/79_LINE_Runtime_Release_Catalog_Recovery_Work_Package.md
 ---
 
 # WP79 LINE runtime release catalog 恢復證據

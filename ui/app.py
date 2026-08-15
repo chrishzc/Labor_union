@@ -1,3 +1,8 @@
+"""
+File: app.py
+Description: 管理端 Streamlit 導覽入口，依頁面名稱載入已註冊的薄 UI 模組。
+"""
+
 import streamlit as st
 import importlib
 import os
@@ -19,6 +24,7 @@ NAV_SECTION_KEY = "nav_section"
 PAGE_REGISTRY: Mapping[str, tuple[tuple[str, str], ...]] = {
     "營運作業": (
         ("📦 訂單管理", "ui.pages.02_orders"),
+        ("📥 資料匯入中心", "ui.pages.09_data_import"),
         ("多月嫂排班", "ui.pages.03_calendar"),
         ("📋 表單與履歷問卷管理", "ui.pages.05_form_management"),
         ("💬 LINE 管理中心", "ui.pages.07_line_management"),

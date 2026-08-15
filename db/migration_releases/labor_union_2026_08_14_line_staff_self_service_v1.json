@@ -1,0 +1,71 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-line-staff-self-service-2026-08-14-v1",
+  "release_metadata": {
+    "release_name": "LINE staff self-service identity flow v1",
+    "application_version": "line-staff-self-service-v1",
+    "published_at": "2026-08-14",
+    "description": "Add the verified staff self-service purpose to canonical LINE identity flows"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "government-overpayment-v1-or-later"
+  },
+  "artifacts": [
+    {
+      "name": "191_line_staff_self_service_identity_flow.sql",
+      "relative_path": "db/schema_parts/191_line_staff_self_service_identity_flow.sql",
+      "sha256": "f3c334d890764101a9d2855a95a2d054c6fce2eaa9bc06ac2f111eb3ebb12bd4",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "restore-source-dump-before-same-name-replacement",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "line-staff-self-service-identity-flow-owned-column",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": [
+      "line-integration-v1",
+      "line-staff-self-service-v1",
+      "private-operations-api-v1"
+    ],
+    "required_restart_targets": ["api", "line-worker", "streamlit-ui"],
+    "watcher_worker_compatibility": "same-release-required",
+    "post_cutover_smoke_ids": ["line-staff-self-service-verified-binding"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_14_line_staff_self_service_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_14_line_staff_self_service_v1.descriptors.json",
+    "sha256": "5d44ee504368dc50cb57f28b64143c72c8836e903831809be0c491b9f2ddc4b4",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": [
+      "--single-transaction",
+      "--routines",
+      "--events",
+      "--triggers",
+      "--hex-blob"
+    ],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

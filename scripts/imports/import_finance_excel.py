@@ -1,10 +1,14 @@
-"""Thin CLI adapter for the finance workbook import application service."""
+"""
+File: import_finance_excel.py
+Description: 銀行 workbook 維運入口預設預覽，明確確認後才建立 typed 匯入批次。
+"""
 
 from __future__ import annotations
 
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 from typing import Any, Sequence
@@ -18,8 +22,8 @@ from shared_kernel.identities import ActorContext, IdempotencyKey
 from subsystems.finance_import.ingestion import ingest_finance_workbook
 
 
-_TEST_ACTOR = ActorContext("finance-import-cli-test")
-_TEST_IDEMPOTENCY_PREFIX = "finance-import-cli-test:"
+_OPERATOR_ACTOR = ActorContext("finance-import-cli-operator")
+_OPERATOR_IDEMPOTENCY_PREFIX = "finance-import-cli-operator:"
 
 
 def _write_report(path: str, manifest: dict[str, Any]) -> str:
@@ -66,9 +70,9 @@ def _console_summary(
     }
 
 
-def _test_idempotency_key(excel_path: Path) -> IdempotencyKey:
+def _operator_idempotency_key(excel_path: Path) -> IdempotencyKey:
     digest = hashlib.sha256(excel_path.read_bytes()).hexdigest()
-    return IdempotencyKey(f"{_TEST_IDEMPOTENCY_PREFIX}{digest}")
+    return IdempotencyKey(f"{_OPERATOR_IDEMPOTENCY_PREFIX}{digest}")
 
 
 def _dry_run_manifest(excel_path: Path) -> dict[str, Any]:
@@ -84,7 +88,7 @@ def _dry_run_manifest(excel_path: Path) -> dict[str, Any]:
 
 def _ingestion_manifest(excel_path: Path) -> dict[str, Any]:
     receipt = ingest_finance_workbook(
-        str(excel_path), _test_idempotency_key(excel_path), _TEST_ACTOR
+        str(excel_path), _operator_idempotency_key(excel_path), _OPERATOR_ACTOR
     )
     return {
         "mode": "test_ingestion", "transaction_outcome": "committed",
@@ -98,14 +102,11 @@ def _ingestion_manifest(excel_path: Path) -> dict[str, Any]:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="匯入銀行對帳 Excel；預設以測試期 typed adapter 寫入銀行根事實，--dry-run 僅驗證格式、不寫入。",
+        description="匯入銀行對帳 Excel；預設只驗證格式，明確 --apply 才建立銀行匯入批次。",
     )
     parser.add_argument("--excel-path", required=True, help="銀行 Excel 完整路徑")
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="僅驗證 Excel 格式與列數，不寫入資料庫",
-    )
+    parser.add_argument("--apply", action="store_true", help="建立 typed 銀行匯入批次")
+    parser.add_argument("--confirm-database", help="必須等於目前 DB_DATABASE")
     parser.add_argument(
         "--report-path",
         help="可選：將完整 UTF-8 JSON manifest 寫入此路徑",
@@ -119,7 +120,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not excel_path.is_file():
         raise FileNotFoundError(f"找不到帳務 Excel：{args.excel_path}")
     resolved_path = excel_path.resolve()
-    manifest = _dry_run_manifest(resolved_path) if args.dry_run else _ingestion_manifest(resolved_path)
+    manifest = _apply_or_preview_manifest(resolved_path, args)
     report_path = (
         _write_report(args.report_path, manifest)
         if args.report_path
@@ -134,6 +135,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     )
     return 0
+
+
+def _apply_or_preview_manifest(excel_path: Path, arguments) -> dict[str, Any]:
+    if not arguments.apply:
+        return _dry_run_manifest(excel_path)
+    _require_confirmed_database(arguments.confirm_database)
+    return _ingestion_manifest(excel_path)
+
+
+def _require_confirmed_database(confirmed_database: str | None) -> None:
+    configured_database = os.getenv("DB_DATABASE", "").strip()
+    if confirmed_database != configured_database:
+        raise RuntimeError("finance_import_database_confirmation_required")
 
 
 if __name__ == "__main__":

@@ -1,4 +1,7 @@
-"""Translate validated HCM root facts into the typed Case Import intent."""
+"""
+File: hcm_adapter.py
+Description: 將已驗證 HCM facts 轉成可保留未知料理條款的 typed Case Import intent。
+"""
 
 from __future__ import annotations
 
@@ -27,7 +30,7 @@ _CLOCK_PATTERN = re.compile(r"(?P<hour>[01]?\d|2[0-3]):(?P<minute>[0-5]\d)")
 
 
 def build_hcm_case_import_intent(
-    record: Mapping[str, object], planned_end_date: date, *, requires_cooking: bool
+    record: Mapping[str, object], planned_end_date: date, *, requires_cooking: bool | None = None
 ) -> CaseImportIntent:
     case_no = _required_text(record, "case_no")
     identity_status = _required_text(record, "identity_status")
@@ -42,10 +45,15 @@ def build_hcm_case_import_intent(
     return CaseImportIntent(case_no, _client_attributes(record), order, bootstrap)
 
 
+def build_hcm_partial_case_import_intent(record: Mapping[str, object]) -> CaseImportIntent:
+    case_no = _required_text(record, "case_no")
+    return CaseImportIntent(case_no, _client_attributes(record), None, None)
+
+
 def _order_root_facts(
     record, case_no, planned_end_date, *, requires_cooking
 ) -> ImportedOrderRootFacts:
-    service_hours, start_time, end_time, end_offset = _service_time_facts(
+    service_hours, start_time, end_time, end_offset = parse_hcm_service_time(
         _required_text(record, "service_time")
     )
     return ImportedOrderRootFacts(
@@ -78,11 +86,22 @@ def build_approved_case_architecture_bootstrap_intent(
     return CaseArchitectureBootstrapIntent(case_no, terms, PAYROLL_POLICY_VERSION)
 
 
+def parse_hcm_service_time(value: str) -> tuple[int, time, time, int]:
+    """Parse HCM source service terms for both new-case and historical-update lanes."""
+    return _service_time_facts(value)
+
+
 def _client_attributes(record):
     return tuple(
         ClientImportAttribute(str(name), _normalize_value(value))
         for name, value in sorted(record.items())
-        if value is not None
+        if _is_client_attribute_value(value)
+    )
+
+
+def _is_client_attribute_value(value: object) -> bool:
+    return value is None or (
+        not isinstance(value, bool) and isinstance(value, (str, int, date, datetime))
     )
 
 
@@ -140,4 +159,6 @@ __all__ = [
     "PAYROLL_POLICY_VERSION",
     "build_approved_case_architecture_bootstrap_intent",
     "build_hcm_case_import_intent",
+    "build_hcm_partial_case_import_intent",
+    "parse_hcm_service_time",
 ]

@@ -1,3 +1,8 @@
+"""
+File: beclass_import_review_panel.py
+Description: 顯示 BeClass 待修正項目，並在有效 review identity 下執行 Query、Preview 與 Apply。
+"""
+
 import json
 from typing import Any, Mapping, Sequence
 from uuid import uuid4
@@ -30,7 +35,10 @@ def render_beclass_import_review_panel(
         "review_identity",
         key="beclass_review_identity",
     )
-    if st.button("讀取資料", key="beclass_review_load"):
+    has_identity = isinstance(identity, str) and bool(identity.strip())
+    if not has_identity:
+        st.info("請先從目前待修正異常選擇一筆，或輸入 review_identity。")
+    if st.button("讀取資料", key="beclass_review_load", disabled=not has_identity):
         _load_review(client, identity)
     query = st.session_state.get("beclass_review_query")
     if query is not None and query.review_identity != identity:

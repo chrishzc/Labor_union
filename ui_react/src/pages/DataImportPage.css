@@ -1,0 +1,197 @@
+/* Data Import Center CSS Stylesheet */
+
+.import-center-container {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--md-sys-color-surface);
+}
+
+.sidebar {
+  width: var(--sidebar-width);
+  background-color: var(--md-sys-color-surface-container);
+  border-right: 1px solid var(--md-sys-color-outline-variant);
+  padding: var(--md-sys-spacing-6);
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-title {
+  font-size: var(--md-sys-font-size-xl);
+  font-weight: 700;
+  color: var(--md-sys-color-primary);
+  margin-bottom: var(--md-sys-spacing-8);
+  display: flex;
+  align-items: center;
+  gap: var(--md-sys-spacing-2);
+}
+
+.nav-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--md-sys-spacing-2);
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--md-sys-spacing-3);
+  padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
+  border-radius: var(--md-sys-radius-md);
+  color: var(--md-sys-color-on-surface-variant);
+  text-decoration: none;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.nav-link:hover, .nav-link.active {
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.main-wrapper {
+  flex: 1;
+  padding: var(--md-sys-spacing-8);
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--md-sys-spacing-8);
+}
+
+.page-title {
+  font-size: var(--md-sys-font-size-3xl);
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+}
+
+.page-subtitle {
+  color: var(--md-sys-color-on-surface-variant);
+  margin-top: var(--md-sys-spacing-1);
+}
+
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: var(--md-sys-spacing-6);
+}
+
+.category-card {
+  background-color: var(--md-sys-color-surface-container);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-radius-lg);
+  padding: var(--md-sys-spacing-6);
+  box-shadow: var(--md-sys-shadow-1);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.category-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--md-sys-shadow-2);
+}
+
+.card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--md-sys-spacing-4);
+}
+
+.card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--md-sys-radius-md);
+  background-color: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+}
+
+.badge {
+  padding: 4px 12px;
+  border-radius: var(--md-sys-radius-full);
+  font-size: var(--md-sys-font-size-xs);
+  font-weight: 600;
+}
+
+.badge.ready {
+  background-color: var(--md-sys-color-success-container);
+  color: var(--md-sys-color-on-success-container);
+}
+
+.badge.pending {
+  background-color: var(--md-sys-color-warning-container);
+  color: var(--md-sys-color-on-warning-container);
+}
+
+.card-title {
+  font-size: var(--md-sys-font-size-xl);
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+}
+
+.card-desc {
+  font-size: var(--md-sys-font-size-sm);
+  color: var(--md-sys-color-on-surface-variant);
+  margin-top: var(--md-sys-spacing-1);
+  margin-bottom: var(--md-sys-spacing-4);
+}
+
+.card-meta {
+  font-size: var(--md-sys-font-size-xs);
+  color: var(--md-sys-color-on-surface-variant);
+  padding-top: var(--md-sys-spacing-3);
+  border-top: 1px dashed var(--md-sys-color-outline-variant);
+  margin-bottom: var(--md-sys-spacing-5);
+}
+
+.card-actions {
+  display: flex;
+  gap: var(--md-sys-spacing-3);
+}
+
+.btn {
+  flex: 1;
+  padding: var(--md-sys-spacing-3) var(--md-sys-spacing-4);
+  border-radius: var(--md-sys-radius-md);
+  font-weight: 600;
+  font-size: var(--md-sys-font-size-sm);
+  cursor: pointer;
+  border: none;
+  transition: background-color 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-primary {
+  background-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+}
+
+.btn-primary:hover {
+  background-color: var(--md-sys-color-primary-hover);
+}
+
+.btn-outline {
+  background-color: transparent;
+  border: 1px solid var(--md-sys-color-outline);
+  color: var(--md-sys-color-on-surface);
+}
+
+.btn-outline:hover {
+  background-color: var(--md-sys-color-surface-variant);
+}
+
+.file-input {
+  display: none;
+}

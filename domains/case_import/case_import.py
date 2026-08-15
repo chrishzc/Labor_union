@@ -1,4 +1,7 @@
-"""Pure candidate rules for importing one negotiated case."""
+"""
+File: case_import.py
+Description: 定義 Case Import 根事實、來源指紋與候選不變量。
+"""
 
 from __future__ import annotations
 
@@ -61,6 +64,14 @@ class CaseImportIssue(StrEnum):
     PROVISIONAL_REGISTRATION_IDENTITY_MISMATCH = "provisional_registration_identity_mismatch"
 
 
+class HcmIdentityResolution(StrEnum):
+    NEW = "new"
+    EXISTING_MATCH = "existing_match"
+    UNIQUE_CANDIDATE = "unique_candidate"
+    CONFLICT = "conflict"
+    AMBIGUOUS = "ambiguous"
+
+
 class CaseImportDomainError(ValueError):
     def __init__(self, issue: CaseImportIssue, message: str) -> None:
         super().__init__(message)
@@ -99,7 +110,7 @@ class ImportedOrderRootFacts:
     service_start_time: time
     service_end_time: time
     service_end_day_offset: int
-    requires_cooking: bool
+    requires_cooking: bool | None
 
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
@@ -114,8 +125,10 @@ class ImportedOrderRootFacts:
         _require_exact_type(self.service_end_time, time, "service end time")
         if self.service_end_day_offset not in {0, 1}:
             _raise_invalid("service end day offset must be zero or one")
-        if not isinstance(self.requires_cooking, bool):
-            _raise_invalid("requires cooking must be bool")
+        if self.requires_cooking is not None and not isinstance(
+            self.requires_cooking, bool
+        ):
+            _raise_invalid("requires cooking must be bool or None")
         if self.planned_end_date < self.planned_start_date:
             _raise_invalid("planned service interval is inverted")
 
@@ -124,21 +137,27 @@ class ImportedOrderRootFacts:
 class CaseImportIntent:
     case_no: str
     client_attributes: tuple[ClientImportAttribute, ...]
-    order: ImportedOrderRootFacts
-    bootstrap: CaseArchitectureBootstrapIntent
+    order: ImportedOrderRootFacts | None
+    bootstrap: CaseArchitectureBootstrapIntent | None
     provisional_registration_id: int | None = None
 
     def __post_init__(self) -> None:
         _validate_case_no(self.case_no)
         if not isinstance(self.client_attributes, tuple):
             raise TypeError("client attributes must be a tuple")
-        _validate_attributes(self.case_no, self.client_attributes)
-        if self.order.case_no != self.case_no:
+        _validate_attributes(self.case_no, self.client_attributes, self.is_complete)
+        if (self.order is None) != (self.bootstrap is None):
+            _raise_invalid("order and bootstrap must be present together")
+        if self.order is not None and self.order.case_no != self.case_no:
             _raise_invalid("order root facts belong to another case")
-        if self.bootstrap.case_no != self.case_no:
+        if self.bootstrap is not None and self.bootstrap.case_no != self.case_no:
             _raise_invalid("bootstrap intent belongs to another case")
         if self.provisional_registration_id is not None:
             require_positive_integer(self.provisional_registration_id, "provisional registration id")
+
+    @property
+    def is_complete(self) -> bool:
+        return self.order is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -164,11 +183,32 @@ class CaseImportFacts:
 
 
 @dataclass(frozen=True, slots=True)
+class HcmIdentityFacts:
+    case_client_ids: tuple[int, ...]
+    ip_name_client_ids: tuple[int, ...]
+    order_exists: bool
+
+
+def resolve_hcm_identity(facts: HcmIdentityFacts) -> HcmIdentityResolution:
+    if len(facts.case_client_ids) > 1 or len(facts.ip_name_client_ids) > 1:
+        return HcmIdentityResolution.AMBIGUOUS
+    if not facts.case_client_ids and not facts.ip_name_client_ids and not facts.order_exists:
+        return HcmIdentityResolution.NEW
+    if not facts.case_client_ids and len(facts.ip_name_client_ids) == 1 and not facts.order_exists:
+        return HcmIdentityResolution.UNIQUE_CANDIDATE
+    if facts.order_exists and not facts.case_client_ids:
+        return HcmIdentityResolution.CONFLICT
+    if facts.case_client_ids == facts.ip_name_client_ids:
+        return HcmIdentityResolution.EXISTING_MATCH
+    return HcmIdentityResolution.CONFLICT
+
+
+@dataclass(frozen=True, slots=True)
 class CaseImportCandidate:
     case_no: str
     client_attributes: tuple[ClientImportAttribute, ...]
-    order: ImportedOrderRootFacts
-    bootstrap: CaseArchitectureBootstrapCandidate
+    order: ImportedOrderRootFacts | None
+    bootstrap: CaseArchitectureBootstrapCandidate | None
     source_fingerprint: PreviewFingerprint
     fingerprint: PreviewFingerprint
     provisional_registration: ProvisionalRegistrationFacts | None = None
@@ -184,13 +224,13 @@ def build_case_import_candidate(
             CaseImportIssue.DUPLICATE_CASE,
             "The case already exists and cannot be imported again.",
         )
-    bootstrap = _build_bootstrap_candidate(facts, intent)
+    bootstrap = None if not intent.is_complete else _build_bootstrap_candidate(facts, intent)
     _validate_provisional_registration(facts.provisional_registration, intent)
-    source_fingerprint = fingerprint_payload(_source_payload(intent))
+    source_fingerprint = fingerprint_case_import_source(intent)
     fingerprint = fingerprint_payload(
         {
             "source_fingerprint": source_fingerprint.value,
-            "bootstrap_fingerprint": bootstrap.fingerprint.value,
+            "bootstrap_fingerprint": None if bootstrap is None else bootstrap.fingerprint.value,
         }
     )
     return CaseImportCandidate(
@@ -202,6 +242,10 @@ def build_case_import_candidate(
         fingerprint,
         facts.provisional_registration,
     )
+
+
+def fingerprint_case_import_source(intent: CaseImportIntent) -> PreviewFingerprint:
+    return fingerprint_payload(_source_payload(intent))
 
 
 def _validate_provisional_registration(registration, intent) -> None:
@@ -220,6 +264,8 @@ def _validate_provisional_registration(registration, intent) -> None:
 # Kept cohesive so the synthetic version-zero root cannot drift across helpers.
 def _build_bootstrap_candidate(facts, intent):
     order = intent.order
+    if order is None or intent.bootstrap is None:
+        _raise_invalid("complete import requires order and bootstrap")
     bootstrap_facts = CaseArchitectureBootstrapFacts(
         CaseRootFacts(
             order.case_no,
@@ -244,13 +290,14 @@ def _build_bootstrap_candidate(facts, intent):
         ) from error
 
 
-def _validate_attributes(case_no, attributes) -> None:
+def _validate_attributes(case_no, attributes, is_complete) -> None:
     names = tuple(item.name for item in attributes)
     if names != tuple(sorted(set(names))):
         _raise_invalid("client attributes must be sorted and unique")
     if _required_attribute(attributes, "case_no") != case_no:
         _raise_invalid("client root facts belong to another case")
-    for name in ("created_at", "identity_status", "name", "service_time"):
+    required = ("created_at", "identity_status", "name", "service_time") if is_complete else ()
+    for name in required:
         _required_attribute(attributes, name)
 
 
@@ -271,8 +318,8 @@ def _source_payload(intent):
             }
             for item in intent.client_attributes
         ),
-        "order": _order_payload(intent.order),
-        "bootstrap": _bootstrap_payload(intent.bootstrap),
+        "order": None if intent.order is None else _order_payload(intent.order),
+        "bootstrap": None if intent.bootstrap is None else _bootstrap_payload(intent.bootstrap),
         "provisional_registration_id": intent.provisional_registration_id,
     }
 
@@ -333,6 +380,10 @@ __all__ = [
     "CaseImportIssue",
     "ClientImportAttribute",
     "ImportedOrderRootFacts",
+    "HcmIdentityFacts",
+    "HcmIdentityResolution",
     "ProvisionalRegistrationFacts",
     "build_case_import_candidate",
+    "fingerprint_case_import_source",
+    "resolve_hcm_identity",
 ]

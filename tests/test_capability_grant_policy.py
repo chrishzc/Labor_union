@@ -34,13 +34,13 @@ def test_dynamic_grant_requires_expiry_and_known_capability():
         _validate_command(_command(capability="invented.capability"), actor)
 
 
-def test_effective_principal_uses_persisted_grant_overlay_not_role_hierarchy():
+def test_legacy_persisted_grant_overlay_cannot_reduce_equal_business_access():
     reviewer = AdminPrincipal(
         9, "temp-reviewer", "代理覆核", "line_agent",
         capabilities=frozenset({"line.identity.read", "knowledge.source.review"}),
     )
 
     assert has_required_capability(reviewer, "knowledge.source.review")
-    assert not has_required_capability(reviewer, "knowledge.source.publish")
+    assert has_required_capability(reviewer, "knowledge.source.publish")
     assert _event_type("grant") == "capability_granted"
     assert _event_type("revoke") == "capability_revoked"

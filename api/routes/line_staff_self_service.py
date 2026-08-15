@@ -10,16 +10,21 @@ from fastapi import APIRouter, HTTPException, Query
 from api.dependencies.line_identity import get_liff_token_verifier
 from api.schemas.base import BaseResponse
 from api.schemas.line_staff_self_service import (
-    StaffLeaveRequestCreate,
-    StaffLeaveRequestCreateResponse,
     StaffLiffRequest,
     StaffOrderPageView,
     StaffOrderSearchRequest,
     StaffScheduleView,
 )
 from domains.line.identities import LineUserId
-from domains.line.identity_flow import LineIdentityFlowId, LineIdentityFlowPurpose, validate_identity_flow
-from infrastructure.line.liff_token_verifier import InvalidLiffTokenError, LiffVerificationUnavailableError
+from domains.line.identity_flow import (
+    LineIdentityFlowId,
+    LineIdentityFlowPurpose,
+    validate_identity_flow,
+)
+from infrastructure.line.liff_token_verifier import (
+    InvalidLiffTokenError,
+    LiffVerificationUnavailableError,
+)
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from subsystems.scheduling.staff_monthly_calendar_query import get_staff_monthly_calendar_schedule
 
@@ -38,57 +43,17 @@ def order_search(payload: StaffOrderSearchRequest):
 
 
 @router.post("/schedule", response_model=BaseResponse[StaffScheduleView])
-def monthly_schedule(payload: StaffLiffRequest, year: int = Query(ge=1900, le=2100), month: int = Query(ge=1, le=12)):
+def monthly_schedule(
+    payload: StaffLiffRequest,
+    year: int = Query(ge=1900, le=2100),
+    month: int = Query(ge=1, le=12),
+):
     line_user_id = _verified_line_user_id(payload)
     with open_line_unit_of_work() as unit_of_work:
         staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
         unit_of_work.commit()
     schedule = get_staff_monthly_calendar_schedule(int(staff["staff_id"]), year, month)
     return BaseResponse(data={**schedule, "staff_name": staff["staff_name"]})
-
-
-@router.post("/leave-requests", response_model=BaseResponse[StaffLeaveRequestCreateResponse])
-def create_leave_request(payload: StaffLeaveRequestCreate):
-    if payload.leave_end_date < payload.leave_start_date:
-        raise HTTPException(status_code=422, detail={"code": "leave_date_range_invalid", "message": "請假結束日期不可早於開始日期"})
-    if payload.substitute_found and not payload.substitute_name.strip():
-        raise HTTPException(status_code=422, detail={"code": "substitute_name_required", "message": "已找到代班人員時，請填寫代班人員姓名"})
-
-    line_user_id = _verified_line_user_id(payload)
-    with open_line_unit_of_work() as unit_of_work:
-        staff = _required_staff(unit_of_work.customer_service.staff_subject(line_user_id.value))
-        with unit_of_work._connection.cursor() as cursor:
-            cursor.execute(
-                """
-                INSERT INTO staff_leave_requests (
-                    staff_id, line_user_id, leave_start_date, leave_end_date,
-                    leave_reason, substitute_found, substitute_name,
-                    substitute_phone, substitute_note, status
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')
-                """,
-                (
-                    int(staff["staff_id"]),
-                    line_user_id.value,
-                    payload.leave_start_date,
-                    payload.leave_end_date,
-                    payload.leave_reason.strip() or None,
-                    payload.substitute_found,
-                    payload.substitute_name.strip() or None,
-                    payload.substitute_phone.strip() or None,
-                    payload.substitute_note.strip() or None,
-                ),
-            )
-            request_id = int(cursor.lastrowid)
-        unit_of_work.commit()
-    return BaseResponse(
-        message="請假申請已送出，請等待工會人員審核。",
-        data={
-            "request_id": request_id,
-            "status": "pending",
-            "staff_id": int(staff["staff_id"]),
-            "staff_name": staff["staff_name"],
-        },
-    )
 
 
 def _required_staff(staff):

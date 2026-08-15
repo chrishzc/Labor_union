@@ -1,8 +1,12 @@
-"""Thin Streamlit display for canonical Finance Import commands."""
+"""
+File: panel.py
+Description: 顯示 Finance Import 上傳、批次 Preview／Apply、穩定重試與人工處理入口。
+"""
 
 from __future__ import annotations
 
 import json
+from hashlib import sha256
 from uuid import uuid4
 
 import streamlit as st
@@ -22,6 +26,7 @@ from ui import nav_helper
 _BATCH_APPLY_STATE_KEY = "finance_import_batch_apply_state"
 _CORRECTION_APPLY_STATE_KEY = "finance_import_correction_apply_state"
 _HISTORICAL_REPROCESS_APPLY_STATE_KEY = "historical_reprocess_apply_state"
+_INGESTION_STATE_KEY = "finance_import_ingestion_state"
 _JOB_STATUS_POLL_INTERVAL_SECONDS = 5
 
 
@@ -87,19 +92,47 @@ def _render_ingestion(client: FinanceImportApiClient) -> None:
             if workbook is None:
                 st.error("請先選擇銀行 Excel 檔案。")
                 return
+            content = workbook.getvalue()
+            command = _finance_ingestion_command(st.session_state, content)
             try:
                 with st.spinner("正在上傳並建立待確認批次…"):
                     receipt = client.ingest_workbook(
                         workbook.name,
-                        workbook.getvalue(),
-                        idempotency_key=_new_key("finance-import-ingest"),
-                        correlation_id=_new_key("finance-import-correlation"),
+                        content,
+                        idempotency_key=command["idempotency_key"],
+                        correlation_id=command["correlation_id"],
                     )
             except FinanceImportApiError as error:
                 _show_api_error(error)
                 return
             st.success(f"已建立批次：{receipt.batch_identity}")
             st.json(receipt.model_dump())
+            st.session_state["finance_import_batch_identity"] = receipt.batch_identity
+            _render_ingestion_manifest(client, receipt.batch_identity)
+
+
+def _finance_ingestion_command(state, content: bytes) -> dict[str, str]:
+    digest = sha256(content).hexdigest()
+    existing = state.get(_INGESTION_STATE_KEY)
+    if isinstance(existing, dict) and existing.get("source_content_digest") == digest:
+        return existing
+    command = {
+        "source_content_digest": digest,
+        "idempotency_key": _new_key("finance-import-ingest"),
+        "correlation_id": _new_key("finance-import-correlation"),
+    }
+    state[_INGESTION_STATE_KEY] = command
+    return command
+
+
+def _render_ingestion_manifest(client, batch_identity: str) -> None:
+    try:
+        manifest = client.get_manifest(batch_identity)
+    except FinanceImportApiError as error:
+        _show_api_error(error)
+        return
+    st.caption("已由後端依欄位契約辨識來源格式與工作表。")
+    st.json(manifest.model_dump())
 
 
 def _render_batch_preview_and_apply(client: FinanceImportApiClient) -> None:

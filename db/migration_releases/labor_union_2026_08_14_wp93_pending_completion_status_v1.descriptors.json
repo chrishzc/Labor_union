@@ -1,0 +1,11 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "198_case_import_pending_completion_status.sql": {
+      "tables": {
+        "orders": ["status"]
+      },
+      "triggers": []
+    }
+  }
+}

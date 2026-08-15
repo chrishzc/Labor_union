@@ -5,7 +5,6 @@ Description: 將客服文字指令轉為可稽核的 LINE 回覆與長效 LIFF �
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta
 import os
 from typing import Callable
@@ -16,7 +15,6 @@ from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineReci
 from domains.line.identity_flow import LineIdentityFlowPurpose
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.customer_service.contracts import CreateCustomerServiceMessage
-from subsystems.line.delivery_contracts import LineProviderOutcomeType
 from subsystems.line.identity_contracts import OpenLineIdentityFlowCommand
 
 
@@ -35,11 +33,9 @@ class LineServiceHelpApplication:
         self,
         now: Callable[[], datetime],
         identity_url: Callable[[str, str], str] | None = None,
-        reply_provider: object | None = None,
     ) -> None:
         self._now = now
         self._identity_url = identity_url
-        self._reply_provider = reply_provider
 
     def handle(self, inbox, unit_of_work, line_user_id, text: str) -> bool:
         normalized = text.strip()
@@ -53,7 +49,7 @@ class LineServiceHelpApplication:
             )
             return True
         if normalized == "服務說明":
-            self._reply_or_enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu")
+            self._enqueue(inbox, unit_of_work, line_user_id, _service_menu_payload(), "menu")
             return True
         category = _category_for_text(normalized)
         if category is None:
@@ -74,7 +70,7 @@ class LineServiceHelpApplication:
             )
             payload = _text_payload(_TICKET_ACKNOWLEDGEMENTS[category])
             unit_of_work.audit.append(_ticket_audit(ticket.ticket_id, line_user_id.value))
-        self._reply_or_enqueue(inbox, unit_of_work, line_user_id, payload, category.value)
+        self._enqueue(inbox, unit_of_work, line_user_id, payload, category.value)
 
     def _progress_payload(self, inbox, unit_of_work, line_user_id):
         context = unit_of_work.customer_service.latest_client_case(line_user_id.value)
@@ -105,26 +101,6 @@ class LineServiceHelpApplication:
             )
         )
 
-    def _reply_or_enqueue(self, inbox, unit_of_work, line_user_id, payload, suffix):
-        reply_token = _reply_token(inbox)
-        if reply_token and self._reply_provider is not None:
-            outcome = self._reply_provider.reply(reply_token, payload)
-            if outcome.outcome_type is LineProviderOutcomeType.SUCCESS:
-                unit_of_work.audit.append(
-                    _reply_audit(
-                        suffix,
-                        line_user_id.value,
-                        outcome.provider_message_id.value if outcome.provider_message_id else "",
-                    )
-                )
-                return
-            unit_of_work.audit.append(
-                _reply_audit(suffix, line_user_id.value, outcome.error_code or "reply_failed")
-            )
-            return
-        self._enqueue(inbox, unit_of_work, line_user_id, payload, suffix)
-
-
 def _category_for_text(text):
     return next((category for category, aliases in _CATEGORY_ALIASES.items() if text in aliases), None)
 
@@ -136,20 +112,6 @@ def _event_key(inbox, suffix):
 def _ticket_audit(ticket_id, line_user_id):
     from subsystems.line.ports import LineAuditIntent
     return LineAuditIntent("customer_service.message.received", f"line:{line_user_id}", "customer_service_ticket", str(ticket_id))
-
-
-def _reply_audit(suffix, line_user_id, provider_message_id):
-    from subsystems.line.ports import LineAuditIntent
-    return LineAuditIntent("line.webhook.reply.sent", f"line:{line_user_id}", "line_reply", f"{suffix}:{provider_message_id or 'accepted'}")
-
-
-def _reply_token(inbox) -> str:
-    try:
-        payload = json.loads(inbox.event.payload_json)
-    except (AttributeError, TypeError, ValueError, json.JSONDecodeError):
-        return ""
-    token = payload.get("replyToken") if isinstance(payload, dict) else ""
-    return token.strip() if isinstance(token, str) else ""
 
 
 def _text_payload(text):

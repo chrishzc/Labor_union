@@ -46,11 +46,17 @@ def test_line_management_ui_uses_only_canonical_identity_review_routes() -> None
     assert "operation_headers" in component_source
 
 
-def test_canonical_worker_entrypoint_does_not_import_legacy_worker_eagerly() -> None:
+def test_cloud_worker_entrypoints_use_private_api_without_database_access() -> None:
     source = (ROOT / "scripts/run_line_worker.py").read_text(encoding="utf-8")
+    monitor = (ROOT / "scripts/run_service_monitor.py").read_text(encoding="utf-8")
     import_prefix = source.split("def main", 1)[0]
 
     assert "from line.worker import" not in import_prefix
+    for entrypoint in (source, monitor):
+        assert "PrivateOperationsClient" in entrypoint
+        assert "discard_database_credentials" in entrypoint
+        assert "infrastructure.mysql" not in entrypoint
+        assert "get_connection" not in entrypoint
 
 
 def test_public_webhook_uses_canonical_boundary_even_with_legacy_environment(monkeypatch) -> None:

@@ -1,3 +1,8 @@
+"""
+File: test_init_db_schema_parts.py
+Description: 驗證 schema loader 的順序、失敗回滾與唯一 assembly 執行邊界。
+"""
+
 from collections import Counter
 from pathlib import Path
 
@@ -139,7 +144,7 @@ def test_main_rolls_back_closes_and_propagates_schema_part_failure(monkeypatch, 
     def fail_schema_part(cursor, schema_parts_dir):
         raise RuntimeError("載入 schema part 失敗：60_broken.sql: forced failure")
 
-    monkeypatch.setattr(init_db, "load_schema_parts", fail_schema_part)
+    monkeypatch.setattr(init_db, "load_schema_paths", fail_schema_part)
 
     with pytest.raises(RuntimeError, match="60_broken.sql"):
         init_db.main(["--allow-drop"])

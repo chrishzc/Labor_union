@@ -1,4 +1,7 @@
-"""Typed anomaly definition registry and current-state reducer."""
+"""
+File: registry.py
+Description: 定義 canonical anomaly 契約並將來源事實歸約為 current-state 警示。
+"""
 
 from __future__ import annotations
 
@@ -247,6 +250,7 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
             _client_refund_return_definition(),
             _finance_integrity_definition(),
             _hcm_validation_definition(),
+            _historical_order_review_definition(),
             _order_matching_stage_definition("ORDER-001"),
             _order_matching_stage_definition("ORDER-002"),
             _order_matching_stage_definition("ORDER-003"),
@@ -297,6 +301,19 @@ def _beclass_missing_definition() -> AnomalyDefinition:
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
         display_fields=("case_no",),
+    )
+
+
+def _historical_order_review_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="HISTORICAL-ORDER-001",
+        source_domain="orders",
+        fingerprint_fields=("review_identity",),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(),
+        no_automated_recovery=True,
+        display_fields=("issue_codes", "masked_case_identity", "review_identity"),
     )
 
 

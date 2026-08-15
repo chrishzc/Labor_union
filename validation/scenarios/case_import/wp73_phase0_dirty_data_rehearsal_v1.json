@@ -1,0 +1,45 @@
+{
+  "scenario_id": "wp73-phase0-dirty-data-rehearsal-v1",
+  "contract_status": "characterization",
+  "source_data_policy": {
+    "synthetic_only": true,
+    "raw_workbooks_committed": false,
+    "real_person_identifiers_committed": false
+  },
+  "lanes": {
+    "hcm_current": {
+      "parser_characterization": "available",
+      "true_no_write_dry_run": "blocked_code_gap",
+      "apply_rehearsal": "not_run"
+    },
+    "hcm_historical": {
+      "parser_characterization": "available",
+      "true_no_write_dry_run": "blocked_code_gap",
+      "apply_rehearsal": "not_run"
+    },
+    "client_beclass_historical": {
+      "parser_characterization": "available",
+      "true_no_write_dry_run": "blocked_code_gap",
+      "apply_rehearsal": "not_run"
+    },
+    "staff_beclass_historical": {
+      "parser_characterization": "available",
+      "true_no_write_dry_run": "blocked_business_owner",
+      "apply_rehearsal": "not_run"
+    }
+  },
+  "no_write_invariant": {
+    "source_snapshot": "read_only",
+    "candidate_snapshot_before_equals_after": true,
+    "database_connections_allowed_during_parser_characterization": 0,
+    "commits_allowed_during_parser_characterization": 0,
+    "rollbacks_allowed_during_parser_characterization": 0
+  },
+  "capability_decision_values": [
+    "reuse-existing-roots",
+    "code-gap-only",
+    "schema-gap-required",
+    "business-owner-blocked"
+  ],
+  "fixture": "tests/fixtures/case_import/wp73_dirty_rows_v1.json"
+}

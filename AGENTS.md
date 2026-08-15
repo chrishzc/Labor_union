@@ -2,10 +2,14 @@
 
 本檔案是本專案所有 AI Agent 與自動化程式修改工作的根層規範。所有 Agent 進入工作區後都必須先讀本檔，再讀任務範圍內的正式規格與相鄰文件。
 
-每個新任務讀完本檔後，必須再完整讀取 `.agents/AGENTS.md`，其中保存使用者個人的互動、
-計畫與 Git 操作習慣，不得把其內容合併回本檔。若該檔不存在或無法以 strict UTF-8 解碼，
-必須先告知使用者，不得靜默略過。同一任務內若檔案內容及 HEAD 均未改變，不必重複載入；
-切換分支、更新 HEAD 或檔案變更後必須重讀。
+`.agents/AGENTS.md` 是可選的個人 overlay；存在時才以 strict UTF-8 完整讀取，只能補充互動、
+計畫與 Git 偏好，不得覆蓋本檔、正式規格或人工裁決，也不得合併回共享規範。缺檔時正常繼續；
+存在但無法 strict UTF-8 解碼時必須告知使用者且不得套用。同一任務內若檔案內容及 HEAD 均未
+改變，不必重複載入；切換分支、更新 HEAD 或檔案變更後必須重讀。
+
+本檔必須保持跨開發者與跨機器可攜：不得要求個人帳號、絕對本機路徑、私人 skill／plugin、
+個人 `.env` 或 Git ignored 檔案才能執行共享工作。個人工具可自行使用，但不能成為專案 gate、
+驗收證據的唯一來源或其他協作者的必要依賴。
 
 `.agents/`、`history/git_PR.md`、`history/git_PR.md.example` 及其他已被 Git 忽略的個人檔案屬
 使用者本機成果。不得 stage、commit、push、覆蓋、搬移、清理或刪除；fetch、pull、merge 與
@@ -53,6 +57,8 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 - schema 依 `db/schema_parts/` → `db/schema.sql` → versioned release metadata 的路徑管理，必須 additive、可驗證且可追溯；不得自行套用到正式資料庫。
 - 每次 schema、欄位、constraint、index、trigger、view 或 seed／backfill 變更，都必須同時交付開發者本機資料庫升級路徑；不得只讓 fresh bootstrap 或 disposable test DB 能建立成功。release 必須被 canonical migration chain／catalog 明確收錄，descriptor 必須涵蓋 altered parent columns 與所有 owned objects，且唯讀 migration preview 必須能列出該 release／artifact。未通過 preserve-data source → candidate → verify 驗證前，不得宣稱該 schema 變更完成。
 - `start_local_development` 不負責套用 schema。保留既有資料使用 `scripts/launchers/update_local_database.bat`；捨棄資料並回到模板使用 `reset_DB.bat`，但 fixture 缺失時必須 fail closed。fresh bootstrap、preserve-data upgrade、fixture reset 與 production migration 是四條不同流程，不得互相替代或隱式串接。
+- 本機 MySQL 的標準執行環境是 Docker `mysql_db` container；`mysql` 與 `mysqldump` 不要求存在於主機 `PATH`。當主機 client 缺失時，`scripts.update_local_database` 應自動偵測運行中的 `mysql_db`，或明確傳入 `--mysql-container mysql_db`。先確認 Docker daemon 可存取；不得因主機 `PATH` 缺少 client 而跳過 database engine gate、改用 mock，或直接操作 container 內 root 帳號。
+- `scripts.update_local_database --apply` 是開發者本機的完整 replacement flow：candidate 驗證後會替換 configured source，不能作為純 engine gate。純 disposable candidate 驗證使用 `scripts.migrate_preserved_database_additive_schema --rehearsal --apply`／`--verify`，並明確傳入 `--mysql-container mysql_db`、source、candidate 與既有 plan／operation receipts；不得執行 `--switch`。若 source 的既有 owned object 為 `partial` 或 `drift`，runner 必須 fail closed，先處理該 baseline 再驗證新 release。
 - DDL、system seed 與既有業務資料 backfill 必須在 release metadata 中分開聲明。任何 row migration 都要有 dry-run、影響筆數／fingerprint、unresolved review、replay 與 rollback evidence；不得把未宣告的資料轉換藏在 schema part，也不得因開發者本機需要升級而擴張成 production data migration 授權。
 
 ### 3.1 資料庫變更執行門
@@ -119,68 +125,37 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 
 ## 7. Dirty worktree、Git 與協作
 
-- 既有未提交、未追蹤與 ignored 修改都視為使用者成果。不得 reset、clean、stash、切換分支、建立 worktree、覆蓋、搬移或刪除無關 dirty paths。
+- 既有未提交、未追蹤與 ignored 修改都視為使用者成果。不得 reset、clean、stash、切換分支、建立 worktree、覆蓋、搬移或刪除無關 dirty paths；可使用已由人員或協調者明確提供的獨立 worktree，但不得自行建立或切換。
 - 修改範圍只限本次任務直接需要的檔案；遇到重疊修改時，先辨認來源、差異與語意再動手。
 - 不得自行 stage、commit、push、建立 PR 或操作遠端資源，除非使用者明確要求。
 - 只有兩個以上互不依賴、寫入範圍不重疊且交接成本合理的工作才平行派工。子代理不得擴大範圍、修改共享檔案或自行 commit；主代理負責整合與最終自我檢查。
 - 所有文字檔使用 strict UTF-8，預設無 BOM；不得用 replacement 或 ignore 隱藏解碼錯誤。
 - secret、token、internal key、完整銀行帳號、raw webhook secret 與完整個資不得寫入 Git、規格、log、command argument、UI 或 receipt。證據只保留驗收所需的最小去敏內容。
 
-## 8. AI Agent Clean Code 守則
+### 多人協作與合併裁決
 
-每次實作、修復、重構或 review production code、schema、migration、script 或測試前，必須先載入並套用 `$coding-rule`（`coding-rule/SKILL.md`）。任務需先建立可驗證的 Task Charter，依公開契約與風險選擇最小且完整的設計，修復 defect 時優先保留 fail-before-fix 證據，並在最後相關編輯後重跑對應驗證。若執行環境沒有該 skill，不得假裝已套用；必須明確回報，並仍遵守本節 Rule 1～5 與專案其他 gate。
+- 任務以人可讀的 Work Package／issue／標題，加上 owner、scope、write set 與 base ref 識別。commit SHA 可作為證據，但不得要求或使用內容 hash／fingerprint 作為任務身分、worktree 或 branch 名稱、協作鎖、進度紀錄或衝突裁決依據。
+- hash 只用於既有契約明確要求的不可變、可重現 artifact 完整性，例如 migration SQL、release／descriptor metadata、generated validation release、已核准 snapshot／golden artifact 與其 receipt。hash 不代表 owner、業務授權、任務狀態，也不能決定哪一側變更應保留。
+- 平行工作開始前，協調者必須記錄各 lane 的 owner、base ref、scope、out-of-scope、exact write set、acceptance 與 shared hot spots。`AGENTS.md`、共同 README／index、catalog、manifest、release chain、lockfile、generated authority 與共享 fixture 在同一協作批次只能有一位 integration writer；其他作者只交付自己的內容檔及精確 index delta，不直接競寫 hot spot。
+- handoff、配號與合併前必須比較目前 integration target 與原 base ref，並重查 write set、shared hot spots 及 canonical catalog 自開工後的變更。發現 base drift 時先重讀受影響規格與 diff、重做衝突盤點；不得沿用舊的 next number、index order、manifest position 或驗收假設。
+- 合併或共同編輯前，先建立最小衝突盤點：path、各方意圖與 owner、語意分類、建議處置（`keep both`、`ours`、`theirs`、`successor`、`defer`）。非純文字格式衝突不得自行定案；須由相關 owner 或人工確認處置。
+- 新增帶 ordinal、正式規格編號、Work Package ID、schema part ordinal 或 release ID 的 artifact 時，必須先確認其 namespace 與 canonical catalog owner。平行 lane 一律先使用人可讀、無整數占位的 provisional identity，例如 `PROV-YYYYMMDD-<owner>-<topic>`；不得自行以「目前最大值 + 1」、README 的 next number 或另一 namespace 的空號宣稱 canonical identity，也不得先修改 shared index。
+- canonical ID 只由 integration writer 在最新 integration target 上 late-bind：先精準檢查 active catalog、相關 archive manifest、release chain 及未追蹤檔案，再於同一整合變更中完成配號、檔名、frontmatter、inbound links、catalog／index／manifest。README 或索引記載的目前最大值只能作觀察提示，不是 reservation；catalog 不完整、owner 不明或 base drift 未解決時維持 provisional 並 fail closed。
+- provisional／draft 且尚未被核准、發布、套用或成為 inbound reference 的 identity 可由 integration writer 改名；已進入 canonical catalog、已被引用、已核准、已發布或已套用的 identity 不得為解決碰撞而改號或覆寫。不同業務 lane 保留並分配不同 canonical ID；同一語意須比較契約與驗收證據後指定 successor／superseded／defer，不得以 Git 的 `ours`／`theirs` 取代語意裁決。
+- release ID、schema part ordinal 與文件／Work Package 編號是不同 namespace，不互相借號。已發布或已套用的 migration SQL、release／descriptor metadata 與 digest bytes 永遠不可改號、覆寫或重算；碰撞或修正只能建立有明確 dependency 的 successor artifact，並重跑資料庫變更執行門。
+- 合併協調者只在各 lane 內容 freeze 且語意裁決完成後，一次整合 shared catalog、index 與 manifest order。每次協調完成都要記錄 provisional → canonical mapping、保留、取代、延後項目、仍待驗證的 gate 及最新 base ref。
 
-每次生成或修改程式碼時，依序執行：
-
-`寫程式碼 → 自我檢查 Rule 1～5 → 發現違反就自行修正 → 交付`
-
-任何一條沒有把握時，先拆解或重寫，不交付不合格程式碼。
-
-### Rule 1：3 秒命名
-
-- 名稱必須精準表達用途，讓第一次看到的人在 3 秒內猜到意圖。
-- 禁止魔術數字、模糊縮寫與無意義編號，例如 `d`、`data1`、`userList2`。
-- 變數使用具體名詞，例如 `elapsed_time_in_days`、`unpaid_invoices`。
-- 函式使用動詞短語，例如 `calculate_tax()`；類別使用名詞，例如 `InvoiceCalculator`。
-- 收尾時重讀所有新增或修改的名稱；無法在 3 秒內理解就改名。
-
-### Rule 2：20 行樂高積木
-
-- 單一函式以 20 行為預設上限，並維持單一職責與單一抽象層。
-- 不得在同一函式混合讀 API、解析資料、寫資料庫等不同責任。
-- 高層業務流程不得與底層字串或序列化細節混在同一函式。
-- 超過 20 行時先嘗試拆成可理解的小單元。
-- 若拆分會產生更難懂的間接層，允許保留超過 20 行，但必須在函式上方用一行註解說明「為何不拆分」。
-
-### Rule 3：防禦型單向出口
-
-- 優先使用 guard clauses；異常與邊界情況先 return 或 throw，再進入主流程。
-- 儘量避免不必要的 `else`；若兩邊都是同等重要的正常分支，可以使用 `else`。
-- 縮排以 2 層為預設上限；超過時優先抽出職責函式，不以放寬限制掩蓋複雜度。
-
-### Rule 4：程式即文件
-
-- 用名稱、型別、物件與函式本身表達意圖。
-- 禁止複述程式行為的註解，例如「宣告變數」或「呼叫 API」。
-- 註解只解釋無法從程式本身看出的 Why，例如特殊業務考量或暫時繞過已知問題；不寫 What 或 How。
-
-### Rule 5：童軍營地法則
-
-- 只修改與本次任務直接相關的程式碼。
-- 修改某個函式或檔案時，可以清理該邊界內明顯的壞命名或重複邏輯。
-- 禁止跨模組、跨檔案的順便重構，不擅自改動無關邏輯。
-- 交付前逐行確認：每一行改動都能對應本次任務；說不出理由的改動必須還原。
-
-## 9. 交付前檢查
+## 8. 交付前檢查
 
 1. 變更是否對應一個明確 business scenario、Domain／Subsystem 與已核准範圍？
 2. owner、SSOT、根事實、衍生值、交易與外部副作用邊界是否仍清楚？
 3. 新檔案是否放在本規範指定位置，且沒有建立雙 SSOT 或 root 暫存？
 4. 規格、代辦、code、tests、validation contract、receipt 與索引是否互相可追溯？
 5. 是否保護所有既有 dirty paths，且每一行 diff 都屬於本任務？
-6. 是否完成正確層級的測試、`git diff --check`、UTF-8 與敏感資訊檢查？
-7. 是否明確揭露未完成、未授權、live-drift、skip、風險與需要人工處理的項目？
-8. 若有 DB 變更，canonical release chain、owned-object descriptor、fresh bootstrap、preserve-data dry-run／candidate 驗證與開發者操作文件是否同步完成？
+6. 若涉及平行工作或新 identity，是否完成 base-drift／namespace／collision 檢查，由唯一 integration writer 配號並更新 shared hot spots？
+7. 是否完成正確層級的測試、`git diff --check`、UTF-8 與敏感資訊檢查？
+8. 是否明確揭露未完成、未授權、live-drift、skip、風險與需要人工處理的項目？
+9. 若有 DB 變更，canonical release chain、owned-object descriptor、fresh bootstrap、preserve-data dry-run／candidate 驗證與開發者操作文件是否同步完成？
 
 ## graphify
 
@@ -192,7 +167,7 @@ Rules:
 - Agents and operators must first run from the project root, then invoke the project-local wrapper `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\graphify.ps1`, followed directly by the Graphify subcommand and arguments; do not insert `--` and do not use bare `graphify`. This process-scoped policy option does not change user or system policy, and the wrapper resolves only `.venv\Scripts\graphify.exe` without changing `PATH`.
 - For codebase questions, first run `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\graphify.ps1 query "<question>"` when graphify-out/graph.json exists. Use `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\graphify.ps1 path "<A>" "<B>"` for relationships and `powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\graphify.ps1 explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
 - Dirty graphify-out/ files are expected after hooks or incremental updates; dirty graph files are not a reason to skip graphify. Only skip graphify if the task is about stale or incorrect graph output, or the user explicitly says not to use it.
-- If `graphify-out/graph.json` is missing or stale, report that state and use authorised source reads. Do not substitute an inline BFS/NetworkX traversal or any other fallback graph query.
+- If `graphify-out/graph.json` is missing or stale, or the project wrapper／`.venv` executable is unavailable, report that state and use authorised source reads. Do not install Graphify, use bare `graphify`, or substitute an inline BFS/NetworkX traversal or any other fallback graph query.
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
 - Do not run `graphify update` for the frozen-base/freshness workflow. Only an explicitly authorised full Base build may refresh its graph evidence.

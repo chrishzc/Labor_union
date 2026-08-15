@@ -24,12 +24,7 @@ RECOVERABLE = frozenset({PART_148.name, PART_163.name})
 def _config() -> migration.DatabaseConfig:
     if not os.getenv("MYSQL_TEST_CONTAINER"):
         pytest.skip("requires an explicitly configured disposable MySQL container")
-    return migration.DatabaseConfig(
-        os.getenv("DB_HOST", "127.0.0.1"),
-        int(os.getenv("DB_PORT", "3306")),
-        os.getenv("DB_USER", "root"),
-        os.getenv("DB_PASSWORD", ""),
-    )
+    return migration.config_from_env(ROOT / ".env")[0]
 
 
 def _configure_recovery_release(monkeypatch: pytest.MonkeyPatch) -> None:
