@@ -21,6 +21,7 @@ from subsystems.line.delivery_contracts import (
 )
 
 _PUSH_ENDPOINT = "https://api.line.me/v2/bot/message/push"
+_REPLY_ENDPOINT = "https://api.line.me/v2/bot/message/reply"
 
 
 class LineMessagingApiAdapter:
@@ -65,6 +66,41 @@ class LineMessagingApiAdapter:
                 LineProviderOutcomeType.SUCCESS,
                 provider_message_id=LineProviderMessageId(
                     _sent_message_id(response) or accepted_request_id
+                ),
+            )
+        return _failure_outcome(response)
+
+    def reply(self, reply_token: str, message: dict[str, Any]) -> LineProviderOutcome:
+        token = reply_token.strip()
+        if not token:
+            return _failed(LineProviderOutcomeType.REJECTED, "line_reply_token_required")
+        try:
+            response = self._session.post(
+                _REPLY_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {self._access_token}",
+                    "Content-Type": "application/json",
+                },
+                data=json.dumps(
+                    {"replyToken": token, "messages": [message]},
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                timeout=self._timeout_seconds,
+            )
+        except requests.Timeout:
+            return _failed(LineProviderOutcomeType.TIMEOUT, "line_provider_timeout")
+        except requests.RequestException:
+            return _failed(
+                LineProviderOutcomeType.UNAVAILABLE,
+                "line_provider_unavailable",
+            )
+        if 200 <= int(response.status_code) < 300:
+            return LineProviderOutcome(
+                LineProviderOutcomeType.SUCCESS,
+                provider_message_id=LineProviderMessageId(
+                    response_request_id(response) or f"reply:{token[:16]}"
                 ),
             )
         return _failure_outcome(response)

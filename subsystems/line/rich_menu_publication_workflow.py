@@ -504,6 +504,12 @@ def build_line_action(action: dict[str, Any]) -> dict[str, str]:
         return {"type": "message", "text": action["text"]}
     if action["type"] == "postback":
         return {"type": "postback", "data": action["data"]}
+    if action["type"] == "richmenuswitch":
+        return {
+            "type": "richmenuswitch",
+            "richMenuAliasId": action["rich_menu_alias_id"],
+            "data": action["data"] or action["rich_menu_alias_id"],
+        }
     if action.get("uri_source") == "liff":
         liff_id = os.getenv("LINE_LIFF_ID", "").strip()
         if not liff_id:
@@ -549,6 +555,34 @@ def _line_request(method: str, url: str, **kwargs) -> requests.Response:
             retryable=response.status_code in RETRYABLE_HTTP,
         )
     return response
+
+
+def _set_rich_menu_alias(
+    alias_id: str | None,
+    rich_menu_id: str,
+    headers: dict[str, str],
+) -> None:
+    if not alias_id:
+        return
+    payload = {"richMenuAliasId": alias_id, "richMenuId": rich_menu_id}
+    try:
+        _line_request(
+            "POST",
+            "https://api.line.me/v2/bot/richmenu/alias",
+            headers=headers,
+            json=payload,
+        )
+    except RichMenuPublishError as exc:
+        if exc.code != "http_409" and not (
+            exc.code == "http_400" and "conflict richmenu alias id" in str(exc)
+        ):
+            raise
+        _line_request(
+            "POST",
+            f"https://api.line.me/v2/bot/richmenu/alias/{alias_id}",
+            headers=headers,
+            json={"richMenuId": rich_menu_id},
+        )
 
 
 def _publish_to_line(item: dict[str, Any]) -> tuple[str, int]:
@@ -605,6 +639,7 @@ def _publish_to_line(item: dict[str, Any]) -> tuple[str, int]:
                 f"https://api.line.me/v2/bot/user/all/richmenu/{created_id}",
                 headers=headers,
             )
+        _set_rich_menu_alias(menu.get("rich_menu_alias_id"), created_id, headers)
         return created_id, int(asset["id"])
     except Exception:
         if created_id:
@@ -624,7 +659,9 @@ def _write_legacy_id(audience_role: str, rich_menu_id: str) -> None:
         "customer": "default_rich_menu_id",
         "staff": "staff_rich_menu_id",
         "union_staff": "union_staff_rich_menu_id",
-    }[audience_role]
+    }.get(audience_role)
+    if key is None:
+        return
     try:
         existing = json.loads(LEGACY_IDS_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError):

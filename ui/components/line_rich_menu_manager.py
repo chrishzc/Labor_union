@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from io import BytesIO
 from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
@@ -14,6 +15,8 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
+from PIL import Image
+from streamlit_cropper import st_cropper
 
 from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
 from ui.components.line_ui_support import (
@@ -31,12 +34,14 @@ ROLE_LABELS = {
     "customer": "一般客戶／媽媽",
     "staff": "月嫂",
     "union_staff": "工會人員",
+    "union_staff_page": "工會人員分頁",
 }
 ACTION_LABELS = {
     "message": "傳送一段文字",
     "url": "開啟指定網頁",
     "liff": "開啟 LINE 內的服務頁面",
     "postback": "執行系統功能",
+    "richmenuswitch": "切換工會分頁",
 }
 PUBLICATION_STATUS_LABELS = {
     "draft": "草稿",
@@ -59,6 +64,8 @@ def _button_rows(menu: dict[str, Any]) -> pd.DataFrame:
     for button in menu["buttons"]:
         action = button["action"]
         value = action.get("text") or action.get("data") or action.get("uri") or ""
+        if action.get("type") == "richmenuswitch":
+            value = action.get("rich_menu_alias_id") or value
         action_kind = action["type"]
         if action["type"] == "uri":
             action_kind = "liff" if action.get("uri_source") == "liff" else "url"
@@ -68,6 +75,7 @@ def _button_rows(menu: dict[str, Any]) -> pd.DataFrame:
                 "label": button["label"],
                 "text_color": button.get("text_color", "#FFFFFF"),
                 "background_color": button.get("background_color", "#4A90E2"),
+                "border_radius": button.get("border_radius", 0),
                 "x": button["bounds"]["x"],
                 "y": button["bounds"]["y"],
                 "width": button["bounds"]["width"],
@@ -109,8 +117,9 @@ def _build_menu_from_editor(
     )
     appearance = deepcopy(menu.get("appearance", {}))
     appearance["background_color"] = background_color
-    appearance["image_mode"] = image_mode
-    if image_mode == "generated":
+    has_uploaded_asset = bool(appearance.get("image_asset_id"))
+    appearance["image_mode"] = image_mode if image_mode == "generated" or has_uploaded_asset else "generated"
+    if appearance["image_mode"] == "generated":
         appearance["image_asset_id"] = None
     menu["appearance"] = appearance
 
@@ -132,7 +141,10 @@ def _build_menu_from_editor(
             "data": value if action_type == "postback" else None,
             "uri": value if action_type == "uri" and value else None,
             "uri_source": uri_source if action_type == "uri" else "literal",
+            "rich_menu_alias_id": value if action_type == "richmenuswitch" else None,
         }
+        if action_type == "richmenuswitch":
+            action["data"] = f"tab={value}"
         buttons.append(
             {
                 "id": str(record["id"]).strip(),
@@ -141,6 +153,7 @@ def _build_menu_from_editor(
                 "background_color": str(
                     record.get("background_color") or "#4A90E2"
                 ),
+                "border_radius": int(record.get("border_radius") or 0),
                 "bounds": {
                     "x": int(record.get("x") or 0),
                     "y": int(record.get("y") or 0),
@@ -234,8 +247,8 @@ def render_rich_menu_manager(
         name = left.text_input("選單名稱", value=selected_menu["name"], disabled=not can_edit)
         audience_role = right.selectbox(
             "顯示給誰看",
-            ["customer", "staff", "union_staff"],
-            index=["customer", "staff", "union_staff"].index(
+            ["customer", "staff", "union_staff", "union_staff_page"],
+            index=["customer", "staff", "union_staff", "union_staff_page"].index(
                 selected_menu["audience_role"]
             ),
             format_func=lambda value: ROLE_LABELS[value],
@@ -353,21 +366,51 @@ def render_rich_menu_manager(
         st.image(preview, width="stretch")
 
     st.markdown("#### 自訂選單圖片")
-    st.caption("若不上傳圖片，系統會依上方顏色自動產生選單。")
+    st.caption("若不上傳圖片，系統會依上方顏色自動產生選單；每個選單一次只能套用一張底圖。")
     uploaded = st.file_uploader(
         "上傳 JPEG／PNG",
         type=["jpg", "jpeg", "png"],
         disabled=not can_edit,
+        accept_multiple_files=False,
         key=f"rich_menu_upload_{selected_id}",
     )
-    if st.button("上傳並套用至選單", disabled=not can_edit or uploaded is None):
+    cropped_image = None
+    if uploaded is not None:
+        try:
+            source_image = Image.open(uploaded).convert("RGB")
+        except Exception:
+            st.error("圖片讀取失敗，請重新上傳 JPEG 或 PNG。")
+        else:
+            st.caption("請拖曳虛線框選擇要套用的範圍，框內就是實際產生的選單底圖。")
+            cropped_image = st_cropper(
+                source_image,
+                realtime_update=True,
+                box_color="#FF4B4B",
+                aspect_ratio=(2500, 843),
+                return_type="image",
+                key=f"rich_menu_cropper_{selected_id}_{uploaded.file_id}",
+            )
+            if cropped_image is not None:
+                st.image(cropped_image, caption="裁切後預覽", width="stretch")
+
+    if st.button("確認裁切並套用至選單", disabled=not can_edit or cropped_image is None):
+        target_size = (
+            int(selected_menu["size"]["width"]),
+            int(selected_menu["size"]["height"]),
+        )
+        final_image = cropped_image.convert("RGB").resize(
+            target_size,
+            Image.Resampling.LANCZOS,
+        )
+        buffer = BytesIO()
+        final_image.save(buffer, format="PNG")
         try:
             asset = client.upload_line_menu_image(
                 token,
                 selected_id,
-                filename=uploaded.name,
-                content=uploaded.getvalue(),
-                content_type=uploaded.type or "application/octet-stream",
+                filename=f"{selected_id}_rich_menu.png",
+                content=buffer.getvalue(),
+                content_type="image/png",
             )
             updated = deepcopy(selected_menu)
             updated["appearance"]["image_mode"] = "uploaded"
