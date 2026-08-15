@@ -1,0 +1,200 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1320" viewBox="0 0 1920 1320" role="img" aria-labelledby="title desc">
+  <title id="title">Cloud Run 與地端 NAS MySQL 連線方案比較</title>
+  <desc id="desc">比較 HA VPN 雙 tunnel、單一 Cloud VPN tunnel、Tailscale，以及 Cloud NAT 固定 IP 加公開 3306，在費用、安全性、優缺點、綜合評分與選用條件上的差異。</desc>
+  <defs>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="6" stdDeviation="10" flood-color="#0f172a" flood-opacity="0.10"/>
+    </filter>
+    <style>
+      .title { font: 700 42px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #0f172a; }
+      .subtitle { font: 400 20px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #475569; }
+      .card-title { font: 700 26px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #0f172a; }
+      .label { font: 700 18px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #334155; }
+      .price { font: 700 27px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #0f172a; }
+      .twd { font: 400 17px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #475569; }
+      .body { font: 400 17px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #1e293b; }
+      .small { font: 400 15px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #475569; }
+      .score { font: 700 30px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #ffffff; }
+      .score-label { font: 500 14px "Noto Sans TC", "Microsoft JhengHei", sans-serif; fill: #ffffff; }
+      .section-line { stroke: #e2e8f0; stroke-width: 2; }
+      .bullet { font: 700 18px "Noto Sans TC", "Microsoft JhengHei", sans-serif; }
+    </style>
+  </defs>
+
+  <rect width="1920" height="1320" fill="#f8fafc"/>
+
+  <text id="title-text" class="title" x="80" y="72">Cloud Run ↔ 地端 NAS MySQL：四種連線方案比較</text>
+  <text class="subtitle" x="80" y="108">成本以低流量正式環境、每月 730 小時、USD 1 ≈ NT$33 估算；所有非公開方案均保留 MySQL mTLS。</text>
+
+  <rect x="80" y="140" width="1760" height="86" rx="18" fill="#ecfdf5" stroke="#86efac" stroke-width="2"/>
+  <text class="label" x="112" y="176" fill="#166534">結論</text>
+  <text class="body" x="112" y="207">安全與省錢平衡首選「單一 Cloud VPN tunnel」；預算壓力更高且可接受可用性下降時，才選 Tailscale。公開 3306 不建議。</text>
+
+  <!-- Card 1 -->
+  <g transform="translate(80 258)" filter="url(#shadow)">
+    <rect width="410" height="920" rx="22" fill="#ffffff" stroke="#86b6f2" stroke-width="3"/>
+    <rect width="410" height="92" rx="20" fill="#dbeafe"/>
+    <rect y="70" width="410" height="22" fill="#dbeafe"/>
+    <text class="card-title" x="28" y="43">HA VPN 雙 Tunnel</text>
+    <text class="small" x="28" y="72">Direct VPC／原生私網／mTLS</text>
+    <rect x="309" y="20" width="76" height="58" rx="15" fill="#2563eb"/>
+    <text class="score" x="347" y="51" text-anchor="middle">9.2</text>
+    <text class="score-label" x="347" y="69" text-anchor="middle">綜合分數</text>
+
+    <text class="label" x="28" y="133">預估月費</text>
+    <text class="price" x="28" y="169">USD 150～170</text>
+    <text class="twd" x="28" y="196">約 NT$4,950～5,610</text>
+    <line class="section-line" x1="28" y1="218" x2="382" y2="218"/>
+
+    <text class="label" x="28" y="253">安全性</text>
+    <text class="price" x="28" y="289" fill="#166534">9.5 / 10</text>
+    <text class="small" x="28" y="316">原生私網、雙 tunnel、mTLS、無公開 3306</text>
+    <line class="section-line" x1="28" y1="338" x2="382" y2="338"/>
+
+    <text class="label" x="28" y="373">優點</text>
+    <text class="bullet" x="28" y="408" fill="#16a34a">＋</text><text class="body" x="54" y="408">GCP 原生路由、防火牆與稽核</text>
+    <text class="bullet" x="28" y="438" fill="#16a34a">＋</text><text class="body" x="54" y="438">雙 tunnel，線路故障可切換</text>
+    <text class="bullet" x="28" y="468" fill="#16a34a">＋</text><text class="body" x="54" y="468">不依賴第三方 overlay control plane</text>
+    <line class="section-line" x1="28" y1="492" x2="382" y2="492"/>
+
+    <text class="label" x="28" y="527">缺點</text>
+    <text class="bullet" x="28" y="562" fill="#dc2626">－</text><text class="body" x="54" y="562">VPN 固定費約 USD 73／月</text>
+    <text class="bullet" x="28" y="592" fill="#dc2626">－</text><text class="body" x="54" y="592">地端需正確維護 BGP／雙 tunnel</text>
+    <text class="bullet" x="28" y="622" fill="#dc2626">－</text><text class="body" x="54" y="622">單 ISP／單 NAS 仍是地端單點</text>
+    <line class="section-line" x1="28" y1="646" x2="382" y2="646"/>
+
+    <text class="label" x="28" y="681">適用／選用條件</text>
+    <text class="body" x="28" y="717">• 資安與正式可用性最高優先</text>
+    <text class="body" x="28" y="748">• 地端具雙 ISP 或雙 gateway</text>
+    <text class="body" x="28" y="779">• 可接受每月約 NT$5,000 以上</text>
+    <rect x="28" y="824" width="354" height="60" rx="14" fill="#eff6ff"/>
+    <text class="label" x="205" y="861" text-anchor="middle" fill="#1d4ed8">最高保障版</text>
+  </g>
+
+  <!-- Card 2 -->
+  <g transform="translate(530 258)" filter="url(#shadow)">
+    <rect width="410" height="920" rx="22" fill="#ffffff" stroke="#4ade80" stroke-width="4"/>
+    <rect width="410" height="92" rx="20" fill="#dcfce7"/>
+    <rect y="70" width="410" height="22" fill="#dcfce7"/>
+    <text class="card-title" x="28" y="43">單一 Cloud VPN</text>
+    <text class="small" x="28" y="72">1 tunnel／保留私網與 mTLS</text>
+    <rect x="309" y="20" width="76" height="58" rx="15" fill="#16a34a"/>
+    <text class="score" x="347" y="51" text-anchor="middle">9.0</text>
+    <text class="score-label" x="347" y="69" text-anchor="middle">綜合分數</text>
+
+    <text class="label" x="28" y="133">預估月費</text>
+    <text class="price" x="28" y="169">USD 115～135</text>
+    <text class="twd" x="28" y="196">約 NT$3,800～4,450</text>
+    <line class="section-line" x1="28" y1="218" x2="382" y2="218"/>
+
+    <text class="label" x="28" y="253">安全性</text>
+    <text class="price" x="28" y="289" fill="#166534">9.2 / 10</text>
+    <text class="small" x="28" y="316">加密與存取邊界不變；降低的是可用性</text>
+    <line class="section-line" x1="28" y1="338" x2="382" y2="338"/>
+
+    <text class="label" x="28" y="373">優點</text>
+    <text class="bullet" x="28" y="408" fill="#16a34a">＋</text><text class="body" x="54" y="408">比雙 Tunnel 每月省約 USD 36.5</text>
+    <text class="bullet" x="28" y="438" fill="#16a34a">＋</text><text class="body" x="54" y="438">仍是 GCP 原生私網與 firewall</text>
+    <text class="bullet" x="28" y="468" fill="#16a34a">＋</text><text class="body" x="54" y="468">不公開 3306，保留 MySQL mTLS</text>
+    <line class="section-line" x1="28" y1="492" x2="382" y2="492"/>
+
+    <text class="label" x="28" y="527">缺點</text>
+    <text class="bullet" x="28" y="562" fill="#dc2626">－</text><text class="body" x="54" y="562">tunnel 維護／故障時 DB 會中斷</text>
+    <text class="bullet" x="28" y="592" fill="#dc2626">－</text><text class="body" x="54" y="592">不具雙 tunnel failover</text>
+    <text class="bullet" x="28" y="622" fill="#dc2626">－</text><text class="body" x="54" y="622">需靠 Pub/Sub 告警備援承接中斷</text>
+    <line class="section-line" x1="28" y1="646" x2="382" y2="646"/>
+
+    <text class="label" x="28" y="681">適用／選用條件</text>
+    <text class="body" x="28" y="717">• 地端本來就是單 ISP／單 NAS</text>
+    <text class="body" x="28" y="748">• 可接受短暫 DB 連線中斷</text>
+    <text class="body" x="28" y="779">• 要省錢但不降低資料機密性</text>
+    <rect x="28" y="824" width="354" height="60" rx="14" fill="#ecfdf5"/>
+    <text class="label" x="205" y="861" text-anchor="middle" fill="#166534">推薦：安全／成本最平衡</text>
+  </g>
+
+  <!-- Card 3 -->
+  <g transform="translate(980 258)" filter="url(#shadow)">
+    <rect width="410" height="920" rx="22" fill="#ffffff" stroke="#c084fc" stroke-width="3"/>
+    <rect width="410" height="92" rx="20" fill="#f3e8ff"/>
+    <rect y="70" width="410" height="22" fill="#f3e8ff"/>
+    <text class="card-title" x="28" y="43">Tailscale 版</text>
+    <text class="small" x="28" y="72">userspace SOCKS5／ACL／mTLS</text>
+    <rect x="309" y="20" width="76" height="58" rx="15" fill="#9333ea"/>
+    <text class="score" x="347" y="51" text-anchor="middle">8.1</text>
+    <text class="score-label" x="347" y="69" text-anchor="middle">綜合分數</text>
+
+    <text class="label" x="28" y="133">預估月費</text>
+    <text class="price" x="28" y="169">USD 90～115</text>
+    <text class="twd" x="28" y="196">約 NT$2,970～3,800</text>
+    <line class="section-line" x1="28" y1="218" x2="382" y2="218"/>
+
+    <text class="label" x="28" y="253">安全性</text>
+    <text class="price" x="28" y="289" fill="#7e22ce">8.3 / 10</text>
+    <text class="small" x="28" y="316">WireGuard／ACL 安全；第三方與 auth key 依賴</text>
+    <line class="section-line" x1="28" y1="338" x2="382" y2="338"/>
+
+    <text class="label" x="28" y="373">優點</text>
+    <text class="bullet" x="28" y="408" fill="#16a34a">＋</text><text class="body" x="54" y="408">四種方案中成本最低的安全選項</text>
+    <text class="bullet" x="28" y="438" fill="#16a34a">＋</text><text class="body" x="54" y="438">NAS 不需公開 3306</text>
+    <text class="bullet" x="28" y="468" fill="#16a34a">＋</text><text class="body" x="54" y="468">ACL 可限 API node → NAS:3306</text>
+    <line class="section-line" x1="28" y1="492" x2="382" y2="492"/>
+
+    <text class="label" x="28" y="527">缺點</text>
+    <text class="bullet" x="28" y="562" fill="#dc2626">－</text><text class="body" x="54" y="562">Cloud Run 只能走 userspace proxy</text>
+    <text class="bullet" x="28" y="592" fill="#dc2626">－</text><text class="body" x="54" y="592">依賴 control plane／auth key／DERP</text>
+    <text class="bullet" x="28" y="622" fill="#dc2626">－</text><text class="body" x="54" y="622">無 HA VPN 原生 SLA 與路由稽核</text>
+    <line class="section-line" x1="28" y1="646" x2="382" y2="646"/>
+
+    <text class="label" x="28" y="681">適用／選用條件</text>
+    <text class="body" x="28" y="717">• 成本優先、低流量、小型團隊</text>
+    <text class="body" x="28" y="748">• 接受第三方 overlay 與短暫斷線</text>
+    <text class="body" x="28" y="779">• 使用商業方案並保留 DB mTLS</text>
+    <rect x="28" y="824" width="354" height="60" rx="14" fill="#faf5ff"/>
+    <text class="label" x="205" y="861" text-anchor="middle" fill="#7e22ce">預算優先的可接受方案</text>
+  </g>
+
+  <!-- Card 4 -->
+  <g transform="translate(1430 258)" filter="url(#shadow)">
+    <rect width="410" height="920" rx="22" fill="#ffffff" stroke="#f87171" stroke-width="3"/>
+    <rect width="410" height="92" rx="20" fill="#fee2e2"/>
+    <rect y="70" width="410" height="22" fill="#fee2e2"/>
+    <text class="card-title" x="28" y="43">NAT + 公開 3306</text>
+    <text class="small" x="28" y="72">固定 NAT IP allowlist／公網 DB</text>
+    <rect x="309" y="20" width="76" height="58" rx="15" fill="#dc2626"/>
+    <text class="score" x="347" y="51" text-anchor="middle">4.1</text>
+    <text class="score-label" x="347" y="69" text-anchor="middle">綜合分數</text>
+
+    <text class="label" x="28" y="133">預估月費</text>
+    <text class="price" x="28" y="169">USD 88～110</text>
+    <text class="twd" x="28" y="196">約 NT$2,900～3,630</text>
+    <line class="section-line" x1="28" y1="218" x2="382" y2="218"/>
+
+    <text class="label" x="28" y="253">安全性</text>
+    <text class="price" x="28" y="289" fill="#b91c1c">3.8 / 10</text>
+    <text class="small" x="28" y="316">IP allowlist 不是私網；3306 仍位於公網面</text>
+    <line class="section-line" x1="28" y1="338" x2="382" y2="338"/>
+
+    <text class="label" x="28" y="373">優點</text>
+    <text class="bullet" x="28" y="408" fill="#16a34a">＋</text><text class="body" x="54" y="408">設定概念直觀、來源 IP 固定</text>
+    <text class="bullet" x="28" y="438" fill="#16a34a">＋</text><text class="body" x="54" y="438">費用可能略低於 Tailscale</text>
+    <text class="bullet" x="28" y="468" fill="#16a34a">＋</text><text class="body" x="54" y="468">不依賴 overlay VPN control plane</text>
+    <line class="section-line" x1="28" y1="492" x2="382" y2="492"/>
+
+    <text class="label" x="28" y="527">缺點</text>
+    <text class="bullet" x="28" y="562" fill="#dc2626">－</text><text class="body" x="54" y="562">NAS 3306 必須暴露公網</text>
+    <text class="bullet" x="28" y="592" fill="#dc2626">－</text><text class="body" x="54" y="592">遭掃描、DDoS、誤設 firewall 風險</text>
+    <text class="bullet" x="28" y="622" fill="#dc2626">－</text><text class="body" x="54" y="622">NAT 只固定來源 IP，不提供 VPN</text>
+    <line class="section-line" x1="28" y1="646" x2="382" y2="646"/>
+
+    <text class="label" x="28" y="681">適用／選用條件</text>
+    <text class="body" x="28" y="717">• 僅限短期測試／不可存正式資料</text>
+    <text class="body" x="28" y="748">• 即使 mTLS + allowlist 仍不建議</text>
+    <text class="body" x="28" y="779">• 不符合本專案正式安全基線</text>
+    <rect x="28" y="824" width="354" height="60" rx="14" fill="#fef2f2"/>
+    <text class="label" x="205" y="861" text-anchor="middle" fill="#b91c1c">不選用／正式環境禁止</text>
+  </g>
+
+  <rect x="80" y="1210" width="1760" height="74" rx="16" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text class="small" x="108" y="1242">綜合分數權重：安全性 45%／可用性 25%／費用 20%／維運複雜度 10%。費用為規劃區間，實際依流量、free tier、Tailscale 席次與 NAT instance assignment 變動。</text>
+  <text class="small" x="108" y="1270">共同底線：只有 Business API 可碰 DB、MySQL mTLS、最小權限帳號、Secret Manager、告警備援。若移除任一底線，圖中安全分數不再成立。</text>
+</svg>
