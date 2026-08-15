@@ -758,3 +758,11 @@
   CI blocking flake8 原命令回報 `0`，相關 Global runtime regression 為 `36 passed`，
   `compileall` 與 `git diff --check` 通過。
 - 無 schema、migration、seed、backfill、DB 操作或外部服務 mutation。
+
+## [2026-08-15] Cloud Run 單一 VPN 與正式容器封裝計畫
+
+- 完成 HA VPN 雙 tunnel、單一 Cloud VPN tunnel、連線方案比較圖與 5+1 Cloud Run 部署規劃；暫定採 Direct VPC egress＋HA VPN gateway resource 上單一 tunnel 的 non-HA 拓樸，NAS 3306 維持不公開。
+- 完成 Dockerfile 正式封裝計畫及 v2；維持 4 個 image 對應 5 個 Cloud Run resource，並將 workers 修正為 Worker Pool、Monitor 為獨立 Job。
+- v2 明確排除開發 launcher、Knowledge、file watcher、測試／migration、secret、VPN 拓樸值、歷史與舊資料；API 是唯一 DB owner，其他 image 不含 DB driver／credential。
+- 封裝計畫採 fail-closed：UI 本機模板寫入、API 可變 JSON／本機 archive、開發 reviewer callback、Worker Pool supervisor 與 ingestion entry point 未完成前，不得宣稱 production-ready。
+- 計畫文件以 runtime manifest、import／asset closure、image layer scan、SBOM、startup／exit、single-tunnel outage/recovery smoke 作為後續驗收；本次未建立 Dockerfile、image、Cloud Run、VPN、IAM 或 DB 變更。
