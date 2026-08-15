@@ -106,7 +106,11 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
             MatchingNotificationApplication(open_line_unit_of_work, now)
         ),
         knowledge_question_scheduler=enqueue_line_knowledge_question,
-        service_help_application=LineServiceHelpApplication(now, _identity_flow_url),
+        service_help_application=LineServiceHelpApplication(
+            now,
+            _identity_flow_url,
+            LineMessagingApiAdapter(_required_access_token()),
+        ),
         menu_command_application=LineMenuCommandApplication(),
     )
     return LineWebhookEventConsumer(

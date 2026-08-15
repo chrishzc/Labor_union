@@ -35,6 +35,7 @@ PAGE_REGISTRY: Mapping[str, tuple[tuple[str, str], ...]] = {
     "異常與稽核": (
         ("異常警示中心", "ui.pages.06_finance_alerts"),
         ("🔍 資料庫原始資料瀏覽", "ui.pages.01_data_browser"),
+        ("工會人員權限", "ui.pages.09_access_management"),
         ("🩺 系統狀態", "ui.pages.08_system_status"),
     ),
 }

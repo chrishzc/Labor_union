@@ -58,6 +58,10 @@ class LineRichMenuApiAdapter:
             if selected.outcome_type is not LineRichMenuProviderOutcomeType.SUCCESS:
                 self.delete(created)
                 return selected
+        aliased = self._set_alias(_rich_menu_alias_id(request.definition_json), created)
+        if aliased is not None:
+            self.delete(created)
+            return aliased
         return LineRichMenuProviderOutcome(
             LineRichMenuProviderOutcomeType.SUCCESS,
             provider_menu_id=created,
@@ -87,6 +91,37 @@ class LineRichMenuApiAdapter:
             f"{_API_ROOT}/user/all/richmenu/{provider_menu_id}",
             provider_menu_id,
         )
+
+    def _set_alias(self, alias_id: str | None, provider_menu_id: str):
+        if not alias_id:
+            return None
+        payload = json.dumps(
+            {"richMenuAliasId": alias_id, "richMenuId": provider_menu_id},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        response = self._request(
+            "post",
+            f"{_API_ROOT}/richmenu/alias",
+            data=payload,
+            content_type="application/json",
+        )
+        if _successful(response):
+            return None
+        if int(getattr(response, "status_code")) != 409:
+            return _rich_menu_failure(response)
+        update_payload = json.dumps(
+            {"richMenuId": provider_menu_id},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        update = self._request(
+            "post",
+            f"{_API_ROOT}/richmenu/alias/{alias_id}",
+            data=update_payload,
+            content_type="application/json",
+        )
+        return None if _successful(update) else _rich_menu_failure(update)
 
     def _create(self, definition_json: str):
         response = self._request(
@@ -153,6 +188,17 @@ class _SyntheticFailure:
 
 def _successful(response: object) -> bool:
     return 200 <= int(getattr(response, "status_code")) < 300
+
+
+def _rich_menu_alias_id(definition_json: str) -> str | None:
+    try:
+        definition = json.loads(definition_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    alias_id = definition.get("rich_menu_alias_id")
+    if isinstance(alias_id, str) and alias_id.strip():
+        return alias_id.strip()
+    return None
 
 
 def _rich_menu_failure(response: object) -> LineRichMenuProviderOutcome:
