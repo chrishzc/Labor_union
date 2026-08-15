@@ -110,6 +110,21 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
   outcome 或七日 buffer。
 - 請假／代班是已有 assignment 後的服務異動；本功能是尚未指派前的個人 availability，兩者不可互相取代。
 
+## 5.1 Staff 退役對 Matching 的約束（2026-08-15，WP91 已人工確認）
+
+- Staff 退役是獨立 `staff_lifecycle_states` 的 `active -> retired` 根事實；既有 `staff.status`
+  保留 legacy `active/inactive` 語意。Matching、Scheduling 或 UI 不得自行寫入、推測或反轉 lifecycle。
+- 退役於 business time 生效後，所有新候選、重算、邀請、媒合與新 assignment 必須排除該 Staff，
+  並回傳 deterministic exclusion reason。
+- 已確認的未來 assignment 不因退役自動取消；變更只能經 Scheduling owner 的替代、取消或改派 command。
+- 尚未確認的 candidate、offer、邀請或暫存媒合在退役生效時失去資格，不得被後續 Apply 採用。
+- Assignment Plan 採整代重建時，retired Staff 只有在 `staff_id`、區間與 official service dates 均與
+  current effective assignment 完全相同時，才視為保留既有義務；新增、延長、移動或增加服務日固定回
+  `staff_retired_new_assignment_forbidden`。Apply 必須重新鎖定 Staff current status 後做相同判定。
+- 復職必須經 Staff owner 的獨立 typed `ReactivateStaff` command；不得自動恢復過期 availability、偏好、
+  邀請或 candidate，重新通過當下資格與必要資料驗證後才可進入 Matching。
+- Staff、BeClass、Orders、Payroll、歷史配對及 audit 資料必須保留並可依權限查詢。
+
 ## 6. Typed errors
 
 - `staff_preference_definition_invalid`

@@ -1,4 +1,7 @@
-"""Fail-closed authentication for non-public runtime operation endpoints."""
+"""
+File: internal_service_auth.py
+Description: 驗證 Private API 的本機 shared key 或 Google OIDC caller，所有錯誤皆 fail closed。
+"""
 
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ LOCAL_ENVIRONMENTS = frozenset({"development", "dev", "local", "test"})
 MINIMUM_SHARED_KEY_LENGTH = 32
 SERVICE_NAME_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,99}")
 SERVICE_ACCOUNT_EMAIL_SUFFIX = ".iam.gserviceaccount.com"
+GOOGLE_OIDC_ISSUERS = frozenset({"accounts.google.com", "https://accounts.google.com"})
 _GOOGLE_AUTH_REQUEST = GoogleAuthRequest(session=CacheControl(requests.Session()))
 
 
@@ -101,6 +105,8 @@ def _verified_claims(token: str, audience: str) -> dict[str, Any]:
 
 def _verify_google_oidc_token(token: str, audience: str) -> dict[str, Any]:
     claims = id_token.verify_oauth2_token(token, _GOOGLE_AUTH_REQUEST, audience)
+    if claims.get("iss") not in GOOGLE_OIDC_ISSUERS:
+        raise ValueError("Google OIDC issuer is invalid")
     return dict(claims)
 
 

@@ -8,6 +8,13 @@ priority: P0
 
 # 90 匯入異常外部確認與重新提交 Work Package
 
+## Execution sequencing／successor
+
+WP90 定義 warning tracking Query 與人工狀態 Preview／Apply 的完整目標契約。WP92 是目前執行
+slice：只授權 import scripts、lane Preview／Apply 與正式寫入；warning center UI、typed Query、
+人工轉態與 WarningReferral 明確 deferred，需由後續 Work Package 取得 write set 與驗收授權。
+這是交付順序，不是撤回或改寫 WP90 已核准的業務決策。
+
 ## 人工裁決與 business scenario
 
 資料有誤或缺漏時，公會人員通常無法立即判定正確值，必須聯絡填寫者、客戶、月嫂或其他資料來源

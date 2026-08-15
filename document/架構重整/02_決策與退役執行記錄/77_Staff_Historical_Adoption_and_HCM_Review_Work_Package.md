@@ -11,8 +11,9 @@ priority: P0
 ## 1. 人工裁決與 business scenario
 
 2026-08-13 最新人工裁決：Staff 歷史來源可包含同一月嫂的重複填寫；identity與姓名相同且來源
-`報名時間`嚴格較新時，最新來源覆寫可更新 scalar，作為同一月嫂更新資料。來源空值與受保護 root
-fields不覆寫；銀行與關聯集仍採保守合併。資料庫既有 identity不得再以 `skipped_existing` 無證據略過。
+`報名時間`嚴格較新時，最新來源覆寫可更新 scalar、銀行帳戶與完整關聯集合，作為同一月嫂更新資料。
+來源空值與受保護 root fields不覆寫；銀行與關聯集合必須在同一 transaction 原子替換，不做 partial
+union。資料庫既有 identity不得再以 `skipped_existing` 無證據略過。
 非根欄位錯誤可依既有裁決以
 `NULL` 建立或合併 Staff，但必須同時建立 durable review 與 canonical anomaly。
 
@@ -50,10 +51,12 @@ BeClass 也不得因 HCM 尚未匯入而失敗。任一方缺少對方只建立�
    - `has_massage_cert`、`care_babies` 的 DB default 無法表達 unknown，既有列不自動改值；
    - 非空不同值保留 current fact並建立 review。
 4. 既有 identity 但姓名不同時結果為 `identity_conflict`，零 Staff mutation並建立 review。
-5. 銀行：完全相同為 no-op；Staff 沒有帳戶時才新增通過驗證的帳戶；不同帳戶、跨 Staff
-   collision 或不完整銀行資訊都 review，receipt／alert 不保存完整帳號。
-6. 關聯集合：空集合才補入、完全相同為 no-op、非空不同時保留 current 並 review；禁止
-   delete-and-reinsert 或 union。正式 Matching preference facts 不由 legacy relation tables 反推更新。
+5. 銀行：完全相同為 no-op；identity／姓名一致且來源時間嚴格較新時，以通過驗證的非空來源值
+   原子替換。空白、無效、跨 Staff collision 或不完整銀行資訊都 review，且不得清空既有值；
+   receipt／alert 不保存完整帳號。
+6. 關聯集合：嚴格較新的有效來源是完整快照，與 scalar／銀行在同一 transaction deterministic
+   replacement；完全相同為 no-op，禁止 partial union。無有效完整快照時不得推測刪除；正式
+   Matching preference facts 不由 legacy relation tables 反推更新。
 7. exclusive outcomes：`created | adopted_existing | exact_replay | blocked_identity |
    identity_conflict | failed_retryable`。每列都必須重新完成DB identity resolution、merge decision、
    review與receipt；不得只因舊程式判定「既有」就略過。`exact_replay`只適用於已有同一source
@@ -123,7 +126,8 @@ registry、production DB操作、seed、business backfill或 destructive migrati
 3. existing dirty row仍建立 review；review root、outbox、Staff mutation與 receipt atomic。
    已發布 outbox 後若 current anomaly projection 遺失，背景 bounded root rescan 必須從 durable
    review root／resolution event 補建，不重置 outbox、不改寫 review root。
-4. bank／relations empty、exact、conflict與跨 Staff collision均有 focused evidence，且既有集合未 DELETE。
+4. bank／relations empty、exact、strictly-newer replacement、invalid／collision 均有 focused evidence；
+   完整集合替換必須 atomic，不做 partial union，且 replay／rollback 可辨識替換前後內容。
 5. HCM與Client BeClass可依任意順序獨立匯入；缺對方不阻擋來源root，分別投影`BECLASS-001`或
    `IMPORT-003 / beclass_hcm_mismatch`，對方出現且唯一綁定後自動解除。
 6. HCM新案件若IP＋姓名未同時命中既有Client可建立roots；案件重複或IP＋姓名同時命中時零Client／
@@ -147,3 +151,11 @@ registry、production DB操作、seed、business backfill或 destructive migrati
 只有 code、schema release、focused與 engine evidence全部完成，且實際 49-row Staff與HCM dirty-data
 驗收 receipt確認無 duplicate／fabricated root後，WP77才可 completed。WP77完成不等於WP73 Web UI完成，
 也不授權封存ADR-001。
+
+## 2026-08-15 非實機收尾
+
+本包的 typed adoption/review 契約、schema/release successor、descriptor、focused evidence 與目標主機
+交接步驟均已收斂；不再有可由文件整理取代的實作工作。剩餘 only-on-engine gate 為完整 Staff
+來源 replay、合法 HCM／Client 順序與 reconciliation、以及上一支援版 preserve-data 的 final verify。
+在這些 receipt 完成前，本包維持 `in-progress` 且不得封存。統一交接紀錄見
+`document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。

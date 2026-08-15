@@ -24,7 +24,7 @@ outbox snapshot 中的原始案件編號、姓名、日期或月嫂資料。`unm
 不得投影此碼。歷史 review 的根事實不因 alert claim／resolve 而被修改；目前沒有自動修復 action，
 人員只能依 evidence 回到 Orders 的後續人工處理流程。
 
-### 匯入警示追蹤（2026-08-14，WP88 已人工確認）
+### 匯入警示追蹤（2026-08-14，WP92 已人工確認）
 
 HCM、Client／Staff BeClass、Historical Orders 與 Finance Import 的 source warning／review 必須使用
 欄位級 immutable occurrence：同一來源列的每個 `logical_code + field_path` 各自保存 issue codes、
@@ -55,7 +55,7 @@ system actor 對舊 task 追加 `closed(reason=replaced_by_new_warning)`；舊 s
 prior warning／source association。第一階段只記錄公會人員以既有 LINE、電話或法定管道聯絡的進度，
 不自動傳 LINE、不推定 recipient、不保存對話全文。
 
-上述六狀態只適用 WP88 匯入警示追蹤。其他既有 current-state anomaly 在完成各自 migration／entrypoint
+上述六狀態只適用 WP92 匯入警示追蹤。其他既有 current-state anomaly 在完成各自 migration／entrypoint
 裁決前，仍沿用下方 generic Alert Workflow；不得把兩套 status 語意混用或只以 UI label 互相映射。
 
 ## 2. Subsystems

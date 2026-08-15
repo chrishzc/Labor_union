@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-08-14-v2
+-- Release: labor-union-validation-schema-2026-08-15-v3
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -95,6 +95,51 @@ CREATE TABLE IF NOT EXISTS staff (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_staff_name (name),
     INDEX idx_staff_phone (phone)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 39. 人員生命週期狀態、事件與冪等套用收據
+CREATE TABLE IF NOT EXISTS staff_lifecycle_states (
+    staff_id INT NOT NULL PRIMARY KEY,
+    lifecycle_state ENUM('active','retired') NOT NULL DEFAULT 'active',
+    aggregate_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    effective_at DATETIME(6) NULL,
+    reason_code VARCHAR(64) NULL,
+    updated_by VARCHAR(100) NULL,
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_staff_lifecycle_state_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT chk_staff_lifecycle_state_version CHECK (aggregate_version >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_lifecycle_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    event_type ENUM('retired','reactivated') NOT NULL,
+    before_state ENUM('active','retired') NOT NULL,
+    resulting_state ENUM('active','retired') NOT NULL,
+    effective_at DATETIME(6) NOT NULL,
+    reason_code VARCHAR(64) NOT NULL,
+    expected_version BIGINT UNSIGNED NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_staff_lifecycle_event_version (staff_id, resulting_version),
+    INDEX idx_staff_lifecycle_event_time (staff_id, effective_at),
+    CONSTRAINT fk_staff_lifecycle_event_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT chk_staff_lifecycle_event_version CHECK (resulting_version = expected_version + 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_lifecycle_apply_receipts (
+    idempotency_key VARCHAR(191) NOT NULL PRIMARY KEY,
+    command_fingerprint CHAR(64) NOT NULL,
+    preview_fingerprint CHAR(64) NOT NULL,
+    staff_id INT NOT NULL,
+    resulting_state ENUM('active','retired') NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    event_id BIGINT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_staff_lifecycle_receipt_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_lifecycle_receipt_event FOREIGN KEY (event_id) REFERENCES staff_lifecycle_events(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 6. 服務人員銀行帳戶表 (支援 1:N 備用帳戶)
@@ -10095,12 +10140,6 @@ FOR EACH ROW SIGNAL SQLSTATE '45000'
 SET MESSAGE_TEXT = 'finance_import_ingestion_attempts cannot be deleted';
 -- END SOURCE: db/schema_parts/152_finance_import_ingestion_attempts.sql
 
--- BEGIN SOURCE: db/schema_parts/153_retire_empty_legacy_field_inventory.sql
--- Current local databases contain only fake data. Retire structures that no
--- production caller owns so bootstrap and the active candidate cannot revive them.
-DROP TABLE IF EXISTS finance_import_reclassification_events;
--- END SOURCE: db/schema_parts/153_retire_empty_legacy_field_inventory.sql
-
 -- BEGIN SOURCE: db/schema_parts/154_line_integration_inbox_delivery.sql
 -- Canonical LINE webhook inbox, delivery queue, receipts, outbox, and audit facts.
 -- Legacy LINE tables remain untouched until the runtime cutover stage.
@@ -13907,271 +13946,6 @@ WHERE slot_name NOT IN (
 ON DUPLICATE KEY UPDATE id=id;
 -- END SOURCE: db/schema_parts/188_matching_preferences_and_staff_availability.sql
 
--- BEGIN SOURCE: db/schema_parts/189_client_refund_recipient_snapshot_local_upgrade.sql
--- Successor release bridge for canonical part 176 omitted from the prior local-upgrade chain.
-CREATE TABLE IF NOT EXISTS client_refund_recipient_snapshots (
-    refund_obligation_identity VARCHAR(191) PRIMARY KEY,
-    case_no VARCHAR(50) NOT NULL,
-    bank_code VARCHAR(50) NOT NULL,
-    bank_account VARCHAR(191) NOT NULL,
-    source_kind VARCHAR(80) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_client_refund_snapshot_obligation
-        FOREIGN KEY (refund_obligation_identity) REFERENCES client_obligations(obligation_identity)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT fk_client_refund_snapshot_order
-        FOREIGN KEY (case_no) REFERENCES orders(case_no)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_client_refund_snapshot_account
-        CHECK (CHAR_LENGTH(TRIM(bank_code)) > 0 AND CHAR_LENGTH(TRIM(bank_account)) > 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-DROP TRIGGER IF EXISTS trg_client_refund_recipient_snapshots_before_update;
-CREATE TRIGGER trg_client_refund_recipient_snapshots_before_update
-BEFORE UPDATE ON client_refund_recipient_snapshots
-FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund recipient snapshots cannot be updated';
-
-DROP TRIGGER IF EXISTS trg_client_refund_recipient_snapshots_before_delete;
-CREATE TRIGGER trg_client_refund_recipient_snapshots_before_delete
-BEFORE DELETE ON client_refund_recipient_snapshots
-FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'client refund recipient snapshots cannot be deleted';
--- END SOURCE: db/schema_parts/189_client_refund_recipient_snapshot_local_upgrade.sql
-
--- BEGIN SOURCE: db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql
--- Immutable root and disposition lineage for government subsidy overpayments.
-
-CREATE TABLE IF NOT EXISTS government_payers (
-    payer_identity VARCHAR(191) PRIMARY KEY,
-    payer_name VARCHAR(191) NOT NULL,
-    incoming_memo_match VARCHAR(191) NOT NULL,
-    is_active TINYINT(1) NOT NULL DEFAULT 1,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT chk_government_payer_identity
-        CHECK (payer_identity = 'hccg'),
-    CONSTRAINT chk_government_payer_name
-        CHECK (payer_name = '新竹市政府'),
-    CONSTRAINT chk_government_payer_memo
-        CHECK (incoming_memo_match = '新竹市政府')
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-INSERT INTO government_payers (payer_identity,payer_name,incoming_memo_match,is_active)
-VALUES ('hccg','新竹市政府','新竹市政府',1)
-ON DUPLICATE KEY UPDATE payer_name=VALUES(payer_name),
-    incoming_memo_match=VALUES(incoming_memo_match),is_active=VALUES(is_active);
-
-CREATE TABLE IF NOT EXISTS government_payer_receiving_accounts (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    payer_identity VARCHAR(191) NOT NULL,
-    bank_code VARCHAR(32) NOT NULL,
-    account_number VARCHAR(191) NOT NULL,
-    account_name VARCHAR(191) NOT NULL,
-    effective_from DATE NOT NULL,
-    effective_until DATE NULL,
-    reason VARCHAR(500) NOT NULL,
-    evidence_reference VARCHAR(500) NOT NULL,
-    created_by VARCHAR(100) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_government_payer_account_version (payer_identity, effective_from),
-    INDEX idx_government_payer_active_account (payer_identity, effective_from, effective_until),
-    CONSTRAINT fk_government_payer_account_payer
-        FOREIGN KEY (payer_identity) REFERENCES government_payers(payer_identity)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_government_payer_account_period
-        CHECK (effective_until IS NULL OR effective_until >= effective_from)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS government_subsidy_overpayments (
-    overpayment_identity VARCHAR(191) PRIMARY KEY,
-    source_finance_import_row_id BIGINT NOT NULL,
-    source_transaction_id BIGINT NOT NULL,
-    payer_identity VARCHAR(191) NOT NULL,
-    original_amount_ntd BIGINT NOT NULL,
-    remaining_amount_ntd BIGINT NOT NULL,
-    status ENUM(
-        'pending_review', 'offset_reserved', 'offset_applied',
-        'return_payable', 'partially_returned', 'returned'
-    ) NOT NULL DEFAULT 'pending_review',
-    projection_version BIGINT UNSIGNED NOT NULL,
-    actor VARCHAR(100) NOT NULL,
-    reason VARCHAR(500) NOT NULL,
-    evidence_reference VARCHAR(500) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_government_subsidy_overpayment_bank_row (source_finance_import_row_id),
-    UNIQUE KEY uq_government_subsidy_overpayment_transaction (source_transaction_id),
-    INDEX idx_government_subsidy_overpayment_status (status, created_at),
-    CONSTRAINT fk_government_subsidy_overpayment_bank_row
-        FOREIGN KEY (source_finance_import_row_id) REFERENCES finance_import_rows(id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT fk_government_subsidy_overpayment_transaction
-        FOREIGN KEY (source_transaction_id) REFERENCES government_subsidy_transactions(id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_government_subsidy_overpayment_amount
-        CHECK (
-            original_amount_ntd > 0
-            AND remaining_amount_ntd >= 0
-            AND remaining_amount_ntd <= original_amount_ntd
-            AND (
-                remaining_amount_ntd > 0
-                OR status IN ('offset_applied', 'returned')
-            )
-        )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS government_subsidy_overpayment_events (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    overpayment_identity VARCHAR(191) NOT NULL,
-    event_type ENUM(
-        'established',
-        'offset_applied',
-        'return_payable_created',
-        'return_paid',
-        'return_reconciled'
-    ) NOT NULL,
-    before_remaining_ntd BIGINT NOT NULL,
-    after_remaining_ntd BIGINT NOT NULL,
-    resulting_status VARCHAR(32) NOT NULL,
-    expected_version BIGINT UNSIGNED NOT NULL,
-    resulting_version BIGINT UNSIGNED NOT NULL,
-    preview_fingerprint CHAR(64) NOT NULL,
-    idempotency_key VARCHAR(191) NOT NULL,
-    actor VARCHAR(100) NOT NULL,
-    reason VARCHAR(500) NOT NULL,
-    evidence_reference VARCHAR(500) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_government_subsidy_overpayment_event_idempotency (idempotency_key),
-    INDEX idx_government_subsidy_overpayment_event_root (overpayment_identity, id),
-    CONSTRAINT fk_government_subsidy_overpayment_event_root
-        FOREIGN KEY (overpayment_identity) REFERENCES government_subsidy_overpayments(overpayment_identity)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_government_subsidy_overpayment_event_amount
-        CHECK (before_remaining_ntd > 0 AND after_remaining_ntd >= 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS government_subsidy_overpayment_offsets (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    overpayment_event_id BIGINT NOT NULL,
-    overpayment_identity VARCHAR(191) NOT NULL,
-    claim_batch_id BIGINT NOT NULL,
-    claim_item_id BIGINT NOT NULL,
-    allocated_amount_ntd BIGINT NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_government_subsidy_overpayment_offset_target (overpayment_identity, claim_item_id),
-    INDEX idx_government_subsidy_overpayment_offset_item (claim_batch_id, claim_item_id),
-    CONSTRAINT fk_government_subsidy_overpayment_offset_event
-        FOREIGN KEY (overpayment_event_id) REFERENCES government_subsidy_overpayment_events(id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT fk_government_subsidy_overpayment_offset_root
-        FOREIGN KEY (overpayment_identity) REFERENCES government_subsidy_overpayments(overpayment_identity)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT fk_government_subsidy_overpayment_offset_item
-        FOREIGN KEY (claim_item_id, claim_batch_id) REFERENCES subsidy_claim_batch_items(id, batch_id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_government_subsidy_overpayment_offset_amount CHECK (allocated_amount_ntd > 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS government_subsidy_overpayment_target_projection_events (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    overpayment_event_id BIGINT NOT NULL,
-    batch_id BIGINT NOT NULL,
-    before_net_allocated_ntd BIGINT UNSIGNED NOT NULL,
-    after_net_allocated_ntd BIGINT UNSIGNED NOT NULL,
-    outstanding_ntd BIGINT UNSIGNED NOT NULL,
-    expected_batch_version BIGINT UNSIGNED NOT NULL,
-    resulting_batch_version BIGINT UNSIGNED NOT NULL,
-    preview_fingerprint CHAR(64) NOT NULL,
-    actor VARCHAR(100) NOT NULL,
-    reason VARCHAR(500) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_government_overpayment_target_projection (
-        overpayment_event_id, batch_id
-    ),
-    CONSTRAINT fk_government_overpayment_target_projection_event
-        FOREIGN KEY (overpayment_event_id)
-        REFERENCES government_subsidy_overpayment_events(id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT fk_government_overpayment_target_projection_batch
-        FOREIGN KEY (batch_id) REFERENCES government_subsidy_batch_accounts(batch_id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_government_overpayment_target_projection_version
-        CHECK (resulting_batch_version = expected_batch_version + 1),
-    CONSTRAINT chk_government_overpayment_target_projection_amount
-        CHECK (after_net_allocated_ntd >= before_net_allocated_ntd)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS government_overpayment_return_payables (
-    payable_identity VARCHAR(191) PRIMARY KEY,
-    overpayment_identity VARCHAR(191) NOT NULL,
-    amount_due_ntd BIGINT NOT NULL,
-    remaining_amount_ntd BIGINT NOT NULL,
-    status ENUM('payable', 'partially_paid', 'paid') NOT NULL DEFAULT 'payable',
-    agency_identity VARCHAR(191) NOT NULL,
-    agency_name VARCHAR(191) NOT NULL,
-    bank_code VARCHAR(32) NOT NULL,
-    account_display VARCHAR(191) NOT NULL,
-    account_fingerprint CHAR(64) NOT NULL,
-    effective_date DATE NOT NULL,
-    due_date DATE NOT NULL,
-    evidence_reference VARCHAR(500) NOT NULL,
-    projection_version BIGINT UNSIGNED NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_government_overpayment_return_root (overpayment_identity),
-    INDEX idx_government_overpayment_return_due (status, due_date),
-    CONSTRAINT fk_government_overpayment_return_root
-        FOREIGN KEY (overpayment_identity) REFERENCES government_subsidy_overpayments(overpayment_identity)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_government_overpayment_return_amount
-        CHECK (
-            amount_due_ntd > 0
-            AND remaining_amount_ntd >= 0
-            AND remaining_amount_ntd <= amount_due_ntd
-            AND (remaining_amount_ntd > 0 OR status = 'paid')
-        )
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS government_overpayment_return_payouts (
-    id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    overpayment_event_id BIGINT NOT NULL,
-    payable_identity VARCHAR(191) NOT NULL,
-    finance_import_row_id BIGINT NOT NULL,
-    amount_ntd BIGINT NOT NULL,
-    preview_fingerprint CHAR(64) NOT NULL,
-    idempotency_key VARCHAR(191) NOT NULL,
-    actor VARCHAR(100) NOT NULL,
-    reason VARCHAR(500) NOT NULL,
-    evidence_reference VARCHAR(500) NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_government_overpayment_return_payout_bank (finance_import_row_id),
-    UNIQUE KEY uq_government_overpayment_return_payout_key (idempotency_key),
-    CONSTRAINT fk_government_overpayment_return_payout_event
-        FOREIGN KEY (overpayment_event_id) REFERENCES government_subsidy_overpayment_events(id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT fk_government_overpayment_return_payout_payable
-        FOREIGN KEY (payable_identity) REFERENCES government_overpayment_return_payables(payable_identity)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT fk_government_overpayment_return_payout_bank
-        FOREIGN KEY (finance_import_row_id) REFERENCES finance_import_rows(id)
-        ON UPDATE RESTRICT ON DELETE RESTRICT,
-    CONSTRAINT chk_government_overpayment_return_payout_amount CHECK (amount_ntd > 0)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-DROP TRIGGER IF EXISTS trg_government_subsidy_overpayment_events_before_update;
-CREATE TRIGGER trg_government_subsidy_overpayment_events_before_update
-BEFORE UPDATE ON government_subsidy_overpayment_events
-FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be updated';
-
-DROP TRIGGER IF EXISTS trg_government_subsidy_overpayment_events_before_delete;
-CREATE TRIGGER trg_government_subsidy_overpayment_events_before_delete
-BEFORE DELETE ON government_subsidy_overpayment_events
-FOR EACH ROW SIGNAL SQLSTATE '45000'
-SET MESSAGE_TEXT = 'government_subsidy_overpayment_events records cannot be deleted';
--- END SOURCE: db/schema_parts/190_government_subsidy_overpayment_disposition_local_upgrade.sql
-
 -- BEGIN SOURCE: db/schema_parts/191_line_staff_self_service_identity_flow.sql
 ALTER TABLE line_identity_flows
     MODIFY COLUMN flow_purpose ENUM(
@@ -14714,6 +14488,15 @@ ALTER TABLE orders
     COMMENT '專案狀態；待補件案件不得進入服務生命週期';
 -- END SOURCE: db/schema_parts/198_case_import_pending_completion_status.sql
 
+-- BEGIN SOURCE: db/schema_parts/199_retire_finance_import_reclassification_events.sql
+-- File: 199_retire_finance_import_reclassification_events.sql
+-- Description: Fresh schema 不再建立已退役的 finance reclassification event 結構。
+
+DROP TRIGGER IF EXISTS trg_finance_import_reclassification_events_before_update;
+DROP TRIGGER IF EXISTS trg_finance_import_reclassification_events_before_delete;
+DROP TABLE IF EXISTS finance_import_reclassification_events;
+-- END SOURCE: db/schema_parts/199_retire_finance_import_reclassification_events.sql
+
 -- BEGIN SOURCE: db/schema_parts/999_v_order_details_view.sql
 -- 25. 訂單與帳務整合檢視表 (獨立拆分訂金與樓層費，並提供首筆應付加總)
 CREATE OR REPLACE VIEW v_order_details AS
@@ -14906,3 +14689,52 @@ FROM orders o
 JOIN clients c ON o.client_id = c.id
 LEFT JOIN staff s ON o.staff_id = s.id;
 -- END SOURCE: db/schema_parts/999_v_order_details_view.sql
+
+-- BEGIN SOURCE: db/schema_parts/1000_staff_retirement.sql
+-- File: 1000_staff_retirement.sql
+-- Description: Staff lifecycle state、不可變事件與冪等 receipt。
+
+CREATE TABLE IF NOT EXISTS staff_lifecycle_states (
+    staff_id INT NOT NULL PRIMARY KEY,
+    lifecycle_state ENUM('active','retired') NOT NULL DEFAULT 'active',
+    aggregate_version BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    effective_at DATETIME(6) NULL,
+    reason_code VARCHAR(64) NULL,
+    updated_by VARCHAR(100) NULL,
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_staff_lifecycle_state_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT chk_staff_lifecycle_state_version CHECK (aggregate_version >= 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_lifecycle_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    event_type ENUM('retired','reactivated') NOT NULL,
+    before_state ENUM('active','retired') NOT NULL,
+    resulting_state ENUM('active','retired') NOT NULL,
+    effective_at DATETIME(6) NOT NULL,
+    reason_code VARCHAR(64) NOT NULL,
+    expected_version BIGINT UNSIGNED NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    actor VARCHAR(100) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_staff_lifecycle_event_version (staff_id, resulting_version),
+    INDEX idx_staff_lifecycle_event_time (staff_id, effective_at),
+    CONSTRAINT fk_staff_lifecycle_event_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT chk_staff_lifecycle_event_version CHECK (resulting_version = expected_version + 1)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS staff_lifecycle_apply_receipts (
+    idempotency_key VARCHAR(191) NOT NULL PRIMARY KEY,
+    command_fingerprint CHAR(64) NOT NULL,
+    preview_fingerprint CHAR(64) NOT NULL,
+    staff_id INT NOT NULL,
+    resulting_state ENUM('active','retired') NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    event_id BIGINT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    CONSTRAINT fk_staff_lifecycle_receipt_staff FOREIGN KEY (staff_id) REFERENCES staff(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_staff_lifecycle_receipt_event FOREIGN KEY (event_id) REFERENCES staff_lifecycle_events(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/1000_staff_retirement.sql

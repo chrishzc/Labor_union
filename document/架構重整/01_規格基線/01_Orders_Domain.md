@@ -217,10 +217,11 @@ restricted historical source 只能補登既有 Order，不建立 Client／Order
 `case_no + client_name` 精確相符；找不到固定為 `unmatched_case`，零 Domain mutation且不建立警示。
 source profile v1 只接受 0→取消、1→完成、2→洽談中；空白／其他值保存 review evidence。
 
-`actual_start_date`、`actual_end_date` 永遠允許 `NULL`。有效來源值只補目前空值，既有非空衝突
-保留 current fact並 review。來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立，
+`actual_start_date`、`actual_end_date` 永遠允許 `NULL`。精確配對且可解析的有效歷史來源值直接寫入，
+不比較 current value 或 source time，也不產生 `current_conflict`。來源 terminal assertion 可在缺日期、取消原因、排班或付款時成立，
 但不得觸發現行通知、訂金、收付款或自動帳務；immutable lifecycle event／receipt 必須標示
-historical origin。既有非洽談狀態與來源不同時不得覆寫。Preview 零寫入，Apply 每列鎖定 fresh
+historical origin。無法精確配對、欄位不可解析或違反 Orders invariant 時建立 typed warning 並 fail closed。
+此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
 Order、驗證 version／fingerprint，並以單一 UoW 保存 projection、event、receipt、outbox及跨域 evidence。
 
 ## 4. Module

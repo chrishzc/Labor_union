@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-14
 owner: Global Deployment / Runtime Supervision
 priority: P0
@@ -92,4 +92,16 @@ security、readiness 與 failure semantics；本輪先不建立或修改 Dockerf
 | Descriptor | NOT_RUN | 無 DB change，不適用 |
 | Read-only plan | NOT_RUN | 無 DB change，不操作既有 DB |
 | Engine verification | NOT_RUN | 無 DB change |
-| Developer acceptance | NOT_RUN | 待使用者地端服務驗收 |
+| Developer acceptance | PASS | 2026-08-15 受使用者授權的 `start_local_development.bat --smoke-test` 通過；API、Streamlit、Monitor、File Watcher、Durable 與 Incident Worker 皆受控啟動並清理，LINE worker 因未設定 credentials 安全略過 |
+
+## 2026-08-15 runtime security focused verification
+
+Private API OIDC adapter 在 Google library 驗證後仍明確限制 issuer 為
+`accounts.google.com`／`https://accounts.google.com`；錯 issuer 固定回 401 typed authentication
+failure。Worker local `.env` fallback 不再把 DB credential 注入 process environment，且
+`runtime-monitor --once` retryable failure 已納入非零退出 regression。focused suite 為
+`28 passed`；launcher smoke 與使用者地端服務驗收仍未執行，故本 WP 保持 `in-progress`。
+
+## 2026-08-15 Developer acceptance closeout
+
+使用者授權執行 scripts\\launchers\\start_local_development.bat --smoke-test。Docker MySQL 與 Redis 已就緒；設定來源 lu_test_dataset_contract_signing_v4 為 current labor-union-staff-retirement-2026-08-15-v1。API、Streamlit、Runtime Monitor、File Watcher、Durable 與 Incident Worker 均通過受控啟動、health check 與自動清理。LINE Worker 缺 credentials，被安全略過，未執行 provider delivery。

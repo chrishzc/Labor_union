@@ -1,3 +1,8 @@
+"""
+File: tab1_overview.py
+Description: 顯示訂單摘要並安全標示待補件案件的未定衍生欄位。
+"""
+
 import streamlit as st
 from ui.api_clients.order_detail_api_client import OrderDetailApiClient
 from ui.pages.order.shared import safe_int
@@ -32,7 +37,7 @@ def _render_tab1_overview(orders_data):
 def _filtered_orders(orders_data):
     status_filter = st.multiselect(
         "篩選訂單狀態",
-        options=["洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"],
+        options=["待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"],
     )
     return [
         order
@@ -77,10 +82,17 @@ def _order_label(order):
         f"月嫂: {order.get('staff_name') or '尚未指派'} ｜ "
         f"身分資格: {order.get('identity_status') or '未設定'} ｜ "
         f"預期開始: {order.get('start_date') or '未定'} ｜ "
-        f"天數: {safe_int(order.get('service_days'))} ｜ "
-        "雇主自費合計: "
-        f"{safe_int(order.get('total_employer_self_pay_payable')):,} 元"
+        f"天數: {_planned_term_label(order.get('service_days'))} ｜ "
+        f"雇主自費合計: {_planned_amount_label(order.get('total_employer_self_pay_payable'))}"
     )
+
+
+def _planned_term_label(value):
+    return "未定" if value is None else str(safe_int(value))
+
+
+def _planned_amount_label(value):
+    return "未定" if value is None else f"{safe_int(value):,} 元"
 
 
 def _find_order(orders, case_no):

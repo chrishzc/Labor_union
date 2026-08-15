@@ -1,12 +1,20 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: Case Import / Orders / Finance Import / Global Management UI
 priority: P0
 ---
 
 # 83 資料匯入中心與 Web Apply Work Package
+
+## 完成狀態收斂
+
+本 Work Package 已由
+`../../03_追蹤清單與證據/evidence/2026-08-14_wp83_data_import_center_closeout_receipt.md`
+完成 closeout。匯入中心內 Client／Staff 暫時卡片的移除，仍以相對應 LIFF typed writer API、UI、
+replay 與 entrypoint retirement 驗收完成為觸發條件；該 successor gate 不重新開啟 WP83。
+2026-08-15 使用者裁定封存本 Work Package；LIFF typed writer 與 temporary Web entry retirement 仍由 successor gate 承接。
 
 ## 1. 人工裁決與 business scenario
 

@@ -24,6 +24,7 @@ from api.routes import (
     admin_auth,
     anomaly_recovery,
     anomaly_registry,
+    import_warning_tracking,
     assignment_plan,
     assignment_schedule_rest_dates,
     beclass_import_review,
@@ -85,6 +86,7 @@ from api.routes import (
     jobs,
     scheduling_current,
     staff_matching_preferences,
+    staff_retirement,
     staff,
     staff_availability,
     staff_monthly_schedule,
@@ -197,6 +199,7 @@ app.include_router(caregiver_segment_availability.router)
 app.include_router(caregiver_availability_locks.router)
 app.include_router(clients.router)
 app.include_router(staff.router)
+app.include_router(staff_retirement.router)
 app.include_router(staff_availability.router)
 app.include_router(staff_monthly_schedule.router)
 
@@ -223,6 +226,7 @@ app.include_router(finance_reports.router)
 app.include_router(government_subsidy.router)
 app.include_router(anomaly_registry.router)
 app.include_router(anomaly_recovery.router)
+app.include_router(import_warning_tracking.router)
 app.include_router(data_browser_admin.router)
 app.include_router(system_status.router)
 app.include_router(runtime_health.router)

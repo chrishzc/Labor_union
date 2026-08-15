@@ -287,7 +287,7 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-11:] == (
+    assert artifact_names[-12:] == (
         "188_matching_preferences_and_staff_availability.sql",
         "189_client_refund_recipient_snapshot_local_upgrade.sql",
         "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
@@ -299,14 +299,43 @@ def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
         "196_case_import_partial_formal_case.sql",
         "197_client_beclass_transition_binding.sql",
         "198_case_import_pending_completion_status.sql",
+        "999_v_order_details_view.sql",
     )
     ordinals = tuple(int(name.split("_", 1)[0]) for name in artifact_names)
     assert ordinals == tuple(sorted(ordinals))
     assert len(ordinals) == len(set(ordinals))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     assert runner.RELEASE_MANIFEST.release_id == (
-        "labor-union-wp93-2026-08-14-v1"
+        "labor-union-schema-assembly-2026-08-15-v1"
     )
+
+
+def test_schema_assembly_release_declares_the_order_details_view_contract() -> None:
+    descriptor = runner.RELEASE_MANIFEST.descriptors[
+        "999_v_order_details_view.sql"
+    ]
+
+    assert descriptor["views"] == {
+        "v_order_details": {
+            "definition_sha256": "4d8fc34c1d50b85d0cd426a0ce3f5fc9d1eee8eede8d6c46943e4cae94577aba"
+        }
+    }
+
+
+def test_owned_view_contract_distinguishes_absent_exact_and_drift(
+    monkeypatch,
+) -> None:
+    descriptor = runner.RELEASE_MANIFEST.descriptors[
+        "999_v_order_details_view.sql"
+    ]
+    expected = descriptor["views"]["v_order_details"]["definition_sha256"]
+    views = [{"table_name": "v_order_details", "view_definition": "SELECT 1"}]
+
+    assert runner._descriptor_presence_state(descriptor, {}, set(), []) == "absent"
+    monkeypatch.setattr(runner, "_view_definition_digest", lambda _definition: expected)
+    assert runner._descriptor_presence_state(descriptor, {}, set(), views) == "exact"
+    monkeypatch.setattr(runner, "_view_definition_digest", lambda _definition: "0" * 64)
+    assert runner._descriptor_presence_state(descriptor, {}, set(), views) == "drift"
 
 
 @pytest.mark.parametrize(

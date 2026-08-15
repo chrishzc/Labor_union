@@ -183,6 +183,8 @@ Worker 與 Monitor 都只呼叫 authenticated Private Operations API；啟動後
 local/test 使用至少 32 字元 shared key；production 固定使用 Google-signed OIDC ID token，並精確
 驗證 Private API audience、caller service name 與 service-account allowlist，不接受 shared-key fallback。
 Worker 會上報自身 instance／PID／hostname／release，API 不會用自己的 process identity 冒充 Worker。
+獨立手動啟動的 Worker／Monitor 會以 process environment 優先、再讀取 Git-ignored `.env` 的方式取得此 key；
+API 與所有 Worker 必須重啟後才會使用更新值。
 
 Cloud Run 環境至少設定：
 

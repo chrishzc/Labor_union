@@ -1,4 +1,7 @@
-"""MySQL repository for the Scheduling Assignment Plan workflow."""
+"""
+File: assignment_plan_repository.py
+Description: 排班計畫 MySQL repository，於讀取最新事實時保護退休人員不得新增或重排服務。
+"""
 
 from __future__ import annotations
 
@@ -116,6 +119,36 @@ def _confirmed_schedule_recipients(cursor, snapshot_id, segment_ids):
     )
 
 
+def _require_retired_staff_assignment_preservation(cursor, source, intent, *, lock):
+    staff_ids = tuple(sorted({segment.staff_id for segment in intent.segments}))
+    if not staff_ids:
+        return
+    placeholders = ",".join("%s" for _ in staff_ids)
+    cursor.execute(
+        "SELECT s.id,s.status,COALESCE(l.lifecycle_state,'active') AS lifecycle_state "
+        "FROM staff s LEFT JOIN staff_lifecycle_states l ON l.staff_id=s.id "
+        f"WHERE s.id IN ({placeholders})" + _lock_suffix(lock),
+        staff_ids,
+    )
+    states = {int(row["id"]): row for row in cursor.fetchall()}
+    existing = _effective_assignments(source)
+    for segment in intent.segments:
+        state = states.get(segment.staff_id)
+        if state is None or state["status"] != "active":
+            raise ValueError("staff_lifecycle_state_unsupported")
+        if state["lifecycle_state"] != "retired":
+            continue
+        preserved = any(
+            assignment.staff_id == segment.staff_id
+            and assignment.assigned_start_date == segment.assigned_start_date
+            and assignment.assigned_end_date == segment.assigned_end_date
+            and assignment.official_service_dates == segment.official_service_dates
+            for assignment in existing
+        )
+        if not preserved:
+            raise ValueError("staff_retired_new_assignment_forbidden")
+
+
 class MySqlAssignmentPlanRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
@@ -133,6 +166,9 @@ class MySqlAssignmentPlanRepository:
         with self._connection.cursor() as cursor:
             _require_schedule_confirmation_gate(cursor, case_no, intent)
             source = load_preview_facts(cursor, case_no)
+            _require_retired_staff_assignment_preservation(
+                cursor, source, intent, lock=False
+            )
             case_staff_ids = preflight_staff_ids(cursor, case_no)
             staff_ids = tuple(
                 sorted(
@@ -188,6 +224,10 @@ class MySqlAssignmentPlanRepository:
                 preflight_staff_ids,
                 load_replay,
             )
+            if stored_receipt is None:
+                _require_retired_staff_assignment_preservation(
+                    cursor, source, request.intent, lock=True
+                )
             occupancy, waiting_lock_ids = load_occupancy_snapshot(
                 cursor,
                 preflight_staff_ids,

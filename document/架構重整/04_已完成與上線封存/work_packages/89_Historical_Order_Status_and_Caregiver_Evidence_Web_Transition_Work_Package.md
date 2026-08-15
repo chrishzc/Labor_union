@@ -1,10 +1,18 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-14
 owner: Orders / Global Management UI
 priority: P0
 ---
+
+## 完成狀態收斂
+
+本 Work Package 的 Web transition 已由
+`../../03_追蹤清單與證據/evidence/2026-08-14_wp85_historical_order_web_transition_receipt.md`
+完成驗收；receipt 檔名保留早期 identity 供歷史追溯，不代表目前 WP 編號。原先的
+`current_conflict` 驗收語意已被 WP92 明確取代：精確配對且可解析的歷史值直接採用，不比較
+current value 或 source time。2026-08-15 使用者裁定封存本 Work Package；WP92 持續承接已取代的 historical-adoption 語意。
 
 # 89 訂單狀態與月嫂歷史配對 Web 過渡匯入 Work Package
 
@@ -71,8 +79,9 @@ writer，也不可讓 Streamlit 呼叫 CLI。
    matching retry 可安全 resume，不建立重複 event、assignment 或 receipt。
 3. 有姓名＋案件編號的月嫂來源 evidence 被保存；日期可空。僅在每位月嫂都有唯一區間時建立正式
    assignment；雙月嫂缺個別區間的 fixture 證明零 assignment／零日期猜測。
-4. `0`／`1`／`2`、空值、未知 status、1900／1904 日期、unmatched、existing current conflict、
-   malformed sheet／header 都有 focused contract evidence；unmatched 固定零 mutation、零 anomaly。
+4. `0`／`1`／`2`、空值、未知 status、1900／1904 日期、unmatched、direct historical assertion、
+   malformed sheet／header 都有 focused contract evidence；unmatched 固定零 mutation、零 anomaly，
+   精確配對且可解析的值不產生 `current_conflict`。
 5. disposable MySQL 證明 Preview、Apply、exact replay、conflict、rollback、existing Order preservation
    與 assignment/evidence projection；若 schema gate 未通過，結果只能為 `DB_CHANGE_NOT_READY`。
 6. 實際啟動 API／Streamlit，使用去敏 `.xlsx` 從資料匯入中心完成 Preview、Apply、review、replay、

@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-14
 owner: Global Migration / Client Finance
 priority: P0
@@ -52,9 +52,9 @@ priority: P0
 5. 本機 updater 完成同名 replacement，`--require-current` 為 successor release。
 6. 2026-08 應付帳款 application query 不再出現 MySQL 1146。
 
-## Evidence
+## Completed evidence
 
-- `../03_追蹤清單與證據/evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md`
+- `../../03_追蹤清單與證據/evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md`
 
 ## 2026-08-14 integration successor repair
 

@@ -33,9 +33,17 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [evidence/2026-08-13_wp78_knowledge_partial_local_database_recovery_receipt.md](evidence/2026-08-13_wp78_knowledge_partial_local_database_recovery_receipt.md) | Knowledge 148／163 partial recovery 的 focused、disposable MySQL 與待開發者驗收 DB gate。 |
 | [evidence/2026-08-13_wp79_line_runtime_release_catalog_recovery_receipt.md](evidence/2026-08-13_wp79_line_runtime_release_catalog_recovery_receipt.md) | LINE 179／184／185／186 catalog 恢復、hash 驗證與待 engine／開發者驗收 DB gate。 |
 | [evidence/2026-08-13_wp78_wp81_legacy_compatibility_receipt.md](evidence/2026-08-13_wp78_wp81_legacy_compatibility_receipt.md) | Knowledge unsigned legacy FK 相容與 Rich Menu 精確空設定修復的 focused evidence、DB gate 與 operator 邊界。 |
-| [evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md](evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md) | exact 且全空的歷史 Knowledge schema 在 candidate 重建之 Docker engine evidence 與 fail-closed 邊界。 |
-| [evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md](evidence/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md) | part 189／190 successor releases、兩次同名 replacement 與應付帳款 query smoke 的本機驗收證據。 |
+| [ARCH-20260815-077 WP84 closeout receipt](../04_已完成與上線封存/receipts/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md) | archive pointer；candidate rebuild、same-name developer-local replacement 與 current-release verification 均已完成。 |
+| [ARCH-20260815-079 WP85 closeout receipt](../04_已完成與上線封存/receipts/2026-08-14_client_refund_snapshot_local_upgrade_receipt.md) | archive pointer；successor releases 189/190、engine verification 與 developer-local replacement 已完成。 |
 | [evidence/2026-08-14_remote_merge_release_chain_reconciliation_receipt.md](evidence/2026-08-14_remote_merge_release_chain_reconciliation_receipt.md) | 跨開發者 release 衝突的 strict successors、191／192／193、WP86、靜態驗證與未完成 DB gates。 |
+| [evidence/2026-08-15_wp93_schema_assembly_and_launcher_receipt.md](evidence/2026-08-15_wp93_schema_assembly_and_launcher_receipt.md) | WP93 唯一 schema assembly、view descriptor、fresh/candidate MySQL 與兩個 local launcher 的去敏驗收。 |
+| [evidence/2026-08-15_wp93_ui_runtime_sweep_receipt.md](evidence/2026-08-15_wp93_ui_runtime_sweep_receipt.md) | WP93 收尾 UI 實測：九個頂層頁面、訂單摘要修復與去敏 API evidence。 |
+| [ARCH-20260815-090 WP94 receipt](../04_已完成與上線封存/receipts/2026-08-15_wp94_import_warning_tracking_receipt.md) | archive pointer；WP94 typed Query、Preview／Apply、MySQL replay 與 Streamlit smoke 已驗收。 |
+| [ARCH-20260815-081 WP86 closeout receipt](../04_已完成與上線封存/receipts/2026-08-15_wp86_independent_worker_local_credential_receipt.md) | archive pointer；credential isolation regression 與 authorized launcher smoke 已完成。 |
+| [ARCH-20260815-083 WP87 closeout receipt](../04_已完成與上線封存/receipts/2026-08-15_wp87_runtime_security_focused_receipt.md) | archive pointer；runtime security verification 與 authorized launcher smoke 已完成。 |
+| [ARCH-20260815-085 WP92 closeout receipt](../04_已完成與上線封存/receipts/2026-08-15_wp92_import_warning_engine_verification_receipt.md) | archive pointer；part 195 engine and authorized developer-local acceptance completed. |
+| [evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md](evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md) | WP73、WP77、WP82 的非實機收尾與不可替代實機驗收交接；不構成完成或封存授權。 |
+| [ARCH-20260815-074 WP91 closeout receipt](../04_已完成與上線封存/receipts/2026-08-15_wp91_staff_retirement_closeout_receipt.md) | archive pointer；developer-local acceptance、fresh bootstrap 與 preserve-data MySQL verification 均已完成。 |
 | [65 LINE canonical cutover receipt（封存）](../04_已完成與上線封存/receipts/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
 | [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |
 | [evidence/](evidence/) | 上述決策包／收據對應的原始 evidence 產物（JSON／SQL／receipt）。 |

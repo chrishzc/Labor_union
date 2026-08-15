@@ -7,7 +7,7 @@
 - LINE ownership：`consolidated-decision`
 - Access Control：`consolidated-decision`
 - 2026-08-13 Case Import／LIFF entry split：`approved-by-IMPORT-ENTRY-02`
-- 2026-08-14 Case Import 欄位級警示、外部追蹤與分域補件：`approved-by-WP88`
+- 2026-08-14 Case Import 欄位級警示、外部追蹤與分域補件：`approved-by-WP92`
 - 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 integration、Access、schema、
   pytest 與 legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
 
@@ -423,7 +423,7 @@ LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Clien
 新來源重新走 typed Preview／Apply；已建 HCM 案件的單一缺漏／無效欄位可由 HCM owning typed
 field-completion command 補齊，不要求整案重送，也不得經警示中心直接改值。
 
-WP77／WP88 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
+WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
 IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，
 並建立獨立 link warning 供外部確認。HCM 歷史過渡模式只要符合最低寫入資格，即直接寫入來源的可寫欄位，
 不推定目前 DB 值較有效；無法寫入的個別欄位仍各自警示。

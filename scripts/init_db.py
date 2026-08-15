@@ -1,3 +1,8 @@
+"""
+File: init_db.py
+Description: 以唯一 schema assembly 初始化本機資料庫，不從目錄推導 fresh schema。
+"""
+
 import sys
 import os
 import re
@@ -6,6 +11,7 @@ from pathlib import Path
 import pymysql
 from dotenv import load_dotenv
 from scripts.sql_statements import split_sql
+from scripts.schema_assembly import load_schema_assembly
 
 # 確保中文輸出編碼正確
 sys.stdout.reconfigure(encoding='utf-8')
@@ -28,8 +34,15 @@ def load_schema_parts(cursor, schema_parts_dir):
     """Execute UTF-8 schema fragments in stable dependency order."""
     parts_dir = Path(schema_parts_dir)
     assert parts_dir.name == "schema_parts" or parts_dir.exists()
+    return load_schema_paths(
+        cursor, sorted(parts_dir.glob("*.sql"), key=_schema_part_sort_key)
+    )
+
+
+def load_schema_paths(cursor, part_paths):
+    """Execute an explicitly selected ordered schema assembly."""
     loaded_parts = []
-    for part_path in sorted(parts_dir.glob("*.sql"), key=_schema_part_sort_key):
+    for part_path in part_paths:
         sql_content = part_path.read_text(encoding="utf-8")
         try:
             for statement in split_sql(sql_content):
@@ -122,8 +135,8 @@ def main(argv: list[str] | None = None):
                     print(f"出錯語句：\n{stmt_clean[:200]}...\n")
                     raise stmt_err
 
-            schema_parts_dir = Path(schema_path).parent / "schema_parts"
-            loaded_parts = load_schema_parts(cursor, schema_parts_dir)
+            assembly = load_schema_assembly()
+            loaded_parts = load_schema_paths(cursor, assembly.active_artifact_paths)
             if loaded_parts:
                 print(f"已依序載入 Schema parts：{', '.join(loaded_parts)}")
             

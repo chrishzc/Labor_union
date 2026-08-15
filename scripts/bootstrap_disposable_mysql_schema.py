@@ -1,4 +1,7 @@
-"""Bootstrap only an explicitly confirmed disposable MySQL schema."""
+"""
+File: bootstrap_disposable_mysql_schema.py
+Description: 以唯一 schema assembly 建立並驗證隔離的 disposable MySQL schema。
+"""
 
 from __future__ import annotations
 
@@ -16,19 +19,19 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.reset_fake_database import split_sql
-from scripts.init_db import _schema_part_sort_key, load_schema_parts
+from scripts.init_db import load_schema_paths
 from scripts.verify_validation_schema_manifest import (
     DEFAULT_MANIFEST_PATH,
     expected_database_objects,
     load_manifest,
     verify_database_objects,
     verify_manifest,
+    selected_schema_parts,
 )
 from scripts.verification_gate_report import build_gate_report
 
 
 SCHEMA_PATH = PROJECT_ROOT / "db" / "schema.sql"
-SCHEMA_PARTS_PATH = PROJECT_ROOT / "db" / "schema_parts"
 
 
 def _require_disposable_database(database: str, confirmation: str) -> str:
@@ -101,23 +104,13 @@ def _require_absent_database(cursor, database: str) -> None:
         raise RuntimeError("disposable database already exists; refusing to overwrite it")
 
 
-def _load_schema_parts_through(cursor, maximum_part: int) -> list[str]:
+def _load_schema_parts_through(cursor, maximum_part: int, manifest) -> list[str]:
     selected: list[Path] = []
-    for path in SCHEMA_PARTS_PATH.glob("*.sql"):
+    for path in selected_schema_parts(manifest):
         match = re.match(r"^(\d+)", path.name)
         if match and int(match.group(1)) <= maximum_part:
             selected.append(path)
-    loaded: list[str] = []
-    for path in sorted(selected, key=_schema_part_sort_key):
-        try:
-            for statement in split_sql(path.read_text(encoding="utf-8")):
-                cursor.execute(statement)
-        except Exception as exc:
-            raise RuntimeError(
-                f"載入 schema part 失敗：{path.name}: {exc}"
-            ) from exc
-        loaded.append(path.name)
-    return loaded
+    return load_schema_paths(cursor, selected)
 
 
 def bootstrap(arguments) -> dict[str, object]:
@@ -139,9 +132,9 @@ def bootstrap(arguments) -> dict[str, object]:
             if getattr(arguments, "base_only", False):
                 parts = []
             elif maximum_part is not None:
-                parts = _load_schema_parts_through(cursor, maximum_part)
+                parts = _load_schema_parts_through(cursor, maximum_part, manifest)
             else:
-                parts = load_schema_parts(cursor, SCHEMA_PARTS_PATH)
+                parts = load_schema_paths(cursor, selected_schema_parts(manifest))
             for view in views:
                 cursor.execute(view)
             _verify_complete_schema(cursor, database, arguments, manifest)

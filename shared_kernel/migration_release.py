@@ -1,4 +1,7 @@
-"""Versioned additive-migration release manifest contracts."""
+"""
+File: migration_release.py
+Description: 驗證可追溯 additive migration manifest 與 owned schema object 契約。
+"""
 
 from __future__ import annotations
 
@@ -586,12 +589,25 @@ def _validate_descriptor_shapes(descriptors: dict[str, Any]) -> None:
     for descriptor in descriptors.values():
         if not isinstance(descriptor, dict):
             raise TypeError("owned-object descriptor must be an object")
-        if set(descriptor) != {"tables", "triggers"}:
+        if not {"tables", "triggers"} <= set(descriptor) <= {
+            "tables", "triggers", "views"
+        }:
             raise ValueError("owned-object descriptor keys are invalid")
         if not isinstance(descriptor["tables"], dict):
             raise TypeError("owned tables must be an object")
         if not isinstance(descriptor["triggers"], list):
             raise TypeError("owned triggers must be a list")
+        _validate_owned_view_contracts(descriptor.get("views", {}))
+
+
+def _validate_owned_view_contracts(views: Any) -> None:
+    if not isinstance(views, dict):
+        raise TypeError("owned views must be an object")
+    for view_name, contract in views.items():
+        require_canonical_text(str(view_name), "owned view name", _IDENTITY_MAXIMUM_LENGTH)
+        if not isinstance(contract, dict) or set(contract) != {"definition_sha256"}:
+            raise ValueError("owned view contract is invalid")
+        require_sha256_hex(contract["definition_sha256"], "owned view definition SHA-256")
 
 
 def _normalize_owned_descriptor(
@@ -603,6 +619,10 @@ def _normalize_owned_descriptor(
             for table_name, columns in descriptor["tables"].items()
         },
         "triggers": set(descriptor["triggers"]),
+        "views": {
+            str(view_name): dict(contract)
+            for view_name, contract in descriptor.get("views", {}).items()
+        },
     }
 
 

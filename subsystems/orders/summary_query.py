@@ -1,4 +1,7 @@
-"""Bounded Orders summary query for canonical and preserved legacy cases."""
+"""
+File: summary_query.py
+Description: 提供正式與歷史案件的唯讀訂單摘要，保留待補件欄位空值。
+"""
 
 from __future__ import annotations
 
@@ -67,12 +70,12 @@ class OrderSummaryItem:
     order_status: str
     staff_name: str | None
     identity_status: str | None
-    start_date: date
+    start_date: date | None
     end_date: date | None
     actual_start_date: date | None
     actual_end_date: date | None
-    service_days: int
-    total_employer_self_pay_payable: int
+    service_days: int | None
+    total_employer_self_pay_payable: int | None
 
 
 @dataclass(frozen=True)
@@ -94,7 +97,7 @@ class OrderSummaryQueryService:
         )
         _validate_repository_page(rows, request)
         items = tuple(_summary_item(row) for row in rows[: request.page_size])
-        _validate_item_order(items, request.after_case_no)
+        _validate_item_identity(items)
         next_cursor = items[-1].case_no if len(rows) > request.page_size else None
         return OrderSummaryPage(items, next_cursor, _page_etag(items, next_cursor))
 
@@ -117,12 +120,12 @@ def _summary_item(row: object) -> OrderSummaryItem:
         order_status=_required_text(row, "order_status", 100),
         staff_name=_optional_text(row, "staff_name", 200),
         identity_status=_optional_text(row, "identity_status", 100),
-        start_date=_required_date(row, "start_date"),
+        start_date=_optional_date(row, "start_date"),
         end_date=_optional_date(row, "end_date"),
         actual_start_date=_optional_date(row, "actual_start_date"),
         actual_end_date=_optional_date(row, "actual_end_date"),
-        service_days=_positive_integer(row, "service_days"),
-        total_employer_self_pay_payable=_nonnegative_ntd(
+        service_days=_optional_planned_service_days(row),
+        total_employer_self_pay_payable=_optional_nonnegative_ntd(
             row, "total_employer_self_pay_payable"
         ),
     )
@@ -165,6 +168,21 @@ def _positive_integer(row: Mapping[str, object], field: str) -> int:
         raise OrderSummaryContractError(str(exc)) from exc
 
 
+def _optional_positive_integer(
+    row: Mapping[str, object], field: str
+) -> int | None:
+    return None if row[field] is None else _positive_integer(row, field)
+
+
+def _optional_planned_service_days(row: Mapping[str, object]) -> int | None:
+    service_days = row["service_days"]
+    if service_days is None:
+        return None
+    if service_days == 0 and row["start_date"] is None:
+        return None
+    return _optional_positive_integer(row, "service_days")
+
+
 def _nonnegative_ntd(row: Mapping[str, object], field: str) -> int:
     value = row[field]
     if isinstance(value, bool) or not isinstance(value, (int, Decimal)):
@@ -176,14 +194,16 @@ def _nonnegative_ntd(row: Mapping[str, object], field: str) -> int:
     return int(value)
 
 
-def _validate_item_order(
-    items: tuple[OrderSummaryItem, ...], after_case_no: str | None
-) -> None:
+def _optional_nonnegative_ntd(
+    row: Mapping[str, object], field: str
+) -> int | None:
+    return None if row[field] is None else _nonnegative_ntd(row, field)
+
+
+def _validate_item_identity(items: tuple[OrderSummaryItem, ...]) -> None:
     case_numbers = tuple(item.case_no for item in items)
-    if case_numbers != tuple(sorted(set(case_numbers))):
-        raise OrderSummaryContractError("repository page order is not canonical")
-    if after_case_no is not None and case_numbers and case_numbers[0] <= after_case_no:
-        raise OrderSummaryContractError("repository page did not advance the cursor")
+    if len(case_numbers) != len(set(case_numbers)):
+        raise OrderSummaryContractError("repository page contains duplicate case numbers")
 
 
 def _page_etag(items: tuple[OrderSummaryItem, ...], next_cursor: str | None) -> str:
@@ -204,7 +224,7 @@ def _item_representation(item: OrderSummaryItem) -> dict[str, object]:
         "order_status": item.order_status,
         "staff_name": item.staff_name,
         "identity_status": item.identity_status,
-        "start_date": item.start_date.isoformat(),
+        "start_date": _date_representation(item.start_date),
         "end_date": _date_representation(item.end_date),
         "actual_start_date": _date_representation(item.actual_start_date),
         "actual_end_date": _date_representation(item.actual_end_date),

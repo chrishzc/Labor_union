@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-14
 approved_at: 2026-08-14
 owner: Anomalies / Case Import / Orders / Finance Import / Staff / LINE Integration
@@ -190,11 +190,11 @@ flowchart LR
    及 validator，未裁決入口固定 fail closed。
 6. 所有 schema gates、focused tests、disposable MySQL 與 preserve-data candidate evidence 為 PASS 後，才可將本 WP 標記 completed。
 
-## DB change gate（目前狀態）
+## 初始 DB change gate（2026-08-14 歷史狀態）
 
 | gate | status | evidence／blocked reason |
 |---|---|---|
-| Scope gate | `PASS` | 2026-08-14 人工採用 WP88 的 business scenarios、整體架構、write set 與 acceptance |
+| Scope gate | `PASS` | 2026-08-14 人工採用 WP92 的 business scenarios、整體架構、write set 與 acceptance |
 | Change inventory | `PASS` | 本文件「Schema 與 migration change inventory」已區分四類；實際 object 名稱尚待 live inventory |
 | Static release gate | `NOT_RUN` | 尚未建立或選定 release artifact |
 | Descriptor gate | `NOT_RUN` | 尚未定案 table／column contract |
@@ -211,20 +211,20 @@ tracking event／receipt、current task projection、explicit resubmission assoc
 LINE 發送、資料回填 UI、Client／Staff／Orders／Finance lane wiring，也不自動拆分既有歷史 umbrella review。
 
 live inventory 已確認 `case_import_hcm_review_rows` 是 immutable source row、但每列只保存 issue-code tuple；generic
-`anomaly_current_alerts` 只有 `open／claimed／resolved`，不得重用為 WP88 task SSOT。preserve-data release catalog 原本漏列
+`anomaly_current_alerts` 只有 `open／claimed／resolved`，不得重用為 WP92 task SSOT。preserve-data release catalog 原本漏列
 WP77 part 189，雖然 local database 已存在該物件；已將 WP77 納回 release chain，read-only plan 現可明確判定 189 exact。
 
 | gate | status | evidence／blocked reason |
 |---|---|---|
 | Scope gate | `PASS` | 本 WP 已核准，第一階段限於上述 HCM warning tracking 基礎 |
-| Change inventory | `PASS` | schema-only：part 191 的 occurrence、event、current task、association、receipt、outbox；無 seed/backfill/destructive change |
-| Static release gate | `PASS` | `labor_union_2026_08_14_wp88_v1` 與 canonical catalog／validation release 已互相引用 |
-| Descriptor gate | `PASS` | WP88 descriptor 覆蓋六個 table 的欄位及 append-only triggers |
-| Read-only plan gate | `PASS` | `.venv\Scripts\python.exe -m scripts.update_local_database` 列出僅 `191_import_warning_tracking.sql` 待套 |
-| Engine verification gate | `NOT_RUN` | 尚未執行 disposable fresh／preserve-data candidate migration |
+| Change inventory | `PASS` | schema-only：part 195 的 occurrence、event、current task、association、receipt、outbox；無 seed/backfill/destructive change |
+| Static release gate | `PASS` | `labor_union_2026_08_14_wp90_import_warning_tracking_v1` 已由 current schema-assembly release 收錄 |
+| Descriptor gate | `PASS` | current descriptor 覆蓋六個 table 的欄位及 append-only triggers |
+| Read-only plan gate | `PASS` | `.venv\Scripts\python.exe -m scripts.update_local_database` 回報 current release 且 part 195 為 exact |
+| Engine verification gate | `PASS` | 2026-08-15 disposable fresh bootstrap 與真實 MySQL source→candidate cutover 均通過；見 evidence receipt |
 | Developer acceptance gate | `NOT_RUN` | 未操作既有 local `union_db` |
 
-結論：`DB_CHANGE_NOT_READY`；schema 尚不可宣告完成或套用到任何既有資料庫。
+結論：`DB_CHANGE_NOT_READY`；Engine 已驗證，但未經 developer acceptance 仍不可宣告完成或套用到既有 `union_db`。
 
 ### 已知後續 live-drift（保留在 HCM 第二切片）
 
@@ -254,3 +254,7 @@ bootstrap 與解除對應欄位警示。
 - 將歷史 umbrella review 自動 backfill 成新 warning items。
 - production data migration、deployment、cutover、刪除舊表／舊 source／舊 review。
 - 在警示中心提供自由文字資料修正、任意 candidate 選取或跨 Domain merge。
+
+## 2026-08-15 Developer acceptance closeout
+
+使用者明確授權對 `lu_test_dataset_contract_signing_v4` 執行 `.venv\Scripts\python.exe -m scripts.update_local_database --apply --mysql-container mysql_db --candidate-database lu_test_dataset_contract_signing_v4_wp92_accept --confirm-database lu_test_dataset_contract_signing_v4`。流程先完成 candidate verify，保存 `source.sql` rollback dump，完成 source replacement；post-replacement verification 顯示 `195_import_warning_tracking.sql=exact`。本次未操作 `union_db`、production database、LINE delivery 或外部 provider。

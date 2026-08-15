@@ -1,4 +1,7 @@
-"""MySQL schedule snapshot adapter."""
+"""
+File: matching_schedule_confirmation_repository.py
+Description: 持久化媒合排班確認快照，套用前重新驗證人員 lifecycle。
+"""
 
 import json
 import hashlib
@@ -50,6 +53,7 @@ class MySqlMatchingScheduleConfirmationRepository:
             if cursor.fetchone():
                 return self.query(case_no, plan_id)
             cursor.execute("UPDATE matching_schedule_snapshots SET current_marker=NULL,status='invalidated',invalidated_at_utc=UTC_TIMESTAMP(6) WHERE case_no=%s AND current_marker=1", (case_no,))
+            self._require_active_lifecycle(cursor, plan_id)
             payloads = self._payloads(cursor, case_no, plan_id, version["id"])
             self._require_line_binding(payloads)
             digest = fingerprint_payload({"case_no": case_no, "plan_id": plan_id, "version": version["version"], "payloads": payloads}).value
@@ -78,8 +82,10 @@ class MySqlMatchingScheduleConfirmationRepository:
                 "SELECT r.id FROM matching_schedule_line_interactions i "
                 "JOIN matching_schedule_recipient_snapshots r ON r.id=i.recipient_snapshot_id "
                 "JOIN matching_schedule_snapshots s ON s.id=r.parent_snapshot_id "
+                "LEFT JOIN caregiver_matching_plan_segments segment ON segment.id=r.segment_id "
+                "LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=segment.staff_id "
                 "WHERE i.token_hash=%s AND i.interaction_status='active' AND s.current_marker=1 "
-                "AND r.recipient_line_user_id=%s FOR UPDATE",
+                "AND r.recipient_line_user_id=%s AND (r.segment_id IS NULL OR COALESCE(lifecycle.lifecycle_state,'active')='active') FOR UPDATE",
                 (token_hash, line_user_id.value),
             )
             row = cursor.fetchone()
@@ -106,8 +112,10 @@ class MySqlMatchingScheduleConfirmationRepository:
                 "SELECT r.id FROM matching_schedule_line_interactions i "
                 "JOIN matching_schedule_recipient_snapshots r ON r.id=i.recipient_snapshot_id "
                 "JOIN matching_schedule_snapshots s ON s.id=r.parent_snapshot_id "
+                "LEFT JOIN caregiver_matching_plan_segments segment ON segment.id=r.segment_id "
+                "LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=segment.staff_id "
                 "WHERE i.interaction_status='awaiting_rejection_reason' "
-                "AND s.current_marker=1 AND r.recipient_line_user_id=%s "
+                "AND s.current_marker=1 AND r.recipient_line_user_id=%s AND (r.segment_id IS NULL OR COALESCE(lifecycle.lifecycle_state,'active')='active') "
                 "ORDER BY i.created_at_utc DESC,i.id DESC LIMIT 1 FOR UPDATE",
                 (line_user_id.value,),
             )
@@ -152,6 +160,12 @@ class MySqlMatchingScheduleConfirmationRepository:
 
     def commit(self): self.connection.commit()
     def rollback(self): self.connection.rollback()
+
+    @staticmethod
+    def _require_active_lifecycle(cursor, plan_id):
+        cursor.execute("SELECT segment.staff_id FROM caregiver_matching_plan_segments segment LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=segment.staff_id WHERE segment.plan_id=%s AND COALESCE(lifecycle.lifecycle_state,'active')<>'active' FOR UPDATE", (plan_id,))
+        if cursor.fetchone():
+            raise ValueError("staff_retired_matching_ineligible")
 
     @staticmethod
     def _payloads(cursor, case_no, plan_id, version_id):

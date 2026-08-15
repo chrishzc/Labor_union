@@ -11,6 +11,8 @@ import re
 from collections.abc import Iterable
 from pathlib import Path
 
+from scripts.schema_assembly import load_schema_assembly
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MANIFEST_PATH = (
@@ -35,6 +37,17 @@ def ordered_schema_parts(schema_parts_directory: Path) -> list[Path]:
     return sorted(schema_parts_directory.glob("*.sql"), key=schema_part_sort_key)
 
 
+def selected_schema_parts(
+    manifest: dict[str, object], project_root: Path = PROJECT_ROOT
+) -> list[Path]:
+    assembly_ref = manifest["schema_assembly"]
+    assembly_path = project_root / str(assembly_ref["path"])
+    if sha256_file(assembly_path) != assembly_ref["sha256"]:
+        raise ValueError("schema assembly digest differs from validation manifest")
+    assembly = load_schema_assembly(assembly_path)
+    return list(assembly.active_artifact_paths)
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -48,11 +61,13 @@ def ordered_parts_digest(schema_parts: list[Path]) -> str:
 
 def verify_manifest(manifest: dict[str, object], project_root: Path = PROJECT_ROOT) -> list[str]:
     base_schema = manifest["base_schema"]
-    schema_parts = manifest["schema_parts"]
     base_path = project_root / str(base_schema["path"])
-    parts = ordered_schema_parts(project_root / str(schema_parts["directory"]))
     errors = _base_schema_errors(base_path, base_schema)
-    errors.extend(_schema_part_errors(parts, schema_parts))
+    try:
+        parts = selected_schema_parts(manifest, project_root)
+    except (KeyError, OSError, ValueError) as error:
+        return [*errors, str(error)]
+    errors.extend(_schema_part_errors(parts, manifest["schema_parts"]))
     return errors
 
 
@@ -61,11 +76,8 @@ def expected_database_objects(
 ) -> dict[str, set[str]]:
     """Return the tables, views, and triggers declared by this release."""
     base_schema = manifest["base_schema"]
-    schema_parts = manifest["schema_parts"]
     artifact_paths = [project_root / str(base_schema["path"])]
-    artifact_paths.extend(
-        ordered_schema_parts(project_root / str(schema_parts["directory"]))
-    )
+    artifact_paths.extend(selected_schema_parts(manifest, project_root))
     return _effective_database_objects(artifact_paths)
 
 

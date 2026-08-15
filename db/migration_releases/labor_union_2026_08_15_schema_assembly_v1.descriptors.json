@@ -1,0 +1,14 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "999_v_order_details_view.sql": {
+      "tables": {},
+      "triggers": [],
+      "views": {
+        "v_order_details": {
+          "definition_sha256": "4d8fc34c1d50b85d0cd426a0ce3f5fc9d1eee8eede8d6c46943e4cae94577aba"
+        }
+      }
+    }
+  }
+}

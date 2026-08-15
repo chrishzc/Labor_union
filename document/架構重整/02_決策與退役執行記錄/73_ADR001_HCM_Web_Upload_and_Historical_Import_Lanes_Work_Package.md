@@ -166,6 +166,16 @@ bounded MySQL coordinator lock 序列化同 key 執行；沒有新增 schema。s
 terminal path 於 `finally` 移除。實機 UI receipt、replay、API conflict 與 focused verification 見
 `document/架構重整/03_追蹤清單與證據/evidence/2026-08-14_wp73_hcm_web_upload_receipt.md`。
 
-本包仍是 `in-progress`：去敏 fixture 兩列皆正確進 review，尚無有效 row 建立 root 的實機 receipt；
-Chrome extension 專項復驗與 HCM review 的 Query／Correct／Reject 後續責任仍未完成。這些缺口不能以
-UI 已可上傳或單元測試取代，也不能作為封存依據。
+本包仍是 `in-progress`：去敏 fixture 兩列皆正確進 review，尚無有效 row 建立 root 的實機 receipt，
+且 Chrome extension 專項復驗尚未完成。決策責任已收斂：warning Query 由 WP92 定義為 typed
+read-only query，但不在目前匯入 slice；通用 `Correct`／`corrected_fields` 已否決，欄位補正必須由
+HCM owner 提供明確 typed command；`RejectCaseImportReview` 不得成為正式 entry point，完成退役前
+固定 fail closed。剩餘 evidence 缺口不能以 UI 已可上傳或單元測試取代，也不能作為封存依據。
+
+## 2026-08-15 非實機收尾
+
+本包的契約、Case Import-owned coordinator、authenticated multipart API、typed receipt、temporary
+workbook cleanup、資料匯入中心 HCM card、entrypoint fail-closed 邊界與去敏 focused evidence 已收斂。
+剩餘項目僅為有效 HCM 列建立 root 的實機 receipt 與具 extension 的 Chrome 驗收，兩者皆不得以
+文件或靜態檢查替代。統一交接紀錄見
+`document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。

@@ -46,4 +46,4 @@ Knowledge schema；現行 148 的 `CREATE TABLE IF NOT EXISTS` 不會替換同�
 
 ## Evidence
 
-- [2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md](../03_追蹤清單與證據/evidence/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md)
+- [2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md](../receipts/2026-08-13_wp84_legacy_knowledge_empty_schema_recovery_receipt.md)

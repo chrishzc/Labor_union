@@ -23,6 +23,7 @@
       ],
       "allowed_legacy_paths": [
         "scripts/migrate_order_contract_identity.py",
+        "scripts/migrate_preserved_database_additive_schema.py",
         "tests/test_migrate_order_contract_identity.py",
         "tests/test_field_authority_legacy_name_audit.py",
         "tests/test_plan_legacy_ui_dataset_integration.py",

@@ -20,6 +20,11 @@ from ui.api_clients.anomaly_registry_api_client import (
     AnomalyRegistryApiClient,
     AnomalyRegistryApiError,
 )
+from ui.api_clients.import_warning_tracking_api_client import (
+    ImportWarningTrackingApiClient,
+    ImportWarningTrackingApiError,
+)
+from api.schemas.import_warning_tracking import WarningTransitionBody
 from ui.api_clients.finance_import_api_client import FinanceImportApiClient
 from ui.api_clients.client_refund_reversal_api_client import ClientRefundReversalApiClient
 from ui.api_clients.client_receipt_reconciliation_api_client import ClientReceiptReconciliationApiClient
@@ -165,6 +170,12 @@ def _recovery_client() -> AnomalyRecoveryApiClient:
         base_url=resolve_api_base_url(),
         headers=build_admin_headers(),
         timeout=20,
+    )
+
+
+def _import_warning_tracking_client() -> ImportWarningTrackingApiClient:
+    return ImportWarningTrackingApiClient(
+        base_url=resolve_api_base_url(), headers=build_admin_headers(), timeout=20
     )
 
 
@@ -1303,6 +1314,63 @@ def _render_import_tab(items: tuple[AnomalySummaryView, ...]) -> None:
         _filter(items, _IMPORT_CODES),
     )
     _render_beclass_review_workspace(_beclass_review_items(items))
+    _render_import_warning_tracking_workspace()
+
+
+def _render_import_warning_tracking_workspace() -> None:
+    st.divider()
+    st.subheader("匯入警示外部確認追蹤")
+    st.caption("只記錄聯絡與重新提交進度；不會修改來源資料，也不代表正式資料已修正。")
+    try:
+        client = _import_warning_tracking_client()
+        tasks = client.query_tasks()
+    except ImportWarningTrackingApiError as error:
+        st.info(f"匯入警示追蹤尚無可用資料 [{error}]。")
+        return
+    if not tasks:
+        st.info("目前沒有待追蹤的匯入警示。")
+        return
+    st.dataframe([
+        {"來源": item.owning_lane, "警示": item.logical_code, "欄位": item.field_path,
+         "去敏主體": item.masked_subject, "狀態": item.tracking_status, "版本": item.tracking_version}
+        for item in tasks
+    ], hide_index=True, width="stretch")
+    selected = st.selectbox("選擇欄位級警示", tasks, format_func=lambda item: f"{item.logical_code}｜{item.masked_subject}｜{item.field_path}", key="import_warning_tracking_task")
+    targets = {
+        "open": ("awaiting_external_confirmation", "closed"),
+        "awaiting_external_confirmation": ("response_recorded", "closed"),
+        "response_recorded": ("reimport_requested", "closed"),
+        "reimport_requested": ("closed",),
+    }.get(selected.tracking_status, ())
+    if not targets:
+        st.info("此警示已是終態，不能由人工再次轉態。")
+        return
+    target = st.selectbox("下一狀態", targets, key="import_warning_tracking_target")
+    reason = st.text_input("處理原因代碼", key="import_warning_tracking_reason")
+    note = st.text_area("去敏備註（選填）", key="import_warning_tracking_note")
+    evidence = st.text_input("證據參考（選填）", key="import_warning_tracking_evidence")
+    body = WarningTransitionBody(expected_version=selected.tracking_version, target_status=target, reason_code=reason or "pending_reason", note=note or None, evidence_reference=evidence or None)
+    signature = body.model_dump_json()
+    preview_key = f"import_warning_preview_{selected.occurrence_identity}"
+    if st.button("Preview 狀態轉態", disabled=not reason.strip(), key="import_warning_tracking_preview"):
+        try:
+            st.session_state[preview_key] = (signature, client.preview(selected.occurrence_identity, body, idempotency_key=f"import-warning-preview-{uuid.uuid4().hex}", correlation_id=f"import-warning-preview-{uuid.uuid4().hex}"))
+        except ImportWarningTrackingApiError as error:
+            st.error(f"Preview 失敗 [{error}]")
+        else:
+            st.rerun()
+    stored = st.session_state.get(preview_key)
+    if isinstance(stored, tuple) and len(stored) == 2 and stored[0] == signature:
+        st.success(f"Preview 完成：將更新為 {stored[1].resulting_status}。")
+        if st.button("Apply 狀態轉態", key="import_warning_tracking_apply"):
+            try:
+                client.apply(selected.occurrence_identity, body, idempotency_key=f"import-warning-apply-{uuid.uuid4().hex}", correlation_id=f"import-warning-apply-{uuid.uuid4().hex}")
+            except ImportWarningTrackingApiError as error:
+                st.error(f"Apply 失敗 [{error}]")
+            else:
+                st.session_state.pop(preview_key, None)
+                st.success("已記錄外部確認追蹤狀態；來源資料未被修改。")
+                st.rerun()
 
 
 def _beclass_review_items(items: tuple[AnomalySummaryView, ...]) -> tuple[AnomalySummaryView, ...]:

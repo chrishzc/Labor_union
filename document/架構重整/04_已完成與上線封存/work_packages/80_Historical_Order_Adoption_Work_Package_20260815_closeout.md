@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: Orders / Scheduling / Payroll
 priority: P0
@@ -8,12 +8,12 @@ priority: P0
 
 # 80 Historical Order Adoption Work Package
 
-## 1. 恢復 active 的原因
+## 1. 完成狀態收斂
 
-本文件於 2026-08-13 曾被誤封存。現有 parser、Preview、successor schema part 193 與 release metadata
-不等於完成：242-row 實際形狀只取得 Preview（111 adopted、131 unmatched、8 review），尚無完整
-disposable MySQL Apply、exact replay、rollback、API／資料匯入中心 UI 與 Chrome receipt evidence。
-因此 archive identity `ARCH-20260813-070` 僅保留歷史追溯，本文件恢復為唯一 active execution
+本文件於 2026-08-13 曾被誤封存，後續缺口現已由
+`../../03_追蹤清單與證據/evidence/2026-08-14_wp80_historical_order_adoption_closeout_receipt.md`
+完成 closeout。Web transition 由 WP89 承接；historical adoption 的最新精確寫入語意由 WP92 收斂，
+均不重新開啟 WP80。archive identity `ARCH-20260813-070` 僅保留歷史追溯，本文件等待 archive gate
 record；正式業務語意仍以 `01_Orders_Domain.md` 與 `15_正式規格索引與裁決總表.md` 為 SSOT。
 
 ## 2. 已核准的行為

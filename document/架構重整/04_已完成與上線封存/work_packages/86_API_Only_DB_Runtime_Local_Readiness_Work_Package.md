@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-14
 owner: Global Deployment / Runtime Supervision
 priority: P0
@@ -64,6 +64,7 @@ DB hostname、port、username 或 password，也不得 import concrete MySQL ada
 - `scripts/run_line_worker.py`
 - `scripts/run_knowledge_worker.py`
 - `scripts/run_incident_worker.py`
+- `infrastructure/http/private_operations_client.py`
 - `subsystems/anomalies/outbox_worker.py`
 - `subsystems/access/security_audit_retention_worker.py`
 - `scripts/launchers/` 與 `config/` 中直接相關說明或啟動設定
@@ -91,7 +92,7 @@ DB hostname、port、username 或 password，也不得 import concrete MySQL ada
 | Descriptor | NOT_RUN | 無 DB change，不適用 |
 | Read-only plan | NOT_RUN | 無 DB change，不操作既有 DB |
 | Engine verification | NOT_RUN | 無 DB change |
-| Developer acceptance | NOT_RUN | 留待使用者地端整合驗收 |
+| Developer acceptance | PASS | 2026-08-15 受使用者授權的 `start_local_development.bat --smoke-test` 通過；API、Streamlit、Monitor、File Watcher、Durable 與 Incident Worker 皆受控啟動並清理，LINE worker 因未設定 credentials 安全略過 |
 
 ## 2026-08-14 Windows launcher regression repair
 
@@ -101,3 +102,21 @@ operation 正常，根因是 batch `for /f` 內嵌 quoted Python command 被 `cm
 launcher 與 smoke 共用；一般 launcher 另固定等待 FastAPI 與 Streamlit health 200 後才啟動
 Worker／Monitor。修復後 controlled full-service smoke 必須沒有 `not recognized`、ConnectionError、
 401／503 或 Traceback 才算通過。
+
+## 2026-08-15 獨立 Worker 本機 credential repair
+
+實機 incident worker 回報 `503 internal_service_authentication_unavailable`。根因是 API composition
+會讀 Git-ignored `.env`，但獨立 Worker／Monitor CLI 只讀 process environment；因此使用 IDE／另一個
+終端分別啟動時，README 已宣告的本機 `INTERNAL_SERVICE_SHARED_KEY` 沒有進入 worker process。修復由
+Private Operations client 在建立時以 process environment 優先、缺值才讀專案根 `.env`；不覆寫部署
+環境、不記錄 key，production 的 OIDC 選擇與 fail-closed 行為不變。驗收須覆蓋本機 `.env` key、明確
+process value 覆蓋與原有 authentication fail-closed regression。
+
+後續真實程式比對發現，原修復使用 `load_dotenv()` 會把 `.env` 內 DB credential 重新注入已清除
+憑證的 Worker process，違反 API-only DB invariant。修復改為只讀
+`INTERNAL_API_*`／`INTERNAL_SERVICE_*` allowlist，且不修改 process environment；focused evidence
+見 `2026-08-15_wp86_independent_worker_local_credential_receipt.md`。
+
+## 2026-08-15 Developer acceptance closeout
+
+使用者授權執行 scripts\\launchers\\start_local_development.bat --smoke-test。Docker MySQL 與 Redis 已就緒；設定來源 lu_test_dataset_contract_signing_v4 為 current labor-union-staff-retirement-2026-08-15-v1。API、Streamlit、Runtime Monitor、File Watcher、Durable 與 Incident Worker 均通過受控啟動、health check 與自動清理。LINE Worker 缺 credentials，被安全略過，未執行 provider delivery。

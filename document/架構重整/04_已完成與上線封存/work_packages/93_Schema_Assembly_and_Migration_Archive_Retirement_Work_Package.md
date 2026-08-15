@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: approved
+declared_status: completed
 date: 2026-08-14
 approved_at: 2026-08-14
 owner: Database Architecture / Release Engineering
@@ -51,7 +51,42 @@ release catalog 只選部分 artifact。隨著 schema part 增加，已被後續
   的預估欄位不是寫入授權，因此不是 WP88 completion 的 schema 依賴。若日後需要調整其顯示，仍須先由本 WP 提供
   view owner descriptor，才能以可追溯 release 更新既有資料庫。
 
-本工作包尚未經人工核准，不授權 implementation、schema mutation、archive 搬移或刪除。
+## 2026-08-15 實作與驗收
+
+- 唯一 fresh assembly 為 `db/schema_assembly/labor_union_fresh_schema_v1.json`；它列出所有 part 的
+  `active-bootstrap`、`migration-only` 或 `retired` 分類，並以 ordered digest 鎖定 active selection。
+- `init_db.py`、disposable bootstrap 與 validation release 都只讀該 catalog；preserve-data runner 驗證 catalog
+  完整性，但仍由不可變的 release manifest chain 決定 migration artifact，兩者不互相推導。
+- `153_retire_empty_legacy_field_inventory.sql`、189、190 為 migration-only；每筆在 catalog 中有 source object、
+  successor、終態、資料效果、replay、rollback 與 unresolved policy。fresh assembly 以 part 199 確保已退役
+  finance reclassification roots 不會重建。
+- 新增 `labor-union-schema-assembly-2026-08-15-v1` release，將 `999_v_order_details_view.sql` 納入 preserve
+  candidate，descriptor 以 definition digest 機械區分 view `absent`、`exact` 與 `drift`。
+- `update_local_database.bat --dry-run` 現在先跑 launcher preflight，再跑 canonical read-only migration plan；
+  apply 維持 backup → candidate apply/verify → same-name replacement 的既有順序。
+
+## Completion evidence
+
+| Gate | 狀態 | 證據 |
+|---|---|---|
+| Scope | PASS | 本 Work Package 與 2026-08-14 使用者明確授權 |
+| Change inventory | PASS | catalog retirement contracts；僅 schema-only、無 seed／business-row backfill |
+| Static release | PASS | `71 passed` focused static suite；catalog、validation manifest 與 release chain digest 全部一致 |
+| Descriptor | PASS | `v_order_details` unit contract 覆蓋 `absent/exact/drift`；fresh postcheck 成功 |
+| Read-only plan | PASS | `scripts.update_local_database` preview 與 `--require-current` 均回報 `labor-union-schema-assembly-2026-08-15-v1` |
+| Engine verification | PASS | fresh bootstrap；WP78/WP84 Docker candidate `7 passed`；missing-view source → candidate 重建後 semantic `exact` |
+| Developer acceptance | PASS | `update_local_database.bat --dry-run`、`start_local_development.bat --smoke-test` exit 0；API、Streamlit 與本機 workers health passed |
+| UI closeout | PASS | 九個頂層頁面各停留至少五秒；修復訂單摘要對待補件／歷史未知條款的誤判 |
+
+完整去敏命令與結果見
+[`2026-08-15_wp93_schema_assembly_and_launcher_receipt.md`](../03_追蹤清單與證據/evidence/2026-08-15_wp93_schema_assembly_and_launcher_receipt.md)。
+UI closeout 見
+[`2026-08-15_wp93_ui_runtime_sweep_receipt.md`](../03_追蹤清單與證據/evidence/2026-08-15_wp93_ui_runtime_sweep_receipt.md)。
+
+## Out of scope retained
+
+- 未修改已發布的 SQL、既有 release manifest bytes、正式資料或 archive 文件。
+- 未處理警示中心、HCM／Case Import 業務規則、或其他 active Work Package 的 completion。
 
 ## 2026-08-14 授權補充
 

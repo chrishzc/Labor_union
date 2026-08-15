@@ -1,4 +1,7 @@
-"""Read-only MySQL facts for Scheduling matching recommendations."""
+"""
+File: matching_recommendation_repository.py
+Description: 讀取排班媒合候選事實，排除 legacy inactive 與 lifecycle retired 人員。
+"""
 
 from __future__ import annotations
 
@@ -17,7 +20,7 @@ class MySqlMatchingRecommendationRepository:
 
     def load_candidates(self, service_dates):
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT id,name,phone,line_user_id,care_babies FROM staff WHERE status='active'")
+            cursor.execute("SELECT s.id,s.name,s.phone,s.line_user_id,s.care_babies FROM staff s LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=s.id WHERE s.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active'")
             staff = tuple(cursor.fetchall())
             cursor.execute("SELECT staff_id,region_name FROM staff_regions")
             regions = _group(cursor.fetchall(), "region_name")
