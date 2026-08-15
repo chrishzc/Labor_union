@@ -408,20 +408,23 @@ Modules：
 - `CaseBootstrapCandidateBuilder`
 
 File Watcher 只建立 durable import job；CLI／Adapter 不直接寫正式 Client／Order。
-invalid row 必須保存 privacy-safe root fact 並投影 canonical anomaly。
+invalid row 必須保存 privacy-safe root fact；只有已滿足該 lane 最低 import 條件、且需要人工處理的
+review 才投影 canonical anomaly。
 
 HCM 不得以 fabricated default 補造欄位。案件編號是最低寫入資格：有可用案件編號時必須建立／保留
 正式案件，其他欄位缺漏、格式錯誤或身份關聯歧義各自形成 durable field／link warning；只有案件編號
-缺失或不可用時不建案、僅留來源警示。Client／Staff historical import 必須另走 HistoricalAdoption
+缺失或不可用時不建案，且只保留來源 review／receipt／outbox 稽核，不投影異常中心。
+Client／Staff historical import 必須另走 HistoricalAdoption
 Preview／Apply，不得重用 current LIFF command 假裝一般資料更新。
 
 ### 匯入異常的外部確認與重新提交
 
 HCM、Client／Staff BeClass 與其他 Case Import 來源的 review 是公會人員聯絡來源當事人的待辦，
 不是管理端直接修正資料的表單。review root、處理狀態與 disposition 必須保留去敏資訊；不得持久化
-LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Client／Order／Staff input。正確資料原則上由
-新來源重新走 typed Preview／Apply；已建 HCM 案件的單一缺漏／無效欄位可由 HCM owning typed
-field-completion command 補齊，不要求整案重送，也不得經警示中心直接改值。
+LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Client／Order／Staff input。正確資料由
+新來源重新走 typed Preview／Apply。2026-08-15 WP95 進一步裁決：已建 HCM 案件的缺漏、無效欄位與
+同案修正版一律提交完整修正來源，由 HCM owning resubmission Preview／Apply 採納通過驗證且屬
+HCM 欄位權威的差異；不提供警示中心或 Streamlit 單欄編輯，也不得修改 immutable source。
 
 WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
 IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，
@@ -437,9 +440,20 @@ Staff BeClass 歷史匯入以有效身分證及姓名為最低資格。後來的
 仍建立欄位級 warning。Staff 退役不由匯入推定或修改。
 
 有 HCM 而無唯一 Client BeClass 對方時投影 `BECLASS-001`；對方日後唯一綁定後由 root predicate 自動解除。
-任何警示均以 `logical_code + field_path` 獨立追蹤；exact replay 不建立新 occurrence。顯式關聯的新提交仍
+任何警示均以 `logical_code + field_path` 獨立追蹤；缺漏與格式錯誤不按欄位新增 logical code，
+由 display projection 以「缺少{欄位名稱}」或「{欄位名稱}格式錯誤」呈現。exact replay 不建立新 occurrence。顯式關聯的新提交仍
 不合格時建立新 warning 並由 system 關閉被取代的舊 task；成功補齊後才 `auto_resolved`。所有來源、issue
 codes、occurrence 與狀態事件保留。第一階段只記錄公會人工聯絡，不自動傳 LINE、不猜 recipient。
+未登錄的 issue code 不得靜默略過或落入 generic field warning；投影交易必須回滾，只寫入
+lane 與 issue digest 的去敏錯誤；總嘗試上限 3 次，相鄰嘗試至少間隔 1 秒，後進入
+dead-letter，供維運先補 registry／映射再重放。retry-ready time 必須持久化，worker 重啟不得提早嘗試。
+
+已知 validator 狀態不得被當成 unknown：Client BeClass 欄位 validation 以
+`client_field_missing:<field_path>`／`client_field_invalid:<field_path>` 保存，兩者共用
+`CLIENT-BECLASS-SOURCE-001`，由 display projection 區分「缺少欄位」與「格式錯誤」；不得保存錯誤
+訊息中的原始值。HCM 既有案件收到不同 source fingerprint 使用 `HCM-CASE-002/$source_row`，缺案號仍
+低於 import 門檻且零 warning。Historical Orders 的起／迄日不可解析分別使用
+`ORDER-HIST-FIELD-001/actual_start_date|actual_end_date`。
 
 live `ApplyBeClassReview`／`RejectCaseImportReview` 的 corrected-fields／Correct／Reject 形狀不是核准目標；
 必須依 entrypoint governance 退役或替換為 tracking-only transition 與 owning Domain typed command。
@@ -466,8 +480,9 @@ Typed operations：
 - `PreviewCaseImport` → candidate、validation、mapping、fingerprint、expected version
 - `ApplyCaseImport`／各 lane HistoricalAdoption Apply → 正式 root receipt、欄位級 warning 或 typed blocker
 - `PreviewWarningTransition`／`ApplyWarningTransition` → 只更新外部追蹤狀態，不接受 corrected payload
-- HCM owning field-completion／linking command → 補指定正式欄位或唯一關聯
-- `AssociateImportResubmission` → 驗證 prior warning／source 與新 source／receipt 的明確關聯
+- `PreviewHcmResubmission`／`ApplyHcmResubmission` → 驗證完整修正來源、prior warning 與 canonical
+  case 的明確關聯，採納通過驗證的 HCM-owned fields；link 只有唯一可證明時建立
+- warning referral descriptor → 只回傳 owner command identifier、expected warning version 與去敏 context
 
 Ports：`CaseImportSourceArchive`、`CaseImportRepository`、`CaseIdentityQuery`、
 `CaseBootstrapGateway`、`CaseImportOutbox`、`CaseImportClock` 與

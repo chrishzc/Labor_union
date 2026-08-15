@@ -1,0 +1,27 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "200_finance_import_source_reviews.sql": {
+      "tables": {
+        "finance_import_source_reviews": [
+          "id", "review_identity", "source_content_digest", "format_id",
+          "sheet_name", "source_row", "masked_source_identity", "issue_codes",
+          "created_at"
+        ],
+        "finance_import_source_review_occurrences": [
+          "id", "batch_id", "review_id", "created_at"
+        ],
+        "finance_import_source_review_outbox": [
+          "id", "review_id", "intent_key", "published_at", "attempts",
+          "last_error", "created_at"
+        ]
+      },
+      "triggers": [
+        "trg_finance_import_source_reviews_before_update",
+        "trg_finance_import_source_reviews_before_delete",
+        "trg_finance_source_review_occurrences_before_update",
+        "trg_finance_source_review_occurrences_before_delete"
+      ]
+    }
+  }
+}

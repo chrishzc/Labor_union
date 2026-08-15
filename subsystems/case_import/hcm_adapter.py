@@ -91,6 +91,31 @@ def parse_hcm_service_time(value: str) -> tuple[int, time, time, int]:
     return _service_time_facts(value)
 
 
+def calculate_hcm_service_end_date(
+    start_date: date,
+    service_days: int,
+    service_type: str,
+    holiday_dates: set[date],
+) -> date | None:
+    """Calculate the HCM-owned planned end date without performing persistence."""
+    if service_days < 1:
+        return None
+    rest_weekdays = {
+        "週休1日": {6},
+        "週休2日": {5, 6},
+        "連續服務": set(),
+    }.get(service_type, set())
+    current_date = start_date
+    completed_days = 0
+    while completed_days < service_days:
+        if current_date.weekday() not in rest_weekdays and current_date not in holiday_dates:
+            completed_days += 1
+            if completed_days == service_days:
+                return current_date
+        current_date += timedelta(days=1)
+    return None
+
+
 def _client_attributes(record):
     return tuple(
         ClientImportAttribute(str(name), _normalize_value(value))

@@ -1,6 +1,6 @@
 ---
 doc_type: evidence-receipt
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-15
 owner: Case Import / LINE Integration / Global Migration
 scope: WP73, WP77, and WP82 non-engine closeout
@@ -44,5 +44,7 @@ or real MySQL evidence.
 
 ## Archive disposition
 
-All three Work Packages remain `in-progress`. Their only remaining work is non-substitutable real
-environment acceptance; archive review resumes only after those receipts exist.
+2026-08-15 使用者明確指示跳過所有列出的實機／provider／engine 驗收並封存 WP73、WP77 與 WP82。
+本 receipt 因此隨三份 Work Package 移入 archive，僅證明非實機範圍與人工豁免；未執行的實機
+驗收不得解讀為 PASS。後續若要啟用、重啟或修改任一能力，須先建立 successor Work Package，
+並在受控環境完成相應的 browser、provider、source-data 或 MySQL evidence。

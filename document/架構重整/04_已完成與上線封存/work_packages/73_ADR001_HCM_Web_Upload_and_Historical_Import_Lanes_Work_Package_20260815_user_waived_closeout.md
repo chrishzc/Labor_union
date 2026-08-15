@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: Case Import / LINE Integration / Global Import Boundary
 priority: P0
@@ -178,4 +178,11 @@ HCM owner 提供明確 typed command；`RejectCaseImportReview` 不得成為正�
 workbook cleanup、資料匯入中心 HCM card、entrypoint fail-closed 邊界與去敏 focused evidence 已收斂。
 剩餘項目僅為有效 HCM 列建立 root 的實機 receipt 與具 extension 的 Chrome 驗收，兩者皆不得以
 文件或靜態檢查替代。統一交接紀錄見
-`document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。
+`document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。
+
+## 2026-08-15 人工豁免封存裁決
+
+使用者明確指示跳過有效 HCM root 建立與 Chrome extension 的實機驗收，並封存本 Work Package。
+因此本包以已完成的非實機範圍結案；上述實機證據仍為未執行，不得解讀為通過或 production-ready。
+如未來重啟 HCM Web upload 的正式啟用，必須以 current 規格另立 successor Work Package 並重做受控
+環境的有效列、replay、conflict 與瀏覽器驗收。

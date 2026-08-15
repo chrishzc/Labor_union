@@ -287,7 +287,7 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-12:] == (
+    assert artifact_names[-15:] == (
         "188_matching_preferences_and_staff_availability.sql",
         "189_client_refund_recipient_snapshot_local_upgrade.sql",
         "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
@@ -299,14 +299,17 @@ def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
         "196_case_import_partial_formal_case.sql",
         "197_client_beclass_transition_binding.sql",
         "198_case_import_pending_completion_status.sql",
+        "200_finance_import_source_reviews.sql",
+        "201_hcm_resubmission_corrections.sql",
         "999_v_order_details_view.sql",
+        "1000_staff_retirement.sql",
     )
     ordinals = tuple(int(name.split("_", 1)[0]) for name in artifact_names)
     assert ordinals == tuple(sorted(ordinals))
     assert len(ordinals) == len(set(ordinals))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     assert runner.RELEASE_MANIFEST.release_id == (
-        "labor-union-schema-assembly-2026-08-15-v1"
+        "labor-union-staff-retirement-2026-08-15-v1"
     )
 
 

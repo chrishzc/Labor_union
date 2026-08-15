@@ -12,6 +12,7 @@
 | [LINE 訂單狀態自動推送通知](01_P0_LINE訂單狀態自動推送通知_狀態盤點與觸發串接計畫.md) | `proposed` | 人工確認通知規則目錄後另立 Work Package。 |
 | [Access Control TOTP 與帳號管理](Access_Control_TOTP與帳號管理功能開發計畫.md) | `proposed-awaiting-human-confirmation` | 確認整體架構與精確 write set。 |
 | [Import Architecture Refactor](ADR-001-import-architecture-refactor.md) | `amended-proposed`／`partial` | WP73 只承接已授權階段；其餘範圍仍須裁決。 |
+| [HCM 待補件完成與警示解除](PROV-20260815_HCM_Owner_Completion_and_Warning_Resolution_Proposal.md) | `proposed-awaiting-human-confirmation` | 確認 HCM owner command、explicit root binding、predicate 與 write set 後另立 successor Work Package。 |
 | [Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed`／`deferred` | 指定 managed host、部署窗口與操作權限。 |
 | [Scheduling 月嫂請假申請待辦](Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md) | `approved`／implementation `not-granted` | 建立精確 Work Package 並取得實作授權。 |
 | [UI 真實業務流程測試資料與驗收主計畫](UI真實業務流程測試資料與驗收主計畫.md) | `approved-planning` | 各 Part 個別完成規格與人工 activation gate。 |

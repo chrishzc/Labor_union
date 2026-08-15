@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: Case Import / Staff Historical Adoption
 priority: P0
@@ -158,4 +158,11 @@ registry、production DB操作、seed、business backfill或 destructive migrati
 交接步驟均已收斂；不再有可由文件整理取代的實作工作。剩餘 only-on-engine gate 為完整 Staff
 來源 replay、合法 HCM／Client 順序與 reconciliation、以及上一支援版 preserve-data 的 final verify。
 在這些 receipt 完成前，本包維持 `in-progress` 且不得封存。統一交接紀錄見
-`document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。
+`document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。
+
+## 2026-08-15 人工豁免封存裁決
+
+使用者明確指示跳過完整 Staff source replay、HCM／Client 順序與 reconciliation、以及 preserve-data
+final verify 的實機驗收，並封存本 Work Package。故本包僅以既有的非實機範圍結案；所有列出的
+engine/data evidence 均維持未執行，不得解讀為通過或 production-ready。未來如需啟用或變更此歷史
+採納能力，必須另立 successor Work Package 並在隔離環境重新驗證。

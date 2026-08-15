@@ -1,12 +1,13 @@
 """
 File: test_wp77_disposable_mysql_e2e.py
-Description: 以明確 disposable MySQL 驗證 Staff adoption receipt與HCM review/outbox原子性。
+Description: 以 disposable MySQL 驗證 Staff adoption、HCM／BeClass 警示與重試停損。
 """
 
 from __future__ import annotations
 
 import hashlib
 import os
+import time
 from uuid import uuid4
 
 import pytest
@@ -15,9 +16,15 @@ from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.beclass_import_review_anomaly_source import (
     project_beclass_import_review_page,
 )
+from subsystems.anomalies.beclass_import_outbox_consumer import (
+    consume_beclass_import_review_events,
+)
 from subsystems.case_import.beclass_review_intake import record_invalid_beclass_row
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 from subsystems.case_import.hcm_import_review_intake import record_hcm_import_review
+from subsystems.anomalies.hcm_import_review_outbox_consumer import (
+    consume_hcm_import_review_events,
+)
 from subsystems.case_import.staff_historical_adoption import adopt_existing_staff
 
 
@@ -104,6 +111,9 @@ def test_newer_staff_snapshot_replaces_name_bank_relations_and_keeps_old_replay(
         assert new_result.changed_fields == ("name", "registered_at")
         assert old_replay.replayed is True
         _assert_replaced_staff_snapshot(connection, staff_id, new_bank)
+        projection = consume_beclass_import_review_events(connection)
+        assert projection.failed_count == 0
+        _assert_staff_name_trace_warning(connection)
     finally:
         connection.close()
 
@@ -137,6 +147,160 @@ def test_hcm_invalid_row_creates_root_and_outbox_then_exactly_replays():
                 (first,),
             )
             assert int(cursor.fetchone()["count"]) == 1
+    finally:
+        connection.close()
+
+
+def test_hcm_review_outbox_projects_field_warnings_and_replays_without_duplicates():
+    digest = hashlib.sha256(uuid4().bytes).hexdigest()
+    connection = get_connection()
+    try:
+        # 共用 disposable schema 可能含前序案例事件，先排空才只驗證本筆 review 投影。
+        consume_hcm_import_review_events(connection)
+        review_identity = record_hcm_import_review(
+            connection,
+            source_content_digest=digest,
+            source_sheet="任意資料頁",
+            source_row=8,
+            case_identity="HCM-TEST-0008",
+            issue_codes=(
+                "hcm_field_missing:服務日期",
+                "hcm_field_invalid:服務時間",
+            ),
+            evidence_snapshot={"invalid_field_count": 2, "has_case_identity": True},
+        )
+
+        first = consume_hcm_import_review_events(connection)
+        replay = consume_hcm_import_review_events(connection)
+
+        assert first.delivered_count == 1
+        assert first.failed_count == 0
+        assert replay.delivered_count == 0
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT logical_code,field_path,masked_subject,issue_codes,evidence_snapshot "
+                "FROM import_warning_occurrences "
+                "WHERE source_receipt_identity=%s ORDER BY field_path",
+                (review_identity,),
+            )
+            warnings = cursor.fetchall()
+            assert [(row["logical_code"], row["field_path"]) for row in warnings] == [
+                ("HCM-FIELD-001", "服務日期"),
+                ("HCM-FIELD-002", "服務時間"),
+            ]
+            assert all(row["masked_subject"] == "hcm-***-0008" for row in warnings)
+            assert all("HCM-TEST-0008" not in str(row) for row in warnings)
+            cursor.execute(
+                "SELECT tracking_status,tracking_version FROM import_warning_current_tasks task "
+                "JOIN import_warning_occurrences occurrence ON occurrence.id=task.occurrence_id "
+                "WHERE occurrence.source_receipt_identity=%s ORDER BY occurrence.field_path",
+                (review_identity,),
+            )
+            assert cursor.fetchall() == [
+                {"tracking_status": "open", "tracking_version": 1},
+                {"tracking_status": "open", "tracking_version": 1},
+            ]
+    finally:
+        connection.close()
+
+
+def test_hcm_row_below_import_threshold_is_audited_but_not_sent_to_anomaly_center():
+    digest = hashlib.sha256(uuid4().bytes).hexdigest()
+    connection = get_connection()
+    try:
+        consume_hcm_import_review_events(connection)
+        review_identity = record_hcm_import_review(
+            connection,
+            source_content_digest=digest,
+            source_sheet="任意資料頁",
+            source_row=10,
+            case_identity=None,
+            issue_codes=("hcm_case_import:case_import_case_no_required",),
+            evidence_snapshot={"has_case_identity": False},
+        )
+
+        result = consume_hcm_import_review_events(connection)
+
+        assert result.delivered_count == 1
+        assert result.failed_count == 0
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
+                "WHERE source_receipt_identity=%s",
+                (review_identity,),
+            )
+            assert cursor.fetchone() == {"count": 0}
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM anomaly_current_alerts "
+                "WHERE definition_code='IMPORT-004' AND source_identity=%s",
+                (review_identity,),
+            )
+            assert cursor.fetchone() == {"count": 0}
+            cursor.execute(
+                "SELECT outbox.published_at,outbox.attempts,outbox.last_error "
+                "FROM case_import_hcm_review_outbox outbox "
+                "JOIN case_import_hcm_review_rows root ON root.id=outbox.review_row_id "
+                "WHERE root.review_identity=%s",
+                (review_identity,),
+            )
+            outbox = cursor.fetchone()
+            assert outbox["published_at"] is not None
+            assert outbox["attempts"] == 0
+            assert outbox["last_error"] is None
+    finally:
+        connection.close()
+
+
+def test_hcm_unknown_issue_retries_then_dead_letters_without_partial_warning():
+    digest = hashlib.sha256(uuid4().bytes).hexdigest()
+    raw_issue = "future_hcm_state:完整姓名不得寫入錯誤"
+    connection = get_connection()
+    try:
+        consume_hcm_import_review_events(connection)
+        review_identity = record_hcm_import_review(
+            connection,
+            source_content_digest=digest,
+            source_sheet="任意資料頁",
+            source_row=11,
+            case_identity="HCM-TEST-0011",
+            issue_codes=(raw_issue,),
+            evidence_snapshot={"has_case_identity": True},
+        )
+
+        for attempt in range(3):
+            result = consume_hcm_import_review_events(connection, maximum_events=1)
+            assert result.failed_count == 1
+            immediate = consume_hcm_import_review_events(connection, maximum_events=1)
+            assert immediate.failed_count == 0
+            if attempt < 2:
+                time.sleep(1.05)
+        stopped = consume_hcm_import_review_events(connection, maximum_events=1)
+
+        assert stopped.delivered_count == 0
+        assert stopped.failed_count == 0
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
+                "WHERE source_receipt_identity=%s",
+                (review_identity,),
+            )
+            assert cursor.fetchone() == {"count": 0}
+            cursor.execute(
+                "SELECT outbox.published_at,outbox.attempts,outbox.last_error "
+                "FROM case_import_hcm_review_outbox outbox "
+                "JOIN case_import_hcm_review_rows root ON root.id=outbox.review_row_id "
+                "WHERE root.review_identity=%s",
+                (review_identity,),
+            )
+            outbox = cursor.fetchone()
+            assert outbox["published_at"] is None
+            assert outbox["attempts"] == 3
+            failure = __import__("json").loads(outbox["last_error"])
+            assert failure["terminal"] is True
+            assert failure["error_code"].startswith(
+                "import_warning_projection_unknown_issue:hcm:"
+            )
+            assert raw_issue not in str(outbox["last_error"])
     finally:
         connection.close()
 
@@ -189,6 +353,101 @@ def test_beclass_review_root_rescan_rebuilds_missing_current_projection():
                 (review_identity,),
             )
             assert cursor.fetchone() == {"count": 1}
+    finally:
+        connection.close()
+
+
+def test_staff_beclass_review_outbox_projects_field_warning_without_source_mutation():
+    digest = hashlib.sha256(uuid4().bytes).hexdigest()
+    connection = get_connection()
+    try:
+        # 先排空前序 HCM／BeClass 事件，使本案例不受測試執行順序影響。
+        consume_beclass_import_review_events(connection)
+        review_identity = record_invalid_beclass_row(
+            connection,
+            source_kind=BeClassImportSourceKind.STAFF,
+            source_content_digest=digest,
+            source_sheet="任意資料頁",
+            source_row=9,
+            masked_identifier="staff-***-0009",
+            source_payload={"has_identity_card": True, "has_name": True},
+            issue_codes=("staff_field_invalid:銀行代號",),
+        )
+        connection.commit()
+
+        result = consume_beclass_import_review_events(connection)
+
+        assert result.delivered_count == 1
+        assert result.failed_count == 0
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT occurrence.logical_code,occurrence.field_path,task.tracking_status,task.tracking_version "
+                "FROM import_warning_occurrences occurrence "
+                "JOIN import_warning_current_tasks task ON task.occurrence_id=occurrence.id "
+                "WHERE occurrence.source_receipt_identity=%s",
+                (review_identity,),
+            )
+            assert cursor.fetchall() == [
+                {
+                    "logical_code": "STAFF-BECLASS-FIELD-002",
+                    "field_path": "銀行代號",
+                    "tracking_status": "open",
+                    "tracking_version": 1,
+                }
+            ]
+    finally:
+        connection.close()
+
+
+def test_beclass_unknown_issue_obeys_one_second_three_attempt_dead_letter_policy():
+    digest = hashlib.sha256(uuid4().bytes).hexdigest()
+    raw_issue = "future_client_state:完整手機不得寫入錯誤"
+    connection = get_connection()
+    try:
+        consume_beclass_import_review_events(connection)
+        review_identity = record_invalid_beclass_row(
+            connection,
+            source_kind=BeClassImportSourceKind.CLIENT,
+            source_content_digest=digest,
+            source_sheet="任意資料頁",
+            source_row=12,
+            masked_identifier="client-***-0012",
+            source_payload={"has_name": True, "has_phone": True},
+            issue_codes=(raw_issue,),
+        )
+        connection.commit()
+
+        for attempt in range(3):
+            result = consume_beclass_import_review_events(connection, maximum_events=1)
+            assert result.failed_count == 1
+            immediate = consume_beclass_import_review_events(connection, maximum_events=1)
+            assert immediate.failed_count == 0
+            if attempt < 2:
+                time.sleep(1.05)
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
+                "WHERE source_receipt_identity=%s",
+                (review_identity,),
+            )
+            assert cursor.fetchone() == {"count": 0}
+            cursor.execute(
+                "SELECT outbox.published_at,outbox.attempts,outbox.last_error "
+                "FROM beclass_import_review_outbox outbox "
+                "JOIN beclass_import_review_rows root ON root.id=outbox.review_row_id "
+                "WHERE root.review_identity=%s AND outbox.intent_type='review_opened'",
+                (review_identity,),
+            )
+            outbox = cursor.fetchone()
+            failure = __import__("json").loads(outbox["last_error"])
+            assert outbox["published_at"] is None
+            assert outbox["attempts"] == 3
+            assert failure["terminal"] == 1
+            assert failure["error_code"].startswith(
+                "import_warning_projection_unknown_issue:beclass_client:"
+            )
+            assert raw_issue not in outbox["last_error"]
     finally:
         connection.close()
 
@@ -272,3 +531,37 @@ def _assert_replaced_staff_snapshot(connection, staff_id, expected_bank):
             "WHERE source_kind='staff' ORDER BY id DESC LIMIT 1"
         )
         assert "historical_name_changed" in str(cursor.fetchone()["issue_codes"])
+
+
+def _assert_staff_name_trace_warning(connection):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT root.review_identity FROM beclass_import_review_rows root "
+            "WHERE root.source_kind='staff' "
+            "AND JSON_CONTAINS(root.issue_codes,%s) ORDER BY root.id DESC LIMIT 1",
+            ('"historical_name_changed"',),
+        )
+        review_identity = cursor.fetchone()["review_identity"]
+        cursor.execute(
+            "SELECT occurrence.logical_code,occurrence.field_path,"
+            "task.tracking_status,task.tracking_version "
+            "FROM import_warning_occurrences occurrence "
+            "JOIN import_warning_current_tasks task ON task.occurrence_id=occurrence.id "
+            "WHERE occurrence.source_receipt_identity=%s",
+            (review_identity,),
+        )
+        assert cursor.fetchall() == [
+            {
+                "logical_code": "STAFF-BECLASS-NAME-002",
+                "field_path": "姓名",
+                "tracking_status": "auto_resolved",
+                "tracking_version": 1,
+            }
+        ]
+        cursor.execute(
+            "SELECT COUNT(*) AS count FROM anomaly_current_alerts "
+            "WHERE definition_code='IMPORT-001' AND source_identity=%s "
+            "AND predicate_active=TRUE",
+            (review_identity,),
+        )
+        assert cursor.fetchone() == {"count": 0}

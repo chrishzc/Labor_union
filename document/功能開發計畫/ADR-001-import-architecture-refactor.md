@@ -9,7 +9,7 @@
 - 實作授權：`not-authorized-before-human-confirmation`
 
 2026-08-13 人工裁決 `IMPORT-ENTRY-02` 已確認下列入口分流，並只授權由
-`../架構重整/04_已完成與上線封存/work_packages/73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package.md`
+`../架構重整/04_已完成與上線封存/work_packages/73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package_20260815_user_waived_closeout.md`
 定義的第一階段實作範圍：
 
 - HCM 是目前唯一需依 Finance Web upload 模式收斂的日常檔案匯入；

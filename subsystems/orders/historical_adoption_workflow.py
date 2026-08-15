@@ -168,8 +168,20 @@ class HistoricalOrderAdoptionWorkflow:
             return _pairing_issue(source, masked, HistoricalPairingResolution.STAFF_MISSING, "historical_staff_not_found")
         if len(staff_ids) != 1:
             return _pairing_issue(source, masked, HistoricalPairingResolution.STAFF_AMBIGUOUS, "historical_staff_ambiguous")
-        if source.issue_codes or not source.has_individual_interval or source.start_date is None or source.end_date is None:
+        if source.issue_codes:
             return HistoricalPairingCandidate(source.ordinal, masked, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.EVIDENCE_ONLY, source.issue_codes)
+        if (
+            not source.has_individual_interval
+            or source.start_date is None
+            or source.end_date is None
+        ):
+            return _pairing_issue(
+                source,
+                masked,
+                HistoricalPairingResolution.ASSIGNMENT_CONFLICT,
+                "historical_assignment_evidence_insufficient",
+                staff_ids[0],
+            )
         if candidate.outcome is not HistoricalOrderOutcome.ADOPTED or candidate.after_status is not OrderLifecycleStatus.COMPLETED or existing:
             return _pairing_issue(source, masked, HistoricalPairingResolution.ASSIGNMENT_CONFLICT, "historical_assignment_conflict", staff_ids[0])
         return HistoricalPairingCandidate(source.ordinal, masked, staff_ids[0], source.start_date, source.end_date, HistoricalPairingResolution.ASSIGNMENT_CANDIDATE, source.issue_codes)

@@ -159,6 +159,8 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_14_wp91_hcm_partial_formal_case_v1.json",
     "labor_union_2026_08_14_wp92_client_beclass_transition_binding_v1.json",
     "labor_union_2026_08_14_wp93_pending_completion_status_v1.json",
+    "labor_union_2026_08_15_wp90_finance_source_warning_v1.json",
+    "labor_union_2026_08_15_wp95_hcm_resubmission_v1.json",
     "labor_union_2026_08_15_schema_assembly_v1.json",
     "labor_union_2026_08_15_staff_retirement_v1.json",
 )

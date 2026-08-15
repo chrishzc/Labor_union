@@ -3,6 +3,80 @@
   "updated_at": "2026-08-15",
   "entries": [
     {
+      "archive_id": "PROV-20260815-archive-waiver-wp73",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package_20260815_user_waived_closeout.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md",
+      "evidence_paths": [
+        "document/架構重整/03_追蹤清單與證據/evidence/2026-08-14_wp73_hcm_web_upload_receipt.md",
+        "document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md"
+      ],
+      "content_sha256": "ed6ee35ef0b3bcee45cfff31248796e295ee8f1a29ba35bd0794d63c3bcafb2c",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "User directed archival after waiving valid-HCM-root and Chrome extension real-environment acceptance; those gates remain NOT_RUN, not PASS.",
+      "restore_triggers": ["HCM Web upload enablement", "HCM import incident", "browser or valid-row acceptance"]
+    },
+    {
+      "archive_id": "PROV-20260815-archive-waiver-wp77",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/77_Staff_Historical_Adoption_and_HCM_Review_Work_Package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/77_Staff_Historical_Adoption_and_HCM_Review_Work_Package_20260815_user_waived_closeout.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md",
+      "evidence_paths": [
+        "document/架構重整/03_追蹤清單與證據/evidence/2026-08-13_wp77_staff_adoption_hcm_review_receipt.md",
+        "document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md"
+      ],
+      "content_sha256": "756823e14b65845e2882597c97d49940cd8a7be55b2ca8c5a46e6edf3872e427",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "User directed archival after waiving Staff replay, HCM/Client reconciliation, and preserve-data real-environment acceptance; those gates remain NOT_RUN, not PASS.",
+      "restore_triggers": ["historical Staff adoption enablement", "reconciliation incident", "preserve-data migration verification"]
+    },
+    {
+      "archive_id": "PROV-20260815-archive-waiver-wp82",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/82_LINE_Service_Registration_LIFF_and_Docker_Client_Work_Package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/82_LINE_Service_Registration_LIFF_and_Docker_Client_Work_Package.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md",
+      "evidence_paths": ["document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md"],
+      "content_sha256": "ddcc7ea242ca9d4e8c0aab2d81683b197f90dfccbd2e2184aac2cf0bb554ad46",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "User directed archival after waiving Rich Menu publication and Docker MySQL recovery real-environment acceptance; those gates remain NOT_RUN, not PASS.",
+      "restore_triggers": ["Rich Menu publication", "service-registration incident", "Docker MySQL recovery verification"]
+    },
+    {
+      "archive_id": "PROV-20260815-archive-waiver-wp73-wp77-wp82-receipt",
+      "source_path": "document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md",
+      "doc_type": "receipt",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": null,
+      "evidence_paths": [],
+      "content_sha256": "cac4791fdeaa4d6a21f8b971696fc3bd217646cff3dbd3b9b0ea1c635a0636f8",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "Non-engine handoff receipt was archived with the three user-waived Work Package closeouts; it records NOT_RUN gates and does not claim real-environment acceptance.",
+      "restore_triggers": ["archive audit", "real-environment acceptance resumption"]
+    },
+    {
       "archive_id": "ARCH-20260815-072",
       "source_path": "document/架構重整/02_決策與退役執行記錄/93_Schema_Assembly_and_Migration_Archive_Retirement_Work_Package.md",
       "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/93_Schema_Assembly_and_Migration_Archive_Retirement_Work_Package.md",
@@ -2028,6 +2102,13 @@
       ]
     },
     {"archive_id":"ARCH-20260815-089","source_path":"document/架構重整/02_決策與退役執行記錄/94_Import_Warning_Query_and_Manual_Tracking_Work_Package.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/94_Import_Warning_Query_and_Manual_Tracking_Work_Package.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/01_規格基線/06_Anomalies_Domain.md","evidence_paths":["document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp94_import_warning_tracking_receipt.md"],"content_sha256":"c7d4e909c2e7d6708ba453dc75f90588c8b269c485c5789ca75baac5ee06187b","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP94 typed Query, manual tracking Preview/Apply, idempotency replay, isolated MySQL and Streamlit smoke completed.","restore_triggers":["import warning tracking API or UI regression","idempotency replay regression","WarningReferral successor implementation"]},
-    {"archive_id":"ARCH-20260815-090","source_path":"document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp94_import_warning_tracking_receipt.md","archive_path":"document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp94_import_warning_tracking_receipt.md","doc_type":"evidence-receipt","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/01_規格基線/06_Anomalies_Domain.md","evidence_paths":[],"content_sha256":"23ae7d88d0884a95238f354ebc094dde55a64bd96ee5aa50fd571750bb069db8","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP94 completion receipt retained for audit and replay regression investigation.","restore_triggers":["import warning tracking API or UI regression","idempotency replay regression"]}
+    {"archive_id":"ARCH-20260815-090","source_path":"document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp94_import_warning_tracking_receipt.md","archive_path":"document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp94_import_warning_tracking_receipt.md","doc_type":"evidence-receipt","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/01_規格基線/06_Anomalies_Domain.md","evidence_paths":[],"content_sha256":"23ae7d88d0884a95238f354ebc094dde55a64bd96ee5aa50fd571750bb069db8","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP94 completion receipt retained for audit and replay regression investigation.","restore_triggers":["import warning tracking API or UI regression","idempotency replay regression"]},
+    {"archive_id":"ARCH-20260815-091","source_path":"document/架構重整/02_決策與退役執行記錄/90_Import_Review_External_Confirmation_Work_Package.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/01_規格基線/06_Anomalies_Domain.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"b73cb0a41e66a55f0649f50933b2ef2f1b580e62ae3b8db7511887f3f73c1a59","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP90 external-confirmation warning tracking, owner navigation, source-row isolation and cross-lane projections completed with candidate preserve-data verification.","restore_triggers":["import warning projection regression","warning tracking or referral API regression","cross-lane retry/dead-letter incident"]},
+    {"archive_id":"ARCH-20260815-092","source_path":"document/架構重整/02_決策與退役執行記錄/95_HCM_Owner_Resubmission_and_Warning_Resolution_Work_Package.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/95_HCM_Owner_Resubmission_and_Warning_Resolution_Work_Package.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":"labor-union-wp95-hcm-resubmission-2026-08-15-v1","successor_path":"document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"1ce00e1b8d9a317d00443864c73bb535bb70a7caeaaf16942394ff99593ccabd","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP95 scoped HCM workbook owner command, immutable correction evidence, outbox-based auto-resolution and candidate engine verification completed; source DB was not replaced.","restore_triggers":["HCM scoped resubmission regression","HCM correction schema/replay incident","developer-local replacement request"]},
+    {"archive_id":"ARCH-20260815-093","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-hcm-warning-navigation.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-hcm-warning-navigation.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"98137b87207cdf4840e87951ace8c669d584f9a1b2aaa934dacd47c593100c63","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP90/WP95 fully absorbed the provisional HCM warning navigation and scoped owner correction responsibilities.","restore_triggers":["HCM warning navigation regression","HCM warning ownership audit"]},
+    {"archive_id":"ARCH-20260815-094","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-historical-order-warning-navigation.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-historical-order-warning-navigation.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"284a15df079d4b37eea081d0b957364c475ed5db9dc08f3c0780585f88578842","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP90 absorbed the provisional historical-order warning navigation responsibilities.","restore_triggers":["historical-order warning projection regression"]},
+    {"archive_id":"ARCH-20260815-095","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-beclass-warning-navigation.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-beclass-warning-navigation.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"98e3aa59697afe60d295f540c43cefd2fd0d34ea62eb557c2434bf5157674add","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP90 absorbed the provisional Client/Staff BeClass warning navigation responsibilities.","restore_triggers":["BeClass warning projection regression"]},
+    {"archive_id":"ARCH-20260815-096","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-finance-row-warning-navigation.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-finance-row-warning-navigation.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"d3ec298acc261068d0f7dc078c1af19367b4cab724af61e65770b38316907f88","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP90 Finance source-row isolation absorbed the provisional finance warning navigation responsibilities.","restore_triggers":["Finance warning projection regression"]},
+    {"archive_id":"ARCH-20260815-097","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-schema-baseline-drift-recovery.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-schema-baseline-drift-recovery.md","doc_type":"work-package","final_status":"superseded","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md","evidence_paths":[],"content_sha256":"5e9cdbfe8cc21d79b51e5fb6d6bdab66845e08ea6f2e558a81394ffbdc48fdba","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"Canonical chain verification proved the provisional schema-drift finding was a false-positive; no repair release was authorized or needed.","restore_triggers":["schema baseline drift incident","canonical release-chain verification regression"]}
   ]
 }

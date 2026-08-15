@@ -131,8 +131,8 @@ class MySqlHistoricalOrderAdoptionRepository:
         date_patch = dict(preview.date_patch)
         with _cursor(self._connection) as cursor:
             cursor.execute(
-                "UPDATE orders SET status=%s,actual_start_date=COALESCE(actual_start_date,%s),"
-                "actual_end_date=COALESCE(actual_end_date,%s),lifecycle_version=%s "
+                "UPDATE orders SET status=%s,actual_start_date=COALESCE(%s,actual_start_date),"
+                "actual_end_date=COALESCE(%s,actual_end_date),lifecycle_version=%s "
                 "WHERE case_no=%s AND lifecycle_version=%s",
                 (
                     preview.after_status,

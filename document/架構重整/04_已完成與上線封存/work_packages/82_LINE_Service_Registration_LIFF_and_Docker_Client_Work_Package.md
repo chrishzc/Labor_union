@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: in-progress
+declared_status: completed
 date: 2026-08-13
 owner: LINE Integration / Developer Experience
 priority: P0
@@ -66,4 +66,11 @@ webhook 已處理但不會開啟登記頁。部分開發者的 MySQL 亦只在 D
 README 與 focused contract tests 均已對應。剩餘 gate 僅為管理端 Rich Menu Preview／Apply 的實際發布
 驗收，以及 Docker MySQL partial source→candidate→exact engine receipt；未完成前維持 `in-progress`。
 統一交接紀錄見
-`document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。
+`document/架構重整/04_已完成與上線封存/receipts/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。
+
+## 2026-08-15 人工豁免封存裁決
+
+使用者明確指示跳過管理端 Rich Menu Preview／Apply 發布與 Docker MySQL partial source → candidate →
+exact recovery 的實機驗收，並封存本 Work Package。既有設定、程式與 focused contract evidence 仍可
+追溯，但 provider/engine acceptance 為未執行，不得解讀為 LINE 已發布或資料庫升級已驗證。未來
+如需啟用或重啟此入口，必須以 current LINE／migration 規格另立 successor Work Package。

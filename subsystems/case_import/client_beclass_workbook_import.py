@@ -15,6 +15,7 @@ from typing import Any
 import pandas as pd
 
 from domains.case_import.client_beclass_validation import CLIENT_BECLASS_REQUIRED_HEADERS, validate_client_beclass_row
+from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
 from infrastructure.mysql.client_beclass_workbook_import_repository import ClientBeClassWorkbookImportRepository
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import fingerprint_payload
@@ -44,6 +45,16 @@ class ClientBeClassWorkbookPreview:
             "existing_source_count": self.existing_source_count,
             "preview_fingerprint": self.preview_fingerprint,
         }
+
+
+def _client_validation_issue_codes(errors: dict[str, str]) -> tuple[str, ...]:
+    """Preserve field identity and missing/invalid semantics without raw values."""
+    return tuple(
+        sorted(
+            f"client_field_{'missing' if '不可空' in message else 'invalid'}:{field}"
+            for field, message in errors.items()
+        )
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,7 +134,14 @@ class ClientBeClassWorkbookImportService:
             return "existing_source"
         if source_state == "conflict":
             return "existing_conflict"
-        return "create" if self._repository.resolve_unique_client_case(payload["name"], payload["phone"]) else "existing_conflict"
+        resolution = self._repository.resolve_client_case_binding(
+            payload["name"], payload["phone"], for_update=False
+        )
+        return (
+            "create"
+            if resolution.status is ClientCaseBindingStatus.UNIQUE
+            else "existing_conflict"
+        )
 
     # Why: every branch must persist the row receipt and review in the same outer row transaction.
     def _apply_row(self, workbook: _Workbook, row_number: int, row: dict[str, Any], actor: str, correlation_id: str) -> str:
@@ -144,7 +162,8 @@ class ClientBeClassWorkbookImportService:
                     self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
                     source_content_digest=workbook.digest, source_sheet=workbook.sheet_identity,
                     source_row=row_number, masked_identifier=masked_review_identifier(BeClassImportSourceKind.CLIENT, payload.get("query_no"), row_number),
-                    source_payload=_safe_review_payload(payload), issue_codes=tuple(sorted(errors)),
+                    source_payload=_safe_review_payload(payload),
+                    issue_codes=_client_validation_issue_codes(errors),
                 )
                 self._repository.save_row_receipt(source_identity, fingerprint, None, "review_required", review_identity, actor)
                 unit_of_work.commit()
@@ -161,15 +180,20 @@ class ClientBeClassWorkbookImportService:
                 )
                 unit_of_work.commit()
                 return outcome
-            client_case = self._repository.resolve_unique_client_case(payload["name"], payload["phone"])
-            if client_case is None:
+            resolution = self._repository.resolve_client_case_binding(
+                payload["name"], payload["phone"], for_update=True
+            )
+            if resolution.status is not ClientCaseBindingStatus.UNIQUE:
                 outcome = self._save_review_outcome(
                     workbook, row_number, payload, source_identity, fingerprint,
-                    actor, "client_case_binding_not_unique",
+                    actor, resolution.issue_code,
+                    _binding_review_payload(payload, resolution),
                 )
                 unit_of_work.commit()
                 return outcome
-            source_id = self._repository.create_bound_source_if_absent(payload, client_case)
+            source_id = self._repository.create_bound_source_if_absent(
+                payload, resolution.bound_root()
+            )
             if source_id is None:
                 outcome = "existing_source"
                 review_identity = None
@@ -186,15 +210,22 @@ class ClientBeClassWorkbookImportService:
             unit_of_work.commit()
             return "created"
 
-    def _save_review_outcome(self, workbook, row_number, payload, source_identity, fingerprint, actor, issue_code) -> str:
-        review_identity = self._record_review(workbook, row_number, payload, issue_code)
+    def _save_review_outcome(
+        self, workbook, row_number, payload, source_identity, fingerprint, actor,
+        issue_code, review_payload=None,
+    ) -> str:
+        review_identity = self._record_review(
+            workbook, row_number, payload, issue_code, review_payload
+        )
         self._repository.save_row_receipt(
             source_identity, fingerprint, None, "existing_conflict",
             review_identity, actor,
         )
         return "existing_conflict"
 
-    def _record_review(self, workbook, row_number, payload, issue_code) -> str:
+    def _record_review(
+        self, workbook, row_number, payload, issue_code, review_payload=None
+    ) -> str:
         return record_invalid_beclass_row(
             self._repository.connection, source_kind=BeClassImportSourceKind.CLIENT,
             source_content_digest=workbook.digest, source_sheet=workbook.sheet_identity,
@@ -202,7 +233,8 @@ class ClientBeClassWorkbookImportService:
             masked_identifier=masked_review_identifier(
                 BeClassImportSourceKind.CLIENT, payload["query_no"], row_number,
             ),
-            source_payload=_safe_review_payload(payload), issue_codes=(issue_code,),
+            source_payload=review_payload or _safe_review_payload(payload),
+            issue_codes=(issue_code,),
         )
 
     def _stored_replay(self, key: str, digest: str) -> ClientBeClassWorkbookReceipt | None:
@@ -258,6 +290,14 @@ def _normalized_payload(row: dict[str, Any]) -> dict[str, object]:
 
 def _safe_review_payload(payload: dict[str, object]) -> dict[str, object]:
     return {"has_query_no": bool(payload.get("query_no")), "has_name": bool(payload.get("name")), "has_phone": bool(payload.get("phone")), "source_field_count": len(payload)}
+
+
+def _binding_review_payload(payload, resolution) -> dict[str, object]:
+    return {
+        **_safe_review_payload(payload),
+        "client_candidate_count": resolution.client_candidate_count,
+        "case_candidate_count": resolution.case_candidate_count,
+    }
 
 
 def _birth_date(row: dict[str, Any]) -> str | None:

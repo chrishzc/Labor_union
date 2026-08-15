@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 from hashlib import sha256
 
+from domains.case_import.client_beclass_binding import classify_client_case_binding
+
 
 class ClientBeClassWorkbookImportRepository:
     _WORKBOOK_FAMILY = "client_beclass_workbook_ingest"
@@ -62,18 +64,32 @@ class ClientBeClassWorkbookImportRepository:
         return outcome
 
     def resolve_unique_client_case(self, name: str | None, phone: str | None):
+        resolution = self.resolve_client_case_binding(name, phone)
+        return resolution.bound_root() if resolution.issue_code is None else None
+
+    def resolve_client_case_binding(
+        self, name: str | None, phone: str | None, *, for_update: bool = True
+    ):
         if not name or not phone:
-            return None
+            return classify_client_case_binding((), ())
+        lock_clause = " FOR UPDATE" if for_update else ""
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT client.id,client.case_no FROM clients client "
-                "JOIN orders order_root ON order_root.client_id=client.id "
+                "SELECT client.id FROM clients client "
                 "WHERE client.name=%s AND client.phone=%s "
-                "ORDER BY client.id LIMIT 2 FOR UPDATE",
+                f"ORDER BY client.id{lock_clause}",
                 (name, phone),
             )
-            rows = cursor.fetchall()
-        return rows[0] if len(rows) == 1 else None
+            client_ids = tuple(int(row["id"]) for row in cursor.fetchall())
+            if len(client_ids) != 1:
+                return classify_client_case_binding(client_ids, ())
+            cursor.execute(
+                "SELECT case_no FROM orders WHERE client_id=%s "
+                f"ORDER BY case_no{lock_clause}",
+                (client_ids[0],),
+            )
+            case_nos = tuple(str(row["case_no"]) for row in cursor.fetchall())
+        return classify_client_case_binding(client_ids, case_nos)
 
     def create_bound_source_if_absent(self, payload: dict[str, object], client_case) -> int | None:
         with self.connection.cursor() as cursor:

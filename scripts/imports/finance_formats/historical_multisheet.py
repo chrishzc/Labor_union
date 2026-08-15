@@ -1,4 +1,7 @@
-"""Normalize the historical multi-sheet bank statement layout."""
+"""
+File: historical_multisheet.py
+Description: 將歷史多工作表銀行列解析為共同格式並保留 safe row warning。
+"""
 
 from __future__ import annotations
 
@@ -139,9 +142,15 @@ def normalize_historical_multisheet_rows(
     for row_index in range(header_row, len(raw)):
         values = raw.iloc[row_index].tolist()[:MAX_CONTRACT_COLUMNS]
         source = dict(zip(headers, values))
-        account_text = "" if pd.isna(source.get("帳號")) else str(source.get("帳號")).strip()
-        if not account_text.isdigit() or len(account_text) < 8:
+        candidate_values = (
+            source.get("帳號"),
+            source.get("交易日"),
+            source.get("支出"),
+            source.get("存入"),
+        )
+        if all(pd.isna(value) or str(value).strip() in {"", "--"} for value in candidate_values):
             continue
+        account_text = "" if pd.isna(source.get("帳號")) else str(source.get("帳號")).strip()
 
         warnings: list[str] = []
         transaction_date, transaction_time = _date_and_time(
@@ -151,6 +160,13 @@ def normalize_historical_multisheet_rows(
         credit = _decimal(source.get("存入"), "credit", warnings)
         balance = _decimal(source.get("餘額"), "balance", warnings)
         account = _identifier(source.get("帳號"), warnings)
+        if not account_text.isdigit() or len(account_text) < 8:
+            warnings.append(
+                "source_bank_account_missing"
+                if not account_text
+                else "source_bank_account_invalid"
+            )
+            account = None
         cancellation_code = _identifier(source.get("銷帳編號"), warnings)
         transaction_reference = _identifier(source.get("交易參考編號"), warnings)
         comparison_field = _identifier(values[COMPARISON_FIELD_INDEX], warnings)

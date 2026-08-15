@@ -51,7 +51,7 @@ def test_valid_status_is_adopted_when_dates_are_null():
     assert candidate.resulting_version == 4
 
 
-def test_existing_nonempty_date_conflict_is_reviewed_without_overwrite():
+def test_valid_historical_date_overwrites_current_value_without_false_warning():
     current = _current(OrderLifecycleStatus.DISCUSSION, actual_start=date(2025, 1, 2))
     source = HistoricalOrderSourceFacts(
         OrderLifecycleStatus.COMPLETED,
@@ -62,22 +62,23 @@ def test_existing_nonempty_date_conflict_is_reviewed_without_overwrite():
     candidate = build_historical_order_candidate(current, source)
 
     assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
-    assert candidate.date_patch == ()
-    assert candidate.issue_codes == ("historical_nonempty_conflict:actual_start_date",)
+    assert candidate.date_patch == (("actual_start_date", date(2025, 1, 3)),)
+    assert candidate.issue_codes == ()
 
 
-def test_current_terminal_status_conflict_is_not_overwritten():
+def test_valid_historical_status_overwrites_current_value_without_false_warning():
     candidate = build_historical_order_candidate(
         _current(OrderLifecycleStatus.CANCELLED),
         HistoricalOrderSourceFacts(OrderLifecycleStatus.COMPLETED, None, None),
     )
 
-    assert candidate.outcome is HistoricalOrderOutcome.CURRENT_CONFLICT
-    assert candidate.after_status is OrderLifecycleStatus.CANCELLED
-    assert candidate.resulting_version == 3
+    assert candidate.outcome is HistoricalOrderOutcome.ADOPTED
+    assert candidate.after_status is OrderLifecycleStatus.COMPLETED
+    assert candidate.resulting_version == 4
+    assert candidate.issue_codes == ()
 
 
-def test_workbook_uses_1904_epoch_and_two_caregivers_are_evidence_only(tmp_path):
+def test_two_caregivers_without_individual_intervals_require_assignment_review(tmp_path):
     path = tmp_path / "historical.xlsx"
     workbook = Workbook()
     workbook.epoch = MAC_EPOCH
@@ -95,7 +96,10 @@ def test_workbook_uses_1904_epoch_and_two_caregivers_are_evidence_only(tmp_path)
     assert row.actual_start_date == date(1904, 1, 2)
     assert row.actual_end_date == date(1904, 1, 3)
     assert tuple(item.name for item in row.caregivers) == ("月嫂甲", "月嫂乙")
-    assert {item.resolution for item in preview.pairings} == {HistoricalPairingResolution.EVIDENCE_ONLY}
+    assert {item.resolution for item in preview.pairings} == {
+        HistoricalPairingResolution.ASSIGNMENT_CONFLICT
+    }
+    assert preview.issue_codes == ("historical_assignment_evidence_insufficient",)
 
 
 def test_single_unique_caregiver_with_interval_builds_completed_assignment_candidate(tmp_path):

@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 115,
-    "ordered_digest_sha256": "1d5a4d12a03e696df08ddc1d8b6bf64e568b4aac02b9cc7c9f3837c7e8cc11a2",
+    "expected_count": 117,
+    "ordered_digest_sha256": "6e3607676a93e40f1e88735cf9203ff85cdfa265f2d7e4ed2afeedae87eac3e0",
     "terminal_artifact": "1000_staff_retirement.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "d666f4d5d7d2429f9639343a20e3d0f324d073442476994257fda7c525ccf138"
+    "sha256": "7cdc4e18a00b1317e761f8a5f4f9d29f3d724d82b5beaa268323f5de42dcf5fa"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",
@@ -23,7 +23,7 @@
   },
   "postcheck": {
     "required_views": ["v_order_details"],
-    "minimum_trigger_count": 209,
+    "minimum_trigger_count": 213,
     "require_no_missing_versioned_tables": true
   },
   "database_safety": {

@@ -1,7 +1,7 @@
 # 匯入警示類型審核佇列
 
 - status: `approved-by-WP88`
-- updated: 2026-08-14
+- updated: 2026-08-15
 - owner: 各 owning import Domain；目前 HCM 由 Case Import 擁有
 - authority: 2026-08-14 人工採用 Work Package 88；正式業務語意仍由 owning Domain 規格與 WP77、WP80、WP85、WP86、WP88 擁有，本表保存類型審核矩陣。
 
@@ -14,13 +14,15 @@
 
 | logical code | 觸發條件 | 正式案件效果 | 審核主題（已由下方矩陣裁決） |
 |---|---|---|---|
-| `HCM-CASE-001` | 案件編號缺失或不可用 | 不建案 | 如何辨識來源、誰可補案號、補到可用案號後如何建立正式案件 |
 | `HCM-FIELD-001` | 有案號但必要欄位缺漏 | 建立／保留正式案件 | 去敏欄位名稱、可由哪個 typed field-completion command 補齊、何時解除 |
 | `HCM-FIELD-002` | 有案號但欄位格式無效 | 建立／保留正式案件 | 顯示格式要求、補件入口、通過 validation 的解除 predicate |
 | `HCM-LINK-001` | IP＋姓名精確命中既有 Client，不能自動綁定 | 建立正式案件但不自動綁定 Client | 顯示為疑似既有客戶或待確認關聯、人工確認後的 typed linking command、解除 predicate |
 | `HCM-LINK-002` | 多個候選或其他身份關聯歧義 | 建立正式案件但保留未確認關聯 | 候選資訊最小揭露、可操作角色、不可自動選擇的邊界與解除 predicate |
 | `HCM-CASE-002` | 既有案件的已填欄位與後續來源不同 | 保留既有欄位；不得以匯入任意覆寫 | 差異顯示、可否以受控 command 確認變更，以及何時關閉或替代舊警示 |
 | `BECLASS-001` | HCM 已建立但尚無唯一 Client BeClass 對方 | HCM 正式案件不受阻擋 | 與 HCM 欄位警示分頁或合併顯示、唯一配對後的自動解除證據 |
+
+案件編號缺失或不可用表示未達 HCM 最低 import 條件：保留 source review／receipt／outbox 稽核，
+但不建立 occurrence、task 或 canonical anomaly，不登錄 `HCM-CASE-001`。
 
 ## 已知 live-drift
 
@@ -35,7 +37,7 @@ schema、警示投影及 DB gate 的正式設計。
 | `CLIENT-BECLASS-BIND-001` | 姓名＋手機號碼未命中 Client | 保留 BeClass 來源，不建立 Client／案件綁定 | 顯示可定位不足、補件或人工確認的合法入口、解除 predicate |
 | `CLIENT-BECLASS-BIND-002` | 姓名＋手機號碼命中多位 Client | 保留 BeClass 來源，不自動選擇 Client | 候選資訊最小揭露、可操作角色與人工確認後的 typed binding |
 | `CLIENT-BECLASS-BIND-003` | 唯一 Client 但案件候選為零或多筆 | 保留 BeClass 來源，不自動選擇案件 | 顯示案件關聯待確認、可採取動作與解除 predicate |
-| `CLIENT-BECLASS-SOURCE-001` | 來源姓名或手機號碼缺失／格式不可用 | 保留來源追溯，不建立過渡綁定 | 缺漏欄位的去敏顯示、補件入口與解除 predicate |
+| `CLIENT-BECLASS-SOURCE-001` | 來源欄位缺失／格式不可用，或同一來源 identity 的內容衝突 | 保留來源追溯，不建立過渡綁定 | 以 field path 顯示缺漏／格式；來源衝突只顯示去敏差異狀態，不顯示原值 |
 
 `query_no`只作來源追溯，禁止用於上述任一綁定條件。LIFF 啟用後，這組過渡警示由登入身分直接綁定流程取代。
 
@@ -80,6 +82,8 @@ schema、警示投影及 DB gate 的正式設計。
 
 所有警示卡片只顯示：人可讀標籤、owning lane、去敏案件／來源識別、問題欄位與 issue code、來源列時間、目前處理狀態、
 最後事件時間及可用操作。禁止顯示完整身分證、手機、銀行帳號、原始工作簿路徑、任意修正 payload 或 LINE 對話全文。
+缺漏／格式錯誤的 logical code 維持通用類型，以 `field_path` 生成「缺少{欄位名稱}」／
+「{欄位名稱}格式錯誤」顯示，不為每個欄位發明新代號。
 
 警示中心只記錄追蹤事件，不直接修改 Domain root；但可將 `warning_id`、field path、expected warning version 與去敏來源
 reference 轉介至該類型允許的 owning Domain typed command。目標 command 成功寫入並通過 predicate 後，系統才解除警示。
@@ -100,7 +104,6 @@ reference 轉介至該類型允許的 owning Domain typed command。目標 comma
 
 | logical code | 警示中心顯示 | 允許的後續處理 | `auto_resolved` predicate |
 |---|---|---|---|
-| `HCM-CASE-001` | 來源批次／列、案號「缺失或不可用」及其他 issue codes；不顯示不存在的案件連結 | 聯絡來源主人並要求提供可用案號；新來源必須顯式關聯本警示，不得直接改警示內容建案 | 關聯的新來源已以可用案號建立正式 HCM 案件 |
 | `HCM-FIELD-001` | 案件連結、缺漏欄位名稱、來源列時間 | 聯絡來源主人；由 HCM typed field-completion command 只補指定欄位，不要求整案重送 | 正式案件該欄位已存在且通過 validation |
 | `HCM-FIELD-002` | 案件連結、無效欄位名稱與格式要求，不顯示原始敏感值 | 同上；回覆只作證據，正式值仍由 HCM typed command 寫入 | 正式案件該欄位已通過 validation |
 | `HCM-LINK-001` | 案件連結與「疑似既有 Client、待確認」；候選僅顯示最小去敏資料 | 外部確認後由 owning HCM／Client linking command 綁定；警示中心不可直接選取或寫入 Client | 案件已存在唯一、有效且可追溯的 Client 關聯 |
@@ -118,7 +121,7 @@ reference 轉介至該類型允許的 owning Domain typed command。目標 comma
 | `CLIENT-BECLASS-BIND-001` | 去敏姓名／手機、來源列及「未命中 Client」 | 要求來源主人更正姓名或手機；不得人工指定不符合精確條件的 Client | 來源姓名＋手機精確且唯一命中 Client，且案件候選唯一 |
 | `CLIENT-BECLASS-BIND-002` | 去敏姓名／手機及候選數，不展開完整候選個資 | 外部確認或修正來源；仍不得以人工挑選繞過唯一匹配規則 | 同上 |
 | `CLIENT-BECLASS-BIND-003` | 唯一 Client 的去敏識別、案件候選數 | 修正案件根事實或等待可唯一判定的新來源；不得把 `query_no` 當案件編號 | 唯一 Client 對應唯一可綁定案件 |
-| `CLIENT-BECLASS-SOURCE-001` | 缺漏／無效的姓名或手機欄位名稱 | 要求補齊來源；不直接改 alert payload | 更正來源已符合姓名＋手機精確唯一綁定條件 |
+| `CLIENT-BECLASS-SOURCE-001` | 缺漏／無效欄位名稱，或來源內容與既有 receipt 不同 | 要求補齊或確認來源；不直接改 alert payload | 明確關聯的新來源通過欄位 validation，並符合姓名＋手機精確唯一綁定條件 |
 
 LIFF 啟用後的新資料不再產生這組過渡綁定警示；登入身分直接建立來源主人與案件關聯。
 
@@ -158,7 +161,10 @@ Staff 退役不是匯入警示操作，也不得由歷史資料推定；另由 W
 1. live `domains/anomalies/registry.py` 與 `subsystems/anomalies/alert_workflow.py` 仍只有 `open／claimed／resolved`，不符合已採用的六狀態及 `closed ≠ data fixed` 語意。
 2. live `ui/pages/anomalies/beclass_import_review_panel.py` 可直接編輯 `corrected_fields` 與 issue codes；新契約要求警示中心只能追蹤，資料修正必須交給 owning Domain typed command，因此該操作需退役或替換。
 3. live `ui/pages/06_finance_alerts.py` 把多種原因收斂為 `IMPORT-004`、`HISTORICAL-ORDER-001` 等 umbrella code；實作前須建立 logical subtype 與顯示 projection，不得只改標籤。
-4. `HCM-CASE-001`、`FINANCE-SOURCE-001` 沒有正式 root，必須先設計「後續來源與舊警示的顯式關聯」，否則不可宣稱可自動消除。
+4. `FINANCE-SOURCE-001` 沒有正式 root，必須先設計「後續來源與舊警示的顯式關聯」，否則不可宣稱可自動消除。
+5. 任一 lane 遇到未登錄 issue 時必須回滾當次投影，寫去敏 digest，總嘗試最多 3 次、
+   相鄰嘗試至少間隔 1 秒後 dead-letter；
+   不得靜默略過、部分建立待辦或誤分類為任一已知警示。
 
 本文件是已採用的審核矩陣，但追蹤清單不取代正式規格；schema、production mutation、LINE 自動發送及資料修正入口
 仍須依 WP88、DB change gates 與 owning Domain typed command 實作及驗收。

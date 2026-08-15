@@ -1,4 +1,7 @@
-"""Persist normalized bank rows and classification results into raw staging."""
+"""
+File: staging.py
+Description: 建立 Finance batch、canonical row、occurrence 與初始分類 staging，不自行 commit。
+"""
 
 from __future__ import annotations
 
@@ -91,12 +94,19 @@ def stage_finance_rows(
     format_id = normalized_result.get("format_id")
     sheet_name = normalized_result.get("sheet_name")
     header_row = normalized_result.get("header_row")
+    source_row_count = normalized_result.get("source_row_count", len(rows))
     if format_id not in {"legacy", "taishin", "sinopac"}:
         raise ValueError("normalized_result has an unsupported format_id")
     if not isinstance(sheet_name, str) or not sheet_name:
         raise ValueError("normalized_result must include sheet_name")
     if not isinstance(header_row, int) or isinstance(header_row, bool) or header_row < 1:
         raise ValueError("normalized_result must include a positive header_row")
+    if (
+        isinstance(source_row_count, bool)
+        or not isinstance(source_row_count, int)
+        or source_row_count < len(rows)
+    ):
+        raise ValueError("normalized_result source_row_count is invalid")
     (
         client_accounts,
         staff_accounts,
@@ -110,7 +120,7 @@ def stage_finance_rows(
         """INSERT INTO finance_import_batches
            (format_id, source_file, sheet_name, header_row, row_count, status)
            VALUES (%s,%s,%s,%s,%s,'staged')""",
-        (format_id, source_file, sheet_name, header_row, len(rows)),
+        (format_id, source_file, sheet_name, header_row, source_row_count),
     )
     batch_id = cursor.lastrowid
     if not batch_id:

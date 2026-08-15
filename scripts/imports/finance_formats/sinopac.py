@@ -1,4 +1,7 @@
-"""Normalize Sinopac's fifteen-column statement without classifying payments."""
+"""
+File: sinopac.py
+Description: 將永豐銀行列解析為共同格式，以 safe warning 保留列級解析失敗。
+"""
 
 from __future__ import annotations
 
@@ -73,13 +76,14 @@ def _verbatim_text(value: Any) -> str | None:
     return _identifier(value)
 
 
-def _decimal(value: Any) -> Decimal | None:
+def _decimal(value: Any, field: str, warnings: list[str]) -> Decimal | None:
     if _is_missing(value) or (isinstance(value, str) and not value.strip()):
         return None
     try:
         return Decimal(str(value).replace(",", "").strip())
-    except (InvalidOperation, ValueError) as exc:
-        raise ValueError(f"無法解析永豐金額：{value!r}") from exc
+    except (InvalidOperation, ValueError):
+        warnings.append(f"{field}_invalid")
+        return None
 
 
 def _timestamp(value: Any) -> pd.Timestamp | None:
@@ -93,8 +97,10 @@ def _timestamp(value: Any) -> pd.Timestamp | None:
     return None if pd.isna(parsed) else parsed
 
 
-def _iso_date(value: Any) -> str | None:
+def _iso_date(value: Any, field: str, warnings: list[str]) -> str | None:
     parsed = _timestamp(value)
+    if parsed is None and not _is_missing(value) and str(value).strip():
+        warnings.append(f"{field}_invalid")
     return parsed.strftime("%Y-%m-%d") if parsed is not None else None
 
 
@@ -168,15 +174,23 @@ def normalize_sinopac_rows(
     normalized_rows: list[dict[str, Any]] = []
     for row_index in range(header_index + 1, len(frame)):
         values = frame.iloc[row_index].tolist()
+        account_value = values[column_index["帳號"]]
+        transaction_value = values[column_index["交易日"]]
         transaction_timestamp = _timestamp(values[column_index["交易日"]])
-        if transaction_timestamp is None:
-            # Blank rows and the report's totals footer are not bank events.
+        account_text = _identifier(account_value)
+        account_is_plausible = bool(
+            account_text and account_text.isdigit() and len(account_text) >= 8
+        )
+        if transaction_timestamp is None and not account_is_plausible:
             continue
-
-        debit = _decimal(values[column_index["支出"]])
-        credit = _decimal(values[column_index["存入"]])
+        warnings: list[str] = []
+        if transaction_timestamp is None and not _is_missing(transaction_value):
+            warnings.append("transaction_date_invalid")
+        debit = _decimal(values[column_index["支出"]], "debit", warnings)
+        credit = _decimal(values[column_index["存入"]], "credit", warnings)
         direction, direction_warnings = _direction(debit, credit)
-        warnings = list(dict.fromkeys(direction_warnings))
+        warnings.extend(direction_warnings)
+        warnings = list(dict.fromkeys(warnings))
 
         raw_payload = {
             source_header: _json_scalar(values[index])
@@ -188,18 +202,18 @@ def normalize_sinopac_rows(
             {
                 "format_id": "sinopac",
                 "source_file": str(path),
-                "source_bank_account": _identifier(values[column_index["帳號"]]),
+                "source_bank_account": account_text if account_is_plausible else None,
                 "sheet_name": sheet_name,
                 "source_row": row_index + 1,
                 "source_reference": None,
-                "transaction_date": transaction_timestamp.strftime("%Y-%m-%d"),
-                "transaction_time": transaction_timestamp.strftime("%H:%M:%S"),
-                "posting_date": _iso_date(values[column_index["入帳日"]]),
-                "value_date": _iso_date(values[column_index["計息日"]]),
+                "transaction_date": transaction_timestamp.strftime("%Y-%m-%d") if transaction_timestamp is not None else None,
+                "transaction_time": transaction_timestamp.strftime("%H:%M:%S") if transaction_timestamp is not None else None,
+                "posting_date": _iso_date(values[column_index["入帳日"]], "posting_date", warnings),
+                "value_date": _iso_date(values[column_index["計息日"]], "value_date", warnings),
                 "debit": debit,
                 "credit": credit,
                 "direction": direction,
-                "balance": _decimal(values[column_index["餘額"]]),
+                "balance": _decimal(values[column_index["餘額"]], "balance", warnings),
                 "currency": _identifier(values[column_index["幣別"]]),
                 "summary": _identifier(values[column_index["摘要"]]),
                 "memo": _verbatim_text(values[column_index["備註"]]),

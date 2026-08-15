@@ -16,6 +16,7 @@ from infrastructure.mysql.client_beclass_workbook_import_repository import (
     ClientBeClassWorkbookImportRepository,
 )
 from infrastructure.mysql.mysql_adapter import get_connection
+from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
 from subsystems.case_import.client_beclass_workbook_import import (
     ClientBeClassWorkbookConflict,
     ClientBeClassWorkbookImportService,
@@ -61,6 +62,50 @@ def test_unique_client_case_binding_preserves_source_query_number():
         connection.close()
 
 
+def test_binding_resolution_distinguishes_no_client_multiple_clients_and_no_case():
+    unique = uuid4().hex[:12]
+    connection = get_connection()
+    try:
+        repository = ClientBeClassWorkbookImportRepository(connection)
+        no_client = repository.resolve_client_case_binding(
+            f"未命中-{unique}", "0900000000"
+        )
+
+        duplicate_name = f"重複客戶-{unique}"
+        duplicate_phone = f"09{uuid4().int % 100000000:08d}"
+        with connection.cursor() as cursor:
+            for suffix in ("A", "B"):
+                cursor.execute(
+                    "INSERT INTO clients (case_no,name,phone) VALUES (%s,%s,%s)",
+                    (f"MULTI-{unique}-{suffix}", duplicate_name, duplicate_phone),
+                )
+        connection.commit()
+        multiple_clients = repository.resolve_client_case_binding(
+            duplicate_name, duplicate_phone
+        )
+
+        case_name = f"多案件-{unique}"
+        case_phone = f"09{uuid4().int % 100000000:08d}"
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "INSERT INTO clients (case_no,name,phone) VALUES (%s,%s,%s)",
+                (f"CLIENT-{unique}", case_name, case_phone),
+            )
+        connection.commit()
+        no_case = repository.resolve_client_case_binding(case_name, case_phone)
+
+        assert no_client.status is ClientCaseBindingStatus.NO_CLIENT
+        assert no_client.client_candidate_count == no_client.case_candidate_count == 0
+        assert multiple_clients.status is ClientCaseBindingStatus.MULTIPLE_CLIENTS
+        assert multiple_clients.client_candidate_count == 2
+        assert multiple_clients.case_candidate_count == 0
+        assert no_case.status is ClientCaseBindingStatus.CASE_NOT_UNIQUE
+        assert no_case.client_candidate_count == 1
+        assert no_case.case_candidate_count == 0
+    finally:
+        connection.close()
+
+
 def test_typed_workbook_apply_isolates_dirty_rows_replays_and_conflicts(tmp_path):
     case_no = f"BIND-{uuid4().hex[:14]}"
     client_name = f"綁定測試客戶-{case_no}"
@@ -102,6 +147,25 @@ def test_typed_workbook_apply_isolates_dirty_rows_replays_and_conflicts(tmp_path
         assert first.review_required_count == 1
         assert first.existing_conflict_count == 1
         assert replay.replayed_workbook is True
+        from subsystems.anomalies.beclass_import_outbox_consumer import (
+            consume_beclass_import_review_events,
+        )
+
+        projected = consume_beclass_import_review_events(connection)
+        assert projected.failed_count == 0
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT DISTINCT occurrence.logical_code "
+                "FROM import_warning_occurrences occurrence "
+                "JOIN beclass_import_review_rows review "
+                "ON review.source_event_identity=occurrence.source_event_identity "
+                "WHERE review.source_event_identity LIKE %s",
+                (f"beclass-workbook:{first.source_content_digest}:%",),
+            )
+            assert {row["logical_code"] for row in cursor.fetchall()} == {
+                "CLIENT-BECLASS-SOURCE-001",
+                "CLIENT-BECLASS-BIND-001",
+            }
         with pytest.raises(
             ClientBeClassWorkbookConflict,
             match="client_beclass_workbook_idempotency_conflict",

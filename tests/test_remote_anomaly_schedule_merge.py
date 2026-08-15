@@ -245,7 +245,10 @@ def test_existing_hcm_case_with_invalid_source_persists_owned_review(monkeypatch
         "record_hcm_import_review",
         lambda connection, **kwargs: recorded.append(kwargs) or "hcm-review:test",
     )
-    application = SimpleNamespace(case_exists=lambda case_no: True)
+    application = SimpleNamespace(
+        resolve_hcm_identity=lambda *_: import_client_hcm.HcmIdentityResolution.EXISTING_MATCH,
+        find_receipt=lambda *_: None,
+    )
 
     result = import_client_hcm._import_row(
         SimpleNamespace(to_dict=lambda: {"查詢序號(案件編號)": "CASE-7"}),

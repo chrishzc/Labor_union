@@ -1,5 +1,11 @@
+"""
+File: test_finance_statement_normalizer.py
+Description: 驗證銀行格式偵測、共同 row contract 與 source review 分流。
+"""
+
 from pathlib import Path
 from shutil import copyfile
+from decimal import Decimal
 
 import pytest
 
@@ -75,9 +81,11 @@ def test_detector_result_selects_exactly_one_adapter_and_revalidates(monkeypatch
             "source_file": "input.xlsx",
             "sheet_name": "sheet",
             "source_row": 2,
-            "direction": "unknown",
+            "transaction_date": "2026-08-15",
+            "debit": Decimal("100"),
+            "direction": "outgoing",
             "bank_references": {},
-            "warnings": ["direction_missing"],
+            "warnings": [],
             "raw_payload": {},
         }
     )
@@ -123,6 +131,8 @@ def test_empty_adapter_result_preserves_detection_metadata(monkeypatch):
         "sheet_name": "data",
         "header_row": 7,
         "normalized_rows": [],
+        "source_reviews": [],
+        "source_row_count": 0,
     }
 
 

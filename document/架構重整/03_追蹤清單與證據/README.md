@@ -39,10 +39,11 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [evidence/2026-08-15_wp93_schema_assembly_and_launcher_receipt.md](evidence/2026-08-15_wp93_schema_assembly_and_launcher_receipt.md) | WP93 唯一 schema assembly、view descriptor、fresh/candidate MySQL 與兩個 local launcher 的去敏驗收。 |
 | [evidence/2026-08-15_wp93_ui_runtime_sweep_receipt.md](evidence/2026-08-15_wp93_ui_runtime_sweep_receipt.md) | WP93 收尾 UI 實測：九個頂層頁面、訂單摘要修復與去敏 API evidence。 |
 | [ARCH-20260815-090 WP94 receipt](../04_已完成與上線封存/receipts/2026-08-15_wp94_import_warning_tracking_receipt.md) | archive pointer；WP94 typed Query、Preview／Apply、MySQL replay 與 Streamlit smoke 已驗收。 |
+| [evidence/2026-08-15_wp90_warning_navigation_projection_progress_receipt.md](evidence/2026-08-15_wp90_warning_navigation_projection_progress_receipt.md) | WP90 HCM／BeClass／歷史訂單／Finance row 的 field-level warning projection、typed navigation 與 disposable MySQL progress evidence；未完成項明確保留。 |
 | [ARCH-20260815-081 WP86 closeout receipt](../04_已完成與上線封存/receipts/2026-08-15_wp86_independent_worker_local_credential_receipt.md) | archive pointer；credential isolation regression 與 authorized launcher smoke 已完成。 |
 | [ARCH-20260815-083 WP87 closeout receipt](../04_已完成與上線封存/receipts/2026-08-15_wp87_runtime_security_focused_receipt.md) | archive pointer；runtime security verification 與 authorized launcher smoke 已完成。 |
 | [ARCH-20260815-085 WP92 closeout receipt](../04_已完成與上線封存/receipts/2026-08-15_wp92_import_warning_engine_verification_receipt.md) | archive pointer；part 195 engine and authorized developer-local acceptance completed. |
-| [evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md](evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md) | WP73、WP77、WP82 的非實機收尾與不可替代實機驗收交接；不構成完成或封存授權。 |
+| [PROV-20260815-archive-waiver-wp73-wp77-wp82 receipt](../04_已完成與上線封存/receipts/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md) | archive pointer；使用者豁免未執行的實機驗收後封存，非實機收尾不代表 provider／engine gate 通過。 |
 | [ARCH-20260815-074 WP91 closeout receipt](../04_已完成與上線封存/receipts/2026-08-15_wp91_staff_retirement_closeout_receipt.md) | archive pointer；developer-local acceptance、fresh bootstrap 與 preserve-data MySQL verification 均已完成。 |
 | [65 LINE canonical cutover receipt（封存）](../04_已完成與上線封存/receipts/65_LINE_Ingress_Canonical_Cutover_Completion_Receipt.md) | canonical runtime default、rollback guard 與 focused cutover regression。 |
 | [LINE_merge功能未移植_history_20260811.md](LINE_merge功能未移植_history_20260811.md) | 第一版刻意不移植的 merge legacy 行為，以及未來重新評估前必須補足的架構條件。 |

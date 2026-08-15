@@ -3,22 +3,26 @@ File: hcm_import.py
 Description: 提供 authenticated HCM workbook Preview／Apply 與暫存檔清理邊界。
 """
 
+from dataclasses import asdict
 from pathlib import Path
 import tempfile
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.hcm_import import (
-    get_hcm_historical_workbook_import_service,
-    get_hcm_workbook_import_service,
-)
+from api.dependencies.hcm_import import get_hcm_resubmission_workbook_service, get_hcm_workbook_import_service
 from api.schemas.base import BaseResponse
-from api.schemas.hcm_import import HcmWorkbookPreviewView, HcmWorkbookReceiptView
+from api.schemas.hcm_import import (
+    HcmResubmissionPreviewView,
+    HcmResubmissionReceiptView,
+    HcmWorkbookPreviewView,
+    HcmWorkbookReceiptView,
+)
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookUnavailable
+from subsystems.case_import.hcm_resubmission_workbook import HcmResubmissionApplyRequest
 
 
 router = APIRouter(prefix="/api/v1/case-import/hcm", tags=["Case Import"])
@@ -51,14 +55,50 @@ async def apply_hcm_workbook(
     return await _run_workbook_command(workbook, service, "apply", arguments)
 
 
+@router.post("/resubmissions/preview", response_model=BaseResponse[HcmResubmissionPreviewView])
+async def preview_hcm_resubmission(
+    workbook: UploadFile = File(...),
+    occurrence_identity: str = Form(min_length=1, max_length=191),
+    principal: AdminPrincipal = Depends(require_admin),
+    service=Depends(get_hcm_resubmission_workbook_service),
+):
+    del principal
+    return await _run_hcm_resubmission_preview(workbook, occurrence_identity, service)
+
+
+@router.post("/resubmissions/apply", response_model=BaseResponse[HcmResubmissionReceiptView])
+async def apply_hcm_resubmission(
+    workbook: UploadFile = File(...),
+    occurrence_identity: str = Form(min_length=1, max_length=191),
+    expected_occurrence_version: int = Form(ge=1),
+    expected_root_fingerprint: str = Form(pattern=r"^[0-9a-f]{64}$"),
+    reason: str = Form(min_length=1, max_length=500),
+    idempotency_key: _IdempotencyHeader = ...,
+    correlation_id: _CorrelationHeader = ...,
+    preview_fingerprint: _PreviewFingerprintHeader = ...,
+    principal: AdminPrincipal = Depends(require_admin),
+    service=Depends(get_hcm_resubmission_workbook_service),
+):
+    request = HcmResubmissionApplyRequest(
+        occurrence_identity,
+        expected_occurrence_version,
+        expected_root_fingerprint,
+        preview_fingerprint,
+        idempotency_key,
+        str(principal.username or "admin"),
+        reason,
+        correlation_id,
+    )
+    return await _run_hcm_resubmission_apply(workbook, request, service)
+
+
 @router.post("/historical-workbooks/preview", response_model=BaseResponse[HcmWorkbookPreviewView])
 async def preview_hcm_historical_workbook(
     workbook: UploadFile = File(...),
     principal: AdminPrincipal = Depends(require_admin),
-    service=Depends(get_hcm_historical_workbook_import_service),
 ):
-    del principal
-    return await _run_workbook_command(workbook, service, "preview")
+    del workbook, principal
+    _raise_historical_whole_row_overwrite_retired()
 
 
 @router.post("/historical-workbooks/apply", response_model=BaseResponse[HcmWorkbookReceiptView])
@@ -68,10 +108,9 @@ async def apply_hcm_historical_workbook(
     correlation_id: _CorrelationHeader = ...,
     preview_fingerprint: _PreviewFingerprintHeader = ...,
     principal: AdminPrincipal = Depends(require_admin),
-    service=Depends(get_hcm_historical_workbook_import_service),
 ):
-    arguments = (preview_fingerprint, idempotency_key, str(principal.username or "admin"), correlation_id)
-    return await _run_workbook_command(workbook, service, "apply", arguments)
+    del workbook, idempotency_key, correlation_id, preview_fingerprint, principal
+    _raise_historical_whole_row_overwrite_retired()
 
 
 @router.post("/workbooks/ingest", response_model=BaseResponse[HcmWorkbookReceiptView])
@@ -125,6 +164,33 @@ async def _run_workbook_command(workbook, service, operation: str, arguments=())
             upload_path.unlink(missing_ok=True)
 
 
+async def _run_hcm_resubmission_preview(workbook, occurrence_identity: str, service):
+    upload_path = None
+    try:
+        upload_path = await _persist_uploaded_workbook(workbook)
+        result = await run_in_threadpool(service.preview, str(upload_path), occurrence_identity)
+        return BaseResponse(data=asdict(result), message="HCM 修正版 Preview 已完成")
+    except ValueError as error:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail={"code": str(error)}) from error
+    finally:
+        if upload_path is not None:
+            upload_path.unlink(missing_ok=True)
+
+
+async def _run_hcm_resubmission_apply(workbook, request: HcmResubmissionApplyRequest, service):
+    upload_path = None
+    try:
+        upload_path = await _persist_uploaded_workbook(workbook)
+        result = await run_in_threadpool(service.apply, str(upload_path), request)
+        return BaseResponse(data=asdict(result), message="HCM 修正版 Apply 已完成")
+    except ValueError as error:
+        http_status = status.HTTP_409_CONFLICT if "stale" in str(error) or "conflict" in str(error) else status.HTTP_422_UNPROCESSABLE_ENTITY
+        raise HTTPException(status_code=http_status, detail={"code": str(error)}) from error
+    finally:
+        if upload_path is not None:
+            upload_path.unlink(missing_ok=True)
+
+
 async def _persist_uploaded_workbook(workbook: UploadFile) -> Path:
     if Path(str(workbook.filename or "")).suffix.lower() != ".xlsx":
         raise ValueError("hcm_workbook_must_be_xlsx")
@@ -136,3 +202,10 @@ async def _persist_uploaded_workbook(workbook: UploadFile) -> Path:
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as target:
         target.write(content)
         return Path(target.name)
+
+
+def _raise_historical_whole_row_overwrite_retired() -> None:
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={"code": "hcm_historical_whole_row_overwrite_retired"},
+    )

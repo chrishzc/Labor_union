@@ -39,6 +39,7 @@ from subsystems.case_import.hcm_import_review_intake import record_hcm_import_re
 from subsystems.case_import.hcm_adapter import (
     build_hcm_case_import_intent,
     build_hcm_partial_case_import_intent,
+    calculate_hcm_service_end_date,
     parse_hcm_service_time,
 )
 from subsystems.case_import.hcm_beclass_reconciliation import (
@@ -211,25 +212,9 @@ def _load_holiday_dates(cursor):
 
 
 def _calculate_service_end_date(start_date, service_days, service_type, holiday_dates):
-    if start_date is None or not service_days or service_days < 1:
+    if start_date is None or not service_days:
         return None
-
-    rest_weekdays = {
-        "週休1日": {6},
-        "週休2日": {5, 6},
-        "連續服務": set(),
-    }.get(service_type, set())
-
-    current_date = start_date
-    completed_days = 0
-    while completed_days < service_days:
-        if current_date.weekday() not in rest_weekdays and current_date not in holiday_dates:
-            completed_days += 1
-            if completed_days == service_days:
-                return current_date
-        current_date += timedelta(days=1)
-
-    return None
+    return calculate_hcm_service_end_date(start_date, service_days, service_type, holiday_dates)
 
 
 def _result(inserted=0, inserted_with_warning=0, exact_replay=0, review_required=0, failed=0):
@@ -732,7 +717,8 @@ def _replay_existing_hcm_case(
     return "exact_replay"
 
 
-def _normalized_record(row):
+def normalize_hcm_row(row):
+    """Return canonical HCM field values for both legacy import and owner correction."""
     record = {
         db_column: clean_data(row[excel_column], db_column)
         for excel_column, db_column in CLIENTS_FIELD_MAPPING.items()
@@ -756,6 +742,11 @@ def _normalized_record(row):
         record["service_type"] = "週休1日"
         
     return record
+
+
+def _normalized_record(row):
+    """Compatibility alias for legacy callers; new owner code uses normalize_hcm_row."""
+    return normalize_hcm_row(row)
 
 
 def _case_import_intent(cursor, record):

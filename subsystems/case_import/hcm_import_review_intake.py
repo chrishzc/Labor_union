@@ -34,13 +34,24 @@ def record_hcm_import_review(
     with HcmImportReviewMySqlUnitOfWork(connection) as unit_of_work:
         existing = repository.find_fingerprint(root.source_event_identity, for_update=True)
         if existing is None:
-            repository.append_root_and_outbox(root)
+            repository.append_root_and_outbox(
+                root,
+                canonical_case_no=_canonical_case_no(case_identity),
+            )
             unit_of_work.commit()
             return root.review_identity
         if existing != root.source_fingerprint.value:
             raise RuntimeError("case_import_source_conflict")
         unit_of_work.commit()
     return root.review_identity
+
+
+def _canonical_case_no(value: object) -> str | None:
+    """A raw case number may create an explicit FK; masked values never do."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
 
 
 __all__ = ["record_hcm_import_review"]

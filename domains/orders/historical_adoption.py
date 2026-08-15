@@ -82,12 +82,10 @@ def build_historical_order_candidate(
 
 
 def _outcome(current_status, asserted_status, issues):
+    del current_status
     if asserted_status is None:
         issues.add("historical_status_invalid")
         return HistoricalOrderOutcome.REVIEW_REQUIRED
-    if current_status is not OrderLifecycleStatus.DISCUSSION and current_status is not asserted_status:
-        issues.add("historical_current_status_conflict")
-        return HistoricalOrderOutcome.CURRENT_CONFLICT
     return HistoricalOrderOutcome.ADOPTED
 
 
@@ -102,13 +100,11 @@ def _date_patch(current, source, issues, outcome):
 
 
 def _append_date_patch(patch, issues, field, current, incoming):
+    del issues
     if incoming is None:
         return
-    if current is None:
-        patch.append((field, incoming))
-        return
     if current != incoming:
-        issues.add(f"historical_nonempty_conflict:{field}")
+        patch.append((field, incoming))
 
 
 __all__ = [
