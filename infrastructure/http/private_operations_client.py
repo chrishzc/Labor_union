@@ -1,4 +1,7 @@
-"""Typed HTTP client for authenticated private runtime operations."""
+"""
+File: private_operations_client.py
+Description: 呼叫受驗證的 Private API，且不把本機資料庫憑證載入 Worker 環境。
+"""
 
 from __future__ import annotations
 
@@ -6,10 +9,12 @@ import os
 import random
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 from socket import gethostname
 from typing import Any, Callable
 
 import requests
+from dotenv import dotenv_values
 from google.auth import jwt
 from google.auth.exceptions import DefaultCredentialsError, TransportError
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -28,12 +33,44 @@ DATABASE_CREDENTIAL_VARIABLES = (
     "MYSQL_PASSWORD",
     "MYSQL_DATABASE",
 )
+LOCAL_ENVIRONMENT_PATH = Path(__file__).resolve().parents[2] / ".env"
+LOCAL_PRIVATE_API_VARIABLES = (
+    "INTERNAL_API_BASE_URL",
+    "INTERNAL_SERVICE_SHARED_KEY",
+    "INTERNAL_SERVICE_AUTH_MODE",
+    "INTERNAL_SERVICE_OIDC_AUDIENCE",
+    "INTERNAL_API_MAX_ATTEMPTS",
+)
 
 
 def discard_database_credentials() -> None:
     """Ensure a worker process cannot retain DB credentials inherited from its parent."""
     for variable_name in DATABASE_CREDENTIAL_VARIABLES:
         os.environ.pop(variable_name, None)
+
+
+def _local_private_api_environment() -> dict[str, str]:
+    """Read only Private API settings without mutating the worker environment."""
+    values = dotenv_values(LOCAL_ENVIRONMENT_PATH)
+    return {
+        variable_name: value
+        for variable_name in LOCAL_PRIVATE_API_VARIABLES
+        if isinstance((value := values.get(variable_name)), str)
+    }
+
+
+def _configured_value(
+    explicit_value: str | None,
+    variable_name: str,
+    local_environment: dict[str, str],
+    default: str,
+) -> str:
+    return (
+        explicit_value
+        or os.getenv(variable_name)
+        or local_environment.get(variable_name)
+        or default
+    )
 
 
 class PrivateOperationError(RuntimeError):
@@ -78,16 +115,42 @@ class PrivateOperationsClient:
         sleep: Callable[[float], None] = time.sleep,
         random_fraction: Callable[[], float] = random.random,
     ) -> None:
+        local_environment = _local_private_api_environment()
         self._service_name = service_name
-        self._base_url = (
-            base_url or os.getenv("INTERNAL_API_BASE_URL", "http://127.0.0.1:8000")
+        self._base_url = _configured_value(
+            base_url,
+            "INTERNAL_API_BASE_URL",
+            local_environment,
+            "http://127.0.0.1:8000",
         ).rstrip("/")
-        self._shared_key = shared_key or os.getenv("INTERNAL_SERVICE_SHARED_KEY", "")
+        self._shared_key = _configured_value(
+            shared_key,
+            "INTERNAL_SERVICE_SHARED_KEY",
+            local_environment,
+            "",
+        )
         self._timeout_seconds = timeout_seconds
-        self._auth_mode = auth_mode or os.getenv("INTERNAL_SERVICE_AUTH_MODE", "local_shared_key")
-        self._oidc_audience = oidc_audience or os.getenv("INTERNAL_SERVICE_OIDC_AUDIENCE", "")
+        self._auth_mode = _configured_value(
+            auth_mode,
+            "INTERNAL_SERVICE_AUTH_MODE",
+            local_environment,
+            "local_shared_key",
+        )
+        self._oidc_audience = _configured_value(
+            oidc_audience,
+            "INTERNAL_SERVICE_OIDC_AUDIENCE",
+            local_environment,
+            "",
+        )
         self._token_provider = token_provider or GoogleOidcTokenProvider()
-        self._max_attempts = max_attempts or int(os.getenv("INTERNAL_API_MAX_ATTEMPTS", "3"))
+        self._max_attempts = max_attempts or int(
+            _configured_value(
+                None,
+                "INTERNAL_API_MAX_ATTEMPTS",
+                local_environment,
+                "3",
+            )
+        )
         self._retry_base_seconds = retry_base_seconds
         self._retry_max_seconds = retry_max_seconds
         self._sleep = sleep

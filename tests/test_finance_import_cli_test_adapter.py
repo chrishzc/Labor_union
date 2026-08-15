@@ -1,11 +1,18 @@
+"""
+File: test_finance_import_cli_test_adapter.py
+Description: 驗證帳務 CLI 預覽預設與受控建立批次邊界。
+"""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from scripts.imports import import_finance_excel as cli
 
 
-def test_cli_uses_typed_ingestion_with_stable_test_identity(tmp_path, monkeypatch):
+def test_cli_apply_uses_confirmed_operator_identity(tmp_path, monkeypatch):
     workbook = tmp_path / "bank.xlsx"
     workbook.write_bytes(b"test bank statement")
     calls = []
@@ -16,18 +23,33 @@ def test_cli_uses_typed_ingestion_with_stable_test_identity(tmp_path, monkeypatc
     )
     monkeypatch.setattr(cli, "ingest_finance_workbook", lambda *args: calls.append(args) or receipt)
 
-    assert cli.main(["--excel-path", str(workbook)]) == 0
+    monkeypatch.setenv("DB_DATABASE", "candidate_history")
+    assert cli.main(
+        [
+            "--excel-path", str(workbook), "--apply",
+            "--confirm-database", "candidate_history",
+        ]
+    ) == 0
 
     path, key, actor = calls[0]
     assert path == str(workbook.resolve())
-    assert key.value.startswith("finance-import-cli-test:")
-    assert actor.actor_id == "finance-import-cli-test"
+    assert key.value.startswith("finance-import-cli-operator:")
+    assert actor.actor_id == "finance-import-cli-operator"
 
 
-def test_cli_dry_run_never_calls_typed_ingestion(tmp_path, monkeypatch):
+def test_cli_preview_never_calls_typed_ingestion(tmp_path, monkeypatch):
     workbook = tmp_path / "bank.xlsx"
     workbook.write_bytes(b"test bank statement")
     monkeypatch.setattr(cli, "ingest_finance_workbook", lambda *_: (_ for _ in ()).throw(AssertionError()))
     monkeypatch.setattr(cli, "normalize_workbook", lambda _: {"format_id": "taishin", "normalized_rows": []})
 
-    assert cli.main(["--excel-path", str(workbook), "--dry-run"]) == 0
+    assert cli.main(["--excel-path", str(workbook)]) == 0
+
+
+def test_cli_apply_requires_configured_database_confirmation(tmp_path, monkeypatch):
+    workbook = tmp_path / "bank.xlsx"
+    workbook.write_bytes(b"test bank statement")
+    monkeypatch.setenv("DB_DATABASE", "candidate_history")
+
+    with pytest.raises(RuntimeError, match="finance_import_database_confirmation_required"):
+        cli.main(["--excel-path", str(workbook), "--apply"])

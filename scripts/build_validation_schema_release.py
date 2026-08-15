@@ -1,4 +1,7 @@
-"""Build the reviewable full-SQL artifact from the versioned schema sources."""
+"""
+File: build_validation_schema_release.py
+Description: 由唯一 schema assembly 組裝可審核的 validation SQL release。
+"""
 
 from __future__ import annotations
 
@@ -13,7 +16,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from scripts.verify_validation_schema_manifest import (
     DEFAULT_MANIFEST_PATH,
     load_manifest,
-    ordered_schema_parts,
+    selected_schema_parts,
     verify_manifest,
 )
 
@@ -29,10 +32,9 @@ def release_output_path(manifest: dict[str, object]) -> Path:
 def build_release_text(manifest: dict[str, object]) -> str:
     _require_valid_manifest(manifest)
     base_schema = manifest["base_schema"]
-    schema_parts = manifest["schema_parts"]
     base_text = (PROJECT_ROOT / str(base_schema["path"])).read_text(encoding="utf-8")
     base_text = base_text.replace("union_db", DATABASE_TOKEN)
-    part_paths = ordered_schema_parts(PROJECT_ROOT / str(schema_parts["directory"]))
+    part_paths = selected_schema_parts(manifest)
     sections = [_release_header(manifest), _source_section("db/schema.sql", base_text)]
     for part_path in part_paths:
         relative_path = part_path.relative_to(PROJECT_ROOT).as_posix()

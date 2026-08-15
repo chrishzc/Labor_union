@@ -1,4 +1,7 @@
-"""MySQL adapter for atomic case import and architecture bootstrap."""
+"""
+File: case_import_repository.py
+Description: 原子保存 Case Import roots、事件、bootstrap 與 replay receipt。
+"""
 
 from __future__ import annotations
 
@@ -20,6 +23,7 @@ from domains.case_import.case_import import (
     CaseImportDomainError,
     CaseImportFacts,
     CaseImportIssue,
+    HcmIdentityFacts,
     ProvisionalRegistrationFacts,
 )
 from infrastructure.mysql.case_architecture_bootstrap_repository import (
@@ -62,6 +66,18 @@ class MySqlCaseImportRepository:
     def case_exists(self, case_no: str) -> bool:
         with _mysql_cursor(self._connection) as cursor:
             return _case_exists(cursor, case_no, lock=False)
+
+    def load_hcm_identity_facts(
+        self, case_no: str, ip_address: str, client_name: str
+    ) -> HcmIdentityFacts:
+        with _mysql_cursor(self._connection) as cursor:
+            case_client_ids = _client_ids_for_field(cursor, "case_no", case_no)
+            ip_name_client_ids = _client_ids_for_ip_and_name(
+                cursor, ip_address, client_name
+            )
+            cursor.execute("SELECT 1 FROM orders WHERE case_no=%s LIMIT 1", (case_no,))
+            order_exists = cursor.fetchone() is not None
+        return HcmIdentityFacts(case_client_ids, ip_name_client_ids, order_exists)
 
     def load(self, intent, *, for_update):
         with _mysql_cursor(self._connection) as cursor:
@@ -125,6 +141,8 @@ class MySqlCaseImportRepository:
         return event_id
 
     def create_architecture_bootstrap(self, command, candidate) -> int:
+        if candidate.bootstrap is None:
+            return None
         return self._bootstrap.create_bootstrap(command, candidate.bootstrap)
 
     # Kept cohesive because this is one immutable event serialization boundary.
@@ -214,6 +232,24 @@ def _case_exists(cursor, case_no, *, lock):
     return client_exists or cursor.fetchone() is not None
 
 
+def _client_ids_for_field(cursor, field_name, value):
+    if field_name not in {"case_no", "ip_address"}:
+        raise ValueError("unsupported_hcm_identity_field")
+    cursor.execute(
+        f"SELECT id FROM clients WHERE `{field_name}`=%s ORDER BY id LIMIT 2",
+        (value,),
+    )
+    return tuple(int(row["id"]) for row in cursor.fetchall())
+
+
+def _client_ids_for_ip_and_name(cursor, ip_address, client_name):
+    cursor.execute(
+        "SELECT id FROM clients WHERE ip_address=%s AND name=%s ORDER BY id LIMIT 2",
+        (ip_address, client_name),
+    )
+    return tuple(int(row["id"]) for row in cursor.fetchall())
+
+
 def _load_provisional_registration(cursor, intent, *, lock):
     if intent.provisional_registration_id is None:
         return None
@@ -240,6 +276,8 @@ def _load_provisional_registration(cursor, intent, *, lock):
 
 
 def _load_rate_policy(cursor, intent, *, lock):
+    if intent.bootstrap is None:
+        return None
     identity = str(_client_attribute(intent, "identity_status"))
     try:
         policy_kind = policy_kind_for_identity(identity)
@@ -300,6 +338,15 @@ def _insert_client(cursor, candidate):
 
 def _insert_order(cursor, candidate, client_id) -> None:
     order = candidate.order
+    if order is None:
+        cursor.execute(
+            "INSERT INTO orders (case_no,client_id,status,lifecycle_version,service_days,service_hours_per_day) "
+            "VALUES (%s,%s,'待補件',0,NULL,NULL)",
+            (candidate.case_no, client_id),
+        )
+        if int(cursor.rowcount) != 1:
+            raise RuntimeError("case_import_partial_order_insert_failed")
+        return
     cursor.execute(
         _ORDER_INSERT_SQL,
         (
@@ -312,7 +359,7 @@ def _insert_order(cursor, candidate, client_id) -> None:
             order.service_start_time,
             order.service_end_time,
             order.service_end_day_offset,
-            int(order.requires_cooking),
+            None if order.requires_cooking is None else int(order.requires_cooking),
         ),
     )
     if int(cursor.rowcount) != 1:
@@ -347,7 +394,7 @@ def _stored_receipt(row):
         int(row["scheduling_version"]),
         int(row["scheduling_generation"]),
         int(row["import_event_id"]),
-        int(row["bootstrap_event_id"]),
+        None if row["bootstrap_event_id"] is None else int(row["bootstrap_event_id"]),
         PreviewFingerprint(str(row["source_fingerprint"])),
         PreviewFingerprint(str(row["preview_fingerprint"])),
         None if row["provisional_registration_id"] is None else int(row["provisional_registration_id"]),
@@ -378,21 +425,22 @@ def _receipt_payload(receipt):
 
 
 def _source_snapshot(candidate):
+    order = candidate.order
     return {
         "case_no": candidate.case_no,
         "client_attributes": {
             item.name: _json_value(item.value)
             for item in candidate.client_attributes
         },
-        "order": {
-            "planned_end_date": candidate.order.planned_end_date.isoformat(),
-            "planned_start_date": candidate.order.planned_start_date.isoformat(),
-            "service_days": candidate.order.service_days,
-            "service_end_day_offset": candidate.order.service_end_day_offset,
-            "service_end_time": candidate.order.service_end_time.isoformat(),
-            "service_hours_per_day": candidate.order.service_hours_per_day,
-            "requires_cooking": candidate.order.requires_cooking,
-            "service_start_time": candidate.order.service_start_time.isoformat(),
+        "order": None if order is None else {
+            "planned_end_date": order.planned_end_date.isoformat(),
+            "planned_start_date": order.planned_start_date.isoformat(),
+            "service_days": order.service_days,
+            "service_end_day_offset": order.service_end_day_offset,
+            "service_end_time": order.service_end_time.isoformat(),
+            "service_hours_per_day": order.service_hours_per_day,
+            "requires_cooking": order.requires_cooking,
+            "service_start_time": order.service_start_time.isoformat(),
         },
     }
 

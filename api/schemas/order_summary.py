@@ -1,4 +1,7 @@
-"""Typed HTTP views for the bounded Orders summary query."""
+"""
+File: order_summary.py
+Description: 定義訂單摘要 HTTP 讀模型，允許待補件案件的衍生欄位為空。
+"""
 
 from datetime import date
 
@@ -13,12 +16,12 @@ class OrderSummaryItemView(BaseModel):
     order_status: str
     staff_name: str | None
     identity_status: str | None
-    start_date: date
+    start_date: date | None
     end_date: date | None
     actual_start_date: date | None
     actual_end_date: date | None
-    service_days: int = Field(gt=0)
-    total_employer_self_pay_payable: int = Field(ge=0)
+    service_days: int | None = Field(default=None, gt=0)
+    total_employer_self_pay_payable: int | None = Field(default=None, ge=0)
 
 
 class OrderSummaryPageView(BaseModel):

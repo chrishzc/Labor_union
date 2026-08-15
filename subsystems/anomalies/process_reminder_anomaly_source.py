@@ -1,17 +1,6 @@
-"""Root-fact consumers for the process-reminder anomaly group.
-
-Covers ORDER-001~004, BECLASS-001, DOC-SEND-001, RECEIVABLE-001,
-CLIENTPAYABLE-001, RETURN-001,
-SCHEDULE-001/002/003/005 and LINE-001/002/004/005. Business rules are ported
-1:1 from the legacy services/anomaly_alert_detection.py scanners.
-
-Unlike that legacy module (which pre-filters queries to only currently-matching
-rows and relies on a separate resolve_absent_alerts() bulk close), every
-builder here is handed the full stable candidate universe (e.g. every order,
-every client_payments row) and computes an explicit active flag per row. That
-lets the canonical reducer (domains.anomalies.registry.reduce_current_alert)
-auto-resolve rows that fall out of the matching condition on the next scan,
-without a separate bulk-close step.
+"""
+File: process_reminder_anomaly_source.py
+Description: 由根事實建立流程提醒與 HCM／BeClass 對稱異常命令。
 """
 
 from __future__ import annotations
@@ -107,6 +96,38 @@ def build_beclass_missing_requests(
         active = row.get("beclass_id") is None
         snapshot = {"case_no": case_no}
         requests.append(_request("BECLASS-001", case_no, version, active, snapshot, {"case_no": case_no}))
+    return tuple(requests)
+
+
+def build_hcm_missing_requests(
+    rows: list[Mapping[str, Any]], *, as_of: date
+) -> tuple[ProjectAlertRequest, ...]:
+    """Project BeClass rows waiting for their independently imported HCM case."""
+    version = as_of.toordinal()
+    requests = []
+    for row in rows:
+        query_no = str(row["query_no"])
+        active = row.get("beclass_id") is not None and row.get("hcm_case_no") is None
+        review_item_id = f"counterpart:{query_no}"
+        snapshot = {
+            "entity_kind": "client_counterpart",
+            "error_codes": ("beclass_hcm_mismatch",),
+            "masked_identifier": f"case-***-{query_no[-4:]}",
+            "review_item_id": review_item_id,
+            "source_row": 1,
+            "source_sheet": "current-state",
+            "version": version,
+        }
+        requests.append(
+            _request(
+                "IMPORT-003",
+                f"beclass-counterpart:{query_no}",
+                version,
+                active,
+                snapshot,
+                {"entity_kind": "client_counterpart", "review_item_id": review_item_id},
+            )
+        )
     return tuple(requests)
 
 

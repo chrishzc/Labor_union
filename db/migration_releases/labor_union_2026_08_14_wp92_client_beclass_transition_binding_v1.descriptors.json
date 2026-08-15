@@ -1,0 +1,11 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "197_client_beclass_transition_binding.sql": {
+      "tables": {
+        "beclass_records": ["client_id", "bound_case_no"]
+      },
+      "triggers": []
+    }
+  }
+}

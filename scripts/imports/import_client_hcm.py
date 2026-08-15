@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-File: scripts/imports/import_client_hcm.py
-Description: 解析並清洗 HCM 月子平台 -市府 Excel 工作表，將乾淨數據寫入 clients 表，並同步初始化 orders 為「洽談中」。
-ponytail: 去重與更新時排除 line_user_id 欄位，自動為新案件在 orders 建立「洽談中」紀錄。
+File: import_client_hcm.py
+Description: 依 HCM 欄位契約選取 Excel 工作表，驗證後建立個案與洽談中訂單。
 """
+import argparse
 import sys
 import os
 import re
@@ -11,11 +11,6 @@ from datetime import date, datetime, timedelta
 
 import pymysql
 import pandas as pd
-from datetime import datetime
-import json
-from api.dependencies.anomaly_registry import get_anomaly_application
-from domains.anomalies.registry import DesiredAlertState
-from subsystems.anomalies.alert_workflow import ProjectAlertRequest
 from dotenv import load_dotenv
 
 # 確保中文輸出編碼正確
@@ -31,20 +26,24 @@ if ROOT not in sys.path:
     sys.path.append(ROOT)
 
 from domains.case_import.client_import_validation import (
+    HCM_REQUIRED_HEADERS,
     validate_hcm_row,
 )
-from domains.case_import.beclass_import_review import BeClassImportSourceKind
-from domains.case_import.cooking_requirement import (
-    CookingRequirementDomainError,
-    normalize_cooking_requirement,
+from domains.case_import.case_import import (
+    HcmIdentityResolution,
+    fingerprint_case_import_source,
 )
 from subsystems.case_import.application import build_case_import_application
-from subsystems.case_import.beclass_review_intake import (
-    fingerprint_workbook,
-    masked_review_identifier,
-    record_invalid_beclass_row,
+from subsystems.case_import.beclass_review_intake import fingerprint_workbook
+from subsystems.case_import.hcm_import_review_intake import record_hcm_import_review
+from subsystems.case_import.hcm_adapter import (
+    build_hcm_case_import_intent,
+    build_hcm_partial_case_import_intent,
+    parse_hcm_service_time,
 )
-from subsystems.case_import.hcm_adapter import build_hcm_case_import_intent
+from subsystems.case_import.hcm_beclass_reconciliation import (
+    reconcile_hcm_beclass_cooking,
+)
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -233,10 +232,11 @@ def _calculate_service_end_date(start_date, service_days, service_type, holiday_
     return None
 
 
-def _result(inserted=0, skipped_existing=0, review_required=0, failed=0):
+def _result(inserted=0, inserted_with_warning=0, exact_replay=0, review_required=0, failed=0):
     return {
         "inserted": inserted,
-        "skipped_existing": skipped_existing,
+        "inserted_with_warning": inserted_with_warning,
+        "exact_replay": exact_replay,
         "review_required": review_required,
         "failed": failed,
     }
@@ -262,27 +262,28 @@ def process_import(excel_path):
 
 def _load_hcm_frame(excel_path):
     print(f"解析 Excel 檔案：{excel_path} ...")
-    workbook = pd.ExcelFile(excel_path)
-    target_sheet = next(
-        (
-            name
-            for name in workbook.sheet_names
-            if _is_hcm_sheet_name(name)
-        ),
-        None,
-    )
-    if target_sheet is None:
-        print("未找到包含 'HCM' 或 '市府' 關鍵字的工作表。跳過此檔案。")
+    with pd.ExcelFile(excel_path) as workbook:
+        candidates = _hcm_sheet_candidates(workbook)
+    if not candidates:
+        print("沒有工作表符合 HCM 必要欄位契約。跳過此檔案。")
         return None
-    frame = workbook.parse(target_sheet)
+    if len(candidates) > 1:
+        print("有多個工作表符合 HCM 必要欄位契約，無法安全自動選擇。跳過此檔案。")
+        return None
+    target_sheet, frame = candidates[0]
     frame.attrs["source_sheet"] = target_sheet
-    print(f"找到匹配工作表：'{target_sheet}'，共有 {len(frame)} 筆資料，準備匯入...")
+    print(f"已依欄位契約選取工作表，共有 {len(frame)} 筆資料，準備匯入...")
     return frame
 
 
-def _is_hcm_sheet_name(name):
-    normalized_name = name.replace(" ", "").lower()
-    return "hcm" in normalized_name or "市府" in normalized_name
+def _hcm_sheet_candidates(workbook):
+    candidates = []
+    for sheet_name in workbook.sheet_names:
+        frame = workbook.parse(sheet_name=sheet_name, dtype=object)
+        actual_headers = {str(column).strip() for column in frame.columns}
+        if not frame.dropna(how="all").empty and HCM_REQUIRED_HEADERS <= actual_headers:
+            candidates.append((sheet_name, frame))
+    return candidates
 
 
 def _connect_database():
@@ -351,6 +352,160 @@ def _process_import_rows(frame, connection, excel_path):
     return counts
 
 
+class HcmLegacyRowIntake:
+    """Temporary adapter exposing existing HCM normalization to typed Web composition."""
+
+    def __init__(self, connection) -> None:
+        self._connection = connection
+
+    def load_frame(self, source_path: str):
+        return _load_hcm_frame(source_path)
+
+    def import_rows(self, frame, source_path: str) -> dict[str, int]:
+        return _process_import_rows(frame, self._connection, source_path)
+
+    def preview_rows(self, frame, source_path: str) -> dict[str, int]:
+        outcomes = {"ready": 0, "ready_with_warning": 0, "review_required": 0}
+        for _, row in frame.iterrows():
+            record = _normalized_record(row)
+            validation_errors = validate_hcm_row(row.to_dict())
+            if not record.get("case_no") or not isinstance(record.get("created_at"), datetime):
+                outcomes["review_required"] += 1
+                continue
+            outcome = "ready_with_warning" if validation_errors else "ready"
+            outcomes[outcome] += 1
+        return outcomes
+
+
+class HcmHistoricalRowIntake:
+    """Temporary HCM transition adapter: source business time determines overwrite order."""
+
+    def __init__(self, connection) -> None:
+        self._connection = connection
+
+    def load_frame(self, source_path: str):
+        return _load_hcm_frame(source_path)
+
+    def preview_rows(self, frame, source_path: str) -> dict[str, int]:
+        outcomes = {"ready": 0, "ready_with_warning": 0, "review_required": 0}
+        for _, row in frame.iterrows():
+            record = _normalized_record(row)
+            if not record.get("case_no") or not isinstance(record.get("created_at"), datetime):
+                outcomes["review_required"] += 1
+                continue
+            outcomes["ready_with_warning" if validate_hcm_row(row.to_dict()) else "ready"] += 1
+        return outcomes
+
+    def import_rows(self, frame, source_path: str) -> dict[str, int]:
+        counts = _result()
+        source_digest = fingerprint_workbook(source_path)
+        source_sheet = str(frame.attrs.get("source_sheet") or "HCM")
+        ordered_rows = _historical_rows_in_source_time_order(frame)
+        application = build_case_import_application(self._connection)
+        with self._connection.cursor() as cursor:
+            for ordinal, row in ordered_rows:
+                outcome = _import_historical_hcm_row(
+                    row, ordinal, cursor, application, source_path, self._connection, source_digest, source_sheet,
+                )
+                counts[outcome] += 1
+        return counts
+
+
+def _historical_rows_in_source_time_order(frame):
+    rows = tuple(enumerate((row for _, row in frame.iterrows()), start=1))
+    return tuple(sorted(rows, key=_historical_row_sort_key))
+
+
+def _historical_row_sort_key(item):
+    ordinal, row = item
+    created_at = _normalized_record(row).get("created_at")
+    return (created_at is None, created_at or datetime.max, ordinal)
+
+
+def _import_historical_hcm_row(
+    row, ordinal, cursor, application, source_path, connection, source_digest, source_sheet,
+):
+    raw_row = row.to_dict()
+    record = _normalized_record(row)
+    case_no = record.get("case_no")
+    errors = validate_hcm_row(raw_row)
+    if not case_no:
+        _persist_hcm_review(connection, source_digest, source_sheet, ordinal, raw_row, None, {
+            "查詢序號(案件編號)": "case_import_case_no_required",
+        })
+        return "review_required"
+    if not isinstance(record.get("created_at"), datetime):
+        errors["報名時間(建檔)"] = "報名時間(建檔) 格式無法轉成 datetime"
+        _persist_hcm_review(connection, source_digest, source_sheet, ordinal, raw_row, case_no, errors)
+        return "review_required"
+    if not _historical_case_exists(cursor, case_no):
+        return _import_row(
+            row, ordinal, cursor, application, source_path, connection=connection,
+            source_digest=source_digest, source_sheet=source_sheet,
+        )
+    _overwrite_historical_hcm_case(cursor, record, errors)
+    if errors:
+        _persist_hcm_review(connection, source_digest, source_sheet, ordinal, raw_row, case_no, errors)
+        return "inserted_with_warning"
+    return "inserted"
+
+
+def _historical_case_exists(cursor, case_no):
+    cursor.execute("SELECT case_no FROM clients WHERE case_no=%s FOR UPDATE", (case_no,))
+    return cursor.fetchone() is not None
+
+
+def _overwrite_historical_hcm_case(cursor, record, errors):
+    overwrite_record = _partial_hcm_record(record, errors)
+    _overwrite_historical_client(cursor, overwrite_record)
+    _overwrite_historical_order_terms(cursor, overwrite_record)
+
+
+def _overwrite_historical_client(cursor, record):
+    attributes = {
+        column: value for column, value in record.items()
+        if column in CLIENTS_FIELD_MAPPING.values() and column != "case_no"
+    }
+    assignments = ",".join(f"`{column}`=%s" for column in sorted(attributes))
+    cursor.execute(
+        f"UPDATE clients SET {assignments} WHERE case_no=%s",
+        tuple(attributes[column] for column in sorted(attributes)) + (record["case_no"],),
+    )
+
+
+def _overwrite_historical_order_terms(cursor, record):
+    service_hours, start_time, end_time, end_offset = _historical_service_time_values(record)
+    end_date = _historical_end_date(cursor, record)
+    cursor.execute(
+        "UPDATE orders SET service_days=%s,service_hours_per_day=%s,start_date=%s,end_date=%s,"
+        "service_start_time=%s,service_end_time=%s,service_end_day_offset=%s WHERE case_no=%s",
+        (
+            record.get("service_days"), service_hours, record.get("service_start_date"), end_date,
+            start_time, end_time, end_offset, record["case_no"],
+        ),
+    )
+
+
+def _historical_service_time_values(record):
+    value = record.get("service_time")
+    if not isinstance(value, str):
+        return None, None, None, None
+    try:
+        return parse_hcm_service_time(value)
+    except ValueError:
+        return None, None, None, None
+
+
+def _historical_end_date(cursor, record):
+    start_date = record.get("service_start_date")
+    service_days = record.get("service_days")
+    if type(start_date) is not date or not isinstance(service_days, int):
+        return None
+    return _calculate_service_end_date(
+        start_date, service_days, record.get("service_type"), _load_holiday_dates(cursor),
+    )
+
+
 # Kept cohesive because every row gate must resolve to one observable outcome.
 def _import_row(
     row,
@@ -380,67 +535,50 @@ def _import_row(
     validation_errors = validate_hcm_row(raw_row)
     if not isinstance(record.get("created_at"), datetime):
         validation_errors["報名時間(建檔)"] = "報名時間(建檔) 格式無法轉成 datetime"
-    if application.case_exists(str(case_no)):
-        return _replay_existing_hcm_anomaly(
-            case_no,
-            ordinal,
-            validation_errors,
-        )
-    if validation_errors:
-        _persist_hcm_review(
-            connection,
-            source_digest,
-            source_sheet,
-            ordinal,
-            raw_row,
-            case_no,
-            validation_errors,
-        )
-        _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors)
-        return "review_required"
     try:
-        intent = _case_import_intent(cursor, record)
+        intent = _hcm_import_intent(cursor, record, validation_errors)
         correlation = CorrelationId(f"hcm-case-import:{case_no}:{ordinal}")
+        identity_resolution = application.resolve_hcm_identity(
+            str(case_no), str(record.get("ip_address") or "").strip(),
+            str(record.get("name") or "").strip(),
+        )
+        if identity_resolution is HcmIdentityResolution.EXISTING_MATCH:
+            return _replay_existing_hcm_case(
+                application,
+                intent,
+                correlation,
+                excel_path,
+                connection,
+                source_digest,
+                source_sheet,
+                ordinal,
+                raw_row,
+            )
         preview = application.preview(intent, correlation)
         command = _apply_command(intent, preview, correlation, excel_path)
         application.apply(command)
-        if validation_errors:
-            _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors)
-        return "inserted"
-    except CaseImportWorkflowError as error:
-        return _workflow_error_outcome(error)
-    except CookingRequirementDomainError as error:
-        cooking_errors = {
-            "月子餐點調理喜好/飲食習慣": error.issue.value,
-        }
-        _persist_hcm_review(
-            connection,
-            source_digest,
-            source_sheet,
-            ordinal,
-            raw_row,
-            case_no,
-            cooking_errors,
-        )
-        _emit_hcm_validation_anomaly(
-            case_no,
-            ordinal,
-            cooking_errors,
-        )
-        return "review_required"
-    except Exception as error:
-        if not hasattr(_import_row, "exception_printed_count"):
-            _import_row.exception_printed_count = 0
-        if _import_row.exception_printed_count < 3:
-            import traceback
-
-            traceback.print_exc()
-            print(
-                f"[除錯] 第 {ordinal} 列發生異常: "
-                f"{type(error).__name__}: {error}"
+        warning_errors = _hcm_warning_errors(validation_errors, identity_resolution)
+        if warning_errors:
+            _persist_hcm_review(
+                connection, source_digest, source_sheet, ordinal, raw_row, case_no, warning_errors,
             )
-            _import_row.exception_printed_count += 1
-        return "review_required"
+        _reconcile_without_rolling_back_hcm(connection, str(case_no))
+        return "inserted_with_warning" if warning_errors else "inserted"
+    except CaseImportWorkflowError as error:
+        outcome = _workflow_error_outcome(error)
+        if outcome == "review_required":
+            _persist_hcm_review(
+                connection,
+                source_digest,
+                source_sheet,
+                ordinal,
+                raw_row,
+                case_no,
+                {"case_import": error.error.code},
+            )
+        return outcome
+    except Exception:
+        raise
 
 
 def _persist_hcm_review(
@@ -454,58 +592,144 @@ def _persist_hcm_review(
 ):
     if connection is None or source_digest is None:
         return None
-    identity = record_invalid_beclass_row(
+    issue_codes = _hcm_review_issue_codes(validation_errors)
+    identity = record_hcm_import_review(
         connection,
-        source_kind=BeClassImportSourceKind.HCM,
         source_content_digest=source_digest,
         source_sheet=source_sheet,
         source_row=ordinal,
-        masked_identifier=masked_review_identifier(
-            BeClassImportSourceKind.HCM,
-            case_no,
-            ordinal,
-        ),
-        source_payload=raw_row,
-        issue_codes=tuple(
-            f"hcm_field_invalid:{field}" for field in sorted(validation_errors)
-        ),
+        case_identity=case_no,
+        issue_codes=issue_codes,
+        evidence_snapshot=_privacy_safe_hcm_evidence(raw_row, validation_errors),
     )
-    connection.commit()
     return identity
 
 
+def _hcm_review_issue_codes(validation_errors):
+    return tuple(
+        _hcm_review_issue_code(field, validation_errors[field])
+        for field in sorted(validation_errors)
+    )
+
+
+def _hcm_review_issue_code(field, error_code):
+    if field == "case_import":
+        return f"hcm_case_import:{error_code}"
+    if field == "hcm_identity":
+        return f"hcm_identity:{error_code}"
+    if "不可空" in str(error_code):
+        return f"hcm_field_missing:{field}"
+    return f"hcm_field_invalid:{field}"
+
+
+def _privacy_safe_hcm_evidence(raw_row, validation_errors):
+    return {
+        "invalid_field_count": len(validation_errors),
+        "source_field_count": len(raw_row),
+        "has_case_identity": bool(str(raw_row.get("查詢序號(案件編號)") or "").strip()),
+    }
+
+
+def _hcm_import_intent(cursor, record, validation_errors):
+    if validation_errors:
+        return build_hcm_partial_case_import_intent(_partial_hcm_record(record, validation_errors))
+    return _case_import_intent(cursor, record)
+
+
+def _partial_hcm_record(record, validation_errors):
+    partial_record = dict(record)
+    for source_field in validation_errors:
+        target_field = CLIENTS_FIELD_MAPPING.get(source_field)
+        if target_field is not None:
+            partial_record[target_field] = None
+    return partial_record
+
+
+def _hcm_warning_errors(validation_errors, identity_resolution):
+    warnings = dict(validation_errors)
+    if identity_resolution is HcmIdentityResolution.UNIQUE_CANDIDATE:
+        warnings["hcm_identity"] = "hcm_unique_candidate"
+    if identity_resolution is HcmIdentityResolution.CONFLICT:
+        warnings["hcm_identity"] = "hcm_duplicate_application"
+    if identity_resolution is HcmIdentityResolution.AMBIGUOUS:
+        warnings["hcm_identity"] = "hcm_identity_ambiguous"
+    return warnings
+
+
 def _workflow_error_outcome(error):
-    if error.error.code == "case_import_duplicate":
-        return "skipped_existing"
     review_categories = {"validation", "domain_blocked", "conflict"}
     if error.error.category.value in review_categories:
         return "review_required"
     raise error
 
 
-def _replay_existing_hcm_anomaly(case_no, ordinal, validation_errors):
-    if not validation_errors:
-        return "skipped_existing"
+def _reconcile_without_rolling_back_hcm(connection, case_no):
+    if connection is None:
+        return "not_run"
     try:
-        _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors)
-    except Exception:
-        return "review_required"
-    return "skipped_existing"
+        result = reconcile_hcm_beclass_cooking(connection, case_no)
+    except Exception as error:
+        print(f"[配對待重試] HCM root 已建立；reconciliation稍後重試：{type(error).__name__}")
+        return "failed_retryable"
+    print(f"[配對狀態] {result.status}")
+    return result.status
 
 
 def _report_import_failure(error):
     import traceback
 
     traceback.print_exc()
-    print(f"執行出錯已 Rollback：{error}")
+    print(f"目前來源列失敗並已回滾；先前已提交的 terminal rows 保留：{error}")
 
 
 def _report_import_success(counts):
     print(
         "匯入成功：新增 "
-        f"{counts['inserted']} 筆，略過既有 {counts['skipped_existing']} 筆，"
+        f"{counts['inserted']} 筆，exact replay {counts['exact_replay']} 筆，"
         f"待確認 {counts['review_required']} 筆。"
     )
+
+
+def _replay_existing_hcm_case(
+    application,
+    intent,
+    correlation,
+    excel_path,
+    connection,
+    source_digest,
+    source_sheet,
+    ordinal,
+    raw_row,
+):
+    key = IdempotencyKey(f"case-import:{intent.case_no}")
+    stored = application.find_receipt(key)
+    source_matches = (
+        stored is not None
+        and stored.receipt.source_fingerprint == fingerprint_case_import_source(intent)
+    )
+    if not source_matches:
+        _persist_hcm_review(
+            connection,
+            source_digest,
+            source_sheet,
+            ordinal,
+            raw_row,
+            intent.case_no,
+            {"case_import": "case_import_existing_source_conflict"},
+        )
+        return "review_required"
+    command = ApplyCaseImport(
+        intent,
+        ExpectedVersion(0),
+        stored.receipt.preview_fingerprint,
+        key,
+        ActorContext("import-client-hcm"),
+        f"Import negotiated HCM case from {os.path.basename(excel_path)}.",
+        correlation,
+    )
+    application.apply(command)
+    _reconcile_without_rolling_back_hcm(connection, intent.case_no)
+    return "exact_replay"
 
 
 def _normalized_record(row):
@@ -548,27 +772,11 @@ def _case_import_intent(cursor, record):
     )
     if end_date is None:
         raise ValueError("case_import_planned_end_date_required")
-    requires_cooking = _load_cooking_requirement(cursor, str(record["case_no"]))
     return build_hcm_case_import_intent(
         record,
         end_date,
-        requires_cooking=requires_cooking,
+        requires_cooking=None,
     )
-
-
-def _load_cooking_requirement(cursor, case_no):
-    cursor.execute(
-        "SELECT survey_details FROM beclass_records WHERE query_no=%s "
-        "ORDER BY id DESC LIMIT 2",
-        (case_no,),
-    )
-    rows = cursor.fetchall()
-    if len(rows) != 1:
-        return normalize_cooking_requirement({})
-    survey = rows[0].get("survey_details")
-    if isinstance(survey, str):
-        survey = json.loads(survey)
-    return normalize_cooking_requirement(survey)
 
 
 def _apply_command(intent, preview, correlation, source_file):
@@ -583,30 +791,25 @@ def _apply_command(intent, preview, correlation, source_file):
     )
 
 
-def _emit_hcm_validation_anomaly(case_no, ordinal, validation_errors):
-    app_gen = get_anomaly_application()
-    application = next(app_gen)
-    try:
-        request = ProjectAlertRequest(
-            desired=DesiredAlertState(
-                definition_code="IMPORT-004",
-                source_identity=str(case_no),
-                source_version=1,
-                active=True,
-                fingerprint_values={"case_no": str(case_no)},
-            ),
-            source_event_identity=f"hcm-import-validation-{case_no}-{ordinal}",
-            consumer_identity="hcm-import-script-v1",
-            partition_identity=f"hcm-import-validation:{case_no}",
-            display_snapshot={"errors": validation_errors, "row": ordinal},
-        )
-        application.project(request)
-    finally:
-        try:
-            next(app_gen)
-        except StopIteration:
-            pass
+def _parse_hcm_apply_arguments(arguments: list[str]) -> str:
+    """Require explicit operator intent before the legacy CLI writes case roots."""
+    parser = argparse.ArgumentParser(description="HCM 案件資料受控匯入")
+    parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--confirm-database")
+    parser.add_argument("workbook")
+    parsed = parser.parse_args(arguments)
+    if not parsed.apply:
+        raise RuntimeError("hcm_import_apply_flag_required")
+    configured_database = os.getenv("DB_DATABASE", "").strip()
+    if parsed.confirm_database != configured_database:
+        raise RuntimeError("hcm_import_database_confirmation_required")
+    return parsed.workbook
+
+
 if __name__ == "__main__":
-    # 提供預設本機路徑或接收命令列參數
-    excel_arg = sys.argv[1] if len(sys.argv) > 1 else "document/資料庫、資料處理/假資料_模板.xlsx"
+    try:
+        excel_arg = _parse_hcm_apply_arguments(sys.argv[1:])
+    except RuntimeError as error:
+        print(f"HCM 匯入已阻擋：{error}")
+        raise SystemExit(2) from error
     process_import(excel_arg)

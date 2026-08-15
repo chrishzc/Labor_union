@@ -3,6 +3,8 @@
 檔案名稱: api/main.py
 功能說明: FastAPI 主程序，掛載 LINE、LIFF、管理介面與其他後端 API；LINE Worker 由獨立程序管理
 ================================================================================
+File: main.py
+Description: 掛載管理 API 與 HCM workbook upload router。
 """
 
 import asyncio
@@ -22,9 +24,11 @@ from api.routes import (
     admin_auth,
     anomaly_recovery,
     anomaly_registry,
+    import_warning_tracking,
     assignment_plan,
     assignment_schedule_rest_dates,
     beclass_import_review,
+    client_beclass_import,
     case_architecture_bootstrap,
     client_deposit_reversal,
     client_receipt_reconciliation,
@@ -35,6 +39,9 @@ from api.routes import (
     contracts,
     data_browser_admin,
     finance_import,
+    hcm_import,
+    historical_order_adoption,
+    staff_historical_workbook,
     finance_reports,
     financial_adjustment,
     government_subsidy,
@@ -79,6 +86,7 @@ from api.routes import (
     jobs,
     scheduling_current,
     staff_matching_preferences,
+    staff_retirement,
     staff,
     staff_availability,
     staff_monthly_schedule,
@@ -191,6 +199,7 @@ app.include_router(caregiver_segment_availability.router)
 app.include_router(caregiver_availability_locks.router)
 app.include_router(clients.router)
 app.include_router(staff.router)
+app.include_router(staff_retirement.router)
 app.include_router(staff_availability.router)
 app.include_router(staff_monthly_schedule.router)
 
@@ -208,11 +217,16 @@ app.include_router(payroll_rebuild.router)
 app.include_router(staff_payments.router)
 app.include_router(contracts.router)
 app.include_router(finance_import.router)
+app.include_router(hcm_import.router)
+app.include_router(client_beclass_import.router)
+app.include_router(historical_order_adoption.router)
+app.include_router(staff_historical_workbook.router)
 app.include_router(beclass_import_review.router)
 app.include_router(finance_reports.router)
 app.include_router(government_subsidy.router)
 app.include_router(anomaly_registry.router)
 app.include_router(anomaly_recovery.router)
+app.include_router(import_warning_tracking.router)
 app.include_router(data_browser_admin.router)
 app.include_router(system_status.router)
 app.include_router(runtime_health.router)

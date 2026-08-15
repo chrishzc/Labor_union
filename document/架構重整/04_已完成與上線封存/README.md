@@ -81,3 +81,13 @@ source path、archive id、release identity 或 Domain 精準搜尋。每筆 ent
 2026-08-13 WP75 與 completion receipt 在 Windows canonical launcher 實跑、健康檢查及 PID／port
 cleanup 通過後封存；current operator entry 與個人 LINE credential 邊界由開發者導覽及
 `scripts/launchers/README.md` 擁有。
+
+2026-08-14 WP76（Migration Release Integrity）與 WP79（LINE Runtime Release Catalog Recovery）通過 Archive Gate 實體移入本目錄 `work_packages/`；`archive_manifest.json` 狀態已同步更新。
+
+2026-08-14 WP73、WP77、WP80 completion、WP83、WP85 在五 lane 去敏 workbook、disposable MySQL、
+preserve-data release、內建瀏覽器與 successor SSOT 均閉合後通過共同 Archive Gate。WP80 同號
+Preview-only 舊版保留原檔；完成版使用 `_Completed_20260814` 避免覆寫 lineage。
+
+2026-08-14 歷史 `08 ADAD／Legacy 邊界`、`11 架構總審矩陣`、`13 規格實作完成度矩陣` 已從
+current formal baseline 移入 `superseded_specs/`。現行契約與 active evidence 分別由 15、
+個別正式規格、AGENTS.md、58 gap register 及 03 evidence 承接。

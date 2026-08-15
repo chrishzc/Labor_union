@@ -1,4 +1,7 @@
-"""Lock and validate the Orders lifecycle aggregate command envelope."""
+"""
+File: subsystems/orders/order_lifecycle_command_envelope.py
+Description: 鎖定訂單生命週期命令事實，待補件案件一律拒絕進入後續命令。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -6,7 +9,7 @@ from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 import re
 
-_CANONICAL_STATUSES = frozenset({"洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"})
+_CANONICAL_STATUSES = frozenset({"待補件", "洽談中", "訂單成立", "服務中", "訂單完成", "訂單取消"})
 _CONTROL_TYPES = frozenset({"cancellation", "actual_start_reconfirmation", "human_hold"})
 _CONTROL_SCOPES = frozenset({"order", "enter_service", "auto_complete"})
 _CONTROL_STATES = frozenset({"active", "cleared"})
@@ -101,6 +104,7 @@ def _validate_order_row(row: Mapping[str, object], case_no: str) -> tuple[str, i
     if row["case_no"] != case_no: raise ValueError("locked order identity differs from case_no")
     status = row["status"]
     if status not in _CANONICAL_STATUSES: raise ValueError("locked order status is not canonical")
+    if status == "待補件": raise ValueError("pending-completion order cannot enter lifecycle commands")
     version = _nonnegative_int(row["lifecycle_version"], "lifecycle_version")
     service_days = _positive_int(row["service_days"], "service_days")
     if row["cancel_reason"] is not None and not isinstance(row["cancel_reason"], str): raise TypeError("cancel_reason must be a string or None")

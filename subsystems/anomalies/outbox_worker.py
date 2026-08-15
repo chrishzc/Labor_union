@@ -1,4 +1,7 @@
-"""Background delivery for cross-domain canonical anomaly outbox events."""
+"""
+File: outbox_worker.py
+Description: 背景投遞各 Domain 已提交的 canonical anomaly outbox事件。
+"""
 
 from __future__ import annotations
 
@@ -14,11 +17,13 @@ from infrastructure.mysql.government_subsidy_reversal_anomaly_source import proj
 from infrastructure.mysql.government_return_outbound_overage_anomaly_source import project_government_return_outbound_overage_page
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
+from infrastructure.mysql.beclass_import_review_anomaly_source import project_beclass_import_review_page
 from infrastructure.mysql.process_reminder_anomaly_source import consume_process_reminder_anomaly_sources
 from infrastructure.mysql.scheduling_coverage_anomaly_source import MySqlSchedulingCoverageAnomalySource
 from shared_kernel.business_time import current_business_instant
 from subsystems.anomalies.alert_workflow import AnomalyApplication
 from subsystems.anomalies.beclass_import_outbox_consumer import consume_beclass_import_review_events
+from subsystems.anomalies.hcm_import_review_outbox_consumer import consume_hcm_import_review_events
 from subsystems.anomalies.finance_import_anomaly_consumer import consume_finance_import_anomaly_events
 from subsystems.anomalies.government_overpayment_anomaly_consumer import (
     consume_government_overpayment_anomaly_events,
@@ -76,15 +81,17 @@ class ArchitectureSourceScanState:
     government_return_outbound_overage_after_row_id: int
     government_return_outbound_overage_exhausted: bool
     process_reminder_exhausted: bool
+    beclass_review_after_row_id: int
+    beclass_review_exhausted: bool
     next_cycle_at: float
 
     @classmethod
     def start(cls):
-        return cls(StaffPayablesAnomalyScanCursors.start(), None, False, 0, False, 0, False, 0, False, 0, False, 0, False, False, 0.0)
+        return cls(StaffPayablesAnomalyScanCursors.start(), None, False, 0, False, 0, False, 0, False, 0, False, 0, False, False, 0, False, 0.0)
 
     def cycle_complete(self) -> bool:
         staff_exhausted = all(cursor is None for cursor in (self.staff_payables.overdue_after_obligation_identity, self.staff_payables.late_change_after_event_id, self.staff_payables.bank_master_after_staff_id))
-        return staff_exhausted and self.scheduling_exhausted and self.government_subsidy_exhausted and self.government_subsidy_integrity_exhausted and self.government_subsidy_reversal_exhausted and self.government_subsidy_assignment_drift_exhausted and self.government_return_outbound_overage_exhausted and self.process_reminder_exhausted
+        return staff_exhausted and self.scheduling_exhausted and self.government_subsidy_exhausted and self.government_subsidy_integrity_exhausted and self.government_subsidy_reversal_exhausted and self.government_subsidy_assignment_drift_exhausted and self.government_return_outbound_overage_exhausted and self.process_reminder_exhausted and self.beclass_review_exhausted
 
 
 class BorrowedAnomalyUnitOfWork:
@@ -103,6 +110,7 @@ def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None):
     try:
         finance = consume_finance_import_anomaly_events(connection)
         beclass = consume_beclass_import_review_events(connection)
+        hcm = consume_hcm_import_review_events(connection)
         subsidy_advance_delivered, subsidy_advance_failed = (
             consume_government_subsidy_advance_events(connection)
         )
@@ -124,8 +132,8 @@ def _consume_once(source_scan_state: ArchitectureSourceScanState | None = None):
         )
         source_delivered, source_failed = _consume_sources_if_due(connection, source_scan_state)
         return ArchitectureDeliveryResult(
-            finance.delivered_count + beclass.delivered_count + subsidy_advance_delivered + overpayment_delivered + client_recovery_delivered + client_underpayment_delivered + staff_recovery_delivered + staff_difference_delivered + deposit_delivered + source_delivered,
-            finance.failed_count + beclass.failed_count + subsidy_advance_failed + overpayment_failed + client_recovery_failed + client_underpayment_failed + staff_recovery_failed + staff_difference_failed + deposit_failed + source_failed,
+            finance.delivered_count + beclass.delivered_count + hcm.delivered_count + subsidy_advance_delivered + overpayment_delivered + client_recovery_delivered + client_underpayment_delivered + staff_recovery_delivered + staff_difference_delivered + deposit_delivered + source_delivered,
+            finance.failed_count + beclass.failed_count + hcm.failed_count + subsidy_advance_failed + overpayment_failed + client_recovery_failed + client_underpayment_failed + staff_recovery_failed + staff_difference_failed + deposit_failed + source_failed,
         )
     finally:
         connection.close()
@@ -149,7 +157,7 @@ def _consume_sources_if_due(connection, state):
 
 
 def _consume_source_pages(connection, state):
-    return (_consume_staff_source(connection, state), _consume_scheduling_source(connection, state), _consume_government_subsidy_source(connection, state), _consume_government_subsidy_integrity_source(connection, state), _consume_government_subsidy_reversal_source(connection, state), _consume_government_subsidy_assignment_drift_source(connection, state), _consume_government_return_outbound_overage_source(connection, state), _consume_process_reminder_source(connection, state))
+    return (_consume_staff_source(connection, state), _consume_scheduling_source(connection, state), _consume_government_subsidy_source(connection, state), _consume_government_subsidy_integrity_source(connection, state), _consume_government_subsidy_reversal_source(connection, state), _consume_government_subsidy_assignment_drift_source(connection, state), _consume_government_return_outbound_overage_source(connection, state), _consume_process_reminder_source(connection, state), _consume_beclass_review_source(connection, state))
 
 
 def _restart_source_cycle(state):
@@ -157,6 +165,7 @@ def _restart_source_cycle(state):
     state.government_subsidy_after_row_id = 0; state.government_subsidy_exhausted = False; state.government_subsidy_integrity_after_batch_id = 0; state.government_subsidy_integrity_exhausted = False
     state.government_subsidy_reversal_after_row_id = 0; state.government_subsidy_reversal_exhausted = False; state.government_subsidy_assignment_drift_after_claim_item_id = 0; state.government_subsidy_assignment_drift_exhausted = False; state.government_return_outbound_overage_after_row_id = 0; state.government_return_outbound_overage_exhausted = False
     state.process_reminder_exhausted = False
+    state.beclass_review_after_row_id = 0; state.beclass_review_exhausted = False
 
 
 def _consume_process_reminder_source(connection, state):
@@ -167,6 +176,23 @@ def _consume_process_reminder_source(connection, state):
     if result.succeeded:
         return result.projected_count, 0
     return 0, 1
+
+
+def _consume_beclass_review_source(connection, state):
+    if state.beclass_review_exhausted:
+        return 0, 0
+    try:
+        result = project_beclass_import_review_page(
+            connection,
+            after_review_row_id=state.beclass_review_after_row_id,
+            limit=_SOURCE_SCAN_PAGE_SIZE,
+        )
+    except Exception:
+        state.beclass_review_exhausted = True
+        return 0, 1
+    state.beclass_review_after_row_id = result.next_review_row_id or 0
+    state.beclass_review_exhausted = result.next_review_row_id is None
+    return result.projected_count, 0
 
 
 def _consume_staff_source(connection, state):

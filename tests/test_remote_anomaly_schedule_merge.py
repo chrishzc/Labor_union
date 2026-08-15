@@ -1,7 +1,14 @@
+"""
+File: test_remote_anomaly_schedule_merge.py
+Description: 驗證遠端異常、排程與 HCM durable review 相容邊界。
+"""
+
 from __future__ import annotations
 
 import json
 from types import SimpleNamespace
+
+import pytest
 
 from api.routes import anomaly_registry, staff
 from domains.anomalies.registry import default_anomaly_registry
@@ -221,32 +228,49 @@ def test_smart_matching_entry_renders_the_real_matching_flow(monkeypatch):
     assert calls == [(order, staff)]
 
 
-def test_existing_hcm_case_replays_missing_validation_anomaly(monkeypatch):
-    emitted = []
+def test_existing_hcm_case_with_invalid_source_persists_owned_review(monkeypatch):
+    recorded = []
     monkeypatch.setattr(
         import_client_hcm,
-        "_emit_hcm_validation_anomaly",
-        lambda *args: emitted.append(args),
+        "_normalized_record",
+        lambda row: {"case_no": "CASE-7", "created_at": object()},
+    )
+    monkeypatch.setattr(
+        import_client_hcm,
+        "validate_hcm_row",
+        lambda row: {"服務天數": "invalid"},
+    )
+    monkeypatch.setattr(
+        import_client_hcm,
+        "record_hcm_import_review",
+        lambda connection, **kwargs: recorded.append(kwargs) or "hcm-review:test",
+    )
+    application = SimpleNamespace(case_exists=lambda case_no: True)
+
+    result = import_client_hcm._import_row(
+        SimpleNamespace(to_dict=lambda: {"查詢序號(案件編號)": "CASE-7"}),
+        3,
+        object(),
+        application,
+        "hcm.xlsx",
+        connection=object(),
+        source_digest="a" * 64,
+        source_sheet="來源",
     )
 
-    result = import_client_hcm._replay_existing_hcm_anomaly(
-        "CASE-7",
-        3,
-        {"服務天數": "invalid"},
+    assert result == "review_required"
+    assert recorded[0]["case_identity"] == "CASE-7"
+    assert recorded[0]["source_row"] == 3
+
+
+def test_hcm_review_persistence_failure_is_not_reported_as_reviewable(monkeypatch):
+    monkeypatch.setattr(
+        import_client_hcm,
+        "record_hcm_import_review",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("DB unavailable")),
     )
 
-    assert result == "skipped_existing"
-    assert emitted == [("CASE-7", 3, {"服務天數": "invalid"})]
-
-
-def test_existing_hcm_case_remains_reviewable_when_projection_fails(monkeypatch):
-    def fail(*args):
-        raise RuntimeError("temporary projector failure")
-
-    monkeypatch.setattr(import_client_hcm, "_emit_hcm_validation_anomaly", fail)
-
-    assert import_client_hcm._replay_existing_hcm_anomaly(
-        "CASE-7",
-        3,
-        {"服務天數": "invalid"},
-    ) == "review_required"
+    with pytest.raises(RuntimeError, match="DB unavailable"):
+        import_client_hcm._persist_hcm_review(
+            object(), "a" * 64, "來源", 3, {}, "CASE-7", {"服務天數": "invalid"}
+        )

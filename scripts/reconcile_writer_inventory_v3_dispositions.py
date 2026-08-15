@@ -1,4 +1,7 @@
-"""Apply reviewed dispositions to the immutable writer-inventory candidate."""
+"""
+File: reconcile_writer_inventory_v3_dispositions.py
+Description: 將人工 owner 裁決套用至不可變 writer inventory 候選證據。
+"""
 
 from __future__ import annotations
 
@@ -118,6 +121,7 @@ def _owner_review_registry() -> dict[str, tuple[str, str, str, str]]:
         "infrastructure/mysql/government_payer_master_repository.py": ("government_subsidy", "typed payer-master version transaction", "GovernmentPayerMasterWorkflow", canonical),
         "infrastructure/mysql/government_return_outbound_overage_anomaly_source.py": ("anomalies", "bounded government-return anomaly projection transaction", "Anomalies scheduled source scan", restricted),
         "infrastructure/mysql/government_subsidy_repository.py": ("government_subsidy", "typed Government Subsidy outer transaction", "Government Subsidy overpayment workflows", canonical),
+        "infrastructure/mysql/hcm_import_review_repository.py": ("case_import", "typed HCM review root and outbox transaction", "subsystems/case_import/hcm_import_review_intake.py", canonical),
         "infrastructure/mysql/line_configuration_publication_repository.py": ("line_integration", "typed LINE configuration and publication transaction", "LINE configuration and Rich Menu applications", canonical),
         "infrastructure/mysql/line_delivery_task_repository.py": ("line_delivery", "typed delivery task state transaction", "LINE delivery worker and admin application", canonical),
         "infrastructure/mysql/line_identity_management_repository.py": ("line_identity", "typed identity revocation transaction", "LineIdentityManagementApplication and worker", canonical),
@@ -134,6 +138,7 @@ def _owner_review_registry() -> dict[str, tuple[str, str, str, str]]:
         "infrastructure/mysql/order_terms_read_model.py": ("orders", "read-model query boundary", "Orders terms query", restricted),
         "infrastructure/mysql/runtime_monitor_repository.py": ("global_operations", "runtime monitor observation and alert-intent transaction", "scripts/run_service_monitor.py", restricted),
         "infrastructure/mysql/staff_overpayment_recovery_repository.py": ("staff_payables", "typed Staff Payables recovery transaction", "StaffOverpaymentRecovery workflows", canonical),
+        "infrastructure/mysql/staff_historical_adoption_repository.py": ("case_import", "typed Staff historical adoption transaction", "subsystems/case_import/staff_historical_adoption.py", canonical),
         "infrastructure/mysql/staff_payout_repository.py": ("staff_payables", "typed staff payout outer transaction", "Staff Payout workflow", canonical),
         "scripts/bootstrap_disposable_mysql_schema.py": ("validation", "disposable validation schema bootstrap", "test and validation operator", restricted),
         "scripts/migrate_legacy_ui_dataset.py": ("global_migration", "versioned legacy UI dataset migration", "reviewed migration operator", restricted),
@@ -152,10 +157,13 @@ def _owner_review_registry() -> dict[str, tuple[str, str, str, str]]:
         "subsystems/anomalies/client_over_refund_recovery_anomaly_consumer.py": ("anomalies", "Client Finance outbox projection delivery transaction", "Anomalies outbox worker", canonical),
         "subsystems/anomalies/client_refund_underpayment_anomaly_consumer.py": ("anomalies", "Client Finance outbox projection delivery transaction", "Anomalies outbox worker", canonical),
         "subsystems/anomalies/government_overpayment_anomaly_consumer.py": ("anomalies", "Government Subsidy outbox projection delivery transaction", "Anomalies outbox worker", canonical),
+        "subsystems/anomalies/hcm_import_review_outbox_consumer.py": ("anomalies", "HCM review outbox projection delivery transaction", "Anomalies outbox worker", canonical),
         "subsystems/anomalies/staff_overpayment_recovery_anomaly_consumer.py": ("anomalies", "Staff Payables outbox projection delivery transaction", "Anomalies outbox worker", canonical),
         "subsystems/anomalies/staff_payout_difference_anomaly_consumer.py": ("anomalies", "Staff Payables outbox projection delivery transaction", "Anomalies outbox worker", canonical),
         "subsystems/client_finance/over_refund_recovery_matching_workflow.py": ("client_finance", "typed recovery-matching outer transaction", "Client Finance recovery-matching API", canonical),
         "subsystems/client_finance/over_refund_recovery_workflow.py": ("client_finance", "typed recovery outer transaction", "Client Finance recovery API", canonical),
+        "subsystems/case_import/hcm_import_review_intake.py": ("case_import", "typed HCM review intake transaction", "HCM historical import adapter", canonical),
+        "subsystems/case_import/staff_historical_adoption.py": ("case_import", "typed Staff historical adoption transaction", "Staff historical import adapter", canonical),
         "subsystems/contract_signing/client_contract_application.py": ("contract_signing", "typed client-contract outer transaction", "Contract Signing client API", canonical),
         "subsystems/contract_signing/command_receipts.py": ("contract_signing", "caller-owned contract receipt and outbox transaction", "Contract Signing applications", canonical),
         "subsystems/contract_signing/staff_contract_application.py": ("contract_signing", "typed staff-contract outer transaction", "Contract Signing staff API", canonical),

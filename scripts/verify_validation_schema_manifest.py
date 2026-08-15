@@ -1,4 +1,7 @@
-"""Verify the version-controlled validation-schema release manifest."""
+"""
+File: verify_validation_schema_manifest.py
+Description: 驗證 validation schema manifest及依順序套用後的最終資料庫物件。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,8 @@ import json
 import re
 from collections.abc import Iterable
 from pathlib import Path
+
+from scripts.schema_assembly import load_schema_assembly
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +37,17 @@ def ordered_schema_parts(schema_parts_directory: Path) -> list[Path]:
     return sorted(schema_parts_directory.glob("*.sql"), key=schema_part_sort_key)
 
 
+def selected_schema_parts(
+    manifest: dict[str, object], project_root: Path = PROJECT_ROOT
+) -> list[Path]:
+    assembly_ref = manifest["schema_assembly"]
+    assembly_path = project_root / str(assembly_ref["path"])
+    if sha256_file(assembly_path) != assembly_ref["sha256"]:
+        raise ValueError("schema assembly digest differs from validation manifest")
+    assembly = load_schema_assembly(assembly_path)
+    return list(assembly.active_artifact_paths)
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -45,11 +61,13 @@ def ordered_parts_digest(schema_parts: list[Path]) -> str:
 
 def verify_manifest(manifest: dict[str, object], project_root: Path = PROJECT_ROOT) -> list[str]:
     base_schema = manifest["base_schema"]
-    schema_parts = manifest["schema_parts"]
     base_path = project_root / str(base_schema["path"])
-    parts = ordered_schema_parts(project_root / str(schema_parts["directory"]))
     errors = _base_schema_errors(base_path, base_schema)
-    errors.extend(_schema_part_errors(parts, schema_parts))
+    try:
+        parts = selected_schema_parts(manifest, project_root)
+    except (KeyError, OSError, ValueError) as error:
+        return [*errors, str(error)]
+    errors.extend(_schema_part_errors(parts, manifest["schema_parts"]))
     return errors
 
 
@@ -58,16 +76,9 @@ def expected_database_objects(
 ) -> dict[str, set[str]]:
     """Return the tables, views, and triggers declared by this release."""
     base_schema = manifest["base_schema"]
-    schema_parts = manifest["schema_parts"]
     artifact_paths = [project_root / str(base_schema["path"])]
-    artifact_paths.extend(
-        ordered_schema_parts(project_root / str(schema_parts["directory"]))
-    )
-    return {
-        "tables": _declared_objects(artifact_paths, _TABLE_PATTERN),
-        "views": _declared_objects(artifact_paths, _VIEW_PATTERN),
-        "triggers": _declared_objects(artifact_paths, _TRIGGER_PATTERN),
-    }
+    artifact_paths.extend(selected_schema_parts(manifest, project_root))
+    return _effective_database_objects(artifact_paths)
 
 
 def verify_database_objects(cursor, database: str, expected: dict[str, set[str]]) -> list[str]:
@@ -111,6 +122,60 @@ _TRIGGER_PATTERN = re.compile(
     r"\bCREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?",
     re.IGNORECASE,
 )
+_DROP_TABLE_PATTERN = re.compile(
+    r"\bDROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?",
+    re.IGNORECASE,
+)
+_DROP_VIEW_PATTERN = re.compile(
+    r"\bDROP\s+VIEW\s+(?:IF\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?",
+    re.IGNORECASE,
+)
+_DROP_TRIGGER_PATTERN = re.compile(
+    r"\bDROP\s+TRIGGER\s+(?:IF\s+EXISTS\s+)?`?([A-Za-z0-9_]+)`?",
+    re.IGNORECASE,
+)
+_TRIGGER_TARGET_PATTERN = re.compile(
+    r"\bCREATE\s+TRIGGER\s+`?([A-Za-z0-9_]+)`?.*?\bON\s+`?([A-Za-z0-9_]+)`?",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _effective_database_objects(paths: Iterable[Path]) -> dict[str, set[str]]:
+    objects = {"tables": set(), "views": set(), "triggers": set()}
+    trigger_targets: dict[str, str] = {}
+    for path in paths:
+        _apply_object_events(path.read_text(encoding="utf-8"), objects, trigger_targets)
+    return objects
+
+
+def _apply_object_events(sql: str, objects, trigger_targets) -> None:
+    events = []
+    for kind, operation, pattern in (
+        ("tables", "create", _TABLE_PATTERN),
+        ("views", "create", _VIEW_PATTERN),
+        ("triggers", "create", _TRIGGER_TARGET_PATTERN),
+        ("tables", "drop", _DROP_TABLE_PATTERN),
+        ("views", "drop", _DROP_VIEW_PATTERN),
+        ("triggers", "drop", _DROP_TRIGGER_PATTERN),
+    ):
+        events.extend((match.start(), kind, operation, match) for match in pattern.finditer(sql))
+    for _, kind, operation, match in sorted(events, key=lambda event: event[0]):
+        name = match.group(1)
+        if operation == "create":
+            objects[kind].add(name)
+            if kind == "triggers":
+                trigger_targets[name] = match.group(2)
+            continue
+        objects[kind].discard(name)
+        if kind == "triggers":
+            trigger_targets.pop(name, None)
+        if kind == "tables":
+            dropped_triggers = {
+                trigger for trigger, target in trigger_targets.items() if target == name
+            }
+            objects["triggers"].difference_update(dropped_triggers)
+            for trigger in dropped_triggers:
+                trigger_targets.pop(trigger, None)
 
 
 def _declared_objects(paths: Iterable[Path], pattern: re.Pattern[str]) -> set[str]:

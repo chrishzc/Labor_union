@@ -15,6 +15,49 @@ Anomalies 是根事實衍生的保護與人工作業 Domain，不是其他 Domai
 
 Alert details JSON、UI 文案、review status 及 reconciliation pending 都不是異常條件 SSOT。
 
+### 歷史訂單待人工確認（2026-08-14，已人工確認）
+
+`HISTORICAL-ORDER-001` 的 owner 是 Orders。每個 immutable
+`historical_order_adoption_reviews.review_identity` 最多投影一筆 current-state warning；fingerprint
+僅為 `review_identity`。projector 必須由 review root 讀取遮罩案件識別與 issue codes，不得採用
+outbox snapshot 中的原始案件編號、姓名、日期或月嫂資料。`unmatched_case` 是零 mutation、零 anomaly，
+不得投影此碼。歷史 review 的根事實不因 alert claim／resolve 而被修改；目前沒有自動修復 action，
+人員只能依 evidence 回到 Orders 的後續人工處理流程。
+
+### 匯入警示追蹤（2026-08-14，WP92 已人工確認）
+
+HCM、Client／Staff BeClass、Historical Orders 與 Finance Import 的 source warning／review 必須使用
+欄位級 immutable occurrence：同一來源列的每個 `logical_code + field_path` 各自保存 issue codes、
+去敏來源識別與解除 predicate。UI 可以依案件或來源分組，但不得以群組按鈕整案修正或一起消除。
+
+Anomalies 只擁有匯入警示的追蹤狀態機與 current task projection；觸發條件、正式資料效果、資料有效性、
+候選唯一性及解除 predicate 仍由 Case Import、Staff、Orders 或 Finance Import 擁有。警示中心不得接收
+`corrected_fields`、直接選擇任意候選、merge roots、修改 bank row 或旁路寫入 source Domain。
+
+警示中心可提供「轉介」：以 `warning_id`、owning lane、field path、expected warning version 與去敏來源 reference
+建立至 owning Domain typed command 的受控操作入口。轉介本身不寫入 Domain root；目標 command 必須重新讀取並鎖定
+正式 root、驗證輸入與 actor capability、保存其 own receipt／event，成功後才由系統依 lane predicate `auto_resolved`
+對應 warning。若 command 不存在、資料無法驗證或版本已 stale，固定回 typed error 並保留 warning，不得退回警示中心
+直接修正資料。
+
+```text
+open → awaiting_external_confirmation → response_recorded → reimport_requested
+任一 active state → closed
+owning Domain predicate 消失 → auto_resolved
+```
+
+前四個狀態是 active。人工 `closed` 只代表外部聯絡工作結束，不代表資料已修正；`auto_resolved` 只能由
+system actor 在 fresh-read owning Domain root 後產生。exact source replay 只回既有 receipt，不新增 occurrence、
+tracking event、outbox 或 task。顯式關聯的新來源若仍不合格，必須建立新 occurrence 並成為 current task，
+system actor 對舊 task 追加 `closed(reason=replaced_by_new_warning)`；舊 source、issue codes、occurrence 與事件永不刪除。
+
+沒有 formal root 的來源警示不得用姓名、手機、列號或模糊內容猜測新舊關係；新提交必須攜帶可驗證的
+prior warning／source association。第一階段只記錄公會人員以既有 LINE、電話或法定管道聯絡的進度，
+不自動傳 LINE、不推定 recipient、不保存對話全文。
+
+上述六狀態只適用 WP92 匯入警示追蹤。其他既有 current-state anomaly 在完成各自 migration／entrypoint
+裁決前，仍沿用下方 generic Alert Workflow；不得把兩套 status 語意混用或只以 UI label 互相映射。
+
 ## 2. Subsystems
 
 ### Root-fact Detection
@@ -169,6 +212,12 @@ operator inputs 未改變。timeout 先查 receipt/job；不得換新 idempotenc
 - `RecoveryActionDescriptor`
 - `RecoveryActionRegistryValidator`
 - `TypedRecoveryFormSchema`
+- `ImportWarningIdentity`
+- `ImportWarningOccurrenceIdentity`
+- `ImportWarningTrackingState`
+- `ImportWarningTransitionPolicy`
+- `ImportWarningTaskProjector`
+- `ResubmissionAssociation`
 
 ## 4. Ports 與交易
 
@@ -179,6 +228,9 @@ operator inputs 未改變。timeout 先查 receipt/job；不得換新 idempotenc
 - `FinanceReconciliationOutcomePort`
 - `FinanceImportReviewDesiredStatePort`
 - `FinanceImportCorrectionCommandPort`
+- `ImportWarningDesiredStatePort`
+- `ImportWarningPredicateQueryPort`
+- `ImportResubmissionOutcomePort`
 - `ClockPort`
 
 基礎設施：
@@ -186,6 +238,10 @@ operator inputs 未改變。timeout 先查 receipt/job；不得換新 idempotenc
 - `SystemAlertProjectionRepository`
 - `FinanceAlertOccurrenceRepository`
 - `AlertWorkflowEventRepository`
+- `ImportWarningOccurrenceRepository`
+- `ImportWarningTrackingEventRepository`
+- `ImportWarningCurrentTaskRepository`
+- `ImportResubmissionAssociationRepository`
 - `OutboxConsumerCheckpointRepository`
 
 Projector transaction：
@@ -199,6 +255,10 @@ lock outbox message + fingerprint
 ```
 
 Projector 失敗可 retry，不回滾來源 Domain。claim／resolve 是獨立短交易。Rescan 只能 auto-resolve 自己 detector/code 範圍的 Alert。
+
+匯入警示 transition 使用獨立 outer Unit of Work：鎖定 current task 與 expected version，驗證 actor／fingerprint，
+append tracking event、更新 current projection、寫 receipt 與 outbox 後一次 commit。owning Domain mutation 不得加入
+這個 tracking transaction；其成功提交後由 committed outbox 或同一 owning transaction 內的 predicate result 驅動 rescan。
 
 ## 5. 驗收
 
@@ -218,6 +278,10 @@ Projector 失敗可 retry，不回滾來源 Domain。claim／resolve 是獨立�
 - `CorrectAndPostFinanceImportRow` partial failure 不留下單獨 classification、ledger、
   allocation、receipt 或 resolved alert。
 - 銀行金額未完整 allocation 或任一所選義務未精確歸零時，零正式寫入並維持警示。
+- 同一來源列的多個欄位警示可獨立補齊及 `auto_resolved`，UI 分組不改變 field-level identity。
+- exact source replay 不新增 warning occurrence；新失敗取代舊 task 時由 system 留下 replacement event。
+- 人工 `closed` 不改正式 root；root predicate 仍成立時不得回傳資料已修正。
+- rootless warning 沒有顯式 prior source association 時，不得以模糊相似度替代或解除舊 task。
 
 ## 6. Typed Commands／Results／Errors
 
@@ -230,6 +294,10 @@ Commands：
 - `ScanAnomalyDefinition`
 - `RetryAnomalyProjector`
 - `QueryRecoveryPreviewLink`
+- `QueryImportWarnings`
+- `PreviewImportWarningTransition`
+- `ApplyImportWarningTransition`
+- `AssociateImportResubmission`
 
 Results 分開回傳 source facts、workflow state、domain blocker、severity、timeline、
 available actions、owning Domain、version 與 projection freshness；UI 不得解析 details JSON
@@ -245,6 +313,9 @@ Stable errors：
 - `anomaly_source_fact_invalid`
 - `anomaly_projection_stale`
 - `anomaly_projection_data_integrity_violation`
+- `import_warning_transition_not_allowed`
+- `import_warning_resubmission_association_invalid`
+- `import_warning_predicate_owner_unavailable`
 - `recovery_action_not_available`
 - `recovery_action_not_supported`
 - `recovery_action_contract_version_mismatch`

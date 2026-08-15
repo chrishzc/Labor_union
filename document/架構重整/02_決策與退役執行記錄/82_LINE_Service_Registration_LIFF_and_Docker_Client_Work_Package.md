@@ -6,6 +6,23 @@ owner: LINE Integration / Developer Experience
 priority: P0
 ---
 
+## Exact write set（決策紀錄收斂）
+
+- `config/line_menu.json`
+- `line/static/gateway.html`
+- `subsystems/line/service_help_application.py`
+- `scripts/update_local_database.py`
+- `scripts/migrate_preserved_database_additive_schema.py`
+- `.env.example`
+- `README.md`
+- `tests/line/infrastructure/test_line_liff_entrypoint.py`
+- `tests/test_line_customer_service_first_release.py`
+- `tests/test_customer_service_partial_recovery_disposable_mysql.py`
+- `tests/test_update_local_database_docker_client.py`
+
+共享 schema assembly、release catalog、manifest 或 migration metadata 不因本清單自動取得寫入授權；
+live inventory 若證明必須修改，須依資料庫變更執行門另行擴充已核准範圍。
+
 # 82 LINE 服務登記 LIFF 與 Docker MySQL Client Work Package
 
 ## 人工核准與場景
@@ -40,3 +57,13 @@ webhook 已處理但不會開啟登記頁。部分開發者的 MySQL 亦只在 D
 2. `.env.example` 與 README 提供 Compose 預設容器，並說明自訂 Docker MySQL client 設定。
 3. 客戶端既有 DB Rich Menu 需由管理端 Preview／Apply 更新並發布後才會生效；未執行時保留舊版本，不能宣稱已切換。
 4. Docker MySQL 8.0.46 完成 partial source → dump → candidate → 185 apply → exact；source 不被修改。
+
+## 2026-08-15 非實機收尾
+
+已完成靜態 write-set 對照：`service_registration` 使用 LIFF `?target=registration`，gateway 導向
+`/line-registration`，舊文字 webhook 回覆長效 LIFF URL；本機 updater 可使用預設 `mysql_db` 或
+`MYSQL_CONTAINER`，185 partial recovery 僅接受已宣告 tickets-exact/events-absent 邊界。`.env.example`、
+README 與 focused contract tests 均已對應。剩餘 gate 僅為管理端 Rich Menu Preview／Apply 的實際發布
+驗收，以及 Docker MySQL partial source→candidate→exact engine receipt；未完成前維持 `in-progress`。
+統一交接紀錄見
+`document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp73_wp77_wp82_non_engine_closeout.md`。

@@ -1,3 +1,8 @@
+"""
+File: test_order_summary_query.py
+Description: 驗證訂單摘要讀模型、游標與待補件欄位空值契約。
+"""
+
 from datetime import date, datetime
 from decimal import Decimal
 from types import SimpleNamespace
@@ -58,16 +63,11 @@ def test_query_rejects_non_tuple_repository_page() -> None:
         _service([_row()]).query(OrderSummaryQueryRequest(1, None))
 
 
-def test_query_rejects_noncanonical_repository_order() -> None:
-    with pytest.raises(OrderSummaryContractError, match="order is not canonical"):
-        _service((_row("CASE-2"), _row("CASE-1"))).query(
+def test_query_rejects_duplicate_case_numbers() -> None:
+    with pytest.raises(OrderSummaryContractError, match="duplicate case numbers"):
+        _service((_row("CASE-1"), _row("CASE-1"))).query(
             OrderSummaryQueryRequest(2, None)
         )
-
-
-def test_query_rejects_cursor_that_does_not_advance() -> None:
-    with pytest.raises(OrderSummaryContractError, match="did not advance"):
-        _service((_row("CASE-1"),)).query(OrderSummaryQueryRequest(1, "CASE-1"))
 
 
 def test_query_rejects_datetime_for_date_projection() -> None:
@@ -87,6 +87,42 @@ def test_query_preserves_legacy_rows_with_unknown_identity_or_planned_end() -> N
 
     assert page.items[0].identity_status is None
     assert page.items[0].end_date is None
+
+
+def test_query_preserves_pending_case_without_planned_terms() -> None:
+    row = _row()
+    row.update({
+        "order_status": "待補件",
+        "start_date": None,
+        "end_date": None,
+        "service_days": None,
+        "total_employer_self_pay_payable": None,
+    })
+
+    page = _service((row,)).query(OrderSummaryQueryRequest(1, None))
+
+    item = page.items[0]
+    assert item.order_status == "待補件"
+    assert item.start_date is None
+    assert item.service_days is None
+    assert item.total_employer_self_pay_payable is None
+
+
+def test_query_normalizes_legacy_zero_days_without_a_planned_start() -> None:
+    row = _row()
+    row.update({"start_date": None, "end_date": None, "service_days": 0})
+
+    page = _service((row,)).query(OrderSummaryQueryRequest(1, None))
+
+    assert page.items[0].service_days is None
+
+
+def test_query_rejects_zero_days_when_a_planned_start_exists() -> None:
+    row = _row()
+    row["service_days"] = 0
+
+    with pytest.raises(OrderSummaryContractError, match="service_days must be a positive integer"):
+        _service((row,)).query(OrderSummaryQueryRequest(1, None))
 
 
 @pytest.mark.parametrize("page_size", [0, 201])

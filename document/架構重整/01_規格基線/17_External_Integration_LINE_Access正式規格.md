@@ -7,6 +7,7 @@
 - LINE ownership：`consolidated-decision`
 - Access Control：`consolidated-decision`
 - 2026-08-13 Case Import／LIFF entry split：`approved-by-IMPORT-ENTRY-02`
+- 2026-08-14 Case Import 欄位級警示、外部追蹤與分域補件：`approved-by-WP92`
 - 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 integration、Access、schema、
   pytest 與 legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
 
@@ -352,10 +353,19 @@ Case Import 擁有：
   platform identity 與驗證 evidence，正式資料仍由各 owning Domain command 寫入；
 - Staff profile 的核准目標同樣為 LIFF → typed API，不得由 browser 直接 SQL；live 目前只有
   Staff identity binding 與 orders／schedule Query，尚無 profile writer。Staff profile owner、root
-  fields、version 與 UoW 另行裁決，不能因入口位於 LINE 而把 root ownership 移給 LINE；
+  fields、version 與 UoW 另行裁決，不能因入口位於 LINE 而把 root ownership 移給 LINE。WP77
+  只裁決 restricted historical source 的 borrowed Staff writer；同 identity、姓名的來源以較新報名時間
+  覆寫可更新 scalar，不擴張成 current profile owner；
 - Client／Staff BeClass scripts 保留為 `restricted_historical_import`，只能處理明確 historical
   source，不能掛入一般 File Watcher、一般 Web upload registry，亦不得覆寫已由 LIFF／人工命令
   更新的 current facts。
+
+2026-08-13 過渡例外：LIFF current registration／Staff profile writer 尚未完成 end-to-end 驗收前，
+管理端「資料匯入中心」可提供 Client／Staff BeClass 的 authenticated temporary Web upload。
+該入口只能呼叫各自 typed intake／HistoricalAdoption application，不得呼叫 browser SQL、File Watcher
+或 script 的 direct writer；每張卡必須區分 `current`／`historical` 意圖、Preview／Apply、review
+與 receipt。LIFF 對應 typed writer 已完成 API、UI、replay 與移除驗收後，temporary Web upload 必須
+從 navigation、entrypoint queue 與 API 移除。HCM 與銀行流水沒有此過渡例外，固定由 Web upload。
 
 不擁有 Client、Orders、Scheduling、Finance 或 Payroll 的正式根事實。正式 case 只能由
 typed `ApplyCaseImport`／`ApplyBeClassReview` 委派各 owning Domain，在單一 outer
@@ -370,7 +380,13 @@ received → normalized → ready → applied
 ```
 
 同一 source row identity＋相同 payload 是 replay；相同 identity＋不同 payload 是
-source conflict。已存在 internal identity 時不得 insert-or-update 覆寫，必須進 review。
+source conflict。歷史 Staff operator 若取得同內容但較新的已確認來源版本，可明示 bounded
+`source_revision`；它與 workbook digest 一起構成新的 source identity，且同 revision 固定 replay。
+一般 current intake遇到已存在 internal identity時不得 insert-or-update覆寫，必須進
+review。唯一例外是WP77核准的Staff HistoricalAdoption：identity與姓名一致且來源報名時間嚴格較新時，
+覆寫可更新 scalar 並將最新來源時間保存為 `registered_at`；來源空值及 identity、LINE、status、系統
+timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-only保守合併。Staff歷史來源的
+`IP位址`允許空值，空值以`NULL`保存且不建立review，不影響同列其他合法欄位落地。
 
 ### 5.3 Subsystems／Modules
 
@@ -394,16 +410,64 @@ Modules：
 File Watcher 只建立 durable import job；CLI／Adapter 不直接寫正式 Client／Order。
 invalid row 必須保存 privacy-safe root fact 並投影 canonical anomaly。
 
-HCM validation 失敗時不得用 fabricated default 建立正式 Client／Order；必須形成 durable
-`review_required` outcome。Client／Staff historical import 必須另走 HistoricalAdoption Preview／Apply
-及 no-impact gate，不得重用 current LIFF command 假裝一般資料更新。
+HCM 不得以 fabricated default 補造欄位。案件編號是最低寫入資格：有可用案件編號時必須建立／保留
+正式案件，其他欄位缺漏、格式錯誤或身份關聯歧義各自形成 durable field／link warning；只有案件編號
+缺失或不可用時不建案、僅留來源警示。Client／Staff historical import 必須另走 HistoricalAdoption
+Preview／Apply，不得重用 current LIFF command 假裝一般資料更新。
+
+### 匯入異常的外部確認與重新提交
+
+HCM、Client／Staff BeClass 與其他 Case Import 來源的 review 是公會人員聯絡來源當事人的待辦，
+不是管理端直接修正資料的表單。review root、處理狀態與 disposition 必須保留去敏資訊；不得持久化
+LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Client／Order／Staff input。正確資料原則上由
+新來源重新走 typed Preview／Apply；已建 HCM 案件的單一缺漏／無效欄位可由 HCM owning typed
+field-completion command 補齊，不要求整案重送，也不得經警示中心直接改值。
+
+WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
+IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，
+並建立獨立 link warning 供外部確認。HCM 歷史過渡模式只要符合最低寫入資格，即直接寫入來源的可寫欄位，
+不推定目前 DB 值較有效；無法寫入的個別欄位仍各自警示。
+
+Client BeClass 的 `query_no` 只是來源流水號，不得作為客戶識別或案件編號。LIFF 啟用前的過渡匯入只在
+姓名＋手機完全一致且唯一命中 Client，且案件候選唯一時綁定；零筆或多筆候選都保留來源並警示，不允許
+人工在警示中心挑選。LIFF 啟用後由登入身分直接綁定，不再使用這組過渡條件。
+
+Staff BeClass 歷史匯入以有效身分證及姓名為最低資格。後來的歷史快照覆蓋可更新 scalar，銀行帳戶與勾選
+關聯視為完整集合原子替換；姓名改變可寫入並留下已自動結束的追溯 warning。任一其他欄位缺漏或格式無效
+仍建立欄位級 warning。Staff 退役不由匯入推定或修改。
+
+有 HCM 而無唯一 Client BeClass 對方時投影 `BECLASS-001`；對方日後唯一綁定後由 root predicate 自動解除。
+任何警示均以 `logical_code + field_path` 獨立追蹤；exact replay 不建立新 occurrence。顯式關聯的新提交仍
+不合格時建立新 warning 並由 system 關閉被取代的舊 task；成功補齊後才 `auto_resolved`。所有來源、issue
+codes、occurrence 與狀態事件保留。第一階段只記錄公會人工聯絡，不自動傳 LINE、不猜 recipient。
+
+live `ApplyBeClassReview`／`RejectCaseImportReview` 的 corrected-fields／Correct／Reject 形狀不是核准目標；
+必須依 entrypoint governance 退役或替換為 tracking-only transition 與 owning Domain typed command。
+
+WP77最新裁決將HCM與Client BeClass定義為可獨立存在的兩條intake lane。HCM案件編號不得重複；
+新案件若IP位址與姓名同時命中既有Client，視為疑似同一客戶重複申請，必須停止該列、建立review
+並在警示中心通知公會人工確認。只有IP相同但姓名不同視為可能共用網路，不阻擋；Client BeClass尚未存在時仍可
+建立Client／Order，`requires_cooking`保持`NULL`。Client BeClass亦可先獨立落地，不得因HCM缺失失敗。
+
+兩方缺件屬可重建的current-state anomaly，不是匯入失敗：有HCM而無Client BeClass投影
+`BECLASS-001`；有Client BeClass而無HCM投影`IMPORT-003 / beclass_hcm_mismatch`。對方日後匯入時，
+reconciliation以案件編號及既有accepted mapping重新解析；唯一且一致才解除缺件
+警示，多筆候選或互相衝突則保留兩方來源並進review，不得以姓名或電話相似度自動綁定。
+
+只有唯一綁定後，reconciliation才可解析Client BeClass controlled cooking answer並透過typed Orders
+command補入`requires_cooking`。missing／malformed／ambiguous／unsupported cooking答案屬BeClass
+來源或配對後條款review，不得阻擋、回滾或刪除已建立的HCM Client／Order。`IMPORT-004`只保留給
+HCM來源列本身的驗證失敗；不得把「缺少Client BeClass」誤投影成HCM validation failure。第一階段
+不預建generic workbook manifest或尚未使用的Correct／Reject tables。
 
 Typed operations：
 
 - `IngestCaseImportSource` → `CaseImportIntakeReceipt`
 - `PreviewCaseImport` → candidate、validation、mapping、fingerprint、expected version
-- `ApplyCaseImport`／`ApplyBeClassReview` → bootstrap receipt 或 typed blocker
-- `RejectCaseImportReview` → immutable rejection receipt
+- `ApplyCaseImport`／各 lane HistoricalAdoption Apply → 正式 root receipt、欄位級 warning 或 typed blocker
+- `PreviewWarningTransition`／`ApplyWarningTransition` → 只更新外部追蹤狀態，不接受 corrected payload
+- HCM owning field-completion／linking command → 補指定正式欄位或唯一關聯
+- `AssociateImportResubmission` → 驗證 prior warning／source 與新 source／receipt 的明確關聯
 
 Ports：`CaseImportSourceArchive`、`CaseImportRepository`、`CaseIdentityQuery`、
 `CaseBootstrapGateway`、`CaseImportOutbox`、`CaseImportClock` 與
@@ -421,14 +485,14 @@ payload digest 與 operation 組成 idempotency identity；stale／identity ambi
 - `case_import_candidate_stale`
 - `case_import_already_applied`
 - `case_bootstrap_failed`
+- `import_warning_transition_not_allowed`
+- `import_warning_resubmission_association_invalid`
+- `import_warning_predicate_owner_unavailable`
 
-人工入口只允許補正缺欄、選定唯一 identity、Preview bootstrap 與 Apply；
-不得使用 Data Browser 或 importer fallback 改正式資料。
-
-`RejectCaseImportReview` 只能由 pending／review-required 狀態執行，必須保存 reviewer、
-reason、expected version 與 idempotency receipt；結果為 `rejected`，不得建立或修改
-任何正式 Client／Order／Finance／Scheduling root fact。相同 key replay 回原 receipt，
-stale review 固定 conflict。
+警示中心人工入口只允許查詢去敏警示、推進外部追蹤狀態及導向已核准的 owning Domain typed command；
+不得使用 Data Browser、importer fallback、generic corrected payload 或 candidate picker 改正式資料。
+人工 `closed` 不等於 reject source 或 resolve root predicate。live `RejectCaseImportReview` 不得再作為正式入口；
+退役前只能 fail closed，不得建立新的 rejection business meaning。
 
 ## 6. Domain：Knowledge Retrieval
 

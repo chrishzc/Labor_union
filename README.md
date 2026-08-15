@@ -183,6 +183,8 @@ Worker 與 Monitor 都只呼叫 authenticated Private Operations API；啟動後
 local/test 使用至少 32 字元 shared key；production 固定使用 Google-signed OIDC ID token，並精確
 驗證 Private API audience、caller service name 與 service-account allowlist，不接受 shared-key fallback。
 Worker 會上報自身 instance／PID／hostname／release，API 不會用自己的 process identity 冒充 Worker。
+獨立手動啟動的 Worker／Monitor 會以 process environment 優先、再讀取 Git-ignored `.env` 的方式取得此 key；
+API 與所有 Worker 必須重啟後才會使用更新值。
 
 Cloud Run 環境至少設定：
 
@@ -197,6 +199,11 @@ INTERNAL_API_MAX_ATTEMPTS=3
 
 各 caller service account 仍須由部署者只授予目標 Private API 的 Cloud Run Invoker；本輪只交付程式
 契約，不建立 IAM、Cloud Run、網路、Dockerfile 或 image。
+
+雲端部署尚未獲得執行授權。Cloud Run、單一 Cloud VPN 與 Dockerfile 的設計、成本假設、
+網路邊界與驗收前置條件，集中於
+[`document/雲端部署/計劃書/`](document/雲端部署/計劃書/)；這些都是規劃文件，不代表已建立
+Google Cloud 資源、已部署映像或已開放任何網路路徑。
 
 [`scripts/launchers/start_local_development.bat`](scripts/launchers/start_local_development.bat)
 是 Windows 本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控、Durable Job Worker

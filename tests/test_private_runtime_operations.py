@@ -1,4 +1,7 @@
-"""Security and transport contracts for API-only DB runtime processes."""
+"""
+File: test_private_runtime_operations.py
+Description: 驗證 API-only runtime 的認證、傳輸與 Worker 無資料庫憑證契約。
+"""
 
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ from infrastructure.http.private_operations_client import (
     PrivateOperationsClient,
     discard_database_credentials,
 )
+import infrastructure.http.private_operations_client as private_operations_client
 from subsystems.line.runtime_contracts import LineRuntimeMode, LineWorkerHeartbeat
 
 
@@ -98,9 +102,10 @@ def test_production_accepts_allowlisted_google_oidc_caller(monkeypatch) -> None:
         "durable-job-worker=durable@example.iam.gserviceaccount.com",
     )
     monkeypatch.setattr(
-        internal_service_auth,
-        "_verify_google_oidc_token",
-        lambda token, audience: {
+        internal_service_auth.id_token,
+        "verify_oauth2_token",
+        lambda *_args, **_kwargs: {
+            "iss": "https://accounts.google.com",
             "email": "durable@example.iam.gserviceaccount.com",
             "email_verified": True,
             "sub": "caller-subject",
@@ -167,6 +172,37 @@ def test_production_rejects_invalid_oidc_token(monkeypatch) -> None:
 
     assert response.status_code == 401
     assert "bad signature" not in response.text
+
+
+def test_production_rejects_wrong_google_oidc_issuer(monkeypatch) -> None:
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("INTERNAL_SERVICE_AUTH_MODE", "google_oidc")
+    monkeypatch.setenv("INTERNAL_SERVICE_OIDC_AUDIENCE", "https://private-api.example")
+    monkeypatch.setenv(
+        "INTERNAL_SERVICE_OIDC_ALLOWED_CALLERS",
+        "durable-job-worker=durable@example.iam.gserviceaccount.com",
+    )
+    monkeypatch.setattr(
+        internal_service_auth.id_token,
+        "verify_oauth2_token",
+        lambda *_args, **_kwargs: {
+            "iss": "https://identity-provider.example",
+            "email": "durable@example.iam.gserviceaccount.com",
+            "email_verified": True,
+        },
+    )
+
+    response = _client().post(
+        "/internal/v1/runtime/check",
+        json={},
+        headers={
+            "Authorization": "Bearer wrong-issuer-token",
+            "X-Internal-Service-Name": "durable-job-worker",
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "internal_service_authentication_failed"
 
 
 def test_missing_environment_fails_closed(monkeypatch) -> None:
@@ -339,6 +375,35 @@ def test_private_client_never_places_key_in_url(monkeypatch) -> None:
 
     assert LOCAL_KEY not in captured["url"]
     assert captured["headers"]["X-Internal-Service-Key"] == LOCAL_KEY
+
+
+def test_private_client_loads_local_credential_without_overriding_process_values(
+    monkeypatch, tmp_path
+) -> None:
+    environment_file = tmp_path / ".env"
+    environment_file.write_text(
+        "INTERNAL_SERVICE_SHARED_KEY=local-file-key-that-is-longer-than-thirty-two-characters\n"
+        "DB_HOST=must-not-enter-worker.example\n"
+        "DB_PASSWORD=must-not-enter-worker\n"
+        "MYSQL_USER=must-not-enter-worker\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("INTERNAL_SERVICE_SHARED_KEY", raising=False)
+    monkeypatch.delenv("DB_HOST", raising=False)
+    monkeypatch.delenv("DB_PASSWORD", raising=False)
+    monkeypatch.delenv("MYSQL_USER", raising=False)
+    monkeypatch.setattr(private_operations_client, "LOCAL_ENVIRONMENT_PATH", environment_file)
+
+    loaded_client = PrivateOperationsClient("incident-worker")
+
+    assert loaded_client._shared_key == "local-file-key-that-is-longer-than-thirty-two-characters"
+    assert "DB_HOST" not in os.environ
+    assert "DB_PASSWORD" not in os.environ
+    assert "MYSQL_USER" not in os.environ
+    monkeypatch.setenv("INTERNAL_SERVICE_SHARED_KEY", LOCAL_KEY)
+    configured_client = PrivateOperationsClient("incident-worker")
+
+    assert configured_client._shared_key == LOCAL_KEY
 
 
 def test_private_client_honors_typed_non_retryable_503(monkeypatch) -> None:
@@ -532,6 +597,7 @@ def test_line_heartbeat_uses_authenticated_caller_process_identity() -> None:
         ("scripts.run_line_worker", "LINE WORKER"),
         ("scripts.run_knowledge_worker", "KNOWLEDGE WORKER"),
         ("scripts.run_incident_worker", "INCIDENT WORKER"),
+        ("scripts.run_service_monitor", "MONITOR"),
     ),
 )
 def test_worker_once_returns_failure_for_retryable_error(monkeypatch, module_name, prefix) -> None:
@@ -565,4 +631,7 @@ class _RetryableFailureClient:
         raise PrivateOperationError("temporary", retryable=True)
 
     def run_incident_maintenance_cycle(self, payload):
+        raise PrivateOperationError("temporary", retryable=True)
+
+    def record_monitor_cycle(self, payload):
         raise PrivateOperationError("temporary", retryable=True)

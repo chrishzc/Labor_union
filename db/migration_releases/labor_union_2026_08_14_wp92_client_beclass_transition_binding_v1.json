@@ -1,0 +1,12 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-wp92-2026-08-14-v1",
+  "release_metadata": {"release_name": "Labor Union WP92 Client BeClass transition binding", "application_version": "wp92-client-beclass-binding-v1", "published_at": "2026-08-14", "description": "Preserve Client BeClass source serials while binding uniquely matched Client cases"},
+  "source_baseline": {"minimum_mysql_version": "8.0", "required_character_set": "utf8mb4", "allowed_owned_object_states": ["absent", "exact"], "forbidden_owned_object_states": ["partial", "drift"], "source_must_be_read_only": true, "maintenance_token_required": true, "baseline_id": "wp91-v1"},
+  "artifacts": [{"name": "197_client_beclass_transition_binding.sql", "relative_path": "db/schema_parts/197_client_beclass_transition_binding.sql", "sha256": "9fa6ce1319350fa8def7f17d21f725f48fa35770b44af8cc2a2be75fd18fb2a5", "dependencies": [], "data_effect": "schema_only", "rollback_policy": "code-rollback-preserve-client-beclass-binding", "resumable_boundary_policy": "statement-sha256-with-durable-receipt"}],
+  "backfills": [],
+  "verification_contracts": [{"verification_id": "wp92-client-beclass-binding-columns", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}],
+  "application_compatibility": {"minimum_api_contract": "typed-api-v1", "compatible_contracts": ["client-beclass-transition-binding-v1"], "required_restart_targets": ["api"], "watcher_worker_compatibility": "same-release-required", "post_cutover_smoke_ids": ["client-beclass-unique-case-binding"]},
+  "descriptor_artifact": {"name": "labor_union_2026_08_14_wp92_client_beclass_transition_binding_v1.descriptors.json", "relative_path": "db/migration_releases/labor_union_2026_08_14_wp92_client_beclass_transition_binding_v1.descriptors.json", "sha256": "e840d0b95db975b723d59b063c5287d25497863e430dc991e9e08515f6569d3b", "dependencies": []},
+  "tool_archive_policy": {"artifact_hash_algorithm": "sha256", "backup_archive_policy": "permanent-release-archive", "journal_archive_policy": "append-only-per-operation", "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"], "receipt_archive_policy": "permanent-release-archive", "restore_required_mode": "new-absent-candidate-only"}
+}

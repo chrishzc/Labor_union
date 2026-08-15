@@ -1,4 +1,7 @@
-"""MySQL adapter for canonical matching intents, interactions, and responses."""
+"""
+File: matching_notification_repository.py
+Description: 持久化媒合通知、互動與回覆，拒絕退休人員的新派送與回覆。
+"""
 
 from __future__ import annotations
 
@@ -358,7 +361,8 @@ JOIN clients c ON c.id=o.client_id WHERE p.id=%s AND p.case_no=%s"""
 _SEGMENTS_SQL = """SELECT s.id AS segment_id,s.segment_order,s.staff_id,
 s.assigned_start_date,s.assigned_end_date,st.name AS staff_name,
 st.line_user_id AS staff_line_user_id FROM caregiver_matching_plan_segments s
-JOIN staff st ON st.id=s.staff_id WHERE s.plan_id=%s ORDER BY s.segment_order"""
+JOIN staff st ON st.id=s.staff_id LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=st.id
+WHERE s.plan_id=%s AND st.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active' ORDER BY s.segment_order"""
 _RESPONSES_SQL = """SELECT segment_id,response_type,response_value FROM
 matching_response_events WHERE plan_id=%s ORDER BY occurred_at_utc DESC,id DESC"""
 _DELIVERIES_SQL = """SELECT i.segment_id,i.notification_kind,t.processing_status
@@ -378,8 +382,10 @@ _INSERT_INTERACTION_SQL = """INSERT INTO matching_line_interactions
 (token_hash,plan_id,segment_id,action_scope,recipient_line_user_id,expires_at_utc)
 VALUES (%s,%s,%s,%s,%s,%s)"""
 _INTERACTION_BY_TOKEN_SQL = """SELECT i.*,p.case_no,p.communication_version,p.status,
-p.is_active FROM matching_line_interactions i JOIN caregiver_matching_plans p
-ON p.id=i.plan_id WHERE i.token_hash=%s FOR UPDATE"""
+p.is_active FROM matching_line_interactions i JOIN caregiver_matching_plans p ON p.id=i.plan_id
+LEFT JOIN caregiver_matching_plan_segments s ON s.id=i.segment_id LEFT JOIN staff st ON st.id=s.staff_id
+LEFT JOIN staff_lifecycle_states lifecycle ON lifecycle.staff_id=st.id WHERE i.token_hash=%s
+AND (i.segment_id IS NULL OR (st.status='active' AND COALESCE(lifecycle.lifecycle_state,'active')='active')) FOR UPDATE"""
 _RESPONSE_BY_KEY_SQL = """SELECT e.*,p.case_no,p.communication_version
 FROM matching_response_events e JOIN caregiver_matching_plans p ON p.id=e.plan_id
 WHERE e.idempotency_key=%s"""

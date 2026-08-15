@@ -1,4 +1,7 @@
-"""Deliver BeClass review outbox events to the canonical anomaly workflow."""
+"""
+File: beclass_import_outbox_consumer.py
+Description: 將 BeClass review outbox事件投影至 canonical anomaly workflow。
+"""
 
 from __future__ import annotations
 
@@ -63,8 +66,8 @@ def _consume_next(connection):
         return True
     except OperationalError as error:
         connection.rollback()
-        if event is None and _mysql_code(error) == 1146:
-            return None
+        if event is None:
+            raise
         _mark_failed(connection, event, error)
         return False
     except Exception as error:
@@ -115,7 +118,3 @@ def _aware_datetime(value):
     if not isinstance(value, datetime):
         raise ValueError("BeClass review outbox created_at must be datetime")
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
-
-
-def _mysql_code(error):
-    return int(error.args[0]) if error.args else 0

@@ -1,0 +1,47 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-2026-08-09-v4-strict-v1",
+  "release_metadata": {
+    "release_name": "Labor Union LINE confirmation and bounded session release v4",
+    "application_version": "global-architecture-v1",
+    "description": "Add server-verified Rich Menu preview confirmation and absolute administrator session expiry",
+    "published_at": "2026-08-14"
+  },
+  "source_baseline": {
+    "baseline_id": "labor-union-2026-08-09-v3",
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "global-architecture-v3-or-later"
+  },
+  "artifacts": [{
+    "name": "150_line_publication_confirmation_and_session_expiry.sql",
+    "relative_path": "db/schema_parts/150_line_publication_confirmation_and_session_expiry.sql",
+    "sha256": "25a89465f653133c3d34fc4eb20f7656aa7c013965146ba5f473451252e805f8",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt",
+    "rollback_policy": "restore-candidate-from-pre-ddl-artifact"
+  }],
+  "backfills": [],
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_09_v4.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_09_v4.descriptors.json",
+    "sha256": "afd1f3ae1a41eef29f1d4f1396cc8ac83f6f70fc33e4bf468c6dfdc4113c847e",
+    "dependencies": []
+  },
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["global-architecture-v1", "access-control-v1", "line-integration-v1"],
+    "required_restart_targets": ["api", "streamlit", "background-worker"],
+    "post_cutover_smoke_ids": ["access-login", "line-review-read", "line-menu-preview"],
+    "watcher_worker_compatibility": "same-release-required"
+  },
+  "verification_contracts": [{"verification_id": "legacy-v4-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}],
+  "tool_archive_policy": {"artifact_hash_algorithm": "sha256", "backup_archive_policy": "permanent-release-archive", "journal_archive_policy": "append-only-per-operation", "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"], "receipt_archive_policy": "permanent-release-archive", "restore_required_mode": "new-absent-candidate-only"}
+}
