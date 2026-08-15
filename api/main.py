@@ -51,6 +51,7 @@ from api.routes import (
     line_configurations,
     line_identity,
     line_staff_self_service,
+    line_mobile_admin,
     line_identity_management,
     customer_service,
     line_order_groups,
@@ -162,6 +163,8 @@ app.include_router(line_identity.page_router)
 app.include_router(line_order_groups.router)
 app.include_router(knowledge_retrieval.router)
 app.include_router(line_staff_self_service.router)
+app.include_router(line_mobile_admin.router)
+app.include_router(line_mobile_admin.page_router)
 app.include_router(customer_service.router)
 app.include_router(line_identity_management.router)
 

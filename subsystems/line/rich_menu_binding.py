@@ -51,7 +51,9 @@ def schedule_published_menu_rebindings(
     provider_menu_id: str,
 ) -> int:
     definition = json.loads(definition_json)
-    subject_type = _SUBJECT_BY_AUDIENCE[str(definition["audience_role"])]
+    subject_type = _SUBJECT_BY_AUDIENCE.get(str(definition["audience_role"]))
+    if subject_type is None:
+        return 0
     bindings = unit_of_work.identities.list_bound_by_subject_type(subject_type)
     for binding in bindings:
         unit_of_work.outbox.append(
