@@ -161,6 +161,13 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_14_wp93_pending_completion_status_v1.json",
     "labor_union_2026_08_15_wp90_finance_source_warning_v1.json",
     "labor_union_2026_08_15_wp95_hcm_resubmission_v1.json",
+    "labor_union_2026_08_15_staff_leave_intake_v1.json",
+    "labor_union_2026_08_15_line_notification_catalog_v1.json",
+    "labor_union_2026_08_16_scheduling_service_day_logs_v1.json",
+    "labor_union_2026_08_16_scheduling_service_day_checkpoints_v1.json",
+    "labor_union_2026_08_16_line_notification_recurring_intents_v1.json",
+    "labor_union_2026_08_16_scheduling_service_day_log_outbox_retry_v1.json",
+    "labor_union_2026_08_16_scheduling_rebuild_notification_invalidation_v1.json",
     "labor_union_2026_08_15_schema_assembly_v1.json",
     "labor_union_2026_08_15_staff_retirement_v1.json",
 )

@@ -3,7 +3,7 @@ status: proposed
 priority: deferred
 owner: Global / Operations
 domain: Global Durable Jobs
-updated_date: 2026-08-12
+updated_date: 2026-08-15
 ---
 
 # Durable Job Worker Supervision 延後開發計畫
@@ -45,9 +45,14 @@ updated_date: 2026-08-12
 ## Write set（重新核准後）
 
 - `scripts/launchers/install_durable_job_worker_task.ps1`（目前不存在，重新核准後才可建立）
-- `scripts/launchers/get_durable_job_worker_task_status.ps1`
-- `scripts/launchers/uninstall_durable_job_worker_task.ps1`
+- 既有 `scripts/launchers/get_durable_job_worker_task_status.ps1` 與
+  `scripts/launchers/uninstall_durable_job_worker_task.ps1` 已在 2026-08-13 保留為 recovery-only；前者
+  只讀查詢既有任務，後者使用 `ShouldProcess` 移除既有任務，兩者都不得成為安裝或啟動入口。
 - 對應 deployment receipt 與操作文件
+
+現行 `tests/test_durable_worker_task_scheduler_scripts.py` 固定驗證不得存在
+`install_durable_job_worker_task.ps1`。因此建立安裝器、註冊 Task Scheduler 或啟動任何 worker 都是
+新的 deployment／host mutation，必須在本計畫重新核准後另立 Work Package。
 
 ## Acceptance
 

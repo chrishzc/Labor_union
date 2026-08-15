@@ -5,20 +5,18 @@ Description: 驗證匯入入口隔離、明確確認與來源版本鍵。
 
 from pathlib import Path
 
-from scripts import file_watcher
 from scripts.imports.historical_import_guard import authorize_historical_apply
 from scripts.imports import import_client_hcm
 from scripts.imports.import_staff_beclass import _staff_source_content_digest
 import pytest
 
 
-def test_file_watcher_excludes_hcm_and_beclass_current_writers():
-    scripts = {entry.script_path for entry in file_watcher.WATCHED_IMPORTS}
+def test_file_watcher_is_retired_from_the_project():
+    assert not Path("scripts/file_watcher.py").exists()
 
-    assert "scripts/imports/import_client_hcm.py" not in scripts
-    assert "scripts/imports/import_client_beclass.py" not in scripts
-    assert "scripts/imports/import_staff_beclass.py" not in scripts
-    assert scripts == {"scripts/imports/import_finance_excel.py"}
+
+def test_legacy_historical_orders_cli_is_retired_from_the_project():
+    assert not Path("scripts/import_historical_orders.py").exists()
 
 
 def test_liff_browser_sources_do_not_contain_database_credentials_or_sql():
@@ -59,17 +57,16 @@ def test_historical_import_returns_source_only_for_allowlisted_target(monkeypatc
     ) == "history.xlsx"
 
 
-def test_hcm_cli_requires_explicit_apply_and_matching_database(monkeypatch):
-    monkeypatch.setenv("DB_DATABASE", "candidate_history")
-    with pytest.raises(RuntimeError, match="hcm_import_apply_flag_required"):
-        import_client_hcm._parse_hcm_apply_arguments(["history.xlsx"])
-    with pytest.raises(RuntimeError, match="hcm_import_database_confirmation_required"):
-        import_client_hcm._parse_hcm_apply_arguments(
-            ["--apply", "--confirm-database", "wrong", "history.xlsx"]
-        )
-    assert import_client_hcm._parse_hcm_apply_arguments(
-        ["--apply", "--confirm-database", "candidate_history", "history.xlsx"]
-    ) == "history.xlsx"
+def test_hcm_legacy_module_has_no_direct_cli_entrypoint():
+    source = Path("scripts/imports/import_client_hcm.py").read_text(encoding="utf-8")
+    assert 'if __name__ == "__main__":' not in source
+
+
+def test_hcm_historical_whole_row_writer_is_removed():
+    source = Path("scripts/imports/import_client_hcm.py").read_text(encoding="utf-8")
+    assert "HcmHistoricalRowIntake" not in source
+    assert "UPDATE clients SET" not in source
+    assert "UPDATE orders SET service_days" not in source
 
 
 def test_staff_source_revision_creates_a_new_deterministic_source_identity(tmp_path):

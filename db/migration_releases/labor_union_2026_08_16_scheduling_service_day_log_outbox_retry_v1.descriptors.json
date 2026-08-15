@@ -1,0 +1,11 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "207_scheduling_service_day_log_outbox_retry.sql": {
+      "tables": {
+        "scheduling_service_day_log_outbox": ["id", "event_id", "intent_key", "payload_snapshot", "delivery_status", "attempt_count", "next_attempt_at_utc", "published_at_utc", "last_error_code", "created_at_utc"]
+      },
+      "triggers": []
+    }
+  }
+}

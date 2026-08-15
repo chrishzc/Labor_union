@@ -1,0 +1,19 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "204_scheduling_service_day_logs.sql": {
+      "tables": {
+        "scheduling_service_day_logs": ["id", "case_no", "assignment_id", "staff_id", "staff_line_user_id", "service_date", "baby_log_text", "requires_cooking", "content_fingerprint", "idempotency_key", "created_at_utc"],
+        "scheduling_service_day_log_attachments": ["id", "service_day_log_id", "provider_media_id", "attachment_kind", "created_at_utc"],
+        "scheduling_service_day_log_events": ["id", "service_day_log_id", "assignment_id", "staff_id", "service_date", "event_type", "idempotency_key", "created_at_utc"],
+        "scheduling_service_day_log_outbox": ["id", "event_id", "intent_key", "payload_snapshot", "delivery_status", "attempt_count", "published_at_utc", "last_error_code", "created_at_utc"]
+      },
+      "triggers": [
+        "trg_scheduling_service_day_log_attachments_before_delete",
+        "trg_scheduling_service_day_log_attachments_before_update",
+        "trg_scheduling_service_day_log_events_before_delete",
+        "trg_scheduling_service_day_log_events_before_update"
+      ]
+    }
+  }
+}

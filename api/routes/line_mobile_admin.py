@@ -1,4 +1,4 @@
-"""Mobile LIFF administration endpoints for linked union staff."""
+"""LINE 綁定工會人員的 LIFF 手機管理端點。"""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from subsystems.customer_service.application import (
     CustomerServiceVersionConflictError,
 )
 from subsystems.customer_service.contracts import CustomerServiceListQuery, ReplyCustomerServiceTicket
-from subsystems.line.capabilities import LineCapability, line_capabilities_for_role, require_line_capability
+from subsystems.line.capabilities import LineCapability
 from subsystems.line.identity_review_application import LineReviewDataConflictError, LineReviewNotFoundError
 from subsystems.line.review_contracts import DecideLineReviewCommand, LineReviewListQuery
 
@@ -78,13 +78,13 @@ def profile(payload: _LiffAuthRequest):
 
 @router.post("/customer-service/summary", response_model=BaseResponse[dict])
 def customer_service_summary(payload: _LiffAuthRequest):
-    actor = _authorized_actor(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
+    actor = _mobile_admin_actor(payload.line_id_token)
     return BaseResponse(data={**CustomerServiceApplication(open_line_unit_of_work).summary(), "actor": actor.actor_id})
 
 
 @router.post("/customer-service/tickets", response_model=BaseResponse[dict])
 def customer_service_tickets(payload: _CustomerServiceListRequest):
-    _authorized_actor(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
+    _mobile_admin_actor(payload.line_id_token)
     page = CustomerServiceApplication(open_line_unit_of_work).list(
         CustomerServiceListQuery(payload.status, payload.category, payload.search, 1, 50)
     )
@@ -93,7 +93,7 @@ def customer_service_tickets(payload: _CustomerServiceListRequest):
 
 @router.post("/customer-service/tickets/{ticket_id}", response_model=BaseResponse[dict])
 def customer_service_detail(ticket_id: int, payload: _LiffAuthRequest):
-    _authorized_actor(payload.line_id_token, LineCapability.CUSTOMER_SERVICE_READ)
+    _mobile_admin_actor(payload.line_id_token)
     try:
         detail = CustomerServiceApplication(open_line_unit_of_work).detail(ticket_id)
     except CustomerServiceTicketNotFoundError as error:
@@ -104,7 +104,7 @@ def customer_service_detail(ticket_id: int, payload: _LiffAuthRequest):
 @router.post("/customer-service/tickets/{ticket_id}/reply", response_model=BaseResponse[dict])
 def customer_service_reply(ticket_id: int, payload: _CustomerServiceReplyRequest):
     admin = _linked_admin(payload.line_id_token)
-    actor = _actor_for_admin(admin, LineCapability.CUSTOMER_SERVICE_HANDLE)
+    actor = _actor_for_admin(admin)
     command = ReplyCustomerServiceTicket(
         ticket_id,
         payload.reply_text,
@@ -128,7 +128,7 @@ def customer_service_reply(ticket_id: int, payload: _CustomerServiceReplyRequest
 
 @router.post("/identity-reviews", response_model=BaseResponse[dict])
 def identity_reviews(payload: _ReviewListRequest):
-    _authorized_actor(payload.line_id_token, LineCapability.IDENTITY_REVIEW)
+    _mobile_admin_actor(payload.line_id_token)
     page = get_line_identity_review_application().list(
         LineReviewListQuery(
             statuses=(payload.review_status,) if payload.review_status else (),
@@ -141,7 +141,7 @@ def identity_reviews(payload: _ReviewListRequest):
 
 @router.post("/identity-reviews/{request_id}/decision", response_model=BaseResponse[dict])
 def identity_review_decision(request_id: int, payload: _ReviewDecisionRequest):
-    actor = _authorized_actor(payload.line_id_token, LineCapability.IDENTITY_REVIEW)
+    actor = _mobile_admin_actor(payload.line_id_token)
     command = DecideLineReviewCommand(
         LineReviewRequestId(request_id),
         payload.decision,
@@ -161,17 +161,14 @@ def identity_review_decision(request_id: int, payload: _ReviewDecisionRequest):
     return BaseResponse(data=_review_view(result.snapshot), message="審核結果已保存")
 
 
-def _authorized_actor(line_id_token: str, capability: LineCapability) -> ActorContext:
-    return _actor_for_admin(_linked_admin(line_id_token), capability)
+def _mobile_admin_actor(line_id_token: str) -> ActorContext:
+    return _actor_for_admin(_linked_admin(line_id_token))
 
 
-def _actor_for_admin(admin, capability: LineCapability) -> ActorContext:
-    actor = ActorContext(
-        f"admin:{admin.admin_user_id}",
-        tuple(line_capabilities_for_role(admin.role)),
-    )
-    require_line_capability(actor, capability)
-    return actor
+def _actor_for_admin(admin) -> ActorContext:
+    # The approved Access policy treats every enabled internal user alike.
+    # Identity review requires this scope inside its owning application.
+    return ActorContext(f"admin:{admin.admin_user_id}", (LineCapability.IDENTITY_REVIEW.value,))
 
 
 def _linked_admin(line_id_token: str):
@@ -183,7 +180,6 @@ def _linked_admin(line_id_token: str):
         raise HTTPException(status_code=503, detail=str(error)) from error
     with open_line_unit_of_work() as unit_of_work:
         admin = unit_of_work.admins.get_linked_admin(line_user_id)
-        unit_of_work.commit()
     if admin is None:
         raise HTTPException(status_code=403, detail="此 LINE 尚未綁定工會人員身分")
     return admin
@@ -194,7 +190,6 @@ def _admin_view(admin) -> dict:
         "admin_user_id": admin.admin_user_id,
         "display_name": admin.display_name,
         "role": admin.role,
-        "capabilities": tuple(line_capabilities_for_role(admin.role)),
     }
 
 

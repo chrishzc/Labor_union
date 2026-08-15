@@ -1,14 +1,18 @@
 ---
-status: approved
+status: superseded
 priority: pending-scheduling
 owner: Scheduling
 domain: Assignments / Scheduling
 subsystem: Staff Leave Request Intake / Leave Substitution
 updated_date: 2026-08-12
-implementation_authorization: not-granted
+implementation_authorization: superseded-by-PROV-20260815-scheduling-line-staff-leave-intake-work-package
 ---
 
 # Scheduling 月嫂請假申請待辦與管理端處理開發計畫
+
+> 已由 2026-08-15 的
+> [`ARCH-20260815-099 Scheduling LINE 請假工作包`](../架構重整/04_已完成與上線封存/work_packages/PROV-20260815-scheduling-line-staff-leave-intake-work-package.md)
+> 承接。此檔保留產品方向與歷史分析，不再是 implementation authorization 或 write-set SSOT。
 
 ## 1. 決策與目標
 

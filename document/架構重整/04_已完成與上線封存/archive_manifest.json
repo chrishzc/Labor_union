@@ -1,6 +1,6 @@
 {
   "schema": "labor-union-document-archive/v1",
-  "updated_at": "2026-08-15",
+  "updated_at": "2026-08-16",
   "entries": [
     {
       "archive_id": "PROV-20260815-archive-waiver-wp73",
@@ -2109,6 +2109,203 @@
     {"archive_id":"ARCH-20260815-094","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-historical-order-warning-navigation.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-historical-order-warning-navigation.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"284a15df079d4b37eea081d0b957364c475ed5db9dc08f3c0780585f88578842","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP90 absorbed the provisional historical-order warning navigation responsibilities.","restore_triggers":["historical-order warning projection regression"]},
     {"archive_id":"ARCH-20260815-095","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-beclass-warning-navigation.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-beclass-warning-navigation.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"98e3aa59697afe60d295f540c43cefd2fd0d34ea62eb557c2434bf5157674add","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP90 absorbed the provisional Client/Staff BeClass warning navigation responsibilities.","restore_triggers":["BeClass warning projection regression"]},
     {"archive_id":"ARCH-20260815-096","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-finance-row-warning-navigation.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-finance-row-warning-navigation.md","doc_type":"work-package","final_status":"completed","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_wp90_wp95_completion_receipt.md"],"content_sha256":"d3ec298acc261068d0f7dc078c1af19367b4cab724af61e65770b38316907f88","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"WP90 Finance source-row isolation absorbed the provisional finance warning navigation responsibilities.","restore_triggers":["Finance warning projection regression"]},
-    {"archive_id":"ARCH-20260815-097","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-schema-baseline-drift-recovery.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-schema-baseline-drift-recovery.md","doc_type":"work-package","final_status":"superseded","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md","evidence_paths":[],"content_sha256":"5e9cdbfe8cc21d79b51e5fb6d6bdab66845e08ea6f2e558a81394ffbdc48fdba","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"Canonical chain verification proved the provisional schema-drift finding was a false-positive; no repair release was authorized or needed.","restore_triggers":["schema baseline drift incident","canonical release-chain verification regression"]}
+    {"archive_id":"ARCH-20260815-097","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-schema-baseline-drift-recovery.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-schema-baseline-drift-recovery.md","doc_type":"work-package","final_status":"superseded","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/01_規格基線/10_Global_保留資料Migration與Cutover_Subsystem.md","evidence_paths":[],"content_sha256":"5e9cdbfe8cc21d79b51e5fb6d6bdab66845e08ea6f2e558a81394ffbdc48fdba","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"Canonical chain verification proved the provisional schema-drift finding was a false-positive; no repair release was authorized or needed.","restore_triggers":["schema baseline drift incident","canonical release-chain verification regression"]},
+    {"archive_id":"ARCH-20260815-098","source_path":"document/架構重整/02_決策與退役執行記錄/PROV-20260815-line-mobile-admin-rich-menu-closeout.md","archive_path":"document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-line-mobile-admin-rich-menu-closeout.md","doc_type":"work-package","final_status":"completed-local-validated","completed_at":"2026-08-15","deployed_at":null,"release_identity":null,"successor_path":"document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md","evidence_paths":["document/架構重整/03_追蹤清單與證據/evidence/2026-08-15_line_mobile_admin_rich_menu_closeout_receipt.md"],"content_sha256":"a3295c8a9ad6bca89bee5f1f9e91a8672ac7ae0c985ab6c1b90467ac7d2fba51","archived_at":"2026-08-15","archived_by":"Codex on user request","reason":"Remote LINE mobile-admin merge drift, entrypoint governance and current Access-policy alignment completed with local focused verification; real LINE provider publish remains out of scope and NOT_RUN.","restore_triggers":["mobile-admin LIFF identity regression","Rich Menu publication or binding incident","entrypoint or schema assembly audit"]}
+    ,
+    {
+      "archive_id": "ARCH-20260815-099",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/PROV-20260815-scheduling-line-staff-leave-intake-work-package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-scheduling-line-staff-leave-intake-work-package.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": "labor-union-staff-leave-intake-2026-08-15-v1",
+      "successor_path": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+      "evidence_paths": [
+        "document/架構重整/03_追蹤清單與證據/evidence/staff_leave_intake_preserve_plan_20260815.json",
+        "document/架構重整/03_追蹤清單與證據/evidence/staff_leave_intake_candidate_operation_20260815.json",
+        "document/架構重整/03_追蹤清單與證據/evidence/staff_leave_intake_developer_acceptance_20260815.md"
+      ],
+      "content_sha256": "4dd2e7548f715b1337640bc62b87028f5278018f6effef37e1a66e71f717ce01",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "LINE staff leave request intake, management review, canonical Leave/Substitution receipt linkage, schema verification and authorized developer-local replacement are complete; enduring business rules remain in the Scheduling and LINE formal specifications.",
+      "restore_triggers": [
+        "LINE staff leave intake or request-state regression",
+        "Leave/Substitution receipt-linkage incident",
+        "staff leave intake schema or preserve-data migration audit",
+        "operator-requested developer-local rollback"
+      ]
+    }
+    ,
+    {
+      "archive_id": "ARCH-20260815-100",
+      "source_path": "document/功能開發計畫/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/superseded_specs/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md",
+      "doc_type": "feature-plan",
+      "final_status": "superseded",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": "labor-union-staff-leave-intake-2026-08-15-v1",
+      "successor_path": "document/架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md",
+      "evidence_paths": [
+        "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-scheduling-line-staff-leave-intake-work-package.md",
+        "document/架構重整/03_追蹤清單與證據/evidence/staff_leave_intake_developer_acceptance_20260815.md"
+      ],
+      "content_sha256": "711eadfdf424c555545f5536b0d77939c0efab1895ad98877de460a5ed767ee2",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "The product proposal was fully superseded by the completed Scheduling-owned LINE leave intake work package; current behavior remains governed by the Scheduling and LINE formal specifications.",
+      "restore_triggers": [
+        "staff leave intake product or implementation audit",
+        "Scheduling leave-substitution workflow regression",
+        "operator-requested rollback investigation"
+      ]
+    }
+    ,
+    {
+      "archive_id": "ARCH-20260815-101",
+      "source_path": "document/功能開發計畫/ADR-001-import-architecture-refactor.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/superseded_specs/ADR-001-import-architecture-refactor.md",
+      "doc_type": "architecture-decision-proposal",
+      "final_status": "superseded",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/02_決策與退役執行記錄/Import_Entry_and_Legacy_Writer_Retirement_工作包.md",
+      "evidence_paths": [
+        "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+        "document/架構重整/04_已完成與上線封存/work_packages/90_Import_Review_External_Confirmation_Work_Package.md",
+        "document/架構重整/04_已完成與上線封存/work_packages/95_HCM_Owner_Resubmission_and_Warning_Resolution_Work_Package.md"
+      ],
+      "content_sha256": "c6c5b53c446821ee99a4221d61f4a0f027a9ed5205bde7b51ecfa1ebfb5c44b5",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "The ADR mixed superseded import architecture proposals, completed delivery lanes and one remaining entrypoint-retirement concern. Current import semantics are owned by formal specifications; the residual concern moved to a narrow active successor plan.",
+      "restore_triggers": [
+        "import architecture or ownership audit",
+        "legacy import writer or File Watcher incident",
+        "historical import evidence reconciliation"
+      ]
+    }
+    ,
+    {
+      "archive_id": "ARCH-20260815-102",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/PROV-20260815-finance-file-watcher-retirement-work-package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-finance-file-watcher-retirement-work-package.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/02_決策與退役執行記錄/Import_Entry_and_Legacy_Writer_Retirement_工作包.md",
+      "evidence_paths": [
+        "document/架構重整/03_追蹤清單與證據/evidence/finance_file_watcher_retirement_receipt_20260815.md"
+      ],
+      "content_sha256": "5bd25251ee6f806ff59da6bb099508b9c2482be56338ec46b0d0f2701a577900",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "Formal import-entry policy prohibits File Watcher fallback for Finance. The watcher, all runtime callers and its direct dependency were removed with focused regression evidence.",
+      "restore_triggers": [
+        "Finance Web ingestion runtime incident",
+        "legacy import entrypoint audit",
+        "operator-requested rollback investigation"
+      ]
+    },
+    {
+      "archive_id": "ARCH-20260815-103",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/PROV-20260815-legacy-historical-orders-cli-retirement-work-package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-legacy-historical-orders-cli-retirement-work-package.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+      "evidence_paths": ["document/架構重整/03_追蹤清單與證據/evidence/legacy_historical_orders_cli_retirement_receipt_20260815.md"],
+      "content_sha256": "63d02848a490afce12cd254e7af50d6a30070d4750d87a4d7050a60ffe1b854e",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "The already-rejected historical-orders CLI still contained dead direct SQL writer code. It was removed while the typed Web and controlled operator replacements remain.",
+      "restore_triggers": ["Historical Orders import incident", "legacy entrypoint audit", "operator-requested rollback investigation"]
+    },
+    {
+      "archive_id": "ARCH-20260815-104",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/PROV-20260815-finance-cli-apply-retirement-work-package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-finance-cli-apply-retirement-work-package.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/01_規格基線/09_Finance_Import_Domain.md",
+      "evidence_paths": ["document/架構重整/03_追蹤清單與證據/evidence/finance_cli_apply_retirement_receipt_20260815.md"],
+      "content_sha256": "84c128203fad9e811596c7036429382298c441f730f2c2aaf41a9103caf9bf8e",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "Finance CLI apply created a second mutation entry. It now fails closed before DB access; only its read-only diagnostic remains, with daily ingestion owned by the authenticated Web API.",
+      "restore_triggers": ["Finance Web ingestion incident", "legacy import entrypoint audit", "operator-requested rollback investigation"]
+    },
+    {
+      "archive_id": "ARCH-20260815-105",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/PROV-20260815-hcm-cli-apply-retirement-work-package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-hcm-cli-apply-retirement-work-package.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md",
+      "evidence_paths": ["document/架構重整/03_追蹤清單與證據/evidence/hcm_cli_apply_retirement_receipt_20260815.md"],
+      "content_sha256": "4db995fbec02655e49f9ce77e105e5fafa4a5d7f8030083d9d056562f426c585",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "HCM direct CLI entry was retired; the same module remains only as a shared adapter for the authenticated typed Web workflow, while historical whole-row overwrite stays retired.",
+      "restore_triggers": ["HCM Web intake incident", "legacy import entrypoint audit", "operator-requested rollback investigation"]
+    },
+    {
+      "archive_id": "ARCH-20260815-106",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/PROV-20260815-hcm-historical-direct-sql-retirement-work-package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/PROV-20260815-hcm-historical-direct-sql-retirement-work-package.md",
+      "doc_type": "work-package",
+      "final_status": "completed",
+      "completed_at": "2026-08-15",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md",
+      "evidence_paths": ["document/架構重整/03_追蹤清單與證據/evidence/hcm_historical_direct_sql_retirement_receipt_20260815.md"],
+      "content_sha256": "86eb80b8d9b355e62a5724dec3094ad0a78f423d51f58a47974c1a73131a7cd2",
+      "archived_at": "2026-08-15",
+      "archived_by": "Codex on user request",
+      "reason": "Historical HCM HTTP routes were already retired; their unreachable composition and direct whole-row writer were removed, leaving the typed current workflow and scoped resubmission.",
+      "restore_triggers": ["HCM Web intake incident", "legacy import entrypoint audit", "operator-requested rollback investigation"]
+    },
+    {
+      "archive_id": "ARCH-20260816-107",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/LINE_Notification_Catalog_Gap_Package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/LINE_Notification_Catalog_Gap_Package.md",
+      "doc_type": "work-package",
+      "final_status": "completed-local-validated",
+      "completed_at": "2026-08-16",
+      "deployed_at": null,
+      "release_identity": "line-notification-catalog-v1; scheduling-service-day-logs-v1; scheduling-service-day-checkpoints-v1; line-notification-recurring-intents-v1; scheduling-rebuild-notification-invalidation-v1",
+      "successor_path": "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md",
+      "evidence_paths": [
+        "document/架構重整/03_追蹤清單與證據/evidence/2026-08-16_line_notification_catalog_configuration_inventory.md",
+        "document/架構重整/03_追蹤清單與證據/evidence/2026-08-16_line_notification_catalog_backend_completion_receipt.md"
+      ],
+      "content_sha256": "866fd9a0fdd035aa1e151718208013f7c67b8e8880cf777555443bda3ce5a8b1",
+      "archived_at": "2026-08-16",
+      "archived_by": "Codex on user request",
+      "reason": "Configurable notification backend, Scheduling service-day facts, typed API, worker reconciliation, LINE-006 projection and developer-local preserved-data replacement are complete. UI and real LINE provider acceptance remain out of scope and NOT_RUN.",
+      "restore_triggers": [
+        "notification rule API or reconciliation regression",
+        "Scheduling service-day reminder or stale-cancellation incident",
+        "LINE-006 notification anomaly projection incident",
+        "notification schema or developer-local migration audit",
+        "real LINE provider rollout"
+      ]
+    }
   ]
 }

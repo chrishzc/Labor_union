@@ -1,4 +1,7 @@
-"""Pure LINE configuration revision and preview rules."""
+"""
+File: configuration.py
+Description: 定義版本化 LINE 設定候選與 revision 規則，包含受控通知規則種類。
+"""
 
 from __future__ import annotations
 
@@ -21,6 +24,7 @@ class LineConfigurationKind(StrEnum):
     RICH_MENUS = "rich_menus"
     LIFF = "liff"
     CUSTOMER_SERVICE = "customer_service"
+    NOTIFICATION_RULES = "notification_rules"
 
 
 class LineConfigurationRevisionConflict(ValueError):

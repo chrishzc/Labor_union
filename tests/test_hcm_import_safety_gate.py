@@ -183,58 +183,6 @@ def test_hcm_review_codes_only_describe_hcm_source_validation():
     )
 
 
-def test_historical_hcm_overwrite_preserves_orders_status_and_nulls_invalid_field():
-    class Cursor:
-        def __init__(self):
-            self.calls = []
-
-        def execute(self, statement, parameters=()):
-            self.calls.append((statement, parameters))
-
-        def fetchall(self):
-            return []
-
-    cursor = Cursor()
-    import_client_hcm._overwrite_historical_hcm_case(
-        cursor,
-        {
-            "case_no": "HCM-HISTORY-001",
-            "created_at": import_client_hcm.datetime(2026, 8, 14),
-            "name": "測試客戶",
-            "service_days": 10,
-            "service_start_date": import_client_hcm.date(2026, 9, 1),
-        },
-        {"姓名": "格式錯誤"},
-    )
-
-    client_statement, client_parameters = cursor.calls[0]
-    order_statement, order_parameters = cursor.calls[-1]
-    assert "`name`=%s" in client_statement
-    assert client_parameters[1] is None
-    assert client_parameters[-1] == "HCM-HISTORY-001"
-    assert "status" not in order_statement.lower()
-    assert order_parameters == (
-        10, None, import_client_hcm.date(2026, 9, 1), import_client_hcm.date(2026, 9, 10),
-        None, None, None, "HCM-HISTORY-001",
-    )
-
-
-def test_historical_hcm_rows_are_processed_from_old_to_new_source_time(monkeypatch):
-    monkeypatch.setattr(
-        import_client_hcm,
-        "_normalized_record",
-        lambda row: {"created_at": row["created_at"]},
-    )
-    older = import_client_hcm.datetime(2025, 1, 1)
-    newer = import_client_hcm.datetime(2026, 1, 1)
-
-    ordered = import_client_hcm._historical_rows_in_source_time_order(
-        pd.DataFrame([{"created_at": newer}, {"created_at": older}]),
-    )
-
-    assert [ordinal for ordinal, _ in ordered] == [2, 1]
-
-
 @pytest.mark.parametrize("identity_status", ("低收入戶", "中低收入戶"))
 def test_hcm_subsidized_identity_statuses_are_accepted(identity_status):
     row = {

@@ -1,0 +1,11 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "206_line_notification_recurring_intents.sql": {
+      "tables": {
+        "line_notification_intents": ["id", "decision_id", "occurrence_number", "delivery_task_id", "template_revision_id", "template_id", "payload_snapshot", "payload_fingerprint", "scheduled_at_utc", "intent_status", "cancellation_reason", "created_at_utc", "cancelled_at_utc"]
+      },
+      "triggers": []
+    }
+  }
+}

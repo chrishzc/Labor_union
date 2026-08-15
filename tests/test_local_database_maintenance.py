@@ -34,6 +34,14 @@ def test_candidate_name_is_stable_and_scoped_to_the_configured_source() -> None:
     assert len(update.candidate_name("a" * 64, now)) == 64
 
 
+def test_explicit_candidate_name_fails_before_mysql_when_it_exceeds_limit() -> None:
+    with pytest.raises(
+        update.LocalDatabaseUpdateError,
+        match="exceeds MySQL identifier limit",
+    ):
+        update.validate_candidate_database("lu_test", "a" * 65)
+
+
 def test_local_update_accepts_the_configured_local_database_name() -> None:
     update.validate_local_source(
         SimpleNamespace(host="127.0.0.1"), "lu_test_dataset", {}
@@ -145,6 +153,109 @@ def test_apply_update_rebuilds_source_only_after_verified_candidate(tmp_path, mo
     assert result["status"] == "completed"
     assert result["source_database"] == "union_db"
     assert result["restart_required"] is True
+
+
+def test_apply_update_resumes_a_partial_schema_candidate(tmp_path, monkeypatch) -> None:
+    calls: list[str] = []
+    config = object()
+    candidate = "union_db_local_20260813010203"
+    preview = {
+        "source_database": "union_db",
+        "candidate_database": candidate,
+        "plan": {
+            "source": {"database": "union_db"},
+            "candidate_database": candidate,
+        },
+    }
+    paths = update.artifact_paths(tmp_path / "receipts", candidate)
+    paths["directory"].mkdir(parents=True)
+    for name in ("plan", "operation", "dump", "backup"):
+        paths[name].write_text("{}", encoding="utf-8")
+
+    def read_receipt(path):
+        if path == paths["plan"]:
+            return preview["plan"]
+        return {"candidate_database": candidate, "status": "partial", "phase": "schema_apply"}
+
+    monkeypatch.setattr(update.migration, "read_receipt", read_receipt)
+    monkeypatch.setattr(update.migration, "apply_schema", lambda *_, **__: calls.append("schema"))
+    monkeypatch.setattr(update.migration, "verify_candidate", lambda *_: calls.append("verify"))
+    monkeypatch.setattr(update.migration, "create_source_dump", lambda *_, **__: calls.append("backup"))
+    monkeypatch.setattr(update, "replace_source_database", lambda *_, **__: calls.append("replace") or {"status": "completed"})
+
+    result = update.apply_update(config, tmp_path / ".env", preview, tmp_path / "receipts")
+
+    assert calls == ["schema", "verify", "backup", "replace"]
+    assert result["status"] == "completed"
+    assert result["resumed"] is True
+
+
+def test_apply_update_restarts_only_a_candidate_stalled_before_restore(tmp_path, monkeypatch) -> None:
+    calls: list[str] = []
+    config = object()
+    candidate = "union_db_local_20260813010203"
+    preview = {
+        "source_database": "union_db",
+        "candidate_database": candidate,
+        "plan": {
+            "source": {"database": "union_db"},
+            "candidate_database": candidate,
+        },
+    }
+    paths = update.artifact_paths(tmp_path / "receipts", candidate)
+    paths["directory"].mkdir(parents=True)
+    for name in ("plan", "operation", "dump", "backup"):
+        paths[name].write_text("{}", encoding="utf-8")
+
+    def read_receipt(path):
+        if path == paths["plan"]:
+            return preview["plan"]
+        return {"candidate_database": candidate, "status": "prepared", "phase": "restore"}
+
+    monkeypatch.setattr(update.migration, "read_receipt", read_receipt)
+    monkeypatch.setattr(update, "discard_incomplete_candidate", lambda *_: calls.append("discard"))
+    monkeypatch.setattr(update.migration, "restore_candidate", lambda *_, **__: calls.append("restore"))
+    monkeypatch.setattr(update.migration, "apply_schema", lambda *_, **__: calls.append("schema"))
+    monkeypatch.setattr(update.migration, "verify_candidate", lambda *_: calls.append("verify"))
+    monkeypatch.setattr(update.migration, "create_source_dump", lambda *_, **__: calls.append("backup"))
+    monkeypatch.setattr(update, "replace_source_database", lambda *_, **__: calls.append("replace") or {"status": "completed"})
+
+    result = update.apply_update(config, tmp_path / ".env", preview, tmp_path / "receipts")
+
+    assert calls == ["discard", "restore", "schema", "verify", "backup", "replace"]
+    assert result["resumed"] is True
+
+
+def test_resumable_partial_artifacts_requires_a_notification_receipt_step() -> None:
+    assert update.resumable_partial_artifacts({"schema_steps": []}) == update.LOCAL_RESUMABLE_PARTIAL_ARTIFACTS
+
+    allowed = update.resumable_partial_artifacts({
+        "schema_steps": [{"part": "203_line_notification_rule_catalog.sql"}],
+    })
+
+    assert allowed == update.LOCAL_RESUMABLE_PARTIAL_ARTIFACTS | update.NOTIFICATION_CATALOG_PARTS
+
+
+def test_resume_or_replace_source_verifies_an_interrupted_prepared_replacement(tmp_path, monkeypatch) -> None:
+    candidate = "union_db_local_20260813010203"
+    paths = update.artifact_paths(tmp_path / "receipts", candidate)
+    paths["directory"].mkdir(parents=True)
+    paths["replacement"].write_text("{}", encoding="utf-8")
+    receipt = {
+        "status": "prepared",
+        "source_database": "union_db",
+        "candidate_database": candidate,
+    }
+    written: list[dict[str, object]] = []
+    monkeypatch.setattr(update.migration, "read_receipt", lambda _: receipt)
+    monkeypatch.setattr(update, "verify_replacement", lambda *_: {"status": "exact"})
+    monkeypatch.setattr(update.migration, "write_receipt", lambda _, value: written.append(value.copy()))
+
+    result = update.resume_or_replace_source(object(), "union_db", candidate, paths)
+
+    assert result["status"] == "completed"
+    assert result["resumed"] is True
+    assert written[-1]["verification"] == {"status": "exact"}
 
 
 def test_backfilled_candidate_is_eligible_for_verification() -> None:

@@ -17,6 +17,10 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 | 檔案 | doc_type | declared_status | 一句話摘要 |
 |---|---|---|---|
 | [58_未實作_未落地_未上線規格總表.md](58_未實作_未落地_未上線規格總表.md) | gap-register | `completed` | 已確認正式規格的未實作、已實作未落地、已驗證未上線與刻意不自動化之集中盤點。 |
+| [ARCH-20260816-107 LINE Notification Catalog](../04_已完成與上線封存/work_packages/LINE_Notification_Catalog_Gap_Package.md) | gap-package | `completed-local-validated` | archive pointer；可配置通知後端、API／worker 與 developer-local schema replacement 完成，實體 LINE provider acceptance 未執行。 |
+| [PROV-20260816 React 管理端遷移 Foundation 工作包 (V4)](PROV-20260816-react-admin-migration-foundation-work-package.md) | work-package | `proposed` | Desktop 視覺模板合併、Shell/Drawer/Router/Decoder 骨架與 System Status 唯讀垂直切片；Auth 維持 BLOCKED。 |
+| [Access Control TOTP 與帳號管理工作包](Access_Control_TOTP_Account_Management_Work_Package.md) | work-package | `blocked` | 待人工確認完整 security architecture、TOTP key ownership 與精確 write set。 |
+| [匯入入口與 Legacy Writer 退役工作包](Import_Entry_and_Legacy_Writer_Retirement_工作包.md) | work-package | `blocked` | 已完成多個 legacy entry 退役；等待 Client LIFF E2E 與 Staff current-writer owner 裁決。 |
 | [WP72（封存）](../04_已完成與上線封存/work_packages/72_Matching_Preferences_and_Staff_Unavailability_Work_Package.md) | work-package | `completed` | 自訂月嫂偏好、匯入下廚條款、長假／暫停接案及 Matching／Calendar 同源整合已完成；residual plan 另有胎數裁決。 |
 | [PROV-20260815-archive-waiver-wp73](../04_已完成與上線封存/work_packages/73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package_20260815_user_waived_closeout.md) | work-package | `completed` | archive pointer；使用者豁免有效 HCM root／Chrome 實機驗收後結案，未執行 gate 不得視為 PASS。 |
 | [WP74（封存）](../04_已完成與上線封存/work_packages/74_Developer_Local_Database_Update_and_Rebuild_Work_Package.md) | work-package | `completed` | 開發者本機 DB 更新工具與兩方向真實 MySQL 驗收完成；來源 DB 維持唯讀，operator update 仍需明確確認。 |
@@ -46,6 +50,12 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 | [WP93（封存）](../04_已完成與上線封存/work_packages/93_Schema_Assembly_and_Migration_Archive_Retirement_Work_Package.md) | work-package | `completed` | 唯一 schema assembly、view descriptor、candidate upgrade、local launcher 與九頁 UI 收尾驗收完成。 |
 | [ARCH-20260815-089 WP94 Import Warning Tracking](../04_已完成與上線封存/work_packages/94_Import_Warning_Query_and_Manual_Tracking_Work_Package.md) | work-package | `completed` | archive pointer；WP90/WP92 的 typed Query 與人工狀態追蹤已驗收，WarningReferral 仍待 owner-specific successor。 |
 | [ARCH-20260815-092 WP95 HCM owner resubmission](../04_已完成與上線封存/work_packages/95_HCM_Owner_Resubmission_and_Warning_Resolution_Work_Package.md) | work-package | `completed` | archive pointer；完整 HCM workbook scoped Preview／Apply、single-warning formal write、outbox 解除與 candidate DB 驗證已完成。 |
+| [ARCH-20260815-098 LINE 手機管理與圖文選單收尾](../04_已完成與上線封存/work_packages/PROV-20260815-line-mobile-admin-rich-menu-closeout.md) | work-package | `completed-local-validated` | archive pointer；mobile-admin Access alignment、entrypoint governance 與 schema duplicate cleanup 完成，實體 LINE provider publish 維持未執行。 |
+| [ARCH-20260815-099 Scheduling LINE 請假申請](../04_已完成與上線封存/work_packages/PROV-20260815-scheduling-line-staff-leave-intake-work-package.md) | work-package | `completed` | archive pointer；LINE 請假待辦、管理受理、canonical Leave/Substitution receipt linkage 與既有本機資料庫 developer acceptance 已完成。 |
+| [ARCH-20260815-102 Finance File Watcher 退役](../04_已完成與上線封存/work_packages/PROV-20260815-finance-file-watcher-retirement-work-package.md) | work-package | `completed` | archive pointer；已退役 local runtime File Watcher，Finance Web upload 保持唯一日常入口。 |
+| [ARCH-20260815-103 Historical Orders CLI 退役](../04_已完成與上線封存/work_packages/PROV-20260815-legacy-historical-orders-cli-retirement-work-package.md) | work-package | `completed` | archive pointer；已移除 rejected CLI 內殘留的 direct SQL writer，typed Web／受控 CLI 保留。 |
+| [ARCH-20260815-104 Finance CLI Apply 退役](../04_已完成與上線封存/work_packages/PROV-20260815-finance-cli-apply-retirement-work-package.md) | work-package | `completed` | archive pointer；`--apply` 已 fail closed，CLI 僅保留 read-only format diagnostic。 |
+| [ARCH-20260815-105 HCM CLI Apply 退役](../04_已完成與上線封存/work_packages/PROV-20260815-hcm-cli-apply-retirement-work-package.md) | work-package | `completed` | archive pointer；已移除 HCM 直接 CLI entry，typed Web 保留 shared adapter。 |
 
 所有 completed／superseded 歷史文件統一由
 [`archive_manifest.json`](../04_已完成與上線封存/archive_manifest.json) 依 archive identity 查找；
@@ -63,6 +73,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 [`document/功能開發計畫/Durable_Job_Worker_Supervision_延後開發計畫.md`](../../功能開發計畫/Durable_Job_Worker_Supervision_延後開發計畫.md)，
 不再構成 active deployment contract 或主機操作授權。
 
-2026-08-12 人工選定 Scheduling 請假方案三；`60` ownership 裁決已封存，後續功能範圍移至
-[`document/功能開發計畫/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md`](../../功能開發計畫/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md)。
-LINE 申請只建立待辦 evidence，正式排班仍由既有 leave-substitution Preview／Apply 擁有；目前尚未授權實作。
+2026-08-12 人工選定 Scheduling 請假方案三；`60` ownership 裁決已封存。2026-08-15 的
+[`ARCH-20260815-099 Scheduling LINE 請假申請`](../04_已完成與上線封存/work_packages/PROV-20260815-scheduling-line-staff-leave-intake-work-package.md)
+承接後續實作範圍；LINE 申請只建立待辦 evidence，正式排班仍由既有 leave-substitution
+Preview／Apply 與 canonical receipt 擁有。

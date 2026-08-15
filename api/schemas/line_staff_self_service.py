@@ -1,4 +1,5 @@
-"""Typed LIFF staff self-service schemas."""
+"""File: line_staff_self_service.py
+Description: 定義已驗證月嫂 LIFF 查詢與請假申請的傳輸模型。"""
 
 from __future__ import annotations
 
@@ -72,17 +73,51 @@ class StaffScheduleView(BaseModel):
 
 
 class StaffLeaveRequestCreate(StaffLiffRequest):
+    model_config = ConfigDict(extra="forbid")
+
     leave_start_date: date
     leave_end_date: date
     leave_reason: str = Field(default="", max_length=1000)
-    substitute_found: bool = False
-    substitute_name: str = Field(default="", max_length=100)
-    substitute_phone: str = Field(default="", max_length=30)
-    substitute_note: str = Field(default="", max_length=1000)
 
 
 class StaffLeaveRequestCreateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     request_id: int
     status: str
     staff_id: int
     staff_name: str
+    version: int
+
+
+class StaffLeaveRequestCancel(StaffLiffRequest):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class StaffServiceDayLogCreate(StaffLiffRequest):
+    model_config = ConfigDict(extra="forbid")
+    assignment_id: int = Field(gt=0)
+    service_date: date
+    baby_log_text: str = Field(min_length=1, max_length=5000)
+    meal_photo_media_ids: list[str] = Field(default_factory=list, max_length=10)
+
+
+class StaffServiceDayLogResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    log_id: int
+    case_no: str
+    service_date: str
+    requires_cooking: bool
+    outcome: str
+
+
+class StaffServiceDayMediaResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    media_id: str
+    content_type: str
+    size_bytes: int
+    outcome: str

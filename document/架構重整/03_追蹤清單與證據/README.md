@@ -16,6 +16,9 @@ evidence，不得整個 `evidence/` 載入上下文。
 | [legacy_active_201_可追蹤清單.md](legacy_active_201_可追蹤清單.md) / [.csv](legacy_active_201_可追蹤清單.csv) | 201 筆依 path pattern 產生的 legacy finding 初步分類清單；status 欄不是執行授權。 |
 | [過期文件候選清單_20260803.md](過期文件候選清單_20260803.md) | `document/文件整併工作區`、`document/架構重整` 範圍內可能過期文件的候選清單（第一版）。 |
 | [31_可刪暫存清單.md](31_可刪暫存清單.md) | 可丟棄測試產物（MySQL test evidence／pytest basetemp 等）的盤點，同樣不授權直接刪除。 |
+| [evidence/2026-08-16_react_admin_ui_surface_inventory.md](evidence/2026-08-16_react_admin_ui_surface_inventory.md) | Desktop React 11 頁、Login、Shell、17 個 Drawer、Modal／Tab／二級操作、mock／安全缺口與 backend disposition 候選的唯讀 inventory；不構成實作或退役授權。 |
+| [evidence/2026-08-16_line_notification_catalog_configuration_inventory.md](evidence/2026-08-16_line_notification_catalog_configuration_inventory.md) | LINE Notification Catalog 的去敏 current template／schedule revision 盤點；現時無 notification rule，系統維持 fail closed。 |
+| [evidence/2026-08-16_line_notification_catalog_backend_completion_receipt.md](evidence/2026-08-16_line_notification_catalog_backend_completion_receipt.md) | LINE Notification Catalog 後端、API／worker 測試與 developer-local schema replacement 收據；實體 LINE provider acceptance 未執行。 |
 | [evidence/2026-08-11_finance_amendment_focused_regression_receipt.md](evidence/2026-08-11_finance_amendment_focused_regression_receipt.md) | 四項 finance amendment 的 focused regression、schema release check 與 interactive browser evidence。 |
 | [Finance Amendment validation closeout receipt（封存）](../04_已完成與上線封存/receipts/2026-08-11_finance_amendment_release_preflight_receipt.md) | Finance Amendment isolated-test schema、UI Preview／Apply 與 focused regression 的結案收據。 |
 | [evidence/2026-08-11_ui_navigation_convergence_receipt.md](evidence/2026-08-11_ui_navigation_convergence_receipt.md) | 單一業務導覽、lazy page registry、訂單／帳務拆分的 focused regression 與 browser smoke。 |

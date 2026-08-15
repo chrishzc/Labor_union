@@ -40,6 +40,14 @@ LOCAL_RESUMABLE_PARTIAL_ARTIFACTS = frozenset({
     "185_customer_service_runtime.sql",
     "186_line_identity_management.sql",
 })
+NOTIFICATION_CATALOG_PARTS = frozenset({
+    "203_line_notification_rule_catalog.sql",
+    "204_scheduling_service_day_logs.sql",
+    "205_scheduling_service_day_checkpoints.sql",
+    "206_line_notification_recurring_intents.sql",
+    "207_scheduling_service_day_log_outbox_retry.sql",
+    "208_scheduling_rebuild_notification_invalidation.sql",
+})
 
 
 class LocalDatabaseUpdateError(RuntimeError):
@@ -104,6 +112,15 @@ def candidate_name(source: str, now=None) -> str:
     timestamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d%H%M%S")
     suffix = f"_local_{timestamp}"
     return f"{source[:MYSQL_IDENTIFIER_MAX_LENGTH - len(suffix)]}{suffix}"
+
+
+def validate_candidate_database(source: str, candidate: str) -> None:
+    if not migration.IDENTIFIER.fullmatch(candidate):
+        raise LocalDatabaseUpdateError("candidate database name is invalid")
+    if len(candidate) > MYSQL_IDENTIFIER_MAX_LENGTH:
+        raise LocalDatabaseUpdateError("candidate database name exceeds MySQL identifier limit")
+    if candidate == source:
+        raise LocalDatabaseUpdateError("candidate database must differ from source")
 
 
 def build_preview(config, source: str, candidate: str) -> dict[str, object]:
@@ -333,6 +350,11 @@ def apply_update(
     source = str(preview["source_database"])
     candidate = str(preview["candidate_database"])
     paths = artifact_paths(receipt_root, candidate)
+    if paths["directory"].exists():
+        return resume_update(
+            config, environment_file, preview, paths,
+            mysql_container=mysql_container,
+        )
     paths["directory"].mkdir(parents=True, exist_ok=False)
     migration.write_receipt(paths["plan"], preview["plan"])
     migration.create_source_dump(
@@ -361,19 +383,8 @@ def apply_update(
         allowed_partial_artifacts=LOCAL_RESUMABLE_PARTIAL_ARTIFACTS,
     )
     migration.verify_candidate(config, source, candidate, paths["operation"])
-    migration.create_source_dump(
-        config,
-        candidate,
-        paths["candidate_dump"],
-        paths["candidate_backup"],
-        **_container_argument(mysql_container),
-    )
-    replacement = replace_source_database(
-        config,
-        source,
-        candidate,
-        paths,
-        **_container_argument(mysql_container),
+    replacement = resume_or_replace_source(
+        config, source, candidate, paths, mysql_container=mysql_container
     )
     return {
         "status": "completed",
@@ -385,6 +396,143 @@ def apply_update(
         "environment_file_unchanged": str(environment_file),
         "restart_required": True,
     }
+
+
+# Kept together because a completed candidate dump may have reached source replacement before interruption.
+def resume_or_replace_source(
+    config,
+    source: str,
+    candidate: str,
+    paths: dict[str, Path],
+    *,
+    mysql_container=None,
+) -> dict[str, object]:
+    if paths["replacement"].is_file():
+        receipt = migration.read_receipt(paths["replacement"])
+        if receipt.get("source_database") != source or receipt.get("candidate_database") != candidate:
+            raise LocalDatabaseUpdateError("existing replacement receipt targets another database")
+        if receipt.get("status") == "completed":
+            return receipt
+        if receipt.get("status") == "prepared":
+            verification = verify_replacement(config, source, candidate)
+            receipt.update(status="completed", verification=verification, resumed=True)
+            migration.write_receipt(paths["replacement"], receipt)
+            return receipt
+        raise LocalDatabaseUpdateError("existing replacement receipt is not resumable")
+    if not paths["candidate_dump"].is_file():
+        migration.create_source_dump(
+            config,
+            candidate,
+            paths["candidate_dump"],
+            paths["candidate_backup"],
+            **_container_argument(mysql_container),
+        )
+    return replace_source_database(
+        config,
+        source,
+        candidate,
+        paths,
+        **_container_argument(mysql_container),
+    )
+
+
+# Kept together because an interrupted candidate is safe to continue only from its recorded schema phase.
+def resume_update(
+    config,
+    environment_file: Path,
+    preview: dict[str, object],
+    paths: dict[str, Path],
+    *,
+    mysql_container=None,
+) -> dict[str, object]:
+    source = str(preview["source_database"])
+    candidate = str(preview["candidate_database"])
+    required = (paths["plan"], paths["operation"], paths["dump"], paths["backup"])
+    if not all(path.is_file() for path in required):
+        raise LocalDatabaseUpdateError(
+            "existing candidate receipt directory is incomplete; choose a new candidate"
+        )
+    plan = migration.read_receipt(paths["plan"])
+    receipt = migration.read_receipt(paths["operation"])
+    plan_source = plan.get("source")
+    plan_source_database = (
+        plan_source.get("database") if isinstance(plan_source, dict) else None
+    )
+    if plan_source_database != source or plan.get("candidate_database") != candidate:
+        raise LocalDatabaseUpdateError("existing candidate plan targets another database")
+    if receipt.get("candidate_database") != candidate:
+        raise LocalDatabaseUpdateError("existing candidate operation targets another database")
+    status = receipt.get("status")
+    phase = receipt.get("phase")
+    if status == "prepared" and phase == "restore":
+        discard_incomplete_candidate(config, source, candidate)
+        migration.restore_candidate(
+            config,
+            source,
+            candidate,
+            paths["dump"],
+            paths["backup"],
+            paths["operation"],
+            **_container_argument(mysql_container),
+        )
+        status = "restored"
+    if status == "restored" or (status == "partial" and phase == "schema_apply"):
+        allowed_partial_artifacts = resumable_partial_artifacts(receipt)
+        migration.apply_schema(
+            config,
+            source,
+            candidate,
+            paths["plan"],
+            paths["operation"],
+            **_container_argument(mysql_container),
+            allowed_partial_artifacts=allowed_partial_artifacts,
+        )
+        status = "backfilled"
+    if status in migration.VERIFYABLE_CANDIDATE_STATUSES:
+        migration.verify_candidate(config, source, candidate, paths["operation"])
+        status = "verified"
+    if status != "verified":
+        raise LocalDatabaseUpdateError(
+            "existing candidate is not resumable from its recorded phase; choose a new candidate"
+        )
+    replacement = resume_or_replace_source(
+        config, source, candidate, paths, mysql_container=mysql_container
+    )
+    return {
+        "status": "completed",
+        "source_database": source,
+        "candidate_database": candidate,
+        "source_backup": str(paths["dump"]),
+        "receipt_directory": str(paths["directory"]),
+        "replacement": replacement,
+        "environment_file_unchanged": str(environment_file),
+        "resumed": True,
+        "restart_required": True,
+    }
+
+
+# Kept together because only a candidate stalled before restore can be discarded and recreated safely.
+def discard_incomplete_candidate(config, source: str, candidate: str) -> None:
+    validate_candidate_database(source, candidate)
+    connection = config.connect()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"DROP DATABASE IF EXISTS `{candidate}`")
+    finally:
+        connection.close()
+
+
+def resumable_partial_artifacts(receipt: dict[str, object]) -> frozenset[str]:
+    raw_steps = receipt.get("schema_steps")
+    steps = raw_steps if isinstance(raw_steps, list) else []
+    completed_parts = {
+        str(step.get("part"))
+        for step in steps
+        if isinstance(step, dict)
+    }
+    if completed_parts.intersection(NOTIFICATION_CATALOG_PARTS):
+        return LOCAL_RESUMABLE_PARTIAL_ARTIFACTS | NOTIFICATION_CATALOG_PARTS
+    return LOCAL_RESUMABLE_PARTIAL_ARTIFACTS
 
 
 def _container_argument(mysql_container: str | None) -> dict[str, str]:
@@ -421,6 +569,7 @@ def update_local_database(
         config, source = migration.config_from_env(environment_path)
         validate_local_source(config, source)
         target = candidate or candidate_name(source)
+        validate_candidate_database(source, target)
         preview = build_preview(config, source, target)
     except migration.UpgradeBlocked as error:
         raise LocalDatabaseUpdateError(str(error)) from error
@@ -447,7 +596,9 @@ def update_local_database(
     except migration.UpgradeBlocked as error:
         raise LocalDatabaseUpdateError(str(error)) from error
     except Exception as error:
-        raise LocalDatabaseUpdateError("database update execution failed") from error
+        raise LocalDatabaseUpdateError(
+            f"database update execution failed: {type(error).__name__}"
+        ) from error
 
 
 def parser() -> argparse.ArgumentParser:

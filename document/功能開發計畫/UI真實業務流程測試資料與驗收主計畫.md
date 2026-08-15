@@ -69,7 +69,9 @@ schema、seed、pytest 或資料庫 mutation。
 - 正式規格索引：`document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md`
 - Contract Signing：`21_Contract_Signing_Commitment與正常驗收資料鏈正式規格.md`
 - 銀行流水及帳務異常：`22_銀行流水匯入與帳務異常處理正式規格.md`
-- Import 相鄰計畫：`document/功能開發計畫/ADR-001-import-architecture-refactor.md`
+- Import 現行語意：`15_正式規格索引與裁決總表.md`、`09_Finance_Import_Domain.md`、
+  `17_External_Integration_LINE_Access正式規格.md`；入口退役相鄰計畫：
+  `document/架構重整/02_決策與退役執行記錄/Import_Entry_and_Legacy_Writer_Retirement_工作包.md`
 - WP56 只作歷史驗收與本輪 inventory 證據，不授權直接沿用其資料作為 current SSOT。
 
 ### 3.2 Scope
@@ -237,9 +239,10 @@ LINE、現行義務、現行政策重算或其他 current side effect。
 每個髒資料 row 都要有且只有一個 outcome：written、review、ignored、duplicate、retry-required 或
 batch-failed；總數必須守恆。無法唯一還原的識別碼或歷史政策只能保留 evidence/review，禁止猜值。
 
-現有 `ADR-001-import-architecture-refactor.md` 的 `IMP-P6-01～19` Historical Data Import Lane 仍是
-未完成代辦；`48/43/5` 回歸 fixture identity 也尚未找回或取得替代 corpus 裁決。Part 01 必須引用並
-收斂這些既有 gaps，不另造競爭代辦，也不得因本主計畫已 approved 就宣稱 Historical Import ready。
+Historical Import 的現行業務語意以 `15` 與 Orders／Case Import 正式規格及已封存的 WP80、WP92、
+WP95 evidence 為準；不得沿用 ADR-001 的歷史 checklist。若 Part 01 驗收仍缺 fixture identity、
+corpus 或 scenario evidence，必須在 Part 01 自己的 proposed 文件具名列出 owner、scope、驗收與
+人工裁決入口，不得因本主計畫已 approved 就宣稱 Historical Import ready。
 
 ## 8. 跨站不可破壞的不變量
 

@@ -1,4 +1,7 @@
-"""Composition root for canonical LINE webhook and independent worker adapters."""
+"""
+File: line_runtime.py
+Description: 組合 LINE webhook、設定、通知規則管理與獨立 worker 的 runtime adapters。
+"""
 
 from __future__ import annotations
 
@@ -21,6 +24,15 @@ from subsystems.line.runtime_contracts import (
 )
 from subsystems.line.runtime_cutover import validate_line_api_runtime
 from subsystems.line.configuration_application import LineConfigurationApplication
+from subsystems.line.notification_rule_administration import (
+    LineNotificationRuleAdministration,
+)
+from subsystems.line.notification_timeline_application import (
+    LineNotificationTimelineApplication,
+)
+from subsystems.line.notification_manual_replay_application import (
+    LineNotificationManualReplayApplication,
+)
 from subsystems.line.delivery_admin_application import (
     LineDeliveryTaskAdminApplication,
 )
@@ -47,6 +59,23 @@ def get_line_webhook_intake() -> LineWebhookIntake:
 @lru_cache(maxsize=1)
 def get_line_configuration_application() -> LineConfigurationApplication:
     return LineConfigurationApplication(open_line_unit_of_work)
+
+
+@lru_cache(maxsize=1)
+def get_line_notification_rule_administration() -> LineNotificationRuleAdministration:
+    return LineNotificationRuleAdministration(open_line_unit_of_work)
+
+
+@lru_cache(maxsize=1)
+def get_line_notification_timeline_application() -> LineNotificationTimelineApplication:
+    return LineNotificationTimelineApplication(open_line_unit_of_work)
+
+
+@lru_cache(maxsize=1)
+def get_line_notification_manual_replay_application() -> LineNotificationManualReplayApplication:
+    return LineNotificationManualReplayApplication(
+        open_line_unit_of_work, lambda: datetime.now(timezone.utc)
+    )
 
 
 @lru_cache(maxsize=1)
@@ -112,6 +141,9 @@ def record_line_webhook_security_receipt(
 
 __all__ = [
     "get_line_configuration_application",
+    "get_line_notification_rule_administration",
+    "get_line_notification_timeline_application",
+    "get_line_notification_manual_replay_application",
     "get_line_delivery_task_admin_application",
     "get_line_rich_menu_application",
     "get_line_order_group_query_application",

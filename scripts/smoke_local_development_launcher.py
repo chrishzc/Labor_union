@@ -1,4 +1,7 @@
-"""Start the Windows local service set, verify it, then stop owned processes."""
+"""
+File: smoke_local_development_launcher.py
+Description: 啟動 Windows 本機服務集合、驗證健康後停止本次擁有的 processes。
+"""
 
 from __future__ import annotations
 
@@ -30,7 +33,6 @@ def _service_commands() -> dict[str, list[str]]:
         "api": [python, "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000"],
         "streamlit": [python, "-m", "streamlit", "run", "ui/app.py", "--server.address", "127.0.0.1", "--server.port", "8501"],
         "runtime-monitor": [python, "-m", "scripts.run_service_monitor"],
-        "file-watcher": [python, "scripts/file_watcher.py"],
         "durable-worker": [python, "-m", "scripts.run_durable_job_worker"],
         "incident-worker": [python, "-m", "scripts.run_incident_worker"],
     }

@@ -1,5 +1,5 @@
 -- GENERATED FILE. Do not edit by hand.
--- Release: labor-union-validation-schema-2026-08-15-v3
+-- Release: labor-union-validation-schema-2026-08-16-v8
 -- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
 -- Rebuild with: python scripts/build_validation_schema_release.py
 
@@ -721,6 +721,411 @@ CREATE TABLE IF NOT EXISTS line_rich_menu_publications (
         REFERENCES admin_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- END SOURCE: db/schema.sql
+
+-- BEGIN SOURCE: db/schema_parts/202_scheduling_staff_leave_intake.sql
+-- File: 202_scheduling_staff_leave_intake.sql
+-- Description: 新增月嫂 LINE 請假待辦的版本化根事實、事件、receipt 與正式排班關聯。
+
+CREATE TABLE IF NOT EXISTS scheduling_staff_leave_request_aggregates (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    staff_id INT NOT NULL,
+    line_user_id VARCHAR(191) NOT NULL,
+    leave_start_date DATE NOT NULL,
+    leave_end_date DATE NOT NULL,
+    request_reason VARCHAR(1000) NOT NULL DEFAULT '',
+    request_status ENUM('pending','accepted_for_processing','rejected','cancelled','resolved') NOT NULL,
+    aggregate_version INT UNSIGNED NOT NULL DEFAULT 1,
+    request_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_leave_request_fingerprint (staff_id, request_fingerprint),
+    INDEX idx_staff_leave_request_queue (request_status, created_at, id),
+    CONSTRAINT fk_staff_leave_request_staff FOREIGN KEY (staff_id) REFERENCES staff(id),
+    CONSTRAINT chk_staff_leave_request_dates CHECK (leave_start_date <= leave_end_date),
+    CONSTRAINT chk_staff_leave_request_fingerprint CHECK (request_fingerprint REGEXP '^[0-9a-f]{64}$')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_staff_leave_request_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    request_id BIGINT NOT NULL,
+    aggregate_version INT UNSIGNED NOT NULL,
+    event_type VARCHAR(64) NOT NULL,
+    actor_id VARCHAR(191) NOT NULL,
+    reason VARCHAR(1000) NOT NULL DEFAULT '',
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_leave_request_event_version (request_id, aggregate_version),
+    CONSTRAINT fk_staff_leave_request_event_root FOREIGN KEY (request_id) REFERENCES scheduling_staff_leave_request_aggregates(id),
+    CONSTRAINT chk_staff_leave_request_event_text CHECK (CHAR_LENGTH(TRIM(event_type)) > 0 AND CHAR_LENGTH(TRIM(actor_id)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_staff_leave_request_receipts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    idempotency_key VARCHAR(191) NOT NULL,
+    request_id BIGINT NOT NULL,
+    request_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    result_snapshot JSON NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_leave_request_receipt_key (idempotency_key),
+    CONSTRAINT fk_staff_leave_request_receipt_root FOREIGN KEY (request_id) REFERENCES scheduling_staff_leave_request_aggregates(id),
+    CONSTRAINT chk_staff_leave_request_receipt_fingerprint CHECK (request_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_staff_leave_request_receipt_snapshot CHECK (JSON_TYPE(result_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_staff_leave_request_resolution_links (
+    request_id BIGINT PRIMARY KEY,
+    leave_substitution_receipt_key VARCHAR(191) NOT NULL,
+    linked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_staff_leave_resolution_receipt (leave_substitution_receipt_key),
+    CONSTRAINT fk_staff_leave_resolution_root FOREIGN KEY (request_id) REFERENCES scheduling_staff_leave_request_aggregates(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TRIGGER trg_staff_leave_request_events_before_update
+BEFORE UPDATE ON scheduling_staff_leave_request_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_events cannot be updated';
+
+CREATE TRIGGER trg_staff_leave_request_events_before_delete
+BEFORE DELETE ON scheduling_staff_leave_request_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_events cannot be deleted';
+
+CREATE TRIGGER trg_staff_leave_request_receipts_before_update
+BEFORE UPDATE ON scheduling_staff_leave_request_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_receipts cannot be updated';
+
+CREATE TRIGGER trg_staff_leave_request_receipts_before_delete
+BEFORE DELETE ON scheduling_staff_leave_request_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_receipts cannot be deleted';
+
+CREATE TRIGGER trg_staff_leave_resolution_links_before_update
+BEFORE UPDATE ON scheduling_staff_leave_request_resolution_links
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_resolution_links cannot be updated';
+
+CREATE TRIGGER trg_staff_leave_resolution_links_before_delete
+BEFORE DELETE ON scheduling_staff_leave_request_resolution_links
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_staff_leave_request_resolution_links cannot be deleted';
+-- END SOURCE: db/schema_parts/202_scheduling_staff_leave_intake.sql
+
+-- BEGIN SOURCE: db/schema_parts/203_line_notification_rule_catalog.sql
+-- File: 203_line_notification_rule_catalog.sql
+-- Description: 新增 LINE 可配置通知規則的來源事件、決策與意圖稽核資料模型。
+
+ALTER TABLE line_configuration_revisions
+    MODIFY COLUMN configuration_kind ENUM(
+        'message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules'
+    ) NOT NULL;
+
+ALTER TABLE line_configuration_current
+    MODIFY COLUMN configuration_kind ENUM(
+        'message_templates','message_schedules','rich_menus','liff','customer_service','notification_rules'
+    ) NOT NULL;
+
+CREATE TABLE IF NOT EXISTS line_notification_source_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    source_domain VARCHAR(64) NOT NULL,
+    event_code VARCHAR(64) NOT NULL,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_aggregate_type VARCHAR(191) NOT NULL,
+    source_aggregate_identity VARCHAR(191) NOT NULL,
+    source_version BIGINT UNSIGNED NOT NULL,
+    historical_silent BOOLEAN NOT NULL DEFAULT FALSE,
+    facts_snapshot JSON NOT NULL,
+    occurred_at_utc DATETIME(6) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_line_notification_source_identity (source_domain,event_code,source_event_identity),
+    INDEX idx_line_notification_source_due (event_code,historical_silent,occurred_at_utc,id),
+    CONSTRAINT chk_line_notification_source_facts CHECK (JSON_TYPE(facts_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_notification_decisions (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    source_event_id BIGINT UNSIGNED NOT NULL,
+    rule_revision_id BIGINT UNSIGNED NOT NULL,
+    rule_id VARCHAR(64) NOT NULL,
+    recipient_selector VARCHAR(64) NOT NULL,
+    recipient_type ENUM('user','group','room') NULL,
+    recipient_identity VARCHAR(191) NOT NULL DEFAULT '',
+    decision_status ENUM('suppressed','intent_created','cancelled_stale') NOT NULL,
+    reason_code VARCHAR(64) NOT NULL,
+    decision_snapshot JSON NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_line_notification_decision (source_event_id,rule_revision_id,rule_id,recipient_selector,recipient_identity),
+    INDEX idx_line_notification_decision_source (source_event_id,id),
+    CONSTRAINT fk_line_notification_decision_source FOREIGN KEY (source_event_id) REFERENCES line_notification_source_events(id),
+    CONSTRAINT fk_line_notification_decision_revision FOREIGN KEY (rule_revision_id) REFERENCES line_configuration_revisions(id),
+    CONSTRAINT chk_line_notification_decision_snapshot CHECK (JSON_TYPE(decision_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_notification_intents (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    decision_id BIGINT UNSIGNED NOT NULL,
+    delivery_task_id BIGINT UNSIGNED NULL,
+    template_revision_id BIGINT UNSIGNED NOT NULL,
+    template_id VARCHAR(64) NOT NULL,
+    payload_snapshot JSON NOT NULL,
+    payload_fingerprint CHAR(64) NOT NULL,
+    scheduled_at_utc DATETIME(6) NOT NULL,
+    intent_status ENUM('scheduled','cancelled','provider_accepted') NOT NULL DEFAULT 'scheduled',
+    cancellation_reason VARCHAR(64) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    cancelled_at_utc DATETIME(6) NULL,
+    UNIQUE KEY uq_line_notification_intent_decision (decision_id),
+    UNIQUE KEY uq_line_notification_intent_delivery (delivery_task_id),
+    INDEX idx_line_notification_intent_status (intent_status,scheduled_at_utc,id),
+    CONSTRAINT fk_line_notification_intent_decision FOREIGN KEY (decision_id) REFERENCES line_notification_decisions(id),
+    CONSTRAINT fk_line_notification_intent_delivery FOREIGN KEY (delivery_task_id) REFERENCES line_delivery_tasks(id),
+    CONSTRAINT fk_line_notification_intent_template FOREIGN KEY (template_revision_id) REFERENCES line_configuration_revisions(id),
+    CONSTRAINT chk_line_notification_intent_payload CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_line_notification_intent_fingerprint CHECK (payload_fingerprint REGEXP '^[0-9a-f]{64}$')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TRIGGER trg_line_notification_source_events_before_update
+BEFORE UPDATE ON line_notification_source_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_notification_source_events records cannot be updated';
+
+CREATE TRIGGER trg_line_notification_source_events_before_delete
+BEFORE DELETE ON line_notification_source_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_notification_source_events records cannot be deleted';
+
+CREATE TRIGGER trg_line_notification_decisions_before_update
+BEFORE UPDATE ON line_notification_decisions
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_notification_decisions records cannot be updated';
+
+CREATE TRIGGER trg_line_notification_decisions_before_delete
+BEFORE DELETE ON line_notification_decisions
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_notification_decisions records cannot be deleted';
+-- END SOURCE: db/schema_parts/203_line_notification_rule_catalog.sql
+
+-- BEGIN SOURCE: db/schema_parts/204_scheduling_service_day_logs.sql
+-- File: 204_scheduling_service_day_logs.sql
+-- Description: 新增月嫂服務日寶寶日誌、餐食照片關聯、完成事件與通知用 Scheduling outbox。
+
+CREATE TABLE IF NOT EXISTS scheduling_service_day_logs (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    assignment_id BIGINT NOT NULL,
+    staff_id INT NOT NULL,
+    staff_line_user_id VARCHAR(191) NOT NULL,
+    service_date DATE NOT NULL,
+    baby_log_text TEXT NOT NULL,
+    requires_cooking BOOLEAN NOT NULL,
+    content_fingerprint CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_scheduling_service_day_log_assignment_date (assignment_id, service_date),
+    UNIQUE KEY uq_scheduling_service_day_log_idempotency (idempotency_key),
+    INDEX idx_scheduling_service_day_log_case_date (case_no, service_date, id),
+    CONSTRAINT fk_scheduling_service_day_log_case FOREIGN KEY (case_no) REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_service_day_log_assignment FOREIGN KEY (assignment_id) REFERENCES case_staff_assignments(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_service_day_log_staff FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_scheduling_service_day_log_text CHECK (CHAR_LENGTH(TRIM(baby_log_text)) > 0),
+    CONSTRAINT chk_scheduling_service_day_log_fingerprint CHECK (content_fingerprint REGEXP '^[0-9a-f]{64}$')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_day_log_attachments (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    service_day_log_id BIGINT UNSIGNED NOT NULL,
+    provider_media_id VARCHAR(191) NOT NULL,
+    attachment_kind ENUM('meal_photo') NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_scheduling_service_day_log_attachment (service_day_log_id, provider_media_id),
+    CONSTRAINT fk_scheduling_service_day_log_attachment_root FOREIGN KEY (service_day_log_id) REFERENCES scheduling_service_day_logs(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_service_day_log_attachment_media FOREIGN KEY (provider_media_id) REFERENCES line_media_records(provider_media_id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_day_log_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    service_day_log_id BIGINT UNSIGNED NOT NULL,
+    assignment_id BIGINT NOT NULL,
+    staff_id INT NOT NULL,
+    service_date DATE NOT NULL,
+    event_type ENUM('submitted') NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_scheduling_service_day_log_event_root (service_day_log_id, event_type),
+    UNIQUE KEY uq_scheduling_service_day_log_event_idempotency (idempotency_key),
+    INDEX idx_scheduling_service_day_log_event_assignment_date (assignment_id, service_date, id),
+    CONSTRAINT fk_scheduling_service_day_log_event_root FOREIGN KEY (service_day_log_id) REFERENCES scheduling_service_day_logs(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_service_day_log_event_assignment FOREIGN KEY (assignment_id) REFERENCES case_staff_assignments(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_service_day_log_event_staff FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_day_log_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id BIGINT UNSIGNED NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    payload_snapshot JSON NOT NULL,
+    delivery_status ENUM('pending','processing','published','failed') NOT NULL DEFAULT 'pending',
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    published_at_utc DATETIME(6) NULL,
+    last_error_code VARCHAR(128) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_scheduling_service_day_log_outbox_event (event_id),
+    UNIQUE KEY uq_scheduling_service_day_log_outbox_intent (intent_key),
+    INDEX idx_scheduling_service_day_log_outbox_delivery (delivery_status, created_at_utc, id),
+    CONSTRAINT fk_scheduling_service_day_log_outbox_event FOREIGN KEY (event_id) REFERENCES scheduling_service_day_log_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_scheduling_service_day_log_outbox_payload CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TRIGGER trg_scheduling_service_day_log_attachments_before_update
+BEFORE UPDATE ON scheduling_service_day_log_attachments
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_day_log_attachments cannot be updated';
+
+CREATE TRIGGER trg_scheduling_service_day_log_attachments_before_delete
+BEFORE DELETE ON scheduling_service_day_log_attachments
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_day_log_attachments cannot be deleted';
+
+CREATE TRIGGER trg_scheduling_service_day_log_events_before_update
+BEFORE UPDATE ON scheduling_service_day_log_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_day_log_events cannot be updated';
+
+CREATE TRIGGER trg_scheduling_service_day_log_events_before_delete
+BEFORE DELETE ON scheduling_service_day_log_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_day_log_events cannot be deleted';
+-- END SOURCE: db/schema_parts/204_scheduling_service_day_logs.sql
+
+-- BEGIN SOURCE: db/schema_parts/205_scheduling_service_day_checkpoints.sql
+-- File: 205_scheduling_service_day_checkpoints.sql
+-- Description: 為已結束的正式服務日保存不可變 checkpoint 與 outbox，供 LINE 規則安全判斷寶寶日誌是否逾期。
+
+CREATE TABLE IF NOT EXISTS scheduling_service_day_checkpoints (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    case_no VARCHAR(50) NOT NULL,
+    assignment_id BIGINT NOT NULL,
+    schedule_id BIGINT NOT NULL,
+    staff_id INT NOT NULL,
+    service_date DATE NOT NULL,
+    service_ends_at_utc DATETIME(6) NOT NULL,
+    requires_cooking BOOLEAN NOT NULL,
+    baby_log_completed BOOLEAN NOT NULL DEFAULT FALSE,
+    checkpoint_key VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_scheduling_service_day_checkpoint_assignment_date (assignment_id, service_date),
+    UNIQUE KEY uq_scheduling_service_day_checkpoint_key (checkpoint_key),
+    INDEX idx_scheduling_service_day_checkpoint_due (service_ends_at_utc, id),
+    CONSTRAINT fk_scheduling_service_day_checkpoint_case FOREIGN KEY (case_no) REFERENCES orders(case_no)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_service_day_checkpoint_assignment FOREIGN KEY (assignment_id) REFERENCES case_staff_assignments(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_scheduling_service_day_checkpoint_staff FOREIGN KEY (staff_id) REFERENCES staff(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_scheduling_service_day_checkpoint_key CHECK (CHAR_LENGTH(TRIM(checkpoint_key)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_day_checkpoint_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    checkpoint_id BIGINT UNSIGNED NOT NULL,
+    event_type ENUM('service_ended') NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_scheduling_service_day_checkpoint_event_root (checkpoint_id, event_type),
+    UNIQUE KEY uq_scheduling_service_day_checkpoint_event_idempotency (idempotency_key),
+    CONSTRAINT fk_scheduling_service_day_checkpoint_event_root FOREIGN KEY (checkpoint_id) REFERENCES scheduling_service_day_checkpoints(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS scheduling_service_day_checkpoint_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id BIGINT UNSIGNED NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    payload_snapshot JSON NOT NULL,
+    delivery_status ENUM('pending','processing','published','failed') NOT NULL DEFAULT 'pending',
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    next_attempt_at_utc DATETIME(6) NULL,
+    published_at_utc DATETIME(6) NULL,
+    last_error_code VARCHAR(128) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_scheduling_service_day_checkpoint_outbox_event (event_id),
+    UNIQUE KEY uq_scheduling_service_day_checkpoint_outbox_intent (intent_key),
+    INDEX idx_scheduling_service_day_checkpoint_outbox_delivery (delivery_status, next_attempt_at_utc, id),
+    CONSTRAINT fk_scheduling_service_day_checkpoint_outbox_event FOREIGN KEY (event_id) REFERENCES scheduling_service_day_checkpoint_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_scheduling_service_day_checkpoint_outbox_payload CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TRIGGER trg_scheduling_service_day_checkpoints_before_update
+BEFORE UPDATE ON scheduling_service_day_checkpoints
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_day_checkpoints cannot be updated';
+
+CREATE TRIGGER trg_scheduling_service_day_checkpoints_before_delete
+BEFORE DELETE ON scheduling_service_day_checkpoints
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_day_checkpoints cannot be deleted';
+
+CREATE TRIGGER trg_scheduling_service_day_checkpoint_events_before_update
+BEFORE UPDATE ON scheduling_service_day_checkpoint_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_day_checkpoint_events cannot be updated';
+
+CREATE TRIGGER trg_scheduling_service_day_checkpoint_events_before_delete
+BEFORE DELETE ON scheduling_service_day_checkpoint_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'scheduling_service_day_checkpoint_events cannot be deleted';
+-- END SOURCE: db/schema_parts/205_scheduling_service_day_checkpoints.sql
+
+-- BEGIN SOURCE: db/schema_parts/206_line_notification_recurring_intents.sql
+-- File: 206_line_notification_recurring_intents.sql
+-- Description: 讓同一通知決策可保存受規則上限約束的多次每日提醒意圖。
+
+ALTER TABLE line_notification_intents
+    ADD COLUMN occurrence_number INT UNSIGNED NOT NULL DEFAULT 1 AFTER decision_id,
+    DROP INDEX uq_line_notification_intent_decision,
+    ADD UNIQUE KEY uq_line_notification_intent_decision_occurrence (decision_id, occurrence_number);
+-- END SOURCE: db/schema_parts/206_line_notification_recurring_intents.sql
+
+-- BEGIN SOURCE: db/schema_parts/207_scheduling_service_day_log_outbox_retry.sql
+-- File: 207_scheduling_service_day_log_outbox_retry.sql
+-- Description: 為服務日日誌完成 outbox 加入一秒間隔、最多三次的可恢復投影時點。
+
+ALTER TABLE scheduling_service_day_log_outbox
+    ADD COLUMN next_attempt_at_utc DATETIME(6) NULL AFTER attempt_count,
+    ADD INDEX idx_scheduling_service_day_log_outbox_retry (delivery_status, next_attempt_at_utc, id);
+-- END SOURCE: db/schema_parts/207_scheduling_service_day_log_outbox_retry.sql
+
+-- BEGIN SOURCE: db/schema_parts/208_scheduling_rebuild_notification_invalidation.sql
+-- File: 208_scheduling_rebuild_notification_invalidation.sql
+-- Description: 將排班重建的已取消指派以不可變 outbox 提供 LINE 取消尚未送出的舊提醒。
+
+CREATE TABLE IF NOT EXISTS scheduling_rebuild_notification_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    rebuild_event_id BIGINT NOT NULL,
+    intent_key VARCHAR(191) NOT NULL,
+    payload_snapshot JSON NOT NULL,
+    delivery_status ENUM('pending','processing','published','failed') NOT NULL DEFAULT 'pending',
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    next_attempt_at_utc DATETIME(6) NULL,
+    published_at_utc DATETIME(6) NULL,
+    last_error_code VARCHAR(128) NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_scheduling_rebuild_notification_outbox_event (rebuild_event_id),
+    UNIQUE KEY uq_scheduling_rebuild_notification_outbox_intent (intent_key),
+    INDEX idx_scheduling_rebuild_notification_outbox_delivery (delivery_status,next_attempt_at_utc,id),
+    CONSTRAINT fk_scheduling_rebuild_notification_outbox_event FOREIGN KEY (rebuild_event_id)
+        REFERENCES scheduling_rebuild_events(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_scheduling_rebuild_notification_outbox_payload CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema_parts/208_scheduling_rebuild_notification_invalidation.sql
 
 -- BEGIN SOURCE: db/schema_parts/20_staff_monthly_settlements.sql
 -- 服務人員月結摘要：每位服務人員、每個薪資歸屬月、每個修訂版一筆。

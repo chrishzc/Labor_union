@@ -1,9 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 File: import_client_hcm.py
-Description: 依 HCM 欄位契約選取 Excel 工作表，驗證後建立個案與洽談中訂單。
+Description: 提供 HCM typed Web intake 共用正規化；舊 CLI 寫入固定退役。
 """
-import argparse
 import sys
 import os
 import re
@@ -20,7 +19,6 @@ try:
 except Exception:
     pass
 
-# Let file_watcher.py run this script as a subprocess with project imports available.
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if ROOT not in sys.path:
     sys.path.append(ROOT)
@@ -362,135 +360,6 @@ class HcmLegacyRowIntake:
         return outcomes
 
 
-class HcmHistoricalRowIntake:
-    """Temporary HCM transition adapter: source business time determines overwrite order."""
-
-    def __init__(self, connection) -> None:
-        self._connection = connection
-
-    def load_frame(self, source_path: str):
-        return _load_hcm_frame(source_path)
-
-    def preview_rows(self, frame, source_path: str) -> dict[str, int]:
-        outcomes = {"ready": 0, "ready_with_warning": 0, "review_required": 0}
-        for _, row in frame.iterrows():
-            record = _normalized_record(row)
-            if not record.get("case_no") or not isinstance(record.get("created_at"), datetime):
-                outcomes["review_required"] += 1
-                continue
-            outcomes["ready_with_warning" if validate_hcm_row(row.to_dict()) else "ready"] += 1
-        return outcomes
-
-    def import_rows(self, frame, source_path: str) -> dict[str, int]:
-        counts = _result()
-        source_digest = fingerprint_workbook(source_path)
-        source_sheet = str(frame.attrs.get("source_sheet") or "HCM")
-        ordered_rows = _historical_rows_in_source_time_order(frame)
-        application = build_case_import_application(self._connection)
-        with self._connection.cursor() as cursor:
-            for ordinal, row in ordered_rows:
-                outcome = _import_historical_hcm_row(
-                    row, ordinal, cursor, application, source_path, self._connection, source_digest, source_sheet,
-                )
-                counts[outcome] += 1
-        return counts
-
-
-def _historical_rows_in_source_time_order(frame):
-    rows = tuple(enumerate((row for _, row in frame.iterrows()), start=1))
-    return tuple(sorted(rows, key=_historical_row_sort_key))
-
-
-def _historical_row_sort_key(item):
-    ordinal, row = item
-    created_at = _normalized_record(row).get("created_at")
-    return (created_at is None, created_at or datetime.max, ordinal)
-
-
-def _import_historical_hcm_row(
-    row, ordinal, cursor, application, source_path, connection, source_digest, source_sheet,
-):
-    raw_row = row.to_dict()
-    record = _normalized_record(row)
-    case_no = record.get("case_no")
-    errors = validate_hcm_row(raw_row)
-    if not case_no:
-        _persist_hcm_review(connection, source_digest, source_sheet, ordinal, raw_row, None, {
-            "查詢序號(案件編號)": "case_import_case_no_required",
-        })
-        return "review_required"
-    if not isinstance(record.get("created_at"), datetime):
-        errors["報名時間(建檔)"] = "報名時間(建檔) 格式無法轉成 datetime"
-        _persist_hcm_review(connection, source_digest, source_sheet, ordinal, raw_row, case_no, errors)
-        return "review_required"
-    if not _historical_case_exists(cursor, case_no):
-        return _import_row(
-            row, ordinal, cursor, application, source_path, connection=connection,
-            source_digest=source_digest, source_sheet=source_sheet,
-        )
-    _overwrite_historical_hcm_case(cursor, record, errors)
-    if errors:
-        _persist_hcm_review(connection, source_digest, source_sheet, ordinal, raw_row, case_no, errors)
-        return "inserted_with_warning"
-    return "inserted"
-
-
-def _historical_case_exists(cursor, case_no):
-    cursor.execute("SELECT case_no FROM clients WHERE case_no=%s FOR UPDATE", (case_no,))
-    return cursor.fetchone() is not None
-
-
-def _overwrite_historical_hcm_case(cursor, record, errors):
-    overwrite_record = _partial_hcm_record(record, errors)
-    _overwrite_historical_client(cursor, overwrite_record)
-    _overwrite_historical_order_terms(cursor, overwrite_record)
-
-
-def _overwrite_historical_client(cursor, record):
-    attributes = {
-        column: value for column, value in record.items()
-        if column in CLIENTS_FIELD_MAPPING.values() and column != "case_no"
-    }
-    assignments = ",".join(f"`{column}`=%s" for column in sorted(attributes))
-    cursor.execute(
-        f"UPDATE clients SET {assignments} WHERE case_no=%s",
-        tuple(attributes[column] for column in sorted(attributes)) + (record["case_no"],),
-    )
-
-
-def _overwrite_historical_order_terms(cursor, record):
-    service_hours, start_time, end_time, end_offset = _historical_service_time_values(record)
-    end_date = _historical_end_date(cursor, record)
-    cursor.execute(
-        "UPDATE orders SET service_days=%s,service_hours_per_day=%s,start_date=%s,end_date=%s,"
-        "service_start_time=%s,service_end_time=%s,service_end_day_offset=%s WHERE case_no=%s",
-        (
-            record.get("service_days"), service_hours, record.get("service_start_date"), end_date,
-            start_time, end_time, end_offset, record["case_no"],
-        ),
-    )
-
-
-def _historical_service_time_values(record):
-    value = record.get("service_time")
-    if not isinstance(value, str):
-        return None, None, None, None
-    try:
-        return parse_hcm_service_time(value)
-    except ValueError:
-        return None, None, None, None
-
-
-def _historical_end_date(cursor, record):
-    start_date = record.get("service_start_date")
-    service_days = record.get("service_days")
-    if type(start_date) is not date or not isinstance(service_days, int):
-        return None
-    return _calculate_service_end_date(
-        start_date, service_days, record.get("service_type"), _load_holiday_dates(cursor),
-    )
-
-
 # Kept cohesive because every row gate must resolve to one observable outcome.
 def _import_row(
     row,
@@ -780,27 +649,3 @@ def _apply_command(intent, preview, correlation, source_file):
         f"Import negotiated HCM case from {os.path.basename(source_file)}.",
         correlation,
     )
-
-
-def _parse_hcm_apply_arguments(arguments: list[str]) -> str:
-    """Require explicit operator intent before the legacy CLI writes case roots."""
-    parser = argparse.ArgumentParser(description="HCM 案件資料受控匯入")
-    parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--confirm-database")
-    parser.add_argument("workbook")
-    parsed = parser.parse_args(arguments)
-    if not parsed.apply:
-        raise RuntimeError("hcm_import_apply_flag_required")
-    configured_database = os.getenv("DB_DATABASE", "").strip()
-    if parsed.confirm_database != configured_database:
-        raise RuntimeError("hcm_import_database_confirmation_required")
-    return parsed.workbook
-
-
-if __name__ == "__main__":
-    try:
-        excel_arg = _parse_hcm_apply_arguments(sys.argv[1:])
-    except RuntimeError as error:
-        print(f"HCM 匯入已阻擋：{error}")
-        raise SystemExit(2) from error
-    process_import(excel_arg)

@@ -1,7 +1,4 @@
-"""
-File: test_line_customer_service_first_release.py
-Description: 驗證客服首版與 Rich Menu 的 canonical LIFF 入口契約。
-"""
+"""檔案：客服與 Rich Menu 的 canonical LIFF 入口契約測試。"""
 
 from datetime import datetime, timezone
 import hashlib
@@ -13,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from api.routes import line_identity
+from api.routes import line_mobile_admin
 from api.schemas.line_identity import LineIdentityFlowOpenRequest
 from domains.customer_service.ticket import (
     CustomerServiceCategory,
@@ -330,3 +328,13 @@ def test_deferred_history_records_legacy_paths_that_must_not_return():
     assert "query string `userId`" in history
     assert "人工 Preview／Apply" in history
     assert "直接 UPDATE clients" in history
+
+
+def test_mobile_admin_actor_is_not_restricted_by_persisted_role():
+    admin = SimpleNamespace(admin_user_id=7, role="line_viewer")
+
+    actor = line_mobile_admin._actor_for_admin(admin)
+
+    assert actor.actor_id == "admin:7"
+    assert actor.permission_scope == ("line.identity.review",)
+    assert "line_viewer" not in actor.permission_scope

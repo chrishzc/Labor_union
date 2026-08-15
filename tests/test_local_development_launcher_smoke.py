@@ -1,4 +1,7 @@
-"""Safety contracts for the controlled Windows launcher smoke."""
+"""
+File: test_local_development_launcher_smoke.py
+Description: 驗證受控 Windows launcher smoke 的安全契約。
+"""
 
 from __future__ import annotations
 
@@ -60,7 +63,7 @@ def test_service_commands_match_the_windows_launcher_modules(monkeypatch) -> Non
     assert commands["runtime-monitor"][-1] == "scripts.run_service_monitor"
     assert commands["durable-worker"][-1] == "scripts.run_durable_job_worker"
     assert commands["incident-worker"][-1] == "scripts.run_incident_worker"
-    assert commands["file-watcher"][-1] == "scripts/file_watcher.py"
+    assert "file-watcher" not in commands
 
 
 def test_service_commands_skip_unconfigured_line_worker(monkeypatch) -> None:

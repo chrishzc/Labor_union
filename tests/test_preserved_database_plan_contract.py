@@ -21,6 +21,7 @@ from infrastructure.migration.rehearsal_runtime import (
     EphemeralCandidateRestartPort,
 )
 from scripts import migrate_preserved_database_additive_schema as runner
+from scripts.schema_assembly import load_schema_assembly
 
 
 def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
@@ -32,6 +33,19 @@ def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
     }
 
     assert required_manifests <= set(runner.DEFAULT_RELEASE_MANIFESTS)
+
+
+def test_current_notification_schema_parts_are_always_in_preserve_data_chain() -> None:
+    """A fresh-only notification part would make local upgrades silently incomplete."""
+    notification_parts = {
+        path.name
+        for path in load_schema_assembly().active_artifact_paths
+        if path.name.split("_", 1)[0].isdigit()
+        and 203 <= int(path.name.split("_", 1)[0]) <= 208
+    }
+    preserve_parts = {path.name for path in runner.SCHEMA_PARTS}
+
+    assert notification_parts <= preserve_parts
 
 
 def test_every_catalog_descriptor_and_schema_artifact_has_exact_hash() -> None:
@@ -287,7 +301,7 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-15:] == (
+    assert artifact_names[-22:] == (
         "188_matching_preferences_and_staff_availability.sql",
         "189_client_refund_recipient_snapshot_local_upgrade.sql",
         "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
@@ -301,6 +315,13 @@ def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
         "198_case_import_pending_completion_status.sql",
         "200_finance_import_source_reviews.sql",
         "201_hcm_resubmission_corrections.sql",
+        "202_scheduling_staff_leave_intake.sql",
+        "203_line_notification_rule_catalog.sql",
+        "204_scheduling_service_day_logs.sql",
+        "205_scheduling_service_day_checkpoints.sql",
+        "206_line_notification_recurring_intents.sql",
+        "207_scheduling_service_day_log_outbox_retry.sql",
+        "208_scheduling_rebuild_notification_invalidation.sql",
         "999_v_order_details_view.sql",
         "1000_staff_retirement.sql",
     )

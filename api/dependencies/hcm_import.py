@@ -7,7 +7,7 @@ from infrastructure.mysql.hcm_workbook_import_repository import HcmWorkbookImpor
 from infrastructure.mysql.hcm_resubmission_repository import MySqlHcmResubmissionRepository
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
-from scripts.imports.import_client_hcm import HcmHistoricalRowIntake, HcmLegacyRowIntake, normalize_hcm_row
+from scripts.imports.import_client_hcm import HcmLegacyRowIntake, normalize_hcm_row
 from subsystems.case_import.hcm_workbook_import import HcmWorkbookImportService
 from subsystems.case_import.hcm_resubmission_workflow import HcmResubmissionWorkflow
 from subsystems.case_import.hcm_resubmission_workbook import HcmResubmissionWorkbookService
@@ -19,17 +19,6 @@ def get_hcm_workbook_import_service():
         yield HcmWorkbookImportService(
             HcmWorkbookImportRepository(connection),
             HcmLegacyRowIntake(connection),
-        )
-    finally:
-        connection.close()
-
-
-def get_hcm_historical_workbook_import_service():
-    connection = get_connection()
-    try:
-        yield HcmWorkbookImportService(
-            HcmWorkbookImportRepository(connection),
-            HcmHistoricalRowIntake(connection),
         )
     finally:
         connection.close()

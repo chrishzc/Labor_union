@@ -1,8 +1,18 @@
-# Access Control：TOTP、帳號管理與內部金鑰退役功能開發計畫
+---
+doc_type: work-package
+declared_status: blocked
+date: 2026-08-10
+owner: Access Control / Global Security
+domain: Internal Access
+subsystem: Authentication, MFA, account administration and legacy-key retirement
+implementation_authorization: not-granted
+---
 
-> 狀態：`proposed-awaiting-human-confirmation`  
-> 日期：2026-08-10  
-> 本文件是後續改善計畫與待辦基線，不授權修改 production code、schema 或 pytest。  
+# Access Control：TOTP、帳號管理與內部金鑰退役工作包
+
+> 狀態：`blocked／awaiting-human-confirmation`
+> 日期：2026-08-10
+> 本工作包不授權修改 production code、schema 或 pytest。
 > 必須先整體人工確認本文件的 `Global → Domain → Subsystem → Module` 架構，才可開始實作。
 
 ## 1. 目標與業務場景

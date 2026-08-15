@@ -1,11 +1,23 @@
-# LINE 訂單狀態自動推送通知：狀態盤點與觸發串接計畫
+---
+doc_type: work-package
+declared_status: completed
+date: 2026-08-15
+owner: Orders / Scheduling / LINE Integration
+domain: Orders / Scheduling / LINE Integration
+subsystem: Notification Catalog
+implementation_authorization: approved-by-user-2026-08-15
+write_set: domains/line notification policy; Orders/Scheduling/Client Finance/Case Import notification event adapters; subsystems/line notification workflow and worker guard; MySQL additive release; notification API and API tests; formal LINE contract; entrypoint queue; evidence/archive manifest
+out_of_scope: Streamlit or React UI; real LINE provider acceptance; production DB application; unregistered future Domain event writers
+---
+
+# LINE 可配置通知規則後端工作包
 
 ## 文件狀態
 
-- 文件類型：新功能改善計畫；不屬於架構重整文件。
-- 狀態：`Proposed／待人工確認通知目錄`。
-- 優先級：`P0 狀態盤點與規格確認`；production 實作順位接在「休假代班天數精算與行事曆差異預覽修復」及「月嫂配對中心：單月嫂預設」之後。
-- 本文件完成前不得開始 production code、schema migration 或 pytest 修改。
+- 文件類型：正式 LINE Notification Rule 後端工作包。
+- 狀態：`completed`；2026-08-16 已完成可配置通知後端、月嫂寶寶日誌／餐食照片 root fact、API／worker 驗收與 developer-local schema replacement。實體 LINE provider acceptance 依 frontmatter `out_of_scope` 未執行。
+- 優先級：`P0 規則配置架構與根事實盤點`；production 實作順位接在「休假代班天數精算與行事曆差異預覽修復」及「月嫂配對中心：單月嫂預設」之後。
+- 事件白名單、condition grammar、schema write set 與「編輯 → 預覽 → 儲存啟用／刪除」command 已依第 5.12、6～10 節收斂；未知事件、predicate 或收件人一律 fail closed。
 - 本文件只定義功能邊界、盤點方法與代辦；訊息文字仍以 LINE 管理頁核准版本為準。
 
 ## 1. 使用者需求
@@ -13,7 +25,7 @@
 1. 訂單狀態或業務里程碑推進時，系統依規則自動推送 LINE 訊息給客戶、月嫂或兩者；
 2. 沿用 LINE 管理頁已可維護的訊息範本，不把正式文字寫死在程式；
 3. 補上「狀態／事件紀錄 → 規則判斷 → 建立發送任務 → 發送結果」完整鏈路；
-4. 實作前先確認所有應記錄事件、收件人、發送時機與例外；
+4. 提供可配置的觸發、收件人、範本、時間、頻率與條件；新增規則不應要求修改程式；
 5. 納入既有雛型，例如客戶資料少填／尚未填 BeClass 問卷；
 6. 管理員能查明某一則訊息為何已發送、尚未發送、被抑制或發送失敗。
 
@@ -70,6 +82,14 @@
 - 修改規則只影響規則生效版本之後的新 source event，除非人工執行重新評估。
 
 ## 4. Global → Domain → Subsystem → Module
+
+### 4.0 本次可啟用的事件邊界
+
+規則後端可管理所有已登錄 event／checkpoint／predicate，但只能對已有 owning-Domain committed event
+adapter 的種類啟用。本工作包承接 Orders、Scheduling、Client Finance 與 Case Import 已存在的 committed
+event／outbox adapter；未來其他 owner event writer 必須另立 Work Package。本工作包不以 current-state
+polling、管理 API 或 LINE webhook 偽造業務事件。沒有已登錄 adapter 的規則可儲存及 Preview，儲存啟用
+必須 fail closed。
 
 ### 4.1 Global
 
@@ -272,6 +292,85 @@ waiting_for_beclass
 
 上述項目應寫 decision／audit，必要時投影行政異常，但不應讓客戶或月嫂收到內部技術訊息。
 
+### 5.6 2026-08-15 人工確認：BeClass 未完成提醒邊界
+
+Notification Catalog v1 的「少填資料」僅指**已綁定 LINE 的客戶尚未有有效 BeClass 完成事實**。
+它走 `FLOW-04`／`FLOW-25` 的既定節奏。已提交表單但欄位缺漏、格式無效或身份關聯歧義，維持
+異常中心追蹤與 owning 業面補正；不建立客戶自動推播。合約資料與服務資料也不納入本規則，待各自
+owner 有正式 source event 與 command 後另立 Notification Rule。
+
+### 5.7 2026-08-15 人工確認：FLOW-13 服務前動線與食材提醒
+
+`FLOW-12` 是雙方群組的開始：在訂金正式確認（`FLOW-11`）後，人工建立並記錄以市府訂單 ID 命名的
+LINE 群組。後續服務前雙方訊息不得改以個別私訊繞過這個邊界。
+
+`FLOW-13` 是一次性服務前提醒，不是可由 LINE 對話自動判定完成的催收流程。收件人為 `FLOW-12` 已
+成功建立、且明確對應該服務案及現行正式指派的客戶／月嫂雙方群組；觸發條件為該指派仍有效，且服務
+開始日前三天（`FLOW-16`）。每一服務案／指派版本只建立一次投遞任務。投遞任務建立成功後即不再
+提醒；LINE 回覆、已讀或聊天內容都不是完成事實。群組尚未建立、群組關聯不明或指派已變更時，必須
+fail closed 並建立行政處理警示，不得改以私訊補發。
+
+若未來要按「已回傳動線與食材」停止或加強催收，必須先由 Scheduling 建立可驗證的回傳資料及完成
+事實，並以新的 owner event／Notification Rule 承接。
+
+### 5.8 2026-08-15 人工確認：FLOW-14 食材與備課確認收件群組
+
+`FLOW-14` 同樣投遞至 `FLOW-12` 已成功建立、且明確對應該服務案及現行正式指派的客戶／月嫂雙方
+群組；不得改用任一方私訊。觸發條件為指派仍有效且服務開始日前三天（`FLOW-16`），每一服務案／
+指派版本只建立一次投遞任務。投遞任務建立成功後即不再提醒；LINE 回覆、已讀或聊天內容不是完成
+事實。群組不存在、關聯不明或指派版本已失效時，fail closed 並建立行政處理警示。
+
+### 5.9 2026-08-15 人工確認：FLOW-15 動線與時間討論提醒
+
+`FLOW-15` 是服務前 D-3 的一次性討論提醒。收件人為 `FLOW-12` 已成功建立、且明確對應該服務案
+及現行正式指派的客戶／月嫂雙方群組；觸發條件為指派仍有效且服務開始日前三天（`FLOW-16`）。每一
+服務案／指派版本只建立一次投遞任務。投遞任務建立成功後即不再提醒；LINE 回覆、已讀或聊天內容
+不是完成事實。群組不存在、關聯不明或指派版本已失效時，fail closed 並建立行政處理警示。
+
+### 5.10 2026-08-15 人工確認：FLOW-17 寶寶狀況確認提醒
+
+`FLOW-17` 是服務前 D-3 的一次性確認提醒。收件人為 `FLOW-12` 已成功建立、且明確對應該服務案
+及現行正式指派的客戶／月嫂雙方群組；觸發條件為指派仍有效且服務開始日前三天（`FLOW-16`）。每一
+服務案／指派版本只建立一次投遞任務。投遞任務建立成功後即不再提醒；LINE 回覆、已讀或聊天內容
+不是完成事實。群組不存在、關聯不明或指派版本已失效時，fail closed 並建立行政處理警示。
+
+### 5.11 2026-08-15 人工確認：FLOW-18 餐食討論提醒
+
+`FLOW-18` 是服務前 D-3 的一次性討論提醒。只有 Orders root 的 `requires_cooking` 已由正式
+Orders Terms 事實確認為 `true` 時，才可建立投遞任務；`false` 與 `NULL`（未知、缺漏、矛盾或尚未
+唯一配對）一律不發送。收件人為 `FLOW-12` 已成功建立、且明確對應該服務案及現行正式指派的客戶／
+月嫂雙方群組；觸發條件為指派仍有效且服務開始日前三天（`FLOW-16`）。每一服務案／指派版本只建立
+一次投遞任務。投遞任務建立成功後即不再提醒；LINE 回覆、已讀或聊天內容不是完成事實。群組不存在、
+關聯不明或指派版本已失效時，fail closed 並建立行政處理警示。
+
+### 5.12 2026-08-15 人工確認：通知規則改為後台可配置
+
+本工作包不將 `FLOW-*` 的收件人、固定訊息、時間節點、發送頻率或狀態條件寫死在程式。後台操作固定
+呈現為「編輯 → 預覽 → 儲存啟用／刪除」：編輯先形成不生效的草稿；預覽以去識別化事實顯示影響；
+儲存啟用才發布新 revision；已啟用規則的「刪除」必須停止未來 evaluation，並取消所有尚未交給 LINE
+provider 的舊 rule intent，確保舊訊息不再套用；保留歷史版本、intent 與 delivery receipt。provider 已
+接受或已送達的訊息無法撤回，必須在時間軸明示。從未啟用、也沒有任何 inbound reference 的草稿才可
+實體刪除。§5.7～§5.11 是已討論的**初始規則內容
+範例**，未來可由發布新 revision 調整，不得以修改資料列或覆寫舊 receipt 改寫歷史。
+
+規則可設定：
+
+- 觸發節點：只能選擇已登錄、由 owning Domain 提供的 immutable event 或 service-time checkpoint；
+- 收件人：客戶、現行有效指派月嫂、或已明確綁定該服務案的雙方 LINE 群組；
+- 固定訊息：選擇已發布 template revision 與受允許變數，不能輸入任意 provider payload；
+- 時機與頻率：立即、相對服務時間（如 D-3）、服務結束時、一次性或受上限約束的週期；
+- 前置／停止條件：只能由白名單 root fact、事件或可驗證 existence predicate 組成，不能以 LINE 已讀、
+  聊天內容或任意 SQL／自由文字判定；
+- 變更範圍：只影響發布後的新 evaluation；已排程但尚未發送的 intent 是否取消，必須在 Publish Preview
+  明示並留下 receipt。
+
+`FLOW-20` 的業務語意成為此能力的代表案例：在某服務日的正式服務結束 checkpoint，僅當目前有效
+assignment 的月嫂尚未有該服務日的寶寶日誌完成事實時，規則才符合。實際收件人、模板、延遲、頻率與
+上限由後台發布的 rule revision 決定；資料未知、assignment／日誌關聯不唯一或群組關聯不明時一律
+fail closed，寫入可處理的行政警示而非猜測發送。
+
+此類警示使用 `LINE-006`（`line_notification`）：fingerprint 為 `case_no + notification_reason`，唯一 follow-up 是唯讀 `QueryLineNotificationTimeline`；不提供在異常中心直接重送或改寫通知。
+
 ## 6. Notification Rule typed contract
 
 每條正式規則至少包含：
@@ -281,18 +380,20 @@ rule_id
 rule_version
 enabled
 source_domain
-trigger_kind
-before_status? / after_status?
-recipient_roles[]
-template_id
-send_timing: immediate | delayed | business_time
-delay_policy?
-prerequisites[]
-suppression_policy[]
+trigger_kind / source_event_code / checkpoint_code?
+recipient_selector
+template_revision_id
+schedule_policy: immediate | relative_service_time | service_end | business_time
+frequency_policy: once | recurring_bounded
+condition_expression[]
+suppression_policy[] / stop_expression[]
+published_at / retired_at
 effective_from / effective_until?
 ```
 
-規則不得只保存中文名稱。`trigger_kind`、recipient role、prerequisite 與 suppression reason 必須是穩定 machine-readable code。
+規則不得只保存中文名稱。觸發、收件人 selector、template revision、schedule、frequency、condition、
+suppression 與停止條件都必須是穩定、白名單化的 machine-readable code；後台不能提供 SQL、任意
+Python expression、任意 webhook payload 或直接送 LINE 的捷徑。
 
 ## 7. 根事實、衍生值與狀態機
 
@@ -342,8 +443,10 @@ source_event observed
 4. intent、template snapshot、recipient snapshot、delivery task 在 LINE UoW 同一交易建立；
 5. provider timeout／429／5xx 依既有 bounded retry；輸入缺資料、無綁定或 identity conflict 不做技術 retry；
 6. 取消訂單、服務日期變更、換月嫂時，以 source linkage 取消仍 pending 的 stale future tasks；已 sent 訊息不得刪除，只能追加更正通知；
-7. Reconciler 驗證「符合規則的 source events 是否都有 terminal decision」，只補建缺失 decision，不盲目重送；
-8. 排程到期前再次驗證 source version／recipient binding／rule validity；stale 時轉 `cancelled_stale`。
+7. 規則刪除必須與 worker 取得 task 的 lease 互斥：刪除先取消尚未 provider-accepted 的 intent，worker
+   在 provider request 前重讀 intent cancellation state；不能讓已刪除規則的 queued／retry task 穿透送出；
+8. Reconciler 驗證「符合規則的 source events 是否都有 terminal decision」，只補建缺失 decision，不盲目重送；
+9. 排程到期前再次驗證 source version／recipient binding／rule validity；stale 或已刪除時轉 `cancelled_stale`。
 
 ## 9. Typed errors 與 suppression reasons
 
@@ -377,64 +480,66 @@ source_event observed
 
 外部訊息不得包含內部 error code；管理 UI 則必須顯示 typed reason 與可採取的人工動作。
 
-## 10. LINE 管理頁調整
+## 10. 後台 API 與未來管理介面
 
-在現有 LINE 管理頁新增「訂單自動通知」子頁，與「新好友自動通知」分開：
+先提供獨立、typed 的 LINE Notification bounded-domain 後台 API；目前不投入 Streamlit 頁面。未來 React
+管理介面使用此 API，並與「新好友自動通知」分開呈現。操作流程固定是「編輯 → 預覽 → 儲存啟用／刪除」：
 
-1. **通知規則矩陣**：觸發事件、收件人、範本、時機、是否啟用、規則版本；
+1. **通知規則矩陣**：觸發事件、收件人、範本、時機、是否啟用、規則版本與刪除狀態；
 2. **規則 Preview**：以去識別化 sample facts 顯示哪些人會收到哪則訊息；
 3. **訂單通知時間軸**：source event、decision、task、attempt、sent／suppressed reason；
 4. **待處理問題**：缺 LINE 綁定、identity conflict、範本缺變數、terminal failure；
 5. **人工補發**：需要 capability、reason、preview、固定 idempotency key 與 receipt；
 6. **變更影響預覽**：修改規則前顯示只影響新事件，或會取消哪些尚未送出的 future tasks。
 
-Streamlit 只能使用獨立 LINE Notification bounded-domain API client 與 typed views，不得讀 raw DB 或自行判斷狀態。
+React 或其他替換式前端只能使用獨立 LINE Notification bounded-domain API 與 typed views，不得讀 raw DB 或
+自行判斷狀態。後台 UI 也不得暴露任意 SQL、任意條件式或直接 LINE provider 呼叫。
 
 ## 11. 實作待辦
 
-### P0：狀態與通知目錄人工確認
+### P0：可配置規則架構與 source-event registry
 
-- [ ] `LINE-AUTO-P0-01` 匯出 DB current message template／schedule revision，與 committed bootstrap config 比對；
-- [ ] `LINE-AUTO-P0-02` 列出所有 production order lifecycle event writers 與 trigger event；
-- [ ] `LINE-AUTO-P0-03` 盤點 Matching、Scheduling、Contract、Client Finance、BeClass completeness 等 source events；
-- [ ] `LINE-AUTO-P0-04` 逐列確認第 5 節 trigger、收件人、訊息、時機、前置條件與 suppression；
-- [ ] `LINE-AUTO-P0-05` 定義「客戶少填資料」的完整欄位規則、到期點、提醒頻率與完成條件；
-- [ ] `LINE-AUTO-P0-06` 確認哪些既有訊息範本可沿用、哪些需新增或合併；
-- [ ] `LINE-AUTO-P0-07` 確認歷史匯入永遠 silent，及人工補發的核准權限；
-- [ ] `LINE-AUTO-P0-08` 產出並人工簽核 Notification Catalog v1；未簽核不得進 P1。
+- [x] `LINE-AUTO-P0-01` 匯出 DB current message template／schedule revision，與 committed bootstrap config 比對；去敏指紋與裁決見 `03_追蹤清單與證據/evidence/2026-08-16_line_notification_catalog_configuration_inventory.md`。
+- [x] `LINE-AUTO-P0-02` 列出所有 production order lifecycle event writers 與 trigger event；證據為 `order_lifecycle_state_events`／`orders_domain_outbox`，由 `order_lifecycle_impact_writer.py` 在同一交易寫入。
+- [x] `LINE-AUTO-P0-03` 盤點 Matching、Scheduling、Contract、Client Finance、BeClass completeness 等 source events；Client Finance 有 `client_finance_outbox`，Scheduling 以 service-day checkpoint 與 rebuild notification outbox 承接，BeClass 仍只有綁定資料列、未納入本次啟用。
+- [x] `LINE-AUTO-P0-04` 定義可配置 rule grammar：trigger／recipient／template／schedule／frequency／condition／suppression／stop 的白名單與型別；實作於 `domains/line/notification_rules.py`。
+- [x] `LINE-AUTO-P0-05` 定義 service-time checkpoint、日誌存在判斷、群組關聯、`requires_cooking` 等可供 rule 使用的 root-fact predicate registry；Scheduling checkpoint 與日誌完成 root fact 已由 `204`／`205` 建立。
+- [x] `LINE-AUTO-P0-06` 確認既有範本僅涵蓋綁定、客服與新好友引導；服務日提醒不得挪用，管理員必須先發布合適 template revision，見上述盤點收據。
+- [x] `LINE-AUTO-P0-07` 確認歷史匯入永遠 silent，及人工補發的核准權限；裁決見 §3.3、§13.5。
+- [x] `LINE-AUTO-P0-08` 產出並人工簽核 Notification Rule Catalog v1（可配置 rule definition，不要求預先逐條硬編碼）；裁決見 §5.12。
 
 ### P1：事件與規則架構
 
-- [ ] `LINE-AUTO-P1-01` 建立 provider-neutral `NotificationTrigger`／`NotificationRule`；
-- [ ] `LINE-AUTO-P1-02` 為每個 owning Domain 定義 outbox contract，不以 current-state polling 取代事件；
-- [ ] `LINE-AUTO-P1-03` 建立 rule revision、effective period、recipient policy 與 suppression policy；
-- [ ] `LINE-AUTO-P1-04` 建立 historical／migration source classification；
-- [ ] `LINE-AUTO-P1-05` 設計 additive schema、release descriptor 與 rollback／writer cutover 順序。
+- [x] `LINE-AUTO-P1-01` 建立 provider-neutral `NotificationTrigger`／`NotificationRule`；實作為 `NotificationSourceEvent`、versioned rule definition 與 `NotificationDecision`。
+- [x] `LINE-AUTO-P1-02` 為 Orders lifecycle、Client Finance deposit 與 Scheduling service-time checkpoint 定義 immutable outbox adapter；未知或未登錄 owner event 一律不投影，實作於 `subsystems/line/notification_source_adapters.py`。
+- [x] `LINE-AUTO-P1-03` 建立 rule revision、effective period、recipient policy 與 suppression policy；規則預設 shadow，只有 `enabled=true` 才建立 task；群組必須為 active 且雙方 joined。
+- [x] `LINE-AUTO-P1-04` 建立 historical／migration source classification；`historical_silent` 與 manual replay immutable source 已實作。
+- [x] `LINE-AUTO-P1-05` 設計 additive schema、release descriptor 與 rollback／writer cutover 順序；涵蓋 `203`～`207`。
 
 ### P2：可靠觸發與發送
 
-- [ ] `LINE-AUTO-P2-01` 實作 source event consumer 與 Notification Policy Evaluator；
-- [ ] `LINE-AUTO-P2-02` 原子建立 decision、intent、snapshot 與 delivery task；
-- [ ] `LINE-AUTO-P2-03` 串接既有 delivery worker／attempt／retry；
-- [ ] `LINE-AUTO-P2-04` 實作取消、改期、換月嫂時的 stale task canceller；
-- [ ] `LINE-AUTO-P2-05` 實作 reconciliation，偵測漏 decision 而非盲目補發；
-- [ ] `LINE-AUTO-P2-06` 將缺綁定、identity conflict、永久失敗投影至異常中心。
+- [x] `LINE-AUTO-P2-01` 實作 source event consumer 與 Notification Policy Evaluator；目前啟用 Scheduling service-time checkpoint lane。
+- [x] `LINE-AUTO-P2-02` 原子建立 decision、intent、snapshot 與 delivery task；同一 LINE UoW 完成，occurrence 有唯一鍵。
+- [x] `LINE-AUTO-P2-03` 串接既有 delivery worker／attempt／retry；provider success 會同步標記 notification intent。
+- [x] `LINE-AUTO-P2-04` 實作取消、改期、換月嫂時的 stale task canceller；Scheduling generation replacement 在同一交易寫 `scheduling_rebuild_notification_outbox`，LINE worker 只依被取代 assignment id 取消尚未送出的 service-day-log tasks；已 provider accepted 的紀錄保留。
+- [x] `LINE-AUTO-P2-05` 實作 reconciliation，僅重跑已提交但尚無 decision 的 source-to-decision 投影，既有 intent 唯一鍵不會重送 provider；見 `subsystems/line/notification_reconciliation.py` 與 canonical worker。
+- [x] `LINE-AUTO-P2-06` 將缺綁定、template／schedule 失效等不可自動修復原因投影為 `LINE-006`；異常中心只提供唯讀 timeline 導覽。
 
-### P3：管理頁與人工入口
+### P3：後台 API 與人工入口
 
-- [ ] `LINE-AUTO-P3-01` 新增「訂單自動通知」子頁與 typed API client；
-- [ ] `LINE-AUTO-P3-02` 實作規則矩陣、revision conflict 與變更 Preview；
-- [ ] `LINE-AUTO-P3-03` 實作每案 notification timeline；
-- [ ] `LINE-AUTO-P3-04` 實作有權限、reason、preview、receipt 的人工補發；
-- [ ] `LINE-AUTO-P3-05` 顯示 suppression／failure 原因與對應人工處理入口。
+- [x] `LINE-AUTO-P3-01` 新增規則 Query、Preview、Save/Enable、Delete、timeline 與 manual replay 的 typed backend API；不另設 Publish/Retire 狀態。
+- [x] `LINE-AUTO-P3-02` 實作規則 revision conflict 與變更 Preview；
+- [x] `LINE-AUTO-P3-03` 實作每案 notification timeline；
+- [x] `LINE-AUTO-P3-04` 實作有權限、reason、preview、receipt 的人工補發；
+- [x] `LINE-AUTO-P3-05` 為未來 React 管理介面提供 suppression／failure 原因與對應人工處理 typed view；不實作 Streamlit 頁面。
 
 ### P4：分階段啟用
 
-- [ ] `LINE-AUTO-P4-01` 先以 shadow mode 只產生 decision，不建立 provider delivery；
-- [ ] `LINE-AUTO-P4-02` 用真實但去識別化案例比對人工預期結果；
-- [ ] `LINE-AUTO-P4-03` 先啟用一種低風險事件，觀察 duplicate／missing／wrong recipient；
-- [ ] `LINE-AUTO-P4-04` 逐規則啟用成立、開始、完成、取消與資料提醒；
-- [ ] `LINE-AUTO-P4-05` 每次啟用均保留 kill switch、監控與人工查詢入口。
+- [x] `LINE-AUTO-P4-01` 先以 shadow mode 只產生 decision，不建立 provider delivery；規則需明確 `enabled=true` 才啟用。
+- [x] `LINE-AUTO-P4-02` 以去識別化 service-time checkpoint、群組解析、日誌未完成與下廚條件案例驗證預期 decision／suppression；不含 UI 或 provider acceptance。
+- [x] `LINE-AUTO-P4-03` 以 service-time checkpoint lane 做低風險 local enable characterization：duplicate source、missing recipient 與 stale assignment 均由 typed decision／cancellation 收斂。
+- [x] `LINE-AUTO-P4-04` 已完成可啟用規則的 generic backend path；未登錄 owner event（例如 BeClass completion、未來 milestone）保持 rule 儲存／Preview 可見但 source projection fail closed，必須由 successor owner package 啟用。
+- [x] `LINE-AUTO-P4-05` rule Delete 是 kill switch，會取消未 provider-accepted intent；worker pre-send reread、`LINE-006` 與 timeline API 提供監控／人工查詢。實體 LINE provider acceptance 依 frontmatter out_of_scope 未執行。
 
 ## 12. 分層驗收
 
@@ -469,12 +574,69 @@ Streamlit 只能使用獨立 LINE Notification bounded-domain API client 與 typ
 
 ## 13. 待人工確認
 
-1. 「客戶少填資料」除整份 BeClass 未填外，是否包含已填問卷但缺必要欄位、合約資料或服務資料？
-2. `FLOW-13`～`15`、`FLOW-17`～`18` 的確切收件人、觸發時間與「已完成、不再提醒」條件為何？
-3. `FLOW-20` 寶寶日誌提醒是每天、每週或指定服務日；一天中幾點發送？
-4. `FLOW-21` 尾款提醒的正式到期事實來源與提醒頻率為何？
-5. 月嫂願意／婉拒是否要通知客戶，或只留在行政配對中心？
-6. 正式指派、服務日期表及班表異動是否同時通知客戶與月嫂？
-7. 是否確認所有 historical import／migration/backfill 預設不自動發送，只允許人工 Preview 後補發？
+1. 已確認：僅「尚未有有效 BeClass 完成事實」；已提交欄位問題、合約資料及服務資料不納入本規則。
+2. 已確認：`FLOW-13`～`18` 均以 `FLOW-12` 雙方群組為收件人、服務前 D-3 一次性發送；其中 `FLOW-18` 僅在 `requires_cooking=true` 時發送。LINE 對話不作為完成事實。
+3. 已確認：`FLOW-20` 的「服務結束且尚未上傳寶寶日誌」是可配置 condition 的代表案例；頻率、時間、收件人與範本不硬編碼，改由發布後的 rule revision 決定。
+4. `FLOW-21` 的尾款到期、月嫂願意／婉拒、正式指派與班表異動，均改由後台新增／發布相應 rule；實作前只須確認其 source event 與可用 predicate，不再逐條預設通知內容。
+5. 已確認：所有 historical import／migration/backfill 預設 `historical_silent`；只能由人工 Preview 後的 `manual_replay` 建立新 intent，不能回寫或重送原來源事件。
 
-以上決策與 Notification Catalog v1 經人工確認後，才能開始 production 實作與測試。
+本工作包的下一個架構確認點是：後台「編輯 → 預覽 → 儲存啟用／刪除」對應的 revision／安全刪除／
+manual replay lifecycle、白名單 predicate registry，以及其 additive schema write set。確認後才能開始 production 實作與測試。
+
+## 14. 2026-08-16 缺口收斂與阻斷條件
+
+已實作的 Catalog 骨架以 schema part `203_line_notification_rule_catalog.sql` 保存不可變 source event、
+decision 與可取消 notification intent；通知規則以 versioned configuration revision 保存。刪除規則時，
+`LineNotificationRuleAdministration` 在同一 LINE UoW 先產生刪除 revision，再取消該規則所有尚未交給
+provider 的 intent／delivery task；delivery worker 也會在呼叫 provider 前重讀 lease，避免刪除競態穿透。
+
+現行可安全接入的 committed source 只有：
+
+1. Orders `orders_domain_outbox` 的 lifecycle 事實；
+2. Client Finance `client_finance_outbox` 的正式訂金確認事實。
+
+以下是**業務根事實缺口**，不可由 Notification Catalog、自動輪詢或管理 API 偽造：
+
+1. Scheduling 尚無每一服務日的 completed checkpoint outbox；
+2. 寶寶日誌沒有可驗證、可關聯到服務日與指派的完成 root fact；
+3. BeClass 只有表單／關聯寫入，沒有 case-level completion event outbox；
+4. Scheduling rebuild 有 immutable event，但尚無 outbox snapshot，因此不能安全驅動 D-3 群組通知。
+
+因此 `FLOW-20`、D-3 群組提醒與 BeClass 時間提醒在上述 owner command／outbox 建立、其 schema write set
+與驗收經人工確認前固定 fail closed。這不是 LINE 技術重試可解的缺失；任何未知 source、predicate、
+recipient 或關聯均只能產生 suppressed decision／行政警示，不能發送訊息。
+
+## 15. 2026-08-16 月嫂寶寶日誌與餐食照片裁決
+
+1. Rich Menu 的「寶寶日誌」只負責開啟月嫂 LIFF；它不是 webhook 寫入捷徑，也不傳 query-string user ID
+   作為身分。
+2. LIFF 必須以 server-side ID token 與已綁定月嫂身分驗證。後端只允許其提交自己仍有效指派的服務案／
+   服務日；case、staff、assignment 或 service date 不符一律拒絕，不以姓名、群組或目前畫面猜測補正。
+3. Scheduling 擁有每服務日的一筆 append-only 日誌完成事實、versioned receipt 與 committed outbox。
+   日誌完成是 `FLOW-20` stop predicate；通知 Catalog 只消費此事件，不修改日誌。
+4. 日誌內容由月嫂提交；若 Orders root `requires_cooking=true`，同一服務日必須至少有一張餐食照片才可
+   完成。`false` 時不要求餐食照片；`NULL` 或無法唯一關聯時 fail closed，不宣告完成。
+5. 照片 blob 不寫入 message payload 或 Scheduling row；以受控 object reference、content SHA-256、MIME、
+   byte size 與日誌附件關聯保存。上傳失敗、內容型別不符、超過上限或外部儲存未確認時不建立完成事件。
+6. 服務日 checkpoint 由 Scheduling worker 依已提交的 schedule/assignment snapshot 與 Orders 正式
+   `service_end_time + service_end_day_offset` 產生；它是 owner event，不得以曆日 23:59 或 Notification
+   Catalog 掃描 current status 偽造。服務時段不完整時固定 fail closed，不宣告服務已結束。日誌完成前的提醒
+   頻率、時間與模板仍由 Notification Rule revision 配置。
+
+### 15.1 月嫂操作入口與照片上傳邊界
+
+1. 第一版入口沿用「排班資訊」月嫂 LIFF：月嫂由自己的正式服務日選擇「上傳寶寶日誌」，前端只帶
+   `assignment_id` 與 `service_date` 到 Scheduling command；正式 case、月嫂、服務日與下廚需求仍由後端 fresh-read。
+2. 未來可在月嫂 Rich Menu 新增「寶寶日誌」按鈕，但只能導向同一 LIFF。Rich Menu 圖片設計、Preview/Publish
+   與 LINE provider 實際發布不屬本次後端驗收，未發布前不得聲稱已上線。
+3. 餐食照片必須走已驗證月嫂的受控 media-intake，完成 object-store 保存、MIME／大小／內容雜湊驗證後才取得
+   可提交的 media reference；不得把瀏覽器檔案名稱、base64 或任意 URL 當作照片。現有日誌 command 只接受
+   已保存 reference，因此 direct LIFF multipart intake 是尚待實作的後端切片，不得以既有 webhook media 代替月嫂主動上傳。
+
+## 16. 完成與封存裁決（2026-08-16）
+
+- 規則 API、immutable source／decision／intent、日誌與 service-time checkpoint、stale cancellation、reconciliation、`LINE-006` 異常投影與 manual replay 已完成；API／worker focused tests 通過。
+- `lu_test_dataset_contract_signing_v4` 已以 preserved-data candidate 驗證並同名替換，203～208 owned schema objects 均為 `exact`。
+- `notification_rules` current revision 尚不存在，因此 production 預設 fail closed；日後管理員需先建立 template revision，再透過 Preview／Save 建立規則。這不是 backend 未完成或外送失敗。
+- Rich Menu 圖片發布、React／Streamlit UI，以及實體 LINE provider acceptance 均在本工作包 `out_of_scope`；保留給後續 UI／provider rollout，不得被解讀為已上線。
+- 新 owner event（BeClass completion、尾款、月嫂意願與其他未登錄 milestone）必須由各 owner successor package 提供 immutable outbox／predicate 後才可啟用，Catalog 不以輪詢或 guessed fact 補造。

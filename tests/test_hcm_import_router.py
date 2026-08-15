@@ -13,10 +13,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.hcm_import import (
-    get_hcm_historical_workbook_import_service,
-    get_hcm_workbook_import_service,
-)
+from api.dependencies.hcm_import import get_hcm_workbook_import_service
 from api.routes.hcm_import import router
 from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookPreview, HcmWorkbookReceipt
 
@@ -48,7 +45,6 @@ def _client(service: _Service) -> TestClient:
     application.include_router(router)
     application.dependency_overrides[require_admin] = lambda: SimpleNamespace(username="test-admin")
     application.dependency_overrides[get_hcm_workbook_import_service] = lambda: service
-    application.dependency_overrides[get_hcm_historical_workbook_import_service] = lambda: service
     return TestClient(application)
 
 
@@ -87,7 +83,7 @@ def test_preview_then_apply_use_separate_typed_endpoints_and_cleanup():
     assert all(path.exists() is False for path in service.upload_paths)
 
 
-def test_historical_preview_then_apply_use_the_same_typed_contract():
+def test_historical_whole_row_overwrite_routes_are_retired():
     service = _Service()
     client = _client(service)
     files = {"workbook": ("hcm.xlsx", b"test", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
@@ -98,8 +94,10 @@ def test_historical_preview_then_apply_use_the_same_typed_contract():
         headers={**_headers(), "X-Preview-Fingerprint": "1" * 64}, files=files,
     )
 
-    assert preview.status_code == 200
-    assert applied.status_code == 200
+    assert preview.status_code == 410
+    assert preview.json()["detail"]["code"] == "hcm_historical_whole_row_overwrite_retired"
+    assert applied.status_code == 410
+    assert applied.json()["detail"]["code"] == "hcm_historical_whole_row_overwrite_retired"
 
 
 def test_same_key_conflict_is_typed_and_removes_temporary_workbook():

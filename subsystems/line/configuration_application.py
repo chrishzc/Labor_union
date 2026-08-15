@@ -20,6 +20,7 @@ from subsystems.line.message_configuration import (
     validate_message_schedules,
     validate_message_templates,
 )
+from domains.line.notification_rules import validate_notification_rules
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 
 
@@ -191,6 +192,8 @@ class LineConfigurationApplication:
                 )
             )
             validate_message_schedules(definition, templates)
+        elif kind is LineConfigurationKind.NOTIFICATION_RULES:
+            validate_notification_rules(definition)
 
 
 __all__ = ["LineConfigurationApplication"]

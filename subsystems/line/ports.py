@@ -1,4 +1,7 @@
-"""Typed ports for LINE repositories, providers, and cross-domain queries."""
+"""
+File: ports.py
+Description: 定義 LINE repository、provider、跨 Domain query 與通知規則取消的 typed ports。
+"""
 
 from __future__ import annotations
 
@@ -353,6 +356,12 @@ class LineDeliveryTaskRepositoryPort(Protocol):
     ) -> LineDeliveryTaskSnapshot: ...
 
 
+class LineNotificationRuleRepositoryPort(Protocol):
+    def cancel_rule(self, rule_id: str, *, reason: str) -> int: ...
+
+    def register_source_event(self, event: object) -> int: ...
+
+
 class LineConfigurationRepositoryPort(Protocol):
     def get(self, kind: LineConfigurationKind) -> LineConfigurationSnapshot: ...
 
@@ -560,6 +569,7 @@ class LineUnitOfWorkPort(UnitOfWork, Protocol):
     staff: StaffIdentityOwnerPort
     admins: AdminIdentityOwnerPort
     delivery_tasks: LineDeliveryTaskRepositoryPort
+    notification_rules: LineNotificationRuleRepositoryPort
     configurations: LineConfigurationRepositoryPort
     rich_menu_publications: LineRichMenuPublicationRepositoryPort
     media_metadata: LineMediaMetadataRepositoryPort
@@ -592,6 +602,7 @@ __all__ = [
     "LineMediaProviderPort",
     "LiffTokenVerifierPort",
     "LineMessagingProviderPort",
+    "LineNotificationRuleRepositoryPort",
     "LineOrderGroupBindingRepositoryPort",
     "LineOutboxRepositoryPort",
     "LineRichMenuProviderPort",

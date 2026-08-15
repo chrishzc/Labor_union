@@ -49,6 +49,9 @@ from api.routes import (
     leave_substitution,
     line_admin,
     line_configurations,
+    line_notification_rules,
+    staff_service_day_media,
+    staff_service_day_logs,
     line_identity,
     line_staff_self_service,
     line_mobile_admin,
@@ -93,6 +96,8 @@ from api.routes import (
     staff_monthly_schedule,
     staff_payout,
     staff_payments,
+    staff_leave_intake,
+    staff_leave_management,
     system_status,
 )
 
@@ -154,6 +159,9 @@ app.include_router(admin_audit.router)
 app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
 app.include_router(line_configurations.router)
+app.include_router(line_notification_rules.router)
+app.include_router(staff_service_day_media.router)
+app.include_router(staff_service_day_logs.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
 app.include_router(line_reviews.router)
@@ -163,6 +171,8 @@ app.include_router(line_identity.page_router)
 app.include_router(line_order_groups.router)
 app.include_router(knowledge_retrieval.router)
 app.include_router(line_staff_self_service.router)
+app.include_router(staff_leave_intake.router)
+app.include_router(staff_leave_management.router)
 app.include_router(line_mobile_admin.router)
 app.include_router(line_mobile_admin.page_router)
 app.include_router(customer_service.router)
