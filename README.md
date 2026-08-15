@@ -200,6 +200,11 @@ INTERNAL_API_MAX_ATTEMPTS=3
 各 caller service account 仍須由部署者只授予目標 Private API 的 Cloud Run Invoker；本輪只交付程式
 契約，不建立 IAM、Cloud Run、網路、Dockerfile 或 image。
 
+雲端部署尚未獲得執行授權。Cloud Run、單一 Cloud VPN 與 Dockerfile 的設計、成本假設、
+網路邊界與驗收前置條件，集中於
+[`document/雲端部署/計劃書/`](document/雲端部署/計劃書/)；這些都是規劃文件，不代表已建立
+Google Cloud 資源、已部署映像或已開放任何網路路徑。
+
 [`scripts/launchers/start_local_development.bat`](scripts/launchers/start_local_development.bat)
 是 Windows 本機開發啟動入口：它會啟動 MySQL、API、Streamlit、檔案監控、Durable Job Worker
 與 Incident Worker，但**不會**自動套用資料庫 schema。所有 operator-facing 腳本、用途與退役對照見
