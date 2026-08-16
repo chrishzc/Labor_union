@@ -10,7 +10,9 @@
     main { max-width: 760px; margin: 0 auto; padding: 24px 16px 44px; }
     h1 { margin: 0 0 8px; font-size: 28px; }
     p { color: #71717a; line-height: 1.6; }
-    .primary { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; color: #fff; background: #be123c; }
+    .tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 18px 0; }
+    .tabs button, .primary { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; color: #fff; background: #be123c; }
+    .tabs button:not(.active) { background: #e4e4e7; color: #3f3f46; }
     .panel { background: #fff; border: 1px solid #fecdd3; border-radius: 8px; padding: 16px; margin-top: 14px; }
     .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
     label { display: block; font-weight: 700; margin-bottom: 7px; }
@@ -34,7 +36,11 @@
 <body>
 <main>
   <h1>排班資訊</h1>
-  <p>您可以查詢個人班表月曆。請假需求請先聯絡工會人員；系統請假入口尚未正式啟用。</p>
+  <p>您可以查詢個人班表月曆，也可以送出請假申請。請假送出後會先由工會人員確認。</p>
+  <div class="tabs">
+    <button id="tabCalendar" class="active">查詢班表</button>
+    <button id="tabLeave">請假申請</button>
+  </div>
 
   <section id="calendarPanel" class="panel">
     <div class="toolbar">
@@ -51,6 +57,30 @@
       <span><i class="dot" style="background:#fff;border:1px solid #d4d4d8"></i>未排班</span>
     </div>
     <div id="calendar" class="calendar"></div>
+  </section>
+
+  <section id="leavePanel" class="panel hide">
+    <label for="leaveStart">請假開始日期</label>
+    <input id="leaveStart" type="date">
+    <label for="leaveEnd" style="margin-top:12px;">請假結束日期</label>
+    <input id="leaveEnd" type="date">
+    <label for="leaveReason" style="margin-top:12px;">請假原因</label>
+    <textarea id="leaveReason" placeholder="請簡要說明請假原因"></textarea>
+    <label for="substituteFound" style="margin-top:12px;">是否已找到代班人員</label>
+    <select id="substituteFound">
+      <option value="false">尚未找到</option>
+      <option value="true">已找到</option>
+    </select>
+    <div id="substituteFields" class="hide">
+      <label for="substituteName" style="margin-top:12px;">代班人員姓名</label>
+      <input id="substituteName" placeholder="請填寫代班人員姓名">
+      <label for="substitutePhone" style="margin-top:12px;">代班人員聯絡電話</label>
+      <input id="substitutePhone" placeholder="請填寫代班人員聯絡電話">
+      <label for="substituteNote" style="margin-top:12px;">代班補充資訊</label>
+      <textarea id="substituteNote" placeholder="例如：可代班日期、可服務時段或其他說明"></textarea>
+    </div>
+    <button id="submitLeave" class="primary" style="margin-top:14px;">送出請假申請</button>
+    <div id="leaveStatus" class="message" style="display:none;"></div>
   </section>
 
 </main>
@@ -81,6 +111,13 @@ function show(id, text, isError = false) {
 
 function identityPayload() {
   return { flow_id: flowId, line_id_token: lineIdToken };
+}
+
+function switchTab(tab) {
+  document.getElementById("tabCalendar").classList.toggle("active", tab === "calendar");
+  document.getElementById("tabLeave").classList.toggle("active", tab === "leave");
+  document.getElementById("calendarPanel").classList.toggle("hide", tab !== "calendar");
+  document.getElementById("leavePanel").classList.toggle("hide", tab !== "leave");
 }
 
 function renderCalendar(schedule) {
@@ -132,6 +169,44 @@ async function loadSchedule() {
   renderCalendar(data.data);
 }
 
+function errorMessage(data, fallback) {
+  return data.message || data.detail?.message || data.detail || fallback;
+}
+
+async function submitLeave() {
+  const substituteFound = document.getElementById("substituteFound").value === "true";
+  const payload = {
+    ...identityPayload(),
+    leave_start_date: document.getElementById("leaveStart").value,
+    leave_end_date: document.getElementById("leaveEnd").value,
+    leave_reason: document.getElementById("leaveReason").value,
+    substitute_found: substituteFound,
+    substitute_name: document.getElementById("substituteName").value,
+    substitute_phone: document.getElementById("substitutePhone").value,
+    substitute_note: document.getElementById("substituteNote").value
+  };
+  if (!payload.leave_start_date || !payload.leave_end_date) {
+    show("leaveStatus", "請填寫請假開始與結束日期。", true);
+    return;
+  }
+  if (!payload.leave_reason.trim()) {
+    show("leaveStatus", "請填寫請假原因。", true);
+    return;
+  }
+  if (substituteFound && !payload.substitute_name.trim()) {
+    show("leaveStatus", "已找到代班人員時，請填寫代班人員姓名。", true);
+    return;
+  }
+  show("leaveStatus", "送出中...");
+  const response = await fetch("/api/v1/line/staff-self-service/leave-requests", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  show("leaveStatus", errorMessage(data, "已送出"), !response.ok || data.success === false);
+}
+
 async function init() {
   const now = new Date();
   document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -156,7 +231,13 @@ async function init() {
   loadSchedule();
 }
 
+document.getElementById("tabCalendar").addEventListener("click", () => switchTab("calendar"));
+document.getElementById("tabLeave").addEventListener("click", () => switchTab("leave"));
 document.getElementById("loadSchedule").addEventListener("click", loadSchedule);
+document.getElementById("submitLeave").addEventListener("click", submitLeave);
+document.getElementById("substituteFound").addEventListener("change", event => {
+  document.getElementById("substituteFields").classList.toggle("hide", event.target.value !== "true");
+});
 init();
 </script>
 </body>

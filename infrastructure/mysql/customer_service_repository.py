@@ -120,6 +120,36 @@ class MySqlCustomerServiceRepository:
             cursor.execute(_STAFF_ORDER_SQL, (staff_id, pattern, pattern))
             return list(cursor.fetchall() or ())
 
+    def create_staff_leave_request(
+        self,
+        *,
+        staff_id: int,
+        line_user_id: str,
+        leave_start_date: Any,
+        leave_end_date: Any,
+        leave_reason: str | None,
+        substitute_found: bool,
+        substitute_name: str | None,
+        substitute_phone: str | None,
+        substitute_note: str | None,
+    ) -> int:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _STAFF_LEAVE_REQUEST_INSERT_SQL,
+                (
+                    staff_id,
+                    line_user_id,
+                    leave_start_date,
+                    leave_end_date,
+                    leave_reason,
+                    substitute_found,
+                    substitute_name,
+                    substitute_phone,
+                    substitute_note,
+                ),
+            )
+            return int(cursor.lastrowid)
+
     def _ticket_for_event(self, event_key: str) -> CustomerServiceTicket | None:
         with self._connection.cursor() as cursor:
             cursor.execute("SELECT ticket_id FROM customer_service_ticket_events WHERE event_key=%s", (event_key,))
@@ -232,6 +262,12 @@ _STAFF_SUBJECT_SQL = (
     ") staff_candidates ORDER BY priority,staff_id LIMIT 1"
 )
 _STAFF_ORDER_SQL = "SELECT o.case_no,c.name client_name,c.phone client_phone,c.city,c.address,o.status order_status,o.start_date,o.end_date,o.service_days,o.service_hours_per_day,c.due_month,c.service_start_date,c.service_time,c.residence_type,c.delivery_type,c.service_type,c.baby_info,c.notes FROM case_staff_assignments a JOIN orders o ON o.case_no=a.case_no JOIN clients c ON c.id=o.client_id WHERE a.staff_id=%s AND (a.status IS NULL OR a.status<>'cancelled') AND (o.case_no LIKE %s OR c.name LIKE %s) ORDER BY o.start_date DESC,o.case_no DESC LIMIT 20"
+_STAFF_LEAVE_REQUEST_INSERT_SQL = (
+    "INSERT INTO staff_leave_requests ("
+    "staff_id,line_user_id,leave_start_date,leave_end_date,leave_reason,"
+    "substitute_found,substitute_name,substitute_phone,substitute_note,status"
+    ") VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,'pending')"
+)
 
 
 __all__ = ["CustomerServiceTicketNotFoundError", "CustomerServiceVersionConflictError", "MySqlCustomerServiceRepository"]

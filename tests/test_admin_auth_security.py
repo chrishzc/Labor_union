@@ -10,6 +10,7 @@ from subsystems.access.authentication_session import (
     hash_admin_password,
     has_required_capability,
     has_required_role,
+    reset_admin_password,
     verify_admin_password,
 )
 
@@ -25,6 +26,65 @@ def test_admin_password_is_salted_and_verifiable():
     assert "a-long-test-password" not in first
     assert verify_admin_password("a-long-test-password", first)
     assert not verify_admin_password("wrong-password", first)
+
+
+def test_reset_admin_password_replaces_hash_and_revokes_sessions(monkeypatch):
+    class FakeCursor:
+        def __init__(self):
+            self.updated_hash = None
+            self.revoked_admin_id = None
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            return False
+
+        def execute(self, sql, params=()):
+            if "UPDATE admin_users" in sql:
+                self.updated_hash = params[0]
+            if "UPDATE admin_sessions" in sql:
+                self.revoked_admin_id = params[0]
+
+        def fetchone(self):
+            return {"id": 7}
+
+    class FakeConnection:
+        def __init__(self):
+            self.cursor_instance = FakeCursor()
+            self.committed = False
+            self.closed = False
+
+        def begin(self):
+            pass
+
+        def cursor(self, *_args, **_kwargs):
+            return self.cursor_instance
+
+        def commit(self):
+            self.committed = True
+
+        def rollback(self):
+            raise AssertionError("rollback should not be called")
+
+        def close(self):
+            self.closed = True
+
+    connection = FakeConnection()
+    monkeypatch.setattr(
+        "subsystems.access.authentication_session.get_connection",
+        lambda: connection,
+    )
+
+    admin_id = reset_admin_password(username=" Ting ", new_password="new-password-1234")
+
+    assert admin_id == 7
+    assert connection.committed
+    assert connection.closed
+    assert connection.cursor_instance.revoked_admin_id == 7
+    assert verify_admin_password(
+        "new-password-1234", connection.cursor_instance.updated_hash
+    )
 
 
 def test_all_enabled_internal_roles_satisfy_legacy_role_guards():

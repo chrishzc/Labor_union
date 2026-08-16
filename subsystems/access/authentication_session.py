@@ -233,6 +233,62 @@ def create_admin_user(
         conn.close()
 
 
+def reset_admin_password(*, username: str, new_password: str) -> int:
+    username = username.strip().lower()
+    if not username:
+        raise ValueError("username 不可為空")
+
+    password_hash = hash_admin_password(new_password)
+    conn = get_connection()
+    try:
+        conn.begin()
+        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
+            cursor.execute(
+                """
+                SELECT id
+                FROM admin_users
+                WHERE username=%s
+                FOR UPDATE
+                """,
+                (username,),
+            )
+            row = cursor.fetchone()
+            if not row:
+                conn.rollback()
+                raise ValueError("找不到指定的管理員帳號")
+
+            admin_id = int(row["id"])
+            cursor.execute(
+                """
+                UPDATE admin_users
+                SET password_hash=%s, updated_at=UTC_TIMESTAMP()
+                WHERE id=%s
+                """,
+                (password_hash, admin_id),
+            )
+            cursor.execute(
+                """
+                UPDATE admin_sessions
+                SET revoked_at=COALESCE(revoked_at, UTC_TIMESTAMP())
+                WHERE admin_user_id=%s
+                  AND revoked_at IS NULL
+                """,
+                (admin_id,),
+            )
+        conn.commit()
+        return admin_id
+    except ValueError:
+        raise
+    except pymysql.MySQLError as error:
+        conn.rollback()
+        raise AdminSessionStorageError("管理員密碼重設服務暫時無法使用") from error
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def authenticate_admin(
     username: str,
     password: str,

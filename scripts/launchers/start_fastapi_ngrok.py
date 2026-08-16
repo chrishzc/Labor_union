@@ -33,6 +33,15 @@ os.chdir(PROJECT_ROOT)
 load_dotenv(PROJECT_ROOT / ".env")
 
 
+def _ensure_local_private_api_authentication() -> None:
+    os.environ.setdefault("APP_ENV", "development")
+    if not os.getenv("INTERNAL_SERVICE_SHARED_KEY", "").strip():
+        os.environ["INTERNAL_SERVICE_SHARED_KEY"] = secrets.token_urlsafe(32)
+    os.environ.setdefault("INTERNAL_SERVICE_AUTH_MODE", "local_shared_key")
+
+
+_ensure_local_private_api_authentication()
+
 
 def _resolve_ngrok() -> str:
     executable = shutil.which("ngrok")
