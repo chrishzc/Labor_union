@@ -2306,6 +2306,32 @@
         "notification schema or developer-local migration audit",
         "real LINE provider rollout"
       ]
+    },
+    {
+      "archive_id": "ARCH-20260816-access-control-totp-local-closeout",
+      "source_path": "document/架構重整/02_決策與退役執行記錄/Access_Control_TOTP_Account_Management_Work_Package.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/work_packages/Access_Control_TOTP_Account_Management_Work_Package.md",
+      "doc_type": "work-package",
+      "final_status": "completed-local-validated",
+      "completed_at": "2026-08-16",
+      "deployed_at": null,
+      "release_identity": "labor_union_2026_08_16_access_control_totp_root_v1; labor_union_2026_08_16_access_control_login_challenge_v1; labor_union_2026_08_16_access_control_security_alert_outbox_v1",
+      "successor_path": "document/架構重整/02_決策與退役執行記錄/Access_Control_Production_Cutover_and_External_Security_Alert_Work_Package.md",
+      "evidence_paths": [
+        "tests/test_access_control_disposable_mysql_e2e.py",
+        "tests/test_access_security_alert_outbox.py",
+        "scratch/ac-totp-outbox-rehearsal/",
+        "scratch/local_database_updates/"
+      ],
+      "content_sha256": "ab550dd58d8d94d6f0704284285838c13a3564fba8edde7d0564d6280f5c0e67",
+      "archived_at": "2026-08-16",
+      "archived_by": "Codex on user request",
+      "reason": "TOTP MFA, root-only account center, Bearer-only human transport, durable security-alert outbox, fresh and preserve-data MySQL validation, and developer-local protected replacement completed. Production deployment, external alert sink and target-specific acceptance remain NOT_RUN and moved to the successor work package.",
+      "restore_triggers": [
+        "Access Control TOTP, account-center or session regression",
+        "security-alert outbox or schema migration audit",
+        "production cutover or external security-alert activation"
+      ]
     }
   ]
 }

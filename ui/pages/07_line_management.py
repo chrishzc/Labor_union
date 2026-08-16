@@ -1,8 +1,6 @@
 """
-================================================================================
-檔案名稱: ui/pages/07_line_management.py
-功能說明: Streamlit LINE 薄管理介面，整合監控、訊息、群組、契約與知識管理 API
-================================================================================
+File: 07_line_management.py
+Description: 呈現已通過全域登入之 Streamlit LINE 薄管理介面。
 """
 
 from __future__ import annotations
@@ -35,24 +33,6 @@ ADMIN_KEY = "line_admin_profile"
 def _clear_session() -> None:
     st.session_state.pop(TOKEN_KEY, None)
     st.session_state.pop(ADMIN_KEY, None)
-
-
-def _login(client: LineAdminApiClient) -> None:
-    st.subheader("工會人員登入")
-    st.caption("此登入只用於內部管理頁；LINE 一般使用者不會看到。")
-    with st.form("line_admin_login"):
-        username = st.text_input("帳號")
-        password = st.text_input("密碼", type="password")
-        submitted = st.form_submit_button("登入", type="primary")
-    if submitted:
-        try:
-            session = client.login(username, password)
-        except LineAdminApiError as exc:
-            st.error(str(exc))
-            return
-        st.session_state[TOKEN_KEY] = session["access_token"]
-        st.session_state[ADMIN_KEY] = session["admin"]
-        st.rerun()
 
 
 ROLE_LABELS = {
@@ -215,7 +195,7 @@ def show() -> None:
     bypassed = client.admin_auth_bypassed
     token = st.session_state.get(TOKEN_KEY)
     if not bypassed and not token:
-        _login(client)
+        st.warning("請先完成全域登入。")
         return
 
     try:

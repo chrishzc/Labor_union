@@ -168,6 +168,9 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_16_line_notification_recurring_intents_v1.json",
     "labor_union_2026_08_16_scheduling_service_day_log_outbox_retry_v1.json",
     "labor_union_2026_08_16_scheduling_rebuild_notification_invalidation_v1.json",
+    "labor_union_2026_08_16_access_control_totp_root_v1.json",
+    "labor_union_2026_08_16_access_control_password_challenge_v1.json",
+    "labor_union_2026_08_16_access_control_security_alert_outbox_v1.json",
     "labor_union_2026_08_15_schema_assembly_v1.json",
     "labor_union_2026_08_15_staff_retirement_v1.json",
 )

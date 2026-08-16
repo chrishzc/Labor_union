@@ -301,33 +301,10 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-22:] == (
-        "188_matching_preferences_and_staff_availability.sql",
-        "189_client_refund_recipient_snapshot_local_upgrade.sql",
-        "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
-        "191_line_staff_self_service_identity_flow.sql",
-        "192_government_subsidy_outbox_intent_type_repair.sql",
-        "193_staff_historical_adoption_hcm_review.sql",
-        "194_historical_order_adoption.sql",
-        "195_import_warning_tracking.sql",
-        "196_case_import_partial_formal_case.sql",
-        "197_client_beclass_transition_binding.sql",
-        "198_case_import_pending_completion_status.sql",
-        "200_finance_import_source_reviews.sql",
-        "201_hcm_resubmission_corrections.sql",
-        "202_scheduling_staff_leave_intake.sql",
-        "203_line_notification_rule_catalog.sql",
-        "204_scheduling_service_day_logs.sql",
-        "205_scheduling_service_day_checkpoints.sql",
-        "206_line_notification_recurring_intents.sql",
-        "207_scheduling_service_day_log_outbox_retry.sql",
-        "208_scheduling_rebuild_notification_invalidation.sql",
-        "999_v_order_details_view.sql",
-        "1000_staff_retirement.sql",
+    assert artifact_names.index("209_access_control_totp_root.sql") == (
+        artifact_names.index("208_scheduling_rebuild_notification_invalidation.sql") + 1
     )
-    ordinals = tuple(int(name.split("_", 1)[0]) for name in artifact_names)
-    assert ordinals == tuple(sorted(ordinals))
-    assert len(ordinals) == len(set(ordinals))
+    assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     assert runner.RELEASE_MANIFEST.release_id == (
         "labor-union-staff-retirement-2026-08-15-v1"

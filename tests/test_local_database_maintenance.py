@@ -116,6 +116,61 @@ def test_only_known_idempotent_partials_are_resumable() -> None:
     assert blocking == {"125_government_subsidy_domain.sql": "partial"}
 
 
+def test_drift_report_is_read_only_and_requires_artifact_decisions(monkeypatch) -> None:
+    snapshot = {
+        "sha256": "source-schema",
+        "columns": [],
+        "triggers": [],
+    }
+    monkeypatch.setattr(update.migration, "_schema_snapshot", lambda *_: snapshot)
+    monkeypatch.setattr(
+        update.migration,
+        "_owned_classification",
+        lambda *_args, **_kwargs: {
+            "109_scheduling_generations.sql": "partial",
+            "107_system_alert_current_projection.sql": "drift",
+        },
+    )
+    monkeypatch.setattr(
+        update.migration,
+        "_canonical_artifact_descriptor",
+        lambda _artifact: {"tables": {}, "parent_columns": {}},
+    )
+
+    report = update.build_drift_report(object(), "lu_test_dataset")
+
+    assert report["status"] == "blocked"
+    assert report["source_policy"] == "read_only_no_source_ddl"
+    by_artifact = {item["artifact"]: item for item in report["remediations"]}
+    assert by_artifact["109_scheduling_generations.sql"]["automatic_apply"] is False
+    assert by_artifact["107_system_alert_current_projection.sql"]["disposition"] == (
+        "candidate_repair_requires_artifact_decision"
+    )
+
+
+def test_drift_report_does_not_build_or_apply_a_candidate(tmp_path, monkeypatch) -> None:
+    config = SimpleNamespace(host="127.0.0.1")
+    monkeypatch.setattr(
+        update.migration,
+        "config_from_env",
+        lambda _path: (config, "lu_test_dataset"),
+    )
+    monkeypatch.setattr(
+        update,
+        "build_drift_report",
+        lambda *_: {"status": "blocked", "remediations": []},
+    )
+    monkeypatch.setattr(
+        update,
+        "build_preview",
+        lambda *_: pytest.fail("preview must not run for a drift report"),
+    )
+
+    assert update.update_local_database(
+        environment_file=tmp_path / ".env", drift_report=True
+    ) == {"status": "blocked", "remediations": []}
+
+
 def test_apply_update_rebuilds_source_only_after_verified_candidate(tmp_path, monkeypatch) -> None:
     calls: list[str] = []
     config = object()

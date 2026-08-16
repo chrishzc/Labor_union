@@ -39,9 +39,10 @@ def test_architecture_worker_delivers_subsidy_advance_recovery_events(monkeypatc
     monkeypatch.setattr(outbox_worker, "consume_staff_overpayment_recovery_anomaly_events", lambda _: (0, 0))
     monkeypatch.setattr(outbox_worker, "consume_staff_payout_difference_anomaly_events", lambda _: (0, 0))
     monkeypatch.setattr(outbox_worker, "consume_client_finance_orders_events", lambda _: (11, 13))
+    monkeypatch.setattr(outbox_worker, "consume_security_alert_outbox", lambda _: _Result(12, 5))
     monkeypatch.setattr(outbox_worker, "_consume_sources_if_due", lambda *_: (7, 3))
 
     result = outbox_worker._consume_once()
 
-    assert (result.delivered_count, result.failed_count) == (46, 26)
+    assert (result.delivered_count, result.failed_count) == (58, 31)
     assert connection.closed is True

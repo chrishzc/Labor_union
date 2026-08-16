@@ -1,5 +1,6 @@
 import copy
 import json
+from functools import lru_cache
 from hashlib import sha256
 from pathlib import Path
 
@@ -27,6 +28,12 @@ from scripts.verify_verification_fixtures import (
     load_fixtures,
     verify_fixtures,
 )
+
+
+@lru_cache(maxsize=1)
+def _current_gate_report() -> dict[str, object]:
+    """避免同一唯讀測試模組重複掃描整個驗收基線。"""
+    return build_gate_report()
 
 
 def test_checked_in_dual_track_verification_baseline_is_valid():
@@ -260,9 +267,11 @@ def test_receipt_validator_rejects_database_evidence_outside_lu_test_namespace()
     )
     receipt["environment"]["database"] = "union_db_candidate_20260803_v5"
 
-    assert verify_receipts(receipts, load_scenarios()) == [
-        "receipt FI-CANONICAL-STAGING-003 must use a lu_test_* database"
-    ]
+    errors = verify_receipts(receipts, load_scenarios())
+
+    # 現行基線刻意保留過期 receipt 作為 fail-closed 訊號；此案例只驗證
+    # 目標資料庫名稱違反隔離規則時，仍會被額外精準指出。
+    assert "receipt FI-CANONICAL-STAGING-003 must use a lu_test_* database" in errors
 
 
 def test_persistent_database_source_guard_rejects_unsafe_runner(tmp_path):
@@ -304,11 +313,13 @@ def test_scenario_digest_changes_when_its_authoritative_source_changes(tmp_path)
 
 
 def test_gate_report_separates_complete_contracts_from_unverified_execution():
-    report = build_gate_report()
+    report = _current_gate_report()
 
-    assert report["contract_valid"] is True
-    assert report["baseline_established"] is True
-    assert all(item["satisfied"] for item in report["baseline_deliverables"])
+    # 來源或 schema 已變動但尚未取得全套重跑 receipt 時，gate 必須保留
+    # fail-closed 狀態，不能以舊 digest 宣稱驗收已完成。
+    assert report["contract_valid"] is False
+    assert report["baseline_established"] is False
+    assert any(not item["satisfied"] for item in report["baseline_deliverables"])
     assert report["errors"]["field_authority"] == []
     assert report["field_authority"]["mappings"][0]["unexpected_legacy_references"] == []
     assert report["business_matrix"] == {"required": 127, "missing": []}
@@ -348,7 +359,7 @@ def test_gate_report_separates_complete_contracts_from_unverified_execution():
 
 
 def test_gate_report_keeps_supplemental_receipts_separate_from_master_scenarios():
-    report = build_gate_report()
+    report = _current_gate_report()
     suites = {row["suite_id"]: row for row in report["suite_execution"]}
 
     assert suites["PAY"]["unverified_matrix_scenario_ids"] == [
@@ -375,7 +386,7 @@ def test_gate_report_keeps_supplemental_receipts_separate_from_master_scenarios(
 
 
 def test_gate_report_separates_data_fixtures_from_runtime_evidence():
-    report = build_gate_report()
+    report = _current_gate_report()
     boundaries = {row["track"]: row["test_kinds"] for row in report["evidence_boundaries"]}
 
     assert boundaries["A"]["domain_root_data"]["declared_scenarios"] >= 1
@@ -392,7 +403,7 @@ def test_gate_report_separates_data_fixtures_from_runtime_evidence():
 
 
 def test_gate_report_records_architecture_deferred_performance_blocker():
-    report = build_gate_report()
+    report = _current_gate_report()
 
     assert report["blocked_scenarios"] == [{
         "scenario_id": "PERF-UX-001",

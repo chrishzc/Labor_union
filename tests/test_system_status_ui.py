@@ -13,4 +13,4 @@ def test_system_status_page_reads_the_snapshot_without_threshold_alerts():
     assert "SystemStatusApiClient" in source
     assert "status_client.performance_snapshot(token)" in source
     assert "不會發出警告、建立異常或阻擋 release" in source
-    assert "st.warning" not in source
+    assert 'st.warning("請先完成全域登入。")' in source

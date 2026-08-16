@@ -213,13 +213,21 @@ pending → processing → published
 
 ### 4.1 正式內部使用者存取模型
 
-2026-08-12 最新人工裁決：所有已登入且 enabled 的內部使用者具有相同業務功能權限。本系統不以
+2026-08-16 最新人工裁決：所有已登入且 enabled 的內部使用者具有相同業務功能權限。本系統不以
 role、capability、職稱或部門限制內部使用者可操作的業務功能，也不採 fixed role bundle、dynamic
-grant／revoke、階層比較或雙人權限覆核。
+grant／revoke、階層比較或雙人權限覆核。root 與所有其他 enabled 帳號一樣可使用完整業務功能集合。
+唯一額外權限是 Access Control 自身的帳號中心：恰有一個 enabled `root` 帳號可進入帳號中心並執行
+帳號生命週期管理；此額外權限不是業務功能權限，也不得延伸為其他 API、UI 選單或 Domain 操作的
+差異化授權。
 
 - `AdminPrincipal` 是 human actor identity，用於 authentication、操作歸屬與 audit，不代表差異化權限。
 - 業務 API 只判斷 session 是否有效且 user 是否 enabled；通過後可使用相同業務功能集合。
-- `X-Legacy-Shared-Key` 只證明受信任 service caller，不能冒充 human actor。
+- `root` 是 Access Control root fact，不是可由一般帳號調整的 role 或 capability；僅 root 可讀寫帳號中心、
+  建立帳號、啟停帳號、重設 credential／MFA 與撤銷其他帳號 session。root 不得停用、降級或移轉自身；
+  root 遺失只能依受控離線維運程序復原，沒有 production HTTP break-glass endpoint。
+- human authorization 不接受 `X-Legacy-Shared-Key` 或任何 legacy shared key。machine caller 在
+  local/test 只可使用 `INTERNAL_SERVICE_SHARED_KEY`，production 只可使用已驗證且 caller allowlist
+  通過的 Google-signed OIDC；兩者都不能冒充 human actor。
 - body、query、UI session label 或任意 role／capability 字串不得成為 actor 或改變可用功能。
 - UI 不顯示依人員而異的業務選單，也不建立「有權／無權角色」驗收案例。
 - 外部 provider、production environment、secret、資料庫 target、SystemPrincipal 自動命令範圍及
@@ -232,6 +240,11 @@ grant／revoke、階層比較或雙人權限覆核。
 - admin user identity；
 - password hash／credential version；
 - enabled flag；
+- root-account designation（恰有一個 enabled root）；
+- encrypted TOTP factor、其 encryption key version 與最後成功 time-step；
+- recovery-code hash 與 consumed fact；
+- password challenge／MFA enrollment challenge 的 hash、綁定 account／credential／active factor identity／account access-control version、absolute expiry 與 single-use consumed fact；
+- hashed login-attempt subject、rate-limit decision 與安全告警投影來源；
 - hashed session token；
 - issued、expires、last-seen、revoked time；
 - security decision audit。
@@ -239,7 +252,9 @@ grant／revoke、階層比較或雙人權限覆核。
 State：
 
 ```text
-Admin user: enabled ↔ disabled
+Admin user: enabled ↔ disabled（root 不可由線上 command 停用或降級）
+TOTP factor: unbound → enrollment_pending → active → rotated | revoked
+Password challenge: issued → consumed | expired
 Session: active → expired | revoked
 Credential: valid → rotated
 ```
@@ -256,6 +271,10 @@ Modules：
 - `SessionRepository`
 - `AdminPrincipalLoader`
 - `AuthenticationPolicy`
+- `LoginAttemptPolicy`
+- `PasswordChallengeIssuer`
+- `TotpVerifier`／`TotpReplayGuard`
+- `RecoveryCodeVerifier`
 
 正式環境：
 
@@ -267,6 +286,12 @@ Modules：
   時 fail closed；
 - `APP_ENV=production` 禁止 auth bypass；
 - development bypass 必須同時是允許環境＋顯式設定，並產生醒目 audit／startup warning。
+- public login 固定兩段：Stage 1 只驗 username/password，成功僅簽發短效、single-use password
+  challenge；Stage 2 驗該 challenge 與 TOTP 或 recovery code，成功後才建立 bearer session。任何
+  Stage 1 未通過都回泛化 `invalid_credentials_or_factor`，Stage 2 failure 回泛化
+  `invalid_credentials_or_factor` 或 rate-limit 429，不洩漏帳號、MFA state 或 factor 狀態。
+- password challenge 必須綁定 user、credential version、active factor identity、account access-control version、source-risk subject 與 absolute
+  expiry；不得在 browser storage、log、audit detail 或 URL 保存 password、TOTP 或原 challenge token。
 
 ### 4.4 Subsystem：Account／Session Administration
 
@@ -277,9 +302,11 @@ Commands：
 - `EnableAdminUser`
 - `RevokeAdminSessions`
 - `RotateAdminCredential`
+- `ResetAdminMfa`
 
-每個 Command 使用 expected version、authenticated actor、reason 與 idempotency key。本系統不採用
-break-glass credential、緊急繞過 API 或自動復原流程。
+上述帳號／session administration commands 僅接受 root session；root identity、目標帳號與 expected
+version 必須在同一 UoW 鎖定驗證。每個 Command 使用 expected version、authenticated actor、reason 與
+idempotency key。本系統不採用 break-glass credential、緊急繞過 API 或自動復原流程。
 
 Ports：`AdminRepository`、`SessionRepository`、`SecurityAuditRepository`、`SecurityOutbox` 與
 `AccessControlUnitOfWork`。disable 依固定順序鎖定 user，驗證 expected version 與 authenticated actor，

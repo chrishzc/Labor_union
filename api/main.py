@@ -1,10 +1,6 @@
 """
-================================================================================
-檔案名稱: api/main.py
-功能說明: FastAPI 主程序，掛載 LINE、LIFF、管理介面與其他後端 API；LINE Worker 由獨立程序管理
-================================================================================
 File: main.py
-Description: 掛載管理 API 與 HCM workbook upload router。
+Description: 掛載 FastAPI 管理、業務、LINE 與 Access Control API router。
 """
 
 import asyncio
@@ -22,6 +18,7 @@ from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
     admin_audit,
     admin_auth,
+    account_center,
     anomaly_recovery,
     anomaly_registry,
     import_warning_tracking,
@@ -155,6 +152,7 @@ app.mount("/static", StaticFiles(directory="line/static"), name="static")
 # LINE/LIFF/webhook endpoints are a child router of this central application.
 app.include_router(line_router)
 app.include_router(admin_auth.router)
+app.include_router(account_center.router)
 app.include_router(admin_audit.router)
 app.include_router(capability_grants.router)
 app.include_router(line_admin.router)

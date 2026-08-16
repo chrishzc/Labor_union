@@ -1,4 +1,7 @@
-"""Administrator-session dependencies."""
+"""
+File: admin_auth.py
+Description: 管理後台 Bearer Session、業務能力與 root 帳號中心授權依賴。
+"""
 
 from __future__ import annotations
 
@@ -24,13 +27,27 @@ DEVELOPMENT_BYPASS_DENIED_CAPABILITIES = frozenset(
     {"line.menu.publish", "line.rich_menu.publish"}
 )
 
+ACCESS_CONTROL_PROFILES = frozenset(
+    {"local_bypass", "local_auth", "local_developer_session", "production"}
+)
+
+
+def access_control_profile() -> str:
+    """Return the explicit auth profile; an absent or invalid profile fails closed."""
+    profile = os.getenv("ACCESS_CONTROL_PROFILE", "").strip().lower()
+    return profile if profile in ACCESS_CONTROL_PROFILES else "production"
+
 
 def admin_auth_is_enabled() -> bool:
-    """Return False only for an explicit bypass in a development environment."""
+    """Return False only for the named local_bypass profile with both safeguards."""
     app_env = os.getenv("APP_ENV", "development").strip().lower()
     configured = os.getenv("ENABLE_ADMIN_AUTH", "true").strip().lower()
     requested_bypass = configured in {"0", "false", "no", "off"}
-    return not (app_env in DEVELOPMENT_ENVIRONMENTS and requested_bypass)
+    return not (
+        access_control_profile() == "local_bypass"
+        and app_env in DEVELOPMENT_ENVIRONMENTS
+        and requested_bypass
+    )
 
 
 def get_bearer_token(authorization: str | None) -> str:
@@ -86,7 +103,18 @@ def _development_bypass_principal() -> AdminPrincipal:
         base.display_name,
         base.role,
         capabilities=capabilities,
+        is_root=True,
     )
+
+
+def require_root(principal: AdminPrincipal = Depends(require_admin)) -> AdminPrincipal:
+    """Allow the sole root fact holder to access Account Center only."""
+    if principal.id is None or not principal.is_root:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="僅 root 帳號可管理帳號中心",
+        )
+    return principal
 
 
 def require_role(minimum_role: str) -> Callable[..., AdminPrincipal]:

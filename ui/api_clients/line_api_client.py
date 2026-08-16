@@ -202,13 +202,6 @@ class LineAdminApiClient:
             raise _response_error(response.status_code, payload, response.text)
         return response.content
 
-    def login(self, username: str, password: str) -> dict[str, Any]:
-        return self._request(
-            "POST",
-            "/api/v1/admin/auth/login",
-            json={"username": username, "password": password},
-        )
-
     def me(self, token: str | None) -> dict[str, Any]:
         return self._request("GET", "/api/v1/admin/auth/me", token=token)
 

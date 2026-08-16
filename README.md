@@ -145,15 +145,46 @@ document/架構重整/  正式規格、決策／退役記錄、追蹤清單與 e
 
 ```env
 APP_ENV=development
+# 只能四選一：local_bypass、local_auth、local_developer_session、production。缺漏時 fail closed。
+ACCESS_CONTROL_PROFILE=local_bypass
 ENABLE_ADMIN_AUTH=false
-LEGACY_SHARED_KEY=<本機專用的長隨機字串>
+# local_auth／production 必須為 true，並設定 versioned Fernet keyring；不得提交真實 key。
+# ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION=v1
+# ACCESS_CONTROL_TOTP_KEYRING=v1:<Fernet-base64-key>
 # 手動分別啟動 API／Worker 時，各 process 必須共用；用 launcher 時會自動產生且不寫檔。
 INTERNAL_SERVICE_SHARED_KEY=<至少 32 字元的本機專用隨機字串>
 INTERNAL_API_BASE_URL=http://127.0.0.1:8000
 ```
 
-`ENABLE_ADMIN_AUTH=false` 只適用於 development／dev／local／test；`LEGACY_SHARED_KEY` 仍會驗證。
-production 必須啟用管理員 session，且不得將 `.env`、token、私鑰或正式資料提交至 Git。
+`local_bypass` 只適用於 development／dev／local／test，且必須同時設定
+`ENABLE_ADMIN_AUTH=false`；`local_auth` 必須設定 `ENABLE_ADMIN_AUTH=true`，走帳密＋TOTP 的完整流程。
+`local_developer_session` 同樣只適用於 development／dev／local／test 且必須啟用 auth；它讀取本機
+ignored `.env` 的 `DEV_ROOT_USERNAME`／`DEV_ROOT_PASSWORD` 來驗證唯一 root 的密碼、建立真正 Bearer
+Session 與 audit，但暫時不要求 TOTP，僅供本機開發驗證其他 Access Control 邊界。
+production 固定啟用管理員 Session 與 TOTP，不存在 `LEGACY_SHARED_KEY` 或 `X-Legacy-Shared-Key` 的
+human authorization fallback。`INTERNAL_SERVICE_SHARED_KEY` 只供本機 machine caller 使用；production
+machine caller 使用 Google-signed OIDC。不得將 `.env`、token、私鑰或正式資料提交至 Git。
+
+### root bootstrap 與 MFA key rotation
+
+首次建立唯一 root 前，先以唯讀計畫確認目前資料庫是預期的 `lu_test_*` 目標；不得對
+`union_db` 執行此流程。root 帳密只在受保護的互動終端輸入，不得寫入命令列、文件或 receipt：
+
+```powershell
+.\.venv\Scripts\python.exe -m scripts.update_local_database --mysql-container mysql_db
+.\.venv\Scripts\python.exe scripts\create_admin.py --bootstrap-root
+```
+
+成功後，將 root 帳號名稱與密碼以 ignored `.env` 的 `DEV_ROOT_USERNAME`／`DEV_ROOT_PASSWORD`
+設定，僅供 `local_developer_session` 產生真實 Bearer Session；不要在 `local_auth` 或
+`production` 以此略過 TOTP。首次一般登入會回 MFA enrollment challenge，使用者掃描畫面上以一次性
+provisioning URI 在本機記憶體產生的 QR code（或展開手動設定資訊）、完成第一組 TOTP，再安全保存只顯示一次的 recovery codes。
+
+TOTP keyring 由部署／維運擁有，資料庫只保存 ciphertext 與 key version。rotation 時先把新
+Fernet key 加入 `ACCESS_CONTROL_TOTP_KEYRING`、切換 `ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION`、
+重啟所有 API/worker 並以既有 factor 驗證登入；待所有舊 ciphertext 已透過受控 re-encryption
+程序更新且保留回復金鑰後，才可移除舊 key。任一步失敗要保留舊 key、停止 MFA mutations、保留
+security audit，不能以關閉 MFA 或重用 legacy human key 作回復。
 
 ### 啟動服務
 

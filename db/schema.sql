@@ -1,3 +1,6 @@
+-- File: schema.sql
+-- Description: 定義 Labor Union fresh bootstrap 的基礎 MySQL schema。
+
 -- 強制重建資料庫以確保 ENUM 編碼正確
 DROP DATABASE IF EXISTS union_db;
 CREATE DATABASE union_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -600,6 +603,82 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
         REFERENCES admin_users(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- 33a. 唯一 root 帳號（root 是帳號中心授權事實，不是業務角色）
+CREATE TABLE IF NOT EXISTS admin_root_account (
+    singleton_key TINYINT NOT NULL DEFAULT 1,
+    admin_user_id BIGINT NOT NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    PRIMARY KEY (singleton_key),
+    UNIQUE KEY uk_admin_root_account_user (admin_user_id),
+    CONSTRAINT chk_admin_root_account_singleton CHECK (singleton_key = 1),
+    CONSTRAINT fk_admin_root_account_user FOREIGN KEY (admin_user_id)
+        REFERENCES admin_users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 33b. 管理員 TOTP factor；seed 只保存 application-key 加密後的 ciphertext。
+CREATE TABLE IF NOT EXISTS admin_totp_factors (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    admin_user_id BIGINT NOT NULL,
+    factor_state ENUM('enrollment_pending','active','revoked') NOT NULL,
+    seed_ciphertext TEXT NOT NULL,
+    encryption_key_version VARCHAR(64) NOT NULL,
+    enrollment_challenge_hash CHAR(64) NOT NULL,
+    enrollment_expires_at DATETIME(6) NOT NULL,
+    last_successful_step BIGINT NULL,
+    activated_at DATETIME(6) NULL,
+    revoked_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uk_admin_totp_factor_user (admin_user_id),
+    INDEX idx_admin_totp_factor_enrollment (factor_state,enrollment_expires_at),
+    CONSTRAINT fk_admin_totp_factor_user FOREIGN KEY (admin_user_id)
+        REFERENCES admin_users(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_admin_totp_factor_activation CHECK (
+        (factor_state = 'active' AND activated_at IS NOT NULL AND revoked_at IS NULL)
+        OR (factor_state = 'enrollment_pending' AND activated_at IS NULL AND revoked_at IS NULL)
+        OR (factor_state = 'revoked' AND revoked_at IS NOT NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 33c. 每個 enrollment challenge 僅保存 hash，成功或逾期後不可重播。
+CREATE TABLE IF NOT EXISTS admin_mfa_enrollment_challenges (
+    id CHAR(36) PRIMARY KEY,
+    admin_user_id BIGINT NOT NULL,
+    challenge_hash CHAR(64) NOT NULL,
+    expires_at DATETIME(6) NOT NULL,
+    consumed_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uk_admin_mfa_challenge_hash (challenge_hash),
+    INDEX idx_admin_mfa_challenge_user_expiry (admin_user_id,expires_at,consumed_at),
+    CONSTRAINT fk_admin_mfa_challenge_user FOREIGN KEY (admin_user_id)
+        REFERENCES admin_users(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 33d. Recovery code 只存 scrypt hash，使用後不可再次通過驗證。
+CREATE TABLE IF NOT EXISTS admin_totp_recovery_codes (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    factor_id BIGINT UNSIGNED NOT NULL,
+    code_hash VARCHAR(512) NOT NULL,
+    consumed_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uk_admin_totp_recovery_code_hash (code_hash),
+    INDEX idx_admin_totp_recovery_factor (factor_id,consumed_at),
+    CONSTRAINT fk_admin_totp_recovery_factor FOREIGN KEY (factor_id)
+        REFERENCES admin_totp_factors(id) ON UPDATE RESTRICT ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 33e. 登入嘗試與 rate-limit 決策事實；只保存去識別化的帳號與來源雜湊。
+CREATE TABLE IF NOT EXISTS admin_login_attempts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    username_hash CHAR(64) NOT NULL,
+    source_hash CHAR(64) NOT NULL,
+    outcome ENUM('failed','succeeded','rate_limited','mfa_replay') NOT NULL,
+    occurred_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    INDEX idx_admin_login_attempt_subject (username_hash,source_hash,occurred_at),
+    INDEX idx_admin_login_attempt_time (occurred_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- 34. 管理後台操作稽核紀錄
 CREATE TABLE IF NOT EXISTS admin_audit_logs (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
@@ -617,6 +696,31 @@ CREATE TABLE IF NOT EXISTS admin_audit_logs (
     INDEX idx_admin_audit_resource (resource_type, resource_id, created_at),
     CONSTRAINT fk_admin_audit_user FOREIGN KEY (admin_user_id)
         REFERENCES admin_users(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- 34a. 管理後台高風險操作告警投遞箱（audit 同一交易寫入、incident worker 非同步投影）
+CREATE TABLE IF NOT EXISTS admin_security_alert_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    source_audit_id BIGINT NOT NULL,
+    alert_code VARCHAR(64) NOT NULL,
+    alert_identity CHAR(64) NOT NULL,
+    payload_snapshot JSON NOT NULL,
+    processing_status ENUM('pending','processing','completed','dead') NOT NULL DEFAULT 'pending',
+    attempt_count INT UNSIGNED NOT NULL DEFAULT 0,
+    max_attempts INT UNSIGNED NOT NULL DEFAULT 5,
+    next_attempt_at DATETIME(6) NULL,
+    lease_owner VARCHAR(191) NULL,
+    lease_expires_at DATETIME(6) NULL,
+    last_error_code VARCHAR(64) NULL,
+    completed_at DATETIME(6) NULL,
+    created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uk_admin_security_alert_outbox_audit (source_audit_id),
+    INDEX idx_admin_security_alert_outbox_due (processing_status, next_attempt_at, lease_expires_at, id),
+    CONSTRAINT fk_admin_security_alert_outbox_audit FOREIGN KEY (source_audit_id)
+        REFERENCES admin_audit_logs(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_admin_security_alert_outbox_payload CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT'),
+    CONSTRAINT chk_admin_security_alert_outbox_attempts CHECK (max_attempts > 0 AND attempt_count <= max_attempts)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 35. 系統異常事件紀錄表 (非財務類「流程提醒」警示：滾動更新，非不可竄改稽核軌跡；

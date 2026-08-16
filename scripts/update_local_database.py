@@ -153,6 +153,72 @@ def build_preview(config, source: str, candidate: str) -> dict[str, object]:
     }
 
 
+def build_drift_report(config, source: str) -> dict[str, object]:
+    """唯讀列出阻擋升級的 owned-object 狀態與可否安全續跑。"""
+    snapshot = migration._schema_snapshot(config, source)
+    states = migration._owned_classification(snapshot, defer_missing_triggers=True)
+    blocked = migration._blocking_schema_states(
+        states, LOCAL_RESUMABLE_PARTIAL_ARTIFACTS
+    )
+    remediations = [
+        _drift_remediation(snapshot, artifact, state)
+        for artifact, state in sorted(blocked.items())
+    ]
+    return {
+        "contract": "local-database-schema-drift-report/v1",
+        "status": "blocked" if remediations else "ready",
+        "source_database": source,
+        "source_schema_sha256": snapshot["sha256"],
+        "source_objects": states,
+        "remediations": remediations,
+        "source_policy": "read_only_no_source_ddl",
+        "next_step": (
+            "review each candidate-only remediation before --apply"
+            if remediations else "run the normal preserved-data update preview"
+        ),
+    }
+
+
+def _drift_remediation(snapshot, artifact: str, state: str) -> dict[str, object]:
+    """把分類結果轉成可稽核的處置，不把未知 schema 猜成可修復。"""
+    descriptor = migration._canonical_artifact_descriptor(artifact)
+    expected_tables = {
+        **descriptor["tables"], **descriptor["parent_columns"],
+    }
+    actual_columns: dict[str, set[str]] = {}
+    for row in snapshot["columns"]:
+        actual_columns.setdefault(str(row["table_name"]), set()).add(
+            str(row["column_name"])
+        )
+    table_deltas = []
+    for table, columns in sorted(expected_tables.items()):
+        actual = actual_columns.get(table, set())
+        expected = set(columns)
+        missing = sorted(expected - actual)
+        unexpected = sorted(actual - expected) if table in descriptor["tables"] else []
+        if missing or unexpected:
+            table_deltas.append({
+                "table": table,
+                "missing_columns": missing,
+                "unexpected_columns": unexpected,
+            })
+    resumable = state == "partial" and artifact in LOCAL_RESUMABLE_PARTIAL_ARTIFACTS
+    return {
+        "artifact": artifact,
+        "state": state,
+        "table_deltas": table_deltas,
+        "disposition": (
+            "candidate_resume_reviewed_partial"
+            if resumable else "candidate_repair_requires_artifact_decision"
+        ),
+        "source_ddl": "forbidden",
+        "automatic_apply": resumable,
+        "required_evidence": (
+            "candidate backup, data preservation projection, exact descriptor verification"
+        ),
+    }
+
+
 def require_current_database(preview: dict[str, object]) -> dict[str, object]:
     pending = [*preview["parts_to_apply"], *preview["parts_to_resume"]]
     if pending:
@@ -551,6 +617,7 @@ def update_local_database(
     confirm_database=None,
     confirm_configured_database=False,
     mysql_container=None,
+    drift_report=False,
 ) -> dict[str, object]:
     if migration is None:
         raise LocalDatabaseUpdateError(f"migration catalog unavailable: {MIGRATION_IMPORT_ERROR}")
@@ -568,6 +635,12 @@ def update_local_database(
         mysql_container = resolve_mysql_container(mysql_container)
         config, source = migration.config_from_env(environment_path)
         validate_local_source(config, source)
+        if drift_report:
+            if apply or require_current:
+                raise LocalDatabaseUpdateError(
+                    "--drift-report cannot be combined with --apply or --require-current"
+                )
+            return build_drift_report(config, source)
         target = candidate or candidate_name(source)
         validate_candidate_database(source, target)
         preview = build_preview(config, source, target)
@@ -607,6 +680,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--receipt-root", type=Path, default=DEFAULT_RECEIPT_ROOT)
     command.add_argument("--candidate-database")
     command.add_argument("--apply", action="store_true")
+    command.add_argument("--drift-report", action="store_true")
     command.add_argument("--require-current", action="store_true")
     command.add_argument("--confirm-database")
     command.add_argument("--confirm-configured-database", action="store_true")
@@ -626,6 +700,7 @@ def main() -> int:
             confirm_database=arguments.confirm_database,
             confirm_configured_database=arguments.confirm_configured_database,
             mysql_container=arguments.mysql_container,
+            drift_report=arguments.drift_report,
         )
     except LocalDatabaseUpdateError as error:
         payload = {"status": "blocked", "error": str(error)}
