@@ -899,3 +899,26 @@
   2. 預算上限指標卡同步調整為 **NT$ 4,000 / 月**。
   3. 表格維持極簡 4 大核心項目（VPN 專線 41%、安全防護 33%、雲端運算 23%、基礎日誌 3%），大字體高畫質呈現。
 - 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-20] 修正單一 Cloud VPN 部署與 Cloud Run 封裝計畫的儲存邊界
+
+- 依使用者確認，正式資料與長期檔案都以地端 NAS 為主儲存；不新增 Cloud Storage、Eventarc 或 Ingestion Producer。
+- 更新 `document/雲端部署/計劃書/單一Cloud VPN計畫書.md`：
+  - 4+1 維持不變，`+1` 明確為地端 NAS 資料平台（MySQL＋耐久檔案區）。
+  - MySQL 保存檔案 metadata／版本／hash，檔案本體由 Business API 經單一 VPN 以受限 SFTP 寫回 NAS。
+  - 補齊 TCP 22 firewall、SFTP identity／host-key pin、atomic publish、交易外寫入、orphan cleanup、刪除 replay、備份還原與 outage gate。
+  - Pub/Sub／DLQ 僅保存去敏告警 envelope，明列目前 publisher／replay transport 尚未完成，不能當 business database 或檔案備援。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫_v2.md`：
+  - 狀態改為 `IMPLEMENTATION_READY_PLAN／BUILD_NOT_READY`，避免把尚未施工的 Dockerfile／adapter 誤稱為 production ready。
+  - API image 成為唯一 MySQL＋SFTP owner；UI／Worker／Monitor 不含 DB／NAS credential、driver 或地端 route。
+  - 增列 NAS SFTP adapter、Pub/Sub fallback、Worker Pool supervisor、production URL、無 Redis、停用 Knowledge／Chroma、dependency split、runtime manifest 與 `.dockerignore` 等封裝前置。
+- 本次只修改兩份計畫與本機 work log；未修改 Python、schema、migration、Dockerfile、雲端資源、VPN／NAS 設定，也未執行 git add／commit。既有兩個舊版計畫的刪除狀態保持不變。
+
+## [2026-08-20] 新增 Cloud Run 現況相容性部署測試封裝計畫
+
+- 新增 `document/雲端部署/計劃書/Cloud_Run_現況相容性部署測試封裝計畫.md`，與正式 Dockerfile 封裝計畫完全分離。
+- 測試方案允許不修改業務程式，先建立 API、UI、runtime-ops 三個 compat image，驗證 Cloud Run 啟動、UI/API 串聯、Google OIDC、單一 VPN與 staging MySQL相容性。
+- 因正式 Worker Pool supervisor尚未實作，測試期由同一 runtime-ops image啟動 Durable、LINE、Incident三個獨立 Worker Pool，Monitor另以 Job `--once`執行。
+- 現有模板、archive與media只以去敏測試資料放在 ephemeral filesystem，固定`max=1`並重現restart／revision資料遺失；不得使用正式合約、正式LINE媒體或production DB。
+- 明列 compat image、resource命名、build context、環境變數、OIDC allowlist、測試順序、故障演練、結果分類、清理與正式方案不得繼承的測試捷徑。
+- 本次未建立 Dockerfile、image或GCP資源，未修改Python／schema／migration，也未執行git add／commit。
