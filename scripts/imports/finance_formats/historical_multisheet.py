@@ -150,6 +150,8 @@ def normalize_historical_multisheet_rows(
         )
         if all(pd.isna(value) or str(value).strip() in {"", "--"} for value in candidate_values):
             continue
+        if pd.isna(source.get("交易日")) or str(source.get("交易日")).strip() in {"", "--"}:
+            continue
         account_text = "" if pd.isna(source.get("帳號")) else str(source.get("帳號")).strip()
 
         warnings: list[str] = []

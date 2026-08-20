@@ -1,8 +1,16 @@
-from fastapi import APIRouter, HTTPException, Query
-from infrastructure.mysql import mysql_adapter as db_service
-from api.error_contracts import internal_query_error
+"""
+File: staff.py
+Description: 提供管理員會話保護的 bounded Staff 摘要 cursor 查詢與退役全量入口。
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from api.dependencies.admin_auth import require_admin
+from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.staff_summary import StaffSummaryPageView, StaffSummaryView
+from infrastructure.mysql import mysql_adapter as db_service
+from subsystems.access.authentication_session import AdminPrincipal
 
 router = APIRouter(prefix="/api/v1/staff", tags=["Staff 服務人員/月嫂名冊"])
 
@@ -12,12 +20,17 @@ def get_staff_summaries(
     page_size: int = Query(default=200, ge=1, le=200),
     after_id: int | None = Query(default=None, ge=1),
     staff_id: int | None = Query(default=None, ge=1),
+    principal: AdminPrincipal = Depends(require_admin),
 ) -> BaseResponse[StaffSummaryPageView]:
     """Return a bounded staff selector page without exposing the staff master."""
+    del principal
     if staff_id is not None and after_id is not None:
-        raise HTTPException(
-            status_code=422,
-            detail="staff_id and after_id cannot be combined",
+        raise typed_http_error(
+            422,
+            "validation",
+            "staff_summary_query_params_conflict",
+            "staff_id 與 after_id 不得同時提供。",
+            "staff-summary-query",
         )
     try:
         connection = db_service.get_connection()
@@ -53,6 +66,7 @@ def get_staff_summaries(
         ),
         message="成功取得服務人員摘要",
     )
+
 
 @router.get("", include_in_schema=False)
 def get_all_staff() -> None:

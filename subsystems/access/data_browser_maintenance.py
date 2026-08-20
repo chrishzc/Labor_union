@@ -1,8 +1,6 @@
 """
-================================================================================
-檔案名稱: subsystems/access/data_browser_maintenance.py
-功能說明: 資料庫原始資料動態主鍵、中繼權限 SSOT 與單列微調服務 (DataBrowserAdminSchemaService)
-================================================================================
+File: data_browser_maintenance.py
+Description: 編排 legacy table metadata 與 masked Data Browser query。
 """
 
 from typing import Any, Dict
@@ -78,3 +76,22 @@ def get_data_browser_table_schema(table_name: str) -> Dict[str, Any]:
         "valid_options": COLUMN_VALID_OPTIONS.get(table_name, {}),
         "read_only": is_read_only,
     }
+
+
+def query_masked_data_browser_source(
+    repository,
+    source_id: str,
+    *,
+    limit: int,
+    after: str | None,
+    query: str | None,
+):
+    """Run one bounded read-only source query without exposing table identifiers."""
+    if limit < 1 or limit > 100:
+        raise ValueError("limit_invalid")
+    return repository.query_masked_page(
+        source_id,
+        limit=limit,
+        after=after,
+        query=query,
+    )

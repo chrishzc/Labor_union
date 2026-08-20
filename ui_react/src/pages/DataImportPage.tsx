@@ -1,218 +1,149 @@
-import React, { useRef, useState } from 'react';
+/**
+ * File: DataImportPage.tsx
+ * Description: 顯示 HCM 最近匯入批次、新增訂單與問題導向；其他匯入family維持原位鎖定。
+ */
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { adaptHcmImportResult, type HcmImportResultViewModel } from '../adapters/case_import/hcm_import_result_adapter';
+import { hcmImportResultClient } from '../api/case_import/hcm_import_result_client';
 import './DataImportPage.css';
-import { requestPreview, requestApply, type PreviewResult } from '../api/client';
 
-interface ImportCategory {
-  id: string;
-  title: string;
-  subtitle: string;
-  icon: string;
-  statusText: string;
-  statusType: 'ready' | 'pending';
-  fileInfo: string;
-}
+const LOCKED_CATEGORIES = [
+  ['hcm-historical', '📜', '2. HCM 歷史過渡匯入', '已退役', 'Historical whole-row overwrite 已退役'],
+  ['client-beclass', '👥', '3. 客戶 BeClass 問卷匯入', '本波未開放', '等待獨立 bounded contract'],
+  ['staff-historical', '👩‍🍼', '4. 月嫂歷史資料匯入', '本波未開放', '等待獨立 bounded contract'],
+  ['historic-orders', '📦', '5. 歷史訂單認領匯入', '本波未開放', '等待獨立 bounded contract'],
+  ['bank-statements', '🏦', '6. 銀行對帳單流水匯入', '本波未開放', '等待 Finance Import 專屬工作包'],
+] as const;
 
-const CATEGORIES: ImportCategory[] = [
-  {
-    id: 'hcm',
-    title: 'HCM 案件資料',
-    subtitle: 'HCM 案件日常與歷史 Workbook 匯入',
-    icon: '📁',
-    statusText: '可供上傳預覽',
-    statusType: 'ready',
-    fileInfo: '支援 .xlsx / .xls 格式',
-  },
-  {
-    id: 'client-beclass',
-    title: 'Client BeClass 資料',
-    subtitle: 'BeClass 客戶登記過渡匯入 (LIFF 穩定後退役)',
-    icon: '👥',
-    statusText: '過渡入口',
-    statusType: 'pending',
-    fileInfo: '支援 .xlsx / .csv 格式',
-  },
-  {
-    id: 'staff-beclass',
-    title: 'Staff BeClass 資料',
-    subtitle: 'BeClass 月嫂履歷過渡匯入 (LIFF 穩定後退役)',
-    icon: '👩‍⚕️',
-    statusText: '過渡入口',
-    statusType: 'pending',
-    fileInfo: '支援 .xlsx / .csv 格式',
-  },
-  {
-    id: 'historical-orders',
-    title: '訂單狀態與月嫂歷史配對',
-    subtitle: '歷史訂單狀態、配對 Evidence 與實際服務日期 (WP85)',
-    icon: '📜',
-    statusText: '可供上傳預覽',
-    statusType: 'ready',
-    fileInfo: '支援 .xlsx 格式',
-  },
-  {
-    id: 'bank-statements',
-    title: '銀行流水與歷史帳務',
-    subtitle: '台新 / 永豐銀行流水與歷史帳務轉帳記錄',
-    icon: '🏦',
-    statusText: '可供上傳預覽',
-    statusType: 'ready',
-    fileInfo: '支援 .xlsx / .csv 格式',
-  },
-];
+type ResultState =
+  | { kind: 'loading' }
+  | { kind: 'ready'; items: HcmImportResultViewModel[] }
+  | { kind: 'empty' }
+  | { kind: 'error'; message: string };
 
 export const DataImportPage: React.FC = () => {
-  const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
-  const [previewData, setPreviewData] = useState<Record<string, PreviewResult>>({});
-  const [loadingCategory, setLoadingCategory] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [state, setState] = useState<ResultState>({ kind: 'loading' });
+  const generationRef = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const handleSelectFile = (categoryId: string) => {
-    setActiveCategoryId(categoryId);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-      fileInputRef.current.click();
+  const loadResults = useCallback(async () => {
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const generation = generationRef.current + 1;
+    generationRef.current = generation;
+    setState({ kind: 'loading' });
+    try {
+      const page = await hcmImportResultClient.query({ limit: 20 }, { signal: controller.signal });
+      if (controller.signal.aborted || generation !== generationRef.current) return;
+      const items = page.items.map(adaptHcmImportResult);
+      setState(items.length ? { kind: 'ready', items } : { kind: 'empty' });
+    } catch (error) {
+      if (controller.signal.aborted || generation !== generationRef.current) return;
+      setState({ kind: 'error', message: error instanceof Error ? error.message : 'HCM 匯入結果載入失敗。' });
+    } finally {
+      if (abortRef.current === controller) abortRef.current = null;
     }
-  };
+  }, []);
 
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeCategoryId) return;
+  useEffect(() => {
+    let cancelled = false;
+    queueMicrotask(() => { if (!cancelled) void loadResults(); });
+    return () => {
+      cancelled = true;
+      abortRef.current?.abort();
+      generationRef.current += 1;
+    };
+  }, [loadResults]);
 
-    setLoadingCategory(activeCategoryId);
-    setMessage(`[Preview 進行中] 正在發送 ${file.name} 至零寫入驗證器...`);
-
-    const response = await requestPreview(activeCategoryId, file);
-    setLoadingCategory(null);
-
-    if (response.success && response.data) {
-      setPreviewData((prev) => ({ ...prev, [activeCategoryId]: response.data! }));
-      setMessage(`✅ ${file.name} Preview 完成！可接受筆數: ${response.data.acceptedRows}，需審核: ${response.data.reviewRows}`);
-    } else {
-      setMessage(`❌ Preview 失敗：${response.error}`);
-    }
-  };
-
-  const handleApply = async (categoryId: string) => {
-    const pData = previewData[categoryId];
-    if (!pData || !pData.previewSummary) {
-      alert('請先點選 Preview 並完成驗證後才能 Apply！');
-      return;
-    }
-
-    setLoadingCategory(categoryId);
-    setMessage(`[Apply 進行中] 發送指令中...`);
-
-    const response = await requestApply(categoryId, pData.previewSummary);
-    setLoadingCategory(null);
-
-    if (response.success && response.data) {
-      setMessage(`🎉 Apply 成功！狀態: ${response.data.status}，已寫入筆數: ${response.data.appliedCount}`);
-    } else {
-      setMessage(`❌ Apply 失敗：${response.error}`);
-    }
+  const navigateToWarning = () => {
+    window.location.hash = '#anomalies';
   };
 
   return (
-    <div className="import-center-container">
-      {/* 隱藏的檔案選擇器 */}
-      <input
-        ref={fileInputRef}
-        className="file-input"
-        type="file"
-        accept=".xlsx,.xls,.csv"
-        onChange={handleFileChange}
-      />
-
-      {/* 左側導航 */}
-      <aside className="sidebar">
-        <div className="brand-title">🏛️ Lobar Union</div>
-        <ul className="nav-list">
-          <li><a href="#orders" className="nav-link">📦 訂單管理</a></li>
-          <li><a href="#data-import" className="nav-link active">📥 資料匯入中心</a></li>
-          <li><a href="#scheduling" className="nav-link">📅 多月嫂排班</a></li>
-          <li><a href="#finance" className="nav-link">💰 帳務作業中心</a></li>
-          <li><a href="#anomalies" className="nav-link">⚠️ 異常警示中心</a></li>
-        </ul>
-      </aside>
-
-      {/* 主內容區 */}
-      <main className="main-wrapper">
-        <header className="page-header">
-          <div>
-            <h1 className="page-title">資料匯入中心</h1>
-            <p className="page-subtitle">單一入口以獨立 Typed Category Cards 進行 Preview (零寫入) 與 Apply (Fresh-Validate)。</p>
-          </div>
-        </header>
-
-        {message && (
-          <div style={{
-            padding: '12px 16px',
-            borderRadius: '8px',
-            backgroundColor: '#e0f2fe',
-            color: '#0369a1',
-            marginBottom: '24px',
-            fontWeight: 500
-          }}>
-            {message}
-          </div>
-        )}
-
-        <div className="cards-grid">
-          {CATEGORIES.map((cat) => {
-            const pData = previewData[cat.id];
-            const isLoading = loadingCategory === cat.id;
-
-            return (
-              <div className="category-card" key={cat.id}>
-                <div>
-                  <div className="card-top">
-                    <div className="card-icon">{cat.icon}</div>
-                    <span className={`badge ${cat.statusType}`}>{cat.statusText}</span>
-                  </div>
-
-                  <h2 className="card-title">{cat.title}</h2>
-                  <p className="card-desc">{cat.subtitle}</p>
-
-                  {pData && (
-                    <div style={{
-                      backgroundColor: '#f1f5f9',
-                      padding: '8px 12px',
-                      borderRadius: '6px',
-                      fontSize: '0.85rem',
-                      marginBottom: '12px'
-                    }}>
-                      <div>總筆數: {pData.totalRows} | 通過: {pData.acceptedRows}</div>
-                      <div>待審核: {pData.reviewRows} | 衝突: {pData.conflictRows}</div>
-                    </div>
-                  )}
-
-                  <div className="card-meta">
-                    📌 {cat.fileInfo}
-                  </div>
-                </div>
-
-                <div className="card-actions">
-                  <button
-                    className="btn btn-outline"
-                    disabled={isLoading}
-                    onClick={() => handleSelectFile(cat.id)}
-                  >
-                    {isLoading ? '處理中...' : 'Preview (預覽)'}
-                  </button>
-                  <button
-                    className="btn btn-primary"
-                    disabled={isLoading || !pData}
-                    onClick={() => handleApply(cat.id)}
-                  >
-                    Apply (寫入)
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+    <div data-surface-id="imports.page">
+      <header className="page-header-banner import-result-header">
+        <div>
+          <h1 className="page-title">📥 批次資料匯入中心</h1>
+          <p className="page-subtitle">查看 HCM 已完成批次的新增訂單與問題欄位；Apply 仍由獨立安全流程管理。</p>
         </div>
-      </main>
+        <button type="button" className="import-result-refresh" data-control-id="imports.hcm-results.refresh" onClick={() => void loadResults()}>
+          重新整理結果
+        </button>
+      </header>
+
+      <section className="import-result-workbench" data-surface-id="imports.hcm-results.open">
+        <div className="import-result-title-row">
+          <div><span className="import-icon">🏢</span><h2>HCM 最近匯入結果與問題檢查</h2></div>
+          <span className="import-status-badge ready">GET-only</span>
+        </div>
+
+        {state.kind === 'loading' && <div className="import-result-state" role="status">正在載入最近匯入結果…</div>}
+        {state.kind === 'error' && <div className="import-result-state import-result-error" data-surface-id="imports.hcm-results.error" role="alert">{state.message}</div>}
+        {state.kind === 'empty' && <div className="import-result-state" data-surface-id="imports.hcm-results.empty">目前沒有可查詢的 HCM 匯入receipt。</div>}
+
+        {state.kind === 'ready' && state.items.map((result) => (
+          <article key={result.receiptId} className="import-result-batch" data-surface-id={`imports.hcm-results.receipt.${result.receiptId}`}>
+            <header>
+              <div><strong>Receipt #{result.receiptId}</strong><span>{result.completedAt}</span></div>
+              <code>{result.digestShort}</code>
+            </header>
+            <p className="import-result-summary">{result.summary}｜來源 {result.sourceRowCount} 列</p>
+
+            {!result.rowOutcomesAvailable ? (
+              <div className="import-result-legacy" data-surface-id="imports.hcm-results.legacy-unavailable">
+                舊receipt未保存逐列membership；不能判定本次新增了哪些訂單。
+              </div>
+            ) : (
+              <div className="import-result-columns">
+                <section data-surface-id="imports.hcm-results.new-orders">
+                  <h3>本次新增訂單</h3>
+                  {result.newOrders.length === 0 ? <p>本批次沒有新增訂單。</p> : result.newOrders.map((row) => (
+                    <div key={row.source_row} className="import-result-row" data-surface-id={`imports.hcm-results.new-order.${encodeURIComponent(row.case_no ?? `row-${row.source_row}`)}`}>
+                      <strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>{row.outcome}</span>
+                    </div>
+                  ))}
+                </section>
+
+                <section data-surface-id="imports.hcm-results.problems">
+                  <h3>需要檢查</h3>
+                  {result.problems.length === 0 ? <p>本批次沒有問題列。</p> : result.problems.map((row) => (
+                    <div key={row.source_row} className="import-result-problem" data-surface-id={`imports.hcm-results.problem.${encodeURIComponent(row.problem_identity ?? `row-${row.source_row}`)}`}>
+                      <strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong>
+                      <span>欄位：{row.problem_fields.join('、') || '未提供'}</span>
+                      <span>代碼：{row.issue_codes.join('、') || '未提供'}</span>
+                      <button type="button" data-control-id={`imports.hcm-results.problem.referral.${encodeURIComponent(row.problem_identity ?? `row-${row.source_row}`)}`} onClick={navigateToWarning}>
+                        前往異常與匯入警示中心
+                      </button>
+                    </div>
+                  ))}
+                </section>
+
+                <section data-surface-id="imports.hcm-results.replays">
+                  <h3>Exact Replay</h3>
+                  {result.replays.length === 0 ? <p>本批次沒有replay。</p> : result.replays.map((row) => (
+                    <div key={row.source_row} className="import-result-row"><strong>{row.case_no ?? `來源列 ${row.source_row}`}</strong><span>未列為新增</span></div>
+                  ))}
+                </section>
+              </div>
+            )}
+          </article>
+        ))}
+      </section>
+
+      <div className="import-cards-grid import-locked-grid">
+        {LOCKED_CATEGORIES.map(([id, icon, title, status, specs]) => (
+          <article key={id} className="import-category-card">
+            <div className="import-card-header"><div className="import-icon-title"><span className="import-icon">{icon}</span><span className="import-title">{title}</span></div><span className="import-status-badge locked">{status}</span></div>
+            <p className="import-description">保留原工作區位置；本結果頁不共用 HCM contract。</p>
+            <div className="import-specs-box">{specs}</div>
+            <div className="import-card-actions">
+              <button type="button" className="import-action secondary" data-control-id={`imports.${id}.preview`} disabled>未開放</button>
+              <button type="button" className="import-action primary" data-control-id={`imports.${id}.apply`} disabled>Apply 未開放</button>
+            </div>
+          </article>
+        ))}
+      </div>
     </div>
   );
 };

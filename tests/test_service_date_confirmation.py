@@ -1,3 +1,8 @@
+"""
+File: test_service_date_confirmation.py
+Description: 驗證服務日期確認 Candidate 規則、週區間分組與可選日期邊界。
+"""
+
 from datetime import date
 
 import pytest

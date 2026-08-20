@@ -1,4 +1,7 @@
-"""Typed HTTP views for accounts-payable export."""
+"""
+File: accounts_payable_export.py
+Description: 定義應付帳款masked preview與封存清單的嚴格HTTP views。
+"""
 
 from datetime import date
 
@@ -12,11 +15,11 @@ class AccountsPayableRowView(BaseModel):
     payment_type: str
     recipient_name: str
     bank_code: str
-    bank_account: str
+    bank_account_masked: str
     amount_ntd: int
     obligation_identities: list[str]
     case_numbers: list[str]
-    recipient_identity_card: str
+    recipient_identity_card_masked: str
 
 
 class AccountsPayablePreviewView(BaseModel):

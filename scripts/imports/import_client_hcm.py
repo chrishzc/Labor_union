@@ -309,6 +309,7 @@ def _database_config():
 # Kept cohesive because it owns the one batch-level rollback and result tally.
 def _process_import_rows(frame, connection, excel_path):
     counts = _result()
+    row_outcomes = []
     application = build_case_import_application(connection)
     cursor = connection.cursor()
     source_digest = fingerprint_workbook(excel_path)
@@ -324,14 +325,18 @@ def _process_import_rows(frame, connection, excel_path):
                 connection=connection,
                 source_digest=source_digest,
                 source_sheet=source_sheet,
+                detailed=True,
             )
-            counts[outcome] += 1
+            counts[outcome["outcome"]] += 1
+            row_outcomes.append(outcome)
     except Exception as error:
         connection.rollback()
         _report_import_failure(error)
         counts["failed"] = 1
+        counts["row_outcomes"] = row_outcomes
         return counts
     _report_import_success(counts)
+    counts["row_outcomes"] = row_outcomes
     return counts
 
 
@@ -344,7 +349,7 @@ class HcmLegacyRowIntake:
     def load_frame(self, source_path: str):
         return _load_hcm_frame(source_path)
 
-    def import_rows(self, frame, source_path: str) -> dict[str, int]:
+    def import_rows(self, frame, source_path: str) -> dict[str, object]:
         return _process_import_rows(frame, self._connection, source_path)
 
     def preview_rows(self, frame, source_path: str) -> dict[str, int]:
@@ -371,12 +376,13 @@ def _import_row(
     connection=None,
     source_digest=None,
     source_sheet="HCM",
+    detailed=False,
 ):
     raw_row = row.to_dict()
     record = _normalized_record(row)
     case_no = record.get("case_no")
     if not case_no:
-        _persist_hcm_review(
+        problem_identity = _persist_hcm_review(
             connection,
             source_digest,
             source_sheet,
@@ -385,7 +391,8 @@ def _import_row(
             None,
             {"查詢序號(案件編號)": "case_import_case_no_required"},
         )
-        return "review_required"
+        errors = {"查詢序號(案件編號)": "case_import_case_no_required"}
+        return _row_outcome("review_required", ordinal, None, errors, problem_identity, detailed)
     validation_errors = validate_hcm_row(raw_row)
     if not isinstance(record.get("created_at"), datetime):
         validation_errors["報名時間(建檔)"] = "報名時間(建檔) 格式無法轉成 datetime"
@@ -397,7 +404,7 @@ def _import_row(
             str(record.get("name") or "").strip(),
         )
         if identity_resolution is HcmIdentityResolution.EXISTING_MATCH:
-            return _replay_existing_hcm_case(
+            outcome = _replay_existing_hcm_case(
                 application,
                 intent,
                 correlation,
@@ -408,31 +415,50 @@ def _import_row(
                 ordinal,
                 raw_row,
             )
+            return _row_outcome(outcome, ordinal, str(case_no), {}, None, detailed)
         preview = application.preview(intent, correlation)
         command = _apply_command(intent, preview, correlation, excel_path)
         application.apply(command)
         warning_errors = _hcm_warning_errors(validation_errors, identity_resolution)
+        problem_identity = None
         if warning_errors:
-            _persist_hcm_review(
+            problem_identity = _persist_hcm_review(
                 connection, source_digest, source_sheet, ordinal, raw_row, case_no, warning_errors,
             )
         _reconcile_without_rolling_back_hcm(connection, str(case_no))
-        return "inserted_with_warning" if warning_errors else "inserted"
+        outcome = "inserted_with_warning" if warning_errors else "inserted"
+        return _row_outcome(outcome, ordinal, str(case_no), warning_errors, problem_identity, detailed)
     except CaseImportWorkflowError as error:
         outcome = _workflow_error_outcome(error)
+        problem_identity = None
+        errors = {"case_import": error.error.code}
         if outcome == "review_required":
-            _persist_hcm_review(
+            problem_identity = _persist_hcm_review(
                 connection,
                 source_digest,
                 source_sheet,
                 ordinal,
                 raw_row,
                 case_no,
-                {"case_import": error.error.code},
+                errors,
             )
-        return outcome
+        return _row_outcome(outcome, ordinal, str(case_no), errors, problem_identity, detailed)
     except Exception:
         raise
+
+
+def _row_outcome(outcome, source_row, case_no, errors, problem_identity, detailed):
+    if not detailed:
+        return outcome
+    return {
+        "source_row": int(source_row),
+        "case_no": None if case_no is None else str(case_no),
+        "outcome": str(outcome),
+        "problem_identity": problem_identity,
+        "problem_fields": sorted(str(field) for field in errors),
+        "issue_codes": list(_hcm_review_issue_codes(errors)) if errors else [],
+        "referral_occurrence_identities": [],
+    }
 
 
 def _persist_hcm_review(

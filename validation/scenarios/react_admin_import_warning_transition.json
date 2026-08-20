@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-scenario/v1", "scenario_id": "ANOM-REACT-ADMIN-WARNING-TRANSITION", "revision": 1,
+  "track": "A", "suite_id": "ANOM", "status": "specified", "part": "14", "browser_execution_mode": "no-browser-execution",
+  "requires_database": true, "test_kinds": ["domain_root_data", "external_input_fixture", "expected_manifest"], "coverage_ids": ["ANOM-REACT-ADMIN-WARNING-TRANSITION-01"], "coverage_scope": "supplemental",
+  "source_scenario_ids": ["CI-CASE-IMPORT-001", "FI-CANONICAL-STAGING-003", "FI-STAGING-DEDUP-002"],
+  "source_refs": ["validation/scenarios/CI-CASE-IMPORT-001.json#CI-CASE-IMPORT-001", "validation/scenarios/FI-CANONICAL-STAGING-003.json#FI-CANONICAL-STAGING-003", "validation/scenarios/FI-STAGING-DEDUP-002.json#FI-STAGING-DEDUP-002"],
+  "source_to_successor_mapping": [{"source": "import warning facts", "successor": "field-level warning task", "disposition": "renamed"}, {"source": "dedup/replay evidence", "successor": "warning transition idempotency and replay", "disposition": "supplemented"}, {"source": "case import validation", "successor": "warning before/after and re-query oracle", "disposition": "unchanged"}],
+  "root_inputs": ["synthetic import warning", "synthetic row fingerprint", "transition reason", "fixed clock"],
+  "root_facts": ["Synthetic warning, source fingerprint, transition reason and fixed clock are the command roots."],
+  "forbidden_direct_seed": ["resolved warning projection", "outbox delivery", "notification success", "anomaly KPI derived state"],
+  "commands": ["query warning task", "preview warning transition", "apply one warning transition", "re-query receipt and observe outbox"],
+  "expected": ["Preview creates zero writes and Apply commits warning state plus outbox atomically.", "Reason, versions and receipt are typed server values.", "Same-key replay, stale, timeout and re-query behavior remain explicit."],
+  "receipt_requirements": ["root and expected digests", "outer-UoW/outbox evidence", "typed receipt/replay evidence", "Network-to-DOM re-query evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
+  "oracle_applicability": {"db": {"status": "required", "reason": "transaction and outbox observation"}, "api": {"status": "required", "reason": "typed preview/apply receipt"}, "ui": {"status": "required", "reason": "Part 14 checklist"}, "replay": {"status": "required", "reason": "same idempotency key"}, "recovery": {"status": "required", "reason": "stale, timeout and re-query"}},
+  "required_receipt_id": "ANOM-REACT-ADMIN-WARNING-TRANSITION-R1"
+}

@@ -5,7 +5,7 @@ Description: 定義管理後台登入、Session 與 root 身分的公開傳輸�
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AdminLoginRequest(BaseModel):
@@ -15,6 +15,8 @@ class AdminLoginRequest(BaseModel):
 
 
 class AdminPasswordChallengeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     username: str = Field(min_length=1, max_length=100)
     password: str = Field(min_length=1, max_length=256)
 

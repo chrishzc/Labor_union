@@ -1,10 +1,14 @@
-"""Typed Customer Service commands, queries, and views."""
+"""
+File: contracts.py
+Description: 定義客服查詢、既有操作及結案 Preview／Apply 的框架無關型別契約。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 
 
@@ -37,6 +41,39 @@ class UpdateCustomerServiceTicket:
 
 
 @dataclass(frozen=True, slots=True)
+class PreviewCustomerServiceTicketUpdate:
+    ticket_id: int
+    status: CustomerServiceStatus
+    internal_note: str | None
+    expected_version: ExpectedVersion
+    correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
+class ApplyCustomerServiceTicketUpdate:
+    ticket_id: int
+    status: CustomerServiceStatus
+    internal_note: str | None
+    expected_version: ExpectedVersion
+    preview_fingerprint: PreviewFingerprint
+    actor_id: str
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerServiceTicketUpdatePreview:
+    ticket_id: int
+    before_status: CustomerServiceStatus
+    after_status: CustomerServiceStatus
+    current_version: int
+    expected_version: int
+    blockers: tuple[str, ...]
+    preview_fingerprint: PreviewFingerprint
+    apply_ready: bool
+
+
+@dataclass(frozen=True, slots=True)
 class ReplyCustomerServiceTicket:
     ticket_id: int
     reply_text: str
@@ -50,8 +87,11 @@ class ReplyCustomerServiceTicket:
 
 
 __all__ = [
+    "ApplyCustomerServiceTicketUpdate",
     "CreateCustomerServiceMessage",
     "CustomerServiceListQuery",
+    "CustomerServiceTicketUpdatePreview",
+    "PreviewCustomerServiceTicketUpdate",
     "ReplyCustomerServiceTicket",
     "UpdateCustomerServiceTicket",
 ]

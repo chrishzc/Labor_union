@@ -72,6 +72,8 @@ schema、seed、pytest 或資料庫 mutation。
 - Import 現行語意：`15_正式規格索引與裁決總表.md`、`09_Finance_Import_Domain.md`、
   `17_External_Integration_LINE_Access正式規格.md`；入口退役相鄰計畫：
   `document/架構重整/02_決策與退役執行記錄/Import_Entry_and_Legacy_Writer_Retirement_工作包.md`
+- React page-slice routing decision：
+  `document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-page-slice-migration-execution-decision.md`
 - WP56 只作歷史驗收與本輪 inventory 證據，不授權直接沿用其資料作為 current SSOT。
 
 ### 3.2 Scope
@@ -90,16 +92,36 @@ schema、seed、pytest 或資料庫 mutation。
 - 不把現有 UI、資料表、receipt 或最終 projection 自動升格為業務 SSOT。
 - 不在本文件複製各 Domain 的金額、資格、日期或狀態公式。
 
+### 3.4 React page-slice applicability
+
+本主計畫的 Scenario／DB 治理仍是 mutation、controlled-data、transaction、worker、external provider
+與跨站 Domain invariant 的必要權威；它不再是既有 typed GET real-data query 接線的無條件前置。React
+依 `PROV-20260817-react-admin-page-slice-migration-execution-decision.md` 逐頁判定：
+
+- `query-only` page slice：沿用現有 typed GET 或補該頁最小 typed view，保留 UI slot，對缺欄顯示
+  `unavailable`，執行 API／UI 的 success、empty、typed error／auth、timeout／abort、PII 與 reload
+  evidence；可用既有 DB 做 GET UI 觀察，但不建立或修改 DB。
+- `mutation／controlled-data` slice：才套用本計畫的 scenario lineage、fixed clock、隔離 validation DB、
+  Preview／Apply／receipt、replay／stale／rollback 與 transaction oracle。
+- 一頁可同時含兩種 slice；query 已完成不解鎖 mutation，mutation blocker 也不阻塞同頁已閉合 query。
+
+因此，本文件中的全生命週期 dependency graph 仍約束完整業務驗收與高副作用流程，但不得被解讀為
+所有 React page query 的中央施工前置。每個 page-slice Work Package 必須明確標記 mode、write set、
+必要 evidence 與 out-of-scope，避免把無關缺口擴張成共同阻塞。
+
 ## 4. 執行原則
 
-1. 依業務 dependency graph 排序，不依頁面選單或檔名排序。
+1. 完整 business mutation／controlled-data 驗收依業務 dependency graph 排序；query-only page slice 依自身
+   bounded contract 與 UI scope 排程，不依頁面選單或檔名排序，也不等待無關 mutation predecessor。
 2. 上游資料未建立或仍在 review 時，下游 scenario 必須 fail closed。
 3. 每個 Part 使用獨立且穩定的 scenario identity；不可讓同一案件經後續 mutation 後失去前態。
 4. UI 只顯示 typed API result；不得用 SQL 預先偽造 Domain 成功狀態。
 5. Query 唯讀、Preview 零寫入、Apply fresh-read；每個 mutation 只有一個 outer UoW owner。
 6. accepted、rejected、stale、replay 與 rollback 都要有可獨立驗證的 oracle。
-7. 拒絕情境本來就可能沒有最終 root row，必須以 receipt、零 partial-write 與 read isolation 驗證。
-8. 測試資料只能進名稱與環境均通過 allowlist 的 disposable validation database。
+7. 拒絕情境本來就可能沒有最終 root row；mutation／controlled-data slice 必須以 receipt、零 partial-write
+   與 read isolation 驗證。query-only slice 只驗證 typed error／empty／read isolation，不建立 mutation receipt。
+8. Mutation／controlled-data 測試資料只能進名稱與環境均通過 allowlist 的 disposable validation database；
+   query-only UI 可在既有 DB 做唯讀觀察，但不得寫入、seed、migration 或 repair。
 9. 每個 Part 在撰寫場景時同步執行基礎建設 readiness audit；不得等到 seed 或 UI 實作時才發現
    schema、typed port、worker、登入／actor audit 安全邊界或驗證工具不存在。
 10. 基礎建設目前可運作只屬 live evidence；若不符合正式契約仍標示 `live-drift`，不得反向修改

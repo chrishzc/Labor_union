@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-scenario/v1", "scenario_id": "GERR-REACT-ADMIN-TYPED-BOUNDARY", "revision": 1,
+  "track": "B", "suite_id": "GERR", "status": "specified", "part": "00", "browser_execution_mode": "no-browser-execution",
+  "requires_database": false, "test_kinds": ["process_network_harness"], "coverage_ids": ["GERR-REACT-ADMIN-TYPED-BOUNDARY-01"], "coverage_scope": "supplemental",
+  "source_scenario_ids": ["GERR-TIMEOUT-001", "GERR-TYPED-UI-RETRY-002", "AC-CAPABILITY-SESSION-002"],
+  "source_refs": ["validation/scenarios/GERR-TIMEOUT-001.json#GERR-TIMEOUT-001", "validation/scenarios/GERR-TYPED-UI-RETRY-002.json#GERR-TYPED-UI-RETRY-002", "validation/scenarios/AC-CAPABILITY-SESSION-002.json#AC-CAPABILITY-SESSION-002"],
+  "source_to_successor_mapping": [{"source": "transport and timeout errors", "successor": "global typed error envelope", "disposition": "unchanged"}, {"source": "UI retry oracle", "successor": "React admin boundary retry oracle", "disposition": "renamed"}, {"source": "session error handling", "successor": "global boundary auth errors", "disposition": "supplemented"}],
+  "root_inputs": ["synthetic FastAPI error responses", "fixed correlation identifier", "typed client request metadata"],
+  "root_facts": ["Synthetic HTTP failure responses and fixed request metadata are the only roots."],
+  "forbidden_direct_seed": ["HTTP success payload", "session state", "receipt", "outbox", "database projection"],
+  "commands": ["exercise typed 401/403/409/422/500 envelopes", "exercise timeout and retry classification"],
+  "expected": ["Typed envelopes retain category, code and correlation identity.", "Timeout and retry remain explicit without optimistic UI state."],
+  "receipt_requirements": ["TestClient response assertions", "typed client error assertions", "retry classification assertions"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
+  "oracle_applicability": {"db": {"status": "not-applicable", "reason": "contract boundary only"}, "api": {"status": "required", "reason": "TestClient receipt"}, "ui": {"status": "required", "reason": "error boundary rendering"}, "replay": {"status": "required", "reason": "same request classification"}, "recovery": {"status": "required", "reason": "retry/outcome-unknown handling"}},
+  "required_receipt_id": "GERR-REACT-ADMIN-TYPED-BOUNDARY-R1"
+}

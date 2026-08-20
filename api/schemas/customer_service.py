@@ -1,8 +1,13 @@
-"""Typed Customer Service API views."""
+"""
+File: customer_service.py
+Description: 定義客服查詢、結案 Preview／Apply 與既有回覆端點的嚴格 HTTP 契約。
+"""
 
 from __future__ import annotations
 
 from datetime import datetime
+
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -51,6 +56,29 @@ class CustomerServiceSummaryView(BaseModel):
     waiting: int
     handling: int
     resolved_today: int
+
+
+class CustomerServiceUpdatePreviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    status: Literal["resolved"]
+    internal_note: str | None = Field(max_length=4000)
+    expected_version: int = Field(ge=0)
+
+
+class CustomerServiceUpdateApplyRequest(CustomerServiceUpdatePreviewRequest):
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class CustomerServiceUpdatePreviewView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    ticket_id: int
+    before_status: CustomerServiceStatus
+    after_status: CustomerServiceStatus
+    current_version: int = Field(ge=0)
+    expected_version: int = Field(ge=0)
+    blockers: list[str]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    apply_ready: bool
 
 
 class CustomerServiceUpdateRequest(BaseModel):

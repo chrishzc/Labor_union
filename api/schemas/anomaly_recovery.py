@@ -1,10 +1,15 @@
-"""Typed HTTP views for Anomalies root-fact recovery."""
+"""
+File: anomaly_recovery.py
+Description: 定義異常根事實修復查詢與維運操作的嚴格 HTTP 契約。
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from domains.anomalies.registry import AlertWorkflowStatus, AnomalySeverity
 
 
 class _StrictModel(BaseModel):
@@ -48,9 +53,9 @@ class AnomalyRecoveryContextView(_StrictModel):
     source_domain: str
     source_identity: str
     source_version: int = Field(ge=0)
-    severity: str
+    severity: AnomalySeverity
     predicate_active: bool
-    workflow_status: str
+    workflow_status: AlertWorkflowStatus
     workflow_version: int = Field(ge=0)
     domain_blocker_active: bool
     projection_freshness: str

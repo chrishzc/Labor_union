@@ -13,6 +13,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.middleware.compression import ResponseCompressionMiddleware
 from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
@@ -137,8 +138,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "If-Match",
+        "If-None-Match",
+        "Idempotency-Key",
+        "X-Preview-Fingerprint",
+        "X-Correlation-ID",
+    ],
+    expose_headers=["X-Correlation-ID", "Retry-After", "WWW-Authenticate"],
 )
 app.add_middleware(
     ResponseCompressionMiddleware,
@@ -146,6 +157,8 @@ app.add_middleware(
     compresslevel=5,
 )
 app.add_middleware(ApiPerformanceMiddleware)
+app.add_middleware(CorrelationBoundaryMiddleware)
+install_typed_error_handlers(app)
 
 app.mount("/static", StaticFiles(directory="line/static"), name="static")
 
@@ -265,8 +278,8 @@ async def audit_authenticated_mutations(request: Request, call_next):
                 resource_id=getattr(request.state, "audit_resource_id", None),
                 details=getattr(request.state, "audit_details", None),
             )
-        except Exception as exc:
-            print(f"[Admin Audit] Failed to record request: {exc}")
+        except Exception:
+            print("[Admin Audit] Failed to record request")
     return response
 
 

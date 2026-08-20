@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1", "scenario_id": "ANOM-REACT-ADMIN-WARNING-TRANSITION", "revision": 1,
+  "assertions": ["Preview creates zero writes and Apply atomically commits warning state plus outbox.", "Reason, versions and receipt are typed server values.", "Same-key replay, stale, timeout and re-query behavior remain explicit."],
+  "db_oracle": {"required": ["preview creates zero writes", "apply changes only the warning aggregate", "outbox is committed with the command"]},
+  "api_oracle": {"required": ["typed before/after preview", "reason is validated", "receipt and re-query are typed"]},
+  "ui_oracle": {"required": ["Part 14 workflow shows server outcome", "claim/resolve remain unavailable"]},
+  "replay_oracle": {"required": ["same idempotency key is idempotent"]}, "recovery_oracle": {"required": ["stale and timeout are explicit", "receipt is re-queried"]},
+  "forbidden_observations": ["frontend status transition", "fake notification success", "alert/confirm as mutation result"]
+}

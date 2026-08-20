@@ -8,7 +8,7 @@ from pathlib import Path
 import tempfile
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, UploadFile, status
 from starlette.concurrency import run_in_threadpool
 
 from api.dependencies.admin_auth import require_admin
@@ -18,6 +18,7 @@ from api.schemas.hcm_import import (
     HcmResubmissionPreviewView,
     HcmResubmissionReceiptView,
     HcmWorkbookPreviewView,
+    HcmWorkbookResultPageView,
     HcmWorkbookReceiptView,
 )
 from subsystems.access.authentication_session import AdminPrincipal
@@ -40,6 +41,21 @@ async def preview_hcm_workbook(
 ):
     del principal
     return await _run_workbook_command(workbook, service, "preview")
+
+
+@router.get("/workbooks/results", response_model=BaseResponse[HcmWorkbookResultPageView])
+def query_hcm_workbook_results(
+    limit: int = Query(20, ge=1, le=50),
+    before_receipt_id: int | None = Query(None, gt=0),
+    principal: AdminPrincipal = Depends(require_admin),
+    service=Depends(get_hcm_workbook_import_service),
+):
+    del principal
+    result = service.query_recent_results(
+        limit=limit,
+        before_receipt_id=before_receipt_id,
+    )
+    return BaseResponse(data=result.as_dict(), message="成功取得 HCM 匯入結果")
 
 
 @router.post("/workbooks/apply", response_model=BaseResponse[HcmWorkbookReceiptView])

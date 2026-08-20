@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1", "scenario_id": "GDATA-REACT-ADMIN-DATA-BROWSER-QUERY", "revision": 1,
+  "assertions": ["The scenario remains blocked until Part identity and source allowlist are decided.", "No raw row, arbitrary source or source-correction mutation may be inferred."],
+  "db_oracle": {"applicability": "blocked", "reason": "Part identity and source allowlist decision is unresolved"},
+  "api_oracle": {"applicability": "blocked", "reason": "no public contract may be inferred from raw routes"},
+  "ui_oracle": {"applicability": "blocked", "reason": "temporary Part directory is forbidden"},
+  "replay_oracle": {"applicability": "not-applicable", "reason": "query only"}, "recovery_oracle": {"applicability": "blocked", "reason": "source correction policy unresolved"},
+  "forbidden_observations": ["UI-ready claim", "arbitrary source correction", "raw row rendering"]
+}

@@ -1,5 +1,5 @@
 <!-- File: staff_schedule.html -->
-<!-- Description: 提供月嫂 LIFF 班表查詢與請假待辦送出介面。 -->
+<!-- Description: 提供月嫂 LIFF 個人班表查詢介面。 -->
 <!DOCTYPE html>
 <html lang="zh-Hant-TW">
 <head>
@@ -36,20 +36,7 @@
 <body>
 <main>
   <h1>排班資訊</h1>
-  <p>您可以查詢個人班表月曆，也可以送出請假待辦；送出後仍須由工會人員依正式排班流程處理。</p>
-
-  <section class="panel">
-    <h2>請假申請</h2>
-    <p>請填寫希望請假的日期與簡要說明。這不是正式核准，工會人員會另行確認服務安排。</p>
-    <div class="toolbar">
-      <div><label for="leaveStart">開始日期</label><input id="leaveStart" type="date"></div>
-      <div><label for="leaveEnd">結束日期</label><input id="leaveEnd" type="date"></div>
-    </div>
-    <div style="margin-top:10px"><label for="leaveReason">說明（選填）</label><textarea id="leaveReason" maxlength="1000"></textarea></div>
-    <button id="submitLeave" class="primary" style="margin-top:12px">送出請假申請</button>
-    <button id="cancelLeave" class="primary hide" style="margin-top:12px;background:#52525b">取消尚未受理的申請</button>
-    <div id="leaveStatus" class="message" style="display:none;"></div>
-  </section>
+  <p>您可以查詢個人班表月曆。</p>
 
   <section id="calendarPanel" class="panel">
     <div class="toolbar">
@@ -74,8 +61,6 @@
 let lineUserId = "";
 let lineIdToken = "";
 let flowId = "";
-let pendingLeaveKey = "";
-let currentLeaveRequest = null;
 
 async function captureLineIdentity() {
   try {
@@ -98,62 +83,6 @@ function show(id, text, isError = false) {
 
 function identityPayload() {
   return { flow_id: flowId, line_id_token: lineIdToken };
-}
-
-function leaveIdempotencyKey() {
-  if (!pendingLeaveKey) {
-    const random = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
-    pendingLeaveKey = `staff-leave-${random}`;
-  }
-  return pendingLeaveKey;
-}
-
-async function submitLeaveRequest() {
-  const leaveStartDate = document.getElementById("leaveStart").value;
-  const leaveEndDate = document.getElementById("leaveEnd").value;
-  if (!leaveStartDate || !leaveEndDate) {
-    show("leaveStatus", "請填寫請假起訖日。", true);
-    return;
-  }
-  show("leaveStatus", "請假申請送出中...");
-  const response = await fetch("/api/v1/line/staff-self-service/leave-requests", {
-    method: "POST",
-    headers: {"Content-Type": "application/json", "Idempotency-Key": leaveIdempotencyKey()},
-    body: JSON.stringify({...identityPayload(), leave_start_date: leaveStartDate, leave_end_date: leaveEndDate, leave_reason: document.getElementById("leaveReason").value})
-  });
-  const data = await response.json();
-  if (!response.ok || data.success === false || !data.data) {
-    show("leaveStatus", data.message || data.detail?.message || "請假申請送出失敗，請使用同一畫面重試。", true);
-    return;
-  }
-  currentLeaveRequest = {requestId: data.data.request_id, version: data.data.version};
-  localStorage.setItem("staffLeaveRequest", JSON.stringify(currentLeaveRequest));
-  document.getElementById("cancelLeave").classList.remove("hide");
-  show("leaveStatus", "請假申請已送出，等待工會人員受理處理。若尚未受理可在此取消。");
-}
-
-async function cancelLeaveRequest() {
-  if (!currentLeaveRequest) return;
-  const reason = window.prompt("請輸入取消原因（必填）") || "";
-  if (!reason.trim()) {
-    show("leaveStatus", "取消請填寫原因。", true);
-    return;
-  }
-  show("leaveStatus", "取消申請處理中...");
-  const response = await fetch(`/api/v1/line/staff-self-service/leave-requests/${currentLeaveRequest.requestId}/cancel`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json", "Idempotency-Key": `staff-leave-cancel-${currentLeaveRequest.requestId}-${currentLeaveRequest.version}`},
-    body: JSON.stringify({...identityPayload(), expected_version: currentLeaveRequest.version, reason})
-  });
-  const data = await response.json();
-  if (!response.ok || data.success === false || !data.data) {
-    show("leaveStatus", data.message || data.detail?.message || "取消失敗，可能已受理，請聯絡工會人員。", true);
-    return;
-  }
-  localStorage.removeItem("staffLeaveRequest");
-  currentLeaveRequest = null;
-  document.getElementById("cancelLeave").classList.add("hide");
-  show("leaveStatus", "請假申請已取消。");
 }
 
 function renderCalendar(schedule) {
@@ -209,10 +138,6 @@ async function init() {
   const now = new Date();
   document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const params = new URLSearchParams(location.search);
-  try {
-    currentLeaveRequest = JSON.parse(localStorage.getItem("staffLeaveRequest") || "null");
-    if (currentLeaveRequest?.requestId && currentLeaveRequest?.version) document.getElementById("cancelLeave").classList.remove("hide");
-  } catch (_) { localStorage.removeItem("staffLeaveRequest"); }
   lineUserId = params.get("userId") || "";
   flowId = params.get("flow_id") || "";
   try {
@@ -234,8 +159,6 @@ async function init() {
 }
 
 document.getElementById("loadSchedule").addEventListener("click", loadSchedule);
-document.getElementById("submitLeave").addEventListener("click", submitLeaveRequest);
-document.getElementById("cancelLeave").addEventListener("click", cancelLeaveRequest);
 init();
 </script>
 </body>

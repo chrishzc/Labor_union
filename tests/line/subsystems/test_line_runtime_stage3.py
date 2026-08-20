@@ -269,6 +269,9 @@ class DeliveryRepository:
         self.claimed = True
         return (self.task,)
 
+    def get(self, task_id):
+        return self.task if task_id == self.task.task_id else None
+
     def record_attempt(self, command):
         self.actions.append("record")
         self.recorded = command

@@ -1,9 +1,13 @@
-"""Validate root-data fixtures and independent expected manifests."""
+"""
+File: verify_verification_fixtures.py
+Description: 驗證 baseline 與 Phase 3 fixture 的契約分區及 expected manifest。
+"""
 
 from __future__ import annotations
 
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -17,6 +21,54 @@ from scripts.verify_verification_scenarios import load_scenarios
 DEFAULT_FIXTURE_DIRECTORY = PROJECT_ROOT / "validation" / "fixtures"
 FIXTURE_CONTRACT = "labor-union-verification-fixture/v1"
 EXPECTED_CONTRACT = "labor-union-verification-expected/v1"
+PHASE3_NAMESPACE = "phase3"
+PHASE3_CATALOG_PATH = PROJECT_ROOT / "validation" / "catalog" / "phase3_scenario_lineage.json"
+
+
+@dataclass(frozen=True)
+class FixtureDocument:
+    """One parsed fixture together with its filesystem contract namespace."""
+
+    path: Path
+    payload: dict[str, object]
+    namespace: str
+
+
+def discover_fixture_documents(
+    directory: Path = DEFAULT_FIXTURE_DIRECTORY,
+) -> tuple[list[FixtureDocument], list[str]]:
+    """Recursively discover JSON fixtures without mixing contract families."""
+    documents: list[FixtureDocument] = []
+    errors: list[str] = []
+    seen_paths: set[Path] = set()
+    if not directory.is_dir():
+        return [], [f"fixture directory is missing: {directory}"]
+    for path in sorted(directory.rglob("*.json")):
+        resolved = path.resolve()
+        display_path = _display_path(path)
+        if resolved in seen_paths:
+            errors.append(f"duplicate fixture path: {display_path}")
+            continue
+        seen_paths.add(resolved)
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            errors.append(
+                f"fixture {display_path} is not valid JSON: {type(exc).__name__}"
+            )
+            continue
+        if not isinstance(payload, dict):
+            errors.append(
+                f"fixture {display_path} has an unsupported shape"
+            )
+            continue
+        relative_parts = path.relative_to(directory).parts
+        namespace = PHASE3_NAMESPACE if relative_parts and relative_parts[0] == PHASE3_NAMESPACE else "baseline"
+        if relative_parts and relative_parts[0] not in {PHASE3_NAMESPACE} and len(relative_parts) > 1:
+            errors.append(f"fixture {display_path} has an unsupported namespace")
+            continue
+        documents.append(FixtureDocument(path=path, payload=payload, namespace=namespace))
+    return documents, errors
 
 
 def load_fixtures(directory: Path = DEFAULT_FIXTURE_DIRECTORY) -> list[dict[str, object]]:
@@ -26,17 +78,58 @@ def load_fixtures(directory: Path = DEFAULT_FIXTURE_DIRECTORY) -> list[dict[str,
 def verify_fixtures(
     fixtures: list[dict[str, object]], scenarios: list[dict[str, object]] | None = None
 ) -> list[str]:
+    """Validate baseline fixtures and any explicitly supplied Phase 3 payloads."""
     scenarios = scenarios or load_scenarios()
-    scenario_test_kinds = {
-        scenario["scenario_id"]: set(scenario["test_kinds"])
-        for scenario in scenarios
-    }
-    scenario_tracks = {
-        scenario["scenario_id"]: scenario["track"]
-        for scenario in scenarios
-    }
-    fixture_scenario_ids: set[object] = set()
+    phase3_ids = _phase3_scenario_ids()
+    baseline = [
+        fixture for fixture in fixtures
+        if not _is_phase3_expected_path(fixture.get("expected_manifest_path"))
+    ]
+    phase3 = [
+        fixture for fixture in fixtures
+        if _is_phase3_expected_path(fixture.get("expected_manifest_path"))
+    ]
+    baseline_scenarios = [
+        scenario for scenario in scenarios
+        if scenario.get("scenario_id") not in phase3_ids
+    ]
+    phase3_scenarios = [
+        scenario for scenario in scenarios
+        if scenario.get("scenario_id") in phase3_ids
+    ]
+    return (
+        _verify_fixture_family(baseline, baseline_scenarios, required_track="A")
+        + _verify_fixture_family(phase3, phase3_scenarios, required_track=None)
+    )
+
+
+def verify_phase3_fixtures(
+    fixtures: list[dict[str, object]], scenarios: list[dict[str, object]] | None = None
+) -> list[str]:
+    """Validate Phase 3 fixtures against their own scenario family."""
+    return _verify_fixture_family(fixtures, scenarios, required_track=None)
+
+
+def _verify_fixture_family(
+    fixtures: list[dict[str, object]], scenarios: list[dict[str, object]] | None,
+    required_track: str | None,
+) -> list[str]:
+    scenarios = scenarios or load_scenarios()
+    scenario_test_kinds: dict[str, set[str]] = {}
+    scenario_tracks: dict[str, object] = {}
     errors: list[str] = []
+    for scenario in scenarios:
+        scenario_id = scenario.get("scenario_id")
+        if not isinstance(scenario_id, str):
+            errors.append(f"scenario has an invalid scenario_id for fixture lookup: {scenario_id}")
+            continue
+        test_kinds = scenario.get("test_kinds")
+        if not isinstance(test_kinds, list) or any(not isinstance(kind, str) for kind in test_kinds):
+            errors.append(f"scenario {scenario_id} has an invalid test_kinds shape")
+            continue
+        scenario_test_kinds[scenario_id] = set(test_kinds)
+        scenario_tracks[scenario_id] = scenario.get("track")
+    fixture_scenario_ids: set[str] = set()
     for fixture in fixtures:
         errors.extend(
             _fixture_errors(
@@ -44,14 +137,14 @@ def verify_fixtures(
                 scenario_test_kinds,
                 scenario_tracks,
                 fixture_scenario_ids,
+                required_track,
             )
         )
     missing = {
-        scenario_id
-        for scenario_id, track in scenario_tracks.items()
-        if track == "A"
+        scenario_id for scenario_id, track in scenario_tracks.items()
+        if (required_track is None or track == required_track)
     } - fixture_scenario_ids
-    if missing:
+    if missing and required_track is not None:
         errors.append(f"missing fixtures for A scenarios: {', '.join(sorted(missing))}")
     return errors
 
@@ -60,12 +153,16 @@ def fixture_coverage_report(
     fixtures: list[dict[str, object]], scenarios: list[dict[str, object]] | None = None
 ) -> dict[str, object]:
     scenarios = scenarios or load_scenarios()
+    phase3_ids = _phase3_scenario_ids()
     required_scenarios = {
         scenario["scenario_id"]
         for scenario in scenarios
-        if scenario["track"] == "A"
+        if scenario["track"] == "A" and scenario["scenario_id"] not in phase3_ids
     }
-    fixture_scenarios = {fixture.get("scenario_id") for fixture in fixtures}
+    fixture_scenarios = {
+        fixture.get("scenario_id") for fixture in fixtures
+        if not _is_phase3_expected_path(fixture.get("expected_manifest_path"))
+    }
     return {
         "fixture_count": len(fixtures),
         "required_a_scenario_count": len(required_scenarios),
@@ -74,15 +171,35 @@ def fixture_coverage_report(
     }
 
 
+def _phase3_scenario_ids() -> set[str]:
+    try:
+        catalog = json.loads(PHASE3_CATALOG_PATH.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return set()
+    ids = catalog.get("expected_scenario_ids") if isinstance(catalog, dict) else None
+    return {item for item in ids if isinstance(item, str)} if isinstance(ids, list) else set()
+
+
+def _is_phase3_expected_path(path_value: object) -> bool:
+    return (
+        isinstance(path_value, str)
+        and path_value.replace("\\", "/").startswith("validation/expected/phase3/")
+    )
+
+
 def _fixture_errors(
     fixture: dict[str, object], scenario_test_kinds: dict[str, set[str]],
-    scenario_tracks: dict[str, object], fixture_scenario_ids: set[object],
+    scenario_tracks: dict[str, object], fixture_scenario_ids: set[str],
+    required_track: str | None,
 ) -> list[str]:
     scenario_id = fixture.get("scenario_id")
     errors: list[str] = []
     if fixture.get("contract") != FIXTURE_CONTRACT:
         errors.append(f"fixture {scenario_id} has an unsupported contract")
-    if scenario_tracks.get(scenario_id) != "A":
+    track = scenario_tracks.get(scenario_id) if isinstance(scenario_id, str) else None
+    if track is None:
+        errors.append(f"fixture {scenario_id} must reference a known scenario")
+    elif required_track is not None and track != required_track:
         errors.append(f"fixture {scenario_id} must reference an A scenario")
     elif scenario_id in fixture_scenario_ids:
         errors.append(f"duplicate fixture scenario id: {scenario_id}")
@@ -92,7 +209,7 @@ def _fixture_errors(
         errors.append(f"fixture {scenario_id} has an unapproved test_kind")
     if fixture.get("test_kind") not in {
         "domain_root_data", "external_input_fixture", "subsystem_state_machine",
-        "typed_query_view",
+        "typed_query_view", "process_network_harness",
     }:
         errors.append(f"fixture {scenario_id} has an unsupported input boundary")
     for field in ("root_inputs", "seed_fields", "derived_fields"):
@@ -157,7 +274,18 @@ def _expected_manifest_errors(scenario_id: object, path_value: object) -> list[s
     path = PROJECT_ROOT / path_value if isinstance(path_value, str) else None
     if path is None or not path.is_file():
         return [f"fixture {scenario_id} has a missing expected manifest"]
-    expected = json.loads(path.read_text(encoding="utf-8"))
+    expected_namespace = PHASE3_NAMESPACE if "validation\\expected\\phase3" in str(path) or "validation/expected/phase3" in str(path).replace("\\", "/") else "baseline"
+    expected_root = PROJECT_ROOT / "validation" / "expected"
+    if expected_namespace == PHASE3_NAMESPACE:
+        expected_root /= PHASE3_NAMESPACE
+    try:
+        expected = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return [f"fixture {scenario_id} expected manifest is invalid JSON: {type(exc).__name__}"]
+    if not isinstance(expected, dict):
+        return [f"fixture {scenario_id} expected manifest has an unsupported shape"]
+    if not _is_relative_to(path, expected_root):
+        return [f"fixture {scenario_id} crosses the expected manifest namespace"]
     if expected.get("contract") != EXPECTED_CONTRACT:
         return [f"fixture {scenario_id} expected manifest has an unsupported contract"]
     if expected.get("scenario_id") != scenario_id:
@@ -170,6 +298,60 @@ def _expected_manifest_errors(scenario_id: object, path_value: object) -> list[s
     if len(set(assertions)) != len(assertions):
         return [f"fixture {scenario_id} expected manifest has duplicate assertions"]
     return []
+
+
+def _is_relative_to(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def verify_fixture_documents(
+    documents: list[FixtureDocument], scenarios: list[dict[str, object]] | None = None,
+) -> dict[str, list[str]]:
+    """Validate discovered documents while keeping baseline and Phase 3 separate."""
+    baseline = [document.payload for document in documents if document.namespace == "baseline"]
+    phase3 = [document.payload for document in documents if document.namespace == PHASE3_NAMESPACE]
+    errors: list[str] = []
+    expected_paths: set[Path] = set()
+    fixture_paths: set[Path] = set()
+    fixture_ids: set[str] = set()
+    for document in documents:
+        resolved_fixture_path = document.path.resolve()
+        if resolved_fixture_path in fixture_paths:
+            errors.append(f"duplicate fixture path: {_display_path(document.path)}")
+        fixture_paths.add(resolved_fixture_path)
+        scenario_id = document.payload.get("scenario_id")
+        if isinstance(scenario_id, str) and scenario_id in fixture_ids:
+            errors.append(f"duplicate fixture scenario id: {scenario_id}")
+        if isinstance(scenario_id, str):
+            fixture_ids.add(scenario_id)
+        expected_value = document.payload.get("expected_manifest_path")
+        if isinstance(expected_value, str):
+            expected_path = (PROJECT_ROOT / expected_value).resolve()
+            if expected_path in expected_paths:
+                errors.append(f"duplicate expected manifest path: {expected_value}")
+            expected_paths.add(expected_path)
+        expected_namespace = PHASE3_NAMESPACE if document.namespace == PHASE3_NAMESPACE else "baseline"
+        expected_text = str(expected_value).replace("\\", "/") if isinstance(expected_value, str) else ""
+        if expected_namespace == PHASE3_NAMESPACE and not expected_text.startswith("validation/expected/phase3/"):
+            errors.append(f"fixture {document.payload.get('scenario_id')} crosses the expected manifest namespace")
+        if expected_namespace == "baseline" and expected_text.startswith("validation/expected/phase3/"):
+            errors.append(f"fixture {document.payload.get('scenario_id')} crosses the expected manifest namespace")
+    return {
+        "document": errors,
+        "baseline": errors + verify_fixtures(baseline, scenarios),
+        "phase3": errors + verify_phase3_fixtures(phase3, scenarios),
+    }
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return str(path.relative_to(PROJECT_ROOT)).replace("\\", "/")
+    except ValueError:
+        return str(path).replace("\\", "/")
 
 
 def main() -> int:

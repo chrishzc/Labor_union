@@ -8,11 +8,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_historical_matrix_marks_target_host_acceptance_as_retired() -> None:
     source = (
-        ROOT / "document/架構重整/01_規格基線/11_架構總審矩陣與實作切片.md"
+        ROOT / "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md"
     ).read_text(encoding="utf-8")
 
-    assert "已由決策 53 退役" in source
-    assert "實際部署\nprotocol／latency evidence" not in source
+    assert "target-host acceptance 已依決策 53 退役" in source
+    assert "target-host acceptance 已依\n`../04_已完成與上線封存" in source
 
 
 def test_historical_matrix_receipt_does_not_keep_target_host_external_gate() -> None:

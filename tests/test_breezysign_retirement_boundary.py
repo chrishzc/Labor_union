@@ -17,7 +17,10 @@ def test_legacy_provider_column_is_absent_outside_its_one_time_migration():
     active_paths = tuple(
         path
         for path in _current_runtime_schema_and_baseline_paths()
-        if path.name != "migrate_order_contract_identity.py"
+        if path.name not in {
+            "migrate_order_contract_identity.py",
+            "migrate_preserved_database_additive_schema.py",
+        }
     )
 
     for path in active_paths:

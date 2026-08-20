@@ -1,4 +1,7 @@
-"""檔案：客服與 Rich Menu 的 canonical LIFF 入口契約測試。"""
+"""
+File: test_line_customer_service_first_release.py
+Description: 驗證客服、Rich Menu 與 LIFF 第一版 canonical 邊界及新舊客服路由共存。
+"""
 
 from datetime import datetime, timezone
 import hashlib
@@ -11,6 +14,7 @@ from pydantic import ValidationError
 
 from api.routes import line_identity
 from api.routes import line_mobile_admin
+from api.routes.customer_service import router as customer_service_router
 from api.schemas.line_identity import LineIdentityFlowOpenRequest
 from domains.customer_service.ticket import (
     CustomerServiceCategory,
@@ -338,3 +342,21 @@ def test_mobile_admin_actor_is_not_restricted_by_persisted_role():
     assert actor.actor_id == "admin:7"
     assert actor.permission_scope == ("line.identity.review",)
     assert "line_viewer" not in actor.permission_scope
+
+
+def test_customer_service_preview_apply_routes_preserve_legacy_patch():
+    routes = {
+        (route.path, method)
+        for route in customer_service_router.routes
+        for method in route.methods
+    }
+
+    assert ("/api/v1/customer-service/tickets/{ticket_id}", "PATCH") in routes
+    assert (
+        "/api/v1/customer-service/tickets/{ticket_id}/update/preview",
+        "POST",
+    ) in routes
+    assert (
+        "/api/v1/customer-service/tickets/{ticket_id}/update/apply",
+        "POST",
+    ) in routes

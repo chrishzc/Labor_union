@@ -7,6 +7,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from domains.anomalies.import_warning_tracking import ImportWarningTrackingStatus
+
 
 class _StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -19,7 +21,7 @@ class ImportWarningTaskView(_StrictModel):
     field_path: str
     masked_subject: str
     issue_codes: list[str]
-    tracking_status: str
+    tracking_status: ImportWarningTrackingStatus
     tracking_version: int = Field(ge=1)
     evidence_reference: str | None = None
     display_message: str = Field(min_length=1, max_length=200)
@@ -34,7 +36,12 @@ class ImportWarningTaskView(_StrictModel):
 
 class WarningTransitionBody(_StrictModel):
     expected_version: int = Field(ge=1)
-    target_status: str = Field(pattern="^(awaiting_external_confirmation|response_recorded|reimport_requested|closed)$")
+    target_status: Literal[
+        "awaiting_external_confirmation",
+        "response_recorded",
+        "reimport_requested",
+        "closed",
+    ]
     reason_code: str = Field(min_length=1, max_length=100)
     note: str | None = Field(default=None, max_length=500)
     evidence_reference: str | None = Field(default=None, max_length=191)
@@ -43,7 +50,7 @@ class WarningTransitionBody(_StrictModel):
 class WarningTransitionPreviewView(_StrictModel):
     occurrence_identity: str
     expected_version: int = Field(ge=1)
-    resulting_status: str
+    resulting_status: ImportWarningTrackingStatus
     resulting_version: int = Field(ge=2)
 
 

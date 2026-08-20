@@ -1,4 +1,7 @@
-"""Typed Preview and Apply endpoints for controlled order reopening."""
+"""
+File: order_reopen.py
+Description: 提供訂單受控重開的 Preview 與 Apply HTTP 端點，支援三版本驗證、冪等與型別化錯誤。
+"""
 
 from __future__ import annotations
 
@@ -7,7 +10,7 @@ from enum import Enum
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -47,6 +50,14 @@ class OrderReopenApplyBody(BaseModel):
     expected_payroll_version: int = Field(ge=0)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     reason: str = Field(min_length=1, max_length=500)
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason(cls, value: str) -> str:
+        trimmed = value.strip()
+        if not (1 <= len(trimmed) <= 500):
+            raise ValueError("reason must be 1 to 500 non-whitespace characters")
+        return trimmed
 
 
 @router.post(
@@ -117,7 +128,7 @@ def _apply_request(case_no, body, key, correlation, principal):
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),
         ActorContext(str(principal.username or "").strip()),
-        body.reason,
+        body.reason.strip(),
         CorrelationId(correlation),
     )
 

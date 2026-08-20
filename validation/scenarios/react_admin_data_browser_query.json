@@ -1,0 +1,19 @@
+{
+  "contract": "labor-union-verification-scenario/v1", "scenario_id": "GDATA-REACT-ADMIN-DATA-BROWSER-QUERY", "revision": 1,
+  "track": "A", "suite_id": "GDATA", "status": "blocked", "part": "BLOCKED_DECISION", "browser_execution_mode": "no-browser-execution",
+  "requires_database": true, "test_kinds": ["domain_root_data", "expected_manifest"], "coverage_ids": ["GDATA-REACT-ADMIN-DATA-BROWSER-QUERY-01"], "coverage_scope": "supplemental",
+  "source_scenario_ids": [],
+  "source_refs": ["document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase3d-data-browser-part-identity-gap.md#Phase 3D Data Browser UI Part／Scenario Identity 缺口"],
+  "source_to_successor_mapping": [{"source": "no sufficient canonical source", "successor": "masked allowlist query contract", "disposition": "unresolved"}],
+  "root_inputs": ["synthetic allowlisted row", "synthetic masked detail", "cursor and row budget"],
+  "root_facts": ["Synthetic allowlisted source, masked row, cursor and row budget are the proposed query roots."],
+  "forbidden_direct_seed": ["raw database row", "source correction mutation", "unmasked PII", "cross-domain arbitrary table access"],
+  "commands": ["query allowlisted masked rows", "reject unknown source and excessive row budget"],
+  "expected": ["The scenario remains blocked until the Part identity and source allowlist are decided.", "No raw row, arbitrary source or source-correction mutation may be inferred."],
+  "receipt_requirements": ["decision receipt", "root and expected digests", "masked query evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
+  "oracle_applicability": {"db": {"status": "blocked", "reason": "Data Browser Part identity and canonical source mapping unresolved"}, "api": {"status": "blocked", "reason": "public query contract depends on Part decision"}, "ui": {"status": "blocked", "reason": "no temporary Part directory allowed"}, "replay": {"status": "not-applicable", "reason": "query only"}, "recovery": {"status": "blocked", "reason": "source correction policy unresolved"}},
+  "required_receipt_id": "GDATA-REACT-ADMIN-DATA-BROWSER-QUERY-R1",
+  "activation_blocker": "BLOCKED_DECISION: Data Browser Part identity and source allowlist decision required",
+  "blocker": "Data Browser Part identity and canonical source allowlist decision are unresolved."
+}

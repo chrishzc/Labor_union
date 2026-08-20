@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 
@@ -47,6 +48,13 @@ from subsystems.access.authentication_session import (
 router = APIRouter(prefix="/api/v1/admin/auth", tags=["Admin Auth"])
 
 
+def _as_utc_transport_datetime(value: datetime) -> datetime:
+    """把 repository 的 UTC-naive 值收斂為具有明確 offset 的公開傳輸時間。"""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
@@ -68,7 +76,7 @@ async def login(
                     "id": result.challenge_id,
                     "token": result.challenge_token,
                     "provisioning_uri": result.provisioning_uri,
-                    "expires_at": result.expires_at.isoformat(),
+                    "expires_at": _as_utc_transport_datetime(result.expires_at).isoformat(),
                 },
             },
         )
@@ -87,10 +95,10 @@ async def issue_login_challenge(payload: AdminPasswordChallengeRequest, request:
     except (AdminSessionSchemaError, AdminSessionStorageError, AdminMfaConfigurationError) as error:
         raise _login_unavailable("admin_auth_unavailable", str(error)) from error
     if isinstance(result, MfaEnrollmentChallenge):
-        raise HTTPException(status_code=403, detail={"code": "mfa_enrollment_required", "message": "請完成 MFA 綁定後再登入", "retryable": False, "challenge": {"id": result.challenge_id, "token": result.challenge_token, "provisioning_uri": result.provisioning_uri, "expires_at": result.expires_at.isoformat()}})
+        raise HTTPException(status_code=403, detail={"code": "mfa_enrollment_required", "message": "請完成 MFA 綁定後再登入", "retryable": False, "challenge": {"id": result.challenge_id, "token": result.challenge_token, "provisioning_uri": result.provisioning_uri, "expires_at": _as_utc_transport_datetime(result.expires_at).isoformat()}})
     if not isinstance(result, PasswordLoginChallenge):
         await _reject_invalid_login(payload, request)
-    return BaseResponse(data=AdminPasswordChallengeResponse(challenge_id=result.challenge_id, challenge_token=result.challenge_token, expires_at=result.expires_at), message="請輸入驗證器代碼")
+    return BaseResponse(data=AdminPasswordChallengeResponse(challenge_id=result.challenge_id, challenge_token=result.challenge_token, expires_at=_as_utc_transport_datetime(result.expires_at)), message="請輸入驗證器代碼")
 
 
 @router.post("/login/challenges/{challenge_id}/verify", response_model=BaseResponse[AdminSessionResponse])
@@ -158,7 +166,7 @@ def _login_response(token, expires_at, principal):
     return BaseResponse(
         data=AdminSessionResponse(
             access_token=token,
-            expires_at=expires_at,
+            expires_at=_as_utc_transport_datetime(expires_at),
             admin=AdminPublic(**principal.as_dict()),
         ),
         message="登入成功",
@@ -234,7 +242,7 @@ async def refresh(
     if expires_at is None:
         raise HTTPException(status_code=401, detail="管理員 Session 已失效")
     return BaseResponse(
-        data=AdminRefreshResponse(expires_at=expires_at),
+        data=AdminRefreshResponse(expires_at=_as_utc_transport_datetime(expires_at)),
         message=f"{principal.display_name} 的 Session 已延長",
     )
 

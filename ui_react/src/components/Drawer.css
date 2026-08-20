@@ -1,0 +1,112 @@
+/* Sliding Right Drawer Styles & Large Workbench */
+
+.drawer-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(30, 27, 25, 0.5);
+  backdrop-filter: blur(4px);
+  z-index: 999;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  animation: backdropFadeIn 0.2s ease;
+}
+
+.drawer-container {
+  height: 100vh;
+  width: min(540px, 92vw);
+  background-color: #ffffff;
+  box-shadow: -8px 0 32px rgba(74, 69, 67, 0.18);
+  display: flex;
+  flex-direction: column;
+  animation: drawerSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  overflow: hidden;
+}
+
+.drawer-container.drawer-size-normal {
+  width: min(720px, 92vw);
+}
+
+.drawer-container.drawer-size-wide {
+  width: min(75vw, 1400px);
+}
+
+.drawer-container.drawer-size-xl {
+  width: min(1280px, 96vw);
+}
+
+.drawer-container.drawer-size-fullscreen {
+  width: min(1440px, 96vw);
+  height: 94vh;
+  margin: auto;
+  border-radius: 24px;
+  box-shadow: 0 16px 48px rgba(74, 69, 67, 0.22);
+  animation: modalScaleIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.drawer-header {
+  padding: 20px 32px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #ffffff;
+}
+
+.drawer-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--md-sys-color-on-surface);
+  letter-spacing: -0.01em;
+}
+
+.drawer-close-btn {
+  background: none;
+  border: none;
+  font-size: 1.35rem;
+  color: var(--md-sys-color-on-surface-variant);
+  cursor: pointer;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  transition: all 0.2s ease;
+}
+
+.drawer-close-btn:hover {
+  background-color: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface);
+}
+
+.drawer-body {
+  flex: 1;
+  padding: 32px;
+  overflow-y: auto;
+  background-color: #fffdfc;
+}
+
+.drawer-footer {
+  padding: 18px 32px;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-3);
+  background-color: #ffffff;
+}
+
+@keyframes backdropFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes drawerSlideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes modalScaleIn {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}

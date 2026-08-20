@@ -9,7 +9,8 @@
 
 | 文件 | 狀態 | 下一個 gate |
 |---|---|---|
-| [Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed`／`deferred` | 指定 managed host、部署窗口與操作權限。 |
+| [Cloud Run＋單一 Cloud VPN 雲端部署測試計畫](Cloud_Run_單一Cloud_VPN_部署測試計畫.md) | `proposed` | 指定隔離 cloud project／NAS DB、operator、預算與故障注入範圍後，另立 exact-scope Work Package。 |
+| [Cloud Run Durable Job Worker Supervision](Durable_Job_Worker_Supervision_延後開發計畫.md) | `proposed`／`deferred` | 指定隔離 cloud test project／NAS DB、OIDC、operator、故障注入與雲端測試 gate。 |
 | [UI 真實業務流程測試資料與驗收主計畫](UI真實業務流程測試資料與驗收主計畫.md) | `approved-planning` | 各 Part 個別完成規格與人工 activation gate。 |
 | [Part 00 全域測試資料治理與 Scenario 契約](Part_00_全域測試資料治理與Scenario契約.md) | `proposed` | 人工確認 Part 00 後才可建立執行 Work Package。 |
 | [React 管理端遷移與 UI 真實業務流程驗收](React管理端遷移與UI真實業務流程驗收計畫.md) | `proposed` | 已確認三項 Orders SOP 業務裁決；仍待確認整體架構與第一包 Access＋System Status exact write set。 |

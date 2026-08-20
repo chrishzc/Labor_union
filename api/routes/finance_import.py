@@ -1,4 +1,7 @@
-"""Authenticated Finance Import Preview, Apply, and correction endpoints."""
+"""
+File: finance_import.py
+Description: 提供Finance Import唯讀批次查詢與受控匯入命令端點。
+"""
 
 from __future__ import annotations
 
@@ -14,7 +17,7 @@ from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Uplo
 from pymysql.err import OperationalError
 from starlette.concurrency import run_in_threadpool
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_admin, require_system_admin
 from api.dependencies.finance_import import (
     FinanceImportApplication,
     HistoricalReprocessApplication,
@@ -109,7 +112,7 @@ _IdempotencyHeader = Annotated[
 def list_finance_import_batches(
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     before_batch_id: Annotated[int | None, Query(ge=1)] = None,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
     del principal
@@ -129,7 +132,7 @@ def list_finance_import_batches(
 )
 def get_finance_import_batch_manifest(
     batch_identity: str,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
     del principal
@@ -149,7 +152,7 @@ def list_finance_import_review_rows(
     batch_identity: str,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     after_row_id: Annotated[int | None, Query(ge=1)] = None,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
     del principal
@@ -176,7 +179,7 @@ def list_finance_import_reprocess_runs(
     batch_identity: str,
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     before_run_id: Annotated[int | None, Query(ge=1)] = None,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
     del principal

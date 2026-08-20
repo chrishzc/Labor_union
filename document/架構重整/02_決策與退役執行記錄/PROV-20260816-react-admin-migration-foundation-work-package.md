@@ -1,13 +1,17 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: in-progress
 identity: PROV-20260816-react-admin-migration-foundation-work-package
 owner: global-admin-web-presentation
-base_ref: 538c836acfe13e0288a82ab29a5f7c3cc4eae853
+base_ref: ad79f5b4fb35f1ef442f889702aaa4ccb2c5d922
 date: 2026-08-16
 ---
 
-# PROV-20260816 React 管理端遷移 Foundation 與 Phase 0/1 執行工作包 (V4)
+# PROV-20260816 React 管理端遷移 Foundation 與 Phase 0/1 執行工作包 (V5)
+
+> 2026-08-16 人工已要求重新驗收並允許修正 Foundation。狀態維持 `in-progress`；不得以舊版
+> `VICTORY_CONFIRMED` 報告宣稱完成。V4 的 base ref、測試數量與 Auth 判定在目前 working tree
+> 已屬 stale，以下第 13 節為最新覆核結果。
 
 ## 1. 任務目標與身分基線
 
@@ -312,3 +316,44 @@ powershell -Command "Get-ChildItem -Path ui_react\src\pages -Recurse -Include *.
 ## 8. 交付停機宣告
 
 本 Work Package (V4) 提交後，Integration Owner 將**立即停止所有操作**並等待人工明確回覆「核准此 exact Work Package」。在獲得核准前，嚴格禁止執行 `npm install`、檔案複製或修改任何 Production 程式碼。
+
+## 9. 2026-08-16 Foundation 重新覆核與完成門檻
+
+### 9.1 已修正並具當前證據的項目
+
+- 保留 Desktop 既有 11 頁與兩段式 Login 視覺結構，沒有重新設計業務頁面。
+- 業務頁改為按頁 lazy import；生產 build 已由單一 534 kB bundle 拆成主 bundle 與頁面 chunks。
+- Shell 初始狀態不再先冒充「在線」，並顯示記憶體 Session 的真實 principal display name。
+- 共用 Drawer 補上唯一 `aria-labelledby`、焦點循環、背景捲動鎖定與關閉後焦點還原。
+- mock business pages 仍以全域警示橫幅明確標示；System Status 是目前唯一 real-data shell slice。
+
+### 9.2 尚未完成且禁止冒充完成
+
+1. 使用者已裁決 Auth 必須是「帳密通過 → TOTP 驗證 → 建立 Session」的真正兩段式流程。目前
+   React 保留兩畫面，但 live backend 仍只有單一 `/api/v1/admin/auth/login` 同時驗三項；前端換頁
+   不是 password challenge 的 server evidence。此項為 `BLOCKED_AUTH_TWO_STEP_CONTRACT`。
+2. 首次 MFA enrollment 尚未在 React 完成；不可用固定 TOTP、假 challenge 或 dev token fallback。
+3. reload／new-tab restore 仍未裁決並落地；記憶體 bearer 只可作開發期 fail-closed 行為。
+4. 11 個業務頁仍為 mock baseline，尚未進入 Phase 2 real-data query 接線。
+5. 先前報告宣稱 `123/123`、`15/15` 與特定測試檔名不符合重新執行結果；每次驗收必須以當前
+   raw command output 為準，不得複製舊數字。
+
+### 9.3 Foundation close gate
+
+- 兩段式 Auth challenge public contract 已人工核准、實作並完成 deny-path／replay／expiry 測試。
+- Login Stage 1 由 server password challenge 成功結果驅動；Stage 2 才顯示且成功後才取得 Session。
+- 首次 enrollment、recovery code 一次性顯示與重新登入流程完成。
+- `npm run lint`、`npm run build`、`npm test`、focused Auth／System Status tests、UTF-8、secret scan 與
+  `git diff --check` 在 freeze candidate 上重新通過且無未說明 warning。
+
+### 9.4 本次 final candidate evidence
+
+| Claim | Command／inspection | Result | Limit |
+|---|---|---|---|
+| Frontend lint | `cd ui_react; npm run lint` | `PASS`, exit 0，無 warning | 只證明 oxlint scope |
+| Production build | `cd ui_react; npm run build` | `PASS`, exit 0；主 JS 268.20 kB，頁面已拆 chunk | 未做部署 smoke |
+| Frontend tests | `cd ui_react; npm test` | `PASS`, 8 files／124 tests，無 stderr warning | mock transport，不是 browser E2E |
+| Backend focused | `.venv\\Scripts\\python.exe -m pytest -p no:cacheprovider ...` | `PASS`, 18 tests | 不證明兩段式 challenge；目前不存在該 contract |
+| UTF-8／header | strict decoder＋structured header audit | 17 files／13 source，0 failure | 只掃本次 bounded files |
+| Secret scan | bounded high-fidelity regex＋production auth antipattern search | 0 secret hit；無 dev token fallback | regex 不能取代完整 repository scan |
+| Diff format | `git diff --check -- <bounded paths>` | exit 0；僅 Git 提示未來可能轉 CRLF | untracked files需以 parser／test補證 |

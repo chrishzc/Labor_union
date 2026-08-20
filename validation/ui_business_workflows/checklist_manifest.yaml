@@ -1,0 +1,35 @@
+contract: labor-union-ui-business-checklist/v1
+work_package_identity: PROV-20260817-react-admin-phase3-scenario-lineage-governance
+revision: 1
+business_clock:
+  timezone: Asia/Taipei
+  business_now: '2026-01-15T09:00:00+08:00'
+execution_policy:
+  mode: no-browser-execution
+  reset_required: true
+  runtime_receipt_owner: downstream-bounded-work-package
+parts:
+  - part: '04'
+    path: validation/ui_business_workflows/part_04_staff_matching
+    scenarios: [SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS]
+    checklist: validation/ui_business_workflows/part_04_staff_matching/checklist.md
+    expected: validation/ui_business_workflows/part_04_staff_matching/expected.yaml
+    result_summary: validation/ui_business_workflows/part_04_staff_matching/result_summary.md
+    status: NOT_RUN
+  - part: '09'
+    path: validation/ui_business_workflows/part_09_scheduling
+    scenarios: [SCH-REACT-ADMIN-CURRENT-QUERY, SCH-REACT-ADMIN-LEAVE-SUBSTITUTION, SCH-REACT-ADMIN-HOLIDAY-POLICY]
+    checklist: validation/ui_business_workflows/part_09_scheduling/checklist.md
+    expected: validation/ui_business_workflows/part_09_scheduling/expected.yaml
+    result_summary: validation/ui_business_workflows/part_09_scheduling/result_summary.md
+    status: NOT_RUN
+  - part: '14'
+    path: validation/ui_business_workflows/part_14_anomalies
+    scenarios: [ANOM-REACT-ADMIN-WARNING-TRANSITION]
+    checklist: validation/ui_business_workflows/part_14_anomalies/checklist.md
+    expected: validation/ui_business_workflows/part_14_anomalies/expected.yaml
+    result_summary: validation/ui_business_workflows/part_14_anomalies/result_summary.md
+    status: NOT_RUN
+blocked_scenarios:
+  - scenario_id: GDATA-REACT-ADMIN-DATA-BROWSER-QUERY
+    reason: Data Browser Part identity decision is required

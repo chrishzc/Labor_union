@@ -3,9 +3,11 @@ File: alert_workflow.py
 Description: 編排 canonical current-state anomaly 查詢、投影與人工工作流。
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from domains.anomalies.registry import (
+    AlertWorkflowStatus,
+    AnomalySeverity,
     claim_alert,
     reduce_current_alert,
     resolve_alert_workflow,
@@ -27,7 +29,7 @@ class StoredWorkflowEvent:
 class AnomalySummary:
     projection: object
     source_domain: str
-    severity: str
+    severity: AnomalySeverity
     display_snapshot: object
 
 
@@ -78,16 +80,33 @@ class AnomalyApplication:
         self._unit_of_work_factory = unit_of_work_factory
 
     def query_summaries(self, *, active_only=True, limit=100, offset=0):
-        return self._repository.query_summaries(active_only=active_only, limit=limit, offset=offset)
+        stored = self._repository.query_summaries(
+            active_only=active_only,
+            limit=limit,
+            offset=offset,
+        )
+        return tuple(self._enrich_summary(summary) for summary in stored)
 
     def query_detail(self, fingerprint):
         detail = self._repository.query_detail(fingerprint)
         if detail is None:
             raise ValueError("anomaly_not_found")
         return AnomalyDetail(
-            detail.summary,
+            self._enrich_summary(detail.summary),
             detail.timeline,
             self._registry.available_actions(detail.summary.projection.definition_code),
+        )
+
+    def _enrich_summary(self, summary: AnomalySummary) -> AnomalySummary:
+        definition = self._registry.require(summary.projection.definition_code)
+        if summary.source_domain != definition.source_domain:
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        if not isinstance(summary.projection.workflow_status, AlertWorkflowStatus):
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        return replace(
+            summary,
+            source_domain=definition.source_domain,
+            severity=definition.severity,
         )
 
     def project(self, request):

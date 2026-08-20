@@ -1,0 +1,9 @@
+contract: labor-union-ui-expected/v1
+scenario_id: SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS
+revision: 1
+oracle:
+  - typed staff summary is rendered without personal or financial secrets
+  - unavailable mutation controls remain natively disabled
+  - no client-derived assignment, payroll, or success state is shown
+  - Network and DOM evidence are both required for a runtime result
+blocked_reason: real browser and API receipt is produced by the downstream bounded work package

@@ -91,6 +91,22 @@ current_version
 
 只有 `unavailable` 可提示以相同 idempotency key 重試。`conflict` 必須重新 Query／Preview；不得自動 Apply。UI 不得依 message 字串判斷流程。
 
+### 4.1 FastAPI 管理端公開邊界
+
+- `/api/v1/**`與`/internal/v1/**`的非2xx JSON固定使用`{"detail":{"error":{...}}}`，error只含上述
+  八欄；LINE webhook／LIFF／gateway與legacy public namespace維持各自provider contract。
+- request correlation header固定為`X-Correlation-ID`。缺少時server產生並在parameter validation前注入；
+  唯一合法值原樣保留；非法或重複值回422且不呼叫下游、不回顯輸入。
+- 既有完整typed error採response-only correlation rebase：只把公開`correlation_id`換成本request值，
+  其餘七欄、HTTP status與`Retry-After`／`WWW-Authenticate`保留；不得改Domain command、receipt、audit、
+  outbox、job、idempotency或持久correlation。
+- legacy detail只允許Global boundary明列的code/string allowlist；未知dict/string依HTTP status去敏，禁止
+  request body、credential、MFA provisioning material、raw exception或PII穿透。
+- React shared transport只在完整strict八欄通過時採用server code/message/retryable；schema drift保留raw
+  payload並退回HTTP status分類，不得以寬鬆cast吞掉錯誤。
+- 本邊界是cross-cutting safety contract，不是所有既有typed GET page-slice的無條件migration前置；
+  page-specific dependency依`PROV-20260817-react-admin-page-slice-migration-execution-decision`判定。
+
 ## 5. SSOT 類型
 
 每個欄位或狀態必須明確歸入下列一種：

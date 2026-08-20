@@ -6,6 +6,7 @@ Description: 驗證 HCM upload route 的 typed result、conflict 與暫存檔終
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 from types import SimpleNamespace
 
 import pandas as pd
@@ -15,7 +16,7 @@ from fastapi.testclient import TestClient
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.hcm_import import get_hcm_workbook_import_service
 from api.routes.hcm_import import router
-from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookPreview, HcmWorkbookReceipt
+from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookPreview, HcmWorkbookReceipt, HcmWorkbookResultPage, HcmWorkbookResultRecord
 
 
 class _Service:
@@ -38,6 +39,12 @@ class _Service:
     def apply(self, frame, source_path, preview_fingerprint, key, actor, correlation_id):
         assert preview_fingerprint == "1" * 64
         return self.ingest(frame, source_path, key, actor, correlation_id)
+
+    def query_recent_results(self, *, limit, before_receipt_id):
+        assert limit == 20
+        assert before_receipt_id is None
+        receipt = HcmWorkbookReceipt("0" * 64, 1, 1, 0, 0, 0, 0, False)
+        return HcmWorkbookResultPage((HcmWorkbookResultRecord(7, datetime(2026, 8, 17, 12, 0), receipt),), None)
 
 
 def _client(service: _Service) -> TestClient:
@@ -111,3 +118,12 @@ def test_same_key_conflict_is_typed_and_removes_temporary_workbook():
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "hcm_workbook_idempotency_conflict"
     assert service.upload_paths[0].exists() is False
+
+
+def test_recent_results_is_authenticated_typed_get_and_marks_legacy_unavailable():
+    response = _client(_Service()).get("/api/v1/case-import/hcm/workbooks/results")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["items"][0]["receipt_id"] == 7
+    assert response.json()["data"]["items"][0]["legacy_summary_only"] is True
+    assert response.json()["data"]["items"][0]["row_outcomes"] == []

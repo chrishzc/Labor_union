@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1", "scenario_id": "GERR-REACT-ADMIN-TYPED-BOUNDARY", "revision": 1,
+  "assertions": ["Typed envelopes preserve category, code and correlation identity.", "Timeout and retry remain explicit without optimistic UI state."],
+  "db_oracle": {"applicability": "not-applicable", "reason": "boundary-only package"},
+  "api_oracle": {"required": ["typed envelope for 401/403/409/422/500", "correlation identifier preserved", "timeout classified"]},
+  "ui_oracle": {"required": ["error boundary displays safe message", "retry remains explicit", "no raw payload rendering"]},
+  "replay_oracle": {"required": ["same error class for same response"]}, "recovery_oracle": {"required": ["timeout is not optimistic success"]},
+  "forbidden_observations": ["HTTP 200 used as proof of business completion", "secret or raw exception rendered"]
+}

@@ -1,26 +1,49 @@
-"""Capability-protected Customer Service API."""
+"""
+File: customer_service.py
+Description: 暴露客服唯讀、既有操作及受控結案 Preview／Apply 的認證 HTTP 入口。
+"""
 
 from __future__ import annotations
 
+from typing import Annotated
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import admin_actor_context, require_customer_service_handler, require_customer_service_reader
 from api.dependencies.line_runtime import publish_line_wakeup_best_effort
 from api.schemas.base import BaseResponse
 from api.schemas.customer_service import (
-    CustomerServiceDetailView, CustomerServicePageView, CustomerServiceReplyRequest,
-    CustomerServiceSummaryView, CustomerServiceUpdateRequest,
+    CustomerServiceDetailView,
+    CustomerServicePageView,
+    CustomerServiceReplyRequest,
+    CustomerServiceSummaryView,
+    CustomerServiceUpdateApplyRequest,
+    CustomerServiceUpdatePreviewRequest,
+    CustomerServiceUpdatePreviewView,
+    CustomerServiceUpdateRequest,
 )
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus, CustomerServiceTransitionError
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
+from shared_kernel.errors import ErrorCategory, TypedError
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.customer_service.application import (
-    CustomerServiceApplication, CustomerServiceTicketNotFoundError, CustomerServiceVersionConflictError,
+    CustomerServiceApplication,
+    CustomerServiceIdempotencyMismatchError,
+    CustomerServicePreviewFingerprintConflictError,
+    CustomerServiceTicketNotFoundError,
+    CustomerServiceVersionConflictError,
 )
-from subsystems.customer_service.contracts import CustomerServiceListQuery, ReplyCustomerServiceTicket, UpdateCustomerServiceTicket
+from subsystems.customer_service.contracts import (
+    ApplyCustomerServiceTicketUpdate,
+    CustomerServiceListQuery,
+    PreviewCustomerServiceTicketUpdate,
+    ReplyCustomerServiceTicket,
+    UpdateCustomerServiceTicket,
+)
 
 
 router = APIRouter(prefix="/api/v1/customer-service/tickets", tags=["Customer Service"])
@@ -50,6 +73,85 @@ def detail(ticket_id: int, _: AdminPrincipal = Depends(require_customer_service_
     return BaseResponse(data=_call(_application().detail, ticket_id))
 
 
+@router.post(
+    "/{ticket_id}/update/preview",
+    response_model=BaseResponse[CustomerServiceUpdatePreviewView],
+)
+def preview_update(
+    ticket_id: int,
+    payload: CustomerServiceUpdatePreviewRequest,
+    correlation_id: Annotated[
+        str,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ],
+    _: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    identity = CorrelationId(correlation_id)
+    command = PreviewCustomerServiceTicketUpdate(
+        ticket_id,
+        CustomerServiceStatus(payload.status),
+        payload.internal_note,
+        ExpectedVersion(payload.expected_version),
+        identity,
+    )
+    preview = _call_update_endpoint(
+        _application().preview_update,
+        command,
+        correlation_id=identity,
+    )
+    return BaseResponse(
+        data=CustomerServiceUpdatePreviewView(
+            ticket_id=preview.ticket_id,
+            before_status=preview.before_status,
+            after_status=preview.after_status,
+            current_version=preview.current_version,
+            expected_version=preview.expected_version,
+            blockers=list(preview.blockers),
+            preview_fingerprint=preview.preview_fingerprint.value,
+            apply_ready=preview.apply_ready,
+        ),
+        message="客服結案 Preview 已建立",
+    )
+
+
+@router.post(
+    "/{ticket_id}/update/apply",
+    response_model=BaseResponse[CustomerServiceDetailView],
+)
+def apply_update(
+    ticket_id: int,
+    payload: CustomerServiceUpdateApplyRequest,
+    request: Request,
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=191),
+    ],
+    correlation_id: Annotated[
+        str,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ],
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    identity = CorrelationId(correlation_id)
+    command = ApplyCustomerServiceTicketUpdate(
+        ticket_id,
+        CustomerServiceStatus(payload.status),
+        payload.internal_note,
+        ExpectedVersion(payload.expected_version),
+        PreviewFingerprint(payload.preview_fingerprint),
+        admin_actor_context(principal).actor_id,
+        IdempotencyKey(idempotency_key),
+        identity,
+    )
+    result = _call_update_endpoint(
+        _application().apply_update,
+        command,
+        correlation_id=identity,
+    )
+    _audit_request(request, "update.apply", ticket_id)
+    return BaseResponse(data=result, message="客服需求已結案")
+
+
 @router.patch("/{ticket_id}", response_model=BaseResponse[CustomerServiceDetailView])
 def update(ticket_id: int, payload: CustomerServiceUpdateRequest, request: Request, principal: AdminPrincipal = Depends(require_customer_service_handler)):
     actor = admin_actor_context(principal).actor_id
@@ -76,6 +178,125 @@ def _call(operation, *arguments):
         raise HTTPException(status_code=404, detail={"code": "customer_service_ticket_not_found", "message": str(error)}) from error
     except (CustomerServiceVersionConflictError, CustomerServiceTransitionError) as error:
         raise HTTPException(status_code=409, detail={"code": "customer_service_ticket_version_conflict", "message": str(error)}) from error
+
+
+def _call_update_endpoint(operation, *arguments, correlation_id: CorrelationId):
+    try:
+        return operation(*arguments)
+    except CustomerServiceTicketNotFoundError as error:
+        raise _typed_http_error(
+            404,
+            TypedError(
+                ErrorCategory.NOT_FOUND,
+                "customer_service_ticket_not_found",
+                "找不到指定的客服需求。",
+                correlation_id,
+            ),
+        ) from error
+    except CustomerServiceIdempotencyMismatchError as error:
+        raise _typed_http_error(
+            409,
+            TypedError(
+                ErrorCategory.IDEMPOTENCY_MISMATCH,
+                "customer_service_update_idempotency_mismatch",
+                "相同冪等鍵已被不同內容使用。",
+                correlation_id,
+            ),
+        ) from error
+    except CustomerServicePreviewFingerprintConflictError as error:
+        raise _typed_http_error(
+            409,
+            TypedError(
+                ErrorCategory.CONFLICT,
+                "customer_service_update_preview_conflict",
+                "客服結案 Preview 已過期，請重新查詢並預覽。",
+                correlation_id,
+            ),
+        ) from error
+    except CustomerServiceVersionConflictError as error:
+        raise _typed_http_error(
+            409,
+            TypedError(
+                ErrorCategory.CONFLICT,
+                "customer_service_ticket_version_conflict",
+                "客服需求版本已更新，請重新查詢。",
+                correlation_id,
+            ),
+        ) from error
+    except CustomerServiceTransitionError as error:
+        raise _typed_http_error(
+            409,
+            TypedError(
+                ErrorCategory.DOMAIN_BLOCKED,
+                "customer_service_transition_invalid",
+                "目前狀態不允許這項客服操作。",
+                correlation_id,
+                domain_blockers=("customer_service_transition_invalid",),
+            ),
+        ) from error
+    except OperationalError as error:
+        mysql_code = int(error.args[0]) if error.args else 0
+        retryable = mysql_code in {1205, 1213}
+        category = ErrorCategory.UNAVAILABLE if retryable else ErrorCategory.INTERNAL
+        status_code = 503 if retryable else 500
+        raise _typed_http_error(
+            status_code,
+            TypedError(
+                category,
+                (
+                    "customer_service_update_temporarily_unavailable"
+                    if retryable
+                    else "customer_service_update_database_error"
+                ),
+                (
+                    "客服操作暫時無法完成，可使用相同冪等鍵重試。"
+                    if retryable
+                    else "客服操作發生資料庫錯誤。"
+                ),
+                correlation_id,
+                retryable=retryable,
+            ),
+        ) from error
+    except Exception as error:
+        raise _typed_http_error(
+            500,
+            TypedError(
+                ErrorCategory.INTERNAL,
+                "customer_service_update_internal_error",
+                "客服操作發生未預期錯誤。",
+                correlation_id,
+            ),
+        ) from error
+
+
+def _typed_http_error(status_code: int, error: TypedError) -> HTTPException:
+    return HTTPException(
+        status_code=status_code,
+        detail={
+            "error": {
+                "category": error.category.value,
+                "code": error.code,
+                "message": error.message,
+                "field_errors": [
+                    {
+                        "field": item.field,
+                        "code": item.code,
+                        "message": item.message,
+                    }
+                    for item in error.field_errors
+                ],
+                "domain_blockers": list(error.domain_blockers),
+                "retryable": error.retryable,
+                "correlation_id": error.correlation_id.value,
+                "current_version": (
+                    None
+                    if error.current_version is None
+                    else error.current_version.value
+                ),
+            }
+        },
+        headers={"Retry-After": "1"} if error.retryable else None,
+    )
 
 
 def _correlation(operation):

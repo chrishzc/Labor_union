@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1", "scenario_id": "SCH-REACT-ADMIN-CURRENT-QUERY", "revision": 1,
+  "assertions": ["The current calendar query is read-only and preserves server facts.", "Empty, abort and typed error states never synthesize calendar data."],
+  "db_oracle": {"required": ["query is read-only", "root facts are not changed"]},
+  "api_oracle": {"required": ["typed current-calendar view", "empty range is explicit", "abort is classified"]},
+  "ui_oracle": {"required": ["Part 09 workflow is repeatable", "unavailable fields remain explicit"]},
+  "replay_oracle": {"applicability": "not-applicable", "reason": "query only"}, "recovery_oracle": {"required": ["retry does not invent calendar data"]},
+  "forbidden_observations": ["local date arithmetic as official fact", "screenshot as sole evidence"]
+}

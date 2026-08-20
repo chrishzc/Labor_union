@@ -78,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
         description="診斷銀行對帳 Excel 格式；正式匯入必須使用 authenticated Finance Web API。",
     )
     parser.add_argument("--excel-path", required=True, help="銀行 Excel 完整路徑")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="相容參數；預設即為唯讀格式預覽"
+    )
     parser.add_argument("--apply", action="store_true", help="已退役；正式匯入必須使用 Finance Web API")
     parser.add_argument("--confirm-database", help="已退役相容參數，不會連線或寫入資料庫")
     parser.add_argument(

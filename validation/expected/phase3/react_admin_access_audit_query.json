@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1", "scenario_id": "AC-REACT-ADMIN-AUDIT-QUERY", "revision": 1,
+  "assertions": ["Only typed masked audit rows are returned and pagination is bounded.", "Unauthorized and malformed requests fail closed without rendering secrets."],
+  "db_oracle": {"required": ["only scoped masked rows are returned", "raw secret columns are not selected"]},
+  "api_oracle": {"required": ["typed masked audit view", "cursor and limit are validated"]},
+  "ui_oracle": {"required": ["audit data remains masked", "auth/decode errors are explicit"]},
+  "replay_oracle": {"applicability": "not-applicable", "reason": "query only"}, "recovery_oracle": {"required": ["malformed query fails closed"]},
+  "forbidden_observations": ["TOTP seed rendered", "session token rendered", "unmasked personal data"]
+}

@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-fixture/v1", "scenario_id": "SCH-REACT-ADMIN-CURRENT-QUERY", "revision": 1,
+  "test_kind": "domain_root_data",
+  "data_classification": "synthetic", "generation_method": "hand-authored fixed-date query roots; no production export",
+  "allowed_use": "validation-only", "redaction_policy": "synthetic case and cursor values only",
+  "root_inputs": ["synthetic current assignment roots", "fixed date range", "bounded cursor"],
+  "input_values": {"case_key": "CASE-SYN-09", "range": {"start": "2026-02-01", "end": "2026-02-07"}, "cursor": "cursor-1"},
+  "seed_fields": ["assignment_root.case_key", "query_input.start", "query_input.end", "query_input.cursor"],
+  "derived_fields": ["calendar_view.items", "calendar_view.next_cursor", "calendar_view.empty_reason"],
+  "expected_manifest_path": "validation/expected/phase3/react_admin_scheduling_current_query.json",
+  "fixed_business_clock": "2026-01-15T09:00:00+08:00",
+  "forbidden_direct_seed": ["calendar read model", "holiday flag", "assignment mutation", "screenshot as sole evidence"]
+}

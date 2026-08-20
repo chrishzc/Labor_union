@@ -82,7 +82,7 @@ def test_first_login_can_omit_totp_until_mfa_enrollment_is_issued():
 
 
 def test_password_challenge_route_never_issues_a_session_before_factor_verification(monkeypatch):
-    challenge = PasswordLoginChallenge("challenge-1", "x" * 48, datetime.now(timezone.utc) + timedelta(minutes=5))
+    challenge = PasswordLoginChallenge("challenge-1", "x" * 48, datetime(2026, 8, 16, 12, 5, 0))
     monkeypatch.setattr(admin_auth, "issue_password_login_challenge", lambda *_args, **_kwargs: challenge)
 
     response = asyncio.run(
@@ -93,6 +93,8 @@ def test_password_challenge_route_never_issues_a_session_before_factor_verificat
 
     assert response.data.challenge_id == "challenge-1"
     assert not hasattr(response.data, "access_token")
+    assert response.data.expires_at.tzinfo is not None
+    assert response.data.expires_at.utcoffset() == timedelta(0)
 
 
 def test_factor_verification_route_issues_session_only_after_valid_challenge(monkeypatch):
@@ -100,7 +102,7 @@ def test_factor_verification_route_issues_session_only_after_valid_challenge(mon
     monkeypatch.setattr(
         admin_auth,
         "complete_password_login_challenge",
-        lambda **_kwargs: ("session-token", datetime.now(timezone.utc) + timedelta(minutes=30), principal),
+        lambda **_kwargs: ("session-token", datetime(2026, 8, 16, 12, 30, 0), principal),
     )
 
     response = asyncio.run(
@@ -112,6 +114,22 @@ def test_factor_verification_route_issues_session_only_after_valid_challenge(mon
     )
 
     assert response.data.access_token == "session-token"
+    assert response.data.expires_at.tzinfo is not None
+    assert response.data.expires_at.utcoffset() == timedelta(0)
+
+
+def test_refresh_route_normalizes_repository_utc_naive_expiry(monkeypatch):
+    principal = AdminPrincipal(1, "admin", "管理員", "system_admin", is_root=True)
+    monkeypatch.setattr(
+        admin_auth,
+        "renew_admin_session",
+        lambda *_args, **_kwargs: datetime(2026, 8, 16, 12, 30, 0),
+    )
+
+    response = asyncio.run(admin_auth.refresh("Bearer session-token", principal))
+
+    assert response.data.expires_at.tzinfo is not None
+    assert response.data.expires_at.utcoffset() == timedelta(0)
 
 
 def test_password_challenge_route_returns_typed_rate_limit(monkeypatch):

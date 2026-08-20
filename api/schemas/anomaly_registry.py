@@ -1,10 +1,15 @@
-"""Typed HTTP contracts for the Anomalies registry vertical."""
+"""
+File: anomaly_registry.py
+Description: 定義異常清單、詳情與人工流程的嚴格 HTTP 契約。
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from domains.anomalies.registry import AlertWorkflowStatus, AnomalySeverity
 
 
 class _StrictModel(BaseModel):
@@ -55,9 +60,9 @@ class AnomalySummaryView(_StrictModel):
     source_domain: str
     source_identity: str
     source_version: int = Field(ge=0)
-    severity: str
+    severity: AnomalySeverity
     predicate_active: bool
-    workflow_status: str
+    workflow_status: AlertWorkflowStatus
     workflow_version: int = Field(ge=0)
     display_snapshot: dict[str, Any] | None = None
     staff_calendar_navigation: StaffCalendarNavigationView | None = None
@@ -73,7 +78,7 @@ class AnomalyWorkflowReceiptView(_StrictModel):
     fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
     action: str
     resulting_workflow_version: int = Field(ge=0)
-    workflow_status: str
+    workflow_status: AlertWorkflowStatus
 
 
 class AnomalyTypedErrorView(_StrictModel):

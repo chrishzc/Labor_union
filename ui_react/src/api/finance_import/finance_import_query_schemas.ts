@@ -1,0 +1,16 @@
+/**
+ * File: finance_import_query_schemas.ts
+ * Description: 定義Finance Import batches、manifest、review與reprocess唯讀Zod契約。
+ */
+import { z } from 'zod';
+const FingerprintSchema = z.string().regex(/^[0-9a-f]{64}$/);
+export const FinanceImportBatchSummarySchema = z.strictObject({ batch_id: z.number().int().positive(), batch_identity: z.string().nullable(), format_id: z.string(), source_file: z.string().nullable(), row_count: z.number().int().nonnegative(), status: z.string(), batch_version: z.number().int().nonnegative().nullable(), architecture_ready: z.boolean(), created_at: z.string() });
+export const FinanceImportManifestSchema = z.strictObject({ batch_id: z.number().int().positive(), batch_identity: z.string(), format_id: z.string(), source_file: z.string().nullable(), sheet_name: z.string(), header_row: z.number().int().positive(), source_row_count: z.number().int().nonnegative(), status: z.string(), batch_version: z.number().int().nonnegative(), source_content_digest: FingerprintSchema, classifier_version: z.string(), fingerprint_version: z.string(), canonical_row_count: z.number().int().nonnegative(), occurrence_count: z.number().int().nonnegative(), review_count: z.number().int().nonnegative(), dispatch_event_count: z.number().int().nonnegative(), reconciliation_receipt_count: z.number().int().nonnegative(), created_at: z.string(), completed_at: z.string().nullable() });
+export const FinanceImportReviewPageSchema = z.strictObject({ items: z.array(z.strictObject({ row_id: z.number().int().positive(), row_identity: z.string(), transaction_date: z.string().nullable(), direction: z.string(), amount_ntd: z.number().int().positive(), classification_type: z.string(), disposition: z.string(), reconciliation_status: z.string(), source_sheet: z.string(), source_row: z.number().int().positive(), occurrence_count: z.number().int().positive(), available_actions: z.array(z.string()), created_at: z.string() })), next_after_row_id: z.number().int().positive().nullable() });
+export const FinanceImportRunPageSchema = z.strictObject({ items: z.array(z.strictObject({ run_id: z.number().int().positive(), batch_identity: z.string(), classifier_version: z.string(), plan_fingerprint: FingerprintSchema, selected_count: z.number().int().nonnegative(), changed_count: z.number().int().nonnegative(), dispatch_count: z.number().int().nonnegative(), reconciled_count: z.number().int().nonnegative(), pending_count: z.number().int().nonnegative(), status: z.string(), created_at: z.string(), completed_at: z.string() })), next_before_run_id: z.number().int().positive().nullable() });
+export const FinanceImportBatchListResponseSchema = z.strictObject({ success: z.boolean(), message: z.string(), data: z.array(FinanceImportBatchSummarySchema), error: z.string().nullable().optional() });
+export function financeEnvelope<T extends z.ZodTypeAny>(schema: T) { return z.strictObject({ success: z.boolean(), message: z.string(), data: schema, error: z.string().nullable().optional() }); }
+export type FinanceImportBatchSummary = z.infer<typeof FinanceImportBatchSummarySchema>;
+export type FinanceImportManifest = z.infer<typeof FinanceImportManifestSchema>;
+export type FinanceImportReviewPage = z.infer<typeof FinanceImportReviewPageSchema>;
+export type FinanceImportRunPage = z.infer<typeof FinanceImportRunPageSchema>;

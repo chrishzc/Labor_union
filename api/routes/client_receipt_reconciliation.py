@@ -1,4 +1,7 @@
-"""Authenticated typed endpoints for Client Receipt reconciliation."""
+"""
+File: client_receipt_reconciliation.py
+Description: 提供客戶收款根事實查詢與受控Preview／Apply端點。
+"""
 
 from __future__ import annotations
 
@@ -11,7 +14,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
 from pymysql.err import OperationalError
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_admin, require_system_admin
 from api.dependencies.client_receipt_reconciliation import (
     ClientReceiptReconciliationApplication,
     get_client_receipt_reconciliation_application,
@@ -63,7 +66,7 @@ _IdempotencyHeader = Annotated[
 @router.get("", response_model=BaseResponse[ClientReceiptQueryView])
 def query_receipt_facts(
     case_no: str = Path(..., min_length=1, max_length=191),
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     application: ClientReceiptReconciliationApplication = Depends(
         get_client_receipt_reconciliation_application
     ),

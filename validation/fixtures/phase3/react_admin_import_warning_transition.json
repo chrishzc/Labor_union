@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-fixture/v1", "scenario_id": "ANOM-REACT-ADMIN-WARNING-TRANSITION", "revision": 1,
+  "test_kind": "external_input_fixture",
+  "data_classification": "invalid-by-design", "generation_method": "hand-authored warning boundary values; no production export",
+  "allowed_use": "validation-only", "redaction_policy": "synthetic import fingerprint and reason; no source rows or recipients",
+  "root_inputs": ["synthetic source warning", "source row fingerprint", "transition reason"],
+  "input_values": {"warning_key": "WARN-SYN-01", "row_fingerprint": "aabbccddeeff00112233445566778899", "reason": "synthetic correction"},
+  "seed_fields": ["warning_input.warning_key", "warning_input.row_fingerprint", "command_input.reason"],
+  "derived_fields": ["warning_projection.tracking_status", "command_receipt.resulting_version", "outbox_projection.delivery_state"],
+  "expected_manifest_path": "validation/expected/phase3/react_admin_import_warning_transition.json",
+  "fixed_business_clock": "2026-01-15T09:00:00+08:00",
+  "forbidden_direct_seed": ["resolved projection", "outbox delivery", "notification result", "anomaly KPI"]
+}
