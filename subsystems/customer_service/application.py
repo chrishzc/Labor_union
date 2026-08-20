@@ -9,7 +9,11 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Callable
 
-from domains.customer_service.ticket import CustomerServiceStatus, transition_ticket
+from domains.customer_service.ticket import (
+    CustomerServiceStatus,
+    CustomerServiceTransitionError,
+    transition_ticket,
+)
 from domains.line.canonical_payload import canonical_line_payload_json
 from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
 from domains.line.identities import LineUserId

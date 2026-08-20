@@ -34,7 +34,7 @@ from domains.scheduling.leave_substitution import (
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from shared_kernel.errors import ErrorCategory, TypedError
-from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,

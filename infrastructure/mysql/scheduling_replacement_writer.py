@@ -476,6 +476,14 @@ def _append_lineage(
     lineage_rows = _lineage_rows(
         command, rebuild_event_id, generation_id, assignment_ids
     )
+    if not lineage_rows:
+        return
+    cursor.executemany(
+        "INSERT INTO scheduling_rebuild_lineage "
+        "(rebuild_event_id,old_assignment_identity,new_assignment_id,"
+        "new_generation_id,lineage_ordinal) VALUES (%s,%s,%s,%s,%s)",
+        lineage_rows,
+    )
 
 
 def _append_notification_invalidation_outbox(
@@ -503,14 +511,6 @@ def _append_notification_invalidation_outbox(
             f"scheduling-rebuild-notification-invalidation:{rebuild_event_id}",
             payload_snapshot,
         ),
-    )
-    if not lineage_rows:
-        return
-    cursor.executemany(
-        "INSERT INTO scheduling_rebuild_lineage "
-        "(rebuild_event_id,old_assignment_identity,new_assignment_id,"
-        "new_generation_id,lineage_ordinal) VALUES (%s,%s,%s,%s,%s)",
-        lineage_rows,
     )
 
 
