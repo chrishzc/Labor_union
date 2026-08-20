@@ -922,3 +922,13 @@
 - 現有模板、archive與media只以去敏測試資料放在 ephemeral filesystem，固定`max=1`並重現restart／revision資料遺失；不得使用正式合約、正式LINE媒體或production DB。
 - 明列 compat image、resource命名、build context、環境變數、OIDC allowlist、測試順序、故障演練、結果分類、清理與正式方案不得繼承的測試捷徑。
 - 本次未建立 Dockerfile、image或GCP資源，未修改Python／schema／migration，也未執行git add／commit。
+
+## [2026-08-20] 完成 Cloud Run 現況相容性測試映像與本機啟動驗證
+
+- 在 `docker/compat/` 建立 API、UI、runtime-ops 三份 test-only Dockerfile、各自的 Dockerfile-specific `.dockerignore`及操作說明；Python 3.11 base image使用固定digest，dependency由`uv.lock`重建，runtime user為`10001:10001`。
+- 修正封裝前回歸測試漂移：HTTP 410測試改依Global typed error sanitization契約驗證、HCM client fixture補齊row outcomes契約、Data Browser auth測試隔離DB、排班測試以deterministic holiday repository取代本機MySQL依賴。
+- 應用層聚焦測試`80 passed`；完整測試`2437 passed, 136 skipped, 3 xfailed, 7 failed`。剩餘失敗為entrypoint人工review、validation schema manifest digest及writer inventory freshness等治理資產問題，未在封裝任務內擅自裁決或重算。
+- 三個image均建置成功且application secret scan通過；API `/health`／OpenAPI、UI health／首頁及UI container→API呼叫皆為HTTP 200，兩個service container均healthy。
+- runtime-ops的Durable、LINE、Incident與Monitor entrypoint均在隔離Private API stub完成check／once；未連既有MySQL、未執行queue／heartbeat mutation、未呼叫LINE或其他外部副作用。
+- 本機保留`union-api-compat-local`（`127.0.0.1:18080`）與`union-ui-compat-local`（`127.0.0.1:18501`）供人工檢查；未推送registry、未建立GCP／VPN／staging DB資源。
+- 由於安裝完整non-dev dependency，三個compat image各約1.34 GB，記為test limitation；正式封裝仍須dependency split與弱點掃描。

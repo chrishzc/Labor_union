@@ -1,7 +1,7 @@
 # Cloud Run 現況相容性部署測試封裝計畫
 
 - 文件性質：獨立的 `TEST_ONLY` 相容性驗證計畫；不是正式容器規格、production readiness 證據或 cutover 授權
-- 計畫狀態：`APPROVED_FOR_TEST_PACKAGING_PLAN`
+- 計畫狀態：`LOCAL_IMAGE_VALIDATED／CLOUD_RUN_STAGING_NOT_RUN`
 - 更新日期：2026-08-20
 - 正式封裝基線：`document/雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫_v2.md`
 - 正式部署基線：`document/雲端部署/計劃書/單一Cloud VPN計畫書.md`
@@ -268,3 +268,24 @@ LINE_LIFF_HEALTH_URL=https://<test-liff-health-url>
 - 缺少正式 Pub/Sub fallback、NAS／檔案保存裁決、HA與production backup evidence。
 
 本計畫只授權撰寫與驗證測試封裝方案；實際建立 GCP資源、連接staging NAS、呼叫LINE測試channel或產生費用前，仍須由操作人員確認目標project、database、service account與預算邊界。
+
+## 九、2026-08-20 本機執行結果
+
+已依本計畫建立 `docker/compat/` 下的三份 Dockerfile、各自的 Dockerfile-specific `.dockerignore` 與操作說明，並完成下列本機驗證：
+
+| Gate | 結果 | 證據摘要 |
+|---|---|---|
+| Dockerfile check | PASS | 三份 `docker build --check` 均無警告 |
+| Image build | PASS | API、UI、runtime-ops 均由同一 lockfile及固定 Python 3.11 base digest建置成功 |
+| Non-root | PASS | 三個 image runtime user皆為 `10001:10001` |
+| Secret file scan | PASS | application closure無 `.env`、private key、credential JSON或 service-account JSON；套件 CA bundle不列為應用 secret |
+| API startup | PASS | `/health`及`/openapi.json`皆為 HTTP 200，container health為 healthy |
+| UI startup | PASS | `/_stcore/health`及首頁皆為 HTTP 200，container health為 healthy |
+| UI → API | PASS | 從 UI container呼叫設定的 `API_BASE_URL/health`取得 HTTP 200／healthy |
+| Runtime entrypoints | PASS_WITH_STUB | Durable `--check`／`--once`、LINE `--once`、Incident `--once`、Monitor `--once`皆正常退出；使用隔離 Private API stub，未連DB或LINE |
+| Staging DB／VPN | NOT_RUN | 尚未取得隔離 staging DB、VPN route及操作授權 |
+| Google OIDC／Cloud Run | NOT_RUN | 尚未建立 GCP測試資源、service account或費用資源 |
+
+完整 pytest 結果為 `2437 passed, 136 skipped, 3 xfailed, 7 failed`。本次修正的應用層聚焦回歸為 `80 passed`；剩餘 7 項均為既有治理／驗證資產阻塞：6 個 entrypoint仍待人工 review、validation schema assembly digest與manifest不一致，以及writer inventory candidate freshness失效。這些不影響本機 API／UI／runtime image啟動，但在正式部署前仍必須由各自owner依正式治理流程處理，不能由本封裝任務重算雜湊或代替人工裁決。
+
+三個 compat image目前因安裝完整 non-dev dependency，各約 1.34 GB；這是預期的 `TEST_LIMITATION`。正式 image仍必須依 v2封裝計畫拆分dependency group、移除Playwright／Chroma等非必要closure並執行弱點掃描。

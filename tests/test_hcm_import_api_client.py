@@ -91,6 +91,9 @@ def _receipt():
         "review_required_count": 0,
         "failed_count": 0,
         "replayed_workbook": False,
+        "row_outcomes_available": True,
+        "legacy_summary_only": False,
+        "row_outcomes": [],
     }
 
 

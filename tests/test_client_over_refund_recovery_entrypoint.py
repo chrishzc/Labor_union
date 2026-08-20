@@ -20,6 +20,5 @@ def test_unmatched_client_collection_http_endpoint_returns_typed_410() -> None:
     )
 
     assert response.status_code == 410
-    assert response.json()["detail"]["error"]["replacement"].endswith(
-        "/matching/preview"
-    )
+    assert response.json()["detail"]["error"]["code"] == "resource_retired"
+    assert "replacement" not in response.json()["detail"]["error"]
