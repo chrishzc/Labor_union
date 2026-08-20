@@ -932,3 +932,9 @@
 - runtime-ops的Durable、LINE、Incident與Monitor entrypoint均在隔離Private API stub完成check／once；未連既有MySQL、未執行queue／heartbeat mutation、未呼叫LINE或其他外部副作用。
 - 本機保留`union-api-compat-local`（`127.0.0.1:18080`）與`union-ui-compat-local`（`127.0.0.1:18501`）供人工檢查；未推送registry、未建立GCP／VPN／staging DB資源。
 - 由於安裝完整non-dev dependency，三個compat image各約1.34 GB，記為test limitation；正式封裝仍須dependency split與弱點掃描。
+
+## [2026-08-20] 移除已被取代的雲端部署計畫
+
+- 依使用者明確指示，刪除`Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md`與舊版`Cloud_Run_Dockerfile封裝計畫.md`。
+- 現行部署與封裝內容分別由`單一Cloud VPN計畫書.md`、`Cloud_Run_Dockerfile封裝計畫_v2.md`及獨立相容性測試計畫承接，避免舊版文件形成競爭SSOT。
+- 本次不修改Python、schema、migration、Docker image或本機已啟動的compat containers。
