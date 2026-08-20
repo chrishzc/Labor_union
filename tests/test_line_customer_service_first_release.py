@@ -1,6 +1,6 @@
 """
 File: test_line_customer_service_first_release.py
-Description: 驗證客服首版與 Rich Menu 的 canonical LIFF 入口契約。
+Description: 驗證客服、Rich Menu 與 LIFF 第一版 canonical 邊界及新舊客服路由共存。
 """
 
 from datetime import datetime, timezone
@@ -13,6 +13,8 @@ import pytest
 from pydantic import ValidationError
 
 from api.routes import line_identity
+from api.routes import line_mobile_admin
+from api.routes.customer_service import router as customer_service_router
 from api.schemas.line_identity import LineIdentityFlowOpenRequest
 from domains.customer_service.ticket import (
     CustomerServiceCategory,
@@ -20,8 +22,9 @@ from domains.customer_service.ticket import (
     CustomerServiceTransitionError,
     transition_ticket,
 )
-from domains.line.identities import LineUserId
+from domains.line.identities import LineProviderMessageId, LineUserId
 from shared_kernel.migration_release import load_migration_release_manifest
+from subsystems.line.delivery_contracts import LineProviderOutcome, LineProviderOutcomeType
 from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
@@ -57,8 +60,25 @@ class Audit:
         self.intents.append(intent)
 
 
+class ReplyProvider:
+    def __init__(self):
+        self.calls = []
+
+    def reply(self, reply_token, message):
+        self.calls.append((reply_token, message))
+        return LineProviderOutcome(
+            LineProviderOutcomeType.SUCCESS,
+            provider_message_id=LineProviderMessageId(f"reply:{reply_token}"),
+        )
+
+
 def _inbox(event_id="event-1"):
-    return SimpleNamespace(event=SimpleNamespace(event_id=SimpleNamespace(value=event_id)))
+    return SimpleNamespace(
+        event=SimpleNamespace(
+            event_id=SimpleNamespace(value=event_id),
+            payload_json=json.dumps({"replyToken": f"reply-{event_id}"}),
+        )
+    )
 
 
 def _unit_of_work():
@@ -87,17 +107,24 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
     request = unit_of_work.delivery_tasks.requests[0]
     assert request.message_kind.value == "flex"
     assert request.idempotency_key.value == "service-help:menu:event-1"
-    assert "聯絡工會人員" in request.payload_json
+    assert "聯絡工會人員" not in request.payload_json
+    assert "其他問題" in request.payload_json
 
 
-def test_service_help_never_calls_line_reply_api_inside_the_unit_of_work():
-    source = (
-        PROJECT_ROOT / "subsystems/line/service_help_application.py"
-    ).read_text(encoding="utf-8")
+def test_service_help_uses_reply_token_before_falling_back_to_delivery():
+    unit_of_work = _unit_of_work()
+    provider = ReplyProvider()
+    application = LineServiceHelpApplication(
+        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc),
+        reply_provider=provider,
+    )
 
-    assert "reply_provider" not in source
-    assert ".reply(" not in source
-    assert "delivery_tasks.enqueue" in source
+    handled = application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), "服務說明")
+
+    assert handled is True
+    assert provider.calls[0][0] == "reply-event-1"
+    assert provider.calls[0][1]["type"] == "flex"
+    assert unit_of_work.delivery_tasks.requests == []
 
 
 def test_contact_union_creates_ticket_audit_and_delivery_in_one_uow_boundary():
@@ -107,8 +134,8 @@ def test_contact_union_creates_ticket_audit_and_delivery_in_one_uow_boundary():
     handled = application.handle(_inbox("event-2"), unit_of_work, LineUserId("U123456789"), "聯絡工會人員")
 
     assert handled is True
-    assert unit_of_work.customer_service.messages[0].category is CustomerServiceCategory.CONTACT_UNION
-    assert unit_of_work.customer_service.messages[0].event_key == "line-service-help:contact_union:event-2"
+    assert unit_of_work.customer_service.messages[0].category is CustomerServiceCategory.OTHER
+    assert unit_of_work.customer_service.messages[0].event_key == "line-service-help:other:event-2"
     assert len(unit_of_work.audit.intents) == 1
     assert len(unit_of_work.delivery_tasks.requests) == 1
 
@@ -305,3 +332,31 @@ def test_deferred_history_records_legacy_paths_that_must_not_return():
     assert "query string `userId`" in history
     assert "人工 Preview／Apply" in history
     assert "直接 UPDATE clients" in history
+
+
+def test_mobile_admin_actor_is_not_restricted_by_persisted_role():
+    admin = SimpleNamespace(admin_user_id=7, role="line_viewer")
+
+    actor = line_mobile_admin._actor_for_admin(admin)
+
+    assert actor.actor_id == "admin:7"
+    assert actor.permission_scope == ("line.identity.review",)
+    assert "line_viewer" not in actor.permission_scope
+
+
+def test_customer_service_preview_apply_routes_preserve_legacy_patch():
+    routes = {
+        (route.path, method)
+        for route in customer_service_router.routes
+        for method in route.methods
+    }
+
+    assert ("/api/v1/customer-service/tickets/{ticket_id}", "PATCH") in routes
+    assert (
+        "/api/v1/customer-service/tickets/{ticket_id}/update/preview",
+        "POST",
+    ) in routes
+    assert (
+        "/api/v1/customer-service/tickets/{ticket_id}/update/apply",
+        "POST",
+    ) in routes

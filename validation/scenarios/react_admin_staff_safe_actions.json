@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-scenario/v1", "scenario_id": "SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS", "revision": 1,
+  "track": "A", "suite_id": "SCH", "status": "specified", "part": "04", "browser_execution_mode": "no-browser-execution",
+  "requires_database": true, "test_kinds": ["domain_root_data", "subsystem_state_machine", "expected_manifest"], "coverage_ids": ["SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS-01"], "coverage_scope": "supplemental",
+  "source_scenario_ids": ["SCH-ASSIGNMENT-COVERAGE-001", "AC-CAPABILITY-SESSION-002"],
+  "source_refs": ["validation/scenarios/SCH-ASSIGNMENT-COVERAGE-001.json#SCH-ASSIGNMENT-COVERAGE-001", "validation/scenarios/AC-CAPABILITY-SESSION-002.json#AC-CAPABILITY-SESSION-002"],
+  "source_to_successor_mapping": [{"source": "assignment and availability roots", "successor": "staff safe-action roots", "disposition": "unchanged"}, {"source": "mutation guard evidence", "successor": "native disabled and typed blocker oracle", "disposition": "renamed"}, {"source": "projection assertions", "successor": "React staff query projection", "disposition": "supplemented"}],
+  "root_inputs": ["synthetic staff identity ST-A", "preference definition/profile snapshot", "availability block request", "lifecycle state/version", "fixed clock"],
+  "root_facts": ["Staff identity, preference profile, availability request, lifecycle version and fixed clock are controlled roots."],
+  "forbidden_direct_seed": ["staff status", "assignment projection", "payroll projection", "UI success state", "audit receipt", "derived day count or eligibility"],
+  "commands": ["query staff summary", "preferences query→preview→apply→receipt→requery", "availability create/cancel query→preview→apply→receipt→requery", "lifecycle retirement/reactivation query→preview→apply→receipt→requery", "same-payload/key retry after outcome_unknown", "attempt remaining unavailable controls"],
+  "expected": ["All three mutation families use server versions, fingerprints and receipts.", "Invalid or stale commands create zero partial writes and availability uses the shared mutex.", "Same payload/key replay is deterministic; outcome_unknown permits only identical retry; requery failure remains observation_failed."],
+  "receipt_requirements": ["root and expected digests", "outer-UoW and mutex evidence", "typed receipt/replay evidence", "Network-to-DOM and re-query evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
+  "oracle_applicability": {"db": {"status": "required", "reason": "outer-UoW, mutex and zero-partial-write evidence"}, "api": {"status": "required", "reason": "typed query/preview/apply/receipt views"}, "ui": {"status": "required", "reason": "Part 04 three controlled mutation families"}, "replay": {"status": "required", "reason": "same payload and idempotency key replay"}, "recovery": {"status": "required", "reason": "outcome_unknown and re-query observation"}},
+  "required_receipt_id": "SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS-R1"
+}

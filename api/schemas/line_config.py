@@ -106,11 +106,17 @@ class MenuBounds(BaseModel):
 
 
 class MenuAction(BaseModel):
-    type: Literal["message", "uri", "postback"]
+    type: Literal["message", "uri", "postback", "richmenuswitch"]
     text: str | None = None
     uri: str | None = None
     uri_source: Literal["literal", "liff"] = "literal"
     data: str | None = None
+    rich_menu_alias_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+    )
 
     @model_validator(mode="after")
     def validate_action_value(self):
@@ -123,6 +129,8 @@ class MenuAction(BaseModel):
                 raise ValueError("literal uri action only supports http or https")
         if self.type == "postback" and not self.data:
             raise ValueError("postback action requires data")
+        if self.type == "richmenuswitch" and not self.rich_menu_alias_id:
+            raise ValueError("rich menu switch action requires rich menu alias")
         return self
 
 
@@ -131,6 +139,7 @@ class RichMenuButton(BaseModel):
     label: str = Field(min_length=1, max_length=30)
     text_color: str = "#FFFFFF"
     background_color: str = "#4A90E2"
+    border_radius: int = Field(default=0, ge=0, le=160)
     bounds: MenuBounds
     action: MenuAction
 
@@ -156,7 +165,13 @@ class RichMenuAppearance(BaseModel):
 class RichMenuDefinition(BaseModel):
     id: str = Field(min_length=1, pattern=r"^[a-z0-9][a-z0-9_-]*$")
     name: str = Field(min_length=1, max_length=300)
-    audience_role: Literal["customer", "staff", "union_staff"]
+    audience_role: Literal["customer", "staff", "union_staff", "union_staff_page"]
+    rich_menu_alias_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=32,
+        pattern=r"^[a-zA-Z0-9_-]+$",
+    )
     enabled: bool = True
     selected: bool = True
     set_as_default: bool = False
@@ -200,7 +215,8 @@ class LineMenusConfig(BaseModel):
         if len(ids) != len(set(ids)):
             raise ValueError("rich menu ids must be unique")
         enabled = [item for item in self.menus if item.enabled]
-        roles = [item.audience_role for item in enabled]
+        primary_roles = {"customer", "staff", "union_staff"}
+        roles = [item.audience_role for item in enabled if item.audience_role in primary_roles]
         if len(roles) != len(set(roles)):
             raise ValueError("only one enabled rich menu is allowed for each audience role")
         defaults = [item for item in enabled if item.set_as_default]

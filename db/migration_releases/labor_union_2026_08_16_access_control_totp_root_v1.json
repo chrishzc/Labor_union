@@ -1,0 +1,12 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-access-control-totp-root-2026-08-16-v1",
+  "release_metadata": {"release_name": "Labor Union Access Control TOTP and root account", "application_version": "access-control-totp-root-v1", "published_at": "2026-08-16", "description": "Add the singleton root account fact, encrypted TOTP factor state, recovery-code state, enrollment challenges, and login-attempt facts"},
+  "source_baseline": {"minimum_mysql_version": "8.0", "required_character_set": "utf8mb4", "allowed_owned_object_states": ["absent", "exact"], "forbidden_owned_object_states": ["partial", "drift"], "source_must_be_read_only": true, "maintenance_token_required": true, "baseline_id": "schema-assembly-v1-or-later"},
+  "artifacts": [{"name": "209_access_control_totp_root.sql", "relative_path": "db/schema_parts/209_access_control_totp_root.sql", "sha256": "b78d757ead53b345492bc5201f7c7ada589e7c6e0e8aba0a25371eceef81c228", "dependencies": [], "data_effect": "schema_only", "rollback_policy": "code-rollback-preserve-access-control-security-evidence", "resumable_boundary_policy": "statement-sha256-with-durable-receipt"}],
+  "backfills": [],
+  "verification_contracts": [{"verification_id": "access-control-totp-root-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}],
+  "application_compatibility": {"minimum_api_contract": "typed-api-v1", "compatible_contracts": ["admin-auth-session-v1", "access-control-totp-root-v1"], "required_restart_targets": ["api", "streamlit-admin"], "watcher_worker_compatibility": "no-worker-contract-change", "post_cutover_smoke_ids": ["admin-totp-login", "root-account-center"]},
+  "descriptor_artifact": {"name": "labor_union_2026_08_16_access_control_totp_root_v1.descriptors.json", "relative_path": "db/migration_releases/labor_union_2026_08_16_access_control_totp_root_v1.descriptors.json", "sha256": "f4386aa3d2452de37f0f2bc85cff05830a198ef07123c48864d1c0fa700e256d", "dependencies": []},
+  "tool_archive_policy": {"artifact_hash_algorithm": "sha256", "backup_archive_policy": "permanent-release-archive", "journal_archive_policy": "append-only-per-operation", "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"], "receipt_archive_policy": "permanent-release-archive", "restore_required_mode": "new-absent-candidate-only"}
+}

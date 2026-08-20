@@ -200,6 +200,16 @@ def test_hcm_review_rejects_nested_or_raw_evidence():
             evidence_snapshot={"raw_row": {"姓名": "不應保存"}},
         )
 
+    with pytest.raises(ValueError, match="numeric or boolean"):
+        build_hcm_import_review_root(
+            source_content_digest="a" * 64,
+            source_sheet="資料",
+            source_row=1,
+            case_identity="HCM-1",
+            issue_codes=("invalid",),
+            evidence_snapshot={"operator_note": "完整姓名不應保存"},
+        )
+
 
 def test_counterpart_anomalies_are_symmetric_and_auto_resolvable():
     as_of = __import__("datetime").date(2026, 8, 13)
@@ -643,17 +653,15 @@ def test_beclass_review_privacy_upgrade_replays_only_the_same_source_issue():
     assert beclass_review_intake._same_source_issue(existing, different_issue) is False
 
 
-def test_alert_workspace_offers_validation_and_identity_conflict_reviews(monkeypatch):
+def test_alert_workspace_navigates_beclass_reviews_without_loading_correction_panel(monkeypatch):
     alerts_page = importlib.import_module("ui.pages.06_finance_alerts")
-    review_panel = importlib.import_module("ui.pages.anomalies.beclass_import_review_panel")
     captured = {}
-    monkeypatch.setattr(alerts_page, "resolve_api_base_url", lambda: "http://localhost:8000")
-    monkeypatch.setattr(alerts_page, "build_admin_headers", lambda: {})
     monkeypatch.setattr(
-        review_panel,
-        "render_beclass_import_review_panel",
-        lambda client, **kwargs: captured.update(kwargs),
+        alerts_page,
+        "st",
+        SimpleNamespace(caption=lambda *_args, **_kwargs: None, button=lambda *_args, **_kwargs: True),
     )
+    monkeypatch.setattr("ui.nav_helper.navigate_to", lambda title: captured.update(title=title))
     all_items = (
         SimpleNamespace(definition_code="IMPORT-001", source_identity="beclass-review:" + "a" * 64),
         SimpleNamespace(definition_code="IMPORT-003", source_identity="beclass-review:" + "b" * 64),
@@ -661,11 +669,18 @@ def test_alert_workspace_offers_validation_and_identity_conflict_reviews(monkeyp
     )
     items = alerts_page._beclass_review_items(all_items)
 
-    alerts_page._render_beclass_review_workspace(items)
+    alerts_page._render_beclass_review_navigation(items)
 
-    assert captured["suggested_review_identities"] == tuple(
-        item.source_identity for item in items
-    )
+    assert captured == {"title": "📥 資料匯入中心"}
+    assert "render_beclass_import_review_panel" not in Path(
+        "ui/pages/06_finance_alerts.py"
+    ).read_text(encoding="utf-8")
+
+
+def test_alert_center_does_not_render_finance_recovery_workspace():
+    source = Path("ui/pages/06_finance_alerts.py").read_text(encoding="utf-8")
+
+    assert "_render_finance_tab(items, registry_client, recovery_client)" not in source
 
 
 def test_review_panel_disables_empty_identity_load(monkeypatch):

@@ -1,0 +1,33 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "201_hcm_resubmission_corrections.sql": {
+      "tables": {
+        "case_import_hcm_review_case_bindings": [
+          "id", "binding_identity", "review_row_id", "case_no", "root_import_event_id", "created_at"
+        ],
+        "case_import_hcm_correction_events": [
+          "id", "event_identity", "case_no", "client_id", "review_binding_id", "prior_occurrence_id",
+          "source_event_identity", "source_fingerprint", "candidate_fingerprint", "adopted_field_paths",
+          "root_before_fingerprint", "root_after_fingerprint", "actor", "reason", "correlation_id", "created_at"
+        ],
+        "case_import_hcm_correction_receipts": [
+          "id", "idempotency_key", "command_fingerprint", "preview_fingerprint", "correction_event_id",
+          "result_snapshot", "created_at"
+        ],
+        "case_import_hcm_correction_outbox": [
+          "id", "correction_event_id", "intent_key", "bounded_snapshot", "published_at", "attempts",
+          "last_error", "created_at"
+        ]
+      },
+      "triggers": [
+        "trg_hcm_review_case_bindings_before_update",
+        "trg_hcm_review_case_bindings_before_delete",
+        "trg_hcm_correction_events_before_update",
+        "trg_hcm_correction_events_before_delete",
+        "trg_hcm_correction_receipts_before_update",
+        "trg_hcm_correction_receipts_before_delete"
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1", "scenario_id": "SCH-REACT-ADMIN-LEAVE-SUBSTITUTION", "revision": 1,
+  "assertions": ["Preview is zero-write and Apply commits the linked pair atomically.", "Half-pair and stale input create zero partial writes.", "Same-key replay returns the original receipt and re-query observes committed lineage."],
+  "db_oracle": {"required": ["linked pair commits atomically", "invalid or stale pair creates zero partial writes", "lineage is preserved"]},
+  "api_oracle": {"required": ["typed preview/apply receipt", "version conflict is typed"]},
+  "ui_oracle": {"required": ["Part 09 workflow shows server outcome", "no optimistic completion"]},
+  "replay_oracle": {"required": ["same idempotency key returns same receipt"]}, "recovery_oracle": {"required": ["enqueue failure is observable", "re-query follows receipt"]},
+  "forbidden_observations": ["half-pair application", "frontend-created replacement lineage"]
+}

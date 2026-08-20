@@ -6,6 +6,7 @@ Description: 驗證 HCM upload route 的 typed result、conflict 與暫存檔終
 from __future__ import annotations
 
 from pathlib import Path
+from datetime import datetime
 from types import SimpleNamespace
 
 import pandas as pd
@@ -13,12 +14,9 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import require_admin
-from api.dependencies.hcm_import import (
-    get_hcm_historical_workbook_import_service,
-    get_hcm_workbook_import_service,
-)
+from api.dependencies.hcm_import import get_hcm_workbook_import_service
 from api.routes.hcm_import import router
-from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookPreview, HcmWorkbookReceipt
+from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookPreview, HcmWorkbookReceipt, HcmWorkbookResultPage, HcmWorkbookResultRecord
 
 
 class _Service:
@@ -42,13 +40,18 @@ class _Service:
         assert preview_fingerprint == "1" * 64
         return self.ingest(frame, source_path, key, actor, correlation_id)
 
+    def query_recent_results(self, *, limit, before_receipt_id):
+        assert limit == 20
+        assert before_receipt_id is None
+        receipt = HcmWorkbookReceipt("0" * 64, 1, 1, 0, 0, 0, 0, False)
+        return HcmWorkbookResultPage((HcmWorkbookResultRecord(7, datetime(2026, 8, 17, 12, 0), receipt),), None)
+
 
 def _client(service: _Service) -> TestClient:
     application = FastAPI()
     application.include_router(router)
     application.dependency_overrides[require_admin] = lambda: SimpleNamespace(username="test-admin")
     application.dependency_overrides[get_hcm_workbook_import_service] = lambda: service
-    application.dependency_overrides[get_hcm_historical_workbook_import_service] = lambda: service
     return TestClient(application)
 
 
@@ -87,7 +90,7 @@ def test_preview_then_apply_use_separate_typed_endpoints_and_cleanup():
     assert all(path.exists() is False for path in service.upload_paths)
 
 
-def test_historical_preview_then_apply_use_the_same_typed_contract():
+def test_historical_whole_row_overwrite_routes_are_retired():
     service = _Service()
     client = _client(service)
     files = {"workbook": ("hcm.xlsx", b"test", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
@@ -98,8 +101,10 @@ def test_historical_preview_then_apply_use_the_same_typed_contract():
         headers={**_headers(), "X-Preview-Fingerprint": "1" * 64}, files=files,
     )
 
-    assert preview.status_code == 200
-    assert applied.status_code == 200
+    assert preview.status_code == 410
+    assert preview.json()["detail"]["code"] == "hcm_historical_whole_row_overwrite_retired"
+    assert applied.status_code == 410
+    assert applied.json()["detail"]["code"] == "hcm_historical_whole_row_overwrite_retired"
 
 
 def test_same_key_conflict_is_typed_and_removes_temporary_workbook():
@@ -113,3 +118,12 @@ def test_same_key_conflict_is_typed_and_removes_temporary_workbook():
     assert response.status_code == 409
     assert response.json()["detail"]["code"] == "hcm_workbook_idempotency_conflict"
     assert service.upload_paths[0].exists() is False
+
+
+def test_recent_results_is_authenticated_typed_get_and_marks_legacy_unavailable():
+    response = _client(_Service()).get("/api/v1/case-import/hcm/workbooks/results")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["items"][0]["receipt_id"] == 7
+    assert response.json()["data"]["items"][0]["legacy_summary_only"] is True
+    assert response.json()["data"]["items"][0]["row_outcomes"] == []

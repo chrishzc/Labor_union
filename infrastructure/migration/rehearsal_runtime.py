@@ -1,4 +1,7 @@
-"""Ephemeral candidate-runtime ports for a preserve-data rehearsal."""
+"""
+File: rehearsal_runtime.py
+Description: 提供 preserve-data rehearsal 的 ephemeral candidate runtime ports。
+"""
 
 from __future__ import annotations
 
@@ -42,8 +45,6 @@ class EphemeralCandidateRestartPort:
             return self._start_http_target(target, self._api_command(), "/health")
         if target == "streamlit":
             return self._start_http_target(target, self._streamlit_command(), "/")
-        if target == "file-watcher":
-            return self._start_background_target(target, self._watcher_command())
         if target == "background-worker":
             return self._run_idle_worker_once()
         raise RehearsalRuntimeError(f"unsupported restart target: {target}")
@@ -104,9 +105,6 @@ class EphemeralCandidateRestartPort:
 
     def _streamlit_command(self):
         return [sys.executable, "-m", "streamlit", "run", "ui/app.py", "--server.address", "127.0.0.1", "--server.port", str(self._config.streamlit_port), "--server.headless", "true"]
-
-    def _watcher_command(self):
-        return [sys.executable, "scripts/file_watcher.py"]
 
     def _worker_command(self):
         return [sys.executable, "-m", "scripts.run_durable_job_worker", "--once", "--worker-id", "preserve-rehearsal"]

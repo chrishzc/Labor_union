@@ -82,7 +82,16 @@ waiting → handling → resolved
 
 ### 5.3 請假
 
-第一版不允許 LIFF 直接改正式排班。未來若啟用，只能先建立人工 intake，再由管理員使用既有 Leave/Substitution Preview／Apply；其版本、fingerprint、mutex 與跨 Domain impact 不得省略。
+LIFF 不得直接改正式排班。已驗證、已綁定月嫂可提交起訖日與去敏說明，僅建立
+Scheduling-owned 的 `pending` 請假待辦、immutable event 與 idempotency receipt；不得輸入案件、
+正式服務日、代班人或帳務資料。管理人員的受理、拒絕、取消只處理該待辦，受理一律顯示為
+「已受理處理」，不是正式核准。
+
+管理人員須以一次性 request context 前往既有案件行事曆，重新執行 Leave/Substitution
+Preview／Apply；其版本、fingerprint、mutex 與跨 Domain impact 不得省略。只有 canonical Apply
+receipt 已提交、且確定原月嫂與 request 相同並尚未被其他 request 關聯時，request 才能標為
+`resolved`，再排入 canonical LINE delivery task 通知月嫂。delivery 失敗不回滾已提交的排班或
+request 結案；timeout／5xx 只由既有 worker 重試。
 
 請假審核 API、管理 client 與 UI caller 屬 Scheduling；不得附加到 LINE identity review route
 或 `LineAdminApiClient`。LINE Integration 只接受已提交的通知 intent 並回報 delivery outcome。
@@ -94,12 +103,25 @@ Typed errors：
 - `staff_order_not_visible`
 - `staff_schedule_query_invalid`
 
+### 5.4 寶寶日誌與餐食照片
+
+Rich Menu 的「寶寶日誌」開啟月嫂 LIFF。LIFF 只可用 server-side 驗證的 ID token 與已綁定月嫂身分；
+後端依正式指派與服務日驗證後，才允許月嫂提交自己服務日的日誌。Scheduling 是日誌、附件關聯、
+完成 event、receipt 與 outbox 的唯一 owner；LINE Integration 只提供身分入口、受控檔案傳輸與已提交
+通知投遞。
+
+每一服務案／指派／服務日最多一筆有效完成日誌。Orders root 的 `requires_cooking=true` 時，日誌完成
+必須附至少一張餐食照片；`false` 時不要求；未知、關聯不唯一、檔案未保存或驗證失敗時一律不建立完成
+事實。照片以受控 object reference 與去敏 metadata 保存，禁止放進 LINE 訊息 payload、URL query 或
+日誌文字欄。日誌完成只停止後續提醒，不直接改正式排班、訂單或付款狀態。
+
 ## 6. UI 與人工入口
 
 - merge 的 Rich Menu 圖面、按鈕標籤與 LIFF 卡片樣式可移植。
 - 客戶「已填過／尚未填過」選擇必須保存 canonical flow ID；未填過流程完成登記後才能完成同一 LINE 身分綁定。
 - LINE 管理中心使用 Customer Service bounded API client；成功 payload 轉 typed Pydantic view，transport/schema error 轉 typed client error。
 - Streamlit 只顯示 typed result 與提交 command，不包含 ticket transition 或 SQL 規則。
+- 已綁定且 enabled 的工會人員可由 `line-mobile-admin` LIFF 查看／回覆客服案件與決定月嫂身分審核；其 server-side ID token、binding、version、receipt 與 outbox 規則不因 persisted role／capability 而改變。
 
 ## 7. 第一版驗收
 

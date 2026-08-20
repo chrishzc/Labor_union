@@ -1,4 +1,7 @@
-"""Pure LINE delivery task, lease, retry, and transition rules."""
+"""
+File: delivery.py
+Description: 定義 LINE 耐久投遞任務、lease、重試與安全取消轉換規則。
+"""
 
 from __future__ import annotations
 
@@ -60,6 +63,7 @@ _ALLOWED_DELIVERY_TRANSITIONS = {
         LineDeliveryStatus.SENT,
         LineDeliveryStatus.RETRYABLE_FAILED,
         LineDeliveryStatus.FAILED,
+        LineDeliveryStatus.CANCELLED,
     },
     LineDeliveryStatus.RETRYABLE_FAILED: {
         LineDeliveryStatus.PENDING,

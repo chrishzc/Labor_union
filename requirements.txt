@@ -20,6 +20,8 @@ anyio==4.14.1
     #   starlette
     #   streamlit
     #   watchfiles
+async-timeout==5.0.1
+    # via redis
 attrs==26.1.0
     # via
     #   aiohttp
@@ -31,6 +33,8 @@ blinker==1.9.0
     # via streamlit
 build==1.5.0
     # via chromadb
+cachecontrol==0.14.4
+    # via union (pyproject.toml)
 cachetools==7.1.4
     # via streamlit
 certifi==2026.6.17
@@ -39,6 +43,8 @@ certifi==2026.6.17
     #   httpx
     #   kubernetes
     #   requests
+cffi==2.1.1
+    # via cryptography
 charset-normalizer==3.4.7
     # via requests
 chromadb==1.5.9
@@ -53,8 +59,13 @@ colorama==0.4.6
     # via
     #   build
     #   click
+    #   qrcode
     #   tqdm
     #   uvicorn
+cryptography==50.0.0
+    # via
+    #   union (pyproject.toml)
+    #   google-auth
 durationpy==0.10
     # via kubernetes
 et-xmlfile==2.0.0
@@ -75,6 +86,8 @@ gitdb==4.0.12
     # via gitpython
 gitpython==3.1.50
     # via streamlit
+google-auth==2.56.3
+    # via union (pyproject.toml)
 googleapis-common-protos==1.75.0
     # via opentelemetry-exporter-otlp-proto-grpc
 greenlet==3.5.2
@@ -117,6 +130,7 @@ jinja2==3.1.6
     #   pydeck
 jsonschema==4.26.0
     # via
+    #   union (pyproject.toml)
     #   altair
     #   chromadb
 jsonschema-specifications==2025.9.1
@@ -131,6 +145,8 @@ mdurl==0.1.2
     # via markdown-it-py
 mmh3==5.2.1
     # via chromadb
+msgpack==1.2.1
+    # via cachecontrol
 multidict==6.7.1
     # via
     #   aiohttp
@@ -144,6 +160,7 @@ numpy==2.4.6
     #   pandas
     #   pydeck
     #   streamlit
+    #   streamlit-cropper
 oauthlib==3.3.1
     # via requests-oauthlib
 onnxruntime==1.27.0
@@ -186,7 +203,11 @@ pandas==3.0.3
     #   union (pyproject.toml)
     #   streamlit
 pillow==12.3.0
-    # via streamlit
+    # via
+    #   union (pyproject.toml)
+    #   qrcode
+    #   streamlit
+    #   streamlit-cropper
 playwright==1.60.0
     # via union (pyproject.toml)
 propcache==0.5.2
@@ -201,8 +222,14 @@ protobuf==7.35.1
     #   streamlit
 pyarrow==24.0.0
     # via streamlit
+pyasn1==0.6.4
+    # via pyasn1-modules
+pyasn1-modules==0.4.2
+    # via google-auth
 pybase64==1.4.3
     # via chromadb
+pycparser==3.0
+    # via cffi
 pydantic==2.13.4
     # via
     #   union (pyproject.toml)
@@ -231,16 +258,24 @@ python-dateutil==2.9.0.post0
     #   pandas
 python-dotenv==1.2.2
     # via
+    #   union (pyproject.toml)
     #   pydantic-settings
     #   uvicorn
 python-multipart==0.0.32
-    # via streamlit
+    # via
+    #   union (pyproject.toml)
+    #   streamlit
 pyyaml==6.0.3
     # via
+    #   union (pyproject.toml)
     #   chromadb
     #   huggingface-hub
     #   kubernetes
     #   uvicorn
+qrcode==8.2
+    # via union (pyproject.toml)
+redis==8.1.0
+    # via union (pyproject.toml)
 referencing==0.37.0
     # via
     #   jsonschema
@@ -248,6 +283,7 @@ referencing==0.37.0
 requests==2.34.2
     # via
     #   union (pyproject.toml)
+    #   cachecontrol
     #   kubernetes
     #   requests-oauthlib
     #   streamlit
@@ -271,9 +307,14 @@ smmap==5.0.3
     # via gitdb
 starlette==1.3.1
     # via
+    #   union (pyproject.toml)
     #   fastapi
     #   streamlit
 streamlit==1.58.0
+    # via
+    #   union (pyproject.toml)
+    #   streamlit-cropper
+streamlit-cropper==0.3.1
     # via union (pyproject.toml)
 tenacity==9.1.4
     # via
@@ -329,9 +370,7 @@ uvicorn==0.49.0
     #   chromadb
     #   streamlit
 watchdog==6.0.0
-    # via
-    #   union (pyproject.toml)
-    #   streamlit
+    # via streamlit
 watchfiles==1.2.0
     # via uvicorn
 websocket-client==1.9.0

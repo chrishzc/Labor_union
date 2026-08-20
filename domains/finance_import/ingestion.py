@@ -1,4 +1,7 @@
-"""Initial Finance Import classification facts without formal accounting writes."""
+"""
+File: ingestion.py
+Description: 定義 Finance 初始分類、匯入 receipt 與安全 attempt 根事實。
+"""
 
 from __future__ import annotations
 
@@ -59,6 +62,8 @@ class FinanceWorkbookIngestionReceipt:
     source_row_count: int
     canonical_created_count: int
     duplicate_occurrence_count: int
+    source_warning_count: int = 0
+    source_warning_created_count: int = 0
 
 
 @dataclass(frozen=True, slots=True)

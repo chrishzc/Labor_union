@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-fixture/v1", "scenario_id": "SCH-REACT-ADMIN-LEAVE-SUBSTITUTION", "revision": 1,
+  "test_kind": "domain_root_data",
+  "data_classification": "synthetic", "generation_method": "hand-authored linked command roots; no production export",
+  "allowed_use": "validation-only", "redaction_policy": "synthetic request and staff keys; no contact or payroll data",
+  "root_inputs": ["synthetic leave request", "synthetic replacement request", "explicit linked request identity", "expected versions"],
+  "input_values": {"leave_request_key": "LEAVE-SYN-01", "replacement_request_key": "REPL-SYN-01", "link_key": "LINK-SYN-01", "versions": {"schedule": 1, "payroll": 1}},
+  "seed_fields": ["leave_input.request_key", "replacement_input.request_key", "command_input.link_key", "command_input.schedule_version", "command_input.payroll_version"],
+  "derived_fields": ["substitution_projection.active_staff", "payroll_projection.obligation", "line_intent.delivery_state"],
+  "expected_manifest_path": "validation/expected/phase3/react_admin_leave_substitution.json",
+  "fixed_business_clock": "2026-01-15T09:00:00+08:00",
+  "forbidden_direct_seed": ["active substitute projection", "payroll obligation", "LINE delivery receipt", "calendar projection"]
+}

@@ -1,0 +1,232 @@
+/* Pixel-Perfect Nurture Core Login Stylesheet (Stitch Style) */
+
+.login-viewport {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: radial-gradient(circle at 50% 30%, #ffffff 0%, #fff8f6 60%, #ffedd5 100%);
+  padding: 24px;
+}
+
+.login-top-brand {
+  position: absolute;
+  top: 24px;
+  left: 32px;
+  font-weight: 700;
+  font-size: 1.1rem;
+  color: #795d43;
+}
+
+.login-card-container {
+  width: 100%;
+  max-width: 440px;
+  background-color: #ffffff;
+  border-radius: 20px;
+  padding: 40px 44px;
+  box-shadow: 0 12px 32px rgba(74, 69, 67, 0.08), 0 2px 6px rgba(74, 69, 67, 0.04);
+  border: 1px solid #f2e2dc;
+  display: flex;
+  flex-direction: column;
+  animation: modalFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.login-brand-badge {
+  width: 64px;
+  height: 64px;
+  background: linear-gradient(135deg, #ffdbcf 0%, #fed9b8 100%);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2rem;
+  margin: 0 auto 20px auto;
+  box-shadow: 0 4px 12px rgba(255, 127, 80, 0.15);
+}
+
+.login-main-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1e1b19;
+  text-align: center;
+  letter-spacing: -0.01em;
+  margin-bottom: 6px;
+}
+
+.login-desc-subtitle {
+  font-size: 0.875rem;
+  color: #74593f;
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.login-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.login-field-label {
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #1e1b19;
+}
+
+.login-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.login-text-input {
+  width: 100%;
+  padding: 13px 16px;
+  border: 1px solid #dec0b6;
+  border-radius: 12px;
+  font-size: 0.95rem;
+  font-family: inherit;
+  background-color: #ffffff;
+  color: #1e1b19;
+  outline: none;
+  transition: all 0.2s ease;
+}
+
+.login-text-input:focus {
+  border-color: #ff7f50;
+  box-shadow: 0 0 0 3px rgba(255, 127, 80, 0.15);
+}
+
+.login-text-input::placeholder {
+  color: #b09a93;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 14px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1.1rem;
+  color: #8b7169;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.login-options-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  color: #57423b;
+  margin-bottom: 24px;
+}
+
+.login-remember-me {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.login-forgot-link {
+  color: #a43c12;
+  text-decoration: none;
+  font-weight: 600;
+  transition: color 0.2s ease;
+}
+
+.login-forgot-link:hover {
+  color: #ff7f50;
+  text-decoration: underline;
+}
+
+.login-submit-btn {
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(135deg, #ff7f50 0%, #e0683a 100%);
+  color: #ffffff;
+  border: none;
+  border-radius: 12px;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 4px 14px rgba(255, 127, 80, 0.25);
+  transition: all 0.2s ease;
+}
+
+.login-submit-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(255, 127, 80, 0.35);
+}
+
+.login-submit-btn:active {
+  transform: translateY(1px);
+}
+
+/* Stage 2: 2FA TOTP Styles */
+.totp-digits-container {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 20px 0 28px 0;
+}
+
+.totp-digit-box {
+  width: 48px;
+  height: 56px;
+  border: 1.5px solid #dec0b6;
+  border-radius: 12px;
+  text-align: center;
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #1e1b19;
+  outline: none;
+  background-color: #fff8f6;
+  transition: all 0.2s ease;
+}
+
+.totp-digit-box:focus {
+  border-color: #ff7f50;
+  background-color: #ffffff;
+  box-shadow: 0 0 0 3px rgba(255, 127, 80, 0.15);
+}
+
+.back-to-stage1-btn {
+  display: block;
+  text-align: center;
+  margin-top: 16px;
+  font-size: 0.85rem;
+  color: #74593f;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.back-to-stage1-btn:hover {
+  color: #ff7f50;
+  text-decoration: underline;
+}
+
+.login-footer-copyright {
+  position: absolute;
+  bottom: 20px;
+  font-size: 0.8rem;
+  color: #8b7169;
+  text-align: center;
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}

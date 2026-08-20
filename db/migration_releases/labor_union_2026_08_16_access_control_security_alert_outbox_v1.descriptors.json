@@ -1,0 +1,11 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "211_access_control_security_alert_outbox.sql": {
+      "tables": {
+        "admin_security_alert_outbox": ["id", "source_audit_id", "alert_code", "alert_identity", "payload_snapshot", "processing_status", "attempt_count", "max_attempts", "next_attempt_at", "lease_owner", "lease_expires_at", "last_error_code", "completed_at", "created_at", "updated_at"]
+      },
+      "triggers": []
+    }
+  }
+}

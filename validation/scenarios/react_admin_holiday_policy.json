@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-scenario/v1", "scenario_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY", "revision": 1,
+  "track": "A", "suite_id": "SCH", "status": "specified", "part": "09", "browser_execution_mode": "no-browser-execution",
+  "requires_database": true, "test_kinds": ["domain_root_data", "expected_manifest"], "coverage_ids": ["SCH-REACT-ADMIN-HOLIDAY-POLICY-01"], "coverage_scope": "supplemental",
+  "source_scenario_ids": ["SCH-ASSIGNMENT-COVERAGE-001", "CACHE-READ-PROJECTION-002"],
+  "source_refs": ["validation/scenarios/SCH-ASSIGNMENT-COVERAGE-001.json#SCH-ASSIGNMENT-COVERAGE-001", "validation/scenarios/CACHE-READ-PROJECTION-002.json#CACHE-READ-PROJECTION-002"],
+  "source_to_successor_mapping": [{"source": "official service-day rules", "successor": "holiday policy source and horizon", "disposition": "unchanged"}, {"source": "cache read projection", "successor": "versioned zero-write cache oracle", "disposition": "supplemented"}],
+  "root_inputs": ["synthetic holiday policy", "synthetic horizon", "policy version", "fixed clock"],
+  "root_facts": ["Holiday policy source, horizon, version and fixed clock are the query roots."],
+  "forbidden_direct_seed": ["calendar holiday flag", "assignment status", "payroll projection", "browser success state"],
+  "commands": ["query policy horizon", "query cache hit and miss", "observe version mismatch without mutation"],
+  "expected": ["Policy horizon and source version are explicit and the query creates zero writes.", "Cache miss and version mismatch remain visible without frontend-derived holiday state."],
+  "receipt_requirements": ["root and expected digests", "zero-write query evidence", "cache/mismatch assertions"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
+  "oracle_applicability": {"db": {"status": "required", "reason": "root policy and zero writes"}, "api": {"status": "required", "reason": "typed policy view"}, "ui": {"status": "required", "reason": "Part 09 checklist"}, "replay": {"status": "not-applicable", "reason": "query only"}, "recovery": {"status": "required", "reason": "version mismatch handling"}},
+  "required_receipt_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY-R1"
+}

@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-scenario/v1", "scenario_id": "SCH-REACT-ADMIN-CURRENT-QUERY", "revision": 1,
+  "track": "A", "suite_id": "SCH", "status": "specified", "part": "09", "browser_execution_mode": "no-browser-execution",
+  "requires_database": true, "test_kinds": ["domain_root_data", "expected_manifest"], "coverage_ids": ["SCH-REACT-ADMIN-CURRENT-QUERY-01"], "coverage_scope": "supplemental",
+  "source_scenario_ids": ["SCH-ASSIGNMENT-COVERAGE-001", "GERR-TIMEOUT-001"],
+  "source_refs": ["validation/scenarios/SCH-ASSIGNMENT-COVERAGE-001.json#SCH-ASSIGNMENT-COVERAGE-001", "validation/scenarios/GERR-TIMEOUT-001.json#GERR-TIMEOUT-001"],
+  "source_to_successor_mapping": [{"source": "official service-day query", "successor": "current-calendar typed query", "disposition": "renamed"}, {"source": "empty/error states", "successor": "empty/error/abort oracle", "disposition": "unchanged"}, {"source": "calendar projection", "successor": "React unavailable-slot behavior", "disposition": "supplemented"}],
+  "root_inputs": ["synthetic current assignment facts", "synthetic date range", "fixed clock", "synthetic cursor"],
+  "root_facts": ["Current assignment roots, date range, cursor and fixed clock define the query input."],
+  "forbidden_direct_seed": ["calendar read model", "derived holiday status", "assignment mutation", "browser screenshot as sole evidence"],
+  "commands": ["query current calendar", "query empty range", "abort an in-flight query", "classify typed server error"],
+  "expected": ["The current calendar query is read-only and preserves server facts.", "Empty, abort and typed error states are explicit and never synthesize calendar data."],
+  "receipt_requirements": ["root and expected digests", "read-only query evidence", "typed empty/error/abort assertions"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
+  "oracle_applicability": {"db": {"status": "required", "reason": "read-only root projection"}, "api": {"status": "required", "reason": "typed current-calendar view"}, "ui": {"status": "required", "reason": "Part 09 checklist"}, "replay": {"status": "not-applicable", "reason": "query only"}, "recovery": {"status": "required", "reason": "abort and retry classification"}},
+  "required_receipt_id": "SCH-REACT-ADMIN-CURRENT-QUERY-R1"
+}

@@ -1,4 +1,7 @@
-"""Emit one honest gate report for the dual-track verification baseline."""
+"""
+File: verification_gate_report.py
+Description: 產出分離 baseline 與 Phase 3 lineage 的唯讀契約門報告。
+"""
 
 from __future__ import annotations
 
@@ -24,9 +27,11 @@ from scripts.verify_verification_scenarios import (
     verify_scenarios,
 )
 from scripts.verify_verification_fixtures import (
+    PHASE3_NAMESPACE,
+    discover_fixture_documents,
     fixture_coverage_report,
     load_fixtures,
-    verify_fixtures,
+    verify_fixture_documents,
 )
 from scripts.verify_field_authority_legacy_names import (
     audit_report as field_authority_audit_report,
@@ -35,48 +40,163 @@ from scripts.verify_field_authority_legacy_names import (
 )
 
 
+PHASE3_CATALOG_PATH = PROJECT_ROOT / "validation" / "catalog" / "phase3_scenario_lineage.json"
+
+
+def _phase3_catalog() -> tuple[dict[str, object] | None, list[str]]:
+    if not PHASE3_CATALOG_PATH.is_file():
+        return None, ["Phase 3 lineage catalog is missing"]
+    try:
+        catalog = json.loads(PHASE3_CATALOG_PATH.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return None, [f"Phase 3 lineage catalog is invalid: {type(exc).__name__}"]
+    if not isinstance(catalog, dict):
+        return None, ["Phase 3 lineage catalog has an unsupported shape"]
+    errors: list[str] = []
+    if catalog.get("contract") != "labor-union-phase3-lineage-catalog/v1":
+        errors.append("Phase 3 lineage catalog has an unsupported contract")
+    entries = catalog.get("entries")
+    expected_ids = catalog.get("expected_scenario_ids")
+    if not isinstance(entries, list) or not isinstance(expected_ids, list):
+        return catalog, errors + ["Phase 3 lineage catalog must define entries and expected_scenario_ids"]
+    entry_ids = [entry.get("scenario_id") for entry in entries if isinstance(entry, dict)]
+    string_entry_ids = [item for item in entry_ids if isinstance(item, str)]
+    string_expected_ids = [item for item in expected_ids if isinstance(item, str)]
+    if len(string_entry_ids) != len(entry_ids):
+        errors.append("Phase 3 lineage catalog has a non-string scenario identity")
+    if len(string_expected_ids) != len(expected_ids):
+        errors.append("Phase 3 lineage catalog has a non-string expected scenario id")
+    if len(set(string_entry_ids)) != len(string_entry_ids):
+        errors.append("Phase 3 lineage catalog has duplicate scenario identity")
+    if set(string_entry_ids) != set(string_expected_ids):
+        errors.append("Phase 3 lineage catalog expected scenario set does not match entries")
+    return catalog, errors
+
+
+def _phase3_asset_errors(catalog: dict[str, object] | None) -> list[str]:
+    if catalog is None:
+        return []
+    entries = catalog.get("entries")
+    if not isinstance(entries, list):
+        return []
+    errors: list[str] = []
+    seen_paths: set[Path] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            errors.append("Phase 3 lineage catalog has an unsupported entry shape")
+            continue
+        scenario_id = entry.get("scenario_id")
+        for field, root in (
+            ("scenario_path", PROJECT_ROOT / "validation" / "scenarios"),
+            ("fixture_path", PROJECT_ROOT / "validation" / "fixtures" / PHASE3_NAMESPACE),
+            ("expected_path", PROJECT_ROOT / "validation" / "expected" / PHASE3_NAMESPACE),
+        ):
+            value = entry.get(field)
+            path = (PROJECT_ROOT / value).resolve() if isinstance(value, str) else None
+            if path is None or not path.is_file():
+                errors.append(f"Phase 3 {field} is missing for {scenario_id}")
+                continue
+            try:
+                path.relative_to(root.resolve())
+            except ValueError:
+                errors.append(f"Phase 3 {field} is outside its namespace for {scenario_id}")
+            if field != "scenario_path":
+                if path in seen_paths:
+                    errors.append(f"Phase 3 duplicate asset path: {value}")
+                seen_paths.add(path)
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                errors.append(f"Phase 3 {field} is invalid JSON for {scenario_id}: {type(exc).__name__}")
+                continue
+            if not isinstance(payload, dict):
+                errors.append(f"Phase 3 {field} has an unsupported shape for {scenario_id}")
+            elif payload.get("scenario_id") != scenario_id:
+                errors.append(f"Phase 3 {field} has a mismatched scenario for {scenario_id}")
+    return errors
+
+
 def build_gate_report() -> dict[str, object]:
     baseline = load_baseline()
     scenarios = load_scenarios()
+    phase3_catalog, phase3_catalog_errors = _phase3_catalog()
+    raw_phase3_ids = phase3_catalog.get("expected_scenario_ids", []) if phase3_catalog else []
+    phase3_ids = {
+        item for item in raw_phase3_ids if isinstance(item, str)
+    } if isinstance(raw_phase3_ids, list) else set()
+    baseline_scenarios = [
+        scenario for scenario in scenarios if scenario.get("scenario_id") not in phase3_ids
+    ]
+    phase3_scenarios = [
+        scenario for scenario in scenarios if scenario.get("scenario_id") in phase3_ids
+    ]
     receipts = load_receipts()
     fixtures = load_fixtures()
+    fixture_documents, fixture_discovery_errors = discover_fixture_documents()
+    baseline_documents = [
+        document for document in fixture_documents if document.namespace == "baseline"
+    ]
+    phase3_documents = [
+        document for document in fixture_documents if document.namespace == PHASE3_NAMESPACE
+    ]
+    baseline_fixture_family = verify_fixture_documents(baseline_documents, baseline_scenarios)
+    phase3_fixture_family = verify_fixture_documents(phase3_documents, phase3_scenarios)
     field_authority_manifest = load_field_authority_manifest()
     baseline_errors = verify_baseline(baseline)
     scenario_errors = verify_scenarios(scenarios, baseline)
-    receipt_errors = verify_receipts(receipts, scenarios)
-    fixture_errors = verify_fixtures(fixtures, scenarios)
+    receipt_errors = verify_receipts(receipts, baseline_scenarios)
+    fixture_errors = baseline_fixture_family["baseline"]
+    phase3_fixture_errors = phase3_fixture_family["phase3"]
+    phase3_lineage_errors = (
+        phase3_catalog_errors
+        + _phase3_asset_errors(phase3_catalog)
+        + fixture_discovery_errors
+        + phase3_fixture_errors
+    )
     field_authority_errors = verify_field_authority_manifest(field_authority_manifest)
     scenario_coverage = scenario_coverage_report(scenarios, baseline)
-    receipt_coverage = receipt_coverage_report(receipts, scenarios)
+    receipt_coverage = receipt_coverage_report(receipts, baseline_scenarios)
     track_contracts = _track_contracts(baseline, scenarios)
     report = {
         "release_id": baseline["release_id"],
         "contract_valid": not (
-            baseline_errors or scenario_errors or fixture_errors or receipt_errors
+            baseline_errors or scenario_errors or fixture_errors or phase3_lineage_errors or receipt_errors
             or field_authority_errors
         ),
         "errors": {
             "baseline": baseline_errors,
             "scenarios": scenario_errors,
             "fixtures": fixture_errors,
+            "phase3_lineage": phase3_lineage_errors,
             "receipts": receipt_errors,
             "field_authority": field_authority_errors,
         },
         "tracks": track_contracts,
-        "suite_execution": _suite_execution_report(baseline, scenarios, receipts),
+        "suite_execution": _suite_execution_report(baseline, baseline_scenarios, receipts),
         "business_matrix": {
             "required": scenario_coverage["business_requirement_count"],
             "missing": scenario_coverage["business_requirements_missing"],
         },
         "fixtures": {
             "valid": not fixture_errors,
-            **fixture_coverage_report(fixtures, scenarios),
+            **fixture_coverage_report(fixtures, baseline_scenarios),
+        },
+        "phase3_lineage": {
+            "valid": not phase3_lineage_errors,
+            "scenario_count": len(phase3_scenarios),
+            "fixture_count": len([
+                document for document in fixture_documents
+                if document.namespace == PHASE3_NAMESPACE
+            ]),
+            "expected_manifest_namespace": "validation/expected/phase3",
+            "errors": phase3_lineage_errors,
+            "runtime_receipts": "metadata-only; no PASS inferred",
         },
         "field_authority": field_authority_audit_report(field_authority_manifest),
-        "evidence_boundaries": _evidence_boundary_report(scenarios, receipts),
-        "blocked_scenarios": _blocked_scenarios(scenarios),
+        "evidence_boundaries": _evidence_boundary_report(baseline_scenarios, receipts),
+        "blocked_scenarios": _blocked_scenarios(baseline_scenarios),
         "receipts": receipt_coverage,
-        "database_execution": _database_execution_report(receipts, scenarios),
+        "database_execution": _database_execution_report(receipts, baseline_scenarios),
         "overall_complete": False,
     }
     report["baseline_deliverables"] = _baseline_deliverables(report, baseline)

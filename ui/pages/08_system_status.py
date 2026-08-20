@@ -1,11 +1,14 @@
-"""Read-only performance summary for system administrators."""
+"""
+File: 08_system_status.py
+Description: 呈現僅供已驗證管理員查看的唯讀系統效能摘要。
+"""
 
 from __future__ import annotations
 
 import streamlit as st
 
 from api.schemas.system_status import PerformanceSnapshotResponse
-from ui.api_clients.line_api_client import LineAdminApiClient, LineAdminApiError
+from ui.api_clients.line_api_client import LineAdminApiClient
 from ui.api_clients.system_status_api_client import (
     SystemStatusApiClient,
     SystemStatusApiError,
@@ -14,21 +17,6 @@ from ui.api_clients.system_status_api_client import (
 
 title = "🩺 系統狀態"
 TOKEN_KEY = "line_admin_access_token"
-
-
-def _login(client: LineAdminApiClient) -> None:
-    st.caption("此頁僅供系統管理員查看，不保存逐筆效能資料。")
-    with st.form("system_status_login"):
-        username = st.text_input("帳號")
-        password = st.text_input("密碼", type="password")
-        submitted = st.form_submit_button("登入", type="primary")
-    if submitted:
-        try:
-            st.session_state[TOKEN_KEY] = client.login(username, password)["access_token"]
-        except LineAdminApiError as error:
-            st.error(str(error))
-            return
-        st.rerun()
 
 
 def _format_milliseconds(value: object) -> str:
@@ -55,7 +43,7 @@ def show() -> None:
     status_client = SystemStatusApiClient(client)
     token = st.session_state.get(TOKEN_KEY)
     if not client.admin_auth_bypassed and not token:
-        _login(client)
+        st.warning("請先完成全域登入。")
         return
     try:
         _render_snapshot(status_client.performance_snapshot(token))

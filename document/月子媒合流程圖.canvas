@@ -31,8 +31,7 @@
 		{"id":"7049e5a41c7321ce","type":"text","text":"💬 **[固定訊息] 簽名邀約**\n(好好簽)","x":30,"y":216,"width":280,"height":80,"color":"6"},
 		{"id":"df273c3cb96cd9a2","type":"text","text":"💬 **[固定訊息] 確認訂金收款**\n人工更新資料","x":30,"y":336,"width":280,"height":80,"color":"3"},
 		{"id":"752d0f184d0a916a","type":"text","text":"**用私人管理帳號拉群組**\n群組名稱=市府訂單ID","x":30,"y":456,"width":280,"height":80,"color":"3"},
-		{"id":"1254a0e0c7c9b132","type":"text","text":"💬 **[固定訊息] 請服務人員回傳動線與食材**","x":30,"y":586,"width":280,"height":80,"color":"6"},
-		{"id":"962a05afcf1b1f30","type":"text","text":"💬 **[固定訊息] 確認食材並傳圖**","x":30,"y":711,"width":280,"height":80,"color":"6"},
+		{"id":"1254a0e0c7c9b132","type":"text","text":"💬 **[固定訊息] 請客戶回傳動線與食材**","x":30,"y":586,"width":280,"height":80,"color":"6"},
 		{"id":"e1b4ea3f42ed3d39","type":"text","text":"💬 **[固定訊息] 確認合約內容**","x":30,"y":96,"width":280,"height":80,"color":"6"},
 		{"id":"04820e05f5924576","type":"text","text":"API","x":350,"y":111,"width":94,"height":50,"color":"4"},
 		{"id":"65cb85ba6d42b599","type":"text","text":"API","x":-120,"y":332,"width":94,"height":50,"color":"4"},
@@ -47,7 +46,8 @@
 		{"id":"250407e615366d78","type":"text","text":"API","x":840,"y":651,"width":94,"height":50,"color":"4"},
 		{"id":"ccc9bfd52f4b20c6","type":"text","text":"API","x":840,"y":776,"width":94,"height":50,"color":"4"},
 		{"id":"f568941bc5c136e7","type":"text","text":"API","x":1280,"y":247,"width":94,"height":50,"color":"4"},
-		{"id":"21a757c9f351bf18","type":"text","text":"API","x":1280,"y":376,"width":94,"height":50,"color":"4"}
+		{"id":"21a757c9f351bf18","type":"text","text":"API","x":1280,"y":376,"width":94,"height":50,"color":"4"},
+		{"id":"962a05afcf1b1f30","type":"text","text":"💬 **[固定訊息] 請客戶確認食材並傳圖片**","x":30,"y":711,"width":280,"height":80,"color":"6"}
 	],
 	"edges":[
 		{"id":"39648e95fddb8af3","fromNode":"b6c43b70f323ae46","fromSide":"bottom","toNode":"9f68d2ac622ff54e","toSide":"top"},

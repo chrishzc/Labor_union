@@ -1,4 +1,7 @@
-"""Typed bounded query for current Scheduling lifecycle and occupancy."""
+"""
+File: scheduling_current.py
+Description: 提供受管理員 Session 保護的 current Scheduling 唯讀投影 API。
+"""
 
 from __future__ import annotations
 
@@ -10,7 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pymysql.err import OperationalError, ProgrammingError
 
-from api.dependencies.admin_auth import require_system_admin
+from api.dependencies.admin_auth import require_admin
 from api.dependencies.scheduling_current import (
     SchedulingCurrentApplication,
     get_scheduling_current_application,
@@ -47,8 +50,8 @@ def query_scheduling_current_calendar(
     correlation_id: Annotated[
         str,
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
-    ] = "scheduling-current-query",
-    principal: AdminPrincipal = Depends(require_system_admin),
+    ] = ...,
+    principal: AdminPrincipal = Depends(require_admin),
     application: SchedulingCurrentApplication = Depends(
         get_scheduling_current_application
     ),

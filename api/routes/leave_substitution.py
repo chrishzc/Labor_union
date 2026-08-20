@@ -1,9 +1,10 @@
-"""Authenticated leave/substitution Preview and atomic Apply API."""
+"""File: leave_substitution.py
+Description: 提供正式請假代班預覽、套用與已受理待辦的收據結案。"""
 
 from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated
@@ -23,6 +24,9 @@ from api.schemas.leave_substitution import (
     LeaveSubstitutionPreviewView,
     LeaveSubstitutionReceiptView,
 )
+from domains.line.canonical_payload import canonical_line_payload_json
+from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
+from domains.line.identities import LineUserId
 from domains.scheduling.leave_substitution import (
     LeaveResolutionType,
     LeaveSubstitutionBatchIntent,
@@ -30,7 +34,7 @@ from domains.scheduling.leave_substitution import (
 )
 from subsystems.access.authentication_session import AdminPrincipal
 from shared_kernel.errors import ErrorCategory, TypedError
-from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -42,6 +46,14 @@ from subsystems.scheduling.leave_substitution_workflow import (
     LeaveSubstitutionPreviewRequest,
     LeaveSubstitutionWorkflowError,
 )
+from subsystems.scheduling.staff_leave_intake_workflow import (
+    ResolveStaffLeaveRequest,
+    StaffLeaveIntakeWorkflow,
+    StaffLeaveIntakeWorkflowError,
+)
+from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
+from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Leave Substitution"])
@@ -118,6 +130,8 @@ class LeaveSubstitutionApplyBody(LeaveSubstitutionPreviewBody):
         pattern=r"^[0-9a-f]{64}$",
     )
     reason: str = Field(min_length=1, max_length=500)
+    leave_request_id: int | None = Field(default=None, gt=0)
+    expected_leave_request_version: int | None = Field(default=None, ge=1)
 
 
 @router.post(
@@ -198,7 +212,48 @@ def _apply_command(application, case_no, body, key, correlation_id, principal):
         correlation_id,
         principal,
     )
-    return _materialize(application.apply(request))
+    receipt = application.apply(request)
+    if body.leave_request_id is not None:
+        if body.expected_leave_request_version is None:
+            raise HTTPException(status_code=422, detail={"code": "leave_request_expected_version_required"})
+        _resolve_linked_leave_request(application.connection, body, receipt, key, correlation_id)
+    return _materialize(receipt)
+
+
+def _resolve_linked_leave_request(connection, body, receipt, key, correlation_id):
+    resolution_key = _resolution_key(key, body.leave_request_id, receipt.batch_key)
+    with MySqlUnitOfWork(connection) as unit_of_work:
+        result = StaffLeaveIntakeWorkflow(MySqlStaffLeaveIntakeRepository(connection)).resolve(
+            ResolveStaffLeaveRequest(
+                body.leave_request_id,
+                body.expected_leave_request_version,
+                receipt.batch_key,
+                resolution_key,
+            )
+        )
+        MySqlLineDeliveryTaskRepository(connection).enqueue(
+            _completion_notification(result, correlation_id, resolution_key)
+        )
+        unit_of_work.commit()
+
+
+def _resolution_key(key: str, request_id: int, receipt_key: str) -> str:
+    return "staff-leave-resolve:" + fingerprint_payload({
+        "apply_key": key, "request_id": request_id, "receipt_key": receipt_key,
+    }).value
+
+
+def _completion_notification(snapshot, correlation_id, resolution_key: str) -> LineDeliveryRequest:
+    return LineDeliveryRequest(
+        LineRecipient(LineRecipientType.USER, LineUserId(snapshot.line_user_id)),
+        LineMessageKind.TEXT,
+        canonical_line_payload_json({"type": "text", "text": "您的請假申請已完成正式排班處理。"}),
+        datetime.now(UTC),
+        IdempotencyKey("staff-leave-notify:" + fingerprint_payload({"resolution_key": resolution_key}).value),
+        correlation_id,
+        "scheduling_staff_leave_request",
+        str(snapshot.request_id),
+    )
 
 
 def _apply_request(case_no, body, key, correlation_id, principal):
@@ -256,6 +311,8 @@ def _call_endpoint(command, message, correlation_id):
         return BaseResponse(data=command(), message=message)
     except LeaveSubstitutionWorkflowError as error:
         _raise_typed_error(error.error)
+    except StaffLeaveIntakeWorkflowError as error:
+        raise HTTPException(status_code=409, detail={"code": str(error)}) from error
     except OperationalError as error:
         _raise_mysql_error(error, correlation_id)
     except (TypeError, ValueError) as error:

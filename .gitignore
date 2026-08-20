@@ -25,8 +25,23 @@ db/chroma_knowledge/
 # Grace 個人協作紀錄資料夾 (不隨專案上傳至遠端 repo)
 graceAdd/
 start.bat
-# Private environment variables / secrets
+# Private environment variables / secrets & OAuth tokens
 .env
+.env.*
+!.env.example
+token.json
+credentials.json
+client_secret*.json
+*.token.json
+service_account*.json
+*.key
+*.pem
+*.pfx
+
+# Frontend & Node artifacts
+node_modules/
+ui_react/node_modules/
+ui_react/dist/
 
 # Legacy local architecture records
 history/adad/

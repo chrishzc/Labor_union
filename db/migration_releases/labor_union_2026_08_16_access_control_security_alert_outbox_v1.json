@@ -1,0 +1,57 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-access-control-security-alert-outbox-2026-08-16-v1",
+  "release_metadata": {
+    "release_name": "Labor Union Access Control security alert outbox",
+    "application_version": "access-control-security-alert-outbox-v1",
+    "published_at": "2026-08-16",
+    "description": "Add durable Access Control audit alert intents for asynchronous system-alert projection"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "access-control-password-challenge-v1"
+  },
+  "artifacts": [{
+    "name": "211_access_control_security_alert_outbox.sql",
+    "relative_path": "db/schema_parts/211_access_control_security_alert_outbox.sql",
+    "sha256": "6d0b26ec5221b13ab7125a1af263113a90b33433145f6eb6a80bf6a214b1739f",
+    "dependencies": [],
+    "data_effect": "schema_only",
+    "rollback_policy": "code-rollback-preserve-security-alert-outbox-evidence",
+    "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+  }],
+  "backfills": [],
+  "verification_contracts": [{
+    "verification_id": "access-control-security-alert-outbox-owned-objects",
+    "phase": "post-schema",
+    "policy": "candidate-owned-objects-exact",
+    "read_only": true,
+    "blocking": true
+  }],
+  "application_compatibility": {
+    "minimum_api_contract": "access-control-password-challenge-v1",
+    "compatible_contracts": ["access-control-security-alert-outbox-v1"],
+    "required_restart_targets": ["api", "incident-worker"],
+    "watcher_worker_compatibility": "incident-worker-projects-durable-alert-intents",
+    "post_cutover_smoke_ids": ["admin-security-alert-outbox", "admin-security-alert-projection"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_16_access_control_security_alert_outbox_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_16_access_control_security_alert_outbox_v1.descriptors.json",
+    "sha256": "88522a50089028413c7389a9a15f6e3962cb8a6ba44935a908aea4839dd08de8",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

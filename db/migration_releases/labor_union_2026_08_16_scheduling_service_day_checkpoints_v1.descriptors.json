@@ -1,0 +1,18 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "205_scheduling_service_day_checkpoints.sql": {
+      "tables": {
+        "scheduling_service_day_checkpoints": ["id", "case_no", "assignment_id", "schedule_id", "staff_id", "service_date", "service_ends_at_utc", "requires_cooking", "baby_log_completed", "checkpoint_key", "created_at_utc"],
+        "scheduling_service_day_checkpoint_events": ["id", "checkpoint_id", "event_type", "idempotency_key", "created_at_utc"],
+        "scheduling_service_day_checkpoint_outbox": ["id", "event_id", "intent_key", "payload_snapshot", "delivery_status", "attempt_count", "next_attempt_at_utc", "published_at_utc", "last_error_code", "created_at_utc"]
+      },
+      "triggers": [
+        "trg_scheduling_service_day_checkpoint_events_before_delete",
+        "trg_scheduling_service_day_checkpoint_events_before_update",
+        "trg_scheduling_service_day_checkpoints_before_delete",
+        "trg_scheduling_service_day_checkpoints_before_update"
+      ]
+    }
+  }
+}

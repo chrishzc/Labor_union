@@ -84,12 +84,24 @@ def render_rich_menu_image(menu: dict[str, object]) -> bytes:
         button_height = int(bounds["height"])
         right = left + int(bounds["width"])
         bottom = top + int(bounds["height"])
-        draw.rectangle(
-            [left, top, right, bottom],
-            fill=button.get("background_color", "#4A90E2"),
-            outline="#FFFFFF",
-            width=4,
-        )
+        button_box = [left, top, right, bottom]
+        radius = int(button.get("border_radius", 0) or 0)
+        fill = button.get("background_color", "#4A90E2")
+        if radius > 0:
+            draw.rounded_rectangle(
+                button_box,
+                radius=min(radius, button_width // 2, button_height // 2),
+                fill=fill,
+                outline="#FFFFFF",
+                width=4,
+            )
+        else:
+            draw.rectangle(
+                button_box,
+                fill=fill,
+                outline="#FFFFFF",
+                width=4,
+            )
         label = str(button["label"])
         font, text_box = _button_font_for_label(draw, label, button_width, button_height)
         text_width = text_box[2] - text_box[0]

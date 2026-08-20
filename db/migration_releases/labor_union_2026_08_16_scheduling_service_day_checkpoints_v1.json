@@ -1,0 +1,12 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-scheduling-service-day-checkpoints-2026-08-16-v1",
+  "release_metadata": {"release_name": "Labor Union Scheduling service-day checkpoints", "application_version": "scheduling-service-day-checkpoints-v1", "published_at": "2026-08-16", "description": "Add immutable service-end checkpoints for overdue caregiver baby-log notifications"},
+  "source_baseline": {"minimum_mysql_version": "8.0", "required_character_set": "utf8mb4", "allowed_owned_object_states": ["absent", "exact"], "forbidden_owned_object_states": ["partial", "drift"], "source_must_be_read_only": true, "maintenance_token_required": true, "baseline_id": "schema-assembly-v1-or-later"},
+  "artifacts": [{"name": "205_scheduling_service_day_checkpoints.sql", "relative_path": "db/schema_parts/205_scheduling_service_day_checkpoints.sql", "sha256": "64256ac1b95f985fc6e7d4ac15a630e7716f7263f46a5f5571e411cfc0460b30", "dependencies": [], "data_effect": "schema_only", "rollback_policy": "code-rollback-preserve-service-day-checkpoint-evidence", "resumable_boundary_policy": "statement-sha256-with-durable-receipt"}],
+  "backfills": [],
+  "verification_contracts": [{"verification_id": "scheduling-service-day-checkpoints-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}],
+  "application_compatibility": {"minimum_api_contract": "typed-api-v1", "compatible_contracts": ["scheduling-service-day-checkpoints-v1"], "required_restart_targets": ["scheduling-checkpoint-worker", "line-notification-source-worker"], "watcher_worker_compatibility": "same-release-required", "post_cutover_smoke_ids": ["scheduling-service-day-checkpoint-project"]},
+  "descriptor_artifact": {"name": "labor_union_2026_08_16_scheduling_service_day_checkpoints_v1.descriptors.json", "relative_path": "db/migration_releases/labor_union_2026_08_16_scheduling_service_day_checkpoints_v1.descriptors.json", "sha256": "22245e2467daebe404c2d83c10482a0a1ad445a6ad26aab0b7abcd2fc4c7b469", "dependencies": []},
+  "tool_archive_policy": {"artifact_hash_algorithm": "sha256", "backup_archive_policy": "permanent-release-archive", "journal_archive_policy": "append-only-per-operation", "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"], "receipt_archive_policy": "permanent-release-archive", "restore_required_mode": "new-absent-candidate-only"}
+}

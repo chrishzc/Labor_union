@@ -1,0 +1,21 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "202_scheduling_staff_leave_intake.sql": {
+      "tables": {
+        "scheduling_staff_leave_request_aggregates": ["id", "staff_id", "line_user_id", "leave_start_date", "leave_end_date", "request_reason", "request_status", "aggregate_version", "request_fingerprint", "created_at"],
+        "scheduling_staff_leave_request_events": ["id", "request_id", "aggregate_version", "event_type", "actor_id", "reason", "created_at"],
+        "scheduling_staff_leave_request_receipts": ["id", "idempotency_key", "request_id", "request_fingerprint", "result_snapshot", "created_at"],
+        "scheduling_staff_leave_request_resolution_links": ["request_id", "leave_substitution_receipt_key", "linked_at"]
+      },
+      "triggers": [
+        "trg_staff_leave_request_events_before_delete",
+        "trg_staff_leave_request_events_before_update",
+        "trg_staff_leave_request_receipts_before_delete",
+        "trg_staff_leave_request_receipts_before_update",
+        "trg_staff_leave_resolution_links_before_delete",
+        "trg_staff_leave_resolution_links_before_update"
+      ]
+    }
+  }
+}

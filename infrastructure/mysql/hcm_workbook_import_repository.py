@@ -41,6 +41,20 @@ class HcmWorkbookImportRepository:
             )
             return cursor.fetchone()
 
+    def query_recent_receipts(self, *, limit: int, before_receipt_id: int | None):
+        if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
+            raise ValueError("hcm_result_limit_invalid")
+        predicate = "AND id<%s" if before_receipt_id is not None else ""
+        parameters = (self._FAMILY, before_receipt_id, limit) if before_receipt_id is not None else (self._FAMILY, limit)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id,request_fingerprint,result_snapshot,created_at "
+                "FROM admin_command_receipts WHERE command_family=%s "
+                f"{predicate} ORDER BY id DESC LIMIT %s",
+                parameters,
+            )
+            return tuple(cursor.fetchall())
+
     def claim(self, key: str, digest: str, correlation_id: str) -> str:
         with self._connection.cursor() as cursor:
             cursor.execute(

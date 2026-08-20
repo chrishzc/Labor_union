@@ -87,6 +87,14 @@ flowchart LR
 - `03_追蹤清單與證據/evidence/global_e2e_manifest.json`：目前 Global E2E 驗收宣告與證據索引。
 - `04_已完成與上線封存/`：低頻歷史區，只放不再 active 的完成 Work Package、superseded 舊規格與 closed release／receipt。日常任務不全文讀取；仍約束 production 的規格即使已上線也留在 `01`。
 
+### 完成後的文件收斂
+
+每個 Work Package 完成、supersede 或封存前，必須以檔名、標題、owner、business scenario 與既有 initiative ID
+搜尋 `document/功能開發計畫/`、active `02`／`03` 索引與 current SSOT。逐筆判定該文件是否仍有未承接的
+業務語意、操作入口、rollback 責任或未完成 gate；結果只能是保留 current、標記 `superseded` 並連到 successor、
+建立新的 active successor，或通過 archive gate 後封存。不可因一份文件尚標 `proposed`／`partial`、不在本次
+write set，或留有舊 checklist，就跳過此重新驗證。
+
 ## 開發與驗證安全界線
 
 - 先讀取 branch、HEAD、status 和相鄰檔案；既有 dirty path 一律視為使用者成果。

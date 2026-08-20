@@ -9,6 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from domains.case_import.client_beclass_binding import (
+    ClientCaseBindingResolution,
+    ClientCaseBindingStatus,
+)
 from subsystems.case_import import client_beclass_workbook_import as intake
 
 
@@ -40,6 +44,10 @@ class _Repository:
         self.created: list[dict] = []
         self.saved_workbook = None
         self.locks = []
+        self.binding_lock_modes = []
+        self.binding_resolution = ClientCaseBindingResolution(
+            ClientCaseBindingStatus.UNIQUE, 1, 1, 7, "HCM-0007"
+        )
 
     def acquire_lock(self, key):
         self.locks.append(key)
@@ -60,6 +68,11 @@ class _Repository:
 
     def resolve_unique_client_case(self, name, phone):
         return {"id": 7, "case_no": "HCM-0007"} if name == "測試客戶" and phone == "0912345678" else None
+
+    def resolve_client_case_binding(self, name, phone, *, for_update):
+        del name, phone
+        self.binding_lock_modes.append(for_update)
+        return self.binding_resolution
 
     def claim_workbook(self, key, fingerprint, correlation):
         return "created"
@@ -98,6 +111,21 @@ def _workbook(*rows):
     return intake._Workbook(_DIGEST, _SHEET, tuple((ordinal, row) for ordinal, row in enumerate(rows, start=2)))
 
 
+def test_validation_issue_codes_preserve_missing_vs_invalid_without_raw_values():
+    issue_codes = intake._client_validation_issue_codes(
+        {
+            "姓名": "不可空值",
+            "Email": "格式不正確：sensitive@example.invalid",
+        }
+    )
+
+    assert issue_codes == (
+        "client_field_invalid:Email",
+        "client_field_missing:姓名",
+    )
+    assert "sensitive@example.invalid" not in "|".join(issue_codes)
+
+
 def test_preview_is_read_only_and_keeps_invalid_rows_as_review(monkeypatch):
     repository = _Repository()
     monkeypatch.setattr(intake, "_load_workbook", lambda _: _workbook(_valid_row(), {**_valid_row(""), "姓名": ""}))
@@ -109,6 +137,7 @@ def test_preview_is_read_only_and_keeps_invalid_rows_as_review(monkeypatch):
     assert preview.review_required_count == 1
     assert repository.created == []
     assert repository.connection.commits == 0
+    assert repository.binding_lock_modes == [False]
 
 
 def test_apply_creates_valid_row_and_records_invalid_review(monkeypatch):
@@ -124,6 +153,7 @@ def test_apply_creates_valid_row_and_records_invalid_review(monkeypatch):
     assert receipt.review_required_count == 1
     assert receipt.exact_replay_count == 0
     assert repository.created[0]["query_no"] == "CASE-1"
+    assert repository.binding_lock_modes == [False, False, True]
     assert repository.saved_workbook == receipt.as_dict()
     assert repository.locks == []
 
@@ -184,3 +214,48 @@ def test_existing_query_number_with_changed_payload_creates_review(monkeypatch):
     assert receipt.existing_conflict_count == 1
     assert receipt.existing_source_count == 0
     assert repository.created == []
+
+
+@pytest.mark.parametrize(
+    ("status", "client_count", "case_count", "expected_issue"),
+    (
+        ("no_client", 0, 0, "client_case_binding_no_client"),
+        ("multiple_clients", 2, 0, "client_case_binding_multiple_clients"),
+        ("case_not_unique", 1, 2, "client_case_binding_case_not_unique"),
+    ),
+)
+def test_binding_review_preserves_real_candidate_classification_without_pii(
+    monkeypatch, status, client_count, case_count, expected_issue
+):
+    repository = _Repository()
+    repository.binding_resolution = ClientCaseBindingResolution(
+        ClientCaseBindingStatus(status), client_count, case_count
+    )
+    captured = {}
+    monkeypatch.setattr(
+        intake,
+        "_load_workbook",
+        lambda _: _workbook(_valid_row("BIND-REVIEW")),
+    )
+    monkeypatch.setattr(
+        intake,
+        "record_invalid_beclass_row",
+        lambda *args, **kwargs: captured.update(kwargs) or "beclass-review:binding",
+    )
+    service = intake.ClientBeClassWorkbookImportService(repository)
+    preview = service.preview("ignored.xlsx")
+
+    receipt = service.apply(
+        "ignored.xlsx", "binding-key", preview.preview_fingerprint, "admin", "corr"
+    )
+
+    assert receipt.existing_conflict_count == 1
+    assert captured["issue_codes"] == (expected_issue,)
+    assert captured["source_payload"] == {
+        "has_name": True,
+        "has_phone": True,
+        "has_query_no": True,
+        "source_field_count": 15,
+        "client_candidate_count": client_count,
+        "case_candidate_count": case_count,
+    }

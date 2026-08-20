@@ -1,0 +1,10 @@
+contract: labor-union-ui-expected/v1
+scenario_id: ANOM-REACT-ADMIN-WARNING-TRANSITION
+revision: 1
+oracle:
+  - warning fields and tracking status come from typed API
+  - Preview does not write and Apply requires a non-empty reason
+  - receipt, outbox observation, and re-query agree
+  - replay with the same idempotency key is deterministic
+  - Claim, Resolve, source correction, and provider controls remain unavailable
+blocked_reason: real browser, API, DB and outbox receipts are produced by the downstream bounded work package

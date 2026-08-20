@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-scenario/v1", "scenario_id": "SCH-REACT-ADMIN-LEAVE-SUBSTITUTION", "revision": 1,
+  "track": "A", "suite_id": "SCH", "status": "specified", "part": "09", "browser_execution_mode": "no-browser-execution",
+  "requires_database": true, "test_kinds": ["domain_root_data", "subsystem_state_machine", "expected_manifest"], "coverage_ids": ["SCH-REACT-ADMIN-LEAVE-SUBSTITUTION-01"], "coverage_scope": "supplemental",
+  "source_scenario_ids": ["SCH-ASSIGNMENT-COVERAGE-001", "PAY-ASSIGNMENT-RECONCILIATION-002", "GDATA-CROSS-DOMAIN-001"],
+  "source_refs": ["validation/scenarios/SCH-ASSIGNMENT-COVERAGE-001.json#SCH-ASSIGNMENT-COVERAGE-001", "validation/scenarios/PAY-ASSIGNMENT-RECONCILIATION-002.json#PAY-ASSIGNMENT-RECONCILIATION-002", "validation/scenarios/GDATA-CROSS-DOMAIN-001.json#GDATA-CROSS-DOMAIN-001"],
+  "source_to_successor_mapping": [{"source": "leave/substitution lineage", "successor": "linked leave request and replacement lineage", "disposition": "unchanged"}, {"source": "reconciliation conservation", "successor": "outer-UoW zero-partial-write oracle", "disposition": "supplemented"}, {"source": "cross-domain view", "successor": "typed LINE intent observation", "disposition": "renamed"}],
+  "root_inputs": ["synthetic leave request", "synthetic replacement request", "linked request identifier", "expected version triple", "fixed clock"],
+  "root_facts": ["Linked leave and replacement requests, expected versions and fixed clock are the command roots."],
+  "forbidden_direct_seed": ["active substitute projection", "payroll obligation", "LINE delivery receipt", "calendar projection"],
+  "commands": ["preview linked leave/substitution", "apply linked pair", "replay same idempotency key", "reject stale or half-pair input"],
+  "expected": ["Preview is zero-write and Apply commits the linked pair atomically.", "Half-pair and stale input create zero partial writes.", "Same-key replay returns the original receipt and re-query observes the committed lineage."],
+  "receipt_requirements": ["root and expected digests", "outer-UoW transaction evidence", "idempotency/replay evidence", "receipt and re-query evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
+  "oracle_applicability": {"db": {"status": "required", "reason": "outer-UoW and zero-partial-write"}, "api": {"status": "required", "reason": "typed command/receipt"}, "ui": {"status": "required", "reason": "Part 09 checklist"}, "replay": {"status": "required", "reason": "idempotency and linked pair"}, "recovery": {"status": "required", "reason": "stale and enqueue failure"}},
+  "required_receipt_id": "SCH-REACT-ADMIN-LEAVE-SUBSTITUTION-R1"
+}

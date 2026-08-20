@@ -1,4 +1,7 @@
-"""Outer MySQL transaction owner exposing all canonical LINE repositories."""
+"""
+File: line_unit_of_work.py
+Description: 提供同一 MySQL outer transaction 的 canonical LINE repositories 與通知規則取消操作。
+"""
 
 from __future__ import annotations
 
@@ -10,6 +13,9 @@ from infrastructure.mysql.line_configuration_publication_repository import (
 )
 from infrastructure.mysql.line_delivery_task_repository import (
     MySqlLineDeliveryTaskRepository,
+)
+from infrastructure.mysql.line_notification_repository import (
+    MySqlLineNotificationRepository,
 )
 from infrastructure.mysql.line_identity_review_repository import (
     MySqlLineIdentityRepository,
@@ -71,6 +77,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.staff = MySqlStaffIdentityOwnerAdapter(connection)
         self.admins = MySqlAdminIdentityOwnerAdapter(connection)
         self.delivery_tasks = MySqlLineDeliveryTaskRepository(connection)
+        self.notification_rules = MySqlLineNotificationRepository(connection)
         self.configurations = MySqlLineConfigurationRepository(connection)
         self.rich_menu_publications = MySqlLineRichMenuPublicationRepository(connection)
         self.media_metadata = MySqlLineMediaMetadataRepository(connection)

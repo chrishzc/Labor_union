@@ -486,6 +486,7 @@ def _run_supervised_session() -> None:
     print("=" * 60)
     print("🚀 正在啟動開發環境（FastAPI + LINE Worker + Monitor + Streamlit + ngrok）...")
     print("=" * 60)
+    _configure_local_private_api_auth()
     line_reviewer = DevLineConsoleReviewer()
     review_notifier = DevReviewNotificationServer(line_reviewer)
     starters = {
@@ -553,6 +554,17 @@ def _run_supervised_session() -> None:
         review_notifier.stop()
         for name, process in reversed(tuple(processes.items())):
             _terminate_process_tree(process, name)
+
+
+def _configure_local_private_api_auth() -> None:
+    """Provide one-session auth for API, workers and monitor without editing .env."""
+    environment = os.getenv("APP_ENV", "development").strip().lower()
+    if environment not in {"development", "dev", "local", "test"}:
+        return
+    if len(os.getenv("INTERNAL_SERVICE_SHARED_KEY", "").strip()) < 32:
+        os.environ["INTERNAL_SERVICE_SHARED_KEY"] = secrets.token_urlsafe(48)
+    os.environ.setdefault("INTERNAL_SERVICE_AUTH_MODE", "local_shared_key")
+    os.environ.setdefault("INTERNAL_API_BASE_URL", "http://127.0.0.1:8000")
 
 
 def main() -> int:

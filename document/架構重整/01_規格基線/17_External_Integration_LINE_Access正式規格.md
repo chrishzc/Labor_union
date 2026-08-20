@@ -213,13 +213,21 @@ pending → processing → published
 
 ### 4.1 正式內部使用者存取模型
 
-2026-08-12 最新人工裁決：所有已登入且 enabled 的內部使用者具有相同業務功能權限。本系統不以
+2026-08-16 最新人工裁決：所有已登入且 enabled 的內部使用者具有相同業務功能權限。本系統不以
 role、capability、職稱或部門限制內部使用者可操作的業務功能，也不採 fixed role bundle、dynamic
-grant／revoke、階層比較或雙人權限覆核。
+grant／revoke、階層比較或雙人權限覆核。root 與所有其他 enabled 帳號一樣可使用完整業務功能集合。
+唯一額外權限是 Access Control 自身的帳號中心：恰有一個 enabled `root` 帳號可進入帳號中心並執行
+帳號生命週期管理；此額外權限不是業務功能權限，也不得延伸為其他 API、UI 選單或 Domain 操作的
+差異化授權。
 
 - `AdminPrincipal` 是 human actor identity，用於 authentication、操作歸屬與 audit，不代表差異化權限。
 - 業務 API 只判斷 session 是否有效且 user 是否 enabled；通過後可使用相同業務功能集合。
-- `X-Legacy-Shared-Key` 只證明受信任 service caller，不能冒充 human actor。
+- `root` 是 Access Control root fact，不是可由一般帳號調整的 role 或 capability；僅 root 可讀寫帳號中心、
+  建立帳號、啟停帳號、重設 credential／MFA 與撤銷其他帳號 session。root 不得停用、降級或移轉自身；
+  root 遺失只能依受控離線維運程序復原，沒有 production HTTP break-glass endpoint。
+- human authorization 不接受 `X-Legacy-Shared-Key` 或任何 legacy shared key。machine caller 在
+  local/test 只可使用 `INTERNAL_SERVICE_SHARED_KEY`，production 只可使用已驗證且 caller allowlist
+  通過的 Google-signed OIDC；兩者都不能冒充 human actor。
 - body、query、UI session label 或任意 role／capability 字串不得成為 actor 或改變可用功能。
 - UI 不顯示依人員而異的業務選單，也不建立「有權／無權角色」驗收案例。
 - 外部 provider、production environment、secret、資料庫 target、SystemPrincipal 自動命令範圍及
@@ -232,6 +240,11 @@ grant／revoke、階層比較或雙人權限覆核。
 - admin user identity；
 - password hash／credential version；
 - enabled flag；
+- root-account designation（恰有一個 enabled root）；
+- encrypted TOTP factor、其 encryption key version 與最後成功 time-step；
+- recovery-code hash 與 consumed fact；
+- password challenge／MFA enrollment challenge 的 hash、綁定 account／credential／active factor identity／account access-control version、absolute expiry 與 single-use consumed fact；
+- hashed login-attempt subject、rate-limit decision 與安全告警投影來源；
 - hashed session token；
 - issued、expires、last-seen、revoked time；
 - security decision audit。
@@ -239,7 +252,9 @@ grant／revoke、階層比較或雙人權限覆核。
 State：
 
 ```text
-Admin user: enabled ↔ disabled
+Admin user: enabled ↔ disabled（root 不可由線上 command 停用或降級）
+TOTP factor: unbound → enrollment_pending → active → rotated | revoked
+Password challenge: issued → consumed | expired
 Session: active → expired | revoked
 Credential: valid → rotated
 ```
@@ -256,6 +271,10 @@ Modules：
 - `SessionRepository`
 - `AdminPrincipalLoader`
 - `AuthenticationPolicy`
+- `LoginAttemptPolicy`
+- `PasswordChallengeIssuer`
+- `TotpVerifier`／`TotpReplayGuard`
+- `RecoveryCodeVerifier`
 
 正式環境：
 
@@ -267,6 +286,12 @@ Modules：
   時 fail closed；
 - `APP_ENV=production` 禁止 auth bypass；
 - development bypass 必須同時是允許環境＋顯式設定，並產生醒目 audit／startup warning。
+- public login 固定兩段：Stage 1 只驗 username/password，成功僅簽發短效、single-use password
+  challenge；Stage 2 驗該 challenge 與 TOTP 或 recovery code，成功後才建立 bearer session。任何
+  Stage 1 未通過都回泛化 `invalid_credentials_or_factor`，Stage 2 failure 回泛化
+  `invalid_credentials_or_factor` 或 rate-limit 429，不洩漏帳號、MFA state 或 factor 狀態。
+- password challenge 必須綁定 user、credential version、active factor identity、account access-control version、source-risk subject 與 absolute
+  expiry；不得在 browser storage、log、audit detail 或 URL 保存 password、TOTP 或原 challenge token。
 
 ### 4.4 Subsystem：Account／Session Administration
 
@@ -277,9 +302,11 @@ Commands：
 - `EnableAdminUser`
 - `RevokeAdminSessions`
 - `RotateAdminCredential`
+- `ResetAdminMfa`
 
-每個 Command 使用 expected version、authenticated actor、reason 與 idempotency key。本系統不採用
-break-glass credential、緊急繞過 API 或自動復原流程。
+上述帳號／session administration commands 僅接受 root session；root identity、目標帳號與 expected
+version 必須在同一 UoW 鎖定驗證。每個 Command 使用 expected version、authenticated actor、reason 與
+idempotency key。本系統不採用 break-glass credential、緊急繞過 API 或自動復原流程。
 
 Ports：`AdminRepository`、`SessionRepository`、`SecurityAuditRepository`、`SecurityOutbox` 與
 `AccessControlUnitOfWork`。disable 依固定順序鎖定 user，驗證 expected version 與 authenticated actor，
@@ -408,20 +435,23 @@ Modules：
 - `CaseBootstrapCandidateBuilder`
 
 File Watcher 只建立 durable import job；CLI／Adapter 不直接寫正式 Client／Order。
-invalid row 必須保存 privacy-safe root fact 並投影 canonical anomaly。
+invalid row 必須保存 privacy-safe root fact；只有已滿足該 lane 最低 import 條件、且需要人工處理的
+review 才投影 canonical anomaly。
 
 HCM 不得以 fabricated default 補造欄位。案件編號是最低寫入資格：有可用案件編號時必須建立／保留
 正式案件，其他欄位缺漏、格式錯誤或身份關聯歧義各自形成 durable field／link warning；只有案件編號
-缺失或不可用時不建案、僅留來源警示。Client／Staff historical import 必須另走 HistoricalAdoption
+缺失或不可用時不建案，且只保留來源 review／receipt／outbox 稽核，不投影異常中心。
+Client／Staff historical import 必須另走 HistoricalAdoption
 Preview／Apply，不得重用 current LIFF command 假裝一般資料更新。
 
 ### 匯入異常的外部確認與重新提交
 
 HCM、Client／Staff BeClass 與其他 Case Import 來源的 review 是公會人員聯絡來源當事人的待辦，
 不是管理端直接修正資料的表單。review root、處理狀態與 disposition 必須保留去敏資訊；不得持久化
-LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Client／Order／Staff input。正確資料原則上由
-新來源重新走 typed Preview／Apply；已建 HCM 案件的單一缺漏／無效欄位可由 HCM owning typed
-field-completion command 補齊，不要求整案重送，也不得經警示中心直接改值。
+LINE 對話原文、完整聯絡資料或把回覆文字直接當成正式 Client／Order／Staff input。正確資料由
+新來源重新走 typed Preview／Apply。2026-08-15 WP95 進一步裁決：已建 HCM 案件的缺漏、無效欄位與
+同案修正版一律提交完整修正來源，由 HCM owning resubmission Preview／Apply 採納通過驗證且屬
+HCM 欄位權威的差異；不提供警示中心或 Streamlit 單欄編輯，也不得修改 immutable source。
 
 WP77／WP92 將 HCM 與 Client BeClass 定義為可獨立存在的兩條 intake lane。HCM 案件編號不得重複；
 IP＋姓名精確命中既有 Client、多候選或其他身份關聯歧義時，案件仍依案件編號建立，但不自動綁定 Client，
@@ -437,9 +467,20 @@ Staff BeClass 歷史匯入以有效身分證及姓名為最低資格。後來的
 仍建立欄位級 warning。Staff 退役不由匯入推定或修改。
 
 有 HCM 而無唯一 Client BeClass 對方時投影 `BECLASS-001`；對方日後唯一綁定後由 root predicate 自動解除。
-任何警示均以 `logical_code + field_path` 獨立追蹤；exact replay 不建立新 occurrence。顯式關聯的新提交仍
+任何警示均以 `logical_code + field_path` 獨立追蹤；缺漏與格式錯誤不按欄位新增 logical code，
+由 display projection 以「缺少{欄位名稱}」或「{欄位名稱}格式錯誤」呈現。exact replay 不建立新 occurrence。顯式關聯的新提交仍
 不合格時建立新 warning 並由 system 關閉被取代的舊 task；成功補齊後才 `auto_resolved`。所有來源、issue
 codes、occurrence 與狀態事件保留。第一階段只記錄公會人工聯絡，不自動傳 LINE、不猜 recipient。
+未登錄的 issue code 不得靜默略過或落入 generic field warning；投影交易必須回滾，只寫入
+lane 與 issue digest 的去敏錯誤；總嘗試上限 3 次，相鄰嘗試至少間隔 1 秒，後進入
+dead-letter，供維運先補 registry／映射再重放。retry-ready time 必須持久化，worker 重啟不得提早嘗試。
+
+已知 validator 狀態不得被當成 unknown：Client BeClass 欄位 validation 以
+`client_field_missing:<field_path>`／`client_field_invalid:<field_path>` 保存，兩者共用
+`CLIENT-BECLASS-SOURCE-001`，由 display projection 區分「缺少欄位」與「格式錯誤」；不得保存錯誤
+訊息中的原始值。HCM 既有案件收到不同 source fingerprint 使用 `HCM-CASE-002/$source_row`，缺案號仍
+低於 import 門檻且零 warning。Historical Orders 的起／迄日不可解析分別使用
+`ORDER-HIST-FIELD-001/actual_start_date|actual_end_date`。
 
 live `ApplyBeClassReview`／`RejectCaseImportReview` 的 corrected-fields／Correct／Reject 形狀不是核准目標；
 必須依 entrypoint governance 退役或替換為 tracking-only transition 與 owning Domain typed command。
@@ -466,8 +507,9 @@ Typed operations：
 - `PreviewCaseImport` → candidate、validation、mapping、fingerprint、expected version
 - `ApplyCaseImport`／各 lane HistoricalAdoption Apply → 正式 root receipt、欄位級 warning 或 typed blocker
 - `PreviewWarningTransition`／`ApplyWarningTransition` → 只更新外部追蹤狀態，不接受 corrected payload
-- HCM owning field-completion／linking command → 補指定正式欄位或唯一關聯
-- `AssociateImportResubmission` → 驗證 prior warning／source 與新 source／receipt 的明確關聯
+- `PreviewHcmResubmission`／`ApplyHcmResubmission` → 驗證完整修正來源、prior warning 與 canonical
+  case 的明確關聯，採納通過驗證的 HCM-owned fields；link 只有唯一可證明時建立
+- warning referral descriptor → 只回傳 owner command identifier、expected warning version 與去敏 context
 
 Ports：`CaseImportSourceArchive`、`CaseImportRepository`、`CaseIdentityQuery`、
 `CaseBootstrapGateway`、`CaseImportOutbox`、`CaseImportClock` 與

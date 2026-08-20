@@ -1,10 +1,6 @@
 """
-================================================================================
-檔案名稱: api/main.py
-功能說明: FastAPI 主程序，掛載 LINE、LIFF、管理介面與其他後端 API；LINE Worker 由獨立程序管理
-================================================================================
 File: main.py
-Description: 掛載管理 API 與 HCM workbook upload router。
+Description: 掛載 FastAPI 管理、業務、LINE 與 Access Control API router。
 """
 
 import asyncio
@@ -17,11 +13,13 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.middleware.compression import ResponseCompressionMiddleware
 from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
     admin_audit,
     admin_auth,
+    account_center,
     anomaly_recovery,
     anomaly_registry,
     import_warning_tracking,
@@ -49,8 +47,12 @@ from api.routes import (
     leave_substitution,
     line_admin,
     line_configurations,
+    line_notification_rules,
+    staff_service_day_media,
+    staff_service_day_logs,
     line_identity,
     line_staff_self_service,
+    line_mobile_admin,
     line_identity_management,
     customer_service,
     line_order_groups,
@@ -92,6 +94,8 @@ from api.routes import (
     staff_monthly_schedule,
     staff_payout,
     staff_payments,
+    staff_leave_intake,
+    staff_leave_management,
     system_status,
 )
 
@@ -134,8 +138,18 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=_allowed_origins(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Accept",
+        "Authorization",
+        "Content-Type",
+        "If-Match",
+        "If-None-Match",
+        "Idempotency-Key",
+        "X-Preview-Fingerprint",
+        "X-Correlation-ID",
+    ],
+    expose_headers=["X-Correlation-ID", "Retry-After", "WWW-Authenticate"],
 )
 app.add_middleware(
     ResponseCompressionMiddleware,
@@ -143,16 +157,22 @@ app.add_middleware(
     compresslevel=5,
 )
 app.add_middleware(ApiPerformanceMiddleware)
+app.add_middleware(CorrelationBoundaryMiddleware)
+install_typed_error_handlers(app)
 
 app.mount("/static", StaticFiles(directory="line/static"), name="static")
 
 # LINE/LIFF/webhook endpoints are a child router of this central application.
 app.include_router(line_router)
 app.include_router(admin_auth.router)
+app.include_router(account_center.router)
 app.include_router(admin_audit.router)
 app.include_router(capability_grants.router)
 app.include_router(line_admin.router)
 app.include_router(line_configurations.router)
+app.include_router(line_notification_rules.router)
+app.include_router(staff_service_day_media.router)
+app.include_router(staff_service_day_logs.router)
 app.include_router(line_tasks.router)
 app.include_router(line_rich_menus.router)
 app.include_router(line_reviews.router)
@@ -162,6 +182,10 @@ app.include_router(line_identity.page_router)
 app.include_router(line_order_groups.router)
 app.include_router(knowledge_retrieval.router)
 app.include_router(line_staff_self_service.router)
+app.include_router(staff_leave_intake.router)
+app.include_router(staff_leave_management.router)
+app.include_router(line_mobile_admin.router)
+app.include_router(line_mobile_admin.page_router)
 app.include_router(customer_service.router)
 app.include_router(line_identity_management.router)
 
@@ -254,8 +278,8 @@ async def audit_authenticated_mutations(request: Request, call_next):
                 resource_id=getattr(request.state, "audit_resource_id", None),
                 details=getattr(request.state, "audit_details", None),
             )
-        except Exception as exc:
-            print(f"[Admin Audit] Failed to record request: {exc}")
+        except Exception:
+            print("[Admin Audit] Failed to record request")
     return response
 
 

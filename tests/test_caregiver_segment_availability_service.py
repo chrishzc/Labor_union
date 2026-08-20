@@ -21,7 +21,7 @@ class QueryAwareCursor:
             self.current = self.fixture.get("order")
             return
 
-        if "FROM staff WHERE" in statement or "FROM staff " in statement and "JOIN" not in statement:
+        if "FROM staff s" in statement or "FROM staff WHERE" in statement:
             self.current = self.fixture.get("staff_rows", [])
             return
 

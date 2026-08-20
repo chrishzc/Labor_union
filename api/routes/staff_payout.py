@@ -1,4 +1,7 @@
-"""Authenticated typed HTTP endpoints for Staff Payout Reconciliation."""
+"""
+File: staff_payout.py
+Description: 提供Staff Payables唯讀查詢與受控付款命令端點。
+"""
 
 from __future__ import annotations
 
@@ -12,7 +15,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, status
 from pymysql.err import OperationalError
 
-from api.dependencies.admin_auth import require_capability, require_system_admin
+from api.dependencies.admin_auth import require_admin, require_capability, require_system_admin
 from api.dependencies.staff_payout import (
     StaffPayoutApplication,
     get_staff_overpayment_recovery_application,
@@ -271,7 +274,7 @@ def apply_reversal(
 )
 def query_staff_payables(
     staff_id: int = Path(..., gt=0),
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     application: StaffPayoutApplication = Depends(get_staff_payout_application),
 ):
     del principal

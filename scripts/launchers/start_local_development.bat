@@ -1,5 +1,5 @@
 @REM File: start_local_development.bat
-@REM Description: 驗證本機 DB readiness 後啟動 API、UI、monitor、watcher 與 workers。
+@REM Description: 驗證本機 DB readiness 後啟動 API、UI、monitor 與 workers。
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
@@ -88,18 +88,15 @@ if !ERRORLEVEL! equ 0 (
 echo [Step 8] Launching active runtime monitor...
 start "Runtime Monitor" cmd /k ""%PY%" -m scripts.run_service_monitor"
 
-echo [Step 9] Launching File Watcher Service...
-start "File Watcher" cmd /k ""%PY%" scripts/file_watcher.py"
-
-echo [Step 10] Launching Durable Background Worker...
+echo [Step 9] Launching Durable Background Worker...
 start "Durable Background Worker" cmd /k ""%PY%" -m scripts.run_durable_job_worker"
 
-echo [Step 11] Launching Incident Maintenance Worker...
+echo [Step 10] Launching Incident Maintenance Worker...
 start "Incident Maintenance Worker" cmd /k ""%PY%" -m scripts.run_incident_worker"
 
 findstr /R /B /I "^KNOWLEDGE_RETRIEVAL_RUNTIME_ENABLED=true" "%CD%\.env" >nul
 if %errorlevel% equ 0 (
-    echo [Step 12] Launching Knowledge Retrieval Worker...
+    echo [Step 11] Launching Knowledge Retrieval Worker...
     start "Knowledge Retrieval Worker" cmd /k ""%PY%" -m scripts.run_knowledge_worker"
 )
 

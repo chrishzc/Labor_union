@@ -104,6 +104,13 @@ delivery intent 與通知結果。現有依賴已退役 `services.*` 的 review 
 在 canonical repository／outer UoW、capability、typed result 與 entrypoint replacement 完成前
 不得掛入 FastAPI。
 
+2026-08-15 人工裁決：LINE 月嫂請假先寫入 Scheduling request evidence，不自動猜案件、服務日、
+代班人或更動 availability／正式排班。request 的 `pending`、`accepted_for_processing`、`rejected`、
+`cancelled` 與 `resolved` 是獨立狀態機；只有已受理 request 能由唯一 canonical leave-substitution
+receipt 關聯為 `resolved`。receipt 必須證明原 leave outcome 的 staff 與 request staff 相同，且同一
+receipt 不得關聯兩筆 request。正式 Apply 的 locks、跨 Domain impacts 與 receipt 不因 request
+存在而變更；LINE 通知是 committed durable delivery task，失敗不回滾正式結果。
+
 Batch replay：
 
 - `batch_key` 是一次多日操作的冪等 identity，並綁定 canonical request snapshot、

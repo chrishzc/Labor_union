@@ -5,6 +5,45 @@ from __future__ import annotations
 from streamlit.testing.v1 import AppTest
 
 
+def _data_browser_test_app():
+    """以檔案層級函式供 AppTest 取得可檢查的原始碼。"""
+    import builtins
+    import importlib
+    import os as _os
+    import pathlib
+    import sys as _sys
+    from unittest import mock
+
+    _sys.path.insert(0, str(pathlib.Path(_os.getcwd()).resolve()))
+    page = importlib.import_module("ui.pages.01_data_browser")
+
+    class _FakeResponse:
+        def __init__(self, data: dict):
+            self._data = {"data": data}
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return self._data
+
+    def _fake_get(url, headers=None, timeout=10, **_kwargs):
+        builtins._DATA_BROWSER_TEST_CALLS.append((url, headers or {}))
+        if url.endswith("/api/v1/admin/data-browser/staff"):
+            return _FakeResponse({"rows": [{"staff_id": "S-1", "name": "測試月嫂"}], "columns": ["staff_id", "name"], "primary_key": "staff_id", "editable_columns": ["name"], "read_only": False, "valid_options": {}})
+        if url.endswith("/api/v1/admin/data-browser/case_staff_assignments"):
+            return _FakeResponse({"rows": [], "columns": ["id", "case_no"], "primary_key": "id", "editable_columns": [], "read_only": True, "valid_options": {}})
+        if "/api/v1/admin/data-browser/" in url:
+            table = url.rsplit("/", 1)[-1]
+            return _FakeResponse({"rows": [], "columns": [f"{table}_id", "name"], "primary_key": f"{table}_id", "editable_columns": [], "read_only": False, "valid_options": {}})
+        if url.endswith("/api/v1/holidays"):
+            return _FakeResponse({"rows": []})
+        raise AssertionError(f"Unexpected GET call: {url}")
+
+    with mock.patch.object(page.requests, "get", _fake_get):
+        page.show()
+
+
 def test_shared_admin_context_loads_project_dotenv():
     from pathlib import Path
 
@@ -18,72 +57,7 @@ def _run_data_browser_page(
     *,
     token: str | None,
 ) -> AppTest:
-    def _app():
-        import importlib
-        import builtins
-        import os as _os
-        import pathlib
-        import sys as _sys
-
-        _sys.path.insert(0, str(pathlib.Path(_os.getcwd()).resolve()))
-        page = importlib.import_module("ui.pages.01_data_browser")
-
-        class _FakeResponse:
-            def __init__(self, data: dict):
-                self._data = {"data": data}
-
-            def raise_for_status(self):
-                return None
-
-            def json(self):
-                return self._data
-
-        def _fake_get(url, headers=None, timeout=10, **_kwargs):
-            builtins._DATA_BROWSER_TEST_CALLS.append((url, headers or {}))
-            if url.endswith("/api/v1/admin/data-browser/staff"):
-                return _FakeResponse(
-                    {
-                        "rows": [{"staff_id": "S-1", "name": "測試月嫂"}],
-                        "columns": ["staff_id", "name"],
-                        "primary_key": "staff_id",
-                        "editable_columns": ["name"],
-                        "read_only": False,
-                        "valid_options": {},
-                    }
-                )
-            if url.endswith("/api/v1/admin/data-browser/case_staff_assignments"):
-                return _FakeResponse(
-                    {
-                        "rows": [],
-                        "columns": ["id", "case_no"],
-                        "primary_key": "id",
-                        "editable_columns": [],
-                        "read_only": True,
-                        "valid_options": {},
-                    }
-                )
-            if "/api/v1/admin/data-browser/" in url:
-                table = url.rsplit("/", 1)[-1]
-                return _FakeResponse(
-                    {
-                        "rows": [],
-                        "columns": [f"{table}_id", "name"],
-                        "primary_key": f"{table}_id",
-                        "editable_columns": [],
-                        "read_only": False,
-                        "valid_options": {},
-                    }
-                )
-            if url.endswith("/api/v1/holidays"):
-                return _FakeResponse({"rows": []})
-            raise AssertionError(f"Unexpected GET call: {url}")
-
-        from unittest import mock
-
-        with mock.patch.object(page.requests, "get", _fake_get):
-            page.show()
-
-    app = AppTest.from_function(_app)
+    app = AppTest.from_function(_data_browser_test_app)
     if token is not None:
         app.session_state["line_admin_access_token"] = token
     app.run(timeout=10)

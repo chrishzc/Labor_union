@@ -1,4 +1,7 @@
-"""API-side composition of one complete LINE worker cycle."""
+"""
+File: line_worker_operation.py
+Description: 組合 canonical LINE worker 與已提交 Scheduling 通知來源的投影工作。
+"""
 
 from __future__ import annotations
 
@@ -20,6 +23,20 @@ from infrastructure.line.redis_wakeup import SleepingLineWakeupSubscriber
 from infrastructure.line.rich_menu_api_adapter import LineRichMenuApiAdapter
 from infrastructure.line.rich_menu_image_store import FileSystemRichMenuImageStore
 from infrastructure.mysql.line_runtime_repository import MySqlLineRuntimeRepository
+from infrastructure.mysql.line_notification_anomaly_worker import MySqlLineNotificationAnomalyWorker
+from infrastructure.mysql.line_notification_reconciliation_worker import (
+    MySqlLineNotificationReconciliationWorker,
+)
+from infrastructure.mysql.service_day_checkpoint_worker import MySqlServiceDayCheckpointWorker
+from infrastructure.mysql.scheduling_checkpoint_notification_source_worker import (
+    MySqlSchedulingCheckpointNotificationSourceWorker,
+)
+from infrastructure.mysql.scheduling_rebuild_notification_invalidation_worker import (
+    MySqlSchedulingRebuildNotificationInvalidationWorker,
+)
+from infrastructure.mysql.service_day_log_notification_stop_worker import (
+    MySqlServiceDayLogNotificationStopWorker,
+)
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
 from subsystems.line.delivery_worker import LineDeliveryWorker
@@ -106,7 +123,11 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
             MatchingNotificationApplication(open_line_unit_of_work, now)
         ),
         knowledge_question_scheduler=enqueue_line_knowledge_question,
-        service_help_application=LineServiceHelpApplication(now, _identity_flow_url),
+        service_help_application=LineServiceHelpApplication(
+            now,
+            _identity_flow_url,
+            LineMessagingApiAdapter(_required_access_token()),
+        ),
         menu_command_application=LineMenuCommandApplication(),
     )
     return LineWebhookEventConsumer(
@@ -119,6 +140,12 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
 
 def _additional_workers(worker_identity: str, now, images, provider) -> dict[str, object]:
     return {
+        "service_day_checkpoints": MySqlServiceDayCheckpointWorker(get_connection, now),
+        "service_day_checkpoint_notification_sources": MySqlSchedulingCheckpointNotificationSourceWorker(get_connection, now),
+        "service_day_log_notification_stops": MySqlServiceDayLogNotificationStopWorker(get_connection, now),
+        "scheduling_rebuild_notification_invalidations": MySqlSchedulingRebuildNotificationInvalidationWorker(get_connection, now),
+        "notification_anomalies": MySqlLineNotificationAnomalyWorker(get_connection),
+        "notification_reconciliation": MySqlLineNotificationReconciliationWorker(get_connection),
         "media_archives": LineMediaArchiveWorker(
             open_line_unit_of_work,
             LineMediaApiAdapter(_required_access_token()),

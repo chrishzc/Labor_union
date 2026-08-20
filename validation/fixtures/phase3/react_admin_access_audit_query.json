@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-fixture/v1", "scenario_id": "AC-REACT-ADMIN-AUDIT-QUERY", "revision": 1,
+  "test_kind": "domain_root_data",
+  "data_classification": "deidentified", "generation_method": "hand-authored masked audit values; no production export",
+  "allowed_use": "validation-only", "redaction_policy": "actor and event values are synthetic; secrets and TOTP material excluded",
+  "root_inputs": ["synthetic actor identity", "synthetic audit event", "bounded cursor and limit"],
+  "input_values": {"actor_key": "ACTOR-SYN-01", "event_key": "AUDIT-SYN-01", "cursor": "audit-cursor-1", "limit": 20},
+  "seed_fields": ["actor_input.actor_key", "audit_input.event_key", "query_input.cursor", "query_input.limit"],
+  "derived_fields": ["audit_view.masked_rows", "audit_view.next_cursor", "audit_view.redaction_labels"],
+  "expected_manifest_path": "validation/expected/phase3/react_admin_access_audit_query.json",
+  "fixed_business_clock": "2026-01-15T09:00:00+08:00",
+  "forbidden_direct_seed": ["raw secret", "TOTP seed", "full personal data", "unmasked payload", "session token"]
+}

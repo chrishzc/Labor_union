@@ -1,0 +1,453 @@
+/**
+ * File: OrderTrackerPage.css
+ * Description: 定義七階 unavailable 槽位、待投影摘要卡與可存取的 SOP／LINE 抽屜樣式。
+ */
+.tracker-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 18px;
+}
+
+.tracker-reload-button,
+.tracker-close-button {
+  min-height: 40px;
+  padding: 8px 16px;
+  border: 1px solid #d85f3a;
+  border-radius: 8px;
+  background: #fff;
+  color: #9a3412;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.tracker-reload-button:hover,
+.tracker-close-button:hover {
+  background: #fff7ed;
+}
+
+.tracker-reload-button:focus-visible,
+.tracker-close-button:focus-visible,
+.pipeline-step-pill:focus-visible,
+.pipeline-order-card:focus-visible,
+.tracker-tabs button:focus-visible {
+  outline: 3px solid #0f766e;
+  outline-offset: 2px;
+}
+
+.tracker-query-state {
+  padding: 22px;
+  border: 1px dashed #c9aca2;
+  border-radius: 12px;
+  background: #fffaf8;
+  color: #57423b;
+  font-weight: 650;
+}
+
+.tracker-query-error {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-color: #fca5a5;
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.pipeline-stepper-nav {
+  position: sticky;
+  top: 64px;
+  z-index: 50;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  margin-bottom: 24px;
+  padding: 12px 16px;
+  border: 1px solid #dec0b6;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.08);
+}
+
+.pipeline-step-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #d5aaa0;
+  border-radius: 10px;
+  background: #fff8f6;
+  color: #57423b;
+  font-size: 0.85rem;
+  font-weight: 700;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pipeline-step-pill:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 3px 10px rgb(154 52 18 / 14%);
+}
+
+.pipeline-step-badge,
+.pipeline-stage-count,
+.tracker-loaded-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.pipeline-step-badge {
+  padding: 2px 8px;
+  border: 1px solid #d5aaa0;
+  border-radius: 999px;
+  background: #fff;
+  color: #9a3412;
+}
+
+.pipeline-vertical-container {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.pipeline-stage-section,
+.tracker-unclassified {
+  scroll-margin-top: 150px;
+  padding: 20px 22px;
+  border: 1px solid #dec0b6;
+  border-radius: 16px;
+  background: #fff;
+  box-shadow: 0 4px 16px rgb(74 69 67 / 4%);
+}
+
+.pipeline-stage-section {
+  scroll-margin-top: 88px;
+}
+
+.pipeline-stage-header,
+.tracker-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #f5ece9;
+}
+
+.pipeline-stage-title-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pipeline-stage-title,
+.tracker-section-heading h2 {
+  margin: 0;
+  color: #1e1b19;
+  font-size: 1.08rem;
+  letter-spacing: -0.01em;
+}
+
+.pipeline-stage-desc,
+.tracker-section-heading p {
+  margin: 0;
+  color: #74593f;
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.pipeline-stage-count,
+.tracker-loaded-count {
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 0.8rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.tracker-unavailable-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px dashed #a8a29e;
+  border-radius: 10px;
+  background: #fafaf9;
+  color: #57534e;
+  line-height: 1.55;
+}
+
+.tracker-unclassified {
+  margin-top: 28px;
+}
+
+.pipeline-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.pipeline-order-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid #d5aaa0;
+  border-radius: 12px;
+  background: #fffdfc;
+  color: #1e1b19;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.pipeline-order-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgb(154 52 18 / 14%);
+}
+
+.card-top-row,
+.card-client-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.card-id-tag {
+  color: #c2410c;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
+.card-days-tag {
+  padding: 3px 8px;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  background: #fff7ed;
+  color: #9a3412;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.card-client-name {
+  font-size: 1rem;
+}
+
+.card-amount-tag {
+  color: #166534;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.tracker-card-facts,
+.tracker-drawer-facts {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+
+.tracker-card-facts div,
+.tracker-drawer-facts div {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.45fr) 1fr;
+  gap: 10px;
+}
+
+.tracker-card-facts dt,
+.tracker-drawer-facts dt {
+  color: #74593f;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.tracker-card-facts dd,
+.tracker-drawer-facts dd {
+  margin: 0;
+  color: #292524;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.card-waiting-alert {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 1px solid #d6d3d1;
+  border-radius: 8px;
+  background: #fafaf9;
+  color: #57534e;
+  font-size: 0.8rem;
+}
+
+.tracker-card-link {
+  align-self: flex-end;
+  color: #9a3412;
+  font-size: 0.8rem;
+  font-weight: 750;
+}
+
+.tracker-drawer {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.tracker-summary-panel,
+.tracker-tab-panel {
+  padding: 16px;
+  border: 1px solid #dec0b6;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.tracker-summary-panel h3,
+.tracker-tab-panel h3 {
+  margin: 0 0 12px;
+  color: #1e1b19;
+}
+
+.tracker-drawer-facts {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tracker-drawer-facts div {
+  grid-template-columns: 1fr;
+  padding: 10px;
+  border-radius: 8px;
+  background: #fff8f6;
+}
+
+.tracker-settlement-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.tracker-settlement-grid article {
+  padding: 14px;
+  border: 1px dashed #a8a29e;
+  border-radius: 10px;
+  background: #fafaf9;
+}
+
+.tracker-settlement-grid span {
+  color: #78716c;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.tracker-settlement-grid h4,
+.tracker-settlement-grid p {
+  margin: 5px 0 0;
+}
+
+.tracker-settlement-grid p {
+  color: #57534e;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.tracker-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 2px solid #f5ece9;
+  padding-bottom: 8px;
+}
+
+.tracker-tabs button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #d5aaa0;
+  border-radius: 8px;
+  background: #fff;
+  color: #57423b;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.tracker-tabs button[aria-selected='true'] {
+  border-color: #c2410c;
+  background: #c2410c;
+  color: #fff;
+}
+
+.tracker-sop-list {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.tracker-sop-list article {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid #d6d3d1;
+  border-radius: 9px;
+  background: #fafaf9;
+}
+
+.tracker-sop-number {
+  display: grid;
+  place-items: center;
+  flex: 0 0 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #e7e5e4;
+  color: #44403c;
+  font-weight: 800;
+}
+
+.tracker-sop-list h4,
+.tracker-sop-list p {
+  margin: 0;
+}
+
+.tracker-sop-list p {
+  margin-top: 4px;
+  color: #57534e;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.tracker-unavailable-badge {
+  display: inline-block;
+  margin-top: 7px;
+  color: #57534e;
+  font-size: 0.75rem;
+  font-weight: 750;
+}
+
+.tracker-disabled-action {
+  margin-top: 14px;
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #d6d3d1;
+  border-radius: 8px;
+  background: #e7e5e4;
+  color: #78716c;
+  font-weight: 700;
+  cursor: not-allowed;
+}
+
+@media (max-width: 800px) {
+  .tracker-page-header,
+  .pipeline-stage-header,
+  .tracker-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .tracker-settlement-grid,
+  .tracker-drawer-facts {
+    grid-template-columns: 1fr;
+  }
+}

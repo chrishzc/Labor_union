@@ -19,8 +19,6 @@ try:
 except Exception:
     pass
 
-# Let file_watcher.py run this script as a subprocess with project imports available.
-# Let file_watcher.py run this script as a subprocess with project imports available.
 def _resolve_project_root() -> Path:
     return Path(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 

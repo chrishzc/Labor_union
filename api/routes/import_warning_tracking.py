@@ -1,6 +1,6 @@
 """
 File: import_warning_tracking.py
-Description: 提供管理員匯入警示追蹤的唯讀查詢與狀態 Preview／Apply API。
+Description: 提供匯入警示查詢、去敏 owner referral 與狀態 Preview／Apply API。
 """
 
 from typing import Annotated
@@ -10,7 +10,12 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.import_warning_tracking import get_import_warning_tracking_application
 from api.schemas.base import BaseResponse
-from api.schemas.import_warning_tracking import ImportWarningTaskView, WarningTransitionBody, WarningTransitionPreviewView
+from api.schemas.import_warning_tracking import (
+    ImportWarningTaskView,
+    WarningReferralView,
+    WarningTransitionBody,
+    WarningTransitionPreviewView,
+)
 from domains.anomalies.import_warning_tracking import ImportWarningTrackingStatus
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
@@ -26,6 +31,37 @@ _IdempotencyHeader = Annotated[str, Header(alias="Idempotency-Key", min_length=1
 def query_tasks(active_only: bool = Query(True), limit: int = Query(100, ge=1, le=200), offset: int = Query(0, ge=0), principal: AdminPrincipal = Depends(require_system_admin), application: ImportWarningTrackingApplication = Depends(get_import_warning_tracking_application)):
     del principal
     return BaseResponse(data=[_task(item) for item in application.query_tasks(active_only=active_only, limit=limit, offset=offset)], message="成功取得匯入警示追蹤清單")
+
+
+@router.get(
+    "/tasks/{occurrence_identity}/referral",
+    response_model=BaseResponse[WarningReferralView],
+)
+def query_referral(
+    occurrence_identity: str = Path(..., min_length=1, max_length=191),
+    expected_version: int = Query(..., ge=1),
+    principal: AdminPrincipal = Depends(require_system_admin),
+    application: ImportWarningTrackingApplication = Depends(
+        get_import_warning_tracking_application
+    ),
+):
+    del principal
+    try:
+        value = application.query_referral(
+            occurrence_identity,
+            expected_version=expected_version,
+        )
+    except ValueError as error:
+        code = str(error)
+        status = 404 if code == "import_warning_not_found" else 409 if code == "import_warning_version_conflict" else 422
+        raise HTTPException(
+            status_code=status,
+            detail={"error": {"code": code}},
+        ) from error
+    return BaseResponse(
+        data=_referral(value),
+        message="成功取得匯入警示 owning 業面導向",
+    )
 
 
 @router.post("/tasks/{occurrence_identity}/preview", response_model=BaseResponse[WarningTransitionPreviewView])
@@ -50,11 +86,26 @@ def _transition(operation, body, occurrence_identity, idempotency_key, correlati
 
 
 def _task(value):
-    return {"occurrence_identity": value.occurrence_identity, "owning_lane": value.owning_lane, "logical_code": value.logical_code, "field_path": value.field_path, "masked_subject": value.masked_subject, "issue_codes": list(value.issue_codes), "tracking_status": value.tracking_status.value, "tracking_version": value.tracking_version, "evidence_reference": value.evidence_reference}
+    return {"occurrence_identity": value.occurrence_identity, "owning_lane": value.owning_lane, "logical_code": value.logical_code, "field_path": value.field_path, "masked_subject": value.masked_subject, "issue_codes": list(value.issue_codes), "tracking_status": value.tracking_status.value, "tracking_version": value.tracking_version, "evidence_reference": value.evidence_reference, "display_message": value.display_message, "navigation_action": value.navigation_action}
 
 
 def _preview(value):
     return {"occurrence_identity": value.occurrence_identity, "expected_version": value.expected_version, "resulting_status": value.resulting_status.value, "resulting_version": value.resulting_version}
+
+
+def _referral(value):
+    return {
+        "occurrence_identity": value.occurrence_identity,
+        "expected_version": value.expected_version,
+        "owning_lane": value.owning_lane,
+        "logical_code": value.logical_code,
+        "field_path": value.field_path,
+        "masked_subject": value.masked_subject,
+        "display_message": value.display_message,
+        "navigation_action": value.navigation_action,
+        "action_kind": value.action_kind,
+        "target_command": value.target_command,
+    }
 
 
 __all__ = ["router"]

@@ -1,0 +1,16 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "209_access_control_totp_root.sql": {
+      "tables": {
+        "admin_users": ["access_control_version"],
+        "admin_root_account": ["singleton_key", "admin_user_id", "created_at", "updated_at"],
+        "admin_totp_factors": ["id", "admin_user_id", "factor_state", "seed_ciphertext", "encryption_key_version", "enrollment_challenge_hash", "enrollment_expires_at", "last_successful_step", "activated_at", "revoked_at", "created_at", "updated_at"],
+        "admin_mfa_enrollment_challenges": ["id", "admin_user_id", "challenge_hash", "expires_at", "consumed_at", "created_at"],
+        "admin_totp_recovery_codes": ["id", "factor_id", "code_hash", "consumed_at", "created_at"],
+        "admin_login_attempts": ["id", "username_hash", "source_hash", "outcome", "occurred_at"]
+      },
+      "triggers": []
+    }
+  }
+}

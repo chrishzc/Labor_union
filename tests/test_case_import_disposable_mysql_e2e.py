@@ -29,7 +29,7 @@ from infrastructure.mysql.case_import_repository import (
 )
 from infrastructure.mysql.hcm_workbook_import_repository import HcmWorkbookImportRepository
 from infrastructure.mysql.mysql_adapter import get_connection
-from scripts.imports.import_client_hcm import HcmHistoricalRowIntake, HcmLegacyRowIntake
+from scripts.imports.import_client_hcm import HcmLegacyRowIntake
 from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
 from shared_kernel.money import MoneyNTD
 from subsystems.case_import.case_import_workflow import ApplyCaseImport, CaseImportWorkflow
@@ -173,49 +173,6 @@ def test_dirty_hcm_workbook_writes_parseable_client_fields_and_keeps_invalid_fie
             review = cursor.fetchone()
             assert review is not None
             assert "hcm_field_invalid:性別" in review["issue_codes"]
-    finally:
-        connection.close()
-
-
-def test_historical_hcm_workbook_overwrites_in_source_time_order_without_changing_status(tmp_path):
-    case_no = f"HCM-HISTORY-{uuid4().hex[:12]}"
-    initial_path = tmp_path / "initial.xlsx"
-    pd.DataFrame([_valid_hcm_workbook_row(case_no)]).to_excel(initial_path, sheet_name="HCM", index=False)
-    history_path = tmp_path / "history.xlsx"
-    older = _valid_hcm_workbook_row(case_no)
-    older.update({"報名時間(建檔)": "2025/01/01", "姓名": "歷史舊姓名", "希望服務天數": 8})
-    newer = _valid_hcm_workbook_row(case_no)
-    newer.update({"報名時間(建檔)": "2026/01/01", "姓名": "歷史新姓名", "希望服務天數": 12})
-    pd.DataFrame([newer, older]).to_excel(history_path, sheet_name="HCM", index=False)
-    connection = get_connection()
-    try:
-        current_service = HcmWorkbookImportService(
-            HcmWorkbookImportRepository(connection), HcmLegacyRowIntake(connection),
-        )
-        initial_frame = current_service.load_frame(str(initial_path))
-        assert initial_frame is not None
-        initial_preview = current_service.preview(initial_frame, str(initial_path))
-        current_service.apply(
-            initial_frame, str(initial_path), initial_preview.preview_fingerprint,
-            f"hcm-history-initial:{case_no}", "test-runner", f"hcm-history-initial:{case_no}",
-        )
-        history_service = HcmWorkbookImportService(
-            HcmWorkbookImportRepository(connection), HcmHistoricalRowIntake(connection),
-        )
-        history_frame = history_service.load_frame(str(history_path))
-        assert history_frame is not None
-        history_preview = history_service.preview(history_frame, str(history_path))
-        receipt = history_service.apply(
-            history_frame, str(history_path), history_preview.preview_fingerprint,
-            f"hcm-history:{case_no}", "test-runner", f"hcm-history:{case_no}",
-        )
-
-        assert receipt.inserted_count == 2
-        with connection.cursor() as cursor:
-            cursor.execute("SELECT name,service_days FROM clients WHERE case_no=%s", (case_no,))
-            assert cursor.fetchone() == {"name": "歷史新姓名", "service_days": 12}
-            cursor.execute("SELECT status,service_days FROM orders WHERE case_no=%s", (case_no,))
-            assert cursor.fetchone() == {"status": "洽談中", "service_days": 12}
     finally:
         connection.close()
 

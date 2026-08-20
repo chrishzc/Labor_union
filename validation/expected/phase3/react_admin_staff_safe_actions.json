@@ -1,0 +1,9 @@
+{
+  "contract": "labor-union-verification-expected/v1", "scenario_id": "SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS", "revision": 1,
+  "assertions": ["Preferences, availability and lifecycle use server versions, fingerprints and receipts.", "Invalid or stale commands create zero partial writes and availability uses the shared occupancy mutex.", "Same payload/key replay is deterministic and outcome_unknown permits only identical retry."],
+  "db_oracle": {"required": ["preferences, availability, and lifecycle each use the approved outer-UoW boundary", "stale/invalid input creates zero partial write", "availability uses the shared occupancy mutex"]},
+  "api_oracle": {"required": ["typed staff query/preview/apply/receipt views", "fingerprints and versions are server values", "remaining controls return typed unavailable/blocker"]},
+  "ui_oracle": {"required": ["Part 04 three mutation families are repeatable", "receipt_received and observed are distinct", "remaining controls are natively disabled"]},
+  "replay_oracle": {"required": ["same payload and idempotency key returns the same receipt", "different payload is a typed conflict"]}, "recovery_oracle": {"required": ["timeout/network/503 becomes outcome_unknown", "only identical payload/key may retry", "requery failure is observation_failed"]},
+  "forbidden_observations": ["frontend-derived staff status, overlap, buffer or eligibility", "fake mutation receipt", "optimistic success"]
+}

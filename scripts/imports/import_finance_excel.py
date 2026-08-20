@@ -1,14 +1,12 @@
 """
 File: import_finance_excel.py
-Description: 銀行 workbook 維運入口預設預覽，明確確認後才建立 typed 匯入批次。
+Description: 銀行 workbook 維運診斷入口，只允許格式預覽，不得建立匯入批次。
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-import os
 from pathlib import Path
 import sys
 from typing import Any, Sequence
@@ -18,12 +16,6 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.imports.finance_statement_normalizer import normalize_workbook
-from shared_kernel.identities import ActorContext, IdempotencyKey
-from subsystems.finance_import.ingestion import ingest_finance_workbook
-
-
-_OPERATOR_ACTOR = ActorContext("finance-import-cli-operator")
-_OPERATOR_IDEMPOTENCY_PREFIX = "finance-import-cli-operator:"
 
 
 def _write_report(path: str, manifest: dict[str, Any]) -> str:
@@ -70,11 +62,6 @@ def _console_summary(
     }
 
 
-def _operator_idempotency_key(excel_path: Path) -> IdempotencyKey:
-    digest = hashlib.sha256(excel_path.read_bytes()).hexdigest()
-    return IdempotencyKey(f"{_OPERATOR_IDEMPOTENCY_PREFIX}{digest}")
-
-
 def _dry_run_manifest(excel_path: Path) -> dict[str, Any]:
     normalized = normalize_workbook(str(excel_path))
     return {
@@ -86,27 +73,16 @@ def _dry_run_manifest(excel_path: Path) -> dict[str, Any]:
     }
 
 
-def _ingestion_manifest(excel_path: Path) -> dict[str, Any]:
-    receipt = ingest_finance_workbook(
-        str(excel_path), _operator_idempotency_key(excel_path), _OPERATOR_ACTOR
-    )
-    return {
-        "mode": "test_ingestion", "transaction_outcome": "committed",
-        "source_path": str(excel_path), "format_manifest": {},
-        "batch_id": receipt.batch_identity,
-        "inserted_rows": receipt.canonical_created_count,
-        "skipped_existing": receipt.duplicate_occurrence_count,
-        "reconciled_counts": {}, "row_results": [], "alert_action": {},
-    }
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="匯入銀行對帳 Excel；預設只驗證格式，明確 --apply 才建立銀行匯入批次。",
+        description="診斷銀行對帳 Excel 格式；正式匯入必須使用 authenticated Finance Web API。",
     )
     parser.add_argument("--excel-path", required=True, help="銀行 Excel 完整路徑")
-    parser.add_argument("--apply", action="store_true", help="建立 typed 銀行匯入批次")
-    parser.add_argument("--confirm-database", help="必須等於目前 DB_DATABASE")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="相容參數；預設即為唯讀格式預覽"
+    )
+    parser.add_argument("--apply", action="store_true", help="已退役；正式匯入必須使用 Finance Web API")
+    parser.add_argument("--confirm-database", help="已退役相容參數，不會連線或寫入資料庫")
     parser.add_argument(
         "--report-path",
         help="可選：將完整 UTF-8 JSON manifest 寫入此路徑",
@@ -138,16 +114,9 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _apply_or_preview_manifest(excel_path: Path, arguments) -> dict[str, Any]:
-    if not arguments.apply:
-        return _dry_run_manifest(excel_path)
-    _require_confirmed_database(arguments.confirm_database)
-    return _ingestion_manifest(excel_path)
-
-
-def _require_confirmed_database(confirmed_database: str | None) -> None:
-    configured_database = os.getenv("DB_DATABASE", "").strip()
-    if confirmed_database != configured_database:
-        raise RuntimeError("finance_import_database_confirmation_required")
+    if arguments.apply:
+        raise RuntimeError("finance_import_cli_apply_retired")
+    return _dry_run_manifest(excel_path)
 
 
 if __name__ == "__main__":

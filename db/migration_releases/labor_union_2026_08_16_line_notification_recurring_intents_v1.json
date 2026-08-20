@@ -1,0 +1,12 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-line-notification-recurring-intents-2026-08-16-v1",
+  "release_metadata": {"release_name": "Labor Union LINE notification recurring intents", "application_version": "line-notification-recurring-intents-v1", "published_at": "2026-08-16", "description": "Permit bounded daily notification occurrences per immutable decision"},
+  "source_baseline": {"minimum_mysql_version": "8.0", "required_character_set": "utf8mb4", "allowed_owned_object_states": ["absent", "exact"], "forbidden_owned_object_states": ["partial", "drift"], "source_must_be_read_only": true, "maintenance_token_required": true, "baseline_id": "schema-assembly-v1-or-later"},
+  "artifacts": [{"name": "206_line_notification_recurring_intents.sql", "relative_path": "db/schema_parts/206_line_notification_recurring_intents.sql", "sha256": "87c7e6b6ffa3864cb608ea8f5f186e0060afbda082ec404d6a514416ef8253c9", "dependencies": [], "data_effect": "schema_only", "rollback_policy": "code-rollback-preserve-recurring-notification-evidence", "resumable_boundary_policy": "statement-sha256-with-durable-receipt"}],
+  "backfills": [],
+  "verification_contracts": [{"verification_id": "line-notification-recurring-intents-owned-objects", "phase": "post-schema", "policy": "candidate-owned-objects-exact", "read_only": true, "blocking": true}],
+  "application_compatibility": {"minimum_api_contract": "typed-api-v1", "compatible_contracts": ["line-notification-catalog-v1", "line-notification-recurring-intents-v1"], "required_restart_targets": ["api", "line-worker"], "watcher_worker_compatibility": "same-release-required", "post_cutover_smoke_ids": ["line-notification-recurring-intents"]},
+  "descriptor_artifact": {"name": "labor_union_2026_08_16_line_notification_recurring_intents_v1.descriptors.json", "relative_path": "db/migration_releases/labor_union_2026_08_16_line_notification_recurring_intents_v1.descriptors.json", "sha256": "80d9bc44d4a668ae65c724ee23b54f70eadfbec0d7d43f48d282a432dc5f8a5a", "dependencies": []},
+  "tool_archive_policy": {"artifact_hash_algorithm": "sha256", "backup_archive_policy": "permanent-release-archive", "journal_archive_policy": "append-only-per-operation", "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"], "receipt_archive_policy": "permanent-release-archive", "restore_required_mode": "new-absent-candidate-only"}
+}

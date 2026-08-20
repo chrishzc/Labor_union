@@ -267,6 +267,7 @@ def default_anomaly_registry() -> AnomalyDefinitionRegistry:
             _schedule_holiday_preference_conflict_definition(),
             _client_missing_line_definition(),
             _staff_missing_line_definition(),
+            _line_notification_delivery_definition(),
             _line_task_no_reply_definition(),
             _line_identity_conflict_definition(),
         )
@@ -454,6 +455,25 @@ def _staff_missing_line_definition() -> AnomalyDefinition:
         projection_kind=AnomalyProjectionKind.CURRENT_STATE,
         available_actions=(),
         display_fields=("case_no",),
+    )
+
+
+def _line_notification_delivery_definition() -> AnomalyDefinition:
+    return AnomalyDefinition(
+        code="LINE-006",
+        source_domain="line_notification",
+        fingerprint_fields=("case_no", "notification_reason"),
+        severity=AnomalySeverity.WARNING,
+        projection_kind=AnomalyProjectionKind.CURRENT_STATE,
+        available_actions=(
+            DomainActionLink(
+                "review_notification_timeline",
+                "line_notification",
+                "QueryLineNotificationTimeline",
+                False,
+            ),
+        ),
+        display_fields=("case_no", "notification_reason"),
     )
 
 

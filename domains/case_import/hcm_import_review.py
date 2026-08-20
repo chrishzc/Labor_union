@@ -1,6 +1,6 @@
 """
 File: hcm_import_review.py
-Description: 定義 HCM 無效來源列的不可逆 identity、privacy-safe evidence 與 anomaly intent。
+Description: 定義 HCM review identity、去敏證據與欄位級 warning 展開。
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from typing import Mapping
 
 from domains.anomalies.import_warning_tracking import (
     ImportWarningOccurrence,
+    UnknownImportWarningIssueError,
     build_import_warning_occurrence,
 )
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
@@ -85,36 +86,56 @@ def opened_anomaly_snapshot(root: HcmImportReviewRoot) -> dict[str, object]:
 def build_hcm_warning_occurrences(
     root: HcmImportReviewRoot,
 ) -> tuple[ImportWarningOccurrence, ...]:
+    return build_hcm_warning_occurrences_from_review(
+        source_event_identity=root.source_event_identity,
+        masked_case_identity=root.masked_case_identity,
+        issue_codes=root.issue_codes,
+    )
+
+
+def build_hcm_warning_occurrences_from_review(
+    *,
+    source_event_identity: str,
+    masked_case_identity: str,
+    issue_codes: tuple[str, ...],
+) -> tuple[ImportWarningOccurrence, ...]:
+    if "hcm_case_import:case_import_case_no_required" in issue_codes:
+        return ()
     return tuple(
         build_import_warning_occurrence(
             owning_lane="hcm",
-            source_event_identity=root.source_event_identity,
+            source_event_identity=source_event_identity,
             logical_code=_hcm_logical_code(issue_code),
             field_path=_hcm_field_path(issue_code),
-            masked_subject=root.masked_case_identity,
+            masked_subject=masked_case_identity,
             issue_codes=(issue_code,),
         )
-        for issue_code in root.issue_codes
+        for issue_code in issue_codes
     )
 
 
 def _hcm_logical_code(issue_code: str) -> str:
-    if issue_code.startswith("hcm_case_import:"):
-        return "HCM-CASE-001"
     if issue_code.startswith("hcm_field_missing:"):
         return "HCM-FIELD-001"
-    if issue_code == "hcm_identity:hcm_unique_candidate":
+    if issue_code.startswith("hcm_field_invalid:"):
+        return "HCM-FIELD-002"
+    if issue_code in {
+        "hcm_identity:hcm_unique_candidate",
+        "hcm_identity:hcm_duplicate_application",
+    }:
         return "HCM-LINK-001"
-    if issue_code.startswith("hcm_identity:"):
+    if issue_code == "hcm_identity:hcm_identity_ambiguous":
         return "HCM-LINK-002"
-    return "HCM-FIELD-002"
+    if issue_code == "hcm_case_import:case_import_existing_source_conflict":
+        return "HCM-CASE-002"
+    raise UnknownImportWarningIssueError(owning_lane="hcm", issue_code=issue_code)
 
 
 def _hcm_field_path(issue_code: str) -> str:
-    if issue_code.startswith("hcm_case_import:"):
-        return "查詢序號(案件編號)"
     if issue_code.startswith("hcm_identity:"):
         return "$client_link"
+    if issue_code.startswith("hcm_case_import:"):
+        return "$source_row"
     _, separator, field_path = issue_code.partition(":")
     return field_path if separator and field_path else "$source_row"
 
@@ -127,8 +148,8 @@ def _bounded_evidence(snapshot: Mapping[str, object]) -> dict[str, object]:
         field_name = str(field).strip()
         if not field_name or isinstance(value, (dict, list, tuple, set)):
             raise ValueError("evidence snapshot must contain bounded scalar values")
-        if value is not None and not isinstance(value, (str, int, bool)):
-            raise ValueError("evidence snapshot contains a non-canonical value")
+        if value is not None and not isinstance(value, (int, bool)):
+            raise ValueError("evidence snapshot only permits bounded numeric or boolean metadata")
         bounded[field_name] = value
     return bounded
 
@@ -151,5 +172,6 @@ __all__ = [
     "HcmImportReviewRoot",
     "build_hcm_import_review_root",
     "build_hcm_warning_occurrences",
+    "build_hcm_warning_occurrences_from_review",
     "opened_anomaly_snapshot",
 ]

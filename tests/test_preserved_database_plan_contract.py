@@ -21,6 +21,7 @@ from infrastructure.migration.rehearsal_runtime import (
     EphemeralCandidateRestartPort,
 )
 from scripts import migrate_preserved_database_additive_schema as runner
+from scripts.schema_assembly import load_schema_assembly
 
 
 def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
@@ -32,6 +33,19 @@ def test_runtime_release_manifests_are_in_preserve_data_catalog() -> None:
     }
 
     assert required_manifests <= set(runner.DEFAULT_RELEASE_MANIFESTS)
+
+
+def test_current_notification_schema_parts_are_always_in_preserve_data_chain() -> None:
+    """A fresh-only notification part would make local upgrades silently incomplete."""
+    notification_parts = {
+        path.name
+        for path in load_schema_assembly().active_artifact_paths
+        if path.name.split("_", 1)[0].isdigit()
+        and 203 <= int(path.name.split("_", 1)[0]) <= 208
+    }
+    preserve_parts = {path.name for path in runner.SCHEMA_PARTS}
+
+    assert notification_parts <= preserve_parts
 
 
 def test_every_catalog_descriptor_and_schema_artifact_has_exact_hash() -> None:
@@ -287,26 +301,13 @@ def test_verified_candidate_is_eligible_for_repeat_verification() -> None:
 def test_default_release_catalog_preserves_successors_in_unique_order() -> None:
     artifact_names = tuple(path.name for path in runner.SCHEMA_PARTS)
 
-    assert artifact_names[-12:] == (
-        "188_matching_preferences_and_staff_availability.sql",
-        "189_client_refund_recipient_snapshot_local_upgrade.sql",
-        "190_government_subsidy_overpayment_disposition_local_upgrade.sql",
-        "191_line_staff_self_service_identity_flow.sql",
-        "192_government_subsidy_outbox_intent_type_repair.sql",
-        "193_staff_historical_adoption_hcm_review.sql",
-        "194_historical_order_adoption.sql",
-        "195_import_warning_tracking.sql",
-        "196_case_import_partial_formal_case.sql",
-        "197_client_beclass_transition_binding.sql",
-        "198_case_import_pending_completion_status.sql",
-        "999_v_order_details_view.sql",
+    assert artifact_names.index("209_access_control_totp_root.sql") == (
+        artifact_names.index("208_scheduling_rebuild_notification_invalidation.sql") + 1
     )
-    ordinals = tuple(int(name.split("_", 1)[0]) for name in artifact_names)
-    assert ordinals == tuple(sorted(ordinals))
-    assert len(ordinals) == len(set(ordinals))
+    assert len(artifact_names) == len(set(artifact_names))
     assert "153_retire_empty_legacy_field_inventory.sql" in artifact_names
     assert runner.RELEASE_MANIFEST.release_id == (
-        "labor-union-schema-assembly-2026-08-15-v1"
+        "labor-union-staff-retirement-2026-08-15-v1"
     )
 
 

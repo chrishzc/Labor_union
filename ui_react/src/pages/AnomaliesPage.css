@@ -1,0 +1,327 @@
+/**
+ * @file AnomaliesPage.css
+ * @description 異常審核與匯入警示追蹤頁面之樣式表，包含 KPI 卡片、篩選列、雙通道列表與抽屜樣式。
+ * 契約依據: PROV-20260816 Phase 2D CONTRACT_MATRIX.md。
+ * 變更範圍: 保留既有 class 名稱與佈局結構，擴充匯入警示、載入中、錯誤重試與空狀態樣式。
+ * 驗證依據: 頁面渲染與無破版驗證。
+ * 無副作用宣告: 純樣式定義，無任何腳本副作用。
+ */
+
+.anomalies-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.anomaly-kpi-card {
+  background-color: #ffffff;
+  border-radius: 16px;
+  padding: 20px 24px;
+  border: 1px solid #dec0b6;
+  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.anomaly-kpi-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #8b7169;
+}
+
+.anomaly-kpi-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.anomaly-kpi-sub {
+  font-size: 0.78rem;
+  color: #888;
+}
+
+.anomalies-category-bar {
+  display: flex;
+  gap: 10px;
+  position: sticky;
+  top: 64px;
+  z-index: 50;
+  background: rgba(255, 248, 246, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  padding: 12px 8px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid #f2e2dc;
+  border-radius: 12px;
+  overflow-x: auto;
+}
+
+.anomaly-cat-btn {
+  padding: 8px 18px;
+  background-color: #ffffff;
+  border: 1px solid #dec0b6;
+  border-radius: 10px;
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: #57423b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.anomaly-cat-btn:hover {
+  background-color: #fff8f6;
+  border-color: #ff7f50;
+  color: #ff7f50;
+}
+
+.anomaly-cat-btn.active {
+  background-color: #ff7f50;
+  border-color: #ff7f50;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(255, 127, 80, 0.25);
+}
+
+.anomalies-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.anomaly-card {
+  background-color: #ffffff;
+  border-radius: 14px;
+  border: 1px solid #dec0b6;
+  padding: 20px 24px;
+  box-shadow: 0 4px 16px rgba(74, 69, 67, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.anomaly-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(74, 69, 67, 0.08);
+}
+
+.anomaly-card.critical {
+  border-left: 6px solid #dc2626;
+}
+
+.anomaly-card.warning {
+  border-left: 6px solid #f59e0b;
+}
+
+.anomaly-card.info {
+  border-left: 6px solid #3b82f6;
+}
+
+.anomaly-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.anomaly-code-tag {
+  font-weight: 700;
+  font-size: 0.95rem;
+  color: #1e1b19;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.anomaly-severity-badge {
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.anomaly-severity-badge.critical {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.anomaly-severity-badge.warning {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.anomaly-severity-badge.info {
+  background-color: #e0e7ff;
+  color: #3730a3;
+}
+
+/* Dual-Lane Section & State Styles */
+.anomalies-section-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1e1b19;
+  margin-top: 32px;
+  margin-bottom: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.anomalies-loading {
+  padding: 24px;
+  text-align: center;
+  color: #8b7169;
+  background-color: #ffffff;
+  border: 1px dashed #dec0b6;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.anomalies-error {
+  padding: 18px 24px;
+  background-color: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: 12px;
+  color: #991b1b;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.anomalies-retry-btn {
+  padding: 6px 14px;
+  background-color: #dc2626;
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+
+.anomalies-empty {
+  padding: 32px;
+  text-align: center;
+  color: #8b7169;
+  background-color: #ffffff;
+  border: 1px dashed #dec0b6;
+  border-radius: 12px;
+  font-size: 0.92rem;
+}
+
+/* Import Warnings Tasks Styles */
+.import-warnings-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.import-warning-card {
+  background-color: #ffffff;
+  border-radius: 12px;
+  border: 1px solid #dec0b6;
+  border-left: 6px solid #6366f1;
+  padding: 16px 20px;
+  box-shadow: 0 2px 10px rgba(74, 69, 67, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.import-warning-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.import-warning-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.import-warning-lane-badge {
+  padding: 3px 8px;
+  background-color: #ede9fe;
+  color: #5b21b6;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.import-warning-code-badge {
+  padding: 3px 8px;
+  background-color: #f1f5f9;
+  color: #334155;
+  border-radius: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.import-warning-status-badge {
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.import-warning-status-badge.closed,
+.import-warning-status-badge.auto_resolved {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.import-warning-status-badge.awaiting_external_confirmation {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.import-warning-status-badge.response_recorded {
+  background-color: #dbeafe;
+  color: #1e40af;
+}
+
+.import-warning-status-badge.reimport_requested {
+  background-color: #ffedd5;
+  color: #9a3412;
+}
+
+.import-warning-body {
+  font-size: 0.88rem;
+  color: #57423b;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  background-color: #faf8f7;
+  padding: 10px 14px;
+  border-radius: 8px;
+}
+
+.import-warning-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px dashed #f2e2dc;
+  font-size: 0.85rem;
+}
+
+.import-warning-issue-tag {
+  display: inline-block;
+  padding: 2px 6px;
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  margin-right: 4px;
+}

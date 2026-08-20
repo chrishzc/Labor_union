@@ -1,0 +1,18 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "203_line_notification_rule_catalog.sql": {
+      "tables": {
+        "line_notification_source_events": ["id", "source_domain", "event_code", "source_event_identity", "source_aggregate_type", "source_aggregate_identity", "source_version", "historical_silent", "facts_snapshot", "occurred_at_utc", "created_at_utc"],
+        "line_notification_decisions": ["id", "source_event_id", "rule_revision_id", "rule_id", "recipient_selector", "recipient_type", "recipient_identity", "decision_status", "reason_code", "decision_snapshot", "created_at_utc"],
+        "line_notification_intents": ["id", "decision_id", "delivery_task_id", "template_revision_id", "template_id", "payload_snapshot", "payload_fingerprint", "scheduled_at_utc", "intent_status", "cancellation_reason", "created_at_utc", "cancelled_at_utc"]
+      },
+      "triggers": [
+        "trg_line_notification_source_events_before_update",
+        "trg_line_notification_source_events_before_delete",
+        "trg_line_notification_decisions_before_update",
+        "trg_line_notification_decisions_before_delete"
+      ]
+    }
+  }
+}

@@ -1,4 +1,7 @@
-"""MySQL writer for one atomic Scheduling generation replacement."""
+"""
+File: scheduling_replacement_writer.py
+Description: 在單一排班世代交易寫入正式指派、重建事件與通知失效 outbox。
+"""
 
 from __future__ import annotations
 
@@ -36,6 +39,11 @@ def persist_scheduling_replacement(
         command,
         previous_generation_id,
         generation_id,
+    )
+    _append_notification_invalidation_outbox(
+        cursor,
+        command,
+        rebuild_event_id,
     )
     _append_lineage(
         cursor,
@@ -475,6 +483,34 @@ def _append_lineage(
         "(rebuild_event_id,old_assignment_identity,new_assignment_id,"
         "new_generation_id,lineage_ordinal) VALUES (%s,%s,%s,%s,%s)",
         lineage_rows,
+    )
+
+
+def _append_notification_invalidation_outbox(
+    cursor,
+    command: SchedulingReplacementCommand,
+    rebuild_event_id: int,
+) -> None:
+    """Emit only immutable cancelled-assignment facts; LINE never infers them."""
+    cancelled_assignment_ids = tuple(
+        sorted({int(value) for value in command.candidate.cancelled_assignment_ids})
+    )
+    if not cancelled_assignment_ids:
+        return
+    payload_snapshot = _canonical_json(
+        {
+            "case_no": command.candidate.case_no,
+            "cancelled_assignment_ids": cancelled_assignment_ids,
+        }
+    )
+    cursor.execute(
+        "INSERT INTO scheduling_rebuild_notification_outbox "
+        "(rebuild_event_id,intent_key,payload_snapshot) VALUES (%s,%s,%s)",
+        (
+            rebuild_event_id,
+            f"scheduling-rebuild-notification-invalidation:{rebuild_event_id}",
+            payload_snapshot,
+        ),
     )
 
 

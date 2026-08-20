@@ -1,4 +1,7 @@
-"""Module tests for LINE delivery state, lease, and retry rules."""
+"""
+File: test_line_delivery_domain.py
+Description: 驗證 LINE 投遞狀態、lease、重試與刪除規則的安全轉換。
+"""
 
 from datetime import datetime, timedelta, timezone
 
@@ -90,6 +93,12 @@ def test_maximum_attempts_becomes_terminal_failure() -> None:
 def test_delivery_rejects_direct_pending_to_sent_transition() -> None:
     with pytest.raises(LineDeliveryStateConflict):
         transition_delivery_status(LineDeliveryStatus.PENDING, LineDeliveryStatus.SENT)
+
+
+def test_processing_delivery_can_be_cancelled_before_provider_send() -> None:
+    assert transition_delivery_status(
+        LineDeliveryStatus.PROCESSING, LineDeliveryStatus.CANCELLED
+    ) is LineDeliveryStatus.CANCELLED
 
 
 def test_lease_activity_uses_bounded_time_window() -> None:

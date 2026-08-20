@@ -1,4 +1,7 @@
-"""Static acceptance coverage for the local-development startup batch script."""
+"""
+File: test_online_script.py
+Description: 驗證本機開發啟動腳本的靜態安全契約。
+"""
 
 from pathlib import Path
 
@@ -53,7 +56,7 @@ def test_online_script_is_development_only_and_uses_non_destructive_entrypoints(
     assert '"%PY%" -m scripts.run_contract_integration_worker' not in script
     assert '"%PY%" -m scripts.run_knowledge_worker' in script
     assert '"%PY%" scripts/run_line_worker.py' not in script
-    assert '"%PY%" scripts/file_watcher.py' in script
+    assert '"%PY%" scripts/file_watcher.py' not in script
     assert '"%PY%" scripts/run_durable_job_worker.py' not in script
     assert "line.main:app" not in script
     assert "init_db" not in script.lower()
@@ -71,6 +74,6 @@ def test_online_shell_script_uses_macos_venv_and_expected_entrypoints():
     assert "Port 3306 is busy" in script
     assert '"$PY" -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &' in script
     assert '"$PY" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 &' in script
-    assert '"$PY" scripts/file_watcher.py &' in script
+    assert '"$PY" scripts/file_watcher.py &' not in script
     assert "scripts/init_db.py" not in script
     assert "generate_fake_data.py" not in script

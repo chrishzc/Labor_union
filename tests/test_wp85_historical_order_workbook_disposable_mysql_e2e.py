@@ -1,6 +1,6 @@
 """
 File: test_wp85_historical_order_workbook_disposable_mysql_e2e.py
-Description: 在 disposable MySQL 驗證訂單歷史 workbook 的配對、replay、conflict 與列內 rollback。
+Description: 在 disposable MySQL 驗證歷史訂單配對、rollback 與未知警示重試停損。
 """
 
 from __future__ import annotations
@@ -8,6 +8,7 @@ from __future__ import annotations
 from datetime import date
 import os
 from pathlib import Path
+import time
 from uuid import uuid4
 
 from openpyxl import Workbook
@@ -58,6 +59,9 @@ def test_workbook_apply_preserves_single_assignment_and_dual_evidence(tmp_path):
         assert receipt.assignments_created == 1
         assert replay.replayed_workbook is True
         _assert_assignment_and_evidence(connection, first_case, second_case)
+        projected = consume_historical_order_adoption_review_events(connection)
+        assert projected.failed_count == 0
+        _assert_assignment_evidence_warning(connection)
     finally:
         connection.close()
 
@@ -78,6 +82,49 @@ def test_workbook_conflict_rejects_changed_source_before_row_apply(tmp_path):
             service.apply(str(changed_path), f"wp85-conflict:{token}", changed_preview.preview_fingerprint, "wp85-test", token)
 
         assert _order_status(connection, case_no) == "訂單完成"
+    finally:
+        connection.close()
+
+
+def test_valid_historical_values_replace_current_values_without_false_conflict(tmp_path):
+    token = uuid4().hex
+    connection = get_connection()
+    try:
+        case_no, staff_name = _seed_case(connection, token, "replace")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE orders SET status='訂單取消',lifecycle_version=3,"
+                "actual_start_date='2024-12-01',actual_end_date='2024-12-31' "
+                "WHERE case_no=%s",
+                (case_no,),
+            )
+        connection.commit()
+        workbook = _write_single_workbook(
+            tmp_path / "replace.xlsx", case_no, staff_name, status=1
+        )
+        service = _service(connection)
+        preview = service.preview(str(workbook))
+
+        receipt = service.apply(
+            str(workbook), f"wp85-replace:{token}", preview.preview_fingerprint,
+            "wp85-test", token,
+        )
+
+        assert receipt.adopted_count == 1
+        assert preview.review_required_count == preview.current_conflict_count == 0
+        assert receipt.review_required_count == receipt.current_conflict_count == 0
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT status,lifecycle_version,actual_start_date,actual_end_date "
+                "FROM orders WHERE case_no=%s",
+                (case_no,),
+            )
+            assert cursor.fetchone() == {
+                "status": "訂單完成",
+                "lifecycle_version": 4,
+                "actual_start_date": date(2025, 1, 2),
+                "actual_end_date": date(2025, 1, 31),
+            }
     finally:
         connection.close()
 
@@ -134,6 +181,86 @@ def test_matched_dirty_row_projects_masked_historical_order_anomaly():
         assert result.failed_count == 0
         assert receipt.review_identity is not None
         _assert_review_alert(connection, receipt.review_identity)
+        _assert_warning_task(connection, receipt.review_identity)
+    finally:
+        connection.close()
+
+
+def test_historical_unknown_issue_obeys_one_second_three_attempt_dead_letter_policy():
+    token = uuid4().hex
+    raw_issue = "future_order_state:完整客戶名不得寫入錯誤"
+    connection = get_connection()
+    try:
+        consume_historical_order_adoption_review_events(connection)
+        case_no, _ = _seed_case(connection, token, "unknown")
+        row = HistoricalOrderWorkbookRow(
+            3,
+            f"historical-orders:{token}:unknown",
+            "b" * 64,
+            case_no,
+            _client_name(case_no),
+            OrderLifecycleStatus.COMPLETED,
+            None,
+            None,
+            (),
+            (raw_issue,),
+        )
+        workflow = HistoricalOrderAdoptionWorkflow(
+            MySqlHistoricalOrderAdoptionRepository(connection),
+            lambda: MySqlUnitOfWork(connection),
+        )
+        preview = workflow.preview(row)
+        receipt = workflow.apply(
+            HistoricalOrderAdoptionRequest(
+                row, preview.fingerprint, f"wp85-unknown:{token}",
+                "wp85-test", "unknown", token,
+            )
+        )
+        assert receipt.review_identity is not None
+
+        for attempt in range(3):
+            result = consume_historical_order_adoption_review_events(
+                connection, maximum_events=1
+            )
+            assert result.failed_count == 1
+            immediate = consume_historical_order_adoption_review_events(
+                connection, maximum_events=1
+            )
+            assert immediate.failed_count == 0
+            if attempt < 2:
+                time.sleep(1.05)
+
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM import_warning_occurrences "
+                "WHERE source_receipt_identity=%s",
+                (receipt.review_identity,),
+            )
+            assert cursor.fetchone() == {"count": 0}
+            cursor.execute(
+                "SELECT COUNT(*) AS count FROM anomaly_current_alerts "
+                "WHERE definition_code='HISTORICAL-ORDER-001' AND source_identity=%s",
+                (receipt.review_identity,),
+            )
+            assert cursor.fetchone() == {"count": 0}
+            cursor.execute(
+                "SELECT outbox.published_at,outbox.attempts,outbox.last_error "
+                "FROM historical_order_adoption_outbox outbox "
+                "JOIN historical_order_adoption_receipts receipt "
+                "ON receipt.id=outbox.receipt_id "
+                "WHERE receipt.review_identity=%s "
+                "AND outbox.intent_type='historical_order_review_required'",
+                (receipt.review_identity,),
+            )
+            outbox = cursor.fetchone()
+            failure = __import__("json").loads(outbox["last_error"])
+            assert outbox["published_at"] is None
+            assert outbox["attempts"] == 3
+            assert failure["terminal"] == 1
+            assert failure["error_code"].startswith(
+                "import_warning_projection_unknown_issue:historical_order:"
+            )
+            assert raw_issue not in outbox["last_error"]
     finally:
         connection.close()
 
@@ -255,6 +382,23 @@ def _assert_assignment_and_evidence(connection, first_case, second_case):
     assert _count(connection, "historical_order_pairing_evidence", second_case, via_receipt=True) == 2
 
 
+def _assert_assignment_evidence_warning(connection):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT occurrence.logical_code,occurrence.field_path "
+            "FROM import_warning_occurrences occurrence "
+            "JOIN historical_order_adoption_reviews review "
+            "ON review.review_identity=occurrence.source_receipt_identity "
+            "WHERE JSON_CONTAINS(review.issue_codes,%s) "
+            "ORDER BY occurrence.id DESC LIMIT 1",
+            ('"historical_assignment_evidence_insufficient"',),
+        )
+        assert cursor.fetchone() == {
+            "logical_code": "ORDER-HIST-ASSIGNMENT-001",
+            "field_path": "$assignment",
+        }
+
+
 def _assert_review_alert(connection, review_identity):
     with connection.cursor() as cursor:
         cursor.execute(
@@ -267,6 +411,26 @@ def _assert_review_alert(connection, review_identity):
     assert alert["definition_code"] == "HISTORICAL-ORDER-001"
     assert alert["source_identity"] == review_identity
     assert "staff_missing" in str(alert["display_snapshot"])
+
+
+def _assert_warning_task(connection, review_identity):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT occurrence.logical_code,occurrence.field_path,task.tracking_status,task.tracking_version "
+            "FROM import_warning_occurrences occurrence "
+            "JOIN import_warning_current_tasks task ON task.occurrence_id=occurrence.id "
+            "WHERE occurrence.source_receipt_identity=%s",
+            (review_identity,),
+        )
+        rows = cursor.fetchall()
+    assert rows == [
+        {
+            "logical_code": "ORDER-HIST-STAFF-001",
+            "field_path": "$staff",
+            "tracking_status": "open",
+            "tracking_version": 1,
+        }
+    ]
 
 
 def _order_status(connection, case_no):

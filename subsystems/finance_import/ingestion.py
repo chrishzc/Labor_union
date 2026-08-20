@@ -15,6 +15,9 @@ from domains.finance_import.ingestion import (
     InitialClassificationFacts,
     build_initial_classification,
 )
+from domains.finance_import.source_warning_review import (
+    build_finance_source_review,
+)
 from infrastructure.mysql.mysql_adapter import get_connection
 from scripts.imports.finance_statement_normalizer import normalize_workbook
 from shared_kernel.fingerprints import fingerprint_payload
@@ -123,7 +126,13 @@ def _ingest_or_replay(
             load_finance_identity_maps(cursor),
         )
         progress.phase = "classification"
-        receipt = _persist_ingestion(cursor, staged, source_digest, actor)
+        receipt = _persist_ingestion(
+            cursor,
+            staged,
+            normalized_result,
+            source_digest,
+            actor,
+        )
         progress.phase = "receipt"
         _save_receipt(cursor, idempotency_key, command_fingerprint, receipt)
         return receipt
@@ -132,24 +141,96 @@ def _ingest_or_replay(
 def _persist_ingestion(
     cursor: Any,
     staged: Mapping[str, Any],
+    normalized_result: Mapping[str, Any],
     source_digest: str,
     actor: ActorContext,
 ) -> FinanceWorkbookIngestionReceipt:
     batch_id = int(staged["batch_id"])
     batch_identity = f"finance-import-batch:{batch_id}"
     _insert_batch_contract(cursor, batch_id, batch_identity, source_digest)
+    source_warning_count, source_warning_created_count = _append_source_reviews(
+        cursor,
+        batch_id,
+        source_digest,
+        normalized_result.get("source_reviews", []),
+    )
     canonical_created = _append_missing_classifications(
         cursor, batch_id, staged["staged_rows"], actor
     )
     _complete_batch(cursor, batch_id)
-    source_rows = len(staged["staged_rows"])
+    source_rows = int(
+        normalized_result.get("source_row_count", len(staged["staged_rows"]))
+    )
     return FinanceWorkbookIngestionReceipt(
         batch_identity,
         source_digest,
         source_rows,
         canonical_created,
-        source_rows - canonical_created,
+        len(staged["staged_rows"]) - canonical_created,
+        source_warning_count,
+        source_warning_created_count,
     )
+
+
+def _append_source_reviews(
+    cursor: Any,
+    batch_id: int,
+    source_digest: str,
+    source_reviews: object,
+) -> tuple[int, int]:
+    if not isinstance(source_reviews, list):
+        raise ValueError("finance_source_reviews_must_be_array")
+    created_count = 0
+    for payload in source_reviews:
+        if not isinstance(payload, Mapping):
+            raise ValueError("finance_source_review_must_be_object")
+        issues = payload.get("issue_codes")
+        if not isinstance(issues, (list, tuple)):
+            raise ValueError("finance_source_review_issues_must_be_array")
+        review = build_finance_source_review(
+            source_content_digest=source_digest,
+            format_id=str(payload.get("format_id")),
+            sheet_name=str(payload.get("sheet_name")),
+            source_row=int(payload.get("source_row", 0)),
+            issue_codes=tuple(str(issue) for issue in issues),
+        )
+        cursor.execute(
+            "INSERT IGNORE INTO finance_import_source_reviews "
+            "(review_identity,source_content_digest,format_id,sheet_name,source_row,"
+            "masked_source_identity,issue_codes) VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (
+                review.review_identity,
+                review.source_content_digest,
+                review.format_id,
+                review.sheet_name,
+                review.source_row,
+                review.masked_source_identity,
+                _canonical_json(review.issue_codes),
+            ),
+        )
+        created = int(cursor.rowcount) == 1
+        created_count += int(created)
+        cursor.execute(
+            "SELECT id FROM finance_import_source_reviews "
+            "WHERE review_identity=%s FOR UPDATE",
+            (review.review_identity,),
+        )
+        stored = cursor.fetchone()
+        if not isinstance(stored, Mapping):
+            raise RuntimeError("finance_source_review_missing_after_insert")
+        review_id = int(stored["id"])
+        cursor.execute(
+            "INSERT IGNORE INTO finance_import_source_review_occurrences "
+            "(batch_id,review_id) VALUES (%s,%s)",
+            (batch_id, review_id),
+        )
+        if created:
+            cursor.execute(
+                "INSERT INTO finance_import_source_review_outbox "
+                "(review_id,intent_key) VALUES (%s,%s)",
+                (review_id, f"finance-source-review-opened:{review.review_identity}"),
+            )
+    return len(source_reviews), created_count
 
 
 def _append_missing_classifications(

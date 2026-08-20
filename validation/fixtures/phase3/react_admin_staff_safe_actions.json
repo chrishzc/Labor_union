@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-fixture/v1", "scenario_id": "SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS", "revision": 1,
+  "test_kind": "domain_root_data",
+  "data_classification": "synthetic", "generation_method": "hand-authored synthetic staff roots; no production export",
+  "allowed_use": "validation-only", "redaction_policy": "synthetic staff key ST-A; no phone, bank or personal data",
+  "root_inputs": ["synthetic staff identity", "preference profile snapshot", "availability request", "lifecycle version"],
+  "input_values": {"staff_key": "ST-A", "preference_profile": {"preferred_service_days": [1, 3], "daily_service_hours": 8, "expected_version": 2}, "availability_request": {"start": "2026-02-01", "end": "2026-02-03", "expected_version": 4}, "lifecycle": {"state": "active", "expected_version": 5}},
+  "seed_fields": ["staff_input.staff_key", "preference_input.preferred_service_days", "preference_input.daily_service_hours", "availability_input.start", "availability_input.end", "lifecycle_input.expected_version"],
+  "derived_fields": ["staff_view.state", "preference_receipt.resulting_version", "availability_projection.block_id", "lifecycle_receipt.resulting_state"],
+  "expected_manifest_path": "validation/expected/phase3/react_admin_staff_safe_actions.json",
+  "fixed_business_clock": "2026-01-15T09:00:00+08:00",
+  "forbidden_direct_seed": ["staff status", "assignment projection", "payroll projection", "UI success state", "audit receipt", "derived day count or eligibility"]
+}

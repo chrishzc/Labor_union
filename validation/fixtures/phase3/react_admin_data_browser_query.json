@@ -1,0 +1,14 @@
+{
+  "contract": "labor-union-verification-fixture/v1", "scenario_id": "GDATA-REACT-ADMIN-DATA-BROWSER-QUERY", "revision": 1,
+  "test_kind": "domain_root_data",
+  "data_classification": "synthetic", "generation_method": "hand-authored allowlist and masking boundary values; no production export",
+  "allowed_use": "validation-only", "redaction_policy": "all row values synthetic and masked; no arbitrary table names",
+  "root_inputs": ["synthetic allowlisted source", "synthetic row key", "bounded cursor and row budget"],
+  "input_values": {"source_key": "allowlisted-source-synthetic", "row_key": "ROW-SYN-01", "cursor": "db-cursor-1", "row_budget": 20},
+  "seed_fields": ["source_input.source_key", "row_input.row_key", "query_input.cursor", "query_input.row_budget"],
+  "derived_fields": ["browser_view.masked_rows", "browser_view.next_cursor", "browser_view.redaction_labels"],
+  "expected_manifest_path": "validation/expected/phase3/react_admin_data_browser_query.json",
+  "fixed_business_clock": "2026-01-15T09:00:00+08:00",
+  "forbidden_direct_seed": ["raw database row", "source correction mutation", "unmasked PII", "arbitrary table access"],
+  "blocked_reason": "Data Browser Part identity and canonical source mapping are not yet decided"
+}

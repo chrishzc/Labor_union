@@ -1,6 +1,6 @@
 """
 File: import_warning_tracking.py
-Description: 定義 WP88 匯入欄位警示 occurrence 與僅追蹤、不修正資料的六狀態規則。
+Description: 定義匯入警示 occurrence、追蹤狀態與未登錄 issue 的去敏錯誤。
 """
 
 from __future__ import annotations
@@ -27,6 +27,16 @@ class ImportWarningTrackingStatus(StrEnum):
 
 class WarningTransitionError(ValueError):
     pass
+
+
+class UnknownImportWarningIssueError(ValueError):
+    """Signal a projection contract gap without copying source issue text."""
+
+    def __init__(self, *, owning_lane: str, issue_code: str) -> None:
+        lane = _require_lane(owning_lane)
+        issue = _require_text(issue_code, "issue code")
+        digest = hashlib.sha256(issue.encode("utf-8")).hexdigest()[:16]
+        super().__init__(f"import_warning_projection_unknown_issue:{lane}:{digest}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,6 +153,7 @@ def _require_version(value: int) -> None:
 __all__ = [
     "ImportWarningOccurrence",
     "ImportWarningTrackingStatus",
+    "UnknownImportWarningIssueError",
     "WarningTransitionError",
     "WarningTransitionPreview",
     "build_import_warning_occurrence",

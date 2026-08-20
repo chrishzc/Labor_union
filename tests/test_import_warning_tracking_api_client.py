@@ -1,6 +1,6 @@
 """
 File: test_import_warning_tracking_api_client.py
-Description: 驗證匯入警示 UI client 只接受 typed API envelope 與合法轉態結果。
+Description: 驗證匯入警示 UI client 僅接受 typed envelope 與合法 enum 轉態結果。
 """
 
 from api.schemas.import_warning_tracking import WarningTransitionBody

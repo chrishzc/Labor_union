@@ -1,4 +1,7 @@
-"""Durable closed-loop proof for a scheduling anomaly on disposable MySQL."""
+"""
+File: test_anomaly_closed_loop_disposable_mysql_e2e.py
+Description: 以隔離 MySQL 驗證排班異常閉環；拒絕非 lu_test_* 目標。
+"""
 
 from __future__ import annotations
 
@@ -8,7 +11,10 @@ from uuid import uuid4
 
 import pytest
 
-from domains.anomalies.registry import AlertWorkflowStatus, default_anomaly_registry
+from domains.anomalies.registry import (
+    AlertWorkflowStatus,
+    default_anomaly_registry,
+)
 from infrastructure.mysql.anomaly_registry_repository import (
     AnomalyMySqlUnitOfWork,
     MySqlAnomalyRepository,
@@ -27,6 +33,11 @@ from subsystems.anomalies.scheduling_coverage_anomaly_consumer import (
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
+if DATABASE and (DATABASE == "union_db" or not DATABASE.startswith("lu_test_")):
+    raise RuntimeError(
+        "LABOR_UNION_TEST_MYSQL_DATABASE must be a disposable lu_test_* database"
+    )
+
 pytestmark = pytest.mark.skipif(
     not DATABASE or os.getenv("DB_DATABASE") != DATABASE,
     reason="requires an explicitly configured disposable lu_test_* MySQL database",
@@ -113,6 +124,10 @@ def _assert_projection_count(connection, fingerprint: str, expected_count: int) 
 
 def _assert_detail(application, projection, case_no: str) -> None:
     detail = application.query_detail(projection.fingerprint)
+    expected_definition = default_anomaly_registry().require(
+        detail.summary.projection.definition_code
+    )
+    assert detail.summary.severity is expected_definition.severity
     assert detail.summary.projection.predicate_active is True
     assert detail.summary.display_snapshot["case_no"] == case_no
     assert [event["action"] for event in detail.timeline] == [

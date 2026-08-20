@@ -1,4 +1,7 @@
-"""共用 UI API 工具函式。"""
+"""
+File: shared.py
+Description: 提供 Streamlit 共用 API 位址、Bearer transport 與明確 auth profile 判定。
+"""
 
 from __future__ import annotations
 
@@ -25,10 +28,27 @@ def resolve_api_base_url() -> str:
 
 
 def admin_auth_is_bypassed() -> bool:
-    """與 backend 相同：只有明確的開發環境設定可省略 Bearer session。"""
+    """與 backend 相同：只有 local_bypass 可省略 Bearer Session。"""
     app_env = (os.getenv("APP_ENV", "development") or "development").strip().lower()
     enabled = (os.getenv("ENABLE_ADMIN_AUTH", "true") or "true").strip().lower()
-    return app_env in DEVELOPMENT_ENVIRONMENTS and enabled in {"0", "false", "no", "off"}
+    profile = (os.getenv("ACCESS_CONTROL_PROFILE", "") or "").strip().lower()
+    return (
+        profile == "local_bypass"
+        and app_env in DEVELOPMENT_ENVIRONMENTS
+        and enabled in {"0", "false", "no", "off"}
+    )
+
+
+def local_developer_session_is_enabled() -> bool:
+    """Allow only the named local profile to obtain a root Session from local env credentials."""
+    app_env = (os.getenv("APP_ENV", "development") or "development").strip().lower()
+    enabled = (os.getenv("ENABLE_ADMIN_AUTH", "true") or "true").strip().lower()
+    profile = (os.getenv("ACCESS_CONTROL_PROFILE", "") or "").strip().lower()
+    return (
+        profile == "local_developer_session"
+        and app_env in {"development", "dev", "local", "test"}
+        and enabled in {"1", "true", "yes", "on"}
+    )
 
 
 def resolve_admin_access_token() -> str:

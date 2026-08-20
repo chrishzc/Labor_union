@@ -1,0 +1,73 @@
+"""
+File: service_day_log_notification_stop_repository.py
+Description: 保存服務日日誌 outbox 的通知停止投影，未知錯誤最多重試三次且每次間隔一秒。
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import datetime, timedelta
+
+from infrastructure.mysql.line_repository_support import database_utc
+from subsystems.line.service_day_log_notification_stop import ServiceDayLogOutboxItem
+
+
+class MySqlServiceDayLogNotificationStopRepository:
+    def __init__(self, connection) -> None:
+        self._connection = connection
+
+    def claim_due(self, now: datetime, limit: int) -> tuple[ServiceDayLogOutboxItem, ...]:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_CLAIM_SQL, (database_utc(now), limit))
+            rows = tuple(cursor.fetchall() or ())
+            for row in rows:
+                cursor.execute(_CLAIM_UPDATE_SQL, (int(row["id"]),))
+        return tuple(_item(row) for row in rows)
+
+    def mark_published(self, outbox_id: int) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_PUBLISH_SQL, (outbox_id,))
+            if cursor.rowcount != 1:
+                raise RuntimeError("service_day_log_outbox_state_conflict")
+
+    def mark_retry_or_failed(self, outbox_id: int, now: datetime, error: Exception) -> None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _FAIL_SQL,
+                (database_utc(now + timedelta(seconds=1)), type(error).__name__[:128], outbox_id),
+            )
+            if cursor.rowcount != 1:
+                raise RuntimeError("service_day_log_outbox_state_conflict")
+
+
+def _item(row) -> ServiceDayLogOutboxItem:
+    payload = json.loads(row["payload_snapshot"]) if isinstance(row["payload_snapshot"], str) else row["payload_snapshot"]
+    if not isinstance(payload, dict):
+        raise ValueError("service_day_log_outbox_payload_invalid")
+    assignment_id = payload.get("assignment_id")
+    service_date = payload.get("service_date")
+    if not isinstance(assignment_id, int) or assignment_id <= 0 or not isinstance(service_date, str) or not service_date:
+        raise ValueError("service_day_log_outbox_payload_invalid")
+    return ServiceDayLogOutboxItem(int(row["id"]), assignment_id, service_date)
+
+
+_CLAIM_SQL = (
+    "SELECT id,payload_snapshot FROM scheduling_service_day_log_outbox "
+    "WHERE delivery_status='pending' AND (next_attempt_at_utc IS NULL OR next_attempt_at_utc<=%s) "
+    "ORDER BY id LIMIT %s FOR UPDATE SKIP LOCKED"
+)
+_CLAIM_UPDATE_SQL = (
+    "UPDATE scheduling_service_day_log_outbox SET delivery_status='processing' WHERE id=%s AND delivery_status='pending'"
+)
+_PUBLISH_SQL = (
+    "UPDATE scheduling_service_day_log_outbox SET delivery_status='published',published_at_utc=UTC_TIMESTAMP(6),last_error_code=NULL "
+    "WHERE id=%s AND delivery_status='processing'"
+)
+_FAIL_SQL = (
+    "UPDATE scheduling_service_day_log_outbox SET delivery_status=IF(attempt_count+1>=3,'failed','pending'),"
+    "attempt_count=attempt_count+1,next_attempt_at_utc=IF(attempt_count+1>=3,NULL,%s),last_error_code=%s "
+    "WHERE id=%s AND delivery_status='processing'"
+)
+
+
+__all__ = ["MySqlServiceDayLogNotificationStopRepository"]

@@ -1,0 +1,245 @@
+<!-- File: mobile_admin.html | Description: LINE LIFF mobile administration for linked union staff. -->
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>工會手機管理</title>
+  <style>
+    :root { --green:#059669; --red:#BE123C; --ink:#1f2937; --muted:#6b7280; --line:#e5e7eb; --bg:#f8fafc; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:-apple-system,BlinkMacSystemFont,"PingFang TC","Noto Sans TC",sans-serif; background:var(--bg); color:var(--ink); }
+    main { max-width:760px; margin:0 auto; padding:18px 14px 40px; }
+    h1 { margin:0 0 8px; font-size:28px; }
+    .caption { color:var(--muted); margin:0 0 18px; line-height:1.5; }
+    .tabs { display:flex; gap:8px; margin-bottom:14px; position:sticky; top:0; background:var(--bg); padding:8px 0; z-index:2; }
+    .tab { flex:1; border:1px solid var(--line); background:white; color:var(--ink); border-radius:12px; padding:12px 8px; font-size:16px; font-weight:700; }
+    .tab.active { background:var(--green); border-color:var(--green); color:white; }
+    .toolbar { display:flex; gap:8px; margin-bottom:12px; }
+    select,input,textarea { width:100%; border:1px solid var(--line); border-radius:12px; padding:12px; font-size:16px; background:white; }
+    textarea { min-height:104px; resize:vertical; }
+    button { border:0; border-radius:12px; padding:12px 14px; font-size:16px; font-weight:700; background:var(--green); color:white; }
+    button.secondary { background:#64748b; }
+    button.danger { background:var(--red); }
+    button:disabled { background:#cbd5e1; }
+    .card { background:white; border:1px solid var(--line); border-radius:16px; padding:14px; margin:10px 0; box-shadow:0 2px 10px rgba(15,23,42,.04); }
+    .row { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+    .pill { display:inline-block; border-radius:999px; background:#ecfdf5; color:#047857; padding:4px 8px; font-size:13px; }
+    .events { border-top:1px solid var(--line); margin-top:12px; padding-top:10px; }
+    .event { padding:8px 0; border-bottom:1px solid #f1f5f9; }
+    .event small { display:block; color:var(--muted); margin-bottom:4px; }
+    .error { background:#fee2e2; color:#b91c1c; border-radius:12px; padding:12px; margin:10px 0; }
+    .info { background:#dbeafe; color:#1d4ed8; border-radius:12px; padding:12px; margin:10px 0; }
+    .hidden { display:none; }
+  </style>
+</head>
+<body>
+<main>
+  <h1 id="title">工會手機管理</h1>
+  <p class="caption" id="subtitle">正在確認您的 LINE 工會人員身分。</p>
+  <div class="tabs">
+    <button class="tab" id="tabCustomer" type="button">客服中心</button>
+    <button class="tab" id="tabReview" type="button">月嫂驗證</button>
+  </div>
+  <div id="status" class="info">載入中...</div>
+  <section id="customerPane" class="hidden">
+    <div class="toolbar">
+      <select id="ticketStatus">
+        <option value="waiting">等待客服</option>
+        <option value="handling">處理中</option>
+        <option value="resolved">已完成</option>
+      </select>
+      <button type="button" id="refreshTickets">重新整理</button>
+    </div>
+    <div id="tickets"></div>
+  </section>
+  <section id="reviewPane" class="hidden">
+    <div class="toolbar">
+      <select id="reviewStatus">
+        <option value="pending">待審核</option>
+        <option value="approved">已核准</option>
+        <option value="rejected">已退回</option>
+      </select>
+      <button type="button" id="refreshReviews">重新整理</button>
+    </div>
+    <div id="reviews"></div>
+  </section>
+</main>
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script>
+let idToken = "";
+let target = "customer_service";
+const statusBox = document.getElementById("status");
+const panes = {
+  customer_service: document.getElementById("customerPane"),
+  staff_review: document.getElementById("reviewPane"),
+};
+
+function liffStateParams() {
+  const params = new URLSearchParams(location.search);
+  const raw = params.get("liff.state") || "";
+  const start = raw.indexOf("?");
+  return new URLSearchParams(start >= 0 ? raw.slice(start) : raw);
+}
+
+function targetFromUrl() {
+  const params = new URLSearchParams(location.search);
+  const state = liffStateParams();
+  return params.get("target") || state.get("target") || "customer_service";
+}
+
+function showStatus(message, isError=false) {
+  statusBox.textContent = message;
+  statusBox.className = isError ? "error" : "info";
+}
+
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({...body, line_id_token: idToken}),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(result.detail?.message || result.detail || result.message || "操作失敗");
+  return result.data;
+}
+
+async function init() {
+  try {
+    target = targetFromUrl() === "staff_review" ? "staff_review" : "customer_service";
+    const configResponse = await fetch("/api/line/config");
+    const config = await configResponse.json();
+    if (!config.liff_id) throw new Error("LIFF 尚未完成設定");
+    await liff.init({liffId: config.liff_id});
+    if (!liff.isLoggedIn()) { liff.login({redirectUri: location.href}); return; }
+    idToken = liff.getIDToken() || "";
+    if (!idToken) throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。");
+    const profile = await postJson("/api/v1/line/mobile-admin/profile", {});
+    document.getElementById("subtitle").textContent = `登入人員：${profile.display_name}｜權限：${profile.role}`;
+    switchPane(target);
+  } catch (error) {
+    showStatus(error.message, true);
+  }
+}
+
+function switchPane(next) {
+  target = next;
+  document.getElementById("tabCustomer").classList.toggle("active", target === "customer_service");
+  document.getElementById("tabReview").classList.toggle("active", target === "staff_review");
+  panes.customer_service.classList.toggle("hidden", target !== "customer_service");
+  panes.staff_review.classList.toggle("hidden", target !== "staff_review");
+  showStatus(target === "customer_service" ? "客服案件列表" : "月嫂驗證待確認申請");
+  if (target === "customer_service") loadTickets();
+  else loadReviews();
+}
+
+async function loadTickets() {
+  try {
+    const data = await postJson("/api/v1/line/mobile-admin/customer-service/tickets", {
+      status: document.getElementById("ticketStatus").value,
+    });
+    const root = document.getElementById("tickets");
+    root.replaceChildren();
+    if (!data.items.length) { root.innerHTML = '<div class="info">目前沒有符合條件的客服案件。</div>'; return; }
+    data.items.forEach(ticket => root.appendChild(ticketCard(ticket)));
+  } catch (error) { showStatus(error.message, true); }
+}
+
+function ticketCard(ticket) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="row"><strong>#${ticket.ticket_id} ${ticket.client_name || "未綁定客戶"}</strong><span class="pill">${ticket.status}</span></div>
+    <p>類型：${ticket.category}｜案件：${ticket.case_no || "無"}｜電話：${ticket.client_phone || "無"}</p>
+    <div class="events" id="events-${ticket.ticket_id}"></div>
+    <textarea id="reply-${ticket.ticket_id}" placeholder="輸入要回覆給用戶的內容"></textarea>
+    <label><input type="checkbox" id="resolve-${ticket.ticket_id}"> 回覆後標示完成</label>
+    <div style="margin-top:10px"><button type="button" data-reply="${ticket.ticket_id}">送出回覆</button></div>
+  `;
+  card.querySelector(`[data-reply="${ticket.ticket_id}"]`).addEventListener("click", () => replyTicket(ticket));
+  loadTicketDetail(ticket.ticket_id);
+  return card;
+}
+
+async function loadTicketDetail(ticketId) {
+  try {
+    const data = await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${ticketId}`, {});
+    const root = document.getElementById(`events-${ticketId}`);
+    root.replaceChildren();
+    data.events.forEach(event => {
+      const item = document.createElement("div");
+      item.className = "event";
+      item.innerHTML = `<small>${event.actor_id}｜${new Date(event.created_at).toLocaleString()}</small>${event.message_text || event.event_type}`;
+      root.appendChild(item);
+    });
+  } catch (_) {}
+}
+
+async function replyTicket(ticket) {
+  const text = document.getElementById(`reply-${ticket.ticket_id}`).value.trim();
+  if (!text) { showStatus("請先輸入回覆內容。", true); return; }
+  try {
+    await postJson(`/api/v1/line/mobile-admin/customer-service/tickets/${ticket.ticket_id}/reply`, {
+      reply_text: text,
+      resolve: document.getElementById(`resolve-${ticket.ticket_id}`).checked,
+      expected_version: ticket.version,
+    });
+    showStatus("已記錄回覆並排入 LINE 傳送。");
+    loadTickets();
+  } catch (error) { showStatus(error.message, true); }
+}
+
+async function loadReviews() {
+  try {
+    const data = await postJson("/api/v1/line/mobile-admin/identity-reviews", {
+      review_status: document.getElementById("reviewStatus").value,
+      review_type: "staff_verification",
+    });
+    const root = document.getElementById("reviews");
+    root.replaceChildren();
+    if (!data.items.length) { root.innerHTML = '<div class="info">目前沒有符合條件的月嫂驗證申請。</div>'; return; }
+    data.items.forEach(review => root.appendChild(reviewCard(review)));
+  } catch (error) { showStatus(error.message, true); }
+}
+
+function reviewCard(review) {
+  const card = document.createElement("div");
+  card.className = "card";
+  card.innerHTML = `
+    <div class="row"><strong>#${review.request_id} ${review.display_name}</strong><span class="pill">${review.status}</span></div>
+    <p>LINE：${review.line_user_id_masked}｜送出：${review.created_at ? new Date(review.created_at).toLocaleString() : "無"}</p>
+    <textarea id="reason-${review.request_id}" placeholder="審核備註或退回原因"></textarea>
+    <div style="display:flex; gap:8px; margin-top:10px">
+      <button type="button" data-approve="${review.request_id}">核准</button>
+      <button type="button" class="danger" data-reject="${review.request_id}">退回</button>
+    </div>
+  `;
+  card.querySelector(`[data-approve="${review.request_id}"]`).addEventListener("click", () => decideReview(review, "approve"));
+  card.querySelector(`[data-reject="${review.request_id}"]`).addEventListener("click", () => decideReview(review, "reject"));
+  return card;
+}
+
+async function decideReview(review, decision) {
+  const reason = document.getElementById(`reason-${review.request_id}`).value.trim() || (decision === "approve" ? "手機端核准月嫂驗證" : "");
+  if (!reason) { showStatus("退回申請時請輸入原因。", true); return; }
+  try {
+    await postJson(`/api/v1/line/mobile-admin/identity-reviews/${review.request_id}/decision`, {
+      decision,
+      expected_version: review.version,
+      reason,
+    });
+    showStatus("審核結果已保存。");
+    loadReviews();
+  } catch (error) { showStatus(error.message, true); }
+}
+
+document.getElementById("tabCustomer").addEventListener("click", () => switchPane("customer_service"));
+document.getElementById("tabReview").addEventListener("click", () => switchPane("staff_review"));
+document.getElementById("refreshTickets").addEventListener("click", loadTickets);
+document.getElementById("refreshReviews").addEventListener("click", loadReviews);
+document.getElementById("ticketStatus").addEventListener("change", loadTickets);
+document.getElementById("reviewStatus").addEventListener("change", loadReviews);
+init();
+</script>
+</body>
+</html>

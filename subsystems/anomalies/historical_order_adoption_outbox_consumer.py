@@ -1,18 +1,28 @@
 """
 File: historical_order_adoption_outbox_consumer.py
-Description: 將歷史訂單待確認 evidence 投影為不含原始個資的 Orders anomaly。
+Description: 投影歷史訂單去敏警示，未知 issue 以三次一秒政策停損。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 import json
 
 from pymysql.err import OperationalError
 
 from domains.anomalies.registry import DesiredAlertState, default_anomaly_registry
+from domains.orders.historical_order_warning_review import (
+    build_historical_order_warning_occurrences,
+)
 from infrastructure.mysql.anomaly_registry_repository import MySqlAnomalyRepository
 from subsystems.anomalies.alert_workflow import AnomalyApplication, ProjectAlertRequest
+from subsystems.anomalies.import_warning_projection_retry import (
+    MAX_WARNING_PROJECTION_ATTEMPTS,
+    WARNING_PROJECTION_RETRY_DELAY_SECONDS,
+    WARNING_PROJECTION_RETRY_READY_SQL,
+    warning_projection_error_code,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,6 +72,7 @@ def _consume_next(connection):
             default_anomaly_registry(), MySqlAnomalyRepository(connection), BorrowedUnitOfWork
         )
         application.project(_project_request(event, review))
+        _project_warning_occurrences(connection, review)
         _mark_delivered(connection, int(event["id"]))
         connection.commit()
         return True
@@ -82,7 +93,9 @@ def _claim_next(connection):
         cursor.execute(
             "SELECT id,bounded_snapshot FROM historical_order_adoption_outbox "
             "WHERE intent_type='historical_order_review_required' AND published_at IS NULL "
-            "AND attempts<10 ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
+            f"AND attempts<{MAX_WARNING_PROJECTION_ATTEMPTS} "
+            f"AND {WARNING_PROJECTION_RETRY_READY_SQL} "
+            "ORDER BY id LIMIT 1 FOR UPDATE SKIP LOCKED"
         )
         return cursor.fetchone()
 
@@ -97,7 +110,7 @@ def _review_identity(event) -> str:
 def _load_review(connection, review_identity: str):
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT review_identity,masked_case_identity,issue_codes FROM "
+            "SELECT review_identity,source_event_identity,masked_case_identity,issue_codes,evidence_snapshot FROM "
             "historical_order_adoption_reviews WHERE review_identity=%s FOR UPDATE",
             (review_identity,),
         )
@@ -130,6 +143,75 @@ def _project_request(event, review) -> ProjectAlertRequest:
     )
 
 
+def _project_warning_occurrences(connection, review) -> None:
+    warnings = build_historical_order_warning_occurrences(
+        source_event_identity=str(review["source_event_identity"]),
+        masked_case_identity=str(review["masked_case_identity"]),
+        issue_codes=_text_tuple(review["issue_codes"]),
+    )
+    evidence = _json_object(review["evidence_snapshot"])
+    for warning in warnings:
+        _append_warning_occurrence(
+            connection,
+            warning,
+            str(review["review_identity"]),
+            evidence,
+        )
+
+
+def _append_warning_occurrence(connection, warning, review_identity: str, evidence) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "INSERT IGNORE INTO import_warning_occurrences "
+            "(occurrence_identity,owning_lane,source_kind,source_event_identity,source_receipt_identity,logical_code,field_path,masked_subject,issue_codes,evidence_snapshot) "
+            "VALUES (%s,%s,'historical_order_review',%s,%s,%s,%s,%s,%s,%s)",
+            (
+                warning.occurrence_identity,
+                warning.owning_lane,
+                warning.source_event_identity,
+                review_identity,
+                warning.logical_code,
+                warning.field_path,
+                warning.masked_subject,
+                _json(list(warning.issue_codes)),
+                _json(evidence),
+            ),
+        )
+        cursor.execute(
+            "SELECT id FROM import_warning_occurrences WHERE occurrence_identity=%s FOR UPDATE",
+            (warning.occurrence_identity,),
+        )
+        occurrence = cursor.fetchone()
+        if occurrence is None:
+            raise RuntimeError("historical_order_warning_occurrence_missing")
+        occurrence_id = int(occurrence["id"])
+        key = _identity("historical-order-warning-open", warning.occurrence_identity)
+        cursor.execute(
+            "INSERT IGNORE INTO import_warning_tracking_events "
+            "(event_identity,occurrence_id,action,before_status,after_status,expected_version,resulting_version,actor_kind,actor_identity,reason_code,command_fingerprint,idempotency_key,correlation_id) "
+            "VALUES (%s,%s,'opened',NULL,'open',0,1,'system','historical-order-projector','source_review_opened',%s,%s,%s)",
+            (
+                key,
+                occurrence_id,
+                _identity("historical-order-warning-fingerprint", warning.occurrence_identity),
+                key,
+                key,
+            ),
+        )
+        cursor.execute(
+            "SELECT id FROM import_warning_tracking_events WHERE idempotency_key=%s",
+            (key,),
+        )
+        event = cursor.fetchone()
+        if event is None:
+            raise RuntimeError("historical_order_warning_open_event_missing")
+        cursor.execute(
+            "INSERT IGNORE INTO import_warning_current_tasks "
+            "(occurrence_id,tracking_status,tracking_version,last_event_id) VALUES (%s,'open',1,%s)",
+            (occurrence_id, int(event["id"])),
+        )
+
+
 def _mark_delivered(connection, event_id: int) -> None:
     with connection.cursor() as cursor:
         cursor.execute(
@@ -145,10 +227,13 @@ def _mark_failed(connection, event, error: Exception) -> None:
     if not isinstance(event, dict) or "id" not in event:
         return
     with connection.cursor() as cursor:
+        message = warning_projection_error_code(error, owning_lane="historical_order")
         cursor.execute(
-            "UPDATE historical_order_adoption_outbox SET attempts=attempts+1,last_error=%s "
-            "WHERE id=%s",
-            ((str(error) or "Historical order anomaly projection failed")[:500], int(event["id"])),
+            "UPDATE historical_order_adoption_outbox SET attempts=attempts+1,"
+            "last_error=JSON_OBJECT('error_code',%s,'retry_after_epoch',"
+            f"UNIX_TIMESTAMP(DATE_ADD(UTC_TIMESTAMP(6),INTERVAL {WARNING_PROJECTION_RETRY_DELAY_SECONDS} SECOND)),"
+            f"'terminal',attempts+1>={MAX_WARNING_PROJECTION_ATTEMPTS}) WHERE id=%s",
+            (message, int(event["id"])),
         )
     connection.commit()
 
@@ -165,6 +250,14 @@ def _text_tuple(value) -> tuple[str, ...]:
     if not isinstance(parsed, list):
         raise ValueError("historical order review issue codes must be an array")
     return tuple(sorted({str(item) for item in parsed}))
+
+
+def _json(value) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def _identity(namespace: str, value: str) -> str:
+    return hashlib.sha256(f"{namespace}:{value}".encode("utf-8")).hexdigest()
 
 
 def _mysql_code(error: OperationalError) -> int:

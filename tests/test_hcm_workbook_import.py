@@ -6,6 +6,7 @@ Description: 驗證 HCM workbook command receipt 的 replay 與 conflict 邊界�
 from __future__ import annotations
 
 import json
+from datetime import datetime
 
 import pandas as pd
 import pytest
@@ -40,10 +41,15 @@ class _Repository:
     def save_receipt(self, key, digest, actor, result):
         self.receipts[key] = {"request_fingerprint": digest, "result_snapshot": json.dumps(result)}
 
+    def query_recent_receipts(self, *, limit, before_receipt_id):
+        del limit, before_receipt_id
+        return tuple(self.recent_rows)
+
 
 class _Intake:
     def __init__(self, repository) -> None:
         self._repository = repository
+        repository.recent_rows = []
 
     def load_frame(self, source_path):
         return pd.DataFrame({"案件": ["A"]})
@@ -77,6 +83,22 @@ class _WarningIntake(_Intake):
 
     def preview_rows(self, frame, source_path):
         return {"ready": 0, "ready_with_warning": len(frame), "review_required": 0}
+
+
+class _DetailedIntake(_Intake):
+    def import_rows(self, frame, source_path):
+        self._repository.intake_calls += 1
+        return {
+            "inserted": 1,
+            "inserted_with_warning": 1,
+            "exact_replay": 0,
+            "review_required": 0,
+            "failed": 0,
+            "row_outcomes": [
+                {"source_row": 1, "case_no": "115000001", "outcome": "inserted", "problem_identity": None, "problem_fields": [], "issue_codes": [], "referral_occurrence_identities": []},
+                {"source_row": 2, "case_no": "115000002", "outcome": "inserted_with_warning", "problem_identity": "hcm-review:warning", "problem_fields": ["行動電話"], "issue_codes": ["hcm_field_invalid:行動電話"], "referral_occurrence_identities": ["warning-2"]},
+            ],
+        }
 
 
 def test_same_key_and_digest_returns_terminal_workbook_receipt(tmp_path):
@@ -173,3 +195,50 @@ def test_incomplete_row_outcomes_do_not_create_a_terminal_receipt(tmp_path):
         service.ingest(pd.DataFrame({"案件": ["A", "B"]}), str(workbook), "key-1", "operator", "corr-1")
 
     assert repository.receipts == {}
+
+
+def test_detailed_receipt_preserves_batch_membership_and_problem_lineage(tmp_path):
+    workbook = tmp_path / "hcm.xlsx"
+    workbook.write_bytes(b"detailed workbook")
+    repository = _Repository()
+    service = HcmWorkbookImportService(repository, _DetailedIntake(repository))
+
+    receipt = service.ingest(
+        pd.DataFrame({"案件": ["A", "B"]}),
+        str(workbook),
+        "key-detail",
+        "operator",
+        "corr-detail",
+    )
+
+    assert receipt.row_outcomes_available is True
+    assert receipt.legacy_summary_only is False
+    assert [row.case_no for row in receipt.row_outcomes] == ["115000001", "115000002"]
+    assert receipt.row_outcomes[1].problem_fields == ("行動電話",)
+
+
+def test_recent_results_keep_legacy_receipt_membership_unavailable(tmp_path):
+    workbook = tmp_path / "hcm.xlsx"
+    workbook.write_bytes(b"legacy workbook")
+    repository = _Repository()
+    service = HcmWorkbookImportService(repository, _Intake(repository))
+    repository.recent_rows = [{
+        "id": 9,
+        "request_fingerprint": "a" * 64,
+        "result_snapshot": json.dumps({
+            "source_row_count": 1,
+            "inserted_count": 1,
+            "inserted_with_warning_count": 0,
+            "exact_replay_count": 0,
+            "review_required_count": 0,
+            "failed_count": 0,
+            "replayed_workbook": False,
+        }),
+        "created_at": datetime(2026, 8, 17, 12, 0, 0),
+    }]
+
+    page = service.query_recent_results(limit=20, before_receipt_id=None)
+
+    assert page.items[0].receipt.legacy_summary_only is True
+    assert page.items[0].receipt.row_outcomes_available is False
+    assert page.items[0].receipt.row_outcomes == ()

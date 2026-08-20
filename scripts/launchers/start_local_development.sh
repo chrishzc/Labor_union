@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# File: start_local_development.sh
+# Description: 驗證本機 DB readiness 後啟動 API、UI、monitor 與 workers。
 set -euo pipefail
 
 SCRIPT_DIR="${BASH_SOURCE[0]%/*}"
@@ -45,5 +47,4 @@ docker compose up -d
 "$PY" -m scripts.run_durable_job_worker &
 "$PY" -m scripts.run_incident_worker &
 "$PY" -m scripts.run_knowledge_worker &
-"$PY" scripts/file_watcher.py &
 wait

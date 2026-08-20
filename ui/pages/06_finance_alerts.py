@@ -1265,10 +1265,9 @@ def _render_process_tab(items: tuple[AnomalySummaryView, ...]) -> None:
 
 def show() -> None:
     st.title(title)
-    st.caption("依異常類型提供固定 Preview／Apply 處置；正式帳務只能由後端核銷命令建立。")
+    st.caption("異常中心僅顯示去敏警示與導向業面；正式資料只能在 owning Domain 的 Preview／Apply 處理。")
     try:
         registry_client = _registry_client()
-        recovery_client = _recovery_client()
     except (RuntimeError, ValueError) as error:
         st.error(str(error))
         return
@@ -1289,7 +1288,11 @@ def show() -> None:
         _render_process_tab(items)
 
     with finance_tab:
-        _render_finance_tab(items, registry_client, recovery_client)
+        _render_table_only(
+            "帳務異常",
+            "僅供檢視與後續導向；帳務 recovery、核銷與沖正必須在帳務作業中心執行。",
+            _filter(items, _FINANCE_CODES),
+        )
 
     with staff_tab:
         st.subheader("服務人員")
@@ -1313,7 +1316,7 @@ def _render_import_tab(items: tuple[AnomalySummaryView, ...]) -> None:
         "HCM／BeClass／歷史訂單欄位驗證與待確認、身分衝突、銀行對帳匯入完整性。",
         _filter(items, _IMPORT_CODES),
     )
-    _render_beclass_review_workspace(_beclass_review_items(items))
+    _render_beclass_review_navigation(_beclass_review_items(items))
     _render_import_warning_tracking_workspace()
 
 
@@ -1331,11 +1334,12 @@ def _render_import_warning_tracking_workspace() -> None:
         st.info("目前沒有待追蹤的匯入警示。")
         return
     st.dataframe([
-        {"來源": item.owning_lane, "警示": item.logical_code, "欄位": item.field_path,
+        {"來源": item.owning_lane, "警示": item.display_message, "欄位": item.field_path,
          "去敏主體": item.masked_subject, "狀態": item.tracking_status, "版本": item.tracking_version}
         for item in tasks
     ], hide_index=True, width="stretch")
-    selected = st.selectbox("選擇欄位級警示", tasks, format_func=lambda item: f"{item.logical_code}｜{item.masked_subject}｜{item.field_path}", key="import_warning_tracking_task")
+    selected = st.selectbox("選擇欄位級警示", tasks, format_func=lambda item: f"{item.display_message}｜{item.masked_subject}", key="import_warning_tracking_task")
+    _render_import_warning_navigation(selected)
     targets = {
         "open": ("awaiting_external_confirmation", "closed"),
         "awaiting_external_confirmation": ("response_recorded", "closed"),
@@ -1373,28 +1377,44 @@ def _render_import_warning_tracking_workspace() -> None:
                 st.rerun()
 
 
+def _render_import_warning_navigation(task) -> None:
+    """Keep navigation as a thin local mapping; source mutation remains in the owner screen."""
+    page_title = {
+        "hcm_import_center": "📥 資料匯入中心",
+        "historical_order_import_center": "📥 資料匯入中心",
+        "client_beclass_import_center": "📥 資料匯入中心",
+        "staff_beclass_import_center": "📥 資料匯入中心",
+        "finance_import_recovery_center": "💰 帳務作業中心",
+    }.get(task.navigation_action)
+    if page_title is None:
+        st.caption("目前沒有可安全導向的業面；請依警示內容聯絡或等待後續處理。")
+        return
+    label = {
+        "hcm_import_center": "前往 HCM 匯入中心",
+        "historical_order_import_center": "前往歷史訂單匯入中心",
+        "client_beclass_import_center": "前往 Client BeClass 匯入中心",
+        "staff_beclass_import_center": "前往 Staff BeClass 匯入中心",
+        "finance_import_recovery_center": "前往帳務作業中心",
+    }[task.navigation_action]
+    if st.button(label, key=f"import_warning_navigate_{task.occurrence_identity}"):
+        from ui.nav_helper import navigate_to
+
+        navigate_to(page_title)
+
+
 def _beclass_review_items(items: tuple[AnomalySummaryView, ...]) -> tuple[AnomalySummaryView, ...]:
     return _filter(items, {"IMPORT-001", "IMPORT-003"})
 
 
-def _render_beclass_review_workspace(items: tuple[AnomalySummaryView, ...]) -> None:
-    try:
-        from ui.api_clients.beclass_import_review_api_client import (
-            BeClassImportReviewApiClient,
-        )
-        from ui.pages.anomalies.beclass_import_review_panel import (
-            render_beclass_import_review_panel,
-        )
+def _render_beclass_review_navigation(items: tuple[AnomalySummaryView, ...]) -> None:
+    """Show BeClass review warnings here, but keep all source work in the owning import screen."""
+    if not items:
+        return
+    st.caption("BeClass 來源需重新提交或由 owning 匯入流程處理；異常中心不接收修正欄位。")
+    if st.button("前往資料匯入中心", key="beclass_review_navigate"):
+        from ui.nav_helper import navigate_to
 
-        render_beclass_import_review_panel(
-            BeClassImportReviewApiClient(
-                base_url=resolve_api_base_url(),
-                headers=build_admin_headers(),
-            ),
-            suggested_review_identities=tuple(item.source_identity for item in items),
-        )
-    except Exception as error:
-        st.error(f"BeClass 匯入修正工作區載入失敗：{error}")
+        navigate_to("📥 資料匯入中心")
 
 
 if __name__ == "__main__":

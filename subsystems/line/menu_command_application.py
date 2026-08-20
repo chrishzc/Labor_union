@@ -20,7 +20,7 @@ from subsystems.line.rich_menu_binding import RICH_MENU_BINDING_INTENT
 
 _CUSTOMER_MENU_COMMANDS = {"一般選單", "一般用戶選單", "切換一般", "切換客戶"}
 _STAFF_MENU_COMMANDS = {"月嫂選單", "月嫂專區", "切換月嫂"}
-_UNION_MENU_COMMANDS = {"工會選單", "工會客服", "切換工會", "開啟客服系統", "月嫂驗證管理"}
+_UNION_MENU_COMMANDS = {"工會選單", "工會客服", "切換工會"}
 _MENU_HELP_COMMANDS = {"切換選單", "選單切換", "管理者選單"}
 
 

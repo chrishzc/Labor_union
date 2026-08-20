@@ -1,4 +1,7 @@
-"""Canonical LINE delivery worker with provider calls outside DB transactions."""
+"""
+File: delivery_worker.py
+Description: 執行 LINE 耐久投遞，並在 provider 呼叫前重新確認任務未被取消。
+"""
 
 from __future__ import annotations
 
@@ -34,6 +37,8 @@ class LineDeliveryWorker:
     def run_once(self) -> int:
         claimed = self._claim()
         for task in claimed:
+            if not self._still_sendable(task):
+                continue
             outcome = self._send(task)
             self._record(task, outcome)
         return len(claimed)
@@ -59,6 +64,20 @@ class LineDeliveryWorker:
                 error_message=str(error)[:500] or "LINE provider exception",
             )
 
+    def _still_sendable(self, task: LineDeliveryTaskSnapshot) -> bool:
+        """Re-read the leased task so cancellation cannot race through to LINE."""
+        if task.lease is None:
+            return False
+        with self._unit_of_work_factory() as unit_of_work:
+            current = unit_of_work.delivery_tasks.get(task.task_id)
+        return (
+            current is not None
+            and current.status.value == "processing"
+            and current.lease is not None
+            and current.lease.owner == task.lease.owner
+            and current.lease.acquired_at == task.lease.acquired_at
+        )
+
     def _record(self, task, outcome: LineProviderOutcome) -> None:
         if task.lease is None:
             raise RuntimeError("claimed LINE delivery task has no lease")
@@ -72,6 +91,13 @@ class LineDeliveryWorker:
         )
         with self._unit_of_work_factory() as unit_of_work:
             unit_of_work.delivery_tasks.record_attempt(command)
+            if outcome.outcome_type is LineProviderOutcomeType.SUCCESS:
+                notification_rules = getattr(unit_of_work, "notification_rules", None)
+                mark_accepted = getattr(
+                    notification_rules, "mark_delivery_task_provider_accepted", None
+                )
+                if callable(mark_accepted):
+                    mark_accepted(task.task_id.value)
             unit_of_work.commit()
 
 

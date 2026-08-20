@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-fixture/v1", "scenario_id": "GERR-REACT-ADMIN-TYPED-BOUNDARY", "revision": 1,
+  "test_kind": "process_network_harness",
+  "data_classification": "synthetic", "generation_method": "hand-authored boundary values; no production export",
+  "allowed_use": "validation-only", "redaction_policy": "synthetic identifiers only; no secrets or recipients",
+  "root_inputs": ["synthetic HTTP failure cases", "fixed correlation identity", "timeout boundary"],
+  "input_values": {"correlation_id": "corr-synthetic-gerr-001", "http_cases": [401, 403, 409, 422, 500], "timeout_ms": 250},
+  "seed_fields": ["http_input.status_code", "request_input.correlation_id", "transport_input.timeout_ms"],
+  "derived_fields": ["typed_error.category", "typed_error.code", "ui_error.retryable"],
+  "expected_manifest_path": "validation/expected/phase3/global_fastapi_typed_error_boundary.json",
+  "fixed_business_clock": "2026-01-15T09:00:00+08:00",
+  "forbidden_direct_seed": ["success payload", "session", "receipt", "outbox", "database projection"]
+}

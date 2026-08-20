@@ -1,4 +1,7 @@
-"""Strict HTTP schemas for Finance Import Preview, Apply, and correction."""
+"""
+File: finance_import.py
+Description: 定義 Finance Import Preview、Apply、receipt 與 correction 的嚴格 HTTP schema。
+"""
 
 from __future__ import annotations
 
@@ -96,6 +99,8 @@ class FinanceWorkbookIngestionReceiptView(_StrictModel):
     source_row_count: int = Field(ge=0)
     canonical_created_count: int = Field(ge=0)
     duplicate_occurrence_count: int = Field(ge=0)
+    source_warning_count: int = Field(default=0, ge=0)
+    source_warning_created_count: int = Field(default=0, ge=0)
 
 
 class FinanceImportBatchApplyBody(FinanceImportBatchPreviewBody):

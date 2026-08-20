@@ -105,6 +105,7 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 - 狀態使用明確且有限的集合：`draft`、`proposed`、`approved`、`in-progress`、`blocked`、`completed`、`superseded`；`completed` 必須連結驗收證據，`blocked` 必須記錄阻塞條件與人工入口。
 - 個人或 Agent 的即時 checklist 放 `scratch/<task-slug>/`，不提交且不構成團隊承諾。不得使用 root `task*.md`、`PROJECT_SPEC.md`、`implementation_plan.md`、checkpoint 或 code comment TODO 作為正式 backlog。
 - production code 中不得留下沒有 owner／issue／Work Package 連結的 `TODO`、`FIXME` 或暫時繞過；無法在本任務完成時，回寫正式代辦並使程式 fail closed。
+- 每個 Work Package 完成、supersede 或封存前，integration owner 必須以其檔名、標題、owner、business scenario 與舊 initiative ID 搜尋 `document/功能開發計畫/`、active `02`／`03` 索引及 current SSOT 的 inbound reference，逐筆裁決為 `current`、`superseded`、`archive-candidate` 或 `needs-successor`。不得因文件未在本次 write set、仍標 `proposed`／`partial`、或只含歷史 checklist，就假定它仍是 active；必須以目前已交付的正式語意、code、release 與驗收 evidence 重判。
 - 工作完成後先在原代辦更新 `completed`、evidence／index 與 release 結果，不另建「完成版」複本。符合 archive gate 後可把不再 active 的 Work Package／舊版本文件移至 `04_已完成與上線封存/`；被取代文件標示 `superseded` 並連結 successor，不靜默覆寫歷史裁決。
 - 「已實作」不等於「可封存」；仍約束 current production 的正式規格永遠留在 `01_規格基線/`。只有 current successor 已完整承接語意，且舊文件不含 active blocker、操作入口或 rollback 責任時，才可封存舊版本。
 - 封存不是依檔名或 status 自動搬移。必須確認 completion／deployment receipt、release identity（如適用）、successor、inbound links、content digest、restore triggers，並更新 `04_已完成與上線封存/archive_manifest.json`。沒有唯一判定時留在原位並進人工 review queue。
@@ -156,6 +157,7 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 7. 是否完成正確層級的測試、`git diff --check`、UTF-8 與敏感資訊檢查？
 8. 是否明確揭露未完成、未授權、live-drift、skip、風險與需要人工處理的項目？
 9. 若有 DB 變更，canonical release chain、owned-object descriptor、fresh bootstrap、preserve-data dry-run／candidate 驗證與開發者操作文件是否同步完成？
+10. 是否已重新盤點並裁決所有相鄰功能計畫、gap／Work Package 與 inbound references，避免已完成實作留下過期的 `proposed`／`partial` 文件或 active index 列？
 
 ## graphify
 
