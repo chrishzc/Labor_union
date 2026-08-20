@@ -766,3 +766,136 @@
 - v2 明確排除開發 launcher、Knowledge、file watcher、測試／migration、secret、VPN 拓樸值、歷史與舊資料；API 是唯一 DB owner，其他 image 不含 DB driver／credential。
 - 封裝計畫採 fail-closed：UI 本機模板寫入、API 可變 JSON／本機 archive、開發 reviewer callback、Worker Pool supervisor 與 ingestion entry point 未完成前，不得宣稱 production-ready。
 - 計畫文件以 runtime manifest、import／asset closure、image layer scan、SBOM、startup／exit、single-tunnel outage/recovery smoke 作為後續驗收；本次未建立 Dockerfile、image、Cloud Run、VPN、IAM 或 DB 變更。
+
+## [2026-08-15] 單一 Cloud VPN 雲端部署簡報
+
+- 依 `document/雲端部署/計劃書/單一Cloud VPN計畫書.md` 製作 16:9、11 頁的雲端部署段落簡報；內容依序涵蓋混合部署理由、全地端比較、四種雲地連線選型、單一 VPN 結論、部署架構、內部服務流程、故障復原、成本與上線 Gate。
+- 指定 `Cloud_Run_連線方案比較圖.svg` 已依上下內容拆成兩頁，`單一Cloud VPN架構圖.png` 內兩張圖已各自裁切為部署架構與服務流程頁；所有衍生圖片只在 Git ignored scratch 中用於組裝與 QA。
+- 逐頁輸出 11 張 PNG 進行視覺檢查，修正 SVG 中文缺字、長圖裁切未生效與標題換行；`slides_test.py` 完成邊界／溢位檢查，未回報錯誤。
+- 同步建立 Gamma 10 卡可編輯版本（Gamma 單次上限為 10 卡）；精確包含指定本機圖檔的正式交付以本機 PPTX 為準。本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-15] 單一 Cloud VPN 簡報主題配色與比較圖合併
+
+- 以 `C:/Users/TMP-214/Downloads/雲端部屬-字體修正.pptx` 的暖白、深棕與橘色系統一簡報背景、文字、卡片與重點色；保留既有內容、架構圖與註解。
+- 將原第 4、5 頁還原為單一完整的 `Cloud_Run_連線方案比較圖.svg` 比較頁，刪除重複拆頁並重新編排頁碼，最終為 16:9、10 頁。
+- 逐頁輸出 10 張 PNG 完成視覺檢查；`slides_test.py` 通過，回報 `Test passed. No overflow detected.`。
+- 原始簡報與參考主題檔均未覆寫；本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-16] 單一 Cloud VPN 簡報內容與圖像修正
+
+- 將資料庫留在地端的主要理由修正為「客戶／機敏資料不上雲，降低雲端外洩風險」，並同步調整封面、混合部署理由與全地端／混合部署比較文案。
+- 第 3 頁兩側統一改為「缺點」；全地端補充硬體採購與汰換、維護／備份／資安成本，以及設備與現場環境對穩定性的影響；混合部署補充 VPN、雲端費用、跨環境監控與 DB 中斷風險。
+- 比較圖移除深色背景與「適用／選用條件」，放大並加粗底部評分權重與共同底線；NAT 結論改為「不推薦正式環境使用」。兩張架構圖以像素級換色保留文字、連線與架構，去除黑色畫布並將淺色文字改為深色。
+- 移除封面左下部署規劃行，第 5 頁標題縮短為穩定單行；最終仍為 16:9、10 頁。逐頁視覺檢查完成，`slides_test.py` 回報 `Test passed. No overflow detected.`。
+- 原始簡報未覆寫；本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-16] 單一 Cloud VPN 簡報架構圖重繪
+
+- 第 6、7 頁不再沿用模糊的原始點陣圖，依原架構語意以 Graphviz 重繪高對比拓樸，並輸出 2600px 高解析 PNG 嵌入 PowerPoint，保留主題暖白、蜜桃與橘色系統。
+- 第 6 頁清楚呈現外部入口、Cloud Run、Business API、Direct VPC egress、單一 VPN tunnel 與地端 NAS MySQL；第 7 頁清楚呈現服務與事件來源、API／UoW 邊界、正式 DB 與告警備援／DLQ。
+- 第 7 頁移除舊版三條重疊原則文字，改為單一大字原則帶：「僅 API 可連 DB、Query 唯讀／Apply 重讀事實、副作用由 outbox／job 執行」。
+- 最終仍為 16:9、10 頁；逐頁視覺檢查完成，`slides_test.py` 回報 `Test passed. No overflow detected.`。原始簡報未覆寫；本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-16] 單一 Cloud VPN 簡報清晰度與版面修正
+
+- 第 3 頁混合部署缺點改為一致字級與縮排，第三點縮短為「VPN 中斷時 DB 暫時無法連線」，避免換行跑版。
+- 第 4 頁比較圖主畫布固定為主題暖白，四張方案卡統一 3px 外框；標題色塊內縮，讓上緣與側邊框線維持相同可見粗度。
+- 第 5 頁標題縮短為「單一 Cloud VPN：兼顧安全、成本與風險」；第 9 頁標題縮短為單行，並移除完整 `v1 不建立` 區塊。
+- 第 6、7 頁重新以高對比實色處理原始架構圖，改採緊密裁切、主題暖白／蜜桃背景與橘色強調，移除圖內「規劃／尚未部署」；細線與文字不再使用半透明抗鋸齒，提升投影可讀性。
+- 第 7 頁放大主要流程圖，底部三原則改為原生 PowerPoint 粗體文字。最終仍為 16:9、10 頁，逐頁視覺檢查完成，`slides_test.py` 回報 `Test passed. No overflow detected.`。
+- 原始簡報未覆寫；本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-17] 新增 Eraser MCP 全域設定
+
+- 於全域設定檔 `$HOME\.gemini\config\mcp_config.json` 新增 `eraser` 遠端 MCP 服務 (`https://app.eraser.io/api/mcp`)。
+- 設定包含 `serverUrl` 與 `url` 鍵名，完整支援 Antigravity 與通用 Remote SSE 傳輸機制。
+
+## [2026-08-17] 雲端部署計畫書調整為 4+1 現行代碼吻合架構
+
+- 檢視歷史與正式文件（`文件整併工作區`、`功能開發計畫`、`架構重整`）及實際程式碼實作（`api/routes/finance_import.py`、`hcm_import.py` 等）。
+- 確認現行檔案匯入均採 Admin UI 透過 HTTP (multipart) 直傳 Business API 於本機暫存處理並即刻清除，專案中無任何 GCS SDK、Eventarc 或 Ingestion Producer 程式碼。
+- 更新 `document/雲端部署/計劃書/單一Cloud VPN計畫書.md`：
+  - 拓樸由 5+1 修正為 4+1（4 個 Cloud Run 資源：API、UI、Worker Pool、Monitor Job + 1 個地端 NAS MySQL）。
+  - 移除 Cloud Storage、Eventarc 與 Ingestion Producer 相關配置與月費，更新流程圖與驗收 Gate。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md`：
+  - 同步修正為 4+1 架構與 3 個容器映像，統一檔案匯入為直傳 API 模式。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫_v2.md`：
+  - 映像數量由 4 個精簡為 3 個（`union-api`、`union-ui`、`union-runtime-ops`），移除未實作的 `Dockerfile.ingestion`。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫.md`：
+  - 開頭標註 `superseded`，明確指引至現行 v2 標準。
+- 本次未修改任何 Python 業務代碼、資料庫 Schema 或現有測試，亦未執行任何 git add/commit。
+
+## [2026-08-17] 使用 Eraser MCP 更新雲端部署與服務架構圖
+
+- 透過 Eraser MCP 工具將工作區內的兩張架構圖全面重繪/更新為 4+1 吻合代碼架構：
+  1. `單一Cloud VPN 雲端部屬架構` (`74h9Cayj7Jlm4ZFtodKN`): 移除 Cloud Storage、Eventarc、Ingestion Producer，更新 Admin UI 直傳 Business API 暫存解析流向，保留 4 個 Cloud Run 資源與地端 NAS MySQL 連線。
+  2. `內部服務架構流程` (`hISmxqzFlIzeAubr5q1p`): 移除 Cloud Storage、Eventarc、Ingestion Producer 與已退役之 Knowledge Runtime，強化 Admin UI 檔案上傳與 Business API 本機暫存解析及即刻清理職責。
+- 兩張圖表均已於 Eraser 雲端工作區即時同步，並產出高解析匯出。
+
+## [2026-08-17] 移除 DB VLAN 規範，簡化為地端私有網路
+
+- 依使用者要求，將架構與文件中過度設計之「DB VLAN」概念移除，簡化為直觀之「地端私有網路 (LAN)」。
+- 更新 `document/雲端部署/計劃書/單一Cloud VPN計畫書.md`：將所有 DB VLAN 改為地端私網與 NAS 私網連線。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md`：同步替換 DB VLAN 為地端私網。
+- 更新 Eraser 架構圖 (`74h9Cayj7Jlm4ZFtodKN`)：移除 `DB VLAN` 方塊，由地端 VPN Gateway 直接連線至 NAS MySQL 正式 DB。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-17] Eraser 雲端架構圖全面中文化
+
+- 透過 Eraser MCP 工具將 `74h9Cayj7Jlm4ZFtodKN`（單一 Cloud VPN 雲端部署架構）與 `hISmxqzFlIzeAubr5q1p`（內部服務架構流程）兩張圖表中所有英文名詞全面轉為清晰易讀的繁體中文標示。
+- 包含外部負載平衡器、WAF 防護、管理後台、背景工作處理器、系統健康監控、核心業務 API、私網直連出口、雲端路由器、VPN 加密隧道等完整中文對照。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-17] 於 Eraser 繪製「三種連線方案比較圖」
+
+- 依使用者要求，在 Eraser 工作區 (`4I8c5lSvLrUnwTW1R8mR`) 繪製三種連線方案比較圖（移除雙 Tunnel 欄位，保留右側 3 個方案）：
+  1. **單一 Cloud VPN**（評分 9.0，推薦：安全／成本最平衡）
+  2. **Tailscale 版**（評分 8.1，預算優先的可接受方案）
+  3. **NAT + 公開 3306**（評分 4.1，不推薦正式環境使用）
+- 完整呈現各方案之預估月費、安全性評分、優點、缺點、結論橫幅與綜合權重說明。
+- 依使用者指示，將各方案內部之月費、安全性、優缺點文字背底由灰底調整為完全透明，並保留精美外邊框。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-17] Eraser 全部 3 張架構圖：字體加大、背底透明化與方框擴大
+
+- 依使用者指示，對工作區內全部 3 張 Eraser 圖表進行視覺大改版：
+  1. `單一 Cloud VPN 雲端部署架構` (`74h9Cayj7Jlm4ZFtodKN`): 全元件背底改為 `transparent`，文字層級全面升級加大（`md/lg/xl`），各方框加寬加高，箭頭連線重新對齊。
+  2. `內部服務架構流程` (`hISmxqzFlIzeAubr5q1p`): 全元件背底改為 `transparent`，加大字體並擴大外部入口、Cloud Run 服務群、Business API 與地端 NAS 的方框，確保文字完整呈現無遮擋。
+  3. `三種連線方案比較圖` (`4I8c5lSvLrUnwTW1R8mR`): 標題、結論、金額、評分、優缺點清單字體全面放大，卡片尺寸擴大至 380px，背底維持透明且邊框更清晰。
+- 3 張圖表皆已於 Eraser 雲端工作區即時同步，並產出高解析匯出。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-17] 整理「雲端部署預估費用（單頁 PPT 表格式）」
+
+- 依使用者指示，將單一 Cloud VPN 雲端混合部署方案之所有成本細項彙整為清晰專業的 1 頁 PPT 表格排版。
+- 依使用者要求進行**極致精簡改版**：
+  1. 頂部保留 2 個超大指標卡（預估總月費 NT$3,800～4,300、預算上限 NT$5,000）。
+  2. 表格大幅精簡為 4 大核心項目（Cloud Run 運算、VPN 專線、負載平衡器+WAF、基礎日誌金鑰），文字精簡至一句話，字體大幅升級至 12～20pt。
+  3. 底部突出「地端保留 NAS 免買 Cloud SQL 現省 3~8 千」核心亮點。
+- 生成並覆蓋更新高畫質 16:9 簡報檔案 `document/雲端部署/雲端混合部署預估費用明細.pptx`。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-19] 於 Eraser 更新「三種連線方案比較圖」價格（以 API min=1 為基準）
+
+- 依使用者指示，將三種連線方案的運算基準統一更新為「僅 Business API 設 min=1 待命，其餘排程叫醒 (min=0)」：
+  1. **單一 Cloud VPN（推薦）**：USD 82～95 / 月（約 **NT$ 2,700～3,100**）
+  2. **Tailscale 版（預算優先）**：USD 45～58 / 月（約 **NT$ 1,500～1,900**）
+  3. **NAT + 公開 3306（不推薦）**：USD 78～91 / 月（約 **NT$ 2,550～3,000**）
+- 圖表副標與各卡片價格已同步於 Eraser 線上工作區 (`4I8c5lSvLrUnwTW1R8mR`) 完成即時更新。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-19] Eraser 比較圖全面重構：純 3 者橫向比較 ＋ 全正統中文語譯
+
+- 依使用者指示，對 `4I8c5lSvLrUnwTW1R8mR` 比較圖進行深度內容審查與重構：
+  1. **徹底清除雙 Tunnel 殘留**：移除「比雙 Tunnel 省 $36.5」、「無雙 Tunnel Failover」等字句，使優缺點與安全性純粹聚焦於「Google 官方 VPN vs Tailscale vs 公開資料庫」三者的橫向客觀比較。
+  2. **全中文正統語譯**：將 Cloud VPN、userspace SOCKS5、allowlist、control plane、auth key、DERP 等全面轉換為正統繁體中文（如「使用者空間代理」、「存取控制清單」、「第三方認證伺服器與中繼節點」）。
+  3. 圖表各項指標、優缺點、結論橫幅與底部底線說明皆已即時同步於 Eraser 線上工作區。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-19] 更新費用預估 PPTX（以 API min=1 為基準，月費 NT$2,700～3,100）
+
+- 依使用者指示，重新生成覆蓋 `document/雲端部署/雲端混合部署預估費用明細.pptx`：
+  1. 運算基準統一為「僅核心業務 API 設 min=1 待命，其餘排程叫醒 (min=0)」，總月費下調至 **NT$ 2,700～3,100 / 月（USD 82～95）**。
+  2. 預算上限指標卡同步調整為 **NT$ 4,000 / 月**。
+  3. 表格維持極簡 4 大核心項目（VPN 專線 41%、安全防護 33%、雲端運算 23%、基礎日誌 3%），大字體高畫質呈現。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。

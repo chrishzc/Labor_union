@@ -4,29 +4,29 @@
 
 部署基線：`document/雲端部署/計劃書/單一Cloud VPN計畫書.md`
 
-適用範圍：Cloud Run 5 個資源、Direct VPC egress、HA VPN gateway resource 上的單一 Cloud VPN tunnel（non-HA topology）及地端 NAS MySQL。本文件只規劃映像封裝、啟動與驗證，不執行部署、VPN／firewall 變更或資料庫變更。
+適用範圍：Cloud Run 4 個資源、Direct VPC egress、HA VPN gateway resource 上的單一 Cloud VPN tunnel（non-HA topology）及地端 NAS MySQL。本文件只規劃映像封裝、啟動與驗證，不執行部署、VPN／firewall 變更或資料庫變更。
 
 安全原則：最小內容、最小權限、唯讀映像、明確 allowlist、未分類資料一律不封裝（fail closed）。單一 tunnel 只降低可用性，不降低映像與身分隔離要求，也不得建立公開 3306 旁路。
 
 ## 一、摘要與結論
 
-最終規劃為 **4 份 Dockerfile、4 個映像、部署到 5 個 Cloud Run 資源**：
+最終規劃為 **3 份 Dockerfile、3 個映像、部署到 4 個 Cloud Run 資源**：
 
 | Dockerfile | 正式映像 | Cloud Run 資源 | 用途 |
 |---|---|---|---|
-| `docker/Dockerfile.api` | `union-api` | 1 個 Service | 唯一可經 Direct VPC、單一 VPN tunnel、MySQL mTLS 存取地端 MySQL 的 FastAPI |
-| `docker/Dockerfile.ui` | `union-ui` | 1 個 Service | Streamlit 薄 UI，只呼叫 API |
+| `docker/Dockerfile.api` | `union-api` | 1 個 Service | 唯一可經 Direct VPC、單一 VPN tunnel、MySQL mTLS 存取地端 MySQL 的 FastAPI，同時處理管理端檔案匯入解析 |
+| `docker/Dockerfile.ui` | `union-ui` | 1 個 Service | Streamlit 薄 UI，支援管理操作與檔案上傳，只呼叫 API |
 | `docker/Dockerfile.runtime-ops` | `union-runtime-ops` | 1 個 Worker Pool + 1 個 monitor Job | 三種正式 worker 共用一個映像；monitor 同映像、不同命令 |
-| `docker/Dockerfile.ingestion` | `union-ingestion` | 1 個 Service | 未來檔案接收服務；正式 entry point 完成後才可建置 |
 
-「5+1」中的 `+1` 是地端 NAS MySQL，不是容器。共用 `runtime-ops` 映像只共用程式與依賴，不共用執行資源、Service Account、環境變數、權限或發布 gate。
+「4+1」中的 `+1` 是地端 NAS MySQL，不是容器。共用 `runtime-ops` 映像只共用程式與依賴，不共用執行資源、Service Account、環境變數、權限或發布 gate。
 
-相較 v1，映像數與正式程式邊界不變；需要修改的部分是：
+相較 v1，主要架構修正為：
 
-1. `union-runtime-workers` 依單一 Cloud VPN 計畫採 **Cloud Run Worker Pool**，不是需要監聽 `PORT` 的 Cloud Run Service。worker supervisor 仍須完整管理三個 worker，但健康判斷改用 process exit、heartbeat、queue lag 與外部 monitor，不建立假 HTTP server。
-2. API 啟動與驗收必須明確區分 process liveness 和 authenticated DB readiness。單 tunnel 中斷時 API process 可存活，但 DB operation 必須 typed unavailable 且不得改走公開 3306。
-3. VPN PSK、BGP、route、network tag、NAS 私有位址及 MySQL mTLS material 都是部署設定，不得燒進 image。映像只包含讀取受控 runtime configuration 的正式 adapter。
-4. 發布驗證增加 tunnel interruption／recovery 行為：中斷時 fail closed，恢復後重新驗證 route、server identity、fresh facts、lease 與 backlog，再恢復 mutation。
+1. 檔案匯入全面收斂為現有代碼的「Admin UI 上傳 $\rightarrow$ Business API 解析與即時清理暫存」模式，退役未實作的 `Dockerfile.ingestion` 與 Cloud Storage 轉發架構。
+2. `union-runtime-workers` 依單一 Cloud VPN 計畫採 **Cloud Run Worker Pool**，不是需要監聽 `PORT` 的 Cloud Run Service。worker supervisor 仍須完整管理三個 worker，但健康判斷改用 process exit、heartbeat、queue lag 與外部 monitor，不建立假 HTTP server。
+3. API 啟動與驗收必須明確區分 process liveness 和 authenticated DB readiness。單 tunnel 中斷時 API process 可存活，但 DB operation 必須 typed unavailable 且不得改走公開 3306。
+4. VPN PSK、BGP、route、network tag、NAS 私有位址及 MySQL mTLS material 都是部署設定，不得燒進 image。映像只包含讀取受控 runtime configuration 的正式 adapter。
+5. 發布驗證增加 tunnel interruption／recovery 行為：中斷時 fail closed，恢復後重新驗證 route、server identity、fresh facts、lease 與 backlog，再恢復 mutation。
 
 目前 live code 尚有以下實作前置條件；未完成前，對應映像必須拒絕建置或不得標記為 production：
 
@@ -35,7 +35,6 @@
 3. 合約封存、LINE 媒體與 rich-menu 圖片仍存在本機檔案預設路徑。正式環境須改用耐久 object-storage adapter，未設定時 fail closed。
 4. `line/line_bot.py` 的 `DEV_REVIEW_NOTIFY_URL` 開發通知路徑須從正式 runtime closure 移除；只讓環境變數為空不足以證明映像沒有開發程序。
 5. Worker Pool 需要正式 supervisor，在同一執行個體管理 durable-job、LINE-delivery、incident 三個 worker，正確處理 SIGTERM、子程序失敗及非零 exit；不需要也不得為了通過 Cloud Run Service 規則而新增假 `PORT` server。
-6. ingestion 尚無核准且可啟動的正式 entry point，因此 `Dockerfile.ingestion` 只能保留設計，不得建立空殼或假成功映像。
 
 ## 二、正式封裝邊界
 
@@ -47,7 +46,6 @@
 | UI Service | `python -m streamlit run ui/app.py --server.address=0.0.0.0 --server.port=${PORT}` | page registry 全部可載入；健康端點成功；沒有 DB driver／DB secret |
 | Worker Pool | `python -m scripts.run_runtime_worker_pool` | 同時監督 durable、LINE、incident worker；不監聽 `PORT`；必要子程序永久失敗時 supervisor 非零結束 |
 | Monitor Job | `python -m scripts.run_service_monitor --once` | 單次執行有明確 exit code、timeout 與重試界線；不得常駐或自行排程 |
-| Ingestion Service | 待正式 entry point 核准後固定 | 必須監聽 `PORT`、完成驗證與 durable enqueue；未核准前禁止建置 |
 
 Worker Pool 僅包含：
 
@@ -87,7 +85,6 @@ manifest 必須由下列證據產生及覆核：
 | API | `api/`、`domains/`、`subsystems/`、`shared_kernel/`、`infrastructure/`、正式 `line/` module | 只 API 可含 MySQL driver；禁止 UI、測試、migration 與 operator code |
 | UI | `ui/` 與 UI typed client 所需的最小共享 schema | 禁止 `infrastructure/`、DB adapter、PyMySQL、可寫資料檔 |
 | runtime-ops | 四個正式 scripts 及最小 `subsystems/`、HTTP adapter、`shared_kernel/` closure | 禁止 DB adapter／driver；只呼叫 authenticated Private API |
-| ingestion | 未來核准 entry point 的最小 closure | 未完成前 manifest 必須不存在，避免誤建 |
 
 ### 2.4 正式 runtime assets
 
@@ -128,7 +125,7 @@ manifest 必須由下列證據產生及覆核：
 
 VPN PSK、Cloud Router/BGP 與 tunnel 設定不屬於 application image。MySQL mTLS material只能由 Secret Manager 掛入 memory-backed／唯讀路徑；image layer、build log、OCI label 與 command argument 都不得出現內容。
 
-不得包含 UI、worker、monitor、ingestion、開發通知、migration／schema、可變 JSON history、舊合約／媒體／封存資料。合約封存與 LINE 媒體必須使用 production object-storage adapter；必要設定不存在時 readiness 失敗。
+不得包含 UI、worker、monitor、開發通知、migration／schema、可變 JSON history、舊合約／媒體／封存資料。合約封存與 LINE 媒體必須使用 production object-storage adapter；必要設定不存在時 readiness 失敗。管理端檔案匯入直接由 API 接收並以本機 tempfile 解析與即刻清除。
 
 啟動與單 tunnel 驗證：
 
@@ -149,7 +146,7 @@ VPN PSK、Cloud Router/BGP 與 tunnel 設定不屬於 application image。MySQL 
 
 - `streamlit run ui/app.py` 監聽 `${PORT}`，`/_stcore/health` 成功。
 - page registry 每個正式頁面可 import；缺一頁即失敗。
-- 以 mock API 驗證登入、主要頁面及 typed unavailable；VPN／DB 故障只能由 API 狀態呈現，UI 不得自行連 DB。
+- 以 mock API 驗證登入、主要頁面、檔案上傳及 typed unavailable；VPN／DB 故障只能由 API 狀態呈現，UI 不得自行連 DB。
 - package inventory 證明沒有 PyMySQL、DB adapter 或 VPN tooling。
 
 ### 3.4 `Dockerfile.runtime-ops`
@@ -170,12 +167,6 @@ Monitor Job 使用獨立 Service Account，只取得探測與告警 API 的最�
 - 模擬 API 因 tunnel down 回傳 typed unavailable，worker 必須 bounded backoff，不丟 task、不 busy loop、不假成功。
 - `--once` monitor 在正常、VPN／DB 告警、API timeout 三種情況回傳約定 exit code。
 - image inventory 證明沒有 Knowledge、file watcher、本機 launcher、PyMySQL、schema、migration 或 VPN tooling。
-
-### 3.5 `Dockerfile.ingestion`
-
-只記錄目標，不先做空殼。須先具備核准的正式 HTTP entry point、格式與大小限制、惡意檔掃描、object storage、durable enqueue、idempotency 與失敗清理契約，才可建立 manifest 與 Dockerfile。
-
-未滿足時，CI 預期結果是 `BLOCKED_NOT_IMPLEMENTED`，不得用 placeholder server 取得綠燈。ingestion 永遠不持有 DB、MySQL mTLS 或 VPN secret。
 
 ## 四、機敏、歷史與開發資料排除
 
@@ -199,7 +190,7 @@ Monitor Job 使用獨立 Service Account，只取得探測與告警 API 的最�
 - secret scan：私鑰、JWT、Google service-account、token、DB DSN、LINE secret、VPN PSK、BGP shared secret不得命中。
 - 拓樸 scan：NAS private/public IP、地端 gateway IP、BGP address／ASN、內部 DNS 不得以常值寫入 image；允許經批准的非機敏環境變數名稱，不允許實際值。
 - 歷史／個資 scan：姓名、電話、email、身分證格式、對話、合約、告警歷史、rich-menu runtime ID 與 provider response 不得命中。
-- package inventory：UI／runtime-ops／ingestion 不得有 MySQL driver；所有映像不得有 VPN/Tailscale/ngrok tooling。
+- package inventory：UI／runtime-ops 不得有 MySQL driver；所有映像不得有 VPN/Tailscale/ngrok tooling。
 - `docker history --no-trunc` 不得顯示 secret、內部 URL 或曾寫入後刪除的資料。
 
 只要命中任一 image layer 就重新建置，不以 final filesystem 已刪除放行。
@@ -223,7 +214,6 @@ Monitor Job 使用獨立 Service Account，只取得探測與告警 API 的最�
 | UI Service | timeout 內監聽 `PORT`；`/_stcore/health` 成功；所有正式頁可載入 |
 | Worker Pool | 三個 worker running；heartbeat 可觀測；fatal child failure 使 supervisor 非零退出；不要求 `PORT` |
 | Monitor Job | 單次執行後結束；成功、告警、timeout 的 exit code 可區分 |
-| Ingestion Service | entry point 核准後才測；HTTP readiness、惡意檔與 durable enqueue 全通過 |
 
 每個容器以 non-root、read-only filesystem、受限 `/tmp`、drop capabilities、無 secret 條件啟動。若程式嘗試寫 repository path、建立 VPN tunnel或依賴開發檔案，測試必須失敗。
 
@@ -241,12 +231,11 @@ Monitor Job 使用獨立 Service Account，只取得探測與告警 API 的最�
 
 1. **封裝前 live-drift 修復**：移除 UI 本機資料讀寫、遷移可變 LINE 設定與歷史、改用耐久 object storage、移除開發通知、完成 Worker Pool supervisor。若涉及 schema，另立已核准 Work Package 並通過 DB gates；本計畫不授權 DB 變更。
 2. **資產分類與去敏**：建立 `runtime_assets/`，逐檔審核與 SHA-256 manifest。
-3. **依賴切分**：建立 api、ui、runtime-ops、ingestion（未來）dependency groups，更新 lockfile並檢查直接 import。
+3. **依賴切分**：建立 api、ui、runtime-ops dependency groups，更新 lockfile並檢查直接 import。
 4. **先做 runtime-ops**：完成 Worker Pool supervisor、Dockerfile、Worker Pool command 與 monitor Job command 驗證。
 5. **再做 API 與 UI**：清除本機可變資料依賴後建置，完成 router/page/startup及 DB unavailable smoke。
-6. **最後做 ingestion**：正式 entry point 與安全契約核准後才施工。
-7. **發布 gate**：SBOM、弱點、secret／PII／拓樸值、image layer、簽章與 provenance 全通過，才推送 immutable digest。
-8. **部署 gate**：Direct VPC network tag、單一 tunnel route、MySQL mTLS、DB isolation、tunnel outage/recovery drill 全通過；Docker image 不承擔建立或修復 VPN。
+6. **發布 gate**：SBOM、弱點、secret／PII／拓樸值、image layer、簽章與 provenance 全通過，才推送 immutable digest。
+7. **部署 gate**：Direct VPC network tag、單一 tunnel route、MySQL mTLS、DB isolation、tunnel outage/recovery drill 全通過；Docker image 不承擔建立或修復 VPN。
 
 ## 七、計畫驗證結果
 
@@ -262,7 +251,7 @@ Monitor Job 使用獨立 Service Account，只取得探測與告警 API 的最�
 | 單 tunnel 中斷安全 | PASS | liveness/readiness 分離、typed unavailable、bounded backoff、無公開 3306 fallback |
 | 無機敏與拓樸值 | PASS | build-context + final-layer secret／PSK／private key／IP／BGP scan |
 | 無歷史／舊資料 | PASS | history、DB/config history、runtime state、舊合約／媒體、validation dataset 禁入 |
-| 未完成服務不假裝成功 | PASS | ingestion 明確 `BLOCKED_NOT_IMPLEMENTED`；API/UI live-drift 未修前禁止 production build |
+| 未完成服務不假裝成功 | PASS | 移除未實作之 ingestion 容器規劃；API/UI live-drift 未修前禁止 production build |
 | DB 變更 | PASS（不適用） | 本次無 schema、migration、seed 或既有 DB 操作；後續若需要另走正式 DB gates |
 
-**總結：`PLAN_VALIDATION_PASS`。** v2 已對齊「Direct VPC＋HA VPN gateway resource 上單一 Cloud VPN tunnel」部署方案。連線方案不改變 4 個 image 的核心程式切分，但修正 Worker Pool 啟動模型、API 單 tunnel failure semantics、secret／拓樸資料排除及 tunnel outage/recovery 驗證。實際映像尚未施工；前置條件完成前不得宣稱 API、UI 或 ingestion 已具 production readiness。
+**總結：`PLAN_VALIDATION_PASS`。** v2 已對齊「Direct VPC＋HA VPN gateway resource 上單一 Cloud VPN tunnel」部署方案。連線方案採 3 個正式映像與 4 個 Cloud Run 資源，修正 Worker Pool 啟動模型、API 單 tunnel failure semantics、檔案直傳解析邊界、secret／拓樸資料排除及 tunnel outage/recovery 驗證。實際映像尚未施工；前置條件完成前不得宣稱 API 或 UI 已具 production readiness。

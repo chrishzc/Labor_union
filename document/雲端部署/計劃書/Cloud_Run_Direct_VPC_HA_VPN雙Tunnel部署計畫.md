@@ -4,21 +4,20 @@
 - 規劃版本：v1
 - 更新日期：2026-08-15
 - 目標區域：Google Cloud `asia-east1`（台灣）
-- 核心原則：MySQL 僅存在地端 NAS，只有 Business API 可取得 DB credential 並連線；所有 Worker、Monitor、UI 與 ingestion producer 都只能經 authenticated API 間接操作 DB。
+- 核心原則：MySQL 僅存在地端 NAS，只有 Business API 可取得 DB credential 並連線；所有 Worker、Monitor 與 UI 都只能經 authenticated API 間接操作 DB。
 
 ## 一、摘要：規劃／計畫大綱
 
-### 1.1 最終結論：採 5+1 runtime
+### 1.1 最終結論：採 4+1 runtime
 
-本案採用 **5 個 Cloud Run runtime resource + 1 個地端 NAS MySQL**：
+本案採用 **4 個 Cloud Run runtime resource + 1 個地端 NAS MySQL**：
 
 | 編號 | Runtime | Cloud Run 型態 | 常駐策略 | 職責 |
 |---|---|---|---|---|
-| 1 | `union-business-api` | Service | `min=1` | 唯一 DB connection owner；business API、LINE webhook、Private Operations API、readiness |
-| 2 | `union-admin-ui` | Service | `min=0` | Streamlit 薄 UI，只呼叫 API |
+| 1 | `union-business-api` | Service | `min=1` | 唯一 DB connection owner；business API、LINE webhook、Private Operations API、檔案接收解析、readiness |
+| 2 | `union-admin-ui` | Service | `min=0` | Streamlit 薄 UI，支援管理操作與檔案上傳，只呼叫 API |
 | 3 | `union-runtime-workers` | Worker Pool | `instances=1` | 合併 Durable Job、LINE、Incident 三個 worker；不持有 DB credential |
 | 4 | `union-runtime-monitor` | Job | 每 5 分鐘一次 | 以 `--once` 探測 API、UI、public edge、LIFF，再經 Private Operations API 回報 |
-| 5 | `union-ingestion-producer` | Service | `min=0` | 接 Cloud Storage／Eventarc 事件，只建立 durable ingestion job，不直接入帳 |
 | +1 | `nas-mysql-prod` | 地端 NAS | 地端常駐 | 正式 MySQL；只接受 API 經 VPN、mTLS 的私網連線 |
 
 這是目前安全、穩定與費用的平衡點：
@@ -26,7 +25,7 @@
 - 三個 worker 已具有相同的安全邊界：都不持有 MySQL credential，只以 Google-signed OIDC 呼叫 Private Operations API。因此合併成一個 Worker Pool，可少付兩個 24 小時常駐 runtime 的費用。
 - Monitor 不與 workers 合併。若同一個 runtime、image process supervisor 或 service account 故障，監控也會同時消失；改成獨立排程 Job，最多約 5 分鐘發現異常，而且只在執行期間計費。
 - UI 不與 API 合併。UI 是人員登入入口，API 是唯一 DB owner；拆開可使 UI `min=0`、獨立套用 IAP，且 UI 漏洞或流量尖峰不會直接擴大到 DB credential 邊界。合併只會少一個幾乎可縮到零的 Service，實際節省很小，安全代價較大。
-- ingestion producer 不與 API 合併。上傳檔案與事件屬不可信輸入，獨立 runtime 不配置 DB secret；即使解析流程被攻擊，也只能呼叫受限 API operation。
+- 檔案匯入直接由 Admin UI 經 HTTP multipart 上傳至 Business API 於本機暫存處理並即刻清除，不需額外建立 Cloud Storage 與 Eventarc 轉發器。
 - 不再拆成 7+1。現階段再把 Durable、LINE、Incident workers 分開，會增加常駐成本、image／IAM／告警維護量；在三者都無 DB credential、量體尚低時，收益不足。
 - 不縮成「所有 worker 一個、其他全部一個」的 2+1。這會讓 public webhook、管理 UI、DB owner、檔案入口和監控共用故障域、權限與擴縮單位，不符合最小權限與獨立監督原則。
 
@@ -37,16 +36,14 @@
 ```mermaid
 flowchart LR
     USER["管理人員／LINE／LIFF"] -->|"HTTPS 443"| EDGE["External Application Load Balancer\nCloud Armor／TLS／IAP"]
-    EDGE -->|"受控 UI 路徑"| UI["Cloud Run Service\nunion-admin-ui"]
+    EDGE -->|"受控 UI 路徑 (IAP)"| UI["Cloud Run Service\nunion-admin-ui"]
     EDGE -->|"必要 public API 路徑"| API["Cloud Run Service\nunion-business-api"]
-    UI -->|"Google OIDC + Private API"| API
+    UI -->|"頁面操作／檔案上傳 (UploadFile) + Google OIDC"| API
     WORKERS["Cloud Run Worker Pool\nDurable／LINE／Incident"] -->|"Google OIDC + Private Operations API"| API
     MONITOR["Cloud Run Job\nRuntime Monitor --once"] -->|"Google OIDC + observations"| API
-    GCS["Cloud Storage"] --> EVENTARC["Eventarc"] --> INGEST["Cloud Run Service\nIngestion Producer"]
-    INGEST -->|"Google OIDC + durable ingestion command"| API
     API -->|"Direct VPC egress"| VPC["VPC／Firewall／Cloud Router"]
     VPC -->|"HA VPN：2 tunnels"| GW["地端固定 IP VPN Gateway"]
-    GW -->|"DB VLAN 私網 + MySQL mTLS :3306"| DB[("NAS MySQL 正式 DB")]
+    GW -->|"地端私網 + MySQL mTLS :3306"| DB[("NAS MySQL 正式 DB")]
 
     MONITOR -. "API／DB 失聯：最小去敏告警" .-> PS["Pub/Sub fallback topic／DLQ"]
     API -. "DB 失聯：最小去敏告警" .-> PS
@@ -60,8 +57,8 @@ flowchart LR
 
 ### 1.3 網路與資安結論
 
-1. **NAS 的 3306 不公開。** NAS 不做 port forwarding，也不設定 `0.0.0.0/0` 或 Cloud Run 公網 IP allowlist。Cloud Run 執行個體沒有固定來源 IP並不影響此設計；API 透過 Direct VPC egress、VPC route、HA VPN 到 NAS 私有 DB VLAN。
-2. **只讓 API 到 DB。** 只有 `union-business-api` 掛載 DB password、client certificate 與 private key；VPC revision network tag 使用 `cr-api-db-client`。雲端 firewall 與地端 firewall 都只允許該 API subnet／tag 對 NAS DB 私有 IP 的 TCP 3306；Worker、Monitor、UI、ingestion 不配置 DB secret。
+1. **NAS 的 3306 不公開。** NAS 不做 port forwarding，也不設定 `0.0.0.0/0` 或 Cloud Run 公網 IP allowlist。Cloud Run 執行個體沒有固定來源 IP並不影響此設計；API 透過 Direct VPC egress、VPC route、HA VPN 到 NAS 地端私網。
+2. **只讓 API 到 DB。** 只有 `union-business-api` 掛載 DB password、client certificate 與 private key；VPC revision network tag 使用 `cr-api-db-client`。雲端 firewall 與地端 firewall 都只允許該 API subnet／tag 對 NAS DB 私有 IP 的 TCP 3306；Worker、Monitor、UI 不配置 DB secret。
 3. **使用 HA VPN，不使用公開 3306。** `asia-east1` 建立一個 HA VPN gateway、兩條 IPsec tunnel 與 Cloud Router/BGP；地端使用固定公網 IP VPN gateway。兩條 tunnel 都正常且 peer 也符合拓樸時，才可主張 HA。若地端只有單一 ISP／單一 gateway，通道仍加密，但地端仍是單點故障，不能宣稱端到端 99.99%。
 4. **MySQL 再加 mTLS。** VPN 提供網路層加密與私網路由；MySQL server 驗證 API client certificate，API 驗證 NAS server CA／hostname，並使用只具 application schema 必要權限的獨立 MySQL user。VPN 或 firewall 任一層被誤設時，mTLS 仍提供第二道身分驗證。
 5. **Cloud NAT v1 不需要。** API 使用 `private-ranges-only`：NAS 私有 IP 經 VPC／VPN，LINE 等公網 HTTPS 走 Cloud Run 預設 egress。其他 runtime 呼叫內部 API 時，使用 Direct VPC egress、Private Google Access 與 private DNS，將 `run.app` 解析到 `private.googleapis.com`／`restricted.googleapis.com` VIP；一般公網 probe 仍走預設 egress。因此不需為固定出口 IP 支付 Cloud NAT。只有未來第三方明確要求固定 outbound IP，或資安政策要求所有公網 egress 經集中防火牆時，才新增 `all-traffic + Cloud NAT`。
@@ -75,9 +72,9 @@ Google 官方文件依據：Direct VPC egress 無 connector VM 固定費、可�
 
 ### 1.4 預估月費
 
-**v1 低流量正式環境預估：每月 USD 150～170，約 NT$4,950～5,610；建議先設 NT$6,000／月預算告警。**
+**v1 低流量正式環境預估：每月 USD 150～165，約 NT$4,950～5,450；建議先設 NT$6,000／月預算告警。**
 
-估算匯率固定用 `USD 1 = NT$33` 作規劃，不代表 Google 實際帳單匯率；以每月 730 小時、每月不超過 200 萬 HTTP requests、Load Balancer 處理 10 GiB、VPN outbound 10 GiB、Cloud Storage 10 GiB、Artifact Registry 5 GiB、Cloud Logging ingestion 50 GiB 以下估算。未含稅、網域註冊、地端固定 IP／ISP、VPN gateway、NAS、UPS、NAS 硬碟與人工維運費。
+估算匯率固定用 `USD 1 = NT$33` 作規劃，不代表 Google 實際帳單匯率；以每月 730 小時、每月不超過 200 萬 HTTP requests、Load Balancer 處理 10 GiB、VPN outbound 10 GiB、Artifact Registry 5 GiB、Cloud Logging ingestion 50 GiB 以下估算。未含稅、網域註冊、地端固定 IP／ISP、VPN gateway、NAS、UPS、NAS 硬碟與人工維運費。
 
 | 細項 | 數量與計算基準 | 預估 USD／月 | 說明 |
 |---|---:|---:|---|
@@ -88,21 +85,18 @@ Google 官方文件依據：Direct VPC egress 無 connector VM 固定費、可�
 | `union-admin-ui` | 1 vCPU／512 MiB、`min=0` | 0～2 | 低流量大多落在 Cloud Run free tier；冷啟動可接受 |
 | `union-runtime-workers` | 1 vCPU／512 MiB Worker Pool、1 instance、730 小時 | 26～31 | 三 worker 共用；free tier 尚未被其他專案消耗時接近低值 |
 | `union-runtime-monitor` | 1 vCPU／512 MiB Job、每 5 分鐘、每次最低計費 60 秒 | 0～5 | Job free tier 未被其他專案消耗時可接近 0；保守上限約 5 |
-| `union-ingestion-producer` | 1 vCPU／512 MiB、`min=0` | 0～2 | 只在 Cloud Storage event 到達時執行 |
 | Cloud Scheduler | 1 job | 0.00 | 每 billing account 前 3 個 job 免費 |
 | Pub/Sub fallback + DLQ | 2 topics／2 subscriptions，低於 10 GiB throughput | 0～1 | 第一個 10 GiB／月 throughput 免費；長期 backlog storage 可能計費 |
-| Cloud Storage | 2 buckets、合計 10 GiB Standard | 0.22～1 | `asia-east1` Standard 約 USD 0.022／GiB-month，另有少量 operations |
 | Secret Manager | 約 10 個 active versions | 約 0.24 | 每 billing account 前 6 個 active versions 與前 10,000 次 access 免費 |
-| Artifact Registry | 1 repo、4 images、合計 5 GiB | 約 0.45 | 前 0.5 GiB 免費，超過約 USD 0.10／GiB-month |
+| Artifact Registry | 1 repo、3 images、合計 5 GiB | 約 0.45 | 前 0.5 GiB 免費，超過約 USD 0.10／GiB-month |
 | Cloud Logging／Monitoring | logging ingestion 不超過 50 GiB | 0～2 | 先設 log exclusion、30 天 retention 與告警，避免敏感 payload／費用失控 |
 | Cloud DNS | 1 managed zone | 約 0.20 | queries 量低時近似固定小額 |
 | VPN／Internet data transfer | 假設 outbound 10 GiB | 1～3 | 依實際方向、目的地與 Cloud SKU 計費 |
 | Direct VPC egress | 1 VPC／1 subnet | 0 固定費 | 只付實際 network traffic，沒有 connector VM 固定費 |
-| Cloud NAT | 0 | 0.00 | v1 不建立 |
-| Cloud SQL | 0 | 0.00 | 本方案只備援告警訊息，不建立第二套正式 DB |
-| **合計** | 低流量、無 CUD | **約 150～170** | 約 **NT$4,950～5,610** |
+| Cloud NAT／Cloud SQL／Cloud Storage | 0 | 0.00 | v1 不建立額外 Storage / NAT / Cloud SQL |
+| **合計** | 低流量、無 CUD | **約 150～165** | 約 **NT$4,950～5,450** |
 
-估算採 Google 公開按量價格，實際 free tier 會在 billing account 各 project 間共享，不能把免費額度當 SLA 或固定折扣。主要依據：[Cloud Run pricing](https://cloud.google.com/run/pricing)、[Cloud VPN pricing](https://cloud.google.com/network-connectivity/pricing)、[Load Balancing pricing](https://cloud.google.com/load-balancing/pricing)、[Cloud Armor pricing](https://cloud.google.com/armor/pricing)、[Cloud Scheduler pricing](https://cloud.google.com/scheduler/pricing)、[Pub/Sub pricing](https://cloud.google.com/pubsub/pricing)、[Secret Manager pricing](https://cloud.google.com/secret-manager/pricing)、[Artifact Registry pricing](https://cloud.google.com/artifact-registry/pricing)、[Cloud Storage pricing](https://cloud.google.com/storage/pricing)、[Cloud Logging pricing](https://cloud.google.com/logging)。
+估算採 Google 公開按量價格，實際 free tier 會在 billing account 各 project 間共享，不能把免費額度當 SLA 或固定折扣。主要依據：[Cloud Run pricing](https://cloud.google.com/run/pricing)、[Cloud VPN pricing](https://cloud.google.com/network-connectivity/pricing)、[Load Balancing pricing](https://cloud.google.com/load-balancing/pricing)、[Cloud Armor pricing](https://cloud.google.com/armor/pricing)、[Cloud Scheduler pricing](https://cloud.google.com/scheduler/pricing)、[Pub/Sub pricing](https://cloud.google.com/pubsub/pricing)、[Secret Manager pricing](https://cloud.google.com/secret-manager/pricing)、[Artifact Registry pricing](https://cloud.google.com/artifact-registry/pricing)、[Cloud Logging pricing](https://cloud.google.com/logging)。
 
 若只使用單一 VPN tunnel，可約省 USD 36.50／月，但會失去 tunnel redundancy，不採用。若 v1 實測後 UI 冷啟動不可接受，可把 UI 改為 `min=1`，預估再增加約 USD 10～15／月。第一個月先不買 committed use discount；蒐集 30 天 billable instance time 後，再只對確定長期常駐的 Worker Pool 評估承諾折扣。
 
@@ -112,18 +106,18 @@ Google 官方文件依據：Direct VPC egress 無 connector VM 固定費、可�
 
 | 項目 | 數量 | 規劃 |
 |---|---:|---|
-| Cloud Run Service | 3 | Business API、Admin UI、Ingestion Producer |
+| Cloud Run Service | 2 | Business API、Admin UI |
 | Cloud Run Worker Pool | 1 | Durable／LINE／Incident workers 合併 |
 | Cloud Run Job | 1 | Runtime Monitor `--once` |
 | Artifact Registry repository | 1 | `asia-east1`、Docker format、immutable digest deploy |
-| Container images | 4 | `union-api`、`union-ui`、`union-runtime-ops`、`union-ingestion` |
+| Container images | 3 | `union-api`、`union-ui`、`union-runtime-ops` |
 
-`union-runtime-ops` image 可同時供 Worker Pool 與 Monitor Job 使用，以不同 command／args 啟動；兩者仍是不同 Cloud Run resource、service account、env 與 release gate。API、UI、ingestion 不共用 image，避免把 DB driver／API code、UI dependencies 與不可信檔案處理器放進同一攻擊面。所有 image 必須 pin digest，禁止 production 使用 mutable `latest`。
+`union-runtime-ops` image 可同時供 Worker Pool 與 Monitor Job 使用，以不同 command／args 啟動；兩者仍是不同 Cloud Run resource、service account、env 與 release gate。API 與 UI 不共用 image，避免把 DB driver／API code 與 UI dependencies 放進同一攻擊面。所有 image 必須 pin digest，禁止 production 使用 mutable `latest`。
 
 ### 2.2 網路、edge 與地端連線
 
 | 項目 | 數量 | 規劃 |
-|---|---:|---|
+|---|---|---|
 | Custom VPC | 1 | `union-prod-vpc` |
 | Regional subnet | 1 | `asia-east1`，建議獨立 `/24`，啟用 Private Google Access |
 | Private DNS policy／zone | 1 組 | `run.app` 指向 Private Google Access VIP；不得影響外部 public DNS |
@@ -131,7 +125,7 @@ Google 官方文件依據：Direct VPC egress 無 connector VM 固定費、可�
 | VPN tunnels | 2 | IKEv2／IPsec，兩條 BGP session |
 | Cloud Router | 1 | 動態路由只宣告必要 prefix |
 | 地端 VPN gateway | 1 組 | 固定公網 IP；建議雙 ISP／雙 peer，至少支援兩條 tunnel |
-| NAS DB VLAN | 1 | 與一般使用者、管理、IoT、guest VLAN 分離 |
+| 地端私有網路 (LAN) | 1 | NAS MySQL 位於地端私網，3306 永不公開 |
 | External Application Load Balancer | 1 | HTTPS 443、Serverless NEGs、Google-managed certificate |
 | Cloud Armor Standard policy | 1 | public API 與 UI edge policy；規則約 5～8 條 |
 | IAP protected application | 1 | Admin UI；Google Group 授權 |
@@ -144,13 +138,10 @@ Google 官方文件依據：Direct VPC egress 無 connector VM 固定費、可�
 
 | 項目 | 數量 | 規劃 |
 |---|---:|---|
-| Runtime service accounts | 5 | API、UI、worker、monitor、ingestion 各一個 |
+| Runtime service accounts | 4 | API、UI、worker、monitor 各一個 |
 | Pub/Sub push service account | 1 | 只能 invoke 告警 replay endpoint |
-| Eventarc service account | 1 | 只能 invoke ingestion producer |
 | CI deploy service account | 1 | Workload Identity Federation；不建立長效 JSON key |
 | Secret Manager secrets | 約 8～10 | DB password、MySQL CA／client cert／key、LINE secrets、IAP／應用必要 secrets；名稱可版本化，值不入 Git |
-| Cloud Storage buckets | 2 | `union-prod-ingress` 與 `union-prod-archive`；Uniform bucket-level access、Public Access Prevention |
-| Eventarc trigger | 1 | ingress bucket object finalized → ingestion producer |
 | Pub/Sub topics | 2 | `runtime-alert-fallback`、`runtime-alert-dlq` |
 | Pub/Sub subscriptions | 2 | OIDC push／replay subscription、DLQ review subscription |
 | Cloud Scheduler jobs | 1 | 每 5 分鐘執行 Monitor Job |
@@ -247,7 +238,7 @@ IAP policy 不直接授權個人清單，改授權 Google Group；人員異動�
 | Instances | 固定 1；v1 不自動擴縮 |
 | Processes | `run_durable_job_worker.py`、`run_line_worker.py`、`run_incident_worker.py` |
 | Supervision | PID 1 supervisor；個別 child 可重啟。任一 child 連續 permanent failure 時整個 instance fail，交由 Cloud Run restart 並觸發告警 |
-| VPC egress | Direct VPC、Private Google Access／private DNS；不允許 NAS DB VLAN 3306 |
+| VPC egress | Direct VPC、Private Google Access／private DNS；無地端 3306 存取權限 |
 | Authentication | worker pool service account 取得目標 API `run.invoker`；每次 request 取得短效 OIDC token |
 | Secrets | 無 DB、MySQL、LINE channel access token；僅 runtime release／API audience 等非秘密設定 |
 | Poll | Durable 2 秒、Incident 2 秒、LINE idle 60 秒；依 queue lag evidence 調整，不以 busy loop 增加費用 |
@@ -271,22 +262,17 @@ Worker Pool 沒有 public URL，不配置 ingress。三個 worker 可共用 imag
 
 Monitoring alert 設定「連續兩次失敗」才 paging，以降低短暫網路抖動；單次失敗仍保留 log。Scheduler job 本身超過 10 分鐘未成功、API readiness critical、VPN 任一 tunnel down、worker heartbeat stale、Pub/Sub backlog age 超標都需獨立 alert。Monitor Job 的 image 可與 worker 共用，但 service account、command、schedule、log label 與 deploy resource 必須分開。
 
-### 3.6 `union-ingestion-producer`：Cloud Run Service
+### 3.6 檔案匯入處理架構（Admin UI 直傳 Business API）
 
-| 項目 | 配置 |
-|---|---|
-| Image | `union-ingestion@sha256:<digest>` |
-| CPU／Memory | 1 vCPU／512 MiB |
-| Billing | request-based |
-| Min／Max instances | `min=0`、`max=2` |
-| Concurrency | 8，避免同時解析過多檔案造成記憶體尖峰 |
-| Timeout | 60 秒；只驗證 event／metadata 並建立 durable job，不同步完成匯入 |
-| Ingress | `internal`；只接受 Eventarc 與核准的 operator upload flow |
-| VPC egress | Direct VPC + Private Google Access／private DNS；無 DB route permission |
-| Authentication | Eventarc 專屬 service account invoke；producer 以自身 OIDC 呼叫 API |
-| Storage | 只讀指定 ingress object；archive／delete 由已提交 job 與受控 API operation 決定 |
+依據現有程式碼架構（如 `api/routes/finance_import.py`、`hcm_import.py`、`client_beclass_import.py`），檔案匯入採用直傳與暫存清理機制：
 
-地端 `file_watcher.py` 不直接搬上 Cloud Run：Cloud Run ephemeral filesystem 不適合作為 NAS directory watcher。正式流程改為「檔案上傳 Cloud Storage → Eventarc → ingestion producer → Private API 建立 durable ingestion job」。上傳 bucket 啟用 Public Access Prevention、Uniform bucket-level access、retention／lifecycle、CMEK 是否需要依資料分級決定；object name 與 metadata 不得含完整個資。
+1. **上傳管道**：管理人員在 `Admin UI` 透過網頁介面上傳 Excel／CSV 檔案。
+2. **傳輸邊界**：UI 將檔案以 HTTP multipart 形式直接傳送至 `Business API` 的專屬匯入端點（如 `/batches/preview`、`/upload`）。
+3. **本機暫存與解析**：API 接收 `UploadFile` 後寫入容器本機臨時檔案（`tempfile.NamedTemporaryFile`），完成格式校驗、去重與 Preview 預覽計算。
+4. **即時清理**：在 API 請求生命週期的 `finally` 區塊中，立即呼叫 `unlink()` 刪除臨時檔案，容器內不保留任何業務檔案磁碟殘留。
+5. **正式入帳**：管理人員確認 Preview 無誤後，發送 Apply 命令，由 Business API 在單一 Outer UoW 交易內將正規化數據寫入地端 NAS MySQL。
+
+本案不部署獨立的檔案監聽服務或 Cloud Storage 轉發器，以保持代碼架構與容器邊界最簡化。
 
 ### 3.7 Pub/Sub 告警備援配置
 
@@ -306,13 +292,13 @@ Pub/Sub 不是資料庫 mirror，也不能承接任意 business write。只有�
 
 | 層級 | 必要配置 |
 |---|---|
-| Cloud subnet | `asia-east1` 獨立 subnet；預留足夠 Direct VPC IP；開 Private Google Access；不與 NAS DB VLAN CIDR 重疊 |
-| Routes | Cloud Router 只學習 NAS DB VLAN／必要管理 prefix；地端只學習 Cloud Run subnet，不宣告整個 LAN |
-| Cloud egress firewall | 允許 `cr-api-db-client` → NAS DB private IP TCP 3306；其他 Cloud Run tags → DB VLAN deny；必要 DNS／HTTPS allow，最後 deny + logging |
-| On-prem firewall | 只允許 Cloud Run API subnet → NAS DB private IP:3306；禁止其他 VLAN、VPN client、internet；management port 使用另一管理網段 |
+| Cloud subnet | `asia-east1` 獨立 subnet；預留足夠 Direct VPC IP；開 Private Google Access；不與 NAS CIDR 重疊 |
+| Routes | Cloud Router 只學習地端 NAS 私網 prefix；地端只學習 Cloud Run subnet，不宣告整個 LAN |
+| Cloud egress firewall | 允許 `cr-api-db-client` → NAS DB private IP TCP 3306；其他 Cloud Run tags → 地端私網 deny；必要 DNS／HTTPS allow，最後 deny + logging |
+| On-prem firewall | 只允許 Cloud Run API subnet → NAS DB private IP:3306；未授權連線全部禁止；management port 使用另一管理網段 |
 | VPN | IKEv2、強 cipher suite、兩 tunnel、BGP authentication 若 peer 支援；tunnel 狀態與 route count 告警 |
-| MySQL | `bind-address` 只綁 DB VLAN private IP；`require_secure_transport=ON`；server CA 驗證；application user 限 schema／來源；禁止 remote root |
-| NAS | DB VLAN ACL、OS／DB patch、磁碟加密、UPS、3-2-1 backup、離線／不可變備份與定期 restore drill |
+| MySQL | `bind-address` 只綁地端私網 private IP；`require_secure_transport=ON`；server CA 驗證；application user 限 schema／來源；禁止 remote root |
+| NAS | 地端私網 ACL、OS／DB patch、磁碟加密、UPS、3-2-1 backup、離線／不可變備份與定期 restore drill |
 
 即使 HA VPN 有兩條 tunnel，NAS、地端電力與 ISP 仍可能故障。本 v1 只確保告警能暫存並於 DB 恢復後回寫，不把 Cloud Run／Pub/Sub 說成 business DB 高可用。若未來要求 DB RTO／RPO，必須另案評估 Cloud SQL migration／replication與資料主從裁決，不能在本部署計畫中暗自加入雙寫。
 
@@ -322,9 +308,9 @@ Pub/Sub 不是資料庫 mirror，也不能承接任意 business write。只有�
 2. 建立 VPC、subnet、Private Google Access、private DNS、firewall deny baseline；確認 CIDR 不與 NAS／其他 VPN 重疊。
 3. 建立 Cloud Router、HA VPN 兩條 tunnel、地端 peer、BGP route；先只做 TCP connectivity test，不開 public 3306。
 4. 在 disposable／staging DB 驗證 MySQL mTLS、server identity、API application user 最小權限與連線池上限；production secret 才寫入 Secret Manager。
-5. Build 四個 image，完成 dependency／vulnerability scan、SBOM、digest pin；先部署 API staging revision，驗證 `/health`、authenticated readiness、OIDC caller mapping及 DB unavailable fail-closed。
-6. 部署 UI、Worker Pool、Monitor Job、ingestion producer；逐一確認它們沒有 DB env、DB secret mount、MySQL route與 concrete DB connection。
-7. 建立 Storage／Eventarc、Pub/Sub fallback／DLQ、Scheduler、Logging／Monitoring alerts；以 disposable event 驗證 DB down → Pub/Sub retained → DB restored → API idempotent write-back。
+5. Build 三個 image（`union-api`、`union-ui`、`union-runtime-ops`），完成 dependency／vulnerability scan、SBOM、digest pin；先部署 API staging revision，驗證 `/health`、authenticated readiness、OIDC caller mapping及 DB unavailable fail-closed。
+6. 部署 UI、Worker Pool、Monitor Job；逐一確認它們沒有 DB env、DB secret mount、MySQL route與 concrete DB connection。
+7. 建立 Pub/Sub fallback／DLQ、Scheduler、Logging／Monitoring alerts；以 disposable event 驗證 DB down → Pub/Sub retained → DB restored → API idempotent write-back。
 8. 建立 External Application Load Balancer、TLS、Cloud Armor、IAP、URL map allowlist；驗證外部 `run.app` 不能繞過 edge，Private Operations／debug／admin mutation 不可由 public path 到達。
 9. 執行 release preflight、DB backup／restore evidence、migration gate與人工 release approval；此步驟不得由 `start_local_development` 或容器啟動隱式套 schema。
 10. 以 0% → 5% → 25% → 100% traffic 漸進切換；驗證 LINE webhook durable task、UI login＋Google key、worker heartbeat、queue lag、Monitor、VPN failover、NAS DB mTLS、告警 fallback與 rollback。
@@ -333,7 +319,7 @@ Pub/Sub 不是資料庫 mirror，也不能承接任意 business write。只有�
 
 | Gate | 驗收 |
 |---|---|
-| DB isolation | 從 internet、UI、worker、monitor、ingestion 均無法連 NAS:3306；只有 API 成功且必須 mTLS |
+| DB isolation | 從 internet、UI、worker、monitor 均無法連 NAS:3306；只有 API 成功且必須 mTLS |
 | Identity | 錯 issuer／audience／service account／service name 全部 fail closed；production shared key 無 fallback |
 | Public edge | 只有 allowlist paths 可達；IAP 群組外使用者不能進 UI；Google passkey／security key 實測成功 |
 | Transaction boundary | webhook／worker 外部 side effect 使用 committed durable task；外部呼叫不在 DB transaction |

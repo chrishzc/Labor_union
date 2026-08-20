@@ -4,28 +4,27 @@
 - 規劃版本：v1
 - 更新日期：2026-08-15
 - 目標區域：Google Cloud `asia-east1`（台灣）
-- 核心原則：MySQL 僅存在地端 NAS，只有 Business API 可取得 DB credential 並經私網連線；所有 Worker、Monitor、UI 與 ingestion producer 都只能透過 authenticated API 間接操作 DB。
+- 核心原則：MySQL 僅存在地端 NAS，只有 Business API 可取得 DB credential 並經私網連線；所有 Worker、Monitor 與 UI 都只能透過 authenticated API 間接操作 DB。
 - 方案定位：以單一 Cloud VPN tunnel 降低固定月費，保留私網、VPC firewall、BGP 與 MySQL mTLS；明確接受 tunnel 維護或故障期間 NAS DB 不可達，且不宣稱具備 VPN 高可用或 99.99% SLA。
 
 ## 一、摘要與選型結論
 
-### 1.1 最終結論：採 5+1 runtime＋單一 VPN tunnel
+### 1.1 最終結論：採 4+1 runtime＋單一 VPN tunnel
 
-本案採用 **5 個 Cloud Run runtime resource + 1 個地端 NAS MySQL**，雲地連線使用 **1 個 HA VPN gateway、1 條 IPsec tunnel、1 組 BGP session**：
+本案採用 **4 個 Cloud Run runtime resource + 1 個地端 NAS MySQL**，雲地連線使用 **1 個 HA VPN gateway、1 條 IPsec tunnel、1 組 BGP session**：
 
 | 編號 | Runtime | Cloud Run 型態 | 常駐策略 | 職責 |
 |---|---|---|---|---|
-| 1 | `union-business-api` | Service | `min=1` | 唯一 DB connection owner；business API、LINE webhook、Private Operations API、readiness |
-| 2 | `union-admin-ui` | Service | `min=0` | Streamlit 薄 UI，只呼叫 API |
+| 1 | `union-business-api` | Service | `min=1` | 唯一 DB connection owner；business API、LINE webhook、Private Operations API、檔案接收解析、readiness |
+| 2 | `union-admin-ui` | Service | `min=0` | Streamlit 薄 UI，支援管理操作與檔案上傳，只呼叫 API |
 | 3 | `union-runtime-workers` | Worker Pool | `instances=1` | 合併 Durable Job、LINE、Incident 三個 worker；不持有 DB credential |
 | 4 | `union-runtime-monitor` | Job | 每 5 分鐘一次 | 以 `--once` 探測 API、UI、public edge、LIFF，再經 Private Operations API 回報 |
-| 5 | `union-ingestion-producer` | Service | `min=0` | 接 Cloud Storage／Eventarc 事件，只建立 durable ingestion job，不直接入帳 |
 | +1 | `nas-mysql-prod` | 地端 NAS | 地端常駐 | 正式 MySQL；只接受 API 經 VPN、mTLS 的私網連線 |
 
 Cloud VPN 採用 **HA VPN gateway resource 的單 tunnel 拓樸**，而不是新建 Classic VPN 動態路由。理由如下：
 
 - Cloud Router／BGP 可明確交換必要 prefix，日後增加第二條 tunnel 時不必把靜態路由方案整套重做。
-- Classic VPN 的動態路由已退役；正式環境不建立新的 deprecated BGP 架構。
+- Classic VPN 的動態路由已退役；正式環境不建立新的 deprecated BGP架構。
 - 使用 HA VPN gateway resource 不代表本拓樸具有 HA。只有一條 tunnel 時沒有介面冗餘，也不符合 Google Cloud 99.99% availability SLA 條件。
 - 相較雙 tunnel 方案，每月少一條 tunnel 的固定費，約節省 USD 36.50；資料機密性與最小權限邊界不變，降低的是連線可用性。
 
@@ -36,16 +35,14 @@ Cloud VPN 採用 **HA VPN gateway resource 的單 tunnel 拓樸**，而不是新
 ```mermaid
 flowchart LR
     USER["管理人員／LINE／LIFF"] -->|"HTTPS 443"| EDGE["External Application Load Balancer\nCloud Armor／TLS／IAP"]
-    EDGE -->|"受控 UI 路徑"| UI["Cloud Run Service\nunion-admin-ui"]
+    EDGE -->|"受控 UI 路徑 (IAP)"| UI["Cloud Run Service\nunion-admin-ui"]
     EDGE -->|"必要 public API 路徑"| API["Cloud Run Service\nunion-business-api"]
-    UI -->|"Google OIDC + Private API"| API
+    UI -->|"頁面操作／檔案上傳 (UploadFile) + Google OIDC"| API
     WORKERS["Cloud Run Worker Pool\nDurable／LINE／Incident"] -->|"Google OIDC + Private Operations API"| API
     MONITOR["Cloud Run Job\nRuntime Monitor --once"] -->|"Google OIDC + observations"| API
-    GCS["Cloud Storage"] --> EVENTARC["Eventarc"] --> INGEST["Cloud Run Service\nIngestion Producer"]
-    INGEST -->|"Google OIDC + durable ingestion command"| API
     API -->|"Direct VPC egress"| VPC["VPC／Firewall／Cloud Router"]
     VPC -->|"Cloud VPN：1 tunnel"| GW["地端固定 IP VPN Gateway"]
-    GW -->|"DB VLAN 私網 + MySQL mTLS :3306"| DB[("NAS MySQL 正式 DB")]
+    GW -->|"地端私網 + MySQL mTLS :3306"| DB[("NAS MySQL 正式 DB")]
 
     MONITOR -. "VPN／DB 失聯：最小去敏告警" .-> PS["Pub/Sub fallback topic／DLQ"]
     API -. "可送達時發佈去敏告警" .-> PS
@@ -53,7 +50,7 @@ flowchart LR
     API -. "同一 outer transaction 寫回告警" .-> DB
 ```
 
-正常流程只有 Business API 可經 Direct VPC egress、Cloud VPN 與 DB VLAN 到達 NAS MySQL。單一 tunnel 中斷時：
+正常流程只有 Business API 可經 Direct VPC egress、Cloud VPN 與地端私網到達 NAS MySQL。單一 tunnel 中斷時：
 
 1. API liveness 可維持存活，但 authenticated readiness 必須回報 VPN／DB dependency unavailable。
 2. 需要 DB 的 query、preview、apply 與 worker operation 必須 fail closed，回傳 typed `unavailable`；不得以 cache、UI state 或 Pub/Sub 偽造成功。
@@ -65,8 +62,8 @@ Pub/Sub DB outage fallback 目前仍是部署前待完成能力。未取得核�
 
 ### 1.3 安全與可用性結論
 
-1. **NAS 3306 永不公開。** 不做 port forwarding，不設定 `0.0.0.0/0` 或 Cloud Run 公網 IP allowlist；流量只走 VPC route、Cloud VPN 與 DB VLAN。
-2. **只有 API 可到 DB。** 只有 `union-business-api` 持有 DB password、client certificate 與 private key，並使用 revision network tag `cr-api-db-client`；UI、Worker、Monitor、ingestion 都沒有 DB secret 與 DB route permission。
+1. **NAS 3306 永不公開。** 不做 port forwarding，不設定 `0.0.0.0/0` 或 Cloud Run 公網 IP allowlist；流量只走 VPC route、Cloud VPN 與地端私網。
+2. **只有 API 可到 DB。** 只有 `union-business-api` 持有 DB password、client certificate 與 private key，並使用 revision network tag `cr-api-db-client`；UI、Worker、Monitor 都沒有 DB secret 與 DB route permission。
 3. **VPN 與 MySQL mTLS 疊加。** VPN 保護網路傳輸；MySQL server 驗證 API client certificate，API 驗證 NAS server CA／hostname，application user 只具必要 schema 權限。
 4. **單 tunnel 是明確單點。** Cloud VPN tunnel、Google gateway interface、地端 peer interface、地端 ISP、VPN gateway、NAS、電力任一中斷，都可能使正式 DB 不可達。本計畫不配置自動 tunnel failover，也不宣稱 99.99% VPN SLA。
 5. **保留升級空間。** VPC subnet、Cloud Router ASN、地端 ASN、BGP address range、peer gateway resource 與 firewall 規則命名需預留第二 tunnel；升級時新增第二 interface／tunnel／BGP session，再驗證 failover，不更換 DB owner。
@@ -78,9 +75,9 @@ Pub/Sub DB outage fallback 目前仍是部署前待完成能力。未取得核�
 
 ### 1.4 預估月費
 
-**低流量正式環境預估每月 USD 115～135，約 NT$3,800～4,450；建議先設 NT$5,000／月預算告警。**
+**低流量正式環境預估每月 USD 115～130，約 NT$3,800～4,300；建議先設 NT$5,000／月預算告警。**
 
-估算使用 `USD 1 = NT$33`、每月 730 小時、每月不超過 200 萬 HTTP requests、Load Balancer 處理 10 GiB、VPN outbound 10 GiB、Cloud Storage 10 GiB、Artifact Registry 5 GiB、Cloud Logging ingestion 50 GiB 以下。未含稅、網域註冊、地端固定 IP／ISP、VPN gateway、NAS、UPS、硬碟與人工維運費。
+估算使用 `USD 1 = NT$33`、每月 730 小時、每月不超過 200 萬 HTTP requests、Load Balancer 處理 10 GiB、VPN outbound 10 GiB、Artifact Registry 5 GiB、Cloud Logging ingestion 50 GiB 以下。未含稅、網域註冊、地端固定 IP／ISP、VPN gateway、NAS、UPS、硬碟與人工維運費。
 
 | 細項 | 數量與計算基準 | 預估 USD／月 | 說明 |
 |---|---:|---:|---|
@@ -91,12 +88,11 @@ Pub/Sub DB outage fallback 目前仍是部署前待完成能力。未取得核�
 | `union-admin-ui` | 1 vCPU／512 MiB、`min=0` | 0～2 | 接受低流量冷啟動 |
 | `union-runtime-workers` | 1 vCPU／512 MiB Worker Pool、1 instance | 26～31 | 三 worker 共用；free tier 依 billing account 實際用量 |
 | `union-runtime-monitor` | 1 vCPU／512 MiB Job、每 5 分鐘 | 0～5 | 依執行時間與 free tier 變動 |
-| `union-ingestion-producer` | 1 vCPU／512 MiB、`min=0` | 0～2 | 只在事件到達時執行 |
-| Scheduler／Pub/Sub／Storage／Secrets／Registry／DNS／Logging | 低流量基準 | 約 1～5 | backlog、retention、image、log 與 secret versions 會影響費用 |
+| Scheduler／Pub/Sub／Secrets／Registry／DNS／Logging | 低流量基準 | 約 1～3 | backlog、retention、image、log 與 secret versions 會影響費用 |
 | VPN／Internet data transfer | 假設 outbound 10 GiB | 1～3 | 依方向、目的地與實際 SKU 計費 |
 | Direct VPC egress | 1 VPC／1 subnet | 0 固定費 | 無 connector VM 固定費；流量另計 |
-| Cloud NAT／Cloud SQL | 0 | 0.00 | 本方案不建立 |
-| **合計** | 低流量、無 CUD | **約 115～135** | 約 **NT$3,800～4,450** |
+| Cloud NAT／Cloud SQL／Cloud Storage | 0 | 0.00 | 本方案不建立額外 Cloud Storage / NAT |
+| **合計** | 低流量、無 CUD | **約 115～130** | 約 **NT$3,800～4,300** |
 
 Cloud VPN 依 tunnel 小時計費；單 tunnel 相較雙 tunnel 約少 USD 36.50／月。實際價格、匯率與 free tier 以帳單為準。第一個月不預買 committed use discount，蒐集 30 天 billable instance time 後，再只對確定長期常駐的 runtime 評估。
 
@@ -108,18 +104,18 @@ Cloud VPN 依 tunnel 小時計費；單 tunnel 相較雙 tunnel 約少 USD 36.50
 
 | 項目 | 數量 | 規劃 |
 |---|---:|---|
-| Cloud Run Service | 3 | Business API、Admin UI、Ingestion Producer |
+| Cloud Run Service | 2 | Business API、Admin UI |
 | Cloud Run Worker Pool | 1 | Durable／LINE／Incident workers 合併 |
 | Cloud Run Job | 1 | Runtime Monitor `--once` |
 | Artifact Registry repository | 1 | `asia-east1`、Docker format、immutable digest deploy |
-| Container images | 4 | `union-api`、`union-ui`、`union-runtime-ops`、`union-ingestion` |
+| Container images | 3 | `union-api`、`union-ui`、`union-runtime-ops` |
 
-`union-runtime-ops` image 可同時供 Worker Pool 與 Monitor Job 使用，但 resource、service account、command、env 與 release gate 必須分開。API、UI 與 ingestion 不共用 image，避免 DB driver、UI dependencies 與不可信檔案處理器共用攻擊面。Production 全部 pin image digest，禁止使用 mutable `latest`。
+`union-runtime-ops` image 可同時供 Worker Pool 與 Monitor Job 使用，但 resource、service account、command、env 與 release gate 必須分開。API 與 UI 不共用 image，避免 DB driver 與 UI dependencies 共用攻擊面。Production 全部 pin image digest，禁止使用 mutable `latest`。
 
 ### 2.2 網路、edge 與地端連線
 
 | 項目 | 數量 | 規劃 |
-|---|---:|---|
+|---|---|---|
 | Custom VPC | 1 | `union-prod-vpc` |
 | Regional subnet | 1 | `asia-east1` 獨立 `/24`；啟用 Private Google Access |
 | Private DNS policy／zone | 1 組 | 內部 `run.app` 存取指向 Private Google Access VIP；不得污染外部 public DNS |
@@ -128,7 +124,7 @@ Cloud VPN 依 tunnel 小時計費；單 tunnel 相較雙 tunnel 約少 USD 36.50
 | Cloud Router | 1 | 只宣告／學習必要 prefix；預留第二 BGP session |
 | External peer VPN gateway resource | 1 | 描述地端單一 peer public IP／interface |
 | 地端 VPN gateway | 1 | 固定公網 IP、支援 IKEv2 與 BGP |
-| NAS DB VLAN | 1 | 與使用者、管理、IoT、guest VLAN 分離 |
+| 地端私有網路 (LAN) | 1 | NAS MySQL 位於地端私網，3306 永不公開 |
 | External Application Load Balancer | 1 | HTTPS 443、Serverless NEGs、Google-managed certificate |
 | Cloud Armor Standard policy | 1 | Public API 與 UI edge policy；約 5～8 條規則 |
 | IAP protected application | 1 | Admin UI；Google Group 授權 |
@@ -140,13 +136,10 @@ Cloud VPN 依 tunnel 小時計費；單 tunnel 相較雙 tunnel 約少 USD 36.50
 
 | 項目 | 數量 | 規劃 |
 |---|---:|---|
-| Runtime service accounts | 5 | API、UI、worker、monitor、ingestion 各一個 |
+| Runtime service accounts | 4 | API、UI、worker、monitor 各一個 |
 | Pub/Sub push service account | 1 | 只可 invoke 告警 replay endpoint |
-| Eventarc service account | 1 | 只可 invoke ingestion producer |
 | CI deploy service account | 1 | Workload Identity Federation；不建立長效 JSON key |
 | Secret Manager secrets | 約 8～10 | DB password、MySQL CA／client cert／key、LINE secrets 與應用必要 secret；值不入 Git |
-| Cloud Storage buckets | 2 | `union-prod-ingress`、`union-prod-archive`；Public Access Prevention＋Uniform bucket-level access |
-| Eventarc trigger | 1 | ingress object finalized → ingestion producer |
 | Pub/Sub topics／subscriptions | 2／2 | fallback、DLQ 與對應 replay／review subscription |
 | Cloud Scheduler jobs | 1 | 每 5 分鐘執行 Monitor Job |
 | Logging／Monitoring alert policies | 1 組 | API 5xx、VPN tunnel、route、DB readiness、worker heartbeat、queue lag、Pub/Sub backlog、TLS、budget |
@@ -231,7 +224,7 @@ Load Balancer URL map 採 allowlist；Private Operations、debug、Data Browser 
 | Instances | 固定 1；v1 不自動擴縮 |
 | Processes | Durable Job、LINE、Incident workers |
 | Supervision | PID 1 supervisor；個別 child 可重啟，連續 permanent failure 使 instance fail 並告警 |
-| VPC egress | Direct VPC＋Private Google Access；無 NAS DB VLAN 3306 權限 |
+| VPC egress | Direct VPC＋Private Google Access；無地端 3306 存取權限 |
 | Authentication | Worker SA 取得 API `run.invoker`，每次 request 使用短效 OIDC token |
 | Secrets | 無 DB／MySQL／LINE channel access token |
 | Shutdown | SIGTERM 後停止 claim；目前 operation 依 lease／idempotency 安全完成或失敗 |
@@ -250,20 +243,17 @@ Load Balancer URL map 採 allowlist；Private Operations、debug、Data Browser 
 
 單 tunnel down 即代表雲地 DB 路徑失效，必須立即產生 critical alert；不得等待第二 tunnel 狀態或把 API process liveness 當成 DB ready。
 
-### 3.6 `union-ingestion-producer`
+### 3.6 檔案匯入處理架構（Admin UI 直傳 Business API）
 
-| 項目 | 配置 |
-|---|---|
-| Image | `union-ingestion@sha256:<digest>` |
-| CPU／Memory | 1 vCPU／512 MiB |
-| Billing／Instances | request-based；`min=0`、`max=2` |
-| Concurrency／Timeout | 8／60 秒 |
-| Ingress | `internal`；只接受 Eventarc 與核准 upload flow |
-| VPC egress | Direct VPC＋Private Google Access；無 DB route |
-| Authentication | Eventarc SA invoke；producer 以自身 OIDC 呼叫 API |
-| Storage | 只讀指定 ingress object；archive／delete 由 committed job 與受控 API operation 決定 |
+依據現有程式碼架構（如 `api/routes/finance_import.py`、`hcm_import.py`、`client_beclass_import.py`），檔案匯入採用直傳與暫存清理機制：
 
-地端 directory watcher 不搬上 Cloud Run。正式流程為「Cloud Storage → Eventarc → ingestion producer → Private API 建立 durable ingestion job」。Object name 與 metadata 不得含完整個資。
+1. **上傳管道**：管理人員在 `Admin UI` 透過網頁介面上傳 Excel／CSV 檔案。
+2. **傳輸邊界**：UI 將檔案以 HTTP multipart 形式直接傳送至 `Business API` 的專屬匯入端點（如 `/batches/preview`、`/upload`）。
+3. **本機暫存與解析**：API 接收 `UploadFile` 後寫入容器本機臨時檔案（`tempfile.NamedTemporaryFile`），完成格式校驗、去重與 Preview 預覽計算。
+4. **即時清理**：在 API 請求生命週期的 `finally` 區塊中，立即呼叫 `unlink()` 刪除臨時檔案，容器內不保留任何業務檔案磁碟殘留。
+5. **正式入帳**：管理人員確認 Preview 無誤後，發送 Apply 命令，由 Business API 在單一 Outer UoW 交易內將正規化數據寫入地端 NAS MySQL。
+
+本案不部署獨立的檔案監聽服務或 Cloud Storage 轉發器，以保持代碼架構與容器邊界最簡化。
 
 ## 四、單一 Cloud VPN 與地端配置
 
@@ -274,7 +264,7 @@ Load Balancer URL map 採 allowlist；Private Operations、debug、Data Browser 
 | Google gateway | `asia-east1` HA VPN gateway resource，使用 interface 0 建立單一 tunnel |
 | Peer resource | External VPN gateway resource，宣告地端固定 public IP 與單一 interface |
 | Tunnel | IKEv2／IPsec；明確選定核准 cipher suite；secret 存 Secret Manager／受控地端 secret store |
-| Routing | Cloud Router＋BGP；只交換 Cloud Run subnet 與 NAS DB VLAN 必要 prefix |
+| Routing | Cloud Router＋BGP；只交換 Cloud Run subnet 與地端私網必要 prefix |
 | BGP addressing | 使用未重疊的 link-local `/30`；預留第二 tunnel 的獨立 `/30` |
 | MTU／MSS | 依 Cloud VPN 與地端設備能力實測；必要時調整 TCP MSS，避免 large packet 黑洞 |
 | Upgrade reserve | 保留 HA VPN interface 1、第二 peer interface、第二 BGP session 與 firewall naming |
@@ -286,11 +276,11 @@ Load Balancer URL map 採 allowlist；Private Operations、debug、Data Browser 
 | 層級 | 必要配置 |
 |---|---|
 | Cloud subnet | `asia-east1` 獨立 subnet；Private Google Access；不與 NAS／其他 VPN CIDR 重疊 |
-| Cloud Router | 只學習 NAS DB VLAN；只向地端宣告 Cloud Run API 所需 subnet |
-| Cloud egress firewall | `cr-api-db-client` → NAS DB private IP TCP 3306 allow；其他 runtime → DB VLAN deny；最後 deny＋logging |
-| On-prem firewall | 只允許 Cloud Run API subnet → NAS DB private IP:3306；internet、一般 VLAN、VPN client 全部禁止 |
-| MySQL | `bind-address` 綁 DB VLAN private IP；`require_secure_transport=ON`；驗證 server／client certificate；禁止 remote root |
-| NAS | DB VLAN ACL、patch、磁碟加密、UPS、3-2-1 backup、離線／不可變備份與 restore drill |
+| Cloud Router | 只學習地端 NAS 私網 prefix；只向地端宣告 Cloud Run API 所需 subnet |
+| Cloud egress firewall | `cr-api-db-client` → NAS DB private IP TCP 3306 allow；其他 runtime → 地端私網 deny；最後 deny＋logging |
+| On-prem firewall | 只允許 Cloud Run API subnet → NAS DB private IP:3306；internet 與其他未授權連線全部禁止 |
+| MySQL | `bind-address` 綁地端私網 private IP；`require_secure_transport=ON`；驗證 server／client certificate；禁止 remote root |
+| NAS | 地端私網 ACL、patch、磁碟加密、UPS、3-2-1 backup、離線／不可變備份與 restore drill |
 
 Firewall 規則不能只靠來源 subnet 區分 API 與其他 runtime；Cloud 端同時使用 revision network tag／service identity，地端再限縮目的 DB IP、port 與 MySQL mTLS identity。未知 route、額外 prefix 或 certificate verification failure 一律 fail closed。
 
@@ -303,7 +293,7 @@ Firewall 規則不能只靠來源 subnet 區分 API 與其他 runtime；Cloud �
 3. 依序確認 Google tunnel、Cloud Router BGP、地端 peer、ISP、公網 IP、IKE／IPsec negotiation、route 與 NAS DB readiness。
 4. 只有在可證明原 tunnel 不可恢復且變更已核准時，才重建 tunnel；不得因重建改用 public 3306 作旁路。
 5. Tunnel 恢復後先驗證 BGP route、VPC Connectivity Test、TCP 3306、MySQL mTLS、authenticated readiness 與 DB server identity。
-6. 檢查 durable queue、worker lease、Pub/Sub backlog／DLQ、LINE webhook source 與 ingestion object；依 idempotency key 恢復處理。
+6. 檢查 durable queue、worker lease、Pub/Sub backlog／DLQ 與 LINE webhook source；依 idempotency key 恢復處理。
 7. 先恢復 API read-only smoke，再恢復 worker claim 與 mutation traffic；確認沒有 double apply、stale receipt 或未解析 operation。
 8. 保存 incident 時間線、影響範圍、root cause、恢復證據與是否觸發升級雙 tunnel 的判斷。
 
@@ -360,9 +350,9 @@ Firewall 規則不能只靠來源 subnet 區分 API 與其他 runtime；Cloud �
 2. 建立 VPC、subnet、Private Google Access、private DNS 與 firewall deny baseline；確認 Cloud／NAS／其他 VPN CIDR 不重疊。
 3. 建立 Cloud Router、HA VPN gateway resource、external peer gateway resource、單一 tunnel 與 BGP session；驗證只出現核准 prefix。
 4. 在 disposable／staging DB 驗證 route、TCP 3306、MySQL mTLS、server identity、application user 最小權限、連線池上限與 tunnel interruption behavior。
-5. Build 四個 image，完成 dependency／vulnerability scan、SBOM、digest pin；先部署 API staging revision，驗證 liveness、readiness、OIDC caller mapping與 DB unavailable fail-closed。
-6. 部署 UI、Worker Pool、Monitor Job、ingestion producer；逐一證明它們沒有 DB env、DB secret mount、MySQL route與 concrete DB connection。
-7. 建立 Storage／Eventarc、Pub/Sub fallback／DLQ、Scheduler 與 alerts；以 disposable event 驗證 DB down → retained／failed state → DB restored → API idempotent replay。
+5. Build 三個 image（`union-api`、`union-ui`、`union-runtime-ops`），完成 dependency／vulnerability scan、SBOM、digest pin；先部署 API staging revision，驗證 liveness、readiness、OIDC caller mapping與 DB unavailable fail-closed。
+6. 部署 UI、Worker Pool、Monitor Job；逐一證明它們沒有 DB env、DB secret mount、MySQL route與 concrete DB connection。
+7. 建立 Pub/Sub fallback／DLQ、Scheduler 與 alerts；以 disposable event 驗證 DB down → retained／failed state → DB restored → API idempotent replay。
 8. 建立 External Application Load Balancer、TLS、Cloud Armor、IAP 與 URL map allowlist；驗證外部 `run.app` 無法繞過 edge，Private Operations／debug／admin mutation 不可由 public path 到達。
 9. 完成 tunnel outage drill、NAS backup／restore evidence、release preflight、migration gate與人工 release approval；不得由 container startup 隱式套 schema。
 10. 以 0% → 5% → 25% → 100% 漸進切換；驗證 LINE webhook durable task、UI login＋Google key、worker heartbeat、queue lag、Monitor、NAS DB mTLS、告警 fallback與 application rollback。
@@ -371,9 +361,9 @@ Firewall 規則不能只靠來源 subnet 區分 API 與其他 runtime；Cloud �
 
 | Gate | 狀態要求 | 驗收內容 |
 |---|---|---|
-| DB isolation | `PASS` | Internet、UI、worker、monitor、ingestion 均無法連 NAS:3306；只有 API 可經 VPN＋mTLS 連線 |
+| DB isolation | `PASS` | Internet、UI、worker、monitor 均無法連 NAS:3306；只有 API 可經 VPN＋mTLS 連線 |
 | VPN topology | `PASS` | 只有一條核准 tunnel／BGP session；文件與監控均標 non-HA，未宣稱 99.99% SLA |
-| Route boundary | `PASS` | 只交換核准 Cloud Run subnet 與 NAS DB VLAN prefix；未知／額外 route fail closed |
+| Route boundary | `PASS` | 只交換核准 Cloud Run subnet 與地端私網 prefix；未知／額外 route fail closed |
 | Identity | `PASS` | 錯 issuer、audience、service account、service name、MySQL client certificate 全部拒絕 |
 | Public edge | `PASS` | 只有 allowlist path 可達；IAP 群組外不能進 UI；passkey／security key 實測成功 |
 | Transaction boundary | `PASS` | 外部 side effect 使用 committed durable task；外部呼叫不在 DB transaction |
@@ -397,8 +387,8 @@ Firewall 規則不能只靠來源 subnet 區分 API 與其他 runtime；Cloud �
 
 只有下列項目全部具備可追溯證據，才可宣告單一 Cloud VPN 方案完成：
 
-1. Cloud Run 五個 runtime 的 image、identity、ingress／egress、secret 與 max instance 邊界完成驗證。
-2. 單一 tunnel、BGP、route、firewall、NAS DB VLAN 與 MySQL mTLS 通過實機測試。
+1. Cloud Run 四個 runtime 的 image、identity、ingress／egress、secret 與 max instance 邊界完成驗證。
+2. 單一 tunnel、BGP、route、firewall、地端私網與 MySQL mTLS 通過實機測試。
 3. Tunnel 中斷時所有 DB mutation fail closed，沒有 public 3306、direct DB bypass、optimistic success 或未授權資料暫存。
 4. Tunnel 恢復後 readiness、fresh-fact validation、idempotent replay、worker lease 與 backlog reconciliation 通過。
 5. IAP、Cloud Armor、OIDC、service account 最小權限與 Google 管理者金鑰完成驗收。

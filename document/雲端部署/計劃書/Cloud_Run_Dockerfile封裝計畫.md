@@ -1,10 +1,10 @@
-# Cloud Run Dockerfile 正式封裝計畫
+# Cloud Run Dockerfile 正式封裝計畫 (v1 - Superseded)
 
-文件狀態：已完成計畫驗證（`PLAN_VALIDATION_PASS`）
+文件狀態：`superseded`（已被 `document/雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫_v2.md` 取代）
 
-適用範圍：Cloud Run 5 個資源與地端 NAS MySQL；本文件只規劃映像封裝、啟動與驗證，不執行部署或資料庫變更。
+部署基線：`document/雲端部署/計劃書/單一Cloud VPN計畫書.md`
 
-安全原則：最小內容、最小權限、唯讀映像、明確 allowlist、未分類資料一律不封裝（fail closed）。
+適用範圍：歷史 5 資源規劃存檔。現行正式標準為 3 個映像、4 個 Cloud Run 資源之 4+1 拓樸。
 
 ## 一、摘要與結論
 
