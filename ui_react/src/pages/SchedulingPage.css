@@ -1,6 +1,6 @@
 /**
  * File: SchedulingPage.css
- * Description: 多月嫂全景排班甘特月曆、連續跨日時間條塊、檔期衝突診斷與防撞期 Buffer 鎖定視覺樣式。
+ * Description: Scheduling server occupancy 甘特月曆樣式；資格與撞期判定缺口以不可用視覺呈現。
  */
 
 .scheduling-gantt-page {
@@ -53,6 +53,10 @@
   border-color: #ff7f50;
   color: #ffffff;
   box-shadow: 0 4px 12px rgba(255, 127, 80, 0.25);
+}
+
+.scheduling-precision-control {
+  min-height: 36px;
 }
 
 /* Hero Gantt Main Container */
@@ -281,6 +285,10 @@
   background: #dcfce7;
   border: 1px solid #86efac;
 }
+.legend-badge.unavailable {
+  background: #e5e7eb;
+  border: 1px solid #9ca3af;
+}
 .legend-badge.projection {
   background: #ea580c;
 }
@@ -455,6 +463,12 @@
   border: 1px solid #86efac;
 }
 
+.tag-unavailable {
+  background: #f3f4f6;
+  color: #4b5563;
+  border: 1px solid #9ca3af;
+}
+
 .tag-leave {
   background: #f3e8ff;
   color: #6b21a8;
@@ -575,6 +589,12 @@
   color: #c2410c;
 }
 
+.span-unavailable {
+  background: #f3f4f6;
+  border: 1.5px dashed #9ca3af;
+  color: #4b5563;
+}
+
 .span-deposit-conflict {
   background: repeating-linear-gradient(
     -45deg,
@@ -683,6 +703,362 @@
   color: #78716c;
   font-weight: 700;
   cursor: not-allowed;
+}
+
+/* Leave/Substitution typed workbench */
+.leave-substitution-workspace {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #dec0b6;
+  border-radius: 16px;
+  color: #292524;
+}
+
+.leave-substitution-header,
+.leave-substitution-query-row,
+.leave-substitution-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.leave-substitution-header h2,
+.leave-substitution-preview h3,
+.leave-substitution-receipt h3 {
+  margin: 0;
+}
+
+.leave-substitution-header p {
+  margin: 6px 0 0;
+  color: #74593f;
+}
+
+.leave-substitution-kicker {
+  color: #9a3412 !important;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.leave-substitution-state {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f5f5f4;
+  color: #57534e;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.leave-substitution-query-row label,
+.leave-substitution-form-grid label,
+.leave-substitution-preview > label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #57534e;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.leave-substitution-query-row label {
+  flex: 1 1 320px;
+}
+
+.leave-substitution-workspace input,
+.leave-substitution-workspace select,
+.leave-substitution-workspace textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #d6d3d1;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #292524;
+  font: inherit;
+}
+
+.leave-substitution-workspace textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.leave-substitution-workspace button {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 9px;
+  background: #9a3412;
+  color: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.leave-substitution-workspace button:disabled {
+  background: #d6d3d1;
+  color: #78716c;
+  cursor: not-allowed;
+}
+
+.leave-substitution-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.leave-substitution-check {
+  display: flex !important;
+  align-items: center;
+  gap: 9px !important;
+  align-self: end;
+}
+
+.leave-substitution-check input {
+  width: auto;
+}
+
+.leave-substitution-notice,
+.leave-substitution-preview,
+.leave-substitution-receipt {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #7c2d12;
+}
+
+.leave-substitution-notice.error {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.leave-substitution-preview,
+.leave-substitution-receipt {
+  display: grid;
+  gap: 14px;
+}
+
+.leave-substitution-preview dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+}
+
+.leave-substitution-preview dl div {
+  padding: 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
+.leave-substitution-preview dt {
+  color: #9a3412;
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.leave-substitution-preview dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+/* Holiday policy typed workbench */
+.holiday-policy-workspace {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+  background: #ffffff;
+  border: 1px solid #dec0b6;
+  border-radius: 16px;
+  color: #292524;
+}
+
+.holiday-policy-header,
+.holiday-policy-horizon,
+.holiday-policy-actions,
+.holiday-policy-meta,
+.holiday-policy-locked-controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.holiday-policy-header h2,
+.holiday-policy-preview h3,
+.holiday-policy-receipt h3 {
+  margin: 0;
+}
+
+.holiday-policy-header p {
+  margin: 6px 0 0;
+  color: #74593f;
+}
+
+.holiday-policy-kicker {
+  color: #9a3412 !important;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.holiday-policy-state {
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f5f5f4;
+  color: #57534e;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.holiday-policy-horizon label,
+.holiday-policy-form-grid label {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  color: #57534e;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.holiday-policy-horizon label {
+  flex: 1 1 210px;
+}
+
+.holiday-policy-workspace input,
+.holiday-policy-workspace select,
+.holiday-policy-workspace textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 10px 12px;
+  border: 1px solid #d6d3d1;
+  border-radius: 9px;
+  background: #ffffff;
+  color: #292524;
+  font: inherit;
+}
+
+.holiday-policy-workspace textarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
+.holiday-policy-workspace button {
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 9px;
+  background: #9a3412;
+  color: #ffffff;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.holiday-policy-workspace button:disabled {
+  background: #d6d3d1;
+  color: #78716c;
+  cursor: not-allowed;
+}
+
+.holiday-policy-calendar,
+.holiday-policy-preview,
+.holiday-policy-receipt,
+.holiday-policy-notice {
+  margin: 0;
+  padding: 14px 16px;
+  border: 1px solid #fed7aa;
+  border-radius: 10px;
+  background: #fff7ed;
+  color: #7c2d12;
+}
+
+.holiday-policy-meta {
+  align-items: center;
+  justify-content: flex-start;
+  font-size: 0.84rem;
+}
+
+.holiday-policy-list {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.holiday-policy-list li {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.7fr) minmax(140px, 1fr) minmax(130px, 0.8fr);
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.holiday-policy-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.holiday-policy-check {
+  display: flex !important;
+  align-items: center;
+  gap: 9px !important;
+  align-self: end;
+  min-height: 42px;
+}
+
+.holiday-policy-check input {
+  width: auto;
+}
+
+.holiday-policy-reason {
+  grid-column: 1 / -1;
+}
+
+.holiday-policy-locked-controls {
+  justify-content: flex-start;
+  padding-top: 4px;
+}
+
+.holiday-policy-locked-controls button {
+  padding: 7px 10px;
+  font-size: 0.76rem;
+}
+
+.holiday-policy-preview,
+.holiday-policy-receipt {
+  display: grid;
+  gap: 10px;
+}
+
+.holiday-policy-preview p,
+.holiday-policy-receipt p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.holiday-policy-notice.error {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}
+
+@media (max-width: 720px) {
+  .leave-substitution-form-grid,
+  .leave-substitution-preview dl,
+  .holiday-policy-form-grid,
+  .holiday-policy-list li {
+    grid-template-columns: 1fr;
+  }
 }
 
 .sr-only {

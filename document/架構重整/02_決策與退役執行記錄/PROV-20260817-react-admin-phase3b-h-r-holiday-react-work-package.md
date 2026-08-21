@@ -1,12 +1,13 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: blocked
 identity: PROV-20260817-react-admin-phase3b-h-r-holiday-react
 date: 2026-08-17
 owner: Scheduling / React
 domain: Scheduling
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase3b-h-holiday-public-contract-uow PASS; PROV-20260816-react-admin-phase3b1-staff-contract-hardening-selector-amendment PASS; PROV-20260817-react-admin-phase3b2-r-leave-substitution-react PASS
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase3b-h-holiday-public-contract-uow PASS; PROV-20260816-react-admin-phase3b1-staff-contract-hardening-selector-amendment PASS; PROV-20260817-react-admin-phase3b2-r-leave-substitution-react PASS
 approval_required: 核准此 exact Phase 3B-H-R Work Package
+approval_authority: 使用者於 2026-08-21 明確核准 exact Work Package
 evidence_directory: document/架構重整/03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3b-h-r-holiday-react/
 required_receipts: candidate-change-inventory.md; contract-matrix-freeze-receipt.md; verification-receipt.md; browser-smoke-receipt.md; open-findings.md
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
@@ -56,3 +57,15 @@ Browser/DOM驗收只能使用`validation/scenarios/react_admin_holiday_policy.js
 7. 真TOTP browser與controlled holiday scenario覆蓋stale/replay/conflict/rollback；Phase5 cutover另案。
 
 DB：Scope PASS（UI only）；其餘NOT_RUN；`DB_CHANGE_NOT_READY`。
+
+## 2026-08-22 integration result
+
+React strict client、adapter state machine、既有Scheduling tab接線、focused 14 tests、production build及
+owned disposable MySQL Chrome Query→Preview→Apply→receipt→re-query均已完成；receipt在post-Apply re-query後
+維持可見，owned DB已刪除且原development 8000／既有DB GET已恢復。
+
+本包尚不能宣稱canonical scenario closure：`validation/scenarios/react_admin_holiday_policy.json` revision 1
+仍只宣告query／zero-write、`browser_execution_mode=no-browser-execution`與replay not-applicable，未涵蓋本包已核准的
+mutation、same-key replay、stale、conflict與rollback。此規格飄移已由
+`PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor-work-package.md`承接；取得exact
+核准並完成前，本包維持`blocked`，不得作為Phase 5 scheduling cutover的PASS prerequisite。

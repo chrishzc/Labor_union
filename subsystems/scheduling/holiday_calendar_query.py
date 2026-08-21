@@ -1,4 +1,7 @@
-"""Typed, versioned Holiday facts for Scheduling Preview and Apply."""
+"""
+File: holiday_calendar_query.py
+Description: 定義 Scheduling 國定假日 horizon 的唯讀、版本化且可鎖定 port。
+"""
 
 from __future__ import annotations
 
@@ -11,6 +14,7 @@ from typing import Protocol
 class HolidayFact:
     holiday_date: date
     holiday_name: str
+    is_double_pay_default: bool = False
 
 
 @dataclass(frozen=True, slots=True)
