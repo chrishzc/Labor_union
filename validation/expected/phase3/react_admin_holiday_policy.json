@@ -1,9 +1,0 @@
-{
-  "contract": "labor-union-verification-expected/v1", "scenario_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY", "revision": 1,
-  "assertions": ["Policy horizon and source version are explicit and the query creates zero writes.", "Cache miss and version mismatch remain visible without frontend-derived holiday state."],
-  "db_oracle": {"required": ["policy query creates zero writes", "version mismatch is preserved"]},
-  "api_oracle": {"required": ["typed policy horizon", "source version is explicit"]},
-  "ui_oracle": {"required": ["Part 09 holiday workflow is repeatable", "unknown state is unavailable"]},
-  "replay_oracle": {"applicability": "not-applicable", "reason": "query only"}, "recovery_oracle": {"required": ["cache miss and mismatch are visible"]},
-  "forbidden_observations": ["frontend-derived holiday status", "calendar mutation from query"]
-}

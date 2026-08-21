@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor
 date: 2026-08-22
 owner: Global Validation Governance Integration Owner / Scheduling
@@ -8,6 +8,7 @@ domain: Global Validation Governance / Scheduling
 source_work_package: PROV-20260817-react-admin-phase3b-h-r-holiday-react
 prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-react-admin-phase3b-h-holiday-public-contract-uow PASS
 approval_required: 核准此 exact Phase 3B-H-R Holiday Mutation Scenario Lineage Successor Work Package
+approval_authority: 使用者於2026-08-22明確核准exact Work Package
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
 ui_execution_mode: metadata-and-controlled-browser-receipt-normalization
 base_branch: main
@@ -54,6 +55,15 @@ not-applicable及no-browser-execution。現有implementation與disposable browse
 
 本包完成後只解除H-R的scenario lineage blocker；H-R仍須由Integration Owner核對所有runtime receipts後才能轉PASS，
 不自動授權Phase 5 entry switch。
+
+## 2026-08-22 execution status
+
+Canonical identity維持`SCH-REACT-ADMIN-HOLIDAY-POLICY`並升為revision 2；scenario、catalog、fixture、
+expected、receipt registry及Part 09已改為controlled mutation lineage。真實既有DB仍只有GET／zero-write Preview；
+Apply evidence只引用owned disposable DB receipt。browser stale／conflict／rollback variants維持`NOT_RUN`，
+Focused lineage validator最終為`18 passed`；strict JSON/YAML、UTF-8/no BOM、secret/PII及scoped diff
+均PASS。兩個Phase4 nested fixture仍由Phase4 owner的獨立validator負責，且在global report中維持明確外部
+namespace blocker；未冒充Phase3或global PASS。本包完成只解除Holiday metadata drift，不宣稱H-R完整runtime PASS。
 
 ## DB gate
 

@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: blocked
+declared_status: completed
 identity: PROV-20260817-react-admin-phase3b-h-r-holiday-react
 date: 2026-08-17
 owner: Scheduling / React
@@ -64,8 +64,15 @@ React strict client、adapter state machine、既有Scheduling tab接線、focus
 owned disposable MySQL Chrome Query→Preview→Apply→receipt→re-query均已完成；receipt在post-Apply re-query後
 維持可見，owned DB已刪除且原development 8000／既有DB GET已恢復。
 
-本包尚不能宣稱canonical scenario closure：`validation/scenarios/react_admin_holiday_policy.json` revision 1
-仍只宣告query／zero-write、`browser_execution_mode=no-browser-execution`與replay not-applicable，未涵蓋本包已核准的
-mutation、same-key replay、stale、conflict與rollback。此規格飄移已由
-`PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor-work-package.md`承接；取得exact
-核准並完成前，本包維持`blocked`，不得作為Phase 5 scheduling cutover的PASS prerequisite。
+Canonical scenario drift已由
+`PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor-work-package.md`改為revision 2
+controlled mutation lineage；此項metadata blocker已解除。browser stale／conflict／rollback variants仍為`NOT_RUN`，
+故本包維持`blocked`，不得作為Phase 5 scheduling cutover的PASS prerequisite。
+
+2026-08-22 controlled follow-up已完成stale typed DOM、rollback zero-partial readback、same-key browser replay
+及conflicting-draft pre-transport guard。最終controlled run另以臨時Vite pre-transform固定UUID，production source、
+HTTP request body與response均未修改；同一UI先成功Apply，再以同key／不同payload送出，真FastAPI回409，DOM進入
+`conflict`並顯示`idempotency_key_conflict`。MySQL readback證明winner row保留、該key只有一筆receipt，owned DB已
+精準刪除，current 8000／5174與既有DB GET均恢復。依本遷移計畫的最新人工裁決，本機UI可採development auth
+bypass，故true-TOTP標為`NOT_RUN_ACCEPTED_DEVELOPMENT_BYPASS`，不得冒充執行。本包runtime acceptance完成；
+Phase 5 scheduling cutover仍須通過其獨立entry gate。

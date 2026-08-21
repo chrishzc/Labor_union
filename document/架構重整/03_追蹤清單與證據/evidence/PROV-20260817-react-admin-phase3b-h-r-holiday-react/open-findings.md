@@ -2,11 +2,12 @@
 
 日期：2026-08-22
 
-1. `BLOCKED_SPEC_DRIFT`：canonical Holiday scenario revision 1仍為query-only／zero-write、replay
-   not-applicable及no-browser-execution，未涵蓋已核准H-R mutation。由
-   `PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor`承接。
-2. `NOT_RUN_BROWSER_VARIANTS`：same-key replay、stale、conflict與rollback已有adapter／backend focused與MySQL
-   evidence，但本輪未逐項做Chrome browser mutation，不冒充browser PASS。
-3. `AUTH_LIMITATION`：採development local bypass；真TOTP未執行。
+1. `RESOLVED_SPEC_DRIFT`：canonical Holiday scenario已由核准successor升為revision 2，涵蓋controlled
+   mutation、same-key replay、stale、conflict、rollback與outcome-unknown recovery；此結果只解除metadata blocker。
+2. `RESOLVED_BROWSER_VARIANTS`：stale、rollback、same-key replay、conflicting-draft pre-transport guard及
+   server-side 409 typed DOM均有Chrome＋真FastAPI＋MySQL evidence；controlled deterministic UUID僅存在於
+   已刪除的臨時Vite config，production source與transport response未修改。
+3. `ACCEPTED_AUTH_LIMITATION`：依最新人工裁決採development local bypass；真TOTP未執行，狀態為
+   `NOT_RUN_ACCEPTED_DEVELOPMENT_BYPASS`，不冒充真TOTP PASS。
 4. `AUTOMATION_LIMITATION`：Chrome程式化date fill未可靠提交React change；本輪Apply使用預設日期。一般使用者
    原生date picker未見UI錯誤，且unit test覆蓋state request identity。

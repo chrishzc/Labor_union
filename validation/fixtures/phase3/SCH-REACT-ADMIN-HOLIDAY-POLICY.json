@@ -1,0 +1,24 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY",
+  "revision": 2,
+  "test_kind": "domain_root_data",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored mutation command and stable identities; no production export",
+  "allowed_use": "validation-only",
+  "redaction_policy": "synthetic policy code, date, reason and UUID identities only",
+  "root_inputs": ["synthetic holiday mutation command", "expected calendar version", "preview fingerprint", "operator reason", "stable idempotency identity", "fixed horizon"],
+  "input_values": {
+    "command": {"action": "upsert", "holiday_date": "2026-08-22", "name": "Phase3B-H-R controlled holiday"},
+    "expected_calendar_version": "sha256:synthetic-calendar-version-r2",
+    "preview_fingerprint": "sha256:synthetic-preview-fingerprint-r2",
+    "reason": "Validate controlled Holiday Query Preview Apply lineage",
+    "idempotency_key": "holiday-r2-00000000-0000-4000-8000-000000000001",
+    "horizon": {"start": "2026-08-01", "end": "2026-08-31"}
+  },
+  "seed_fields": ["command.action", "command.holiday_date", "command.name", "expected_calendar_version", "preview_fingerprint", "reason", "idempotency_key", "horizon.start", "horizon.end"],
+  "derived_fields": ["apply_receipt", "calendar_projection", "replay_result", "browser_success_state"],
+  "expected_manifest_path": "validation/expected/phase3/SCH-REACT-ADMIN-HOLIDAY-POLICY.yaml",
+  "fixed_business_clock": "2026-08-22T09:00:00+08:00",
+  "forbidden_direct_seed": ["apply receipt", "calendar projection", "browser success state", "replay success state", "payroll projection"]
+}

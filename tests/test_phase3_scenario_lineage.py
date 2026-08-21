@@ -48,6 +48,10 @@ ALLOWED_DEPENDENCY_TYPES = {
 }
 FORBIDDEN_RESULT_WORDS = ("pass", "passed", "completed", "success")
 WORK_PACKAGE_IDENTITY = "PROV-20260817-react-admin-phase3-scenario-lineage-governance"
+HOLIDAY_SCENARIO_ID = "SCH-REACT-ADMIN-HOLIDAY-POLICY"
+HOLIDAY_SUCCESSOR_IDENTITY = (
+    "PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor"
+)
 REQUIRED_CATALOG_LINEAGE_FIELDS = {
     "work_package_identity",
     "source_scenario_ids",
@@ -131,13 +135,23 @@ def test_catalog_paths_and_dependency_dag_are_strict() -> None:
 def test_catalog_entries_preserve_scenario_and_fixture_lineage() -> None:
     for scenario_id, entry in _entries_by_id().items():
         assert REQUIRED_CATALOG_LINEAGE_FIELDS <= entry.keys()
-        assert entry["work_package_identity"] == WORK_PACKAGE_IDENTITY
+        expected_identity = (
+            HOLIDAY_SUCCESSOR_IDENTITY
+            if scenario_id == HOLIDAY_SCENARIO_ID
+            else WORK_PACKAGE_IDENTITY
+        )
+        assert entry["work_package_identity"] == expected_identity
         assert entry["source_refs"]
         assert entry["source_to_successor_mapping"]
         assert entry["business_clock"]
         assert entry["commands"]
         assert entry["oracle_applicability"]
-        assert entry["browser_execution_mode"] == "no-browser-execution"
+        expected_browser_mode = (
+            "controlled-execution"
+            if scenario_id == HOLIDAY_SCENARIO_ID
+            else "no-browser-execution"
+        )
+        assert entry["browser_execution_mode"] == expected_browser_mode
         assert entry["missing_artifacts"]
         assert entry["data_classification"] in {
             "synthetic",
@@ -170,7 +184,7 @@ def test_scenarios_match_catalog_and_have_source_lineage() -> None:
     for scenario_id, entry in _entries_by_id().items():
         scenario = _load_json(_resolve_repo_path(entry["scenario_path"]))
         assert scenario["scenario_id"] == scenario_id
-        assert scenario["revision"] == 1
+        assert scenario["revision"] == entry["revision"]
         assert scenario["suite_id"] == entry["suite_id"]
         assert scenario["track"] == entry["track"]
         assert scenario["source_to_successor_mapping"]
@@ -198,8 +212,9 @@ def test_fixture_metadata_and_root_boundary_are_fail_closed() -> None:
 
 def test_expected_files_contain_oracles_but_no_observed_payload() -> None:
     forbidden_keys = {"actual", "observed", "runtime_receipt", "generated_receipt"}
-    for expected_path in EXPECTED_DIR.glob("*.json"):
-        expected = _load_json(expected_path)
+    expected_paths = sorted(EXPECTED_DIR.glob("*.json")) + sorted(EXPECTED_DIR.glob("*.yaml"))
+    for expected_path in expected_paths:
+        expected = yaml.safe_load(expected_path.read_text(encoding="utf-8"))
         assert {"db_oracle", "api_oracle", "ui_oracle", "replay_oracle", "recovery_oracle"} <= expected.keys()
         assert not forbidden_keys.intersection(expected)
 
@@ -209,9 +224,18 @@ def test_ui_manifest_and_receipt_registry_are_not_runtime_claims() -> None:
     assert ui_manifest["execution_policy"]["mode"] == "no-browser-execution"
     assert {part["status"] for part in ui_manifest["parts"]} == {"NOT_RUN"}
     receipt_manifest = _load_json(RECEIPT_PATH)
-    assert set(receipt_manifest["allowed_initial_states"]) == {"missing", "not_run", "blocked"}
+    assert set(receipt_manifest["allowed_initial_states"]) == {
+        "missing",
+        "not_run",
+        "blocked",
+        "partial",
+    }
     assert all(receipt["status"] in receipt_manifest["allowed_initial_states"] for receipt in receipt_manifest["receipts"])
-    assert all(receipt["revision"] == 1 for receipt in receipt_manifest["receipts"])
+    entries = _entries_by_id()
+    assert all(
+        receipt["revision"] == entries[receipt["scenario_id"]]["revision"]
+        for receipt in receipt_manifest["receipts"]
+    )
     assert {
         (receipt["scenario_id"], receipt["receipt_id"])
         for receipt in receipt_manifest["receipts"]
@@ -225,9 +249,48 @@ def test_ui_manifest_and_receipt_registry_are_not_runtime_claims() -> None:
 def test_result_summaries_are_initial_and_do_not_fake_completion() -> None:
     for summary_path in ROOT.glob("validation/ui_business_workflows/part_*/result_summary.md"):
         text = summary_path.read_text(encoding="utf-8").lower()
-        assert "result: not_run" in text
-        assert not any(word in text for word in FORBIDDEN_RESULT_WORDS)
+        if summary_path.parent.name == "part_09_scheduling":
+            assert "result: partial" in text
+            assert "browser stale variant: pass" in text
+            assert "browser same-key replay variant: pass" in text
+            assert "browser rollback variant: pass" in text
+            assert "browser conflicting-draft pre-transport guard: pass" in text
+            assert "browser server-conflict 409 dom variant: not_run" in text
+            assert "真totp：not_run" in text
+        else:
+            assert "result: not_run" in text
+            assert not any(word in text for word in FORBIDDEN_RESULT_WORDS)
         assert "assertion count" not in text
+
+
+def test_holiday_mutation_successor_is_revision_two_and_partial_not_fake_pass() -> None:
+    entry = _entries_by_id()[HOLIDAY_SCENARIO_ID]
+    scenario = _load_json(_resolve_repo_path(entry["scenario_path"]))
+    fixture = _load_json(_resolve_repo_path(entry["fixture_path"]))
+    expected = yaml.safe_load(_resolve_repo_path(entry["expected_path"]).read_text(encoding="utf-8"))
+    receipt = next(
+        item
+        for item in _load_json(RECEIPT_PATH)["receipts"]
+        if item["scenario_id"] == HOLIDAY_SCENARIO_ID
+    )
+
+    assert entry["revision"] == scenario["revision"] == fixture["revision"] == expected["revision"] == 2
+    assert entry["receipt_id"] == scenario["required_receipt_id"] == receipt["receipt_id"]
+    assert scenario["browser_execution_mode"] == "controlled-execution"
+    assert scenario["oracle_applicability"]["replay"]["status"] == "required"
+    assert {
+        "synthetic holiday mutation command",
+        "expected calendar version",
+        "preview fingerprint",
+        "operator reason",
+        "stable idempotency identity",
+    } <= set(scenario["root_inputs"])
+    assert "apply receipt" in scenario["forbidden_direct_seed"]
+    assert receipt["status"] == "partial"
+    assert receipt["remaining"] == [
+        "browser server-conflict 409 DOM",
+        "true-TOTP browser",
+    ]
 
 
 def test_data_browser_cannot_be_marked_ui_ready() -> None:
@@ -289,8 +352,22 @@ def test_canonical_gate_report_separates_phase3_family_without_crashing() -> Non
     assert report["errors"]["scenarios"] == []
     assert report["contract_valid"] is False
     assert report["errors"]["fixtures"] == []
-    assert report["errors"]["phase3_lineage"] == []
-    assert report["fixtures"]["fixture_count"] == 32
+    external_phase4_errors = {
+        error
+        for error in report["errors"]["phase3_lineage"]
+        if error.startswith("fixture validation/fixtures/phase4/")
+    }
+    phase3_owned_errors = [
+        error
+        for error in report["errors"]["phase3_lineage"]
+        if error not in external_phase4_errors
+    ]
+    assert phase3_owned_errors == []
+    assert external_phase4_errors == {
+        "fixture validation/fixtures/phase4/react_admin_notification_rule_mutation.json has an unsupported namespace",
+        "fixture validation/fixtures/phase4/react_admin_rich_menu_publication.json has an unsupported namespace",
+    }
+    assert report["fixtures"]["fixture_count"] == len(load_fixtures())
     assert report["phase3_lineage"]["scenario_count"] == 8
     assert report["phase3_lineage"]["fixture_count"] == 8
     assert report["phase3_lineage"]["runtime_receipts"] == "metadata-only; no PASS inferred"

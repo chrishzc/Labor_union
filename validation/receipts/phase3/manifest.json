@@ -3,13 +3,13 @@
   "work_package_identity": "PROV-20260817-react-admin-phase3-scenario-lineage-governance",
   "revision": 1,
   "registry_status": "metadata-ready",
-  "allowed_initial_states": ["missing", "not_run", "blocked"],
+  "allowed_initial_states": ["missing", "not_run", "blocked", "partial"],
   "receipts": [
     {"receipt_id": "GERR-REACT-ADMIN-TYPED-BOUNDARY-R1", "scenario_id": "GERR-REACT-ADMIN-TYPED-BOUNDARY", "revision": 1, "owner": "Global Error Boundary Owner", "status": "missing"},
     {"receipt_id": "SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS-R1", "scenario_id": "SCH-REACT-ADMIN-STAFF-SAFE-ACTIONS", "revision": 1, "owner": "Staff Validation Owner", "status": "missing"},
     {"receipt_id": "SCH-REACT-ADMIN-CURRENT-QUERY-R1", "scenario_id": "SCH-REACT-ADMIN-CURRENT-QUERY", "revision": 1, "owner": "Scheduling Validation Owner", "status": "missing"},
     {"receipt_id": "SCH-REACT-ADMIN-LEAVE-SUBSTITUTION-R1", "scenario_id": "SCH-REACT-ADMIN-LEAVE-SUBSTITUTION", "revision": 1, "owner": "Leave Validation Owner", "status": "missing"},
-    {"receipt_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY-R1", "scenario_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY", "revision": 1, "owner": "Holiday Validation Owner", "status": "missing"},
+    {"receipt_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY-R2", "scenario_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY", "revision": 2, "owner": "Holiday Validation Owner", "status": "partial", "evidence_path": "document/架構重整/03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3b-h-r-holiday-react/browser-smoke-receipt.md", "remaining": ["browser server-conflict 409 DOM", "true-TOTP browser"]},
     {"receipt_id": "AC-REACT-ADMIN-AUDIT-QUERY-R1", "scenario_id": "AC-REACT-ADMIN-AUDIT-QUERY", "revision": 1, "owner": "Access Validation Owner", "status": "missing"},
     {"receipt_id": "ANOM-REACT-ADMIN-WARNING-TRANSITION-R1", "scenario_id": "ANOM-REACT-ADMIN-WARNING-TRANSITION", "revision": 1, "owner": "Warning Validation Owner", "status": "missing"},
     {"receipt_id": "GDATA-REACT-ADMIN-DATA-BROWSER-QUERY-R1", "scenario_id": "GDATA-REACT-ADMIN-DATA-BROWSER-QUERY", "revision": 1, "owner": "Data Browser Decision Owner", "status": "blocked", "blocked_reason": "Part identity and source allowlist decision required"}

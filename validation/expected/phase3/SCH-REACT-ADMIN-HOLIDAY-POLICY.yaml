@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY",
+  "revision": 2,
+  "assertions": [
+    "Query and Preview create zero writes and expose the server calendar version and preview fingerprint.",
+    "Apply commits exactly once and the UI reports success only after receipt plus post-commit re-query observation.",
+    "Same-key replay returns the original receipt; stale and conflicting inputs create zero partial writes.",
+    "Outcome-unknown recovery reuses the exact payload and idempotency identity."
+  ],
+  "db_oracle": {"required": ["Preview creates zero writes", "Apply creates one owned mutation and one receipt", "stale conflict and rollback create zero partial writes"]},
+  "api_oracle": {"required": ["typed Query Preview Apply receipt", "server version and fingerprint are explicit", "stale conflict and outcome-unknown remain typed"]},
+  "ui_oracle": {"required": ["controlled Part 09 Query Preview Apply receipt re-query", "only observed state displays completion", "unknown state never becomes optimistic success"]},
+  "replay_oracle": {"required": ["same payload and idempotency key return the original receipt", "same key with a different payload fails closed"]},
+  "recovery_oracle": {"required": ["outcome-unknown retries the exact request identity", "rollback is established by server and DB readback"]},
+  "forbidden_observations": ["frontend-derived holiday status", "optimistic Apply success", "directly seeded receipt or projection"]
+}

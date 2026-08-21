@@ -2,7 +2,7 @@
 
 日期：2026-08-22
 
-狀態：`IMPLEMENTATION_PASS / CANONICAL_SCENARIO_BLOCKED`
+狀態：`IMPLEMENTATION_PASS / RUNTIME_ACCEPTANCE_PASS / DEVELOPMENT_AUTH_BYPASS`
 
 ## Static and focused verification
 
@@ -20,6 +20,10 @@
 - readback：holiday 1 row、`scheduling_holiday_maintenance/v2` receipt 1 row；owned DB cleanup後
   `exists_after_cleanup=false`。
 - 原8000以development `local_bypass`恢復；`/health`=200、Holiday GET=200／16 rows，Chrome online/query-ready。
+- final server-conflict run：同一production UI/client以controlled deterministic key先成功Apply，再送不同payload；
+  FastAPI回409、DOM=`conflict`且顯示`idempotency_key_conflict`。readback保留winner row、該key receipt count=1。
+- conflict owned DB cleanup後`EXISTS_AFTER_CLEANUP=0`；臨時Vite config已刪除，current 8000／5174恢復。
+- 真TOTP依最新人工裁決採`NOT_RUN_ACCEPTED_DEVELOPMENT_BYPASS`，不宣稱執行。
 
 ## DB gate
 

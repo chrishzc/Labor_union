@@ -3,11 +3,16 @@ scenario_ids:
   - SCH-REACT-ADMIN-CURRENT-QUERY
   - SCH-REACT-ADMIN-LEAVE-SUBSTITUTION
   - SCH-REACT-ADMIN-HOLIDAY-POLICY
-revision: 1
+revision: 2
 oracle:
   - current query is read-only and never invents calendar facts
   - linked leave/substitution is atomic; half-pair and stale input produce no partial write
   - receipt and re-query are server observations, not optimistic UI state
-  - holiday policy source and version remain visible when cache is unavailable
+  - holiday Query and Preview are zero-write and expose server version plus fingerprint
+  - holiday Apply commits once; receipt plus post-commit re-query is required before observed success
+  - same-key replay returns the original receipt; stale and conflict variants produce zero partial write
+  - outcome-unknown recovery reuses the exact payload and idempotency identity
   - browser evidence is separate from DB/UoW evidence
-blocked_reason: real browser, API and disposable MySQL receipts are produced by downstream bounded work packages
+remaining_browser_evidence:
+  - server-conflict 409 DOM variant
+  - true-TOTP variant

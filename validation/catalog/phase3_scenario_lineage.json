@@ -96,27 +96,27 @@
       "disposition": "ADOPT_AND_SUPPLEMENT", "activation_blockers": ["outer-UoW and linked-request receipts not produced"]
     },
     {
-      "scenario_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY", "revision": 1, "part": "09",
+      "scenario_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY", "revision": 2, "part": "09",
       "owner": "Scheduling Validation Owner", "suite_id": "SCH", "track": "A",
-      "work_package_identity": "PROV-20260817-react-admin-phase3-scenario-lineage-governance",
+      "work_package_identity": "PROV-20260822-react-admin-phase3b-h-r-holiday-mutation-scenario-lineage-successor",
       "source_scenario_ids": ["SCH-ASSIGNMENT-COVERAGE-001", "CACHE-READ-PROJECTION-002"],
       "source_refs": ["validation/scenarios/SCH-ASSIGNMENT-COVERAGE-001.json#SCH-ASSIGNMENT-COVERAGE-001", "validation/scenarios/CACHE-READ-PROJECTION-002.json#CACHE-READ-PROJECTION-002"],
-      "source_to_successor_mapping": [{"source": "official service-day rules", "successor": "holiday policy source and horizon", "disposition": "unchanged"}, {"source": "cache read projection", "successor": "versioned zero-write cache oracle", "disposition": "supplemented"}],
-      "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
-      "commands": ["query policy horizon", "query cache hit and miss", "observe version mismatch without mutation"],
-      "oracle_applicability": {"db": {"status": "required", "reason": "root policy and zero writes"}, "api": {"status": "required", "reason": "typed policy view"}, "ui": {"status": "required", "reason": "Part 09 checklist"}, "replay": {"status": "not-applicable", "reason": "query only"}, "recovery": {"status": "required", "reason": "version mismatch handling"}},
-      "browser_execution_mode": "no-browser-execution", "missing_artifacts": ["holiday policy API receipt", "browser Network-to-DOM receipt"],
-      "data_classification": "synthetic", "generation_method": "hand-authored policy and horizon values; no production export", "allowed_use": "validation-only", "redaction_policy": "synthetic policy code and dates only",
+      "source_to_successor_mapping": [{"source": "official service-day rules", "successor": "holiday policy query and mutation roots", "disposition": "supplemented"}, {"source": "cache read projection", "successor": "versioned zero-write Preview and post-commit re-query oracle", "disposition": "supplemented"}],
+      "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-08-22T09:00:00+08:00"},
+      "commands": ["query policy horizon", "preview holiday mutation with zero writes", "apply the fresh preview", "re-query committed calendar", "replay same payload with the same idempotency key", "reject stale version", "reject conflicting same-key payload", "observe rollback after rejected command", "recover outcome-unknown with the same payload and idempotency key"],
+      "oracle_applicability": {"db": {"status": "required", "reason": "zero-write Preview, single commit, replay and zero-partial-write"}, "api": {"status": "required", "reason": "typed Query Preview Apply receipt and errors"}, "ui": {"status": "required", "reason": "controlled Part 09 Query to observed flow"}, "replay": {"status": "required", "reason": "same payload and stable idempotency identity"}, "recovery": {"status": "required", "reason": "stale conflict rollback and outcome-unknown"}},
+      "browser_execution_mode": "controlled-execution", "missing_artifacts": ["browser server-conflict 409 DOM receipt", "true-TOTP browser receipt"],
+      "data_classification": "synthetic", "generation_method": "hand-authored mutation command and stable identities; no production export", "allowed_use": "validation-only", "redaction_policy": "synthetic policy code, date, reason and UUID identities only",
       "scenario_path": "validation/scenarios/react_admin_holiday_policy.json",
-      "fixture_path": "validation/fixtures/phase3/react_admin_holiday_policy.json",
-      "expected_path": "validation/expected/phase3/react_admin_holiday_policy.json",
+      "fixture_path": "validation/fixtures/phase3/SCH-REACT-ADMIN-HOLIDAY-POLICY.json",
+      "expected_path": "validation/expected/phase3/SCH-REACT-ADMIN-HOLIDAY-POLICY.yaml",
       "checklist_path": "validation/ui_business_workflows/part_09_scheduling/checklist.md",
       "dependencies": [
         {"scenario_id": "GERR-REACT-ADMIN-TYPED-BOUNDARY", "type": "global-dependency"},
         {"scenario_id": "SCH-REACT-ADMIN-LEAVE-SUBSTITUTION", "type": "hard-dependency"}
       ],
-      "receipt_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY-R1",
-      "disposition": "SUPPLEMENT", "activation_blockers": ["holiday policy runtime receipt not produced"]
+      "receipt_id": "SCH-REACT-ADMIN-HOLIDAY-POLICY-R2",
+      "disposition": "ADOPT_AND_SUPPLEMENT", "activation_blockers": ["server-conflict 409 DOM and true-TOTP browser variants remain NOT_RUN"]
     },
     {
       "scenario_id": "AC-REACT-ADMIN-AUDIT-QUERY", "revision": 1, "part": "cross-cutting",
