@@ -1,12 +1,23 @@
+"""
+File: jobs.py
+Description: 提供 Durable Job masked closed outcome 查詢與 outer-UoW 安全取消入口。
+"""
+
 from fastapi import APIRouter, Depends
+from pydantic import ValidationError
 
 from api.dependencies.admin_auth import require_system_admin, AdminPrincipal
-from api.dependencies.jobs import get_job_repository
+from api.dependencies.jobs import get_durable_job_cancellation, get_job_repository
 from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
-from api.schemas.jobs import JobResponse
+from api.schemas.jobs import (
+    JobFailureOutcomeView,
+    JobResponse,
+    JobSuccessOutcomeView,
+)
 from infrastructure.mysql.background_job_repository import BackgroundJobRepository
 from shared_kernel.durable_job_queue import DurableJobStateConflict
+from subsystems.jobs.command_application import DurableJobCancellationApplication
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["Jobs"])
 
@@ -20,13 +31,13 @@ def get_job_status(
     if not job:
         raise typed_http_error(
             404,
-            "NOT_FOUND",
+            "not_found",
             "job_not_found",
             "Job was not found.",
             f"job-status:{job_id}",
         )
         
-    return BaseResponse(data=_job_response(job))
+    return BaseResponse(data=_job_response(job, f"job-status:{job_id}"))
 
 
 @router.post("/{job_id}/cancel", response_model=BaseResponse[JobResponse])
@@ -34,29 +45,49 @@ def cancel_queued_job(
     job_id: str,
     principal: AdminPrincipal = Depends(require_system_admin),
     repository: BackgroundJobRepository = Depends(get_job_repository),
+    cancellation: DurableJobCancellationApplication = Depends(
+        get_durable_job_cancellation
+    ),
 ) -> BaseResponse[JobResponse]:
     del principal
     job = repository.get_job(job_id)
     if job is None:
-        raise typed_http_error(404, "NOT_FOUND", "job_not_found", "Job was not found.", f"job-cancel:{job_id}")
+        raise typed_http_error(404, "not_found", "job_not_found", "Job was not found.", f"job-cancel:{job_id}")
     try:
-        repository.cancel_queued_job(job_id)
+        cancellation.cancel_queued(job_id)
     except DurableJobStateConflict as error:
-        raise typed_http_error(409, "CONFLICT", "job_state_conflict", "Only an unclaimed queued job can be cancelled.", f"job-cancel:{job_id}") from error
-    cancelled = repository.get_job(job_id)
-    if cancelled is None:
-        raise typed_http_error(503, "UNAVAILABLE", "job_result_unavailable", "Cancelled job status is unavailable.", f"job-cancel:{job_id}")
-    return BaseResponse(data=_job_response(cancelled))
-
-
-def _job_response(job) -> JobResponse:
-    return JobResponse(
-        job_id=job.job_id,
-        status=job.status,
-        receipt_payload=job.receipt_payload,
-        error_payload=job.error_payload,
-        command_type=job.command_type,
-        attempt_count=job.attempt_count,
-        max_attempts=job.max_attempts,
-        result_reference=job.result_reference,
+        raise typed_http_error(409, "conflict", "job_state_conflict", "Only an unclaimed queued job can be cancelled.", f"job-cancel:{job_id}") from error
+    return BaseResponse(
+        data=_job_response(job, f"job-cancel:{job_id}", status_override="cancelled")
     )
+
+
+def _job_response(
+    job,
+    correlation_id: str,
+    *,
+    status_override: str | None = None,
+) -> JobResponse:
+    try:
+        public_status = job.status if status_override is None else status_override
+        outcome = None
+        if public_status == "succeeded":
+            outcome = JobSuccessOutcomeView.model_validate(job.receipt_payload)
+        elif public_status == "failed":
+            outcome = JobFailureOutcomeView.model_validate(job.error_payload)
+        return JobResponse(
+            job_id=job.job_id,
+            status=public_status,
+            command_type=job.command_type,
+            attempt_count=job.attempt_count,
+            max_attempts=job.max_attempts,
+            outcome=outcome,
+        )
+    except ValidationError as error:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "job_outcome_contract_unavailable",
+            "Durable Job outcome is not available through the closed public contract.",
+            correlation_id,
+        ) from error

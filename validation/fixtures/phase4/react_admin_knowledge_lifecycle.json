@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "KN-REACT-LIFECYCLE-001",
+  "revision": 1,
+  "test_kind": "external_input_fixture",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored revisions and immutable synthetic actors; no production export",
+  "allowed_use": "validation-only",
+  "redaction_policy": "synthetic item and actor keys only; no source content or user identity",
+  "root_inputs": ["synthetic draft revision", "distinct immutable actors", "preview fingerprint"],
+  "input_values": {"item_key": "knowledge-syn-02", "draft_revision": 4, "author": "admin_user_id:101", "reviewer": "admin_user_id:202", "preview_fingerprint": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "idempotency_key": "knowledge.lifecycle.syn.01"},
+  "seed_fields": ["item_key", "draft_revision", "author", "reviewer", "preview_fingerprint", "idempotency_key"],
+  "derived_fields": ["review_receipt", "published_revision", "requery_view"],
+  "expected_manifest_path": "validation/expected/phase4/react_admin_knowledge_lifecycle.json",
+  "fixed_business_clock": "2026-08-20T10:00:00+08:00",
+  "forbidden_direct_seed": ["published result", "review receipt", "author-reviewer equivalence", "browser result"]
+}

@@ -1,4 +1,7 @@
-"""Typed Government Subsidy Query, Preview, and Apply endpoints."""
+"""
+File: government_subsidy.py
+Description: 提供 Government Subsidy typed Query／Preview，並以 Durable Job Bridge 接受 Apply。
+"""
 
 from __future__ import annotations
 
@@ -9,12 +12,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query, status
 from api.schemas.jobs import JobAcceptedResponse
-from api.dependencies.jobs import get_job_repository
-from infrastructure.mysql.background_job_repository import (
-    BackgroundJobRepository,
-    JobIdempotencyConflict,
+from api.dependencies.jobs import (
+    durable_job_conflict_http_error,
+    get_durable_job_application,
+    immutable_admin_job_actor,
 )
 from shared_kernel.durable_job_queue import DurableJobCommand
+from subsystems.jobs.command_application import DurableJobCommandApplication
+from subsystems.jobs.contracts import DurableJobCommandConflict
 import uuid
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -128,7 +133,6 @@ def list_government_subsidy_batches(
     application: GovernmentSubsidyApplication = Depends(
         get_government_subsidy_application
     ),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     del principal
     correlation = CorrelationId("government-subsidy-batch-list")
@@ -177,7 +181,6 @@ def query_government_subsidy_batch(
     application: GovernmentSubsidyApplication = Depends(
         get_government_subsidy_application
     ),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     del principal
     correlation = CorrelationId(f"government-subsidy-query:{batch_id}")
@@ -202,7 +205,6 @@ def preview_government_subsidy_claim_plan(
     application: GovernmentSubsidyApplication = Depends(
         get_government_subsidy_application
     ),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     del principal
     correlation = CorrelationId(correlation_id)
@@ -232,18 +234,18 @@ def apply_government_subsidy_claim_plan(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = ClaimPlanningApplyRequest(
         _planning_intent(body),
         ExpectedVersion(body.expected_batch_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        _actor(principal),
+        _actor(principal, correlation_id),
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _enqueue_apply(_government_subsidy_command("claim_plan", body.intent.model_dump(), request), job_repository)
+    return _enqueue_apply(_government_subsidy_command("claim_plan", body.intent.model_dump(), request), job_application)
 
 
 @router.post(
@@ -261,7 +263,6 @@ def preview_government_subsidy_claim_submission(
     application: GovernmentSubsidyApplication = Depends(
         get_government_subsidy_application
     ),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     del body, principal
     correlation = CorrelationId(correlation_id)
@@ -292,18 +293,18 @@ def apply_government_subsidy_claim_submission(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = ClaimSubmissionApplyRequest(
         ClaimSubmissionIntent(batch_id),
         ExpectedVersion(body.expected_batch_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        _actor(principal),
+        _actor(principal, correlation_id),
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _enqueue_apply(_government_subsidy_command("claim_submission", {"batch_id": batch_id}, request), job_repository)
+    return _enqueue_apply(_government_subsidy_command("claim_submission", {"batch_id": batch_id}, request), job_application)
 
 
 @router.post(
@@ -321,7 +322,6 @@ def preview_government_subsidy_claim_approval(
     application: GovernmentSubsidyApplication = Depends(
         get_government_subsidy_application
     ),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     del principal
     correlation = CorrelationId(correlation_id)
@@ -352,18 +352,18 @@ def apply_government_subsidy_claim_approval(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = ClaimApprovalApplyRequest(
         _approval_intent(batch_id, body.item_approvals),
         ExpectedVersion(body.expected_batch_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        _actor(principal),
+        _actor(principal, correlation_id),
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _enqueue_apply(_government_subsidy_command("claim_approval", {"batch_id": batch_id, "item_approvals": [item.model_dump() for item in body.item_approvals]}, request), job_repository)
+    return _enqueue_apply(_government_subsidy_command("claim_approval", {"batch_id": batch_id, "item_approvals": [item.model_dump() for item in body.item_approvals]}, request), job_application)
 
 
 @router.post(
@@ -380,7 +380,6 @@ def preview_government_subsidy_receipt(
     application: GovernmentSubsidyApplication = Depends(
         get_government_subsidy_application
     ),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     del principal
     correlation = CorrelationId(correlation_id)
@@ -409,18 +408,18 @@ def apply_government_subsidy_receipt(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = GovernmentSubsidyReceiptApplyRequest(
         _receipt_intent(body.intent),
         ExpectedVersion(body.expected_batch_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        _actor(principal),
+        _actor(principal, correlation_id),
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _enqueue_apply(_government_subsidy_command("receipt", body.intent.model_dump(), request), job_repository)
+    return _enqueue_apply(_government_subsidy_command("receipt", body.intent.model_dump(), request), job_application)
 
 
 @router.post(
@@ -437,7 +436,6 @@ def preview_government_subsidy_reversal(
     application: GovernmentSubsidyApplication = Depends(
         get_government_subsidy_application
     ),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
 ):
     del principal
     correlation = CorrelationId(correlation_id)
@@ -466,18 +464,18 @@ def apply_government_subsidy_reversal(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = GovernmentSubsidyReversalApplyRequest(
         _reversal_intent(body.intent),
         ExpectedVersion(body.expected_batch_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        _actor(principal),
+        _actor(principal, correlation_id),
         body.reason,
         CorrelationId(correlation_id),
     )
-    return _enqueue_apply(_government_subsidy_command("reversal", body.intent.model_dump(), request), job_repository)
+    return _enqueue_apply(_government_subsidy_command("reversal", body.intent.model_dump(), request), job_application)
 
 
 def _receipt_intent(view):
@@ -527,8 +525,8 @@ def _approval_intent(batch_id, approvals):
     )
 
 
-def _actor(principal):
-    return ActorContext(str(principal.username or "").strip())
+def _actor(principal, correlation_id):
+    return ActorContext(immutable_admin_job_actor(principal, correlation_id))
 
 
 def _batch_payload(batch):
@@ -685,15 +683,21 @@ def _approval_amounts(candidate):
 
 
 
-def _enqueue_apply(command, job_repository):
-    job_id = str(uuid.uuid4())
+def _enqueue_apply(command, job_application):
+    durable_command = command(str(uuid.uuid4()))
     try:
-        job_id = job_repository.enqueue_command(command(job_id))
-    except JobIdempotencyConflict as error:
-        job_id = error.job_id
+        acceptance = job_application.enqueue(durable_command)
+    except DurableJobCommandConflict as error:
+        raise durable_job_conflict_http_error(
+            error,
+            durable_command.correlation_id,
+        ) from error
 
     return BaseResponse(
-        data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
+        data=JobAcceptedResponse(
+            job_id=acceptance.job_id,
+            status_url=f"/api/v1/jobs/{acceptance.job_id}",
+        ),
         message="202 Accepted",
     )
 

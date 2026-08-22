@@ -1,16 +1,18 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-durable-job-core-persistence-worker-contract
 date: 2026-08-17
 owner: Global Durable Jobs Integration Owner
 domain: Global / Jobs
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-durable-job-persistence-caller-adoption-decision PASS; PROV-20260817-react-admin-phase4-scenario-lineage-governance PASS
-activation_state: blocked-prerequisites
-authority: awaiting-exact-human-approval
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance completed with PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-durable-job-persistence-caller-adoption-decision PASS; PROV-20260817-react-admin-phase4-scenario-lineage-governance completed with PHASE4_SCENARIO_LINEAGE_METADATA_READY
+activation_state: completed-local-validated
+authority: exact-human-approved-completed
 approval_required: 核准此 exact Durable Job Core Persistence / Worker Contract Work Package
+approved_at: 2026-08-22
+completed_at: 2026-08-22
 base_branch: main
-base_head: 8615225481c8f72a9629289285516189b270cb36
+base_head: f9240b9e3abbcf665b5c979e0973f675197d8494
 dirty_baseline: required-before-writer; preserve-all-user-work
 base_drift_rule: any relevant path drift requires fresh read and re-freeze before edits
 ui_execution_mode: not-applicable
@@ -92,12 +94,28 @@ migration、provider與shared Auth。
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Scope | BLOCKED | 等待Option A與exact本包核准 |
+| Scope | PASS | Option A、Phase4 metadata prerequisite、exact本包核准與fresh base audit均已完成 |
 | Change Inventory | PASS | 0 schema／seed／backfill／destructive |
 | Static Release | NOT_RUN | 無release |
 | Descriptor | NOT_RUN | 無schema變更 |
 | Read-only Plan | NOT_RUN | 不適用 |
-| Engine Verification | BLOCKED | 無disposable `lu_test_*` MySQL evidence；case-collision/round-trip尚未驗證 |
+| Engine Verification | PASS | 3個唯一`lu_test_*` queue-only DB；12個MySQL cases驗證round-trip、collation、replay、conflict與crash-resume後已各自清除 |
 | Developer Acceptance | NOT_RUN | 不操作既有資料庫 |
 
 結論：`DB_CHANGE_NOT_READY`。
+
+## 6. Completion record（2026-08-22）
+
+本 exact Core 工作包已完成 canonical equality、closed terminal outcome、canonical repository port 與 worker
+outer transaction ownership。新 canonical methods 沒有 hidden commit／rollback；recovery、claim、terminal
+transition 由 worker 分別提交，heartbeat 另由 private composition 在 terminal commit 後持有獨立 transaction。
+
+Final focused verification：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -p no:cacheprovider --basetemp .pytest_tmp\durable-core-final -q tests\test_phase4_scenario_lineage.py tests\test_durable_job_core_contract.py tests\test_durable_job_worker.py tests\test_background_job_repository_mysql.py tests\test_durable_job_payload_equality_disposable_mysql_e2e.py tests\test_durable_job_disposable_mysql_e2e.py tests\test_private_runtime_operations.py
+86 passed in 7.93s
+```
+
+本完成紀錄只適用 Core：沒有切換 caller、public jobs route、React、provider 或 production；8 個 handler 仍各自
+持有 Domain connection/UoW，故 Domain command 與 queue terminal transition 不宣稱 atomic 或 exactly-once。

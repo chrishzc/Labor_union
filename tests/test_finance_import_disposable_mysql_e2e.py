@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from argparse import Namespace
 import os
+from pathlib import Path
 import time
 
 import pandas as pd
@@ -16,6 +17,10 @@ from scripts.bootstrap_disposable_mysql_schema import bootstrap
 
 
 DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEIDENTIFIED_TAISHIN_FIXTURE = (
+    PROJECT_ROOT / "tests/fixtures/finance_import/taishin_deidentified_minimal.xlsx"
+)
 pytestmark = pytest.mark.skipif(
     not DATABASE,
     reason="requires an explicitly configured disposable lu_test_* MySQL database",
@@ -62,16 +67,10 @@ def _use_explicit_disposable_database(monkeypatch):
     )
 
 
-def test_real_taishin_workbook_becomes_root_fact_and_unresolved_reprocess_blocks(tmp_path):
+def test_deidentified_taishin_fixture_becomes_root_fact_and_unresolved_reprocess_blocks():
     bootstrap(_arguments())
-    workbook = tmp_path / "taishin-unresolved.xlsx"
-    pd.DataFrame(
-        [
-            ["說明"],
-            ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"],
-            ["0001", "2026/08/04", "09:08:07", "2026/08/04", "轉帳", "300", "", "9000", "客戶退款 0012345678901234"],
-        ]
-    ).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
+    workbook = DEIDENTIFIED_TAISHIN_FIXTURE
+    assert workbook.is_file()
 
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.finance_import.ingestion import ingest_finance_workbook
@@ -421,6 +420,7 @@ def test_durable_correction_worker_posts_manual_refund_once(tmp_path):
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.identities import CorrelationId
     from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from subsystems.jobs.command_application import DurableJobCommandApplication
 
     connection = get_connection()
     try:
@@ -447,9 +447,9 @@ def test_durable_correction_worker_posts_manual_refund_once(tmp_path):
         )
         repository = BackgroundJobRepository(connection)
         job_id = "durable-correction-job"
-        assert repository.enqueue_command(
+        assert DurableJobCommandApplication(repository, connection).enqueue(
             _correction_apply_job_command(job_id, request)
-        ) == job_id
+        ).job_id == job_id
     finally:
         connection.close()
 
@@ -457,6 +457,7 @@ def test_durable_correction_worker_posts_manual_refund_once(tmp_path):
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "durable-correction-worker",
             retry_delay_seconds=0,
@@ -465,8 +466,12 @@ def test_durable_correction_worker_posts_manual_refund_once(tmp_path):
         assert worker.recover_and_run_once() is False
         stored = BackgroundJobRepository(worker_connection).get_job(job_id)
         assert stored is not None
-        assert stored.status == "succeeded"
-        assert stored.receipt_payload["ledger_entry_count"] == 1
+        assert stored.status == "succeeded", stored.error_payload
+        assert stored.receipt_payload == {
+            "kind": "success",
+            "result_reference": "finance_import_correction:finance-import-row:1",
+            "schema_version": 1,
+        }
         with worker_connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM client_ledger_entries")
             assert cursor.fetchone() == {"count": 1}
@@ -1060,12 +1065,24 @@ def _seed_open_refund_obligation() -> None:
     connection = get_connection()
     try:
         with connection.cursor() as cursor:
+            synthetic_account = "9" * 16
             cursor.execute("INSERT INTO clients(case_no,name) VALUES ('C-1','E2E Client')")
             client_id = int(cursor.lastrowid)
+            cursor.execute(
+                "INSERT INTO beclass_records(query_no,refund_bank_code,refund_account_no) "
+                "VALUES ('C-1','synthetic-bank',%s)",
+                (synthetic_account,),
+            )
             cursor.execute("INSERT INTO orders(case_no,client_id,status) VALUES ('C-1',%s,'訂單完成')", (client_id,))
             cursor.execute("INSERT INTO client_obligation_events(obligation_identity,case_no,obligation_type,direction,event_type,before_amount_ntd,after_amount_ntd,before_due_date,after_due_date,source_event_identity,source_obligation_identity,expected_account_version,idempotency_key,actor,reason) VALUES ('refund:C-1','C-1','refund','payable_to_client','established',0,300,NULL,'2026-08-15','lu-test-refund-root',NULL,0,'lu-test-refund-root','lu-test-runner','fixture root fact')")
             event_id = int(cursor.lastrowid)
             cursor.execute("INSERT INTO client_obligations(obligation_identity,case_no,obligation_type,direction,source_obligation_identity,amount_due_ntd,due_date,status,current_event_id,projection_version) VALUES ('refund:C-1','C-1','refund','payable_to_client',NULL,300,'2026-08-15','open',%s,0)", (event_id,))
+            cursor.execute(
+                "INSERT INTO client_refund_recipient_snapshots "
+                "(refund_obligation_identity,case_no,bank_code,bank_account,source_kind) "
+                "VALUES ('refund:C-1','C-1','synthetic-bank',%s,'test-fixture')",
+                (synthetic_account,),
+            )
         connection.commit()
     finally:
         connection.close()
@@ -1075,7 +1092,7 @@ def _ingest_unresolved_taishin_outflow(tmp_path, *, amount=300):
     workbook = tmp_path / "taishin-manual-refund.xlsx"
     if not workbook.exists():
         pd.DataFrame(
-            [["說明"], ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"], ["0001", "2026/08/04", "09:08:07", "2026/08/04", "轉帳", str(amount), "", "9000", "客戶退款 0012345678901234"]]
+            [["說明"], ["序號", "交易日期", "交易時間", "帳務日期", "摘要", "支出金額", "存入金額", "帳戶餘額", "備註"], ["0001", "2026/08/04", "09:08:07", "2026/08/04", "轉帳", str(amount), "", "9000", "客戶退款 " + ("9" * 16)]]
         ).to_excel(workbook, sheet_name="交易明細", index=False, header=False)
     from shared_kernel.identities import ActorContext, IdempotencyKey
     from subsystems.finance_import.ingestion import ingest_finance_workbook
@@ -1117,7 +1134,7 @@ def _correction_request(selection, preview, idempotency_key, correlation_id):
     return FinanceImportCorrectionApplyRequest(
         selection, ExpectedVersion(preview.batch_version), ExpectedVersion(preview.canonical_fact_version),
         ExpectedVersion(preview.alert_version), preview.fingerprint, IdempotencyKey(idempotency_key),
-        ActorContext("lu-test-runner"), CorrelationId(correlation_id),
+        ActorContext("admin_user_id:1"), CorrelationId(correlation_id),
     )
 
 

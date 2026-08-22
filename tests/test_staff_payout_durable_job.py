@@ -1,4 +1,7 @@
-"""Regression contract for durable Staff Payout Apply delivery."""
+"""
+File: test_staff_payout_durable_job.py
+Description: 驗證 Staff Payout canonical command、worker重建與三種付款事件契約。
+"""
 
 from datetime import date
 
@@ -21,7 +24,7 @@ def _request(event_type, bank_fact_identities, reopen_fact_identity=None):
     return StaffPayoutApplyRequest(
         StaffPayoutSelection(event_type, bank_fact_identities, ("obligation-1",), reopen_fact_identity),
         ExpectedVersion(3), ExpectedVersion(4), PreviewFingerprint("a" * 64),
-        IdempotencyKey(f"staff-payout-{event_type.value}"), ActorContext("payroll-admin"),
+        IdempotencyKey(f"staff-payout-{event_type.value}"), ActorContext("admin_user_id:1"),
         "record canonical staff payment", CorrelationId("staff-payout-correlation"),
     )
 
@@ -88,7 +91,7 @@ def test_staff_payout_command_preserves_difference_mode():
             difference_mode=StaffPayoutDifferenceMode.OVERPAYMENT,
         ),
         ExpectedVersion(3), ExpectedVersion(4), PreviewFingerprint("a" * 64),
-        IdempotencyKey("staff-payout-overpayment"), ActorContext("payroll-admin"),
+        IdempotencyKey("staff-payout-overpayment"), ActorContext("admin_user_id:1"),
         "record staff overpayment", CorrelationId("staff-payout-overpayment"),
     )
 

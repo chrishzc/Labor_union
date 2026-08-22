@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "KN-REACT-LIFECYCLE-001",
+  "revision": 1,
+  "assertions": ["Preview is zero-write.", "Author and reviewer identities must be distinct.", "Same key and payload replays one receipt.", "Receipt and re-query expose the same committed revision."],
+  "db_oracle": {"applicability": "blocked", "required": ["single outer transaction", "revision and receipt rollback together"], "reason": "database execution not run"},
+  "api_oracle": {"required": ["closed preview", "closed lifecycle receipt", "typed actor-separation conflict"]},
+  "ui_oracle": {"applicability": "blocked", "required": ["Part 15 knowledge lifecycle flow"], "reason": "browser execution not run"},
+  "replay_oracle": {"required": ["same key and canonical payload returns identical receipt", "same key mismatch is rejected"]},
+  "recovery_oracle": {"required": ["stale revision is zero-write", "same actor rejection is zero-write"]},
+  "execution_limits": {"provider": "not_run", "browser": "not_run", "database": "not_run", "production": "not_run"},
+  "forbidden_observations": ["same actor approval", "partial revision", "raw source content"]
+}

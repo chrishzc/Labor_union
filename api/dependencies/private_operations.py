@@ -1,4 +1,7 @@
-"""API-side composition for runtime operations that are allowed to reach MySQL."""
+"""
+File: private_operations.py
+Description: 組合可接觸 MySQL 的 private runtime operations，明示 connection 與 outer transaction ownership。
+"""
 
 from __future__ import annotations
 
@@ -44,22 +47,36 @@ def run_durable_job_cycle(
         repository = BackgroundJobRepository(connection)
         repository.assert_durable_queue_schema()
         if check_only:
-            write_runtime_heartbeat(connection, runtime_identity, 0)
-            connection.commit()
+            _write_durable_job_heartbeat(connection, runtime_identity, 0)
             return 0
         worker = DurableJobWorker(
             repository,
+            connection,
             default_job_handlers(),
             worker_id,
             lease_seconds,
             retry_delay_seconds,
         )
         processed = int(worker.recover_and_run_once())
-        write_runtime_heartbeat(connection, runtime_identity, processed)
-        connection.commit()
+        _write_durable_job_heartbeat(connection, runtime_identity, processed)
         return processed
     finally:
         connection.close()
+
+
+def _write_durable_job_heartbeat(
+    connection,
+    runtime_identity: WorkerRuntimeIdentity,
+    processed: int,
+) -> None:
+    """Own a heartbeat transaction after queue terminal state is already committed."""
+    connection.begin()
+    try:
+        write_runtime_heartbeat(connection, runtime_identity, processed)
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
 
 
 def run_knowledge_cycle(worker_id: str, runtime_identity: WorkerRuntimeIdentity) -> int:

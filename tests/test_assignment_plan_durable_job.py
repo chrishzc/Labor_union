@@ -1,3 +1,8 @@
+"""
+File: test_assignment_plan_durable_job.py
+Description: 驗證 Assignment Plan command、Bridge adoption、worker重建與accepted語意。
+"""
+
 from datetime import date
 
 from api.routes.assignment_plan import (
@@ -6,6 +11,7 @@ from api.routes.assignment_plan import (
     apply_assignment_plan,
 )
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.jobs.command_application import DurableJobAcceptance
 from subsystems.jobs.durable_job_worker import (
     assignment_plan_apply_handler,
     default_job_handlers,
@@ -69,17 +75,18 @@ def test_assignment_plan_handler_reconstructs_existing_apply_request(monkeypatch
 def test_assignment_plan_apply_route_enqueues_durable_command_only():
     commands = []
 
-    class _JobRepository:
-        def enqueue_command(self, command):
+    class _JobApplication:
+        def enqueue(self, command):
             commands.append(command)
-            return command.job_id
+            return DurableJobAcceptance(command.job_id, replayed=False)
 
     principal = AdminPrincipal(1, "admin", "Admin", "system_admin")
     response = apply_assignment_plan(
-        _Body(), "CASE-001", "idem-1", "corr-1", principal, _JobRepository()
+        _Body(), "CASE-001", "idem-1", "corr-1", principal, _JobApplication()
     )
 
     assert commands[0].command_type == "assignment_plan_apply"
+    assert commands[0].submitted_by == "admin_user_id:1"
     assert response.data.status_url.endswith(commands[0].job_id)
 
 

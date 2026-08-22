@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "JOB-PUBLIC-OUTCOME-001",
+  "revision": 1,
+  "test_kind": "external_input_fixture",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored canonical command envelopes and typed outcomes; no database export",
+  "allowed_use": "validation-only",
+  "redaction_policy": "synthetic command and actor identities only; no business payload or raw exception",
+  "root_inputs": ["synthetic canonical commands", "queue transitions", "typed terminal outcomes"],
+  "input_values": {"command_identity": "job.public.syn.01", "command_type": "assignment_plan_apply", "command_version": 1, "canonical_payload": {"case_key": "case-syn-01", "expected_version": 3}, "submitted_by": "admin_user_id:101", "correlation_id": "corr-syn-01", "initial_queue_state": "accepted"},
+  "seed_fields": ["command_identity", "command_type", "command_version", "canonical_payload", "submitted_by", "correlation_id", "initial_queue_state"],
+  "derived_fields": ["canonical_fingerprint", "replayed", "queue_transition", "masked_public_outcome"],
+  "expected_manifest_path": "validation/expected/phase4/durable_job_public_outcome.json",
+  "fixed_business_clock": "2026-08-20T10:00:00+08:00",
+  "forbidden_direct_seed": ["terminal success", "raw command payload", "raw handler receipt", "provider acknowledgement"]
+}

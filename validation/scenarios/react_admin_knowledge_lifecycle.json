@@ -1,0 +1,36 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "KN-REACT-LIFECYCLE-001",
+  "revision": 1,
+  "track": "A",
+  "suite_id": "KN",
+  "status": "specified",
+  "part": "15",
+  "browser_execution_mode": "browser-blocked",
+  "requires_database": true,
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["PH4-KNOWLEDGE-LIFECYCLE"],
+  "coverage_scope": "supplemental",
+  "source_scenario_ids": ["KN-KNOWLEDGE-LIFECYCLE-001"],
+  "source_refs": ["document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#6.2 State machines"],
+  "lineage_mappings": [
+    {"source": "draft-review-publication lifecycle", "successor": "typed lifecycle mutation", "disposition": "unchanged"},
+    {"source": "author and reviewer identity", "successor": "immutable actor separation", "disposition": "regenerated"},
+    {"source": "publication receipt", "successor": "receipt-to-re-query oracle", "disposition": "renamed"}
+  ],
+  "root_inputs": ["synthetic draft revision", "distinct immutable actors", "preview fingerprint"],
+  "root_facts": ["Draft revision, review decision and actor identities are lifecycle roots."],
+  "forbidden_direct_seed": ["published result", "review receipt", "author-reviewer equivalence", "browser result"],
+  "commands": ["preview review transition", "approve with distinct reviewer", "reject same-actor approval", "re-query committed revision"],
+  "expected": ["Preview is zero-write.", "Author and reviewer must be different immutable actors.", "Receipt and re-query expose the same committed revision."],
+  "receipt_requirements": ["preview evidence", "mutation receipt", "author-separation evidence", "re-query evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-08-20T10:00:00+08:00"},
+  "oracle_applicability": {
+    "db": {"status": "blocked", "reason": "transaction evidence not produced"},
+    "api": {"status": "required", "reason": "typed lifecycle preview and apply"},
+    "ui": {"status": "blocked", "reason": "Part 15 checklist is not present"},
+    "replay": {"status": "required", "reason": "same-key receipt replay"},
+    "recovery": {"status": "required", "reason": "stale revision and actor-separation rollback"}
+  },
+  "required_receipt_id": "KN-REACT-LIFECYCLE-001-R1"
+}

@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "LINE-REACT-DELIVERY-QUERY-001",
+  "revision": 1,
+  "assertions": ["Query is read-only and returns only bounded delivery fields.", "Recipient, message body and provider payload remain redacted.", "Attempt retryability and terminal state come from committed task facts."],
+  "db_oracle": {"applicability": "blocked", "required": ["read-only query", "stable cursor"], "reason": "database execution not run"},
+  "api_oracle": {"required": ["closed delivery status", "bounded attempt outcome", "no recipient or provider payload"]},
+  "ui_oracle": {"applicability": "blocked", "required": ["Part 15 delivery query flow"], "reason": "browser execution not run"},
+  "replay_oracle": {"applicability": "not_applicable", "required": []},
+  "recovery_oracle": {"required": ["retryable failure remains visible", "terminal failure does not alter Domain facts"]},
+  "execution_limits": {"provider": "not_run", "browser": "not_run", "database": "not_run", "production": "not_run"},
+  "forbidden_observations": ["recipient identity", "message body", "provider response", "query write"]
+}

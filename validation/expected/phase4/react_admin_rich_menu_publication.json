@@ -1,0 +1,18 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "LINE-RICH-MENU-PUBLICATION-001",
+  "revision": 1,
+  "assertions": [
+    "Preview is zero-write and returns a deterministic fingerprint.",
+    "Apply re-reads the current revision and rejects a stale or mismatched fingerprint.",
+    "Durable step receipts prevent recreation of acknowledged assets after retry.",
+    "Published state is retained when cleanup records an operational anomaly."
+  ],
+  "db_oracle": {"applicability": "blocked", "required": ["single outer transaction", "durable step and cleanup records"], "reason": "database execution not run"},
+  "api_oracle": {"required": ["closed preview receipt", "closed queue receipt", "bounded publication status", "typed conflict errors"]},
+  "ui_oracle": {"applicability": "blocked", "required": ["Part 15 publication flow"], "reason": "browser execution not run"},
+  "replay_oracle": {"required": ["same key and fingerprint returns the same receipt", "lost acknowledgement resumes from the last durable step"]},
+  "recovery_oracle": {"required": ["cleanup failure creates bounded anomaly evidence", "published state is not reversed"]},
+  "execution_limits": {"provider": "not_run", "browser": "not_run", "database": "not_run", "production": "not_run"},
+  "forbidden_observations": ["raw external response", "external credential", "recipient identity", "job acceptance treated as published", "cleanup failure treated as publication failure"]
+}

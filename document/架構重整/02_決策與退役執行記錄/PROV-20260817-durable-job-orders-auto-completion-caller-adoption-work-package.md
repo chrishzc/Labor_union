@@ -1,6 +1,8 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
+activation_state: completed-local-validated-2026-08-22
+authority: user-approved-in-spec-auto-activation-2026-08-22
 identity: PROV-20260817-durable-job-orders-auto-completion-caller-adoption
 date: 2026-08-17
 owner: Orders

@@ -1,4 +1,7 @@
-"""MySQL proof that Assignment Plan Apply survives worker crash and replay."""
+"""
+File: test_assignment_plan_durable_mysql_e2e.py
+Description: 以 disposable MySQL 驗證 Assignment Plan Bridge replay、crash recovery 與單次 Domain Apply。
+"""
 
 from __future__ import annotations
 
@@ -120,6 +123,19 @@ def _seed_waiting_lock(cursor, case_no, staff_id) -> None:
     )
     segment_id = cursor.lastrowid
     cursor.execute(
+        "INSERT INTO precontract_service_commitments "
+        "(case_no,matching_plan_id,commitment_key,plan_snapshot_sha256,created_by) "
+        "VALUES (%s,%s,%s,%s,'test')",
+        (case_no, plan_id, f"{case_no}-commitment", "c" * 64),
+    )
+    commitment_id = cursor.lastrowid
+    for service_date in (date(2026, 8, 1), date(2026, 8, 2)):
+        cursor.execute(
+            "INSERT INTO precontract_service_commitment_days "
+            "(commitment_id,matching_segment_id,staff_id,service_date) VALUES (%s,%s,%s,%s)",
+            (commitment_id, segment_id, staff_id, service_date),
+        )
+    cursor.execute(
         "INSERT INTO caregiver_availability_locks (plan_id,status,is_active,created_by) VALUES (%s,'active',1,'test')",
         (plan_id,),
     )
@@ -129,6 +145,44 @@ def _seed_waiting_lock(cursor, case_no, staff_id) -> None:
             "INSERT INTO caregiver_availability_lock_days (lock_id,segment_id,staff_id,lock_date,active_marker) "
             "VALUES (%s,%s,%s,%s,1)",
             (lock_id, segment_id, staff_id, lock_date),
+        )
+    cursor.execute(
+        "INSERT INTO confirmed_service_date_versions "
+        "(case_no,version,order_version,scheduling_version,service_day_count,"
+        "service_date_fingerprint,is_current,confirmed_by_actor_id,reason) "
+        "VALUES (%s,1,0,0,2,%s,1,'test','durable fixture')",
+        (case_no, "d" * 64),
+    )
+    confirmed_version_id = cursor.lastrowid
+    for ordinal, service_date in enumerate((date(2026, 8, 1), date(2026, 8, 2)), start=1):
+        cursor.execute(
+            "INSERT INTO confirmed_service_date_days "
+            "(confirmed_version_id,ordinal,service_date) VALUES (%s,%s,%s)",
+            (confirmed_version_id, ordinal, service_date),
+        )
+    cursor.execute(
+        "INSERT INTO matching_schedule_snapshots "
+        "(case_no,plan_id,confirmed_version_id,snapshot_fingerprint,status,current_marker,"
+        "created_by_actor_id) VALUES (%s,%s,%s,%s,'sent',1,'test')",
+        (case_no, plan_id, confirmed_version_id, "e" * 64),
+    )
+    snapshot_id = cursor.lastrowid
+    for audience_type, recipient_key, recipient_segment in (
+        ("customer", "customer", None),
+        ("caregiver", f"caregiver:{segment_id}", segment_id),
+    ):
+        cursor.execute(
+            "INSERT INTO matching_schedule_recipient_snapshots "
+            "(parent_snapshot_id,audience_type,recipient_key,segment_id,payload_snapshot,"
+            "payload_fingerprint,delivery_status) VALUES (%s,%s,%s,%s,'{}',%s,'sent')",
+            (snapshot_id, audience_type, recipient_key, recipient_segment, "f" * 64),
+        )
+        recipient_id = cursor.lastrowid
+        cursor.execute(
+            "INSERT INTO matching_schedule_confirmation_events "
+            "(recipient_snapshot_id,confirmation_value,source,actor_id,reason,idempotency_key) "
+            "VALUES (%s,'manually_confirmed','admin','test','durable fixture',%s)",
+            (recipient_id, f"{case_no}-{recipient_key}-confirmed"),
         )
 
 
@@ -180,6 +234,7 @@ def test_assignment_plan_durable_job_crash_recovery_and_duplicate_apply():
     from shared_kernel.identities import CorrelationId
     from subsystems.access.authentication_session import AdminPrincipal
     from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from subsystems.jobs.command_application import DurableJobCommandApplication
     from subsystems.scheduling.assignment_plan_workflow import AssignmentPlanPreviewRequest
 
     connection = get_connection()
@@ -204,10 +259,11 @@ def test_assignment_plan_durable_job_crash_recovery_and_duplicate_apply():
         )
         body = body.model_copy(update={"preview_fingerprint": preview.fingerprint.value})
         repository = BackgroundJobRepository(connection)
+        job_application = DurableJobCommandApplication(repository, connection)
         apply_kwargs = {
             "body": body, "case_no": "AP-DURABLE-1", "idempotency_key": "durable-apply",
             "correlation_id": "durable-apply", "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": job_application,
         }
         apply_assignment_plan(**apply_kwargs)
         response = apply_assignment_plan(**apply_kwargs)
@@ -215,7 +271,9 @@ def test_assignment_plan_durable_job_crash_recovery_and_duplicate_apply():
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM background_jobs")
             assert cursor.fetchone() == {"count": 1}
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute("UPDATE background_jobs SET lease_expires_at=DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE job_id=%s", (job_id,))
         connection.commit()
@@ -224,14 +282,14 @@ def test_assignment_plan_durable_job_crash_recovery_and_duplicate_apply():
 
     worker_connection = get_connection()
     try:
-        worker = DurableJobWorker(BackgroundJobRepository(worker_connection), default_job_handlers(), "durable-test-worker", retry_delay_seconds=0)
+        worker = DurableJobWorker(BackgroundJobRepository(worker_connection), worker_connection, default_job_handlers(), "durable-test-worker", retry_delay_seconds=0)
         assert worker.recover_and_run_once() is True
         assert worker.recover_and_run_once() is False
         stored = BackgroundJobRepository(worker_connection).get_job(job_id)
         assert stored is not None
-        assert stored.status == "succeeded"
+        assert stored.status == "succeeded", stored.error_payload
         assert stored.attempt_count == 2
-        assert stored.receipt_payload["case_no"] == "AP-DURABLE-1"
+        assert stored.result_reference == "assignment_plan:AP-DURABLE-1"
         with worker_connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM assignment_plan_apply_receipts")
             assert cursor.fetchone() == {"count": 1}

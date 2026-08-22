@@ -1,0 +1,18 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "LINE-NOTIFICATION-RULE-001",
+  "revision": 1,
+  "assertions": [
+    "Preview is zero-write and returns a deterministic fingerprint.",
+    "Save-disable and delete cancel linked pending intent and task lineage in one outer transaction.",
+    "Same key and canonical payload returns the same receipt without a second cancellation.",
+    "Stale revision and key collision create typed conflict with zero partial writes."
+  ],
+  "db_oracle": {"applicability": "blocked", "required": ["single outer transaction", "revision and cancellation rollback together"], "reason": "database execution not run"},
+  "api_oracle": {"required": ["closed preview receipt", "closed mutation receipt", "typed stale and idempotency conflict"]},
+  "ui_oracle": {"applicability": "blocked", "required": ["Part 15 notification rule flow"], "reason": "browser execution not run"},
+  "replay_oracle": {"required": ["same key and payload returns identical receipt", "different payload with the same key is rejected"]},
+  "recovery_oracle": {"required": ["stale input creates zero writes", "audit or cancellation failure rolls back the revision"]},
+  "execution_limits": {"provider": "not_run", "browser": "not_run", "database": "not_run", "production": "not_run"},
+  "forbidden_observations": ["partial revision without cancellation", "second cancellation on exact replay", "external call from HTTP command", "manual replay mutation"]
+}

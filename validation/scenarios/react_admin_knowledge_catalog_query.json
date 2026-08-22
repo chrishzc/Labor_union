@@ -1,0 +1,36 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "KN-REACT-CATALOG-QUERY-001",
+  "revision": 1,
+  "track": "A",
+  "suite_id": "KN",
+  "status": "specified",
+  "part": "15",
+  "browser_execution_mode": "browser-blocked",
+  "requires_database": true,
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["PH4-KNOWLEDGE-CATALOG-QUERY"],
+  "coverage_scope": "supplemental",
+  "source_scenario_ids": ["KN-KNOWLEDGE-LIFECYCLE-001"],
+  "source_refs": ["document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#6.1 責任與 non-goals"],
+  "lineage_mappings": [
+    {"source": "knowledge item identity and revision", "successor": "masked catalog row", "disposition": "unchanged"},
+    {"source": "publication state", "successor": "closed catalog status", "disposition": "renamed"},
+    {"source": "crawler provenance", "successor": "bounded provenance summary", "disposition": "regenerated"}
+  ],
+  "root_inputs": ["synthetic knowledge catalog", "publication revisions", "query filters"],
+  "root_facts": ["Knowledge item revisions and publication decisions are the query roots."],
+  "forbidden_direct_seed": ["authoritative answer", "raw source document", "credential", "browser result"],
+  "commands": ["query catalog", "filter by closed publication state", "page by stable identity"],
+  "expected": ["Query is read-only and masked.", "Knowledge output remains non-authoritative.", "Unknown projection fields fail closed."],
+  "receipt_requirements": ["query contract receipt", "masking evidence", "browser checklist evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-08-20T10:00:00+08:00"},
+  "oracle_applicability": {
+    "db": {"status": "blocked", "reason": "database query evidence not produced"},
+    "api": {"status": "required", "reason": "typed catalog query"},
+    "ui": {"status": "blocked", "reason": "Part 15 checklist is not present"},
+    "replay": {"status": "not_applicable", "reason": "query-only scenario"},
+    "recovery": {"status": "not_applicable", "reason": "query-only scenario"}
+  },
+  "required_receipt_id": "KN-REACT-CATALOG-QUERY-001-R1"
+}

@@ -1,0 +1,31 @@
+{
+  "contract": "labor-union-validation-receipt-registry/v1",
+  "scope_contract": "labor-union-phase4-scenario-lineage/v1",
+  "work_package_identity": "PROV-20260817-react-admin-phase4-scenario-lineage-governance",
+  "revision": 1,
+  "registry_status": "metadata-ready",
+  "authorized_scope": [
+    "PH4-HCM-APPLY", "PH4-BECLASS-WORKBOOK", "PH4-STAFF-HISTORICAL-WORKBOOK", "PH4-HISTORICAL-ORDERS-WORKBOOK", "PH4-FINANCE-IMPORT",
+    "PH4-ACCOUNTS-PAYABLE", "PH4-CLIENT-FINANCE", "PH4-STAFF-PAYOUT", "PH4-GOVERNMENT-SUBSIDY-REPORT", "PH4-LINE-DELIVERY-QUERY",
+    "PH4-KNOWLEDGE-CATALOG-QUERY", "PH4-KNOWLEDGE-LIFECYCLE", "PH4-RICH-MENU-PUBLICATION", "PH4-NOTIFICATION-RULE-MUTATION", "PH4-DURABLE-JOB-OUTCOME"
+  ],
+  "allowed_initial_states": ["missing", "not_run", "blocked"],
+  "receipts": [
+    {"receipt_id": "CI-CASE-IMPORT-001-R1", "scenario_id": "CI-CASE-IMPORT-001", "coverage_id": "PH4-HCM-APPLY", "revision": 1, "owner": "Case Import Validation Owner", "status": "missing", "blocked_reason": "fresh apply, rollback, re-query and browser evidence not produced"},
+    {"receipt_id": "CI-CANONICAL-ROOTS-002-BECLASS-R1", "scenario_id": "CI-CANONICAL-ROOTS-002", "coverage_id": "PH4-BECLASS-WORKBOOK", "revision": 1, "owner": "Case Import Validation Owner", "status": "missing", "blocked_reason": "family-specific workbook and browser evidence not produced"},
+    {"receipt_id": "CI-CANONICAL-ROOTS-002-STAFF-R1", "scenario_id": "CI-CANONICAL-ROOTS-002", "coverage_id": "PH4-STAFF-HISTORICAL-WORKBOOK", "revision": 1, "owner": "Case Import Validation Owner", "status": "missing", "blocked_reason": "family-specific historical staff evidence not produced"},
+    {"receipt_id": "CI-CANONICAL-ROOTS-002-ORDERS-R1", "scenario_id": "CI-CANONICAL-ROOTS-002", "coverage_id": "PH4-HISTORICAL-ORDERS-WORKBOOK", "revision": 1, "owner": "Orders Import Validation Owner", "status": "missing", "blocked_reason": "historical orders adoption and browser evidence not produced"},
+    {"receipt_id": "FI-IMPORT-AND-RECONCILIATION-001-R1", "scenario_id": "FI-IMPORT-AND-RECONCILIATION-001", "coverage_id": "PH4-FINANCE-IMPORT", "revision": 1, "owner": "Finance Import Validation Owner", "status": "blocked", "blocked_reason": "local Durable caller and legal fixture prerequisites passed; broader FI-H and Phase4 runtime promotion remain open"},
+    {"receipt_id": "APX-PAYABLE-VIEWMODEL-002-R1", "scenario_id": "APX-PAYABLE-VIEWMODEL-002", "coverage_id": "PH4-ACCOUNTS-PAYABLE", "revision": 1, "owner": "Accounts Payable Validation Owner", "status": "missing", "blocked_reason": "authenticated download and browser evidence not produced"},
+    {"receipt_id": "CF-EXPLICIT-REFUND-RECOVERY-002-R1", "scenario_id": "CF-EXPLICIT-REFUND-RECOVERY-002", "coverage_id": "PH4-CLIENT-FINANCE", "revision": 1, "owner": "Client Finance Validation Owner", "status": "missing", "blocked_reason": "fresh re-query and browser evidence not produced"},
+    {"receipt_id": "SP-EXACT-PAYOUT-STATE-002-R1", "scenario_id": "SP-EXACT-PAYOUT-STATE-002", "coverage_id": "PH4-STAFF-PAYOUT", "revision": 1, "owner": "Staff Payables Validation Owner", "status": "blocked", "blocked_reason": "local Durable caller and masked outcome prerequisites passed; broader SP-H and Phase4 runtime promotion remain open"},
+    {"receipt_id": "GS-CLAIM-FUNDING-001-R1", "scenario_id": "GS-CLAIM-FUNDING-001", "coverage_id": "PH4-GOVERNMENT-SUBSIDY-REPORT", "revision": 1, "owner": "Government Subsidy Validation Owner", "status": "blocked", "blocked_reason": "report authority and browser evidence not produced"},
+    {"receipt_id": "LINE-REACT-DELIVERY-QUERY-001-R1", "scenario_id": "LINE-REACT-DELIVERY-QUERY-001", "coverage_id": "PH4-LINE-DELIVERY-QUERY", "revision": 1, "owner": "LINE Delivery Validation Owner", "status": "missing", "blocked_reason": "backend, database and browser evidence not produced"},
+    {"receipt_id": "KN-REACT-CATALOG-QUERY-001-R1", "scenario_id": "KN-REACT-CATALOG-QUERY-001", "coverage_id": "PH4-KNOWLEDGE-CATALOG-QUERY", "revision": 1, "owner": "Knowledge Validation Owner", "status": "missing", "blocked_reason": "backend, database and browser evidence not produced"},
+    {"receipt_id": "KN-REACT-LIFECYCLE-001-R1", "scenario_id": "KN-REACT-LIFECYCLE-001", "coverage_id": "PH4-KNOWLEDGE-LIFECYCLE", "revision": 1, "owner": "Knowledge Validation Owner", "status": "missing", "blocked_reason": "backend, transaction and browser evidence not produced"},
+    {"receipt_id": "LINE-RICH-MENU-PUBLICATION-001-R1", "scenario_id": "LINE-RICH-MENU-PUBLICATION-001", "coverage_id": "PH4-RICH-MENU-PUBLICATION", "revision": 1, "owner": "LINE Configuration Validation Owner", "status": "missing", "blocked_reason": "backend, database, browser and external execution evidence not produced"},
+    {"receipt_id": "LINE-NOTIFICATION-RULE-001-R1", "scenario_id": "LINE-NOTIFICATION-RULE-001", "coverage_id": "PH4-NOTIFICATION-RULE-MUTATION", "revision": 1, "owner": "LINE Configuration Validation Owner", "status": "missing", "blocked_reason": "backend, database and browser evidence not produced"},
+    {"receipt_id": "JOB-PUBLIC-OUTCOME-001-R1", "scenario_id": "JOB-PUBLIC-OUTCOME-001", "coverage_id": "PH4-DURABLE-JOB-OUTCOME", "revision": 1, "owner": "Global Durable Jobs Integration Owner", "status": "blocked", "blocked_reason": "local prerequisite evidence passed; metadata-only manifest intentionally awaits separate Phase4 runtime promotion"}
+  ],
+  "execution_limits": {"provider": "not_run", "browser": "not_run", "database": "not_run", "production": "not_run"}
+}

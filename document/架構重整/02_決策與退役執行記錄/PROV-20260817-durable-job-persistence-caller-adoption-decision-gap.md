@@ -1,12 +1,16 @@
 ---
 doc_type: gap-package
-declared_status: proposed
+declared_status: superseded
 identity: PROV-20260817-durable-job-persistence-caller-adoption-decision-gap
 date: 2026-08-17
 owner: Global Durable Jobs / Domain Integration Owners
 domain: Global / Jobs / Finance Import / Staff Payables / Scheduling / Government Subsidy
 source_work_package: PROV-20260817-durable-job-public-outcome-contract
 approval_required: 核准 Durable Job persistence與caller adoption方案後另立exact successor
+selected_option: option-a-existing-column-canonicalization
+decision_resolved_by: PROV-20260817-durable-job-persistence-caller-adoption-decision
+decision_authority: exact-human-approved-2026-08-21
+superseded_by: PROV-20260817-durable-job-persistence-caller-adoption-decision; PROV-20260817-durable-job-core-persistence-worker-contract
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
 ui_execution_mode: not-applicable
 ---
@@ -34,7 +38,7 @@ ui_execution_mode: not-applicable
 
 ## 2. Required human／architecture decision
 
-必須選定並凍結一個方案：
+架構選項已於2026-08-21選定Option A；下列兩方案保留為裁決歷史與engine fail-closed出口：
 
 1. **Existing-column canonicalization**：證明可由現有command columns與canonical JSON穩定重建fingerprint，
    並以closed typed serialization安全使用現有receipt/error JSON；0 schema change。推薦子裁決為canonical Durable
@@ -56,7 +60,9 @@ shared application port提供closed replay／mismatch result。不得讓reposito
 - `PROV-20260817-durable-job-public-outcome-contract-work-package`：所有caller採用後才執行masked bounded GET
   view；不得回raw command／provider／PII payload，也不得反向修改Core或caller。
 
-未凍結上述split與write sets前，不得修改production。
+上述split與write sets已由Option A decision凍結。2026-08-22 Core successor已完成真MySQL round-trip、typed JSON、
+collation、replay、conflict與crash-resume evidence，因此本decision gap已由decision與Core successors取代；Bridge、
+六個bounded caller與masked public outcome仍各自未完成，不得據此修改production。
 
 ## 4. Acceptance for closing this gap
 
@@ -73,12 +79,12 @@ shared application port提供closed replay／mismatch result。不得讓reposito
 
 | Gate | Status | Evidence／reason |
 |---|---|---|
-| Scope | BLOCKED | persistence方案與schema需求未裁決 |
-| Change Inventory | BLOCKED | 尚未選existing-column或additive schema方案 |
+| Scope | PASS | Option A existing-column架構已exact裁決；runtime successor另包 |
+| Change Inventory | PASS | 本decision為0 schema／seed／backfill／destructive |
 | Static Release | NOT_RUN | 只有選additive方案才適用 |
 | Descriptor | NOT_RUN | 同上 |
 | Read-only Plan | NOT_RUN | 同上 |
-| Engine Verification | BLOCKED | disposable MySQL evidence尚未取得 |
+| Engine Verification | PASS | Core receipt以3個唯一`lu_test_*` queue-only DB、12個cases驗證`1`／`1.0`、Unicode、null、key collation、replay與conflict |
 | Developer Acceptance | NOT_RUN | 不得操作既有資料庫 |
 
 結論：`DB_CHANGE_NOT_READY`。

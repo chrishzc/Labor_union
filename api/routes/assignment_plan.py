@@ -1,4 +1,7 @@
-"""Authenticated Assignment Plan Query, Preview, and Apply API."""
+"""
+File: assignment_plan.py
+Description: 提供 Assignment Plan typed Query、Preview 與 Durable Job Apply API。
+"""
 
 from __future__ import annotations
 
@@ -25,10 +28,10 @@ from api.schemas.assignment_plan import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.jobs import JobAcceptedResponse
-from api.dependencies.jobs import get_job_repository
-from infrastructure.mysql.background_job_repository import (
-    BackgroundJobRepository,
-    JobIdempotencyConflict,
+from api.dependencies.jobs import (
+    durable_job_conflict_http_error,
+    get_durable_job_application,
+    immutable_admin_job_actor,
 )
 from shared_kernel.durable_job_queue import DurableJobCommand
 from domains.scheduling.assignment_plan import (
@@ -49,6 +52,8 @@ from subsystems.scheduling.assignment_plan_workflow import (
     AssignmentPlanPreviewRequest,
     AssignmentPlanWorkflowError,
 )
+from subsystems.jobs.command_application import DurableJobCommandApplication
+from subsystems.jobs.contracts import DurableJobCommandConflict
 
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Assignment Plan"])
@@ -163,7 +168,7 @@ def apply_assignment_plan(
         Header(alias="X-Correlation-ID", min_length=1, max_length=191),
     ] = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = _apply_request(
         case_no,
@@ -173,14 +178,18 @@ def apply_assignment_plan(
         principal,
     )
     
-    job_id = str(uuid.uuid4())
     try:
-        job_id = job_repository.enqueue_command(_assignment_plan_command(job_id, request))
-    except JobIdempotencyConflict as e:
-        job_id = e.job_id
+        acceptance = job_application.enqueue(
+            _assignment_plan_command(str(uuid.uuid4()), request)
+        )
+    except DurableJobCommandConflict as error:
+        raise durable_job_conflict_http_error(error, correlation_id) from error
 
     return BaseResponse(
-        data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
+        data=JobAcceptedResponse(
+            job_id=acceptance.job_id,
+            status_url=f"/api/v1/jobs/{acceptance.job_id}",
+        ),
         message="202 Accepted",
     )
 
@@ -231,7 +240,7 @@ def _apply_request(case_no, body, key, correlation, principal):
         ExpectedVersion(body.expected_payroll_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(key),
-        ActorContext(str(principal.username or "").strip()),
+        ActorContext(immutable_admin_job_actor(principal, correlation)),
         body.reason,
         CorrelationId(correlation),
     )

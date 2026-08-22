@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "SP-EXACT-PAYOUT-STATE-002",
+  "revision": 1,
+  "assertions": ["Accepted job is pending and not paid.", "Terminal success requires a closed payout result reference.", "Re-query of Staff Payables confirms the committed payout state.", "Mismatch is a typed conflict with zero duplicate payout."],
+  "db_oracle": {"applicability": "blocked", "required": ["one payout command", "one terminal receipt", "no duplicate obligation settlement"], "reason": "caller database execution not run"},
+  "api_oracle": {"required": ["accepted identity", "masked terminal outcome", "typed re-query"]},
+  "ui_oracle": {"applicability": "blocked", "required": ["Part 12 payout flow"], "reason": "browser execution not run"},
+  "replay_oracle": {"required": ["same command replays one job", "same key mismatch is rejected"]},
+  "recovery_oracle": {"required": ["crash recovery does not duplicate payout", "terminal failure remains queryable"]},
+  "execution_limits": {"provider": "not_run", "browser": "not_run", "database": "not_run", "production": "not_run"},
+  "forbidden_observations": ["accepted treated as paid", "raw bank data", "duplicate payout"]
+}

@@ -1,0 +1,39 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "LINE-REACT-DELIVERY-QUERY-001",
+  "revision": 1,
+  "track": "A",
+  "suite_id": "LINE",
+  "status": "specified",
+  "part": "15",
+  "browser_execution_mode": "browser-blocked",
+  "requires_database": true,
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["PH4-LINE-DELIVERY-QUERY"],
+  "coverage_scope": "supplemental",
+  "source_scenario_ids": ["LINE-IDENTITY-DELIVERY-001"],
+  "source_refs": [
+    "document/資料庫、資料處理/新版測試資料規則矩陣_草案.md#LINE-02",
+    "document/功能開發計畫/Part_00_全域測試資料治理與Scenario契約.md#7.3.1 LINE 管理中心與訂單狀態自動推送"
+  ],
+  "lineage_mappings": [
+    {"source": "committed LINE delivery task", "successor": "masked delivery query row", "disposition": "unchanged"},
+    {"source": "provider attempt result", "successor": "bounded attempt outcome", "disposition": "renamed"},
+    {"source": "legacy task detail", "successor": "redacted public projection", "disposition": "regenerated"}
+  ],
+  "root_inputs": ["synthetic delivery task", "attempt history", "query cursor"],
+  "root_facts": ["Committed delivery task and attempt rows are the query roots."],
+  "forbidden_direct_seed": ["successful domain outcome", "provider credential", "recipient identity", "browser result"],
+  "commands": ["query masked delivery tasks", "page by stable cursor", "observe retryable and terminal attempt states"],
+  "expected": ["Query is read-only and redacted.", "Provider failure does not alter committed Domain facts.", "Unknown or malformed projection fails closed."],
+  "receipt_requirements": ["query contract receipt", "redaction evidence", "browser checklist evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-08-20T10:00:00+08:00"},
+  "oracle_applicability": {
+    "db": {"status": "blocked", "reason": "database query evidence not produced"},
+    "api": {"status": "required", "reason": "typed redacted delivery query"},
+    "ui": {"status": "blocked", "reason": "Part 15 checklist is not present"},
+    "replay": {"status": "not_applicable", "reason": "query-only scenario"},
+    "recovery": {"status": "required", "reason": "retry and terminal attempt visibility"}
+  },
+  "required_receipt_id": "LINE-REACT-DELIVERY-QUERY-001-R1"
+}

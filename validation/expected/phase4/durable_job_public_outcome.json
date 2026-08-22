@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "JOB-PUBLIC-OUTCOME-001",
+  "revision": 1,
+  "assertions": ["Job acceptance is not terminal Domain success.", "Same key and equality returns the same job identity.", "Same key with different type, version, payload or actor is a typed conflict.", "Terminal receipt and error are closed and redacted."],
+  "db_oracle": {"applicability": "blocked", "required": ["canonical equality round-trip", "queue lifecycle transaction ownership"], "reason": "Core and caller database execution not run"},
+  "api_oracle": {"required": ["closed public status", "discriminated terminal outcome", "safe result reference"]},
+  "ui_oracle": {"applicability": "not_applicable", "required": []},
+  "replay_oracle": {"required": ["same equality replays one identity", "mismatch returns typed conflict"]},
+  "recovery_oracle": {"required": ["retry and exhaustion remain distinct", "crash-resume does not invent success"]},
+  "execution_limits": {"provider": "not_run", "browser": "not_run", "database": "not_run", "production": "not_run"},
+  "forbidden_observations": ["raw command payload", "raw handler receipt", "traceback", "provider acknowledgement treated as success"]
+}

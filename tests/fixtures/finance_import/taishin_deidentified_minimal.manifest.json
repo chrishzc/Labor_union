@@ -1,0 +1,12 @@
+{
+  "contract": "labor-union-finance-fixture/v1",
+  "fixture": "taishin_deidentified_minimal.xlsx",
+  "format_owner": "Finance Import Validation Owner",
+  "source_format": "taishin-transaction-detail",
+  "classification": "deidentified-synthetic-product-acceptance",
+  "contains_personal_data": false,
+  "contains_full_bank_account": false,
+  "rows": 1,
+  "purpose": "Finance Import parser, root-fact ingestion and disposable MySQL replay evidence",
+  "authority": "user-approved-in-spec-auto-activation-2026-08-22"
+}

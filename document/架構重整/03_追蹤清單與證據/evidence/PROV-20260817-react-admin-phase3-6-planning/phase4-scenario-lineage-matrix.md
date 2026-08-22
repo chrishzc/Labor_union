@@ -5,12 +5,17 @@ date: 2026-08-17
 owner: React Migration Integration Owner
 scope: Phase 4 scenario adoption and missing-artifact gates
 authority: evidence-only
+metadata_completion: PHASE4_SCENARIO_LINEAGE_METADATA_READY
 ---
 
 # Phase 4 Scenario Lineage Matrix
 
 本表只記錄Phase 4工作包應採用的既有Scenario與仍缺少的React／browser／receipt artifacts；不把既有
 scenario自動升格成新public contract，也不構成production、外部provider或資料庫操作授權。
+
+2026-08-22 integration writer 已依 catalog 建立完整 6 個 successor scenario 與 15 筆 coverage metadata；
+focused validator為 `14 passed`。此紀錄只解除 metadata/test-data lineage prerequisite，所有 fresh runtime
+receipt、DB、browser、provider與production gate仍維持原表 blocker。
 
 ## 1. Canonical rule
 
@@ -34,7 +39,7 @@ scenario自動升格成新public contract，也不構成production、外部provi
 | Knowledge lifecycle | `KN-KNOWLEDGE-LIFECYCLE-001` | `KN-REACT-LIFECYCLE-001` / `validation/scenarios/react_admin_knowledge_lifecycle.json` | `TEST_DATA_GAP` | `validation/fixtures/phase4/react_admin_knowledge_lifecycle.json`; `validation/expected/phase4/react_admin_knowledge_lifecycle.json`; receipt ID於Phase4 manifest；checklist owner=`part_15_documents` | Query hardening＋auth normalization＋Knowledge lifecycle H/R；multi-actor author-separation與receipt→re-query oracle；`LineManagementPage.tsx`串行 |
 | Rich Menu publication | none | `LINE-RICH-MENU-PUBLICATION-001` / `validation/scenarios/react_admin_rich_menu_publication.json` | `TEST_DATA_GAP` | `validation/fixtures/phase4/react_admin_rich_menu_publication.json`; `validation/expected/phase4/react_admin_rich_menu_publication.json`; receipt ID於Phase4 manifest；checklist owner=`part_15_documents` | provider saga/step receipt backend未閉合；`LineManagementPage.tsx` sole writer；真provider禁止 |
 | Notification Rules mutation | none | `LINE-NOTIFICATION-RULE-001` / `validation/scenarios/react_admin_notification_rule_mutation.json` | `TEST_DATA_GAP` | `validation/fixtures/phase4/react_admin_notification_rule_mutation.json`; `validation/expected/phase4/react_admin_notification_rule_mutation.json`; receipt ID於Phase4 manifest；checklist owner=`part_15_documents` | registered-source/kill-switch/replay contract未閉合；`LineManagementPage.tsx` sole writer |
-| Durable Job public outcome | `JOB-DURABLE-001`、`JOB-QUEUE-LIFECYCLE-002` | `JOB-PUBLIC-OUTCOME-001` / `validation/scenarios/durable_job_public_outcome.json` | `SUPPLEMENT` | `validation/fixtures/phase4/durable_job_public_outcome.json`; `validation/expected/phase4/durable_job_public_outcome.json`; receipt ID於Phase4 manifest；無單一Part UI，`browser_checklist_path=null`、`browser_execution_mode=not_applicable` | Core＋caller integration bridge＋六caller adoption未PASS；各caller UI checklist回到其owning Part；Jobs public route為shared hot spot |
+| Durable Job public outcome | `JOB-DURABLE-001`、`JOB-QUEUE-LIFECYCLE-002` | `JOB-PUBLIC-OUTCOME-001` / `validation/scenarios/durable_job_public_outcome.json` | `SUPPLEMENT` | `validation/fixtures/phase4/durable_job_public_outcome.json`; `validation/expected/phase4/durable_job_public_outcome.json`; receipt ID於Phase4 manifest；無單一Part UI，`browser_checklist_path=null`、`browser_execution_mode=not-applicable` | Core＋caller integration bridge＋六caller adoption未PASS；各caller UI checklist回到其owning Part；Jobs public route為shared hot spot |
 
 ## 3. Mechanical gate
 

@@ -1,0 +1,50 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "LINE-NOTIFICATION-RULE-001",
+  "revision": 1,
+  "track": "A",
+  "suite_id": "LINE",
+  "status": "specified",
+  "part": "15",
+  "browser_execution_mode": "browser-blocked",
+  "requires_database": true,
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["PH4-NOTIFICATION-RULE-MUTATION"],
+  "coverage_scope": "supplemental",
+  "source_scenario_ids": [],
+  "source_scenario_absence_reason": "no canonical scenario exists",
+  "source_refs": [
+    "document/架構重整/01_規格基線/00_Global_共同契約.md#2. 跨 Domain 不變量",
+    "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase4c-line-notification-rules-mutation-work-package.md#Phase 4C-NR-H：Notification Rules mutation public contract hardening"
+  ],
+  "lineage_mappings": [
+    {"source": "Global Preview and Apply invariants", "successor": "notification rule preview and apply contract", "disposition": "unchanged"},
+    {"source": "rule revision to pending intent lineage", "successor": "disable and delete cancellation oracle", "disposition": "regenerated"},
+    {"source": "configuration replay boundary", "successor": "same-key receipt and collision oracle", "disposition": "renamed"}
+  ],
+  "root_inputs": ["synthetic rule catalog", "configuration revision", "preview fingerprint", "pending intent lineage"],
+  "root_facts": ["The current rule revision and linked pending intent identities are the mutation roots."],
+  "forbidden_direct_seed": ["resulting revision", "cancelled intent status", "audit receipt", "browser result"],
+  "commands": [
+    "preview rule catalog with zero writes",
+    "save an enabled rule as disabled and cancel linked pending work",
+    "delete a rule and cancel linked pending work",
+    "reject stale revision and same-key payload collision"
+  ],
+  "expected": [
+    "Preview creates no revision, receipt, audit, cancellation, wakeup, or external call.",
+    "Save-disable and delete persist a new revision with cancellation lineage in one outer transaction.",
+    "Same key and canonical payload returns the same receipt without repeating cancellation.",
+    "Stale revision and key collision return typed conflict with zero partial writes."
+  ],
+  "receipt_requirements": ["preview zero-write evidence", "mutation receipt", "intent and task cancellation lineage", "stale and collision evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-08-20T10:00:00+08:00"},
+  "oracle_applicability": {
+    "db": {"status": "blocked", "reason": "disposable database receipt not produced"},
+    "api": {"status": "required", "reason": "typed preview, save, delete and conflict views"},
+    "ui": {"status": "blocked", "reason": "Part 15 checklist is not present"},
+    "replay": {"status": "required", "reason": "same-key replay and payload collision"},
+    "recovery": {"status": "required", "reason": "stale revision and transactional rollback"}
+  },
+  "required_receipt_id": "LINE-NOTIFICATION-RULE-001-R1"
+}

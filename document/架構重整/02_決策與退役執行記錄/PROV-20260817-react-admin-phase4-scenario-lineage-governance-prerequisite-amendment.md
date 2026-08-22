@@ -1,17 +1,19 @@
 ---
 doc_type: work-package-amendment
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-react-admin-phase4-scenario-lineage-governance-prerequisite-amendment
 date: 2026-08-17
 owner: Global Validation Governance Integration Owner
 domain: Global Validation Governance / React Phase 4
-amends: PROV-20260817-react-admin-phase4-scenario-lineage-governance
+amends: PROV-20260817-react-admin-phase4-scenario-lineage-governance; PROV-20260817-durable-job-core-persistence-worker-contract; PROV-20260817-react-admin-phase4a-finance-import-public-contract-hardening
 source_gap: PROV-20260817-react-admin-phase4-scenario-lineage-governance-gap
-authority: awaiting-exact-human-approval
-approval_required: 核准此 exact Phase 4 Scenario Lineage Governance prerequisite amendment：Phase 3 只需 PHASE3_SCENARIO_LINEAGE_METADATA_READY；Global typed error boundary 不屬 metadata-only prerequisite；Phase 4 最高輸出維持 PHASE4_SCENARIO_LINEAGE_METADATA_READY，不得宣稱 runtime PASS。
+authority: exact-human-approved-completed
+approval_required: 核准此 exact Phase 4 Scenario Lineage prerequisite normalization amendment：Phase3/Phase4 lineage只以對應的METADATA_READY解除metadata依賴，不升格runtime PASS；同步修正Phase4 lineage WP、Durable Job Core與Finance FI-H內全部四條 impossible PASS references。
+approved_at: 2026-08-21
+completed_at: 2026-08-21
 ui_execution_mode: not-applicable
 base_branch: main
-base_head: 8615225481c8f72a9629289285516189b270cb36
+base_head: f9240b9e3abbcf665b5c979e0973f675197d8494
 dirty_baseline: preserve-all-user-work
 ---
 
@@ -19,8 +21,9 @@ dirty_baseline: preserve-all-user-work
 
 ## 1. 裁決目的與目前狀態
 
-本文件是對 `PROV-20260817-react-admin-phase4-scenario-lineage-governance` 的**前置條件文字修正提案**，目前為
-`proposed`，尚未取得人工核准，不授權任何 production、API、React、DB、provider 或 browser 執行。
+本文件是對Phase4 Scenario Lineage工作包及其Durable Core／Finance FI-H downstream edges的**前置條件文字
+正規化裁決**，已於2026-08-21取得exact human approval並完成文件delta；它不授權任何 production、API、React、
+DB、provider 或browser執行。
 
 目前可追溯事實如下：
 
@@ -30,12 +33,12 @@ dirty_baseline: preserve-all-user-work
 - Phase 4 Scenario Lineage Governance 本身是 metadata-only 工作包，目的為建立 scenario、fixture、expected、
   receipt registry 與 checklist lineage；它不應等待 Phase 3 的 runtime PASS，因為 Phase 3 工作包並不產生該類
   PASS。
-- Global FastAPI Typed Error Boundary 是獨立的 public API contract／runtime 工作包，具有自己的契約、前置條件與
-  未決 correlation precedence amendment；它不是 Phase 4 metadata-only lineage artifact 的必要前置條件。
+- Global FastAPI Typed Error Boundary 與 correlation precedence amendment 均已獨立完成；它們的runtime evidence
+  不屬於 Phase 4 metadata-only lineage artifact 的必要前置條件，也不得被本修訂冒領。
 
 ## 2. 精確裁決
 
-核准後，Phase 4 Scenario Lineage Governance 工作包的 prerequisite 應解讀為：
+Phase 4 Scenario Lineage Governance 工作包的 prerequisite 固定解讀為：
 
 ```text
 required prerequisite:
@@ -50,9 +53,13 @@ not a prerequisite:
 `PHASE3_SCENARIO_LINEAGE_METADATA_READY` 是本 metadata-only 工作包可接受的 Phase 3 gate；它不能被升格為
 `PASS`，也不能解除任何 Phase 3 runtime、DB、API、browser 或 provider gate。
 
-Global typed error boundary 仍須依其自身 Work Package 與 correlation precedence amendment 的核准及驗收流程處理。
+Phase4 Scenario Lineage完成後的唯一有效輸出同理固定為`PHASE4_SCENARIO_LINEAGE_METADATA_READY`。Durable Job
+Core與Finance FI-H只可將此值視為scenario metadata/test-data lineage前置已存在，不得要求該metadata-only工作包產生
+不可能的runtime `PASS`，也不得以metadata-ready解除它們自己的API、runtime、DB、browser、provider或fixture gate。
+
+Global typed error boundary 與 correlation precedence amendment 的既有completed evidence維持由各自Work Package擁有。
 Phase 4 scenario metadata 可建立對 Global typed error boundary 的 scenario lineage reference，但不得把該 reference
-解讀為 Global runtime 已完成，也不得為了通過 Phase 4 validator 偽造 Global runtime receipt。
+當成本metadata包的產物，也不得為了通過 Phase 4 validator 重寫或偽造 Global runtime receipt。
 
 Browser metadata固定沿用React主計畫的唯一enum：
 
@@ -65,10 +72,9 @@ browser-required | browser-file-dialog-assisted | browser-blocked | not-applicab
 `missing_artifacts`列出exact path與owning Part；只有checklist path存在且mode不是`browser-blocked`時，step IDs才
 必填、非空且全manifest唯一。本metadata包不得代替Part owner建立缺少的checklist。
 
-## 3. Exact integration patch delta（核准後才可執行）
+## 3. Exact integration patch delta（已完成）
 
-本 amendment 核准後，由唯一 Integration Owner 在最新 integration target 上執行下列最小文件同步；本 amendment
-本身不預先修改這些檔案：
+本 amendment 核准後，已由唯一 Integration Owner 在最新 integration target 上執行下列最小文件同步：
 
 1. 在 `PROV-20260817-react-admin-phase4-scenario-lineage-governance-work-package.md` 將 frontmatter
    `prerequisites` 從
@@ -88,6 +94,12 @@ browser-required | browser-file-dialog-assisted | browser-blocked | not-applicab
    receipt、scenario、fixture、expected 或 digest。
 7. 對主 React migration plan／dependency matrix 只做精確的 prerequisite wording delta；不得藉此啟動 Phase 4
    runtime bounded work packages。
+8. 在`PROV-20260817-durable-job-core-persistence-worker-contract-work-package.md`將Phase3／Phase4 Scenario Lineage
+   的`PASS`前置分別正規化為`completed with PHASE3_SCENARIO_LINEAGE_METADATA_READY`及
+   `completed with PHASE4_SCENARIO_LINEAGE_METADATA_READY`；其Global、Option A與DB engine gates不變。
+9. 在`PROV-20260817-react-admin-phase4a-finance-import-public-contract-hardening-work-package.md`將Phase4 Scenario
+   Lineage的`PASS`前置正規化為`completed with PHASE4_SCENARIO_LINEAGE_METADATA_READY`；Durable Core／Bridge、
+   Finance XLSX authority與existing DB禁止規則不變。
 
 任何 production writer、backend contract hardening、React mutation、DB seed／migration、browser runner 或 provider
 驗證，均不在本 amendment write set 內，且必須另依其 own Work Package、approval 與 gate 執行。
@@ -98,24 +110,31 @@ browser-required | browser-file-dialog-assisted | browser-blocked | not-applicab
   provider、browser script 或測試程式。
 - 不新增或重產 scenario、fixture、expected、receipt、checklist 或 validator；那些是原 Phase 4 工作包的 write set。
 - 不把 Phase 3 的 `10 passed` 解釋成 runtime PASS，不把 Phase 4 metadata-ready 解釋成 API／DB／UI／browser PASS。
-- 不解除 Global typed error boundary 的獨立 blocker，也不批准其 correlation precedence 行為。
+- 不改寫或冒領已獨立完成的 Global typed error boundary／correlation precedence evidence。
 - 不因 Phase 4 metadata prerequisite 修正而解除 HCM、Finance、LINE、Knowledge、Durable Job 或其他 bounded runtime
   工作包的各自 contract／engine／browser gates。
 - 不改變任何 scenario identity、revision、source mapping、fixture digest、expected oracle 或 receipt identity。
 
 ## 5. Acceptance after approval
 
-只有下列文件性驗證全部通過，才能把本 amendment 標為 `completed`：
+下列文件性驗證全部通過後，本 amendment標為`completed`：
 
 1. 原 Phase 4 工作包的 prerequisite、activation、completion boundary 三處文字與本裁決一致。
 2. Phase 3 reference 精確使用 `PHASE3_SCENARIO_LINEAGE_METADATA_READY`，未出現要求 Phase 3 runtime `PASS` 的殘留文字。
-3. Global typed error boundary 與 correlation amendment 均明確列為非本 metadata-only prerequisite，且沒有被標示為已完成。
+3. Global typed error boundary 與 correlation amendment 均明確列為已獨立完成但非本 metadata-only prerequisite；本修訂未重寫或冒領其evidence。
 4. Phase 4 最高輸出仍是 `PHASE4_SCENARIO_LINEAGE_METADATA_READY`；所有 runtime receipt 初始狀態仍限於
    `missing | not_run | blocked`。
 5. README、主計畫、dependency matrix 與 Phase 4 evidence 的 inbound references 可互相追溯，且沒有建立第二份 SSOT。
 6. manifest只接受主計畫browser enum；missing checklist固定`browser-blocked`＋空step IDs＋exact missing owner，
    存在的checklist則step IDs非空且全域唯一。
 7. scoped `git diff --check`、strict UTF-8／無 BOM 與 exact write-set audit 通過。
+8. Durable Core與FI-H不再要求Scenario Lineage runtime `PASS`，且仍明確保留各自runtime／engine／fixture blockers。
+
+## 5.1 Completion record
+
+2026-08-21已完成上述8個既有target的精確同步。原規劃的專屬Phase4 evidence目錄目前不存在；本修訂依
+「不新增或重產receipt」限制不建立空目錄或假receipt，改以現存`phase4-scenario-lineage-matrix.md`記錄evidence
+wording。正式Phase4 evidence只可由該工作包取得自己的exact核准後建立。
 
 ## 6. DB gate
 

@@ -1,0 +1,23 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "LINE-NOTIFICATION-RULE-001",
+  "revision": 1,
+  "test_kind": "external_input_fixture",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored rule revisions and pending lineage; no production export",
+  "allowed_use": "validation-only",
+  "redaction_policy": "synthetic rule, intent and task keys only; no recipients or message content",
+  "root_inputs": ["synthetic rule catalog", "configuration revision", "preview fingerprint", "pending intent lineage"],
+  "input_values": {
+    "preview_case": {"expected_revision": 7, "rule_id": "reminder_syn", "enabled": true},
+    "save_disable_case": {"expected_revision": 7, "preview_fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", "idempotency_key": "NR-SYN-SAVE-01", "correlation_id": "NR-SYN-CORR-01", "rule_id": "reminder_syn", "enabled": false},
+    "delete_case": {"expected_revision": 7, "preview_fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc", "idempotency_key": "NR-SYN-DELETE-01", "correlation_id": "NR-SYN-CORR-02", "rule_id": "reminder_syn"},
+    "pending_lineage": [{"intent_key": "INTENT-SYN-01", "task_key": "TASK-SYN-01", "rule_id": "reminder_syn", "state": "scheduled"}],
+    "conflict_cases": [{"kind": "stale_revision", "expected_revision": 6}, {"kind": "idempotency_collision", "idempotency_key": "NR-SYN-SAVE-01", "alternate_rule_id": "alternate_syn"}]
+  },
+  "seed_fields": ["preview_case", "save_disable_case", "delete_case", "pending_lineage", "conflict_cases"],
+  "derived_fields": ["resulting_revision", "mutation_receipt", "cancelled_intents", "cancelled_tasks", "audit_event"],
+  "expected_manifest_path": "validation/expected/phase4/react_admin_notification_rule_mutation.json",
+  "fixed_business_clock": "2026-08-20T10:00:00+08:00",
+  "forbidden_direct_seed": ["resulting revision", "cancelled intent status", "audit receipt", "browser result"]
+}

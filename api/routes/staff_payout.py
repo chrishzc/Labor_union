@@ -1,6 +1,6 @@
 """
 File: staff_payout.py
-Description: 提供Staff Payables唯讀查詢與受控付款命令端點。
+Description: 提供 Staff Payables typed Query／Preview，並以 Durable Job Bridge 接受付款命令。
 """
 
 from __future__ import annotations
@@ -24,12 +24,14 @@ from api.dependencies.staff_payout import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.jobs import JobAcceptedResponse
-from api.dependencies.jobs import get_job_repository
-from infrastructure.mysql.background_job_repository import (
-    BackgroundJobRepository,
-    JobIdempotencyConflict,
+from api.dependencies.jobs import (
+    durable_job_conflict_http_error,
+    get_durable_job_application,
+    immutable_admin_job_actor,
 )
 from shared_kernel.durable_job_queue import DurableJobCommand
+from subsystems.jobs.command_application import DurableJobCommandApplication
+from subsystems.jobs.contracts import DurableJobCommandConflict
 from api.schemas.staff_payout import (
     PayoutApplyBody,
     PayoutDifferenceApplyBody,
@@ -131,7 +133,7 @@ def apply_payout(
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     return _apply_response(
         lambda: _apply_request(
@@ -141,7 +143,7 @@ def apply_payout(
             correlation_id,
             principal,
         ),
-        job_repository,
+        job_application,
     )
 
 
@@ -173,14 +175,14 @@ def apply_payout_difference(
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     return _apply_response(
         lambda: _apply_request(
             _payout_difference_selection(body), body, idempotency_key,
             correlation_id, principal,
         ),
-        job_repository,
+        job_application,
     )
 
 
@@ -212,7 +214,7 @@ def apply_return(
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     return _apply_response(
         lambda: _apply_request(
@@ -222,7 +224,7 @@ def apply_return(
             correlation_id,
             principal,
         ),
-        job_repository,
+        job_application,
     )
 
 
@@ -254,7 +256,7 @@ def apply_reversal(
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     return _apply_response(
         lambda: _apply_request(
@@ -264,7 +266,7 @@ def apply_reversal(
             correlation_id,
             principal,
         ),
-        job_repository,
+        job_application,
     )
 
 
@@ -448,18 +450,23 @@ def _build_preview_payload(application, build_selection, correlation_id):
     return _preview_payload(preview, selection.event_type)
 
 
-def _apply_response(build_request, job_repository):
+def _apply_response(build_request, job_application):
     request = build_request()
-    job_id = str(uuid.uuid4())
     try:
-        job_id = job_repository.enqueue_command(
-            _staff_payout_command(job_id, request)
+        acceptance = job_application.enqueue(
+            _staff_payout_command(str(uuid.uuid4()), request)
         )
-    except JobIdempotencyConflict as e:
-        job_id = e.job_id
+    except DurableJobCommandConflict as error:
+        raise durable_job_conflict_http_error(
+            error,
+            request.correlation_id.value,
+        ) from error
 
     return BaseResponse(
-        data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
+        data=JobAcceptedResponse(
+            job_id=acceptance.job_id,
+            status_url=f"/api/v1/jobs/{acceptance.job_id}",
+        ),
         message="202 Accepted",
     )
 
@@ -540,7 +547,7 @@ def _reversal_selection(body) -> StaffPayoutSelection:
 
 
 def _apply_request(selection, body, key, correlation, principal):
-    actor_id = str(principal.username or "").strip()
+    actor_id = immutable_admin_job_actor(principal, correlation)
     return StaffPayoutApplyRequest(
         selection,
         ExpectedVersion(body.expected_staff_payables_version),

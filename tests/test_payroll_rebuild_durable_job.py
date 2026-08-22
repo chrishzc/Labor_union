@@ -1,4 +1,7 @@
-"""Regression contract for durable Payroll Rebuild Apply delivery."""
+"""
+File: test_payroll_rebuild_durable_job.py
+Description: 驗證 Payroll Rebuild command、Bridge adoption、worker重建與accepted語意。
+"""
 
 from dataclasses import dataclass, field
 
@@ -14,6 +17,7 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.jobs.command_application import DurableJobAcceptance
 from subsystems.jobs.durable_job_worker import (
     default_job_handlers,
     payroll_rebuild_apply_handler,
@@ -33,7 +37,7 @@ def _request() -> PayrollRebuildRequest:
         ExpectedVersion(6),
         PreviewFingerprint("a" * 64),
         IdempotencyKey("payroll-rebuild-idempotency"),
-        ActorContext("payroll-admin"),
+        ActorContext("admin_user_id:1"),
         "rebuild payroll from canonical service facts",
         CorrelationId("payroll-rebuild-correlation"),
     )
@@ -45,7 +49,7 @@ def test_payroll_rebuild_command_preserves_apply_identity_and_freshness_guard():
     assert command.command_type == "payroll_rebuild_apply"
     assert command.command_identity == "payroll-rebuild-idempotency"
     assert command.payload == {
-        "actor": "payroll-admin",
+        "actor": "admin_user_id:1",
         "case_no": "CASE-001",
         "correlation_id": "payroll-rebuild-correlation",
         "expected_payroll_version": 6,
@@ -106,10 +110,10 @@ def test_payroll_rebuild_handler_reconstructs_existing_apply_request(monkeypatch
 def test_payroll_rebuild_apply_route_enqueues_durable_command_only():
     commands = []
 
-    class _JobRepository:
-        def enqueue_command(self, command):
+    class _JobApplication:
+        def enqueue(self, command):
             commands.append(command)
-            return command.job_id
+            return DurableJobAcceptance(command.job_id, replayed=False)
 
     response = apply_payroll_rebuild(
         _Body(),
@@ -117,10 +121,11 @@ def test_payroll_rebuild_apply_route_enqueues_durable_command_only():
         "payroll-rebuild-idempotency",
         "payroll-rebuild-correlation",
         AdminPrincipal(1, "payroll-admin", "Payroll Admin", "system_admin"),
-        _JobRepository(),
+        _JobApplication(),
     )
 
     assert commands[0].command_type == "payroll_rebuild_apply"
+    assert commands[0].submitted_by == "admin_user_id:1"
     assert response.data.status_url.endswith(commands[0].job_id)
 
 

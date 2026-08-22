@@ -1,9 +1,15 @@
+"""
+File: test_order_auto_completion_job_dispatch.py
+Description: 驗證 Orders Auto Completion 以 canonical Bridge 分頁enqueue、replay與key契約。
+"""
+
 from datetime import datetime
+import hashlib
 
 import pytest
 
-from infrastructure.mysql.background_job_repository import JobIdempotencyConflict
 from shared_kernel.clock import TAIPEI_TIME_ZONE
+from subsystems.jobs.command_application import DurableJobAcceptance
 from subsystems.orders.auto_completion_job_dispatch import (
     AutoCompletionJobDispatcher,
     DueOrderAutoCompletion,
@@ -25,12 +31,12 @@ class CommandEnqueuer:
         self._duplicate_case_numbers = set(duplicate_case_numbers)
         self.commands = []
 
-    def enqueue_command(self, command):
+    def enqueue(self, command):
         case_no = command.payload["case_no"]
         if case_no in self._duplicate_case_numbers:
-            raise JobIdempotencyConflict("existing-" + case_no)
+            return DurableJobAcceptance("existing-" + case_no, replayed=True)
         self.commands.append(command)
-        return command.job_id
+        return DurableJobAcceptance(command.job_id, replayed=False)
 
 
 def _due(case_no, version=0):
@@ -57,10 +63,17 @@ def test_dispatcher_pages_due_orders_and_uses_the_due_instant_as_command_time():
         "2026-08-04T17:00:00+08:00",
         "2026-08-04T17:00:00+08:00",
     ]
+    expected_sources = (
+        "CASE-A\0" + "2\0" + "20260804T170000+0800",
+        "CASE-B\0" + "3\0" + "20260804T170000+0800",
+    )
     assert [command.command_identity for command in enqueuer.commands] == [
-        "orders-auto-completion:CASE-A:v2:20260804T170000+0800",
-        "orders-auto-completion:CASE-B:v3:20260804T170000+0800",
+        "orders-auto-completion:" + hashlib.sha256(source.encode("utf-8")).hexdigest()
+        for source in expected_sources
     ]
+    assert {command.submitted_by for command in enqueuer.commands} == {
+        "system:orders-auto-completion"
+    }
     assert reader.calls[1][1] == "CASE-B"
 
 

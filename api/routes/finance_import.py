@@ -13,7 +13,7 @@ import tempfile
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 from pymysql.err import OperationalError
 from starlette.concurrency import run_in_threadpool
 
@@ -28,13 +28,19 @@ from api.dependencies.finance_import import (
     get_refund_return_review_application,
 )
 from api.schemas.base import BaseResponse
-from api.schemas.jobs import JobAcceptedResponse
-from api.dependencies.jobs import get_job_repository
-from infrastructure.mysql.background_job_repository import (
-    BackgroundJobRepository,
-    JobIdempotencyConflict,
+from api.schemas.jobs import JobAcceptedResponse, JobResponse
+from api.dependencies.jobs import (
+    durable_job_conflict_http_error,
+    get_durable_job_application,
+    get_job_repository,
+    immutable_admin_job_actor,
 )
+from api.error_contracts import typed_http_error
+from api.routes.jobs import _job_response
+from infrastructure.mysql.background_job_repository import BackgroundJobRepository
 from shared_kernel.durable_job_queue import DurableJobCommand
+from subsystems.jobs.command_application import DurableJobCommandApplication
+from subsystems.jobs.contracts import DurableJobCommandConflict
 from api.schemas.finance_import import (
     FinanceImportBatchApplyBody,
     FinanceImportBatchManifestView,
@@ -93,6 +99,13 @@ from subsystems.finance_import.refund_return_review_workflow import (
 )
 
 router = APIRouter(prefix="/api/v1/finance-import", tags=["Finance Import"])
+_FINANCE_JOB_COMMAND_TYPES = frozenset(
+    {
+        "finance_import_historical_reprocess_apply",
+        "finance_import_batch_apply",
+        "finance_import_correction_apply",
+    }
+)
 _RETRYABLE_MYSQL_CODES = frozenset({1205, 1213})
 _MAXIMUM_WORKBOOK_BYTES = 20 * 1024 * 1024
 _CorrelationHeader = Annotated[
@@ -105,24 +118,52 @@ _IdempotencyHeader = Annotated[
 ]
 
 
+@router.get("/jobs/{job_id}", response_model=BaseResponse[JobResponse])
+def query_finance_import_job(
+    job_id: str,
+    principal: AdminPrincipal = Depends(require_admin),
+    repository: BackgroundJobRepository = Depends(get_job_repository),
+) -> BaseResponse[JobResponse]:
+    del principal
+    correlation_id = f"finance-import-job:{job_id}"
+    job = repository.get_job(job_id)
+    if job is None or job.command_type not in _FINANCE_JOB_COMMAND_TYPES:
+        raise typed_http_error(
+            404,
+            "not_found",
+            "finance_import_job_not_found",
+            "Finance Import job was not found.",
+            correlation_id,
+        )
+    return BaseResponse(
+        data=_job_response(job, correlation_id),
+        message="成功取得 Finance Import job 狀態",
+    )
+
+
 @router.get(
     "/batches",
     response_model=BaseResponse[list[FinanceImportBatchSummaryView]],
 )
 def list_finance_import_batches(
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     before_batch_id: Annotated[int | None, Query(ge=1)] = None,
     principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
     del principal
-    summaries = query_service.list_batches(
-        limit=limit,
-        before_batch_id=before_batch_id,
-    )
-    return BaseResponse(
-        data=[_materialize_summary(item) for item in summaries],
-        message="成功載入 Finance Import 批次",
+    correlation = CorrelationId(_request_correlation(request))
+    return _call_query(
+        lambda: [
+            _materialize_summary(item)
+            for item in query_service.list_batches(
+                limit=limit,
+                before_batch_id=before_batch_id,
+            )
+        ],
+        "成功載入 Finance Import 批次",
+        correlation,
     )
 
 
@@ -132,11 +173,12 @@ def list_finance_import_batches(
 )
 def get_finance_import_batch_manifest(
     batch_identity: str,
+    request: Request,
     principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
     del principal
-    correlation = CorrelationId("finance-import-manifest-query")
+    correlation = CorrelationId(_request_correlation(request))
     return _call_query(
         lambda: _materialize(query_service.get_manifest(batch_identity)),
         "成功載入 Finance Import 批次 Manifest",
@@ -150,13 +192,14 @@ def get_finance_import_batch_manifest(
 )
 def list_finance_import_review_rows(
     batch_identity: str,
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     after_row_id: Annotated[int | None, Query(ge=1)] = None,
     principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
     del principal
-    correlation = CorrelationId("finance-import-review-query")
+    correlation = CorrelationId(_request_correlation(request))
     return _call_query(
         lambda: _review_page(
             query_service.list_review_rows(
@@ -177,13 +220,14 @@ def list_finance_import_review_rows(
 )
 def list_finance_import_reprocess_runs(
     batch_identity: str,
+    request: Request,
     limit: Annotated[int, Query(ge=1, le=100)] = 25,
     before_run_id: Annotated[int | None, Query(ge=1)] = None,
     principal: AdminPrincipal = Depends(require_admin),
     query_service=Depends(get_finance_import_query_service),
 ):
     del principal
-    correlation = CorrelationId("finance-import-run-query")
+    correlation = CorrelationId(_request_correlation(request))
     return _call_query(
         lambda: _run_page(
             query_service.list_reprocess_runs(
@@ -299,41 +343,22 @@ def apply_historical_finance_reprocess(
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = HistoricalReprocessApplyRequest(
         body.batch_identity.strip(),
         ExpectedVersion(body.expected_batch_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        ActorContext(str(principal.username or "").strip()),
+        ActorContext(immutable_admin_job_actor(principal, correlation_id)),
         body.reason.strip(),
         CorrelationId(correlation_id),
         _historical_owner_selections(body.owner_selections),
     )
-    # Direct controller tests retain the former injected application shape;
-    # HTTP requests always receive the durable queue dependency above.
-    if not hasattr(job_repository, "enqueue_command"):
-        return _call_endpoint(
-            lambda: _historical_reprocess_receipt_payload(
-                job_repository.apply(request)
-            ),
-            "歷史帳務重處理完成",
-            request.correlation_id,
-        )
-    job_id = str(uuid.uuid4())
-    try:
-        job_id = job_repository.enqueue_command(
-            _historical_reprocess_apply_job_command(job_id, request)
-        )
-    except JobIdempotencyConflict as error:
-        job_id = error.job_id
-    return BaseResponse(
-        data=JobAcceptedResponse(
-            job_id=job_id,
-            status_url=f"/api/v1/jobs/{job_id}",
-        ),
-        message="202 Accepted",
+    return _durable_acceptance(
+        job_application,
+        _historical_reprocess_apply_job_command(str(uuid.uuid4()), request),
+        correlation_id,
     )
 
 
@@ -407,7 +432,7 @@ def apply_finance_import_batch(
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     correlation = CorrelationId(correlation_id)
     request = FinanceImportApplyRequest(
@@ -415,22 +440,15 @@ def apply_finance_import_batch(
         ExpectedVersion(body.expected_batch_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        ActorContext(str(principal.username or "").strip()),
+        ActorContext(immutable_admin_job_actor(principal, correlation_id)),
         body.reason.strip(),
         correlation,
     )
     
-    job_id = str(uuid.uuid4())
-    try:
-        job_id = job_repository.enqueue_command(
-            _batch_apply_job_command(job_id, request)
-        )
-    except JobIdempotencyConflict as e:
-        job_id = e.job_id
-
-    return BaseResponse(
-        data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
-        message="202 Accepted",
+    return _durable_acceptance(
+        job_application,
+        _batch_apply_job_command(str(uuid.uuid4()), request),
+        correlation_id,
     )
 
 
@@ -536,7 +554,7 @@ def apply_finance_import_correction(
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     correlation = CorrelationId(correlation_id)
     request = FinanceImportCorrectionApplyRequest(
@@ -546,20 +564,27 @@ def apply_finance_import_correction(
         ExpectedVersion(body.expected_alert_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        ActorContext(str(principal.username or "").strip()),
+        ActorContext(immutable_admin_job_actor(principal, correlation_id)),
         correlation,
     )
     
-    job_id = str(uuid.uuid4())
-    try:
-        job_id = job_repository.enqueue_command(
-            _correction_apply_job_command(job_id, request)
-        )
-    except JobIdempotencyConflict as e:
-        job_id = e.job_id
+    return _durable_acceptance(
+        job_application,
+        _correction_apply_job_command(str(uuid.uuid4()), request),
+        correlation_id,
+    )
 
+
+def _durable_acceptance(job_application, command, correlation_id):
+    try:
+        acceptance = job_application.enqueue(command)
+    except DurableJobCommandConflict as error:
+        raise durable_job_conflict_http_error(error, correlation_id) from error
     return BaseResponse(
-        data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
+        data=JobAcceptedResponse(
+            job_id=acceptance.job_id,
+            status_url=f"/api/v1/jobs/{acceptance.job_id}",
+        ),
         message="202 Accepted",
     )
 
@@ -762,10 +787,10 @@ def _call_query(query, message, correlation_id):
         typed = TypedError(
             ErrorCategory.NOT_FOUND,
             "finance_import_batch_not_found",
-            str(error),
+            "找不到指定的 Finance Import 批次",
             correlation_id,
         )
-        raise _http_error(404, typed)
+        raise _http_error(404, typed) from error
     except OperationalError as error:
         _raise_mysql_error(error, correlation_id)
     except (TypeError, ValueError) as error:
@@ -774,6 +799,13 @@ def _call_query(query, message, correlation_id):
         raise
     except Exception as error:
         raise _internal_error(correlation_id) from error
+
+
+def _request_correlation(request: Request) -> str:
+    value = getattr(request.state, "correlation_id", None)
+    if not isinstance(value, str) or not value:
+        return "finance-import-query-correlation-unavailable"
+    return value
 
 
 def _review_page(items, limit):

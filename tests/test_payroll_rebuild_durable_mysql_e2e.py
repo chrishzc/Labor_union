@@ -1,4 +1,7 @@
-"""Real MySQL proof that Payroll Rebuild Apply survives durable replay."""
+"""
+File: test_payroll_rebuild_durable_mysql_e2e.py
+Description: 以 disposable MySQL 驗證 Payroll Rebuild Bridge replay、crash recovery 與單次 Domain Apply。
+"""
 
 from __future__ import annotations
 
@@ -75,6 +78,7 @@ def test_payroll_rebuild_durable_crash_recovery_and_duplicate_apply():
     from infrastructure.mysql.mysql_adapter import get_connection
     from subsystems.access.authentication_session import AdminPrincipal
     from subsystems.jobs.durable_job_worker import DurableJobWorker, default_job_handlers
+    from subsystems.jobs.command_application import DurableJobCommandApplication
 
     connection = get_connection()
     try:
@@ -87,13 +91,14 @@ def test_payroll_rebuild_durable_crash_recovery_and_duplicate_apply():
             reason="durable payroll rebuild e2e",
         )
         repository = BackgroundJobRepository(connection)
+        job_application = DurableJobCommandApplication(repository, connection)
         apply_kwargs = {
             "body": body,
             "case_no": "AP-DURABLE-1",
             "idempotency_key": "payroll-rebuild-durable-apply",
             "correlation_id": "payroll-rebuild-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": job_application,
         }
         apply_payroll_rebuild(**apply_kwargs)
         response = apply_payroll_rebuild(**apply_kwargs)
@@ -101,7 +106,9 @@ def test_payroll_rebuild_durable_crash_recovery_and_duplicate_apply():
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM background_jobs")
             assert cursor.fetchone() == {"count": 1}
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE background_jobs SET lease_expires_at="
@@ -116,6 +123,7 @@ def test_payroll_rebuild_durable_crash_recovery_and_duplicate_apply():
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "payroll-rebuild-durable-worker",
             retry_delay_seconds=0,
@@ -126,7 +134,7 @@ def test_payroll_rebuild_durable_crash_recovery_and_duplicate_apply():
         assert stored is not None
         assert stored.status == "succeeded"
         assert stored.attempt_count == 2
-        assert stored.receipt_payload["case_no"] == "AP-DURABLE-1"
+        assert stored.result_reference == "payroll_rebuild:AP-DURABLE-1"
         with worker_connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM payroll_apply_receipts")
             assert cursor.fetchone() == {"count": 1}

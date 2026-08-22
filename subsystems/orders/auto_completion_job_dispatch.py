@@ -1,20 +1,24 @@
-"""Discover due Orders completion commands and persist their durable envelopes."""
+"""
+File: auto_completion_job_dispatch.py
+Description: 掃描到期 Orders 並透過 canonical Durable Job Bridge 持久化自動完成命令。
+"""
 
 from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+import hashlib
 from typing import Protocol
 from uuid import uuid4
 
-from infrastructure.mysql.background_job_repository import JobIdempotencyConflict
 from shared_kernel.clock import TAIPEI_TIME_ZONE
 from shared_kernel.durable_job_queue import DurableJobCommand
+from subsystems.jobs.command_application import DurableJobAcceptance
 
 
 _COMMAND_TYPE = "orders_auto_completion_apply"
-_SYSTEM_ACTOR = "orders-auto-completion-worker"
+_SYSTEM_ACTOR = "system:orders-auto-completion"
 _REASON = "scheduled service completion instant reached"
 
 
@@ -51,7 +55,7 @@ class DueOrderAutoCompletionReader(Protocol):
 
 
 class DurableCommandEnqueuer(Protocol):
-    def enqueue_command(self, command: DurableJobCommand) -> str: ...
+    def enqueue(self, command: DurableJobCommand) -> DurableJobAcceptance: ...
 
 
 class AutoCompletionJobDispatcher:
@@ -96,11 +100,8 @@ class AutoCompletionJobDispatcher:
             after_case_no = page[-1].case_no
 
     def _enqueue_due_order(self, due_order: DueOrderAutoCompletion) -> bool:
-        try:
-            self._job_enqueuer.enqueue_command(build_auto_completion_job_command(due_order))
-        except JobIdempotencyConflict:
-            return False
-        return True
+        acceptance = self._job_enqueuer.enqueue(build_auto_completion_job_command(due_order))
+        return not acceptance.replayed
 
 
 def build_auto_completion_job_command(due_order: DueOrderAutoCompletion) -> DurableJobCommand:
@@ -127,7 +128,9 @@ def build_auto_completion_job_command(due_order: DueOrderAutoCompletion) -> Dura
 
 def _command_identity(due_order: DueOrderAutoCompletion) -> str:
     instant = due_order.completion_instant.strftime("%Y%m%dT%H%M%S%z")
-    return f"orders-auto-completion:{due_order.case_no}:v{due_order.lifecycle_version}:{instant}"
+    source = f"{due_order.case_no}\0{due_order.lifecycle_version}\0{instant}"
+    digest = hashlib.sha256(source.encode("utf-8")).hexdigest()
+    return f"orders-auto-completion:{digest}"
 
 
 def _taipei_instant(value: datetime) -> datetime:

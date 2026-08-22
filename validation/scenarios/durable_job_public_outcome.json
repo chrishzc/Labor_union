@@ -1,0 +1,36 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "JOB-PUBLIC-OUTCOME-001",
+  "revision": 1,
+  "track": "B",
+  "suite_id": "JOB",
+  "status": "specified",
+  "part": null,
+  "browser_execution_mode": "not-applicable",
+  "requires_database": true,
+  "test_kinds": ["process_network_harness"],
+  "coverage_ids": ["JOB-PUBLIC-OUTCOME"],
+  "coverage_scope": "supplemental",
+  "source_scenario_ids": ["JOB-DURABLE-001", "JOB-QUEUE-LIFECYCLE-002"],
+  "source_refs": ["document/資料庫、資料處理/新版驗證雙軌總計畫_草案.md#6.1"],
+  "lineage_mappings": [
+    {"source": "durable command identity", "successor": "masked public job identity", "disposition": "unchanged"},
+    {"source": "queue lifecycle", "successor": "closed public status", "disposition": "renamed"},
+    {"source": "raw receipt and error", "successor": "closed discriminated outcome", "disposition": "regenerated"}
+  ],
+  "root_inputs": ["synthetic canonical commands", "queue transitions", "typed terminal outcomes"],
+  "root_facts": ["Canonical command equality and committed queue transitions are public observation roots."],
+  "forbidden_direct_seed": ["terminal success", "raw command payload", "raw handler receipt", "provider acknowledgement"],
+  "commands": ["submit canonical command", "replay same command", "reject same-key mismatch", "query masked terminal outcome"],
+  "expected": ["Accepted is not Domain success.", "Same-key mismatch is a typed conflict.", "Terminal outcome is closed, redacted and queryable."],
+  "receipt_requirements": ["canonical equality evidence", "queue lifecycle receipt", "masked terminal outcome evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-08-20T10:00:00+08:00"},
+  "oracle_applicability": {
+    "db": {"status": "blocked", "reason": "Core and caller database evidence not produced"},
+    "api": {"status": "required", "reason": "masked public outcome contract"},
+    "ui": {"status": "not_applicable", "reason": "each bounded caller owns its UI flow"},
+    "replay": {"status": "required", "reason": "same equality replay and mismatch conflict"},
+    "recovery": {"status": "required", "reason": "retry, exhaustion and crash-resume"}
+  },
+  "required_receipt_id": "JOB-PUBLIC-OUTCOME-001-R1"
+}

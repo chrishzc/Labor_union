@@ -1,6 +1,6 @@
 ---
 doc_type: gap-package
-declared_status: proposed
+declared_status: superseded
 identity: PROV-20260817-react-admin-phase4-scenario-lineage-governance-gap
 date: 2026-08-17
 owner: React Migration Integration Owner
@@ -28,6 +28,10 @@ scenario。既有 Domain scenario 只能作來源，不足以讓 production writ
 建立 exact metadata-only successor，逐 package 記錄 source scenario、fixture、expected、receipt、browser checklist、
 shared hot spot、missing artifact 與 blocker；所有新 artifact 必須去敏、可 strict decode，且不得包含 production、DB、
 provider 或 browser 執行副作用。
+
+2026-08-22：上述 metadata-only 關閉條件已由
+`PROV-20260817-react-admin-phase4-scenario-lineage-governance` 完成；runtime、DB、browser、provider blocker
+仍由各 bounded successor 擁有，本 gap 不再作 active metadata blocker。
 
 ## DB gate
 

@@ -1,17 +1,19 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-react-admin-phase4-scenario-lineage-governance
 date: 2026-08-17
 owner: React Migration Integration Owner
 domain: Global Validation Governance
 source_gap: PROV-20260817-react-admin-phase4-scenario-lineage-governance-gap
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS
-activation_state: blocked-prerequisites
-authority: awaiting-exact-human-approval
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance completed with PHASE3_SCENARIO_LINEAGE_METADATA_READY
+activation_state: completed-metadata-only
+authority: exact-human-approved-completed
 approval_required: 核准此 exact Phase 4 Scenario Lineage Governance Work Package
+approved_at: 2026-08-22
+completed_at: 2026-08-22
 base_branch: main
-base_head: 8615225481c8f72a9629289285516189b270cb36
+base_head: f9240b9e3abbcf665b5c979e0973f675197d8494
 dirty_baseline: required-before-writer; preserve-all-user-work
 base_drift_rule: any relevant path drift requires fresh read and re-freeze before edits
 ui_execution_mode: not-applicable
@@ -64,7 +66,8 @@ Browser checklist只引用Part 00已凍結的`validation/ui_business_workflows/p
 `part_16_end_to_end/`canonical paths；缺少的Part檔案只能在manifest標記`missing/blocked`，由該Part的
 owning successor另案建立。本包不代替Part owner寫入checklist、expected或result summary。
 
-Current activation固定`BLOCKED_PREREQUISITES`，直到Phase3 Scenario Lineage真實PASS；本包approval不會繞過。
+Phase3已輸出可追溯的`PHASE3_SCENARIO_LINEAGE_METADATA_READY`；Current activation只等待本工作包exact human
+approval。Global typed error boundary／correlation runtime evidence不是本metadata包前置，也不得由本包冒領。
 
 ## 2. Artifact contract
 
@@ -80,7 +83,9 @@ Current activation固定`BLOCKED_PREREQUISITES`，直到Phase3 Scenario Lineage�
 
 Manifest contract固定`labor-union-phase4-scenario-lineage/v1`與`manifest_revision: 1`。Dependency type只允許
 `hard-dependency | soft-dependency | independent-lane | global-dependency`；browser execution mode只允許
-`not_applicable | controlled_browser_required | blocked`。Fixture asset必填`data_classification`（
+`browser-required | browser-file-dialog-assisted | browser-blocked | not-applicable`。缺少canonical checklist時固定
+`browser-blocked`、`browser_checklist_step_ids: []`並在`missing_artifacts`列出exact path與owning Part；只有checklist
+存在且mode不是`browser-blocked`時，step IDs才必填、非空且全manifest唯一。Fixture asset必填`data_classification`（
 `synthetic | deidentified | invalid-by-design`）、`generation_method`、`allowed_use`與`redaction_policy`。
 Digest固定SHA-256，由Integration Owner freeze，僅作artifact完整性，不作task identity。
 
@@ -173,6 +178,21 @@ Scenario fixture不得含真姓名、
 `git diff --check`。本包最高輸出只能是`PHASE4_SCENARIO_LINEAGE_METADATA_READY`；禁止使用`PASS`、
 `completed`或`success`冒充任何runtime、DB、browser或provider驗收。
 
+### 4.1 Rules／Rich Menu scoped prerequisite progress（2026-08-20）
+
+| Family | Scenario／fixture／expected | Catalog／receipt state | Runtime state |
+|---|---|---|---|
+| Rich Menu publication | `LINE-RICH-MENU-PUBLICATION-001` scoped metadata present；contract test `11 passed` | local metadata prerequisite `PASS`；receipt `missing`；browser checklist `blocked` | backend/provider/browser/DB `not_run` |
+| Notification Rules mutation | `LINE-NOTIFICATION-RULE-001` scoped metadata present；contract test `11 passed` | local metadata prerequisite `PASS`；receipt `missing`；browser checklist `blocked` | backend/provider/browser/DB `not_run` |
+
+本次只建立上述兩個user-authorized backend prerequisite，catalog明確列出其餘四個Phase 4 family未納入。
+此 scoped evidence 的最高輸出為`PHASE4_RULES_RICHMENU_METADATA_READY`；不變更本工作包的`proposed`／
+`blocked-prerequisites`狀態，也不構成完整`PHASE4_SCENARIO_LINEAGE_METADATA_READY`、production、provider、
+browser或database驗收。
+
+2026-08-20使用者只核准以這兩組scoped metadata作Rules／Rich Menu兩個backend工作包的local prerequisite；
+此裁決不核准或啟動其餘四個family，也不改變本工作包整體authority／activation state。
+
 ## 5. DB gate
 
 | Gate | Status | Evidence |
@@ -186,3 +206,20 @@ Scenario fixture不得含真姓名、
 | Developer Acceptance | NOT_RUN | 不操作既有資料庫 |
 
 結論：`DB_CHANGE_NOT_READY`。
+
+## 6. Completion record（2026-08-22）
+
+使用者已核准本 exact 工作包並將 shared catalog／scenario integration writer ownership 轉移至本任務。唯一
+integration writer 已建立完整 6 個 successor scenarios、15 筆 coverage records、fixture／expected lineage、
+metadata-only receipt registry 與 fail-closed validator。
+
+Focused verification：
+
+```text
+.\.venv\Scripts\python.exe -m pytest -p no:cacheprovider --basetemp .pytest_tmp\phase4-lineage -q tests\test_phase4_scenario_lineage.py
+14 passed in 0.98s
+```
+
+本工作包唯一完成輸出為 `PHASE4_SCENARIO_LINEAGE_METADATA_READY`。所有 runtime receipt 仍為
+`missing | not_run | blocked`；database、browser、provider 與 production 均未執行。第 4.1 節只保留
+2026-08-20 scoped 歷史，已由本次完整 metadata completion 接續，絕不代表任何 runtime PASS。

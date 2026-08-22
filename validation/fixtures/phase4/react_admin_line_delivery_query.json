@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "LINE-REACT-DELIVERY-QUERY-001",
+  "revision": 1,
+  "test_kind": "external_input_fixture",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored delivery task and attempt identities; no production export",
+  "allowed_use": "validation-only",
+  "redaction_policy": "synthetic task keys and bounded attempt codes only; no recipient or provider payload",
+  "root_inputs": ["synthetic delivery task", "attempt history", "query cursor"],
+  "input_values": {"task_key": "delivery-syn-01", "status": "retry_pending", "attempts": [{"sequence": 1, "outcome": "temporary_unavailable"}], "cursor": "delivery-syn-00"},
+  "seed_fields": ["task_key", "status", "attempts", "cursor"],
+  "derived_fields": ["masked_query_row", "next_cursor", "retryability"],
+  "expected_manifest_path": "validation/expected/phase4/react_admin_line_delivery_query.json",
+  "fixed_business_clock": "2026-08-20T10:00:00+08:00",
+  "forbidden_direct_seed": ["successful domain outcome", "provider credential", "recipient identity", "browser result"]
+}

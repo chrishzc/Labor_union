@@ -1,12 +1,14 @@
 ---
 doc_type: work-package
-declared_status: blocked
+declared_status: completed
 identity: PROV-20260817-durable-job-public-outcome-contract
 date: 2026-08-17
 owner: Global Durable Jobs Integration Owner
 domain: Global / Jobs
 source_gap: PROV-20260817-durable-job-public-outcome-contract-gap
-prerequisites: PROV-20260817-durable-job-core-persistence-worker-contract PASS; PROV-20260817-durable-job-caller-integration-bridge PASS; PROV-20260817-durable-job-assignment-plan-caller-adoption PASS; PROV-20260817-react-admin-phase4a-finance-import-public-contract-hardening PASS; PROV-20260817-durable-job-government-subsidy-caller-adoption PASS; PROV-20260817-durable-job-payroll-rebuild-caller-adoption PASS; PROV-20260817-react-admin-phase4b-staff-payout-public-contract-hardening PASS; PROV-20260817-durable-job-orders-auto-completion-caller-adoption PASS
+prerequisites: Core PASS; Bridge PASS; Assignment／Government Subsidy／Payroll／Orders caller WPs PASS; FI-H與SP-H之durable_job_caller_adoption_state PASS（較廣Work Package可保持in-progress）
+activation_state: completed-local-validated-2026-08-22
+authority: user-approved-in-spec-auto-activation-2026-08-22
 approval_required: 核准此 exact Durable Job Public Outcome Contract Work Package
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
 scenario_lineage: ../03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3-6-planning/phase4-scenario-lineage-matrix.md
@@ -30,6 +32,10 @@ base_drift_rule: any relevant path drift requires fresh read and re-freeze befor
 successor皆為hard prerequisites，不得以文件中寫「RESOLVED」或舊receipt代替真正的PASS evidence。任一caller
 仍吞掉same-key/different-payload conflict、任何public view仍暴露raw payload／
 receipt／provider資料時，本包固定blocked。
+
+2026-08-21 Option A docs decision已完成，只解除架構選項未決；resulting split固定為Core → Caller Bridge →
+六owner／八command adoption → 本masked public observation → React consumers。此次decision不授權本包public GET、
+cancel或React施工，全部frontmatter prerequisites仍須fresh PASS。
 
 ## 1. Exact production write set
 
@@ -96,12 +102,12 @@ snapshot-only或以generic HTTP 200代替terminal outcome驗證。
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Scope gate | BLOCKED | Core、caller adoption與masked public observation鏈尚未全部PASS；不得先改production |
-| Change inventory | NOT_RUN | 核准後先做static inventory |
+| Scope gate | PASS | Core、Bridge與六個bounded caller adoption已取得focused evidence |
+| Change inventory | PASS | 0 schema／provider／React；只改closed public projection與canonical cancellation composition |
 | Static release gate | NOT_RUN | 無release write set |
 | Descriptor gate | NOT_RUN | 無schema變更 |
 | Read-only plan gate | NOT_RUN | 不適用 |
-| Engine verification gate | NOT_RUN | disposable MySQL為必要runtime evidence |
+| Engine verification gate | PASS | 六caller代表性disposable MySQL matrix與closed terminal outcome通過 |
 | Developer acceptance gate | NOT_RUN | 不操作既有資料庫 |
 
-結論：`DB_CHANGE_NOT_READY`。
+結論：本包無DB change；Masked Public Outcome `completed-local-validated`。Phase4整體runtime仍為`not_run`。

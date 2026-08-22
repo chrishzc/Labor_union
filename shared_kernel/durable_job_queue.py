@@ -1,4 +1,7 @@
-"""Typed durable-command envelope and queue lifecycle contracts."""
+"""
+File: durable_job_queue.py
+Description: 提供 Global Durable Job command envelope、lease 與 queue lifecycle typed errors。
+"""
 
 from __future__ import annotations
 
@@ -24,7 +27,6 @@ class DurableJobCommand:
             raise ValueError("durable command identity is required")
         if self.command_version < 1 or self.max_attempts < 1:
             raise ValueError("durable command version and attempts must be positive")
-
 
 @dataclass(frozen=True, slots=True)
 class DurableJobLease:

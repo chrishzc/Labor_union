@@ -1,4 +1,7 @@
-"""Authenticated endpoints for Payroll rebuild and monthly aggregation."""
+"""
+File: payroll_rebuild.py
+Description: 提供 Payroll 重建與月彙總的 typed Query、Preview 與 Durable Job Apply API。
+"""
 
 from __future__ import annotations
 
@@ -17,12 +20,14 @@ from api.dependencies.payroll_rebuild import (
 )
 from api.schemas.base import BaseResponse
 from api.schemas.jobs import JobAcceptedResponse
-from api.dependencies.jobs import get_job_repository
-from infrastructure.mysql.background_job_repository import (
-    BackgroundJobRepository,
-    JobIdempotencyConflict,
+from api.dependencies.jobs import (
+    durable_job_conflict_http_error,
+    get_durable_job_application,
+    immutable_admin_job_actor,
 )
 from shared_kernel.durable_job_queue import DurableJobCommand
+from subsystems.jobs.command_application import DurableJobCommandApplication
+from subsystems.jobs.contracts import DurableJobCommandConflict
 from api.schemas.payroll_rebuild import (
     PayrollRebuildApplyBody,
     PayrollRebuildPreviewView,
@@ -89,27 +94,29 @@ def apply_payroll_rebuild(
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),
-    job_repository: BackgroundJobRepository = Depends(get_job_repository),
+    job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     request = PayrollRebuildRequest(
         case_no,
         ExpectedVersion(body.expected_payroll_version),
         PreviewFingerprint(body.preview_fingerprint),
         IdempotencyKey(idempotency_key),
-        ActorContext(str(principal.username or "").strip()),
+        ActorContext(immutable_admin_job_actor(principal, correlation_id)),
         body.reason,
         CorrelationId(correlation_id),
     )
-    job_id = str(uuid.uuid4())
     try:
-        job_id = job_repository.enqueue_command(
-            _payroll_rebuild_command(job_id, request)
+        acceptance = job_application.enqueue(
+            _payroll_rebuild_command(str(uuid.uuid4()), request)
         )
-    except JobIdempotencyConflict as e:
-        job_id = e.job_id
+    except DurableJobCommandConflict as error:
+        raise durable_job_conflict_http_error(error, correlation_id) from error
 
     return BaseResponse(
-        data=JobAcceptedResponse(job_id=job_id, status_url=f"/api/v1/jobs/{job_id}"),
+        data=JobAcceptedResponse(
+            job_id=acceptance.job_id,
+            status_url=f"/api/v1/jobs/{acceptance.job_id}",
+        ),
         message="202 Accepted",
     )
 

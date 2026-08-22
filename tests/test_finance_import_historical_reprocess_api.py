@@ -1,3 +1,8 @@
+"""
+File: test_finance_import_historical_reprocess_api.py
+Description: 驗證 Finance historical reprocess Preview 與 Durable Job Bridge accepted command。
+"""
+
 from api.routes.finance_import import (
     apply_historical_finance_reprocess,
     preview_historical_finance_reprocess,
@@ -15,6 +20,7 @@ from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId
 from shared_kernel.money import MoneyNTD
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.jobs.command_application import DurableJobAcceptance
 from subsystems.finance_import.historical_reprocess_workflow import (
     HistoricalReprocessPlan,
     HistoricalReprocessReceipt,
@@ -66,6 +72,7 @@ class _Application:
     def __init__(self):
         self.plan = _plan()
         self.request = None
+        self.command = None
 
     def preview(self, batch_identity, correlation_id, _owner_selections=()):
         assert batch_identity == "batch:1"
@@ -82,6 +89,10 @@ class _Application:
             1,
             request.preview_fingerprint,
         )
+
+    def enqueue(self, command):
+        self.command = command
+        return DurableJobAcceptance(command.job_id, replayed=False)
 
 
 def test_historical_reprocess_preview_is_a_lossless_typed_plan_projection():
@@ -129,22 +140,21 @@ def test_historical_reprocess_apply_carries_the_guarded_command_contract():
         application,
     )
 
-    assert application.request.idempotency_key.value == "reprocess-1"
-    assert application.request.actor.actor_id == "admin"
-    assert response.data["reprocess_run_id"] == 99
-    assert response.data["resulting_batch_version"] == 5
+    assert application.command.command_identity == "reprocess-1"
+    assert application.command.submitted_by == "admin_user_id:1"
+    assert response.data.status_url.endswith(response.data.job_id)
 
 
 def test_historical_reprocess_apply_enqueues_a_replayable_durable_command():
-    class JobRepository:
+    class JobApplication:
         def __init__(self):
             self.command = None
 
-        def enqueue_command(self, command):
+        def enqueue(self, command):
             self.command = command
-            return command.job_id
+            return DurableJobAcceptance(command.job_id, replayed=False)
 
-    repository = JobRepository()
+    application = JobApplication()
     response = apply_historical_finance_reprocess(
         FinanceImportHistoricalReprocessApplyBody(
             batch_identity="batch:1",
@@ -156,10 +166,10 @@ def test_historical_reprocess_apply_enqueues_a_replayable_durable_command():
         "reprocess-1",
         "apply-1",
         _principal(),
-        repository,
+        application,
     )
 
     assert response.data.status_url.endswith(response.data.job_id)
-    assert repository.command.command_type == "finance_import_historical_reprocess_apply"
-    assert repository.command.command_identity == "reprocess-1"
-    assert repository.command.payload["owner_selections"] == _owner_selection()
+    assert application.command.command_type == "finance_import_historical_reprocess_apply"
+    assert application.command.command_identity == "reprocess-1"
+    assert application.command.payload["owner_selections"] == _owner_selection()

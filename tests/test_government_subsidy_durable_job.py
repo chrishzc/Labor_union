@@ -1,4 +1,7 @@
-"""Durable payload contracts for every Government Subsidy Apply action."""
+"""
+File: test_government_subsidy_durable_job.py
+Description: 驗證 Government Subsidy 全 action canonical payload、worker重建與handler registry。
+"""
 
 from __future__ import annotations
 
@@ -19,7 +22,7 @@ def _payload(action: str, intent: dict) -> dict:
         "expected_batch_version": 3,
         "preview_fingerprint": "a" * 64,
         "idempotency_key": f"government-{action}",
-        "actor": "durable-test",
+        "actor": "admin_user_id:1",
         "reason": "durable command contract",
         "correlation_id": f"government-{action}",
     }
@@ -62,7 +65,7 @@ def test_route_command_contains_the_full_durable_envelope():
     assert command.job_id == "job-1"
     assert command.command_identity == "government-claim_submission"
     assert command.command_type == "government_subsidy_apply"
-    assert command.submitted_by == "durable-test"
+    assert command.submitted_by == "admin_user_id:1"
     assert command.payload["intent"] == {"batch_id": 7}
 
 

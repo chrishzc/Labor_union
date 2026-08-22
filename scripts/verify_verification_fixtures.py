@@ -22,6 +22,7 @@ DEFAULT_FIXTURE_DIRECTORY = PROJECT_ROOT / "validation" / "fixtures"
 FIXTURE_CONTRACT = "labor-union-verification-fixture/v1"
 EXPECTED_CONTRACT = "labor-union-verification-expected/v1"
 PHASE3_NAMESPACE = "phase3"
+PHASE4_NAMESPACE = "phase4"
 PHASE3_CATALOG_PATH = PROJECT_ROOT / "validation" / "catalog" / "phase3_scenario_lineage.json"
 
 
@@ -63,8 +64,12 @@ def discover_fixture_documents(
             )
             continue
         relative_parts = path.relative_to(directory).parts
-        namespace = PHASE3_NAMESPACE if relative_parts and relative_parts[0] == PHASE3_NAMESPACE else "baseline"
-        if relative_parts and relative_parts[0] not in {PHASE3_NAMESPACE} and len(relative_parts) > 1:
+        namespace = (
+            relative_parts[0]
+            if relative_parts and relative_parts[0] in {PHASE3_NAMESPACE, PHASE4_NAMESPACE}
+            else "baseline"
+        )
+        if relative_parts and relative_parts[0] not in {PHASE3_NAMESPACE, PHASE4_NAMESPACE} and len(relative_parts) > 1:
             errors.append(f"fixture {display_path} has an unsupported namespace")
             continue
         documents.append(FixtureDocument(path=path, payload=payload, namespace=namespace))

@@ -1,4 +1,7 @@
-"""G05 durable discovery and worker proof on an explicitly disposable MySQL schema."""
+"""
+File: test_order_auto_completion_durable_worker_e2e.py
+Description: 以 disposable MySQL 驗證 Orders Auto Completion Bridge discovery 與 canonical worker。
+"""
 
 from __future__ import annotations
 
@@ -70,12 +73,13 @@ def _dispatch(value):
         MySqlDueOrderAutoCompletionRepository,
     )
     from subsystems.orders.auto_completion_job_dispatch import AutoCompletionJobDispatcher
+    from subsystems.jobs.command_application import DurableJobCommandApplication
 
     connection = get_connection()
     try:
         return AutoCompletionJobDispatcher(
             MySqlDueOrderAutoCompletionRepository(connection),
-            BackgroundJobRepository(connection),
+            DurableJobCommandApplication(BackgroundJobRepository(connection), connection),
         ).dispatch_due_orders(datetime.fromisoformat(value))
     finally:
         connection.close()
@@ -90,6 +94,7 @@ def _run_worker_once():
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(connection),
+            connection,
             default_job_handlers(),
             "g05-durable-e2e-worker",
             retry_delay_seconds=0,

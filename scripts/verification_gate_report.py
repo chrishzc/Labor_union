@@ -41,6 +41,19 @@ from scripts.verify_field_authority_legacy_names import (
 
 
 PHASE3_CATALOG_PATH = PROJECT_ROOT / "validation" / "catalog" / "phase3_scenario_lineage.json"
+PHASE4_CATALOG_PATH = PROJECT_ROOT / "validation" / "catalog" / "phase4_scenario_lineage.json"
+
+
+def _metadata_catalog_scenario_ids(path: Path) -> set[str]:
+    """Return metadata-only identities that must not enter baseline runtime gates."""
+    try:
+        catalog = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return set()
+    expected_ids = catalog.get("expected_scenario_ids") if isinstance(catalog, dict) else None
+    if not isinstance(expected_ids, list):
+        return set()
+    return {item for item in expected_ids if isinstance(item, str)}
 
 
 def _phase3_catalog() -> tuple[dict[str, object] | None, list[str]]:
@@ -124,8 +137,11 @@ def build_gate_report() -> dict[str, object]:
     phase3_ids = {
         item for item in raw_phase3_ids if isinstance(item, str)
     } if isinstance(raw_phase3_ids, list) else set()
+    phase4_ids = _metadata_catalog_scenario_ids(PHASE4_CATALOG_PATH)
     baseline_scenarios = [
-        scenario for scenario in scenarios if scenario.get("scenario_id") not in phase3_ids
+        scenario
+        for scenario in scenarios
+        if scenario.get("scenario_id") not in phase3_ids | phase4_ids
     ]
     phase3_scenarios = [
         scenario for scenario in scenarios if scenario.get("scenario_id") in phase3_ids
@@ -134,7 +150,10 @@ def build_gate_report() -> dict[str, object]:
     fixtures = load_fixtures()
     fixture_documents, fixture_discovery_errors = discover_fixture_documents()
     baseline_documents = [
-        document for document in fixture_documents if document.namespace == "baseline"
+        document
+        for document in fixture_documents
+        if document.namespace == "baseline"
+        and document.payload.get("scenario_id") not in phase4_ids
     ]
     phase3_documents = [
         document for document in fixture_documents if document.namespace == PHASE3_NAMESPACE

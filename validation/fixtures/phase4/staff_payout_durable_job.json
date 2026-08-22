@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "SP-EXACT-PAYOUT-STATE-002",
+  "revision": 1,
+  "test_kind": "external_input_fixture",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored payout selection linked to a synthetic durable identity",
+  "allowed_use": "validation-only",
+  "redaction_policy": "synthetic obligation and job keys only; no staff identity or bank account",
+  "root_inputs": ["synthetic payout obligations", "expected versions", "durable command identity"],
+  "input_values": {"obligation_keys": ["obligation-syn-01"], "expected_versions": [2], "command_identity": "staff.payout.syn.01", "submitted_by": "admin_user_id:101"},
+  "seed_fields": ["obligation_keys", "expected_versions", "command_identity", "submitted_by"],
+  "derived_fields": ["accepted_job", "terminal_outcome", "payout_requery"],
+  "expected_manifest_path": "validation/expected/phase4/staff_payout_durable_job.json",
+  "fixed_business_clock": "2026-08-20T10:00:00+08:00",
+  "forbidden_direct_seed": ["paid state", "terminal success", "receipt payload", "bank account"]
+}

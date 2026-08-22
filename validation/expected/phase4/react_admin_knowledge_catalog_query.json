@@ -1,0 +1,13 @@
+{
+  "contract": "labor-union-verification-expected/v1",
+  "scenario_id": "KN-REACT-CATALOG-QUERY-001",
+  "revision": 1,
+  "assertions": ["Catalog query is read-only and masked.", "Publication status is a closed value.", "Knowledge output remains non-authoritative."],
+  "db_oracle": {"applicability": "blocked", "required": ["read-only query", "stable item ordering"], "reason": "database execution not run"},
+  "api_oracle": {"required": ["strict catalog row", "bounded provenance summary", "closed publication status"]},
+  "ui_oracle": {"applicability": "blocked", "required": ["Part 15 knowledge catalog flow"], "reason": "browser execution not run"},
+  "replay_oracle": {"applicability": "not_applicable", "required": []},
+  "recovery_oracle": {"applicability": "not_applicable", "required": []},
+  "execution_limits": {"provider": "not_run", "browser": "not_run", "database": "not_run", "production": "not_run"},
+  "forbidden_observations": ["raw source content", "crawler credential", "authoritative business answer"]
+}

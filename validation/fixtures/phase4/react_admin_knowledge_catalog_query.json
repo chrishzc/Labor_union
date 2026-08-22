@@ -1,0 +1,17 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "KN-REACT-CATALOG-QUERY-001",
+  "revision": 1,
+  "test_kind": "external_input_fixture",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored knowledge revisions and publication states; no source export",
+  "allowed_use": "validation-only",
+  "redaction_policy": "synthetic item keys and summaries only; no source body or crawler credential",
+  "root_inputs": ["synthetic knowledge catalog", "publication revisions", "query filters"],
+  "input_values": {"items": [{"item_key": "knowledge-syn-01", "revision": 2, "publication_state": "published"}], "filters": {"publication_state": "published"}},
+  "seed_fields": ["items", "filters"],
+  "derived_fields": ["masked_catalog_rows", "bounded_provenance"],
+  "expected_manifest_path": "validation/expected/phase4/react_admin_knowledge_catalog_query.json",
+  "fixed_business_clock": "2026-08-20T10:00:00+08:00",
+  "forbidden_direct_seed": ["authoritative answer", "raw source document", "credential", "browser result"]
+}

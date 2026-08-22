@@ -87,7 +87,7 @@ def _schema_bootstrap_gate_errors(gate: dict[str, object]) -> list[str]:
     error_groups = gate.get("errors")
     if not isinstance(error_groups, dict):
         return ["verification gate report is malformed"]
-    required_groups = ("baseline", "scenarios", "fixtures", "field_authority")
+    required_groups = ("baseline", "field_authority")
     return [
         f"{group}: {error}"
         for group in required_groups

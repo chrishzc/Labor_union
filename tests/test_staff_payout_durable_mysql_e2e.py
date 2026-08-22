@@ -1,4 +1,7 @@
-"""MySQL proof that Staff Payout Apply survives durable replay."""
+"""
+File: test_staff_payout_durable_mysql_e2e.py
+Description: 以 disposable MySQL 驗證 Staff Payout 全事件 Bridge replay 與 crash recovery。
+"""
 
 from __future__ import annotations
 
@@ -7,6 +10,8 @@ from datetime import date
 import os
 
 import pytest
+
+from subsystems.jobs.command_application import DurableJobCommandApplication
 
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
 from tests.test_assignment_plan_durable_mysql_e2e import _seed_waiting_lock_case
@@ -228,7 +233,7 @@ def test_staff_payout_durable_crash_recovery_and_duplicate_apply():
             "idempotency_key": "staff-payout-durable-apply",
             "correlation_id": "staff-payout-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_payout(**apply_kwargs)
         response = apply_payout(**apply_kwargs)
@@ -236,7 +241,9 @@ def test_staff_payout_durable_crash_recovery_and_duplicate_apply():
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM background_jobs")
             assert cursor.fetchone() == {"count": 1}
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE background_jobs SET lease_expires_at="
@@ -251,6 +258,7 @@ def test_staff_payout_durable_crash_recovery_and_duplicate_apply():
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "staff-payout-durable-worker",
             retry_delay_seconds=0,
@@ -261,7 +269,11 @@ def test_staff_payout_durable_crash_recovery_and_duplicate_apply():
         assert stored is not None
         assert stored.status == "succeeded"
         assert stored.attempt_count == 2
-        assert stored.receipt_payload["event_type"] == "payout"
+        assert stored.receipt_payload == {
+            "kind": "success",
+            "result_reference": f"staff_payout:{staff_id}",
+            "schema_version": 1,
+        }
         with worker_connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM staff_payout_events")
             assert cursor.fetchone() == {"count": 1}
@@ -310,12 +322,14 @@ def test_staff_payout_return_durable_crash_recovery_and_duplicate_apply():
             "idempotency_key": "staff-return-durable-apply",
             "correlation_id": "staff-return-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_return(**apply_kwargs)
         response = apply_return(**apply_kwargs)
         job_id = response.data.job_id
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE background_jobs SET lease_expires_at="
@@ -330,6 +344,7 @@ def test_staff_payout_return_durable_crash_recovery_and_duplicate_apply():
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "staff-return-durable-worker",
             retry_delay_seconds=0,
@@ -340,7 +355,11 @@ def test_staff_payout_return_durable_crash_recovery_and_duplicate_apply():
         assert stored is not None
         assert stored.status == "succeeded"
         assert stored.attempt_count == 2
-        assert stored.receipt_payload["event_type"] == "return"
+        assert stored.receipt_payload == {
+            "kind": "success",
+            "result_reference": f"staff_payout:{staff_id}",
+            "schema_version": 1,
+        }
         with worker_connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM staff_payout_events")
             assert cursor.fetchone() == {"count": 2}
@@ -388,12 +407,14 @@ def test_staff_payout_reversal_durable_crash_recovery_and_duplicate_apply():
             "idempotency_key": "staff-reversal-durable-apply",
             "correlation_id": "staff-reversal-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_reversal(**apply_kwargs)
         response = apply_reversal(**apply_kwargs)
         job_id = response.data.job_id
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE background_jobs SET lease_expires_at="
@@ -408,6 +429,7 @@ def test_staff_payout_reversal_durable_crash_recovery_and_duplicate_apply():
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "staff-reversal-durable-worker",
             retry_delay_seconds=0,
@@ -418,7 +440,11 @@ def test_staff_payout_reversal_durable_crash_recovery_and_duplicate_apply():
         assert stored is not None
         assert stored.status == "succeeded"
         assert stored.attempt_count == 2
-        assert stored.receipt_payload["event_type"] == "reversal"
+        assert stored.receipt_payload == {
+            "kind": "success",
+            "result_reference": f"staff_payout:{staff_id}",
+            "schema_version": 1,
+        }
         with worker_connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM staff_payout_events")
             assert cursor.fetchone() == {"count": 2}

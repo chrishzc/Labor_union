@@ -1,4 +1,7 @@
-"""MySQL proof that Government Subsidy receipt apply survives durable replay."""
+"""
+File: test_government_subsidy_durable_mysql_e2e.py
+Description: 以 disposable MySQL 驗證 Government Subsidy 全 action Bridge replay 與 crash recovery。
+"""
 
 from __future__ import annotations
 
@@ -6,6 +9,8 @@ from argparse import Namespace
 import os
 
 import pytest
+
+from subsystems.jobs.command_application import DurableJobCommandApplication
 
 from scripts.bootstrap_disposable_mysql_schema import bootstrap
 from tests.test_finance_import_disposable_mysql_e2e import _insert_finance_row
@@ -128,12 +133,14 @@ def test_government_subsidy_receipt_durable_crash_recovery_and_duplicate_apply()
             "idempotency_key": "government-receipt-durable-apply",
             "correlation_id": "government-receipt-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_government_subsidy_receipt(**kwargs)
         response = apply_government_subsidy_receipt(**kwargs)
         job_id = response.data.job_id
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE background_jobs SET lease_expires_at="
@@ -148,6 +155,7 @@ def test_government_subsidy_receipt_durable_crash_recovery_and_duplicate_apply()
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "government-receipt-durable-worker",
             retry_delay_seconds=0,
@@ -201,12 +209,14 @@ def test_government_subsidy_claim_plan_durable_crash_recovery_and_duplicate_appl
             "idempotency_key": "government-claim-plan-durable-apply",
             "correlation_id": "government-claim-plan-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_government_subsidy_claim_plan(**kwargs)
         response = apply_government_subsidy_claim_plan(**kwargs)
         job_id = response.data.job_id
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE background_jobs SET lease_expires_at="
@@ -221,6 +231,7 @@ def test_government_subsidy_claim_plan_durable_crash_recovery_and_duplicate_appl
     try:
         worker = DurableJobWorker(
             BackgroundJobRepository(worker_connection),
+            worker_connection,
             default_job_handlers(),
             "government-claim-plan-durable-worker",
             retry_delay_seconds=0,
@@ -293,12 +304,14 @@ def test_government_subsidy_submission_durable_crash_recovery_and_duplicate_appl
             "idempotency_key": "government-submission-durable-apply",
             "correlation_id": "government-submission-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_government_subsidy_claim_submission(**kwargs)
         response = apply_government_subsidy_claim_submission(**kwargs)
         job_id = response.data.job_id
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute("UPDATE background_jobs SET lease_expires_at=DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE job_id=%s", (job_id,))
         connection.commit()
@@ -307,7 +320,7 @@ def test_government_subsidy_submission_durable_crash_recovery_and_duplicate_appl
 
     worker_connection = get_connection()
     try:
-        worker = DurableJobWorker(BackgroundJobRepository(worker_connection), default_job_handlers(), "government-submission-durable-worker", retry_delay_seconds=0)
+        worker = DurableJobWorker(BackgroundJobRepository(worker_connection), worker_connection, default_job_handlers(), "government-submission-durable-worker", retry_delay_seconds=0)
         assert worker.recover_and_run_once() is True
         assert worker.recover_and_run_once() is False
         stored = BackgroundJobRepository(worker_connection).get_job(job_id)
@@ -382,12 +395,14 @@ def test_government_subsidy_approval_durable_crash_recovery_and_duplicate_apply(
             "idempotency_key": "government-approval-durable-apply",
             "correlation_id": "government-approval-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_government_subsidy_claim_approval(**kwargs)
         response = apply_government_subsidy_claim_approval(**kwargs)
         job_id = response.data.job_id
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute("UPDATE background_jobs SET lease_expires_at=DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE job_id=%s", (job_id,))
         connection.commit()
@@ -396,7 +411,7 @@ def test_government_subsidy_approval_durable_crash_recovery_and_duplicate_apply(
 
     worker_connection = get_connection()
     try:
-        worker = DurableJobWorker(BackgroundJobRepository(worker_connection), default_job_handlers(), "government-approval-durable-worker", retry_delay_seconds=0)
+        worker = DurableJobWorker(BackgroundJobRepository(worker_connection), worker_connection, default_job_handlers(), "government-approval-durable-worker", retry_delay_seconds=0)
         assert worker.recover_and_run_once() is True
         assert worker.recover_and_run_once() is False
         stored = BackgroundJobRepository(worker_connection).get_job(job_id)
@@ -459,12 +474,14 @@ def test_government_subsidy_reversal_durable_crash_recovery_and_duplicate_apply(
             "idempotency_key": "government-reversal-durable-apply",
             "correlation_id": "government-reversal-durable-apply",
             "principal": AdminPrincipal(1, "durable-test", "Durable Test", "system_admin"),
-            "job_repository": repository,
+            "job_application": DurableJobCommandApplication(repository, connection),
         }
         apply_government_subsidy_reversal(**kwargs)
         response = apply_government_subsidy_reversal(**kwargs)
         job_id = response.data.job_id
-        assert repository.claim_next_command("crashed-worker", 60) is not None
+        connection.begin()
+        assert repository.claim_next_canonical_command("crashed-worker", 60) is not None
+        connection.commit()
         with connection.cursor() as cursor:
             cursor.execute("UPDATE background_jobs SET lease_expires_at=DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) WHERE job_id=%s", (job_id,))
         connection.commit()
@@ -473,7 +490,7 @@ def test_government_subsidy_reversal_durable_crash_recovery_and_duplicate_apply(
 
     worker_connection = get_connection()
     try:
-        worker = DurableJobWorker(BackgroundJobRepository(worker_connection), default_job_handlers(), "government-reversal-durable-worker", retry_delay_seconds=0)
+        worker = DurableJobWorker(BackgroundJobRepository(worker_connection), worker_connection, default_job_handlers(), "government-reversal-durable-worker", retry_delay_seconds=0)
         assert worker.recover_and_run_once() is True
         assert worker.recover_and_run_once() is False
         stored = BackgroundJobRepository(worker_connection).get_job(job_id)

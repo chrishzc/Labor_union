@@ -1,0 +1,50 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "LINE-RICH-MENU-PUBLICATION-001",
+  "revision": 1,
+  "track": "A",
+  "suite_id": "LINE",
+  "status": "specified",
+  "part": "15",
+  "browser_execution_mode": "browser-blocked",
+  "requires_database": true,
+  "test_kinds": ["external_input_fixture", "expected_manifest"],
+  "coverage_ids": ["PH4-RICH-MENU-PUBLICATION"],
+  "coverage_scope": "supplemental",
+  "source_scenario_ids": [],
+  "source_scenario_absence_reason": "no canonical scenario exists",
+  "source_refs": [
+    "document/架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md#3.5 Subsystem：Rich Menu／Media",
+    "document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase4c-line-richmenu-publication-mutation-work-package.md#Phase 4C-RM-H：Rich Menu publication public contract／provider saga hardening"
+  ],
+  "lineage_mappings": [
+    {"source": "formal Rich Menu publication contract", "successor": "typed preview and apply contract", "disposition": "unchanged"},
+    {"source": "durable publication workflow", "successor": "step receipt and retry oracle", "disposition": "regenerated"},
+    {"source": "cleanup operational outcome", "successor": "published cleanup anomaly oracle", "disposition": "renamed"}
+  ],
+  "root_inputs": ["synthetic menu definition", "configuration revision", "preview fingerprint", "fake step outcomes"],
+  "root_facts": ["The current configuration revision and canonical menu definition are the publication roots."],
+  "forbidden_direct_seed": ["published state", "provider acknowledgement", "cleanup anomaly", "browser result"],
+  "commands": [
+    "preview publication with zero writes",
+    "apply using fresh revision and preview fingerprint",
+    "resume create-upload-link-switch-cleanup from durable acknowledged steps",
+    "record cleanup failure as an anomaly without reversing published state"
+  ],
+  "expected": [
+    "Preview creates no revision, receipt, audit, durable step, wakeup, or external call.",
+    "Apply rejects stale revision or fingerprint before durable work is queued.",
+    "A retry resumes from the last acknowledged step and does not recreate an acknowledged asset.",
+    "Cleanup failure remains operational evidence after publication and does not erase the new asset."
+  ],
+  "receipt_requirements": ["preview zero-write evidence", "queue receipt", "step attempt receipts", "published cleanup anomaly evidence"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-08-20T10:00:00+08:00"},
+  "oracle_applicability": {
+    "db": {"status": "blocked", "reason": "disposable database receipt not produced"},
+    "api": {"status": "required", "reason": "typed preview, queue, status and retry views"},
+    "ui": {"status": "blocked", "reason": "Part 15 checklist is not present"},
+    "replay": {"status": "required", "reason": "same-key replay and step resume"},
+    "recovery": {"status": "required", "reason": "lost acknowledgement, timeout and cleanup anomaly"}
+  },
+  "required_receipt_id": "LINE-RICH-MENU-PUBLICATION-001-R1"
+}

@@ -1,4 +1,7 @@
-"""Independent worker orchestration for replayable Global commands."""
+"""
+File: durable_job_worker.py
+Description: 編排 Durable Job recovery、claim、handler 與 terminal transition 的獨立 outer transactions。
+"""
 
 from __future__ import annotations
 
@@ -8,12 +11,13 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any
 
-from infrastructure.mysql.background_job_repository import BackgroundJobRepository
 from shared_kernel.durable_job_queue import (
     DurableJobLease,
     RetryableDurableJobError,
     TerminalDurableJobError,
 )
+from subsystems.jobs.contracts import DurableJobFailureOutcome, DurableJobSuccessOutcome
+from subsystems.jobs.ports import CanonicalDurableJobRepository, DurableJobTransaction
 
 JobHandler = Callable[[dict[str, Any]], tuple[dict[str, Any], str]]
 
@@ -21,23 +25,31 @@ JobHandler = Callable[[dict[str, Any]], tuple[dict[str, Any], str]]
 class DurableJobWorker:
     def __init__(
         self,
-        repository: BackgroundJobRepository,
+        repository: CanonicalDurableJobRepository,
+        transaction: DurableJobTransaction,
         handlers: dict[str, JobHandler],
         worker_id: str,
         lease_seconds: int = 60,
         retry_delay_seconds: int = 15,
     ):
         self._repository = repository
+        self._transaction = transaction
         self._handlers = handlers
         self._worker_id = worker_id
         self._lease_seconds = lease_seconds
         self._retry_delay_seconds = retry_delay_seconds
 
     def recover_and_run_once(self) -> bool:
-        self._repository.requeue_expired_leases(self._retry_delay_seconds)
-        lease = self._repository.claim_next_command(
-            self._worker_id,
-            self._lease_seconds,
+        self._in_transaction(
+            lambda: self._repository.recover_expired_canonical_leases(
+                self._retry_delay_seconds
+            )
+        )
+        lease = self._in_transaction(
+            lambda: self._repository.claim_next_canonical_command(
+                self._worker_id,
+                self._lease_seconds,
+            )
         )
         if lease is None:
             return False
@@ -50,34 +62,60 @@ class DurableJobWorker:
             self._fail_unknown_command(lease)
             return
         try:
-            receipt, reference = handler(lease.command.payload)
-            self._repository.complete_claimed_job(lease, receipt, reference)
+            _private_receipt, reference = handler(lease.command.payload)
         except TerminalDurableJobError as error:
-            self._repository.fail_claimed_job(
-                lease,
-                _typed_error_payload(error.error),
+            outcome = DurableJobFailureOutcome.from_typed_error(error.error)
+            self._in_transaction(
+                lambda: self._repository.fail_canonical_claim(lease, outcome)
             )
         except RetryableDurableJobError as error:
-            self._repository.fail_claimed_job(
-                lease,
-                _error_payload(error.code, error.message, "UNAVAILABLE"),
-                self._retry_delay_seconds,
+            outcome = DurableJobFailureOutcome(
+                "unavailable",
+                error.code,
+                error.message,
+                retryable=True,
             )
-        except Exception as error:
-            self._repository.fail_claimed_job(
-                lease,
-                _error_payload("durable_job_execution_failed", str(error), "INTERNAL"),
+            self._in_transaction(
+                lambda: self._repository.fail_canonical_claim(
+                    lease,
+                    outcome,
+                    self._retry_delay_seconds,
+                )
+            )
+        except Exception:
+            outcome = DurableJobFailureOutcome(
+                "internal",
+                "durable_job_execution_failed",
+                "Durable job execution failed.",
+            )
+            self._in_transaction(
+                lambda: self._repository.fail_canonical_claim(lease, outcome)
+            )
+        else:
+            outcome = DurableJobSuccessOutcome(reference)
+            self._in_transaction(
+                lambda: self._repository.complete_canonical_claim(lease, outcome)
             )
 
     def _fail_unknown_command(self, lease: DurableJobLease) -> None:
-        self._repository.fail_claimed_job(
-            lease,
-            _error_payload(
-                "durable_job_handler_not_registered",
-                "No durable worker handler is registered for this command.",
-                "INTERNAL",
-            ),
+        outcome = DurableJobFailureOutcome(
+            "internal",
+            "durable_job_handler_not_registered",
+            "No durable worker handler is registered for this command.",
         )
+        self._in_transaction(
+            lambda: self._repository.fail_canonical_claim(lease, outcome)
+        )
+
+    def _in_transaction(self, operation):
+        self._transaction.begin()
+        try:
+            result = operation()
+            self._transaction.commit()
+            return result
+        except Exception:
+            self._transaction.rollback()
+            raise
 
 
 def finance_import_batch_apply_handler(payload: dict[str, Any]) -> tuple[dict[str, Any], str]:
@@ -211,7 +249,7 @@ def government_subsidy_apply_handler(payload: dict[str, Any]) -> tuple[dict[str,
         raise TerminalDurableJobError(
             TypedError(
                 ErrorCategory.VALIDATION,
-                str(error) or "invalid_government_subsidy_intent",
+                "invalid_government_subsidy_intent",
                 "Government Subsidy command is invalid.",
                 CorrelationId(payload["correlation_id"]),
             )
@@ -414,7 +452,7 @@ def staff_payout_apply_handler(payload: dict[str, Any]) -> tuple[dict[str, Any],
         raise TerminalDurableJobError(
             TypedError(
                 ErrorCategory.VALIDATION,
-                str(error) or "invalid_staff_payout_intent",
+                "invalid_staff_payout_intent",
                 "Staff payout command is invalid.",
                 CorrelationId(payload["correlation_id"]),
             )
@@ -524,8 +562,12 @@ def finance_import_correction_apply_handler(payload: dict[str, Any]) -> tuple[di
     )
     from infrastructure.mysql.mysql_adapter import get_connection
     from shared_kernel.fingerprints import PreviewFingerprint
+    from shared_kernel.errors import ErrorCategory
     from shared_kernel.identities import ActorContext, CorrelationId, ExpectedVersion, IdempotencyKey
-    from subsystems.finance_import.correction_workflow import FinanceImportCorrectionApplyRequest
+    from subsystems.finance_import.correction_workflow import (
+        FinanceImportCorrectionApplyRequest,
+        FinanceImportCorrectionWorkflowError,
+    )
 
     connection = get_connection()
     try:
@@ -541,6 +583,8 @@ def finance_import_correction_apply_handler(payload: dict[str, Any]) -> tuple[di
             tuple(payload["evidence"]),
             payload.get("refund_ledger_entry_identity"),
             bool(payload.get("allow_partial_refund_recovery", False)),
+            bool(payload.get("allow_refund_overage_recovery", False)),
+            bool(payload.get("allow_client_receipt_overage", False)),
         )
         request = FinanceImportCorrectionApplyRequest(
             selection,
@@ -555,25 +599,12 @@ def finance_import_correction_apply_handler(payload: dict[str, Any]) -> tuple[di
         receipt = _materialize(application.correct_and_post(request))
         reference = "finance_import_correction:" + receipt["row_identity"]
         return receipt, reference
+    except FinanceImportCorrectionWorkflowError as error:
+        if error.error.category is ErrorCategory.UNAVAILABLE and error.error.retryable:
+            raise RetryableDurableJobError(error.error.code, error.error.message) from error
+        raise TerminalDurableJobError(error.error) from error
     finally:
         connection.close()
-
-
-def _error_payload(code: str, message: str, category: str) -> dict[str, Any]:
-    return {"error": {"category": category, "code": code, "message": message}}
-
-
-def _typed_error_payload(error) -> dict[str, Any]:
-    return {
-        "error": {
-            "category": error.category.value,
-            "code": error.code,
-            "correlation_id": error.correlation_id.value,
-            "domain_blockers": list(error.domain_blockers),
-            "message": error.message,
-            "retryable": error.retryable,
-        }
-    }
 
 
 def _is_retryable_mysql_error(error: Exception) -> bool:
