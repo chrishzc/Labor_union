@@ -18,6 +18,7 @@ pointer。2026-08-11 已完成多輪保守封存；歷史文件以
 
 | 檔案 | doc_type | declared_status | 一句話摘要 |
 |---|---|---|---|
+| [PROV-20260820 Access Control MFA enrollment 成功契約修復工作包](PROV-20260820-access-control-mfa-enrollment-success-contract-work-package.md) | work-package | `in-progress` | 已人工核准；首次 MFA 綁定改由 password 驗證成功的 typed 200 data 回傳，Streamlit 顯示 QR，非 2xx 維持去敏。 |
 | [58_未實作_未落地_未上線規格總表.md](58_未實作_未落地_未上線規格總表.md) | gap-register | `completed` | 已確認正式規格的未實作、已實作未落地、已驗證未上線與刻意不自動化之集中盤點。 |
 | [ARCH-20260816-107 LINE Notification Catalog](../04_已完成與上線封存/work_packages/LINE_Notification_Catalog_Gap_Package.md) | gap-package | `completed-local-validated` | archive pointer；可配置通知後端、API／worker 與 developer-local schema replacement 完成，實體 LINE provider acceptance 未執行。 |
 | [PROV-20260816 React 管理端遷移 Foundation 工作包 (V5)](PROV-20260816-react-admin-migration-foundation-work-package.md) | work-package | `in-progress` | Desktop 視覺模板與共用基礎已合併；真正兩段式 Auth 已由Phase 2C successor完成並有真Chrome證據，Foundation仍須依其自身剩餘gate結案，不因Auth successor完成自動標completed。 |

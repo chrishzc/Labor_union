@@ -938,3 +938,85 @@
 - 依使用者明確指示，刪除`Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md`與舊版`Cloud_Run_Dockerfile封裝計畫.md`。
 - 現行部署與封裝內容分別由`單一Cloud VPN計畫書.md`、`Cloud_Run_Dockerfile封裝計畫_v2.md`及獨立相容性測試計畫承接，避免舊版文件形成競爭SSOT。
 - 本次不修改Python、schema、migration、Docker image或本機已啟動的compat containers。
+
+## [2026-08-20] 相容性映像移除 Redis、升級本機 DB 並恢復登入 schema
+
+- 停止並移除 `union_redis` container（既有匿名 volume 未刪除），將 Redis client 從專案 dependency 與三個 compat image 移除；新增 `compat-api`、`compat-ui`、`compat-runtime-ops` dependency groups，API／runtime-ops 預設 `REDIS_URL` 為空。
+- 重建 `union-api-compat:redisless-local`、`union-ui-compat:redisless-local`、`union-runtime-ops-compat:redisless-local`；入口匯入皆通過且三個 image 的 `redis` module 均為 absent，大小分別約 829 MB、797 MB、332 MB。
+- 修復 validation manifest 對 canonical schema assembly 的 stale digest，並以 `scripts/build_validation_schema_release.py` 重建 generated validation SQL；migration／assembly focused gate 為 `64 passed`。
+- 為未 publish 3306 的 Docker MySQL 增加 `scripts.update_local_database --database-port` local TCP-forward port override；不改 `.env`、credential 或 database identity，focused regression 為 `7 passed`。
+- 真實 MySQL fresh bootstrap `lu_test_db_update_20260820_v1` 驗證通過：127 schema parts、292 triggers、`v_order_details` 與 contract identity 均有效。
+- 依 canonical preserve-data 流程將 `union_db` 備份、還原到 `union_db_local_20260820103531`、套用 17 個既有 additive artifacts、驗證後同名 replacement；operation／replacement receipt 均 completed，`--require-current` 回報 release `labor-union-staff-retirement-2026-08-15-v1`。
+- 以 Redis-free image 重建本機 API/UI；`18080/health` 與 `18501/_stcore/health` 均通過。`joker` 帳號仍 enabled，四張必要登入表存在；不存在帳號的 login-chain smoke 正確回 401，不再回 schema 503，登入／TOTP／UI guard focused regression 為 `37 passed`。
+- `joker` 目前沒有 TOTP factor，且本機 `.env` 未設定 `ACCESS_CONTROL_TOTP_KEYRING`；未經 secret 操作授權未自動產生 keyring、重設密碼或完成 MFA enrollment。本次未 stage、commit、push或操作任何 production／GCP 資源。
+
+## [2026-08-20] 初始化本機 TOTP Keyring
+
+- 依使用者明確授權，以 `cryptography.fernet.Fernet.generate_key()` 產生本機專用 `v1` Keyring，原子寫入 Git-ignored `.env` 的 `ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION` 與 `ACCESS_CONTROL_TOTP_KEYRING`；未在 console、log、文件或 Git 輸出 secret。
+- 一次性設定程式執行後已刪除，未留下可執行暫存檔；`.env` 仍由 `.gitignore` 排除。
+- 重建 `union-api-compat-local` 讓 Keyring 生效；API health 通過，容器內完成隨機 TOTP seed 的 encrypt／decrypt round-trip，結果為 PASS 且未輸出 seed 或 ciphertext。
+- 未重設 `joker` 密碼、未代替使用者掃描 Authenticator QR code、未建立 TOTP factor 或 recovery codes；實際 MFA enrollment 保留給帳號本人透過管理後台完成。本次未 stage、commit、push或操作 production／GCP secret。
+
+## [2026-08-20] 修復 Streamlit 首次 MFA enrollment QR 契約
+
+- 根因確認為 `/api/v1/admin/auth/login/challenges` 把已通過帳密驗證的 enrollment challenge 放入 403 detail；Global typed error boundary 依正式安全契約去除 provisioning URI 與 challenge token，導致 Streamlit 收不到 QR 資料。
+- 經使用者核准，新增 `challenge_type` typed success contract：active factor 回 `factor_verification`，未綁定 factor 回 HTTP 200 `mfa_enrollment` data；legacy `/login` 與所有非 2xx error 仍禁止帶 provisioning secret。
+- Streamlit typed client 改以 success data 分流到記憶體內 QR 畫面，並同步支援 strict `detail.error` 解碼；未寫 browser storage、log、DB receipt 或檔案。
+- API／Global boundary／Streamlit／TOTP／auth focused regression 為 `75 passed`；真 HTTP regression 證明 enrollment 回 200 data 且不建立 Session，legacy 403 仍完整去敏。
+- 重建並重啟 `union-api-compat:redisless-local`、`union-ui-compat:redisless-local`；`18080/health` 與 `18501/_stcore/health` 均通過，兩個 container 均 healthy，live OpenAPI 已載入新 contract。
+- pending enrollment 會於下一次正確帳密登入替換成新的短效 seed／challenge，因此舊 challenge 過期不需人工清 DB。仍待帳號本人於 8501 掃描 QR 並輸入第一組 TOTP 完成 browser acceptance；未 stage、commit、push或修改 production／GCP 資源。
+
+## [2026-08-20] 啟動 React 5173 本機預覽雙軌
+
+- 保留既有 Streamlit `18501` 與 API `18080`，另以同一 Redis-free API image 啟動 `union-api-react-local`，在 `8000` 提供 React Vite proxy target；React 不取代或切換 Streamlit entry。
+- 主機未安裝 Node/npm；改以官方 `node:24-bookworm-slim` 啟動 `union-react-ui-local`，React source 以 bind mount提供，依賴只寫入 `union-react-node-modules-local` Docker volume。React container未取得 `.env`、DB credential或API secrets。
+- `http://127.0.0.1:5173/` 回 HTTP 200、HTML含`id="root"`；經 `5173/api/v1/admin/auth/login/challenges` 的空JSON probe由FastAPI回typed 422 `request_validation_error`，證明relative `/api` proxy成功且未寫DB。
+- `npm audit --omit=dev`為0 vulnerabilities；完整audit僅回報direct dev/test dependency `happy-dom<=20.8.8`一項critical且有fix，不在本次啟動任務自動改lockfile或執行force upgrade。
+- 此次只是ad hoc local preview，不冒充Phase5B、逐entry cutover、production hosting或Streamlit retirement receipt；未修改React source、未stage、commit或push。
+
+## [2026-08-22] 新增GCP Cloud Run compat互動部署腳本
+
+- 新增 `scripts/launchers/setup_gcp_cloud_run_compat.ps1`：列出既有Billing Accounts並支援人工開啟新帳務流程，優先讀取Billing Account `currencyCode`、只詢問預算數字並自動附加TWD／USD等計費幣別，無法讀取時才人工確認ISO 4217代碼；互動取得Project ID／名稱／預算／subnet，建立或續跑具`environment=staging`、`deployment=compat`標籤的隔離Project、必要APIs、月預算、VPC、subnet、六個runtime service accounts及immutable Artifact Registry。
+- 新增 `scripts/launchers/publish_gcp_cloud_run_compat.ps1`：列出可存取Project、Docker倉庫、遠端images與本機Docker images；本機images以空格分隔項次複選，逐一設定API／UI／runtime-ops／只push角色、alias及唯一tag，拒絕覆寫既有immutable tag，push後解析digest才部署。
+- Cloud Run compat拓樸固定為API／UI兩個Services、Durable／LINE／Incident三個獨立Worker Pools及Monitor Job；既有資源只更新image，不清除env、secret、network或identity。UI維持IAM保護，API只允許`internal-and-cloud-load-balancing` ingress；不把測試捷徑升格為production配置。
+- 兩支腳本均支援`-DryRun`，mutation前分別要求`CREATE`、`PUSH`、`DEPLOY`確認；拒絕非staging/test＋compat Project，不讀`.env`、不接受secret參數、不建立service-account JSON key、不執行migration、VPN、production traffic cutover或地端NAS／DB操作。
+- PowerShell AST語法檢查兩支腳本均為0 errors；另以完成後已刪除的假`gcloud`／Docker工具執行端到端`-DryRun`，成功覆蓋Billing選擇、Project／倉庫建立計畫、三個本機image複選、別名／tag、digest pin、兩個Services、三個Worker Pools與Monitor Job命令生成。未登入GCP、未push image、未建立雲端資源或產生費用。
+- 同步更新`scripts/launchers/README.md`操作與安全邊界；未修改production Python、schema、migration、Dockerfile，亦未stage、commit或push。
+
+## [2026-08-22] 將首次Cloud Run compat部署收斂為開發用GCE＋IAP反向SSH Tunnel版
+
+- 依人工核准，把`setup_gcp_cloud_run_compat.ps1`明確標示為「開發用GCE＋IAP反向SSH Tunnel版，嚴禁正式部署使用」；production仍只能使用正式計畫核准的Cloud VPN → 地端NAS／MySQL路徑。
+- 首次腳本改為strict UTF-8讀取Git-ignored`.env`，必要DB／TOTP／LINE secret只經stdin建立Secret Manager version，不進image、Git或CLI參數；新增`DEV-SAFE`人工gate，要求確認非production DB與測試LINE channel後才可建立付費資源及啟動worker。
+- 新增無外部IP的GCE bridge VM與IAP SSH控制路徑；本機以`local_mysql_tcp_forward.py`在Docker network內轉送`mysql_db:3306`，主機只綁`127.0.0.1:13307`，再建立`GCE:13306 → IAP reverse SSH → localhost forward`，不公開MySQL port。
+- API成為唯一DB connection owner；UI／Durable／LINE／Incident／Monitor不取得DB credential。UI → API與runtime → API均採Google OIDC，application Bearer token改以`X-Serverless-Authorization`與平台token並存。
+- 新增production fail-closed：`APP_ENV=production`拒絕`development_gce_iap_reverse_ssh` profile；MySQL TLS mode的CA／client material不完整時拒絕啟動。
+- 本機實際smoke使用新images與localhost-only forward，API health通過，假帳號登入經MySQL查詢後正確回401；暫時smoke containers已停止。聚焦回歸`32 passed`，三支PowerShell AST與bridge dry-run通過；整支首次部署dry-run覆蓋Project、預算、VPC、GCE／IAP、Secret Manager、Artifact Registry、三image、Cloud Run、OIDC與驗收命令生成。
+- 截至本紀錄尚未建立GCP Project、未push image、未啟動雲端worker或產生新GCP資源費用；正式執行仍待操作人員確認最終Project ID、Billing Account、月預算、CIDR及目前DB／LINE測試安全邊界。本次未stage、commit或push。
+
+## [2026-08-22] 完成GCP Cloud Run開發compat部署與自動驗收
+
+- 經使用者確認`DEV-SAFE`與費用參數後，建立`labor-union-dev-20260822`、連結TWD Billing Account、建立每月TWD 3,000預算警告、`asia-east1` VPC/subnet、六個service accounts、四個Secret Manager secrets、無外部IP的`e2-micro` bridge VM及兩條最小防火牆規則。
+- 建立immutable Artifact Registry `labor-union-compat`，推送API／UI／runtime-ops三個images；Cloud Run資源皆以各自不可變digest reference部署。
+- 部署API、UI兩個Services、Durable／LINE／Incident三個Worker Pools與Monitor Job；API與UI latest revision ready，四個HTTP入口（API health、UI health、Webhook GET、LIFF）皆為200。
+- 首次Monitor因Windows gcloud使用PuTTY時reverse port未真正監聽而失敗；API與workers正確fail closed為503，未改走公開DB。bridge manager改用Windows OpenSSH、獨立known-hosts、tree-aware stop及GCE端port驗收，並收緊既有GCE私鑰ACL為目前Windows使用者唯讀。
+- Tunnel修復後Monitor execution`union-monitor-compat-g8twc`成功；Cloud Logging顯示Durable、LINE、Incident的Google OIDC Private API呼叫均持續HTTP 200，證明Cloud Run → Direct VPC → GCE → IAP reverse SSH → localhost forward → `mysql_db`完整路徑可用。
+- 修正Budget API `--billing-project`與PowerShell native output污染回傳值；聚焦pytest仍為`32 passed`，三支PowerShell AST與`git diff --check`通過。
+- 尚待帳號本人完成Admin UI密碼＋TOTP登入，以及LINE channel owner更新並Verify Webhook／LIFF URL。API目前沿用本機`DB_USER=root`，只接受短期開發測試，正式部署固定視為最小權限blocker。本次未stage、commit或push Git。
+
+## [2026-08-22] 修復Cloud Run UI缺少google-auth
+
+- 使用者人工開啟`union-ui-compat`時得到`ModuleNotFoundError: google.auth`；API頁面同時顯示database connected，確認問題只在UI image dependency closure，不是API或DB Tunnel。
+- 將直接相依`google-auth>=2.38.0`加入`compat-ui`dependency group並以`uv lock`同步lockfile；未靠完整project dependencies掩蓋UI image缺件。
+- 重建`union-ui-compat:ui-google-auth-20260822`，container內`import google.auth`與`import ui.app`通過，local health／root均200；推送immutable tag並只更新既有UI Service image，保留原OIDC、VPC、env與service account。
+- Cloud Run revision`union-ui-compat-00002-pjw`已服務100%流量，實際image digest為`sha256:ecb3f94495fe460ad25a78d7e96934cbb3fbc3cc44bee3b2f5162d48b2598b01`；雲端health／root均200，新revision log無`ModuleNotFoundError`，聚焦回歸`11 passed`。
+- API、Worker Pools、Monitor Job、DB bridge與LINE設定未修改；未stage、commit或push Git。
+
+## [2026-08-22] 完成Cloud Run compat自動build與既有環境一鍵更新驗收
+
+- 新增`build_and_validate_cloud_run_compat_images.ps1`，由三份compat Dockerfile自動build固定HEAD tag，並在push前驗證Dockerfile check、non-root、built-image imports、API／UI health、UI→API及runtime→Private API；驗收receipt只寫入Git-ignored`scratch/`。
+- 首次與更新launcher新增集中式`-PreflightOnly`、明確缺件提示、gcloud 429／`RESOURCE_EXHAUSTED`／API propagation與Docker push短暫錯誤的bounded retry；更新入口預設從source build，人工挑選舊image改為顯式`-SelectExistingImages`。
+- DB bridge改用Project專用Ed25519 key，Windows ACL只保留目前使用者與SYSTEM；OS Login新增後會read-back比對public key，PID狀態亦確認為OpenSSH process。stop／start演練發現GCE端13306殘留`sshd` listener後，新增只針對compat專用port的自動清理與釋放確認；修復後bridge為RUNNING（PID 3568）。
+- 完整首次腳本`-DryRun`通過，能保留既有Budget、VPC、Secrets及Cloud Run設定並輸出完整部署計畫；目前電腦的preflight與實際local image gate均通過。
+- 實際更新`labor-union-dev-20260822`：API revision`union-api-compat-00003-kx4`、UI revision`union-ui-compat-00003-j6n`，三個Worker Pool revision均Ready；API／UI／Webhook／LIFF皆HTTP 200。
+- bridge重啟後Monitor execution`union-monitor-compat-2sbhs`成功完成Google OIDC → Private API →本機MySQL bridge；提交前擴大MFA／typed error／DB更新／launcher／bridge／Private Operations回歸為`113 passed`，四支PowerShell parser均無錯誤。同步更新LINE UI client安全測試，使其驗證Google OIDC invocation header與application Session bearer並存的現行契約。
+- 全新組員電腦的OAuth／MFA與首次付費Project實際部署仍為`NOT_RUN`，不得以目前開發機重跑冒充；因此可交付現有環境一鍵更新，但`TEAM_ONE_CLICK_DEPLOYMENT_ACCEPTED`仍待組員機實測。本次未stage、commit或push Git。

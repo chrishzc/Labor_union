@@ -1,10 +1,16 @@
+-- GENERATED FILE. Do not edit by hand.
+-- Release: labor-union-validation-schema-2026-08-16-v9
+-- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
+-- Rebuild with: python scripts/build_validation_schema_release.py
+
+-- BEGIN SOURCE: db/schema.sql
 -- File: schema.sql
 -- Description: 定義 Labor Union fresh bootstrap 的基礎 MySQL schema。
 
 -- 強制重建資料庫以確保 ENUM 編碼正確
-DROP DATABASE IF EXISTS union_db;
-CREATE DATABASE union_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE union_db;
+DROP DATABASE IF EXISTS __LU_TEST_DATABASE__;
+CREATE DATABASE __LU_TEST_DATABASE__ CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE __LU_TEST_DATABASE__;
 
 -- 1. 客戶資料表 (對應 欄位.xlsx 結構)
 CREATE TABLE IF NOT EXISTS clients (
@@ -818,6 +824,7 @@ CREATE TABLE IF NOT EXISTS line_rich_menu_publications (
     CONSTRAINT fk_rich_menu_publish_admin FOREIGN KEY (requested_by_admin_user_id)
         REFERENCES admin_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema.sql
 
 -- BEGIN SOURCE: db/schema_parts/202_scheduling_staff_leave_intake.sql
 -- File: 202_scheduling_staff_leave_intake.sql
@@ -11662,7 +11669,7 @@ CREATE TABLE IF NOT EXISTS admin_password_login_challenges (
 
 -- BEGIN SOURCE: db/schema_parts/211_access_control_security_alert_outbox.sql
 -- File: 211_access_control_security_alert_outbox.sql
--- Description: Access Control 高風險稽核事件的耐久告警投遞箱；由既有 incident worker 投影到 system_alerts。
+-- Description: 保存 Access Control security audit 的耐久告警投影 intent，供 Incident Worker 非同步重試。
 
 CREATE TABLE IF NOT EXISTS admin_security_alert_outbox (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -11681,11 +11688,13 @@ CREATE TABLE IF NOT EXISTS admin_security_alert_outbox (
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     UNIQUE KEY uk_admin_security_alert_outbox_audit (source_audit_id),
-    INDEX idx_admin_security_alert_outbox_due (processing_status, next_attempt_at, lease_expires_at, id),
+    INDEX idx_admin_security_alert_outbox_due (processing_status,next_attempt_at,lease_expires_at,id),
     CONSTRAINT fk_admin_security_alert_outbox_audit FOREIGN KEY (source_audit_id)
         REFERENCES admin_audit_logs(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT chk_admin_security_alert_outbox_payload CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT'),
-    CONSTRAINT chk_admin_security_alert_outbox_attempts CHECK (max_attempts > 0 AND attempt_count <= max_attempts)
+    CONSTRAINT chk_admin_security_alert_outbox_attempts CHECK (
+        attempt_count <= max_attempts AND max_attempts > 0
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- END SOURCE: db/schema_parts/211_access_control_security_alert_outbox.sql
 

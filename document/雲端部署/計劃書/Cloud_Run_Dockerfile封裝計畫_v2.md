@@ -2,7 +2,7 @@
 
 文件狀態：封裝施工基線已確認（`IMPLEMENTATION_READY_PLAN`）；現況尚未完成 Dockerfile 與必要 adapter，故為 `BUILD_NOT_READY`
 
-更新日期：2026-08-20
+更新日期：2026-08-22
 
 部署基線：`document/雲端部署/計劃書/單一Cloud VPN計畫書.md`
 
@@ -44,6 +44,7 @@
 8. Knowledge／Chroma／Agent runtime 維持停用；production router、import closure與 dependency group 不得因 private knowledge route 把 `chromadb` 或 Knowledge worker 帶入映像。
 9. 三份 Dockerfile、runtime manifests、image-specific dependency groups與完整 `.dockerignore` 目前尚未建立／補齊，完成前不得產生 production tag。
 10. Monitor production URL 必須顯式設定 API、UI、public edge 與 LIFF 位址；production preflight 必須拒絕 localhost default。
+11. UI → API採Google OIDC時，`google-auth`是UI image的直接runtime dependency，不得只存在於完整開發環境、API或runtime-ops group；built-image import gate未通過前不得發布UI tag。
 
 ## 二、正式封裝邊界
 
@@ -169,6 +170,7 @@ RUNTIME_ALERT_TOPIC=runtime-alert-fallback
 啟動驗證：
 
 - `streamlit run ui/app.py` 監聽 `${PORT}`，`/_stcore/health` 成功。
+- UI專屬lockfile dependency group必須包含每個production direct import；目前OIDC client直接import`google.auth`，因此至少須明列`google-auth`，並在只安裝UI group的built image內驗證`import google.auth`與`import ui.app`。
 - page registry 每個正式頁面可 import；缺一頁即失敗。
 - 以 mock API 驗證登入、主要頁面、檔案上傳及 typed unavailable；VPN／DB 故障只能由 API 狀態呈現，UI 不得自行連 DB。
 - package inventory 證明沒有 PyMySQL、DB adapter 或 VPN tooling。
@@ -252,14 +254,23 @@ Monitor Job 使用獨立 Service Account，只取得探測、告警 API 與 `run
 
 實際 tunnel drill 是部署計畫 gate，不在 Docker build 階段假造。Docker 階段以可替換的 network fault／typed adapter 測試證明 application 行為，部署階段再以 staging tunnel 提供實機證據。
 
+### 5.4 Operator automation與新電腦gate
+
+- Git只保存Dockerfile、lockfile、build／validation launcher及驗收契約；image本體不得提交Git。部署入口必須由目前source自動build三個角色image，本機gate未通過前不得push。
+- prerequisites須一次檢查PowerShell、Git、Docker daemon、gcloud／登入、OpenSSH、必要檔案與target-specific設定，並以編號列出所有缺口；不得執行到一半才逐項報錯。
+- built-image gate至少包含non-root、直接import、API／UI health、UI→API、runtime→Private API及無DB credential注入runtime。UI固定驗證`google.auth`與`ui.app`。
+- push使用自動產生且不可覆寫的immutable tag，部署前解析成digest；429、`RESOURCE_EXHAUSTED`、rate limit及已分類的API propagation錯誤只允許bounded exponential backoff，永久權限／設定錯誤立即fail closed。
+- 全新電腦必須先通過`PreflightOnly`及完整`DryRun`，再由帳號本人完成OAuth／MFA並執行一次實際staging部署。驗收須保存三個local image IDs、三個remote digests、Cloud Run revisions、health／OIDC／dependency結果與清理責任。
+- 開發用GCE＋IAP bridge可建立Project專用Ed25519 key並收緊Windows ACL；此能力只屬compat測試，不得進入正式Cloud VPN部署路徑。正式封裝不可建立、攜帶或依賴SSH private key。
+
 ## 六、施工順序
 
 1. **封裝前 live-drift 修復**：移除 UI 本機資料讀寫、把可變 LINE 設定與歷史移入 API-owned MySQL store、把合約／媒體／封存改接 NAS SFTP adapter、完成 Pub/Sub fallback publisher／replay、移除開發通知、完成 Worker Pool supervisor，並排除 Redis與 Knowledge／Chroma production closure。若涉及 schema，另立已核准 Work Package並通過 DB gates；本計畫不授權 DB 變更。
 2. **資產分類與去敏**：建立 `runtime_assets/`，逐檔審核與 SHA-256 manifest。
-3. **依賴切分**：建立 api、ui、runtime-ops dependency groups，更新 lockfile並檢查直接 import；API 只增加核准的 SFTP／Pub/Sub client，runtime-ops 只增加 Pub/Sub publisher，三者均移除 Redis與 Knowledge／Chroma非必要依賴。
+3. **依賴切分**：建立 api、ui、runtime-ops dependency groups，更新 lockfile並檢查直接 import；UI的Google OIDC client必須在UI group明列`google-auth`並於built image執行import smoke，禁止以完整開發環境測試取代；API只增加核准的SFTP／Pub/Sub client，runtime-ops只增加Pub/Sub publisher，三者均移除Redis與Knowledge／Chroma非必要依賴。
 4. **先做 runtime-ops**：完成 Worker Pool supervisor、Pub/Sub alert publisher、Dockerfile、Worker Pool command、monitor Job command 與 production URL preflight。
 5. **再做 API 與 UI**：完成 NAS file adapter、alert replay、清除本機可變資料依賴後建置，完成 router/page/startup、DB／NAS unavailable與無雲端／本機 storage fallback smoke。
-6. **發布 gate**：SBOM、弱點、secret／PII／拓樸值、image layer、簽章與 provenance 全通過，才推送 immutable digest。
+6. **發布 gate**：由共用launcher自動build並完成built-image驗收；SBOM、弱點、secret／PII／拓樸值、image layer、簽章與 provenance 全通過，才推送 immutable digest。
 7. **部署 gate**：Direct VPC network tag、單一 tunnel route、MySQL mTLS、SFTP host-key／restricted-root、DB／file isolation、Pub/Sub alert fallback與 tunnel outage/recovery drill 全通過；Docker image 不承擔建立或修復 VPN。
 
 ## 七、計畫驗證結果

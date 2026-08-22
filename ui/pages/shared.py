@@ -10,6 +10,8 @@ from pathlib import Path
 
 import streamlit as st
 from dotenv import load_dotenv
+from google.auth.transport.requests import Request as GoogleAuthRequest
+from google.oauth2.id_token import fetch_id_token
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -19,6 +21,7 @@ API_BASE_URL_ENV = "API_BASE_URL"
 API_BASE_URL_DEFAULT = "http://localhost:8000"
 ADMIN_ACCESS_TOKEN_KEY = "line_admin_access_token"
 DEVELOPMENT_ENVIRONMENTS = {"development", "dev", "local", "test"}
+DEVELOPMENT_BRIDGE_PROFILE = "development_gce_iap_reverse_ssh"
 
 
 def resolve_api_base_url() -> str:
@@ -62,7 +65,22 @@ def resolve_admin_access_token() -> str:
 
 
 def build_admin_headers() -> dict[str, str]:
-    headers: dict[str, str] = {}
+    headers = build_cloud_run_invocation_headers()
     if not admin_auth_is_bypassed():
         headers["Authorization"] = f"Bearer {resolve_admin_access_token()}"
     return headers
+
+
+def build_cloud_run_invocation_headers() -> dict[str, str]:
+    """Add the Google-signed service identity without replacing the app session."""
+    auth_mode = os.getenv("UI_API_AUTH_MODE", "").strip().lower()
+    if auth_mode != "google_oidc":
+        return {}
+    audience = os.getenv("UI_API_OIDC_AUDIENCE", "").strip()
+    if not audience:
+        raise RuntimeError("UI_API_OIDC_AUDIENCE 未設定，UI 不得無身分呼叫 Cloud Run API。")
+    try:
+        token = fetch_id_token(GoogleAuthRequest(), audience)
+    except Exception as error:
+        raise RuntimeError("無法取得 UI service account 的 Google OIDC ID token。") from error
+    return {"X-Serverless-Authorization": f"Bearer {token}"}

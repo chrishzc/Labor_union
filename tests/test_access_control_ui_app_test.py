@@ -74,6 +74,29 @@ def _factor_failure_test_app() -> None:
     app._render_login_or_enrollment(_Client())
 
 
+def _enrollment_success_test_app() -> None:
+    """驗證 Stage 1 typed success 會切到既有 QR enrollment 畫面。"""
+    import importlib
+
+    app = importlib.import_module("ui.app")
+    client_module = importlib.import_module("ui.api_clients.access_control_api_client")
+
+    class _Client:
+        def issue_password_challenge(self, **_kwargs):
+            return client_module.PasswordChallengeView(
+                challenge_type="mfa_enrollment",
+                challenge_id="enrollment-id",
+                challenge_token="x" * 48,
+                expires_at="2026-08-20T12:30:00Z",
+                provisioning_uri=(
+                    "otpauth://totp/Labor%20Union%20Admin:root"
+                    "?secret=JBSWY3DPEHPK3PXP&issuer=Labor%20Union%20Admin"
+                ),
+            )
+
+    app._render_login_or_enrollment(_Client())
+
+
 def test_global_guard_renders_login_before_navigation(monkeypatch):
     import builtins
 
@@ -149,3 +172,59 @@ def test_factor_failure_discards_single_use_challenge() -> None:
     assert not app.exception
     assert "access_control_password_challenge" not in app.session_state
     assert any("已作廢" in info.value for info in app.info)
+
+
+def test_enrollment_success_response_renders_qr_flow() -> None:
+    app = AppTest.from_function(_enrollment_success_test_app)
+    app.run(timeout=10)
+
+    app.text_input[0].input("root")
+    app.text_input[1].input("password")
+    app.button[0].click().run(timeout=10)
+
+    assert not app.exception
+    enrollment = app.session_state["access_control_enrollment"]
+    assert enrollment["id"] == "enrollment-id"
+    assert enrollment["provisioning_uri"].startswith("otpauth://totp/")
+    assert any("掃描 QR code" in info.value for info in app.info)
+
+
+def test_access_control_client_decodes_global_typed_error(monkeypatch) -> None:
+    from ui.api_clients.access_control_api_client import (
+        AccessControlApiClient,
+        AccessControlApiError,
+    )
+
+    class _Response:
+        ok = False
+        status_code = 401
+
+        @staticmethod
+        def json():
+            return {
+                "detail": {
+                    "error": {
+                        "category": "forbidden",
+                        "code": "invalid_credentials_or_factor",
+                        "message": "帳號、密碼或驗證碼錯誤",
+                        "field_errors": [],
+                        "domain_blockers": [],
+                        "retryable": False,
+                        "correlation_id": "test-correlation",
+                        "current_version": None,
+                    }
+                }
+            }
+
+    monkeypatch.setattr(
+        "ui.api_clients.access_control_api_client.requests.request",
+        lambda *_args, **_kwargs: _Response(),
+    )
+
+    with pytest.raises(AccessControlApiError) as raised:
+        AccessControlApiClient().issue_password_challenge(
+            username="root", password="wrong"
+        )
+
+    assert raised.value.code == "invalid_credentials_or_factor"
+    assert str(raised.value) == "帳號、密碼或驗證碼錯誤"

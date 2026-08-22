@@ -13,7 +13,7 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from ui.pages.shared import resolve_api_base_url
+from ui.pages.shared import build_cloud_run_invocation_headers, resolve_api_base_url
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -105,7 +105,7 @@ class LineAdminApiClient:
         }
 
     def _request_headers(self, token: str | None) -> dict[str, str]:
-        headers: dict[str, str] = {}
+        headers = build_cloud_run_invocation_headers()
         if token:
             headers["Authorization"] = f"Bearer {token}"
         return headers

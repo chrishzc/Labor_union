@@ -4,16 +4,21 @@
 
 ## 建置
 
-在 repository root 執行，並以目前 commit SHA 當作測試識別：
+一般操作請在repository root執行共用builder；它會建置三個images並完成non-root、built-image
+imports、API／UI health、UI→API及runtime→Private API驗收，失敗時不允許後續push：
 
 ```powershell
-$testId = git rev-parse --short HEAD
-docker build --build-arg APP_RELEASE_VERSION=$testId -f docker/compat/Dockerfile.api -t union-api-compat:$testId .
-docker build --build-arg APP_RELEASE_VERSION=$testId -f docker/compat/Dockerfile.ui -t union-ui-compat:$testId .
-docker build --build-arg APP_RELEASE_VERSION=$testId -f docker/compat/Dockerfile.runtime-ops -t union-runtime-ops-compat:$testId .
+.\scripts\launchers\build_and_validate_cloud_run_compat_images.ps1 -DryRun
+.\scripts\launchers\build_and_validate_cloud_run_compat_images.ps1
 ```
 
+三個輸出名稱固定為`union-api-compat:compat-<HEAD>`、`union-ui-compat:compat-<HEAD>`及
+`union-runtime-ops-compat:compat-<HEAD>`。image是本機／Artifact Registry產物，不提交Git；Git只保存
+Dockerfile、lockfile、builder與驗收契約。
+
 Docker 會自動採用各 Dockerfile 同名的 `.dockerignore`。建置前仍應檢查 context，且不得用 `--secret` 以外的方式傳入敏感值。
+
+三個測試映像分別安裝 `compat-api`、`compat-ui`、`compat-runtime-ops` dependency group，避免把其他 process 的完整依賴一併封裝。Redis client 已自此測試封裝移除；API 與 runtime-ops 映像預設 `REDIS_URL` 為空字串，Redis 不再是啟動或 readiness 前置條件。
 
 ## 本機啟動
 
