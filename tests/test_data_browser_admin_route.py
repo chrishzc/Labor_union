@@ -40,6 +40,18 @@ def test_admin_router_allows_any_authenticated_enabled_internal_role(monkeypatch
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("ENABLE_ADMIN_AUTH", "true")
     monkeypatch.setattr(admin_auth, "get_admin_session", lambda _token: _principal("line_manager"))
+    monkeypatch.setattr(
+        data_browser_admin.data_browser_maintenance,
+        "get_data_browser_table_schema",
+        lambda _table: {
+            "rows": [],
+            "columns": [],
+            "primary_key": "case_no",
+            "editable_columns": [],
+            "valid_options": {},
+            "read_only": True,
+        },
+    )
 
     response = _client().get(
         "/api/v1/admin/data-browser/orders",

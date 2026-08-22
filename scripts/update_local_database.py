@@ -108,6 +108,20 @@ def validate_local_source(config, source: str, environment=None) -> None:
         raise LocalDatabaseUpdateError("production environment refused")
 
 
+def with_database_port(config, database_port: int | None):
+    """Return the same credential set with an explicit local TCP forwarding port."""
+    if database_port is None:
+        return config
+    if not 1 <= database_port <= 65535:
+        raise LocalDatabaseUpdateError("database port must be between 1 and 65535")
+    return migration.DatabaseConfig(
+        host=config.host,
+        port=database_port,
+        user=config.user,
+        password=config.password,
+    )
+
+
 def candidate_name(source: str, now=None) -> str:
     timestamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d%H%M%S")
     suffix = f"_local_{timestamp}"
@@ -617,6 +631,7 @@ def update_local_database(
     confirm_database=None,
     confirm_configured_database=False,
     mysql_container=None,
+    database_port=None,
     drift_report=False,
 ) -> dict[str, object]:
     if migration is None:
@@ -634,6 +649,7 @@ def update_local_database(
         )
         mysql_container = resolve_mysql_container(mysql_container)
         config, source = migration.config_from_env(environment_path)
+        config = with_database_port(config, database_port)
         validate_local_source(config, source)
         if drift_report:
             if apply or require_current:
@@ -685,6 +701,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--confirm-database")
     command.add_argument("--confirm-configured-database", action="store_true")
     command.add_argument("--mysql-container")
+    command.add_argument("--database-port", type=int)
     return command
 
 
@@ -700,6 +717,7 @@ def main() -> int:
             confirm_database=arguments.confirm_database,
             confirm_configured_database=arguments.confirm_configured_database,
             mysql_container=arguments.mysql_container,
+            database_port=arguments.database_port,
             drift_report=arguments.drift_report,
         )
     except LocalDatabaseUpdateError as error:

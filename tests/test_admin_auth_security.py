@@ -80,7 +80,8 @@ def test_streamlit_line_client_uses_session_transport():
     source = (ROOT / "ui/api_clients/line_api_client.py").read_text(encoding="utf-8")
     page = (ROOT / "ui/pages/07_line_management.py").read_text(encoding="utf-8")
 
-    assert 'headers: dict[str, str] = {}' in source
+    assert "build_cloud_run_invocation_headers" in source
+    assert "headers = build_cloud_run_invocation_headers()" in source
     assert 'headers["Authorization"] = f"Bearer {token}"' in source
     assert "os.getenv" not in page
 

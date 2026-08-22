@@ -9,14 +9,45 @@ from dotenv import load_dotenv
 # 從專案根目錄的 .env 讀取資料庫連線設定 (若 .env 不存在或缺少某欄位，則回退為原本的預設值)
 load_dotenv(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
 
-DB_CONFIG = {
-    'host': os.getenv('DB_HOST', '127.0.0.1'),
-    'port': int(os.getenv('DB_PORT', 3306)),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', '1234'),
-    'database': os.getenv('DB_DATABASE', 'union_db'),
-    'charset': 'utf8mb4'
-}
+DEVELOPMENT_GCE_IAP_BRIDGE_PROFILE = "development_gce_iap_reverse_ssh"
+
+
+def _database_config_from_environment() -> dict:
+    app_env = os.getenv("APP_ENV", "development").strip().lower()
+    deployment_profile = os.getenv("DEPLOYMENT_PROFILE", "").strip().lower()
+    if app_env == "production" and deployment_profile == DEVELOPMENT_GCE_IAP_BRIDGE_PROFILE:
+        raise RuntimeError(
+            "development GCE+IAP reverse SSH DB bridge is forbidden in production"
+        )
+
+    config = {
+        "host": os.getenv("DB_HOST", "127.0.0.1"),
+        "port": int(os.getenv("DB_PORT", "3306")),
+        "user": os.getenv("DB_USER", "root"),
+        "password": os.getenv("DB_PASSWORD", "1234"),
+        "database": os.getenv("DB_DATABASE", "union_db"),
+        "charset": "utf8mb4",
+    }
+    ssl_mode = os.getenv("DB_SSL_MODE", "disabled").strip().lower()
+    if ssl_mode == "disabled":
+        return config
+    if ssl_mode not in {"verify_ca", "verify_identity"}:
+        raise RuntimeError("DB_SSL_MODE must be disabled, verify_ca, or verify_identity")
+    ca_path = os.getenv("DB_SSL_CA", "").strip()
+    cert_path = os.getenv("DB_SSL_CERT", "").strip()
+    key_path = os.getenv("DB_SSL_KEY", "").strip()
+    if not all((ca_path, cert_path, key_path)):
+        raise RuntimeError("MySQL mTLS requires DB_SSL_CA, DB_SSL_CERT, and DB_SSL_KEY")
+    config["ssl"] = {
+        "ca": ca_path,
+        "cert": cert_path,
+        "key": key_path,
+        "check_hostname": ssl_mode == "verify_identity",
+    }
+    return config
+
+
+DB_CONFIG = _database_config_from_environment()
 
 def safe_float(val) -> float:
     if val is None:

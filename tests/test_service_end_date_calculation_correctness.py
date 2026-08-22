@@ -43,6 +43,38 @@ HOLIDAYS_2026 = {
 }
 
 
+class _HolidayCursor:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, _query):
+        return None
+
+    def fetchall(self):
+        return [
+            {"holiday_date": holiday_date, "holiday_name": "測試國定假日"}
+            for holiday_date in sorted(HOLIDAYS_2026)
+        ]
+
+
+class _HolidayConnection:
+    def cursor(self):
+        return _HolidayCursor()
+
+    def close(self):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _isolated_holiday_repository(monkeypatch):
+    from infrastructure.mysql import mysql_adapter
+
+    monkeypatch.setattr(mysql_adapter, "get_connection", _HolidayConnection)
+
+
 # (name, start, service_days, service_type, holiday_dates, expected_end)
 SCENARIOS = [
     # C1: 連續服務 never skips a weekday and no holiday falls in range,

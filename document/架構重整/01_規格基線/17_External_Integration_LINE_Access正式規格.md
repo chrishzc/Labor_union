@@ -290,6 +290,13 @@ Modules：
   challenge；Stage 2 驗該 challenge 與 TOTP 或 recovery code，成功後才建立 bearer session。任何
   Stage 1 未通過都回泛化 `invalid_credentials_or_factor`，Stage 2 failure 回泛化
   `invalid_credentials_or_factor` 或 rate-limit 429，不洩漏帳號、MFA state 或 factor 狀態。
+- Stage 1 帳密驗證成功但 factor 尚未綁定時，屬成功的 `mfa_enrollment` challenge 結果，不是 403
+  error；`POST /api/v1/admin/auth/login/challenges` 必須以 HTTP 200 `data` 回傳短效 challenge token、
+  expiry 與 provisioning URI，且仍不得建立 bearer session。已綁定 factor 則回
+  `factor_verification`；consumer 必須依 `challenge_type` 分支，未實作 enrollment 的 consumer 固定
+  fail closed，不得把 enrollment challenge 當作一般 factor challenge。
+- provisioning URI 與原 challenge token 只允許出現在帳密已驗證成功的短效 success `data` 及
+  記憶體內綁定畫面；所有非 2xx error、URL、browser storage、log 與 audit detail 均禁止包含。
 - password challenge 必須綁定 user、credential version、active factor identity、account access-control version、source-risk subject 與 absolute
   expiry；不得在 browser storage、log、audit detail 或 URL 保存 password、TOTP 或原 challenge token。
 

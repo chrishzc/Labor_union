@@ -177,9 +177,8 @@ def test_unmatched_staff_collection_http_endpoint_returns_typed_410():
     )
 
     assert response.status_code == 410
-    assert response.json()["detail"]["error"]["replacement"].endswith(
-        "/matching/preview"
-    )
+    assert response.json()["detail"]["error"]["code"] == "resource_retired"
+    assert "replacement" not in response.json()["detail"]["error"]
 
 
 def test_collection_preview_payload_does_not_accept_client_money_values():

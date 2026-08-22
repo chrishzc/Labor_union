@@ -203,11 +203,16 @@ def _render_login_or_enrollment(client: AccessControlApiClient) -> None:
         try:
             challenge = client.issue_password_challenge(username=username, password=password)
         except AccessControlApiError as error:
-            if error.code == "mfa_enrollment_required" and isinstance(error.context.get("challenge"), dict):
-                st.session_state["access_control_enrollment"] = error.context["challenge"]
-                st.rerun()
             st.error(str(error))
             return
+        if challenge.challenge_type == "mfa_enrollment":
+            st.session_state["access_control_enrollment"] = {
+                "id": challenge.challenge_id,
+                "token": challenge.challenge_token,
+                "provisioning_uri": challenge.provisioning_uri,
+                "expires_at": challenge.expires_at.isoformat(),
+            }
+            st.rerun()
         st.session_state["access_control_password_challenge"] = {"id": challenge.challenge_id, "token": challenge.challenge_token}
         st.rerun()
 

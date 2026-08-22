@@ -19,6 +19,7 @@ from subsystems.access.authentication_session import (
     AdminPrincipal,
     AdminSessionSchemaError,
     AdminLoginRateLimitedError,
+    MfaEnrollmentChallenge,
     PasswordLoginChallenge,
     authenticate_admin,
 )
@@ -92,9 +93,37 @@ def test_password_challenge_route_never_issues_a_session_before_factor_verificat
     )
 
     assert response.data.challenge_id == "challenge-1"
+    assert response.data.challenge_type == "factor_verification"
+    assert response.data.provisioning_uri is None
     assert not hasattr(response.data, "access_token")
     assert response.data.expires_at.tzinfo is not None
     assert response.data.expires_at.utcoffset() == timedelta(0)
+
+
+def test_password_challenge_route_returns_enrollment_as_typed_success(monkeypatch):
+    challenge = MfaEnrollmentChallenge(
+        "enrollment-1",
+        "y" * 48,
+        "otpauth://totp/Labor%20Union%20Admin:root?secret=PRIVATE",
+        datetime(2026, 8, 16, 12, 5, 0),
+    )
+    monkeypatch.setattr(
+        admin_auth, "issue_password_login_challenge", lambda *_args, **_kwargs: challenge
+    )
+
+    response = asyncio.run(
+        admin_auth.issue_login_challenge(
+            admin_auth.AdminPasswordChallengeRequest(
+                username="admin", password="password"
+            ),
+            _login_request(),
+        )
+    )
+
+    assert response.data.challenge_type == "mfa_enrollment"
+    assert response.data.challenge_id == "enrollment-1"
+    assert response.data.provisioning_uri.startswith("otpauth://totp/")
+    assert not hasattr(response.data, "access_token")
 
 
 def test_factor_verification_route_issues_session_only_after_valid_challenge(monkeypatch):
