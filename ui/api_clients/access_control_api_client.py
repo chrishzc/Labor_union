@@ -6,13 +6,13 @@ Description: 提供 Streamlit 全域登入與帳號中心使用的 typed Access 
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 import requests
 from pydantic import BaseModel, ValidationError
 
-from ui.pages.shared import resolve_api_base_url
+from ui.pages.shared import build_cloud_run_invocation_headers, resolve_api_base_url
 
 
 class AccessControlApiError(RuntimeError):
@@ -42,9 +42,11 @@ class AdminSessionView(BaseModel):
 
 
 class PasswordChallengeView(BaseModel):
+    challenge_type: Literal["factor_verification", "mfa_enrollment"]
     challenge_id: str
     challenge_token: str
     expires_at: datetime
+    provisioning_uri: str | None = None
 
 
 class AccountCenterUserView(AdminPrincipalView):
@@ -114,7 +116,9 @@ class AccessControlApiClient:
         self._request("POST", f"/api/v1/admin/accounts/{account_id}/sessions/revoke", token=token, json={"reason": reason, "expected_version": expected_version, "idempotency_key": str(uuid4())})
 
     def _request(self, method: str, path: str, *, token: str | None = None, json: dict[str, Any] | None = None) -> Any:
-        headers = {"Authorization": f"Bearer {token}"} if token else {}
+        headers = build_cloud_run_invocation_headers()
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
         try:
             response = requests.request(method, f"{resolve_api_base_url()}{path}", headers=headers, json=json, timeout=8)
         except requests.RequestException as error:
@@ -126,9 +130,13 @@ class AccessControlApiClient:
         if not response.ok:
             detail = payload.get("detail") if isinstance(payload, dict) else None
             detail = detail if isinstance(detail, dict) else {}
+            nested_error = detail.get("error")
+            error_detail = nested_error if isinstance(nested_error, dict) else detail
             raise AccessControlApiError(
-                str(detail.get("message") or "登入請求失敗"), status_code=response.status_code,
-                code=str(detail.get("code") or "access_control_request_failed"), context=detail,
+                str(error_detail.get("message") or "登入請求失敗"),
+                status_code=response.status_code,
+                code=str(error_detail.get("code") or "access_control_request_failed"),
+                context=error_detail,
             )
         try:
             return _Envelope.model_validate(payload).data or {}

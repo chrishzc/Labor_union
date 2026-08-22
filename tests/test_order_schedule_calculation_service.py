@@ -9,6 +9,35 @@ import pytest
 from datetime import date
 from subsystems.scheduling.attendance_schedule_query import calculate_order_attendance_schedule
 
+
+class _HolidayCursor:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, _query):
+        return None
+
+    def fetchall(self):
+        return [{"holiday_date": date(2026, 10, 10), "holiday_name": "測試國定假日"}]
+
+
+class _HolidayConnection:
+    def cursor(self):
+        return _HolidayCursor()
+
+    def close(self):
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _isolated_holiday_repository(monkeypatch):
+    from infrastructure.mysql import mysql_adapter
+
+    monkeypatch.setattr(mysql_adapter, "get_connection", _HolidayConnection)
+
 def test_order_schedule_calculation_union_dates():
     """驗證 custom_holiday_rest_dates 與 custom_leave_dates 會取聯集，不互斥遺失"""
     start_d = date(2026, 10, 1)

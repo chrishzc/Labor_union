@@ -88,36 +88,65 @@ macOS／Unix 另執行 `./scripts/launchers/start_local_development.sh --dry-run
 
 ## Cloud Run compat staging（開發用 GCE＋IAP 反向 SSH Tunnel 版）
 
-> **嚴禁正式部署使用。** 此拓樸只用於隔離的 `environment=staging|test`、
-> `deployment=compat` Project，提早驗證 Cloud Run、容器、OIDC 與本機開發 DB 相容性。
-> 它不具 HA、SLA、正式資料保護或 production cutover 能力；正式環境仍須核准的
-> Cloud VPN → 地端 NAS／MySQL 路徑。
+> **嚴禁正式部署使用。** 此版本只為提早驗證 Cloud Run、容器、服務間 OIDC 與目前本機開發 DB
+> 的相容性；不具 HA、SLA、固定地端入口、正式資料保護或 production cutover 能力。正式環境仍必須
+> 使用核准的 Cloud VPN → 地端 NAS／MySQL 路徑。
 
-使用 PowerShell 7 從專案根目錄執行，並在任何 GCP mutation 前先跑 preflight 與 dry run：
+以下入口只執行 `Cloud_Run_現況相容性部署測試封裝計畫.md` 的隔離開發測試拓樸。三支腳本都要求
+專案標籤為 `environment=staging|test` 與 `deployment=compat`，拒絕其他 Project；image alias、Cloud
+Run資源及tag也固定包含 `compat`。請使用 PowerShell 7（`pwsh`），首次建立環境前先執行dry run：
 
 ```powershell
 .\scripts\launchers\setup_gcp_cloud_run_compat.ps1 -PreflightOnly
 .\scripts\launchers\setup_gcp_cloud_run_compat.ps1 -DryRun
 .\scripts\launchers\setup_gcp_cloud_run_compat.ps1
+```
+
+`-PreflightOnly`會一次檢查PowerShell 7、Git、Docker CLI／daemon、gcloud、Windows OpenSSH、
+`ssh-keygen`、`icacls`、`.env`及三份Dockerfile；只要缺少任何項目，就以編號列出原因與處置方向，
+不登入、不build、不建立GCP資源。首次正式執行在任何GCP mutation前，會自動從目前source建置
+API、UI、runtime-ops三個images並完成本機container驗收；組員不需要先手動建立或挑選images。
+
+首次入口會以 strict UTF-8 讀取 Git-ignored `.env`，只把必要的 DB、TOTP 與 LINE secret 透過 stdin
+建立為 Secret Manager version；不把 `.env`、secret值或 service-account key 放入 image／Git／CLI
+參數。它會列出目前帳號可用的Billing Accounts，並從Cloud Billing API的`currencyCode`自動判斷
+計費幣別；預算只需輸入數字，腳本會附加例如`TWD`或`USD`。若API因權限或舊版CLI無法回傳幣別，
+才會要求人工輸入3碼ISO 4217代碼。若選擇建立新帳務，腳本只會開啟Google Cloud
+Billing網頁並等待使用者完成付款與法律資料，無法也不會代替使用者裁決。Project、月預算、subnet
+CIDR、Artifact Registry及所有預計建立的付費資源都會在mutation前再次顯示；輸入指定確認字串後
+才會繼續。
+
+環境已由首次入口建立後，使用下列入口發布新images：
+
+```powershell
 .\scripts\launchers\publish_gcp_cloud_run_compat.ps1 -PreflightOnly
 .\scripts\launchers\publish_gcp_cloud_run_compat.ps1 -DryRun
+.\scripts\launchers\publish_gcp_cloud_run_compat.ps1
+# 只更新指定角色
 .\scripts\launchers\publish_gcp_cloud_run_compat.ps1 -Roles api,ui
+# 進階模式：改為人工挑選已存在的本機images
 .\scripts\launchers\publish_gcp_cloud_run_compat.ps1 -SelectExistingImages
 ```
 
-setup 入口必須 fail closed 檢查 PowerShell 7、Git、Docker、gcloud、OpenSSH、`.env` 與三份
-Dockerfile；預設從 source 建置並本機驗收 API、UI、runtime-ops images。只在明確指定
-`-SelectExistingImages` 時才人工挑選已存在 image。publish 只接受不可變
-`image@sha256:<digest>`，有上限重試短暫 429／server error，永久權限、設定或驗收錯誤立即停止。
+發布入口預設從三份Dockerfile重建、完成與首次入口相同的本機驗收，再自動建立唯一immutable tag；
+`-Roles`可限制只更新指定角色。只有明確指定`-SelectExistingImages`時才列出本機images供人工複選。
+push後一定解析為`image@sha256:<digest>`才允許部署；既有Cloud Run資源只更新image，不清除env、
+secret、network或identity設定。gcloud的HTTP 429／`RESOURCE_EXHAUSTED`／rate limit與已知API
+propagation錯誤，以及Docker push短暫server error，會採有上限的exponential backoff重試；永久權限、
+設定或驗收錯誤仍立即fail closed。
 
-`.env` 以 strict UTF-8 讀取；DB、TOTP 與 LINE secret 只能透過 stdin 建立 Secret Manager
-version，不得進入 image、Git、CLI 參數、log 或 service-account key。建立付費資源前必須顯示
-Project、幣別、預算、subnet 與 Artifact Registry，並取得人工確認。
+compat拓樸為兩個Services、三個獨立Worker Pools及一個Monitor Job。首次入口另外建立無外部 IP 的
+小型 GCE bridge VM、IAP SSH 防火牆規則及 Cloud Run subnet → bridge TCP/13306 規則。本機另啟動
+只綁 `127.0.0.1:13307` 的 Docker TCP forward，再由 IAP SSH 建立
+`GCE:13306 → 本機:13307 → mysql_db:3306` 反向 Tunnel；MySQL 不直接公開到 Internet。UI公開 URL
+仍由 application login＋TOTP保護，UI → API與runtime → API使用Google OIDC。腳本不建立Cloud VPN、
+Load Balancer／Cloud Armor、staging NAS、LINE測試channel或production migration，也不建立
+service-account JSON key。
 
-compat DB bridge 只能走 `GCE:13306 → 本機:13307 → mysql_db:3306`，MySQL 不公開到
-Internet。私鑰、known-hosts、PID 與 log 保留在 Git-ignored
-`scratch/cloud-run-db-bridge/<project-id>/`，並以 `icacls` 限制權限。電腦休眠、斷網、Docker／MySQL
-或 bridge 停止後必須 fail closed，不得改走公開 DB。
+bridge manager會在`scratch/cloud-run-db-bridge/<project-id>/`建立該Project專用Ed25519 key，使用
+`icacls`移除繼承權限、只保留目前Windows使用者與SYSTEM，再透過OS Login登錄public key；不再要求
+新電腦事先存在`~/.ssh/google_compute_engine`。私鑰、known-hosts、PID與log全部維持Git ignored，
+不得搬入`.env`、image或版本庫。
 
 ```powershell
 pwsh -NoProfile -File .\scripts\launchers\manage_gcp_cloud_run_db_bridge.ps1 -Action status -ProjectId <PROJECT_ID>
@@ -125,9 +154,15 @@ pwsh -NoProfile -File .\scripts\launchers\manage_gcp_cloud_run_db_bridge.ps1 -Ac
 pwsh -NoProfile -File .\scripts\launchers\manage_gcp_cloud_run_db_bridge.ps1 -Action start -ProjectId <PROJECT_ID>
 ```
 
-測試結束先停止 bridge，再由操作人員依 receipt 清理 compat 資源。本拓樸不建立 Cloud VPN、
-Load Balancer／Cloud Armor、staging NAS、LINE 測試 channel 或 production migration；Webhook 與 LIFF URL
-仍由人工在 LINE Developers Console 設定與驗證。
+電腦休眠、斷網、停止 bridge process或停止本機 Docker/MySQL後，Cloud Run DB操作會 fail closed；
+不會自動改走公開 DB。實際建立GCP資源會產生費用；測試完成後先停止 bridge，再由操作人員依
+測試報告及清理receipt刪除compat資源。首次腳本輸出的Webhook與LIFF URL仍須到LINE Developers
+Console人工設定並驗證，這是整體驗收的人工 gate。
+
+Windows launcher 只在本機 LINE runtime 設定與 access token 通過唯讀檢查時啟動 LINE worker；未設定
+LINE 的開發者會看到 `skipped` 提示，其餘本機服務仍正常啟動。這不會自動切換 runtime mode，也不會
+把 placeholder credential 當成有效設定。維護者可用下列受控 smoke 實際啟動並檢查服務；完成或失敗
+時只終止本次 smoke 建立的 PID：
 
 Smoke 固定 GET-only；不使用既有 DB mutation，不啟動 monitor／worker／LINE／provider。React ready 必須是
 5173 回傳 HTML 且含 `id="root"`，並以 `/api/...` relative proxy 觀察 backend response。每次 run 使用唯一

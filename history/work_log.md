@@ -766,3 +766,257 @@
 - v2 明確排除開發 launcher、Knowledge、file watcher、測試／migration、secret、VPN 拓樸值、歷史與舊資料；API 是唯一 DB owner，其他 image 不含 DB driver／credential。
 - 封裝計畫採 fail-closed：UI 本機模板寫入、API 可變 JSON／本機 archive、開發 reviewer callback、Worker Pool supervisor 與 ingestion entry point 未完成前，不得宣稱 production-ready。
 - 計畫文件以 runtime manifest、import／asset closure、image layer scan、SBOM、startup／exit、single-tunnel outage/recovery smoke 作為後續驗收；本次未建立 Dockerfile、image、Cloud Run、VPN、IAM 或 DB 變更。
+
+## [2026-08-15] 單一 Cloud VPN 雲端部署簡報
+
+- 依 `document/雲端部署/計劃書/單一Cloud VPN計畫書.md` 製作 16:9、11 頁的雲端部署段落簡報；內容依序涵蓋混合部署理由、全地端比較、四種雲地連線選型、單一 VPN 結論、部署架構、內部服務流程、故障復原、成本與上線 Gate。
+- 指定 `Cloud_Run_連線方案比較圖.svg` 已依上下內容拆成兩頁，`單一Cloud VPN架構圖.png` 內兩張圖已各自裁切為部署架構與服務流程頁；所有衍生圖片只在 Git ignored scratch 中用於組裝與 QA。
+- 逐頁輸出 11 張 PNG 進行視覺檢查，修正 SVG 中文缺字、長圖裁切未生效與標題換行；`slides_test.py` 完成邊界／溢位檢查，未回報錯誤。
+- 同步建立 Gamma 10 卡可編輯版本（Gamma 單次上限為 10 卡）；精確包含指定本機圖檔的正式交付以本機 PPTX 為準。本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-15] 單一 Cloud VPN 簡報主題配色與比較圖合併
+
+- 以 `C:/Users/TMP-214/Downloads/雲端部屬-字體修正.pptx` 的暖白、深棕與橘色系統一簡報背景、文字、卡片與重點色；保留既有內容、架構圖與註解。
+- 將原第 4、5 頁還原為單一完整的 `Cloud_Run_連線方案比較圖.svg` 比較頁，刪除重複拆頁並重新編排頁碼，最終為 16:9、10 頁。
+- 逐頁輸出 10 張 PNG 完成視覺檢查；`slides_test.py` 通過，回報 `Test passed. No overflow detected.`。
+- 原始簡報與參考主題檔均未覆寫；本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-16] 單一 Cloud VPN 簡報內容與圖像修正
+
+- 將資料庫留在地端的主要理由修正為「客戶／機敏資料不上雲，降低雲端外洩風險」，並同步調整封面、混合部署理由與全地端／混合部署比較文案。
+- 第 3 頁兩側統一改為「缺點」；全地端補充硬體採購與汰換、維護／備份／資安成本，以及設備與現場環境對穩定性的影響；混合部署補充 VPN、雲端費用、跨環境監控與 DB 中斷風險。
+- 比較圖移除深色背景與「適用／選用條件」，放大並加粗底部評分權重與共同底線；NAT 結論改為「不推薦正式環境使用」。兩張架構圖以像素級換色保留文字、連線與架構，去除黑色畫布並將淺色文字改為深色。
+- 移除封面左下部署規劃行，第 5 頁標題縮短為穩定單行；最終仍為 16:9、10 頁。逐頁視覺檢查完成，`slides_test.py` 回報 `Test passed. No overflow detected.`。
+- 原始簡報未覆寫；本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-16] 單一 Cloud VPN 簡報架構圖重繪
+
+- 第 6、7 頁不再沿用模糊的原始點陣圖，依原架構語意以 Graphviz 重繪高對比拓樸，並輸出 2600px 高解析 PNG 嵌入 PowerPoint，保留主題暖白、蜜桃與橘色系統。
+- 第 6 頁清楚呈現外部入口、Cloud Run、Business API、Direct VPC egress、單一 VPN tunnel 與地端 NAS MySQL；第 7 頁清楚呈現服務與事件來源、API／UoW 邊界、正式 DB 與告警備援／DLQ。
+- 第 7 頁移除舊版三條重疊原則文字，改為單一大字原則帶：「僅 API 可連 DB、Query 唯讀／Apply 重讀事實、副作用由 outbox／job 執行」。
+- 最終仍為 16:9、10 頁；逐頁視覺檢查完成，`slides_test.py` 回報 `Test passed. No overflow detected.`。原始簡報未覆寫；本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-16] 單一 Cloud VPN 簡報清晰度與版面修正
+
+- 第 3 頁混合部署缺點改為一致字級與縮排，第三點縮短為「VPN 中斷時 DB 暫時無法連線」，避免換行跑版。
+- 第 4 頁比較圖主畫布固定為主題暖白，四張方案卡統一 3px 外框；標題色塊內縮，讓上緣與側邊框線維持相同可見粗度。
+- 第 5 頁標題縮短為「單一 Cloud VPN：兼顧安全、成本與風險」；第 9 頁標題縮短為單行，並移除完整 `v1 不建立` 區塊。
+- 第 6、7 頁重新以高對比實色處理原始架構圖，改採緊密裁切、主題暖白／蜜桃背景與橘色強調，移除圖內「規劃／尚未部署」；細線與文字不再使用半透明抗鋸齒，提升投影可讀性。
+- 第 7 頁放大主要流程圖，底部三原則改為原生 PowerPoint 粗體文字。最終仍為 16:9、10 頁，逐頁視覺檢查完成，`slides_test.py` 回報 `Test passed. No overflow detected.`。
+- 原始簡報未覆寫；本次未 stage、commit、push、部署或修改任何雲端／資料庫資源。
+
+## [2026-08-17] 新增 Eraser MCP 全域設定
+
+- 於全域設定檔 `$HOME\.gemini\config\mcp_config.json` 新增 `eraser` 遠端 MCP 服務 (`https://app.eraser.io/api/mcp`)。
+- 設定包含 `serverUrl` 與 `url` 鍵名，完整支援 Antigravity 與通用 Remote SSE 傳輸機制。
+
+## [2026-08-17] 雲端部署計畫書調整為 4+1 現行代碼吻合架構
+
+- 檢視歷史與正式文件（`文件整併工作區`、`功能開發計畫`、`架構重整`）及實際程式碼實作（`api/routes/finance_import.py`、`hcm_import.py` 等）。
+- 確認現行檔案匯入均採 Admin UI 透過 HTTP (multipart) 直傳 Business API 於本機暫存處理並即刻清除，專案中無任何 GCS SDK、Eventarc 或 Ingestion Producer 程式碼。
+- 更新 `document/雲端部署/計劃書/單一Cloud VPN計畫書.md`：
+  - 拓樸由 5+1 修正為 4+1（4 個 Cloud Run 資源：API、UI、Worker Pool、Monitor Job + 1 個地端 NAS MySQL）。
+  - 移除 Cloud Storage、Eventarc 與 Ingestion Producer 相關配置與月費，更新流程圖與驗收 Gate。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md`：
+  - 同步修正為 4+1 架構與 3 個容器映像，統一檔案匯入為直傳 API 模式。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫_v2.md`：
+  - 映像數量由 4 個精簡為 3 個（`union-api`、`union-ui`、`union-runtime-ops`），移除未實作的 `Dockerfile.ingestion`。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫.md`：
+  - 開頭標註 `superseded`，明確指引至現行 v2 標準。
+- 本次未修改任何 Python 業務代碼、資料庫 Schema 或現有測試，亦未執行任何 git add/commit。
+
+## [2026-08-17] 使用 Eraser MCP 更新雲端部署與服務架構圖
+
+- 透過 Eraser MCP 工具將工作區內的兩張架構圖全面重繪/更新為 4+1 吻合代碼架構：
+  1. `單一Cloud VPN 雲端部屬架構` (`74h9Cayj7Jlm4ZFtodKN`): 移除 Cloud Storage、Eventarc、Ingestion Producer，更新 Admin UI 直傳 Business API 暫存解析流向，保留 4 個 Cloud Run 資源與地端 NAS MySQL 連線。
+  2. `內部服務架構流程` (`hISmxqzFlIzeAubr5q1p`): 移除 Cloud Storage、Eventarc、Ingestion Producer 與已退役之 Knowledge Runtime，強化 Admin UI 檔案上傳與 Business API 本機暫存解析及即刻清理職責。
+- 兩張圖表均已於 Eraser 雲端工作區即時同步，並產出高解析匯出。
+
+## [2026-08-17] 移除 DB VLAN 規範，簡化為地端私有網路
+
+- 依使用者要求，將架構與文件中過度設計之「DB VLAN」概念移除，簡化為直觀之「地端私有網路 (LAN)」。
+- 更新 `document/雲端部署/計劃書/單一Cloud VPN計畫書.md`：將所有 DB VLAN 改為地端私網與 NAS 私網連線。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md`：同步替換 DB VLAN 為地端私網。
+- 更新 Eraser 架構圖 (`74h9Cayj7Jlm4ZFtodKN`)：移除 `DB VLAN` 方塊，由地端 VPN Gateway 直接連線至 NAS MySQL 正式 DB。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-17] Eraser 雲端架構圖全面中文化
+
+- 透過 Eraser MCP 工具將 `74h9Cayj7Jlm4ZFtodKN`（單一 Cloud VPN 雲端部署架構）與 `hISmxqzFlIzeAubr5q1p`（內部服務架構流程）兩張圖表中所有英文名詞全面轉為清晰易讀的繁體中文標示。
+- 包含外部負載平衡器、WAF 防護、管理後台、背景工作處理器、系統健康監控、核心業務 API、私網直連出口、雲端路由器、VPN 加密隧道等完整中文對照。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-17] 於 Eraser 繪製「三種連線方案比較圖」
+
+- 依使用者要求，在 Eraser 工作區 (`4I8c5lSvLrUnwTW1R8mR`) 繪製三種連線方案比較圖（移除雙 Tunnel 欄位，保留右側 3 個方案）：
+  1. **單一 Cloud VPN**（評分 9.0，推薦：安全／成本最平衡）
+  2. **Tailscale 版**（評分 8.1，預算優先的可接受方案）
+  3. **NAT + 公開 3306**（評分 4.1，不推薦正式環境使用）
+- 完整呈現各方案之預估月費、安全性評分、優點、缺點、結論橫幅與綜合權重說明。
+- 依使用者指示，將各方案內部之月費、安全性、優缺點文字背底由灰底調整為完全透明，並保留精美外邊框。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-17] Eraser 全部 3 張架構圖：字體加大、背底透明化與方框擴大
+
+- 依使用者指示，對工作區內全部 3 張 Eraser 圖表進行視覺大改版：
+  1. `單一 Cloud VPN 雲端部署架構` (`74h9Cayj7Jlm4ZFtodKN`): 全元件背底改為 `transparent`，文字層級全面升級加大（`md/lg/xl`），各方框加寬加高，箭頭連線重新對齊。
+  2. `內部服務架構流程` (`hISmxqzFlIzeAubr5q1p`): 全元件背底改為 `transparent`，加大字體並擴大外部入口、Cloud Run 服務群、Business API 與地端 NAS 的方框，確保文字完整呈現無遮擋。
+  3. `三種連線方案比較圖` (`4I8c5lSvLrUnwTW1R8mR`): 標題、結論、金額、評分、優缺點清單字體全面放大，卡片尺寸擴大至 380px，背底維持透明且邊框更清晰。
+- 3 張圖表皆已於 Eraser 雲端工作區即時同步，並產出高解析匯出。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-17] 整理「雲端部署預估費用（單頁 PPT 表格式）」
+
+- 依使用者指示，將單一 Cloud VPN 雲端混合部署方案之所有成本細項彙整為清晰專業的 1 頁 PPT 表格排版。
+- 依使用者要求進行**極致精簡改版**：
+  1. 頂部保留 2 個超大指標卡（預估總月費 NT$3,800～4,300、預算上限 NT$5,000）。
+  2. 表格大幅精簡為 4 大核心項目（Cloud Run 運算、VPN 專線、負載平衡器+WAF、基礎日誌金鑰），文字精簡至一句話，字體大幅升級至 12～20pt。
+  3. 底部突出「地端保留 NAS 免買 Cloud SQL 現省 3~8 千」核心亮點。
+- 生成並覆蓋更新高畫質 16:9 簡報檔案 `document/雲端部署/雲端混合部署預估費用明細.pptx`。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-19] 於 Eraser 更新「三種連線方案比較圖」價格（以 API min=1 為基準）
+
+- 依使用者指示，將三種連線方案的運算基準統一更新為「僅 Business API 設 min=1 待命，其餘排程叫醒 (min=0)」：
+  1. **單一 Cloud VPN（推薦）**：USD 82～95 / 月（約 **NT$ 2,700～3,100**）
+  2. **Tailscale 版（預算優先）**：USD 45～58 / 月（約 **NT$ 1,500～1,900**）
+  3. **NAT + 公開 3306（不推薦）**：USD 78～91 / 月（約 **NT$ 2,550～3,000**）
+- 圖表副標與各卡片價格已同步於 Eraser 線上工作區 (`4I8c5lSvLrUnwTW1R8mR`) 完成即時更新。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-19] Eraser 比較圖全面重構：純 3 者橫向比較 ＋ 全正統中文語譯
+
+- 依使用者指示，對 `4I8c5lSvLrUnwTW1R8mR` 比較圖進行深度內容審查與重構：
+  1. **徹底清除雙 Tunnel 殘留**：移除「比雙 Tunnel 省 $36.5」、「無雙 Tunnel Failover」等字句，使優缺點與安全性純粹聚焦於「Google 官方 VPN vs Tailscale vs 公開資料庫」三者的橫向客觀比較。
+  2. **全中文正統語譯**：將 Cloud VPN、userspace SOCKS5、allowlist、control plane、auth key、DERP 等全面轉換為正統繁體中文（如「使用者空間代理」、「存取控制清單」、「第三方認證伺服器與中繼節點」）。
+  3. 圖表各項指標、優缺點、結論橫幅與底部底線說明皆已即時同步於 Eraser 線上工作區。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-19] 更新費用預估 PPTX（以 API min=1 為基準，月費 NT$2,700～3,100）
+
+- 依使用者指示，重新生成覆蓋 `document/雲端部署/雲端混合部署預估費用明細.pptx`：
+  1. 運算基準統一為「僅核心業務 API 設 min=1 待命，其餘排程叫醒 (min=0)」，總月費下調至 **NT$ 2,700～3,100 / 月（USD 82～95）**。
+  2. 預算上限指標卡同步調整為 **NT$ 4,000 / 月**。
+  3. 表格維持極簡 4 大核心項目（VPN 專線 41%、安全防護 33%、雲端運算 23%、基礎日誌 3%），大字體高畫質呈現。
+- 本次未修改任何 Python 業務代碼或資料庫 Schema，亦未執行任何 git add/commit。
+
+## [2026-08-20] 修正單一 Cloud VPN 部署與 Cloud Run 封裝計畫的儲存邊界
+
+- 依使用者確認，正式資料與長期檔案都以地端 NAS 為主儲存；不新增 Cloud Storage、Eventarc 或 Ingestion Producer。
+- 更新 `document/雲端部署/計劃書/單一Cloud VPN計畫書.md`：
+  - 4+1 維持不變，`+1` 明確為地端 NAS 資料平台（MySQL＋耐久檔案區）。
+  - MySQL 保存檔案 metadata／版本／hash，檔案本體由 Business API 經單一 VPN 以受限 SFTP 寫回 NAS。
+  - 補齊 TCP 22 firewall、SFTP identity／host-key pin、atomic publish、交易外寫入、orphan cleanup、刪除 replay、備份還原與 outage gate。
+  - Pub/Sub／DLQ 僅保存去敏告警 envelope，明列目前 publisher／replay transport 尚未完成，不能當 business database 或檔案備援。
+- 更新 `document/雲端部署/計劃書/Cloud_Run_Dockerfile封裝計畫_v2.md`：
+  - 狀態改為 `IMPLEMENTATION_READY_PLAN／BUILD_NOT_READY`，避免把尚未施工的 Dockerfile／adapter 誤稱為 production ready。
+  - API image 成為唯一 MySQL＋SFTP owner；UI／Worker／Monitor 不含 DB／NAS credential、driver 或地端 route。
+  - 增列 NAS SFTP adapter、Pub/Sub fallback、Worker Pool supervisor、production URL、無 Redis、停用 Knowledge／Chroma、dependency split、runtime manifest 與 `.dockerignore` 等封裝前置。
+- 本次只修改兩份計畫與本機 work log；未修改 Python、schema、migration、Dockerfile、雲端資源、VPN／NAS 設定，也未執行 git add／commit。既有兩個舊版計畫的刪除狀態保持不變。
+
+## [2026-08-20] 新增 Cloud Run 現況相容性部署測試封裝計畫
+
+- 新增 `document/雲端部署/計劃書/Cloud_Run_現況相容性部署測試封裝計畫.md`，與正式 Dockerfile 封裝計畫完全分離。
+- 測試方案允許不修改業務程式，先建立 API、UI、runtime-ops 三個 compat image，驗證 Cloud Run 啟動、UI/API 串聯、Google OIDC、單一 VPN與 staging MySQL相容性。
+- 因正式 Worker Pool supervisor尚未實作，測試期由同一 runtime-ops image啟動 Durable、LINE、Incident三個獨立 Worker Pool，Monitor另以 Job `--once`執行。
+- 現有模板、archive與media只以去敏測試資料放在 ephemeral filesystem，固定`max=1`並重現restart／revision資料遺失；不得使用正式合約、正式LINE媒體或production DB。
+- 明列 compat image、resource命名、build context、環境變數、OIDC allowlist、測試順序、故障演練、結果分類、清理與正式方案不得繼承的測試捷徑。
+- 本次未建立 Dockerfile、image或GCP資源，未修改Python／schema／migration，也未執行git add／commit。
+
+## [2026-08-20] 完成 Cloud Run 現況相容性測試映像與本機啟動驗證
+
+- 在 `docker/compat/` 建立 API、UI、runtime-ops 三份 test-only Dockerfile、各自的 Dockerfile-specific `.dockerignore`及操作說明；Python 3.11 base image使用固定digest，dependency由`uv.lock`重建，runtime user為`10001:10001`。
+- 修正封裝前回歸測試漂移：HTTP 410測試改依Global typed error sanitization契約驗證、HCM client fixture補齊row outcomes契約、Data Browser auth測試隔離DB、排班測試以deterministic holiday repository取代本機MySQL依賴。
+- 應用層聚焦測試`80 passed`；完整測試`2437 passed, 136 skipped, 3 xfailed, 7 failed`。剩餘失敗為entrypoint人工review、validation schema manifest digest及writer inventory freshness等治理資產問題，未在封裝任務內擅自裁決或重算。
+- 三個image均建置成功且application secret scan通過；API `/health`／OpenAPI、UI health／首頁及UI container→API呼叫皆為HTTP 200，兩個service container均healthy。
+- runtime-ops的Durable、LINE、Incident與Monitor entrypoint均在隔離Private API stub完成check／once；未連既有MySQL、未執行queue／heartbeat mutation、未呼叫LINE或其他外部副作用。
+- 本機保留`union-api-compat-local`（`127.0.0.1:18080`）與`union-ui-compat-local`（`127.0.0.1:18501`）供人工檢查；未推送registry、未建立GCP／VPN／staging DB資源。
+- 由於安裝完整non-dev dependency，三個compat image各約1.34 GB，記為test limitation；正式封裝仍須dependency split與弱點掃描。
+
+## [2026-08-20] 移除已被取代的雲端部署計畫
+
+- 依使用者明確指示，刪除`Cloud_Run_Direct_VPC_HA_VPN雙Tunnel部署計畫.md`與舊版`Cloud_Run_Dockerfile封裝計畫.md`。
+- 現行部署與封裝內容分別由`單一Cloud VPN計畫書.md`、`Cloud_Run_Dockerfile封裝計畫_v2.md`及獨立相容性測試計畫承接，避免舊版文件形成競爭SSOT。
+- 本次不修改Python、schema、migration、Docker image或本機已啟動的compat containers。
+
+## [2026-08-20] 相容性映像移除 Redis、升級本機 DB 並恢復登入 schema
+
+- 停止並移除 `union_redis` container（既有匿名 volume 未刪除），將 Redis client 從專案 dependency 與三個 compat image 移除；新增 `compat-api`、`compat-ui`、`compat-runtime-ops` dependency groups，API／runtime-ops 預設 `REDIS_URL` 為空。
+- 重建 `union-api-compat:redisless-local`、`union-ui-compat:redisless-local`、`union-runtime-ops-compat:redisless-local`；入口匯入皆通過且三個 image 的 `redis` module 均為 absent，大小分別約 829 MB、797 MB、332 MB。
+- 修復 validation manifest 對 canonical schema assembly 的 stale digest，並以 `scripts/build_validation_schema_release.py` 重建 generated validation SQL；migration／assembly focused gate 為 `64 passed`。
+- 為未 publish 3306 的 Docker MySQL 增加 `scripts.update_local_database --database-port` local TCP-forward port override；不改 `.env`、credential 或 database identity，focused regression 為 `7 passed`。
+- 真實 MySQL fresh bootstrap `lu_test_db_update_20260820_v1` 驗證通過：127 schema parts、292 triggers、`v_order_details` 與 contract identity 均有效。
+- 依 canonical preserve-data 流程將 `union_db` 備份、還原到 `union_db_local_20260820103531`、套用 17 個既有 additive artifacts、驗證後同名 replacement；operation／replacement receipt 均 completed，`--require-current` 回報 release `labor-union-staff-retirement-2026-08-15-v1`。
+- 以 Redis-free image 重建本機 API/UI；`18080/health` 與 `18501/_stcore/health` 均通過。`joker` 帳號仍 enabled，四張必要登入表存在；不存在帳號的 login-chain smoke 正確回 401，不再回 schema 503，登入／TOTP／UI guard focused regression 為 `37 passed`。
+- `joker` 目前沒有 TOTP factor，且本機 `.env` 未設定 `ACCESS_CONTROL_TOTP_KEYRING`；未經 secret 操作授權未自動產生 keyring、重設密碼或完成 MFA enrollment。本次未 stage、commit、push或操作任何 production／GCP 資源。
+
+## [2026-08-20] 初始化本機 TOTP Keyring
+
+- 依使用者明確授權，以 `cryptography.fernet.Fernet.generate_key()` 產生本機專用 `v1` Keyring，原子寫入 Git-ignored `.env` 的 `ACCESS_CONTROL_TOTP_ACTIVE_KEY_VERSION` 與 `ACCESS_CONTROL_TOTP_KEYRING`；未在 console、log、文件或 Git 輸出 secret。
+- 一次性設定程式執行後已刪除，未留下可執行暫存檔；`.env` 仍由 `.gitignore` 排除。
+- 重建 `union-api-compat-local` 讓 Keyring 生效；API health 通過，容器內完成隨機 TOTP seed 的 encrypt／decrypt round-trip，結果為 PASS 且未輸出 seed 或 ciphertext。
+- 未重設 `joker` 密碼、未代替使用者掃描 Authenticator QR code、未建立 TOTP factor 或 recovery codes；實際 MFA enrollment 保留給帳號本人透過管理後台完成。本次未 stage、commit、push或操作 production／GCP secret。
+
+## [2026-08-20] 修復 Streamlit 首次 MFA enrollment QR 契約
+
+- 根因確認為 `/api/v1/admin/auth/login/challenges` 把已通過帳密驗證的 enrollment challenge 放入 403 detail；Global typed error boundary 依正式安全契約去除 provisioning URI 與 challenge token，導致 Streamlit 收不到 QR 資料。
+- 經使用者核准，新增 `challenge_type` typed success contract：active factor 回 `factor_verification`，未綁定 factor 回 HTTP 200 `mfa_enrollment` data；legacy `/login` 與所有非 2xx error 仍禁止帶 provisioning secret。
+- Streamlit typed client 改以 success data 分流到記憶體內 QR 畫面，並同步支援 strict `detail.error` 解碼；未寫 browser storage、log、DB receipt 或檔案。
+- API／Global boundary／Streamlit／TOTP／auth focused regression 為 `75 passed`；真 HTTP regression 證明 enrollment 回 200 data 且不建立 Session，legacy 403 仍完整去敏。
+- 重建並重啟 `union-api-compat:redisless-local`、`union-ui-compat:redisless-local`；`18080/health` 與 `18501/_stcore/health` 均通過，兩個 container 均 healthy，live OpenAPI 已載入新 contract。
+- pending enrollment 會於下一次正確帳密登入替換成新的短效 seed／challenge，因此舊 challenge 過期不需人工清 DB。仍待帳號本人於 8501 掃描 QR 並輸入第一組 TOTP 完成 browser acceptance；未 stage、commit、push或修改 production／GCP 資源。
+
+## [2026-08-20] 啟動 React 5173 本機預覽雙軌
+
+- 保留既有 Streamlit `18501` 與 API `18080`，另以同一 Redis-free API image 啟動 `union-api-react-local`，在 `8000` 提供 React Vite proxy target；React 不取代或切換 Streamlit entry。
+- 主機未安裝 Node/npm；改以官方 `node:24-bookworm-slim` 啟動 `union-react-ui-local`，React source 以 bind mount提供，依賴只寫入 `union-react-node-modules-local` Docker volume。React container未取得 `.env`、DB credential或API secrets。
+- `http://127.0.0.1:5173/` 回 HTTP 200、HTML含`id="root"`；經 `5173/api/v1/admin/auth/login/challenges` 的空JSON probe由FastAPI回typed 422 `request_validation_error`，證明relative `/api` proxy成功且未寫DB。
+- `npm audit --omit=dev`為0 vulnerabilities；完整audit僅回報direct dev/test dependency `happy-dom<=20.8.8`一項critical且有fix，不在本次啟動任務自動改lockfile或執行force upgrade。
+- 此次只是ad hoc local preview，不冒充Phase5B、逐entry cutover、production hosting或Streamlit retirement receipt；未修改React source、未stage、commit或push。
+
+## [2026-08-22] 新增GCP Cloud Run compat互動部署腳本
+
+- 新增 `scripts/launchers/setup_gcp_cloud_run_compat.ps1`：列出既有Billing Accounts並支援人工開啟新帳務流程，優先讀取Billing Account `currencyCode`、只詢問預算數字並自動附加TWD／USD等計費幣別，無法讀取時才人工確認ISO 4217代碼；互動取得Project ID／名稱／預算／subnet，建立或續跑具`environment=staging`、`deployment=compat`標籤的隔離Project、必要APIs、月預算、VPC、subnet、六個runtime service accounts及immutable Artifact Registry。
+- 新增 `scripts/launchers/publish_gcp_cloud_run_compat.ps1`：列出可存取Project、Docker倉庫、遠端images與本機Docker images；本機images以空格分隔項次複選，逐一設定API／UI／runtime-ops／只push角色、alias及唯一tag，拒絕覆寫既有immutable tag，push後解析digest才部署。
+- Cloud Run compat拓樸固定為API／UI兩個Services、Durable／LINE／Incident三個獨立Worker Pools及Monitor Job；既有資源只更新image，不清除env、secret、network或identity。UI維持IAM保護，API只允許`internal-and-cloud-load-balancing` ingress；不把測試捷徑升格為production配置。
+- 兩支腳本均支援`-DryRun`，mutation前分別要求`CREATE`、`PUSH`、`DEPLOY`確認；拒絕非staging/test＋compat Project，不讀`.env`、不接受secret參數、不建立service-account JSON key、不執行migration、VPN、production traffic cutover或地端NAS／DB操作。
+- PowerShell AST語法檢查兩支腳本均為0 errors；另以完成後已刪除的假`gcloud`／Docker工具執行端到端`-DryRun`，成功覆蓋Billing選擇、Project／倉庫建立計畫、三個本機image複選、別名／tag、digest pin、兩個Services、三個Worker Pools與Monitor Job命令生成。未登入GCP、未push image、未建立雲端資源或產生費用。
+- 同步更新`scripts/launchers/README.md`操作與安全邊界；未修改production Python、schema、migration、Dockerfile，亦未stage、commit或push。
+
+## [2026-08-22] 將首次Cloud Run compat部署收斂為開發用GCE＋IAP反向SSH Tunnel版
+
+- 依人工核准，把`setup_gcp_cloud_run_compat.ps1`明確標示為「開發用GCE＋IAP反向SSH Tunnel版，嚴禁正式部署使用」；production仍只能使用正式計畫核准的Cloud VPN → 地端NAS／MySQL路徑。
+- 首次腳本改為strict UTF-8讀取Git-ignored`.env`，必要DB／TOTP／LINE secret只經stdin建立Secret Manager version，不進image、Git或CLI參數；新增`DEV-SAFE`人工gate，要求確認非production DB與測試LINE channel後才可建立付費資源及啟動worker。
+- 新增無外部IP的GCE bridge VM與IAP SSH控制路徑；本機以`local_mysql_tcp_forward.py`在Docker network內轉送`mysql_db:3306`，主機只綁`127.0.0.1:13307`，再建立`GCE:13306 → IAP reverse SSH → localhost forward`，不公開MySQL port。
+- API成為唯一DB connection owner；UI／Durable／LINE／Incident／Monitor不取得DB credential。UI → API與runtime → API均採Google OIDC，application Bearer token改以`X-Serverless-Authorization`與平台token並存。
+- 新增production fail-closed：`APP_ENV=production`拒絕`development_gce_iap_reverse_ssh` profile；MySQL TLS mode的CA／client material不完整時拒絕啟動。
+- 本機實際smoke使用新images與localhost-only forward，API health通過，假帳號登入經MySQL查詢後正確回401；暫時smoke containers已停止。聚焦回歸`32 passed`，三支PowerShell AST與bridge dry-run通過；整支首次部署dry-run覆蓋Project、預算、VPC、GCE／IAP、Secret Manager、Artifact Registry、三image、Cloud Run、OIDC與驗收命令生成。
+- 截至本紀錄尚未建立GCP Project、未push image、未啟動雲端worker或產生新GCP資源費用；正式執行仍待操作人員確認最終Project ID、Billing Account、月預算、CIDR及目前DB／LINE測試安全邊界。本次未stage、commit或push。
+
+## [2026-08-22] 完成GCP Cloud Run開發compat部署與自動驗收
+
+- 經使用者確認`DEV-SAFE`與費用參數後，建立`labor-union-dev-20260822`、連結TWD Billing Account、建立每月TWD 3,000預算警告、`asia-east1` VPC/subnet、六個service accounts、四個Secret Manager secrets、無外部IP的`e2-micro` bridge VM及兩條最小防火牆規則。
+- 建立immutable Artifact Registry `labor-union-compat`，推送API／UI／runtime-ops三個images；Cloud Run資源皆以各自不可變digest reference部署。
+- 部署API、UI兩個Services、Durable／LINE／Incident三個Worker Pools與Monitor Job；API與UI latest revision ready，四個HTTP入口（API health、UI health、Webhook GET、LIFF）皆為200。
+- 首次Monitor因Windows gcloud使用PuTTY時reverse port未真正監聽而失敗；API與workers正確fail closed為503，未改走公開DB。bridge manager改用Windows OpenSSH、獨立known-hosts、tree-aware stop及GCE端port驗收，並收緊既有GCE私鑰ACL為目前Windows使用者唯讀。
+- Tunnel修復後Monitor execution`union-monitor-compat-g8twc`成功；Cloud Logging顯示Durable、LINE、Incident的Google OIDC Private API呼叫均持續HTTP 200，證明Cloud Run → Direct VPC → GCE → IAP reverse SSH → localhost forward → `mysql_db`完整路徑可用。
+- 修正Budget API `--billing-project`與PowerShell native output污染回傳值；聚焦pytest仍為`32 passed`，三支PowerShell AST與`git diff --check`通過。
+- 尚待帳號本人完成Admin UI密碼＋TOTP登入，以及LINE channel owner更新並Verify Webhook／LIFF URL。API目前沿用本機`DB_USER=root`，只接受短期開發測試，正式部署固定視為最小權限blocker。本次未stage、commit或push Git。
+
+## [2026-08-22] 修復Cloud Run UI缺少google-auth
+
+- 使用者人工開啟`union-ui-compat`時得到`ModuleNotFoundError: google.auth`；API頁面同時顯示database connected，確認問題只在UI image dependency closure，不是API或DB Tunnel。
+- 將直接相依`google-auth>=2.38.0`加入`compat-ui`dependency group並以`uv lock`同步lockfile；未靠完整project dependencies掩蓋UI image缺件。
+- 重建`union-ui-compat:ui-google-auth-20260822`，container內`import google.auth`與`import ui.app`通過，local health／root均200；推送immutable tag並只更新既有UI Service image，保留原OIDC、VPC、env與service account。
+- Cloud Run revision`union-ui-compat-00002-pjw`已服務100%流量，實際image digest為`sha256:ecb3f94495fe460ad25a78d7e96934cbb3fbc3cc44bee3b2f5162d48b2598b01`；雲端health／root均200，新revision log無`ModuleNotFoundError`，聚焦回歸`11 passed`。
+- API、Worker Pools、Monitor Job、DB bridge與LINE設定未修改；未stage、commit或push Git。
+
+## [2026-08-22] 完成Cloud Run compat自動build與既有環境一鍵更新驗收
+
+- 新增`build_and_validate_cloud_run_compat_images.ps1`，由三份compat Dockerfile自動build固定HEAD tag，並在push前驗證Dockerfile check、non-root、built-image imports、API／UI health、UI→API及runtime→Private API；驗收receipt只寫入Git-ignored`scratch/`。
+- 首次與更新launcher新增集中式`-PreflightOnly`、明確缺件提示、gcloud 429／`RESOURCE_EXHAUSTED`／API propagation與Docker push短暫錯誤的bounded retry；更新入口預設從source build，人工挑選舊image改為顯式`-SelectExistingImages`。
+- DB bridge改用Project專用Ed25519 key，Windows ACL只保留目前使用者與SYSTEM；OS Login新增後會read-back比對public key，PID狀態亦確認為OpenSSH process。stop／start演練發現GCE端13306殘留`sshd` listener後，新增只針對compat專用port的自動清理與釋放確認；修復後bridge為RUNNING（PID 3568）。
+- 完整首次腳本`-DryRun`通過，能保留既有Budget、VPC、Secrets及Cloud Run設定並輸出完整部署計畫；目前電腦的preflight與實際local image gate均通過。
+- 實際更新`labor-union-dev-20260822`：API revision`union-api-compat-00003-kx4`、UI revision`union-ui-compat-00003-j6n`，三個Worker Pool revision均Ready；API／UI／Webhook／LIFF皆HTTP 200。
+- bridge重啟後Monitor execution`union-monitor-compat-2sbhs`成功完成Google OIDC → Private API →本機MySQL bridge；提交前擴大MFA／typed error／DB更新／launcher／bridge／Private Operations回歸為`113 passed`，四支PowerShell parser均無錯誤。同步更新LINE UI client安全測試，使其驗證Google OIDC invocation header與application Session bearer並存的現行契約。
+- 全新組員電腦的OAuth／MFA與首次付費Project實際部署仍為`NOT_RUN`，不得以目前開發機重跑冒充；因此可交付現有環境一鍵更新，但`TEAM_ONE_CLICK_DEPLOYMENT_ACCEPTED`仍待組員機實測。本次未stage、commit或push Git。

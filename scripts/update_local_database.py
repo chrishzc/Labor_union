@@ -153,6 +153,20 @@ def with_database_port(config, database_port: int | None):
     )
 
 
+def with_database_port(config, database_port: int | None):
+    """Return the same credential set with an explicit local TCP forwarding port."""
+    if database_port is None:
+        return config
+    if not 1 <= database_port <= 65535:
+        raise LocalDatabaseUpdateError("database port must be between 1 and 65535")
+    return migration.DatabaseConfig(
+        host=config.host,
+        port=database_port,
+        user=config.user,
+        password=config.password,
+    )
+
+
 def candidate_name(source: str, now=None) -> str:
     timestamp = (now or datetime.now(timezone.utc)).strftime("%Y%m%d%H%M%S")
     suffix = f"_local_{timestamp}"

@@ -72,12 +72,6 @@ async def login(
                 "code": "mfa_enrollment_required",
                 "message": "請完成 MFA 綁定後再登入",
                 "retryable": False,
-                "challenge": {
-                    "id": result.challenge_id,
-                    "token": result.challenge_token,
-                    "provisioning_uri": result.provisioning_uri,
-                    "expires_at": _as_utc_transport_datetime(result.expires_at).isoformat(),
-                },
             },
         )
     if result is None:
@@ -95,10 +89,27 @@ async def issue_login_challenge(payload: AdminPasswordChallengeRequest, request:
     except (AdminSessionSchemaError, AdminSessionStorageError, AdminMfaConfigurationError) as error:
         raise _login_unavailable("admin_auth_unavailable", str(error)) from error
     if isinstance(result, MfaEnrollmentChallenge):
-        raise HTTPException(status_code=403, detail={"code": "mfa_enrollment_required", "message": "請完成 MFA 綁定後再登入", "retryable": False, "challenge": {"id": result.challenge_id, "token": result.challenge_token, "provisioning_uri": result.provisioning_uri, "expires_at": _as_utc_transport_datetime(result.expires_at).isoformat()}})
+        return BaseResponse(
+            data=AdminPasswordChallengeResponse(
+                challenge_type="mfa_enrollment",
+                challenge_id=result.challenge_id,
+                challenge_token=result.challenge_token,
+                expires_at=_as_utc_transport_datetime(result.expires_at),
+                provisioning_uri=result.provisioning_uri,
+            ),
+            message="請完成 MFA 綁定",
+        )
     if not isinstance(result, PasswordLoginChallenge):
         await _reject_invalid_login(payload, request)
-    return BaseResponse(data=AdminPasswordChallengeResponse(challenge_id=result.challenge_id, challenge_token=result.challenge_token, expires_at=_as_utc_transport_datetime(result.expires_at)), message="請輸入驗證器代碼")
+    return BaseResponse(
+        data=AdminPasswordChallengeResponse(
+            challenge_type="factor_verification",
+            challenge_id=result.challenge_id,
+            challenge_token=result.challenge_token,
+            expires_at=_as_utc_transport_datetime(result.expires_at),
+        ),
+        message="請輸入驗證器代碼",
+    )
 
 
 @router.post("/login/challenges/{challenge_id}/verify", response_model=BaseResponse[AdminSessionResponse])
