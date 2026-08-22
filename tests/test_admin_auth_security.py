@@ -5,10 +5,14 @@ Description: 驗證管理員登入、同權業務存取與開發 auth profile �
 
 from pathlib import Path
 
-from fastapi import HTTPException
+import pytest
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import (
     admin_auth_is_enabled,
+    require_admin,
+    require_capability,
     require_root,
     require_line_menu_publisher,
     require_line_task_controller,
@@ -80,7 +84,8 @@ def test_streamlit_line_client_uses_session_transport():
     source = (ROOT / "ui/api_clients/line_api_client.py").read_text(encoding="utf-8")
     page = (ROOT / "ui/pages/07_line_management.py").read_text(encoding="utf-8")
 
-    assert 'headers: dict[str, str] = {}' in source
+    assert "build_cloud_run_invocation_headers" in source
+    assert "headers = build_cloud_run_invocation_headers()" in source
     assert 'headers["Authorization"] = f"Bearer {token}"' in source
     assert "os.getenv" not in page
 
@@ -157,3 +162,97 @@ def test_local_bypass_principal_cannot_administer_real_accounts():
         assert error.status_code == 403
     else:
         raise AssertionError("local_bypass must not administer Account Center")
+
+
+def test_local_bypass_still_enforces_registered_and_denied_capabilities(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
+    request = Request({"type": "http"})
+    principal = require_admin(request, None)
+
+    require_capability("line.customer_service.read")(request, principal)
+
+    for capability in ("line.rich_menu.publish", "unknown.capability"):
+        with pytest.raises(HTTPException) as raised:
+            require_capability(capability)(request, principal)
+        assert raised.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    ("invalid_state", "authorization"),
+    (
+        ("disabled", "Bearer disabled-token"),
+        ("revoked", "Bearer revoked-token"),
+        ("expired", "Bearer expired-token"),
+        ("missing-session", "Bearer missing-session-token"),
+        ("missing-token", None),
+    ),
+)
+def test_invalid_admin_session_fails_closed_before_downstream(
+    monkeypatch, invalid_state, authorization
+):
+    looked_up_tokens = []
+    downstream_calls = []
+
+    def fake_get_admin_session(token):
+        looked_up_tokens.append(token)
+        return None
+
+    monkeypatch.setattr(
+        "api.dependencies.admin_auth.get_admin_session", fake_get_admin_session
+    )
+
+    def invoke_protected_application():
+        principal = require_admin(Request({"type": "http"}), authorization)
+        downstream_calls.append(principal)
+
+    with pytest.raises(HTTPException) as raised:
+        invoke_protected_application()
+
+    assert raised.value.status_code == 401, invalid_state
+    expected_lookup = [authorization.partition(" ")[2]] if authorization else []
+    assert looked_up_tokens == expected_lookup, invalid_state
+    assert downstream_calls == [], invalid_state
+
+
+@pytest.mark.parametrize(
+    ("invalid_state", "authorization", "expected_detail"),
+    (
+        ("disabled", "Bearer disabled-token", "管理員 Session 已失效或過期"),
+        ("revoked", "Bearer revoked-token", "管理員 Session 已失效或過期"),
+        ("expired", "Bearer expired-token", "管理員 Session 已失效或過期"),
+        ("missing-session", "Bearer missing-session-token", "管理員 Session 已失效或過期"),
+        ("missing-token", None, "缺少有效的管理員 Session"),
+    ),
+)
+def test_invalid_admin_session_http_boundary_blocks_endpoint(
+    monkeypatch, invalid_state, authorization, expected_detail
+):
+    looked_up_tokens = []
+    downstream_calls = []
+
+    def fake_get_admin_session(token):
+        looked_up_tokens.append(token)
+        return None
+
+    monkeypatch.setattr(
+        "api.dependencies.admin_auth.get_admin_session", fake_get_admin_session
+    )
+    app = FastAPI()
+
+    @app.get("/sentinel")
+    def sentinel_endpoint(principal=Depends(require_admin)):
+        downstream_calls.append(principal)
+        return {"ok": True}
+
+    request_kwargs = {"headers": {"Authorization": authorization}} if authorization else {}
+    with TestClient(app) as client:
+        response = client.get("/sentinel", **request_kwargs)
+
+    assert response.status_code == 401, invalid_state
+    assert response.json() == {"detail": expected_detail}, invalid_state
+    assert "ok" not in response.json(), invalid_state
+    expected_lookup = [authorization.partition(" ")[2]] if authorization else []
+    assert looked_up_tokens == expected_lookup, invalid_state
+    assert downstream_calls == [], invalid_state

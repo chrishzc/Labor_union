@@ -10,6 +10,9 @@
 - 2026-08-14 Case Import 欄位級警示、外部追蹤與分域補件：`approved-by-WP92`
 - 2026-08-03 原始核准只啟用 Inventory v2 evidence；後續 integration、Access、schema、
   pytest 與 legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
+- 2026-08-21 LINE four-module specification freeze：M1 Alternative A、M2 deterministic Phase 1、M3
+  Scheduling Matching Coordination Phase A–D、M4 runtime target／human escalation ownership 已核准；
+  implementation、schema／DB、provider 與外部副作用仍未授權。
 
 ## 2. Global Integration Boundary
 
@@ -161,6 +164,50 @@ duplicate idempotency key 必須回既有 task／receipt，不得只回 `None`�
 retry 使用 bounded exponential backoff；非 retryable 4xx、invalid recipient、
 content validation failure 直接 failed＋alert。
 
+#### LINE Configuration typed／redacted query（2026-08-20）
+
+LINE Configuration 提供 authenticated、query-only 的
+`GET /api/v1/line/configurations/{kind}/safe`，`kind` 僅接受已凍結的六個 closed kinds。
+成功資料只允許 `kind`、non-negative `revision` 與 `state=empty|configured`；canonical definition `{}`
+固定為 `empty`，其餘 canonical object 為 `configured`。既有 full-definition GET 保留為 compatibility
+projection，不由本 query 取代或退役。
+
+safe query 不得輸出 definition、URL／URI、action data、image、secret、token、credential、provider identity、
+payload、actor、correlation、reason、idempotency 或 LINE recipient identity。snapshot kind mismatch、malformed
+revision／canonical object 與 repository unavailable 必須 typed fail closed；success、empty、invalid 與 unavailable
+路徑均不得 commit、append audit／receipt／outbox、wakeup 或呼叫 provider。
+
+#### Delivery public observation query（2026-08-20）
+
+LINE Delivery 提供 authenticated、typed、server-masked summary/list/detail queries；公開欄位限 bounded status、
+safe task/source label、attempt count 與時間欄位。recipient identity／type、payload、message preview、provider ID、
+correlation、raw error、source identity 與 worker runtime detail 均不得穿透。list filter 僅可使用 server-defined
+allowlist，`user_id`、recipient identity 與 arbitrary source identity filter 必須拒絕；page size 為 bounded page
+限制，total/page metadata 必須支援超過單頁上限的資料集，不得先載入固定上限後在記憶體假分頁。
+
+Query 必須 0 commit、0 enqueue、0 worker wakeup、0 provider call；malformed repository item、unknown enum、extra
+sensitive field 與內部例外均須在 route/application boundary typed fail closed。cancel、run-now、retry、React caller
+adoption 與 provider rollout 不因本 query 契約而被授權。
+
+#### Notification Rule Administration（2026-08-20）
+
+LINE Configuration 擁有通知規則 revision 與 closed grammar；LINE Notification 擁有 derived decision／intent，
+LINE Delivery 擁有 delivery task。規則只接受已登錄 event、recipient selector、schedule、frequency 與 predicate；
+未知 owner event 只能以 `enabled=false` 的 shadow 保存，不得啟用。空 genesis `{}` 在邊界明確 materialize 為
+`{"rules":[]}`，不得讓 raw `dict` 穿透 dedicated public route。
+
+Preview 固定零寫入並回 server fingerprint。Save／Delete 必須在單一 outer LINE UoW 內 fresh-read revision、
+核對 preview fingerprint 與完整 command identity，依序保存新 configuration revision、鎖定並取消 removed／
+enabled→disabled 規則的 scheduled intents、將 exact task IDs 交由 LINE Delivery owner 鎖定取消、append
+idempotency receipt 與 audit，最後由唯一 commit owner commit。Repository 不得 hidden commit，Notification
+repository 不得直接更新 delivery task，lock 順序固定 configuration → intent → task。
+
+same key＋same canonical command 必須在 stale check 前回既有 receipt；same key＋different definition、actor、reason、
+correlation、revision 或 preview fingerprint 固定 typed conflict。Receipt revision／counts、DB row shape/type 與
+intent→task lineage 均 strict fail closed；不得以 coercion、去重或重算 fingerprint 隱藏 drift。HTTP command 本身
+不得呼叫 provider或 wakeup；worker/provider 執行前仍需重讀 cancellation。Manual replay 會建立新 intent，
+不屬於本契約，也不得因本節完成而開放 React 呼叫。
+
 ### 3.4 Subsystem：LINE Identity／Review
 
 State：
@@ -198,6 +245,13 @@ pending → processing → published
 - Menu definition、image digest 與 publication snapshot 不可在 processing 後被覆寫。
 - 發布採 create／upload／link／switch／cleanup 的 saga，每一步保存 receipt。
 - retry 從已確認 provider receipt 繼續，不重複建立資產。
+- Rich Menu saga 的現行 additive persistence contract 由
+  `line_rich_menu_publication_step_acknowledgements`、
+  `line_rich_menu_publication_step_attempt_events` 與
+  `line_rich_menu_publication_cleanup_anomalies` 保存 acknowledged step、typed provider outcome
+  與 cleanup anomaly；三表均以 publication FK、request fingerprint、idempotency key 與 immutable
+  update/delete guard 維持 replay／lost-ack 證據。既有 `line_rich_menu_publication_step_receipts` 保留為
+  compatibility projection，Option B 不 alter、seed 或 backfill 該表。
 - 身分綁定成功必須在同一交易 enqueue 個人 Rich Menu binding intent；worker 解析該身分角色
   最新已發布的 provider menu 後執行 link，identity binding 不因外部 API 暫時失敗而回滾。
 - 新 Rich Menu publication 成功時，必須在記錄 published 的同一交易，依 menu audience role
@@ -225,6 +279,7 @@ grant／revoke、階層比較或雙人權限覆核。root 與所有其他 enable
 - `root` 是 Access Control root fact，不是可由一般帳號調整的 role 或 capability；僅 root 可讀寫帳號中心、
   建立帳號、啟停帳號、重設 credential／MFA 與撤銷其他帳號 session。root 不得停用、降級或移轉自身；
   root 遺失只能依受控離線維運程序復原，沒有 production HTTP break-glass endpoint。
+
 - human authorization 不接受 `X-Legacy-Shared-Key` 或任何 legacy shared key。machine caller 在
   local/test 只可使用 `INTERNAL_SERVICE_SHARED_KEY`，production 只可使用已驗證且 caller allowlist
   通過的 Google-signed OIDC；兩者都不能冒充 human actor。
@@ -232,6 +287,13 @@ grant／revoke、階層比較或雙人權限覆核。root 與所有其他 enable
 - UI 不顯示依人員而異的業務選單，也不建立「有權／無權角色」驗收案例。
 - 外部 provider、production environment、secret、資料庫 target、SystemPrincipal 自動命令範圍及
   Preview／Confirm／Apply 等安全門禁不屬於人員差異化權限，仍須遵守各自契約。
+
+### 4.1.1 2026-08-20 live traceability note
+
+正式 invariant 不變。`PROV-20260817-line-knowledge-authorization-normalization-work-package.md` 已取得
+exact approval 並完成 `G0-G6`；Access/FastAPI、LINE compatibility projection、Knowledge route inventory 與
+current regression evidence 已完成本包範圍的 live traceability。此完成不代表 Knowledge direct authorization、
+provider、browser、deployment 或 React UI cutover；Knowledge direct authorization 維持 out-of-scope。
 
 ### 4.2 根事實與 state machine
 
@@ -290,6 +352,13 @@ Modules：
   challenge；Stage 2 驗該 challenge 與 TOTP 或 recovery code，成功後才建立 bearer session。任何
   Stage 1 未通過都回泛化 `invalid_credentials_or_factor`，Stage 2 failure 回泛化
   `invalid_credentials_or_factor` 或 rate-limit 429，不洩漏帳號、MFA state 或 factor 狀態。
+- Stage 1 帳密驗證成功但 factor 尚未綁定時，屬成功的 `mfa_enrollment` challenge 結果，不是 403
+  error；`POST /api/v1/admin/auth/login/challenges` 必須以 HTTP 200 `data` 回傳短效 challenge token、
+  expiry 與 provisioning URI，且仍不得建立 bearer session。已綁定 factor 則回
+  `factor_verification`；consumer 必須依 `challenge_type` 分支，未實作 enrollment 的 consumer 固定
+  fail closed，不得把 enrollment challenge 當作一般 factor challenge。
+- provisioning URI 與原 challenge token 只允許出現在帳密已驗證成功的短效 success `data` 及
+  記憶體內綁定畫面；所有非 2xx error、URL、browser storage、log 與 audit detail 均禁止包含。
 - password challenge 必須綁定 user、credential version、active factor identity、account access-control version、source-risk subject 與 absolute
   expiry；不得在 browser storage、log、audit detail 或 URL 保存 password、TOTP 或原 challenge token。
 
@@ -359,6 +428,29 @@ Authorization、LINE user ID、電話與身分證等敏感值。所有已登入�
 
 管理入口提供 user enable／disable、session revoke、credential rotation 與 audit search；不得以
 Data Browser generic PATCH 代替。
+
+### 4.8 Subsystem：Data Browser masked query
+
+Data Browser只提供system admin對六個stable public source identities的bounded唯讀查詢；UI tab只是presentation，
+不得把table literal升格為權威。canonical mapping固定為：
+
+| UI tab | Public source identity | Cursor／row identity | Masked view |
+|---|---|---|---|
+| `orders_archive` | `orders` | `case_no` ascending／case number | status、service dates、updated time |
+| `clients_archive` | `clients` | positive `id` ascending／decimal id | masked name、city、identity status、updated time |
+| `staff_archive` | `staff` | positive `id` ascending／decimal id | masked name、city、status、updated time |
+| `beclass_history` | `beclass_intake` | positive `id` ascending／decimal id | query number、masked name、received／updated time |
+| `hcm_history` | `hcm_review` | positive `id` ascending／decimal id | masked case identity、issue codes、created time |
+| `bank_facts_history` | `bank_facts` | positive `id` ascending／decimal id | dates/statuses；amount固定mask，不回帳號、交易人或fingerprint |
+
+`GET /api/v1/admin/data-browser/sources/{source_id}`只接受上述enum，limit 1–100，cursor與query有界；unknown source
+與invalid cursor在SQL前fail closed。list row本身即包含完整核准masked detail，因此本slice不新增detail GET。
+columns/cells、row identity、source identity、version fingerprint與next cursor皆為strict typed fields；任何schema、
+masking或identity drift使整個request失敗，不可回partial raw row。Query只執行stable-order SELECT，0 commit、0 mutation、
+0 source-correction call；Global correlation boundary與typed 401／403／404／422／500涵蓋此route。
+
+legacy raw table metadata與source-correction Preview／Apply不屬此query slice，仍保持not-ready；本契約不授權generic
+PATCH、raw row、任意table／SQL、source repair或entry cutover。
 
 ## 5. Domain：Case Import
 
@@ -672,3 +764,19 @@ durable source job 或退出；LINE bot 不得直接更新 knowledge root 或無
 其中 `line/line_bot.py` 的越權路徑是 live drift 證據，不是正式規格來源。
 所有 live source、schema 與 test evidence 必須在實作／驗收矩陣綁定 Git HEAD 或
 content digest；本節列出的 path 不代表未來版本自動符合本規格。
+
+## 2026-08-21 Four-module specification amendment
+
+### Identity／M1
+
+`line_identity_bindings` 與 binding events 由 LINE Identity application 作唯一 writer；Case Import 擁有 `provisional_client_registrations` 的 provisional registration。LIFF onboarding 是 binding projection outcome，不是 role promotion；customer／staff／admin root facts 仍由各 Domain 擁有。legacy direct writers 必須 guarded／readonly 或 `410` 並逐 caller 退出。Customer Service 可提供 `binding_failed_assistance`，但 dual-role／two-failure escalation 由 M4 successor 處理；真實 LIFF／verified-token E2E 仍需 sandbox config，規格不宣稱 PASS。
+
+### M2 routing precedence
+
+production full AI 現在 REJECT；Phase 1 只核准 deterministic harness＋durable manual fallback，Phase 2 維持 proposed。explicit human／wrong 優先於所有自動路由；只有不含 human／wrong marker、且 exact match protected identity alias 的輸入才可進 identity。`reply_provider` commit 前 live drift 仍待 implementation。
+
+### M3／M4 boundaries
+
+Scheduling Matching Coordination 是 Scheduling subsystem；`accepted` 只進 fresh-effects check，產生 typed Assignment conversion/rematch request，LINE／Orders／Assignment／Payroll root writer 不被接管。M3 Phase D 只可透過 typed ports 整合 leave／assignment owner。Runtime target registration／reset／enable／disable 共用 0-schema advisory serialization boundary、active singleton、opaque CAS 與 same-key replay；lock failure 固定 0 write，commit 後 release unknown 不回 success 並以原 key 查 receipt。Customer Service 擁有 HIGH escalation；Anomaly 只作 source，escalation 不競寫 `runtime_alert_application`。
+
+本 amendment 只凍結 specification／Work Package identity；不授權 production code、schema／DDL、DB、LINE provider、AI provider、deployment 或 external side effect。

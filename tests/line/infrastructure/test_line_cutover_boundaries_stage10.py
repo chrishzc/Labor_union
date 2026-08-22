@@ -30,7 +30,11 @@ def test_canonical_mode_retires_legacy_identity_and_review_routes(
     assert legacy_identity.status_code == 410
     assert legacy_identity.json()["detail"]["replacement"].startswith("/api/v1/line/identity")
     assert legacy_review.status_code == 410
-    assert legacy_review.json()["detail"]["code"] == "legacy_line_review_route_retired"
+    # Controlled `/api/v1` errors are normalized by the Global typed boundary;
+    # the retired route's compatibility code is intentionally not exposed as a
+    # second untyped envelope.
+    assert legacy_review.json()["detail"]["error"]["code"] == "resource_retired"
+    assert "replacement" not in legacy_review.json()["detail"]["error"]
 
 
 def test_line_management_ui_uses_only_canonical_identity_review_routes() -> None:

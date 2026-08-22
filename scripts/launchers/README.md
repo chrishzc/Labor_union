@@ -9,7 +9,10 @@ Worker 與 Monitor 都是 Private Operations API client，不直接連 MySQL。W
 `.env`、log 或 Git。若手動分別啟動服務，必須先在同一 shell 設定至少 32 字元的 key；production
 不接受 shared key，須待後續部署工作接上 Google-signed OIDC/IAM 後才可啟用 private endpoints。
 
-所有命令都從專案根目錄執行。啟動服務不會自動更新 schema；拉取新版程式後，應先依資料需求選擇
+所有命令都從專案根目錄執行。一般本機啟動流程仍會啟動既有 Docker、資料庫 readiness、monitor 與
+已設定的 workers；只有明確傳入 `--smoke-test` 時，才使用 Phase 5B 受控三服務 dual-run foundation：
+API `127.0.0.1:8000`、Streamlit `127.0.0.1:8501`、React/Vite `127.0.0.1:5173`。該 smoke 不啟動
+Docker、monitor、worker、LINE 或 provider，也不切換 navigation。啟動服務不會自動更新 schema；拉取新版程式後，應先依資料需求選擇
 「保留資料更新」或「模板重設」，完成後再啟動服務。
 
 每支現行 launcher 都提供唯讀 dry run。Batch／shell／Python 使用 `--dry-run`，PowerShell 使用
@@ -20,15 +23,20 @@ Worker 與 Monitor 都是 Private Operations API client，不直接連 MySQL。W
 
 | 腳本 | 狀態 | 用途與安全邊界 |
 |---|---|---|
-| `start_local_development.bat` | active | Windows 本機開發：連線後先唯讀確認 schema 為 current，再啟動 API、UI、monitor 與 workers；不套用 schema，禁止作為 production deployment。 |
-| `start_local_development.sh` | active | macOS／Unix 的本機開發入口；責任與 Windows 版相同。 |
+| `start_local_development.bat` | active | Windows 一般本機開發入口；`--smoke-test` 才切入 Phase 5B 三服務 GET-only 驗證並只清理本次 owned process。 |
+| `start_local_development.sh` | active | Unix 一般本機開發入口；`--smoke-test` 使用 owned process group 執行同一 Phase 5B 契約。 |
 | `start_local_development_no_auth.bat` | active, local-only | 先停用本機 Admin 認證再啟動全部服務；只供隔離開發機，禁止 shared staging／production。 |
 | `configure_local_admin_no_auth.bat`／`.ps1` | active, local-only | 只調整本機 `.env` 的 Admin 開發認證設定，不啟動服務。 |
-| `update_local_database.bat` | active | 保留 `.env` 指定的本機資料庫：備份 source → 建立 candidate → 套用 migration／backfill → 驗證 → 同名替換；失敗保留診斷資料並嘗試 rollback。 |
+| `update_local_database.bat` | active | 預設執行 `lu_test_*` qualified schema-only additive fast path；不建立 candidate、不 DROP source。保留資料 replacement 必須明確使用 `--strategy replacement --allow-long-run`。 |
+
+若 Docker MySQL 未直接 publish 到 `.env` 的 `DB_PORT`，可先建立只綁定 localhost 的暫時 TCP forward，並以 Python 入口的 `--database-port <forward-port>` 覆寫連線 port。此參數只改變當次連線位置，不改寫 `.env`、credential 或 database identity；MySQL client 仍以 `--mysql-container mysql_db` 在既有容器內執行。
 | `reset_DB.bat` | active, destructive | 不保留現有資料：預檢版本化模板 fixture，要求輸入 `RESET` 後刪除 `union_db`、重建並載入模板測試資料。 |
 | `start_fastapi_ngrok.py` | active, development-only | 本機 FastAPI/ngrok supervisor；production 明確禁止 ngrok。 |
 | `get_durable_job_worker_task_status.ps1` | recovery-only | 唯讀查詢既有 Windows 排程任務；不安裝、不啟動任務。 |
 | `uninstall_durable_job_worker_task.ps1` | recovery-only | 移除過去已安裝的 Durable Job Worker 排程任務，保留 `ShouldProcess` 確認。 |
+| `setup_gcp_cloud_run_compat.ps1` | active, development-only | **開發用 GCE＋IAP 反向 SSH Tunnel 版，嚴禁正式部署使用。** 首次建立或續跑隔離 GCP compat Project，並把 Cloud Run 測試 API 暫時連到本機 Docker MySQL。 |
+| `publish_gcp_cloud_run_compat.ps1` | active, staging-only | 在既有 `environment=staging|test`、`deployment=compat` Project中選倉庫及複選本機images，建立不可變tag、push、解析digest，並按API／UI／runtime-ops角色建立或更新compat Cloud Run資源。 |
+| `manage_gcp_cloud_run_db_bridge.ps1` | active, development-only | 啟動／停止／查詢 localhost-only Docker TCP forward 與 GCE IAP reverse SSH Tunnel；只允許 compat Project，嚴禁作為正式 DB 路徑。 |
 
 ## 常用流程
 
@@ -49,7 +57,14 @@ Worker 與 Monitor 都是 Private Operations API client，不直接連 MySQL。W
 待核准工作，不得直接復活已退役的舊 v3 snapshot。兩種資料庫流程執行前都必須停止 API、UI、
 monitor 與 workers；保留資料更新只接受 `.env` 指定的本機非 production DB，模板重設仍只操作 `union_db`。
 
-資料庫完成後啟動 Windows 本機環境：
+Phase 5B controlled foundation：
+
+```powershell
+.\scripts\launchers\start_local_development.bat --dry-run
+.\scripts\launchers\start_local_development.bat --smoke-test
+```
+
+一般完整本機環境仍使用：
 
 ```powershell
 .\scripts\launchers\start_local_development.bat
@@ -71,14 +86,52 @@ monitor 與 workers；保留資料更新只接受 `.env` 指定的本機非 prod
 
 macOS／Unix 另執行 `./scripts/launchers/start_local_development.sh --dry-run`。
 
-Windows launcher 只在本機 LINE runtime 設定與 access token 通過唯讀檢查時啟動 LINE worker；未設定
-LINE 的開發者會看到 `skipped` 提示，其餘本機服務仍正常啟動。這不會自動切換 runtime mode，也不會
-把 placeholder credential 當成有效設定。維護者可用下列受控 smoke 實際啟動並檢查服務；完成或失敗
-時只終止本次 smoke 建立的 PID：
+## Cloud Run compat staging（開發用 GCE＋IAP 反向 SSH Tunnel 版）
+
+> **嚴禁正式部署使用。** 此拓樸只用於隔離的 `environment=staging|test`、
+> `deployment=compat` Project，提早驗證 Cloud Run、容器、OIDC 與本機開發 DB 相容性。
+> 它不具 HA、SLA、正式資料保護或 production cutover 能力；正式環境仍須核准的
+> Cloud VPN → 地端 NAS／MySQL 路徑。
+
+使用 PowerShell 7 從專案根目錄執行，並在任何 GCP mutation 前先跑 preflight 與 dry run：
 
 ```powershell
-.\scripts\launchers\start_local_development.bat --smoke-test
+.\scripts\launchers\setup_gcp_cloud_run_compat.ps1 -PreflightOnly
+.\scripts\launchers\setup_gcp_cloud_run_compat.ps1 -DryRun
+.\scripts\launchers\setup_gcp_cloud_run_compat.ps1
+.\scripts\launchers\publish_gcp_cloud_run_compat.ps1 -PreflightOnly
+.\scripts\launchers\publish_gcp_cloud_run_compat.ps1 -DryRun
+.\scripts\launchers\publish_gcp_cloud_run_compat.ps1 -Roles api,ui
+.\scripts\launchers\publish_gcp_cloud_run_compat.ps1 -SelectExistingImages
 ```
+
+setup 入口必須 fail closed 檢查 PowerShell 7、Git、Docker、gcloud、OpenSSH、`.env` 與三份
+Dockerfile；預設從 source 建置並本機驗收 API、UI、runtime-ops images。只在明確指定
+`-SelectExistingImages` 時才人工挑選已存在 image。publish 只接受不可變
+`image@sha256:<digest>`，有上限重試短暫 429／server error，永久權限、設定或驗收錯誤立即停止。
+
+`.env` 以 strict UTF-8 讀取；DB、TOTP 與 LINE secret 只能透過 stdin 建立 Secret Manager
+version，不得進入 image、Git、CLI 參數、log 或 service-account key。建立付費資源前必須顯示
+Project、幣別、預算、subnet 與 Artifact Registry，並取得人工確認。
+
+compat DB bridge 只能走 `GCE:13306 → 本機:13307 → mysql_db:3306`，MySQL 不公開到
+Internet。私鑰、known-hosts、PID 與 log 保留在 Git-ignored
+`scratch/cloud-run-db-bridge/<project-id>/`，並以 `icacls` 限制權限。電腦休眠、斷網、Docker／MySQL
+或 bridge 停止後必須 fail closed，不得改走公開 DB。
+
+```powershell
+pwsh -NoProfile -File .\scripts\launchers\manage_gcp_cloud_run_db_bridge.ps1 -Action status -ProjectId <PROJECT_ID>
+pwsh -NoProfile -File .\scripts\launchers\manage_gcp_cloud_run_db_bridge.ps1 -Action stop -ProjectId <PROJECT_ID>
+pwsh -NoProfile -File .\scripts\launchers\manage_gcp_cloud_run_db_bridge.ps1 -Action start -ProjectId <PROJECT_ID>
+```
+
+測試結束先停止 bridge，再由操作人員依 receipt 清理 compat 資源。本拓樸不建立 Cloud VPN、
+Load Balancer／Cloud Armor、staging NAS、LINE 測試 channel 或 production migration；Webhook 與 LIFF URL
+仍由人工在 LINE Developers Console 設定與驗證。
+
+Smoke 固定 GET-only；不使用既有 DB mutation，不啟動 monitor／worker／LINE／provider。React ready 必須是
+5173 回傳 HTML 且含 `id="root"`，並以 `/api/...` relative proxy 觀察 backend response。每次 run 使用唯一
+`scratch/phase5b-dual-run/<run-id>/`，完成或失敗只終止本次建立的 PID tree／process group。
 
 ## 已搬移或退役
 

@@ -27,6 +27,14 @@ except Exception as migration_import_error:  # Catalog corruption must remain an
 else:
     MIGRATION_IMPORT_ERROR = None
 
+try:
+    from scripts import local_database_additive_update as additive
+except Exception as additive_import_error:  # Fast-path wiring must fail closed if unavailable.
+    additive = None
+    ADDITIVE_IMPORT_ERROR = additive_import_error
+else:
+    ADDITIVE_IMPORT_ERROR = None
+
 
 DEFAULT_ENVIRONMENT_FILE = ROOT / ".env"
 DEFAULT_RECEIPT_ROOT = ROOT / "scratch/local_database_updates"
@@ -51,7 +59,11 @@ NOTIFICATION_CATALOG_PARTS = frozenset({
 
 
 class LocalDatabaseUpdateError(RuntimeError):
-    pass
+    """Bounded operator-facing updater failure."""
+
+    def __init__(self, message: str, *, code: str = "database_update_blocked"):
+        super().__init__(message)
+        self.code = code
 
 
 def resolve_mysql_container(configured_container=None) -> str | None:
@@ -98,6 +110,16 @@ def require_mysql_clients(mysql_container: str | None) -> None:
         )
 
 
+def require_mysql_apply_client(mysql_container: str | None) -> None:
+    """The qualified in-place path executes mysql only; it never dumps data."""
+    if mysql_container or shutil.which("mysql"):
+        return
+    raise LocalDatabaseUpdateError(
+        "required MySQL apply client is unavailable: mysql; "
+        "start Docker container mysql_db or set MYSQL_CONTAINER"
+    )
+
+
 def validate_local_source(config, source: str, environment=None) -> None:
     values = environment if environment is not None else os.environ
     if config.host.casefold() not in LOCAL_HOSTS:
@@ -106,6 +128,29 @@ def validate_local_source(config, source: str, environment=None) -> None:
         raise LocalDatabaseUpdateError("source database name is invalid")
     if any("prod" in str(values.get(key, "")).casefold() for key in ("APP_ENV", "ENV", "FLASK_ENV")):
         raise LocalDatabaseUpdateError("production environment refused")
+    profile = str(
+        values.get("APP_ENV", values.get("ENV", values.get("FLASK_ENV", "local")))
+    ).casefold()
+    if source.casefold() == "union_db" or not source.casefold().startswith("lu_test_"):
+        raise LocalDatabaseUpdateError(
+            "daily additive update requires a lu_test_* local development database"
+        )
+    if profile not in {"local", "development", "dev", "test", "testing"}:
+        raise LocalDatabaseUpdateError("local development profile required")
+
+
+def with_database_port(config, database_port: int | None):
+    """Return the same credential set with an explicit local TCP forwarding port."""
+    if database_port is None:
+        return config
+    if not 1 <= database_port <= 65535:
+        raise LocalDatabaseUpdateError("database port must be between 1 and 65535")
+    return migration.DatabaseConfig(
+        host=config.host,
+        port=database_port,
+        user=config.user,
+        password=config.password,
+    )
 
 
 def candidate_name(source: str, now=None) -> str:
@@ -151,6 +196,111 @@ def build_preview(config, source: str, candidate: str) -> dict[str, object]:
         "source_policy": "no_ddl_before_verified_same_name_replacement",
         "plan": plan,
     }
+
+
+def _fast_backup_receipt_path(receipt_root: Path, source: str) -> Path:
+    return (
+        Path(receipt_root).expanduser().resolve()
+        / "fast_additive"
+        / f"{source}.backup.receipt.json"
+    )
+
+
+def _additive_error_payload(error: Exception) -> dict[str, object]:
+    code = getattr(error, "code", "additive_preflight_failed")
+    details = getattr(error, "details", {})
+    message = str(error)
+    if any(word in message.casefold() for word in ("password", "passwd", "secret", "token", "credential", "api_key")):
+        message = "additive operation failed; sensitive detail redacted"
+    message = message[:240]
+    return {
+        "status": "blocked",
+        "route": (
+            "recovery"
+            if code == "recovery_required"
+            else "rare_replacement"
+            if code == "replacement_required"
+            else "daily_additive"
+        ),
+        "selected_strategy": "additive",
+        "blocked_reason": message,
+        "code": code,
+        "details": dict(details) if isinstance(details, dict) else {},
+        "target_profile": "local-development",
+        "local_qualified_additive_exception": True,
+        "estimated_work": {"artifact_count": 0, "statement_count": 0},
+        "duration_guard_ms": 30_000,
+    }
+
+
+def build_additive_preview(
+    config,
+    source: str,
+    receipt_root: Path,
+    *,
+    backup_receipt_path: Path | None = None,
+    qualification_receipt_path: Path | None = None,
+    duration_guard_ms: int = 30_000,
+) -> dict[str, object]:
+    """Build a bounded local-only plan without candidate creation or mysqldump."""
+    if additive is None:
+        raise LocalDatabaseUpdateError(
+            f"additive runner unavailable: {ADDITIVE_IMPORT_ERROR}"
+        )
+    try:
+        plan = additive.plan(
+            config,
+            source,
+            receipt_root=receipt_root,
+            qualification_path=qualification_receipt_path,
+        )
+    except additive.LocalAdditiveBlocked as error:
+        return _additive_error_payload(error)
+    return plan
+
+
+def apply_additive_update(
+    config,
+    source: str,
+    receipt_root: Path,
+    *,
+    backup_receipt_path: Path | None = None,
+    qualification_receipt_path: Path | None = None,
+    duration_guard_ms: int = 30_000,
+    lock_timeout_seconds: int = 5,
+    mysql_container: str | None = None,
+) -> dict[str, object]:
+    """Apply only the already-qualified source plan; no candidate or dump operations."""
+    if additive is None:
+        raise LocalDatabaseUpdateError(
+            f"additive runner unavailable: {ADDITIVE_IMPORT_ERROR}"
+        )
+    preview = build_additive_preview(
+        config,
+        source,
+        receipt_root,
+        qualification_receipt_path=qualification_receipt_path,
+    )
+    if preview.get("status") not in {"ready", "current"}:
+        raise LocalDatabaseUpdateError(
+            f"{preview.get('blocked_reason', 'additive route blocked')} "
+            f"[{preview.get('code', 'additive_blocked')}]"
+        )
+    if preview.get("status") == "current":
+        return preview
+    try:
+        return additive.apply(
+            config,
+            source,
+            receipt_root=Path(receipt_root),
+            duration_guard_ms=duration_guard_ms,
+            lock_timeout_seconds=lock_timeout_seconds,
+            qualification_path=qualification_receipt_path,
+        )
+    except additive.LocalAdditiveBlocked as error:
+        raise LocalDatabaseUpdateError(
+            f"{error} [{error.code}]"
+        ) from error
 
 
 def build_drift_report(config, source: str) -> dict[str, object]:
@@ -617,15 +767,30 @@ def update_local_database(
     confirm_database=None,
     confirm_configured_database=False,
     mysql_container=None,
+    database_port=None,
     drift_report=False,
+    strategy="auto",
+    allow_long_run=False,
+    duration_guard_ms=30_000,
+    lock_timeout_seconds=5,
+    backup_receipt_path=None,
+    qualification_receipt_path=None,
 ) -> dict[str, object]:
     if migration is None:
         raise LocalDatabaseUpdateError(f"migration catalog unavailable: {MIGRATION_IMPORT_ERROR}")
+    normalized_strategy = str(strategy or "auto").casefold().replace("_", "-")
+    if normalized_strategy == "additive-in-place":
+        normalized_strategy = "additive"
+    if normalized_strategy not in {"auto", "additive", "replacement", "fresh-reset"}:
+        raise LocalDatabaseUpdateError(
+            f"unknown update strategy: {strategy}", code="strategy_invalid"
+        )
     environment_path = Path(environment_file)
     try:
-        environment_values = {}
+        environment_values = dict(os.environ)
         if environment_path.is_file():
-            _, environment_values = migration._read_env_bytes(environment_path)
+            _, file_environment_values = migration._read_env_bytes(environment_path)
+            environment_values.update(file_environment_values)
         mysql_container = (
             mysql_container
             or environment_values.get("MYSQL_CONTAINER")
@@ -634,32 +799,124 @@ def update_local_database(
         )
         mysql_container = resolve_mysql_container(mysql_container)
         config, source = migration.config_from_env(environment_path)
-        validate_local_source(config, source)
+        config = with_database_port(config, database_port)
+        validate_local_source(config, source, environment_values)
         if drift_report:
-            if apply or require_current:
+            if apply or require_current or normalized_strategy != "auto":
                 raise LocalDatabaseUpdateError(
-                    "--drift-report cannot be combined with --apply or --require-current"
+                    "--drift-report cannot be combined with apply, require-current, or an explicit strategy",
+                    code="strategy_flags_conflict",
                 )
             return build_drift_report(config, source)
-        target = candidate or candidate_name(source)
-        validate_candidate_database(source, target)
-        preview = build_preview(config, source, target)
+        if normalized_strategy == "fresh-reset":
+            preview = {
+                "status": "blocked",
+                "route": "fresh_reset",
+                "selected_strategy": "fresh_reset",
+                "target_profile": "local-development",
+                "blocked_reason": "fresh reset is owned by scripts/init_db.py or reset_DB.bat",
+                "estimated_work": {"artifact_count": 0, "statement_count": 0},
+                "duration_guard_ms": 30_000,
+            }
+        elif normalized_strategy == "replacement":
+            if not allow_long_run:
+                raise LocalDatabaseUpdateError(
+                    "replacement requires --allow-long-run",
+                    code="replacement_requires_allow_long_run",
+                )
+            target = candidate or candidate_name(source)
+            validate_candidate_database(source, target)
+            preview = build_preview(config, source, target)
+            preview.update({
+                "route": "rare_replacement",
+                "selected_strategy": "replacement",
+                "warning": "long-running preserve-data candidate replacement explicitly selected",
+                "allow_long_run": True,
+                "estimated_work": {
+                    "artifact_count": len(preview.get("parts_to_apply", ())),
+                    "statement_count": "unbounded_candidate_flow",
+                },
+            })
+        else:
+            preview = build_additive_preview(
+                config,
+                source,
+                Path(receipt_root),
+                backup_receipt_path=(
+                    Path(backup_receipt_path)
+                    if backup_receipt_path is not None
+                    else None
+                ),
+                duration_guard_ms=duration_guard_ms,
+                qualification_receipt_path=(
+                    Path(qualification_receipt_path)
+                    if qualification_receipt_path is not None
+                    else None
+                ),
+            )
     except migration.UpgradeBlocked as error:
         raise LocalDatabaseUpdateError(str(error)) from error
+    except LocalDatabaseUpdateError:
+        raise
     except Exception as error:
         raise LocalDatabaseUpdateError("database update preview failed") from error
     if require_current:
         if apply:
-            raise LocalDatabaseUpdateError("--require-current cannot be combined with --apply")
-        return require_current_database(preview)
+            raise LocalDatabaseUpdateError(
+                "--require-current cannot be combined with --apply",
+                code="strategy_flags_conflict",
+            )
+        if preview.get("status") == "current":
+            return {
+                "status": "current",
+                "source_database": source,
+                "release_id": preview.get("release_id"),
+            }
+        if preview.get("status") != "blocked":
+            raise LocalDatabaseUpdateError(
+                "schema update required",
+                code="schema_update_required",
+            )
+        raise LocalDatabaseUpdateError(
+            str(preview.get("blocked_reason") or "database update is blocked"),
+            code=str(preview.get("code") or "database_update_blocked"),
+        )
     if not apply:
         return {key: value for key, value in preview.items() if key != "plan"}
+    if preview.get("status") == "blocked":
+        raise LocalDatabaseUpdateError(
+            str(preview.get("blocked_reason") or "database update is blocked"),
+            code=str(preview.get("code") or "database_update_blocked"),
+        )
     if confirm_configured_database:
         confirm_database = source
     if confirm_database != source:
-        raise LocalDatabaseUpdateError(f"apply requires --confirm-database {source}")
-    require_mysql_clients(mysql_container)
+        raise LocalDatabaseUpdateError(
+            f"apply requires --confirm-database {source}",
+            code="confirmation_required",
+        )
     try:
+        if normalized_strategy in {"auto", "additive"}:
+            require_mysql_apply_client(mysql_container)
+            return apply_additive_update(
+                config,
+                source,
+                Path(receipt_root),
+                backup_receipt_path=(
+                    Path(backup_receipt_path)
+                    if backup_receipt_path is not None
+                    else None
+                ),
+                duration_guard_ms=duration_guard_ms,
+                lock_timeout_seconds=lock_timeout_seconds,
+                mysql_container=mysql_container,
+                qualification_receipt_path=(
+                    Path(qualification_receipt_path)
+                    if qualification_receipt_path is not None
+                    else None
+                ),
+            )
+        require_mysql_clients(mysql_container)
         arguments = (config, environment_path, preview, Path(receipt_root))
         if mysql_container is None:
             return apply_update(*arguments)
@@ -670,7 +927,8 @@ def update_local_database(
         raise LocalDatabaseUpdateError(str(error)) from error
     except Exception as error:
         raise LocalDatabaseUpdateError(
-            f"database update execution failed: {type(error).__name__}"
+            f"database update execution failed: {type(error).__name__}",
+            code="database_update_execution_failed",
         ) from error
 
 
@@ -680,16 +938,35 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--receipt-root", type=Path, default=DEFAULT_RECEIPT_ROOT)
     command.add_argument("--candidate-database")
     command.add_argument("--apply", action="store_true")
+    command.add_argument("--dry-run", action="store_true", help="bounded preview; never mutates the source")
     command.add_argument("--drift-report", action="store_true")
     command.add_argument("--require-current", action="store_true")
     command.add_argument("--confirm-database")
     command.add_argument("--confirm-configured-database", action="store_true")
     command.add_argument("--mysql-container")
+    command.add_argument("--database-port", type=int)
+    command.add_argument(
+        "--strategy",
+        choices=("auto", "additive", "additive-in-place", "replacement", "fresh-reset"),
+        default="auto",
+    )
+    command.add_argument(
+        "--allow-long-run",
+        action="store_true",
+        help="required for the explicit preserve-data replacement route",
+    )
+    command.add_argument("--duration-guard-ms", type=int, default=30_000)
+    command.add_argument("--lock-timeout-seconds", type=int, default=5)
+    command.add_argument("--backup-receipt", type=Path)
+    command.add_argument("--qualification-receipt", type=Path)
     return command
 
 
 def main() -> int:
     arguments = parser().parse_args()
+    if arguments.dry_run and arguments.apply:
+        print(json.dumps({"status": "blocked", "code": "dry_run_apply_conflict", "error": "--dry-run cannot be combined with --apply"}, ensure_ascii=False), file=sys.stderr)
+        return 2
     try:
         result = update_local_database(
             environment_file=arguments.environment_file,
@@ -700,10 +977,21 @@ def main() -> int:
             confirm_database=arguments.confirm_database,
             confirm_configured_database=arguments.confirm_configured_database,
             mysql_container=arguments.mysql_container,
+            database_port=arguments.database_port,
             drift_report=arguments.drift_report,
+            strategy=arguments.strategy,
+            allow_long_run=arguments.allow_long_run,
+            duration_guard_ms=arguments.duration_guard_ms,
+            lock_timeout_seconds=arguments.lock_timeout_seconds,
+            backup_receipt_path=arguments.backup_receipt,
+            qualification_receipt_path=arguments.qualification_receipt,
         )
     except LocalDatabaseUpdateError as error:
-        payload = {"status": "blocked", "error": str(error)}
+        payload = {
+            "status": "blocked",
+            "error": str(error),
+            "code": getattr(error, "code", "database_update_blocked"),
+        }
         print(json.dumps(payload, ensure_ascii=False), file=sys.stderr)
         return 2
     print(json.dumps(result, ensure_ascii=False, indent=2))

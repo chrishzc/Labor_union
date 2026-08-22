@@ -60,21 +60,21 @@ def test_restore_dump_uses_mysql_inside_configured_container(tmp_path, monkeypat
 def test_environment_file_container_is_forwarded_to_apply(tmp_path, monkeypatch):
     environment = tmp_path / ".env"
     environment.write_text(
-        "DB_DATABASE=union_db\nMYSQL_CONTAINER=mysql_db\n", encoding="utf-8"
+        "DB_DATABASE=lu_test_dataset\nMYSQL_CONTAINER=mysql_db\n", encoding="utf-8"
     )
     config = SimpleNamespace(host="127.0.0.1", port=3306, user="root")
-    preview = {"source_database": "union_db", "candidate_database": "candidate"}
+    preview = {"source_database": "lu_test_dataset", "status": "ready"}
     captured = {}
 
-    monkeypatch.setattr(update.migration, "config_from_env", lambda _: (config, "union_db"))
+    monkeypatch.setattr(update.migration, "config_from_env", lambda _: (config, "lu_test_dataset"))
     monkeypatch.setattr(update, "validate_local_source", lambda *_: None)
-    monkeypatch.setattr(update, "build_preview", lambda *_: preview)
+    monkeypatch.setattr(update, "build_additive_preview", lambda *_args, **_kwargs: preview)
 
     def apply_update(*args, **kwargs):
         captured.update(kwargs)
         return {"status": "completed"}
 
-    monkeypatch.setattr(update, "apply_update", apply_update)
+    monkeypatch.setattr(update, "apply_additive_update", apply_update)
 
     result = update.update_local_database(
         environment_file=environment,
@@ -85,6 +85,52 @@ def test_environment_file_container_is_forwarded_to_apply(tmp_path, monkeypatch)
 
     assert result == {"status": "completed"}
     assert captured["mysql_container"] == "mysql_db"
+
+
+def test_local_tcp_forward_port_overrides_environment_port(tmp_path, monkeypatch):
+    environment = tmp_path / ".env"
+    environment.write_text("DB_DATABASE=lu_test_dataset\n", encoding="utf-8")
+    config = migration.DatabaseConfig(
+        host="127.0.0.1", port=3306, user="root", password="unit-test-only"
+    )
+    captured = {}
+
+    monkeypatch.setattr(
+        update.migration,
+        "config_from_env",
+        lambda _: (config, "lu_test_dataset"),
+    )
+    monkeypatch.setattr(update, "validate_local_source", lambda *_args, **_kwargs: None)
+
+    def build_additive_preview(actual_config, source, *_args, **_kwargs):
+        captured.update(config=actual_config, source=source)
+        return {"status": "ready", "source_database": source}
+
+    monkeypatch.setattr(update, "build_additive_preview", build_additive_preview)
+
+    result = update.update_local_database(
+        environment_file=environment,
+        receipt_root=tmp_path / "receipts",
+        database_port=13306,
+    )
+
+    assert result["source_database"] == "lu_test_dataset"
+    assert captured["config"].host == "127.0.0.1"
+    assert captured["config"].port == 13306
+    assert captured["config"].password == "unit-test-only"
+
+
+def test_local_tcp_forward_port_rejects_invalid_value():
+    config = migration.DatabaseConfig(
+        host="127.0.0.1", port=3306, user="root", password="unit-test-only"
+    )
+
+    try:
+        update.with_database_port(config, 70000)
+    except update.LocalDatabaseUpdateError as error:
+        assert str(error) == "database port must be between 1 and 65535"
+    else:
+        raise AssertionError("invalid database port must fail closed")
 
 
 def test_candidate_python_uses_utf8_and_hashes_non_utf8_stderr(monkeypatch):

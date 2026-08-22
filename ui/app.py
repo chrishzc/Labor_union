@@ -6,6 +6,7 @@ Description: 管理端 Streamlit 導覽、全域登入與短效 TOTP QR 配對�
 import importlib
 import os
 import sys
+from urllib.parse import parse_qs
 from io import BytesIO
 from collections.abc import Mapping
 
@@ -48,6 +49,53 @@ PAGE_REGISTRY: Mapping[str, tuple[tuple[str, str], ...]] = {
     ),
 }
 
+ROLLBACK_TARGETS: Mapping[str, tuple[str, str | tuple[str, ...] | None, str]] = {
+    "form-management": ("ui.pages.05_form_management", "order-tracker", "📋 表單與履歷問卷管理"),
+    "orders": ("ui.pages.02_orders", None, "📦 訂單管理"),
+    "scheduling": ("ui.pages.03_calendar", ("calendar", "staff-directory"), "多月嫂排班"),
+    "data-import": ("ui.pages.09_data_import", None, "📥 資料匯入中心"),
+    "line-management": ("ui.pages.07_line_management", None, "💬 LINE 管理中心"),
+    "system-status": ("ui.pages.08_system_status", "reports", "🩺 系統狀態"),
+    "finance": ("ui.pages.04_finance", None, "💰 帳務作業中心"),
+    "anomalies": ("ui.pages.06_finance_alerts", None, "異常警示中心"),
+    "data-browser": ("ui.pages.01_data_browser", None, "🔍 資料庫原始資料瀏覽"),
+    "access-management": ("ui.pages.09_access_management", None, "工會人員權限"),
+}
+
+
+def resolve_rollback_query(raw_query: str | Mapping[str, object]) -> tuple[str, str | None] | None:
+    """Resolve only the frozen entry/view pair; malformed input fails closed."""
+    if isinstance(raw_query, str):
+        values = parse_qs(raw_query.lstrip("?"), keep_blank_values=True)
+    else:
+        values = {key: value if isinstance(value, list) else [value] for key, value in raw_query.items()}
+    if set(values) - {"entry", "view"} or any(len(items) != 1 for items in values.values()):
+        return None
+    entry = values.get("entry", [None])[0]
+    view = values.get("view", [None])[0]
+    if not isinstance(entry, str) or not entry.isascii() or entry != entry.lower() or entry not in ROLLBACK_TARGETS:
+        return None
+    module_name, expected_view, page_title = ROLLBACK_TARGETS[entry]
+    allowed_views = (expected_view,) if isinstance(expected_view, str) else expected_view
+    if view != expected_view and (not allowed_views or view not in allowed_views):
+        return None
+    return page_title, view
+
+
+def _consume_rollback_query() -> bool:
+    params = getattr(st, "query_params", None)
+    if params is None:
+        return True
+    resolved = resolve_rollback_query(params)
+    params.clear()
+    if resolved is None:
+        return False
+    page_title, view = resolved
+    st.session_state[NAV_KEY] = page_title
+    if view is not None:
+        st.session_state["rollback_calendar_view"] = view
+    return True
+
 
 def _load_page_show(module_name):
     module = importlib.import_module(module_name)
@@ -59,6 +107,10 @@ def _load_page_show(module_name):
 
 # Kept cohesive because selection and lazy page execution form one shell boundary.
 def main():
+    if not _consume_rollback_query():
+        st.session_state[NAV_KEY] = DEFAULT_PAGE_TITLE
+        st.warning("無效的回復入口，已安全返回預設頁面。")
+        return
     if not _require_global_authentication():
         return
     st.sidebar.title("🧭 Lobar Union 系統導覽")
@@ -203,11 +255,16 @@ def _render_login_or_enrollment(client: AccessControlApiClient) -> None:
         try:
             challenge = client.issue_password_challenge(username=username, password=password)
         except AccessControlApiError as error:
-            if error.code == "mfa_enrollment_required" and isinstance(error.context.get("challenge"), dict):
-                st.session_state["access_control_enrollment"] = error.context["challenge"]
-                st.rerun()
             st.error(str(error))
             return
+        if challenge.challenge_type == "mfa_enrollment":
+            st.session_state["access_control_enrollment"] = {
+                "id": challenge.challenge_id,
+                "token": challenge.challenge_token,
+                "provisioning_uri": challenge.provisioning_uri,
+                "expires_at": challenge.expires_at.isoformat(),
+            }
+            st.rerun()
         st.session_state["access_control_password_challenge"] = {"id": challenge.challenge_id, "token": challenge.challenge_token}
         st.rerun()
 

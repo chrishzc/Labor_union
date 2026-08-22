@@ -1,10 +1,16 @@
+-- GENERATED FILE. Do not edit by hand.
+-- Release: labor-union-validation-schema-2026-08-16-v9
+-- Replace __LU_TEST_DATABASE__ with an explicitly confirmed lu_test_* database.
+-- Rebuild with: python scripts/build_validation_schema_release.py
+
+-- BEGIN SOURCE: db/schema.sql
 -- File: schema.sql
 -- Description: 定義 Labor Union fresh bootstrap 的基礎 MySQL schema。
 
 -- 強制重建資料庫以確保 ENUM 編碼正確
-DROP DATABASE IF EXISTS union_db;
-CREATE DATABASE union_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-USE union_db;
+DROP DATABASE IF EXISTS __LU_TEST_DATABASE__;
+CREATE DATABASE __LU_TEST_DATABASE__ CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+USE __LU_TEST_DATABASE__;
 
 -- 1. 客戶資料表 (對應 欄位.xlsx 結構)
 CREATE TABLE IF NOT EXISTS clients (
@@ -818,6 +824,7 @@ CREATE TABLE IF NOT EXISTS line_rich_menu_publications (
     CONSTRAINT fk_rich_menu_publish_admin FOREIGN KEY (requested_by_admin_user_id)
         REFERENCES admin_users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+-- END SOURCE: db/schema.sql
 
 -- BEGIN SOURCE: db/schema_parts/202_scheduling_staff_leave_intake.sql
 -- File: 202_scheduling_staff_leave_intake.sql
@@ -2572,36 +2579,30 @@ CREATE TRIGGER trg_caregiver_matching_plan_segments_before_delete BEFORE DELETE 
 -- BEGIN SOURCE: db/schema_parts/98_customer_service_tickets.sql
 CREATE TABLE IF NOT EXISTS customer_service_tickets (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
-    line_user_id VARCHAR(100) NOT NULL COMMENT '提出需求的 LINE 用戶',
-    client_id INT NULL COMMENT '已綁定客戶時連結 clients.id',
-    case_no VARCHAR(50) NULL COMMENT '已綁定案件時連結 orders.case_no',
-    category ENUM(
-        'service_flow',
-        'payment_subsidy',
-        'service_progress',
-        'profile_update',
-        'contact_union',
-        'other'
-    ) NOT NULL,
-    message TEXT NOT NULL COMMENT '用戶原始問題或系統分類內容',
+    line_user_id VARCHAR(100) NOT NULL,
+    client_id INT NULL,
+    case_no VARCHAR(50) NULL,
+    category ENUM('service_flow','payment_subsidy','service_progress','profile_update','contact_union','other') NOT NULL,
     status ENUM('waiting','handling','resolved') NOT NULL DEFAULT 'waiting',
-    assigned_to_admin_user_id BIGINT NULL COMMENT '目前處理人員',
-    internal_note TEXT NULL COMMENT '工會內部備註',
-    last_reply TEXT NULL COMMENT '最近一次回覆客戶內容',
-    last_replied_at DATETIME NULL,
-    resolved_at DATETIME NULL,
-    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    INDEX idx_customer_service_status_time (status, created_at),
-    INDEX idx_customer_service_line_user (line_user_id, status),
-    INDEX idx_customer_service_client (client_id, created_at),
-    INDEX idx_customer_service_case_no (case_no),
-    CONSTRAINT fk_customer_service_client
-        FOREIGN KEY (client_id) REFERENCES clients(id) ON DELETE SET NULL,
-    CONSTRAINT fk_customer_service_order
-        FOREIGN KEY (case_no) REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE SET NULL,
-    CONSTRAINT fk_customer_service_assigned_admin
-        FOREIGN KEY (assigned_to_admin_user_id) REFERENCES admin_users(id) ON DELETE SET NULL
+    assigned_to_admin_user_id BIGINT NULL,
+    internal_note TEXT NULL,
+    version BIGINT NOT NULL DEFAULT 0,
+    resolved_at_utc DATETIME NULL,
+    created_at_utc DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at_utc DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    active_marker TINYINT GENERATED ALWAYS AS (
+        CASE WHEN status IN ('waiting','handling') THEN 1 ELSE NULL END
+    ) STORED,
+    UNIQUE KEY uq_customer_service_active_category (line_user_id, category, active_marker),
+    INDEX idx_customer_service_status_time (status, created_at_utc),
+    INDEX idx_customer_service_client (client_id, created_at_utc),
+    INDEX idx_customer_service_case (case_no, created_at_utc),
+    CONSTRAINT fk_customer_service_client FOREIGN KEY (client_id)
+        REFERENCES clients(id) ON UPDATE RESTRICT ON DELETE SET NULL,
+    CONSTRAINT fk_customer_service_order FOREIGN KEY (case_no)
+        REFERENCES orders(case_no) ON UPDATE CASCADE ON DELETE SET NULL,
+    CONSTRAINT fk_customer_service_admin FOREIGN KEY (assigned_to_admin_user_id)
+        REFERENCES admin_users(id) ON UPDATE RESTRICT ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS client_profile_change_requests (
@@ -11662,7 +11663,7 @@ CREATE TABLE IF NOT EXISTS admin_password_login_challenges (
 
 -- BEGIN SOURCE: db/schema_parts/211_access_control_security_alert_outbox.sql
 -- File: 211_access_control_security_alert_outbox.sql
--- Description: Access Control 高風險稽核事件的耐久告警投遞箱；由既有 incident worker 投影到 system_alerts。
+-- Description: 保存 Access Control security audit 的耐久告警投影 intent，供 Incident Worker 非同步重試。
 
 CREATE TABLE IF NOT EXISTS admin_security_alert_outbox (
     id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -11681,11 +11682,13 @@ CREATE TABLE IF NOT EXISTS admin_security_alert_outbox (
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
     UNIQUE KEY uk_admin_security_alert_outbox_audit (source_audit_id),
-    INDEX idx_admin_security_alert_outbox_due (processing_status, next_attempt_at, lease_expires_at, id),
+    INDEX idx_admin_security_alert_outbox_due (processing_status,next_attempt_at,lease_expires_at,id),
     CONSTRAINT fk_admin_security_alert_outbox_audit FOREIGN KEY (source_audit_id)
         REFERENCES admin_audit_logs(id) ON UPDATE RESTRICT ON DELETE RESTRICT,
     CONSTRAINT chk_admin_security_alert_outbox_payload CHECK (JSON_TYPE(payload_snapshot) = 'OBJECT'),
-    CONSTRAINT chk_admin_security_alert_outbox_attempts CHECK (max_attempts > 0 AND attempt_count <= max_attempts)
+    CONSTRAINT chk_admin_security_alert_outbox_attempts CHECK (
+        attempt_count <= max_attempts AND max_attempts > 0
+    )
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- END SOURCE: db/schema_parts/211_access_control_security_alert_outbox.sql
 
@@ -15609,3 +15612,571 @@ CREATE TABLE IF NOT EXISTS staff_lifecycle_apply_receipts (
     CONSTRAINT fk_staff_lifecycle_receipt_event FOREIGN KEY (event_id) REFERENCES staff_lifecycle_events(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 -- END SOURCE: db/schema_parts/1000_staff_retirement.sql
+
+-- BEGIN SOURCE: db/schema_parts/1001_line_rich_menu_publication_step_saga.sql
+-- File: 1001_line_rich_menu_publication_step_saga.sql
+-- Description: Rich Menu 分步確認、provider 嘗試結果與 cleanup anomaly 的不可變保存契約。
+
+-- Option B is additive. The legacy step-receipt table is intentionally retained
+-- unchanged; this part has no data copy, seed, backfill, ALTER, or DROP.
+CREATE TABLE IF NOT EXISTS line_rich_menu_publication_step_acknowledgements (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    publication_id BIGINT UNSIGNED NOT NULL,
+    step_name ENUM('create','upload','link','switch','cleanup') NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    provider_menu_id VARCHAR(191) NOT NULL,
+    acknowledged_at_utc DATETIME(6) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_line_rich_menu_step_ack (publication_id, step_name),
+    UNIQUE KEY uq_line_rich_menu_step_ack_idempotency (idempotency_key),
+    INDEX idx_line_rich_menu_step_ack_publication (publication_id, id),
+    CONSTRAINT fk_line_rich_menu_step_ack_publication
+        FOREIGN KEY (publication_id) REFERENCES line_rich_menu_publication_tasks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_rich_menu_step_ack_fingerprint
+        CHECK (request_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_line_rich_menu_step_ack_provider_id
+        CHECK (CHAR_LENGTH(TRIM(provider_menu_id)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_rich_menu_publication_step_attempt_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    publication_id BIGINT UNSIGNED NOT NULL,
+    step_name ENUM('create','upload','link','switch','cleanup') NOT NULL,
+    attempt_number INT UNSIGNED NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    outcome ENUM(
+        'success','rate_limited','rejected','unavailable','timeout','lost_ack'
+    ) NOT NULL,
+    provider_menu_id VARCHAR(191) NULL,
+    error_code VARCHAR(191) NULL,
+    attempted_at_utc DATETIME(6) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_line_rich_menu_step_attempt (
+        publication_id, step_name, attempt_number
+    ),
+    UNIQUE KEY uq_line_rich_menu_step_attempt_idempotency (idempotency_key),
+    INDEX idx_line_rich_menu_step_attempt_publication (
+        publication_id, step_name, attempt_number
+    ),
+    CONSTRAINT fk_line_rich_menu_step_attempt_publication
+        FOREIGN KEY (publication_id) REFERENCES line_rich_menu_publication_tasks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_rich_menu_step_attempt_number
+        CHECK (attempt_number > 0),
+    CONSTRAINT chk_line_rich_menu_step_attempt_fingerprint
+        CHECK (request_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_line_rich_menu_step_attempt_outcome
+        CHECK (
+            (outcome = 'success'
+                AND provider_menu_id IS NOT NULL
+                AND CHAR_LENGTH(TRIM(provider_menu_id)) > 0
+                AND error_code IS NULL)
+            OR
+            (outcome <> 'success'
+                AND provider_menu_id IS NULL
+                AND error_code IS NOT NULL
+                AND CHAR_LENGTH(TRIM(error_code)) > 0)
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS line_rich_menu_publication_cleanup_anomalies (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    publication_id BIGINT UNSIGNED NOT NULL,
+    request_fingerprint CHAR(64) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    error_code VARCHAR(191) NOT NULL,
+    occurred_at_utc DATETIME(6) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_line_rich_menu_cleanup_anomaly_idempotency (idempotency_key),
+    INDEX idx_line_rich_menu_cleanup_anomaly_publication (publication_id, id),
+    CONSTRAINT fk_line_rich_menu_cleanup_anomaly_publication
+        FOREIGN KEY (publication_id) REFERENCES line_rich_menu_publication_tasks(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_line_rich_menu_cleanup_anomaly_fingerprint
+        CHECK (request_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_line_rich_menu_cleanup_anomaly_error
+        CHECK (CHAR_LENGTH(TRIM(error_code)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_line_rich_menu_step_ack_before_update;
+CREATE TRIGGER trg_line_rich_menu_step_ack_before_update
+BEFORE UPDATE ON line_rich_menu_publication_step_acknowledgements
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_acknowledgements records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_line_rich_menu_step_ack_before_delete;
+CREATE TRIGGER trg_line_rich_menu_step_ack_before_delete
+BEFORE DELETE ON line_rich_menu_publication_step_acknowledgements
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_acknowledgements records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_line_rich_menu_step_attempt_before_update;
+CREATE TRIGGER trg_line_rich_menu_step_attempt_before_update
+BEFORE UPDATE ON line_rich_menu_publication_step_attempt_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_attempt_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_line_rich_menu_step_attempt_before_delete;
+CREATE TRIGGER trg_line_rich_menu_step_attempt_before_delete
+BEFORE DELETE ON line_rich_menu_publication_step_attempt_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_rich_menu_publication_step_attempt_events records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_line_rich_menu_cleanup_anomaly_before_update;
+CREATE TRIGGER trg_line_rich_menu_cleanup_anomaly_before_update
+BEFORE UPDATE ON line_rich_menu_publication_cleanup_anomalies
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_rich_menu_publication_cleanup_anomalies records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_line_rich_menu_cleanup_anomaly_before_delete;
+CREATE TRIGGER trg_line_rich_menu_cleanup_anomaly_before_delete
+BEFORE DELETE ON line_rich_menu_publication_cleanup_anomalies
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'line_rich_menu_publication_cleanup_anomalies records cannot be deleted';
+-- END SOURCE: db/schema_parts/1001_line_rich_menu_publication_step_saga.sql
+
+-- BEGIN SOURCE: db/schema_parts/1002_customer_service_human_escalation.sql
+-- File: 1002_customer_service_human_escalation.sql
+-- Description: Customer Service HIGH escalation 與不可變事件的 additive schema。
+
+-- M4-DB is additive only. It does not alter, seed, backfill, or remove any
+-- existing Customer Service, LINE, anomaly, runtime, or scheduling object.
+CREATE TABLE IF NOT EXISTS customer_service_escalations (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    source_event_identity VARCHAR(191) NOT NULL,
+    source_kind VARCHAR(64) NOT NULL,
+    source_fingerprint CHAR(64) NOT NULL,
+    trigger_code ENUM(
+        'explicit_human_request',
+        'explicit_wrong_answer',
+        'binding_failure_threshold_2',
+        'complaint',
+        'runtime_critical'
+    ) NOT NULL,
+    trigger_policy_version VARCHAR(191) NOT NULL,
+    ticket_id BIGINT NOT NULL,
+    ticket_category ENUM(
+        'service_flow',
+        'payment_subsidy',
+        'service_progress',
+        'profile_update',
+        'contact_union',
+        'other'
+    ) NOT NULL,
+    urgency ENUM('high') NOT NULL DEFAULT 'high',
+    workflow_status ENUM('open','claimed','handling','resolved') NOT NULL DEFAULT 'open',
+    workflow_version BIGINT NOT NULL DEFAULT 0,
+    hold_scope_ref VARCHAR(191) NOT NULL,
+    automation_hold_state ENUM('active','released') NOT NULL DEFAULT 'active',
+    hold_version BIGINT NOT NULL DEFAULT 0,
+    actor_ref VARCHAR(191) NOT NULL,
+    claim_at_utc DATETIME(6) NULL,
+    handling_started_at_utc DATETIME(6) NULL,
+    resolved_at_utc DATETIME(6) NULL,
+    resolution_code VARCHAR(64) NULL,
+    resolution_evidence_digest CHAR(64) NULL,
+    masked_context JSON NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    masked_alert_intent_ref VARCHAR(191) NULL,
+    delivery_task_ref VARCHAR(191) NULL,
+    delivery_outcome_ref VARCHAR(191) NULL,
+    alert_status ENUM('pending','queued','sent','failed','unknown') NOT NULL DEFAULT 'pending',
+    active_hold_scope_key VARCHAR(191)
+        GENERATED ALWAYS AS (
+            CASE WHEN automation_hold_state = 'active' THEN hold_scope_ref ELSE NULL END
+        ) STORED,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    updated_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_customer_service_escalation_source (source_event_identity),
+    UNIQUE KEY uq_customer_service_escalation_idempotency (idempotency_key),
+    UNIQUE KEY uq_customer_service_escalation_active_scope (active_hold_scope_key),
+    INDEX idx_customer_service_escalation_ticket (ticket_id, id),
+    INDEX idx_customer_service_escalation_status_time (workflow_status, updated_at_utc),
+    INDEX idx_customer_service_escalation_trigger_time (trigger_code, created_at_utc),
+    CONSTRAINT fk_customer_service_escalation_ticket
+        FOREIGN KEY (ticket_id) REFERENCES customer_service_tickets(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_customer_service_escalation_source_fingerprint
+        CHECK (source_fingerprint REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_customer_service_escalation_source_kind
+        CHECK (CHAR_LENGTH(TRIM(source_kind)) > 0),
+    CONSTRAINT chk_customer_service_escalation_policy_version
+        CHECK (CHAR_LENGTH(TRIM(trigger_policy_version)) > 0),
+    CONSTRAINT chk_customer_service_escalation_scope
+        CHECK (CHAR_LENGTH(TRIM(hold_scope_ref)) > 0),
+    CONSTRAINT chk_customer_service_escalation_actor
+        CHECK (CHAR_LENGTH(TRIM(actor_ref)) > 0),
+    CONSTRAINT chk_customer_service_escalation_identities
+        CHECK (
+            CHAR_LENGTH(TRIM(idempotency_key)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        ),
+    CONSTRAINT chk_customer_service_escalation_hold_state
+        CHECK (
+            (workflow_status = 'resolved' AND automation_hold_state = 'released')
+            OR (workflow_status <> 'resolved' AND automation_hold_state = 'active')
+        ),
+    CONSTRAINT chk_customer_service_escalation_resolution
+        CHECK (
+            workflow_status <> 'resolved'
+            OR (
+                resolution_code IS NOT NULL
+                AND resolution_evidence_digest IS NOT NULL
+                AND
+                CHAR_LENGTH(TRIM(resolution_code)) > 0
+                AND resolution_evidence_digest REGEXP '^[0-9a-f]{64}$'
+            )
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS customer_service_escalation_events (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    escalation_id BIGINT NOT NULL,
+    event_type ENUM('created','claimed','handling_started','resolved','hold_released') NOT NULL,
+    expected_escalation_version BIGINT NOT NULL,
+    resulting_escalation_version BIGINT NOT NULL,
+    expected_ticket_version BIGINT NULL,
+    resulting_ticket_version BIGINT NULL,
+    expected_hold_version BIGINT NOT NULL,
+    resulting_hold_version BIGINT NOT NULL,
+    actor_ref VARCHAR(191) NOT NULL,
+    reason_code VARCHAR(64) NOT NULL,
+    reason_evidence_digest CHAR(64) NOT NULL,
+    receipt_id VARCHAR(191) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_customer_service_escalation_event_receipt (receipt_id),
+    UNIQUE KEY uq_customer_service_escalation_event_idempotency (idempotency_key),
+    INDEX idx_customer_service_escalation_event_stream (escalation_id, id),
+    INDEX idx_customer_service_escalation_event_type_time (event_type, created_at_utc),
+    CONSTRAINT fk_customer_service_escalation_event_escalation
+        FOREIGN KEY (escalation_id) REFERENCES customer_service_escalations(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_customer_service_escalation_event_versions
+        CHECK (
+            resulting_escalation_version >= expected_escalation_version
+            AND resulting_hold_version >= expected_hold_version
+            AND (
+                expected_ticket_version IS NULL
+                OR resulting_ticket_version IS NOT NULL
+            )
+        ),
+    CONSTRAINT chk_customer_service_escalation_event_actor
+        CHECK (CHAR_LENGTH(TRIM(actor_ref)) > 0),
+    CONSTRAINT chk_customer_service_escalation_event_reason
+        CHECK (
+            CHAR_LENGTH(TRIM(reason_code)) > 0
+            AND reason_evidence_digest REGEXP '^[0-9a-f]{64}$'
+        ),
+    CONSTRAINT chk_customer_service_escalation_event_identities
+        CHECK (
+            CHAR_LENGTH(TRIM(receipt_id)) > 0
+            AND CHAR_LENGTH(TRIM(idempotency_key)) > 0
+            AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+        )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_customer_service_escalation_events_before_update;
+CREATE TRIGGER trg_customer_service_escalation_events_before_update
+BEFORE UPDATE ON customer_service_escalation_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'customer_service_escalation_events records cannot be updated';
+
+DROP TRIGGER IF EXISTS trg_customer_service_escalation_events_before_delete;
+CREATE TRIGGER trg_customer_service_escalation_events_before_delete
+BEFORE DELETE ON customer_service_escalation_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'customer_service_escalation_events records cannot be deleted';
+-- END SOURCE: db/schema_parts/1002_customer_service_human_escalation.sql
+
+-- BEGIN SOURCE: db/schema_parts/1003_matching_coordination_successor.sql
+-- File: 1003_matching_coordination_successor.sql
+-- Description: 保存 M3 不可變條件、方案血緣、事件、收據與 typed outbox。
+
+-- Additive M3 persistence only.  These tables do not copy or write any
+-- Orders, Assignment, Leave, Scheduling, Payroll, or LINE provider root.
+CREATE TABLE IF NOT EXISTS matching_coordination_criteria_snapshots (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    snapshot_id VARCHAR(191) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    criteria_version BIGINT UNSIGNED NOT NULL,
+    criteria_snapshot JSON NOT NULL,
+    source_version_tuple JSON NOT NULL,
+    criteria_digest CHAR(64) NOT NULL,
+    actor_ref VARCHAR(191) NOT NULL,
+    occurred_at_utc DATETIME(6) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_matching_criteria_snapshot_id (snapshot_id),
+    UNIQUE KEY uq_matching_criteria_case_version (case_no, criteria_version),
+    INDEX idx_matching_criteria_case_time (case_no, created_at_utc),
+    CONSTRAINT chk_matching_criteria_identity CHECK (
+        CHAR_LENGTH(TRIM(snapshot_id)) > 0 AND CHAR_LENGTH(TRIM(case_no)) > 0
+    ),
+    CONSTRAINT chk_matching_criteria_payload CHECK (
+        JSON_TYPE(criteria_snapshot) = 'OBJECT' AND JSON_LENGTH(criteria_snapshot) > 0
+    ),
+    CONSTRAINT chk_matching_criteria_sources CHECK (
+        JSON_TYPE(source_version_tuple) = 'ARRAY' AND JSON_LENGTH(source_version_tuple) > 0
+    ),
+    CONSTRAINT chk_matching_criteria_digest CHECK (criteria_digest REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_matching_criteria_actor CHECK (CHAR_LENGTH(TRIM(actor_ref)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS matching_coordination_package_lineage (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    package_id VARCHAR(191) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    criteria_snapshot_id BIGINT UNSIGNED NOT NULL,
+    parent_package_id BIGINT UNSIGNED NULL,
+    package_version BIGINT UNSIGNED NOT NULL,
+    lineage_kind ENUM('initial','criteria_diff','rematch','alternative') NOT NULL,
+    package_state ENUM(
+        'candidate_pool_open','proposed','awaiting_caregiver_willingness',
+        'awaiting_customer_decision','no_candidate','alternative_previewed',
+        'alternative_applied','no_candidate_terminal','accepted','declined',
+        'expired','rematch_required','superseded'
+    ) NOT NULL,
+    package_snapshot JSON NOT NULL,
+    source_version_tuple JSON NOT NULL,
+    package_digest CHAR(64) NOT NULL,
+    actor_ref VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_matching_package_id (package_id),
+    UNIQUE KEY uq_matching_package_case_version (case_no, package_version),
+    INDEX idx_matching_package_criteria (criteria_snapshot_id, id),
+    INDEX idx_matching_package_parent (parent_package_id, id),
+    INDEX idx_matching_package_state_time (package_state, created_at_utc),
+    CONSTRAINT fk_matching_package_criteria FOREIGN KEY (criteria_snapshot_id)
+        REFERENCES matching_coordination_criteria_snapshots(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_matching_package_parent FOREIGN KEY (parent_package_id)
+        REFERENCES matching_coordination_package_lineage(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_matching_package_identity CHECK (
+        CHAR_LENGTH(TRIM(package_id)) > 0 AND CHAR_LENGTH(TRIM(case_no)) > 0
+    ),
+    CONSTRAINT chk_matching_package_payload CHECK (
+        JSON_TYPE(package_snapshot) = 'OBJECT' AND JSON_LENGTH(package_snapshot) > 0
+    ),
+    CONSTRAINT chk_matching_package_sources CHECK (
+        JSON_TYPE(source_version_tuple) = 'ARRAY' AND JSON_LENGTH(source_version_tuple) > 0
+    ),
+    CONSTRAINT chk_matching_package_digest CHECK (package_digest REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_matching_package_actor CHECK (CHAR_LENGTH(TRIM(actor_ref)) > 0),
+    CONSTRAINT chk_matching_package_parent CHECK (
+        (lineage_kind = 'initial' AND parent_package_id IS NULL)
+        OR (lineage_kind <> 'initial' AND parent_package_id IS NOT NULL)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS matching_coordination_events (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id VARCHAR(191) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    criteria_snapshot_id BIGINT UNSIGNED NOT NULL,
+    package_lineage_id BIGINT UNSIGNED NULL,
+    event_type ENUM(
+        'criteria_snapshotted','package_proposed','candidate_contacted',
+        'caregiver_willingness','customer_decision','criteria_diff',
+        'rematch_required','conversion_requested','stale','superseded'
+    ) NOT NULL,
+    expected_version BIGINT UNSIGNED NOT NULL,
+    resulting_version BIGINT UNSIGNED NOT NULL,
+    event_payload JSON NOT NULL,
+    source_version_tuple JSON NOT NULL,
+    event_digest CHAR(64) NOT NULL,
+    actor_ref VARCHAR(191) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    occurred_at_utc DATETIME(6) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_matching_event_id (event_id),
+    UNIQUE KEY uq_matching_event_idempotency (idempotency_key),
+    INDEX idx_matching_event_case_time (case_no, id),
+    INDEX idx_matching_event_criteria (criteria_snapshot_id, id),
+    INDEX idx_matching_event_package_time (package_lineage_id, id),
+    INDEX idx_matching_event_type_time (event_type, created_at_utc),
+    CONSTRAINT fk_matching_event_criteria FOREIGN KEY (criteria_snapshot_id)
+        REFERENCES matching_coordination_criteria_snapshots(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_matching_event_package FOREIGN KEY (package_lineage_id)
+        REFERENCES matching_coordination_package_lineage(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_matching_event_identity CHECK (
+        CHAR_LENGTH(TRIM(event_id)) > 0 AND CHAR_LENGTH(TRIM(case_no)) > 0
+        AND CHAR_LENGTH(TRIM(idempotency_key)) > 0
+        AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+    ),
+    CONSTRAINT chk_matching_event_payload CHECK (
+        JSON_TYPE(event_payload) = 'OBJECT' AND JSON_LENGTH(event_payload) > 0
+    ),
+    CONSTRAINT chk_matching_event_sources CHECK (
+        JSON_TYPE(source_version_tuple) = 'ARRAY' AND JSON_LENGTH(source_version_tuple) > 0
+    ),
+    CONSTRAINT chk_matching_event_versions CHECK (resulting_version >= expected_version),
+    CONSTRAINT chk_matching_event_digest CHECK (event_digest REGEXP '^[0-9a-f]{64}$'),
+    CONSTRAINT chk_matching_event_actor CHECK (CHAR_LENGTH(TRIM(actor_ref)) > 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS matching_coordination_apply_receipts (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    receipt_id VARCHAR(191) NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    event_id BIGINT UNSIGNED NOT NULL,
+    criteria_snapshot_id BIGINT UNSIGNED NOT NULL,
+    package_lineage_id BIGINT UNSIGNED NULL,
+    command_name VARCHAR(96) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    command_fingerprint CHAR(64) NOT NULL,
+    preview_fingerprint CHAR(64) NULL,
+    source_version_tuple JSON NOT NULL,
+    result_snapshot JSON NOT NULL,
+    outcome_state ENUM('applied','replayed','rematch_required','rejected_as_stale','conflict') NOT NULL,
+    actor_ref VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    applied_at_utc DATETIME(6) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_matching_receipt_id (receipt_id),
+    UNIQUE KEY uq_matching_receipt_idempotency (idempotency_key),
+    INDEX idx_matching_receipt_event (event_id, id),
+    INDEX idx_matching_receipt_criteria (criteria_snapshot_id, id),
+    INDEX idx_matching_receipt_package (package_lineage_id, id),
+    INDEX idx_matching_receipt_outcome_time (outcome_state, created_at_utc),
+    CONSTRAINT fk_matching_receipt_event FOREIGN KEY (event_id)
+        REFERENCES matching_coordination_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_matching_receipt_criteria FOREIGN KEY (criteria_snapshot_id)
+        REFERENCES matching_coordination_criteria_snapshots(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_matching_receipt_package FOREIGN KEY (package_lineage_id)
+        REFERENCES matching_coordination_package_lineage(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_matching_receipt_identity CHECK (
+        CHAR_LENGTH(TRIM(receipt_id)) > 0 AND CHAR_LENGTH(TRIM(command_name)) > 0
+        AND CHAR_LENGTH(TRIM(idempotency_key)) > 0 AND CHAR_LENGTH(TRIM(actor_ref)) > 0
+        AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+    ),
+    CONSTRAINT chk_matching_receipt_fingerprints CHECK (
+        command_fingerprint REGEXP '^[0-9a-f]{64}$'
+        AND (preview_fingerprint IS NULL OR preview_fingerprint REGEXP '^[0-9a-f]{64}$')
+    ),
+    CONSTRAINT chk_matching_receipt_sources CHECK (
+        JSON_TYPE(source_version_tuple) = 'ARRAY' AND JSON_LENGTH(source_version_tuple) > 0
+    ),
+    CONSTRAINT chk_matching_receipt_result CHECK (
+        JSON_TYPE(result_snapshot) = 'OBJECT' AND JSON_LENGTH(result_snapshot) > 0
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS matching_coordination_outbox (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    reference_id VARCHAR(191) NOT NULL,
+    event_id BIGINT UNSIGNED NOT NULL,
+    receipt_id BIGINT UNSIGNED NOT NULL,
+    case_no VARCHAR(50) NOT NULL,
+    intent_type ENUM(
+        'line_matching_interaction','line_criteria_diff_resend',
+        'assignment_conversion_requested','rematch_requested',
+        'orders_terms_update_requested'
+    ) NOT NULL,
+    target_owner ENUM('line_integration','assignment_workflow','orders_workflow') NOT NULL,
+    intent_payload JSON NOT NULL,
+    source_version_tuple JSON NOT NULL,
+    reference_digest CHAR(64) NOT NULL,
+    idempotency_key VARCHAR(191) NOT NULL,
+    correlation_id VARCHAR(191) NOT NULL,
+    created_at_utc DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UNIQUE KEY uq_matching_outbox_reference_id (reference_id),
+    UNIQUE KEY uq_matching_outbox_idempotency (idempotency_key),
+    INDEX idx_matching_outbox_event (event_id, id),
+    INDEX idx_matching_outbox_receipt (receipt_id, id),
+    INDEX idx_matching_outbox_created_time (created_at_utc, id),
+    INDEX idx_matching_outbox_case (case_no, id),
+    CONSTRAINT fk_matching_outbox_event FOREIGN KEY (event_id)
+        REFERENCES matching_coordination_events(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT fk_matching_outbox_receipt FOREIGN KEY (receipt_id)
+        REFERENCES matching_coordination_apply_receipts(id)
+        ON UPDATE RESTRICT ON DELETE RESTRICT,
+    CONSTRAINT chk_matching_outbox_identity CHECK (
+        CHAR_LENGTH(TRIM(reference_id)) > 0 AND CHAR_LENGTH(TRIM(case_no)) > 0
+        AND CHAR_LENGTH(TRIM(idempotency_key)) > 0 AND CHAR_LENGTH(TRIM(correlation_id)) > 0
+    ),
+    CONSTRAINT chk_matching_outbox_target CHECK (
+        (intent_type IN ('line_matching_interaction','line_criteria_diff_resend')
+            AND target_owner = 'line_integration')
+        OR (intent_type IN ('assignment_conversion_requested','rematch_requested')
+            AND target_owner = 'assignment_workflow')
+        OR (intent_type = 'orders_terms_update_requested'
+            AND target_owner = 'orders_workflow')
+    ),
+    CONSTRAINT chk_matching_outbox_payload CHECK (
+        JSON_TYPE(intent_payload) = 'OBJECT' AND JSON_LENGTH(intent_payload) > 0
+    ),
+    CONSTRAINT chk_matching_outbox_sources CHECK (
+        JSON_TYPE(source_version_tuple) = 'ARRAY' AND JSON_LENGTH(source_version_tuple) > 0
+    ),
+    CONSTRAINT chk_matching_outbox_digest CHECK (reference_digest REGEXP '^[0-9a-f]{64}$')
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_matching_criteria_snapshots_before_update;
+CREATE TRIGGER trg_matching_criteria_snapshots_before_update
+BEFORE UPDATE ON matching_coordination_criteria_snapshots
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_criteria_snapshots records cannot be updated';
+DROP TRIGGER IF EXISTS trg_matching_criteria_snapshots_before_delete;
+CREATE TRIGGER trg_matching_criteria_snapshots_before_delete
+BEFORE DELETE ON matching_coordination_criteria_snapshots
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_criteria_snapshots records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_matching_package_lineage_before_update;
+CREATE TRIGGER trg_matching_package_lineage_before_update
+BEFORE UPDATE ON matching_coordination_package_lineage
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_package_lineage records cannot be updated';
+DROP TRIGGER IF EXISTS trg_matching_package_lineage_before_delete;
+CREATE TRIGGER trg_matching_package_lineage_before_delete
+BEFORE DELETE ON matching_coordination_package_lineage
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_package_lineage records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_matching_coordination_events_before_update;
+CREATE TRIGGER trg_matching_coordination_events_before_update
+BEFORE UPDATE ON matching_coordination_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_events records cannot be updated';
+DROP TRIGGER IF EXISTS trg_matching_coordination_events_before_delete;
+CREATE TRIGGER trg_matching_coordination_events_before_delete
+BEFORE DELETE ON matching_coordination_events
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_events records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_matching_apply_receipts_before_update;
+CREATE TRIGGER trg_matching_apply_receipts_before_update
+BEFORE UPDATE ON matching_coordination_apply_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_apply_receipts records cannot be updated';
+DROP TRIGGER IF EXISTS trg_matching_apply_receipts_before_delete;
+CREATE TRIGGER trg_matching_apply_receipts_before_delete
+BEFORE DELETE ON matching_coordination_apply_receipts
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_apply_receipts records cannot be deleted';
+
+DROP TRIGGER IF EXISTS trg_matching_outbox_before_update;
+CREATE TRIGGER trg_matching_outbox_before_update
+BEFORE UPDATE ON matching_coordination_outbox
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_outbox records cannot be updated';
+DROP TRIGGER IF EXISTS trg_matching_outbox_before_delete;
+CREATE TRIGGER trg_matching_outbox_before_delete
+BEFORE DELETE ON matching_coordination_outbox
+FOR EACH ROW SIGNAL SQLSTATE '45000'
+SET MESSAGE_TEXT = 'matching_coordination_outbox records cannot be deleted';
+-- END SOURCE: db/schema_parts/1003_matching_coordination_successor.sql

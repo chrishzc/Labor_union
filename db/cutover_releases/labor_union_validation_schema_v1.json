@@ -8,13 +8,13 @@
   },
   "schema_parts": {
     "selection": "schema_assembly_active_bootstrap",
-    "expected_count": 127,
-    "ordered_digest_sha256": "b91957c88e23f727377707a47921e71b4478dd1cd376cd7965d1b53ef06c80ed",
-    "terminal_artifact": "1000_staff_retirement.sql"
+    "expected_count": 130,
+    "ordered_digest_sha256": "1b49347304648c72744caca9dda2640ae50f870ddc3bc9faba5ecaf59c799ff8",
+    "terminal_artifact": "1003_matching_coordination_successor.sql"
   },
   "schema_assembly": {
     "path": "db/schema_assembly/labor_union_fresh_schema_v1.json",
-    "sha256": "8f8577978f56876550a0ecc90e0a5a9f5f045b10c241df4310e42273f7029fb7"
+    "sha256": "b0f91a9a788f9da52eec4f23126e0209c45553a4cf74ff3bb8171acf14902b58"
   },
   "full_release": {
     "path": "db/releases/labor_union_validation_schema_v1.sql",

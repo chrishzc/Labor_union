@@ -346,6 +346,28 @@ def test_f_retry_after_is_preserved_on_typed_unavailable():
     assert error["correlation_id"] == "retry-correlation"
 
 
+def test_f_typed_response_replaces_exception_correlation_without_middleware():
+    app = FastAPI()
+    install_typed_error_handlers(app)
+
+    @app.get("/api/v1/header-precedence")
+    def header_precedence():
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "admin_auth_unavailable"},
+            headers={"x-correlation-id": "untrusted-exception-header", "Retry-After": "1"},
+        )
+
+    response = TestClient(app).get("/api/v1/header-precedence")
+
+    assert response.status_code == 503
+    error = _error(response)
+    assert SAFE_CORRELATION.fullmatch(error["correlation_id"])
+    assert response.headers.get_list("X-Correlation-ID") == [error["correlation_id"]]
+    assert error["correlation_id"] != "untrusted-exception-header"
+    assert response.headers["Retry-After"] == "1"
+
+
 def test_g_mfa_legacy_detail_does_not_expose_provisioning_secret(monkeypatch):
     challenge = MfaEnrollmentChallenge(
         "challenge-id",
@@ -353,11 +375,11 @@ def test_g_mfa_legacy_detail_does_not_expose_provisioning_secret(monkeypatch):
         "otpauth://totp/private-secret",
         datetime(2026, 8, 17, tzinfo=timezone.utc),
     )
-    monkeypatch.setattr(admin_auth, "issue_password_login_challenge", lambda *_a, **_k: challenge)
+    monkeypatch.setattr(admin_auth, "authenticate_admin", lambda *_a, **_k: challenge)
     response = TestClient(_admin_app()).post(
-        "/api/v1/admin/auth/login/challenges",
+        "/api/v1/admin/auth/login",
         headers={"X-Correlation-ID": "mfa-correlation"},
-        json={"username": "admin", "password": "password"},
+        json={"username": "admin", "password": "password", "totp_code": "123456"},
     )
 
     assert response.status_code == 403
@@ -367,6 +389,35 @@ def test_g_mfa_legacy_detail_does_not_expose_provisioning_secret(monkeypatch):
         response.json(),
         ("challenge-token-secret", "otpauth://totp/private-secret", "provisioning_uri"),
     )
+
+
+def test_g_mfa_enrollment_is_password_authenticated_success_data(monkeypatch):
+    challenge = MfaEnrollmentChallenge(
+        "challenge-id",
+        "challenge-token-secret",
+        "otpauth://totp/private-secret",
+        datetime(2026, 8, 17, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(
+        admin_auth, "issue_password_login_challenge", lambda *_a, **_k: challenge
+    )
+
+    response = TestClient(_admin_app()).post(
+        "/api/v1/admin/auth/login/challenges",
+        json={"username": "admin", "password": "password"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "detail" not in payload
+    assert payload["data"] == {
+        "challenge_type": "mfa_enrollment",
+        "challenge_id": "challenge-id",
+        "challenge_token": "challenge-token-secret",
+        "expires_at": "2026-08-17T00:00:00Z",
+        "provisioning_uri": "otpauth://totp/private-secret",
+    }
+    assert "access_token" not in payload["data"]
 
 
 def test_g_unknown_data_browser_dict_is_status_redacted():
@@ -419,6 +470,8 @@ def test_i_unexpected_exception_is_redacted_in_response_and_log(monkeypatch, cap
     assert response.status_code == 500
     error = _error(response)
     assert error["code"] == "internal_error"
+    assert response.headers.get_list("X-Correlation-ID") == [error["correlation_id"]]
+    assert error["correlation_id"] == "unexpected-correlation"
     _assert_no_sensitive_values(response.json(), ("unexpected-secret-value",))
     assert "unexpected-secret-value" not in caplog.text
 
@@ -439,6 +492,8 @@ def test_i_response_validation_failure_is_redacted(monkeypatch):
     assert response.status_code == 500
     error = _error(response)
     assert error["code"] == "response_contract_mismatch"
+    assert response.headers.get_list("X-Correlation-ID") == [error["correlation_id"]]
+    assert error["correlation_id"] == "response-validation"
     _assert_no_sensitive_values(response.json(), ("response-secret",))
 
 
