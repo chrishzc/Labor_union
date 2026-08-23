@@ -1,6 +1,6 @@
 """
 File: test_orders_card_projection.py
-Description: 驗證 Orders 卡片 projection 的遮罩、缺件與 bounded read 契約。
+Description: 驗證內部 Orders 卡片完整聯絡資料、缺件與 bounded read 契約。
 """
 
 from datetime import date, datetime
@@ -80,13 +80,13 @@ class _Connection:
         return self.cursor_instance
 
 
-def test_card_projection_masks_contact_and_keeps_nested_typed_fields():
+def test_card_projection_keeps_full_contact_for_internal_admin_and_nested_typed_fields():
     projection = OrdersCardProjectionQueryService(
         _Repository((_row(),))
     ).query("C-100")
 
-    assert projection.contact_phone.value == "***5678"
-    assert projection.contact_address.value == "地址已遮罩"
+    assert projection.contact_phone.value == "0912345678"
+    assert projection.contact_address.value == "新竹市測試路 1 號"
     assert projection.requires_cooking.value is True
     assert projection.floor_fee_ntd.value == 1200
     assert projection.deposit_amount_ntd.value == 12000

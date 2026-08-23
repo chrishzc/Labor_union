@@ -1,6 +1,6 @@
 /**
  * File: OrdersPage.tsx
- * Description: 顯示 Orders 摘要與可操作 Drawer，必要查詢失敗時依資料 owner fail closed。
+ * Description: 顯示 Orders 摘要與可操作 Drawer，媒合控制只使用 typed facts 與可靠任務。
  */
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
@@ -137,8 +137,13 @@ export const OrdersPage: React.FC = () => {
   const [matchingDetail, setMatchingDetail] = useState<MatchingWorkbenchDrawerViewModel | null>(null);
   const [matchingDetailError, setMatchingDetailError] = useState<string | null>(null);
   const [activePlanQueryError, setActivePlanQueryError] = useState<string | null>(null);
+  const [matchingContractQueryError, setMatchingContractQueryError] = useState<string | null>(null);
   const [matchingCorrectionNotice, setMatchingCorrectionNotice] = useState<string | null>(null);
   const [matchingAssignmentPlanCorrection, setMatchingAssignmentPlanCorrection] = useState(false);
+  const [candidateFilter, setCandidateFilter] = useState<'all' | 'willing' | 'unwilling' | 'pending'>('all');
+  const [candidateActionKey, setCandidateActionKey] = useState<string | null>(null);
+  const [candidateActionError, setCandidateActionError] = useState<string | null>(null);
+  const [candidateActionNotice, setCandidateActionNotice] = useState<string | null>(null);
   const [contractDetail, setContractDetail] = useState<OrderTermsContractDrawerViewModel | null>(null);
   const [contractQueryError, setContractQueryError] = useState<string | null>(null);
   const [contractCorrectionNotice, setContractCorrectionNotice] = useState<string | null>(null);
@@ -548,24 +553,36 @@ export const OrdersPage: React.FC = () => {
   };
 
   // Handle opening Drawer 2: Matching Workbench
-  const handleOpenMatchingDrawer = async (order: OrderSummaryCardViewModel) => {
+  const handleOpenMatchingDrawer = async (
+    order: OrderSummaryCardViewModel,
+    options?: { preserveCandidateAction?: boolean },
+  ) => {
     setMatchingOrder(order);
     setMatchingDetail(null);
     setMatchingDetailError(null);
     setActivePlanQueryError(null);
+    setMatchingContractQueryError(null);
     setMatchingCorrectionNotice(null);
     setMatchingAssignmentPlanCorrection(false);
+    setContractDetail(null);
+    if (!options?.preserveCandidateAction) {
+      setCandidateFilter('all');
+      setCandidateActionError(null);
+      setCandidateActionNotice(null);
+    }
     loadCardProjection(order.id);
     setDrawerLoading(true);
     const { controller, requestId } = beginDrawerRequest();
 
     try {
-      const [detailRes, assignmentPlanRes, termsRes, candidatePoolRes, activePlanRes] = await Promise.allSettled([
+      const [detailRes, assignmentPlanRes, termsRes, candidatePoolRes, activePlanRes, completionRes, signingRes] = await Promise.allSettled([
         ordersQueryClient.getOrderDetail(order.id, { signal: controller.signal }),
         ordersQueryClient.getAssignmentPlan(order.id, { signal: controller.signal }),
         ordersQueryClient.getOrderTerms(order.id, { signal: controller.signal }),
         candidateContactPoolClient.query(order.id, { signal: controller.signal }),
         waitingDepositLockClient.queryPlan(order.id, controller.signal),
+        ordersQueryClient.getContractCompletion(order.id, { signal: controller.signal }),
+        contractSigningClient.query(order.id, { signal: controller.signal }),
       ]);
 
       if (requestId !== currentDrawerRequestRef.current) return;
@@ -578,6 +595,24 @@ export const OrdersPage: React.FC = () => {
         && activePlanRes.reason instanceof ApiHttpError
         && activePlanRes.reason.status === 404;
       const activePlanFailed = activePlanRes.status === 'rejected' && !activePlanMissing;
+      const matchingContractView =
+        detailRes.status === 'fulfilled'
+        && detailRes.value.case_no === order.id
+        && termsRes.status === 'fulfilled'
+        && termsRes.value.case_no === order.id
+        && completionRes.status === 'fulfilled'
+        && completionRes.value.case_no === order.id
+        && signingRes.status === 'fulfilled'
+        && signingRes.value.case_no === order.id
+          ? adaptOrderTermsContractDrawer({
+              caseNo: order.id,
+              terms: termsRes.value,
+              completion: completionRes.value,
+              signing: signingRes.value,
+              summary: order,
+              orderDetail: detailRes.value,
+            })
+          : null;
 
       const termsHistoricalGap = termsRes.status === 'rejected' && isClientFinanceBootstrapGap(termsRes.reason);
       const assignmentHistoricalGap = assignmentPlanRes.status === 'rejected'
@@ -608,11 +643,42 @@ export const OrdersPage: React.FC = () => {
         setActivePlanQueryError(activePlanFailed
           ? '進行中媒合方案與等待訂金鎖資料載入失敗，請關閉後重試。'
           : null);
+        setContractDetail(matchingContractView);
+        setMatchingContractQueryError(matchingContractView
+          ? null
+          : '契約簽署與定金狀態暫時無法取得，請重新查詢。');
       }
     } finally {
       if (requestId === currentDrawerRequestRef.current) {
         setDrawerLoading(false);
       }
+    }
+  };
+
+  const sendCandidateInformation = async (candidateId: number, infoType: 1 | 2) => {
+    if (!matchingOrder) return;
+    const actionKey = `${candidateId}:${infoType}`;
+    setCandidateActionKey(actionKey);
+    setCandidateActionError(null);
+    setCandidateActionNotice(null);
+    try {
+      const result = await candidateContactPoolClient.sendInformation(
+        matchingOrder.id,
+        candidateId,
+        infoType,
+      );
+      await handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true });
+      setCandidateActionNotice(
+        result.status === 'queued'
+          ? `訂單資訊-${infoType} 已建立可靠發送任務 #${result.line_task_id}。`
+          : `訂單資訊-${infoType} 已由既有冪等任務受理。`,
+      );
+    } catch (caught) {
+      setCandidateActionError(
+        caught instanceof Error ? caught.message : `訂單資訊-${infoType} 發送失敗。`,
+      );
+    } finally {
+      setCandidateActionKey(null);
     }
   };
 
@@ -825,6 +891,13 @@ export const OrdersPage: React.FC = () => {
   const filteredOrders = selectedStage === '全部'
     ? allItems
     : allItems.filter((order) => stageIndex.get(order.id)?.current_stage_code === selectedStage);
+  const depositAmountText = cardProjection?.rows.find((row) => row.key === 'deposit_amount_ntd')?.valueText
+    ?? (cardProjectionError ? '資料載入失敗（定金金額）' : '正在確認定金金額…');
+  const depositSettlementText = cardProjection?.rows.find((row) => row.key === 'deposit_settlement_state')?.valueText
+    ?? (cardProjectionError ? '資料載入失敗（定金狀態）' : '正在確認定金狀態…');
+  const visibleMatchingCandidates = matchingDetail?.candidatePool.filter((candidate) => (
+    candidateFilter === 'all' || candidate.willingness === candidateFilter
+  )) ?? [];
 
   return (
     <div>
@@ -1345,14 +1418,15 @@ export const OrdersPage: React.FC = () => {
               </div>
 
               <div className="matching-facts-col">
-                <div className="matching-facts-label">合約總額與定金狀態</div>
+                <div className="matching-facts-label">雇主自付應付額與定金狀態</div>
                 <div className="matching-facts-val" style={{ color: '#ff7f50' }}>{matchingOrder.contractAmountFormatted}</div>
                 <div className="matching-facts-sub">
-                  💰 定金：{cardProjection?.rows.find((row) => row.key === 'deposit_amount_ntd')?.valueText
-                    ?? (cardProjectionError ? '資料載入失敗（定金金額）' : '正在確認定金金額…')}
+                  💰 定金：{depositAmountText}
                 </div>
-                <div className="matching-deposit-pill">
-                  🟢 定金狀態：已核銷（檔期鎖定）
+                <div className="matching-deposit-pill" style={{
+                  color: cardProjection?.depositSettlementState === 'settled' ? '#166534' : '#9a3412',
+                }}>
+                  定金狀態：{depositSettlementText}
                 </div>
               </div>
             </div>
@@ -1366,7 +1440,7 @@ export const OrdersPage: React.FC = () => {
                     🎯 設定配對篩選條件與偏好
                   </h3>
                   <div className="matching-step-subtext">
-                    預設啟用五大核心條件；取消條件只影響候選查詢，不會略過正式檔期衝突 gate。
+                    依案件 owner 根事實重新載入候選聯繫池；檔期衝突仍由正式媒合 gate 判定。
                   </div>
                 </div>
                 <button
@@ -1374,38 +1448,17 @@ export const OrdersPage: React.FC = () => {
                   className="orders-load-more-btn"
                   style={{ padding: '6px 20px', fontSize: '0.82rem' }}
                   disabled={drawerLoading}
-                  onClick={() => undefined}
+                  onClick={() => void handleOpenMatchingDrawer(matchingOrder, { preserveCandidateAction: true })}
                 >
                   🔍 重新查詢符合條件月嫂
                 </button>
               </div>
 
-              <div className="matching-criteria-grid">
-                <label className="matching-criteria-item">
-                  <input type="checkbox" defaultChecked disabled />
-                  <span>📍 服務地區符合（大安區/鄰近）</span>
-                </label>
-                <label className="matching-criteria-item">
-                  <input type="checkbox" defaultChecked disabled />
-                  <span>⏰ 承接時段相符（{matchingDetail?.serviceTimeText ?? '8hr 日間'}）</span>
-                </label>
-                <label className="matching-criteria-item">
-                  <input type="checkbox" defaultChecked disabled />
-                  <span>📅 承接天數相符（{matchingOrder.serviceDaysLabel}）</span>
-                </label>
-                <label className="matching-criteria-item">
-                  <input type="checkbox" defaultChecked disabled />
-                  <span>🍳 具備月子餐料理專長</span>
-                </label>
-                <label className="matching-criteria-item">
-                  <input type="checkbox" defaultChecked disabled />
-                  <span>🔒 排除檔期衝突與不可服務期間</span>
-                </label>
-              </div>
-
-              <div style={{ display: 'flex', gap: '20px', fontSize: '0.84rem', color: '#74593f' }}>
-                <div>容許天數差：<strong>0 天</strong></div>
-                <div>自訂偏好：<strong>特殊早產/雙胞胎照顧經驗（已納入比對）</strong></div>
+              <div className="matching-criteria-grid" role="list" aria-label="目前媒合查詢根事實">
+                <div className="matching-criteria-item" role="listitem">📍 服務地點：{cardProjection?.rows.find((row) => row.key === 'contact_address')?.valueText ?? '正在確認…'}</div>
+                <div className="matching-criteria-item" role="listitem">⏰ 每日時段：{matchingDetail?.serviceTimeText ?? '正在確認…'}</div>
+                <div className="matching-criteria-item" role="listitem">📅 承接天數：{matchingOrder.serviceDaysLabel}</div>
+                <div className="matching-criteria-item" role="listitem">🍳 料理條款：{matchingDetail?.requiresCookingText ?? '正在確認…'}</div>
               </div>
             </div>
 
@@ -1424,38 +1477,33 @@ export const OrdersPage: React.FC = () => {
               </div>
 
               <div className="matching-mode-strip">
-                <button
-                  type="button"
-                  className={`matching-mode-btn ${matchingDetail?.assignmentSegments.length && matchingDetail.assignmentSegments.length > 1 ? '' : 'active'}`}
-                >
-                  單一月嫂完整服務（30天）
-                </button>
-                <button
-                  type="button"
-                  className={`matching-mode-btn ${matchingDetail?.assignmentSegments.length && matchingDetail.assignmentSegments.length > 1 ? 'active' : ''}`}
-                >
-                  多月嫂分段連續排班（2～4段）
-                </button>
+                <span className="matching-mode-btn active" role="status">
+                  {matchingDetail?.assignmentSegments.length
+                    ? matchingDetail.assignmentSegments.length === 1
+                      ? `單一月嫂正式指派（${matchingOrder.serviceDaysLabel}）`
+                      : `${matchingDetail.assignmentSegments.length} 段多月嫂正式指派`
+                    : '尚無正式指派模式'}
+                </span>
               </div>
 
               <div className="matching-coverage-card">
                 <div>
-                  <strong style={{ color: '#1e1b19', fontSize: '0.92rem' }}>分段排程連續覆蓋檢核：</strong>
+                  <strong style={{ color: '#1e1b19', fontSize: '0.92rem' }}>正式分段排程來源：</strong>
                   <div style={{ color: '#57423b', fontSize: '0.84rem', marginTop: '4px' }}>
-                    {matchingDetail?.assignmentSegments.length && matchingDetail.assignmentSegments.length > 1
+                    {matchingDetail?.assignmentSegments.length
                       ? matchingDetail.assignmentSegments.map((s) => `第 ${s.sequence} 段 (Staff #${s.staffId} · ${s.serviceRange})`).join(' ＋ ')
-                      : `單人全段覆蓋：${matchingOrder.serviceRange}（共 ${matchingOrder.serviceDaysLabel}）`}
+                      : '目前尚無正式指派分段。'}
                   </div>
                 </div>
                 <span style={{
                   padding: '4px 12px',
                   borderRadius: '9999px',
-                  backgroundColor: '#dcfce7',
-                  color: '#166534',
+                  backgroundColor: '#f8fafc',
+                  color: '#57423b',
                   fontWeight: 700,
                   fontSize: '0.82rem',
                 }}>
-                  ✅ 100% 完整覆蓋無空檔
+                  已載入 {matchingDetail?.assignmentSegments.length ?? 0} 段正式指派
                 </span>
               </div>
             </div>
@@ -1475,23 +1523,26 @@ export const OrdersPage: React.FC = () => {
               </div>
 
               <div className="matching-candidate-tabs">
-                <button type="button" className="matching-tab-btn active">
+                <button type="button" className={`matching-tab-btn ${candidateFilter === 'all' ? 'active' : ''}`} aria-pressed={candidateFilter === 'all'} onClick={() => setCandidateFilter('all')}>
                   全部（{matchingDetail?.candidatePool.length ?? 0} 位）
                 </button>
-                <button type="button" className="matching-tab-btn">
+                <button type="button" className={`matching-tab-btn ${candidateFilter === 'willing' ? 'active' : ''}`} aria-pressed={candidateFilter === 'willing'} onClick={() => setCandidateFilter('willing')}>
                   🟢 願意（{matchingDetail?.candidatePool.filter((c) => c.willingness === 'willing').length ?? 0} 位）
                 </button>
-                <button type="button" className="matching-tab-btn">
+                <button type="button" className={`matching-tab-btn ${candidateFilter === 'unwilling' ? 'active' : ''}`} aria-pressed={candidateFilter === 'unwilling'} onClick={() => setCandidateFilter('unwilling')}>
                   🔴 無意願（{matchingDetail?.candidatePool.filter((c) => c.willingness === 'unwilling').length ?? 0} 位）
                 </button>
-                <button type="button" className="matching-tab-btn">
-                  ⏳ 待回覆
+                <button type="button" className={`matching-tab-btn ${candidateFilter === 'pending' ? 'active' : ''}`} aria-pressed={candidateFilter === 'pending'} onClick={() => setCandidateFilter('pending')}>
+                  ⏳ 待回覆（{matchingDetail?.candidatePool.filter((c) => c.willingness === 'pending').length ?? 0} 位）
                 </button>
               </div>
 
+              {candidateActionNotice && <div role="status" style={{ color: '#166534', marginBottom: '10px' }}>{candidateActionNotice}</div>}
+              {candidateActionError && <div role="alert" style={{ color: '#991b1b', marginBottom: '10px' }}>{candidateActionError}</div>}
+
               {matchingDetail && matchingDetail.candidatePool.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {matchingDetail.candidatePool.map((c) => (
+                  {visibleMatchingCandidates.map((c) => (
                     <div
                       key={c.candidateId}
                       className={`matching-candidate-item ${c.contactStatus === 'selected' ? 'selected' : ''}`}
@@ -1551,8 +1602,14 @@ export const OrdersPage: React.FC = () => {
                           <div style={{ fontSize: '0.78rem', color: '#888' }}>
                             推播服務天數、時段與地區，保護產婦個資並徵詢初步接案意願。
                           </div>
-                          <button type="button" className="matching-action-btn-sm" disabled>
-                            🔄 重新寄送資訊-1
+                          <button
+                            type="button"
+                            className="matching-action-btn-sm"
+                            disabled={candidateActionKey !== null || c.contactStatus === 'withdrawn'}
+                            title={c.contactStatus === 'withdrawn' ? '已退出候選池，不建立新的發送任務。' : '建立可靠發送任務'}
+                            onClick={() => void sendCandidateInformation(c.candidateId, 1)}
+                          >
+                            {candidateActionKey === `${c.candidateId}:1` ? '正在建立資訊-1 發送任務…' : '🔄 重新寄送資訊-1'}
                           </button>
                         </div>
 
@@ -1566,13 +1623,22 @@ export const OrdersPage: React.FC = () => {
                           <div style={{ fontSize: '0.78rem', color: '#888' }}>
                             推播詳細合約條款、地址與特殊膳食需求，供月嫂二次確認。
                           </div>
-                          <button type="button" className="matching-action-btn-sm" disabled>
-                            🔄 重新寄送資訊-2
+                          <button
+                            type="button"
+                            className="matching-action-btn-sm"
+                            disabled={candidateActionKey !== null || c.contactStatus === 'withdrawn'}
+                            title={c.contactStatus === 'withdrawn' ? '已退出候選池，不建立新的發送任務。' : '建立可靠發送任務'}
+                            onClick={() => void sendCandidateInformation(c.candidateId, 2)}
+                          >
+                            {candidateActionKey === `${c.candidateId}:2` ? '正在建立資訊-2 發送任務…' : '🔄 重新寄送資訊-2'}
                           </button>
                         </div>
                       </div>
                     </div>
                   ))}
+                  {visibleMatchingCandidates.length === 0 && (
+                    <div role="status" style={{ color: '#74593f' }}>目前篩選條件下沒有候選聯繫紀錄。</div>
+                  )}
                 </div>
               ) : matchingDetail ? (
                 <div role="status" style={{ color: '#74593f' }}>目前尚無候選聯繫紀錄。</div>
@@ -1621,38 +1687,41 @@ export const OrdersPage: React.FC = () => {
                     <div style={{ fontSize: '0.82rem', color: '#57423b', lineHeight: '1.5' }}>
                       🔒 {matchingDetail.waitingLockText}
                     </div>
-                    <button type="button" className="matching-action-btn-sm" disabled>
-                      📤 發送月嫂履歷輪播卡給產婦
-                    </button>
+                    <div role="status" style={{ fontSize: '0.78rem', color: '#74593f' }}>
+                      履歷發送依進行中方案的 communication version 與 segment identity 建立可靠任務。
+                    </div>
                   </div>
 
                   <div className="matching-contract-box">
                     <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1e1b19' }}>
                       📑 雙邊線上契約簽署進度 (Contract Signing SSOT)
                     </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.84rem' }}>
+                    {matchingContractQueryError && (
+                      <div role="alert" style={{ color: '#991b1b' }}>{matchingContractQueryError}</div>
+                    )}
+                    {contractDetail && <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.84rem' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span>👩‍🍼 月嫂服務契約：</span>
                         <span style={{ color: contractDetail?.staffContractSigned ? '#16a34a' : '#c2410c', fontWeight: 700 }}>
-                          {contractDetail?.staffContractSignedText || '已簽回'}
+                          {contractDetail.staffContractSignedText}
                         </span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span>👥 產婦服務契約：</span>
                         <span style={{ color: contractDetail?.clientContractSigned ? '#16a34a' : '#c2410c', fontWeight: 700 }}>
-                          {contractDetail?.clientContractSignedText || '已簽回'}
+                          {contractDetail.clientContractSignedText}
                         </span>
                       </div>
                       <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                         <span>💰 客戶定金核銷：</span>
-                        <span style={{ color: contractDetail?.depositSettled ? '#16a34a' : '#16a34a', fontWeight: 700 }}>
-                          {contractDetail?.depositSettledText || '已完成核銷'}
+                        <span style={{ color: contractDetail.depositSettled ? '#16a34a' : '#c2410c', fontWeight: 700 }}>
+                          {contractDetail.depositSettledText}
                         </span>
                       </div>
+                    </div>}
+                    <div role="status" style={{ fontSize: '0.78rem', color: '#74593f' }}>
+                      契約寄送需由文件版本與收件人 binding 共同建立可靠任務。
                     </div>
-                    <button type="button" className="matching-action-btn-sm" disabled>
-                      📤 寄送/補發線上簽約通知
-                    </button>
                   </div>
                 </div>
               </div>

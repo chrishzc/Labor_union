@@ -1,6 +1,6 @@
 """
 File: card_projection_query.py
-Description: 建立案件範圍的 Orders 卡片唯讀 typed projection。
+Description: 建立內部案件 Orders 卡片與完整必要聯絡資料的唯讀 typed projection。
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ class OrdersCardProjectionRepository(Protocol):
 
 
 class OrdersCardProjectionQueryService:
-    """Translate one bounded repository read into a redacted typed card."""
+    """Translate one bounded repository read into an internal typed card."""
 
     def __init__(self, repository: OrdersCardProjectionRepository) -> None:
         self._repository = repository
@@ -187,10 +187,8 @@ def _project(
 def _contact_phone(
     row: Mapping[str, object], source_identity: str, source_version: str | None
 ) -> CardProjectionField[str]:
-    raw = _optional_text(row, "phone", 20)
-    value = None if raw is None else f"***{raw[-4:]}"
     return _field(
-        value,
+        _optional_text(row, "phone", 20),
         "Client",
         source_identity,
         source_version,
@@ -201,10 +199,8 @@ def _contact_phone(
 def _contact_address(
     row: Mapping[str, object], source_identity: str, source_version: str | None
 ) -> CardProjectionField[str]:
-    raw = _optional_text(row, "address", 255)
-    value = None if raw is None else "地址已遮罩"
     return _field(
-        value,
+        _optional_text(row, "address", 255),
         "Client",
         source_identity,
         source_version,

@@ -1,6 +1,6 @@
 /**
  * File: OrderTrackerPage.tsx
- * Description: 顯示訂單七階段、案件卡片投影三態、SOP、結清與 LINE 通知唯讀歷程。
+ * Description: 顯示訂單七階段、完整聯絡資料、SOP、結清與 LINE 通知唯讀歷程。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { adaptOrderTrackerPage, type OrderTrackerPageViewModel, type TrackerOrderCardViewModel } from '../adapters/orders/order_tracker_adapter';
@@ -597,7 +597,7 @@ export const OrderTrackerPage: React.FC = () => {
                 <div className="drawer-summary-icon">📍</div>
                 <div className="drawer-summary-text">
                   <span className="drawer-summary-label">服務區域</span>
-                  <strong className="drawer-summary-val">{cardProjectionContactValue(cardProjectionState, 'contact_address') || '台北市'}</strong>
+                  <strong className="drawer-summary-val">{cardProjectionContactValue(cardProjectionState, 'contact_address')}</strong>
                 </div>
               </div>
               <div className="drawer-summary-divider" />

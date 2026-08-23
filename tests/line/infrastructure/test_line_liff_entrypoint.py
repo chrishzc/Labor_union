@@ -1,6 +1,6 @@
 """
 File: test_line_liff_entrypoint.py
-Description: 驗證 LIFF 身分入口與服務登記 Rich Menu URI 導向。
+Description: 驗證 LIFF 身分入口、Rich Menu 導向與月嫂自助服務靜態契約。
 """
 
 from pathlib import Path
@@ -112,3 +112,24 @@ def test_registration_page_uses_only_canonical_identity_endpoints() -> None:
     assert "/api/v1/line/identity/registration/apply" in source
     assert "/api/line/register" not in source
     assert "/api/line/config" not in source
+
+
+def test_staff_schedule_page_wires_the_approved_self_service_contracts() -> None:
+    source = (ROOT / "line" / "static" / "staff_schedule.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "/api/v1/line/staff-self-service/leave-requests" in source
+    assert "/api/v1/line/staff-self-service/service-day-logs" in source
+    assert "/api/v1/line/staff-self-service/service-day-media" in source
+    assert '"Idempotency-Key": idempotencyKey' in source
+    assert 'development_line_user_id: lineIdToken ? "" : developmentLineUserId' in source
+    assert 'params.get("userId")' in source
+    assert '"line_user_id"' not in source
+    assert "item.is_work_day === true && Number(item.assignment_id) > 0" in source
+    assert "assignment_id: Number(selected.assignment_id)" in source
+    assert "service_date: selected.service_date" in source
+    assert 'formData.append("photo", photo)' in source
+    assert "uploadData.data?.media_id" in source
+    assert "meal_photo_media_ids: mediaIds" in source
+    assert "待辦，不是正式核准" in source

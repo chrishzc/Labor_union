@@ -1,6 +1,6 @@
 /**
  * File: candidate_contact_pool_client.test.ts
- * Description: 驗證候選聯繫池 GET 的 closed decode、identity、空池與 request signal。
+ * Description: 驗證候選聯繫池查詢與可靠資訊發送的 closed decode、identity 及認證邊界。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -41,6 +41,7 @@ describe('candidateContactPoolClient', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(sessionClient, 'getToken').mockReturnValue('volatile-token');
+    vi.spyOn(sessionClient, 'getUser').mockReturnValue({ username: 'operator-1' } as never);
   });
 
   it('queries the bounded endpoint and strictly decodes owner facts', async () => {
@@ -97,5 +98,50 @@ describe('candidateContactPoolClient', () => {
     await expect(candidateContactPoolClient.query('CASE-POOL-001')).rejects.toBeInstanceOf(
       ApiHttpError,
     );
+  });
+
+  it('creates a reliable candidate information task with authenticated actor identity', async () => {
+    const post = vi.spyOn(transport, 'post').mockResolvedValue({
+      success: true,
+      message: 'queued',
+      data: { status: 'queued', event_id: 31, line_task_id: 52 },
+      error: null,
+    });
+
+    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 2)).resolves.toEqual({
+      status: 'queued',
+      event_id: 31,
+      line_task_id: 52,
+    });
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/information',
+      expect.objectContaining({
+        info_type: 2,
+        actor: 'operator-1',
+        event_key: expect.stringMatching(/^orders-candidate-info-2-17-/),
+      }),
+      { token: 'volatile-token' },
+    );
+  });
+
+  it('fails closed before sending when session identity is missing', async () => {
+    vi.mocked(sessionClient.getUser).mockReturnValue(null);
+    const post = vi.spyOn(transport, 'post');
+
+    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 1)).rejects.toBeInstanceOf(
+      ApiHttpError,
+    );
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('rejects a queued response without durable line task identity', async () => {
+    vi.spyOn(transport, 'post').mockResolvedValue({
+      success: true,
+      message: 'queued',
+      data: { status: 'queued', event_id: 31, line_task_id: null },
+      error: null,
+    });
+
+    await expect(candidateContactPoolClient.sendInformation('CASE-POOL-001', 17, 1)).rejects.toThrow();
   });
 });

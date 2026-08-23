@@ -1,6 +1,6 @@
 /**
  * File: order_card_projection_adapter.ts
- * Description: 將案件卡片投影映射為業務欄位與精簡來源資訊。
+ * Description: 將案件卡片投影映射為業務欄位、定金狀態與精簡來源資訊。
  */
 import type {
   OrdersCardAssignmentSegment,
@@ -26,6 +26,7 @@ export interface OrdersCardAssignmentViewModel {
 export interface OrdersCardProjectionViewModel {
   caseNo: string;
   rows: readonly OrdersCardProjectionRowViewModel[];
+  depositSettlementState: 'settled' | 'unsettled' | null;
   assignmentSegments: readonly OrdersCardAssignmentViewModel[];
   assignmentSegmentsAvailability: 'available' | 'unavailable' | 'blocked';
   assignmentSegmentsMessage: string;
@@ -78,6 +79,9 @@ export function adaptOrdersCardProjection(projection: OrdersCardProjection, expe
   }
   return {
     caseNo: projection.case_no,
+    depositSettlementState: projection.deposit_settlement_state.availability === 'available'
+      ? projection.deposit_settlement_state.value
+      : null,
     rows: [
       row('contact_phone', '聯絡電話', projection.contact_phone, String),
       row('contact_address', '服務地址', projection.contact_address, String),

@@ -1,6 +1,6 @@
 /**
  * File: order_tracker_entry_cutover.test.tsx
- * Description: 驗證 Order Tracker entry 的 StrictMode GET 預算、七階段與唯讀 Drawer 查詢。
+ * Description: 驗證 Order Tracker entry、完整聯絡資料、七階段 projection 與互動請求。
  */
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -310,6 +310,10 @@ describe('Order Tracker #order-tracker entry static subgate', () => {
     }
 
     fireEvent.click(screen.getByRole('button', { name: /查看訂單 ORD-2026-0801/ }));
+    await waitFor(() => {
+      expect(screen.getByText('聯絡電話').nextElementSibling).toHaveTextContent('0900000000');
+      expect(screen.getByText('服務地址').nextElementSibling).toHaveTextContent('測試地址');
+    });
     expect(document.querySelectorAll('[data-surface-id^="order-tracker.sop.step."]')).toHaveLength(11);
     expect(screen.queryByText('狀態 —　時間 —')).not.toBeInTheDocument();
     expect(screen.getByText('七階段作業狀態')).toBeInTheDocument();

@@ -1,6 +1,6 @@
 /**
  * File: line_rules_query_flow.test.tsx
- * Description: 驗證通知規則只在頁籤啟用時查詢，呈現真實 catalog／empty 且不暴露 mutation。
+ * Description: 驗證通知規則只在頁籤啟用時查詢，並同時呈現真實 catalog 與 typed mutation 維護區。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -27,7 +27,7 @@ function dependencies(rules: LineNotificationRulesCatalog = LINE_NOTIFICATION_RU
 
 afterEach(() => vi.restoreAllMocks());
 
-describe('LINE 通知規則 query-only 接線', () => {
+describe('LINE 通知規則 query 與 mutation 接線', () => {
   it('只在頁籤啟用時查一次並以真實規則開啟查詢 Drawer', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
@@ -36,11 +36,11 @@ describe('LINE 通知規則 query-only 接線', () => {
     expect(configuration.getNotificationRules).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
-    await waitFor(() => expect(screen.getByText('deposit_notice')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getAllByText('deposit_notice').length).toBeGreaterThan(0));
     expect(configuration.getNotificationRules).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /deposit_notice/ }));
-    expect(screen.getByText('訂金確認')).toBeInTheDocument();
+    expect(screen.getAllByText('訂金確認').length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -51,7 +51,7 @@ describe('LINE 通知規則 query-only 接線', () => {
     render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
     fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
     await screen.findByText('目前尚未設定通知規則');
-    expect(screen.getByText(/Current revision：0/)).toBeInTheDocument();
+    expect(screen.getAllByText(/Current revision：0/).length).toBeGreaterThan(0);
     expect(screen.queryByText('FLOW-13')).not.toBeInTheDocument();
   });
 });

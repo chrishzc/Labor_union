@@ -56,6 +56,9 @@ describe('OrdersPage zero fake mutation', () => {
       case_no: 'ORD-2026-0801',
       candidates: [],
     });
+    vi.spyOn(candidateContactPoolClient, 'sendInformation').mockResolvedValue({
+      status: 'queued', event_id: 91, line_task_id: 92,
+    });
     vi.spyOn(waitingDepositLockClient, 'queryPlan').mockResolvedValue({
       planId: 19,
       status: 'proposed',
@@ -128,6 +131,42 @@ describe('OrdersPage zero fake mutation', () => {
     expect(ordersQueryClient.getAssignmentPlan).toHaveBeenCalledOnce();
     expect(candidateContactPoolClient.query).toHaveBeenCalledOnce();
     expect(waitingDepositLockClient.queryPlan).toHaveBeenCalledOnce();
+  });
+
+  it('requeries matching facts, filters candidates, and queues information from real controls', async () => {
+    vi.mocked(candidateContactPoolClient.query).mockResolvedValue({
+      pool_id: 11,
+      case_no: 'ORD-2026-0801',
+      candidates: [{
+        id: 17,
+        staff_id: 8892,
+        service_start_date: '2026-09-01',
+        service_end_date: '2026-09-30',
+        status: 'active',
+        created_at: '2026-08-23T10:00:00',
+        staff_name: '測試月嫂',
+        willingness: 'willing',
+        reason: null,
+        information: { '1': null, '2': null },
+      }],
+    });
+    render(React.createElement(OrdersPage));
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]);
+    await screen.findByText('測試月嫂');
+
+    fireEvent.click(screen.getByRole('button', { name: /無意願（0 位）/ }));
+    expect(screen.getByText('目前篩選條件下沒有候選聯繫紀錄。')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /全部（1 位）/ }));
+    fireEvent.click(screen.getByRole('button', { name: '🔄 重新寄送資訊-1' }));
+
+    await screen.findByText('訂單資訊-1 已建立可靠發送任務 #92。');
+    expect(candidateContactPoolClient.sendInformation).toHaveBeenCalledWith('ORD-2026-0801', 17, 1);
+    expect(screen.queryByText('✅ 100% 完整覆蓋無空檔')).not.toBeInTheDocument();
+    expect(screen.queryByText('定金狀態：已核銷（檔期鎖定）')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '🔍 重新查詢符合條件月嫂' }));
+    await waitFor(() => expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(3));
   });
 
   it('offers cancellation Query and Preview without exposing Apply', async () => {

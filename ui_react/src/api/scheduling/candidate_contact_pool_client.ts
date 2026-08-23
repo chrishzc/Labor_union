@@ -1,6 +1,6 @@
 /**
  * File: candidate_contact_pool_client.ts
- * Description: 以 closed Zod 解碼候選聯繫池 GET，驗證案件 identity 並保留傳輸錯誤語意。
+ * Description: 查詢候選聯繫池並建立可靠資訊發送任務，嚴格驗證案件與操作 identity。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -62,7 +62,29 @@ const CandidateContactPoolEnvelopeSchema = z.strictObject({
   error: z.string().nullable(),
 });
 
+const SendCandidateInformationResultSchema = z.strictObject({
+  status: z.enum(['queued', 'idempotent_replay']),
+  event_id: z.number().int().positive(),
+  line_task_id: z.number().int().positive().nullable(),
+}).superRefine((result, context) => {
+  if (result.status === 'queued' && result.line_task_id === null) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['line_task_id'],
+      message: 'queued 結果必須帶 line_task_id。',
+    });
+  }
+});
+
+const SendCandidateInformationEnvelopeSchema = z.strictObject({
+  success: z.boolean(),
+  message: z.string(),
+  data: SendCandidateInformationResultSchema.nullable(),
+  error: z.string().nullable(),
+});
+
 export type CandidateContactPool = z.infer<typeof CandidateContactPoolSchema>;
+export type SendCandidateInformationResult = z.infer<typeof SendCandidateInformationResultSchema>;
 
 export interface CandidateContactPoolQueryOptions {
   signal?: AbortSignal;
@@ -99,6 +121,47 @@ export const candidateContactPoolClient = {
     }
     if (envelope.data.case_no !== canonicalCaseNo) {
       throw new Error('候選聯繫池案件識別不一致。');
+    }
+    return envelope.data;
+  },
+
+  async sendInformation(
+    caseNo: string,
+    candidateId: number,
+    infoType: 1 | 2,
+  ): Promise<SendCandidateInformationResult> {
+    const canonicalCaseNo = caseNo.trim();
+    const actor = sessionClient.getUser()?.username.trim() ?? '';
+    const token = sessionClient.getToken();
+    if (!canonicalCaseNo || canonicalCaseNo.length > 50) {
+      throw new Error('案件編號必須是 1 至 50 字元。');
+    }
+    if (!Number.isInteger(candidateId) || candidateId <= 0) {
+      throw new Error('候選聯繫識別必須是正整數。');
+    }
+    if (!actor || !token) {
+      throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    }
+    const envelope = decodePayload(
+      SendCandidateInformationEnvelopeSchema,
+      await transport.post(
+        `/api/v1/orders/${encodeURIComponent(canonicalCaseNo)}/candidate-contact-pool/candidates/${candidateId}/information`,
+        {
+          info_type: infoType,
+          actor,
+          event_key: `orders-candidate-info-${infoType}-${candidateId}-${crypto.randomUUID()}`,
+        },
+        { token },
+      ),
+    );
+    if (!envelope.success || envelope.data === null) {
+      throw new ApiHttpError(
+        422,
+        'CANDIDATE_INFORMATION_SEND_FAILED',
+        envelope.error ?? envelope.message,
+        false,
+        envelope,
+      );
     }
     return envelope.data;
   },

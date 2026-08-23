@@ -1,6 +1,8 @@
-<!-- File: staff_schedule.html -->
-<!-- Description: 提供月嫂 LIFF 個人班表查詢介面。 -->
 <!DOCTYPE html>
+<!--
+File: staff_schedule.html
+Description: 提供月嫂查班、請假待辦與正式服務日日誌及餐食照片提交。
+-->
 <html lang="zh-Hant-TW">
 <head>
   <meta charset="UTF-8">
@@ -13,8 +15,14 @@
     h1 { margin: 0 0 8px; font-size: 28px; }
     p { color: #71717a; line-height: 1.6; }
     .primary { border: 0; border-radius: 6px; padding: 13px 12px; font-size: 16px; font-weight: 700; color: #fff; background: #be123c; }
+    .primary:disabled { cursor: wait; opacity: .6; }
     .panel { background: #fff; border: 1px solid #fecdd3; border-radius: 8px; padding: 16px; margin-top: 14px; }
     .toolbar { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: end; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .field { margin-top: 12px; }
+    .full { grid-column: 1 / -1; }
+    .hint { margin: 7px 0 0; font-size: 14px; color: #71717a; }
+    .section-title { margin: 0 0 6px; font-size: 21px; }
     label { display: block; font-weight: 700; margin-bottom: 7px; }
     input, textarea, select { width: 100%; border: 1px solid #d4d4d8; border-radius: 6px; padding: 11px; font-size: 16px; }
     textarea { min-height: 86px; resize: vertical; }
@@ -31,6 +39,7 @@
     .legend { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 12px; font-size: 14px; color: #52525b; }
     .dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
     .hide { display: none; }
+    @media (max-width: 560px) { .toolbar, .form-grid { grid-template-columns: 1fr; } .full { grid-column: auto; } }
   </style>
 </head>
 <body>
@@ -44,7 +53,7 @@
         <label for="monthInput">查詢月份</label>
         <input id="monthInput" type="month">
       </div>
-      <button id="loadSchedule" class="primary">查詢班表</button>
+      <button id="loadSchedule" class="primary" disabled>查詢班表</button>
     </div>
     <div id="calendarStatus" class="message" style="display:none;"></div>
     <div class="legend">
@@ -55,22 +64,58 @@
     <div id="calendar" class="calendar"></div>
   </section>
 
+  <section class="panel" aria-labelledby="leaveTitle">
+    <h2 id="leaveTitle" class="section-title">提交請假待辦</h2>
+    <p>送出後只會建立工會處理待辦，不是正式核准，也不會直接改變班表。</p>
+    <div class="form-grid">
+      <div>
+        <label for="leaveStart">請假開始日</label>
+        <input id="leaveStart" type="date">
+      </div>
+      <div>
+        <label for="leaveEnd">請假結束日</label>
+        <input id="leaveEnd" type="date">
+      </div>
+      <div class="full">
+        <label for="leaveReason">去敏說明（選填）</label>
+        <textarea id="leaveReason" maxlength="1000" placeholder="請勿填寫醫療診斷或其他敏感個資"></textarea>
+      </div>
+    </div>
+    <button id="submitLeave" class="primary" disabled>送出請假待辦</button>
+    <div id="leaveStatus" class="message" role="status" style="display:none;"></div>
+  </section>
+
+  <section class="panel" aria-labelledby="logTitle">
+    <h2 id="logTitle" class="section-title">提交寶寶日誌</h2>
+    <p>只能選擇已載入班表中的正式服務日；如有餐食照片，會先安全上傳再連結到日誌。</p>
+    <div class="field">
+      <label for="serviceDaySelect">服務案件與日期</label>
+      <select id="serviceDaySelect" disabled>
+        <option value="">請先載入包含正式服務日的月份</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="babyLog">寶寶日誌內容</label>
+      <textarea id="babyLog" maxlength="5000" placeholder="請記錄當日照護重點"></textarea>
+    </div>
+    <div class="field">
+      <label for="mealPhoto">餐食照片（選填）</label>
+      <input id="mealPhoto" type="file" accept="image/jpeg,image/png,image/webp">
+      <p class="hint">單張上限 10 MB；需要下廚的案件必須附餐食照片才能完成日誌。</p>
+    </div>
+    <button id="submitLog" class="primary" disabled>送出服務日日誌</button>
+    <div id="logStatus" class="message" role="status" style="display:none;"></div>
+  </section>
+
 </main>
 <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-let lineUserId = "";
 let lineIdToken = "";
 let flowId = "";
+let developmentLineUserId = "";
+let loadedServiceDays = [];
 
 async function captureLineIdentity() {
-  try {
-    const context = liff.getContext && liff.getContext();
-    if (context?.userId) lineUserId = context.userId;
-  } catch (_) {}
-  try {
-    const profile = await liff.getProfile();
-    if (profile?.userId) lineUserId = profile.userId;
-  } catch (_) {}
   try { lineIdToken = liff.getIDToken() || ""; } catch (_) {}
 }
 
@@ -82,7 +127,36 @@ function show(id, text, isError = false) {
 }
 
 function identityPayload() {
-  return { flow_id: flowId, line_id_token: lineIdToken };
+  return {
+    flow_id: lineIdToken ? "" : flowId,
+    line_id_token: lineIdToken,
+    development_line_user_id: lineIdToken ? "" : developmentLineUserId,
+  };
+}
+
+const actionKeys = new Map();
+
+function idempotencyKeyFor(kind, fingerprint) {
+  const current = actionKeys.get(kind);
+  if (current?.fingerprint === fingerprint) return current.key;
+  const nonce = globalThis.crypto?.randomUUID
+    ? globalThis.crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  const key = `staff-liff:${kind}:${nonce}`;
+  actionKeys.set(kind, { fingerprint, key });
+  return key;
+}
+
+function clearIdempotencyKey(kind) {
+  actionKeys.delete(kind);
+}
+
+async function responseData(response) {
+  try { return await response.json(); } catch (_) { return {}; }
+}
+
+function responseMessage(data, fallback) {
+  return data.message || data.detail?.message || data.detail?.error?.message || fallback;
 }
 
 function renderCalendar(schedule) {
@@ -112,33 +186,215 @@ function renderCalendar(schedule) {
   }
 }
 
+function updateServiceDayOptions(schedule) {
+  const select = document.getElementById("serviceDaySelect");
+  const uniqueDays = new Map();
+  for (const item of schedule.days || []) {
+    if (item.is_work_day === true && Number(item.assignment_id) > 0) {
+      const key = `${item.assignment_id}:${item.work_date}`;
+      uniqueDays.set(key, {
+        assignment_id: item.assignment_id,
+        service_date: item.work_date,
+        case_no: item.case_no || "未提供案件編號",
+        client_name: item.client_name || "服務案件",
+      });
+    }
+  }
+  loadedServiceDays = Array.from(uniqueDays.values()).sort((left, right) =>
+    String(left.service_date).localeCompare(String(right.service_date))
+  );
+  select.replaceChildren();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = loadedServiceDays.length
+    ? "請選擇正式服務日"
+    : "此月份沒有可提交日誌的正式服務日";
+  select.appendChild(placeholder);
+  loadedServiceDays.forEach((item, index) => {
+    const option = document.createElement("option");
+    option.value = String(index);
+    option.textContent = `${item.service_date}｜${item.case_no}｜${item.client_name}`;
+    select.appendChild(option);
+  });
+  select.disabled = loadedServiceDays.length === 0;
+}
+
+function selectedServiceDay() {
+  const value = document.getElementById("serviceDaySelect").value;
+  return value === "" ? null : loadedServiceDays[Number(value)] || null;
+}
+
 async function loadSchedule() {
-  const value = document.getElementById("monthInput").value;
+  const monthInput = document.getElementById("monthInput");
+  const value = monthInput.value;
   if (!value) {
     show("calendarStatus", "請先選擇查詢月份。", true);
     return;
   }
   const [year, month] = value.split("-").map(Number);
+  const button = document.getElementById("loadSchedule");
+  button.disabled = true;
+  monthInput.disabled = true;
   show("calendarStatus", "班表查詢中...");
-  const response = await fetch(`/api/v1/line/staff-self-service/schedule?year=${year}&month=${month}`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(identityPayload())
-  });
-  const data = await response.json();
-  if (!response.ok || data.success === false || !data.data) {
-    show("calendarStatus", data.message || data.detail?.message || "查詢失敗", true);
+  updateServiceDayOptions({ days: [] });
+  try {
+    const response = await fetch(`/api/v1/line/staff-self-service/schedule?year=${year}&month=${month}`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(identityPayload())
+    });
+    const data = await responseData(response);
+    if (!response.ok || data.success === false || !data.data) {
+      updateServiceDayOptions({ days: [] });
+      show("calendarStatus", responseMessage(data, "查詢失敗"), true);
+      return;
+    }
+    show("calendarStatus", `${data.data.staff_name} 的 ${year} 年 ${month} 月排班`);
+    renderCalendar(data.data);
+    updateServiceDayOptions(data.data);
+  } catch (_) {
+    updateServiceDayOptions({ days: [] });
+    show("calendarStatus", "無法連線到班表服務，請稍後重試。", true);
+  } finally {
+    button.disabled = false;
+    monthInput.disabled = false;
+  }
+}
+
+async function submitLeaveRequest() {
+  const startDate = document.getElementById("leaveStart").value;
+  const endDate = document.getElementById("leaveEnd").value;
+  const reason = document.getElementById("leaveReason").value.trim();
+  if (!startDate || !endDate) {
+    show("leaveStatus", "請填寫請假開始日與結束日。", true);
     return;
   }
-  show("calendarStatus", `${data.data.staff_name} 的 ${year} 年 ${month} 月排班`);
-  renderCalendar(data.data);
+  if (endDate < startDate) {
+    show("leaveStatus", "請假結束日不得早於開始日。", true);
+    return;
+  }
+  const payload = {
+    ...identityPayload(),
+    leave_start_date: startDate,
+    leave_end_date: endDate,
+    leave_reason: reason,
+  };
+  const idempotencyKey = idempotencyKeyFor("leave", JSON.stringify(payload));
+  const button = document.getElementById("submitLeave");
+  button.disabled = true;
+  show("leaveStatus", "請假待辦送出中...");
+  try {
+    const response = await fetch("/api/v1/line/staff-self-service/leave-requests", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify(payload),
+    });
+    const data = await responseData(response);
+    if (!response.ok || data.success === false || !data.data) {
+      show("leaveStatus", responseMessage(data, "請假待辦送出失敗"), true);
+      return;
+    }
+    clearIdempotencyKey("leave");
+    document.getElementById("leaveStart").value = "";
+    document.getElementById("leaveEnd").value = "";
+    document.getElementById("leaveReason").value = "";
+    show("leaveStatus", `${responseMessage(data, "請假待辦已送出")}；目前狀態為待辦，不是正式核准。`);
+  } catch (_) {
+    show("leaveStatus", "連線中斷；請保持欄位不變後重試，系統會沿用同一防重識別。", true);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function uploadMealPhoto(photo, fingerprint) {
+  if (!photo) return [];
+  const idempotencyKey = idempotencyKeyFor("meal-photo", fingerprint);
+  const identity = identityPayload();
+  const formData = new FormData();
+  formData.append("photo", photo);
+  formData.append("flow_id", identity.flow_id);
+  formData.append("line_id_token", identity.line_id_token);
+  formData.append("development_line_user_id", identity.development_line_user_id);
+  const response = await fetch("/api/v1/line/staff-self-service/service-day-media", {
+    method: "POST",
+    headers: {"Idempotency-Key": idempotencyKey},
+    body: formData,
+  });
+  const uploadData = await responseData(response);
+  const mediaId = uploadData.data?.media_id;
+  if (!response.ok || uploadData.success === false || !mediaId) {
+    throw new Error(responseMessage(uploadData, "餐食照片上傳失敗"));
+  }
+  return [mediaId];
+}
+
+async function submitServiceDayLog() {
+  const selected = selectedServiceDay();
+  const logText = document.getElementById("babyLog").value.trim();
+  const photo = document.getElementById("mealPhoto").files[0] || null;
+  if (!selected) {
+    show("logStatus", "請先載入班表並選擇正式服務日。", true);
+    return;
+  }
+  if (!logText) {
+    show("logStatus", "請填寫寶寶日誌內容。", true);
+    return;
+  }
+  if (photo && photo.size > 10 * 1024 * 1024) {
+    show("logStatus", "餐食照片不得超過 10 MB。", true);
+    return;
+  }
+  const fingerprint = JSON.stringify({
+    assignment_id: selected.assignment_id,
+    service_date: selected.service_date,
+    log_text: logText,
+    photo: photo ? [photo.name, photo.size, photo.lastModified] : null,
+  });
+  const idempotencyKey = idempotencyKeyFor("service-day-log", fingerprint);
+  const button = document.getElementById("submitLog");
+  button.disabled = true;
+  show("logStatus", photo ? "餐食照片上傳中..." : "服務日日誌送出中...");
+  try {
+    const mediaIds = await uploadMealPhoto(photo, fingerprint);
+    const response = await fetch("/api/v1/line/staff-self-service/service-day-logs", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Idempotency-Key": idempotencyKey,
+      },
+      body: JSON.stringify({
+        ...identityPayload(),
+        assignment_id: Number(selected.assignment_id),
+        service_date: selected.service_date,
+        baby_log_text: logText,
+        meal_photo_media_ids: mediaIds,
+      }),
+    });
+    const data = await responseData(response);
+    if (!response.ok || data.success === false || !data.data) {
+      show("logStatus", responseMessage(data, "服務日日誌送出失敗"), true);
+      return;
+    }
+    clearIdempotencyKey("meal-photo");
+    clearIdempotencyKey("service-day-log");
+    document.getElementById("babyLog").value = "";
+    document.getElementById("mealPhoto").value = "";
+    show("logStatus", `服務日日誌已完成：${data.data.case_no}｜${data.data.service_date}`);
+  } catch (error) {
+    show("logStatus", error?.message || "連線中斷；請保持內容不變後重試。", true);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 async function init() {
   const now = new Date();
   document.getElementById("monthInput").value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const params = new URLSearchParams(location.search);
-  lineUserId = params.get("userId") || "";
+  developmentLineUserId = params.get("userId") || "";
   flowId = params.get("flow_id") || "";
   try {
     const result = await fetch("/api/v1/line/identity/runtime-config").then(r => r.json());
@@ -146,19 +402,30 @@ async function init() {
     if (config.liff_id) {
       await liff.init({ liffId: config.liff_id });
       if (!liff.isLoggedIn()) {
-        if (flowId || lineUserId) return;
-        liff.login();
-        return;
+        if (!flowId && !developmentLineUserId) {
+          liff.login();
+          return;
+        }
+      } else {
+        await captureLineIdentity();
       }
-      await captureLineIdentity();
     }
   } catch (_) {
     show("calendarStatus", "LIFF 初始化失敗，請重新開啟頁面。", true);
   }
+  if (!lineIdToken && !flowId && !developmentLineUserId) {
+    show("calendarStatus", "無法取得 LINE 身分，請從 LINE 圖文選單重新開啟。", true);
+    return;
+  }
+  document.getElementById("loadSchedule").disabled = false;
+  document.getElementById("submitLeave").disabled = false;
+  document.getElementById("submitLog").disabled = false;
   loadSchedule();
 }
 
 document.getElementById("loadSchedule").addEventListener("click", loadSchedule);
+document.getElementById("submitLeave").addEventListener("click", submitLeaveRequest);
+document.getElementById("submitLog").addEventListener("click", submitServiceDayLog);
 init();
 </script>
 </body>

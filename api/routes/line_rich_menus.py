@@ -97,6 +97,7 @@ _SAFE_CONFLICT_CODES = frozenset(
         "line_rich_menu_preview_stale",
     }
 )
+_DEVELOPMENT_PREVIEW_ACTOR_ID = 2_147_483_647
 
 
 def _publication_error(exc: Exception) -> NoReturn:
@@ -414,11 +415,15 @@ def publication_retry(
 )
 def create_rich_menu_publish_preview(
     menu_id: Annotated[str, Path(min_length=1, max_length=191)],
-    principal: AdminPrincipal = Depends(require_line_menu_publisher),
+    principal: AdminPrincipal = Depends(require_line_configuration_reader),
 ) -> RichMenuPublishPreviewResponse:
     preview_request = RichMenuPublishPreviewRequest(
         menu_id=menu_id,
-        actor_id=principal.id,
+        actor_id=(
+            principal.id
+            if principal.id is not None
+            else _DEVELOPMENT_PREVIEW_ACTOR_ID
+        ),
     )
     actor = admin_actor_context(principal)
     try:
