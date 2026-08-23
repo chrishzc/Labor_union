@@ -619,34 +619,89 @@ export const OrderTrackerPage: React.FC = () => {
             </div>
 
             {/* Basic Order Facts Panel (Placed on Top) */}
-            <section className="tracker-summary-panel">
-              <div className="panel-header-row">
-                <h3 className="panel-title">📝 案件基本資料與條件</h3>
+            <section className="orders-card-projection-container" style={{ marginBottom: '18px' }}>
+              <div className="card-projection-header">
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <h3 className="card-projection-title">📝 案件基本資料與條件</h3>
+                  <span className="card-projection-badge">SSOT 根事實</span>
+                </div>
                 <span className="panel-status-tag">{selectedOrder.rawOrderStatus}</span>
               </div>
-              <dl className="tracker-drawer-facts">
-                <div><dt>案件編號</dt><dd>{selectedOrder.id}</dd></div>
-                <div><dt>原始訂單狀態</dt><dd>{selectedOrder.rawOrderStatus}</dd></div>
-                <div><dt>聯絡電話</dt><dd>{cardProjectionContactValue(cardProjectionState, 'contact_phone')}</dd></div>
-                <div><dt>服務地址</dt><dd>{cardProjectionContactValue(cardProjectionState, 'contact_address')}</dd></div>
-                <div><dt>約定服務日期</dt><dd>{selectedOrder.plannedServiceRange}</dd></div>
-                <div><dt>實際服務日期</dt><dd>{selectedOrder.actualServiceRange}</dd></div>
-                <div><dt>正式指派月嫂</dt><dd className="highlight-staff">{selectedOrder.assignedStaffDisplay}</dd></div>
-                <div><dt>契約應付金額</dt><dd className="highlight-amount">{selectedOrder.contractAmountFormatted}</dd></div>
+              
+              <div className="panel-sub-header" style={{ borderTop: 'none', margin: '10px 0 6px', paddingTop: 0 }}>
+                <h4 style={{ fontSize: '0.86rem', color: '#8b7169', fontWeight: 700 }}>📌 核心案件與聯絡資訊</h4>
+              </div>
+              <dl className="tracker-drawer-facts card-projection-grid" style={{ margin: 0 }}>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">案件編號</dt>
+                  <dd className="card-projection-item-value">{selectedOrder.id}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">原始訂單狀態</dt>
+                  <dd className="card-projection-item-value">{selectedOrder.rawOrderStatus}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">聯絡電話</dt>
+                  <dd className="card-projection-item-value">{cardProjectionContactValue(cardProjectionState, 'contact_phone')}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">服務地址</dt>
+                  <dd className="card-projection-item-value">{cardProjectionContactValue(cardProjectionState, 'contact_address')}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">約定服務日期</dt>
+                  <dd className="card-projection-item-value">{selectedOrder.plannedServiceRange}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">實際服務日期</dt>
+                  <dd className="card-projection-item-value">{selectedOrder.actualServiceRange}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">正式指派月嫂</dt>
+                  <dd className="card-projection-item-value highlight-staff">{selectedOrder.assignedStaffDisplay}</dd>
+                </div>
+                <div className="card-projection-item">
+                  <dt className="card-projection-item-label">契約應付金額</dt>
+                  <dd className="card-projection-item-value highlight-amount">{selectedOrder.contractAmountFormatted}</dd>
+                </div>
               </dl>
-              {cardProjectionState.kind === 'loading' && <p className="drawer-loading-note" role="status">正在載入案件聯絡、定金與正式指派資料…</p>}
-              {cardProjectionState.kind === 'error' && <p className="drawer-error-note" role="alert">{cardProjectionState.message}</p>}
+
+              {cardProjectionState.kind === 'loading' && (
+                <p className="drawer-loading-note" role="status" style={{ marginTop: '12px' }}>
+                  ⏳ 正在載入案件聯絡、定金與正式指派資料…
+                </p>
+              )}
+              {cardProjectionState.kind === 'error' && (
+                <p className="drawer-error-note" role="alert" style={{ marginTop: '12px' }}>
+                  {cardProjectionState.message}
+                </p>
+              )}
               {cardProjectionState.kind === 'ready' && (
                 <>
-                  <div className="panel-sub-header">
-                    <h4>🍳 履約條件與加給</h4>
+                  <div className="panel-sub-header" style={{ marginTop: '16px', paddingTop: '12px', borderTop: '1px dashed #fed9b8' }}>
+                    <h4 style={{ fontSize: '0.86rem', color: '#8b7169', fontWeight: 700 }}>🍳 履約條件、定金與指派</h4>
                   </div>
-                  <dl className="tracker-drawer-facts" data-surface-id="order-tracker.card-projection">
-                    <div><dt>下廚料理</dt><dd>{cardProjectionValue(cardProjectionState.data.requires_cooking, (value) => value ? '需要' : '不需要', '尚未登錄')}</dd></div>
-                    <div><dt>樓層加給</dt><dd>{cardProjectionValue(cardProjectionState.data.floor_fee_ntd, (value) => `NT$ ${value.toLocaleString('en-US')}`, '尚未登錄')}</dd></div>
-                    <div><dt>定金狀態</dt><dd>{cardProjectionValue(cardProjectionState.data.deposit_settlement_state, (value) => value === 'settled' ? '已核銷' : '尚未核銷', '尚未登錄')}</dd></div>
-                    <div><dt>實際服務日期</dt><dd>{cardProjectionValue(cardProjectionState.data.actual_start_date, String, '待確認')} ～ {cardProjectionValue(cardProjectionState.data.actual_end_date, String, '待確認')}</dd></div>
-                    <div><dt>正式指派分段</dt><dd>{cardProjectionValue(cardProjectionState.data.assignment_segments, (value) => `${value.length} 段`, '0 段')}</dd></div>
+                  <dl className="tracker-drawer-facts card-projection-grid" data-surface-id="order-tracker.card-projection" style={{ margin: 0 }}>
+                    <div className="card-projection-item">
+                      <dt className="card-projection-item-label">下廚料理</dt>
+                      <dd className="card-projection-item-value">{cardProjectionValue(cardProjectionState.data.requires_cooking, (value) => value ? '需要' : '不需要', '尚未登錄')}</dd>
+                    </div>
+                    <div className="card-projection-item">
+                      <dt className="card-projection-item-label">樓層加給</dt>
+                      <dd className="card-projection-item-value">{cardProjectionValue(cardProjectionState.data.floor_fee_ntd, (value) => `NT$ ${value.toLocaleString('en-US')}`, '尚未登錄')}</dd>
+                    </div>
+                    <div className="card-projection-item">
+                      <dt className="card-projection-item-label">定金狀態</dt>
+                      <dd className="card-projection-item-value">{cardProjectionValue(cardProjectionState.data.deposit_settlement_state, (value) => value === 'settled' ? '已核銷' : '尚未核銷', '尚未登錄')}</dd>
+                    </div>
+                    <div className="card-projection-item">
+                      <dt className="card-projection-item-label">實際服務日期</dt>
+                      <dd className="card-projection-item-value">{cardProjectionValue(cardProjectionState.data.actual_start_date, String, '待確認')} ～ {cardProjectionValue(cardProjectionState.data.actual_end_date, String, '待確認')}</dd>
+                    </div>
+                    <div className="card-projection-item">
+                      <dt className="card-projection-item-label">正式指派分段</dt>
+                      <dd className="card-projection-item-value">{cardProjectionValue(cardProjectionState.data.assignment_segments, (value) => `${value.length} 段`, '0 段')}</dd>
+                    </div>
                   </dl>
                 </>
               )}

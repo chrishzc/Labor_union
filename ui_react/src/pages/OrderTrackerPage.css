@@ -1133,3 +1133,107 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* ==========================================================================
+   Card Projection (案件基本資料與條件)
+   ========================================================================== */
+
+.orders-card-projection-container {
+  background-color: #fffdfc;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 18px 22px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+}
+
+.card-projection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #fed9b8;
+}
+
+.card-projection-title {
+  font-size: 1.05rem;
+  font-weight: 750;
+  color: #ff7f50;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-projection-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background-color: #ffedd5;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+}
+
+.card-projection-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  margin-top: 10px;
+}
+
+@media (max-width: 600px) {
+  .card-projection-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card-projection-item {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.card-projection-item:hover {
+  border-color: #ff7f50;
+  box-shadow: 0 2px 8px rgba(255, 127, 80, 0.1);
+}
+
+.card-projection-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-projection-item-label {
+  font-size: 0.78rem;
+  color: #8b7169;
+  font-weight: 700;
+  margin: 0;
+}
+
+.card-projection-item-value {
+  font-size: 0.95rem;
+  font-weight: 750;
+  color: #1e1b19;
+  word-break: break-word;
+  margin: 0;
+}
+
+.card-projection-item-value.highlight-staff {
+  color: #c2410c;
+  font-weight: 800;
+}
+
+.card-projection-item-value.highlight-amount {
+  color: #ff7f50;
+  font-weight: 800;
+}
+
