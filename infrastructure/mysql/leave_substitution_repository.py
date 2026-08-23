@@ -9,7 +9,11 @@ import json
 from typing import Any, Mapping
 
 from domains.scheduling.assignment_plan import AssignmentPlanFacts, EffectiveAssignmentFact
-from domains.scheduling.leave_substitution import LeaveSubstitutionFacts, OfficialScheduleFact
+from domains.scheduling.leave_substitution import (
+    LeaveResolutionType,
+    LeaveSubstitutionFacts,
+    OfficialScheduleFact,
+)
 from infrastructure.mysql.assignment_plan_repository import (
     build_assignment_plan_workflow_facts,
     ensure_scheduling_aggregate,
@@ -44,6 +48,9 @@ from subsystems.scheduling.leave_substitution_workflow import (
     LeaveSubstitutionReceipt,
     LeaveSubstitutionWorkflowFacts,
     StoredLeaveSubstitutionReceipt,
+)
+from subsystems.scheduling.matching_leave_integration import (
+    CanonicalSchedulingLeaveReference,
 )
 
 
@@ -110,6 +117,18 @@ def _group_effective_assignment_schedules(rows):
 class MySqlLeaveSubstitutionRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
+
+    def get_canonical_receipt(
+        self, receipt_key: str
+    ) -> CanonicalSchedulingLeaveReference | None:
+        """Project an immutable Scheduling receipt for M3 without writing roots."""
+
+        if not isinstance(receipt_key, str) or not receipt_key.strip():
+            raise ValueError("leave receipt key is required")
+        with self._connection.cursor() as cursor:
+            cursor.execute(_MATCHING_LEAVE_REFERENCE_SQL, (receipt_key.strip(),))
+            rows = tuple(cursor.fetchall())
+        return _matching_leave_reference(rows)
 
     def load_for_preview(self, case_no, intent):
         with self._connection.cursor() as cursor:
@@ -523,6 +542,82 @@ def _stored_receipt(row):
     )
 
 
+def _matching_leave_reference(rows) -> CanonicalSchedulingLeaveReference | None:
+    if not rows:
+        return None
+    if any(not isinstance(row, Mapping) for row in rows):
+        raise ValueError("leave receipt projection returned an invalid row")
+    first = rows[0]
+    receipt_key = str(first["batch_key"])
+    case_no = str(first["case_no"])
+    leave_version = int(first["resulting_scheduling_version"])
+    receipt_event_ids = tuple(
+        str(int(value)) for value in _json_value(first["receipt_outcome_event_ids"])
+    )
+    row_event_ids = tuple(str(int(row["outcome_event_id"])) for row in rows)
+    if receipt_event_ids != row_event_ids:
+        raise ValueError("leave receipt outcome lineage is incomplete")
+    if any(
+        str(row["batch_key"]) != receipt_key
+        or str(row["case_no"]) != case_no
+        or int(row["resulting_scheduling_version"]) != leave_version
+        for row in rows
+    ):
+        raise ValueError("leave receipt projection identity is ambiguous")
+    staff_ids = {int(row["original_staff_id"]) for row in rows}
+    resolutions = {str(row["resolution_type"]) for row in rows}
+    if len(staff_ids) != 1 or len(resolutions) != 1:
+        raise ValueError("leave receipt requires one original staff and resolution")
+    resolution = LeaveResolutionType(next(iter(resolutions)))
+    original_dates = tuple(_date_value(row["original_work_date"]) for row in rows)
+    resulting_dates = tuple(_date_value(row["resulting_service_date"]) for row in rows)
+    resulting_staff_ids = {int(row["resulting_staff_id"]) for row in rows}
+    original_staff_id = next(iter(staff_ids))
+    substitute_staff_id = None
+    if resolution is LeaveResolutionType.SUBSTITUTE:
+        if len(resulting_staff_ids) != 1:
+            raise ValueError("leave substitute receipt has multiple resulting staff")
+        substitute_staff_id = next(iter(resulting_staff_ids))
+        original_work_date = min(original_dates)
+        resulting_work_date = original_work_date
+    else:
+        if resulting_staff_ids != {original_staff_id}:
+            raise ValueError("leave defer receipt changed staff owner")
+        original_work_date = min(original_dates)
+        resulting_work_date = max(resulting_dates)
+    receipt_fingerprint = fingerprint_payload(
+        {
+            "batch_key": receipt_key,
+            "case_no": case_no,
+            "leave_version": leave_version,
+            "outcomes": tuple(
+                {
+                    "event_id": str(int(row["outcome_event_id"])),
+                    "original_staff_id": int(row["original_staff_id"]),
+                    "original_work_date": _date_value(row["original_work_date"]).isoformat(),
+                    "resolution_type": str(row["resolution_type"]),
+                    "resulting_staff_id": int(row["resulting_staff_id"]),
+                    "resulting_service_date": _date_value(row["resulting_service_date"]).isoformat(),
+                    "result_fingerprint": str(row["result_fingerprint"]),
+                }
+                for row in rows
+            ),
+        }
+    )
+    return CanonicalSchedulingLeaveReference(
+        receipt_key=receipt_key,
+        case_no=case_no,
+        leave_version=leave_version,
+        original_staff_id=original_staff_id,
+        resolution_type=resolution,
+        original_work_date=original_work_date,
+        resulting_work_date=resulting_work_date,
+        outcome_event_ids=row_event_ids,
+        receipt_fingerprint=receipt_fingerprint,
+        substitute_staff_id=substitute_staff_id,
+    )
+
+
 def _insert_batch_header(cursor, request, preview, command_fingerprint):
     request_snapshot = _request_snapshot(request)
     cursor.execute(
@@ -736,6 +831,12 @@ def _iso_date(value):
     return value.isoformat() if isinstance(value, date) else str(value)
 
 
+def _date_value(value):
+    if isinstance(value, date):
+        return value
+    return date.fromisoformat(str(value))
+
+
 def _json_value(value):
     return json.loads(value) if isinstance(value, str) else value
 
@@ -853,6 +954,17 @@ _RECEIPT_SELECT_SQL = (
     "resulting_generation_number,resulting_client_finance_version,"
     "resulting_payroll_version,outcome_event_ids,result_snapshot "
     "FROM scheduling_leave_substitution_receipts WHERE batch_key=%s"
+)
+
+_MATCHING_LEAVE_REFERENCE_SQL = (
+    "SELECT r.batch_key,r.case_no,r.resulting_scheduling_version,"
+    "r.outcome_event_ids AS receipt_outcome_event_ids,"
+    "o.id AS outcome_event_id,o.original_staff_id,o.original_work_date,"
+    "o.resolution_type,o.resulting_staff_id,o.resulting_service_date,"
+    "o.result_fingerprint "
+    "FROM scheduling_leave_substitution_receipts r "
+    "JOIN scheduling_leave_substitution_outcomes o ON o.batch_key=r.batch_key "
+    "WHERE r.batch_key=%s ORDER BY o.item_index"
 )
 
 _HEADER_INSERT_SQL = (

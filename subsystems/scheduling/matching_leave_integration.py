@@ -10,9 +10,13 @@ from datetime import date
 from typing import Protocol
 
 from domains.scheduling.leave_substitution import LeaveResolutionType
-from domains.scheduling.matching_coordination import MatchingSourceTuple, canonical_source_tuple
+from domains.scheduling.matching_coordination import (
+    MatchingSourceTuple,
+    MatchingSourceVersion,
+    canonical_source_tuple,
+)
 from shared_kernel.errors import TypedError
-from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import CorrelationId
 from shared_kernel.validation import require_canonical_text, require_positive_integer
 from subsystems.scheduling.matching_coordination_contracts import typed_error
@@ -45,23 +49,18 @@ class MatchingLeaveImpactRequest:
 class CanonicalSchedulingLeaveReference:
     receipt_key: str
     case_no: str
-    package_id: str
-    criteria_snapshot_id: str
     leave_version: int
     original_staff_id: int
     resolution_type: LeaveResolutionType | str
     original_work_date: date
     resulting_work_date: date
     outcome_event_ids: tuple[str, ...]
-    source_versions: MatchingSourceTuple
     receipt_fingerprint: PreviewFingerprint
     substitute_staff_id: int | None = None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.receipt_key, "leave receipt key", 191)
         require_canonical_text(self.case_no, "case number", 50)
-        require_canonical_text(self.package_id, "package ID", 191)
-        require_canonical_text(self.criteria_snapshot_id, "criteria snapshot ID", 191)
         require_positive_integer(self.leave_version, "leave version")
         require_positive_integer(self.original_staff_id, "original staff ID")
         try:
@@ -76,7 +75,6 @@ class CanonicalSchedulingLeaveReference:
             raise TypeError("leave outcome event IDs must be a tuple")
         for event_id in self.outcome_event_ids:
             require_canonical_text(event_id, "leave outcome event ID", 191)
-        object.__setattr__(self, "source_versions", canonical_source_tuple(self.source_versions))
         if not isinstance(self.receipt_fingerprint, PreviewFingerprint):
             object.__setattr__(self, "receipt_fingerprint", PreviewFingerprint(self.receipt_fingerprint))
         if self.substitute_staff_id is not None:
@@ -94,7 +92,9 @@ class MatchingLeaveImpactResult:
     original_work_date: date
     resulting_work_date: date
     outcome_event_ids: tuple[str, ...]
+    source_versions: MatchingSourceTuple
     receipt_fingerprint: PreviewFingerprint
+    preview_fingerprint: PreviewFingerprint
     substitute_staff_id: int | None = None
 
     def __post_init__(self) -> None:
@@ -112,8 +112,11 @@ class MatchingLeaveImpactResult:
             raise TypeError("resulting work date must be date")
         if not isinstance(self.outcome_event_ids, tuple):
             raise TypeError("leave outcome event IDs must be a tuple")
+        object.__setattr__(self, "source_versions", canonical_source_tuple(self.source_versions))
         if not isinstance(self.receipt_fingerprint, PreviewFingerprint):
             object.__setattr__(self, "receipt_fingerprint", PreviewFingerprint(self.receipt_fingerprint))
+        if not isinstance(self.preview_fingerprint, PreviewFingerprint):
+            object.__setattr__(self, "preview_fingerprint", PreviewFingerprint(self.preview_fingerprint))
 
 
 class SchedulingLeaveReferencePort(Protocol):
@@ -139,9 +142,6 @@ class MatchingLeaveIntegration:
             or reference.case_no != request.case_no
             or reference.leave_version != request.expected_leave_version
             or reference.original_staff_id != request.original_staff_id
-            or reference.package_id != request.package_id
-            or reference.criteria_snapshot_id != request.criteria_snapshot_id
-            or reference.source_versions != request.expected_source_versions
         ):
             raise self._error(request, "matching_leave_reference_stale")
         if reference.resolution_type is LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS:
@@ -158,23 +158,61 @@ class MatchingLeaveIntegration:
             state = "leave_substituted"
         else:
             raise self._error(request, "matching_leave_resolution_not_applied")
+        source_versions = _with_leave_source(request.expected_source_versions, reference)
+        preview_fingerprint = fingerprint_payload(
+            {
+                "case_no": request.case_no,
+                "package_id": request.package_id,
+                "criteria_snapshot_id": request.criteria_snapshot_id,
+                "receipt_key": reference.receipt_key,
+                "leave_version": reference.leave_version,
+                "original_staff_id": reference.original_staff_id,
+                "resolution_type": reference.resolution_type.value,
+                "original_work_date": reference.original_work_date.isoformat(),
+                "resulting_work_date": reference.resulting_work_date.isoformat(),
+                "outcome_event_ids": reference.outcome_event_ids,
+                "substitute_staff_id": reference.substitute_staff_id,
+                "receipt_fingerprint": reference.receipt_fingerprint.value,
+                "source_versions": tuple(item.as_payload() for item in source_versions),
+            }
+        )
         return MatchingLeaveImpactResult(
             receipt_key=reference.receipt_key,
             result_state=state,
-            package_id=reference.package_id,
-            criteria_snapshot_id=reference.criteria_snapshot_id,
+            package_id=request.package_id,
+            criteria_snapshot_id=request.criteria_snapshot_id,
             rematch_required=True,
             resolution_type=reference.resolution_type,
             original_work_date=reference.original_work_date,
             resulting_work_date=reference.resulting_work_date,
             outcome_event_ids=reference.outcome_event_ids,
+            source_versions=source_versions,
             receipt_fingerprint=reference.receipt_fingerprint,
+            preview_fingerprint=preview_fingerprint,
             substitute_staff_id=reference.substitute_staff_id,
         )
 
     @staticmethod
     def _error(request: MatchingLeaveImpactRequest, code: str) -> MatchingLeaveIntegrationError:
         return MatchingLeaveIntegrationError(typed_error(code, request.correlation_id))
+
+
+def _with_leave_source(
+    sources: MatchingSourceTuple,
+    reference: CanonicalSchedulingLeaveReference,
+) -> MatchingSourceTuple:
+    leave_source = MatchingSourceVersion(
+        "leave_request_or_outcome",
+        reference.receipt_key,
+        reference.leave_version,
+        reference.receipt_fingerprint,
+    )
+    return canonical_source_tuple(
+        tuple(
+            leave_source if item.source_kind == "leave_request_or_outcome" else item
+            for item in sources
+        )
+    )
 
 
 __all__ = [

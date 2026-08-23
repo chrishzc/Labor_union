@@ -827,26 +827,56 @@ export const OrderTrackerPage: React.FC = () => {
               <section className="tracker-tab-panel" role="tabpanel" data-surface-id="order-tracker.notifications.timeline">
                 <div className="panel-header-row">
                   <h3 className="panel-title">🔔 訂單生命週期通知紀錄</h3>
+                  {notificationTimelineState.kind === 'ready' && notificationTimelineState.data.records.length > 0 && (
+                    <span className="panel-status-tag">
+                      共 {notificationTimelineState.data.records.length} 則通知
+                    </span>
+                  )}
                 </div>
                 {notificationTimelineState.kind === 'loading' && <p role="status">正在載入 LINE 通知歷程…</p>}
                 {notificationTimelineState.kind === 'error' && <p role="alert">{notificationTimelineState.message}</p>}
                 {notificationTimelineState.kind === 'ready' && notificationTimelineState.data.records.length === 0 && (
                   <p className="no-records-note">目前沒有 LINE 通知紀錄。</p>
                 )}
-                {notificationTimelineState.kind === 'ready' && (
+                {notificationTimelineState.kind === 'ready' && notificationTimelineState.data.records.length > 0 && (
                   <div className="line-notification-list">
-                    {notificationTimelineState.data.records.map((record) => (
-                      <article key={`${record.source_event_id}-${record.occurrence_number ?? 0}`} className="notification-card">
-                        <div className="notification-card-header">
-                          <span className="notification-badge-event">{record.event_code}</span>
-                          <span className="notification-badge-delivery">{record.delivery_status ?? '未建立'}</span>
-                        </div>
-                        <div className="notification-card-body">
-                          <p>決策：{record.decision_status ?? '未產生'} ｜ 通知意圖：{record.intent_status ?? '未建立'}</p>
-                          <p>收件者：{record.recipient_masked ?? '未指定'} ｜ 時間：{record.occurred_at_utc ? formatProjectionTimestamp(record.occurred_at_utc) : '未記錄'}</p>
-                        </div>
-                      </article>
-                    ))}
+                    {notificationTimelineState.data.records.map((record) => {
+                      const deliveryStatus = record.delivery_status ?? '未建立';
+                      const isDelivered = deliveryStatus === 'delivered' || deliveryStatus === 'sent' || deliveryStatus === '發送成功' || deliveryStatus === '已送達';
+                      const isRead = deliveryStatus === 'read' || deliveryStatus === '已讀';
+                      const isFailed = deliveryStatus === 'failed' || deliveryStatus === '發送失敗';
+                      return (
+                        <article key={`${record.source_event_id}-${record.occurrence_number ?? 0}`} className="notification-card">
+                          <div className="notification-card-header">
+                            <div className="notification-event-group">
+                              <span className="notification-icon">💬</span>
+                              <span className="notification-badge-event">{record.event_code}</span>
+                            </div>
+                            <span className={`notification-badge-delivery ${isDelivered ? 'delivery--success' : isRead ? 'delivery--read' : isFailed ? 'delivery--failed' : 'delivery--neutral'}`}>
+                              {isDelivered ? '🟢 發送成功' : isRead ? '🔵 已讀' : isFailed ? '🔴 發送失敗' : deliveryStatus}
+                            </span>
+                          </div>
+
+                          <div className="notification-meta-row">
+                            <span className="notification-recipient">
+                              對象：{record.recipient_type === 'staff' ? '👩‍🍼 月嫂' : '👤 客戶'}（{record.recipient_masked ?? '未指定'}）
+                            </span>
+                            <span className="notification-time">
+                              🕒 {record.occurred_at_utc ? formatFriendlyTimestamp(record.occurred_at_utc) : '未記錄'}
+                            </span>
+                          </div>
+
+                          <div className="notification-bubble">
+                            <p className="notification-bubble-text">
+                              決策：{record.decision_status ?? '未產生'} ｜ 通知意圖：{record.intent_status ?? '未建立'}
+                            </p>
+                            {record.reason_code && (
+                              <p className="notification-bubble-reason">原因代碼：{record.reason_code}</p>
+                            )}
+                          </div>
+                        </article>
+                      );
+                    })}
                   </div>
                 )}
               </section>

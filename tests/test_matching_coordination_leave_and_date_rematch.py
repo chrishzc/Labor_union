@@ -13,6 +13,9 @@ from domains.scheduling.matching_coordination import SOURCE_KINDS, MatchingSourc
 from domains.scheduling.staff_availability import StaffAvailabilityConflict, StaffAvailabilityFacts
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import CorrelationId
+from infrastructure.mysql.leave_substitution_repository import (
+    MySqlLeaveSubstitutionRepository,
+)
 from subsystems.scheduling.matching_leave_integration import (
     CanonicalSchedulingLeaveReference,
     MatchingLeaveImpactRequest,
@@ -34,6 +37,34 @@ class FakeLeaveReferencePort:
     def get_canonical_receipt(self, receipt_key: str) -> CanonicalSchedulingLeaveReference | None:
         self.calls.append(receipt_key)
         return self.reference
+
+
+class _ReceiptCursor:
+    def __init__(self, rows) -> None:
+        self.rows = rows
+        self.sql = ""
+        self.params = ()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, sql, params) -> None:
+        self.sql = sql
+        self.params = params
+
+    def fetchall(self):
+        return self.rows
+
+
+class _ReceiptConnection:
+    def __init__(self, rows) -> None:
+        self.cursor_instance = _ReceiptCursor(rows)
+
+    def cursor(self):
+        return self.cursor_instance
 
 
 def _availability(*, conflicts: tuple[StaffAvailabilityConflict, ...] = ()) -> StaffAvailabilityFacts:
@@ -82,6 +113,41 @@ def test_service_date_shift_returns_deterministic_reassignment_reference_on_conf
     assert len(result.source_fingerprint.value) == 64
 
 
+def test_mysql_leave_receipt_projection_is_read_only_and_owner_scoped() -> None:
+    rows = (
+        {
+            "batch_key": "leave-receipt-db",
+            "case_no": "case-db",
+            "resulting_scheduling_version": 8,
+            "receipt_outcome_event_ids": "[901]",
+            "outcome_event_id": 901,
+            "original_staff_id": 17,
+            "original_work_date": date(2026, 8, 22),
+            "resolution_type": "substitute",
+            "resulting_staff_id": 29,
+            "resulting_service_date": date(2026, 8, 22),
+            "result_fingerprint": "a" * 64,
+        },
+    )
+    connection = _ReceiptConnection(rows)
+
+    result = MySqlLeaveSubstitutionRepository(connection).get_canonical_receipt(
+        "leave-receipt-db"
+    )
+
+    assert result is not None
+    assert result.case_no == "case-db"
+    assert result.leave_version == 8
+    assert result.substitute_staff_id == 29
+    assert result.outcome_event_ids == ("901",)
+    assert "SELECT" in connection.cursor_instance.sql
+    assert all(
+        keyword not in connection.cursor_instance.sql.upper()
+        for keyword in ("INSERT", "UPDATE", "DELETE")
+    )
+    assert connection.cursor_instance.params == ("leave-receipt-db",)
+
+
 def test_leave_defer_projects_rematch_and_reads_canonical_receipt_once() -> None:
     receipt_key = "leave-receipt-001"
     original_date = date(2026, 8, 22)
@@ -89,15 +155,12 @@ def test_leave_defer_projects_rematch_and_reads_canonical_receipt_once() -> None
     reference = CanonicalSchedulingLeaveReference(
         receipt_key=receipt_key,
         case_no="case-001",
-        package_id="package-001",
-        criteria_snapshot_id="criteria-001",
         leave_version=2,
         original_staff_id=17,
         resolution_type=LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
         original_work_date=original_date,
         resulting_work_date=original_date + timedelta(days=1),
         outcome_event_ids=("leave-outcome-001",),
-        source_versions=source_versions,
         receipt_fingerprint=PreviewFingerprint("a" * 64),
     )
     port = FakeLeaveReferencePort(reference)
@@ -116,6 +179,8 @@ def test_leave_defer_projects_rematch_and_reads_canonical_receipt_once() -> None
 
     assert result.result_state == "leave_deferred"
     assert result.rematch_required is True
+    assert result.source_versions[11].source_id == receipt_key
+    assert result.preview_fingerprint != result.receipt_fingerprint
     assert port.calls == [receipt_key]
 
 
@@ -126,15 +191,12 @@ def test_leave_substitute_projects_rematch_and_retains_substitute_staff() -> Non
     reference = CanonicalSchedulingLeaveReference(
         receipt_key=receipt_key,
         case_no="case-substitute",
-        package_id="package-substitute",
-        criteria_snapshot_id="criteria-substitute",
         leave_version=3,
         original_staff_id=17,
         resolution_type=LeaveResolutionType.SUBSTITUTE,
         original_work_date=work_date,
         resulting_work_date=work_date,
         outcome_event_ids=("leave-outcome-substitute",),
-        source_versions=source_versions,
         receipt_fingerprint=PreviewFingerprint("e" * 64),
         substitute_staff_id=29,
     )
@@ -198,15 +260,12 @@ def test_invalid_leave_substitute_fails_closed_after_one_read(
     reference = CanonicalSchedulingLeaveReference(
         receipt_key=receipt_key,
         case_no="case-invalid-substitute",
-        package_id="package-invalid-substitute",
-        criteria_snapshot_id="criteria-invalid-substitute",
         leave_version=4,
         original_staff_id=17,
         resolution_type=LeaveResolutionType.SUBSTITUTE,
         original_work_date=work_date,
         resulting_work_date=work_date + timedelta(days=resulting_date_offset),
         outcome_event_ids=("leave-outcome-invalid-substitute",),
-        source_versions=source_versions,
         receipt_fingerprint=PreviewFingerprint("f" * 64),
         substitute_staff_id=substitute_staff_id,
     )
@@ -232,12 +291,9 @@ def test_invalid_leave_substitute_fails_closed_after_one_read(
 @pytest.mark.parametrize(
     ("request_field", "mismatched_value"),
     (
-        ("package_id", "package-stale"),
-        ("criteria_snapshot_id", "criteria-stale"),
-        (
-            "expected_source_versions",
-            tuple(MatchingSourceVersion(kind, f"{kind}:changed", 2, "d" * 64) for kind in SOURCE_KINDS),
-        ),
+        ("expected_leave_version", 3),
+        ("original_staff_id", 18),
+        ("case_no", "case-stale"),
     ),
 )
 def test_reference_mismatch_raises_stale_error_once(
@@ -250,15 +306,12 @@ def test_reference_mismatch_raises_stale_error_once(
     reference = CanonicalSchedulingLeaveReference(
         receipt_key=receipt_key,
         case_no="case-mismatch",
-        package_id="package-mismatch",
-        criteria_snapshot_id="criteria-mismatch",
         leave_version=2,
         original_staff_id=17,
         resolution_type=LeaveResolutionType.DEFER_FOLLOWING_ASSIGNMENTS,
         original_work_date=original_date,
         resulting_work_date=original_date + timedelta(days=1),
         outcome_event_ids=("leave-outcome-mismatch",),
-        source_versions=source_versions,
         receipt_fingerprint=PreviewFingerprint("b" * 64),
     )
     port = FakeLeaveReferencePort(reference)

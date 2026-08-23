@@ -42,6 +42,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     MatchingCommandName,
     PreviewCriteriaDiffResend,
     PreviewMatchingPackage,
+    PreviewServiceDateChangeRematch,
     PreviewZeroCandidateAlternative,
     QueryMatchingCoordination,
 )
@@ -199,6 +200,21 @@ class _RecordingWorkflow(MatchingCoordinationWorkflow):
         )
 
 
+class _ServiceDateInputLoader:
+    def __init__(
+        self,
+        operations: list[str],
+        inputs: ServiceDateRematchPreviewInput,
+    ) -> None:
+        self.operations = operations
+        self.inputs = inputs
+
+    def __call__(self, command, *, for_update: bool):
+        self.operations.append(f"service-date:{for_update}")
+        assert command.case_no == self.inputs.case_no
+        return self.inputs
+
+
 def _application(facts: MatchingCoordinationFacts, operations: list[str], workflow=None):
     repository = _Repository(operations)
     unit = _Unit(operations)
@@ -268,6 +284,116 @@ def test_apply_order_and_single_commit() -> None:
     assert unit.commits == 1
     assert unit.rollbacks == 0
     assert len(repository.saved) == 1
+
+
+def test_service_date_apply_locks_shifted_owner_facts_and_commits_rematch() -> None:
+    operations: list[str] = []
+    facts = _facts()
+    inputs = ServiceDateRematchPreviewInput(
+        case_no="CASE-001",
+        assignment_id=17,
+        original_staff_id=7,
+        original_service_dates=(date(2026, 9, 1),),
+        shifted_service_dates=(date(2026, 9, 3),),
+        availability=StaffAvailabilityFacts(7, 4, (), ()),
+    )
+    workflow = MatchingCoordinationWorkflow()
+    preview = workflow.preview_service_date_shift(
+        PreviewServiceDateChangeRematch(
+            **_common(facts, "preview:service-date:1"),
+            criteria_snapshot_id="snapshot-1",
+            package_id="package-1",
+            assignment_id=17,
+            original_staff_id=7,
+            original_service_dates=inputs.original_service_dates,
+            shifted_service_dates=inputs.shifted_service_dates,
+        ),
+        facts,
+        inputs.availability,
+    )
+    repository = _Repository(operations)
+    unit = _Unit(operations)
+    application = MatchingCoordinationApplication(
+        _Reader(facts, operations),
+        repository,
+        lambda: unit,
+        workflow=workflow,
+        service_date_input_loader=_ServiceDateInputLoader(operations, inputs),
+    )
+    command = ApplyServiceDateChangeRematch(
+        **_common(facts, "matching:service-date:1"),
+        criteria_snapshot_id="snapshot-1",
+        package_id="package-1",
+        assignment_id=17,
+        original_staff_id=7,
+        original_service_dates=inputs.original_service_dates,
+        shifted_service_dates=inputs.shifted_service_dates,
+        preview_fingerprint=preview.source_fingerprint,
+    )
+
+    receipt = application.apply(command)
+
+    assert receipt.result_state == "rematch_required"
+    assert receipt.preview_fingerprint == preview.source_fingerprint
+    assert operations == [
+        "begin",
+        "claim",
+        "lock",
+        "fresh",
+        "service-date:True",
+        "lineage",
+        "receipt",
+        "intents",
+        "commit",
+    ]
+    assert unit.commits == 1
+    assert unit.rollbacks == 0
+
+
+def test_service_date_apply_rejects_stale_preview_and_rolls_back() -> None:
+    operations: list[str] = []
+    facts = _facts()
+    inputs = ServiceDateRematchPreviewInput(
+        case_no="CASE-001",
+        assignment_id=17,
+        original_staff_id=7,
+        original_service_dates=(date(2026, 9, 1),),
+        shifted_service_dates=(date(2026, 9, 3),),
+        availability=StaffAvailabilityFacts(7, 4, (), ()),
+    )
+    repository = _Repository(operations)
+    unit = _Unit(operations)
+    application = MatchingCoordinationApplication(
+        _Reader(facts, operations),
+        repository,
+        lambda: unit,
+        service_date_input_loader=_ServiceDateInputLoader(operations, inputs),
+    )
+    command = ApplyServiceDateChangeRematch(
+        **_common(facts, "matching:service-date:stale"),
+        criteria_snapshot_id="snapshot-1",
+        package_id="package-1",
+        assignment_id=17,
+        original_staff_id=7,
+        original_service_dates=inputs.original_service_dates,
+        shifted_service_dates=inputs.shifted_service_dates,
+        preview_fingerprint=PreviewFingerprint("0" * 64),
+    )
+
+    with pytest.raises(MatchingCoordinationWorkflowError) as captured:
+        application.apply(command)
+
+    assert captured.value.error.code == "matching_invalid_replay_snapshot"
+    assert operations == [
+        "begin",
+        "claim",
+        "lock",
+        "fresh",
+        "service-date:True",
+    ]
+    assert repository.saved == []
+    assert unit.commits == 0
+    assert unit.rollbacks == 1
 
 
 def test_apply_fails_closed_when_owner_fresh_lock_loader_is_absent() -> None:
