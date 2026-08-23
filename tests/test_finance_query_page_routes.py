@@ -11,10 +11,12 @@ from fastapi.testclient import TestClient
 
 from api.dependencies.accounts_payable_export import get_accounts_payable_export_application
 from api.dependencies.admin_auth import require_admin
+from api.dependencies.finance_import import get_finance_import_query_service
 from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes import client_receipt_reconciliation, finance_import, finance_reports, staff_payout
 from shared_kernel.money import MoneyNTD
 from subsystems.access.authentication_session import AdminPrincipal
+from subsystems.finance_import.query import FinanceImportQueryNotFound
 
 
 class _Application:
@@ -32,6 +34,11 @@ class _Application:
                 recipient_identity_card="A123456789",
             ),
         )
+
+
+class _MissingFinanceImportBatchQuery:
+    def get_manifest(self, _batch_identity):
+        raise FinanceImportQueryNotFound("internal-batch-detail")
 
 
 def _dependency(function, parameter):
@@ -70,3 +77,24 @@ def test_accounts_payable_query_requires_admin_and_masks_sensitive_values(monkey
     assert row["recipient_identity_card_masked"] == "A*********"
     assert "123456789012" not in response.text
     assert "A123456789" not in response.text
+
+
+def test_finance_import_query_error_uses_request_correlation_and_redacts_detail():
+    app = FastAPI()
+    app.include_router(finance_import.router)
+    app.add_middleware(CorrelationBoundaryMiddleware)
+    install_typed_error_handlers(app)
+    app.dependency_overrides[require_admin] = lambda: AdminPrincipal(7, "finance", "Finance", "admin")
+    app.dependency_overrides[get_finance_import_query_service] = _MissingFinanceImportBatchQuery
+
+    response = TestClient(app).get(
+        "/api/v1/finance-import/batches/public-batch/manifest",
+        headers={"X-Correlation-ID": "finance-import-query-request-01"},
+    )
+
+    assert response.status_code == 404
+    assert response.headers["X-Correlation-ID"] == "finance-import-query-request-01"
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "finance_import_batch_not_found"
+    assert error["correlation_id"] == "finance-import-query-request-01"
+    assert "internal-batch-detail" not in response.text

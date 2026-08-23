@@ -5,7 +5,7 @@
     "path": "db/schema.sql",
     "sha256": "b9cd84ae5a09a46949b5d4c131659f7f114480306f94e0af1246833d021b1bfb"
   },
-  "active_artifacts_sha256": "b91957c88e23f727377707a47921e71b4478dd1cd376cd7965d1b53ef06c80ed",
+  "active_artifacts_sha256": "1b49347304648c72744caca9dda2640ae50f870ddc3bc9faba5ecaf59c799ff8",
   "active_bootstrap": [
     "db/schema_parts/202_scheduling_staff_leave_intake.sql",
     "db/schema_parts/20_staff_monthly_settlements.sql",
@@ -133,7 +133,10 @@
     "db/schema_parts/200_finance_import_source_reviews.sql",
     "db/schema_parts/201_hcm_resubmission_corrections.sql",
     "db/schema_parts/999_v_order_details_view.sql",
-    "db/schema_parts/1000_staff_retirement.sql"
+    "db/schema_parts/1000_staff_retirement.sql",
+    "db/schema_parts/1001_line_rich_menu_publication_step_saga.sql",
+    "db/schema_parts/1002_customer_service_human_escalation.sql",
+    "db/schema_parts/1003_matching_coordination_successor.sql"
   ],
   "classifications": {
     "db/schema_parts/153_retire_empty_legacy_field_inventory.sql": "migration-only",

@@ -1,0 +1,66 @@
+/**
+ * File: historical_order_workbook_client.test.ts
+ * Description: 驗證Historical Orders immutable snapshot、typed Preview／Apply、Apply錯誤與無Session零fetch。
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { sessionClient } from '../api/auth/session_client';
+import { HISTORICAL_ORDER_WORKBOOK_APPLY_PATH, HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH, HistoricalOrderWorkbookSnapshot, applyHistoricalOrderWorkbook, previewHistoricalOrderWorkbook } from '../api/orders/historical_order_workbook/client';
+import { HistoricalOrderWorkbookApplyError, HistoricalOrderWorkbookUnauthenticatedError } from '../api/orders/historical_order_workbook/errors';
+import { HistoricalOrderWorkbookPreviewSchema } from '../api/orders/historical_order_workbook/schemas';
+
+function setSession(): void {
+  sessionClient.setSession('historical-order-preview-token', { id: 1, username: 'tester', display_name: '測試', role: 'operator', linked_line_user_id: null, capabilities: [], is_root: false, access_control_version: 1 });
+}
+
+describe('Historical Orders workbook Preview client', () => {
+  beforeEach(() => { vi.restoreAllMocks(); setSession(); });
+  afterEach(() => { sessionClient.clearSession(); vi.restoreAllMocks(); });
+
+  it('只送出workbook multipart並嚴格回傳typed aggregate', async () => {
+    const snapshot = await HistoricalOrderWorkbookSnapshot.fromFile(new File(['orders'], 'orders.xlsx'));
+    const data = { source_content_digest: snapshot.sha256, sheet_identity: 'b'.repeat(64), source_row_count: 4, adopted_count: 2, unmatched_case_count: 1, review_required_count: 1, current_conflict_count: 0, assignment_candidate_count: 1, evidence_only_pairing_count: 1, preview_fingerprint: 'c'.repeat(64) };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, message: 'ok', data, error: null }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    globalThis.fetch = fetchMock;
+
+    await expect(previewHistoricalOrderWorkbook(snapshot)).resolves.toEqual(data);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(HISTORICAL_ORDER_WORKBOOK_PREVIEW_PATH);
+    const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(Array.from(form.keys())).toEqual(['workbook']);
+  });
+
+  it('Apply送出fingerprint form與冪等headers並回傳typed receipt', async () => {
+    const snapshot = await HistoricalOrderWorkbookSnapshot.fromFile(new File(['orders'], 'orders.xlsx'));
+    const receipt = { source_content_digest: snapshot.sha256, source_row_count: 1, adopted_count: 1, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignments_created: 1, replayed_rows: 0, replayed_workbook: false };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ success: true, message: 'ok', data: receipt, error: null }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    globalThis.fetch = fetchMock;
+    await expect(applyHistoricalOrderWorkbook(snapshot, 'c'.repeat(64), { idempotencyKey: 'orders-apply-1', correlationId: 'orders-correlation-1' })).resolves.toEqual(receipt);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(HISTORICAL_ORDER_WORKBOOK_APPLY_PATH);
+    const form = fetchMock.mock.calls[0]?.[1]?.body as FormData;
+    expect(form.get('preview_fingerprint')).toBe('c'.repeat(64));
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('Idempotency-Key')).toBe('orders-apply-1');
+    expect(headers.get('X-Correlation-ID')).toBe('orders-correlation-1');
+  });
+
+  it('Apply暫時不可用時不會誤報成Preview錯誤', async () => {
+    const snapshot = await HistoricalOrderWorkbookSnapshot.fromFile(new File(['orders'], 'orders.xlsx'));
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response('{}', { status: 503, headers: { 'content-type': 'application/json' } }));
+    const request = applyHistoricalOrderWorkbook(snapshot, 'c'.repeat(64), { idempotencyKey: 'orders-apply-1', correlationId: 'orders-correlation-1' });
+    await expect(request).rejects.toBeInstanceOf(HistoricalOrderWorkbookApplyError);
+  });
+
+  it('無Session時零fetch', async () => {
+    sessionClient.clearSession();
+    globalThis.fetch = vi.fn();
+    const snapshot = await HistoricalOrderWorkbookSnapshot.fromFile(new File(['x'], 'orders.xlsx'));
+    await expect(previewHistoricalOrderWorkbook(snapshot)).rejects.toBeInstanceOf(HistoricalOrderWorkbookUnauthenticatedError);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('strict schema拒絕extra、null與無效digest', () => {
+    const base = { source_content_digest: 'a'.repeat(64), sheet_identity: 'b'.repeat(64), source_row_count: 0, adopted_count: 0, unmatched_case_count: 0, review_required_count: 0, current_conflict_count: 0, assignment_candidate_count: 0, evidence_only_pairing_count: 0, preview_fingerprint: 'c'.repeat(64) };
+    expect(HistoricalOrderWorkbookPreviewSchema.safeParse({ ...base, extra: true }).success).toBe(false);
+    expect(HistoricalOrderWorkbookPreviewSchema.safeParse({ ...base, adopted_count: null }).success).toBe(false);
+    expect(HistoricalOrderWorkbookPreviewSchema.safeParse({ ...base, sheet_identity: 'BAD' }).success).toBe(false);
+  });
+});

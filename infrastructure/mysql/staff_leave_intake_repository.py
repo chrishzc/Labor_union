@@ -50,6 +50,12 @@ class MySqlStaffLeaveIntakeRepository:
             row = cursor.fetchone()
         return _snapshot(row) if row is not None else None
 
+    def load(self, request_id: int) -> StaffLeaveRequestSnapshot | None:
+        with self._connection.cursor() as cursor:
+            cursor.execute(_ROOT_SQL, (request_id,))
+            row = cursor.fetchone()
+        return _snapshot(row) if row is not None else None
+
     def replay_mutation(self, key: str, fingerprint: str) -> StaffLeaveRequestSnapshot | None:
         return self.replay(key, fingerprint)
 
@@ -106,13 +112,26 @@ def _snapshot(row) -> StaffLeaveRequestSnapshot:
 
 _ROOT_COLUMNS = "id,staff_id,line_user_id,request_status,aggregate_version,request_fingerprint"
 _ROOT_SQL = f"SELECT {_ROOT_COLUMNS} FROM scheduling_staff_leave_request_aggregates WHERE id=%s"
-_RECEIPT_SQL = f"SELECT r.request_fingerprint,{_ROOT_COLUMNS} FROM scheduling_staff_leave_request_receipts r JOIN scheduling_staff_leave_request_aggregates a ON a.id=r.request_id WHERE r.idempotency_key=%s"
+_RECEIPT_ROOT_COLUMNS = (
+    "a.id,a.staff_id,a.line_user_id,a.request_status,a.aggregate_version,"
+    "a.request_fingerprint"
+)
+_RECEIPT_SQL = (
+    f"SELECT r.request_fingerprint,{_RECEIPT_ROOT_COLUMNS} "
+    "FROM scheduling_staff_leave_request_receipts r "
+    "JOIN scheduling_staff_leave_request_aggregates a ON a.id=r.request_id "
+    "WHERE r.idempotency_key=%s"
+)
 _ROOT_INSERT_SQL = "INSERT INTO scheduling_staff_leave_request_aggregates (staff_id,line_user_id,leave_start_date,leave_end_date,request_reason,request_status,request_fingerprint) VALUES (%s,%s,%s,%s,%s,'pending',%s)"
 _EVENT_INSERT_SQL = "INSERT INTO scheduling_staff_leave_request_events (request_id,aggregate_version,event_type,actor_id,reason) VALUES (%s,%s,%s,%s,%s)"
 _RECEIPT_INSERT_SQL = "INSERT INTO scheduling_staff_leave_request_receipts (idempotency_key,request_id,request_fingerprint,result_snapshot) VALUES (%s,%s,%s,%s)"
 _ROOT_TRANSITION_SQL = "UPDATE scheduling_staff_leave_request_aggregates SET request_status=%s,aggregate_version=aggregate_version+1 WHERE id=%s AND aggregate_version=%s"
 _RESOLUTION_LINK_SQL = "INSERT INTO scheduling_staff_leave_request_resolution_links (request_id,leave_substitution_receipt_key) VALUES (%s,%s)"
-_CANONICAL_RECEIPT_SQL = ("SELECT r.batch_key FROM scheduling_leave_substitution_receipts r JOIN scheduling_leave_substitution_outcomes o ON o.batch_key=r.batch_key WHERE r.batch_key=%s AND o.original_staff_id=%s LIMIT 1 FOR UPDATE")
+_CANONICAL_RECEIPT_SQL = (
+    "SELECT b.batch_key FROM scheduling_leave_substitution_batches b "
+    "JOIN scheduling_leave_substitution_outcomes o ON o.batch_key=b.batch_key "
+    "WHERE b.batch_key=%s AND o.original_staff_id=%s LIMIT 1 FOR UPDATE"
+)
 
 
 def _result_snapshot(request_id: int, status: str, version: int, receipt_key: str | None = None) -> str:

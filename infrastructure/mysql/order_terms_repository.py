@@ -1,4 +1,7 @@
-"""MySQL persistence adapter for the Orders Terms transaction."""
+"""
+File: order_terms_repository.py
+Description: 實作 Orders Terms transaction 與 typed borrowed owner read adapter。
+"""
 
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ from subsystems.orders.terms_workflow import (
 
 from .client_finance_terms_writer import persist_client_finance_terms_impact
 from .order_terms_read_model import (
+    load_order_facts,
     load_locked_facts,
     load_preview_facts,
     preflight_staff_ids,
@@ -44,6 +48,14 @@ class MySqlOrderTermsRepository:
     def load_for_preview(self, case_no: str) -> TermsWorkflowFacts:
         with self._connection.cursor() as cursor:
             return load_preview_facts(cursor, case_no)
+
+    def load_order_terms(
+        self, case_no: str, *, for_update: bool = False
+    ):
+        """Expose the owner root as a typed borrowed read for M3 coordination."""
+
+        with self._connection.cursor() as cursor:
+            return load_order_facts(cursor, case_no, for_update=for_update)
 
     def preflight_impacted_staff_ids(self, case_no: str) -> tuple[int, ...]:
         with self._connection.cursor() as cursor:

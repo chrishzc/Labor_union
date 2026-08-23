@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class WorkerRuntimeIdentity(BaseModel):
@@ -64,3 +64,18 @@ class RuntimeReadinessItem(BaseModel):
 class RuntimeReadinessResponse(BaseModel):
     ready: bool
     checks: tuple[RuntimeReadinessItem, ...]
+
+
+class ReactAdminArtifactHealthResponse(BaseModel):
+    """Closed, redacted attestation for the mounted React admin artifact."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    active_selector: Literal["current", "previous"]
+    artifact_version: str = Field(min_length=1, max_length=191)
+    artifact_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    api_compatibility_revision: str = Field(min_length=1, max_length=191)
+    root_marker_checked: Literal[True]
+    checked_asset_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    healthy: Literal[True]

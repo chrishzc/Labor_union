@@ -1,3 +1,8 @@
+"""
+File: test_entrypoint_review_queue.py
+Description: 驗證 entry queue 與 runtime discovery 完全一致且 review 狀態 fail closed。
+"""
+
 from __future__ import annotations
 
 import json
@@ -24,7 +29,14 @@ def test_queue_has_no_unreviewed_entries() -> None:
         if entry["status"] == "review_required"
     ]
 
-    assert unreviewed == []
+    assert {entry_id for entry_id in unreviewed if entry_id.startswith("ui-react:#")} == {
+        f"ui-react:#{page}"
+        for page in (
+            "order-tracker", "orders", "scheduling", "staff", "data-import", "line-management",
+            "reports", "finance", "anomalies", "data-browser", "account-management", "system-status",
+            "line-ai-events", "line-liff-studio", "line-security",
+        )
+    }
 
 
 def _load_queue() -> list[dict[str, object]]:

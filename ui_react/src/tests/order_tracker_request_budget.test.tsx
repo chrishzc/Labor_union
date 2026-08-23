@@ -1,18 +1,24 @@
 /**
  * File: order_tracker_request_budget.test.tsx
- * Description: 驗證 Tracker 初始單一GET、明確重載、Abort／stale防護及所有本地操作零額外請求。
+ * Description: 驗證 Tracker 摘要請求預算、明確重載、Abort／stale 與 Drawer 唯讀查詢。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import type { OrderSummaryPage } from '../api/orders/order_query_schemas';
+import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
+import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
+import { lineNotificationTimelineClient } from '../api/line/notification_timeline_client';
 import { OrderTrackerPage } from '../pages/OrderTrackerPage';
 import { realisticOrderSummaryPage } from './fixtures/orders_real_data_fixtures';
 
 describe('OrderTrackerPage request budget', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(orderStageProjectionClient, 'getOperationalTimelines').mockRejectedValue(new Error('stage query fixture'));
+    vi.spyOn(orderCardProjectionClient, 'getCardProjection').mockRejectedValue(new Error('card query fixture'));
+    vi.spyOn(lineNotificationTimelineClient, 'query').mockResolvedValue({ case_no: 'ORD-2026-0801', records: [] });
   });
 
   it('uses one initial GET in StrictMode and local interactions add no request', async () => {
@@ -28,7 +34,8 @@ describe('OrderTrackerPage request budget', () => {
     fireEvent.click(stageNav as HTMLButtonElement);
     fireEvent.click(screen.getByRole('button', { name: /查看訂單 ORD-2026-0801/ }));
     fireEvent.click(screen.getByRole('tab', { name: /LINE 通知紀錄與發送狀態/ }));
-    fireEvent.click(screen.getByRole('button', { name: '手動重發（未開放）' }));
+    await waitFor(() => expect(screen.getByText('目前沒有 LINE 通知紀錄。')).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /手動重發/ })).not.toBeInTheDocument();
     expect(query).toHaveBeenCalledTimes(1);
   });
 

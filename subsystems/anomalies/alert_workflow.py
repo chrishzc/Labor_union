@@ -31,6 +31,7 @@ class AnomalySummary:
     source_domain: str
     severity: AnomalySeverity
     display_snapshot: object
+    display_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +108,7 @@ class AnomalyApplication:
             summary,
             source_domain=definition.source_domain,
             severity=definition.severity,
+            display_fields=definition.display_fields,
         )
 
     def project(self, request):

@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/admin/entry-targets/{entry_id}",
+  "method": "GET",
+  "path_template": "/api/v1/admin/entry-targets/{entry_id}",
+  "fingerprint": "4956ffdc",
+  "case_id": "dwKyDz",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/admin/entry-targets/ui-react%3A%230",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/admin/entry-targets/ui-react%3A%230",
+      "url_template": "http://127.0.0.1:8765/api/v1/admin/entry-targets/{entry_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "dwKyDz"
+      },
+      "response": {
+        "status_code": 503,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:11:40 GMT",
+          "server": "uvicorn",
+          "content-length": "265",
+          "content-type": "application/json",
+          "server-timing": "application;dur=6.3",
+          "x-response-time-ms": "6.3",
+          "x-correlation-id": "a70147ed7f9547f594af98ea4768530e"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"unavailable\",\"code\":\"entry_target_state_path_missing\",\"message\":\"Entry target state path \u672a\u8a2d\u5b9a\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":true,\"correlation_id\":\"a70147ed7f9547f594af98ea4768530e\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "not_a_server_error",
+          "status": "failure",
+          "message": "Server error"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.00907339999685064,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/admin/entry-targets/{entry_id}",
+      "path_parameters": {
+        "entry_id": "ui-react%3A%230"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

@@ -1,12 +1,13 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-react-admin-phase3d-db-query-public-contract-hardening
 date: 2026-08-17
 owner: Access / Data Browser
 domain: Access
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase3d-data-browser-part-identity-decision PASS
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase3d-data-browser-part-identity-decision PASS
 approval_required: 核准此 exact Phase 3D-DB-H Work Package
+authority: 2026-08-22 human exact approval
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
 ui_execution_mode: not-applicable
 base_branch: main
@@ -66,4 +67,26 @@ fixture/expected。Data Browser UI Part identity尚未裁決，本backend包不�
 - raw row/PII/secret scan、strict UTF-8、focused/full pytest、diff check通過。
 - React wiring與entry cutover另由後續bounded WP處理。
 
-DB Gate：Scope PASS（0 schema）；其餘NOT_RUN；`DB_CHANGE_NOT_READY`。
+## Completion／DB gate（2026-08-22）
+
+六個canonical sources凍結為`orders`、`clients`、`staff`、`beclass_intake`、`hcm_review`、`bank_facts`。
+cursor以各source primary key ascending排序：orders為`case_no`，其餘為positive integer `id`；row identity
+分別為case number或decimal id string。選擇list row內含完整masked detail，不新增detail GET。unknown source／invalid
+cursor在SQL前fail closed；Query只執行bounded SELECT，0 commit／rollback／source correction。
+
+| Gate | Status | Evidence |
+|---|---|---|
+| Scope gate | PASS | 人工exact approval；Part 17 decision PASS；0 schema |
+| Change inventory | PASS | schema-only 0、system-seed 0、business-row-backfill 0、destructive 0 |
+| Static release gate | NOT_RUN | 無release |
+| Descriptor gate | NOT_RUN | 無DB object變更 |
+| Read-only plan gate | NOT_RUN | 無migration |
+| Engine verification gate | PASS | 真`lu_test_*`六來源、cursor、masking、SELECT-only／0 commit E2E |
+| Developer acceptance gate | NOT_RUN | 無本機schema升級；未操作`union_db` |
+
+結論：`DB_CHANGE_NOT_READY`。
+
+final focused為12 PASS；GET-only API workflow exact 1 operation、25 events、2 successes discarded、0 failures／unique，
+raw已刪除。broader scoped為79 PASS／3 FAIL；3項均是非本包MFA環境與AC／Knowledge／LINE fixture缺件，DB-H direct
+selectors另重跑2 PASS。strict UTF-8/header、AST、secret/PII pattern scan與diff check PASS。本包只宣稱masked query
+slice ready；legacy raw table metadata／source-correction boundary仍not-ready且不被本證據吸收。

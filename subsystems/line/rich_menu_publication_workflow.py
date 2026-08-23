@@ -1,8 +1,6 @@
 """
-================================================================================
-檔案名稱: services/line_rich_menu_service.py
-功能說明: LINE 下方選單可靠發布服務，管理圖片、版本、發布狀態、重試與使用者綁定
-================================================================================
+File: rich_menu_publication_workflow.py
+Description: 建立零寫入預覽收據並維持既有 Rich Menu 發布相容流程。
 """
 
 from __future__ import annotations
@@ -13,17 +11,28 @@ import os
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pymysql
 import requests
 
 from api.schemas.line_config import LineMenusConfig, RichMenuDefinition
 from domains.line.configuration import LineConfigurationKind
+from domains.line.identities import LineRichMenuPublicationId
+from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.identities import IdempotencyReceipt
+from shared_kernel.ports import OutboxIntent
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from subsystems.line.delivery_task_workflow import enqueue_line_task
+from subsystems.line.capabilities import LineCapability, require_line_capability
 from subsystems.line.message_configuration import configuration_definition
+from subsystems.line.ports import LineAuditIntent, LineRichMenuPublicationPage
+from subsystems.line.rich_menu_contracts import (
+    LineRichMenuPublicationQuery,
+    QueueLineRichMenuPublicationCommand,
+)
+from subsystems.line.rich_menu_definition import rich_menu_provider_definition
 from subsystems.line.media_archive import (
     MediaValidationError,
     get_media_asset,
@@ -97,31 +106,46 @@ def _current_menu_snapshot(menu_id: str) -> tuple[RichMenuDefinition, str, str]:
     return menu, revision, fingerprint
 
 
-def create_publication_preview(menu_id: str, previewed_by_admin_user_id: int | None) -> dict[str, Any]:
-    if previewed_by_admin_user_id is None:
+def create_publication_preview(
+    menu_id: str,
+    previewed_by_admin_user_id: int | None,
+    *,
+    config_revision: int,
+    candidate: Mapping[str, object],
+) -> dict[str, Any]:
+    if (
+        not isinstance(previewed_by_admin_user_id, int)
+        or isinstance(previewed_by_admin_user_id, bool)
+        or previewed_by_admin_user_id <= 0
+    ):
         raise RichMenuPublicationConflictError(
             "發布預覽需要已登入的管理員",
             code="authenticated_admin_required",
         )
-    menu, revision, fingerprint = _current_menu_snapshot(menu_id)
-    conn = get_connection()
-    try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                INSERT INTO line_rich_menu_publish_previews (
-                    menu_config_id, config_revision, config_fingerprint,
-                    previewed_by_admin_user_id
-                ) VALUES (%s,%s,%s,%s)
-                ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id), previewed_at=UTC_TIMESTAMP()
-                """,
-                (menu.id, revision, fingerprint, previewed_by_admin_user_id),
-            )
-            preview_id = int(cursor.lastrowid)
-        conn.commit()
-        return {"preview_id": preview_id, "config_revision": revision, "config_fingerprint": fingerprint}
-    finally:
-        conn.close()
+    if not isinstance(menu_id, str) or menu_id.strip() != menu_id or not menu_id:
+        raise ValueError("LINE Rich Menu preview menu ID is invalid")
+    if len(menu_id) > 191:
+        raise ValueError("LINE Rich Menu preview menu ID is too long")
+    if (
+        not isinstance(config_revision, int)
+        or isinstance(config_revision, bool)
+        or config_revision < 0
+    ):
+        raise ValueError("LINE Rich Menu preview revision is invalid")
+    if not isinstance(candidate, Mapping):
+        raise TypeError("LINE Rich Menu preview candidate must be a mapping")
+    fingerprint = _candidate_fingerprint(candidate)
+    preview_id = _preview_id(
+        previewed_by_admin_user_id,
+        menu_id,
+        config_revision,
+        fingerprint,
+    )
+    return {
+        "preview_id": preview_id,
+        "config_revision": str(config_revision),
+        "config_fingerprint": fingerprint,
+    }
 
 
 def validate_publication_preview(
@@ -129,40 +153,263 @@ def validate_publication_preview(
     preview_id: int,
     previewed_by_admin_user_id: int | None,
 ) -> dict[str, Any]:
-    if previewed_by_admin_user_id is None:
+    if (
+        not isinstance(previewed_by_admin_user_id, int)
+        or isinstance(previewed_by_admin_user_id, bool)
+        or previewed_by_admin_user_id <= 0
+    ):
         raise RichMenuPublicationConflictError(
             "發布需要已登入的管理員",
             code="authenticated_admin_required",
         )
-    _, revision, fingerprint = _current_menu_snapshot(menu_id)
-    conn = get_connection()
-    try:
-        with conn.cursor(pymysql.cursors.DictCursor) as cursor:
-            cursor.execute(
-                """
-                SELECT id FROM line_rich_menu_publish_previews
-                WHERE id=%s AND menu_config_id=%s AND config_revision=%s
-                  AND config_fingerprint=%s AND previewed_by_admin_user_id=%s
-                  AND publication_id IS NULL
-                  AND canonical_publication_task_id IS NULL
-                """,
-                (
-                    preview_id, menu_id, revision, fingerprint,
-                    previewed_by_admin_user_id,
-                ),
-            )
-            if cursor.fetchone() is None:
-                raise RichMenuPublicationConflictError(
-                    "請先預覽目前版本的 Rich Menu，再確認套用",
-                    code="rich_menu_preview_stale",
-                )
-        return {
-            "preview_id": preview_id,
-            "config_revision": revision,
-            "config_fingerprint": fingerprint,
+    if not isinstance(preview_id, int) or isinstance(preview_id, bool) or preview_id <= 0:
+        raise ValueError("LINE Rich Menu preview ID is invalid")
+    menu, revision, candidate = _current_publication_candidate(menu_id)
+    revision_number = int(revision)
+    fingerprint = _candidate_fingerprint(candidate)
+    expected_preview_id = _preview_id(
+        previewed_by_admin_user_id,
+        menu.id,
+        revision_number,
+        fingerprint,
+    )
+    if preview_id != expected_preview_id:
+        raise RichMenuPublicationConflictError(
+            "請先預覽目前版本的 Rich Menu，再確認套用",
+            code="rich_menu_preview_stale",
+        )
+    return {
+        "preview_id": preview_id,
+        "config_revision": str(revision_number),
+        "config_fingerprint": fingerprint,
+    }
+
+
+def queue_publication(
+    command: QueueLineRichMenuPublicationCommand,
+    *,
+    reason: str,
+):
+    """在單一 LINE UoW 內建立 publication、receipt、audit 與首次 outbox。"""
+
+    require_line_capability(command.actor, LineCapability.MENU_PUBLISH)
+    if not isinstance(reason, str) or reason.strip() != reason or not reason:
+        raise ValueError("LINE Rich Menu publication reason is invalid")
+    if len(reason) > 500:
+        raise ValueError("LINE Rich Menu publication reason is too long")
+    with open_line_unit_of_work() as unit_of_work:
+        menu = _locked_menu(unit_of_work, command)
+        fresh_candidate = {
+            "menu_definition": menu,
+            "provider_definition": json.loads(rich_menu_provider_definition(menu)),
         }
-    finally:
-        conn.close()
+        fresh_fingerprint = _candidate_fingerprint(fresh_candidate)
+        if command.preview_config_revision != str(command.configuration_revision.value):
+            raise RichMenuPublicationConflictError(
+                "Rich Menu 預覽版本已過期",
+                code="rich_menu_preview_stale",
+            )
+        if command.preview_config_fingerprint != fresh_fingerprint:
+            raise RichMenuPublicationConflictError(
+                "Rich Menu 預覽內容已變更",
+                code="rich_menu_preview_stale",
+            )
+        if command.preview_id != _preview_id(
+            command.previewed_by_admin_user_id,
+            command.menu_definition_id,
+            command.configuration_revision.value,
+            fresh_fingerprint,
+        ):
+            raise RichMenuPublicationConflictError(
+                "Rich Menu 預覽收據已過期",
+                code="rich_menu_preview_stale",
+            )
+        command_fingerprint = fingerprint_payload(
+            {
+                "menu_definition_id": command.menu_definition_id,
+                "configuration_revision": command.configuration_revision.value,
+                "preview_id": command.preview_id,
+                "preview_config_revision": command.preview_config_revision,
+                "preview_config_fingerprint": command.preview_config_fingerprint,
+                "reason": reason,
+                "menu": menu,
+            }
+        )
+        existing = unit_of_work.receipts.get(command.idempotency_key)
+        if existing is not None:
+            if existing.payload_fingerprint != command_fingerprint:
+                raise RichMenuPublicationConflictError(
+                    "相同套用鍵對應不同 Rich Menu 請求",
+                    code="line_rich_menu_command_idempotency_conflict",
+                )
+            try:
+                publication_id = int(existing.result_reference.rsplit(":", 1)[-1])
+            except (AttributeError, ValueError) as error:
+                raise RuntimeError("line_rich_menu_receipt_reference_invalid") from error
+            result = unit_of_work.rich_menu_publications.get(
+                LineRichMenuPublicationId(publication_id)
+            )
+            if result is None:
+                raise RuntimeError("line_rich_menu_receipt_result_missing")
+            return result
+
+        queued = unit_of_work.rich_menu_publications.queue(command)
+        publication = queued.publication
+        result_reference = f"line-rich-menu-publication:{publication.publication_id.value}"
+        unit_of_work.receipts.append(
+            IdempotencyReceipt(command.idempotency_key, command_fingerprint, result_reference)
+        )
+        unit_of_work.audit.append(
+            LineAuditIntent(
+                "line.rich_menu.queue",
+                command.actor.actor_id,
+                "line_rich_menu_publication",
+                str(publication.publication_id.value),
+            )
+        )
+        unit_of_work.outbox.append(
+            OutboxIntent(
+                "line_rich_menu_publication",
+                str(publication.publication_id.value),
+                "line.rich_menu.publish",
+                json.dumps(
+                    {
+                        "configuration_revision": command.configuration_revision.value,
+                        "correlation_id": command.correlation_id.value,
+                        "menu_definition_id": command.menu_definition_id,
+                        "preview_fingerprint": command.preview_config_fingerprint,
+                        "publication_id": publication.publication_id.value,
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                result_reference,
+            )
+        )
+        unit_of_work.commit()
+    return publication
+
+
+def list_publication_page(
+    query: LineRichMenuPublicationQuery,
+    *,
+    offset: int,
+    actor,
+) -> LineRichMenuPublicationPage:
+    """直接委派 repository 的 COUNT/LIMIT/OFFSET，不建立記憶體假分頁。"""
+
+    require_line_capability(actor, LineCapability.CONFIG_READ)
+    with open_line_unit_of_work() as unit_of_work:
+        return unit_of_work.rich_menu_publications.list_page(query, offset=offset)
+
+
+def get_publication_step_receipts(
+    publication_id: LineRichMenuPublicationId,
+    actor,
+):
+    """讀取已確認步驟；只回傳 typed port 結果，不開啟任何寫入。"""
+
+    require_line_capability(actor, LineCapability.CONFIG_READ)
+    with open_line_unit_of_work() as unit_of_work:
+        return unit_of_work.rich_menu_publications.list_step_receipts(publication_id)
+
+
+def _current_publication_candidate(
+    menu_id: str,
+) -> tuple[RichMenuDefinition, str, dict[str, object]]:
+    with open_line_unit_of_work() as unit_of_work:
+        configuration_snapshot = unit_of_work.configurations.get(
+            LineConfigurationKind.RICH_MENUS
+        )
+    definition = configuration_definition(configuration_snapshot)
+    menu = next(
+        (
+            item
+            for item in definition.get("menus", [])
+            if isinstance(item, dict) and item.get("id") == menu_id
+        ),
+        None,
+    )
+    if menu is None:
+        raise RichMenuPublicationNotFoundError(f"找不到 Rich Menu {menu_id}")
+    validated = RichMenuDefinition.model_validate(menu)
+    if not validated.enabled:
+        raise RichMenuPublicationConflictError("停用中的 Rich Menu 不能發布")
+    if validated.appearance.image_mode == "uploaded":
+        if not validated.appearance.image_asset_id:
+            raise RichMenuPublicationConflictError("上傳圖片模式尚未選擇圖片資產")
+        asset = get_media_asset(validated.appearance.image_asset_id)
+        if (asset.get("width"), asset.get("height")) != (
+            validated.size.width,
+            validated.size.height,
+        ):
+            raise RichMenuPublicationConflictError("圖片尺寸與 Rich Menu 尺寸不一致")
+    candidate = {
+        "menu_definition": menu,
+        "provider_definition": json.loads(rich_menu_provider_definition(menu)),
+    }
+    return validated, str(configuration_snapshot.revision.value), candidate
+
+
+def _candidate_fingerprint(candidate: Mapping[str, object]) -> str:
+    candidate_json = json.dumps(
+        dict(candidate),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(candidate_json.encode("utf-8")).hexdigest()
+
+
+def _preview_id(actor_id: int, menu_id: str, config_revision: int, fingerprint: str) -> int:
+    receipt_json = json.dumps(
+        {
+            "actor_id": actor_id,
+            "menu_definition_id": menu_id,
+            "configuration_revision": config_revision,
+            "candidate_fingerprint": fingerprint,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    receipt_digest = hashlib.sha256(receipt_json.encode("utf-8")).digest()
+    preview_id = int.from_bytes(receipt_digest[:8], "big") & 0x7FFF_FFFF_FFFF_FFFF
+    return preview_id or 1
+
+
+def _locked_menu(unit_of_work, command: QueueLineRichMenuPublicationCommand):
+    snapshot = unit_of_work.configurations.get(LineConfigurationKind.RICH_MENUS)
+    if snapshot.revision != command.configuration_revision:
+        raise RichMenuPublicationConflictError(
+            "Rich Menu 設定已變更，請重新預覽",
+            code="line_rich_menu_configuration_revision_conflict",
+        )
+    definition = configuration_definition(snapshot)
+    menu = next(
+        (
+            item
+            for item in definition.get("menus", [])
+            if isinstance(item, dict) and item.get("id") == command.menu_definition_id
+        ),
+        None,
+    )
+    if menu is None or menu.get("enabled", True) is not True:
+        raise RichMenuPublicationNotFoundError("找不到可發布的 Rich Menu")
+    validated = RichMenuDefinition.model_validate(menu)
+    if validated.appearance.image_mode == "uploaded":
+        if not validated.appearance.image_asset_id:
+            raise RichMenuPublicationConflictError("上傳圖片模式尚未選擇圖片資產")
+        asset = get_media_asset(validated.appearance.image_asset_id)
+        if (asset.get("width"), asset.get("height")) != (
+            validated.size.width,
+            validated.size.height,
+        ):
+            raise RichMenuPublicationConflictError("圖片尺寸與 Rich Menu 尺寸不一致")
+    rich_menu_provider_definition(menu)
+    return menu
 
 
 def create_publication_job(

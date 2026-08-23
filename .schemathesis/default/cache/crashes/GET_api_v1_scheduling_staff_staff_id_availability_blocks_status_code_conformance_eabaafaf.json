@@ -1,0 +1,86 @@
+{
+  "operation": "GET /api/v1/scheduling/staff/{staff_id}/availability-blocks",
+  "method": "GET",
+  "path_template": "/api/v1/scheduling/staff/{staff_id}/availability-blocks",
+  "fingerprint": "eabaafaf",
+  "case_id": "c5sGhF",
+  "code_sample": "curl -X GET 'http://127.0.0.1:8876/api/v1/scheduling/staff/1/availability-blocks?range_end=2000-01-01&range_start=2000-01-01'",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8876/api/v1/scheduling/staff/1/availability-blocks?range_end=2000-01-01&range_start=2000-01-01",
+      "url_template": "http://127.0.0.1:8876/api/v1/scheduling/staff/{staff_id}/availability-blocks",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "c5sGhF"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Sat, 22 Aug 2026 00:38:01 GMT",
+          "server": "uvicorn",
+          "content-length": "312",
+          "content-type": "application/json",
+          "server-timing": "application;dur=80.8",
+          "x-response-time-ms": "80.8",
+          "x-correlation-id": "39eacef1317c41ceb608b8c1acdd85fd"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"not_found\",\"code\":\"staff_availability_staff_not_found\",\"message\":\"\u6708\u5ac2\u4e0d\u53ef\u670d\u52d9\u671f\u9593\u7570\u52d5\u672a\u901a\u904e\u3002\",\"field_errors\":[],\"domain_blockers\":[\"staff_availability_staff_not_found\"],\"retryable\":false,\"correlation_id\":\"39eacef1317c41ceb608b8c1acdd85fd\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.06876479997299612,
+          "mode": "positive"
+        },
+        "components": {
+          "QUERY": "positive",
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/scheduling/staff/{staff_id}/availability-blocks",
+      "path_parameters": {
+        "staff_id": 1
+      },
+      "query": {
+        "range_end": "2000-01-01",
+        "range_start": "2000-01-01"
+      },
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

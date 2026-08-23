@@ -1,0 +1,15 @@
+{
+  "contract": "react-admin-api-compatibility/v1",
+  "registry_revision": "react-admin-api-registry-v1",
+  "family": "react-admin-api",
+  "active_revision": "react-admin-api-v1",
+  "accepted_revisions": [
+    "react-admin-api-v1"
+  ],
+  "revisions": {
+    "react-admin-api-v1": {
+      "status": "active"
+    }
+  },
+  "registry_digest": "06b2332e2f5b299b52acf05436065aab51bf2f8815dd6802d192d55c6ae38cf7"
+}

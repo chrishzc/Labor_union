@@ -1,13 +1,13 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-react-admin-phase3d-w-r-warning-transition-react
 date: 2026-08-17
 owner: Import Warning React Integration Owner
 domain: Anomalies / Case Import
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase2d-h-closure-gate-amendment PASS; PROV-20260817-react-admin-phase3d-warning-transition-receipt-hardening PASS; PROV-20260817-react-admin-phase3d-r-anomaly-detail-react PASS
-authority: awaiting-exact-human-approval
-approval_required: 核准此 exact Phase 3D-W-R Import Warning Transition React Work Package
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase2d-h-closure-gate-amendment PASS; PROV-20260817-react-admin-phase3d-warning-transition-receipt-hardening PASS; PROV-20260817-react-admin-phase3d-r-anomaly-detail-react PASS
+authority: 2026-08-22 human exact approval and corrective-patch authorization
+approval_required: satisfied
 evidence_directory: document/架構重整/03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3d-w-r-warning-transition-react/
 required_receipts: candidate-change-inventory.md; contract-matrix-freeze-receipt.md; verification-receipt.md; browser-smoke-receipt.md; open-findings.md
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
@@ -43,6 +43,9 @@ Controlled input只消費Phase3 Scenario Lineage凍結的
 - `ui_react/src/tests/import_warning_transition_adapter.test.ts`（new）
 - `ui_react/src/tests/anomalies_warning_transition_flow.test.tsx`（new）
 - `ui_react/src/tests/anomalies_no_fake_mutation.test.tsx`
+- `ui_react/src/components/Drawer.tsx`（corrective amendment：Apply／unknown／re-query期間原生鎖定close）
+- `ui_react/src/tests/anomalies_detail_referral_flow.test.tsx`（direct-affected regression）
+- `ui_react/src/tests/anomalies_entry_cutover.test.tsx`（direct-affected regression）
 
 `AnomaliesPage.tsx/.css`與no-fake test是shared hot spot，固定在Phase2D query與Phase3D-R detail完成後，由同一
 Presentation Integration Writer串行接入。shared transport/Auth、backend、DB、DataImportPage及其他page不在write set。
@@ -101,12 +104,25 @@ disabled，且不得將warning disposition文案寫成「來源已修復」。
 
 | Gate | Status | Evidence |
 |---|---|---|
-| Scope gate | BLOCKED | 本React successor尚未取得exact approval且backend prerequisite未PASS |
+| Scope gate | PASS | 2026-08-22人工exact核准；3D-W-H與3D-R prerequisites均PASS |
 | Change inventory | PASS | React-only，0 schema/seed/backfill/destructive |
 | Static release gate | NOT_RUN | 無release |
 | Descriptor gate | NOT_RUN | 無DB object |
 | Read-only plan gate | NOT_RUN | 不適用 |
-| Engine verification gate | NOT_RUN | backend engine evidence由3D-W-H擁有 |
+| Engine verification gate | PASS | 3D-W-H final focused 39含2支真MySQL；W-R真FastAPI＋Vite browser閉環回讀`lu_test_*` |
 | Developer acceptance gate | NOT_RUN | 不操作既有DB |
 
 結論：`DB_CHANGE_NOT_READY`。
+
+## 6. Completion receipt（2026-08-22）
+
+G0–G7已完成。strict client／schema／typed error／adapter與React狀態機維持Query → Preview → Apply →
+terminal receipt → authenticated receipt re-query；只有receipt核心欄位與server observation一致才顯示完成。
+corrective amendment為`Drawer.closeDisabled`，使ESC、backdrop、header close在Apply／unknown／re-query期間一致原生鎖定。
+
+focused direct-affected為8 files／66 tests PASS；full React為119 files／757 tests PASS；lint exit 0（4個既存非本包
+warning）、build PASS、UTF-8/no-BOM/header 14 paths PASS、scoped diff check無錯誤。真瀏覽器使用development
+`lu_test_*`唯一scenario `phase3d-wr-browser-20260822195924`，完成Preview 200、Apply 200、receipt GET 200；
+receipt `a387d3e2459492b5717a8d37f378f1712373f8033e9266c6b346811d196c6cac`由畫面與DB共同觀察到
+`open v1 → awaiting_external_confirmation v2`。Claim／Resolve／owner root repair仍native disabled；未執行provider、
+deployment、cutover、schema、seed、backfill或destructive operation。

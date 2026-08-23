@@ -10,6 +10,9 @@ import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Mapping
+
+from fastapi import Request
 
 from api.dependencies.runtime_heartbeat import (
     record_runtime_heartbeat,
@@ -32,6 +35,17 @@ from subsystems.line.runtime_monitoring import RuntimeHealthObservation, Runtime
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def inspect_react_admin_artifact_health(request: Request) -> Mapping[str, object]:
+    """Read the startup-validated artifact attestation without touching DB/runtime state."""
+    provider = getattr(request.app.state, "react_admin_artifact_health", None)
+    if not callable(provider):
+        raise RuntimeError("react admin artifact hosting is not configured")
+    result = provider()
+    if not isinstance(result, Mapping):
+        raise RuntimeError("react admin artifact health provider returned an invalid value")
+    return result
 
 
 def run_durable_job_cycle(

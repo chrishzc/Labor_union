@@ -8,6 +8,8 @@ import React from 'react';
 import { OrdersPage } from '../pages/OrdersPage';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
+import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
+import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import {
   realisticServiceDateQueryView,
@@ -19,6 +21,7 @@ import {
   ApiTimeoutError,
 } from '../api/orders/order_mutation_errors';
 import { realisticOrderDetail } from './fixtures/orders_real_data_fixtures';
+import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 
 describe('Confirmed Service Dates Component Flow Suite', () => {
   const originalFetch = globalThis.fetch;
@@ -30,7 +33,7 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       throw new Error(`Unexpected network request: ${String(input)}`);
     }) as typeof fetch;
 
-    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockReset().mockResolvedValue({
+    const summaryPage = {
       items: [
         {
           case_no: 'ORD-2026-0801',
@@ -48,7 +51,14 @@ describe('Confirmed Service Dates Component Flow Suite', () => {
       ],
       next_cursor: null,
       etag: 'a'.repeat(64),
-    });
+    };
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockReset().mockResolvedValue(summaryPage);
+    vi.spyOn(orderStageProjectionClient, 'getOperationalTimelines').mockResolvedValue(
+      buildOrdersStageProjectionFixture(summaryPage),
+    );
+    vi.spyOn(orderCardProjectionClient, 'getCardProjection').mockRejectedValue(
+      new Error('Card projection intentionally unavailable in service-date flow fixture'),
+    );
 
     vi.spyOn(ordersQueryClient, 'getActualStart').mockReset().mockResolvedValue({
       case_no: 'ORD-2026-0801',

@@ -24,6 +24,11 @@ Preview→Apply契約未被本包核准。
 在successor核准前，`staff.availability.end-pause`及definition mutations必須native-disabled/unavailable；不得
 藉Phase3B1 profile flow測試宣稱整個route family完成。
 
+2026-08-22已建立最小、仍待exact核准的
+`PROV-20260822-react-admin-phase3b1-staff-end-pause-successor-work-package.md`；它只處理結束open-ended
+`paused_service`，不包含definition administration、Staff master、PII、銀行、證照或附件。核准前control仍維持
+native disabled。
+
 ## DB gate
 
 Scope `BLOCKED`（owner/public contract未裁決）；Change inventory與其餘gates `NOT_RUN`；

@@ -1,11 +1,13 @@
+@echo off
+goto :MAIN
 @REM File: start_local_development.bat
 @REM Description: 驗證本機 DB readiness 後啟動 API、UI、monitor 與 workers。
-@echo off
+:MAIN
+chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 cd /d "%PROJECT_ROOT%"
 set "PYTHONPATH=%CD%"
-chcp 65001 >nul
 set PYTHONUTF8=1
 set PYTHONIOENCODING=utf-8
 set "PY=%CD%\.venv\Scripts\python.exe"
@@ -16,12 +18,25 @@ if /I "%~1"=="--dry-run" (
     )
     "%PY%" -m scripts.launcher_preflight --profile local-windows
     set "DRY_RUN_EXIT=!ERRORLEVEL!"
+    if not "!DRY_RUN_EXIT!"=="0" exit /b !DRY_RUN_EXIT!
+    "%PY%" -m scripts.launcher_preflight --profile dual-run
+    set "DRY_RUN_EXIT=!ERRORLEVEL!"
+    if /I "%REACT_ADMIN_RUNTIME_PROFILE%"=="artifact-runtime" (
+        if not "!DRY_RUN_EXIT!"=="0" exit /b !DRY_RUN_EXIT!
+        "%PY%" -m scripts.launcher_preflight --profile artifact-runtime
+        set "DRY_RUN_EXIT=!ERRORLEVEL!"
+    )
     exit /b !DRY_RUN_EXIT!
 )
 if /I "%~1"=="--smoke-test" goto :SMOKE_TEST
+if /I "%~1"=="--artifact-runtime-smoke" goto :ARTIFACT_RUNTIME_SMOKE
 echo ==========================================
 echo Labor Union Local Development Startup Script
 echo ==========================================
+if /I "%REACT_ADMIN_RUNTIME_PROFILE%"=="artifact-runtime" (
+    "%PY%" -m scripts.launcher_preflight --profile artifact-runtime
+    if errorlevel 1 exit /b !ERRORLEVEL!
+)
 
 :: 1. Launch Docker Compose
 echo [Step 1] Launching Docker Compose (MySQL 8.0)...
@@ -71,6 +86,10 @@ echo [Step 5] Launching FastAPI server...
 start "FastAPI Server" cmd /k ""%PY%" -m uvicorn api.main:app --host 0.0.0.0 --port 8000"
 call :WAIT_FOR_HTTP "http://127.0.0.1:8000/health" "FastAPI"
 if errorlevel 1 exit /b !ERRORLEVEL!
+if /I "%REACT_ADMIN_RUNTIME_PROFILE%"=="artifact-runtime" (
+    "%PY%" -m scripts.run_service_monitor --react-admin-health-check
+    if errorlevel 1 exit /b !ERRORLEVEL!
+)
 
 echo [Step 6] Launching Streamlit interface...
 start "Streamlit Client UI" cmd /k ""%PY%" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501"
@@ -113,16 +132,13 @@ pause
 exit /b 0
 
 :SMOKE_TEST
-call :ENSURE_INTERNAL_SERVICE_KEY
-if errorlevel 1 exit /b !ERRORLEVEL!
-echo [Smoke] Launching Docker Compose and waiting for MySQL...
-docker-compose up -d
-if errorlevel 1 exit /b !ERRORLEVEL!
-"%PY%" scripts/wait_for_db.py
-if errorlevel 1 exit /b !ERRORLEVEL!
-"%PY%" -m scripts.update_local_database --require-current
-if errorlevel 1 exit /b !ERRORLEVEL!
+echo [Smoke] Phase5B GET-only dual-run; Docker, DB, monitor and workers disabled.
 "%PY%" -m scripts.smoke_local_development_launcher
+exit /b !ERRORLEVEL!
+
+:ARTIFACT_RUNTIME_SMOKE
+echo [Smoke] Phase6B-RUN artifact health only; no child, Docker, DB, provider or observation write.
+"%PY%" -m scripts.smoke_local_development_launcher --artifact-runtime
 exit /b !ERRORLEVEL!
 
 :ENSURE_INTERNAL_SERVICE_KEY

@@ -1,10 +1,15 @@
-"""MySQL persistence adapter for Scheduling-owned staff availability."""
+"""
+File: staff_availability_repository.py
+Description: 提供 Staff Availability 的 canonical occupancy mutex 與無 hidden commit 持久化 adapter。
+"""
 
 from __future__ import annotations
 
 import json
 from datetime import date, datetime, timezone
 from typing import Any, Mapping
+
+from pymysql.err import IntegrityError
 
 from domains.scheduling.staff_availability import (
     StaffAvailabilityAction,
@@ -20,8 +25,12 @@ from domains.scheduling.staff_availability import (
 )
 from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import ActorContext, IdempotencyKey
+from subsystems.scheduling.occupancy_mutex import (
+    lock_staff_occupancy_mutex as _lock_staff_occupancy_mutex,
+)
 from subsystems.scheduling.staff_availability_workflow import (
     StaffAvailabilityApplyReceipt,
+    StaffAvailabilityReceiptRaceError,
     StaffAvailabilityApplyRequest,
     StaffAvailabilityQuery,
     StoredStaffAvailabilityReceipt,
@@ -45,6 +54,40 @@ class MySqlStaffAvailabilityRepository:
             target = _load_target(cursor, intent, for_update)
             blocks, conflicts = _load_create_conflicts(cursor, intent, for_update)
             return StaffAvailabilityFacts(intent.staff_id, version, blocks, conflicts, target)
+
+    def load_matching_facts(
+        self,
+        staff_id: int,
+        service_dates: tuple[date, ...],
+        *,
+        for_update: bool,
+    ) -> StaffAvailabilityFacts:
+        """Read availability over an owner-supplied service interval, with zero writes."""
+
+        if not service_dates or service_dates != tuple(sorted(set(service_dates))):
+            raise ValueError("matching service dates must be sorted and unique")
+        intent = StaffAvailabilityIntent(
+            StaffAvailabilityAction.CREATE_LONG_LEAVE,
+            staff_id,
+            "matching coordination availability read",
+            service_dates[0],
+            service_dates[-1],
+        )
+        with self._connection.cursor() as cursor:
+            _require_staff(cursor, staff_id, for_update)
+            cursor.execute(
+                _AGGREGATE_SELECT_SQL + (" FOR UPDATE" if for_update else ""),
+                (staff_id,),
+            )
+            row = cursor.fetchone()
+            version = int(row["aggregate_version"]) if row is not None else 0
+            blocks, conflicts = _load_create_conflicts(cursor, intent, for_update)
+        return StaffAvailabilityFacts(staff_id, version, blocks, conflicts)
+
+    def lock_staff_occupancy_mutex(self, staff_id: int) -> None:
+        """Acquire the shared staff occupancy mutex on this transaction cursor."""
+        with self._connection.cursor() as cursor:
+            _lock_staff_occupancy_mutex(cursor, [staff_id])
 
     def load_receipt(self, key: IdempotencyKey) -> StoredStaffAvailabilityReceipt | None:
         with self._connection.cursor() as cursor:
@@ -125,29 +168,39 @@ class MySqlStaffAvailabilityRepository:
 
     def save_receipt(self, request, request_fingerprint, receipt, occurred_at):
         with self._connection.cursor() as cursor:
-            cursor.execute(
-                _RECEIPT_INSERT_SQL,
-                (
-                    request.idempotency_key.value,
-                    request_fingerprint.value,
-                    receipt.preview_fingerprint.value,
-                    receipt.staff_id,
-                    receipt.aggregate_version,
-                    receipt.block.block_id,
-                    receipt.action.value,
-                    _canonical_json(_receipt_payload(receipt)),
-                    request.actor.actor_id,
-                    request.intent.reason,
-                    request.correlation_id.value,
-                    _database_datetime(occurred_at),
-                ),
-            )
+            try:
+                cursor.execute(
+                    _RECEIPT_INSERT_SQL,
+                    (
+                        request.idempotency_key.value,
+                        request_fingerprint.value,
+                        receipt.preview_fingerprint.value,
+                        receipt.staff_id,
+                        receipt.aggregate_version,
+                        receipt.block.block_id,
+                        receipt.action.value,
+                        _canonical_json(_receipt_payload(receipt)),
+                        request.actor.actor_id,
+                        request.intent.reason,
+                        request.correlation_id.value,
+                        _database_datetime(occurred_at),
+                    ),
+                )
+            except IntegrityError as error:
+                if not _is_receipt_identity_race(error):
+                    raise
+                raise StaffAvailabilityReceiptRaceError(
+                    "staff availability receipt identity was concurrently claimed"
+                ) from error
 
-    def commit(self) -> None:
-        self._connection.commit()
 
-    def rollback(self) -> None:
-        self._connection.rollback()
+def _is_receipt_identity_race(error: IntegrityError) -> bool:
+    if not error.args:
+        return False
+    try:
+        return int(error.args[0]) == 1062
+    except (TypeError, ValueError):
+        return False
 
 
 def _load_version(cursor, staff_id, for_update):
@@ -172,7 +225,7 @@ def _load_create_conflicts(cursor, intent, for_update):
         StaffAvailabilityConflict("unavailability", str(block.block_id), block.start_date, block.end_date or date.max)
         for block in blocks
     ]
-    conflicts.extend(_occupancy_conflicts(cursor, intent))
+    conflicts.extend(_occupancy_conflicts(cursor, intent, for_update))
     return blocks, tuple(conflicts)
 
 
@@ -184,10 +237,13 @@ def _overlapping_blocks(cursor, intent, for_update):
     return tuple(_block_from_row(row) for row in _mapping_rows(cursor.fetchall()))
 
 
-def _occupancy_conflicts(cursor, intent):
+def _occupancy_conflicts(cursor, intent, for_update):
     conflicts = []
     for source_kind, sql in _CONFLICT_QUERIES:
-        cursor.execute(sql, (intent.staff_id, intent.start_date, intent.end_date, intent.end_date))
+        cursor.execute(
+            sql + (" FOR UPDATE" if for_update else ""),
+            (intent.staff_id, intent.start_date, intent.end_date, intent.end_date),
+        )
         conflicts.extend(_conflict_from_row(source_kind, row) for row in _mapping_rows(cursor.fetchall()))
     return conflicts
 

@@ -1,8 +1,6 @@
 """
-================================================================================
-檔案名稱: ui/components/line_task_manager.py
-功能說明: LINE 發送紀錄元件，查看通知狀態並提供立即發送、取消與重新發送操作
-================================================================================
+File: line_task_manager.py
+Description: 呈現 LINE Delivery 安全查詢並維持控制操作的薄 UI 邊界。
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ FLASH_KEY = "line_task_flash"
 PAGE_KEY = "line_task_page"
 FILTER_KEY = "line_task_filter_signature"
 STATUSES = ["pending", "processing", "sent", "failed", "cancelled"]
-TASK_TYPES = ["line_push", "rich_menu_link", "rich_menu_unlink"]
+TASK_TYPES = ["general_push", "rich_menu_link", "rich_menu_unlink"]
 TAIPEI_TIMEZONE = ZoneInfo("Asia/Taipei")
 STATUS_LABELS = {
     "pending": "等待發送",
@@ -36,10 +34,25 @@ STATUS_LABELS = {
     "cancelled": "已取消",
 }
 TASK_TYPE_LABELS = {
-    "line_push": "LINE 訊息",
+    "general_push": "LINE 訊息",
     "rich_menu_link": "套用 LINE 選單",
     "rich_menu_unlink": "移除 LINE 選單",
 }
+
+
+def _delivery_query_filters(
+    status_filter: str | None,
+    type_filter: str | None,
+    onboarding_only: bool,
+    page: int,
+) -> dict[str, Any]:
+    source_type = "follow_schedule" if onboarding_only else type_filter
+    return {
+        "status": status_filter,
+        "source_type": source_type,
+        "page": page,
+        "page_size": 25,
+    }
 
 
 def _format_utc_as_taipei(value: Any) -> str:
@@ -140,14 +153,9 @@ def render_task_manager(
     try:
         result = client.line_tasks(
             token,
-            filters={
-                "status": status_filter,
-                "task_type": type_filter,
-                "user_id": "",
-                "onboarding_only": onboarding_only,
-                "page": page,
-                "page_size": 25,
-            },
+            filters=_delivery_query_filters(
+                status_filter, type_filter, onboarding_only, page
+            ),
         )
     except LineAdminApiError as exc:
         st.error(f"無法載入發送紀錄：{exc}")
@@ -166,8 +174,7 @@ def render_task_manager(
             "狀態": STATUS_LABELS.get(item["status"], item["status"]),
             "通知種類": TASK_TYPE_LABELS.get(item["task_type"], "系統通知"),
             "預計發送時間": _format_utc_as_taipei(item["scheduled_at"]),
-            "訊息摘要": item.get("message_preview") or "系統設定更新",
-            "需要處理的原因": item.get("error_code") or "",
+            "通知範圍": item.get("source_type") or "受控來源",
         }
         for item in items
     ]
@@ -192,7 +199,7 @@ def render_task_manager(
         [item["id"] for item in items],
         format_func=lambda value: next(
             f"{STATUS_LABELS.get(item['status'], item['status'])} · "
-            f"{item.get('message_preview') or TASK_TYPE_LABELS.get(item['task_type'], '系統通知')}"
+            f"{TASK_TYPE_LABELS.get(item['task_type'], '系統通知')}"
             for item in items
             if item["id"] == value
         ),
@@ -208,8 +215,7 @@ def render_task_manager(
         "目前狀態": STATUS_LABELS.get(task["status"], task["status"]),
         "通知種類": TASK_TYPE_LABELS.get(task["task_type"], "系統通知"),
         "預計發送時間": _format_utc_as_taipei(task.get("scheduled_at")),
-        "訊息內容": task.get("message_preview") or task.get("message_content") or "系統設定更新",
-        "失敗原因": task.get("error_code") or "-",
+        "查詢來源": task.get("source_type") or "受控來源",
     }
     st.dataframe(
         pd.DataFrame([{"項目": key, "內容": value} for key, value in detail_rows.items()]),
@@ -222,7 +228,7 @@ def render_task_manager(
             {
                 "時間": _format_utc_as_taipei(item.get("started_at")),
                 "結果": STATUS_LABELS.get(item.get("outcome"), item.get("outcome") or "處理中"),
-                "說明": item.get("error_code") or "",
+                "說明": item.get("outcome") or "處理中",
             }
             for item in detail["attempts"]
         ]

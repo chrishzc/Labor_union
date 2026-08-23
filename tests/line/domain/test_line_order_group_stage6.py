@@ -1,4 +1,7 @@
-"""Stage 6 order-group invitation and runtime health domain contracts."""
+"""
+File: test_line_order_group_stage6.py
+Description: 驗證 LINE 訂單群組能力投影與執行期契約。
+"""
 
 from datetime import datetime, timezone
 
@@ -32,14 +35,12 @@ def test_invitation_accepts_only_clean_line_group_url_and_never_repr_leaks_secre
         )
 
 
-def test_operational_read_and_group_capabilities_are_role_scoped() -> None:
-    viewer = line_capabilities_for_role("line_viewer")
-    agent = line_capabilities_for_role("line_agent")
-    assert LineCapability.MONITOR_READ.value in viewer
-    assert LineCapability.ORDER_GROUP_READ.value in viewer
-    assert LineCapability.ORDER_GROUP_BIND.value not in viewer
-    assert LineCapability.ORDER_GROUP_BIND.value in agent
-    assert LineCapability.ALERT_MANAGE.value not in agent
+def test_enabled_compatibility_roles_receive_equal_line_capabilities() -> None:
+    expected = tuple(sorted(item.value for item in LineCapability))
+    roles = ("line_viewer", "line_agent", "line_manager", "system_admin")
+
+    assert {line_capabilities_for_role(role) for role in roles} == {expected}
+    assert line_capabilities_for_role("unknown-role") == ()
 
 
 def test_health_observation_fingerprint_is_stable_and_contains_no_mutation() -> None:

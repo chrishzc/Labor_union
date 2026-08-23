@@ -1,6 +1,6 @@
 """
 File: test_local_database_maintenance.py
-Description: 驗證本機保留資料升級的來源選擇、候選替換與失敗保護。
+Description: 驗證本機資料庫更新路由、候選替換與有界失敗保護。
 """
 
 from __future__ import annotations
@@ -64,12 +64,12 @@ def test_apply_confirms_the_database_configured_in_the_environment(
         lambda _path: (config, "lu_test_dataset"),
     )
     monkeypatch.setattr(update, "candidate_name", lambda source: preview["candidate_database"])
-    monkeypatch.setattr(update, "build_preview", lambda *_: preview)
-    monkeypatch.setattr(update, "require_mysql_clients", lambda *_: None)
+    monkeypatch.setattr(update, "build_additive_preview", lambda *_args, **_kwargs: {"status": "ready", "source_database": "lu_test_dataset"})
+    monkeypatch.setattr(update, "require_mysql_apply_client", lambda *_: None)
     monkeypatch.setattr(
         update,
-        "apply_update",
-        lambda _config, _environment, received, _receipt_root, **_options: captured.update(received) or {"status": "completed"},
+        "apply_additive_update",
+        lambda _config, received, _receipt_root, **_options: captured.update(source_database=received) or {"status": "completed"},
     )
 
     result = update.update_local_database(
@@ -93,8 +93,17 @@ def test_preview_connection_failure_is_reported_as_a_bounded_error(
     )
     monkeypatch.setattr(
         update,
+        "build_additive_preview",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("connection failed")
+        ),
+    )
+    monkeypatch.setattr(
+        update,
         "build_preview",
-        lambda *_: (_ for _ in ()).throw(RuntimeError("connection failed")),
+        lambda *_args, **_kwargs: pytest.fail(
+            "auto preview must not call the legacy replacement preview"
+        ),
     )
 
     with pytest.raises(update.LocalDatabaseUpdateError, match="preview failed"):
@@ -351,7 +360,11 @@ def test_cli_reports_a_bounded_blocked_error(monkeypatch, capsys) -> None:
 
     assert update.main() == 2
     error = json.loads(capsys.readouterr().err)
-    assert error == {"status": "blocked", "error": "catalog mismatch"}
+    assert error == {
+        "status": "blocked",
+        "error": "catalog mismatch",
+        "code": "database_update_blocked",
+    }
 
 
 def test_show_create_table_comparison_ignores_dynamic_auto_increment_value() -> None:

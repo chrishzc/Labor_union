@@ -92,11 +92,31 @@ describe('scheduling current client', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
-  it('rejects extra fields, duplicate days and pre-aborted requests', async () => {
+  it('rejects extra fields, duplicate, incomplete or out-of-order days and pre-aborted requests', async () => {
+    const incompleteDays = {
+      ...SCHEDULING_RESPONSE_READY,
+      data: {
+        ...SCHEDULING_RESPONSE_READY.data,
+        days: SCHEDULING_RESPONSE_READY.data.days.slice(0, 2),
+      },
+    };
+    const outOfOrderDays = {
+      ...SCHEDULING_RESPONSE_READY,
+      data: {
+        ...SCHEDULING_RESPONSE_READY.data,
+        days: [
+          SCHEDULING_RESPONSE_READY.data.days[1],
+          SCHEDULING_RESPONSE_READY.data.days[0],
+          SCHEDULING_RESPONSE_READY.data.days[2],
+        ],
+      },
+    };
     globalThis.fetch = vi
       .fn()
       .mockResolvedValueOnce(response(SCHEDULING_RESPONSE_EXTRA_FIELD))
-      .mockResolvedValueOnce(response(SCHEDULING_RESPONSE_DUPLICATE_DAY));
+      .mockResolvedValueOnce(response(SCHEDULING_RESPONSE_DUPLICATE_DAY))
+      .mockResolvedValueOnce(response(incompleteDays))
+      .mockResolvedValueOnce(response(outOfOrderDays));
     const client = createSchedulingCurrentClient();
     const query = {
       staffId: 11,
@@ -109,11 +129,17 @@ describe('scheduling current client', () => {
     await expect(client.queryCurrentCalendar(query)).rejects.toBeInstanceOf(
       SchedulingValidationError
     );
+    await expect(client.queryCurrentCalendar(query)).rejects.toBeInstanceOf(
+      SchedulingValidationError
+    );
+    await expect(client.queryCurrentCalendar(query)).rejects.toBeInstanceOf(
+      SchedulingValidationError
+    );
     const controller = new AbortController();
     controller.abort();
     await expect(
       client.queryCurrentCalendar(query, { signal: controller.signal })
     ).rejects.toBeInstanceOf(SchedulingAbortedError);
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(4);
   });
 });

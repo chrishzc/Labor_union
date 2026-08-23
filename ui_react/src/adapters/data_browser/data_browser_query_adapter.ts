@@ -68,7 +68,7 @@ export function adaptDataBrowserPage(page: DataBrowserMaskedPage): DataBrowserPa
       summary: adaptCells(row.summary_cells),
       detail: adaptCells(row.detail_cells),
       recordedAt: row.recorded_at ?? '—',
-      actorLabel: row.source_actor_label ?? '後端未提供',
+      actorLabel: row.source_actor_label ?? '—',
       versionIdentity: row.version_identity,
     };
   });

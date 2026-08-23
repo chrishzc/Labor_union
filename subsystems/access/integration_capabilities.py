@@ -1,4 +1,7 @@
-"""Stable human capabilities for Contract and Knowledge administration."""
+"""
+File: integration_capabilities.py
+Description: 提供整合管理能力名稱及 enabled 使用者同權映射。
+"""
 
 from enum import StrEnum
 
@@ -13,8 +16,8 @@ class IntegrationCapability(StrEnum):
 
 
 _ROLE_CAPABILITIES = {
-    "line_viewer": {IntegrationCapability.KNOWLEDGE_READ},
-    "line_agent": {IntegrationCapability.KNOWLEDGE_READ},
+    "line_viewer": set(IntegrationCapability),
+    "line_agent": set(IntegrationCapability),
     "line_manager": set(IntegrationCapability),
     "system_admin": set(IntegrationCapability),
 }

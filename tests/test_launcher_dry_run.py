@@ -17,7 +17,7 @@ def _source(name: str) -> str:
 
 
 def test_profiles_report_no_side_effects() -> None:
-    for profile in ("local-windows", "local-unix", "admin-no-auth", "database-update", "database-reset", "ngrok-development", "line-worker"):
+    for profile in ("artifact-runtime", "dual-run", "local-windows", "local-unix", "admin-no-auth", "database-update", "database-reset", "ngrok-development", "line-worker"):
         assert inspect_profile(profile)["side_effects"] == "none"
 
 
@@ -32,6 +32,10 @@ def test_batch_and_shell_launchers_route_dry_run_to_preflight() -> None:
         source = _source(name)
         assert "--dry-run" in source
         assert f"--profile {profile}" in source
+        if name.startswith("start_local_development"):
+            assert "--profile dual-run" in source
+        else:
+            assert "--profile dual-run" not in source
 
 
 def test_batch_dry_run_propagates_a_blocked_preflight() -> None:
@@ -49,15 +53,31 @@ def test_windows_launcher_exposes_controlled_smoke_test() -> None:
     source = _source("start_local_development.bat")
 
     assert 'if /I "%~1"=="--smoke-test" goto :SMOKE_TEST' in source
-    smoke_block = source.split(":SMOKE_TEST", maxsplit=1)[1]
-    assert smoke_block.index("docker-compose up -d") < smoke_block.index("scripts/wait_for_db.py")
-    assert smoke_block.index("scripts/wait_for_db.py") < smoke_block.index(
-        "scripts.update_local_database --require-current"
-    )
-    assert smoke_block.index("scripts.update_local_database --require-current") < smoke_block.index(
-        "scripts.smoke_local_development_launcher"
-    )
+    smoke_block = source.rsplit("\n:SMOKE_TEST", maxsplit=1)[1]
+    assert "scripts.smoke_local_development_launcher" in smoke_block
+    assert "docker-compose up -d" not in smoke_block
+    assert "scripts/wait_for_db.py" not in smoke_block
+    assert "scripts.update_local_database" not in smoke_block
     assert "exit /b !ERRORLEVEL!" in smoke_block
+
+
+def test_launchers_gate_artifact_runtime_before_children_and_probe_after_api() -> None:
+    for name in ("start_local_development.bat", "start_local_development.sh"):
+        source = _source(name)
+        assert "--profile artifact-runtime" in source
+        assert "--react-admin-health-check" in source
+        assert "--artifact-runtime-smoke" in source
+        assert source.index("--profile artifact-runtime") < source.index("api.main:app")
+
+
+def test_dual_run_preflight_freezes_three_get_only_services() -> None:
+    report = inspect_profile("dual-run")
+
+    assert report["ports"] == [8000, 8501, 5173]
+    assert report["startup_order"] == ["api", "streamlit", "react"]
+    assert "monitor" in report["disabled"]
+    assert "consumer/provider workers" in report["disabled"]
+    assert report["side_effects"] == "none"
 
 
 def test_windows_launcher_guards_optional_line_worker_configuration() -> None:
@@ -86,11 +106,23 @@ def test_configuration_and_scheduler_scripts_have_non_mutating_dry_run() -> None
     assert "no task was queried or removed" in uninstall
 
 
+def test_no_auth_configuration_persists_backend_bypass_profile() -> None:
+    configure = _source("configure_local_admin_no_auth.ps1")
+
+    assert 'ACCESS_CONTROL_PROFILE = "local_bypass"' in configure
+    assert 'ACCESS_CONTROL_PROFILE=$($desired[' in configure
+
+
 def test_composed_no_auth_launcher_dry_runs_both_steps() -> None:
     source = _source("start_local_development_no_auth.bat")
 
     assert "configure_local_admin_no_auth.ps1\" -DryRun" in source
     assert "start_local_development.bat\" --dry-run" in source
+    assert 'set "ACCESS_CONTROL_PROFILE=local_bypass"' in source
+    assert 'set "VITE_ACCESS_CONTROL_PROFILE=local_bypass"' in source
+    assert source.index('set "VITE_ACCESS_CONTROL_PROFILE=local_bypass"') < source.index(
+        'call "%~dp0start_local_development.bat"'
+    )
 
 
 def test_ngrok_launcher_routes_dry_run_before_supervision() -> None:

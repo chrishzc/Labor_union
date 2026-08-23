@@ -1,0 +1,81 @@
+{
+  "operation": "GET /api/v1/assignment-schedules/{assignment_id}",
+  "method": "GET",
+  "path_template": "/api/v1/assignment-schedules/{assignment_id}",
+  "fingerprint": "476837ad",
+  "case_id": "ICUV0V",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/assignment-schedules/1",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/assignment-schedules/1",
+      "url_template": "http://127.0.0.1:8765/api/v1/assignment-schedules/{assignment_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "ICUV0V"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:11:49 GMT",
+          "server": "uvicorn",
+          "content-length": "243",
+          "content-type": "application/json",
+          "server-timing": "application;dur=2131.7",
+          "x-response-time-ms": "2131.7",
+          "x-correlation-id": "df4ff192e8a042a5b7192949abce25c2"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"internal_error\",\"message\":\"\u4f3a\u670d\u5668\u767c\u751f\u672a\u9810\u671f\u932f\u8aa4\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"df4ff192e8a042a5b7192949abce25c2\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "not_a_server_error",
+          "status": "failure",
+          "message": "Server error"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.005198400001972914,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/assignment-schedules/{assignment_id}",
+      "path_parameters": {
+        "assignment_id": 1
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

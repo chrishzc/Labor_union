@@ -1,0 +1,11 @@
+contract: labor-union-ui-expected/v1
+scenario_id: GDATA-REACT-ADMIN-DATA-BROWSER-QUERY
+revision: 1
+oracle:
+  - only canonical allowlisted source identities are accepted
+  - columns, cells, row identities and cursors satisfy the strict typed contract
+  - masking and schema drift fail closed without rendering partial raw rows
+  - pagination, timeout, abort, reload and stale responses preserve request and identity boundaries
+  - Drawer and copy expose only the approved masked view
+  - generic source correction remains native-disabled with zero non-GET requests
+blocked_reason: canonical source mapping and runtime API, DB and browser receipts are produced by Phase 3D-DB-H and DB-R

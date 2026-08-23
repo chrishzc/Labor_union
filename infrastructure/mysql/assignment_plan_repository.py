@@ -158,6 +158,35 @@ class MySqlAssignmentPlanRepository:
             source = load_preview_facts(cursor, case_no)
         return build_assignment_plan_workflow_facts(source, (), ())
 
+    def load_current_assignments(
+        self,
+        case_no: str,
+        *,
+        staff_ids: tuple[int, ...] = (),
+        for_update: bool = False,
+    ) -> AssignmentPlanFacts:
+        """Read incumbent facts without creating an Assignment command claim."""
+
+        with self._connection.cursor() as cursor:
+            current_staff_ids = preflight_staff_ids(cursor, case_no)
+            selected_staff_ids = staff_ids or current_staff_ids
+            if not set(current_staff_ids).issubset(selected_staff_ids):
+                raise ValueError("assignment_lock_set_expanded")
+            source = (
+                load_locked_facts(cursor, case_no, selected_staff_ids)
+                if for_update
+                else load_preview_facts(cursor, case_no)
+            )
+            occupancy, waiting_lock_ids = load_occupancy_snapshot(
+                cursor,
+                selected_staff_ids,
+                case_no,
+                lock=for_update,
+            )
+        return build_assignment_plan_workflow_facts(
+            source, occupancy, waiting_lock_ids
+        ).assignment_plan
+
     def load_for_preview(
         self,
         case_no: str,

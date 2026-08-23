@@ -1,4 +1,7 @@
-"""Authenticated query and workflow endpoints for Anomalies."""
+"""
+File: anomaly_registry.py
+Description: 提供異常清單、詳情、工作流與封閉去敏投影的 FastAPI 路由。
+"""
 
 from __future__ import annotations
 
@@ -14,7 +17,9 @@ from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.anomaly_registry import get_anomaly_application
 from api.schemas.anomaly_registry import (
     AnomalyDetailView,
+    AnomalyDisplaySnapshotView,
     AnomalySummaryView,
+    AnomalyTimelineEventView,
     AnomalyWorkflowReceiptView,
     ClaimAnomalyBody,
     ResolveAnomalyBody,
@@ -169,7 +174,12 @@ def _workflow_request(
 
 def _summary_payload(summary, *, include_snapshot=True):
     projection = summary.projection
-    display_snapshot = dict(summary.display_snapshot)
+    raw_snapshot = summary.display_snapshot
+    display_snapshot = _safe_display_snapshot(
+        projection.definition_code,
+        summary.display_fields,
+        raw_snapshot,
+    )
     return {
         "fingerprint": projection.fingerprint.value,
         "definition_code": projection.definition_code,
@@ -182,17 +192,19 @@ def _summary_payload(summary, *, include_snapshot=True):
         "workflow_version": projection.workflow_version,
         "staff_calendar_navigation": _staff_calendar_navigation(
             projection.definition_code,
-            display_snapshot,
+            raw_snapshot,
         ),
         **(
             {"display_snapshot": display_snapshot}
             if include_snapshot
-            else {}
+            else {"display_snapshot": None}
         ),
     }
 
 
-def _staff_calendar_navigation(code: str, snapshot: Mapping[str, object]):
+def _staff_calendar_navigation(code: str, snapshot: object):
+    if not isinstance(snapshot, Mapping):
+        return None
     date_field_by_code = {
         "SCHEDULE-001": "holiday_date",
         "SCHEDULE-005": "work_date",
@@ -216,10 +228,406 @@ def _staff_calendar_navigation(code: str, snapshot: Mapping[str, object]):
 
 def _detail_payload(detail):
     return {
-        "summary": _summary_payload(detail.summary),
-        "timeline": _materialize(detail.timeline),
-        "available_actions": _materialize(detail.available_actions),
+        "summary": _summary_payload(detail.summary, include_snapshot=True),
+        "timeline": [_timeline_payload(event) for event in detail.timeline],
+        "available_actions": [
+            _action_payload(action) for action in detail.available_actions
+        ],
     }
+
+
+_IDENTITY_EVIDENCE_FIELDS = frozenset(
+    {
+        "assignment_id",
+        "assignment_id_a",
+        "assignment_id_b",
+        "bank_fact_identity",
+        "batch_id",
+        "case_no",
+        "claim_item_id",
+        "obligation_identity",
+        "overpayment_identity",
+        "payable_identity",
+        "payout_difference_identity",
+        "recovery_identity",
+        "review_identity",
+        "review_item_id",
+        "reversal_bank_fact_identity",
+        "source_event_identity",
+        "source_receipt_id",
+        "staff_id",
+        "task_id",
+        "underpayment_identity",
+    }
+)
+_MASKED_TEXT_EVIDENCE_FIELDS = frozenset(
+    {
+        "line_user_id",
+        "masked_case_identity",
+        "masked_identifier",
+        "staff_name",
+        "to_user_id",
+    }
+)
+_DATE_EVIDENCE_FIELDS = frozenset(
+    {"due_date", "holiday_date", "original_due_date", "work_date"}
+)
+_MONEY_EVIDENCE_FIELDS = frozenset(
+    {
+        "after_amount_ntd",
+        "amount",
+        "amount_delta_ntd",
+        "amount_due_ntd",
+        "balance_ntd",
+        "bank_amount_ntd",
+        "before_amount_ntd",
+        "excess_amount_ntd",
+        "remaining_reversible_ntd",
+    }
+)
+_INTEGER_EVIDENCE_FIELDS = frozenset(
+    {"integrity_revision", "source_row", "version"}
+)
+_CODE_EVIDENCE_FIELDS = frozenset(
+    {
+        "action",
+        "bank_account_issue",
+        "entity_kind",
+        "notification_reason",
+        "source_sheet",
+    }
+)
+_CODE_LIST_EVIDENCE_FIELDS = frozenset(
+    {"drift_fields", "error_codes", "integrity_blockers", "issue_codes", "reason_codes"}
+)
+_IDENTITY_LIST_EVIDENCE_FIELDS = frozenset(
+    {
+        "advance_candidates",
+        "candidate_batch_ids",
+        "item_outstanding",
+        "obligation_identities",
+        "overdue_obligations",
+    }
+)
+_IDENTITY_ITEM_KEYS = (
+    "advance_identity",
+    "advance_id",
+    "assignment_identity",
+    "assignment_id",
+    "batch_identity",
+    "batch_id",
+    "claim_item_identity",
+    "claim_item_id",
+    "finance_import_row_identity",
+    "obligation_identity",
+    "obligation_id",
+    "payable_identity",
+    "recovery_identity",
+)
+
+
+def _safe_display_snapshot(
+    definition_code: str,
+    display_fields: object,
+    snapshot: object,
+) -> AnomalyDisplaySnapshotView:
+    """Validate one definition-owned display contract and emit no raw mapping."""
+    if not isinstance(display_fields, tuple) or any(
+        not isinstance(key, str) or not key for key in display_fields
+    ):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    if display_fields != tuple(sorted(set(display_fields))):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    if snapshot is None:
+        if display_fields:
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        snapshot = {}
+    if not isinstance(snapshot, Mapping):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    public_snapshot = {
+        key: value for key, value in snapshot.items() if key in display_fields
+    }
+    if set(public_snapshot) != set(display_fields):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    unknown = set(snapshot) - set(display_fields)
+    if unknown - _private_navigation_fields(definition_code):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    return AnomalyDisplaySnapshotView(
+        redaction_version="anomaly-safe.v1",
+        definition_code=definition_code,
+        fields=[
+            _evidence_payload(key, public_snapshot[key]) for key in display_fields
+        ],
+    )
+
+
+def _private_navigation_fields(definition_code: str) -> frozenset[str]:
+    if definition_code == "SCHEDULE-003":
+        return frozenset({"assignment_a"})
+    return frozenset()
+
+
+def _evidence_payload(key: str, value: object) -> dict[str, object]:
+    if key in _IDENTITY_EVIDENCE_FIELDS:
+        return {"kind": "identity", "key": key, "value": _identity(value)}
+    if key in _MASKED_TEXT_EVIDENCE_FIELDS:
+        return {"kind": "masked_text", "key": key, "value": _masked_text(value)}
+    if key in _DATE_EVIDENCE_FIELDS:
+        return {"kind": "date", "key": key, "value": _date_value(value)}
+    if key in _MONEY_EVIDENCE_FIELDS:
+        return {"kind": "money_ntd", "key": key, "value": _integer(value)}
+    if key in _INTEGER_EVIDENCE_FIELDS:
+        return {"kind": "integer", "key": key, "value": _integer(value)}
+    if key in _CODE_EVIDENCE_FIELDS:
+        return {"kind": "code", "key": key, "value": _text(value)}
+    if key in _CODE_LIST_EVIDENCE_FIELDS:
+        return {"kind": "code_list", "key": key, "value": _text_list(value)}
+    if key in _IDENTITY_LIST_EVIDENCE_FIELDS:
+        return {
+            "kind": "identity_list",
+            "key": key,
+            "value": _identity_list(value),
+        }
+    raise ValueError("anomaly_projection_data_integrity_violation")
+
+
+def _identity(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    if isinstance(value, int) and value <= 0:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    rendered = str(value).strip()
+    if not rendered or len(rendered) > 191:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    return rendered
+
+
+def _masked_text(value: object) -> str:
+    text = _text(value)
+    if "*" in text:
+        return text
+    return f"{text[:1]}***"
+
+
+def _date_value(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError as error:
+        raise ValueError("anomaly_projection_data_integrity_violation") from error
+
+
+def _integer(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    return value
+
+
+def _text(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    rendered = value.strip()
+    if not rendered or len(rendered) > 191:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    return rendered
+
+
+def _text_list(value: object) -> list[str]:
+    if not isinstance(value, (tuple, list)) or len(value) > 100:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    return [_text(item) for item in value]
+
+
+def _identity_list(value: object) -> list[str]:
+    if not isinstance(value, (tuple, list)) or len(value) > 100:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    return [_identity_item(item) for item in value]
+
+
+def _identity_item(value: object) -> str:
+    if isinstance(value, Mapping):
+        candidates = [key for key in _IDENTITY_ITEM_KEYS if key in value]
+        if len(candidates) != 1:
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        return _identity(value[candidates[0]])
+    return _identity(value)
+
+
+def _timeline_payload(event) -> AnomalyTimelineEventView:
+    raw = _materialize(event)
+    if not isinstance(raw, Mapping):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    required = {
+        "action",
+        "expected_workflow_version",
+        "resulting_workflow_version",
+        "actor",
+        "reason",
+        "correlation_id",
+        "created_at",
+    }
+    if set(raw) != required or raw["action"] not in {
+        "claim",
+        "resolve",
+        "reopen",
+        "auto_resolve",
+    }:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    actor = str(raw["actor"]).strip()
+    correlation_id = str(raw["correlation_id"]).strip()
+    if not actor or not correlation_id:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    return AnomalyTimelineEventView(
+        action=raw["action"],
+        expected_workflow_version=raw["expected_workflow_version"],
+        resulting_workflow_version=raw["resulting_workflow_version"],
+        actor=f"{actor[:1]}***",
+        reason=_safe_timeline_reason(raw["action"]),
+        correlation_id=correlation_id,
+        created_at=raw["created_at"],
+    )
+
+
+def _safe_timeline_reason(action: str) -> str:
+    return {
+        "claim": "異常已進入人工確認流程。",
+        "resolve": "人工處理進度已更新；不代表根事實已修正。",
+        "reopen": "根條件仍存在，異常已重新開啟。",
+        "auto_resolve": "根條件已由來源投影解除。",
+    }[action]
+
+
+def _action_payload(action):
+    raw = _materialize(action)
+    if not isinstance(raw, Mapping):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    expected_fields = {
+        "action_key",
+        "apply_operation",
+        "action_contract_version",
+        "completion_predicate",
+        "form_schema_key",
+        "label",
+        "owning_domain",
+        "preview_operation",
+        "required_capability",
+        "required_operator_inputs",
+        "requires_preview",
+        "source_binding_keys",
+        "source_bindings",
+    }
+    if set(raw) != expected_fields:
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    if not all(
+        isinstance(raw.get(key), str) and str(raw[key]).strip()
+        for key in (
+            "action_key",
+            "label",
+            "owning_domain",
+            "form_schema_key",
+            "preview_operation",
+            "completion_predicate",
+        )
+    ):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    source_keys = raw.get("source_binding_keys")
+    if not isinstance(source_keys, (tuple, list)) or not all(
+        isinstance(item, str) and item.strip() for item in source_keys
+    ):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    source_keys = list(source_keys)
+    if source_keys != sorted(set(source_keys)):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    operator_inputs = raw.get("required_operator_inputs")
+    if not isinstance(operator_inputs, (tuple, list)) or not all(
+        isinstance(item, str) and item.strip() for item in operator_inputs
+    ):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    operator_inputs = list(operator_inputs)
+    if operator_inputs != sorted(set(operator_inputs)):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    if not isinstance(raw.get("requires_preview"), bool):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    contract_version = raw.get("action_contract_version")
+    if (
+        isinstance(contract_version, bool)
+        or not isinstance(contract_version, int)
+        or contract_version < 1
+    ):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    for optional_key in ("apply_operation", "required_capability"):
+        optional_value = raw.get(optional_key)
+        if optional_value is not None and (
+            not isinstance(optional_value, str) or not optional_value.strip()
+        ):
+            raise ValueError("anomaly_projection_data_integrity_violation")
+    bindings = _source_bindings(source_keys, raw.get("source_bindings"))
+    return {
+        "action_key": raw["action_key"],
+        "label": raw["label"],
+        "owning_domain": raw["owning_domain"],
+        "form_schema_key": raw["form_schema_key"],
+        "source_binding_keys": source_keys,
+        "source_bindings": bindings,
+        "required_operator_inputs": operator_inputs,
+        "preview_operation": raw["preview_operation"],
+        "apply_operation": raw.get("apply_operation"),
+        "required_capability": raw.get("required_capability"),
+        "completion_predicate": raw["completion_predicate"],
+        "action_contract_version": contract_version,
+        "requires_preview": raw["requires_preview"],
+    }
+
+
+_IDENTITY_BINDING_KEYS = frozenset(
+    {
+        "assignment_id",
+        "bank_row_identity",
+        "batch_id",
+        "case_no",
+        "finance_import_row_identity",
+        "item_id",
+        "matching_identity",
+        "obligation_identity",
+        "overpayment_identity",
+        "recovery_identity",
+        "staff_id",
+    }
+)
+_VERSION_BINDING_KEYS = frozenset(
+    {
+        "account_version",
+        "matching_version",
+        "overpayment_version",
+        "recovery_version",
+        "source_version",
+        "staff_payables_version",
+    }
+)
+
+
+def _source_bindings(
+    source_keys: list[str],
+    bindings: object,
+) -> list[dict[str, object]] | None:
+    if bindings is None:
+        return None
+    if not isinstance(bindings, Mapping) or set(bindings) != set(source_keys):
+        raise ValueError("anomaly_projection_data_integrity_violation")
+    result = []
+    for key in source_keys:
+        value = bindings[key]
+        if key in _IDENTITY_BINDING_KEYS:
+            result.append({"kind": "identity", "key": key, "value": _identity(value)})
+        elif key in _VERSION_BINDING_KEYS:
+            version = _integer(value)
+            if version < 0:
+                raise ValueError("anomaly_projection_data_integrity_violation")
+            result.append({"kind": "version", "key": key, "value": version})
+        else:
+            raise ValueError("anomaly_projection_data_integrity_violation")
+    return result
 
 
 def _call(command, message, correlation):
@@ -278,7 +686,15 @@ def _raise_mysql(error, correlation):
 
 
 def _raise_value_error(error, correlation):
-    code = str(error) or "anomaly_projection_data_integrity_violation"
+    code = str(error)
+    if code not in {
+        "anomaly_not_found",
+        "anomaly_definition_not_found",
+        "anomaly_projection_data_integrity_violation",
+        "anomaly_projection_stale",
+        "anomaly_source_fact_invalid",
+    }:
+        code = "anomaly_projection_data_integrity_violation"
     status = 404 if code == "anomaly_not_found" else 422
     category = ErrorCategory.NOT_FOUND if status == 404 else ErrorCategory.VALIDATION
     typed = TypedError(category, code, "異常資料未通過驗證。", correlation)

@@ -1,0 +1,71 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:labor-union:admin-entry-targets:v1",
+  "title": "Admin Entry Target State",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "registry_revision", "registry_digest", "revision", "entries", "receipts", "state_digest"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "registry_revision": {"const": "phase5a-mapped-entries-v2-system-status"},
+    "registry_digest": {"const": "1d829dc89fda82843907fe134b90d5147b9de44f6263c4d80fc69d3e86ef42de"},
+    "revision": {"type": "integer", "minimum": 1},
+    "entries": {"type": "array", "minItems": 12, "maxItems": 12, "items": {"$ref": "#/$defs/entry"}},
+    "receipts": {"type": "array", "items": {"$ref": "#/$defs/receipt"}},
+    "state_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "identity": {"type": "string", "minLength": 1, "maxLength": 191, "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,190}$"},
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "digest", "api_compatibility_revision"],
+      "properties": {
+        "version": {"$ref": "#/$defs/identity"},
+        "digest": {"$ref": "#/$defs/digest"},
+        "api_compatibility_revision": {"$ref": "#/$defs/identity"}
+      }
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_id", "replacement_group", "current_target", "streamlit_target", "react_target", "required_react_artifact", "entry_revision"],
+      "properties": {
+        "entry_id": {"type": "string", "pattern": "^ui-react:#[a-z0-9-]+$"},
+        "replacement_group": {"type": "string", "minLength": 1, "maxLength": 64},
+        "current_target": {"enum": ["streamlit", "react"]},
+        "streamlit_target": {"type": "string", "pattern": "^/\\?entry=[a-z0-9-]+(?:&view=[a-z0-9-]+)?$"},
+        "react_target": {"type": "string", "pattern": "^/admin/#[a-z0-9-]+$"},
+        "required_react_artifact": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/artifact"}]},
+        "entry_revision": {"type": "integer", "minimum": 1}
+      }
+    },
+    "receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["receipt_id", "command_fingerprint", "idempotency_key", "entry_id", "before_target", "resulting_target", "before_state_revision", "resulting_state_revision", "before_entry_revision", "resulting_entry_revision", "artifact_version", "artifact_digest", "api_compatibility_revision", "actor_id", "reason_code", "correlation_id", "occurred_at", "previous_receipt_digest", "receipt_digest"],
+      "properties": {
+        "receipt_id": {"type": "string", "minLength": 1, "maxLength": 255},
+        "command_fingerprint": {"$ref": "#/$defs/digest"},
+        "idempotency_key": {"$ref": "#/$defs/identity"},
+        "entry_id": {"type": "string", "pattern": "^ui-react:#[a-z0-9-]+$"},
+        "before_target": {"enum": ["streamlit", "react"]},
+        "resulting_target": {"enum": ["streamlit", "react"]},
+        "before_state_revision": {"type": "integer", "minimum": 1},
+        "resulting_state_revision": {"type": "integer", "minimum": 2},
+        "before_entry_revision": {"type": "integer", "minimum": 1},
+        "resulting_entry_revision": {"type": "integer", "minimum": 2},
+        "artifact_version": {"type": ["string", "null"]},
+        "artifact_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+        "api_compatibility_revision": {"type": ["string", "null"]},
+        "actor_id": {"$ref": "#/$defs/identity"},
+        "reason_code": {"enum": ["activate_react", "rollback", "rehearsal", "incident_recovery"]},
+        "correlation_id": {"$ref": "#/$defs/identity"},
+        "occurred_at": {"type": "string", "format": "date-time"},
+        "previous_receipt_digest": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/digest"}]},
+        "receipt_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

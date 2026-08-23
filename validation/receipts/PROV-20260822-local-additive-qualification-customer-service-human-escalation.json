@@ -1,0 +1,81 @@
+{
+  "contract": "local-additive-qualification/v1",
+  "work_package": "PROV-20260821-customer-service-human-escalation",
+  "release_id": "labor-union-customer-service-human-escalation-2026-08-21-v1",
+  "release_fingerprint": "6e5464258d478dc880420da74ed32ecfb39287583469ad4e0823874d43d20098",
+  "published_manifest_sha256": "8afd8a53132c0bae8015c1b647f5defc500928b377665f7e39f4c88cb324ee3a",
+  "manifest_artifact_inventory": [
+    {
+      "name": "1002_customer_service_human_escalation.sql",
+      "sha256": "cfdb0852aee16c619a18574464eaaf4ab4e930be9c64f2aed5df8188b4762c49",
+      "data_effect": "schema_only",
+      "dependencies": []
+    }
+  ],
+  "artifact": {
+    "name": "1002_customer_service_human_escalation.sql",
+    "sql_sha256": "cfdb0852aee16c619a18574464eaaf4ab4e930be9c64f2aed5df8188b4762c49",
+    "descriptor_sha256": "e932cc4c5d615a9fdce2925016d827d359f193b15dbcadf467fb9628f055a81a",
+    "data_effect": "schema_only",
+    "dependencies": [],
+    "required_dependency_sql_sha256": {},
+    "dependency_contracts": {}
+  },
+  "fresh_bootstrap": {
+    "status": "verified",
+    "mysql_version": "8.0.46",
+    "schema_fingerprint": "fe1a6eb2f6fea88cbb8e96c6c53fc668dcc3a568772859946f819db2986d4577",
+    "artifact_state": "exact",
+    "data_rows_written": 0
+  },
+  "preserve_data_candidate": {
+    "status": "verified",
+    "source_schema_fingerprint": "b2bd529c68fcaf41ba9b5106c1716c771c3bcb43b44fc434c10a8ebe7e4f2835",
+    "candidate_schema_fingerprint": "39e699fc511f5b02c6a0ac3b52fa6864142ea19e0c5baf6b94e6a5fdadd9fd76",
+    "source_dump_sha256": "b9faef655f5e61ea50894366925bd28905a5a30975151848ca53e52da5e82b3f",
+    "candidate_dump_sha256": "257b9b2d8e03aae79e853cfeab7336218faca7911e066048358d81c7b18e30ac",
+    "artifact_state": "exact",
+    "existing_table_preservation": "verified"
+  },
+  "metadata_backup": {
+    "status": "verified",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "database": "lu_test_dataset_contract_signing_v4",
+    "schema_sha256": "3132a8a274fe30bb70ca60f54e35759890ec5117d2d55c03c0e0a6a0983c9c90",
+    "source_dump_sha256": "c12e0a7ee93c9c2a94176a4d2cdc61cfbe6e0478ff4d0122c945347a046fe9d9",
+    "data_row_counts": {
+      "customer_service_tickets": 0
+    },
+    "data_fingerprints": {
+      "customer_service_tickets": "189664eff2f58edcdddb5be18734d631fb66cb26e30b14881e27c5cf7b83edfc"
+    },
+    "data_fingerprint_sha256": "e189942cc5a90cdbe2348ce77d2145f7c27f8d5ab2e00eff85b8ca2dda52e4a5"
+  },
+  "target_projection": {
+    "contract": "local-additive-target-projection/v1",
+    "artifact_name": "1002_customer_service_human_escalation.sql",
+    "descriptor_sha256": "e932cc4c5d615a9fdce2925016d827d359f193b15dbcadf467fb9628f055a81a",
+    "fresh_state": "exact",
+    "preserve_candidate_state": "exact",
+    "fresh_fingerprint": "e932cc4c5d615a9fdce2925016d827d359f193b15dbcadf467fb9628f055a81a",
+    "preserve_candidate_fingerprint": "e932cc4c5d615a9fdce2925016d827d359f193b15dbcadf467fb9628f055a81a"
+  },
+  "policy_evidence": {
+    "fresh_schema_fingerprint": "fe1a6eb2f6fea88cbb8e96c6c53fc668dcc3a568772859946f819db2986d4577",
+    "preserve_source_schema_fingerprint": "b2bd529c68fcaf41ba9b5106c1716c771c3bcb43b44fc434c10a8ebe7e4f2835",
+    "preserve_candidate_schema_fingerprint": "39e699fc511f5b02c6a0ac3b52fa6864142ea19e0c5baf6b94e6a5fdadd9fd76",
+    "source_dump_sha256": "b9faef655f5e61ea50894366925bd28905a5a30975151848ca53e52da5e82b3f",
+    "candidate_dump_sha256": "257b9b2d8e03aae79e853cfeab7336218faca7911e066048358d81c7b18e30ac",
+    "fresh_target_projection_fingerprint": "e932cc4c5d615a9fdce2925016d827d359f193b15dbcadf467fb9628f055a81a",
+    "preserve_candidate_target_projection_fingerprint": "e932cc4c5d615a9fdce2925016d827d359f193b15dbcadf467fb9628f055a81a"
+  },
+  "policy": {
+    "local_in_place_eligible": true,
+    "seed": 0,
+    "backfill": 0,
+    "destructive": 0,
+    "target_prefix": "lu_test_"
+  },
+  "payload_digest": "7f1aa4f20d22e80a8812dd7d62da7c18b0a4389868d829764fcc33739484c08b"
+}

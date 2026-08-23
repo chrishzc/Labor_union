@@ -1,4 +1,7 @@
-"""Canonical LIFF identity preview and apply workflows for all LINE actors."""
+"""
+File: identity_application.py
+Description: 編排 LINE 身分流程、原子登記、owner projection 與 durable intent。
+"""
 
 from __future__ import annotations
 
@@ -6,6 +9,10 @@ from datetime import datetime, timedelta
 from typing import Callable
 
 from domains.line.canonical_payload import canonical_line_payload_json
+from domains.case_import.provisional_registration import (
+    ProvisionalRegistrationIntent,
+    build_provisional_registration_candidate,
+)
 from domains.line.delivery import (
     LineDeliveryRequest,
     LineMessageKind,
@@ -39,6 +46,11 @@ from subsystems.line.identity_contracts import (
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 from subsystems.line.review_contracts import CreateLineReviewCommand
 from subsystems.line.rich_menu_binding import schedule_rich_menu_binding
+from subsystems.case_import.provisional_registration_types import (
+    ProvisionalRegistrationConflict,
+    ProvisionalRegistrationConflictError,
+    ProvisionalRegistrationReceipt,
+)
 
 
 class LineIdentityNotFoundError(LookupError):
@@ -131,6 +143,68 @@ class LineIdentityApplication:
             )
             unit_of_work.commit()
         return result
+
+    # Kept cohesive so provisional roots, verified binding, owner projection, and
+    # durable intents share exactly one outer UoW and one commit owner.
+    def apply_registration(
+        self,
+        intent: ProvisionalRegistrationIntent,
+        line_user_id: LineUserId,
+        flow_id: LineIdentityFlowId | None,
+        correlation_id: CorrelationId,
+    ) -> tuple[ProvisionalRegistrationReceipt, LineIdentityApplyResult]:
+        if intent.line_user_id.strip() != line_user_id.value:
+            raise LineIdentityConflictError("registration_line_identity_mismatch")
+        candidate = build_provisional_registration_candidate(intent)
+        with self._unit_of_work_factory() as unit_of_work:
+            if flow_id is not None:
+                _require_flow(
+                    unit_of_work,
+                    flow_id,
+                    LineIdentityFlowPurpose.CUSTOMER_BINDING,
+                    line_user_id,
+                    self._now(),
+                )
+            outcome = unit_of_work.provisional_registrations.apply(candidate)
+            if isinstance(outcome, ProvisionalRegistrationConflict):
+                raise ProvisionalRegistrationConflictError("registration_conflict")
+            if not isinstance(outcome, ProvisionalRegistrationReceipt):
+                raise RuntimeError("registration_receipt_invalid")
+            # Case Import is the owner of provisional registration and creates
+            # the customer root in this same UoW.  Registration must therefore
+            # not perform a proof lookup that assumes a pre-existing customer;
+            # the receipt's client ID is the fresh root reference.
+            current_binding = unit_of_work.identities.get(line_user_id)
+            currently_bound = None
+            if (
+                current_binding
+                and current_binding.status is LineIdentityBindingStatus.BOUND
+                and current_binding.subject_type is LineBindingSubjectType.CUSTOMER
+                and current_binding.subject_reference == str(outcome.client_id)
+            ):
+                currently_bound = line_user_id
+            customer = LineIdentityCandidate(
+                LineBindingSubjectType.CUSTOMER,
+                str(outcome.client_id),
+                currently_bound,
+            )
+            preview = _customer_preview(unit_of_work, line_user_id, customer)
+            if flow_id is not None:
+                unit_of_work.identity_flows.consume(
+                    flow_id,
+                    LineIdentityFlowPurpose.CUSTOMER_BINDING,
+                    line_user_id,
+                    self._now(),
+                )
+            result = self._apply_customer_candidate(
+                unit_of_work,
+                flow_id or LineIdentityFlowId(f"registration:{outcome.registration_id}"),
+                preview,
+                CustomerIdentityProof(intent.name.strip(), intent.phone.strip()),
+                correlation_id,
+            )
+            unit_of_work.commit()
+        return outcome, result
 
     def preview_staff(self, flow_id, line_user_id, proof):
         with self._unit_of_work_factory() as unit_of_work:

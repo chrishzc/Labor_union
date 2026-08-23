@@ -1,0 +1,310 @@
+"""
+File: test_orders_stage_projection.py
+Description: 驗證 Orders 七階段投影的 owner lineage、partial availability、游標及 bounded SQL。
+"""
+
+from __future__ import annotations
+
+from datetime import date, datetime
+from decimal import Decimal
+
+import pytest
+
+from infrastructure.mysql.orders_stage_projection_repository import MySqlOrdersStageProjectionRepository
+from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+from subsystems.orders.stage_projection_query import OrderStageProjectionContractError, OrderStageProjectionQueryService, StageProjectionQuery
+
+
+NOW = datetime(2026, 8, 21, 8, 0, 0)
+BUSINESS_CLOCK = FixedBusinessClock(datetime(2026, 8, 21, 18, 0, tzinfo=TAIPEI_TIME_ZONE))
+
+
+def _row(case_no: str = "CASE-001") -> dict[str, object]:
+    return {
+        "case_no": case_no,
+        "order_version": 7,
+        "order_updated_at": NOW,
+        "import_receipt_id": 1,
+        "import_created_at": NOW,
+        "terms_event_id": 2,
+        "terms_version": 2,
+        "terms_created_at": NOW,
+        "matching_plan_id": 3,
+        "matching_plan_version": 1,
+        "matching_plan_status": "accepted",
+        "matching_created_at": NOW,
+        "willingness_contact_attempt_count": 2,
+        "willingness_count": 2,
+        "willingness_replied_count": 2,
+        "willingness_accepted_count": 1,
+        "willingness_contacted_at": NOW,
+        "willingness_replied_at": NOW,
+        "resume_attempt_count": 1,
+        "resume_sent_count": 1,
+        "resume_sent_at": NOW,
+        "matching_segment_count": 1,
+        "staff_contract_sent_count": 1,
+        "staff_contract_sent_at": NOW,
+        "staff_contract_signed_count": 1,
+        "staff_contract_signed_at": NOW,
+        "client_contract_sent_count": 1,
+        "client_contract_sent_at": NOW,
+        "client_contract_signed_count": 1,
+        "client_contract_signed_at": NOW,
+        "contract_event_id": 4,
+        "contract_created_at": NOW,
+        "finance_version": 5,
+        "deposit_obligation_count": 1,
+        "deposit_open_count": 0,
+        "deposit_updated_at": NOW,
+        "confirmed_version_id": 6,
+        "confirmed_version": 2,
+        "confirmed_at": NOW,
+        "scheduling_version": 8,
+        "assignment_count": 2,
+        "assignment_active_count": 0,
+        "assignment_completed_count": 2,
+        "assignment_updated_at": NOW,
+        "assignment_first_service_date": date(2026, 8, 1),
+        "assignment_last_service_date": date(2026, 8, 20),
+        "service_start_seconds": 9 * 60 * 60,
+        "service_end_seconds": 17 * 60 * 60,
+        "service_end_day_offset": 0,
+        "service_completion_identity": "a" * 64,
+        "service_completed_at": NOW,
+        "client_obligation_count": 2,
+        "client_open_count": 0,
+        "client_updated_at": NOW,
+        "staff_obligation_count": 2,
+        "staff_open_count": 0,
+        "staff_updated_at": NOW,
+    }
+
+
+class _Repository:
+    def __init__(self, rows: tuple[dict[str, object], ...]) -> None:
+        self.rows = rows
+
+    def fetch_page(self, *, after_case_no: str | None, page_size: int):
+        del after_case_no, page_size
+        return self.rows
+
+
+def test_projection_keeps_seven_stages_eleven_steps_and_three_settlement_owners() -> None:
+    page = OrderStageProjectionQueryService(_Repository((_row(),)), BUSINESS_CLOCK).query(StageProjectionQuery(50))
+    item = page.items[0]
+    assert len(item.stages) == 7
+    assert len(item.sop_steps) == 11
+    assert [part.code for part in item.stages[-1].settlement] == ["service_completion", "client_settlement", "staff_payout"]
+    assert item.stages[-1].status == "completed"
+    assert item.current_stage_code == "settlement_payout"
+    assert [step.status for step in item.sop_steps] == ["completed"] * 11
+    assert page.stage_counts["settlement_payout"] == 1
+
+
+def test_missing_owner_fact_is_local_unavailable_and_never_copies_prior_stage() -> None:
+    row = _row()
+    row.update({"confirmed_version_id": None, "confirmed_version": None, "confirmed_at": None, "client_obligation_count": 0, "client_updated_at": None})
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(StageProjectionQuery(50)).items[0]
+    assert item.stages[4].status == "unavailable"
+    assert item.stages[6].status == "in_progress"
+    assert item.stages[6].settlement[1].status == "unavailable"
+    assert item.stages[3].status == "completed"
+
+
+def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage() -> None:
+    row = _row("LEGACY-ROOTLESS-001")
+    for field in (
+        "import_receipt_id", "import_created_at", "terms_event_id", "terms_version",
+        "terms_created_at", "matching_plan_id", "matching_plan_version",
+        "matching_plan_status", "matching_created_at", "willingness_contacted_at",
+        "willingness_replied_at", "resume_sent_at", "staff_contract_sent_at",
+        "staff_contract_signed_at", "client_contract_sent_at", "client_contract_signed_at",
+        "contract_event_id", "contract_created_at", "finance_version", "deposit_updated_at",
+        "confirmed_version_id", "confirmed_version", "confirmed_at", "scheduling_version",
+        "assignment_updated_at", "assignment_first_service_date", "assignment_last_service_date",
+        "service_start_seconds", "service_end_seconds", "service_end_day_offset",
+        "service_completion_identity", "service_completed_at", "client_updated_at",
+        "staff_updated_at",
+    ):
+        row[field] = None
+    for field in (
+        "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
+        "willingness_accepted_count", "resume_attempt_count", "resume_sent_count",
+        "matching_segment_count", "staff_contract_sent_count", "staff_contract_signed_count",
+        "client_contract_sent_count", "client_contract_signed_count", "deposit_obligation_count",
+        "deposit_open_count", "assignment_count", "assignment_active_count",
+        "assignment_completed_count", "client_obligation_count", "client_open_count",
+        "staff_obligation_count", "staff_open_count",
+    ):
+        row[field] = 0
+
+    page = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    )
+    item = page.items[0]
+
+    assert {stage.status for stage in item.stages} == {"unavailable"}
+    assert item.current_stage_code is None
+    assert sum(page.stage_counts.values()) == 0
+
+
+def test_mysql_aggregate_decimals_and_blocked_settlement_keep_typed_owner() -> None:
+    row = _row()
+    for field in (
+        "willingness_contact_attempt_count",
+        "willingness_count",
+        "willingness_replied_count",
+        "willingness_accepted_count",
+        "resume_attempt_count",
+        "resume_sent_count",
+        "matching_segment_count",
+        "staff_contract_sent_count",
+        "staff_contract_signed_count",
+        "client_contract_sent_count",
+        "client_contract_signed_count",
+        "deposit_obligation_count",
+        "deposit_open_count",
+        "assignment_count",
+        "assignment_active_count",
+        "assignment_completed_count",
+        "client_obligation_count",
+        "client_open_count",
+        "staff_obligation_count",
+        "staff_open_count",
+    ):
+        row[field] = Decimal(row[field])
+    row["staff_open_count"] = Decimal(1)
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[-1].status == "blocked"
+    assert item.stages[-1].blockers[0].message == "Staff Payables 子投影尚未完成。"
+
+
+def test_service_stage_uses_official_service_completion_not_stale_assignment_status() -> None:
+    row = _row()
+    row.update({"assignment_active_count": 2, "assignment_completed_count": 0})
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[5].status == "completed"
+    assert item.sop_steps[9].status == "completed"
+
+
+def test_completed_service_advances_to_settlement_even_when_settlement_roots_are_unavailable() -> None:
+    row = _row()
+    row.update({
+        "service_completion_identity": None,
+        "service_completed_at": None,
+        "client_obligation_count": 0,
+        "client_updated_at": None,
+        "staff_obligation_count": 0,
+        "staff_updated_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[5].status == "completed"
+    assert item.stages[6].status == "unavailable"
+    assert item.current_stage_code == "settlement_payout"
+
+
+def test_sop_matching_and_two_party_contract_steps_use_distinct_owner_facts() -> None:
+    row = _row()
+    row.update({
+        "willingness_replied_count": 1,
+        "matching_segment_count": 2,
+        "resume_attempt_count": 0,
+        "resume_sent_count": 0,
+        "staff_contract_sent_count": 0,
+        "staff_contract_sent_at": None,
+        "staff_contract_signed_count": 0,
+        "staff_contract_signed_at": None,
+    })
+
+    steps = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0].sop_steps
+
+    assert steps[2].status == "completed"
+    assert steps[3].status == "in_progress"
+    assert steps[4].status == "in_progress"
+    assert steps[5].status == "not_started"
+    assert steps[7].status == "completed"
+
+
+def test_sent_contracts_are_in_progress_until_each_party_signs() -> None:
+    row = _row()
+    row.update({
+        "staff_contract_signed_count": 0,
+        "staff_contract_signed_at": None,
+        "client_contract_signed_count": 0,
+        "client_contract_signed_at": None,
+        "contract_event_id": None,
+        "contract_created_at": None,
+    })
+
+    steps = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0].sop_steps
+
+    assert steps[5].status == "in_progress"
+    assert steps[7].status == "in_progress"
+
+
+@pytest.mark.parametrize("mutation", [lambda row: row.pop("finance_version"), lambda row: row.update({"order_version": -1})])
+def test_repository_contract_fails_closed_on_shape_or_version_drift(mutation) -> None:
+    row = _row()
+    mutation(row)
+    with pytest.raises(OrderStageProjectionContractError):
+        OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(StageProjectionQuery(50))
+
+
+class _Cursor:
+    def __init__(self) -> None:
+        self.sql = ""
+        self.params: tuple[object, ...] = ()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def execute(self, sql: str, params: tuple[object, ...]) -> None:
+        self.sql = sql
+        self.params = params
+
+    def fetchall(self):
+        return []
+
+
+class _Connection:
+    def __init__(self) -> None:
+        self.last_cursor = _Cursor()
+
+    def cursor(self):
+        return self.last_cursor
+
+
+def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
+    connection = _Connection()
+    rows = MySqlOrdersStageProjectionRepository(connection).fetch_page(after_case_no="CASE-009", page_size=50)
+    assert rows == ()
+    assert connection.last_cursor.params == ("CASE-009", 51)
+    assert connection.last_cursor.sql.count("SELECT") >= 1
+    assert "staff_schedule" in connection.last_cursor.sql
+    assert "service_start_time" in connection.last_cursor.sql
+    assert "matching_notification_intents" in connection.last_cursor.sql
+    assert "matching_response_events" in connection.last_cursor.sql
+    assert "contract_signing_events" in connection.last_cursor.sql
+    assert "signing.matching_plan_id = plan.id" in connection.last_cursor.sql
+    assert "LIMIT %s" in connection.last_cursor.sql
+    assert not hasattr(connection, "commit")

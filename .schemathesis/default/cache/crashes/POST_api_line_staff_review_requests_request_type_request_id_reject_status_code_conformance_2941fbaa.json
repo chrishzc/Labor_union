@@ -1,0 +1,83 @@
+{
+  "operation": "POST /api/line/staff/review-requests/{request_type}/{request_id}/reject",
+  "method": "POST",
+  "path_template": "/api/line/staff/review-requests/{request_type}/{request_id}/reject",
+  "fingerprint": "2941fbaa",
+  "case_id": "evHVd4",
+  "code_sample": "curl -X POST http://127.0.0.1:60434/api/line/staff/review-requests/0/0/reject",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:60434/api/line/staff/review-requests/0/0/reject",
+      "url_template": "http://127.0.0.1:60434/api/line/staff/review-requests/{request_type}/{request_id}/reject",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "evHVd4",
+        "Content-Length": "0"
+      },
+      "response": {
+        "status_code": 410,
+        "headers": {
+          "date": "Thu, 20 Aug 2026 08:45:50 GMT",
+          "server": "uvicorn",
+          "content-length": "90",
+          "content-type": "application/json",
+          "server-timing": "application;dur=1.8",
+          "x-response-time-ms": "1.8",
+          "cache-control": "no-store"
+        },
+        "body": "{\"detail\":{\"code\":\"line_review_api_retired\",\"replacement\":\"/api/v1/line/review-requests\"}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 410\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.002947599976323545,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/line/staff/review-requests/{request_type}/{request_id}/reject",
+      "path_parameters": {
+        "request_id": "0",
+        "request_type": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

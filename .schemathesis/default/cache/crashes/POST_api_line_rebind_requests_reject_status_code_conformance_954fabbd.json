@@ -1,0 +1,78 @@
+{
+  "operation": "POST /api/line/rebind_requests/reject",
+  "method": "POST",
+  "path_template": "/api/line/rebind_requests/reject",
+  "fingerprint": "954fabbd",
+  "case_id": "uqpbme",
+  "code_sample": "curl -X POST http://127.0.0.1:60434/api/line/rebind_requests/reject",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:60434/api/line/rebind_requests/reject",
+      "url_template": "http://127.0.0.1:60434/api/line/rebind_requests/reject",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "uqpbme",
+        "Content-Length": "0"
+      },
+      "response": {
+        "status_code": 410,
+        "headers": {
+          "date": "Thu, 20 Aug 2026 08:45:50 GMT",
+          "server": "uvicorn",
+          "content-length": "90",
+          "content-type": "application/json",
+          "server-timing": "application;dur=2.0",
+          "x-response-time-ms": "2.0",
+          "cache-control": "no-store"
+        },
+        "body": "{\"detail\":{\"code\":\"line_review_api_retired\",\"replacement\":\"/api/v1/line/review-requests\"}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 410\nDocumented: 200"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0005407000426203012,
+          "mode": "positive"
+        },
+        "components": {},
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/line/rebind_requests/reject",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 """
 File: test_government_subsidy_report_query_contract.py
-Description: 驗證季度與年度補助GET的Session、strict view、PII遮罩與aggregate。
+Description: 驗證季度與年度補助查詢及匯出的Session、strict view、PII遮罩與aggregate。
 """
 from datetime import date
 from decimal import Decimal
@@ -38,7 +38,10 @@ def test_quarterly_and_annual_reports_are_strict_and_redacted(monkeypatch):
     client = TestClient(_app())
     quarterly = client.get("/api/v1/finance-reports/subsidy-reconciliation/quarterly", params={"application_year": 2026, "quarter": 1})
     annual = client.get("/api/v1/finance-reports/subsidy-reconciliation/annual", params={"application_year": 2026})
+    quarterly_export = client.get("/api/v1/finance-reports/subsidy-reconciliation/quarterly/export", params={"application_year": 2026, "quarter": 1})
+    annual_export = client.get("/api/v1/finance-reports/subsidy-reconciliation/annual/export", params={"application_year": 2026})
     assert quarterly.status_code == annual.status_code == 200
+    assert quarterly_export.status_code == annual_export.status_code == 200
     assert quarterly.json()["data"]["period_kind"] == "quarterly"
     assert annual.json()["data"]["quarter"] is None
     row = quarterly.json()["data"]["partitions"][0]["rows"][0]
@@ -56,3 +59,24 @@ def test_subsidy_report_requires_admin_before_builder(monkeypatch):
     monkeypatch.setattr(finance_reports.reconciliation_register_query, "build_annual_subsidy_summary", lambda *_: (_ for _ in ()).throw(AssertionError("builder must not run")))
     response = TestClient(_app(authenticated=False)).get("/api/v1/finance-reports/subsidy-reconciliation/annual", params={"application_year": 2026})
     assert response.status_code == 401
+
+
+def test_subsidy_report_exports_require_admin_before_builder(monkeypatch):
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "production")
+    def blocked_builder(*_):
+        raise AssertionError("builder must not run")
+
+    monkeypatch.setattr(finance_reports.reconciliation_register_query, "build_quarterly_subsidy_register", blocked_builder)
+    monkeypatch.setattr(finance_reports.reconciliation_register_query, "build_annual_subsidy_summary", blocked_builder)
+    client = TestClient(_app(authenticated=False))
+
+    quarterly = client.get(
+        "/api/v1/finance-reports/subsidy-reconciliation/quarterly/export",
+        params={"application_year": 2026, "quarter": 1},
+    )
+    annual = client.get(
+        "/api/v1/finance-reports/subsidy-reconciliation/annual/export",
+        params={"application_year": 2026},
+    )
+
+    assert quarterly.status_code == annual.status_code == 401

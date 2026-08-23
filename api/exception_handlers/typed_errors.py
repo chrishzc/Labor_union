@@ -349,10 +349,16 @@ def _typed_response(
     headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     payload = GlobalTypedErrorResponseView(detail={"error": error})
+    response_headers = {
+        key: value
+        for key, value in (headers or {}).items()
+        if key.lower() != CORRELATION_HEADER.lower()
+    }
+    response_headers[CORRELATION_HEADER] = error.correlation_id
     return JSONResponse(
         status_code=status_code,
         content=payload.model_dump(mode="json"),
-        headers=dict(headers or {}),
+        headers=response_headers,
     )
 
 

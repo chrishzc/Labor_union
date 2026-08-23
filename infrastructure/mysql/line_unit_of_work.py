@@ -5,7 +5,7 @@ Description: 提供同一 MySQL outer transaction 的 canonical LINE repositorie
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from infrastructure.mysql.line_configuration_publication_repository import (
     MySqlLineConfigurationRepository,
@@ -57,8 +57,14 @@ from infrastructure.mysql.knowledge_retrieval_repository import (
 from infrastructure.mysql.customer_service_repository import (
     MySqlCustomerServiceRepository,
 )
+from infrastructure.mysql.customer_service_escalation_repository import (
+    MySqlCustomerServiceEscalationRepository,
+)
 from infrastructure.mysql.line_identity_management_repository import (
     MySqlLineIdentityManagementRepository,
+)
+from infrastructure.mysql.provisional_registration_repository import (
+    MySqlProvisionalRegistrationRepository,
 )
 from infrastructure.mysql.matching_schedule_confirmation_repository import (
     MySqlMatchingScheduleConfirmationRepository,
@@ -84,6 +90,7 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.order_groups = MySqlLineOrderGroupBindingRepository(connection)
         self.order_audiences = MySqlOrdersLineAudienceAdapter(connection)
         self.runtime_monitor = MySqlRuntimeMonitorRepository(connection)
+        self.escalation_source = self.runtime_monitor
         self.receipts = MySqlLineIdempotencyReceiptRepository(connection)
         self.audit = MySqlLineAuditRepository(connection)
         self.outbox = MySqlLineOutboxWriter(connection)
@@ -91,7 +98,48 @@ class LineMySqlUnitOfWork(MySqlUnitOfWork):
         self.matching_schedule_confirmations = MySqlMatchingScheduleConfirmationRepository(connection)
         self.knowledge_questions = MySqlKnowledgeQuestionIntakeAdapter(connection)
         self.customer_service = MySqlCustomerServiceRepository(connection)
+        self.escalations = MySqlCustomerServiceEscalationRepository(connection)
         self.identity_management = MySqlLineIdentityManagementRepository(connection)
+        # Registration remains Case Import-owned, but shares this outer transaction.
+        self.provisional_registrations = MySqlProvisionalRegistrationRepository(connection)
+        self._after_completion_hooks: list[Callable[[], None]] = []
+
+    def add_after_completion(self, hook: Callable[[], None]) -> None:
+        """註冊 transaction finalized 後執行一次的同 connection cleanup。"""
+        if self._committed or self._rolled_back:
+            raise RuntimeError("transaction is already finalized")
+        self._after_completion_hooks.append(hook)
+
+    def __exit__(self, exception_type, exception, traceback) -> bool:
+        if self._committed:
+            return False
+        return super().__exit__(exception_type, exception, traceback)
+
+    def commit(self) -> None:
+        self._finalize(super().commit)
+
+    def rollback(self) -> None:
+        self._finalize(super().rollback)
+
+    def _finalize(self, operation: Callable[[], None]) -> None:
+        primary_error: BaseException | None = None
+        try:
+            operation()
+        except BaseException as error:
+            primary_error = error
+        hook_error: BaseException | None = None
+        hooks, self._after_completion_hooks = self._after_completion_hooks, []
+        for hook in hooks:
+            try:
+                hook()
+            except BaseException as error:
+                hook_error = hook_error or error
+        if primary_error is not None:
+            if hook_error is not None:
+                primary_error.add_note(f"after_completion failed: {hook_error!r}")
+            raise primary_error
+        if hook_error is not None:
+            raise hook_error
 
 
 class ManagedLineMySqlUnitOfWork(LineMySqlUnitOfWork):

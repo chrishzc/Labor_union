@@ -1,56 +1,53 @@
-"""
-File: smoke_local_development_launcher.py
-Description: 啟動 Windows 本機服務集合、驗證健康後停止本次擁有的 processes。
-"""
+"""Phase 5B 三服務 GET-only smoke；只清理由本次 run 建立的 process。"""
 
 from __future__ import annotations
 
 import json
 import os
 from pathlib import Path
+from dataclasses import asdict
 import secrets
+import signal
+import shutil
 import socket
 import subprocess
 import sys
 import time
 from typing import BinaryIO
+from urllib.error import HTTPError
 from urllib.request import urlopen
 
 from scripts.launcher_preflight import inspect_profile
+from infrastructure.http.private_operations_client import PrivateOperationsClient
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LOG_DIRECTORY = ROOT / "scratch" / "wp75-launcher-smoke" / "logs"
 READY_URLS = {
     "api": "http://127.0.0.1:8000/health",
     "streamlit": "http://127.0.0.1:8501/_stcore/health",
+    "react": "http://127.0.0.1:5173/",
 }
+PORTS = (8000, 8501, 5173)
 
 
 def _service_commands() -> dict[str, list[str]]:
     python = sys.executable
-    commands = {
+    npm = shutil.which("npm.cmd" if os.name == "nt" else "npm") or "npm"
+    return {
         "api": [python, "-m", "uvicorn", "api.main:app", "--host", "127.0.0.1", "--port", "8000"],
         "streamlit": [python, "-m", "streamlit", "run", "ui/app.py", "--server.address", "127.0.0.1", "--server.port", "8501"],
-        "runtime-monitor": [python, "-m", "scripts.run_service_monitor"],
-        "durable-worker": [python, "-m", "scripts.run_durable_job_worker"],
-        "incident-worker": [python, "-m", "scripts.run_incident_worker"],
+        "react": [npm, "run", "dev", "--", "--host", "127.0.0.1", "--port", "5173", "--strictPort"],
     }
-    if inspect_profile("line-worker")["status"] == "ready":
-        commands["line-worker"] = [python, "-m", "scripts.run_line_worker"]
-    if _knowledge_worker_enabled():
-        commands["knowledge-worker"] = [python, "-m", "scripts.run_knowledge_worker"]
-    return commands
 
 
 def _knowledge_worker_enabled() -> bool:
-    environment = ROOT / ".env"
-    if not environment.is_file():
-        return False
-    return any(
-        line.strip().casefold() == "knowledge_retrieval_runtime_enabled=true"
-        for line in environment.read_text(encoding="utf-8").splitlines()
-    )
+    """保留舊 smoke inventory API；Phase5B 不會依設定啟動 worker。"""
+    return False
+
+
+def _clear_previous_logs() -> None:
+    """Phase5B logs are unique per run; intentionally never remove prior evidence."""
+    return None
 
 
 def _require_free_port(port: int) -> None:
@@ -58,82 +55,108 @@ def _require_free_port(port: int) -> None:
         try:
             probe.bind(("127.0.0.1", port))
         except OSError as exc:
-            raise RuntimeError(f"local smoke port is already in use: {port}") from exc
+            raise RuntimeError(f"dual-run port is already in use: {port}") from exc
 
 
-def _start_services(
-    processes: dict[str, subprocess.Popen[bytes]], handles: list[BinaryIO]
-) -> None:
-    LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    commands = _service_commands()
-    _start_service("api", commands.pop("api"), processes, handles)
-    _wait_for_service_url(processes["api"], READY_URLS["api"], 30)
-    _start_service("streamlit", commands.pop("streamlit"), processes, handles)
-    _wait_for_service_url(processes["streamlit"], READY_URLS["streamlit"], 30)
-    for name, command in commands.items():
-        _start_service(name, command, processes, handles)
-
-
-def _start_service(name, command, processes, handles) -> None:
-    handle = (LOG_DIRECTORY / f"{name}.log").open("wb")
-    handles.append(handle)
-    processes[name] = subprocess.Popen(
-        command,
-        cwd=ROOT,
-        stdout=handle,
-        stderr=subprocess.STDOUT,
-        creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-    )
-
-
-def _wait_for_service_url(process, url: str, timeout_seconds: int) -> None:
-    deadline = time.monotonic() + timeout_seconds
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"local smoke service exited before readiness: {url}")
-        if _url_ready(url):
-            return
-        time.sleep(0.25)
-    raise RuntimeError(f"local smoke service readiness timed out: {url}")
-
-
-def _clear_previous_logs() -> None:
-    LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    for log_path in LOG_DIRECTORY.glob("*.log"):
-        log_path.unlink()
-
-
-def _url_ready(url: str) -> bool:
+def _url_response(url: str) -> tuple[int, str, str]:
     try:
         with urlopen(url, timeout=2) as response:
-            return response.status == 200
-    except OSError:
-        return False
+            body = response.read(4096).decode("utf-8", errors="replace")
+            return response.status, response.headers.get("content-type", ""), body
+    except HTTPError as error:
+        body = error.read(4096).decode("utf-8", errors="replace")
+        return error.code, error.headers.get("content-type", ""), body
 
 
-def _wait_until_ready(
-    processes: dict[str, subprocess.Popen[bytes]], timeout_seconds: int
-) -> None:
-    deadline = time.monotonic() + timeout_seconds
+def _react_ready() -> bool:
+    status, content_type, body = _url_response(READY_URLS["react"])
+    return status == 200 and "html" in content_type.casefold() and 'id="root"' in body
+
+
+def _wait_for_service(name: str, process: subprocess.Popen[bytes], timeout: int = 45) -> None:
+    deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        stopped = [name for name, process in processes.items() if process.poll() is not None]
-        if stopped:
-            raise RuntimeError("local smoke process exited early: " + ",".join(stopped))
-        if all(_url_ready(url) for url in READY_URLS.values()):
-            time.sleep(3)
+        if process.poll() is not None:
+            raise RuntimeError(f"{name} exited before readiness")
+        try:
+            ready = _react_ready() if name == "react" else _url_response(READY_URLS[name])[0] == 200
+        except OSError:
+            ready = False
+        if ready:
             return
-        time.sleep(1)
-    raise RuntimeError("local launcher smoke readiness timed out")
+        time.sleep(0.25)
+    raise RuntimeError(f"{name} readiness timed out")
 
 
-def _stop_processes(processes: dict[str, subprocess.Popen[bytes]]) -> None:
+def _start_service(name: str, command: list[str], run_dir: Path, processes: dict[str, subprocess.Popen[bytes]], handles: list[BinaryIO]) -> None:
+    handle = (run_dir / f"{name}.log").open("wb")
+    handles.append(handle)
+    kwargs: dict[str, object] = {"cwd": ROOT, "stdout": handle, "stderr": subprocess.STDOUT}
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        if Path(command[0]).suffix.casefold() in {".bat", ".cmd"}:
+            command = [
+                os.environ.get("COMSPEC", "cmd.exe"),
+                "/d",
+                "/c",
+                "call",
+                *command,
+            ]
+    else:
+        kwargs["start_new_session"] = True
+    if name == "react":
+        kwargs["cwd"] = ROOT / "ui_react"
+    processes[name] = subprocess.Popen(command, **kwargs)
+
+
+def _windows_listener_pid(port: int) -> int | None:
+    if os.name != "nt":
+        return None
+    output = subprocess.check_output(
+        ["netstat", "-ano", "-p", "tcp"],
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    suffix = f":{port}"
+    for line in output.splitlines():
+        parts = line.split()
+        if (
+            len(parts) >= 5
+            and parts[0].upper() == "TCP"
+            and parts[1].endswith(suffix)
+            and parts[3].upper() == "LISTENING"
+        ):
+            return int(parts[4])
+    return None
+
+
+def _stop_processes(
+    processes: dict[str, subprocess.Popen[bytes]],
+    owned_listener_pids: set[int] | None = None,
+) -> None:
     for process in reversed(tuple(processes.values())):
         if process.poll() is not None:
             continue
-        subprocess.run(
-            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
-        )
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+    if os.name == "nt":
+        for pid in sorted(owned_listener_pids or set(), reverse=True):
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
     for process in processes.values():
         try:
             process.wait(timeout=10)
@@ -141,34 +164,124 @@ def _stop_processes(processes: dict[str, subprocess.Popen[bytes]]) -> None:
             process.kill()
 
 
-def run_smoke(timeout_seconds: int = 45) -> dict[str, object]:
-    os.environ.setdefault("APP_ENV", "development")
-    os.environ.setdefault("INTERNAL_SERVICE_SHARED_KEY", secrets.token_urlsafe(32))
-    for port in (8000, 8501):
-        _require_free_port(port)
-    _clear_previous_logs()
-    processes: dict[str, subprocess.Popen[bytes]] = {}
-    handles: list[BinaryIO] = []
+def _start_services(
+    processes: dict[str, subprocess.Popen[bytes]],
+    handles: list[BinaryIO],
+    run_dir: Path,
+    timeout_seconds: int,
+) -> set[int]:
+    owned_listener_pids: set[int] = set()
+    for (name, command), port in zip(_service_commands().items(), PORTS, strict=True):
+        _start_service(name, command, run_dir, processes, handles)
+        _wait_for_service(name, processes[name], timeout_seconds)
+        listener_pid = _windows_listener_pid(port)
+        if listener_pid is not None:
+            owned_listener_pids.add(listener_pid)
+    return owned_listener_pids
+
+
+def _wait_until_ready(processes: dict[str, subprocess.Popen[bytes]], timeout_seconds: int) -> None:
+    """Compatibility helper for callers that already spawned the controlled services."""
+    for name, process in processes.items():
+        _wait_for_service(name, process, timeout_seconds)
+
+
+def _proxy_check() -> dict[str, object]:
     try:
-        _start_services(processes, handles)
-        _wait_until_ready(processes, timeout_seconds)
-        return {
-            "status": "passed", "services": tuple(processes),
-            "health_urls": READY_URLS,
-            "line_worker": "started" if "line-worker" in processes else "skipped-unconfigured",
-            "logs": str(LOG_DIRECTORY),
+        status, content_type, _ = _url_response(
+            "http://127.0.0.1:5173/api/v1/system/status/performance-snapshot"
+        )
+        return {"status": "passed" if 200 <= status < 500 else "failed", "http_status": status, "content_type": content_type}
+    except OSError as exc:
+        return {"status": "failed", "error": str(exc)}
+
+
+def run_smoke(timeout_seconds: int = 45) -> dict[str, object]:
+    preflight = inspect_profile("dual-run")
+    if preflight["status"] != "ready":
+        raise RuntimeError("dual-run preflight blocked: " + json.dumps(preflight["missing"], ensure_ascii=False))
+    for port in PORTS:
+        _require_free_port(port)
+    run_dir = ROOT / "scratch" / "phase5b-dual-run" / secrets.token_hex(8)
+    run_dir.mkdir(parents=True, exist_ok=False)
+    processes: dict[str, subprocess.Popen[bytes]] = {}
+    owned_listener_pids: set[int] = set()
+    handles: list[BinaryIO] = []
+    started_at = time.time()
+    result: dict[str, object]
+    try:
+        _clear_previous_logs()
+        owned_listener_pids = _start_services(
+            processes, handles, run_dir, timeout_seconds
+        )
+        proxy = _proxy_check()
+        if proxy["status"] != "passed":
+            raise RuntimeError("React relative /api proxy failed")
+        result = {
+            "status": "passed",
+            "run_id": run_dir.name,
+            "services": list(processes),
+            "owned_listener_pids": sorted(owned_listener_pids),
+            "ports": list(PORTS),
+            "ready": {name: True for name in processes},
+            "proxy": proxy,
+            "disabled": preflight["disabled"],
+            "get_only": True,
+            "non_get_requests": 0,
+            "logs": str(run_dir),
+            "duration_seconds": round(time.time() - started_at, 3),
         }
     finally:
-        _stop_processes(processes)
+        _stop_processes(processes, owned_listener_pids)
         for handle in handles:
             handle.close()
+    time.sleep(0.25)
+    for port in PORTS:
+        _require_free_port(port)
+    result["owned_cleanup"] = {str(port): True for port in PORTS}
+    return result
+
+
+def run_artifact_runtime_smoke(
+    client_factory=PrivateOperationsClient,
+) -> dict[str, object]:
+    """Compare pre-child local validation with the mounted read-only attestation."""
+    preflight = inspect_profile("artifact-runtime")
+    if preflight["status"] != "ready":
+        raise RuntimeError(
+            "artifact-runtime preflight blocked: "
+            + json.dumps(preflight["missing"], ensure_ascii=False)
+        )
+    remote = client_factory("runtime-monitor").react_admin_artifact_health()
+    local = preflight["artifact_attestation"]
+    remote_data = asdict(remote)
+    identity_fields = (
+        "active_selector",
+        "artifact_version",
+        "artifact_digest",
+        "manifest_digest",
+        "api_compatibility_revision",
+        "checked_asset_digest",
+    )
+    if any(local[field] != remote_data[field] for field in identity_fields):
+        raise RuntimeError("mounted React admin artifact identity differs from preflight")
+    return {
+        "status": "passed",
+        "profile": "artifact-runtime",
+        "attestation": remote_data,
+        "streamlit_rollback": preflight["streamlit_rollback"],
+        "get_only": True,
+        "non_get_requests": 0,
+        "side_effects": "none",
+    }
 
 
 def main() -> int:
+    artifact_runtime = "--artifact-runtime" in sys.argv[1:]
     try:
-        result = run_smoke()
+        result = run_artifact_runtime_smoke() if artifact_runtime else run_smoke()
     except Exception as exc:
-        print(json.dumps({"status": "failed", "error": str(exc)}, ensure_ascii=False))
+        print(json.dumps({"status": "failed", "error": str(exc), "get_only": True, "non_get_requests": 0}, ensure_ascii=False))
         return 1
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     return 0

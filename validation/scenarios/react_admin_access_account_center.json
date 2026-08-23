@@ -1,0 +1,35 @@
+{
+  "contract": "labor-union-verification-scenario/v1",
+  "scenario_id": "AC-REACT-ADMIN-ACCOUNT-CENTER",
+  "revision": 1,
+  "track": "A",
+  "suite_id": "AC",
+  "status": "specified",
+  "part": "cross-cutting",
+  "browser_execution_mode": "browser-required",
+  "requires_database": true,
+  "test_kinds": ["domain_root_data", "expected_manifest"],
+  "coverage_ids": ["AC-REACT-ADMIN-ACCOUNT-CENTER-01"],
+  "coverage_scope": "supplemental",
+  "source_scenario_ids": ["AC-SECURITY-STATE-001", "AC-CAPABILITY-SESSION-002"],
+  "source_refs": ["validation/scenarios/AC-SECURITY-STATE-001.json#AC-SECURITY-STATE-001", "validation/scenarios/AC-CAPABILITY-SESSION-002.json#AC-CAPABILITY-SESSION-002"],
+  "source_to_successor_mapping": [
+    {"source": "root account command", "successor": "typed Account Center receipt", "disposition": "strengthened"},
+    {"source": "access control version", "successor": "fresh CAS expected_version", "disposition": "unchanged"}
+  ],
+  "root_inputs": ["scenario-owned account", "root actor", "expected version", "reason", "idempotency key"],
+  "root_facts": ["Root actor, target account version and idempotency identity are the command roots."],
+  "forbidden_direct_seed": ["production account", "TOTP seed", "recovery code", "raw session token"],
+  "commands": ["create scenario account", "toggle enabled", "reset password", "reset MFA", "revoke sessions"],
+  "expected": ["Each command returns a closed typed receipt.", "Same-key replay is stable and stale version fails closed."],
+  "receipt_requirements": ["before-after account version", "typed command receipt", "scenario-owned cleanup"],
+  "business_clock": {"timezone": "Asia/Taipei", "business_now": "2026-01-15T09:00:00+08:00"},
+  "oracle_applicability": {
+    "db": {"status": "required", "reason": "CAS and rollback evidence"},
+    "api": {"status": "required", "reason": "typed mutation receipt"},
+    "ui": {"status": "required", "reason": "root command controls"},
+    "replay": {"status": "required", "reason": "same-key outcome"},
+    "recovery": {"status": "required", "reason": "timeout and stale conflict"}
+  },
+  "required_receipt_id": "AC-REACT-ADMIN-ACCOUNT-CENTER-R1"
+}

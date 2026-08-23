@@ -1,168 +1,256 @@
+"""
+File: test_background_job_repository_mysql.py
+Description: 以單一唯一 lu_test DB 驗證 canonical Durable Job replay、conflict、lifecycle 與 fail-closed reader。
+"""
+
+from __future__ import annotations
+
 import os
 import uuid
-from argparse import Namespace
+from pathlib import Path
 
+import pymysql
 import pytest
 
 from infrastructure.mysql.background_job_repository import BackgroundJobRepository
-from infrastructure.mysql.mysql_adapter import get_connection
-from scripts.bootstrap_disposable_mysql_schema import bootstrap
 from shared_kernel.durable_job_queue import DurableJobCommand
-from shared_kernel.durable_job_queue import DurableJobStateConflict
+from subsystems.jobs.contracts import (
+    DurableJobCommandConflict,
+    DurableJobContractViolation,
+    DurableJobFailureOutcome,
+    DurableJobSuccessOutcome,
+)
 
 
 pytestmark = pytest.mark.integration
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def _require_disposable_database() -> None:
-    required_names = (
+def _create_queue_database(database: str) -> None:
+    connection = pymysql.connect(
+        host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        user=os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+        password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+        charset="utf8mb4",
+    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            cursor.execute(f"USE `{database}`")
+            for relative_path in ("db/schema_parts/137_background_jobs.sql", "db/schema_parts/141_durable_background_job_queue.sql"):
+                sql = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+                for statement in (part.strip() for part in sql.split(";") if part.strip()):
+                    cursor.execute(statement)
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _connect_queue_database(database: str):
+    return pymysql.connect(
+        host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        user=os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+        password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+        database=database,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+
+@pytest.fixture(scope="module")
+def disposable_database():
+    required = (
         "LABOR_UNION_TEST_MYSQL_HOST",
         "LABOR_UNION_TEST_MYSQL_PORT",
         "LABOR_UNION_TEST_MYSQL_USER",
         "LABOR_UNION_TEST_MYSQL_PASSWORD",
-        "LABOR_UNION_TEST_MYSQL_DATABASE",
     )
-    if any(not os.environ.get(name) for name in required_names):
-        pytest.skip("requires LABOR_UNION_TEST_MYSQL_* disposable database configuration")
-    database = os.environ.get("DB_DATABASE", "")
-    if not database.startswith("lu_test_"):
-        pytest.skip("requires an explicitly configured disposable MySQL database")
-
-
-def _bootstrap_disposable_database() -> None:
-    _require_disposable_database()
-    bootstrap(
-        Namespace(
+    missing = [name for name in required if os.environ.get(name) is None]
+    assert not missing, "BLOCKED_ENGINE_EVIDENCE: missing " + ",".join(missing)
+    database = "lu_test_durable_core_" + uuid.uuid4().hex[:12]
+    assert database.startswith("lu_test_") and database != "union_db"
+    previous_database = os.environ.get("DB_DATABASE")
+    os.environ["DB_DATABASE"] = database
+    _create_queue_database(database)
+    try:
+        yield database
+    finally:
+        connection = pymysql.connect(
             host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
             port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
             user=os.environ["LABOR_UNION_TEST_MYSQL_USER"],
             password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
-            database=os.environ["LABOR_UNION_TEST_MYSQL_DATABASE"],
-            confirm_database=os.environ["LABOR_UNION_TEST_MYSQL_DATABASE"],
+            charset="utf8mb4",
         )
-    )
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f"DROP DATABASE `{database}`")
+            connection.commit()
+        finally:
+            connection.close()
+        if previous_database is None:
+            os.environ.pop("DB_DATABASE", None)
+        else:
+            os.environ["DB_DATABASE"] = previous_database
 
 
-def _command(job_id: str, identity: str) -> DurableJobCommand:
-    return DurableJobCommand(
-        job_id,
-        identity,
-        "test.durable.command",
-        1,
-        {"job_id": job_id},
-        "test-admin",
-        "test-correlation",
-        max_attempts=2,
-    )
+def _command(key: str, **overrides) -> DurableJobCommand:
+    values = {
+        "job_id": "job-" + uuid.uuid4().hex,
+        "command_identity": key,
+        "command_type": "test.durable.command",
+        "command_version": 1,
+        "payload": {"items": [1, 1.0, None, "台灣"], "object": {"b": 2, "a": 1}},
+        "submitted_by": "admin_user_id:41",
+        "correlation_id": "corr-" + uuid.uuid4().hex,
+        "max_attempts": 2,
+    }
+    values.update(overrides)
+    return DurableJobCommand(**values)
 
 
-def test_mysql_queue_retries_the_same_identity_and_completes_once():
-    _bootstrap_disposable_database()
-    job_id = "test-durable-" + uuid.uuid4().hex
-    identity = "test-durable-identity-" + uuid.uuid4().hex
-    connection = get_connection()
+def _delete_keys(connection, *keys: str) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "DELETE FROM background_jobs WHERE command_identity IN ("
+            + ",".join(["%s"] * len(keys))
+            + ")",
+            keys,
+        )
+    connection.commit()
+
+
+def test_same_key_same_equality_replays_identity_while_correlation_is_observation_only(
+    disposable_database,
+) -> None:
+    connection = _connect_queue_database(disposable_database)
     repository = BackgroundJobRepository(connection)
+    key = "job.replay." + uuid.uuid4().hex
+    first = _command(key)
     try:
-        assert repository.enqueue_command(_command(job_id, identity)) == job_id
-        first_lease = repository.claim_next_command("worker-a", 60)
-        assert first_lease is not None
-        assert first_lease.command.command_identity == identity
-        assert first_lease.attempt_count == 1
-
-        repository.fail_claimed_job(
-            first_lease,
-            {"error": {"code": "database_busy"}},
-            retry_after_seconds=0,
-        )
-        second_lease = repository.claim_next_command("worker-b", 60)
-        assert second_lease is not None
-        assert second_lease.command.command_identity == identity
-        assert second_lease.attempt_count == 2
-        assert second_lease.lease_token != first_lease.lease_token
-
-        repository.complete_claimed_job(
-            second_lease,
-            {"result": "ok"},
-            "test-result-reference",
-        )
-        stored = repository.get_job(job_id)
-        assert stored is not None
-        assert stored.status == "succeeded"
-        assert stored.attempt_count == 2
-        assert stored.receipt_payload == {"result": "ok"}
-        assert stored.result_reference == "test-result-reference"
-    finally:
-        with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM background_jobs WHERE job_id = %s", (job_id,))
+        connection.begin()
+        assert repository.enqueue_canonical_command(first) == first.job_id
         connection.commit()
+        replay = _command(
+            key,
+            command_type=first.command_type,
+            command_version=first.command_version,
+            payload=first.payload,
+            submitted_by=first.submitted_by,
+            correlation_id="corr-observation-changed",
+        )
+        connection.begin()
+        assert repository.enqueue_canonical_command(replay) == first.job_id
+        connection.commit()
+    finally:
+        _delete_keys(connection, key)
         connection.close()
 
 
-def test_mysql_queue_recovers_an_expired_lease_without_changing_command_identity():
-    _bootstrap_disposable_database()
-    job_id = "test-durable-expired-" + uuid.uuid4().hex
-    identity = "test-durable-expired-identity-" + uuid.uuid4().hex
-    connection = get_connection()
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("command_type", "test.other.command"),
+        ("command_version", 2),
+        ("payload", {"items": [1.0, 1, None, "台灣"], "object": {"a": 1, "b": 2}}),
+        ("submitted_by", "admin_user_id:42"),
+    ],
+)
+def test_same_key_mismatch_is_typed_conflict(disposable_database, field, value) -> None:
+    connection = _connect_queue_database(disposable_database)
     repository = BackgroundJobRepository(connection)
+    key = "job.conflict." + uuid.uuid4().hex
+    first = _command(key)
     try:
-        repository.enqueue_command(_command(job_id, identity))
-        first_lease = repository.claim_next_command("worker-a", 60)
-        assert first_lease is not None
+        connection.begin()
+        repository.enqueue_canonical_command(first)
+        connection.commit()
+        changed = {
+            "command_type": first.command_type,
+            "command_version": first.command_version,
+            "payload": first.payload,
+            "submitted_by": first.submitted_by,
+        }
+        changed[field] = value
+        mismatch = _command(key, **changed)
+        connection.begin()
+        with pytest.raises(DurableJobCommandConflict) as raised:
+            repository.enqueue_canonical_command(mismatch)
+        connection.rollback()
+        expected_field = "canonical_payload" if field == "payload" else field
+        assert expected_field in raised.value.mismatched_fields
+    finally:
+        _delete_keys(connection, key)
+        connection.close()
+
+
+def test_key_case_collision_and_legacy_null_fail_closed(disposable_database) -> None:
+    connection = _connect_queue_database(disposable_database)
+    repository = BackgroundJobRepository(connection)
+    suffix = uuid.uuid4().hex
+    uppercase_key = "job.Case." + suffix
+    lowercase_key = uppercase_key.lower()
+    try:
         with connection.cursor() as cursor:
             cursor.execute(
-                "UPDATE background_jobs SET lease_expires_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) "
-                "WHERE job_id = %s",
-                (job_id,),
+                "INSERT INTO background_jobs "
+                "(job_id,command_identity,command_type,command_version,command_payload,submitted_by,correlation_id,status,max_attempts) "
+                "VALUES (%s,%s,%s,%s,%s,%s,%s,'queued',%s)",
+                ("legacy-case-" + suffix, uppercase_key, "test.durable.command", 1, "{}", "admin_user_id:41", "corr-case", 2),
+            )
+            cursor.execute(
+                "INSERT INTO background_jobs (job_id,command_identity,status) VALUES (%s,%s,'queued')",
+                ("legacy-null-" + suffix, "job.legacy." + suffix),
             )
         connection.commit()
-
-        assert repository.requeue_expired_leases(0) == 1
-        recovered_lease = repository.claim_next_command("worker-b", 60)
-        assert recovered_lease is not None
-        assert recovered_lease.command.command_identity == identity
-        assert recovered_lease.attempt_count == 2
+        connection.begin()
+        with pytest.raises(DurableJobCommandConflict) as raised:
+            repository.enqueue_canonical_command(_command(lowercase_key))
+        connection.rollback()
+        assert "command_identity" in raised.value.mismatched_fields
+        with pytest.raises(DurableJobContractViolation):
+            repository.read_canonical_command_by_identity("job.legacy." + suffix)
     finally:
-        with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM background_jobs WHERE job_id = %s", (job_id,))
-        connection.commit()
+        _delete_keys(connection, uppercase_key, "job.legacy." + suffix)
         connection.close()
 
 
-def test_mysql_queue_cancels_only_an_unclaimed_job():
-    _bootstrap_disposable_database()
-    job_id = "test-durable-cancel-" + uuid.uuid4().hex
-    identity = "test-durable-cancel-identity-" + uuid.uuid4().hex
-    connection = get_connection()
+def test_canonical_retry_and_terminal_outcome_are_closed(disposable_database) -> None:
+    connection = _connect_queue_database(disposable_database)
     repository = BackgroundJobRepository(connection)
+    command = _command("job.lifecycle." + uuid.uuid4().hex)
     try:
-        repository.enqueue_command(_command(job_id, identity))
-        repository.cancel_queued_job(job_id)
-
-        stored = repository.get_job(job_id)
-        assert stored is not None
-        assert stored.status == "cancelled"
-        assert repository.claim_next_command("worker-a", 60) is None
-    finally:
-        with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM background_jobs WHERE job_id = %s", (job_id,))
+        connection.begin()
+        repository.enqueue_canonical_command(command)
         connection.commit()
-        connection.close()
-
-
-def test_mysql_queue_rejects_cancellation_after_claim():
-    _bootstrap_disposable_database()
-    job_id = "test-durable-claimed-" + uuid.uuid4().hex
-    identity = "test-durable-claimed-identity-" + uuid.uuid4().hex
-    connection = get_connection()
-    repository = BackgroundJobRepository(connection)
-    try:
-        repository.enqueue_command(_command(job_id, identity))
-        assert repository.claim_next_command("worker-a", 60) is not None
-
-        with pytest.raises(DurableJobStateConflict):
-            repository.cancel_queued_job(job_id)
-    finally:
-        with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM background_jobs WHERE job_id = %s", (job_id,))
+        connection.begin()
+        first = repository.claim_next_canonical_command("worker-a", 60)
         connection.commit()
+        assert first is not None
+        connection.begin()
+        repository.fail_canonical_claim(
+            first,
+            DurableJobFailureOutcome("unavailable", "database_busy", "Retry later.", True),
+            0,
+        )
+        connection.commit()
+        connection.begin()
+        second = repository.claim_next_canonical_command("worker-b", 60)
+        connection.commit()
+        assert second is not None and second.attempt_count == 2
+        connection.begin()
+        repository.complete_canonical_claim(second, DurableJobSuccessOutcome("result:safe"))
+        connection.commit()
+        stored = repository.get_job(command.job_id)
+        assert stored is not None and stored.status == "succeeded"
+        assert stored.receipt_payload == {
+            "kind": "success",
+            "result_reference": "result:safe",
+            "schema_version": 1,
+        }
+        assert stored.result_reference == "result:safe"
+    finally:
+        _delete_keys(connection, command.command_identity)
         connection.close()

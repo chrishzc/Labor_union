@@ -50,7 +50,7 @@ export const SCHEDULING_PROJECTION_READY: SchedulingCurrentProjection = {
       available: false,
       entries: [
         {
-          occupancy_kind: 'assignment_buffer',
+          occupancy_kind: 'assignment_rest',
           case_no: 'CASE-SCH-001',
           assignment_id: 31,
           assignment_status: 'active',
@@ -77,7 +77,11 @@ export const SCHEDULING_RESPONSE_READY: SchedulingCurrentResponse = {
 export const SCHEDULING_PROJECTION_EMPTY: SchedulingCurrentProjection = {
   ...SCHEDULING_PROJECTION_READY,
   assignments: [],
-  days: [],
+  days: [
+    { calendar_date: '2026-08-01', available: true, entries: [] },
+    { calendar_date: '2026-08-02', available: true, entries: [] },
+    { calendar_date: '2026-08-03', available: true, entries: [] },
+  ],
   case_versions: [],
   projection_token: 'b'.repeat(64),
 };

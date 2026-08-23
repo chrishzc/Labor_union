@@ -1,10 +1,13 @@
-"""Preview/apply workflow for staff long leave and paused-service periods."""
+"""
+File: staff_availability_workflow.py
+Description: 編排 Staff Availability 的 canonical mutex、Preview、Apply 與唯一 outer UoW。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Protocol
+from typing import Callable, Protocol
 
 from domains.scheduling.staff_availability import (
     StaffAvailabilityAction,
@@ -26,9 +29,14 @@ from shared_kernel.identities import (
     ExpectedVersion,
     IdempotencyKey,
 )
+from shared_kernel.ports import UnitOfWork
 from shared_kernel.validation import require_positive_integer
 
 _MAXIMUM_QUERY_DAY_COUNT = 366
+
+
+class StaffAvailabilityReceiptRaceError(RuntimeError):
+    """另一個交易已先取得相同全域 Idempotency-Key。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,15 +138,19 @@ class StaffAvailabilityRepository(Protocol):
         occurred_at: datetime,
     ) -> None: ...
 
-    def commit(self) -> None: ...
-
-    def rollback(self) -> None: ...
+    def lock_staff_occupancy_mutex(self, staff_id: int) -> None: ...
 
 
 class StaffAvailabilityWorkflow:
-    def __init__(self, repository: StaffAvailabilityRepository, clock: BusinessClock) -> None:
+    def __init__(
+        self,
+        repository: StaffAvailabilityRepository,
+        clock: BusinessClock,
+        unit_of_work_factory: Callable[[], UnitOfWork],
+    ) -> None:
         self._repository = repository
         self._clock = clock
+        self._unit_of_work_factory = unit_of_work_factory
 
     def query(self, request: StaffAvailabilityQuery) -> tuple[StaffUnavailabilityBlock, ...]:
         return self._repository.list_blocks(request)
@@ -149,21 +161,39 @@ class StaffAvailabilityWorkflow:
 
     def apply(self, request: StaffAvailabilityApplyRequest) -> StaffAvailabilityApplyReceipt:
         request_fingerprint = _request_fingerprint(request)
-        replay = self._repository.load_receipt(request.idempotency_key)
-        if replay is not None:
-            return _replayed_receipt(replay, request_fingerprint)
         try:
-            return self._apply_fresh(request, request_fingerprint)
-        except Exception:
-            self._repository.rollback()
-            raise
+            with self._unit_of_work_factory() as unit_of_work:
+                _lock_staff_occupancy_mutex(self._repository, request.intent.staff_id)
+                replay = self._repository.load_receipt(request.idempotency_key)
+                if replay is not None:
+                    receipt = _replayed_receipt(replay, request_fingerprint)
+                    unit_of_work.commit()
+                    return receipt
+                receipt = self._apply_fresh(request, request_fingerprint, unit_of_work)
+                unit_of_work.commit()
+                return receipt
+        except StaffAvailabilityReceiptRaceError:
+            return self._resolve_receipt_race(request, request_fingerprint)
 
-    def _apply_fresh(self, request, request_fingerprint):
+    def _resolve_receipt_race(self, request, request_fingerprint):
+        """原交易已回滾後，以新交易讀取勝出交易的 immutable receipt。"""
+        with self._unit_of_work_factory() as unit_of_work:
+            _lock_staff_occupancy_mutex(self._repository, request.intent.staff_id)
+            replay = self._repository.load_receipt(request.idempotency_key)
+            if replay is None:
+                raise StaffAvailabilityDomainError(
+                    StaffAvailabilityErrorCode.IDEMPOTENCY_CONFLICT
+                )
+            receipt = _replayed_receipt(replay, request_fingerprint)
+            unit_of_work.commit()
+            return receipt
+
+    def _apply_fresh(self, request, request_fingerprint, unit_of_work):
         facts = self._repository.load_facts(request.intent, for_update=True)
         concurrent_replay = self._repository.load_receipt(request.idempotency_key)
         if concurrent_replay is not None:
             receipt = _replayed_receipt(concurrent_replay, request_fingerprint)
-            self._repository.rollback()
+            unit_of_work.commit()
             return receipt
         _require_version(facts.aggregate_version, request.expected_version)
         preview = build_staff_availability_preview(request.intent, facts)
@@ -174,7 +204,6 @@ class StaffAvailabilityWorkflow:
         receipt = _receipt(request, block, version)
         self._repository.append_event(request, preview.target_block, block, version, occurred_at)
         self._repository.save_receipt(request, request_fingerprint, receipt, occurred_at)
-        self._repository.commit()
         return receipt
 
 
@@ -207,6 +236,7 @@ def _request_fingerprint(request):
             "block_id": intent.block_id,
             "resume_date": _date_text(intent.resume_date),
             "expected_version": request.expected_version.value,
+            "preview_fingerprint": request.preview_fingerprint.value,
             "actor": request.actor.actor_id,
         }
     )
@@ -256,6 +286,11 @@ def _validate_query_range(range_start, range_end):
 
 def _date_text(value):
     return value.isoformat() if value is not None else None
+
+
+def _lock_staff_occupancy_mutex(repository, staff_id: int) -> None:
+    """Acquire the shared occupancy mutex before any receipt or fact read."""
+    repository.lock_staff_occupancy_mutex(staff_id)
 
 
 __all__ = [

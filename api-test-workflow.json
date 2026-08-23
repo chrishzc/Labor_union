@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "api": {
+    "start_command": [
+      ".venv/Scripts/python.exe",
+      "-m",
+      "uvicorn",
+      "api.main:app",
+      "--host",
+      "127.0.0.1",
+      "--port",
+      "{port}"
+    ],
+    "base_url": "http://127.0.0.1:{port}",
+    "health_path": "/health",
+    "schema_path": "/openapi.json",
+    "startup_timeout_seconds": 90,
+    "environment": {
+      "APP_ENV": "test",
+      "ENABLE_ADMIN_AUTH": "false",
+      "ACCESS_CONTROL_PROFILE": "local_bypass",
+      "DB_HOST": "127.0.0.2",
+      "DB_PORT": "3306",
+      "DB_USER": "api_test_readonly",
+      "DB_PASSWORD": "",
+      "DB_DATABASE": "{disposable_id}",
+      "LINE_CHANNEL_SECRET": "",
+      "LINE_CHANNEL_ACCESS_TOKEN": "",
+      "LINE_LOGIN_CHANNEL_ID": "",
+      "LINE_LIFF_ID": ""
+    },
+    "disposable_id_prefix": "apitest_"
+  },
+  "schemathesis": {
+    "methods": ["GET"],
+    "max_examples": 1,
+    "max_failures": 200,
+    "request_timeout_seconds": 5
+  },
+  "safety": {
+    "profile": "local-readonly"
+  },
+  "hurl": {
+    "case_globs": [
+      "tests/hurl/hcm_result_timestamp_contract.hurl",
+      "tests/hurl/staff_phase3b1_query_contract.hurl"
+    ]
+  },
+  "artifacts": {
+    "directory": "scratch/api-test-workflow"
+  }
+}

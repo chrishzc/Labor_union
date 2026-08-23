@@ -1,6 +1,6 @@
 /**
  * File: staff_directory_no_fake_mutation.test.tsx
- * Description: 驗證 Staff query slice 的未核准控制皆 native disabled，且不觸發假變更或網路。
+ * Description: 驗證 Staff 不呈現無契約控制，合法動作保留輸入鎖且不觸發假變更。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,51 +14,48 @@ describe('StaffPage zero fake mutation', () => {
     vi.spyOn(staffDirectoryClient, 'resetPagination').mockImplementation(() => undefined);
   });
 
-  it('keeps every visible mutation control natively disabled', async () => {
+  it('removes unsupported mutations while supported actions remain input-gated', async () => {
     render(<StaffPage />);
     await waitFor(() => expect(screen.getByText('去敏人員甲')).toBeInTheDocument());
-    for (const id of ['staff.master.create', 'staff.lifecycle.retirement.apply']) {
-      expect(document.querySelector(`[data-control-id="${id}"]`)).toBeDisabled();
-    }
+    expect(document.querySelector('[data-control-id="staff.master.create"]')).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '辦理退役／復職' })[0]).toBeEnabled();
 
     fireEvent.click(screen.getByRole('button', { name: /配對偏好/ }));
     for (const id of [
       'staff.preferences.preview',
       'staff.preferences.apply',
-      'staff.preferences.cooking-skills',
-      'staff.preferences.special-notes',
     ]) {
       expect(document.querySelector(`[data-control-id="${id}"]`)).toBeDisabled();
     }
+    expect(document.querySelector('[data-control-id="staff.preferences.cooking-skills"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="staff.preferences.special-notes"]')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /長假與暫停/ }));
+    fireEvent.change(screen.getByLabelText('查詢服務人員'), { target: { value: '11' } });
     for (const id of [
       'staff.availability.create.preview',
       'staff.availability.create.apply',
-      'staff.availability.cancel.preview',
       'staff.availability.cancel.apply',
       'staff.availability.end-pause',
+      'staff.availability.end-pause.apply',
     ]) {
       expect(document.querySelector(`[data-control-id="${id}"]`)).toBeDisabled();
     }
-
     fireEvent.click(screen.getByRole('button', { name: /服務月嫂名冊/ }));
-    fireEvent.click(screen.getAllByRole('button', { name: /檢視摘要/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /檢視服務人員摘要/ })[0]);
 
-    const mutationIds = [
+    const unsupportedIds = [
       'staff.master.save',
       'staff.master.edit',
       'staff.master.attachment-upload',
       'staff.master.bank-edit',
       'staff.master.certificate-approve',
-      'staff.lifecycle.retirement.preview',
-      'staff.lifecycle.reactivation.preview',
-      'staff.lifecycle.reactivation.apply',
     ];
-    for (const id of mutationIds) {
-      const control = document.querySelector(`[data-control-id="${id}"]`);
-      expect(control).toBeTruthy();
-      expect(control).toBeDisabled();
+    for (const id of unsupportedIds) {
+      expect(document.querySelector(`[data-control-id="${id}"]`)).not.toBeInTheDocument();
+    }
+    for (const id of ['staff.lifecycle.retirement.preview', 'staff.lifecycle.reactivation.preview', 'staff.lifecycle.reactivation.apply']) {
+      expect(document.querySelector(`[data-control-id="${id}"]`)).toBeDisabled();
     }
     expect(staffDirectoryClient.queryPage).toHaveBeenCalledTimes(1);
   });

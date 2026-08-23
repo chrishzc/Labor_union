@@ -79,3 +79,39 @@ def test_rule_rejects_non_boolean_enablement_state() -> None:
                 }]
             }
         )
+
+
+def test_unknown_event_is_allowed_only_for_disabled_shadow_rule() -> None:
+    definition = {
+        "rules": [{
+            "id": "future_shadow",
+            "event_code": "future_owner_event",
+            "recipient_selector": "case_group",
+            "template_id": "future_shadow",
+            "enabled": False,
+            "schedule": {"kind": "immediate"},
+            "frequency": {"kind": "once"},
+            "predicates": [],
+        }]
+    }
+    validate_notification_rules(definition)
+    definition["rules"][0]["enabled"] = True
+    with pytest.raises(LineNotificationRuleError, match="not registered"):
+        validate_notification_rules(definition)
+
+
+def test_rule_grammar_rejects_unknown_nested_fields() -> None:
+    definition = {
+        "rules": [{
+            "id": "deposit_notice",
+            "event_code": "deposit_confirmed",
+            "recipient_selector": "case_group",
+            "template_id": "deposit_notice",
+            "enabled": True,
+            "schedule": {"kind": "immediate", "sql": "SELECT 1"},
+            "frequency": {"kind": "once"},
+            "predicates": [],
+        }]
+    }
+    with pytest.raises(LineNotificationRuleError, match="fields"):
+        validate_notification_rules(definition)

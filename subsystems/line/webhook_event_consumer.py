@@ -1,4 +1,7 @@
-"""Lease-based consumer for canonical LINE webhook inbox events."""
+"""
+File: webhook_event_consumer.py
+Description: 以獨立交易隔離 LINE webhook 業務處理與失敗完成紀錄。
+"""
 
 from __future__ import annotations
 
@@ -60,21 +63,31 @@ class LineWebhookEventConsumer:
     def _consume(self, event) -> None:
         if event.lease is None:
             raise RuntimeError("claimed LINE webhook event has no lease")
-        with self._unit_of_work_factory() as unit_of_work:
-            command = self._dispatch_command(event, unit_of_work)
-            unit_of_work.webhook_inbox.complete(command)
-            unit_of_work.commit()
-
-    def _dispatch_command(self, event, unit_of_work):
-        completed_at = self._now()
         try:
-            result = self._dispatcher.dispatch(event, unit_of_work)
+            with self._unit_of_work_factory() as unit_of_work:
+                result = self._dispatcher.dispatch(event, unit_of_work)
+                status = (
+                    "ignored"
+                    if result.status is LineEventDispatchStatus.IGNORED
+                    else "processed"
+                )
+                unit_of_work.webhook_inbox.complete(
+                    _completion(event, self._now(), status)
+                )
+                unit_of_work.commit()
         except TerminalLineEventError as error:
-            return _completion(event, completed_at, "terminal_failed", error)
+            self._record_failure(event, "terminal_failed", error)
         except Exception as error:
-            return _completion(event, completed_at, "retryable_failed", error)
-        status = "ignored" if result.status is LineEventDispatchStatus.IGNORED else "processed"
-        return _completion(event, completed_at, status)
+            self._record_failure(event, "retryable_failed", error)
+
+    def _record_failure(self, event, status: str, error: Exception) -> None:
+        """Persist only failure completion after the business UoW has rolled back."""
+
+        with self._unit_of_work_factory() as unit_of_work:
+            unit_of_work.webhook_inbox.complete(
+                _completion(event, self._now(), status, error)
+            )
+            unit_of_work.commit()
 
 
 def _completion(event, completed_at, status: str, error: Exception | None = None):

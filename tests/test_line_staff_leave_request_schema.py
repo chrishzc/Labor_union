@@ -5,7 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 from api.schemas.line_staff_self_service import StaffLeaveRequestCancel, StaffLeaveRequestCreate
-from api.routes.leave_substitution import LeaveSubstitutionApplyBody
+from api.schemas.leave_substitution import LeaveSubstitutionApplyBody
 
 
 def test_leave_request_rejects_substitute_identity_fields():
@@ -27,7 +27,7 @@ def test_leave_request_accepts_dates_and_optional_reason_only():
 
 
 def test_canonical_apply_requires_request_version_when_linking_leave_request():
-    body = LeaveSubstitutionApplyBody.model_validate({
+    payload = {
         "original_assignment_id": 1,
         "items": [],
         "expected_order_version": 1,
@@ -37,9 +37,15 @@ def test_canonical_apply_requires_request_version_when_linking_leave_request():
         "preview_fingerprint": "0" * 64,
         "reason": "正式處理",
         "leave_request_id": 7,
-    })
+    }
+    with pytest.raises(ValidationError, match="leave_request_identity_pair_required"):
+        LeaveSubstitutionApplyBody.model_validate(payload)
+
+    body = LeaveSubstitutionApplyBody.model_validate(
+        {**payload, "expected_leave_request_version": 3}
+    )
     assert body.leave_request_id == 7
-    assert body.expected_leave_request_version is None
+    assert body.expected_leave_request_version == 3
 
 
 def test_leave_request_cancel_requires_reason_and_expected_version():

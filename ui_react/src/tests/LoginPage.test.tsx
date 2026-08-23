@@ -75,7 +75,7 @@ describe('LoginPage Component: Phase 2C Two-Step Authentication Flow', () => {
       screen.getByRole('button', { name: /下一步：進行雙重驗證/ })
     ).toBeInTheDocument();
     expect(screen.getByText(/記住帳號/)).toBeInTheDocument();
-    expect(screen.getByText(/忘記密碼？/)).toBeInTheDocument();
+    expect(screen.queryByText(/忘記密碼？/)).not.toBeInTheDocument();
   });
 
   it('Stage 1 欄位校驗：未輸入帳號時提交應提示「請輸入帳號」且不發起網路請求', () => {

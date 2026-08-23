@@ -23,8 +23,15 @@ from api.schemas.customer_service import (
     CustomerServiceUpdatePreviewRequest,
     CustomerServiceUpdatePreviewView,
     CustomerServiceUpdateRequest,
+    HumanEscalationClaimRequest,
+    HumanEscalationCreateRequest,
+    HumanEscalationHandlingRequest,
+    HumanEscalationReceiptResponse,
+    HumanEscalationResolveRequest,
+    HumanEscalationViewResponse,
 )
 from domains.customer_service.ticket import CustomerServiceCategory, CustomerServiceStatus, CustomerServiceTransitionError
+from domains.customer_service.escalation import TriggerCode
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint
@@ -37,6 +44,14 @@ from subsystems.customer_service.application import (
     CustomerServiceTicketNotFoundError,
     CustomerServiceVersionConflictError,
 )
+from subsystems.customer_service.escalation_application import HumanEscalationApplication
+from subsystems.customer_service.escalation_contracts import (
+    ClaimHumanEscalation,
+    CreateHumanEscalation,
+    HumanEscalationError,
+    ResolveHumanEscalation,
+    StartHumanEscalationHandling,
+)
 from subsystems.customer_service.contracts import (
     ApplyCustomerServiceTicketUpdate,
     CustomerServiceListQuery,
@@ -47,10 +62,113 @@ from subsystems.customer_service.contracts import (
 
 
 router = APIRouter(prefix="/api/v1/customer-service/tickets", tags=["Customer Service"])
+escalation_router = APIRouter(prefix="/api/v1/customer-service/escalations", tags=["Customer Service Escalations"])
 
 
 def _application():
     return CustomerServiceApplication(open_line_unit_of_work)
+
+
+def _escalation_application():
+    return HumanEscalationApplication(open_line_unit_of_work)
+
+
+@escalation_router.post("", response_model=BaseResponse[HumanEscalationReceiptResponse])
+def create_escalation(
+    payload: HumanEscalationCreateRequest,
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    command = CreateHumanEscalation(
+        payload.source_event_identity,
+        payload.source_kind,
+        payload.source_fingerprint,
+        TriggerCode(payload.trigger_code),
+        payload.trigger_policy_version,
+        CustomerServiceCategory(payload.ticket_category),
+        payload.masked_context,
+        payload.hold_scope,
+        IdempotencyKey(payload.idempotency_key),
+        CorrelationId(payload.correlation_id),
+        admin_actor_context(principal),
+    )
+    try:
+        receipt = _escalation_application().create(command)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, payload.correlation_id) from error
+    return BaseResponse(data=_escalation_receipt_response(receipt))
+
+
+@escalation_router.get("/{escalation_id}", response_model=BaseResponse[HumanEscalationViewResponse])
+def escalation_detail(escalation_id: int, _: AdminPrincipal = Depends(require_customer_service_reader)):
+    try:
+        view = _escalation_application().query(escalation_id)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, f"customer-service:escalation:query:{escalation_id}") from error
+    return BaseResponse(data=_escalation_view_response(view))
+
+
+@escalation_router.post("/{escalation_id}/claim", response_model=BaseResponse[HumanEscalationReceiptResponse])
+def claim_escalation(
+    escalation_id: int,
+    payload: HumanEscalationClaimRequest,
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    command = ClaimHumanEscalation(
+        escalation_id,
+        payload.expected_escalation_version,
+        admin_actor_context(principal),
+        IdempotencyKey(payload.idempotency_key),
+        CorrelationId(payload.correlation_id),
+    )
+    try:
+        receipt = _escalation_application().claim(command)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, payload.correlation_id) from error
+    return BaseResponse(data=_escalation_receipt_response(receipt))
+
+
+@escalation_router.post("/{escalation_id}/handling", response_model=BaseResponse[HumanEscalationReceiptResponse])
+def start_escalation_handling(
+    escalation_id: int,
+    payload: HumanEscalationHandlingRequest,
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    command = StartHumanEscalationHandling(
+        escalation_id,
+        payload.expected_escalation_version,
+        payload.expected_ticket_version,
+        admin_actor_context(principal),
+        IdempotencyKey(payload.idempotency_key),
+        CorrelationId(payload.correlation_id),
+    )
+    try:
+        receipt = _escalation_application().start_handling(command)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, payload.correlation_id) from error
+    return BaseResponse(data=_escalation_receipt_response(receipt))
+
+
+@escalation_router.post("/{escalation_id}/resolve", response_model=BaseResponse[HumanEscalationReceiptResponse])
+def resolve_escalation(
+    escalation_id: int,
+    payload: HumanEscalationResolveRequest,
+    principal: AdminPrincipal = Depends(require_customer_service_handler),
+):
+    command = ResolveHumanEscalation(
+        escalation_id,
+        payload.expected_escalation_version,
+        payload.expected_ticket_version,
+        payload.resolution_code,
+        payload.resolution_evidence_digest,
+        admin_actor_context(principal),
+        IdempotencyKey(payload.idempotency_key),
+        CorrelationId(payload.correlation_id),
+    )
+    try:
+        receipt = _escalation_application().resolve(command)
+    except HumanEscalationError as error:
+        raise _human_escalation_http_error(error, payload.correlation_id) from error
+    return BaseResponse(data=_escalation_receipt_response(receipt))
 
 
 @router.get("/summary", response_model=BaseResponse[CustomerServiceSummaryView])
@@ -299,6 +417,66 @@ def _typed_http_error(status_code: int, error: TypedError) -> HTTPException:
     )
 
 
+def _human_escalation_http_error(error: HumanEscalationError, correlation_id: str) -> HTTPException:
+    category = {
+        "validation": ErrorCategory.VALIDATION,
+        "not_found": ErrorCategory.NOT_FOUND,
+        "conflict": ErrorCategory.CONFLICT,
+        "idempotency_mismatch": ErrorCategory.IDEMPOTENCY_MISMATCH,
+        "domain_blocked": ErrorCategory.DOMAIN_BLOCKED,
+        "unavailable": ErrorCategory.UNAVAILABLE,
+        "internal": ErrorCategory.INTERNAL,
+    }.get(error.category, ErrorCategory.INTERNAL)
+    status_code = {
+        ErrorCategory.VALIDATION: 422,
+        ErrorCategory.NOT_FOUND: 404,
+        ErrorCategory.CONFLICT: 409,
+        ErrorCategory.IDEMPOTENCY_MISMATCH: 409,
+        ErrorCategory.DOMAIN_BLOCKED: 409,
+        ErrorCategory.UNAVAILABLE: 503,
+    }.get(category, 500)
+    return _typed_http_error(
+        status_code,
+        TypedError(category, error.code, "客服人工接手操作未完成。", CorrelationId(correlation_id), retryable=error.retryable),
+    )
+
+
+def _escalation_receipt_response(receipt) -> HumanEscalationReceiptResponse:
+    return HumanEscalationReceiptResponse(
+        receipt_id=receipt.receipt_id,
+        command_family=receipt.command_family,
+        operation=receipt.operation,
+        escalation_id=receipt.escalation_id,
+        ticket_ref=receipt.ticket_ref,
+        resulting_workflow_status=receipt.resulting_workflow_status.value,
+        resulting_hold_state=receipt.resulting_hold_state.value,
+        current_version=receipt.current_version,
+        replayed=receipt.replayed,
+        correlation_id=receipt.correlation_id,
+        committed_at=receipt.committed_at,
+    )
+
+
+def _escalation_view_response(view) -> HumanEscalationViewResponse:
+    return HumanEscalationViewResponse(
+        escalation_id=view.escalation_id,
+        ticket_ref=view.ticket_ref,
+        category=view.category.value,
+        urgency=view.urgency,
+        trigger_code=view.trigger_code.value,
+        workflow_status=view.workflow_status.value,
+        workflow_version=view.workflow_version,
+        automation_hold=view.automation_hold.value,
+        hold_scope_label=view.hold_scope_label,
+        masked_context=dict(view.masked_context),
+        alert_status=view.alert_status.value,
+        current_version=view.current_version,
+        created_at=view.created_at,
+        updated_at=view.updated_at,
+        available_actions=list(view.available_actions),
+    )
+
+
 def _correlation(operation):
     return CorrelationId(f"customer-service:{operation}:{uuid4()}")
 
@@ -309,4 +487,4 @@ def _audit_request(request, operation, ticket_id):
     request.state.audit_resource_id = str(ticket_id)
 
 
-__all__ = ["router"]
+__all__ = ["escalation_router", "router"]

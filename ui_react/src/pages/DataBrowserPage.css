@@ -1,4 +1,7 @@
-/* Data Browser Page CSS - Audit & Historical Records Browser */
+/**
+ * File: DataBrowserPage.css
+ * Description: 去敏資料來源分頁、查詢列與歷史快照表格版面。
+ */
 
 .databrowser-tab-bar {
   display: flex;
@@ -51,6 +54,29 @@
   align-items: center;
   margin-bottom: 16px;
   gap: 16px;
+}
+
+.databrowser-filter-bar > div:first-child,
+.databrowser-filter-bar [data-control-id="data-browser.query"] {
+  min-width: 0;
+}
+
+.databrowser-filter-bar [data-control-id="data-browser.query.submit"] {
+  flex: 0 0 auto;
+  min-width: 72px;
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .databrowser-filter-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .databrowser-filter-bar > div:first-child {
+    max-width: none !important;
+    width: 100%;
+  }
 }
 
 .databrowser-table-container {

@@ -1,5 +1,12 @@
+"""
+File: test_bootstrap_disposable_mysql_schema.py
+Description: 驗證 disposable schema bootstrap 的安全邊界與前置契約。
+"""
+
 from pathlib import Path
 import re
+
+import pytest
 
 from scripts.bootstrap_disposable_mysql_schema import (
     _base_schema_for,
@@ -9,6 +16,7 @@ from scripts.bootstrap_disposable_mysql_schema import (
     _schema_bootstrap_gate_errors,
 )
 from scripts.init_db import _schema_part_sort_key
+from scripts.verify_verification_scenarios import load_scenarios
 
 
 def test_disposable_schema_bootstrap_requires_exact_lu_test_confirmation():
@@ -95,6 +103,29 @@ def test_schema_bootstrap_gate_rejects_invalid_scenario_contracts():
     assert _schema_bootstrap_gate_errors(gate) == [
         "scenarios: missing business requirement mapping"
     ]
+
+
+def test_scenario_loader_excludes_phase6_requirements_artifact_without_weakening_contracts():
+    scenarios = load_scenarios()
+
+    assert scenarios
+    assert all(item.get("contract") == "labor-union-verification-scenario/v1" for item in scenarios)
+    assert all("scenario_id" in item for item in scenarios)
+
+
+def test_scenario_loader_rejects_unknown_non_scenario_artifact(tmp_path):
+    (tmp_path / "unknown.json").write_text('{"unexpected": true}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="unsupported verification scenario artifact"):
+        load_scenarios(tmp_path)
+
+
+@pytest.mark.parametrize("payload", ["[]", "null"])
+def test_scenario_loader_rejects_non_object_artifact(tmp_path, payload):
+    (tmp_path / "invalid.json").write_text(payload, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must be a JSON object"):
+        load_scenarios(tmp_path)
 
 
 def test_every_multiline_trigger_declares_its_timing_and_table() -> None:

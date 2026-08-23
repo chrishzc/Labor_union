@@ -1,0 +1,77 @@
+{
+  "operation": "GET /api/orders/operational-timelines",
+  "method": "GET",
+  "path_template": "/api/orders/operational-timelines",
+  "fingerprint": "ebee5b04",
+  "case_id": "oBKAUd",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/orders/operational-timelines",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/orders/operational-timelines",
+      "url_template": "http://127.0.0.1:8765/api/orders/operational-timelines",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "oBKAUd"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:11:29 GMT",
+          "server": "uvicorn",
+          "content-length": "21",
+          "content-type": "text/plain; charset=utf-8"
+        },
+        "body": "Internal Server Error"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "not_a_server_error",
+          "status": "failure",
+          "message": "Server error"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.006748199986759573,
+          "mode": "positive"
+        },
+        "components": {
+          "QUERY": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/orders/operational-timelines",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

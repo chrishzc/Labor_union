@@ -1,10 +1,6 @@
 /**
- * @file AnomaliesPage.css
- * @description 異常審核與匯入警示追蹤頁面之樣式表，包含 KPI 卡片、篩選列、雙通道列表與抽屜樣式。
- * 契約依據: PROV-20260816 Phase 2D CONTRACT_MATRIX.md。
- * 變更範圍: 保留既有 class 名稱與佈局結構，擴充匯入警示、載入中、錯誤重試與空狀態樣式。
- * 驗證依據: 頁面渲染與無破版驗證。
- * 無副作用宣告: 純樣式定義，無任何腳本副作用。
+ * File: AnomaliesPage.css
+ * Description: 異常頁面列表、詳情抽屜與匯入警示的響應式純樣式。
  */
 
 .anomalies-kpi-grid {
@@ -324,4 +320,176 @@
   border-radius: 4px;
   font-size: 0.75rem;
   margin-right: 4px;
+}
+
+.import-warning-transition-panel {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid #fed9b8;
+  border-radius: 12px;
+  background: #fffaf7;
+  color: #57423b;
+}
+
+.import-warning-transition-heading,
+.import-warning-transition-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.import-warning-transition-heading h4,
+.import-warning-transition-heading p { margin: 0; }
+.import-warning-transition-heading p { margin-top: 5px; font-size: .82rem; color: #74593f; }
+
+.import-warning-transition-panel button {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: #ff7f50;
+  color: #fff;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.import-warning-transition-panel button:disabled {
+  cursor: not-allowed;
+  background: #d6d3d1;
+  color: #57534e;
+}
+
+.import-warning-transition-field { display: grid; gap: 6px; font-size: .86rem; font-weight: 700; }
+.import-warning-transition-field select,
+.import-warning-transition-field input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 11px;
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  background: #fff;
+  color: #1e1b19;
+}
+
+.import-warning-transition-preview,
+.import-warning-transition-receipt {
+  display: grid;
+  gap: 5px;
+  padding: 12px 14px;
+  border: 1px solid #dec0b6;
+  border-radius: 9px;
+  background: #fff;
+  overflow-wrap: anywhere;
+  font-size: .84rem;
+}
+
+.import-warning-transition-observed,
+.import-warning-transition-warning {
+  padding: 11px 13px;
+  border-radius: 8px;
+  font-size: .84rem;
+}
+.import-warning-transition-observed { border: 1px solid #bbf7d0; background: #f0fdf4; color: #166534; }
+.import-warning-transition-warning { border: 1px solid #fde68a; background: #fffbeb; color: #92400e; }
+
+/* Typed anomaly detail surfaces remain read-only and visually grouped. */
+.anomalies-detail-card,
+.anomalies-timeline-card,
+.anomalies-evidence-card,
+.anomalies-root-evidence-card,
+.anomalies-recovery-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 16px 18px;
+  border: 1px solid #dec0b6;
+  border-radius: 12px;
+  background: #ffffff;
+  color: #57423b;
+}
+
+.anomalies-detail-card,
+.anomalies-timeline-card,
+.anomalies-evidence-card {
+  box-shadow: 0 2px 10px rgba(74, 69, 67, 0.04);
+}
+
+.anomalies-root-evidence-card {
+  background: #fffdfc;
+}
+
+.anomalies-recovery-card {
+  border-color: #fed9b8;
+  background: #fff8f6;
+}
+
+.anomaly-evidence-row,
+.anomaly-recovery-metadata-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.4fr) minmax(0, 1fr);
+  gap: 8px 16px;
+  align-items: start;
+  padding: 8px 0;
+  border-bottom: 1px solid #f2e2dc;
+}
+
+.anomaly-evidence-row:last-child,
+.anomaly-recovery-metadata-row:last-child {
+  border-bottom: 0;
+}
+
+.anomaly-evidence-row > :first-child,
+.anomaly-recovery-metadata-row > :first-child {
+  color: #8b7169;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.anomaly-evidence-row > :last-child,
+.anomaly-recovery-metadata-row > :last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #1e1b19;
+  font-size: 0.88rem;
+}
+
+.anomalies-detail-loading,
+.anomalies-detail-error,
+.anomalies-detail-empty {
+  padding: 12px 14px;
+  border-radius: 8px;
+  font-size: 0.88rem;
+}
+
+.anomalies-detail-loading,
+.anomalies-detail-empty {
+  border: 1px dashed #dec0b6;
+  background: #faf8f7;
+  color: #8b7169;
+}
+
+.anomalies-detail-error {
+  border: 1px solid #fecdd3;
+  background: #fff1f2;
+  color: #991b1b;
+}
+
+@media (max-width: 640px) {
+  .anomalies-detail-card,
+  .anomalies-timeline-card,
+  .anomalies-evidence-card,
+  .anomalies-root-evidence-card,
+  .anomalies-recovery-card {
+    padding: 14px;
+  }
+
+  .anomaly-evidence-row,
+  .anomaly-recovery-metadata-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }

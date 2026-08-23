@@ -1,0 +1,77 @@
+{
+  "operation": "GET /api/v1/line/identity/runtime-config",
+  "method": "GET",
+  "path_template": "/api/v1/line/identity/runtime-config",
+  "fingerprint": "888a5037",
+  "case_id": "LnxzqG",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/line/identity/runtime-config",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/line/identity/runtime-config",
+      "url_template": "http://127.0.0.1:8765/api/v1/line/identity/runtime-config",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "LnxzqG"
+      },
+      "response": {
+        "status_code": 503,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:13:18 GMT",
+          "server": "uvicorn",
+          "content-length": "245",
+          "content-type": "application/json",
+          "server-timing": "application;dur=2.5",
+          "x-response-time-ms": "2.5",
+          "x-correlation-id": "91a442dd03d24499ba4ed3eddd94cc88"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"unavailable\",\"code\":\"service_unavailable\",\"message\":\"\u670d\u52d9\u66ab\u6642\u7121\u6cd5\u4f7f\u7528\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"91a442dd03d24499ba4ed3eddd94cc88\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "not_a_server_error",
+          "status": "failure",
+          "message": "Server error"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0004765000194311142,
+          "mode": "positive"
+        },
+        "components": {},
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/line/identity/runtime-config",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

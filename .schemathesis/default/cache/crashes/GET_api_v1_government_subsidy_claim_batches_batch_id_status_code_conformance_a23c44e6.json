@@ -1,0 +1,79 @@
+{
+  "operation": "GET /api/v1/government-subsidy/claim-batches/{batch_id}",
+  "method": "GET",
+  "path_template": "/api/v1/government-subsidy/claim-batches/{batch_id}",
+  "fingerprint": "a23c44e6",
+  "case_id": "d9pMNP",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/government-subsidy/claim-batches/1",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/government-subsidy/claim-batches/1",
+      "url_template": "http://127.0.0.1:8765/api/v1/government-subsidy/claim-batches/{batch_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "d9pMNP"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:12:41 GMT",
+          "server": "uvicorn",
+          "content-length": "243",
+          "content-type": "application/json"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"internal_error\",\"message\":\"\u4f3a\u670d\u5668\u767c\u751f\u672a\u9810\u671f\u932f\u8aa4\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"ff8920b37ccf4949a2b47342a26b1396\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 500\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.007178700005169958,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/government-subsidy/claim-batches/{batch_id}",
+      "path_parameters": {
+        "batch_id": 1
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

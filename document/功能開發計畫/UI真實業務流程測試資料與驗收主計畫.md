@@ -100,7 +100,8 @@ schema、seed、pytest 或資料庫 mutation。
 
 - `query-only` page slice：沿用現有 typed GET 或補該頁最小 typed view，保留 UI slot，對缺欄顯示
   `unavailable`，執行 API／UI 的 success、empty、typed error／auth、timeout／abort、PII 與 reload
-  evidence；可用既有 DB 做 GET UI 觀察，但不建立或修改 DB。
+  evidence；可用既有allowlist開發測試DB做GET UI觀察。若同一exact Work Package另含受控mutation，則依
+  2026-08-21裁決可在該DB建立或修改本次owned測試資料，不需另建non-root disposable DB。
 - `mutation／controlled-data` slice：才套用本計畫的 scenario lineage、fixed clock、隔離 validation DB、
   Preview／Apply／receipt、replay／stale／rollback 與 transaction oracle。
 - 一頁可同時含兩種 slice；query 已完成不解鎖 mutation，mutation blocker 也不阻塞同頁已閉合 query。
@@ -120,8 +121,11 @@ schema、seed、pytest 或資料庫 mutation。
 6. accepted、rejected、stale、replay 與 rollback 都要有可獨立驗證的 oracle。
 7. 拒絕情境本來就可能沒有最終 root row；mutation／controlled-data slice 必須以 receipt、零 partial-write
    與 read isolation 驗證。query-only slice 只驗證 typed error／empty／read isolation，不建立 mutation receipt。
-8. Mutation／controlled-data 測試資料只能進名稱與環境均通過 allowlist 的 disposable validation database；
-   query-only UI 可在既有 DB 做唯讀觀察，但不得寫入、seed、migration 或 repair。
+8. Mutation／controlled-data 測試資料只能進名稱與環境均通過allowlist的development／validation database；
+   2026-08-21人工已撤銷「既有DB只能GET」及「必須non-root disposable DB」。可使用目前credential（包括root）
+   在既有`lu_test_*` DB執行已核准scope的受控mutation，但必須隔離scenario identity、限定owned rows、保存
+   before/after與receipt，並做scoped cleanup或明確保留。disposable DB為選配；schema／migration、全庫seed、
+   reset、replacement、`--switch`、`union_db`及production target仍不在此授權。
 9. 每個 Part 在撰寫場景時同步執行基礎建設 readiness audit；不得等到 seed 或 UI 實作時才發現
    schema、typed port、worker、登入／actor audit 安全邊界或驗證工具不存在。
 10. 基礎建設目前可運作只屬 live evidence；若不符合正式契約仍標示 `live-drift`，不得反向修改
@@ -148,9 +152,13 @@ schema、seed、pytest 或資料庫 mutation。
 | 14 | 異常警示與人工修復閉環 | claim、resolve、reopen、auto-resolve、typed action | Part 1～13 | 待撰寫 | 未開放 |
 | 15 | LINE 與外部副作用 | binding、delivery、retry、timeout、exhausted | Part 1～14 | 待撰寫 | 未開放 |
 | 16 | 跨 Domain 端到端驗收 | 完整人物劇本與全鏈對帳 | Part 0～15 | 待撰寫 | 未開放 |
+| 17 | Data Browser 去敏資料查詢 | allowlisted source、masked pagination、typed detail與source lineage | Part 0及各來源唯讀projection | identity已核准；result `NOT_RUN` | 只由3D-DB-H／DB-R bounded WPs開放 |
 
 Part 14、15 的契約在上游各 Part 撰寫時就必須引用；其集中 Part 用於跨 Domain 一致性驗收，
 不表示異常與 LINE 要等到最後才思考。
+
+Part 17是獨立的跨source唯讀驗收identity，不表示它在業務生命週期上晚於Part 16。它只擁有server-masked
+Query／typed detail與immutable lineage顯示；raw row、任意table／SQL、source correction及entry cutover均不屬此Part。
 
 ## 6. 每個 Part 的文件完成定義
 
@@ -183,7 +191,7 @@ Part 14、15 的契約在上游各 Part 撰寫時就必須引用；其集中 Par
 |---|---|---|
 | Global contract | Actor、BusinessClock、version、fingerprint、idempotency、typed error、correlation | 共用型別及實際 caller 一致；無 UI 自算或 message parsing |
 | Transaction | outer UoW、lock order、commit owner、rollback、outbox | 成功／失敗／replay 均能證明零 hidden commit 與零 partial write |
-| Schema | root/event/receipt/outbox/version/index/constraint | current schema 與 release metadata 可在 disposable DB 重建並通過約束驗證 |
+| Schema | root/event/receipt/outbox/version/index/constraint | schema／migration變更仍須以disposable fresh與preserve-data candidate重建並通過約束驗證；一般API／UI mutation可用既有allowlist開發測試DB |
 | Domain／Subsystem | root ownership、state machine、Preview／Apply、typed ports | 正式規格、production chain 與 tests 可一對一追溯 |
 | API | typed request／view／error、capability、stale/replay | route 不直接寫 DB，成功與失敗 envelope 均有契約測試 |
 | UI | bounded typed client、loading/blocker/receipt、repair navigation | raw dict 不穿透 render，Apply 前有 Preview，成功只以 server receipt 顯示 |

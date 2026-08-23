@@ -1,6 +1,6 @@
 /**
  * File: hcm_workbook_client.ts
- * Description: 保存 HCM 真檔快照並以即時記憶體 Session 執行唯一 Preview 請求。
+ * Description: 保存 HCM 真檔快照並提供 typed Preview／Apply 請求。
  */
 import { sessionClient } from '../auth/session_client';
 import { decodePayload } from '../shared/runtime_decoder';
@@ -9,15 +9,20 @@ import {
   HcmWorkbookContractError,
   HcmWorkbookFileError,
   HcmWorkbookUnauthenticatedError,
+  mapHcmWorkbookApplyError,
   mapHcmWorkbookPreviewError,
 } from './hcm_workbook_errors';
 import {
   HcmWorkbookPreviewEnvelopeSchema,
+  HcmWorkbookReceiptEnvelopeSchema,
   type HcmWorkbookPreview,
+  type HcmWorkbookReceipt,
 } from './hcm_workbook_schemas';
 
 export const HCM_WORKBOOK_PREVIEW_PATH =
   '/api/v1/case-import/hcm/workbooks/preview';
+export const HCM_WORKBOOK_APPLY_PATH =
+  '/api/v1/case-import/hcm/workbooks/apply';
 export const HCM_WORKBOOK_PREVIEW_TIMEOUT_MS = 30_000;
 export const HCM_WORKBOOK_MAXIMUM_BYTES = 20 * 1024 * 1024;
 
@@ -82,6 +87,11 @@ export interface HcmWorkbookPreviewClient {
     snapshot: HcmWorkbookSnapshot,
     options?: HcmWorkbookPreviewRequestOptions
   ): Promise<HcmWorkbookPreview>;
+  apply(
+    snapshot: HcmWorkbookSnapshot,
+    previewFingerprint: string,
+    options: HcmWorkbookPreviewRequestOptions & { idempotencyKey: string; correlationId: string }
+  ): Promise<HcmWorkbookReceipt>;
 }
 
 function validateHcmWorkbookFile(file: File): void {
@@ -135,11 +145,12 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 }
 
 function requestOptions(
-  options?: HcmWorkbookPreviewRequestOptions
+  options?: HcmWorkbookPreviewRequestOptions,
+  operation: 'preview' | 'apply' = 'preview'
 ): RequestOptions {
   const token = sessionClient.getToken();
   if (!token) {
-    throw new HcmWorkbookUnauthenticatedError();
+    throw new HcmWorkbookUnauthenticatedError(operation);
   }
 
   const headers = { ...options?.headers };
@@ -161,6 +172,22 @@ function requestOptions(
     headers,
     baseUrl: options?.baseUrl,
     timeoutMs: HCM_WORKBOOK_PREVIEW_TIMEOUT_MS,
+  };
+}
+
+function applyRequestOptions(
+  previewFingerprint: string,
+  options: HcmWorkbookPreviewRequestOptions & { idempotencyKey: string; correlationId: string }
+): RequestOptions {
+  const base = requestOptions(options, 'apply');
+  return {
+    ...base,
+    headers: {
+      ...base.headers,
+      'X-Preview-Fingerprint': previewFingerprint,
+      'Idempotency-Key': options.idempotencyKey,
+      'X-Correlation-ID': options.correlationId,
+    },
   };
 }
 
@@ -194,12 +221,37 @@ export async function previewHcmWorkbook(
   }
 }
 
+export async function applyHcmWorkbook(
+  snapshot: HcmWorkbookSnapshot,
+  previewFingerprint: string,
+  options: HcmWorkbookPreviewRequestOptions & { idempotencyKey: string; correlationId: string }
+): Promise<HcmWorkbookReceipt> {
+  try {
+    const raw = await transport.post(HCM_WORKBOOK_APPLY_PATH, snapshot.toFormData(), applyRequestOptions(previewFingerprint, options));
+    const receipt = decodePayload(HcmWorkbookReceiptEnvelopeSchema, raw).data;
+    if (receipt.source_content_digest !== snapshot.sha256) {
+      throw new HcmWorkbookContractError('hcm_apply_source_digest_mismatch', '套用收據摘要與已選檔案不一致。');
+    }
+    return receipt;
+  } catch (error) {
+    throw mapHcmWorkbookApplyError(error);
+  }
+}
+
 class DefaultHcmWorkbookPreviewClient implements HcmWorkbookPreviewClient {
   preview(
     snapshot: HcmWorkbookSnapshot,
     options?: HcmWorkbookPreviewRequestOptions
   ): Promise<HcmWorkbookPreview> {
     return previewHcmWorkbook(snapshot, options);
+  }
+
+  apply(
+    snapshot: HcmWorkbookSnapshot,
+    previewFingerprint: string,
+    options: HcmWorkbookPreviewRequestOptions & { idempotencyKey: string; correlationId: string }
+  ): Promise<HcmWorkbookReceipt> {
+    return applyHcmWorkbook(snapshot, previewFingerprint, options);
   }
 }
 

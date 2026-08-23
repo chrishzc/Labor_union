@@ -1,6 +1,6 @@
 """
 File: hcm_workbook_import.py
-Description: 協調 HCM workbook replay、conflict 與逐列 typed intake。
+Description: 協調HCM workbook Preview、Apply、跨identity摘要replay與結果查詢。
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import Protocol
 import pandas as pd
 
 from infrastructure.mysql.hcm_workbook_import_repository import HcmWorkbookImportRepository
+from shared_kernel.clock import TAIPEI_TIME_ZONE
 
 
 class HcmRowIntake(Protocol):
@@ -103,6 +104,10 @@ class HcmWorkbookResultRecord:
     completed_at: datetime
     receipt: HcmWorkbookReceipt
 
+    def __post_init__(self) -> None:
+        if self.completed_at.tzinfo is None or self.completed_at.utcoffset() is None:
+            raise ValueError("hcm_workbook_result_completed_at_timezone_required")
+
     def as_dict(self) -> dict[str, object]:
         return {
             "receipt_id": self.receipt_id,
@@ -144,6 +149,9 @@ class HcmWorkbookImportService:
             replay = self._stored_replay(key, digest)
             if replay is not None:
                 return replay
+            digest_replay = self._stored_digest_replay(digest)
+            if digest_replay is not None:
+                return digest_replay
             claim = self._repository.claim(key, digest, correlation_id)
             if claim == "conflict":
                 raise HcmWorkbookConflict("hcm_workbook_idempotency_conflict")
@@ -200,7 +208,7 @@ class HcmWorkbookImportService:
         items = tuple(
             HcmWorkbookResultRecord(
                 receipt_id=int(row["id"]),
-                completed_at=row["created_at"],
+                completed_at=_as_business_datetime(row["created_at"]),
                 receipt=_receipt_from_payload(
                     json.loads(row["result_snapshot"]),
                     source_digest=str(row["request_fingerprint"]),
@@ -225,6 +233,24 @@ class HcmWorkbookImportService:
             source_digest=digest,
             replayed=True,
         )
+
+    def _stored_digest_replay(self, digest: str) -> HcmWorkbookReceipt | None:
+        stored = self._repository.load_receipt_by_digest(digest)
+        if stored is None:
+            return None
+        return _receipt_from_payload(
+            json.loads(stored["result_snapshot"]),
+            source_digest=digest,
+            replayed=True,
+        )
+
+
+def _as_business_datetime(value: object) -> datetime:
+    if not isinstance(value, datetime):
+        raise TypeError("hcm_workbook_result_completed_at_invalid")
+    if value.tzinfo is None or value.utcoffset() is None:
+        return value.replace(tzinfo=TAIPEI_TIME_ZONE)
+    return value.astimezone(TAIPEI_TIME_ZONE)
 
 
 def _workbook_digest(source_path: str) -> str:

@@ -30,6 +30,11 @@ parts:
     expected: validation/ui_business_workflows/part_14_anomalies/expected.yaml
     result_summary: validation/ui_business_workflows/part_14_anomalies/result_summary.md
     status: NOT_RUN
-blocked_scenarios:
-  - scenario_id: GDATA-REACT-ADMIN-DATA-BROWSER-QUERY
-    reason: Data Browser Part identity decision is required
+  - part: '17'
+    path: validation/ui_business_workflows/part_17_data_browser
+    scenarios: [GDATA-REACT-ADMIN-DATA-BROWSER-QUERY]
+    checklist: validation/ui_business_workflows/part_17_data_browser/checklist.md
+    expected: validation/ui_business_workflows/part_17_data_browser/expected.yaml
+    result_summary: validation/ui_business_workflows/part_17_data_browser/result_summary.md
+    status: NOT_RUN
+blocked_scenarios: []

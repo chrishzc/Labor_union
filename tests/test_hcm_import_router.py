@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 from api.dependencies.admin_auth import require_admin
 from api.dependencies.hcm_import import get_hcm_workbook_import_service
 from api.routes.hcm_import import router
+from shared_kernel.clock import TAIPEI_TIME_ZONE
 from subsystems.case_import.hcm_workbook_import import HcmWorkbookConflict, HcmWorkbookPreview, HcmWorkbookReceipt, HcmWorkbookResultPage, HcmWorkbookResultRecord
 
 
@@ -44,7 +45,8 @@ class _Service:
         assert limit == 20
         assert before_receipt_id is None
         receipt = HcmWorkbookReceipt("0" * 64, 1, 1, 0, 0, 0, 0, False)
-        return HcmWorkbookResultPage((HcmWorkbookResultRecord(7, datetime(2026, 8, 17, 12, 0), receipt),), None)
+        completed_at = datetime(2026, 8, 17, 12, 0, tzinfo=TAIPEI_TIME_ZONE)
+        return HcmWorkbookResultPage((HcmWorkbookResultRecord(7, completed_at, receipt),), None)
 
 
 def _client(service: _Service) -> TestClient:
@@ -125,5 +127,6 @@ def test_recent_results_is_authenticated_typed_get_and_marks_legacy_unavailable(
 
     assert response.status_code == 200
     assert response.json()["data"]["items"][0]["receipt_id"] == 7
+    assert response.json()["data"]["items"][0]["completed_at"].endswith("+08:00")
     assert response.json()["data"]["items"][0]["legacy_summary_only"] is True
     assert response.json()["data"]["items"][0]["row_outcomes"] == []

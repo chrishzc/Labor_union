@@ -102,6 +102,53 @@
   font-size: 0.85rem;
 }
 
+.waiting-lock-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1 1 520px;
+  justify-content: flex-end;
+}
+
+.waiting-lock-control small,
+.waiting-lock-preview {
+  flex-basis: 100%;
+  text-align: right;
+}
+
+.waiting-lock-preview {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.schedule-precision-workspace {
+  margin-bottom: 18px;
+}
+
+.schedule-precision-form,
+.schedule-precision-result {
+  display: flex;
+  align-items: end;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.schedule-precision-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary, #475569);
+  font-size: 13px;
+}
+
+.schedule-precision-result {
+  margin-top: 14px;
+  padding: 14px;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
 /* Top Matrix Header Bar (Month + Search + Filter Pills) */
 .gantt-matrix-header-bar {
   display: flex;
@@ -210,6 +257,29 @@
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+}
+
+.scheduling-load-more {
+  margin: 0 0 12px;
+  padding: 7px 14px;
+  border: 1px solid #e8b8a9;
+  border-radius: 8px;
+  background: #fffaf7;
+  color: #9a3412;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.scheduling-load-more:hover:not(:disabled) {
+  background: #fff1eb;
+  border-color: #ff9f7c;
+}
+
+.scheduling-load-more:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 .gantt-pill {
@@ -1070,4 +1140,51 @@
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
+}
+
+.leave-inbox-toolbar,
+.leave-inbox-review,
+.leave-inbox-review > div {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.leave-inbox-toolbar label,
+.leave-inbox-review label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-secondary, #475569);
+  font-size: 13px;
+}
+
+.leave-inbox-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.leave-inbox-card {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px;
+  border: 1px solid var(--border-color, #dbe3ee);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.leave-inbox-card p { margin: 6px 0; }
+
+.leave-inbox-empty {
+  margin-top: 16px;
+  padding: 20px;
+  border: 1px dashed var(--border-color, #cbd5e1);
+  border-radius: 12px;
+  color: var(--text-secondary, #64748b);
+}
+
+@media (max-width: 760px) {
+  .leave-inbox-card { flex-direction: column; }
 }

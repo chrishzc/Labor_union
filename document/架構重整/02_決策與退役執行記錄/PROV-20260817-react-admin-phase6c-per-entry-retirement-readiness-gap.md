@@ -14,12 +14,16 @@ source_template: PROV-20260817-react-admin-phase6c-per-entry-retirement-template
 
 `READY 0 / GAP 10`。本文件是active retirement backlog，不授權刪除或建立可執行retirement WP。
 
-共同缺口：Phase5A registry/rollback、Phase5B dual-run、Phase5 navigation switch production successor與逐entry
-switch/observation receipts、Phase6B-HOST、Phase6B-RUN、
-Phase6A PASS、逐entry真browser/forward-data/observation receipts均尚未閉合。Current queue仍漏Data Import與全部
-React identities，且不存在approved production artifact／previous artifact。
-Phase6A requirements與source inventory也尚無獨立producer/revision receipts；HOST/RUN尚無machine-readable
-release approval receipts，故validator即使安裝成功也只能是`VALIDATOR_INSTALLED_NOT_READY`。
+共同缺口已有部分基礎完成但仍不足以啟動退役：Phase5A inventory／rollback及Phase5B Windows dual-run已PASS，
+Phase6B-HOST亦已完成；current entrypoint queue為568筆，但readiness aggregate尚未重新產生。尚未閉合的是Phase5 production switch
+successor與逐entryswitch／closed observation receipts、Phase6B-RUN release、Phase6A
+`PHASE6_READY_FOR_ENTRY_RETIREMENT`、逐entry真browser／forward-data／rollback retention與deletion authority。
+
+current registry有15個React identities與12筆rollback mapping，12-entry file-backed static control plane已安裝；
+`#system-status`的durable runtime state仍未provision。Queue仍有37筆`review_required`，structural discovery exact
+不等於semantic one-entry review完成。HOST已有artifact evidence，但RUN及
+per-entry production switch／observation release receipts不存在，因此validator仍只能是
+`VALIDATOR_INSTALLED_NOT_READY`／`PHASE6_NOT_READY`。
 
 ## Per-entry backlog
 
@@ -32,7 +36,7 @@ release approval receipts，故validator即使安裝成功也只能是`VALIDATOR
 | `ui:05_form_management.py` | none approved | BLOCKED | dedicated identity、five-owner split、template/document/PII public contract | 不得建立WP |
 | `ui:06_finance_alerts.py` | `ui-react:#anomalies` | PARTIAL | detail/recovery/claim/resolve/warning transition、disposable closed-loop、rollback | `PROV-20260817-react-admin-phase6c-retire-anomalies` |
 | `ui:07_line_management.py` | `ui-react:#line-management` | PARTIAL | Delivery/Knowledge/rules/menu mutations、controlled identities/provider boundary、six-tab parity | `PROV-20260817-react-admin-phase6c-retire-line-management` |
-| `ui:08_system_status.py` | proposed `ui-react:#system-status` | PARTIAL | identity amendment、dedicated page、artifact health、rollback | `PROV-20260817-react-admin-phase6c-retire-system-status` |
+| `ui:08_system_status.py` | `ui-react:#system-status` | PARTIAL | identity／dedicated page／rollback mapping與12-entry static control plane已安裝；仍缺durable runtime provision、production switch／observation與retention | `PROV-20260817-react-admin-phase6c-retire-system-status` |
 | `ui:09_access_management.py` | `ui-react:#account-management` | BLOCKED | Account public contract/root auth/typed receipts、secret removal、true TOTP browser | `PROV-20260817-react-admin-phase6c-retire-access-management` |
 | `ui:09_data_import.py` | `ui-react:#data-import` | BLOCKED | queue identity、six families、archive/atomicity/job outcome/warnings/replay/forward-data | `PROV-20260817-react-admin-phase6c-retire-data-import` |
 
@@ -54,6 +58,26 @@ mutation forward-data（如適用）與path-level caller manifest全部PASS後�
 G7B隔離candidate removal及G8正式移除後回歸；Form Management另須先有approved successor identity與owner。
 
 任何模型不得從本表自動產生刪除命令、修改queue為removed、配canonical ordinal或批次推進下一entry。
+
+## Option A首筆候選：System Status preflight
+
+本節只是non-authorizing checklist，不是retirement Work Package，也不含刪除命令。目前狀態：
+
+| Required input | Current state | Disposition |
+|---|---|---|
+| React identity／dedicated page／rollback mapping | PASS（static installed） | 保留current evidence；不冒充target switch |
+| 第12筆file-backed control-plane target | PASS（static installed） | `PROV-20260821-react-admin-system-status-control-plane-target-successor`已完成；不冒充runtime provision或switch |
+| Durable 12-entry runtime state | NOT_RUN | provisioning tooling已完成，但deployment-owned state、lock、backup／restore drill與launcher readback尚未執行 |
+| API compatibility／manifest identity | PARTIAL | Option C static focused 51 PASS；G6 runtime attestation與G7 React final gate仍NOT_RUN |
+| Phase6B-RUN release | BLOCKED | 需HOST/local與private attestation一致、queue/state before-after不變 |
+| Production same-origin single-entry switch | NOT_RUN | 必須另有exact switch successor與CAS receipt；本gap不授權 |
+| Switch-back rehearsal／closed observation | NOT_RUN | 必須保留previous artifact與Streamlit exact rollback URL |
+| Retention `expired_approved` | NOT_RUN | observation closed_success後才可開始；須BusinessClock與release-owner approval |
+| G7A candidate removal authority | NOT_RUN | 需exact path/caller/test/source digest/restore provenance；只產authority不刪除 |
+| G7B～G9 removal／regression／release | NOT_RUN | 只能在隔離candidate PASS後串行執行；失敗不得改正式source或queue |
+
+在上述全部前置完成前，不建立`PROV-20260817-react-admin-phase6c-retire-system-status`實體檔案；只保留其
+future provisional identity。這符合已核准Option A「READY 0時禁止啟動第一包」及exactly-one-candidate規則。
 
 ## DB gate
 

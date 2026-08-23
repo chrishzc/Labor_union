@@ -5,9 +5,9 @@ identity: PROV-20260817-react-admin-phase4a-finance-import-public-contract-harde
 date: 2026-08-17
 owner: Finance Import
 domain: Finance Import
-activation_state: durable-caller-and-fixture-prerequisites-completed-broader-fi-h-open
+activation_state: blocked-prerequisites
 durable_job_caller_adoption_state: completed-local-validated-2026-08-22
-fixture_authority_state: completed-deidentified-disposable-evidence-2026-08-22
+fixture_authority_state: blocked-test-data-authority
 authority: exact-human-approved-blocked-prerequisites
 approval_required: 核准此 exact Phase 4A-FI-H Work Package
 approved_at: 2026-08-21
@@ -15,7 +15,7 @@ base_branch: main
 base_head: f9240b9e3abbcf665b5c979e0973f675197d8494
 dirty_baseline: integration-owner-must-capture-before-writer; required-before-writer; preserve-all-user-work
 base_drift_rule: any relevant path drift requires fresh read and re-freeze before edits
-prerequisites: PROV-20260817-react-admin-phase4-scenario-lineage-governance completed with PHASE4_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-durable-job-core-persistence-worker-contract PASS; PROV-20260817-durable-job-caller-integration-bridge PASS
+prerequisites: PROV-20260817-react-admin-phase4-scenario-lineage-governance completed with PHASE4_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-durable-job-core-persistence-worker-contract PASS; PROV-20260817-durable-job-caller-integration-bridge proposed / approval-ready-refrozen
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
 scenario_lineage: ../03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3-6-planning/phase4-scenario-lineage-matrix.md
 ui_execution_mode: not-applicable
@@ -33,7 +33,7 @@ conflict與outer UoW adoption，並收斂Finance bounded public contract。Job a
 本包已於2026-08-21取得exact human approval；目前狀態為`approved / blocked-prerequisites`，不得立即啟動writer。Current hard
 prerequisites中Phase4 Scenario Lineage已輸出`PHASE4_SCENARIO_LINEAGE_METADATA_READY`，Durable Job Core
 Persistence/Worker已`completed-local-validated`，Global FastAPI Typed Error Boundary已`completed`；Durable Job Caller
-Integration Bridge仍為`proposed / approval-ready-refrozen`。Bridge完成，且Finance XLSX fixture authority與disposable evidence成立後，Integration Owner才可重新
+Integration Bridge仍為`proposed / approval-ready-refrozen`。Bridge取得 exact approval 並完成，且Finance XLSX fixture authority與disposable evidence成立後，Integration Owner才可重新
 捕捉dirty/collision並把activation改為active。
 
 人工核准同時重申writer activation必須具備以下四項fresh evidence，任一缺失即維持blocked：

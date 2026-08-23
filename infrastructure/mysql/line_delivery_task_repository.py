@@ -1,4 +1,7 @@
-"""MySQL adapter for canonical LINE delivery task enqueue, lease, and attempts."""
+"""
+File: line_delivery_task_repository.py
+Description: 實作 LINE Delivery 任務的 MySQL 讀寫、租約、重試與查詢資料形狀驗證。
+"""
 
 from __future__ import annotations
 
@@ -28,6 +31,7 @@ from infrastructure.mysql.line_repository_support import (
     recipient,
 )
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from shared_kernel.validation import require_canonical_text
 from subsystems.line.delivery_contracts import (
     CancelLineDeliveryTaskCommand,
     ClaimLineDeliveryTasksQuery,
@@ -220,6 +224,49 @@ class MySqlLineDeliveryTaskRepository:
             cursor.execute(_CANCEL_RECIPIENT_SQL, (line_user_id.value,))
             return int(cursor.rowcount)
 
+    def cancel_pending_for_notification_rule(
+        self,
+        task_ids: tuple[LineDeliveryTaskId, ...],
+        *,
+        reason: str,
+    ) -> tuple[LineDeliveryTaskId, ...]:
+        """Cancel only the task IDs handed off by the notification-intent owner."""
+        require_canonical_text(reason, "LINE notification task cancellation reason", 191)
+        if not isinstance(task_ids, tuple) or any(
+            not isinstance(task_id, LineDeliveryTaskId) for task_id in task_ids
+        ):
+            raise TypeError("LINE notification task IDs must be typed")
+        normalized = tuple(
+            sorted(
+                {task_id for task_id in task_ids},
+                key=lambda task_id: task_id.value,
+            )
+        )
+        if normalized != task_ids:
+            raise ValueError("LINE notification task IDs must be sorted and unique")
+        if not normalized:
+            return ()
+        placeholders = ",".join("%s" for _ in normalized)
+        values = tuple(task_id.value for task_id in normalized)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                _LOCK_NOTIFICATION_RULE_TASKS_SQL.format(placeholders=placeholders),
+                values,
+            )
+            rows = tuple(cursor.fetchall() or ())
+            if len(rows) != len(normalized) or any(
+                not _valid_notification_task_cancellation_row(row, task_id)
+                for row, task_id in zip(rows, normalized)
+            ):
+                raise RuntimeError("line_notification_delivery_task_cancellation_conflict")
+            cursor.execute(
+                _CANCEL_NOTIFICATION_RULE_TASKS_SQL.format(placeholders=placeholders),
+                (reason, *values),
+            )
+            if int(cursor.rowcount) != len(normalized):
+                raise RuntimeError("line_notification_delivery_task_cancellation_conflict")
+        return normalized
+
     def list_admin(self, query: LineDeliveryAdminQuery) -> LineDeliveryAdminPage:
         clauses: list[str] = []
         parameters: list[object] = []
@@ -230,9 +277,16 @@ class MySqlLineDeliveryTaskRepository:
                 + ")"
             )
             parameters.extend(item.value for item in query.statuses)
+        source_types = query.source_aggregate_types
         if query.source_aggregate_type is not None:
-            clauses.append("source_aggregate_type=%s")
-            parameters.append(query.source_aggregate_type)
+            source_types = (query.source_aggregate_type,)
+        if source_types:
+            clauses.append(
+                "source_aggregate_type IN ("
+                + ",".join("%s" for _ in source_types)
+                + ")"
+            )
+            parameters.extend(source_types)
         if query.recipient_identity is not None:
             clauses.append("recipient_identity=%s")
             parameters.append(query.recipient_identity)
@@ -480,6 +534,7 @@ def _is_expired_invitation(row: dict[str, object], now) -> bool:
 def _admin_record(row: object) -> LineDeliveryAdminRecord:
     if not isinstance(row, dict):
         row = dict(row)
+    _require_row_shape(row, _ADMIN_ROW_KEYS)
     payload = canonical_json_value(row["payload_snapshot"])
     if str(row["source_aggregate_type"]) == "line_order_group_invitation":
         payload = _redact_invitation_payload(payload)
@@ -509,6 +564,7 @@ def _admin_record(row: object) -> LineDeliveryAdminRecord:
 def _attempt_record(row: object) -> LineDeliveryAttemptRecord:
     if not isinstance(row, dict):
         row = dict(row)
+    _require_row_shape(row, _ATTEMPT_ROW_KEYS)
     return LineDeliveryAttemptRecord(
         int(row["attempt_number"]),
         str(row["outcome"]),
@@ -525,6 +581,26 @@ def _attempt_record(row: object) -> LineDeliveryAttemptRecord:
 
 def _optional_utc(value: object):
     return None if value is None else aware_utc(value)
+
+
+def _require_row_shape(row: dict[str, object], expected: frozenset[str]) -> None:
+    if frozenset(row) != expected:
+        raise ValueError("LINE delivery admin result shape is invalid")
+
+
+def _valid_notification_task_cancellation_row(
+    row: object,
+    task_id: LineDeliveryTaskId,
+) -> bool:
+    return (
+        isinstance(row, dict)
+        and frozenset(row) == {"id", "processing_status"}
+        and isinstance(row["id"], int)
+        and not isinstance(row["id"], bool)
+        and row["id"] == task_id.value
+        and isinstance(row["processing_status"], str)
+        and row["processing_status"] in {"pending", "retryable_failed", "processing"}
+    )
 
 
 def _redact_invitation_payload(payload_json: str) -> str:
@@ -550,10 +626,25 @@ _SELECT_COLUMNS = (
     "completed_attempts,max_attempts,next_attempt_at_utc,lease_owner,"
     "lease_acquired_at_utc,lease_expires_at_utc"
 )
+# Keep the admin query projection separate from the worker/task projection.
+# The latter contains fingerprints, idempotency, correlation, and lease state
+# that are not part of the typed admin record and must not cross this boundary.
 _ADMIN_COLUMNS = (
-    _SELECT_COLUMNS
-    + ",provider_message_id,error_code,error_message,sent_at_utc,failed_at_utc,"
-    "created_at_utc,updated_at_utc"
+    "id,recipient_type,recipient_identity,message_kind,payload_snapshot,"
+    "processing_status,scheduled_at_utc,source_aggregate_type,"
+    "source_aggregate_identity,completed_attempts,max_attempts,"
+    "next_attempt_at_utc,provider_message_id,error_code,error_message,"
+    "sent_at_utc,failed_at_utc,created_at_utc,updated_at_utc"
+)
+_ADMIN_ROW_KEYS = frozenset(
+    {
+        "id", "recipient_type", "recipient_identity", "message_kind",
+        "payload_snapshot", "processing_status", "scheduled_at_utc",
+        "source_aggregate_type", "source_aggregate_identity", "completed_attempts",
+        "max_attempts", "next_attempt_at_utc", "provider_message_id", "error_code",
+        "error_message", "sent_at_utc", "failed_at_utc", "created_at_utc",
+        "updated_at_utc",
+    }
 )
 _INSERT_SQL = (
     "INSERT INTO line_delivery_tasks (recipient_type,recipient_identity,"
@@ -624,11 +715,29 @@ _CANCEL_RECIPIENT_SQL = (
     "lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL WHERE recipient_type='user' "
     "AND recipient_identity=%s AND processing_status IN ('pending','retryable_failed')"
 )
+_LOCK_NOTIFICATION_RULE_TASKS_SQL = (
+    "SELECT id,processing_status FROM line_delivery_tasks "
+    "WHERE id IN ({placeholders}) ORDER BY id FOR UPDATE"
+)
+_CANCEL_NOTIFICATION_RULE_TASKS_SQL = (
+    "UPDATE line_delivery_tasks SET processing_status='cancelled',"
+    "error_code=%s,error_message='notification rule disabled or removed',"
+    "lease_owner=NULL,lease_acquired_at_utc=NULL,lease_expires_at_utc=NULL "
+    "WHERE id IN ({placeholders}) AND processing_status IN "
+    "('pending','retryable_failed','processing')"
+)
 _ADMIN_ATTEMPTS_SQL = (
     "SELECT attempt_number,outcome,provider_outcome_type,provider_message_id,"
     "error_code,error_message,retry_after_seconds,started_at_utc,completed_at_utc,"
     "correlation_id FROM line_delivery_attempt_events WHERE task_id=%s "
     "ORDER BY attempt_number DESC"
+)
+_ATTEMPT_ROW_KEYS = frozenset(
+    {
+        "attempt_number", "outcome", "provider_outcome_type", "provider_message_id",
+        "error_code", "error_message", "retry_after_seconds", "started_at_utc",
+        "completed_at_utc", "correlation_id",
+    }
 )
 _SUMMARY_COUNT_KEYS = (
     "total",

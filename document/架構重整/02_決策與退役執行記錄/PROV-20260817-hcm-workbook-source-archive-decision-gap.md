@@ -1,14 +1,24 @@
 ---
 doc_type: gap-package
-declared_status: proposed
+declared_status: superseded
 identity: PROV-20260817-hcm-workbook-source-archive-decision-gap
 date: 2026-08-17
 owner: Case Import / Privacy / Operations
 domain: Case Import
 source_gap: PROV-20260816-react-admin-phase4a-hcm-backend-transaction-receipt-gap
+successor: PROV-20260817-case-import-workbook-policy-decision
 ---
 
 # HCM workbook source archive 決策缺口
+
+## Resolution（2026-08-23）
+
+人工已在combined successor exact採用Option A：HCM Current原始workbook為Apply必要archive，採content digest
+immutable identity、受控operator讀取、archive-first／0-write failure、DB rollback compensating delete與
+delete-failure operational anomaly。retention期間、encryption及production provider仍是deployment target
+configuration gate，不由developer-local adapter決定。
+
+本gap因此`superseded`；此resolution不授權backend、storage provider、schema／DB或React Apply。
 
 ## 0. 需要人工決定的原因
 

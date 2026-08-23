@@ -1,13 +1,72 @@
-"""Typed HTTP views for Scheduling leave/substitution Preview and Apply."""
+"""
+File: leave_substitution.py
+Description: 定義Scheduling請假代班assignment query、command、Preview與receipt嚴格HTTP契約。
+"""
 
 from __future__ import annotations
 
 from datetime import date
-from typing import Any
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from api.schemas.assignment_plan import AssignmentPlanSegmentView
+from domains.scheduling.leave_substitution import (
+    LeaveResolutionType,
+    LeaveSubstitutionBatchIntent,
+    LeaveSubstitutionItem,
+)
+
+
+class LeaveSubstitutionItemInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    original_schedule_id: int = Field(gt=0)
+    work_date: date
+    resolution_type: LeaveResolutionType
+    substitute_staff_id: int | None = Field(default=None, gt=0)
+    is_double_pay: bool = False
+
+    def to_domain(self) -> LeaveSubstitutionItem:
+        return LeaveSubstitutionItem(
+            self.original_schedule_id,
+            self.work_date,
+            self.resolution_type,
+            self.substitute_staff_id,
+            self.is_double_pay,
+        )
+
+
+class LeaveSubstitutionPreviewBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    original_assignment_id: int = Field(gt=0)
+    items: tuple[LeaveSubstitutionItemInput, ...] = ()
+    leave_request_id: int | None = Field(default=None, gt=0)
+    expected_leave_request_version: int | None = Field(default=None, ge=1)
+
+    @model_validator(mode="after")
+    def require_complete_linked_request_identity(self):
+        if (self.leave_request_id is None) != (
+            self.expected_leave_request_version is None
+        ):
+            raise ValueError("leave_request_identity_pair_required")
+        return self
+
+    def to_intent(self) -> LeaveSubstitutionBatchIntent:
+        return LeaveSubstitutionBatchIntent(
+            self.original_assignment_id,
+            tuple(item.to_domain() for item in self.items),
+        )
+
+
+class LeaveSubstitutionApplyBody(LeaveSubstitutionPreviewBody):
+    expected_order_version: int = Field(ge=0)
+    expected_scheduling_version: int = Field(ge=0)
+    expected_client_finance_version: int = Field(ge=0)
+    expected_payroll_version: int = Field(ge=0)
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class LeaveSubstitutionOutcomeView(BaseModel):
@@ -62,12 +121,40 @@ class LeaveApplyReadinessView(BaseModel):
     blockers: list[str]
 
 
+class LeaveOfficialScheduleSummaryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schedule_id: int = Field(gt=0)
+    work_date: date
+
+
 class LeaveAssignmentSummaryView(BaseModel):
     model_config = ConfigDict(extra="forbid")
     assignment_id: int = Field(gt=0)
     staff_id: int = Field(gt=0)
     assigned_start_date: date
     assigned_end_date: date
+    official_schedules: list[LeaveOfficialScheduleSummaryView]
+
+
+class LeaveImpactSummaryView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_version: int = Field(ge=0)
+    resulting_version: int = Field(ge=0)
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    blockers: list[str]
+
+
+class LinkedLeaveRequestView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: int = Field(gt=0)
+    expected_version: int = Field(ge=1)
+    resolved_version: int | None = Field(default=None, ge=1)
+    status: Literal["accepted_for_processing", "resolved"]
+    receipt_key: str | None
+    notification_intent: Literal["not_requested", "enqueued"]
 
 
 class LeaveSubstitutionPreviewView(BaseModel):
@@ -82,11 +169,12 @@ class LeaveSubstitutionPreviewView(BaseModel):
     cancelled_assignment_ids: list[int]
     assignments: list[AssignmentPlanSegmentView]
     outcomes: list[LeaveSubstitutionOutcomeView]
-    client_finance_impact: dict[str, Any]
-    payroll_impact: dict[str, Any]
-    orders_impact: dict[str, Any]
+    client_finance_impact: LeaveImpactSummaryView
+    payroll_impact: LeaveImpactSummaryView
+    orders_impact: LeaveImpactSummaryView
     calendar_candidate: LeaveCalendarCandidateView
     apply_readiness: LeaveApplyReadinessView
+    linked_request: LinkedLeaveRequestView | None
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -102,16 +190,4 @@ class LeaveSubstitutionReceiptView(BaseModel):
     payroll_version: int = Field(ge=0)
     outcome_event_ids: list[int]
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-
-
-class LeaveSubstitutionTypedErrorView(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    category: str
-    code: str
-    message: str
-    correlation_id: str
-    field_errors: list[dict[str, Any]] = Field(default_factory=list)
-    domain_blockers: list[str] = Field(default_factory=list)
-    retryable: bool = False
-    current_version: int | None = None
+    linked_request: LinkedLeaveRequestView | None

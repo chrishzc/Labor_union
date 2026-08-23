@@ -60,15 +60,25 @@ describe('Orders Drawer adapters', () => {
       actualStart: { ...realisticActualStart, current_actual_start_date: '2026-09-03' },
       calendarDetail: realisticOrderCalendarDetail,
       orderDetail: realisticOrderDetail,
+      precision: {
+        actual_start_date: '2026-09-03', actual_end_date: '2026-10-07',
+        target_service_days: 30, total_calendar_days: 35,
+        actual_work_days_count: 30, rest_days_count: 5,
+        national_holidays_found: [], total_estimated_salary: null,
+        weekly_stats: [], day_by_day: [],
+      },
     });
     expect(view.actualStartDate).toBe('2026-09-03');
     expect(view.serviceMode).toBe('週休1日');
+    expect(view.serviceRangeText).toBe('2026-09-03 ~ 2026-10-07');
+    expect(view.calculatedServiceDaysText).toBe('30 天（目標 30 天）');
+    expect(view.restDaysCountText).toBe('5 天');
     expect(view.bufferDateRange).toContain(ORDERS_TYPED_PROJECTION_UNAVAILABLE);
     expect(view.customerConfirmed).toBeNull();
     expect(view.staffConfirmed).toBeNull();
   });
 
-  it('renders assignment-owned segments without manufacturing candidates or recommendations', () => {
+  it('renders assignment-owned segments and an explicit empty candidate pool', () => {
     const view = adaptMatchingWorkbenchDrawer({
       caseNo: realisticAssignmentPlan.case_no,
       assignmentPlan: realisticAssignmentPlan,
@@ -76,11 +86,34 @@ describe('Orders Drawer adapters', () => {
     expect(view.assignmentSegments).toHaveLength(1);
     expect(view.assignmentSegments[0]).toMatchObject({ staffId: 88, sequence: 1 });
     expect(view.candidatePool).toEqual([]);
-    expect(view.customerDecision).toBeNull();
-    expect(view.candidatePoolUnavailable).toContain(ORDERS_TYPED_PROJECTION_UNAVAILABLE);
+    expect(view.status).toBe('無進行中方案');
+    expect(view.waitingLockAcquired).toBe(false);
+    expect(view.serviceTimeText).toContain(ORDERS_TYPED_PROJECTION_UNAVAILABLE);
   });
 
-  it('uses typed terms and completion while contract signing remains unavailable', () => {
+  it('does not expose replacement-question-mark corruption as a candidate reason', () => {
+    const view = adaptMatchingWorkbenchDrawer({
+      caseNo: '115000015',
+      candidateContactPool: {
+        pool_id: 1,
+        case_no: '115000015',
+        candidates: [{
+          id: 2,
+          staff_id: 531,
+          staff_name: '驗收月嫂',
+          service_start_date: '2026-09-01',
+          service_end_date: '2026-09-30',
+          status: 'active',
+          information: {},
+          willingness: 'willing',
+          reason: '??????',
+        }],
+      } as never,
+    });
+    expect(view.candidatePool[0].reason).toBe('原因文字無法辨識');
+  });
+
+  it('uses typed terms and completion while no signing record is present', () => {
     const summary = adaptOrderSummaryItem(mockSummaryItems[0]);
     const view = adaptOrderTermsContractDrawer({
       caseNo: summary.id,
@@ -93,9 +126,10 @@ describe('Orders Drawer adapters', () => {
     expect(view.requiresCookingText).toBe('是');
     expect(view.depositSettled).toBe(false);
     expect(view.depositSettledText).toBe('⏳ 待核銷');
-    expect(view.staffContractSigned).toBeNull();
-    expect(view.clientContractSigned).toBeNull();
-    expect(view.staffContractSignedText).toContain(ORDERS_TYPED_PROJECTION_UNAVAILABLE);
+    expect(view.staffContractSigned).toBe(false);
+    expect(view.clientContractSigned).toBe(false);
+    expect(view.staffContractSignedText).toBe('尚無月嫂契約分段');
+    expect(view.clientContractSignedText).toBe('尚未寄送客戶契約');
   });
 
   it('keeps the cancellation Drawer visible without calculating a refund', () => {

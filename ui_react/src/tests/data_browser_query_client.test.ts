@@ -1,6 +1,6 @@
 /**
  * File: data_browser_query_client.test.ts
- * Description: 驗證 Data Browser client 的 GET、strict decode 與 auth。
+ * Description: 驗證 Data Browser client 的 GET、exact-key coalescing、strict decode 與 auth。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -55,5 +55,56 @@ describe('Data Browser query client', () => {
     sessionClient.clearSession();
     await expect(queryDataBrowserSource({ sourceId: 'orders' })).rejects.toMatchObject({ code: 'unauthenticated' });
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces only the same no-signal in-flight GET', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => VALID_DATA_BROWSER_ENVELOPE,
+    });
+
+    await Promise.all([
+      queryDataBrowserSource({ sourceId: 'orders', limit: 25 }),
+      queryDataBrowserSource({ limit: 25, sourceId: 'orders' }),
+    ]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+
+    await Promise.all([
+      queryDataBrowserSource({ sourceId: 'orders', limit: 25, query: 'A' }),
+      queryDataBrowserSource({ sourceId: 'orders', limit: 25, query: 'B' }),
+    ]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it('does not coalesce caller-owned AbortSignal requests', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: async () => VALID_DATA_BROWSER_ENVELOPE,
+    });
+    const first = new AbortController();
+    const second = new AbortController();
+    await Promise.all([
+      queryDataBrowserSource({ sourceId: 'orders' }, { signal: first.signal }),
+      queryDataBrowserSource({ sourceId: 'orders' }, { signal: second.signal }),
+    ]);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('maps malformed runtime source and cursor inputs to typed invalid errors before fetch', async () => {
+    globalThis.fetch = vi.fn();
+
+    const invalidSource = Reflect.apply(queryDataBrowserSource, undefined, [{ sourceId: 'unknown' }]);
+    await expect(invalidSource).rejects.toMatchObject({ code: 'invalid', status: 422 });
+
+    const invalidCursor = Reflect.apply(queryDataBrowserSource, undefined, [{
+      sourceId: 'orders',
+      after: 123,
+    }]);
+    await expect(invalidCursor).rejects.toMatchObject({ code: 'invalid', status: 422 });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 /**
  * File: DataImportPage.css
- * Description: 定義 HCM 匯入結果、新增訂單、問題檢查與其他family鎖定卡片的可存取工作台樣式。
+ * Description: 定義四類工作簿Preview／Apply、receipt與狀態說明的可存取工作台樣式。
  */
 .import-cards-grid {
   display: grid;
@@ -142,6 +142,7 @@
 .import-row-unavailable p,
 .import-apply-locked p { margin: 6px 0 0; }
 .import-apply-locked { border-color: #fdba74; background: #fff7ed; color: #9a3412; }
+.import-control-guidance { margin: 8px 0 0; color: #475569; font-size: 0.82rem; line-height: 1.45; }
 
 @media (max-width: 760px) {
   .import-preview-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }

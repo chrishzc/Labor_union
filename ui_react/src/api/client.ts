@@ -1,9 +1,6 @@
-/**
- * Typed API Client for Lobar Union Backend (FastAPI)
- * Handles REST HTTP communication, Preview (zero-write), and Apply (fresh-validate)
- */
+/** Phase 5B: React browser calls stay relative so Vite owns the local API proxy. */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
+const API_BASE_URL = '/api';
 
 export interface ApiResponse<T> {
   success: boolean;
@@ -34,7 +31,7 @@ export async function requestPreview(categoryId: string, file: File): Promise<Ap
     const formData = new FormData();
     formData.append('file', file);
 
-    const response = await fetch(`${API_BASE_URL}/api/v1/imports/${categoryId}/preview`, {
+    const response = await fetch(`${API_BASE_URL}/v1/imports/${categoryId}/preview`, {
       method: 'POST',
       body: formData,
     });
@@ -57,7 +54,7 @@ export async function requestPreview(categoryId: string, file: File): Promise<Ap
 
 export async function requestApply(categoryId: string, commandKey: string): Promise<ApiResponse<ApplyResult>> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/v1/imports/${categoryId}/apply`, {
+    const response = await fetch(`${API_BASE_URL}/v1/imports/${categoryId}/apply`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

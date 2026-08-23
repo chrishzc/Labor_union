@@ -1,0 +1,165 @@
+{
+  "contract": "local-additive-qualification/v1",
+  "work_package": "PROV-20260820-local-database-fast-additive-update",
+  "release_id": "labor-union-line-rich-menu-publication-step-saga-2026-08-20-v1",
+  "release_fingerprint": "e20a22532b446a78471785882b1a45f5789bb38c971a7a5194d4075cdc2656c0",
+  "published_manifest_sha256": "481b72b9f8bcb8922464e55549a6278abe46ddfb445d96cb5ed43142f281fbff",
+  "manifest_artifact_inventory": [
+    {
+      "name": "1001_line_rich_menu_publication_step_saga.sql",
+      "sha256": "a9366cacdb65ad41d26153bd288b2503b8306be55faa8252d2f162e453f4ff47",
+      "data_effect": "schema_only",
+      "dependencies": []
+    }
+  ],
+  "artifact": {
+    "name": "1001_line_rich_menu_publication_step_saga.sql",
+    "sql_sha256": "a9366cacdb65ad41d26153bd288b2503b8306be55faa8252d2f162e453f4ff47",
+    "descriptor_sha256": "8b407a46a860033062955afd0e2d9e5db883bf906513f5ae5c5c9145c3cedeac",
+    "data_effect": "schema_only",
+    "dependencies": [],
+    "required_dependency_sql_sha256": {},
+    "dependency_contracts": {}
+  },
+  "local_prerequisites": [
+    {
+      "name": "156_line_publication_media_order_group.sql",
+      "relative_path": "db/schema_parts/156_line_publication_media_order_group.sql",
+      "sha256": "683f8f78bf3f3989ebf32850039b3611eb52aed2fde939c49a4c72f48ae06ca1",
+      "required_state": "exact",
+      "projection_sha256": "3e9833269e1af6bea6918f2f44f9b19f7e48006b4a5c07382696b3c54c1acd33",
+      "projection": {
+        "checks": {
+          "('line_rich_menu_publication_tasks', 'chk_line_rich_menu_definition')": "atom(json_type(definition_snapshot)='OBJECT')"
+        },
+        "foreign_keys": {},
+        "indexes": {
+          "('line_rich_menu_publication_tasks', 'PRIMARY')": {"columns": ["id"], "non_unique": 0},
+          "('line_rich_menu_publication_tasks', 'idx_line_rich_menu_definition')": {"columns": ["menu_definition_id", "configuration_revision", "id"], "non_unique": 1},
+          "('line_rich_menu_publication_tasks', 'idx_line_rich_menu_publication_due')": {"columns": ["publication_status", "next_attempt_at_utc", "id"], "non_unique": 1},
+          "('line_rich_menu_publication_tasks', 'uq_line_rich_menu_publication_idempotency')": {"columns": ["idempotency_key"], "non_unique": 0}
+        },
+        "parent_columns": {},
+        "tables": {
+          "line_rich_menu_publication_tasks": {
+            "attempt_count": {"column_default": "0", "column_type": "int unsigned", "extra": "", "is_nullable": "NO"},
+            "configuration_revision": {"column_default": null, "column_type": "bigint unsigned", "extra": "", "is_nullable": "NO"},
+            "correlation_id": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "NO"},
+            "created_at_utc": {"column_default": "current_timestamp(6)", "column_type": "datetime(6)", "extra": "default_generated", "is_nullable": "NO"},
+            "definition_snapshot": {"column_default": null, "column_type": "json", "extra": "", "is_nullable": "NO"},
+            "error_code": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "YES"},
+            "error_message": {"column_default": null, "column_type": "varchar(1000)", "extra": "", "is_nullable": "YES"},
+            "id": {"column_default": null, "column_type": "bigint unsigned", "extra": "auto_increment", "is_nullable": "NO"},
+            "idempotency_key": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "NO"},
+            "image_object_reference": {"column_default": null, "column_type": "varchar(500)", "extra": "", "is_nullable": "YES"},
+            "lease_expires_at_utc": {"column_default": null, "column_type": "datetime(6)", "extra": "", "is_nullable": "YES"},
+            "lease_owner": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "YES"},
+            "max_attempts": {"column_default": "3", "column_type": "int unsigned", "extra": "", "is_nullable": "NO"},
+            "menu_definition_id": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "NO"},
+            "next_attempt_at_utc": {"column_default": null, "column_type": "datetime(6)", "extra": "", "is_nullable": "YES"},
+            "operation": {"column_default": "publish", "column_type": "enum('publish','rollback','delete')", "extra": "", "is_nullable": "NO"},
+            "previous_provider_menu_id": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "YES"},
+            "provider_menu_id": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "YES"},
+            "publication_status": {"column_default": null, "column_type": "enum('draft','queued','publishing','published','publish_retryable_failed','failed','rollback_queued','delete_queued','rollback_retryable_failed','delete_retryable_failed','rolled_back','deleted')", "extra": "", "is_nullable": "NO"},
+            "requested_by_actor_id": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "NO"},
+            "updated_at_utc": {"column_default": "current_timestamp(6)", "column_type": "datetime(6)", "extra": "default_generated on update current_timestamp(6)", "is_nullable": "NO"}
+          }
+        },
+        "triggers": {}
+      }
+    },
+    {
+      "name": "159_line_messaging_publication_runtime.sql",
+      "relative_path": "db/schema_parts/159_line_messaging_publication_runtime.sql",
+      "sha256": "bb1a99410fa4b7474ad0d9f47f474a30aa4db0641496c2aa7265504740eca946",
+      "required_state": "exact",
+      "projection_sha256": "3c0cbeaa307e68302df24f62a3f57c4834c5f8daabc4162a3e930285be21048c",
+      "projection": {
+        "checks": {},
+        "foreign_keys": {
+          "('line_rich_menu_publication_step_receipts', 'fk_line_rich_menu_step_publication')": {
+            "columns": ["publication_id"], "delete_rule": "RESTRICT", "referenced_columns": ["id"],
+            "referenced_table": "line_rich_menu_publication_tasks", "update_rule": "RESTRICT"
+          }
+        },
+        "indexes": {
+          "('line_rich_menu_publication_step_receipts', 'PRIMARY')": {"columns": ["id"], "non_unique": 0},
+          "('line_rich_menu_publication_step_receipts', 'uq_line_rich_menu_step')": {"columns": ["publication_id", "step_name"], "non_unique": 0},
+          "('line_rich_menu_publication_step_receipts', 'uq_line_rich_menu_step_idempotency')": {"columns": ["idempotency_key"], "non_unique": 0}
+        },
+        "parent_columns": {
+          "line_domain_outbox": {
+            "error_message": {"column_default": null, "column_type": "varchar(1000)", "extra": "", "is_nullable": "YES"},
+            "max_attempts": {"column_default": "3", "column_type": "int unsigned", "extra": "", "is_nullable": "NO"}
+          }
+        },
+        "tables": {
+          "line_rich_menu_publication_step_receipts": {
+            "completed_at_utc": {"column_default": null, "column_type": "datetime(6)", "extra": "", "is_nullable": "NO"},
+            "created_at_utc": {"column_default": "current_timestamp(6)", "column_type": "datetime(6)", "extra": "default_generated", "is_nullable": "NO"},
+            "id": {"column_default": null, "column_type": "bigint unsigned", "extra": "auto_increment", "is_nullable": "NO"},
+            "idempotency_key": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "NO"},
+            "provider_menu_id": {"column_default": null, "column_type": "varchar(191)", "extra": "", "is_nullable": "YES"},
+            "publication_id": {"column_default": null, "column_type": "bigint unsigned", "extra": "", "is_nullable": "NO"},
+            "step_name": {"column_default": null, "column_type": "enum('create','upload','switch','cleanup')", "extra": "", "is_nullable": "NO"}
+          }
+        },
+        "triggers": {
+          "trg_line_rich_menu_step_receipts_before_delete": {"action_statement": "atom(signalsqlstate'45000'setmessage_text='line_rich_menu_publication_step_receipts records cannot be deleted')", "action_timing": "BEFORE", "event_manipulation": "DELETE", "event_object_table": "line_rich_menu_publication_step_receipts"},
+          "trg_line_rich_menu_step_receipts_before_update": {"action_statement": "atom(signalsqlstate'45000'setmessage_text='line_rich_menu_publication_step_receipts records cannot be updated')", "action_timing": "BEFORE", "event_manipulation": "UPDATE", "event_object_table": "line_rich_menu_publication_step_receipts"}
+        }
+      }
+    }
+  ],
+  "owned_object_counts": {"tables": 3, "indexes": 11, "foreign_keys": 3, "checks": 7, "triggers": 6},
+  "fresh_bootstrap": {
+    "status": "verified",
+    "verified_at_utc": "2026-08-20T13:40:22Z",
+    "mysql_version": "8.0",
+    "schema_fingerprint": "ffe07a629dec9015ce898097f36ac696468bf3efa53a391ec73b84f908b8a724",
+    "data_rows_written": 0,
+    "object_counts": {"tables": 3, "indexes": 11, "foreign_keys": 3, "checks": 7, "triggers": 6},
+    "engine_command_category": "fresh bootstrap + descriptor verify"
+  },
+  "preserve_data_candidate": {
+    "status": "verified",
+    "verified_at_utc": "2026-08-20T13:40:22Z",
+    "mysql_version": "8.0",
+    "source_schema_fingerprint": "9b1d39dc5681e00033e842f93b58c4e0e61e55c44443d6036419adb98be980aa",
+    "candidate_schema_fingerprint": "ffe07a629dec9015ce898097f36ac696468bf3efa53a391ec73b84f908b8a724",
+    "source_dump_sha256": "ab79a9632360e492dedc7f987ffb7a6ee265a2d95b86ffa8b812cdefdac1183d",
+    "candidate_dump_sha256": "660ce7eba1493668949171166bb2172ad3f52edb707fc944e0f87fb19fe0104a",
+    "legacy_receipt_preserved": true,
+    "data_row_counts": {"tasks": 0, "legacy_step_receipts": 0, "publications": 2},
+    "object_counts": {"tables": 3, "indexes": 11, "foreign_keys": 3, "checks": 7, "triggers": 6},
+    "engine_command_category": "preserve-data candidate + readback"
+  },
+  "metadata_backup": {
+    "status": "verified",
+    "server_uuid": "1029e96ce4d0",
+    "host": "127.0.0.1",
+    "port": 3306,
+    "database": "lu_test_dataset_contract_signing_v4",
+    "tool": "read-only metadata snapshot",
+    "schema_sha256": "9b1d39dc5681e00033e842f93b58c4e0e61e55c44443d6036419adb98be980aa",
+    "owned_object_snapshot": {"tables": 0, "indexes": 0, "foreign_keys": 0, "checks": 0, "triggers": 0},
+    "data_row_counts": {"line_rich_menu_publication_tasks": 0, "line_rich_menu_publication_step_receipts": 0, "line_rich_menu_publications": 2},
+    "data_fingerprints": {
+      "line_rich_menu_publication_step_receipts": "189664eff2f58edcdddb5be18734d631fb66cb26e30b14881e27c5cf7b83edfc",
+      "line_rich_menu_publication_tasks": "189664eff2f58edcdddb5be18734d631fb66cb26e30b14881e27c5cf7b83edfc",
+      "line_rich_menu_publications": "4e513e21abe4b66bb0c5b478ad6f6a44bc64e037d445cc25c9c0c8032e1be210"
+    },
+    "data_fingerprint_sha256": "3f3a478621f0966ba0b16816b96004f8de241d10bb270c09f6af43d77e812661",
+    "created_at_utc": "2026-08-20T13:40:22Z"
+  },
+  "engine_evidence": {"mysql_version": "8.0", "verified_at_utc": "2026-08-20T13:40:22Z", "commands_category": ["fresh bootstrap", "preserve-data candidate", "descriptor exactness", "read-only metadata"]},
+  "policy_evidence": {
+    "fresh_schema_fingerprint": "ffe07a629dec9015ce898097f36ac696468bf3efa53a391ec73b84f908b8a724",
+    "preserve_source_schema_fingerprint": "9b1d39dc5681e00033e842f93b58c4e0e61e55c44443d6036419adb98be980aa",
+    "preserve_candidate_schema_fingerprint": "ffe07a629dec9015ce898097f36ac696468bf3efa53a391ec73b84f908b8a724",
+    "source_dump_sha256": "ab79a9632360e492dedc7f987ffb7a6ee265a2d95b86ffa8b812cdefdac1183d",
+    "candidate_dump_sha256": "660ce7eba1493668949171166bb2172ad3f52edb707fc944e0f87fb19fe0104a"
+  },
+  "policy": {"local_in_place_eligible": true, "seed": 0, "backfill": 0, "destructive": 0, "target_prefix": "lu_test_"},
+  "payload_digest": "9aae81e725ab5b42886d2257d36fa67a324fac28357a9fd9cc13c9508a00121b"
+}

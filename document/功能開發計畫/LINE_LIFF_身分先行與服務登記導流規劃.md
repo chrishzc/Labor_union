@@ -37,5 +37,6 @@
 ---
 
 ## 五、 Eraser.io 流程圖對照
-- **圖表連結**：`https://app.eraser.io/workspace/bzK8Pm9tVCOFa5VHLeRu?diagram=0dXMFM1JaK-mi8Ayl_sB&layout=canvas`
-- **Diagram ID**：`0dXMFM1JaK-mi8Ayl_sB`
+- **圖表連結（current read-only audit）**：`https://app.eraser.io/workspace/87vWpXgxRJMD2prPgXgO?diagram=9vI_ssJZUHa59Yw7LXc0d&layout=canvas`
+- **Diagram ID**：`9vI_ssJZUHa59Yw7LXc0d`
+- **Last verified**：2026-08-21（Eraser MCP）；僅更新外部圖表 identity，不把圖中文字升格為正式規格或實作授權。舊 ID `1XwrLwQvzREt3gYfwac2` 與 `0dXMFM1JaK-mi8Ayl_sB` 僅供追溯。

@@ -1,12 +1,12 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-react-admin-phase3d-r-anomaly-detail-react
 date: 2026-08-17
 owner: Anomalies React Integration Owner
 domain: Anomalies
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase3d-anomalies-public-detail-hardening PASS
-approval_required: 核准此 exact Phase 3D-R Work Package
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase3d-anomalies-public-detail-hardening PASS
+approval_required: 已完成 exact Phase 3D-R scope 核准與 backend receipt 對照
 evidence_directory: document/架構重整/03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3d-r-anomaly-detail-react/
 required_receipts: candidate-change-inventory.md; contract-matrix-freeze-receipt.md; verification-receipt.md; browser-smoke-receipt.md; open-findings.md
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
@@ -52,4 +52,39 @@ G0 exact approval/backend receipt；G1 strict field/redaction matrix；G2 strict
 G4 lazy detail/abort/stale/error/close-switch tests；G5 zero non-GET/mock/alert/confirm；G6 full React build/lint/test、
 UTF-8/diff/PII；G7真FastAPI+Vite Network↔DOM。Happy DOM或HTTP 200不能替代G7。
 
-DB：Scope PASS，其餘NOT_RUN；`DB_CHANGE_NOT_READY`。
+DB：Scope與零變更inventory PASS，其餘NOT_RUN；`DB_CHANGE_NOT_READY`。
+
+## Completion
+
+本 Work Package 已完成 read-only Anomaly detail／recovery React query scope：detail GET、typed
+timeline／evidence／source bindings 與 recovery metadata 已接入既有 Drawer；Claim、Resolve、Warning
+transition 與 repair controls 維持 native disabled。Recovery GET 在真 FastAPI＋Vite smoke 回傳 404，UI
+依 typed unavailable 局部顯示，未將 recovery metadata 宣稱為已修復。
+
+## Final gate record
+
+| Gate | 狀態 | 最終證據／限制 |
+|---|---|---|
+| G0 exact scope／backend prerequisite | `PASS` | 3D-H backend receipt 與本包 exact write set 已對照。 |
+| G1 strict field／redaction matrix | `PASS` | detail／recovery closed typed schema、`anomaly-safe.v1` 與去敏欄位驗證。 |
+| G2 strict Zod negative cases | `PASS` | focused client／schema vectors；未知、額外、malformed payload fail closed。 |
+| G3 adapter zero derivation | `PASS` | adapter 僅轉 typed result，不由 UI 推導 business facts。 |
+| G4 lazy／abort／stale／error／close-switch | `PASS` | focused React flow evidence；legacy direct-affected tests另列 open finding。 |
+| G5 zero non-GET／mock／alert／confirm | `PASS` | focused no-fake-mutation evidence；Claim／Resolve 保持 disabled。 |
+| G6 React build | `PASS` | React build PASS；full React suite 與 lint 未在本包定稿。 |
+| G6 full suite／lint | `NOT_RUN` | 不宣稱 full suite 或 lint 完成。 |
+| G7 FastAPI＋Vite Network↔DOM | `PASS (partial)` | detail GET 200 與 DOM typed detail PASS；recovery GET 404 且以 unavailable 呈現，positive recovery browser 未證明。 |
+
+## DB gate record
+
+| Gate | 狀態 | 證據／限制 |
+|---|---|---|
+| Scope | `PASS` | 本包無 DB、schema、migration、seed、backfill 或 mutation。 |
+| Change inventory | `PASS` | schema-only、system-seed、business-row-backfill、destructive 均為 0。 |
+| Static release | `NOT_RUN` | 無 schema release。 |
+| Descriptor | `NOT_RUN` | 無 altered／owned DB object。 |
+| Read-only plan | `NOT_RUN` | 無 migration plan。 |
+| Engine verification | `NOT_RUN` | 無 DB engine operation。 |
+| Developer acceptance | `NOT_RUN` | 無 local DB replacement 或 developer DB mutation。 |
+
+結論：`DB_CHANGE_NOT_READY (0 DB change)`。

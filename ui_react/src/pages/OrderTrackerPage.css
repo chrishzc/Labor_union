@@ -1,6 +1,6 @@
 /**
  * File: OrderTrackerPage.css
- * Description: 定義七階 unavailable 槽位、待投影摘要卡與可存取的 SOP／LINE 抽屜樣式。
+ * Description: 定義七階槽位、SOP 狀態辨識與可存取的訂單／LINE 抽屜樣式。
  */
 .tracker-page-header {
   display: flex;
@@ -183,6 +183,36 @@
   line-height: 1.55;
 }
 
+.stage-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 24px 16px;
+  border: 1px dashed #e8d7d0;
+  border-radius: 12px;
+  background-color: #fffaf8;
+  text-align: center;
+}
+
+.stage-empty-icon {
+  font-size: 1.5rem;
+  margin-bottom: 2px;
+}
+
+.stage-empty-text {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #74593f;
+}
+
+.stage-empty-hint {
+  font-size: 0.78rem;
+  color: #a8948d;
+}
+
 .tracker-unclassified {
   margin-top: 28px;
 }
@@ -198,19 +228,21 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  padding: 16px;
-  border: 1px solid #d5aaa0;
-  border-radius: 12px;
-  background: #fffdfc;
+  padding: 18px;
+  border: 1px solid #dec0b6;
+  border-radius: 14px;
+  background: #ffffff;
   color: #1e1b19;
   text-align: left;
   cursor: pointer;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  box-shadow: 0 4px 14px rgba(74, 69, 67, 0.05);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .pipeline-order-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 6px 16px rgb(154 52 18 / 14%);
+  box-shadow: 0 8px 20px rgba(255, 127, 80, 0.14);
+  border-color: #ff7f50;
 }
 
 .card-top-row,
@@ -239,40 +271,64 @@
 
 .card-client-name {
   font-size: 1rem;
+  color: #1e1b19;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .card-amount-tag {
   color: #166534;
   font-weight: 800;
+  font-size: 0.92rem;
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.tracker-card-facts,
-.tracker-drawer-facts {
-  display: grid;
-  gap: 8px;
+.card-amount-tag.amount-pending {
+  color: #8b7169;
+  font-weight: 600;
+  font-size: 0.8rem;
+  background-color: #fff8f6;
+  padding: 2px 8px;
+  border-radius: 6px;
+  border: 1px solid #f2e2dc;
+}
+
+.tracker-card-facts {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   margin: 0;
+  padding: 10px 12px;
+  background-color: #fff8f6;
+  border: 1px solid #f5ece9;
+  border-radius: 10px;
 }
 
-.tracker-card-facts div,
-.tracker-drawer-facts div {
-  display: grid;
-  grid-template-columns: minmax(120px, 0.45fr) 1fr;
-  gap: 10px;
+.tracker-card-facts div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.82rem;
 }
 
-.tracker-card-facts dt,
-.tracker-drawer-facts dt {
-  color: #74593f;
+.tracker-card-facts dt {
+  color: #8b7169;
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: 650;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.tracker-card-facts dd,
-.tracker-drawer-facts dd {
+.tracker-card-facts dd {
   margin: 0;
   color: #292524;
   font-size: 0.82rem;
+  font-weight: 550;
+  text-align: right;
   overflow-wrap: anywhere;
 }
 
@@ -281,11 +337,18 @@
   flex-direction: column;
   gap: 4px;
   padding: 10px 12px;
-  border: 1px solid #d6d3d1;
-  border-radius: 8px;
-  background: #fafaf9;
-  color: #57534e;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  background-color: #fffbeb;
+  color: #92400e;
   font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.card-waiting-alert strong {
+  font-size: 0.78rem;
+  font-weight: 750;
+  color: #b45309;
 }
 
 .tracker-card-link {
@@ -301,29 +364,199 @@
   gap: 18px;
 }
 
-.tracker-summary-panel,
-.tracker-tab-panel {
-  padding: 16px;
+/* Stitch Nurture Core Drawer Top Hero Capsule */
+.drawer-hero-capsule {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  background-color: #ffffff;
+  border-radius: 14px;
   border: 1px solid #dec0b6;
-  border-radius: 12px;
-  background: #fff;
+  box-shadow: 0px 4px 12px rgba(74, 69, 67, 0.08);
 }
 
-.tracker-summary-panel h3,
-.tracker-tab-panel h3 {
-  margin: 0 0 12px;
+.drawer-hero-client {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.drawer-hero-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background-color: rgba(255, 127, 80, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  border: 1px solid rgba(255, 127, 80, 0.25);
+}
+
+.drawer-hero-label {
+  display: block;
+  font-size: 0.72rem;
+  color: #795d43;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 2px;
+}
+
+.drawer-hero-name {
+  font-size: 1.15rem;
+  font-weight: 750;
   color: #1e1b19;
 }
 
+.drawer-hero-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.drawer-hero-badge-id {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background-color: #f5ece9;
+  color: #a43c12;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 750;
+  font-size: 0.82rem;
+  border: 1px solid #dec0b6;
+}
+
+.drawer-hero-badge-days {
+  padding: 4px 10px;
+  border-radius: 6px;
+  background-color: #ffdbcf;
+  color: #6c2000;
+  font-weight: 700;
+  font-size: 0.8rem;
+}
+
+.drawer-hero-amount-group {
+  text-align: right;
+  padding-left: 8px;
+  border-left: 1px solid #dec0b6;
+}
+
+.drawer-hero-amount {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #a43c12;
+  font-variant-numeric: tabular-nums;
+}
+
+.tracker-summary-panel,
+.tracker-tab-panel {
+  padding: 18px 20px;
+  border: 1px solid #dec0b6;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0px 4px 12px rgba(74, 69, 67, 0.06);
+}
+
+.panel-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f5ece9;
+}
+
+.panel-header-row .panel-title {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 750;
+  color: #1e1b19;
+}
+
+.panel-status-tag {
+  padding: 3px 10px;
+  border-radius: 9999px;
+  background-color: #f5ece9;
+  color: #74593f;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.panel-sub-header {
+  margin: 16px 0 10px;
+  padding-top: 12px;
+  border-top: 1px dashed #dec0b6;
+}
+
+.panel-sub-header h4 {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: #74593f;
+}
+
 .tracker-drawer-facts {
+  display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
 }
 
 .tracker-drawer-facts div {
-  grid-template-columns: 1fr;
-  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 14px;
   border-radius: 8px;
-  background: #fff8f6;
+  background: #fbf2ef;
+  border: 1px solid rgba(222, 192, 182, 0.4);
+}
+
+.tracker-drawer-facts dt {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #795d43;
+  margin: 0;
+}
+
+.tracker-drawer-facts dd {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #1e1b19;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.tracker-drawer-facts dd.highlight-staff {
+  color: #a43c12;
+  font-weight: 700;
+}
+
+.tracker-drawer-facts dd.highlight-amount {
+  color: #a43c12;
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+}
+
+.drawer-loading-note {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: #74593f;
+}
+
+.drawer-error-note {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: #ba1a1a;
+  background-color: #ffdad6;
+  padding: 8px 12px;
+  border-radius: 6px;
 }
 
 .tracker-settlement-grid {
@@ -386,13 +619,35 @@
   gap: 9px;
 }
 
-.tracker-sop-list article {
+.tracker-sop-step {
   display: flex;
   gap: 12px;
   padding: 12px;
   border: 1px solid #d6d3d1;
   border-radius: 9px;
   background: #fafaf9;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.tracker-sop-step--completed {
+  border-color: #86b994;
+  background: #f0fdf4;
+}
+
+.tracker-sop-step--in_progress {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: inset 4px 0 0 #d97706, 0 3px 10px rgb(154 52 18 / 10%);
+}
+
+.tracker-sop-step--blocked {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.tracker-sop-step--unavailable {
+  border-style: dashed;
+  background: #f5f5f4;
 }
 
 .tracker-sop-number {
@@ -404,6 +659,44 @@
   background: #e7e5e4;
   color: #44403c;
   font-weight: 800;
+}
+
+.tracker-sop-step--completed .tracker-sop-number {
+  background: #166534;
+  color: #fff;
+}
+
+.tracker-sop-step--in_progress .tracker-sop-number {
+  background: #c2410c;
+  color: #fff;
+}
+
+.tracker-sop-step--blocked .tracker-sop-number {
+  background: #b91c1c;
+  color: #fff;
+}
+
+.tracker-sop-number input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: #166534;
+  opacity: 1;
+}
+
+.tracker-sop-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.tracker-sop-title-row strong {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #ffedd5;
+  color: #9a3412;
+  font-size: 0.72rem;
 }
 
 .tracker-sop-list h4,
@@ -418,12 +711,34 @@
   line-height: 1.5;
 }
 
-.tracker-unavailable-badge {
+.tracker-sop-status {
   display: inline-block;
   margin-top: 7px;
-  color: #57534e;
+  padding: 2px 7px;
+  border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 750;
+}
+
+.tracker-sop-status--completed {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.tracker-sop-status--in_progress {
+  background: #ffedd5;
+  color: #9a3412;
+}
+
+.tracker-sop-status--blocked {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.tracker-sop-status--not_started,
+.tracker-sop-status--unavailable {
+  background: #e7e5e4;
+  color: #57534e;
 }
 
 .tracker-disabled-action {

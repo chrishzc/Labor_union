@@ -30,7 +30,7 @@ commands 重播指定業務場景，再以 DB、API 及 UI oracle 證明結果�
 ```text
 選定已核准 scenario release
 → preflight artifacts／schema／target／external adapters
-→ 建立全新 disposable database
+→ 選擇既有 allowlist 開發測試 DB 或全新 disposable database
 → 匯入 root／external input fixtures
 → 依 dependency graph 執行 typed commands
 → rebuild projections
@@ -39,7 +39,7 @@ commands 重播指定業務場景，再以 DB、API 及 UI oracle 證明結果�
 → 執行 UI／browser oracle
 → replay／stale／conflict／failure injection
 → 產生 receipt 與 inventory linkage
-→ 保留驗收證據；依核准流程處置 disposable database
+→ 保留驗收證據；依核准流程處置本次 owned rows 或 disposable database
 ```
 
 ## 3. Scope、non-goals 與 proposed write set
@@ -841,6 +841,12 @@ baseline 重跑。分類本身不改變 blocker propagation，仍依 6.9 判斷�
 ## 7. 資料庫、reset 與外部副作用安全
 
 ### 7.1 Database target
+
+2026-08-21人工已撤銷「既有DB只能GET」與「必須non-root disposable DB」兩項blanket restriction。Route B可
+直接使用既有allowlist `lu_test_*` development／validation DB與目前credential（包括root）執行已核准scenario；
+每次仍須驗證target、使用唯一scenario identity、限制owned rows、保存before/after／receipt並執行scoped cleanup
+或明確保留。disposable DB改為Route A的選配隔離工具。此裁決不授權`union_db`、production、schema／migration、
+全庫seed、reset、replacement或`--switch`；schema／migration仍遵守獨立fresh與preserve-data candidate gate。
 
 - DB 名稱不作業務契約；`union_db` 或其他名稱是否可 reset，由明確註冊的 environment/target profile
   決定，不以單一名稱前綴假定安全。

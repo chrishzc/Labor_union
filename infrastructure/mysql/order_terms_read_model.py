@@ -1,4 +1,7 @@
-"""Strict MySQL readers for Orders Terms transaction facts."""
+"""
+File: order_terms_read_model.py
+Description: 提供 Orders Terms transaction 與 borrowed owner facts 的嚴格 MySQL readers。
+"""
 
 from __future__ import annotations
 
@@ -45,6 +48,14 @@ def load_preview_facts(cursor: Any, case_no: str) -> TermsWorkflowFacts:
     order_row = select_order(cursor, case_no, lock=False)
     aggregate_row = select_scheduling_aggregate(cursor, case_no, lock=False)
     return _assemble_facts(cursor, order_row, aggregate_row, lock=False)
+
+
+def load_order_facts(
+    cursor: Any, case_no: str, *, for_update: bool = False
+) -> OrderAggregateFacts:
+    """Load only the Orders root through a borrowed transaction cursor."""
+
+    return _order_facts(select_order(cursor, case_no, lock=for_update))
 
 
 # Kept cohesive because schedule and Finance roots must share one cursor snapshot.

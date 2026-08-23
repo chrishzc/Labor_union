@@ -1,0 +1,81 @@
+{
+  "operation": "GET /api/v1/cases/{case_no}/assignment-schedules",
+  "method": "GET",
+  "path_template": "/api/v1/cases/{case_no}/assignment-schedules",
+  "fingerprint": "bbf31280",
+  "case_id": "UGfKNf",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/cases/0/assignment-schedules",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/cases/0/assignment-schedules",
+      "url_template": "http://127.0.0.1:8765/api/v1/cases/{case_no}/assignment-schedules",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "UGfKNf"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:11:58 GMT",
+          "server": "uvicorn",
+          "content-length": "243",
+          "content-type": "application/json",
+          "server-timing": "application;dur=2115.2",
+          "x-response-time-ms": "2115.2",
+          "x-correlation-id": "7f043646b6fb4b319fdaf29be86558f5"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"internal_error\",\"message\":\"\u4f3a\u670d\u5668\u767c\u751f\u672a\u9810\u671f\u932f\u8aa4\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"7f043646b6fb4b319fdaf29be86558f5\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 500\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.004604299960192293,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/cases/{case_no}/assignment-schedules",
+      "path_parameters": {
+        "case_no": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

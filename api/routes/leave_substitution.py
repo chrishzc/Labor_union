@@ -1,16 +1,16 @@
-"""File: leave_substitution.py
-Description: 提供正式請假代班預覽、套用與已受理待辦的收據結案。"""
+"""
+File: leave_substitution.py
+Description: 提供正式請假代班assignment query、預覽、套用與已受理待辦收據。"""
 
 from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
-from pydantic import BaseModel, ConfigDict, Field
 from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
@@ -21,20 +21,14 @@ from api.dependencies.leave_substitution import (
 from api.schemas.base import BaseResponse
 from api.schemas.leave_substitution import (
     LeaveAssignmentSummaryView,
+    LeaveSubstitutionApplyBody,
+    LeaveSubstitutionPreviewBody,
     LeaveSubstitutionPreviewView,
     LeaveSubstitutionReceiptView,
 )
-from domains.line.canonical_payload import canonical_line_payload_json
-from domains.line.delivery import LineDeliveryRequest, LineMessageKind, LineRecipient, LineRecipientType
-from domains.line.identities import LineUserId
-from domains.scheduling.leave_substitution import (
-    LeaveResolutionType,
-    LeaveSubstitutionBatchIntent,
-    LeaveSubstitutionItem,
-)
 from subsystems.access.authentication_session import AdminPrincipal
 from shared_kernel.errors import ErrorCategory, TypedError
-from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
+from shared_kernel.fingerprints import PreviewFingerprint
 from shared_kernel.identities import (
     ActorContext,
     CorrelationId,
@@ -43,17 +37,10 @@ from shared_kernel.identities import (
 )
 from subsystems.scheduling.leave_substitution_workflow import (
     LeaveSubstitutionApplyRequest,
+    LinkedLeaveRequestIntent,
     LeaveSubstitutionPreviewRequest,
     LeaveSubstitutionWorkflowError,
 )
-from subsystems.scheduling.staff_leave_intake_workflow import (
-    ResolveStaffLeaveRequest,
-    StaffLeaveIntakeWorkflow,
-    StaffLeaveIntakeWorkflowError,
-)
-from infrastructure.mysql.line_delivery_task_repository import MySqlLineDeliveryTaskRepository
-from infrastructure.mysql.staff_leave_intake_repository import MySqlStaffLeaveIntakeRepository
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 
 
 router = APIRouter(prefix="/api/v1/orders", tags=["Leave Substitution"])
@@ -80,58 +67,18 @@ def list_leave_assignments(
                 "staff_id": row["staff_id"],
                 "assigned_start_date": row["assigned_start_date"],
                 "assigned_end_date": row["assigned_end_date"],
+                "official_schedules": [
+                    {
+                        "schedule_id": schedule["schedule_id"],
+                        "work_date": schedule["work_date"],
+                    }
+                    for schedule in row["official_schedules"]
+                ],
             }
             for row in assignments
         ],
         message="成功取得請假與代班正式服務指派",
     )
-
-
-class LeaveSubstitutionItemInput(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    original_schedule_id: int = Field(gt=0)
-    work_date: date
-    resolution_type: LeaveResolutionType
-    substitute_staff_id: int | None = Field(default=None, gt=0)
-    is_double_pay: bool = False
-
-    def to_domain(self) -> LeaveSubstitutionItem:
-        return LeaveSubstitutionItem(
-            self.original_schedule_id,
-            self.work_date,
-            self.resolution_type,
-            self.substitute_staff_id,
-            self.is_double_pay,
-        )
-
-
-class LeaveSubstitutionPreviewBody(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    original_assignment_id: int = Field(gt=0)
-    items: tuple[LeaveSubstitutionItemInput, ...] = ()
-
-    def to_intent(self) -> LeaveSubstitutionBatchIntent:
-        return LeaveSubstitutionBatchIntent(
-            self.original_assignment_id,
-            tuple(item.to_domain() for item in self.items),
-        )
-
-
-class LeaveSubstitutionApplyBody(LeaveSubstitutionPreviewBody):
-    expected_order_version: int = Field(ge=0)
-    expected_scheduling_version: int = Field(ge=0)
-    expected_client_finance_version: int = Field(ge=0)
-    expected_payroll_version: int = Field(ge=0)
-    preview_fingerprint: str = Field(
-        min_length=64,
-        max_length=64,
-        pattern=r"^[0-9a-f]{64}$",
-    )
-    reason: str = Field(min_length=1, max_length=500)
-    leave_request_id: int | None = Field(default=None, gt=0)
-    expected_leave_request_version: int | None = Field(default=None, ge=1)
 
 
 @router.post(
@@ -200,6 +147,7 @@ def _preview_command(application, case_no, body, correlation_id):
         case_no,
         body.to_intent(),
         correlation_id,
+        _linked_intent(body),
     )
     return _preview_payload(application.preview(request))
 
@@ -212,48 +160,7 @@ def _apply_command(application, case_no, body, key, correlation_id, principal):
         correlation_id,
         principal,
     )
-    receipt = application.apply(request)
-    if body.leave_request_id is not None:
-        if body.expected_leave_request_version is None:
-            raise HTTPException(status_code=422, detail={"code": "leave_request_expected_version_required"})
-        _resolve_linked_leave_request(application.connection, body, receipt, key, correlation_id)
-    return _materialize(receipt)
-
-
-def _resolve_linked_leave_request(connection, body, receipt, key, correlation_id):
-    resolution_key = _resolution_key(key, body.leave_request_id, receipt.batch_key)
-    with MySqlUnitOfWork(connection) as unit_of_work:
-        result = StaffLeaveIntakeWorkflow(MySqlStaffLeaveIntakeRepository(connection)).resolve(
-            ResolveStaffLeaveRequest(
-                body.leave_request_id,
-                body.expected_leave_request_version,
-                receipt.batch_key,
-                resolution_key,
-            )
-        )
-        MySqlLineDeliveryTaskRepository(connection).enqueue(
-            _completion_notification(result, correlation_id, resolution_key)
-        )
-        unit_of_work.commit()
-
-
-def _resolution_key(key: str, request_id: int, receipt_key: str) -> str:
-    return "staff-leave-resolve:" + fingerprint_payload({
-        "apply_key": key, "request_id": request_id, "receipt_key": receipt_key,
-    }).value
-
-
-def _completion_notification(snapshot, correlation_id, resolution_key: str) -> LineDeliveryRequest:
-    return LineDeliveryRequest(
-        LineRecipient(LineRecipientType.USER, LineUserId(snapshot.line_user_id)),
-        LineMessageKind.TEXT,
-        canonical_line_payload_json({"type": "text", "text": "您的請假申請已完成正式排班處理。"}),
-        datetime.now(UTC),
-        IdempotencyKey("staff-leave-notify:" + fingerprint_payload({"resolution_key": resolution_key}).value),
-        correlation_id,
-        "scheduling_staff_leave_request",
-        str(snapshot.request_id),
-    )
+    return _receipt_payload(application.apply(request))
 
 
 def _apply_request(case_no, body, key, correlation_id, principal):
@@ -269,6 +176,7 @@ def _apply_request(case_no, body, key, correlation_id, principal):
         ActorContext(str(principal.username or "").strip()),
         body.reason,
         correlation_id,
+        _linked_intent(body),
     )
 
 
@@ -284,12 +192,59 @@ def _preview_payload(preview):
         "cancelled_assignment_ids": scheduling.cancelled_assignment_ids,
         "assignments": [_assignment_payload(item) for item in scheduling.assignments],
         "outcomes": _materialize(preview.candidate.outcomes),
-        "client_finance_impact": _materialize(preview.client_finance_impact),
-        "payroll_impact": _materialize(preview.payroll_impact),
-        "orders_impact": _materialize(preview.orders_impact),
+        "client_finance_impact": _impact_payload(preview.client_finance_impact),
+        "payroll_impact": _impact_payload(preview.payroll_impact),
+        "orders_impact": _impact_payload(preview.orders_impact),
         "calendar_candidate": _materialize(preview.calendar_candidate),
         "apply_readiness": _materialize(preview.apply_readiness),
+        "linked_request": _linked_payload(preview.linked_request),
         "preview_fingerprint": preview.fingerprint.value,
+    }
+
+
+def _receipt_payload(receipt):
+    return {
+        "batch_key": receipt.batch_key,
+        "case_no": receipt.case_no,
+        "order_version": receipt.order_version,
+        "scheduling_generation": receipt.scheduling_generation,
+        "scheduling_version": receipt.scheduling_version,
+        "client_finance_version": receipt.client_finance_version,
+        "payroll_version": receipt.payroll_version,
+        "outcome_event_ids": list(receipt.outcome_event_ids),
+        "preview_fingerprint": receipt.preview_fingerprint.value,
+        "linked_request": _linked_payload(receipt.linked_request),
+    }
+
+
+def _linked_intent(body):
+    if body.leave_request_id is None:
+        return None
+    return LinkedLeaveRequestIntent(
+        body.leave_request_id,
+        body.expected_leave_request_version,
+    )
+
+
+def _linked_payload(linked):
+    if linked is None:
+        return None
+    return {
+        "request_id": linked.request_id,
+        "expected_version": linked.expected_version,
+        "resolved_version": linked.resolved_version,
+        "status": linked.status,
+        "receipt_key": linked.receipt_key,
+        "notification_intent": linked.notification_intent,
+    }
+
+
+def _impact_payload(impact):
+    return {
+        "expected_version": impact.expected_version,
+        "resulting_version": impact.resulting_version,
+        "fingerprint": impact.fingerprint.value,
+        "blockers": list(impact.blockers),
     }
 
 
@@ -311,8 +266,6 @@ def _call_endpoint(command, message, correlation_id):
         return BaseResponse(data=command(), message=message)
     except LeaveSubstitutionWorkflowError as error:
         _raise_typed_error(error.error)
-    except StaffLeaveIntakeWorkflowError as error:
-        raise HTTPException(status_code=409, detail={"code": str(error)}) from error
     except OperationalError as error:
         _raise_mysql_error(error, correlation_id)
     except (TypeError, ValueError) as error:

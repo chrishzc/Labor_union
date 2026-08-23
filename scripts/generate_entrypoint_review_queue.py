@@ -1,19 +1,39 @@
-"""Generate the entry-point review queue without recording runtime usage."""
+"""
+File: generate_entrypoint_review_queue.py
+Description: 產生 API、CLI、Streamlit 與 React entry review queue，不記錄 runtime 使用量。
+"""
 
 from __future__ import annotations
 
 import ast
 import json
+import re
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 QUEUE_PATH = ROOT / "document" / "架構重整" / "03_追蹤清單與證據" / "evidence" / "entrypoint_review_queue_v1.jsonl"
 HTTP_METHODS = frozenset({"get", "post", "put", "patch", "delete"})
+REACT_NAV_PATH = ROOT / "ui_react" / "src" / "components" / "MasterLayout.tsx"
+REACT_APP_PATH = ROOT / "ui_react" / "src" / "App.tsx"
+REACT_ROLLBACKS = {
+    "order-tracker": ("ui:05_form_management.py", "/?entry=form-management&view=order-tracker", "order-workbench"),
+    "orders": ("ui:02_orders.py", "/?entry=orders", "orders"),
+    "scheduling": ("ui:03_calendar.py", "/?entry=scheduling&view=calendar", "staff-scheduling"),
+    "staff": ("ui:03_calendar.py", "/?entry=scheduling&view=staff-directory", "staff-scheduling"),
+    "data-import": ("ui:09_data_import.py", "/?entry=data-import", "data-import"),
+    "line-management": ("ui:07_line_management.py", "/?entry=line-management", "line"),
+    "reports": ("ui:08_system_status.py", "/?entry=system-status&view=reports", "reports-system"),
+    "finance": ("ui:04_finance.py", "/?entry=finance", "finance"),
+    "anomalies": ("ui:06_finance_alerts.py", "/?entry=anomalies", "anomalies"),
+    "data-browser": ("ui:01_data_browser.py", "/?entry=data-browser", "data-browser"),
+    "account-management": ("ui:09_access_management.py", "/?entry=access-management", "access"),
+    "system-status": ("ui:08_system_status.py", "/?entry=system-status", "reports-system"),
+}
 
 
 def discover_entrypoints() -> list[dict[str, object]]:
-    entries = [*_discover_api_entries(), *_discover_ui_entries(), *_discover_cli_entries()]
+    entries = [*_discover_api_entries(), *_discover_ui_entries(), *_discover_react_entries(), *_discover_cli_entries()]
     return sorted(entries, key=lambda entry: str(entry["entry_id"]))
 
 
@@ -77,7 +97,53 @@ def _route_path(prefix_by_name: dict[str, str], decorator: ast.expr) -> str:
 
 
 def _discover_ui_entries() -> list[dict[str, object]]:
-    return [_new_entry("ui", path.name, path) for path in (ROOT / "ui/pages").glob("*.py") if _page_title(path)]
+    modules = _runtime_page_registry()
+    return [
+        _new_entry("ui", f"{module.removeprefix('ui.pages.')}.py", ROOT / "ui" / "pages" / f"{module.removeprefix('ui.pages.')}.py")
+        for module in modules
+    ]
+
+
+def _runtime_page_registry() -> list[str]:
+    tree = _tree(ROOT / "ui" / "app.py")
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            is_registry = any(isinstance(target, ast.Name) and target.id == "PAGE_REGISTRY" for target in node.targets)
+            value_node = node.value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.target.id == "PAGE_REGISTRY":
+            is_registry = True
+            value_node = node.value
+        else:
+            is_registry = False
+            value_node = None
+        if not is_registry or value_node is None:
+            continue
+        return list(dict.fromkeys(
+            value.value for value in ast.walk(value_node)
+            if isinstance(value, ast.Constant) and isinstance(value.value, str) and value.value.startswith("ui.pages.")
+        ))
+    raise ValueError("ui/app.py PAGE_REGISTRY not found")
+
+
+def _discover_react_entries() -> list[dict[str, object]]:
+    nav_source = REACT_NAV_PATH.read_text(encoding="utf-8")
+    app_source = REACT_APP_PATH.read_text(encoding="utf-8")
+    nav_ids = re.findall(r"\{\s*id:\s*'([a-z0-9-]+)'\s*,", nav_source)
+    render_ids = set(re.findall(r"currentPage\s*===\s*'([a-z0-9-]+)'", app_source))
+    entries = []
+    for page_id in dict.fromkeys(nav_ids):
+        entry = _new_entry("ui-react", f"#{page_id}", REACT_NAV_PATH)
+        entry["witnesses"] = {
+            "nav": REACT_NAV_PATH.relative_to(ROOT).as_posix(),
+            "render": REACT_APP_PATH.relative_to(ROOT).as_posix() if page_id in render_ids else None,
+        }
+        rollback = REACT_ROLLBACKS.get(page_id)
+        if rollback is None or page_id not in render_ids:
+            entry["review_reason"] = "blocked_react_registry_drift"
+        else:
+            entry["streamlit_entry"], entry["rollback_deep_link"], entry["replacement_group"] = rollback
+        entries.append(entry)
+    return entries
 
 
 def _page_title(path: Path) -> str | None:

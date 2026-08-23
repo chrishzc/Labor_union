@@ -1,0 +1,85 @@
+{
+  "operation": "GET /api/v1/staff/{staff_id}/monthly-schedule",
+  "method": "GET",
+  "path_template": "/api/v1/staff/{staff_id}/monthly-schedule",
+  "fingerprint": "6569dfea",
+  "case_id": "JK1hKa",
+  "code_sample": "curl -X GET 'http://127.0.0.1:8765/api/v1/staff/1/monthly-schedule?month=1&year=1900'",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/staff/1/monthly-schedule?month=1&year=1900",
+      "url_template": "http://127.0.0.1:8765/api/v1/staff/{staff_id}/monthly-schedule",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "JK1hKa"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Thu, 20 Aug 2026 19:07:10 GMT",
+          "server": "uvicorn",
+          "content-length": "269",
+          "content-type": "application/json",
+          "server-timing": "application;dur=2067.3",
+          "x-response-time-ms": "2067.3",
+          "x-correlation-id": "be1a3466650b4b1ca7a4b0f7b7f5454f"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"staff_monthly_schedule_internal_error\",\"message\":\"\u6708\u5ac2\u6708\u5ea6\u6a94\u671f\u67e5\u8a62\u5931\u6557\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"be1a3466650b4b1ca7a4b0f7b7f5454f\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 500\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.007681199989747256,
+          "mode": "positive"
+        },
+        "components": {
+          "QUERY": "positive",
+          "PATH": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/staff/{staff_id}/monthly-schedule",
+      "path_parameters": {
+        "staff_id": 1
+      },
+      "query": {
+        "month": 1,
+        "year": 1900
+      },
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

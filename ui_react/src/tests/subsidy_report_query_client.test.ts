@@ -1,6 +1,6 @@
 /**
  * File: subsidy_report_query_client.test.ts
- * Description: 驗證補助報表client的fresh Session、GET、strict decode、aggregate與PII拒絕。
+ * Description: 驗證補助報表client的fresh Session、GET、完整partition、aggregate與PII拒絕。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -23,5 +23,20 @@ describe('subsidy report query client', () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce(response({ ...SUBSIDY_REPORT_RESPONSE, data: { ...SUBSIDY_REPORT_RESPONSE.data, partitions: [{ ...SUBSIDY_REPORT_RESPONSE.data.partitions[0], rows: [{ ...row, identity_card_masked: 'A123456789' }] }, SUBSIDY_REPORT_RESPONSE.data.partitions[1]] } })).mockResolvedValueOnce(response({ ...SUBSIDY_REPORT_RESPONSE, data: { ...SUBSIDY_REPORT_RESPONSE.data, total_amount_ntd: 1 } }));
     await expect(subsidyReportQueryClient.query({ kind: 'quarterly', applicationYear: 2026, quarter: 1 })).rejects.toThrow(/PII/);
     await expect(subsidyReportQueryClient.query({ kind: 'quarterly', applicationYear: 2026, quarter: 1 })).rejects.toThrow(/aggregate/);
+  });
+  it('rejects missing and duplicate citizen partitions', async () => {
+    const general = SUBSIDY_REPORT_RESPONSE.data.partitions[0];
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(response({
+        ...SUBSIDY_REPORT_RESPONSE,
+        data: { ...SUBSIDY_REPORT_RESPONSE.data, partitions: [general] },
+      }))
+      .mockResolvedValueOnce(response({
+        ...SUBSIDY_REPORT_RESPONSE,
+        data: { ...SUBSIDY_REPORT_RESPONSE.data, partitions: [general, general] },
+      }));
+
+    await expect(subsidyReportQueryClient.query({ kind: 'quarterly', applicationYear: 2026, quarter: 1 })).rejects.toThrow(/結構異常/);
+    await expect(subsidyReportQueryClient.query({ kind: 'quarterly', applicationYear: 2026, quarter: 1 })).rejects.toThrow(/partition重複/);
   });
 });

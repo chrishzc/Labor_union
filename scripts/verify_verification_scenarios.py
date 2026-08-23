@@ -1,4 +1,7 @@
-"""Validate versioned business and infrastructure verification scenario contracts."""
+"""
+File: verify_verification_scenarios.py
+Description: 載入並驗證版本化業務與基礎設施情境契約。
+"""
 
 from __future__ import annotations
 
@@ -20,6 +23,12 @@ DEFAULT_BUSINESS_MATRIX_PATH = (
 )
 SCENARIO_CONTRACT = "labor-union-verification-scenario/v1"
 SCENARIO_STATUS = {"specified", "bound", "blocked"}
+NON_SCENARIO_ARTIFACTS = frozenset(
+    {
+        "react_admin_entrypoints.json",
+        "react_admin_retirement_requirements.json",
+    }
+)
 DATABASE_EXECUTION_MODES = {
     "persistent_append_only",
     "read_only_existing_database",
@@ -28,7 +37,22 @@ DATABASE_EXECUTION_MODES = {
 
 
 def load_scenarios(directory: Path = DEFAULT_SCENARIO_DIRECTORY) -> list[dict[str, object]]:
-    return [json.loads(path.read_text(encoding="utf-8")) for path in sorted(directory.glob("*.json"))]
+    scenarios: list[dict[str, object]] = []
+    for path in sorted(directory.glob("*.json")):
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(payload, dict):
+            raise ValueError(
+                f"verification scenario artifact must be a JSON object: {path.name}"
+            )
+        if payload.get("contract") == SCENARIO_CONTRACT:
+            scenarios.append(payload)
+            continue
+        if path.name in NON_SCENARIO_ARTIFACTS:
+            continue
+        raise ValueError(
+            f"unsupported verification scenario artifact: {path.name}"
+        )
+    return scenarios
 
 
 def verify_scenarios(

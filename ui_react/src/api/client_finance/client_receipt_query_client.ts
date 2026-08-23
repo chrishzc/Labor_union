@@ -11,6 +11,13 @@ import { ClientReceiptQueryError, mapClientReceiptQueryError } from './client_re
 export interface ClientReceiptQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
 export interface ClientReceiptQueryClient { query(caseNo: string, options?: ClientReceiptQueryOptions): Promise<ClientReceiptQuery>; }
 
+let correlationSequence = 0;
+
+function nextCorrelationId(): string {
+  correlationSequence += 1;
+  return `client-receipt-query-${correlationSequence.toString(36)}`;
+}
+
 class DefaultClientReceiptQueryClient implements ClientReceiptQueryClient {
   async query(caseNo: string, options?: ClientReceiptQueryOptions): Promise<ClientReceiptQuery> {
     const normalized = caseNo.trim();
@@ -20,7 +27,13 @@ class DefaultClientReceiptQueryClient implements ClientReceiptQueryClient {
     try {
       const raw = await transport.get<unknown>(
         `/api/v1/orders/${encodeURIComponent(normalized)}/client-finance/receipt-reconciliation`,
-        { signal: options?.signal, timeoutMs: options?.timeoutMs, baseUrl: options?.baseUrl, token }
+        {
+          signal: options?.signal,
+          timeoutMs: options?.timeoutMs,
+          baseUrl: options?.baseUrl,
+          token,
+          headers: { 'X-Correlation-ID': nextCorrelationId() },
+        }
       );
       const decoded = ClientReceiptQueryResponseSchema.safeParse(raw);
       if (!decoded.success) throw new ApiDecodeError('Client Receipt回應結構異常。', decoded.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message, code: issue.code })), raw);

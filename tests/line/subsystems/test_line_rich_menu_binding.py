@@ -1,4 +1,7 @@
-"""Subsystem coverage for durable identity-to-Rich-Menu binding."""
+"""
+File: test_line_rich_menu_binding.py
+Description: 驗證 Rich Menu 發布後的 durable identity binding 與 worker 整合契約。
+"""
 
 import json
 from datetime import datetime, timezone
@@ -168,7 +171,12 @@ def test_successful_publication_fans_out_bound_audience_in_same_transaction() ->
         publication=SimpleNamespace(publication_id=LineRichMenuPublicationId(12)),
     )
 
-    worker._record(item, "image/reference", _successful_outcome("richmenu-union-v3"))
+    worker._record(
+        item,
+        "image/reference",
+        _successful_outcome("richmenu-union-v3"),
+        None,
+    )
 
     intent = outbox.appended[0]
     assert identities.requested_subject_type is LineBindingSubjectType.ADMIN

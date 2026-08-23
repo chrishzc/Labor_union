@@ -1,15 +1,24 @@
+"""
+File: test_scheduling_current_projection_workflow.py
+Description: 驗證 current Scheduling workflow 的時鐘狀態、占用與不可服務投影。
+"""
+
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
 
 from domains.scheduling.current_projection import (
+    AssignmentLifecycleStatus,
+    EffectiveAssignmentCurrentFact,
     SchedulingCurrentFacts,
     SchedulingOccupancyKind,
     StaffUnavailabilityCurrentFact,
+    StoredEffectiveOccupancyFact,
 )
+from domains.orders.terms import ServiceTimeTerms
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from subsystems.scheduling.current_projection_workflow import (
     SchedulingCurrentProjectionWorkflow,
@@ -24,6 +33,15 @@ class _Repository:
     def load_current_facts(self, request):
         self.request = request
         return SchedulingCurrentFacts(request.staff_id, (), (), ())
+
+
+class _FactsRepository:
+    def __init__(self, facts: SchedulingCurrentFacts) -> None:
+        self.facts = facts
+
+    def load_current_facts(self, request):
+        assert request.staff_id == self.facts.staff_id
+        return self.facts
 
 
 def test_current_projection_workflow_is_readable_source_without_bridge():
@@ -69,3 +87,121 @@ def test_current_projection_marks_long_leave_as_unavailable():
     assert result.days[0].available is False
     assert result.days[0].entries[0].occupancy_kind is SchedulingOccupancyKind.STAFF_UNAVAILABILITY
     assert result.days[2].available is True
+
+
+def _assignment_with_active_buffer(
+    *,
+    assignment_id: int = 31,
+    case_no: str = "CASE-SCH-BUFFER",
+    generation_id: int = 41,
+    assigned_date: date = date(2026, 8, 10),
+    case_first_service_date: date | None = None,
+) -> tuple[
+    EffectiveAssignmentCurrentFact,
+    tuple[StoredEffectiveOccupancyFact, ...],
+]:
+    buffer_dates = tuple(assigned_date + timedelta(days=offset) for offset in range(1, 8))
+    assignment = EffectiveAssignmentCurrentFact(
+        assignment_id,
+        case_no,
+        generation_id,
+        3,
+        11,
+        assigned_date,
+        assigned_date,
+        case_first_service_date or assigned_date,
+        (assigned_date,),
+        buffer_dates,
+        8,
+        ServiceTimeTerms(time(9), time(17), 0),
+    )
+    occupancy = (
+        StoredEffectiveOccupancyFact(
+            11, assigned_date, generation_id, assignment_id, "assignment_interval"
+        ),
+        *(
+            StoredEffectiveOccupancyFact(
+                11, buffer_date, generation_id, assignment_id, "buffer"
+            )
+            for buffer_date in buffer_dates
+        ),
+    )
+    return assignment, occupancy
+
+
+@pytest.mark.parametrize(
+    ("evaluated_at", "expected_status"),
+    (
+        (datetime(2026, 8, 10, 10, tzinfo=TAIPEI_TIME_ZONE), AssignmentLifecycleStatus.ACTIVE),
+        (datetime(2026, 8, 10, 18, tzinfo=TAIPEI_TIME_ZONE), AssignmentLifecycleStatus.COMPLETED),
+    ),
+)
+def test_current_projection_hides_assignment_buffer_after_service_starts(
+    evaluated_at,
+    expected_status,
+):
+    assignment, occupancy = _assignment_with_active_buffer()
+
+    facts = SchedulingCurrentFacts(11, (assignment,), occupancy, ())
+    projection = SchedulingCurrentProjectionWorkflow(
+        _FactsRepository(facts), FixedBusinessClock(evaluated_at)
+    ).query(SchedulingCurrentQuery(11, date(2026, 8, 10), date(2026, 8, 17)))
+
+    assert projection.assignments[0].status is expected_status
+    assert all(
+        entry.occupancy_kind is not SchedulingOccupancyKind.ASSIGNMENT_BUFFER
+        for day in projection.days
+        for entry in day.entries
+    )
+    assert all(day.available for day in projection.days[1:])
+
+
+def test_current_projection_keeps_assignment_buffer_before_service_starts():
+    assignment, occupancy = _assignment_with_active_buffer()
+
+    facts = SchedulingCurrentFacts(11, (assignment,), occupancy, ())
+    projection = SchedulingCurrentProjectionWorkflow(
+        _FactsRepository(facts),
+        FixedBusinessClock(datetime(2026, 8, 9, 10, tzinfo=TAIPEI_TIME_ZONE)),
+    ).query(SchedulingCurrentQuery(11, date(2026, 8, 10), date(2026, 8, 17)))
+
+    assert projection.assignments[0].status is AssignmentLifecycleStatus.PLANNED
+    assert sum(
+        entry.occupancy_kind is SchedulingOccupancyKind.ASSIGNMENT_BUFFER
+        for day in projection.days
+        for entry in day.entries
+    ) == 7
+
+
+def test_current_projection_uses_case_start_fact_across_staff_scope():
+    future_same_case, same_case_occupancy = _assignment_with_active_buffer(
+        assignment_id=32,
+        assigned_date=date(2026, 9, 1),
+        case_first_service_date=date(2026, 8, 10),
+    )
+    future_other_case, other_case_occupancy = _assignment_with_active_buffer(
+        assignment_id=33,
+        case_no="CASE-SCH-OTHER",
+        generation_id=42,
+        assigned_date=date(2026, 9, 20),
+    )
+    facts = SchedulingCurrentFacts(
+        11,
+        (future_same_case, future_other_case),
+        (*same_case_occupancy, *other_case_occupancy),
+        (),
+    )
+
+    projection = SchedulingCurrentProjectionWorkflow(
+        _FactsRepository(facts),
+        FixedBusinessClock(datetime(2026, 8, 10, 10, tzinfo=TAIPEI_TIME_ZONE)),
+    ).query(SchedulingCurrentQuery(11, date(2026, 9, 2), date(2026, 9, 27)))
+
+    buffer_case_numbers = {
+        entry.case_no
+        for day in projection.days
+        for entry in day.entries
+        if entry.occupancy_kind is SchedulingOccupancyKind.ASSIGNMENT_BUFFER
+    }
+    assert projection.assignments[0].status is AssignmentLifecycleStatus.PLANNED
+    assert buffer_case_numbers == {"CASE-SCH-OTHER"}

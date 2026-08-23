@@ -1,4 +1,7 @@
-"""Project persisted health transitions into canonical LINE delivery tasks."""
+"""
+File: runtime_alert_application.py
+Description: 投影 runtime health 並委派 LINE alert target 唯一 registration writer。
+"""
 
 from __future__ import annotations
 
@@ -38,10 +41,16 @@ class RuntimeLineAlertProjector:
 
 
 def register_group_alert_target(inbox, unit_of_work, actor) -> bool:
-    return unit_of_work.runtime_monitor.upsert_group_target(
+    from subsystems.line.runtime_alert_target_application import RuntimeAlertTargetApplication
+
+    return RuntimeAlertTargetApplication(
+        lambda: unit_of_work,
+        lambda: inbox.event.occurred_at,
+    ).register_group(
+        unit_of_work,
         inbox.event.source.source_id,
-        "LINE 工會異常通知群組",
         actor.actor_id,
+        inbox.event.event_id.value,
     )
 
 

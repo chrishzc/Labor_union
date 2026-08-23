@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/orders/{case_no}/client-finance/refund-reversal",
+  "method": "GET",
+  "path_template": "/api/v1/orders/{case_no}/client-finance/refund-reversal",
+  "fingerprint": "19f819f6",
+  "case_id": "Osy3ff",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/orders/0/client-finance/refund-reversal",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/orders/0/client-finance/refund-reversal",
+      "url_template": "http://127.0.0.1:8821/api/v1/orders/{case_no}/client-finance/refund-reversal",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "Osy3ff"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:48 GMT",
+          "server": "uvicorn",
+          "content-length": "274",
+          "content-type": "application/json",
+          "server-timing": "application;dur=85.5",
+          "x-response-time-ms": "85.5",
+          "x-correlation-id": "9d3302376b3d49ebb1618c4a86bf5740"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"not_found\",\"code\":\"client_finance_case_not_found\",\"message\":\"\u5ba2\u6236\u9000\u6b3e\u6216\u6c96\u6b63\u8acb\u6c42\u672a\u901a\u904e\u9a57\u8b49\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"9d3302376b3d49ebb1618c4a86bf5740\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.005025000020395964,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/orders/{case_no}/client-finance/refund-reversal",
+      "path_parameters": {
+        "case_no": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

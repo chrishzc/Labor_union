@@ -1,4 +1,7 @@
-"""MySQL adapter for Scheduling-owned staff matching preferences."""
+"""
+File: staff_matching_preference_repository.py
+Description: 提供 Staff matching preference 的 MySQL aggregate lock 與持久化 adapter。
+"""
 
 from __future__ import annotations
 
@@ -11,11 +14,15 @@ from domains.scheduling.staff_matching_preferences import (
     PreferenceValue,
     PreferenceValueKind,
     StaffPreferenceDefinition,
+    parse_preference_value,
 )
 from shared_kernel.identities import IdempotencyKey
 from subsystems.scheduling.staff_matching_preference_workflow import (
     PreferenceEvent,
     PreferenceReceipt,
+)
+from subsystems.scheduling.matching_coordination_query import (
+    StaffProfileValuesFacts,
 )
 
 
@@ -23,12 +30,50 @@ class MySqlStaffMatchingPreferenceRepository:
     def __init__(self, connection: Any) -> None:
         self._connection = connection
 
-    def list_definitions(self, *, active_only: bool):
+    def list_definitions(self, *, active_only: bool, for_update: bool = False):
         clause = " WHERE status='active'" if active_only else ""
         with self._connection.cursor() as cursor:
-            cursor.execute(_DEFINITION_SELECT + clause + " ORDER BY id")
+            cursor.execute(
+                _DEFINITION_SELECT
+                + clause
+                + " ORDER BY id"
+                + (" FOR UPDATE" if for_update else "")
+            )
             rows = cursor.fetchall() or ()
         return tuple(_definition_with_version(row) for row in rows)
+
+    def load_definitions(
+        self, *, for_update: bool = False
+    ) -> tuple[tuple[StaffPreferenceDefinition, int], ...]:
+        """Project active owner definitions through the M3 typed read port."""
+
+        return self.list_definitions(active_only=True, for_update=for_update)
+
+    def load_profile_values(
+        self, staff_ids: tuple[int, ...], *, for_update: bool = False
+    ) -> tuple[StaffProfileValuesFacts, ...]:
+        """Read canonical profile values without creating a command claim."""
+
+        if staff_ids != tuple(sorted(set(staff_ids))) or any(
+            isinstance(staff_id, bool) or not isinstance(staff_id, int) or staff_id <= 0
+            for staff_id in staff_ids
+        ):
+            raise ValueError("staff_profile_ids_not_canonical")
+        definitions = {
+            definition.preference_key: definition
+            for definition, _version in self.load_definitions(for_update=for_update)
+        }
+        result = []
+        for staff_id in staff_ids:
+            version, raw_values = self.load_profile(staff_id, for_update=for_update)
+            values = []
+            for key, payload in sorted(raw_values.items()):
+                definition = definitions.get(key)
+                if definition is None:
+                    raise ValueError("preference_definition_not_active")
+                values.append((key, parse_preference_value(definition, payload)))
+            result.append(StaffProfileValuesFacts(staff_id, version, tuple(values)))
+        return tuple(result)
 
     def load_definition(self, preference_key: str, *, for_update: bool):
         lock_clause = " FOR UPDATE" if for_update else ""
@@ -45,6 +90,13 @@ class MySqlStaffMatchingPreferenceRepository:
             cursor.execute("SELECT 1 FROM staff WHERE id=%s", (staff_id,))
             return cursor.fetchone() is not None
 
+    def lock_profile_aggregate(self, staff_id: int) -> None:
+        """Lock the stable staff identity even when no profile row exists."""
+        with self._connection.cursor() as cursor:
+            cursor.execute("SELECT id FROM staff WHERE id=%s FOR UPDATE", (staff_id,))
+            if cursor.fetchone() is None:
+                raise ValueError("staff_not_found")
+
     def load_profile(self, staff_id: int, *, for_update: bool):
         lock_clause = " FOR UPDATE" if for_update else ""
         with self._connection.cursor() as cursor:
@@ -58,7 +110,8 @@ class MySqlStaffMatchingPreferenceRepository:
                 "SELECT d.preference_key,v.value_json "
                 "FROM staff_matching_preference_values v "
                 "JOIN staff_matching_preference_definitions d "
-                "ON d.id=v.definition_id WHERE v.staff_id=%s",
+                "ON d.id=v.definition_id WHERE v.staff_id=%s"
+                + (" FOR UPDATE" if for_update else ""),
                 (staff_id,),
             )
             rows = cursor.fetchall() or ()

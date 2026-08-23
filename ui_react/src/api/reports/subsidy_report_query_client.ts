@@ -1,6 +1,6 @@
 /**
  * File: subsidy_report_query_client.ts
- * Description: 以fresh Session執行單一季度或年度補助報表GET並驗證aggregate與redaction。
+ * Description: 以 fresh Session 查詢季度或年度補助報表並驗證期間、完整分區、aggregate 與 redaction。
  */
 import { sessionClient } from '../auth/session_client';
 import { transport } from '../shared/transport';
@@ -12,7 +12,9 @@ export interface SubsidyReportQueryOptions { signal?: AbortSignal; timeoutMs?: n
 function validate(query: SubsidyReportQuery) { if (!Number.isInteger(query.applicationYear) || query.applicationYear < 1912) throw new SubsidyReportQueryError('SUBSIDY_REPORT_VALIDATION', 'applicationYear無效。'); if (query.kind === 'quarterly' && (!Number.isInteger(query.quarter) || query.quarter < 1 || query.quarter > 4)) throw new SubsidyReportQueryError('SUBSIDY_REPORT_VALIDATION', 'quarter無效。'); }
 function assertView(view: SubsidyReportPreview, query: SubsidyReportQuery) {
   if (view.period_kind !== query.kind || view.application_year !== query.applicationYear || view.quarter !== (query.kind === 'quarterly' ? query.quarter : null)) throw new SubsidyReportQueryError('SUBSIDY_REPORT_PERIOD_MISMATCH', '報表period與request不一致。');
-  if (new Set(view.partitions.map((item) => item.citizen_kind)).size !== view.partitions.length) throw new SubsidyReportQueryError('SUBSIDY_REPORT_DUPLICATE_PARTITION', 'partition重複。');
+  const partitionKinds = new Set(view.partitions.map((item) => item.citizen_kind));
+  if (partitionKinds.size !== view.partitions.length) throw new SubsidyReportQueryError('SUBSIDY_REPORT_DUPLICATE_PARTITION', 'partition重複。');
+  if (!partitionKinds.has('general') || !partitionKinds.has('subsidized')) throw new SubsidyReportQueryError('SUBSIDY_REPORT_INCOMPLETE_PARTITIONS', '報表缺少必要partition。');
   const rows = view.partitions.flatMap((item) => item.rows);
   for (const partition of view.partitions) { if (partition.row_count !== partition.rows.length || partition.total_amount_ntd !== partition.rows.reduce((sum, row) => sum + row.subsidy_amount_ntd, 0)) throw new SubsidyReportQueryError('SUBSIDY_REPORT_AGGREGATE_MISMATCH', 'partition aggregate不一致。'); }
   if (view.total_row_count !== rows.length || view.total_amount_ntd !== rows.reduce((sum, row) => sum + row.subsidy_amount_ntd, 0)) throw new SubsidyReportQueryError('SUBSIDY_REPORT_AGGREGATE_MISMATCH', 'report aggregate不一致。');

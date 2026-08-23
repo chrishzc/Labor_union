@@ -363,7 +363,7 @@ def _raise_legacy_review_api_gone() -> None:
         status_code=410,
         detail={
             "code": "line_review_api_retired",
-            "replacement": "/api/v1/line/review-requests",
+            "replacement": "/api/v1/line/identity/reviews",
         },
     )
 

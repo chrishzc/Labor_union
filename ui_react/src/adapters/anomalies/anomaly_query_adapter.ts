@@ -57,7 +57,7 @@ export interface AnomalySummaryViewModel {
   id: string; // fingerprint identity
   fingerprint: string;
   code: string; // definition_code
-  title: string; // "後端尚未提供 typed 顯示摘要" (Gap)
+  title: string; // "目前 typed view 未納入摘要欄位" (Gap)
   severity: string; // "🔴 嚴重阻擋" | "🟡 警示待補"
   severityClass: 'critical' | 'warning';
   status: string; // "🟡 待處理" | "🔵 已認領" | "✅ 已排除"
@@ -65,10 +65,10 @@ export interface AnomalySummaryViewModel {
   rawWorkflowStatus: AnomalyWorkflowStatus;
   rawDomain: string;
   category: AnomalyDomainCategory;
-  relatedEntity: string; // "後端尚未提供" (Gap)
-  description: string; // "後端尚未提供 typed 顯示摘要" (Gap)
-  suggestedAction: string; // "後端尚未提供" (Gap)
-  rootEvidence: string; // "後端 typed detail/recovery contract 尚未開放" (Gap)
+  relatedEntity: string; // "目前 typed view 未納入關聯實體欄位" (Gap)
+  description: string; // "目前 typed view 未納入描述欄位" (Gap)
+  suggestedAction: string; // "目前 typed view 未納入建議處理欄位" (Gap)
+  rootEvidence: string; // "目前 typed view 未納入根事實明細欄位" (Gap)
   staffCalendarNavigation: StaffCalendarNavigationView | null;
   metadata: AnomalyMetadataViewModel;
 }
@@ -230,7 +230,7 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
     id: dto.fingerprint,
     fingerprint: dto.fingerprint,
     code: dto.definition_code,
-    title: '後端尚未提供 typed 顯示摘要',
+    title: '目前 typed view 未納入摘要欄位',
     severity: severityLabel,
     severityClass,
     status: statusLabel,
@@ -238,10 +238,10 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
     rawWorkflowStatus: dto.workflow_status,
     rawDomain: dto.source_domain,
     category: mapDomainToCategory(dto.source_domain),
-    relatedEntity: '後端尚未提供',
-    description: '後端尚未提供 typed 顯示摘要',
-    suggestedAction: '後端尚未提供',
-    rootEvidence: '後端 typed detail/recovery contract 尚未開放',
+    relatedEntity: '目前 typed view 未納入關聯實體欄位',
+    description: '目前 typed view 未納入描述欄位',
+    suggestedAction: '目前 typed view 未納入建議處理欄位',
+    rootEvidence: '目前 typed view 未納入根事實明細欄位',
     staffCalendarNavigation: dto.staff_calendar_navigation ?? null,
     metadata: {
       sourceDomain: dto.source_domain,

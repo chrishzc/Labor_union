@@ -80,4 +80,16 @@ class JobStatusResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     job_id: str
-    status: str
+    status: _JobStatus
+
+
+class JobObservationView(BaseModel):
+    """人工查詢用的最小背景工作狀態投影，不含 receipt/error payload。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    job_id: str = Field(min_length=1, max_length=191)
+    command_type: _JobCommandType
+    status: _JobStatus
+    attempt_count: int = Field(ge=0)
+    max_attempts: int = Field(ge=0)

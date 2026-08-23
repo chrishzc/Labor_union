@@ -1,6 +1,13 @@
-"""Stage 8 governed knowledge worker orchestration with fake ports."""
+"""
+File: test_contract_knowledge_applications_stage8.py
+Description: 驗證 Knowledge worker 與整合能力契約。
+"""
 
 from domains.knowledge_retrieval.knowledge import KnowledgeAnswer, KnowledgeCitation
+from subsystems.access.integration_capabilities import (
+    IntegrationCapability,
+    integration_capabilities_for_role,
+)
 from subsystems.knowledge_retrieval.application import KnowledgeWorker
 
 
@@ -53,3 +60,14 @@ def test_knowledge_worker_records_cited_answer_receipt() -> None:
 
     assert worker.run_once() == 1
     assert repository.completed[0][2].authoritative is False
+
+
+def test_known_roles_share_complete_integration_capability_set() -> None:
+    expected = tuple(sorted(capability.value for capability in IntegrationCapability))
+
+    for role in ("line_viewer", "line_agent", "line_manager", "system_admin"):
+        assert integration_capabilities_for_role(role) == expected
+
+
+def test_unknown_role_has_no_integration_capabilities() -> None:
+    assert integration_capabilities_for_role("unknown-role") == ()

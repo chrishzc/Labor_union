@@ -1,11 +1,11 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: in-progress
 identity: PROV-20260817-react-admin-phase3d-db-r-react
 date: 2026-08-17
 owner: Access / React Data Browser
 domain: Access
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase3d-data-browser-part-identity-decision PASS; PROV-20260817-react-admin-phase3d-db-query-public-contract-hardening PASS
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase3d-data-browser-part-identity-decision PASS; PROV-20260817-react-admin-phase3d-db-query-public-contract-hardening PASS
 approval_required: 核准此 exact Phase 3D-DB-R Work Package
 evidence_directory: document/架構重整/03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3d-db-r-react/
 required_receipts: candidate-change-inventory.md; contract-matrix-freeze-receipt.md; verification-receipt.md; browser-smoke-receipt.md; open-findings.md
@@ -55,3 +55,18 @@ server-masked Query。source-correction與generic PATCH維持disabled；不重�
    Data Browser全部public boundary ready。
 
 DB：Scope PASS（UI only）；其餘NOT_RUN；`DB_CHANGE_NOT_READY`。
+
+## 2026-08-22 execution status
+
+- Corrective patch：runtime malformed source／cursor固定映射typed `invalid` 422；next-page失敗保留相同cursor並提供去重重試。
+- Focused React：6 files／16 tests PASS；TypeScript＋Vite build PASS；lint exit 0，4項非DB-R既有warning。
+- 真TOTP browser：六canonical sources、success、empty、orders cursor 25→50、50/50 unique ascending identities、
+  Drawer零detail GET、masked copy contract、native-disabled correction與快速切換stale guard均PASS；17個Data Browser requests
+  全為GET，0 non-GET。無Bearer直連由API access log觀察到401。
+- 低權限403帳號不存在可安全使用的既有憑證；timeout／schema mismatch無受控browser fault injection，三項保持
+  `NOT_RUN`。因此本Work Package維持`in-progress`，不得宣稱整包完成。
+- lineage scenario JSON仍為`blocked/no-browser-execution`，與Part 17 current identity有metadata drift；該檔由lineage owner持有，
+  本包不覆寫。
+
+DB gates：Scope `PASS`；Change inventory `PASS`（四類DB變更皆0）；其餘`NOT_RUN`；結論
+`DB_CHANGE_NOT_READY`。

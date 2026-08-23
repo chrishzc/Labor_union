@@ -1,4 +1,7 @@
-"""Typed query and command contracts for canonical LINE delivery administration."""
+"""
+File: delivery_admin_contracts.py
+Description: 定義 LINE Delivery 查詢、公開篩選與控制命令契約。
+"""
 
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ _MAXIMUM_PAGE_SIZE = 100
 class LineDeliveryAdminQuery:
     statuses: tuple[LineDeliveryStatus, ...] = ()
     source_aggregate_type: str | None = None
+    source_aggregate_types: tuple[str, ...] = ()
     recipient_identity: str | None = None
     scheduled_from: datetime | None = None
     scheduled_to: datetime | None = None
@@ -36,6 +40,12 @@ class LineDeliveryAdminQuery:
                 "LINE source aggregate type",
                 191,
             )
+        if self.source_aggregate_type is not None and self.source_aggregate_types:
+            raise ValueError("LINE delivery source filters are ambiguous")
+        for source_type in self.source_aggregate_types:
+            require_canonical_text(source_type, "LINE source aggregate type", 191)
+        if len(set(self.source_aggregate_types)) != len(self.source_aggregate_types):
+            raise ValueError("LINE delivery source filters must be unique")
         if self.recipient_identity is not None:
             require_canonical_text(
                 self.recipient_identity,

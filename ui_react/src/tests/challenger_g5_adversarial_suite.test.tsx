@@ -2,11 +2,14 @@
  * File: challenger_g5_adversarial_suite.test.tsx
  * Description: 對 OrdersPage 競態、壞契約、request budget 與 unavailable 行為做對抗驗證。
  */
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
+import { orderCancellationClient } from '../api/orders/order_cancellation_client';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
+import { waitingDepositLockClient } from '../api/scheduling/waiting_deposit_lock_client';
 import { OrdersPage } from '../pages/OrdersPage';
 import {
   realisticActualStart,
@@ -25,6 +28,12 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function orderCard(caseNo: string): HTMLElement {
+  const card = screen.getByText(caseNo).closest<HTMLElement>('.order-card');
+  if (!card) throw new Error(`找不到 ${caseNo} 訂單卡片。`);
+  return card;
+}
+
 describe('G5 OrdersPage adversarial suite', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -32,7 +41,10 @@ describe('G5 OrdersPage adversarial suite', () => {
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue(realisticOrderSummaryPage);
     vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue(realisticOrderDetail);
     vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockResolvedValue(realisticOrderCalendarDetail);
-    vi.spyOn(ordersQueryClient, 'getOrderTerms').mockResolvedValue(realisticOrderTerms);
+    vi.spyOn(ordersQueryClient, 'getOrderTerms').mockImplementation(async (caseNo) => ({
+      ...realisticOrderTerms,
+      case_no: caseNo,
+    }));
     vi.spyOn(ordersQueryClient, 'getFormManagementContext').mockResolvedValue({
       case_no: 'ORD-2026-0801', service_time: null, service_type: null,
       delivery_type: null, residence_type: null, city: null, identity_status: null,
@@ -41,6 +53,32 @@ describe('G5 OrdersPage adversarial suite', () => {
     vi.spyOn(ordersQueryClient, 'getContractCompletion').mockResolvedValue(realisticContractCompletion);
     vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue(realisticAssignmentPlan);
     vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue(realisticServiceDateQueryView);
+    vi.spyOn(candidateContactPoolClient, 'query').mockImplementation(async (caseNo) => ({
+      pool_id: null,
+      case_no: caseNo,
+      candidates: [],
+    }));
+    vi.spyOn(waitingDepositLockClient, 'queryPlan').mockResolvedValue({
+      planId: 701,
+      status: 'proposed',
+      activeLockId: null,
+    });
+    vi.spyOn(orderCancellationClient, 'query').mockImplementation(async (caseNo) => ({
+      case_no: caseNo,
+      lifecycle_status: '訂單成立',
+      actual_start_date: null,
+      contracted_service_days: 30,
+      service_hours_per_day: 8,
+      service_started: false,
+      service_data_locked: false,
+      order_version: 0,
+      scheduling_version: 0,
+      scheduling_generation: 0,
+      client_finance_version: 0,
+      payroll_version: 0,
+      confirmed_service_days: [],
+      caregiver_options: [],
+    }));
   });
 
   it('discards a stale matching assignment response after fast case switching', async () => {
@@ -55,17 +93,17 @@ describe('G5 OrdersPage adversarial suite', () => {
     }));
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
-    const buttons = screen.getAllByRole('button', { name: /媒合與正式排班/ });
-    await act(async () => fireEvent.click(buttons[0]));
-    await act(async () => fireEvent.click(buttons[1]));
+    await act(async () => fireEvent.click(within(orderCard('ORD-2026-0802')).getByRole('button', { name: /媒合與正式排班/ })));
+    await act(async () => fireEvent.click(within(orderCard('ORD-2026-0803')).getByRole('button', { name: /媒合與正式排班/ })));
     second.resolve({
       ...realisticAssignmentPlan,
-      case_no: 'ORD-2026-0802',
+      case_no: 'ORD-2026-0803',
       assignments: [{ ...realisticAssignmentPlan.assignments[0], staff_id: 222 }],
     });
     await screen.findByText(/Staff #222/);
     first.resolve({
       ...realisticAssignmentPlan,
+      case_no: 'ORD-2026-0802',
       assignments: [{ ...realisticAssignmentPlan.assignments[0], staff_id: 111 }],
     });
     await act(async () => Promise.resolve());
@@ -92,8 +130,9 @@ describe('G5 OrdersPage adversarial suite', () => {
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
     await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /取消試算/ })[0]));
+    expect(await screen.findByText('取消前根事實')).toBeInTheDocument();
     expect(screen.queryByText(/全額退還/)).not.toBeInTheDocument();
     expect(screen.queryByText(/已勾選推薦此履歷/)).not.toBeInTheDocument();
-    expect(screen.getAllByText(/後端尚未提供 typed projection/).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/後端.*提供|未開放|未納入/)).not.toBeInTheDocument();
   });
 });

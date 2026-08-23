@@ -1,6 +1,6 @@
 /**
  * File: DataBrowserPage.tsx
- * Description: 六來源 masked query、cursor table 與 loaded-row Drawer。
+ * Description: 六來源 masked query、StrictMode-safe首屏、cursor table 與 loaded-row Drawer。
  */
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import './DataBrowserPage.css';
@@ -21,7 +21,7 @@ type QueryState =
   | { kind: 'empty' }
   | { kind: 'error'; message: string }
   | { kind: 'loading_more'; rows: DataBrowserRowViewModel[] }
-  | { kind: 'page_error'; rows: DataBrowserRowViewModel[]; message: string };
+  | { kind: 'page_error'; rows: DataBrowserRowViewModel[]; message: string; failedCursor: string };
 
 const INITIAL_TAB = DATA_BROWSER_TABS[0];
 
@@ -42,11 +42,12 @@ export const DataBrowserPage: React.FC = () => {
     tab: DataBrowserTab,
     query: string,
     after?: string,
-    existingRows: DataBrowserRowViewModel[] = []
+    existingRows: DataBrowserRowViewModel[] = [],
+    coalesceReplay = false
   ) => {
     const seq = ++generation.current;
     controller.current?.abort();
-    const activeController = new AbortController();
+    const activeController = coalesceReplay ? null : new AbortController();
     controller.current = activeController;
     setSelectedRecord(null);
     setCopyStatus('');
@@ -54,9 +55,9 @@ export const DataBrowserPage: React.FC = () => {
     try {
       const page = await dataBrowserQueryClient.querySource(
         { sourceId: tab.sourceId, limit: 25, after, query: query || undefined },
-        { signal: activeController.signal }
+        activeController === null ? undefined : { signal: activeController.signal }
       );
-      if (seq !== generation.current || activeController.signal.aborted) return;
+      if (seq !== generation.current || activeController?.signal.aborted) return;
       const adapted = adaptDataBrowserPage(page);
       if (adapted.sourceId !== tab.sourceId) throw new Error('data_browser_source_mismatch');
       const existingIds = new Set(existingRows.map((row) => row.id));
@@ -68,16 +69,17 @@ export const DataBrowserPage: React.FC = () => {
         ? { kind: 'empty' }
         : { kind: 'ready', rows, nextCursor: adapted.nextCursor });
     } catch (error) {
-      if (seq !== generation.current || activeController.signal.aborted) return;
+      if (seq !== generation.current || activeController?.signal.aborted) return;
       const message = error instanceof Error ? error.message : '載入資料來源失敗';
-      setState(existingRows.length > 0
-        ? { kind: 'page_error', rows: existingRows, message }
+      if (after !== undefined) seenCursors.current.delete(after);
+      setState(existingRows.length > 0 && after !== undefined
+        ? { kind: 'page_error', rows: existingRows, message, failedCursor: after }
         : { kind: 'error', message });
     }
   }, []);
 
   useEffect(() => {
-    void loadSource(INITIAL_TAB, '');
+    void loadSource(INITIAL_TAB, '', undefined, [], true);
     return () => {
       generation.current += 1;
       controller.current?.abort();
@@ -110,6 +112,12 @@ export const DataBrowserPage: React.FC = () => {
     if (!nextCursor || seenCursors.current.has(nextCursor)) return;
     seenCursors.current.add(nextCursor);
     void loadSource(selectedTab, appliedQuery, nextCursor, rows);
+  };
+
+  const retryNextPage = () => {
+    if (state.kind !== 'page_error' || seenCursors.current.has(state.failedCursor)) return;
+    seenCursors.current.add(state.failedCursor);
+    void loadSource(selectedTab, appliedQuery, state.failedCursor, state.rows);
   };
 
   const copyMaskedView = async () => {
@@ -200,7 +208,12 @@ export const DataBrowserPage: React.FC = () => {
       )}
 
       {state.kind === 'loading_more' && <div className="anomalies-loading">正在載入下一頁...</div>}
-      {state.kind === 'page_error' && <div className="anomalies-error">下一頁載入失敗：{state.message}</div>}
+      {state.kind === 'page_error' && (
+        <div className="anomalies-error">
+          <span>下一頁載入失敗：{state.message}</span>
+          <button data-control-id="data-browser.next-page.retry" onClick={retryNextPage}>重試下一頁</button>
+        </div>
+      )}
       {nextCursor && <button data-control-id="data-browser.next-page" onClick={loadNextPage}>載入下一頁</button>}
 
       <Drawer

@@ -69,13 +69,16 @@ export class OrderValidationError extends OrderQueryError {
   public readonly name = 'OrderValidationError';
   public readonly status = 422;
 
+  public readonly code: string;
   public readonly fieldErrors: ReadonlyArray<{ field: string; message: string }>;
 
   constructor(
     message = '訂單查詢請求參數驗證失敗',
-    fieldErrors: ReadonlyArray<{ field: string; message: string }> = []
+    fieldErrors: ReadonlyArray<{ field: string; message: string }> = [],
+    code = 'ORDER_VALIDATION_ERROR'
   ) {
     super(message);
+    this.code = code;
     this.fieldErrors = fieldErrors;
   }
 }
@@ -84,15 +87,18 @@ export class OrderConflictError extends OrderQueryError {
   public readonly name = 'OrderConflictError';
   public readonly status = 409;
 
+  public readonly code: string;
   public readonly currentVersion: number | null;
   public readonly domainBlockers: readonly string[];
 
   constructor(
     message = '訂單版本衝突或領域聚合狀態受阻',
     currentVersion: number | null = null,
-    domainBlockers: readonly string[] = []
+    domainBlockers: readonly string[] = [],
+    code = 'ORDER_CONFLICT'
   ) {
     super(message);
+    this.code = code;
     this.currentVersion = currentVersion;
     this.domainBlockers = domainBlockers;
   }
@@ -171,14 +177,16 @@ export function mapHttpErrorToOrderError(
   if (error.status === 422) {
     return new OrderValidationError(
       error.message,
-      facts?.field_errors.map((item) => ({ field: item.field, message: item.message })) ?? []
+      facts?.field_errors.map((item) => ({ field: item.field, message: item.message })) ?? [],
+      facts?.code ?? error.code
     );
   }
   if (error.status === 409) {
     return new OrderConflictError(
       error.message,
       facts?.current_version ?? null,
-      facts?.domain_blockers ?? []
+      facts?.domain_blockers ?? [],
+      facts?.code ?? error.code
     );
   }
   if (error.status === 503) {

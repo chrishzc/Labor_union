@@ -1,0 +1,81 @@
+{
+  "operation": "GET /api/config/line-menus/{menu_id}",
+  "method": "GET",
+  "path_template": "/api/config/line-menus/{menu_id}",
+  "fingerprint": "f02246e0",
+  "case_id": "590cLt",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/config/line-menus/0",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/config/line-menus/0",
+      "url_template": "http://127.0.0.1:8765/api/config/line-menus/{menu_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "590cLt"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:11:29 GMT",
+          "server": "uvicorn",
+          "content-length": "27",
+          "content-type": "application/json",
+          "server-timing": "application;dur=6.9",
+          "x-response-time-ms": "6.9"
+        },
+        "body": "{\"detail\":\"Menu not found\"}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.007893000030890107,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/config/line-menus/{menu_id}",
+      "path_parameters": {
+        "menu_id": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

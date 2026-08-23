@@ -1,10 +1,14 @@
-"""Per-request construction for Staff Availability Preview/Apply."""
+"""
+File: staff_availability.py
+Description: 建立 Staff Availability 的 MySQL repository 與唯一 outer UoW。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.scheduling.staff_availability_workflow import (
     StaffAvailabilityApplyRequest,
@@ -37,6 +41,7 @@ def get_staff_availability_application():
     workflow = StaffAvailabilityWorkflow(
         MySqlStaffAvailabilityRepository(connection),
         SystemBusinessClock(),
+        lambda: MySqlUnitOfWork(connection),
     )
     try:
         yield StaffAvailabilityApplication(workflow)

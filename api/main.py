@@ -19,6 +19,7 @@ from api.middleware.performance import ApiPerformanceMiddleware
 from api.routes import (
     admin_audit,
     admin_auth,
+    admin_entry_targets,
     account_center,
     anomaly_recovery,
     anomaly_registry,
@@ -79,17 +80,22 @@ from api.routes import (
     order_schedule_calculation,
     service_date_confirmation,
     matching_schedule_confirmation,
+    matching_coordination,
     order_terms,
     orders,
+    orders_card_projection,
+    orders_stage_projection,
     payroll,
     payroll_rebuild,
     private_operations,
     schedule,
     jobs,
     scheduling_current,
+    scheduling_eligibility_collision,
     staff_matching_preferences,
     staff_retirement,
     staff,
+    staff_qualification_master,
     staff_availability,
     staff_monthly_schedule,
     staff_payout,
@@ -106,12 +112,36 @@ from api.routes import (
 
 from api.schemas.base import BaseResponse
 from api.dependencies.line_runtime import line_webhook_runtime_mode
+from infrastructure.runtime.react_admin_artifact import (
+    ReactAdminArtifactRuntime,
+    ReactAdminStaticApplication,
+    load_react_admin_runtime_from_environment,
+)
 from line.line_bot import router as line_router
 from subsystems.access.authentication_session import record_admin_audit
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(PROJECT_ROOT / ".env")
+REACT_ADMIN_RUNTIME = load_react_admin_runtime_from_environment(
+    workspace_root=PROJECT_ROOT
+)
+
+
+def mount_react_admin_static(
+    application: FastAPI,
+    runtime: ReactAdminArtifactRuntime | None,
+) -> bool:
+    """Mount the validated active artifact and its private health provider once."""
+    if runtime is None:
+        return False
+    application.state.react_admin_artifact_health = runtime.health_attestation
+    application.mount(
+        "/admin",
+        ReactAdminStaticApplication(runtime.active),
+        name="react-admin",
+    )
+    return True
 
 
 def _allowed_origins() -> list[str]:
@@ -187,10 +217,13 @@ app.include_router(staff_leave_management.router)
 app.include_router(line_mobile_admin.router)
 app.include_router(line_mobile_admin.page_router)
 app.include_router(customer_service.router)
+app.include_router(customer_service.escalation_router)
 app.include_router(line_identity_management.router)
 
 # Existing administration API routers.
 app.include_router(orders.router)
+app.include_router(orders_card_projection.router)
+app.include_router(orders_stage_projection.router)
 app.include_router(case_architecture_bootstrap.router)
 app.include_router(order_terms.router)
 app.include_router(order_contract_completion.router)
@@ -204,6 +237,7 @@ app.include_router(leave_substitution.router)
 app.include_router(order_schedule_calculation.router)
 app.include_router(service_date_confirmation.router)
 app.include_router(matching_schedule_confirmation.router)
+app.include_router(matching_coordination.router)
 app.include_router(assignment_schedule_rest_dates.router)
 
 
@@ -214,6 +248,7 @@ app.include_router(match_records.router)
 app.include_router(schedule.router)
 app.include_router(jobs.router)
 app.include_router(scheduling_current.router)
+app.include_router(scheduling_eligibility_collision.router)
 app.include_router(staff_matching_preferences.router)
 app.include_router(multi_caregiver_case_assignments.router)
 app.include_router(multi_caregiver_case_assignments.staff_router)
@@ -223,6 +258,7 @@ app.include_router(caregiver_segment_availability.router)
 app.include_router(caregiver_availability_locks.router)
 app.include_router(clients.router)
 app.include_router(staff.router)
+app.include_router(staff_qualification_master.router)
 app.include_router(staff_retirement.router)
 app.include_router(staff_availability.router)
 app.include_router(staff_monthly_schedule.router)
@@ -255,6 +291,7 @@ app.include_router(data_browser_admin.router)
 app.include_router(system_status.router)
 app.include_router(runtime_health.router)
 app.include_router(private_operations.router)
+app.include_router(admin_entry_targets.router)
 
 
 
@@ -264,7 +301,19 @@ async def audit_authenticated_mutations(request: Request, call_next):
     response = await call_next(request)
     principal = getattr(request.state, "admin_principal", None)
     is_preview = request.url.path.endswith("/preview")
-    if principal and request.method in {"POST", "PUT", "PATCH", "DELETE"} and not is_preview:
+    is_entry_target_apply = (
+        request.method == "POST" and request.url.path == "/api/v1/admin/entry-targets/apply"
+    )
+    uses_control_plane_receipt = is_entry_target_apply and (
+        getattr(request.state, "audit_persistence", None) == "admin_entry_target_control_plane"
+        or response.status_code >= 400
+    )
+    if (
+        principal
+        and request.method in {"POST", "PUT", "PATCH", "DELETE"}
+        and not is_preview
+        and not uses_control_plane_receipt
+    ):
         try:
             await asyncio.to_thread(
                 record_admin_audit,
@@ -289,3 +338,6 @@ def api_health_check():
         data={"status": "healthy", "service": "Labor Union API"},
         message="API Server is running normally",
     )
+
+
+mount_react_admin_static(app, REACT_ADMIN_RUNTIME)

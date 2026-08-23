@@ -1,4 +1,7 @@
-"""Pure current Scheduling calendar, lifecycle, and occupancy projection."""
+"""
+File: current_projection.py
+Description: 依正式服務時刻投影 current Scheduling 狀態、占用與已開工案件的 buffer 釋放。
+"""
 
 from __future__ import annotations
 
@@ -61,6 +64,7 @@ class EffectiveAssignmentCurrentFact:
     staff_id: int
     assigned_start_date: date
     assigned_end_date: date
+    case_first_service_date: date
     official_service_dates: tuple[date, ...]
     active_buffer_dates: tuple[date, ...]
     service_hours_per_day: int
@@ -222,7 +226,7 @@ def build_scheduling_current_projection(
     _validate_evaluation_instant(evaluated_at)
     _validate_stored_occupancy(facts)
     assignments = _project_assignments(facts.assignments, evaluated_at)
-    days = _project_days(facts, assignments, query_dates)
+    days = _project_days(facts, assignments, query_dates, evaluated_at)
     case_versions = _case_versions(facts.assignments)
     token = _projection_token(facts, assignments, days, case_versions)
     return _projection_result(
@@ -259,11 +263,13 @@ def _projection_result(
     )
 
 
-def _project_days(facts, assignments, query_dates):
+def _project_days(facts, assignments, query_dates, evaluated_at):
     status_by_assignment = {
         item.assignment_id: item.status for item in assignments
     }
-    entries_by_date = _build_entries(facts, status_by_assignment, query_dates)
+    entries_by_date = _build_entries(
+        facts, status_by_assignment, query_dates, evaluated_at
+    )
     return tuple(
         SchedulingCurrentDay(
             calendar_date=value,
@@ -278,11 +284,36 @@ def project_assignment_status(
     assignment: EffectiveAssignmentCurrentFact,
     evaluated_at: datetime,
 ) -> AssignmentLifecycleStatus:
+    return project_service_period_status(
+        first_service_date=assignment.official_service_dates[0],
+        last_service_date=assignment.official_service_dates[-1],
+        service_time_terms=assignment.service_time_terms,
+        evaluated_at=evaluated_at,
+    )
+
+
+def project_service_period_status(
+    *,
+    first_service_date: date,
+    last_service_date: date,
+    service_time_terms: ServiceTimeTerms,
+    evaluated_at: datetime,
+) -> AssignmentLifecycleStatus:
+    _require_date(first_service_date, "first service date")
+    _require_date(last_service_date, "last service date")
+    if last_service_date < first_service_date:
+        raise ValueError("service period is inverted")
+    if not isinstance(service_time_terms, ServiceTimeTerms) or not service_time_terms.complete:
+        raise ValueError("service time terms must be complete")
     _validate_evaluation_instant(evaluated_at)
-    first_service_at = _first_service_at(assignment)
+    first_service_at = datetime.combine(
+        first_service_date,
+        service_time_terms.start_time,
+        tzinfo=TAIPEI_TIME_ZONE,
+    )
     if evaluated_at < first_service_at:
         return AssignmentLifecycleStatus.PLANNED
-    if evaluated_at < _completion_at(assignment):
+    if evaluated_at < service_time_terms.completion_instant(last_service_date):
         return AssignmentLifecycleStatus.ACTIVE
     return AssignmentLifecycleStatus.COMPLETED
 
@@ -315,15 +346,21 @@ def _project_assignment(assignment, evaluated_at):
     )
 
 
-def _build_entries(facts, status_by_assignment, query_dates):
+def _build_entries(facts, status_by_assignment, query_dates, evaluated_at):
     entries: dict[date, list[SchedulingDayEntry]] = {}
     occupied_dates: dict[date, SchedulingDayEntry] = {}
+    started_case_numbers = {
+        assignment.case_no
+        for assignment in facts.assignments
+        if evaluated_at >= _case_first_service_at(assignment)
+    }
     for assignment in facts.assignments:
         _append_assignment_entries(
             entries,
             occupied_dates,
             assignment,
             status_by_assignment[assignment.assignment_id],
+            started_case_numbers,
         )
     for waiting_lock in facts.waiting_locks:
         _append_waiting_lock_entries(entries, occupied_dates, waiting_lock)
@@ -342,6 +379,7 @@ def _append_assignment_entries(
     occupied_dates,
     assignment,
     assignment_status,
+    started_case_numbers,
 ):
     _append_assignment_interval_entries(
         entries,
@@ -354,6 +392,7 @@ def _append_assignment_entries(
         occupied_dates,
         assignment,
         assignment_status,
+        started_case_numbers,
     )
 
 
@@ -383,7 +422,10 @@ def _append_assignment_buffer_entries(
     occupied_dates,
     assignment,
     assignment_status,
+    started_case_numbers,
 ):
+    if assignment.case_no in started_case_numbers:
+        return
     for buffer_date in assignment.active_buffer_dates:
         _append_assignment_buffer_entry(
             entries,
@@ -660,6 +702,7 @@ def _validate_assignment_identities(assignment):
 def _validate_assignment_dates(assignment):
     _require_date(assignment.assigned_start_date, "assigned start date")
     _require_date(assignment.assigned_end_date, "assigned end date")
+    _require_date(assignment.case_first_service_date, "case first service date")
     if assignment.assigned_end_date < assignment.assigned_start_date:
         raise ValueError("assignment interval is inverted")
     service_dates = assignment.official_service_dates
@@ -673,6 +716,8 @@ def _validate_assignment_dates(assignment):
     )
     if not set(service_dates).issubset(interval_dates):
         raise ValueError("official service date is outside assignment interval")
+    if assignment.case_first_service_date > service_dates[0]:
+        raise ValueError("case first service date exceeds assignment service start")
 
 
 def _validate_assignment_service_facts(assignment):
@@ -759,6 +804,14 @@ def _first_service_at(assignment):
     )
 
 
+def _case_first_service_at(assignment):
+    return datetime.combine(
+        assignment.case_first_service_date,
+        assignment.service_time_terms.start_time,
+        tzinfo=TAIPEI_TIME_ZONE,
+    )
+
+
 def _completion_at(assignment):
     return assignment.service_time_terms.completion_instant(
         assignment.official_service_dates[-1]
@@ -809,4 +862,5 @@ __all__ = [
     "WaitingDepositLockCurrentFact",
     "build_scheduling_current_projection",
     "project_assignment_status",
+    "project_service_period_status",
 ]

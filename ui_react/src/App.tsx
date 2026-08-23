@@ -1,6 +1,6 @@
 /**
- * @file App.tsx
- * @description 應用程式根元件，實作 URL Hash 路由同步、認證守衛與 ErrorBoundary 容錯防護。
+ * File: App.tsx
+ * Description: 應用程式根元件，實作 URL Hash 路由同步、認證守衛與 ErrorBoundary 容錯防護。
  */
 import React, { useEffect, useState } from 'react';
 import './styles/design-tokens.css';
@@ -28,6 +28,7 @@ import { FinancePage } from './pages/FinancePage';
 import { AnomaliesPage } from './pages/AnomaliesPage';
 import { DataBrowserPage } from './pages/DataBrowserPage';
 import { AccountManagementPage } from './pages/AccountManagementPage';
+import { SystemStatusPage } from './pages/SystemStatusPage';
 import './pages/LineManagementPage.css';
 
 const HASH_ALIASES: Record<string, PageType> = {
@@ -163,6 +164,7 @@ export const App: React.FC = () => {
         {currentPage === 'anomalies' && <AnomaliesPage />}
         {currentPage === 'data-browser' && <DataBrowserPage />}
         {currentPage === 'account-management' && <AccountManagementPage />}
+        {currentPage === 'system-status' && <SystemStatusPage />}
       </MasterLayout>
     </ErrorBoundary>
   );

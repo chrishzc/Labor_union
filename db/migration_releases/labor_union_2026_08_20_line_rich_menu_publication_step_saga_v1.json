@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-line-rich-menu-publication-step-saga-2026-08-20-v1",
+  "release_metadata": {
+    "release_name": "Labor Union LINE Rich Menu publication step saga",
+    "application_version": "line-rich-menu-publication-step-saga-v1",
+    "published_at": "2026-08-20",
+    "description": "Add immutable Rich Menu step acknowledgements, typed attempt outcomes, and cleanup anomalies"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-staff-retirement-2026-08-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1001_line_rich_menu_publication_step_saga.sql",
+      "relative_path": "db/schema_parts/1001_line_rich_menu_publication_step_saga.sql",
+      "sha256": "a9366cacdb65ad41d26153bd288b2503b8306be55faa8252d2f162e453f4ff47",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "code-rollback-preserve-rich-menu-saga-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "line-rich-menu-publication-step-saga-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["line-rich-menu-publication-step-saga-v1"],
+    "required_restart_targets": ["api", "line-worker"],
+    "watcher_worker_compatibility": "legacy-worker-drain-or-terminal-fallback",
+    "post_cutover_smoke_ids": ["line-rich-menu-publication-step-saga-owned-objects"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_20_line_rich_menu_publication_step_saga_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_20_line_rich_menu_publication_step_saga_v1.descriptors.json",
+    "sha256": "8b407a46a860033062955afd0e2d9e5db883bf906513f5ae5c5c9145c3cedeac",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

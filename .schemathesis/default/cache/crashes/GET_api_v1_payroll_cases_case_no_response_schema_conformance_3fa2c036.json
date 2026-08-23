@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/payroll/cases/{case_no}",
+  "method": "GET",
+  "path_template": "/api/v1/payroll/cases/{case_no}",
+  "fingerprint": "3fa2c036",
+  "case_id": "GiObHn",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/payroll/cases/0",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/payroll/cases/0",
+      "url_template": "http://127.0.0.1:8821/api/v1/payroll/cases/{case_no}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "GiObHn"
+      },
+      "response": {
+        "status_code": 422,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:49 GMT",
+          "server": "uvicorn",
+          "content-length": "260",
+          "content-type": "application/json",
+          "server-timing": "application;dur=66.7",
+          "x-response-time-ms": "66.7",
+          "x-correlation-id": "3267899415d7438b836762977781a75c"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"validation\",\"code\":\"invalid_payroll_facts\",\"message\":\"Payroll \u8abf\u6574\u8acb\u6c42\u672a\u901a\u904e\u9a57\u8b49\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"3267899415d7438b836762977781a75c\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "response_schema_conformance",
+          "status": "failure",
+          "message": "Response violates schema\n\n{\"error\":{\"category\":\"validation\",\"code\":\"invalid_payroll_facts\",\"correlation_id\":\"3267899415d7438b836762977781a75c\",\"current_version\":null,\"domain_blockers\":[],\"field_errors\":[],\"message\":\"Payroll \u8abf\u6574\u8acb\u6c42\u672a\u901a\u904e\u9a57\u8b49\u3002\",\"retryable\":false}} is not of type \"array\"\n\nValidated against the response schema for status code 422.\n\nSchema at /components/schemas/HTTPValidationError/properties/detail:\n\n    {\n        \"type\": \"array\",\n        \"items\": {\n            \"$ref\": \"#/components/schemas/ValidationError\"\n        },\n        \"title\": \"Detail\"\n    }\n\nValue:\n\n    {\n        \"error\": {\n            \"category\": \"validation\",\n            \"code\": \"invalid_payroll_facts\",\n            \"correlation_id\": \"3267899415d7438b836762977781a75c\",\n            \"current_version\": null,\n            \"domain_blockers\": [],\n            \"field_errors\": [],\n            \"message\": \"Payroll \\u8abf\\u6574\\u8acb\\u6c42\\u672a\\u901a\\u904e\\u9a57\\...\n            \"retryable\": false\n        }\n    }"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.003962499962653965,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/payroll/cases/{case_no}",
+      "path_parameters": {
+        "case_no": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

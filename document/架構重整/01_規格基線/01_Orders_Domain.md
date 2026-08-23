@@ -50,6 +50,20 @@ Orders 不擁有：
 
 - 修資料、觸發狀態機、持久化重算或以 fallback 補造根事實。
 
+### 3.1.1 Order Operational Timeline／11 步 SOP
+
+- 七階段與 11 步 SOP 都是後端唯讀 typed projection；React 只能依 server status 呈現，
+  不得由 `orders.status`、日期字串或畫面所在欄位重算完成、進行中或目前階段。
+- 每一步固定回 `not_started | in_progress | blocked | completed | unavailable`。`completed`
+  必須有完成標記，`in_progress` 必須有明確的目前執行強調，`blocked` 與 `unavailable` 必須
+  分開顯示；不得把讀取失敗或缺根事實偽裝為尚未完成。
+- 媒合聯繫、月嫂意願、客戶履歷推薦、月嫂簽回、訂金核銷、客戶簽回各讀取自己的
+  immutable owner fact；不得用同一 Contract Completion event 代替月嫂與客戶兩種簽回。
+- 正式服務履約只依 effective assignment-owned official service dates、完整 service-time tuple 與
+  `BusinessClock` 投影 `not_started／in_progress／completed`；不得依可過期的 assignment status count。
+- 正式服務完成後，current stage 必須前進至完工結案與請款，即使其中某個 settlement owner
+  projection 仍為 `unavailable`；不得繼續把案件留在「正式服務履約／進行中」。
+
 ### 3.2 Terms Preview／Apply
 
 Preview 輸入只接受 Terms 根事實意圖；輸出：
@@ -223,6 +237,17 @@ source profile v1 只接受 0→取消、1→完成、2→洽談中；空白／�
 historical origin。無法精確配對、欄位不可解析或違反 Orders invariant 時建立 typed warning 並 fail closed。
 此受限斷言只授權 Orders-owned historical adoption command，不授權一般 adapter 或 UI 寫入。Preview 零寫入，Apply 每列鎖定 fresh
 Order、驗證 version／fingerprint，並以單一 UoW 保存 projection、event、receipt、outbox及跨域 evidence。
+
+2026-08-23人工進一步裁決Historical Orders workbook採`ROW_ATOMIC_RESUMABLE + archive_required`。
+workbook command必須有durable `running → row_committed* → terminal_receipt`、resume cursor、每列fresh
+Order version與`retryable_interrupted | terminal_failed`；same key＋same canonical workbook只續跑未terminal
+rows或replay terminal receipt，same key＋different workbook固定conflict。`assignment_candidate`與
+`evidence_only_pairing`是`adopted`子分類，不得重複計入source-row aggregate。
+
+HCM Current仍由Case Import編排whole-workbook outer UoW。若HCM來源`exact IP + exact normalized name`
+命中既有Client，Orders端固定0 mutation並接受`review_only`結果，不得建立partial Order；只有未命中duplicate
+identity、但尚無唯一Client BeClass對方的合法案件，才可依既有條款建立Order並讓
+`requires_cooking = NULL`。archive成功不等於Orders commit，rollback後的archive compensation由Case Import擁有。
 
 ## 4. Module
 

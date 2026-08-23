@@ -1,10 +1,13 @@
-"""Typed Preview and atomic Apply workflow for leave/substitution batches."""
+"""
+File: leave_substitution_workflow.py
+Description: 編排請假代班 Preview、跨域單一交易 Apply、linked request與immutable receipt。
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
-from typing import Callable, Protocol
+from typing import Callable, Mapping, Protocol
 
 from domains.scheduling.leave_substitution import LeaveSubstitutionBatchIntent, LeaveSubstitutionCandidate, LeaveSubstitutionDomainError, LeaveSubstitutionFacts, LeaveSubstitutionIssue, build_leave_substitution_candidate
 from shared_kernel.errors import ErrorCategory, TypedError
@@ -40,10 +43,70 @@ class LeaveSubstitutionWorkflowFacts:
 
 
 @dataclass(frozen=True, slots=True)
+class LinkedLeaveRequestIntent:
+    request_id: int
+    expected_version: int
+
+
+@dataclass(frozen=True, slots=True)
+class LinkedLeaveRequestResult:
+    request_id: int
+    expected_version: int
+    resolved_version: int | None
+    status: str
+    receipt_key: str | None
+    notification_intent: str
+    staff_id: int
+
+
+class LinkedLeaveRequestResolutionError(ValueError):
+    pass
+
+
+class LeaveLinkedRequestResolver(Protocol):
+    def preview(
+        self,
+        intent: LinkedLeaveRequestIntent | None,
+    ) -> LinkedLeaveRequestResult | None: ...
+
+    def lock_for_apply(
+        self,
+        intent: LinkedLeaveRequestIntent | None,
+    ) -> LinkedLeaveRequestResult | None: ...
+
+    def resolve_and_enqueue(
+        self,
+        locked: LinkedLeaveRequestResult | None,
+        *,
+        receipt_key: str,
+        idempotency_key: IdempotencyKey,
+        correlation_id: CorrelationId,
+    ) -> LinkedLeaveRequestResult | None: ...
+
+
+class _NoLinkedRequestResolver:
+    def preview(self, intent):
+        if intent is not None:
+            raise LinkedLeaveRequestResolutionError("leave_request_resolver_unavailable")
+        return None
+
+    def lock_for_apply(self, intent):
+        if intent is not None:
+            raise LinkedLeaveRequestResolutionError("leave_request_resolver_unavailable")
+        return None
+
+    def resolve_and_enqueue(self, locked, **_kwargs):
+        if locked is not None:
+            raise LinkedLeaveRequestResolutionError("leave_request_resolver_unavailable")
+        return None
+
+
+@dataclass(frozen=True, slots=True)
 class LeaveSubstitutionPreviewRequest:
     case_no: str
     intent: LeaveSubstitutionBatchIntent
     correlation_id: CorrelationId
+    linked_request: LinkedLeaveRequestIntent | None = None
 
     def __post_init__(self) -> None:
         _validate_case_number(self.case_no)
@@ -54,6 +117,7 @@ class LeaveSubstitutionApplyRequest:
     case_no: str; intent: LeaveSubstitutionBatchIntent; expected_order_version: ExpectedVersion; expected_scheduling_version: ExpectedVersion
     expected_client_finance_version: ExpectedVersion; expected_payroll_version: ExpectedVersion; preview_fingerprint: PreviewFingerprint
     idempotency_key: IdempotencyKey; actor: ActorContext; reason: str; correlation_id: CorrelationId
+    linked_request: LinkedLeaveRequestIntent | None = None
 
     def __post_init__(self) -> None:
         _validate_case_number(self.case_no)
@@ -65,6 +129,7 @@ class LeaveSubstitutionPreview:
     candidate: LeaveSubstitutionCandidate; client_finance_impact: VersionedImpactCandidate; payroll_impact: VersionedImpactCandidate; orders_impact: VersionedImpactCandidate
     order_version: int; scheduling_version: int; client_finance_version: int; payroll_version: int; fingerprint: PreviewFingerprint
     calendar_candidate: "LeaveCalendarCandidate"; apply_readiness: "LeaveApplyReadiness"
+    linked_request: LinkedLeaveRequestResult | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,12 +165,14 @@ class BlockedLeaveImpact:
 class LeaveSubstitutionReceipt:
     batch_key: str; case_no: str; order_version: int; scheduling_generation: int; scheduling_version: int
     client_finance_version: int; payroll_version: int; outcome_event_ids: tuple[int, ...]; preview_fingerprint: PreviewFingerprint
+    linked_request: LinkedLeaveRequestResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class LeaveBatchHeaderEvidence:
     batch_key: str; case_no: str; command_fingerprint: PreviewFingerprint; preview_fingerprint: PreviewFingerprint
     item_count: int; actor: str; reason: str; request_fingerprint: PreviewFingerprint
+    request_snapshot: Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,11 +185,12 @@ class LeaveOutcomeEvidence:
 class StoredLeaveSubstitutionReceipt:
     command_fingerprint: PreviewFingerprint
     receipt: LeaveSubstitutionReceipt
+    result_snapshot: Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
 class LeaveApplyEvidence:
-    facts: LeaveSubstitutionWorkflowFacts; claim_state: "CommandClaimState"; header: LeaveBatchHeaderEvidence | None
+    facts: LeaveSubstitutionWorkflowFacts | None; claim_state: "CommandClaimState"; header: LeaveBatchHeaderEvidence | None
     outcomes: tuple[LeaveOutcomeEvidence, ...]; receipt: StoredLeaveSubstitutionReceipt | None
 
 
@@ -133,7 +201,14 @@ class CommandClaimState(Enum):
 class LeaveSubstitutionRepository(Protocol):
     def load_for_preview(self, case_no: str, intent: LeaveSubstitutionBatchIntent) -> LeaveSubstitutionWorkflowFacts: ...
     def preflight_impacted_staff_ids(self, case_no: str, intent: LeaveSubstitutionBatchIntent) -> tuple[int, ...]: ...
-    def load_for_apply(self, request: LeaveSubstitutionApplyRequest, preflight_staff_ids: tuple[int, ...], command_fingerprint: PreviewFingerprint) -> LeaveApplyEvidence: ...
+    def load_replay_evidence(self, request: LeaveSubstitutionApplyRequest, command_fingerprint: PreviewFingerprint) -> LeaveApplyEvidence | None: ...
+    def load_for_apply(
+        self,
+        request: LeaveSubstitutionApplyRequest,
+        preflight_staff_ids: tuple[int, ...],
+        command_fingerprint: PreviewFingerprint,
+        after_command_lock: Callable[[int], LinkedLeaveRequestResult | None],
+    ) -> tuple[LeaveApplyEvidence, LinkedLeaveRequestResult | None]: ...
     def replace_scheduling_generation(self, candidate, context: AssignmentPlanPersistenceContext) -> object: ...
     def append_batch_outcomes(self, request, preview, command_fingerprint, scheduling_result) -> tuple[int, ...]: ...
     def save_receipt(self, stored: StoredLeaveSubstitutionReceipt, scheduling_result: object, context: AssignmentPlanPersistenceContext) -> None: ...
@@ -158,34 +233,80 @@ class LeaveSubstitutionWorkflowError(Exception):
 
 
 class LeaveSubstitutionWorkflow:
-    def __init__(self, repository: LeaveSubstitutionRepository, client_finance_port: LeaveClientFinanceImpactPort, payroll_port: LeavePayrollImpactPort, orders_port: LeaveOrdersImpactPort, holiday_query: SchedulingHolidayQuery, unit_of_work_factory: Callable[[], UnitOfWork]) -> None:
+    def __init__(self, repository: LeaveSubstitutionRepository, client_finance_port: LeaveClientFinanceImpactPort, payroll_port: LeavePayrollImpactPort, orders_port: LeaveOrdersImpactPort, holiday_query: SchedulingHolidayQuery, unit_of_work_factory: Callable[[], UnitOfWork], linked_request_resolver: LeaveLinkedRequestResolver | None = None) -> None:
         self._repository = repository; self._client_finance_port = client_finance_port; self._payroll_port = payroll_port; self._orders_port = orders_port; self._holiday_query = holiday_query; self._unit_of_work_factory = unit_of_work_factory
+        self._linked_request_resolver = linked_request_resolver or _NoLinkedRequestResolver()
 
     def preview(self, request: LeaveSubstitutionPreviewRequest) -> LeaveSubstitutionPreview:
-        return self._build_preview(self._repository.load_for_preview(request.case_no, request.intent), request.intent, request.correlation_id, lock_holidays=False)
+        facts = self._repository.load_for_preview(request.case_no, request.intent)
+        linked = _resolve_linked_preview(self._linked_request_resolver, request)
+        _validate_linked_staff_relation(request, facts, linked)
+        return self._build_preview(facts, request.intent, request.correlation_id, linked, lock_holidays=False)
 
     def apply(self, request: LeaveSubstitutionApplyRequest) -> LeaveSubstitutionReceipt:
         try: return self._apply_transaction(request)
         except LeaveSubstitutionWorkflowError: raise
-        except Exception as exception: raise _workflow_error(request.correlation_id, ErrorCategory.INTERNAL, "transaction_failed", "The leave/substitution transaction failed and was rolled back.") from exception
+        except Exception as exception:
+            if _mysql_error_code(exception) in {1205, 1213}:
+                raise
+            raise _workflow_error(request.correlation_id, ErrorCategory.INTERNAL, "transaction_failed", "The leave/substitution transaction failed and was rolled back.") from exception
 
     def _apply_transaction(self, request):
-        command_fingerprint = _command_fingerprint(request); preflight = _canonical_staff_ids(self._repository.preflight_impacted_staff_ids(request.case_no, request.intent))
+        command_fingerprint = _command_fingerprint(request)
         with self._unit_of_work_factory() as unit_of_work:
-            receipt = self._replay_or_apply(request, command_fingerprint, preflight); unit_of_work.commit(); return receipt
+            receipt = self._replay_or_apply(request, command_fingerprint)
+            unit_of_work.commit()
+            return receipt
 
-    def _replay_or_apply(self, request, command_fingerprint, preflight):
-        evidence = self._repository.load_for_apply(request, preflight, command_fingerprint); _raise_if_claim_mismatched(request, evidence.claim_state)
+    def _replay_or_apply(self, request, command_fingerprint):
+        try:
+            replay_evidence = self._repository.load_replay_evidence(
+                request,
+                command_fingerprint,
+            )
+        except RuntimeError as error:
+            _raise_replay_repository_error(request, error)
+        if replay_evidence is not None:
+            _raise_if_claim_mismatched(request, replay_evidence.claim_state)
+            return _validate_replay_evidence(
+                request,
+                command_fingerprint,
+                replay_evidence.claim_state,
+                replay_evidence,
+            )
+        preflight = _canonical_staff_ids(
+            self._repository.preflight_impacted_staff_ids(
+                request.case_no,
+                request.intent,
+            )
+        )
+        try:
+            evidence, linked = self._repository.load_for_apply(
+                request,
+                preflight,
+                command_fingerprint,
+                lambda original_staff_id: _resolve_and_validate_linked_apply(
+                    self._linked_request_resolver, request, original_staff_id
+                ),
+            )
+        except RuntimeError as error:
+            _raise_replay_repository_error(request, error)
+        _raise_if_claim_mismatched(request, evidence.claim_state)
         replay = _validate_replay_evidence(request, command_fingerprint, evidence.claim_state, evidence)
-        return replay if replay is not None else self._apply_fresh(request, command_fingerprint, preflight, evidence.facts)
+        if replay is not None:
+            return replay
+        if evidence.facts is None:
+            _raise_replay_integrity(request, "fresh command facts are missing")
+        return self._apply_fresh(request, command_fingerprint, preflight, evidence.facts, linked)
 
-    def _apply_fresh(self, request, command_fingerprint, preflight, facts):
+    def _apply_fresh(self, request, command_fingerprint, preflight, facts, linked):
+        _validate_linked_staff_relation(request, facts, linked)
         _validate_locked_staff_set(request, facts, preflight); _validate_expected_versions(request, facts.leave_facts)
-        preview = self._build_preview(facts, request.intent, request.correlation_id, lock_holidays=True); _validate_preview_fingerprint(request, preview)
+        preview = self._build_preview(facts, request.intent, request.correlation_id, linked, lock_holidays=True); _validate_preview_fingerprint(request, preview)
         _raise_if_impacts_blocked(request.correlation_id, preview.client_finance_impact, preview.payroll_impact, preview.orders_impact)
-        return self._persist(request, preview, command_fingerprint)
+        return self._persist(request, preview, command_fingerprint, linked)
 
-    def _build_preview(self, facts, intent, correlation_id, *, lock_holidays):
+    def _build_preview(self, facts, intent, correlation_id, linked_request, *, lock_holidays):
         try:
             holiday_facts = _query_holiday_facts(
                 facts.leave_facts,
@@ -212,7 +333,7 @@ class LeaveSubstitutionWorkflow:
             holiday_facts,
         )
         client_finance, payroll, orders = self._build_impacts(facts, candidate, correlation_id)
-        return _preview_result(facts.leave_facts, candidate, client_finance, payroll, orders, calendar_candidate)
+        return _preview_result(facts.leave_facts, candidate, client_finance, payroll, orders, calendar_candidate, linked_request)
 
     def _build_impacts(self, facts, candidate, correlation_id):
         if facts.impact_facts is None:
@@ -239,24 +360,31 @@ class LeaveSubstitutionWorkflow:
         )
         return client_finance, payroll, orders
 
-    def _persist(self, request, preview, command_fingerprint):
+    def _persist(self, request, preview, command_fingerprint, linked):
         context = AssignmentPlanPersistenceContext(request.idempotency_key, request.actor, request.reason, request.correlation_id, preview.fingerprint, command_fingerprint, preview.order_version, ())
         scheduling_result = self._repository.replace_scheduling_generation(preview.candidate.scheduling, context)
         event_ids = self._repository.append_batch_outcomes(request, preview, command_fingerprint, scheduling_result)
         self._client_finance_port.persist_leave_substitution(preview.client_finance_impact, context, scheduling_result)
         self._payroll_port.persist_leave_substitution(preview.payroll_impact, context, scheduling_result)
         self._orders_port.persist_leave_substitution(preview.orders_impact, context, scheduling_result)
-        receipt = _build_receipt(request, preview, event_ids)
-        self._repository.save_receipt(StoredLeaveSubstitutionReceipt(command_fingerprint, receipt), scheduling_result, context)
+        linked_result = _resolve_and_enqueue_linked(
+            self._linked_request_resolver,
+            request,
+            linked,
+        )
+        receipt = _build_receipt(request, preview, event_ids, linked_result)
+        result_snapshot = _receipt_snapshot(receipt)
+        self._repository.save_receipt(StoredLeaveSubstitutionReceipt(command_fingerprint, receipt, result_snapshot), scheduling_result, context)
         return receipt
 
 
 def _build_domain_candidate(facts, intent, correlation_id, holiday_rest_dates=()):
     try: return build_leave_substitution_candidate(facts.leave_facts, intent, holiday_rest_dates)
     except LeaveSubstitutionDomainError as exception: raise _domain_workflow_error(correlation_id, exception) from exception
-def _preview_result(facts, candidate, client_finance, payroll, orders, calendar_candidate):
+def _preview_result(facts, candidate, client_finance, payroll, orders, calendar_candidate, linked_request):
     blockers = tuple(sorted(set(item for impact in (client_finance, payroll, orders) for item in impact.blockers)))
-    return LeaveSubstitutionPreview(candidate, client_finance, payroll, orders, facts.assignment_plan.order_version, facts.assignment_plan.scheduling_version, facts.assignment_plan.client_finance_version, facts.assignment_plan.payroll_version, fingerprint_payload({"leave":candidate.fingerprint.value,"client_finance":client_finance.fingerprint.value,"payroll":payroll.fingerprint.value,"orders":orders.fingerprint.value,"holiday_version":calendar_candidate.holiday_version}), calendar_candidate, LeaveApplyReadiness("blocked" if blockers else "ready", blockers))
+    linked_fingerprint = _linked_result_payload(linked_request)
+    return LeaveSubstitutionPreview(candidate, client_finance, payroll, orders, facts.assignment_plan.order_version, facts.assignment_plan.scheduling_version, facts.assignment_plan.client_finance_version, facts.assignment_plan.payroll_version, fingerprint_payload({"leave":candidate.fingerprint.value,"client_finance":client_finance.fingerprint.value,"payroll":payroll.fingerprint.value,"orders":orders.fingerprint.value,"holiday_version":calendar_candidate.holiday_version,"linked_request":linked_fingerprint}), calendar_candidate, LeaveApplyReadiness("blocked" if blockers else "ready", blockers), linked_request)
 
 
 def _blocked_impact(blocker):
@@ -335,8 +463,8 @@ def _preview_impact(build_impact):
             fingerprint_payload({"blocked_impact": code}),
             (code,),
         )
-def _build_receipt(request, preview, event_ids):
-    scheduling = preview.candidate.scheduling; return LeaveSubstitutionReceipt(request.idempotency_key.value, request.case_no, preview.orders_impact.resulting_version, scheduling.generation_number, scheduling.resulting_aggregate_version, preview.client_finance_impact.resulting_version, preview.payroll_impact.resulting_version, event_ids, preview.fingerprint)
+def _build_receipt(request, preview, event_ids, linked_request):
+    scheduling = preview.candidate.scheduling; return LeaveSubstitutionReceipt(request.idempotency_key.value, request.case_no, preview.orders_impact.resulting_version, scheduling.generation_number, scheduling.resulting_aggregate_version, preview.client_finance_impact.resulting_version, preview.payroll_impact.resulting_version, event_ids, preview.fingerprint, linked_request)
 def _validate_replay_evidence(request, command_fingerprint, claim, evidence):
     parts = (evidence.header is not None, evidence.receipt is not None)
     if claim is CommandClaimState.CREATED:
@@ -344,10 +472,14 @@ def _validate_replay_evidence(request, command_fingerprint, claim, evidence):
         return None
     if not all(parts): _raise_replay_integrity(request, "batch replay evidence is incomplete")
     _validate_header_identity(request, command_fingerprint, evidence.header); _validate_outcome_evidence(request, evidence.header, evidence.outcomes); _validate_receipt_outcomes(request, evidence)
+    if dict(evidence.receipt.result_snapshot) != _receipt_snapshot(evidence.receipt.receipt): _raise_replay_integrity(request, "receipt result snapshot is invalid")
     if evidence.receipt.command_fingerprint != command_fingerprint: raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "batch_key_request_identity_conflict", "Batch key was already used with a different request identity.")
     return evidence.receipt.receipt
 def _validate_header_identity(request, command_fingerprint, header):
-    matches = (header.batch_key == request.idempotency_key.value and header.case_no == request.case_no and header.command_fingerprint == command_fingerprint and header.preview_fingerprint == request.preview_fingerprint and header.item_count == len(request.intent.items) and header.actor == request.actor.actor_id and header.reason == request.reason and header.request_fingerprint == leave_request_fingerprint(request.intent))
+    expected_snapshot = _request_snapshot(request)
+    if dict(header.request_snapshot) != expected_snapshot or header.request_fingerprint != fingerprint_payload(expected_snapshot):
+        _raise_replay_integrity(request, "batch request snapshot is invalid")
+    matches = (header.batch_key == request.idempotency_key.value and header.case_no == request.case_no and header.command_fingerprint == command_fingerprint and header.preview_fingerprint == request.preview_fingerprint and header.item_count == len(request.intent.items) and header.actor == request.actor.actor_id and header.reason == request.reason)
     if not matches: raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "batch_key_request_identity_conflict", "Batch key was already used with different request, actor, or reason.")
 def _validate_outcome_evidence(request, header, outcomes):
     if len(outcomes) != header.item_count: _raise_replay_integrity(request, "batch outcome count is invalid")
@@ -371,8 +503,41 @@ def _raise_if_impacts_blocked(correlation_id, *impacts):
 def _raise_if_claim_mismatched(request, claim):
     if claim is CommandClaimState.MISMATCH: raise _workflow_error(request.correlation_id, ErrorCategory.IDEMPOTENCY_MISMATCH, "batch_key_request_identity_conflict", "Batch key was already used with a different command.")
 def _raise_replay_integrity(request, message): raise _workflow_error(request.correlation_id, ErrorCategory.DOMAIN_BLOCKED, "invalid_batch_replay_snapshot", message)
-def _command_fingerprint(request): return fingerprint_payload({"family":"scheduling-leave-substitution","batch_key":request.idempotency_key.value,"case_no":request.case_no,"request_fingerprint":leave_request_fingerprint(request.intent).value,"expected_versions":{"order":request.expected_order_version.value,"scheduling":request.expected_scheduling_version.value,"client_finance":request.expected_client_finance_version.value,"payroll":request.expected_payroll_version.value},"preview_fingerprint":request.preview_fingerprint.value,"actor":request.actor.actor_id,"reason":request.reason})
+def _command_fingerprint(request): return fingerprint_payload({"family":"scheduling-leave-substitution","batch_key":request.idempotency_key.value,"case_no":request.case_no,"request_fingerprint":_request_fingerprint(request).value,"expected_versions":{"order":request.expected_order_version.value,"scheduling":request.expected_scheduling_version.value,"client_finance":request.expected_client_finance_version.value,"payroll":request.expected_payroll_version.value},"preview_fingerprint":request.preview_fingerprint.value,"actor":request.actor.actor_id,"reason":request.reason})
 def leave_request_fingerprint(intent): return fingerprint_payload({"original_assignment_id":intent.original_assignment_id,"items":tuple({"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay} for item in intent.items)})
+def _request_fingerprint(request): return fingerprint_payload(_request_snapshot(request))
+def _request_snapshot(request): return {"case_no":request.case_no,"original_assignment_id":request.intent.original_assignment_id,"items":[{"original_schedule_id":item.original_schedule_id,"work_date":item.work_date.isoformat(),"resolution_type":item.resolution_type.value,"substitute_staff_id":item.substitute_staff_id,"is_double_pay":item.is_double_pay} for item in request.intent.items],"linked_request":None if request.linked_request is None else {"request_id":request.linked_request.request_id,"expected_version":request.linked_request.expected_version}}
+def _receipt_snapshot(receipt): return {"batch_key":receipt.batch_key,"case_no":receipt.case_no,"order_version":receipt.order_version,"scheduling_generation":receipt.scheduling_generation,"scheduling_version":receipt.scheduling_version,"client_finance_version":receipt.client_finance_version,"payroll_version":receipt.payroll_version,"outcome_event_ids":list(receipt.outcome_event_ids),"preview_fingerprint":receipt.preview_fingerprint.value,"linked_request":_linked_result_payload(receipt.linked_request)}
+def _linked_result_payload(result): return None if result is None else {"request_id":result.request_id,"expected_version":result.expected_version,"resolved_version":result.resolved_version,"status":result.status,"receipt_key":result.receipt_key,"notification_intent":result.notification_intent,"staff_id":result.staff_id}
+def _resolve_linked_preview(resolver, request):
+    try: return resolver.preview(request.linked_request)
+    except LinkedLeaveRequestResolutionError as error: raise _linked_workflow_error(request.correlation_id, error) from error
+def _resolve_linked_apply(resolver, request):
+    try: return resolver.lock_for_apply(request.linked_request)
+    except LinkedLeaveRequestResolutionError as error: raise _linked_workflow_error(request.correlation_id, error) from error
+def _resolve_and_validate_linked_apply(resolver, request, original_staff_id):
+    linked = _resolve_linked_apply(resolver, request)
+    if linked is not None and linked.staff_id != original_staff_id:
+        raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "leave_request_staff_mismatch", "Linked leave request does not belong to the original assignment staff.")
+    return linked
+def _resolve_and_enqueue_linked(resolver, request, linked):
+    try: return resolver.resolve_and_enqueue(linked, receipt_key=request.idempotency_key.value, idempotency_key=request.idempotency_key, correlation_id=request.correlation_id)
+    except LinkedLeaveRequestResolutionError as error: raise _linked_workflow_error(request.correlation_id, error) from error
+def _validate_linked_staff_relation(request, facts, linked):
+    if linked is None: return
+    original = next((item for item in facts.leave_facts.assignment_plan.effective_assignments if item.assignment_id == request.intent.original_assignment_id), None)
+    if original is None or original.staff_id != linked.staff_id: raise _workflow_error(request.correlation_id, ErrorCategory.CONFLICT, "leave_request_staff_mismatch", "Linked leave request does not belong to the original assignment staff.")
+def _linked_workflow_error(correlation_id, error):
+    code = str(error) or "leave_request_invalid"
+    category = ErrorCategory.NOT_FOUND if code == "leave_request_not_found" else ErrorCategory.IDEMPOTENCY_MISMATCH if "idempotency" in code else ErrorCategory.DOMAIN_BLOCKED if code == "leave_request_not_resolvable" else ErrorCategory.CONFLICT
+    return _workflow_error(correlation_id, category, code, "Linked leave request rejected the leave/substitution command.")
+def _mysql_error_code(error):
+    arguments = getattr(error, "args", ())
+    return arguments[0] if arguments and isinstance(arguments[0], int) else 0
+def _raise_replay_repository_error(request, error):
+    if str(error) == "invalid_batch_replay_snapshot":
+        _raise_replay_integrity(request, "batch replay snapshot is invalid")
+    raise error
 def _domain_workflow_error(correlation_id, exception):
     categories = {LeaveSubstitutionIssue.INVALID_INTENT:ErrorCategory.VALIDATION,LeaveSubstitutionIssue.ASSIGNMENT_NOT_FOUND:ErrorCategory.NOT_FOUND}; return _workflow_error(correlation_id,categories.get(exception.issue,ErrorCategory.DOMAIN_BLOCKED),exception.issue.value,str(exception))
 def _impact_workflow_error(correlation_id, exception):

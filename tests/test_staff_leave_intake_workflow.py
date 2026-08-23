@@ -1,11 +1,17 @@
 """File: test_staff_leave_intake_workflow.py
 Description: 驗證請假待辦 workflow 的重播與樂觀鎖定契約。"""
 
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
 from domains.scheduling.staff_leave_intake import StaffLeaveRequestIntent, StaffLeaveRequestStatus
+from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
+from shared_kernel.identities import CorrelationId, IdempotencyKey
+from subsystems.scheduling.leave_substitution_linked_request_resolution import (
+    LeaveSubstitutionLinkedRequestResolution,
+)
+from subsystems.scheduling.leave_substitution_workflow import LinkedLeaveRequestIntent
 from subsystems.scheduling.staff_leave_intake_workflow import (
     ReviewStaffLeaveRequest,
     StaffLeaveIntakeWorkflow,
@@ -33,6 +39,9 @@ class FakeRepository:
         return self.snapshot
 
     def load_for_update(self, request_id):
+        return self.snapshot if self.snapshot and self.snapshot.request_id == request_id else None
+
+    def load(self, request_id):
         return self.snapshot if self.snapshot and self.snapshot.request_id == request_id else None
 
     def replay_mutation(self, key, fingerprint):
@@ -76,3 +85,67 @@ def test_staff_cannot_cancel_another_staff_request():
     submitted = workflow.submit(SubmitStaffLeaveRequest(7, "U-7", StaffLeaveRequestIntent(date(2026, 8, 20), date(2026, 8, 20)), "leave-1"))
     with pytest.raises(StaffLeaveIntakeWorkflowError, match="leave_request_not_found"):
         workflow.review(ReviewStaffLeaveRequest(submitted.request_id, 1, "cancel", "取消", True, "line:U-8", "cancel-1", 8))
+
+
+class FakeLineDeliveryRepository:
+    def __init__(self, failure=None):
+        self.failure = failure
+        self.requests = []
+
+    def enqueue(self, request):
+        if self.failure is not None:
+            raise self.failure
+        self.requests.append(request)
+
+
+def test_linked_leave_resolution_uses_locked_snapshot_and_stable_notification():
+    repository = FakeRepository()
+    workflow = StaffLeaveIntakeWorkflow(repository)
+    submitted = workflow.submit(SubmitStaffLeaveRequest(7, "U-7", StaffLeaveRequestIntent(date(2026, 8, 20), date(2026, 8, 20)), "leave-1"))
+    accepted = workflow.review(ReviewStaffLeaveRequest(submitted.request_id, 1, "accept", "受理", False, "admin", "review-1"))
+    line = FakeLineDeliveryRepository()
+    resolver = LeaveSubstitutionLinkedRequestResolution(
+        repository,
+        line,
+        FixedBusinessClock(datetime(2026, 8, 21, 9, tzinfo=TAIPEI_TIME_ZONE)),
+    )
+
+    locked = resolver.lock_for_apply(
+        LinkedLeaveRequestIntent(accepted.request_id, accepted.version)
+    )
+    result = resolver.resolve_and_enqueue(
+        locked,
+        receipt_key="leave-batch-1",
+        idempotency_key=IdempotencyKey("leave-batch-1"),
+        correlation_id=CorrelationId("phase3b2-linked"),
+    )
+
+    assert result.status == StaffLeaveRequestStatus.RESOLVED.value
+    assert result.receipt_key == "leave-batch-1"
+    assert result.notification_intent == "enqueued"
+    assert len(line.requests) == 1
+    assert line.requests[0].scheduled_at == datetime(
+        2026, 8, 21, 9, tzinfo=TAIPEI_TIME_ZONE
+    )
+
+
+def test_linked_leave_resolution_propagates_line_enqueue_failure():
+    repository = FakeRepository()
+    workflow = StaffLeaveIntakeWorkflow(repository)
+    submitted = workflow.submit(SubmitStaffLeaveRequest(7, "U-7", StaffLeaveRequestIntent(date(2026, 8, 20), date(2026, 8, 20)), "leave-1"))
+    accepted = workflow.review(ReviewStaffLeaveRequest(submitted.request_id, 1, "accept", "受理", False, "admin", "review-1"))
+    resolver = LeaveSubstitutionLinkedRequestResolution(
+        repository,
+        FakeLineDeliveryRepository(RuntimeError("enqueue_failed")),
+        FixedBusinessClock(datetime(2026, 8, 21, 9, tzinfo=TAIPEI_TIME_ZONE)),
+    )
+
+    with pytest.raises(RuntimeError, match="enqueue_failed"):
+        resolver.resolve_and_enqueue(
+            resolver.lock_for_apply(
+                LinkedLeaveRequestIntent(accepted.request_id, accepted.version)
+            ),
+            receipt_key="leave-batch-1",
+            idempotency_key=IdempotencyKey("leave-batch-1"),
+            correlation_id=CorrelationId("phase3b2-linked"),
+        )

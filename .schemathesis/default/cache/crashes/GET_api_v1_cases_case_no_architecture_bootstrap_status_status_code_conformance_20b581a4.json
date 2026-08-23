@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/cases/{case_no}/architecture-bootstrap/status",
+  "method": "GET",
+  "path_template": "/api/v1/cases/{case_no}/architecture-bootstrap/status",
+  "fingerprint": "20b581a4",
+  "case_id": "i3mVZt",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/cases/0/architecture-bootstrap/status",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/cases/0/architecture-bootstrap/status",
+      "url_template": "http://127.0.0.1:8821/api/v1/cases/{case_no}/architecture-bootstrap/status",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "i3mVZt"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:42 GMT",
+          "server": "uvicorn",
+          "content-length": "242",
+          "content-type": "application/json",
+          "server-timing": "application;dur=71.7",
+          "x-response-time-ms": "71.7",
+          "x-correlation-id": "518914dfd34c48a3af797f774f7e0974"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"not_found\",\"code\":\"resource_not_found\",\"message\":\"\u627e\u4e0d\u5230\u8981\u6c42\u7684\u8cc7\u6e90\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"518914dfd34c48a3af797f774f7e0974\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0037007000064477324,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/cases/{case_no}/architecture-bootstrap/status",
+      "path_parameters": {
+        "case_no": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

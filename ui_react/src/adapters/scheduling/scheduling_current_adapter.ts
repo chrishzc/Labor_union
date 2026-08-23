@@ -4,6 +4,7 @@
  */
 import type { StaffDirectoryCardViewModel } from '../staff/staff_directory_adapter';
 import type {
+  SchedulingAssignmentStatus,
   SchedulingCurrentDay,
   SchedulingCurrentProjection,
   SchedulingOccupancyKind,
@@ -27,6 +28,7 @@ export interface SchedulingDayViewModel {
   statusLabel: string;
   caseLabels: string[];
   occupancyKinds: SchedulingOccupancyKind[];
+  assignmentStatuses: SchedulingAssignmentStatus[];
 }
 
 export interface SchedulingCalendarRowViewModel {
@@ -37,6 +39,7 @@ export interface SchedulingCalendarRowViewModel {
   projectionTokenLabel: string;
   days: SchedulingDayViewModel[];
   occupancyKinds: SchedulingOccupancyKind[];
+  assignmentStatuses: SchedulingAssignmentStatus[];
   loadedStatusLabel: string;
 }
 
@@ -67,14 +70,27 @@ function dayTone(kinds: readonly SchedulingOccupancyKind[]): SchedulingDayTone {
   return 'available';
 }
 
-function toneLabel(tone: SchedulingDayTone): string {
+function assignmentStatusLabel(
+  statuses: readonly SchedulingAssignmentStatus[],
+  rest: boolean
+): string | null {
+  if (statuses.includes('active')) return rest ? '服務中排休' : '服務中';
+  if (statuses.includes('planned')) return rest ? '已排定休息日' : '已排定服務';
+  if (statuses.includes('completed')) return rest ? '已結束排休' : '服務已結束';
+  return null;
+}
+
+function toneLabel(
+  tone: SchedulingDayTone,
+  statuses: readonly SchedulingAssignmentStatus[]
+): string {
   switch (tone) {
     case 'active':
-      return '正式服務日';
+      return assignmentStatusLabel(statuses, false) ?? '正式服務日';
     case 'rest':
-      return '正式指派休息日';
+      return assignmentStatusLabel(statuses, true) ?? '正式指派休息日';
     case 'buffer':
-      return 'Server buffer 占用';
+      return '7天防撞期 Buffer 鎖定';
     case 'waiting':
       return '待成立檔期占用';
     case 'leave':
@@ -87,6 +103,11 @@ function toneLabel(tone: SchedulingDayTone): string {
 export function adaptSchedulingDay(day: SchedulingCurrentDay): SchedulingDayViewModel {
   const date = presentationDate(day.calendar_date);
   const kinds = unique(day.entries.map((entry) => entry.occupancy_kind));
+  const statuses = unique(
+    day.entries
+      .map((entry) => entry.assignment_status)
+      .filter((status): status is SchedulingAssignmentStatus => status !== null)
+  );
   const tone = dayTone(kinds);
   return {
     date: day.calendar_date,
@@ -94,17 +115,21 @@ export function adaptSchedulingDay(day: SchedulingCurrentDay): SchedulingDayView
     weekdayLabel: WEEKDAY_FORMATTER.format(date),
     available: day.available,
     tone,
-    statusLabel: toneLabel(tone),
+    statusLabel: toneLabel(tone, statuses),
     caseLabels: unique(
       day.entries
         .map((entry) => entry.case_no)
         .filter((caseNo): caseNo is string => caseNo !== null)
     ).sort(),
     occupancyKinds: kinds,
+    assignmentStatuses: statuses,
   };
 }
 
-function loadedStatusLabel(kinds: readonly SchedulingOccupancyKind[]): string {
+function loadedStatusLabel(
+  kinds: readonly SchedulingOccupancyKind[],
+  statuses: readonly SchedulingAssignmentStatus[]
+): string {
   if (kinds.includes('staff_unavailability')) return '請假／暫停服務';
   if (
     kinds.includes('waiting_deposit_service') ||
@@ -112,13 +137,10 @@ function loadedStatusLabel(kinds: readonly SchedulingOccupancyKind[]): string {
   ) {
     return '待成立檔期占用';
   }
-  if (
-    kinds.includes('official_workday') ||
-    kinds.includes('assignment_rest') ||
-    kinds.includes('assignment_buffer')
-  ) {
-    return '正式指派占用';
-  }
+  if (statuses.includes('active')) return '正常履約中';
+  if (statuses.includes('planned')) return '已排定待開始';
+  if (statuses.includes('completed')) return '服務已完成';
+  if (kinds.includes('assignment_buffer')) return '七日防撞期占用';
   return '目前區間無占用';
 }
 
@@ -128,6 +150,7 @@ export function adaptSchedulingProjection(
 ): SchedulingCalendarRowViewModel {
   const days = projection.days.map(adaptSchedulingDay);
   const kinds = unique(days.flatMap((day) => day.occupancyKinds));
+  const statuses = unique(projection.assignments.map((assignment) => assignment.status));
   return {
     staffId: staff.id,
     displayName: staff.displayName,
@@ -136,7 +159,8 @@ export function adaptSchedulingProjection(
     projectionTokenLabel: `${projection.projection_token.slice(0, 12)}…`,
     days,
     occupancyKinds: kinds,
-    loadedStatusLabel: loadedStatusLabel(kinds),
+    assignmentStatuses: statuses,
+    loadedStatusLabel: loadedStatusLabel(kinds, statuses),
   };
 }
 
@@ -150,13 +174,10 @@ export function matchesSchedulingFilter(
   }
   if (filter === 'waiting') {
     return (
+      row.occupancyKinds.includes('assignment_buffer') ||
       row.occupancyKinds.includes('waiting_deposit_service') ||
       row.occupancyKinds.includes('waiting_deposit_buffer')
     );
   }
-  return (
-    row.occupancyKinds.includes('official_workday') ||
-    row.occupancyKinds.includes('assignment_rest') ||
-    row.occupancyKinds.includes('assignment_buffer')
-  );
+  return row.assignmentStatuses.includes('active');
 }

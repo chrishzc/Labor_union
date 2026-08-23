@@ -1,4 +1,7 @@
-"""Thin privacy-safe Streamlit viewer for administrator operation audit records."""
+"""
+File: line_audit_manager.py
+Description: 以遮罩 typed view 顯示管理操作紀錄，不讓 raw audit payload 穿透 UI。
+"""
 
 from __future__ import annotations
 
@@ -28,7 +31,11 @@ def render_audit_manager(runtime_client, token, _profile: dict[str, Any]) -> Non
     if not records:
         st.info("目前沒有符合條件的操作紀錄。")
         return
-    st.dataframe(pd.DataFrame(records), width="stretch", hide_index=True)
+    st.dataframe(
+        pd.DataFrame([record.model_dump() for record in records]),
+        width="stretch",
+        hide_index=True,
+    )
 
 
 __all__ = ["render_audit_manager"]

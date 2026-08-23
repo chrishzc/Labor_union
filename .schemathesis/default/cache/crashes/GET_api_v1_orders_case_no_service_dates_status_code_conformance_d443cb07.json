@@ -1,0 +1,79 @@
+{
+  "operation": "GET /api/v1/orders/{case_no}/service-dates",
+  "method": "GET",
+  "path_template": "/api/v1/orders/{case_no}/service-dates",
+  "fingerprint": "d443cb07",
+  "case_id": "mxLSb3",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/orders/0/service-dates",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/orders/0/service-dates",
+      "url_template": "http://127.0.0.1:8765/api/v1/orders/{case_no}/service-dates",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "mxLSb3"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:14:28 GMT",
+          "server": "uvicorn",
+          "content-length": "243",
+          "content-type": "application/json"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"internal_error\",\"message\":\"\u4f3a\u670d\u5668\u767c\u751f\u672a\u9810\u671f\u932f\u8aa4\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"13f468541cd14677be0b73ef993c380d\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 500\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.00445519998902455,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/orders/{case_no}/service-dates",
+      "path_parameters": {
+        "case_no": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

@@ -1,4 +1,7 @@
-"""MySQL persistence for confirmed planned service dates."""
+"""
+File: service_date_confirmation_repository.py
+Description: 實作 confirmed service dates persistence 與 typed borrowed owner read。
+"""
 
 from __future__ import annotations
 
@@ -30,12 +33,12 @@ class MySqlServiceDateConfirmationRepository:
                 raise ValueError("service_date_confirmation_case_not_found")
             cursor.execute(
                 "SELECT id,version FROM confirmed_service_date_versions "
-                "WHERE case_no=%s AND is_current=1",
+                "WHERE case_no=%s AND is_current=1" + lock_clause,
                 (case_no,),
             )
             current = cursor.fetchone()
-            current_dates = self._dates(cursor, current["id"]) if current else ()
-            suggested = self._suggested_dates(cursor, case_no, order)
+            current_dates = self._dates(cursor, current["id"], lock=lock) if current else ()
+            suggested = self._suggested_dates(cursor, case_no, order, lock=lock)
         return ServiceDateConfirmationFacts(
             str(order["case_no"]),
             int(order["lifecycle_version"] or 0),
@@ -46,6 +49,13 @@ class MySqlServiceDateConfirmationRepository:
             int(current["version"]) if current else None,
             current_dates,
         )
+
+    def load_service_dates(
+        self, case_no: str, *, for_update: bool = False
+    ) -> ServiceDateConfirmationFacts:
+        """Expose the owner root through the shared typed M3 read port."""
+
+        return self.load(case_no, lock=for_update)
 
     def replay(self, idempotency_key, command_fingerprint):
         with self._connection.cursor() as cursor:
@@ -114,19 +124,21 @@ class MySqlServiceDateConfirmationRepository:
         self._connection.rollback()
 
     @staticmethod
-    def _dates(cursor, version_id):
+    def _dates(cursor, version_id, *, lock=False):
         cursor.execute(
-            "SELECT service_date FROM confirmed_service_date_days WHERE confirmed_version_id=%s ORDER BY ordinal",
+            "SELECT service_date FROM confirmed_service_date_days WHERE confirmed_version_id=%s "
+            "ORDER BY ordinal" + (" FOR UPDATE" if lock else ""),
             (version_id,),
         )
         return tuple(row["service_date"] for row in cursor.fetchall())
 
     @staticmethod
-    def _suggested_dates(cursor, case_no, order):
+    def _suggested_dates(cursor, case_no, order, *, lock=False):
         cursor.execute(
             "SELECT s.work_date FROM staff_schedule s JOIN scheduling_aggregates g "
             "ON g.effective_generation_id=s.generation_id WHERE g.case_no=%s "
-            "AND s.effective_marker=1 AND s.is_work_day=1 ORDER BY s.work_date",
+            "AND s.effective_marker=1 AND s.is_work_day=1 ORDER BY s.work_date"
+            + (" FOR UPDATE" if lock else ""),
             (case_no,),
         )
         dates = tuple(dict.fromkeys(row["work_date"] for row in cursor.fetchall()))

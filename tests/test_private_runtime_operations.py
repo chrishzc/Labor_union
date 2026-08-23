@@ -259,6 +259,102 @@ def test_durable_endpoint_delegates_one_complete_cycle(monkeypatch) -> None:
     assert runtime.hostname == "worker-host"
 
 
+def test_durable_composition_gives_worker_transaction_owner_then_commits_heartbeat(monkeypatch) -> None:
+    calls = []
+    connection = SimpleNamespace(
+        begin=lambda: calls.append("heartbeat-begin"),
+        commit=lambda: calls.append("heartbeat-commit"),
+        rollback=lambda: calls.append("heartbeat-rollback"),
+        close=lambda: calls.append("close"),
+    )
+
+    class Repository:
+        def __init__(self, active_connection):
+            assert active_connection is connection
+
+        def assert_durable_queue_schema(self):
+            calls.append("schema")
+
+    class Worker:
+        def __init__(self, repository, transaction, _handlers, worker_id, lease_seconds, retry_delay):
+            assert isinstance(repository, Repository)
+            assert transaction is connection
+            assert (worker_id, lease_seconds, retry_delay) == ("worker-1", 60, 15)
+
+        def recover_and_run_once(self):
+            calls.append("worker-terminal-committed")
+            return True
+
+    identity = WorkerRuntimeIdentity.model_validate(_runtime_identity())
+    monkeypatch.setattr(private_operation_dependencies, "get_connection", lambda: connection)
+    monkeypatch.setattr(private_operation_dependencies, "BackgroundJobRepository", Repository)
+    monkeypatch.setattr(private_operation_dependencies, "DurableJobWorker", Worker)
+    monkeypatch.setattr(private_operation_dependencies, "default_job_handlers", lambda: {})
+    monkeypatch.setattr(
+        private_operation_dependencies,
+        "write_runtime_heartbeat",
+        lambda active_connection, _identity, processed: calls.append(
+            ("heartbeat-write", active_connection is connection, processed)
+        ),
+    )
+
+    assert private_operation_dependencies.run_durable_job_cycle(
+        "worker-1", 60, 15, identity, check_only=False
+    ) == 1
+    assert calls == [
+        "schema",
+        "worker-terminal-committed",
+        "heartbeat-begin",
+        ("heartbeat-write", True, 1),
+        "heartbeat-commit",
+        "close",
+    ]
+
+
+def test_durable_heartbeat_failure_rolls_back_only_heartbeat_after_terminal(monkeypatch) -> None:
+    calls = []
+    connection = SimpleNamespace(
+        begin=lambda: calls.append("heartbeat-begin"),
+        commit=lambda: calls.append("heartbeat-commit"),
+        rollback=lambda: calls.append("heartbeat-rollback"),
+        close=lambda: calls.append("close"),
+    )
+    repository = SimpleNamespace(assert_durable_queue_schema=lambda: calls.append("schema"))
+
+    class Worker:
+        def __init__(self, *_args):
+            pass
+
+        def recover_and_run_once(self):
+            calls.append("worker-terminal-committed")
+            return True
+
+    identity = WorkerRuntimeIdentity.model_validate(_runtime_identity())
+    monkeypatch.setattr(private_operation_dependencies, "get_connection", lambda: connection)
+    monkeypatch.setattr(private_operation_dependencies, "BackgroundJobRepository", lambda _: repository)
+    monkeypatch.setattr(private_operation_dependencies, "DurableJobWorker", Worker)
+    monkeypatch.setattr(private_operation_dependencies, "default_job_handlers", lambda: {})
+
+    def fail_heartbeat(*_args):
+        calls.append("heartbeat-write-failed")
+        raise RuntimeError("heartbeat unavailable")
+
+    monkeypatch.setattr(private_operation_dependencies, "write_runtime_heartbeat", fail_heartbeat)
+
+    with pytest.raises(RuntimeError, match="heartbeat unavailable"):
+        private_operation_dependencies.run_durable_job_cycle(
+            "worker-1", 60, 15, identity, check_only=False
+        )
+    assert calls == [
+        "schema",
+        "worker-terminal-committed",
+        "heartbeat-begin",
+        "heartbeat-write-failed",
+        "heartbeat-rollback",
+        "close",
+    ]
+
+
 def test_endpoint_rejects_authenticated_service_for_another_operation(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "test")
     monkeypatch.setenv("INTERNAL_SERVICE_SHARED_KEY", LOCAL_KEY)
@@ -374,6 +470,29 @@ def test_private_client_never_places_key_in_url(monkeypatch) -> None:
     client.check()
 
     assert LOCAL_KEY not in captured["url"]
+    assert captured["headers"]["X-Internal-Service-Key"] == LOCAL_KEY
+
+
+def test_private_client_decodes_closed_react_admin_artifact_health(monkeypatch) -> None:
+    digest = "a" * 64
+    captured = {}
+
+    def fake_get(url, **kwargs):
+        captured.update(url=url, headers=kwargs["headers"])
+        return _Response(200, {"data": {
+            "active_selector": "current", "artifact_version": "react-admin-v1",
+            "artifact_digest": digest, "manifest_digest": "b" * 64,
+            "api_compatibility_revision": "api-v1", "root_marker_checked": True,
+            "checked_asset_digest": "c" * 64, "healthy": True,
+        }})
+
+    monkeypatch.setattr("infrastructure.http.private_operations_client.requests.get", fake_get)
+    client = PrivateOperationsClient("runtime-monitor", base_url="http://private-api", shared_key=LOCAL_KEY)
+
+    attestation = client.react_admin_artifact_health()
+
+    assert attestation.active_selector == "current"
+    assert captured["url"].endswith("/internal/v1/runtime/react-admin/artifact-health")
     assert captured["headers"]["X-Internal-Service-Key"] == LOCAL_KEY
 
 

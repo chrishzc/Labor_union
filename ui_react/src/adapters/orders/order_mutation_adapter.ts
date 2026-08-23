@@ -479,6 +479,7 @@ export async function fetchServiceDatesQuery(
     orderMutationFlowStore.setServiceDatesQueryReady(caseNo, queryView);
     return queryView;
   } catch (err) {
+    if (options?.signal?.aborted) throw err;
     const error = normalizeFlowError(err, caseNo);
     orderMutationFlowStore.setServiceDatesTypedError(caseNo, error);
     throw err;
@@ -518,9 +519,11 @@ export async function previewServiceDatesFlow(
       { service_dates: draft.selectedDates },
       options
     );
+    if (options?.signal?.aborted) throw new Error('Service Dates Preview已取消。');
     orderMutationFlowStore.setServiceDatesPreviewReady(caseNo, previewView);
     return previewView;
   } catch (err) {
+    if (options?.signal?.aborted) throw err;
     const error = normalizeFlowError(err, caseNo);
     if (isStaleConflictError(error)) {
       orderMutationFlowStore.setServiceDatesStale(caseNo, error);
@@ -665,6 +668,7 @@ export async function previewReopenFlow(
   orderMutationFlowStore.setReopenPreviewLoading(caseNo);
   try {
     const preview = await ordersMutationClient.previewReopen(caseNo, options);
+    if (options?.signal?.aborted) throw new Error('Controlled Reopen Preview已取消。');
 
     // Fail closed on restored lists drift
     if (
@@ -684,6 +688,7 @@ export async function previewReopenFlow(
     orderMutationFlowStore.setReopenPreviewReady(caseNo, preview);
     return preview;
   } catch (err) {
+    if (options?.signal?.aborted) throw err;
     const error = normalizeFlowError(err, caseNo);
     if (isStaleConflictError(error)) {
       orderMutationFlowStore.setReopenStale(caseNo, error);

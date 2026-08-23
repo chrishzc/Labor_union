@@ -1,8 +1,6 @@
 """
-================================================================================
-檔案名稱: api/routes/line_configurations.py
-功能說明: canonical LINE 訊息、排程、Rich Menu、LIFF 與客服設定版本 API
-================================================================================
+File: line_configurations.py
+Description: 提供 LINE 設定的安全唯讀查詢與既有預覽、套用相容端點。
 """
 
 from __future__ import annotations
@@ -20,6 +18,8 @@ from api.dependencies.line_runtime import get_line_configuration_application
 from api.schemas.base import BaseResponse
 from api.schemas.line_configurations import (
     ApplyLineConfigurationRequest,
+    LineConfigurationSafePublicView,
+    LineConfigurationSafeResponse,
     PreviewLineConfigurationRequest,
 )
 from domains.line.configuration import (
@@ -30,8 +30,42 @@ from domains.line.identities import LineConfigurationRevision
 from shared_kernel.identities import CorrelationId, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.message_configuration import LineMessageConfigurationError
+from subsystems.line.configuration_contracts import (
+    GetLineConfigurationSafeQuery,
+    LineConfigurationQueryContractError,
+    LineConfigurationQueryUnavailableError,
+)
 
 router = APIRouter(prefix="/api/v1/line/configurations", tags=["LINE Configuration"])
+
+
+@router.get("/{kind}/safe", response_model=LineConfigurationSafeResponse)
+def get_safe_configuration(
+    kind: LineConfigurationKind,
+    principal: AdminPrincipal = Depends(require_line_configuration_reader),
+) -> LineConfigurationSafeResponse:
+    try:
+        result = get_line_configuration_application().get_safe(
+            GetLineConfigurationSafeQuery(kind),
+            admin_actor_context(principal),
+        )
+    except LineConfigurationQueryContractError as error:
+        raise _safe_query_error(
+            "line_configuration_query_contract_invalid",
+            retryable=False,
+        ) from error
+    except LineConfigurationQueryUnavailableError as error:
+        raise _safe_query_error(
+            "line_configuration_query_unavailable",
+            retryable=True,
+        ) from error
+    return LineConfigurationSafeResponse(
+        data=LineConfigurationSafePublicView(
+            kind=result.kind,
+            revision=result.revision,
+            state=result.state,
+        )
+    )
 
 
 @router.get("/{kind}", response_model=BaseResponse[dict])
@@ -103,6 +137,24 @@ def _snapshot(snapshot) -> dict[str, object]:
         "revision": snapshot.revision.value,
         "definition": json.loads(snapshot.definition_json),
     }
+
+
+def _safe_query_error(code: str, *, retryable: bool) -> HTTPException:
+    return HTTPException(
+        status_code=503,
+        detail={
+            "error": {
+                "category": "unavailable",
+                "code": code,
+                "message": "LINE 設定查詢結果無法安全提供。",
+                "field_errors": [],
+                "domain_blockers": [],
+                "retryable": retryable,
+                "correlation_id": "line-configuration-safe-query",
+                "current_version": None,
+            }
+        },
+    )
 
 
 __all__ = ["router"]

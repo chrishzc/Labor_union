@@ -1,7 +1,16 @@
 @echo off
+goto :MAIN
+@REM File: start_local_development_no_auth.bat
+@REM Description: 以本機免登入 profile 啟動後端與 React 開發服務。
+:MAIN
+chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
 cd /d "%PROJECT_ROOT%"
+set "APP_ENV=development"
+set "ENABLE_ADMIN_AUTH=false"
+set "ACCESS_CONTROL_PROFILE=local_bypass"
+set "VITE_ACCESS_CONTROL_PROFILE=local_bypass"
 
 if /I "%~1"=="--dry-run" (
   powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0configure_local_admin_no_auth.ps1" -DryRun

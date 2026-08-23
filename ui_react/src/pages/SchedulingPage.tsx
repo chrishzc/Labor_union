@@ -1,6 +1,6 @@
 /**
  * File: SchedulingPage.tsx
- * Description: 顯示排班甘特、請假代班與國定假日 Query、Preview、Apply、receipt 工作台。
+ * Description: 顯示完整月份排班甘特，並提供獨立資格查詢與受控調度工作台。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './SchedulingPage.css';
@@ -11,8 +11,10 @@ import { schedulingCurrentClient } from '../api/scheduling/scheduling_current_cl
 import { SchedulingCurrentError } from '../api/scheduling/scheduling_current_errors';
 import { schedulingEligibilityCollisionClient } from '../api/scheduling/eligibility_collision_client';
 import { SchedulingEligibilityCollisionError } from '../api/scheduling/eligibility_collision_errors';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import {
   adaptSchedulingProjection,
+  matchesSchedulingFilter,
   type SchedulingCalendarRowViewModel,
 } from '../adapters/scheduling/scheduling_current_adapter';
 import {
@@ -47,6 +49,21 @@ import {
   type HolidayApplyRequest,
   type HolidayPreviewRequest,
 } from '../adapters/scheduling/holiday_flow_adapter';
+import {
+  staffLeaveInboxClient,
+  type LeaveInboxItem,
+  type LeaveInboxReviewAction,
+  type LeaveInboxStatus,
+} from '../api/scheduling/staff_leave_inbox_client';
+import {
+  waitingDepositLockClient,
+  type WaitingDepositPreview,
+  type WaitingDepositReceipt,
+} from '../api/scheduling/waiting_deposit_lock_client';
+import {
+  schedulePrecisionClient,
+  type SchedulePrecisionResult,
+} from '../api/scheduling/schedule_precision_client';
 
 type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays' | 'leave_inbox';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
@@ -56,11 +73,22 @@ interface MonthSelection {
   month: number;
 }
 
-const STAFF_PAGE_SIZE = 50;
+const STAFF_PAGE_SIZE = 20;
+
+export function taipeiCalendarDate(at: Date): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Taipei',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(at);
+  const value = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((part) => part.type === type)?.value);
+  return { year: value('year'), month: value('month'), day: value('day') };
+}
 
 function currentMonth(): MonthSelection {
-  const now = new Date();
-  return { year: now.getFullYear(), month: now.getMonth() + 1 };
+  const now = taipeiCalendarDate(new Date());
+  return { year: now.year, month: now.month };
 }
 
 function isoDate(year: number, month: number, day: number): string {
@@ -68,8 +96,8 @@ function isoDate(year: number, month: number, day: number): string {
 }
 
 function todayIsoDate(): string {
-  const now = new Date();
-  return isoDate(now.getFullYear(), now.getMonth() + 1, now.getDate());
+  const now = taipeiCalendarDate(new Date());
+  return isoDate(now.year, now.month, now.day);
 }
 
 function monthRange(selection: MonthSelection) {
@@ -81,6 +109,21 @@ function monthRange(selection: MonthSelection) {
   };
 }
 
+function monthAxis(selection: MonthSelection) {
+  const { totalDays } = monthRange(selection);
+  const weekdayLabels = ['日', '一', '二', '三', '四', '五', '六'];
+  return Array.from({ length: totalDays }, (_, index) => {
+    const dayNumber = index + 1;
+    const date = new Date(Date.UTC(selection.year, selection.month - 1, dayNumber));
+    return {
+      dayNumber,
+      dateStr: isoDate(selection.year, selection.month, dayNumber),
+      weekday: weekdayLabels[date.getUTCDay()],
+      isWeekend: date.getUTCDay() === 0 || date.getUTCDay() === 6,
+    };
+  });
+}
+
 function moveMonth(selection: MonthSelection, offset: number): MonthSelection {
   const target = new Date(Date.UTC(selection.year, selection.month - 1 + offset, 1));
   return { year: target.getUTCFullYear(), month: target.getUTCMonth() + 1 };
@@ -90,29 +133,109 @@ function renderError(error: SchedulingCurrentError | Error): string {
   if (error instanceof SchedulingCurrentError) {
     const code = error.publicCode ?? error.code;
     const correlation = error.correlationId ? `｜Correlation: ${error.correlationId}` : '';
+    if (code === 'SCHEDULING_UNAVAILABLE') {
+      return '排班日曆服務暫時無法回應，請稍後重試。';
+    }
     return `[${code}] ${error.message}${correlation}`;
   }
   return error.message;
 }
 
-function UnavailableTab({ title, controls }: { title: string; controls: string[] }) {
+function StaffLeaveInboxWorkspace() {
+  const [status, setStatus] = useState<LeaveInboxStatus>('pending');
+  const [items, setItems] = useState<readonly LeaveInboxItem[]>([]);
+  const [reasonById, setReasonById] = useState<Record<number, string>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [receipt, setReceipt] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      setItems(await staffLeaveInboxClient.list(status));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '請假待辦載入失敗。');
+    } finally {
+      setBusy(false);
+    }
+  }, [status]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  const review = async (item: LeaveInboxItem, action: LeaveInboxReviewAction) => {
+    if (busy) return;
+    const reason = reasonById[item.id]?.trim() ?? '';
+    if ((action === 'reject' || action === 'cancel') && !reason) {
+      setError('退回或取消請先填寫原因。');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setReceipt(null);
+    try {
+      const result = await staffLeaveInboxClient.review(item, action, reason);
+      setReceipt(`待辦 #${result.request_id} 已更新為 ${result.status}（版本 ${result.version}）。`);
+      await load();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '請假待辦審核失敗。');
+      setBusy(false);
+    }
+  };
+
   return (
-    <section className="scheduling-unavailable-workspace" aria-live="polite">
-      <h2>{title}</h2>
-      <p>後端 typed contract 尚未在本次唯讀 page-slice 開放。</p>
-      <div className="scheduling-unavailable-actions">
-        {controls.map((control) => (
-          <button key={control} data-control-id={control} disabled>
-            未開放
-          </button>
-        ))}
+    <section className="scheduling-workspace leave-inbox-workspace" aria-live="polite">
+      <div className="scheduling-workspace-heading">
+        <div><h2>請假待辦收件匣</h2><p>直接讀取後端待辦根事實；接受或退回後會重查最新版本。</p></div>
+        <span className="scheduling-machine-state">{busy ? 'loading' : 'ready'}</span>
       </div>
+      <div className="leave-inbox-toolbar">
+        <label>狀態
+          <select value={status} onChange={(event) => setStatus(event.target.value as LeaveInboxStatus)} disabled={busy}>
+            <option value="pending">待審核</option><option value="accepted_for_processing">已接受處理</option>
+            <option value="rejected">已退回</option><option value="cancelled">已取消</option><option value="resolved">已完成代班</option>
+          </select>
+        </label>
+        <button type="button" onClick={() => void load()} disabled={busy}>重新整理</button>
+      </div>
+      {error && <p className="leave-substitution-notice error" role="alert">{error}</p>}
+      {receipt && <p className="leave-substitution-notice success">{receipt}</p>}
+      {!busy && items.length === 0 && <p className="leave-inbox-empty">此狀態目前沒有請假待辦。</p>}
+      <div className="leave-inbox-list">{items.map((item) => (
+        <article key={item.id} className="leave-inbox-card">
+          <div><strong>#{item.id}｜{item.staff_name}</strong><p>{item.leave_start_date} ～ {item.leave_end_date}</p>
+            <p>{item.request_reason || '未填請假說明'}</p><small>{item.request_status}｜版本 {item.aggregate_version}</small></div>
+          {item.request_status === 'pending' && <div className="leave-inbox-review">
+            <label>審核原因<input value={reasonById[item.id] ?? ''}
+              onChange={(event) => setReasonById((current) => ({ ...current, [item.id]: event.target.value }))}
+              placeholder="接受可留空；退回必填" disabled={busy} /></label>
+            <div><button type="button" onClick={() => void review(item, 'accept')} disabled={busy}>接受處理</button>
+              <button type="button" onClick={() => void review(item, 'reject')} disabled={busy}>退回申請</button></div>
+          </div>}
+        </article>
+      ))}</div>
     </section>
   );
 }
 
+function holidayPreviewRequestsMatch(
+  current: HolidayPreviewRequest | null,
+  previewed: HolidayPreviewRequest | null,
+): boolean {
+  return Boolean(
+    current
+      && previewed
+      && current.action === previewed.action
+      && current.holiday_date === previewed.holiday_date
+      && current.holiday_name === previewed.holiday_name
+      && current.is_double_pay_default === previewed.is_double_pay_default
+      && current.from_date === previewed.from_date
+      && current.to_date === previewed.to_date,
+  );
+}
+
 function HolidayPolicyWorkspace() {
-  const year = new Date().getFullYear();
+  const year = taipeiCalendarDate(new Date()).year;
   const [fromDate, setFromDate] = useState(`${year}-01-01`);
   const [toDate, setToDate] = useState(`${year}-12-31`);
   const [action, setAction] = useState<HolidayAction>('upsert');
@@ -134,6 +257,8 @@ function HolidayPolicyWorkspace() {
   const draft = holidayFlowStore.get();
   const machine = resolveHolidayMachineState(draft);
   const calendar = draft?.calendar ?? null;
+  const calendarMatchesHorizon = calendar?.planning_horizon.from_date === fromDate
+    && calendar.planning_horizon.to_date === toDate;
   const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading']
     .includes(machine.type);
 
@@ -169,15 +294,24 @@ function HolidayPolicyWorkspace() {
 
   const preview = () => {
     const request = buildPreviewRequest();
-    if (!request || !calendar || busy) return;
+    if (!request || !calendarMatchesHorizon || busy) return;
     setHolidayDraft(request);
     void previewHolidayFlow(request).catch(() => undefined);
   };
 
+  const currentPreviewRequest = buildPreviewRequest();
+  const previewMatchesCurrentInputs = holidayPreviewRequestsMatch(
+    currentPreviewRequest,
+    draft?.previewRequest ?? null,
+  );
+  const previewNeedsRefresh = Boolean(
+    draft?.previewRequest && !draft.preview && machine.type === 'query_ready',
+  );
+
   const apply = () => {
     const previewResult = draft?.preview;
     const previewRequest = draft?.previewRequest;
-    if (!previewResult || !previewRequest || !reason.trim() || busy) return;
+    if (!previewResult || !previewRequest || !previewMatchesCurrentInputs || !calendarMatchesHorizon || !reason.trim() || busy) return;
     const request: HolidayApplyRequest = {
       ...previewRequest,
       expected_calendar_version: previewResult.command.expected_calendar_version,
@@ -316,21 +450,27 @@ function HolidayPolicyWorkspace() {
       </div>
 
       <div className="holiday-policy-actions">
-        <button type="button" data-control-id="scheduling.holiday.preview" disabled={!calendar || !buildPreviewRequest() || busy} onClick={preview}>
+        <button type="button" data-control-id="scheduling.holiday.preview" disabled={!calendarMatchesHorizon || !buildPreviewRequest() || busy} onClick={preview}>
           {machine.type === 'preview_loading' ? '預覽中…' : '預覽國定假日變更'}
         </button>
-        <button type="button" data-control-id="scheduling.holiday.apply" disabled={!draft?.preview || !reason.trim() || busy} onClick={apply}>
+        <button
+          type="button"
+          data-control-id="scheduling.holiday.apply"
+          aria-describedby={previewNeedsRefresh || !calendarMatchesHorizon ? 'scheduling-holiday-apply-guidance' : undefined}
+          disabled={!draft?.preview || !previewMatchesCurrentInputs || !calendarMatchesHorizon || !reason.trim() || busy}
+          onClick={apply}
+        >
           {machine.type === 'apply_pending' || machine.type === 'requery_loading' ? '套用並觀察中…' : '套用國定假日變更'}
         </button>
       </div>
-
-      <div className="holiday-policy-locked-controls" aria-label="未核准國定假日控制">
-        {['create', 'toggle-rest', 'toggle-pay', 'delete'].map((control) => (
-          <button key={control} type="button" data-control-id={`scheduling.holiday.${control}`} disabled>
-            未開放
-          </button>
-        ))}
-      </div>
+      {calendar && !calendarMatchesHorizon && (
+        <small className="holiday-policy-notice">查詢區間已變更，請重新查詢日曆後再建立 Preview。</small>
+      )}
+      {(previewNeedsRefresh || !calendarMatchesHorizon) && (
+        <small id="scheduling-holiday-apply-guidance" className="holiday-policy-notice">
+          Preview 後的查詢區間或變更欄位已調整；請重新查詢並建立新的 Preview，才能套用。
+        </small>
+      )}
 
       {draft?.preview && (
         <section className="holiday-policy-preview" aria-label="國定假日變更預覽">
@@ -395,7 +535,7 @@ function LeaveSubstitutionWorkspace({
   const selectedAssignment = assignments.find((item) => item.assignment_id === assignmentId) ?? null;
   const schedules = selectedAssignment?.official_schedules ?? [];
   const selectedSchedule = schedules.find((item) => item.schedule_id === scheduleId) ?? null;
-  const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading']
+  const busy = ['query_loading', 'preview_loading', 'apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown', 'observation_failed']
     .includes(machine.type);
 
   useEffect(() => {
@@ -504,7 +644,7 @@ function LeaveSubstitutionWorkspace({
       </div>
 
       {draft?.assignments && draft.assignments.length === 0 && (
-        <p className="leave-substitution-notice">此訂單沒有可處理的正式指派；若屬測試資料不完整，請補齊後再測試。</p>
+        <p className="leave-substitution-notice">此訂單目前沒有正式指派。請先至訂單管理完成正式排班，再回此處建立代班 Preview。</p>
       )}
 
       {assignments.length > 0 && (
@@ -539,7 +679,7 @@ function LeaveSubstitutionWorkspace({
                 invalidatePreview();
               }}
             >
-              {schedules.length === 0 && <option value="">後端未提供正式服務日</option>}
+              {schedules.length === 0 && <option value="">此指派目前沒有正式服務日</option>}
               {schedules.map((schedule) => (
                 <option key={schedule.schedule_id} value={schedule.schedule_id}>
                   {schedule.work_date}｜Schedule #{schedule.schedule_id}
@@ -600,7 +740,7 @@ function LeaveSubstitutionWorkspace({
       )}
 
       {selectedAssignment && schedules.length === 0 && (
-        <p className="leave-substitution-notice error">後端未提供此指派的正式服務日，不能建立 Preview；請補齊測試資料後再測試。</p>
+        <p className="leave-substitution-notice error">此指派目前沒有正式服務日，不能建立 Preview；請先完成正式排班。</p>
       )}
 
       <div className="leave-substitution-actions">
@@ -612,13 +752,8 @@ function LeaveSubstitutionWorkspace({
         >
           {machine.type === 'preview_loading' ? '預覽中…' : '建立安全預覽'}
         </button>
-        <button type="button" data-control-id="scheduling.leave.extension" disabled>
-          其他延長調度未開放
-        </button>
         {!draft?.preview && (
-          <button type="button" data-control-id="scheduling.leave.apply" disabled>
-            確認套用
-          </button>
+          <small data-control-id="scheduling.leave.apply-gate">建立安全預覽並通過檢核後，才會顯示確認套用。</small>
         )}
       </div>
 
@@ -689,31 +824,205 @@ export type CalendarRowState =
   | { kind: 'terms_incomplete' }
   | { kind: 'error'; message: string };
 
+function WaitingDepositLockControl({ caseNo: suggestedCaseNo, onApplied }: { caseNo: string | null; onApplied: () => void }) {
+  const [caseNoInput, setCaseNoInput] = useState(suggestedCaseNo ?? '');
+  const [preview, setPreview] = useState<WaitingDepositPreview | null>(null);
+  const [receipt, setReceipt] = useState<WaitingDepositReceipt | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (suggestedCaseNo) setCaseNoInput(suggestedCaseNo);
+  }, [suggestedCaseNo]);
+  useEffect(() => { setPreview(null); setReceipt(null); setError(null); }, [caseNoInput]);
+
+  const runPreview = async () => {
+    const caseNo = caseNoInput.trim();
+    if (!caseNo || busy) return;
+    setBusy(true); setError(null); setReceipt(null);
+    try {
+      const plan = await waitingDepositLockClient.queryPlan(caseNo);
+      if (plan.status !== 'proposed') {
+        setError(`案件目前為 ${plan.status} 方案；只有洽談中的 proposed 方案可以建立預約鎖。`);
+        return;
+      }
+      if (plan.activeLockId !== null) {
+        setError(`案件已有有效預約鎖 #${plan.activeLockId}，不會重複建立。`);
+        return;
+      }
+      setPreview(await waitingDepositLockClient.preview(caseNo, plan.planId));
+    } catch (caught) {
+      setError(caught instanceof ApiHttpError ? `[${caught.code}] ${caught.message}` : caught instanceof Error ? caught.message : '預約鎖定 Preview 失敗。');
+    } finally { setBusy(false); }
+  };
+
+  const apply = async () => {
+    const caseNo = caseNoInput.trim();
+    if (!caseNo || !preview?.apply_allowed || busy) return;
+    setBusy(true); setError(null);
+    try {
+      const result = await waitingDepositLockClient.apply(caseNo, preview.plan_id, preview.preview_fingerprint);
+      setReceipt(result); setPreview(null); onApplied();
+    } catch (caught) {
+      setError(caught instanceof ApiHttpError ? `[${caught.code}] ${caught.message}` : caught instanceof Error ? caught.message : '預約鎖定 Apply 失敗。');
+    } finally { setBusy(false); }
+  };
+
+  return <div className="waiting-lock-control">
+    <label>洽談中案件編號
+      <input aria-label="洽談中案件編號" data-control-id="scheduling.projection.order-input" value={caseNoInput}
+        onChange={(event) => setCaseNoInput(event.target.value)} placeholder="例如 115000015" disabled={busy} />
+    </label>
+    <button data-control-id="scheduling.projection.lock-preview" aria-describedby="scheduling-waiting-lock-guidance" onClick={() => void runPreview()} disabled={!caseNoInput.trim() || busy}>
+      {busy ? '處理中…' : '預覽預約鎖定'}
+    </button>
+    <button data-control-id="scheduling.projection.lock-apply" aria-describedby="scheduling-waiting-lock-guidance" onClick={() => void apply()} disabled={!preview?.apply_allowed || busy}>
+      確認套用預約鎖定
+    </button>
+    <small id="scheduling-waiting-lock-guidance">
+      {!caseNoInput.trim()
+        ? '輸入已建立有效媒合方案的洽談中案件編號後即可 Preview；Preview 通過後才能套用預約鎖。'
+        : preview?.apply_allowed
+          ? 'Preview 已通過，可確認套用預約鎖。'
+          : '先建立 Preview；確認沒有衝突後才可套用預約鎖。'}
+    </small>
+    {preview && <div className="waiting-lock-preview"><strong>Preview：服務 {preview.service_day_count} 日、Buffer {preview.buffer_day_count} 日</strong>
+      <span>衝突 {preview.conflicts.length} 筆；{preview.apply_allowed ? '可套用' : '有衝突，禁止套用'}</span></div>}
+    {receipt && <p className="leave-substitution-notice success">預約鎖 #{receipt.lock_id} 已{receipt.result === 'created' ? '建立' : '確認既有結果'}，共 {receipt.lock_rows.length} 日。</p>}
+    {error && <p className="leave-substitution-notice error" role="alert">{error}</p>}
+  </div>;
+}
+
+function SchedulePrecisionWorkspace({ onClose }: { onClose: () => void }) {
+  const [startDate, setStartDate] = useState(todayIsoDate());
+  const [serviceDays, setServiceDays] = useState(20);
+  const [serviceMode, setServiceMode] = useState<'週休1日' | '週休2日' | '連續服務'>('週休1日');
+  const [result, setResult] = useState<SchedulePrecisionResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const calculate = async () => {
+    if (!startDate || serviceDays < 1 || busy) return;
+    setBusy(true); setError(null); setResult(null);
+    try {
+      setResult(await schedulePrecisionClient.calculate({ actual_start_date: startDate, target_service_days: serviceDays, service_mode: serviceMode }));
+    } catch (caught) {
+      setError(caught instanceof ApiHttpError ? `[${caught.code}] ${caught.message}` : caught instanceof Error ? caught.message : '出勤精算失敗。');
+    } finally { setBusy(false); }
+  };
+
+  return <section className="scheduling-workspace schedule-precision-workspace" aria-label="訂單出勤精算工作台">
+    <div className="scheduling-workspace-heading"><div><h2>訂單出勤精算工作台</h2><p>日期、週統計與薪資預估全部採用 server calculation。</p></div>
+      <button type="button" onClick={onClose}>關閉</button></div>
+    <div className="schedule-precision-form">
+      <label>實際起始日<input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} disabled={busy} /></label>
+      <label>目標服務日<input type="number" min="1" value={serviceDays} onChange={(event) => setServiceDays(Number(event.target.value))} disabled={busy} /></label>
+      <label>服務模式<select value={serviceMode} onChange={(event) => setServiceMode(event.target.value as typeof serviceMode)} disabled={busy}>
+        <option value="週休1日">週休1日</option><option value="週休2日">週休2日</option><option value="連續服務">連續服務</option>
+      </select></label>
+      <button type="button" onClick={() => void calculate()} disabled={!startDate || serviceDays < 1 || busy}>{busy ? '精算中…' : '執行出勤精算'}</button>
+    </div>
+    {error && <p className="leave-substitution-notice error" role="alert">{error}</p>}
+    {result && <div className="schedule-precision-result">
+      <strong>{result.actual_start_date} ～ {result.actual_end_date}</strong>
+      <span>服務 {result.actual_work_days_count} 日｜休息 {result.rest_days_count} 日｜曆日 {result.total_calendar_days} 日</span>
+      <span>{result.total_estimated_salary === null ? '未輸入薪資基數，因此不顯示薪資估算' : `預估薪資 NT$ ${result.total_estimated_salary.toLocaleString('zh-TW')}`}</span>
+      <span>週統計 {result.weekly_stats.length} 週｜逐日明細 {result.day_by_day.length} 筆｜國定假日 {result.national_holidays_found.length} 筆</span>
+    </div>}
+  </section>;
+}
+
 type SchedulingDiagnosticTone = 'unavailable' | 'active' | 'waiting' | 'leave';
 
 type EligibilityCollisionState =
   | { kind: 'idle' }
   | { kind: 'loading'; caseNo: string }
   | { kind: 'ready'; data: SchedulingEligibilityCollisionViewModel }
-  | { kind: 'unavailable'; message: string };
+  | { kind: 'error'; message: string };
+
+function eligibilityErrorMessage(error: unknown): string {
+  if (!(error instanceof SchedulingEligibilityCollisionError)) {
+    return '資格與檔期服務暫時無法回應，請稍後重試。';
+  }
+  if (error.code === 'SCHEDULING_ELIGIBILITY_NOT_FOUND') {
+    return '找不到指定案件或服務人員，請確認案件編號與人員後重試。';
+  }
+  if (error.code === 'SCHEDULING_ELIGIBILITY_CONFLICT') {
+    return '案件或排班版本已變更，請重新查詢最新資料。';
+  }
+  if (error.code === 'SCHEDULING_ELIGIBILITY_UNAUTHENTICATED') {
+    return '目前沒有資格查詢權限，請確認管理員登入狀態。';
+  }
+  if (error.code === 'SCHEDULING_ELIGIBILITY_VALIDATION') {
+    return '案件服務日期、每日時段或服務人員資格主檔尚未完整，請補齊後重試。';
+  }
+  return '資格與檔期服務暫時無法回應，請稍後重試。';
+}
+
+function eligibilityDisplay(data: SchedulingEligibilityCollisionViewModel) {
+  const eligibility = {
+    eligible: '資格符合',
+    ineligible: '資格不符合',
+    partial: '資格資料待補正',
+    unavailable: '資格主檔待建立',
+  }[data.eligibility];
+  const availability = {
+    available: '檔期可用',
+    blocked: '檔期衝突阻擋',
+    requires_review: '檔期需人工確認（資料待補正）',
+    unknown: '檔期狀態未知（資料待補正）',
+  }[data.availability];
+  const coverage = {
+    complete: '完整',
+    incomplete: '不完整',
+    requires_review: '需人工確認（資料待補正）',
+    unavailable: '覆蓋資料待建立',
+  }[data.coverage.status];
+  const needsCorrection = data.partialData.length > 0
+    || data.eligibility === 'partial'
+    || data.eligibility === 'unavailable'
+    || data.availability === 'requires_review'
+    || data.availability === 'unknown'
+    || data.qualificationChecks.some((check) => check.status === 'unknown')
+    || data.collisions.some((collision) => collision.severity === 'requires_review')
+    || data.coverage.status !== 'complete';
+  return { eligibility, availability, coverage, needsCorrection };
+}
+
+function qualificationStatusLabel(status: SchedulingEligibilityCollisionViewModel['qualificationChecks'][number]['status']): string {
+  if (status === 'pass') return '通過';
+  if (status === 'fail') return '不通過';
+  return '資料待補正（無法判定）';
+}
+
+function collisionSeverityLabel(severity: SchedulingEligibilityCollisionViewModel['collisions'][number]['severity']): string {
+  return severity === 'hard_block' ? '排班阻擋' : '資料待補正（需人工確認）';
+}
 
 interface SchedulingDiagnosticBadge {
   tone: SchedulingDiagnosticTone;
   text: string;
 }
 
-const UNAVAILABLE_DIAGNOSTIC: SchedulingDiagnosticBadge = {
+const LOADING_DIAGNOSTIC: SchedulingDiagnosticBadge = {
   tone: 'unavailable',
-  text: '⚪ 後端未提供接單資格／撞期判定',
+  text: '⚪ 正在載入正式排班',
 };
 
-const UNAVAILABLE_SLOT_TEXT = '後端未提供接單資格／撞期判定';
-const UNAVAILABLE_SLOT_DETAIL = '此 page-slice 僅顯示 server occupancy，無法判定接單或撞期。';
+const NO_OCCUPANCY_DIAGNOSTIC: SchedulingDiagnosticBadge = {
+  tone: 'unavailable',
+  text: '⚪ 本月無排班占用',
+};
+const NO_OCCUPANCY_SLOT_TEXT = '本月無排班占用';
+const NO_OCCUPANCY_SLOT_DETAIL = '已完成 server 查詢；接單資格與撞期請使用上方案件查詢。';
 
 // 只將 server occupancy／typed error 映射為標籤，不從空資料推導接單資格或撞期。
 function getStaffDiagnosticBadge(state: CalendarRowState | undefined): SchedulingDiagnosticBadge {
-  if (!state || state.kind === 'empty') {
-    return UNAVAILABLE_DIAGNOSTIC;
+  if (!state) {
+    return LOADING_DIAGNOSTIC;
+  }
+  if (state.kind === 'empty') {
+    return { tone: 'unavailable', text: '⚪ 排班投影缺少日期' };
   }
   if (state.kind === 'terms_incomplete') {
     return { tone: 'waiting', text: '🟡 ⚠️ 時段未確認 (需補齊資料)' };
@@ -726,9 +1035,23 @@ function getStaffDiagnosticBadge(state: CalendarRowState | undefined): Schedulin
   const hasBuffer = row.days.some((d) => d.tone === 'buffer');
   const hasWaiting = row.days.some((d) => d.tone === 'waiting');
   const hasActive = row.days.some((d) => d.tone === 'active');
+  const hasActiveAssignment = row.assignmentStatuses.includes('active');
+  const hasPlannedAssignment = row.assignmentStatuses.includes('planned');
+  const hasCompletedAssignment = row.assignmentStatuses.includes('completed');
+  const hasUnknownOfficialWorkday = row.assignmentStatuses.length === 0
+    && row.days.some((day) => (
+      day.occupancyKinds.includes('official_workday')
+      && day.assignmentStatuses.length === 0
+    ));
 
   if (hasLeave) {
     return { tone: 'leave', text: '🟣 服務中請假留停 (待代班)' };
+  }
+  if (hasActiveAssignment) {
+    return { tone: 'active', text: '🟢 正常履約中' };
+  }
+  if (hasPlannedAssignment) {
+    return { tone: 'active', text: '🟢 已排定待開始' };
   }
   if (hasWaiting) {
     return { tone: 'waiting', text: '🔵 待定金核銷鎖定中' };
@@ -736,10 +1059,13 @@ function getStaffDiagnosticBadge(state: CalendarRowState | undefined): Schedulin
   if (hasBuffer) {
     return { tone: 'waiting', text: '🟡 7天防撞期 Buffer 鎖定' };
   }
-  if (hasActive) {
-    return { tone: 'active', text: '🟢 正常履約中' };
+  if (hasUnknownOfficialWorkday) {
+    return { tone: 'waiting', text: '⚠️ 服務狀態未知／資料待補正' };
   }
-  return UNAVAILABLE_DIAGNOSTIC;
+  if (hasCompletedAssignment || hasActive) {
+    return { tone: 'active', text: '⚪ 服務已完成' };
+  }
+  return NO_OCCUPANCY_DIAGNOSTIC;
 }
 
 // 動態將 Server 天數投影合併為連續甘特區間條塊
@@ -765,8 +1091,8 @@ function buildGanttSpans(
         endDay: totalDays,
         tone: 'unavailable',
         icon: '⚪',
-        caseText: UNAVAILABLE_SLOT_TEXT,
-        statusLabel: UNAVAILABLE_SLOT_DETAIL,
+        caseText: state ? '排班投影缺少日期' : '正在載入正式排班',
+        statusLabel: state ? '請重試月曆查詢。' : '正在讀取 server projection。',
       },
     ];
   }
@@ -794,7 +1120,7 @@ function buildGanttSpans(
         tone: 'unavailable',
         icon: '⚪',
         caseText: '排班資料載入異常',
-        statusLabel: `${state.message}；${UNAVAILABLE_SLOT_DETAIL}`,
+        statusLabel: `${state.message}；請重試月曆查詢。`,
       },
     ];
   }
@@ -809,8 +1135,8 @@ function buildGanttSpans(
         endDay: totalDays,
         tone: 'unavailable',
         icon: '⚪',
-        caseText: UNAVAILABLE_SLOT_TEXT,
-        statusLabel: UNAVAILABLE_SLOT_DETAIL,
+        caseText: NO_OCCUPANCY_SLOT_TEXT,
+        statusLabel: NO_OCCUPANCY_SLOT_DETAIL,
       },
     ];
   }
@@ -820,22 +1146,32 @@ function buildGanttSpans(
 
   row.days.forEach((day, index) => {
     const dayNum = index + 1;
-    const isRest = day.tone === 'rest';
     const isOccupied = day.occupancyKinds.length > 0;
-    const tone: GanttSpan['tone'] = day.tone === 'rest' ? 'active' : day.tone;
+    const unknownOfficialWorkday = row.assignmentStatuses.length === 0
+      && day.occupancyKinds.includes('official_workday')
+      && day.assignmentStatuses.length === 0;
+    const tone: GanttSpan['tone'] = unknownOfficialWorkday
+      ? 'waiting'
+      : day.tone === 'rest' ? 'active' : day.tone;
     const hasCase = day.caseLabels.length > 0;
     const caseText = hasCase
       ? day.caseLabels.join('、')
-      : (isOccupied ? day.statusLabel : UNAVAILABLE_SLOT_TEXT);
-    const statusLabel = hasCase ? (isRest ? '排休' : '服務中') : undefined;
+      : (isOccupied ? day.statusLabel : NO_OCCUPANCY_SLOT_TEXT);
+    const statusLabel = unknownOfficialWorkday
+      ? '服務狀態未知／資料待補正'
+      : hasCase ? day.statusLabel : undefined;
     const icon =
-      tone === 'active' ? '🟢' : tone === 'buffer' ? '🔒' : tone === 'leave' ? '🚑' : tone === 'waiting' ? '🔵' : undefined;
+      unknownOfficialWorkday ? '⚠️' : tone === 'active' ? '🟢' : tone === 'buffer' ? '🔒' : tone === 'leave' ? '🚑' : tone === 'waiting' ? '🔵' : undefined;
 
     if (!current) {
       if (isOccupied) {
         current = { id: `span-${dayNum}`, startDay: dayNum, endDay: dayNum, tone, icon, caseText, statusLabel };
       }
-    } else if (current.tone === tone && current.caseText === caseText) {
+    } else if (
+      current.tone === tone &&
+      current.caseText === caseText &&
+      current.statusLabel === statusLabel
+    ) {
       current.endDay = dayNum;
     } else {
       spans.push(current);
@@ -856,9 +1192,13 @@ function buildGanttSpans(
 
 export const SchedulingPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<SchedulingTab>('calendar');
+  const [precisionOpen, setPrecisionOpen] = useState(false);
   const [staffList, setStaffList] = useState<StaffDirectoryCardViewModel[]>([]);
   const [directoryLoading, setDirectoryLoading] = useState<boolean>(true);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
+  const [directoryNextCursor, setDirectoryNextCursor] = useState<number | null>(null);
+  const [directoryLoadingMore, setDirectoryLoadingMore] = useState(false);
+  const [directoryNextPageError, setDirectoryNextPageError] = useState<string | null>(null);
 
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
   const [month, setMonth] = useState<MonthSelection>(currentMonth);
@@ -869,11 +1209,14 @@ export const SchedulingPage: React.FC = () => {
   const [calendarLoading, setCalendarLoading] = useState<boolean>(false);
   const [calendarError, setCalendarError] = useState<Error | null>(null);
   const [retryGeneration, setRetryGeneration] = useState<number>(0);
+  const [eligibilityCaseNo, setEligibilityCaseNo] = useState('');
   const [eligibilityState, setEligibilityState] = useState<EligibilityCollisionState>({ kind: 'idle' });
 
   const mountedRef = useRef(true);
   const directoryControllerRef = useRef<AbortController | null>(null);
+  const directoryPendingCursorRef = useRef<number | null>(null);
   const calendarControllerRef = useRef<AbortController | null>(null);
+  const calendarLoadedKeyRef = useRef<Map<number, string>>(new Map());
   const eligibilityControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -881,6 +1224,7 @@ export const SchedulingPage: React.FC = () => {
     return () => {
       mountedRef.current = false;
       directoryControllerRef.current?.abort();
+      directoryPendingCursorRef.current = null;
       calendarControllerRef.current?.abort();
       eligibilityControllerRef.current?.abort();
     };
@@ -893,6 +1237,9 @@ export const SchedulingPage: React.FC = () => {
     directoryControllerRef.current = controller;
     setDirectoryLoading(true);
     setDirectoryError(null);
+    setDirectoryNextPageError(null);
+    setDirectoryNextCursor(null);
+    directoryPendingCursorRef.current = null;
 
     try {
       const page = adaptStaffDirectoryPage(
@@ -903,6 +1250,7 @@ export const SchedulingPage: React.FC = () => {
       );
       if (!mountedRef.current || controller.signal.aborted) return;
       setStaffList(page.items);
+      setDirectoryNextCursor(page.nextCursor);
       if (page.items.length > 0) {
         setSelectedStaffId(page.items[0].id);
       }
@@ -915,6 +1263,40 @@ export const SchedulingPage: React.FC = () => {
       }
     }
   }, []);
+
+  const loadNextDirectoryPage = async () => {
+    const cursor = directoryNextCursor;
+    if (cursor === null || directoryPendingCursorRef.current === cursor) return;
+    directoryControllerRef.current?.abort();
+    const controller = new AbortController();
+    directoryControllerRef.current = controller;
+    directoryPendingCursorRef.current = cursor;
+    setDirectoryLoadingMore(true);
+    setDirectoryNextPageError(null);
+    try {
+      const page = adaptStaffDirectoryPage(
+        await staffDirectoryClient.queryPage(
+          { pageSize: STAFF_PAGE_SIZE, afterId: cursor },
+          { signal: controller.signal }
+        )
+      );
+      if (!mountedRef.current || controller.signal.aborted || directoryPendingCursorRef.current !== cursor) return;
+      setStaffList((current) => {
+        const byId = new Map(current.map((staff) => [staff.id, staff]));
+        page.items.forEach((staff) => byId.set(staff.id, staff));
+        return [...byId.values()];
+      });
+      setDirectoryNextCursor(page.nextCursor);
+    } catch (error) {
+      if (!mountedRef.current || controller.signal.aborted || directoryPendingCursorRef.current !== cursor) return;
+      setDirectoryNextPageError(error instanceof Error ? error.message : '下一頁服務人員摘要載入失敗');
+    } finally {
+      if (mountedRef.current && directoryPendingCursorRef.current === cursor) {
+        directoryPendingCursorRef.current = null;
+        setDirectoryLoadingMore(false);
+      }
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -929,96 +1311,120 @@ export const SchedulingPage: React.FC = () => {
 
   const range = useMemo(() => monthRange(month), [month]);
 
+  const prevMonthRef = useRef<MonthSelection | null>(null);
+
   // 切換月份時重置排班快取
   useEffect(() => {
-    setCalendarRows({});
+    if (prevMonthRef.current === null) {
+      prevMonthRef.current = month;
+      return;
+    }
+    if (prevMonthRef.current.year !== month.year || prevMonthRef.current.month !== month.month) {
+      prevMonthRef.current = month;
+      setCalendarRows({});
+      calendarLoadedKeyRef.current.clear();
+    }
   }, [month]);
 
-  // 根據 selectedStaffId 載入日曆排班資料
+  // 甘特矩陣中的每一列都必須有自己的 server projection，不能只查目前選取的人員。
   useEffect(() => {
-    if (!selectedStaffId || staffList.length === 0) return;
+    if (staffList.length === 0) return undefined;
+    const rangeKey = `${range.rangeStart}:${range.rangeEnd}:${retryGeneration}`;
+    const staffToLoad = staffList.filter(
+      (staff) => calendarLoadedKeyRef.current.get(staff.id) !== rangeKey,
+    );
+    if (staffToLoad.length === 0) return undefined;
 
-    const currentStaff = staffList.find((s) => s.id === selectedStaffId);
-    if (!currentStaff) return;
+    staffToLoad.forEach((staff) => calendarLoadedKeyRef.current.set(staff.id, rangeKey));
 
-    calendarControllerRef.current?.abort();
+    let cancelled = false;
     const controller = new AbortController();
+    calendarControllerRef.current?.abort();
     calendarControllerRef.current = controller;
     setCalendarLoading(true);
     setCalendarError(null);
 
-    schedulingCurrentClient
-      .queryCurrentCalendar(
-        {
-          staffId: selectedStaffId,
-          rangeStart: range.rangeStart,
-          rangeEnd: range.rangeEnd,
-        },
-        { signal: controller.signal }
-      )
-      .then((projection) => {
-        if (!mountedRef.current || controller.signal.aborted) return;
-        if (projection.days.length === 0) {
-          setCalendarRows((prev) => ({ ...prev, [selectedStaffId]: { kind: 'empty' } }));
-        } else {
-          const row = adaptSchedulingProjection(currentStaff, projection);
-          setCalendarRows((prev) => ({ ...prev, [selectedStaffId]: { kind: 'loaded', row } }));
+    const loadRows = async () => {
+      const results = await Promise.all(staffToLoad.map(async (staff) => {
+        try {
+          const projection = await schedulingCurrentClient.queryCurrentCalendar(
+            {
+              staffId: staff.id,
+              rangeStart: range.rangeStart,
+              rangeEnd: range.rangeEnd,
+            },
+            { signal: controller.signal },
+          );
+          const state: CalendarRowState = projection.days.length === 0
+            ? { kind: 'empty' }
+            : { kind: 'loaded', row: adaptSchedulingProjection(staff, projection) };
+          return { staffId: staff.id, state, error: null };
+        } catch (caught) {
+          const error = caught instanceof Error ? caught : new Error('排班日曆查詢失敗');
+          const state: CalendarRowState = caught instanceof SchedulingCurrentError
+            && caught.publicCode === 'service_time_terms_incomplete'
+            ? { kind: 'terms_incomplete' }
+            : { kind: 'error', message: renderError(error) };
+          return { staffId: staff.id, state, error: state.kind === 'error' ? error : null };
         }
-      })
-      .catch((err: unknown) => {
-        if (!mountedRef.current || controller.signal.aborted) return;
-        const isTermsIncomplete =
-          err instanceof SchedulingCurrentError &&
-          err.publicCode === 'service_time_terms_incomplete';
-
-        if (isTermsIncomplete) {
-          setCalendarRows((prev) => ({ ...prev, [selectedStaffId]: { kind: 'terms_incomplete' } }));
-        } else {
-          setCalendarError(err instanceof Error ? err : new Error('排班日曆查詢失敗'));
-          setCalendarRows((prev) => ({
-            ...prev,
-            [selectedStaffId]: { kind: 'error', message: err instanceof Error ? err.message : '查詢失敗' },
-          }));
-        }
-      })
-      .finally(() => {
-        if (mountedRef.current && !controller.signal.aborted) {
-          setCalendarLoading(false);
-        }
+      }));
+      if (!mountedRef.current || controller.signal.aborted || cancelled) return;
+      results.forEach((result) => calendarLoadedKeyRef.current.set(result.staffId, rangeKey));
+      setCalendarRows((current) => {
+        const next = { ...current };
+        results.forEach((result) => {
+          next[result.staffId] = result.state;
+        });
+        return next;
       });
-  }, [selectedStaffId, range, retryGeneration, staffList]);
+      const failed = results.filter((result) => result.error !== null);
+      if (failed.length > 0) {
+        setCalendarError(new Error(
+          `${failed.length} 位服務人員的排班投影載入失敗；請查看各列狀態後重試。`,
+        ));
+      }
+    };
 
-  const selectedCaseNo = useMemo(() => {
-    if (selectedStaffId === null) return null;
-    const row = calendarRows[selectedStaffId];
-    if (row?.kind !== 'loaded') return null;
-    return row.row.days.flatMap((day) => day.caseLabels).find((caseNo) => caseNo.length > 0) ?? null;
-  }, [calendarRows, selectedStaffId]);
+    queueMicrotask(() => {
+      if (!cancelled) {
+        void loadRows().finally(() => {
+          if (mountedRef.current && !controller.signal.aborted && !cancelled) {
+            setCalendarLoading(false);
+          }
+        });
+      }
+    });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [range, retryGeneration, staffList]);
 
   useEffect(() => {
     eligibilityControllerRef.current?.abort();
     setEligibilityState({ kind: 'idle' });
-    if (selectedStaffId === null || selectedCaseNo === null) return;
+  }, [selectedStaffId]);
 
+  const queryEligibility = async () => {
+    const caseNo = eligibilityCaseNo.trim();
+    if (selectedStaffId === null || !caseNo || eligibilityState.kind === 'loading') return;
+    eligibilityControllerRef.current?.abort();
     const controller = new AbortController();
     eligibilityControllerRef.current = controller;
-    setEligibilityState({ kind: 'loading', caseNo: selectedCaseNo });
-    void schedulingEligibilityCollisionClient.query(
-      { caseNo: selectedCaseNo, staffId: selectedStaffId, asOf: todayIsoDate() },
-      { signal: controller.signal }
-    ).then((projection) => {
+    setEligibilityState({ kind: 'loading', caseNo });
+    try {
+      const projection = await schedulingEligibilityCollisionClient.query(
+        { caseNo, staffId: selectedStaffId, asOf: todayIsoDate() },
+        { signal: controller.signal }
+      );
       if (controller.signal.aborted || !mountedRef.current) return;
       setEligibilityState({ kind: 'ready', data: adaptSchedulingEligibilityCollision(projection) });
-    }).catch((error: unknown) => {
+    } catch (error) {
       if (controller.signal.aborted || !mountedRef.current) return;
-      const message = error instanceof SchedulingEligibilityCollisionError
-        ? error.message
-        : '資格與檔期衝突查詢失敗。';
-      setEligibilityState({ kind: 'unavailable', message: `${message}；測試資料不足時請補齊後再測試。` });
-    });
-
-    return () => controller.abort();
-  }, [selectedCaseNo, selectedStaffId]);
+      setEligibilityState({ kind: 'error', message: eligibilityErrorMessage(error) });
+    }
+  };
 
   // 篩選與搜尋過濾
   const filteredStaff = useMemo(() => {
@@ -1030,48 +1436,28 @@ export const SchedulingPage: React.FC = () => {
 
       if (!matchKeyword) return false;
 
-      const diagnostic = getStaffDiagnosticBadge(calendarRows[staff.id]);
-      if (statusFilter === 'active' && !diagnostic.text.includes('履約') && !diagnostic.text.includes('服務')) return false;
-      if (statusFilter === 'waiting' && !diagnostic.text.includes('待定金') && !diagnostic.text.includes('Buffer') && !diagnostic.text.includes('時段未確認')) return false;
-      if (statusFilter === 'leave' && !diagnostic.text.includes('假')) return false;
+      const state = calendarRows[staff.id];
+      if (state?.kind === 'loaded' && !matchesSchedulingFilter(state.row, statusFilter)) return false;
+      if (state?.kind !== 'loaded' && statusFilter !== 'all') return false;
 
       return true;
     });
   }, [staffList, searchKeyword, statusFilter, calendarRows]);
 
-  // 產生當月天數與星期清單（精確計算系統今日）
-  const daysList = useMemo(() => {
-    const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
-    const today = new Date();
-    const currentYear = today.getFullYear();
-    const currentMonthNum = today.getMonth() + 1;
-    const currentDayNum = today.getDate();
+  const selectedStaffRow = selectedStaffId ? calendarRows[selectedStaffId] : null;
+  const taipeiToday = todayIsoDate();
+  const [, taipeiMonth, taipeiDay] = taipeiToday.split('-');
 
-    const list = [];
-    for (let day = 1; day <= range.totalDays; day++) {
-      const dateStr = isoDate(month.year, month.month, day);
-      const dateObj = new Date(Date.UTC(month.year, month.month - 1, day));
-      const weekdayIdx = dateObj.getUTCDay();
-      const isWeekend = weekdayIdx === 0 || weekdayIdx === 6;
-      const isToday =
-        month.year === currentYear &&
-        month.month === currentMonthNum &&
-        day === currentDayNum;
-
-      list.push({
-        dayNumber: day,
-        dateStr,
-        weekday: weekdays[weekdayIdx],
-        isWeekend,
-        isToday,
-      });
-    }
-    return list;
-  }, [month, range.totalDays]);
+  const daysList = useMemo(() => monthAxis(month).map((day) => ({
+    ...day,
+    isToday: day.dateStr === taipeiToday,
+  })), [month, taipeiToday]);
+  const eligibilityResult = eligibilityState.kind === 'ready'
+    ? eligibilityDisplay(eligibilityState.data)
+    : null;
 
   const prevMonthName = `${month.month === 1 ? 12 : month.month - 1}月`;
   const nextMonthName = `${month.month === 12 ? 1 : month.month + 1}月`;
-  const selectedStaffRow = selectedStaffId ? calendarRows[selectedStaffId] : null;
 
   return (
     <div data-surface-id="scheduling.page" className="scheduling-gantt-page">
@@ -1080,18 +1466,19 @@ export const SchedulingPage: React.FC = () => {
         <div>
           <h1 className="page-title">📅 多月嫂排班日曆與調度中心</h1>
           <p className="page-subtitle">
-            全景甘特檔期矩陣與 server occupancy 顯示；接單資格／撞期判定尚未開放。
+            全景甘特檔期矩陣、接單資格／撞期判定與預約鎖定均使用 server projection。
           </p>
         </div>
         <button
           type="button"
           className="scheduling-precision-control"
           data-control-id="scheduling.precision.open"
-          disabled
+          onClick={() => setPrecisionOpen((current) => !current)}
         >
-          ⚙️ 訂單出勤精算工作台（未開放）
+          ⚙️ 訂單出勤精算工作台
         </button>
       </header>
+      {precisionOpen && <SchedulePrecisionWorkspace onClose={() => setPrecisionOpen(false)} />}
 
       {/* Sticky Tabs Bar */}
       <nav className="scheduling-tab-bar" aria-label="排班工作區">
@@ -1136,33 +1523,91 @@ export const SchedulingPage: React.FC = () => {
           <section className="gantt-projection-panel" aria-label="媒合投影狀態">
             <div>
               <strong>🔮 洽談中訂單檔期衝突預覽</strong>
-              <p>typed matching projection 已接線；選擇具 case_no 的 occupancy 後查詢。</p>
+              <p>輸入案件並選擇服務人員，可直接查詢尚未指派候選人的接單資格與撞期。</p>
             </div>
-            <select
-              aria-label="洽談中訂單檔期投影"
-              data-control-id="scheduling.projection.order-select"
-              disabled
-            >
-              <option>待測試資料提供 case_no</option>
-            </select>
-            <button data-control-id="scheduling.projection.lock" disabled>
-              預約鎖定（未開放）
-            </button>
-            <div data-surface-id="scheduling.eligibility-collision" aria-live="polite">
-              {eligibilityState.kind === 'idle' && selectedStaffId !== null && selectedCaseNo === null && !calendarLoading && (
-                <p>測試資料不完整：目前 occupancy 未提供可查詢的 case_no，未推定資格或撞期。</p>
+            <div className="waiting-lock-control" aria-label="接單資格與撞期查詢">
+              <label>案件編號
+                <input
+                  aria-label="資格查詢案件編號"
+                  data-control-id="scheduling.eligibility.case-input"
+                  value={eligibilityCaseNo}
+                  onChange={(event) => {
+                    eligibilityControllerRef.current?.abort();
+                    setEligibilityCaseNo(event.target.value);
+                    setEligibilityState({ kind: 'idle' });
+                  }}
+                  placeholder="例如 115000003"
+                />
+              </label>
+              <label>服務人員
+                <select
+                  aria-label="服務人員"
+                  data-control-id="scheduling.eligibility.staff-select"
+                  value={selectedStaffId ?? ''}
+                  onChange={(event) => setSelectedStaffId(event.target.value ? Number(event.target.value) : null)}
+                >
+                  <option value="">請選擇服務人員</option>
+                  {staffList.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}｜#{staff.id}</option>)}
+                </select>
+              </label>
+              <button
+                type="button"
+                data-control-id="scheduling.eligibility.query"
+                aria-describedby="scheduling-eligibility-guidance"
+                disabled={!eligibilityCaseNo.trim() || selectedStaffId === null || eligibilityState.kind === 'loading'}
+                onClick={() => void queryEligibility()}
+              >
+                {eligibilityState.kind === 'loading' ? '查詢中…' : '查詢資格與撞期'}
+              </button>
+            </div>
+            <WaitingDepositLockControl
+              caseNo={eligibilityCaseNo.trim() || null}
+              onApplied={() => setRetryGeneration((value) => value + 1)}
+            />
+            <div id="scheduling-eligibility-guidance" data-surface-id="scheduling.eligibility-collision" aria-live="polite">
+              {eligibilityState.kind === 'idle' && (
+                <p>輸入案件編號並選擇服務人員後，即可查詢正式資格與檔期衝突。</p>
               )}
               {eligibilityState.kind === 'loading' && (
                 <p role="status">正在查詢 {eligibilityState.caseNo} 的資格與檔期衝突…</p>
               )}
-              {eligibilityState.kind === 'unavailable' && (
-                <p role="alert">資格／檔期查詢不可用：{eligibilityState.message}</p>
+              {eligibilityState.kind === 'error' && (
+                <p role="alert">資格／檔期查詢失敗：{eligibilityState.message}</p>
               )}
-              {eligibilityState.kind === 'ready' && (
+              {eligibilityState.kind === 'ready' && eligibilityResult && (
                 <div>
-                  <p><strong>{eligibilityState.data.caseNo}</strong>：{eligibilityState.data.eligibilityLabel}；{eligibilityState.data.availabilityLabel}。</p>
-                  <p>衝突筆數：{eligibilityState.data.collisionCount}；覆蓋狀態：{eligibilityState.data.coverage.status}。</p>
+                  <p><strong>{eligibilityState.data.caseNo}</strong>：{eligibilityResult.eligibility}；{eligibilityResult.availability}。</p>
+                  <p>衝突筆數：{eligibilityState.data.collisionCount}；覆蓋狀態：{eligibilityResult.coverage}。</p>
+                  {eligibilityState.data.qualificationChecks.length > 0 && (
+                    <section aria-label="資格檢查明細">
+                      <h3>資格檢查</h3>
+                      <ul>
+                        {eligibilityState.data.qualificationChecks.map((check) => (
+                          <li key={check.code}>
+                            <strong>{check.code}</strong>｜<span>{qualificationStatusLabel(check.status)}</span>
+                            <p>{check.detail}</p>
+                            <small>{check.owner}｜{check.source_identity}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
+                  {eligibilityState.data.collisions.length > 0 && (
+                    <section aria-label="衝突與人工審核明細">
+                      <h3>衝突與人工審核</h3>
+                      <ul>
+                        {eligibilityState.data.collisions.map((collision, index) => (
+                          <li key={`${collision.source_identity}-${index}`}>
+                            <strong>{collision.kind}</strong>｜<span>{collisionSeverityLabel(collision.severity)}</span>
+                            <p>{collision.detail}</p>
+                            <small>{collision.owner}｜{collision.source_identity}</small>
+                          </li>
+                        ))}
+                      </ul>
+                    </section>
+                  )}
                   {eligibilityState.data.dataNote && <p role="status">{eligibilityState.data.dataNote}</p>}
+                  {eligibilityResult.needsCorrection && <p role="status">資料待補正：請至訂單管理補齊服務日期與每日時段，並至服務人員名冊確認資格主檔後重試。</p>}
                 </div>
               )}
             </div>
@@ -1202,7 +1647,7 @@ export const SchedulingPage: React.FC = () => {
                 data-control-id="scheduling.calendar.today"
                 onClick={() => setMonth(currentMonth())}
               >
-                🗓 今天 ({new Date().getMonth() + 1}/{new Date().getDate()})
+                🗓 今天 ({Number(taipeiMonth)}/{Number(taipeiDay)})
               </button>
             </div>
 
@@ -1252,20 +1697,6 @@ export const SchedulingPage: React.FC = () => {
                 </button>
               </div>
 
-              {/* Preserved staff selector label for test compatibility */}
-              <label className="scheduling-staff-select-hidden">
-                服務人員
-                <select
-                  data-control-id="scheduling.calendar.staff-select"
-                  aria-label="服務人員"
-                  value={selectedStaffId ?? ''}
-                  onChange={(e) => setSelectedStaffId(Number(e.target.value))}
-                >
-                  {staffList.map((staff) => (
-                    <option key={staff.id} value={staff.id}>{staff.displayName}</option>
-                  ))}
-                </select>
-              </label>
             </div>
           </section>
 
@@ -1289,11 +1720,11 @@ export const SchedulingPage: React.FC = () => {
             </div>
             <div className="legend-item">
               <span className="legend-badge unavailable" />
-              <span>接單資格／撞期判定未提供</span>
+              <span>接單資格／撞期判定</span>
             </div>
             <div className="legend-item">
               <span className="legend-badge today" />
-              <span>今日 ({new Date().getMonth() + 1}/{new Date().getDate()})</span>
+              <span>今日 ({Number(taipeiToday.slice(5, 7))}/{Number(taipeiToday.slice(8, 10))})</span>
             </div>
           </section>
 
@@ -1306,6 +1737,22 @@ export const SchedulingPage: React.FC = () => {
               {directoryError}
               <button onClick={() => void loadDirectory()}>重試摘要查詢</button>
             </div>
+          )}
+          {directoryNextPageError && (
+            <div className="scheduling-status error" role="alert">
+              下一頁服務人員摘要載入失敗：{directoryNextPageError}
+            </div>
+          )}
+          {!directoryLoading && directoryNextCursor !== null && (
+            <button
+              type="button"
+              data-control-id="scheduling.staff.next-page"
+              className="scheduling-load-more"
+              disabled={directoryLoadingMore}
+              onClick={() => void loadNextDirectoryPage()}
+            >
+              {directoryLoadingMore ? '正在載入更多服務人員…' : '載入更多服務人員'}
+            </button>
           )}
           {calendarLoading && (
             <div className="scheduling-status" role="status">正在載入 current calendar…</div>
@@ -1433,16 +1880,13 @@ export const SchedulingPage: React.FC = () => {
 
       {/* Other Tabs */}
       {activeTab === 'leave_sub' && (
-        <LeaveSubstitutionWorkspace suggestedCaseNo={selectedCaseNo} staffList={staffList} />
+        <LeaveSubstitutionWorkspace suggestedCaseNo={eligibilityCaseNo.trim() || null} staffList={staffList} />
       )}
       {activeTab === 'holidays' && (
         <HolidayPolicyWorkspace />
       )}
       {activeTab === 'leave_inbox' && (
-        <UnavailableTab
-          title="請假待辦收件匣"
-          controls={['scheduling.leave-inbox.accept', 'scheduling.leave-inbox.reject']}
-        />
+        <StaffLeaveInboxWorkspace />
       )}
     </div>
   );

@@ -1,7 +1,12 @@
-"""Response and command schemas for persisted runtime health and LINE alerts."""
+"""
+File: runtime_health.py
+Description: 定義 runtime health 與 LINE alert target 的封閉 HTTP schema。
+"""
 
 from datetime import datetime
-from pydantic import BaseModel, Field
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class RuntimeHealthRecordResponse(BaseModel):
@@ -29,9 +34,64 @@ class RuntimeHealthEventResponse(BaseModel):
 
 
 class AlertAdminTargetRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
     admin_user_id: int = Field(gt=0)
     minimum_status: str = Field(pattern="^(warning|critical)$")
+    reason: str = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class ResetLineAlertGroupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    expected_version: str = Field(min_length=1, max_length=191)
+    reason: str = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    correlation_id: str = Field(min_length=1, max_length=191)
 
 
 class AlertTargetEnabledRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    expected_version: str = Field(min_length=1, max_length=191)
     enabled: bool
+    reason: str = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=1, max_length=191)
+    correlation_id: str = Field(min_length=1, max_length=191)
+
+
+class AlertTargetViewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    target_id: int = Field(gt=0)
+    target_kind: Literal["group", "admin_user"]
+    display_label: str
+    state: Literal["active", "disabled"]
+    minimum_status: Literal["warning", "critical"]
+    current_version: str
+    updated_at: datetime
+
+
+class AlertAdminCandidateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    candidate_id: int = Field(gt=0)
+    display_label: str
+    line_linked: bool
+
+
+class AlertTargetMutationResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
+    receipt_id: str
+    command_family: Literal["line_alert_target"]
+    operation: Literal["group_reset", "enable", "disable", "admin_target_add"]
+    target_id: int = Field(gt=0)
+    previous_state: Literal["active", "disabled"]
+    resulting_state: Literal["active", "disabled"]
+    current_version: str
+    replayed: bool
+    correlation_id: str
+    committed_at: datetime

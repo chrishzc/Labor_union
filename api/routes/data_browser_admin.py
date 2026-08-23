@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from api.dependencies.admin_auth import require_system_admin
 from api.error_contracts import internal_query_error, typed_http_error
 from api.schemas.base import BaseResponse
+from api.schemas.errors import GlobalTypedErrorResponseView
 from api.schemas.data_browser import (
     DataBrowserSourceCorrectionApplyRequest,
     DataBrowserSourceCorrectionPreviewRequest,
@@ -24,11 +25,19 @@ from subsystems.access import source_data_correction
 from subsystems.access.authentication_session import AdminPrincipal
 
 router = APIRouter(prefix="/api/v1/admin/data-browser", tags=["Admin Data Browser"])
+_ERROR_RESPONSES = {
+    401: {"model": GlobalTypedErrorResponseView},
+    403: {"model": GlobalTypedErrorResponseView},
+    404: {"model": GlobalTypedErrorResponseView},
+    422: {"model": GlobalTypedErrorResponseView},
+    500: {"model": GlobalTypedErrorResponseView},
+}
 
 
 @router.get(
     "/sources/{source_id}",
     response_model=BaseResponse[DataBrowserMaskedPageView],
+    responses=_ERROR_RESPONSES,
 )
 def get_masked_data_browser_source(
     source_id: str = Path(..., min_length=1, max_length=50, pattern=r"^[a-z][a-z0-9_]*$"),

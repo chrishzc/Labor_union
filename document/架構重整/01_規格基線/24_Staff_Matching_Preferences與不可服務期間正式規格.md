@@ -147,3 +147,9 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 - Domain：五項預設 filter、自訂偏好加入／停用、長假與 Calendar／Matching 同源、buffer-only 仍顯示。
 - Browser：建立偏好、填月嫂值、建立不可服務期間、配對結果刷新、Calendar 顯示、取消後恢復。
 - 真人 LINE 不在本 Work Package 驗收範圍。
+
+## 2026-08-21 M3 coordination amendment
+
+Staff Matching Preferences／不可服務期間仍由本規格與 Scheduling owner 擁有；M3 Matching Coordination 只能透過 typed query／port 讀取 current preference、lifecycle、availability 與 unavailability facts，不能寫入偏好、不可服務期間、assignment、leave 或正式服務日。
+
+`accepted` 只代表 matching decision；M3 需 fresh-read 本規格提供的 source versions，若 facts 變動則回 `rematch_required`，並透過 typed Assignment conversion/rematch request 交回 owning workflow。M3 Phase D 不接管本 Domain root writer；本 amendment 不授權 production code、schema／DB、provider 或真人 LINE 驗收。

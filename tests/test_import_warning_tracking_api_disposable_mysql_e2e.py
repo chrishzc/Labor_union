@@ -31,10 +31,13 @@ def test_http_apply_then_query_uses_real_tracking_tables() -> None:
 
     preview = client.post(f"/api/v1/import-warning-tracking/tasks/{identity}/preview", headers=headers, json={"expected_version": 1, "target_status": "awaiting_external_confirmation", "reason_code": "contact_started"})
     applied = client.post(f"/api/v1/import-warning-tracking/tasks/{identity}/apply", headers=headers, json={"expected_version": 1, "target_status": "awaiting_external_confirmation", "reason_code": "contact_started"})
+    receipt = client.get(f"/api/v1/import-warning-tracking/receipts/{applied.json()['data']['receipt_identity']}")
     queried = client.get("/api/v1/import-warning-tracking/tasks")
 
     assert preview.status_code == 200
     assert applied.status_code == 200
+    assert receipt.status_code == 200
+    assert receipt.json()["data"] == applied.json()["data"]
     assert any(item["occurrence_identity"] == identity and item["tracking_version"] == 2 for item in queried.json()["data"])
 
 

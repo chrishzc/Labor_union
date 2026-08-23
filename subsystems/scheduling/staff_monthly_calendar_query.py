@@ -1,14 +1,13 @@
 """
-================================================================================
-檔案名稱: services/staff_monthly_calendar_schedule_service.py
-功能說明: 由 case_staff_assignments 查詢月嫂指定年月檔期排班視圖服務 (StaffMonthlyCalendarScheduleService)
-================================================================================
+File: staff_monthly_calendar_query.py
+Description: 查詢月嫂月份排班、正式占用與尚未開始服務的防撞緩衝。
 """
 
 from typing import Dict, Any, List
 from calendar import monthrange
 from datetime import date, datetime, timedelta
 from infrastructure.mysql.mysql_adapter import get_connection
+from shared_kernel.clock import BusinessClock, SystemBusinessClock, TAIPEI_TIME_ZONE
 
 
 def _as_date(value: Any) -> date | None:
@@ -35,7 +34,13 @@ def _coerce_bool(value: Any) -> bool:
 def _priority_status(status: str) -> int:
     return {"red": 3, "green": 2, "yellow": 1, "historical": 1}.get(status, 0)
 
-def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) -> Dict[str, Any]:
+def get_staff_monthly_calendar_schedule(
+    staff_id: int,
+    year: int,
+    month: int,
+    *,
+    clock: BusinessClock | None = None,
+) -> Dict[str, Any]:
     """
     查詢月嫂在指定年月的每日檔期排班視圖。
     關鍵約束：
@@ -46,6 +51,7 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
     days_list: List[Dict[str, Any]] = []
     grouped_rows: Dict[int, List[Dict[str, Any]]] = {}
     schedule_map: Dict[int, Dict[str, Any]] = {}
+    evaluated_on = (clock or SystemBusinessClock()).now().astimezone(TAIPEI_TIME_ZONE).date()
 
     try:
         num_days = monthrange(year, month)[1]
@@ -244,6 +250,7 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
                     csa.id AS assignment_id,
                     csa.case_no,
                     csa.staff_id,
+                    COALESCE(o.actual_start_date, csa.assigned_start_date) AS calc_start_date,
                     COALESCE(o.actual_end_date, csa.assigned_end_date) AS calc_end_date,
                     c.name AS client_name,
                     o.status AS order_status,
@@ -253,7 +260,7 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
                 JOIN clients c ON o.client_id = c.id
                 JOIN staff s ON csa.staff_id = s.id
                 WHERE csa.staff_id = %s
-                  AND o.status IN ('訂單成立', '服務中', '訂單完成')
+                  AND o.status = '訂單成立'
                   AND (csa.status IS NULL OR csa.status <> 'cancelled')
                   AND COALESCE(o.actual_end_date, csa.assigned_end_date) IS NOT NULL
                 """,
@@ -261,8 +268,14 @@ def get_staff_monthly_calendar_schedule(staff_id: int, year: int, month: int) ->
             )
             assignment_rows = cursor.fetchall()
             for row in assignment_rows:
+                start_date = _as_date(row.get("calc_start_date"))
                 end_date = _as_date(row.get("calc_end_date"))
-                if not end_date:
+                if (
+                    row.get("order_status") != "訂單成立"
+                    or not start_date
+                    or not end_date
+                    or start_date <= evaluated_on
+                ):
                     continue
                 for offset in range(1, 8):
                     buffer_date = end_date + timedelta(days=offset)

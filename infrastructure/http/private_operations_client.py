@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import os
 import random
+import re
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from socket import gethostname
@@ -41,6 +43,21 @@ LOCAL_PRIVATE_API_VARIABLES = (
     "INTERNAL_SERVICE_OIDC_AUDIENCE",
     "INTERNAL_API_MAX_ATTEMPTS",
 )
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+
+
+@dataclass(frozen=True, slots=True)
+class ReactAdminArtifactAttestation:
+    """Closed read-only projection returned by the mounted HOST runtime."""
+
+    active_selector: str
+    artifact_version: str
+    artifact_digest: str
+    manifest_digest: str
+    api_compatibility_revision: str
+    root_marker_checked: bool
+    checked_asset_digest: str
+    healthy: bool
 
 
 def discard_database_credentials() -> None:
@@ -162,6 +179,11 @@ class PrivateOperationsClient:
     def readiness(self) -> dict[str, Any]:
         return self._post("/internal/v1/runtime/readiness", {})
 
+    def react_admin_artifact_health(self) -> ReactAdminArtifactAttestation:
+        return _decode_react_admin_attestation(
+            self._get("/internal/v1/runtime/react-admin/artifact-health")
+        )
+
     def run_durable_cycle(self, payload: dict[str, Any]) -> int:
         return int(self._post("/internal/v1/runtime/durable-jobs/run-once", payload)["processed"])
 
@@ -190,6 +212,30 @@ class PrivateOperationsClient:
                 self._sleep(self._retry_delay(attempt_index))
         raise AssertionError("retry loop must return or raise")
 
+    def _get(self, path: str) -> dict[str, Any]:
+        attempts = max(1, self._max_attempts)
+        for attempt_index in range(attempts):
+            try:
+                return self._get_once(path)
+            except PrivateOperationError as error:
+                if not error.retryable or attempt_index + 1 >= attempts:
+                    raise
+                self._sleep(self._retry_delay(attempt_index))
+        raise AssertionError("retry loop must return or raise")
+
+    def _get_once(self, path: str) -> dict[str, Any]:
+        try:
+            response = requests.get(
+                self._base_url + path,
+                headers=self._request_headers(),
+                timeout=self._timeout_seconds,
+            )
+        except requests.RequestException as error:
+            raise PrivateOperationError(
+                f"Private API unavailable: {type(error).__name__}", retryable=True
+            ) from error
+        return _decode_private_response(response)
+
     # Keep request, typed HTTP failure and response validation in one transport boundary.
     def _post_once(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -204,19 +250,7 @@ class PrivateOperationsClient:
                 f"Private API unavailable: {type(error).__name__}",
                 retryable=True,
             ) from error
-        try:
-            body = response.json()
-        except (TypeError, ValueError) as error:
-            raise PrivateOperationError(
-                "Private API returned invalid JSON.",
-                retryable=True,
-            ) from error
-        if response.status_code >= 400:
-            raise _response_error(response.status_code, body)
-        data = body.get("data") if isinstance(body, dict) else None
-        if not isinstance(data, dict):
-            raise PrivateOperationError("Private API returned an invalid response.", retryable=True)
-        return data
+        return _decode_private_response(response)
 
     def _request_headers(self) -> dict[str, str]:
         headers = {"X-Internal-Service-Name": self._service_name}
@@ -293,3 +327,37 @@ def _response_error(status_code: int, body: object) -> PrivateOperationError:
         retryable=retryable,
         code=code,
     )
+
+
+def _decode_private_response(response: Any) -> dict[str, Any]:
+    try:
+        body = response.json()
+    except (TypeError, ValueError) as error:
+        raise PrivateOperationError("Private API returned invalid JSON.", retryable=True) from error
+    if response.status_code >= 400:
+        raise _response_error(response.status_code, body)
+    data = body.get("data") if isinstance(body, dict) else None
+    if not isinstance(data, dict):
+        raise PrivateOperationError("Private API returned an invalid response.", retryable=True)
+    return data
+
+
+def _decode_react_admin_attestation(data: dict[str, Any]) -> ReactAdminArtifactAttestation:
+    expected = {
+        "active_selector", "artifact_version", "artifact_digest", "manifest_digest",
+        "api_compatibility_revision", "root_marker_checked", "checked_asset_digest", "healthy",
+    }
+    if set(data) != expected:
+        raise PrivateOperationError("React admin artifact attestation shape is invalid.", retryable=False)
+    selector = data["active_selector"]
+    text_fields = (data["artifact_version"], data["api_compatibility_revision"])
+    digests = (data["artifact_digest"], data["manifest_digest"], data["checked_asset_digest"])
+    if (
+        selector not in {"current", "previous"}
+        or any(not isinstance(value, str) or not value or len(value) > 191 for value in text_fields)
+        or any(not isinstance(value, str) or _SHA256.fullmatch(value) is None for value in digests)
+        or data["root_marker_checked"] is not True
+        or data["healthy"] is not True
+    ):
+        raise PrivateOperationError("React admin artifact attestation is invalid.", retryable=False)
+    return ReactAdminArtifactAttestation(**data)

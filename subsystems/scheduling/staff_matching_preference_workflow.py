@@ -1,4 +1,7 @@
-"""Preview/Apply workflow for Scheduling-owned staff matching preferences."""
+"""
+File: staff_matching_preference_workflow.py
+Description: 編排 Staff matching preference 的 aggregate lock、Preview、Apply 與冪等交易。
+"""
 
 from __future__ import annotations
 
@@ -18,6 +21,7 @@ class StaffMatchingPreferenceRepository(Protocol):
     def list_definitions(self, *, active_only: bool) -> tuple[tuple[StaffPreferenceDefinition, int], ...]: ...
     def load_definition(self, preference_key: str, *, for_update: bool) -> tuple[StaffPreferenceDefinition, int] | None: ...
     def staff_exists(self, staff_id: int) -> bool: ...
+    def lock_profile_aggregate(self, staff_id: int) -> None: ...
     def load_profile(self, staff_id: int, *, for_update: bool) -> tuple[int, Mapping[str, Mapping[str, Any]]]: ...
     def find_receipt(self, key: IdempotencyKey, *, for_update: bool) -> Mapping[str, Any] | None: ...
     def save_definition(self, definition: StaffPreferenceDefinition, version: int, actor: str) -> None: ...
@@ -132,6 +136,7 @@ class StaffMatchingPreferenceWorkflow:
         family, identity = "staff_matching_profile/v1", str(staff_id)
         command_fingerprint = _command_fingerprint(family, identity, proposed, request)
         with self._unit_of_work_factory() as unit_of_work:
+            _lock_profile_aggregate(self._repository, staff_id)
             replay = _replay(self._repository, request, command_fingerprint)
             if replay is not None:
                 unit_of_work.commit()
@@ -167,14 +172,25 @@ class StaffMatchingPreferenceWorkflow:
     def _persist_definition(self, preview, request, command_fingerprint):
         version = preview.version + 1
         self._repository.save_definition(preview.after, version, request.actor.actor_id)
-        result = {"preference_key": preview.after.preference_key, "version": version}
+        result = {
+            "preference_key": preview.after.preference_key,
+            "version": version,
+            "preview_fingerprint": request.preview_fingerprint.value,
+            "idempotency_key": request.idempotency_key.value,
+        }
         self._save_event_and_receipt("definition_changed", preview.after.preference_key, version, preview.before.canonical_payload() if preview.before else {}, preview.after.canonical_payload(), result, request, command_fingerprint)
         return result
 
     def _persist_profile(self, preview, values, request, command_fingerprint):
         version = preview.version + 1
         self._repository.save_profile(preview.staff_id, values, version, request.actor.actor_id)
-        result = {"staff_id": preview.staff_id, "version": version, "values": preview.after}
+        result = {
+            "staff_id": preview.staff_id,
+            "version": version,
+            "values": preview.after,
+            "preview_fingerprint": request.preview_fingerprint.value,
+            "idempotency_key": request.idempotency_key.value,
+        }
         self._save_event_and_receipt("profile_changed", str(preview.staff_id), version, preview.before, preview.after, result, request, command_fingerprint)
         return result
 
@@ -230,7 +246,22 @@ def _definition_preview_payload(before, after, version):
 
 
 def _command_fingerprint(family, identity, payload, request):
-    return fingerprint_payload({"actor": request.actor.actor_id, "aggregate_identity": identity, "command_family": family, "payload": dict(payload), "reason": request.reason})
+    return fingerprint_payload(
+        {
+            "actor": request.actor.actor_id,
+            "aggregate_identity": identity,
+            "command_family": family,
+            "payload": dict(payload),
+            "reason": request.reason,
+            "expected_version": request.expected_version.value,
+            "preview_fingerprint": request.preview_fingerprint.value,
+        }
+    )
+
+
+def _lock_profile_aggregate(repository, staff_id: int) -> None:
+    """Lock the stable staff identity before profile/receipt reads."""
+    repository.lock_profile_aggregate(staff_id)
 
 
 def _replay(repository, request, command_fingerprint):

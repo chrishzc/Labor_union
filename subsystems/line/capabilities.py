@@ -1,4 +1,7 @@
-"""Stable human capability names for LINE administration."""
+"""
+File: capabilities.py
+Description: 定義 LINE 管理能力字串、角色相容投影與第二層能力檢查。
+"""
 
 from enum import StrEnum
 
@@ -41,28 +44,8 @@ class LineCapabilityDeniedError(PermissionError):
 
 
 _ROLE_CAPABILITIES = {
-    "line_viewer": {
-        LineCapability.IDENTITY_READ,
-        LineCapability.REVIEW_READ,
-        LineCapability.ORDER_GROUP_READ,
-        LineCapability.MONITOR_READ,
-        LineCapability.MATCHING_READ,
-        LineCapability.CUSTOMER_SERVICE_READ,
-        LineCapability.IDENTITY_BINDING_READ,
-    },
-    "line_agent": {
-        LineCapability.IDENTITY_READ,
-        LineCapability.REVIEW_READ,
-        LineCapability.TASK_READ,
-        LineCapability.ORDER_GROUP_READ,
-        LineCapability.ORDER_GROUP_BIND,
-        LineCapability.MONITOR_READ,
-        LineCapability.MATCHING_READ,
-        LineCapability.MATCHING_SEND,
-        LineCapability.CUSTOMER_SERVICE_HANDLE,
-    },
-    "line_manager": set(LineCapability) - {LineCapability.IDENTITY_BINDING_OVERRIDE},
-    "system_admin": set(LineCapability),
+    role: set(LineCapability)
+    for role in ("line_viewer", "line_agent", "line_manager", "system_admin")
 }
 
 

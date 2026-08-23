@@ -1,23 +1,11 @@
 /**
  * File: data_import_no_fake_mutation.test.tsx
- * Description: 驗證匯入結果頁沒有upload／Apply，其他匯入family控制皆原生鎖定且無假成功。
+ * Description: 驗證退役／跨域匯入不再佔用操作頁，active Apply只會在成功Preview後出現。
  */
-import { fireEvent, render } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { hcmImportResultClient } from '../api/case_import/hcm_import_result_client';
 import { DataImportPage } from '../pages/DataImportPage';
-
-const LOCKED_CONTROL_IDS = [
-  'imports.hcm-historical.preview',
-  'imports.hcm-historical.apply',
-  'imports.client-beclass.preview',
-  'imports.client-beclass.apply',
-  'imports.staff-historical.preview',
-  'imports.staff-historical.apply',
-  'imports.historic-orders.preview',
-  'imports.historic-orders.apply',
-  'imports.bank-statements.preview',
-  'imports.bank-statements.apply',
-] as const;
 
 describe('DataImportPage zero fake mutation gate', () => {
   const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
@@ -26,24 +14,24 @@ describe('DataImportPage zero fake mutation gate', () => {
   beforeEach(() => {
     alertSpy.mockClear();
     confirmSpy.mockClear();
+    vi.spyOn(hcmImportResultClient, 'query').mockResolvedValue({ items: [], next_cursor: null });
   });
 
-  it('keeps every out-of-wave card control natively disabled with no handler effect', () => {
+  it('does not render retired HCM historical or cross-domain bank controls', async () => {
     render(<DataImportPage />);
-    for (const id of LOCKED_CONTROL_IDS) {
-      const control = document.querySelector(`[data-control-id="${id}"]`);
-      expect(control, id).not.toBeNull();
-      expect(control as HTMLButtonElement).toBeDisabled();
-      fireEvent.click(control as HTMLButtonElement);
+    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入receipt/)).toBeInTheDocument());
+    for (const id of ['imports.hcm-historical.preview', 'imports.hcm-historical.apply', 'imports.bank-statements.preview', 'imports.bank-statements.apply']) {
+      expect(document.querySelector(`[data-control-id="${id}"]`), id).toBeNull();
     }
     expect(alertSpy).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
-  it('removes the superseded HCM file Preview and Apply controls', () => {
+  it('exposes active Preview but no Apply control before a successful Preview', async () => {
     render(<DataImportPage />);
-    expect(document.querySelector('input[type="file"]')).toBeNull();
-    expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeNull();
+    await waitFor(() => expect(screen.getByText(/目前沒有可查詢的 HCM 匯入receipt/)).toBeInTheDocument());
+    expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="imports.hcm-current.preview"]')).toBeDisabled();
     expect(document.querySelector('[data-control-id="imports.hcm-current.apply"]')).toBeNull();
     expect(alertSpy).not.toHaveBeenCalled();
     expect(confirmSpy).not.toHaveBeenCalled();

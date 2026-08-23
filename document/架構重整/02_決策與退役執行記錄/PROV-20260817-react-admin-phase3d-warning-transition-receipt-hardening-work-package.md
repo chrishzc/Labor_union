@@ -1,12 +1,12 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-react-admin-phase3d-warning-transition-receipt-hardening
 date: 2026-08-17
 owner: Import Warning / Anomalies Integration Owner
 domain: Anomalies / Case Import
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase2d-h-closure-gate-amendment PASS; PROV-20260816-react-admin-phase2d-backend-public-contract-hardening PASS
-approval_required: 核准此 exact Phase 3D-W-H Work Package
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase2d-h-closure-gate-amendment PASS; PROV-20260816-react-admin-phase2d-backend-public-contract-hardening PASS
+approval_required: satisfied-by-2026-08-22-human-corrective-patch-approval
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
 ui_execution_mode: not-applicable
 base_branch: main
@@ -31,6 +31,7 @@ Controlled input固定來自`validation/scenarios/react_admin_import_warning_tra
 - `api/routes/import_warning_tracking.py`
 - `subsystems/anomalies/import_warning_tracking_workflow.py`
 - `infrastructure/mysql/import_warning_tracking_repository.py`
+- `ui/api_clients/import_warning_tracking_api_client.py`
 - `tests/test_import_warning_tracking.py`
 - `tests/test_import_warning_tracking_workflow.py`
 - `tests/test_import_warning_tracking_api.py`
@@ -81,12 +82,12 @@ authenticated receipt lookup、re-query observation、outbox count與任一失�
 
 | Gate | Status | Evidence／reason |
 |---|---|---|
-| Scope gate | BLOCKED | 尚未exact核准且scenario/upstream prerequisites未PASS |
-| Change inventory | BLOCKED | 核准前須列existing warning status/version、transition receipt、audit/outbox runtime writes；0 schema不等於0 DB write |
+| Scope gate | PASS | 2026-08-22人工核准額外corrective patch與focused rerun；controlled scenario及Phase 3D-H／R前置已收旂 |
+| Change inventory | PASS | schema-only、system-seed、business-row-backfill、destructive皆為0；runtime僅更新owned warning status/version並append event、receipt、outbox |
 | Static release gate | NOT_RUN | 無schema release |
-| Descriptor gate | NOT_RUN | 若現有table不足固定DB_SCOPE_REQUIRED |
+| Descriptor gate | NOT_RUN | 無owned schema object變更；現有table透過engine test驗證 |
 | Read-only plan gate | NOT_RUN | 不適用 |
-| Engine verification gate | NOT_RUN | 核准後要求真HTTP＋disposable MySQL，skip即BLOCKED |
+| Engine verification gate | PASS | required focused command `39 passed`，含真HTTP＋`lu_test_*` MySQL 2 tests |
 | Developer acceptance gate | NOT_RUN | 不操作既有資料庫 |
 
-總結固定`DB_CHANGE_NOT_READY`。
+總結`DB_CHANGE_NOT_READY`（本包不提出DB／schema change completion claim）。Backend scope已完成，只解鎖Phase 3D-W-R。

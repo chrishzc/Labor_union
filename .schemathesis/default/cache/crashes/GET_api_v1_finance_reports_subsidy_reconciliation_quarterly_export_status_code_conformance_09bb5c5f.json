@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/finance-reports/subsidy-reconciliation/quarterly/export",
+  "method": "GET",
+  "path_template": "/api/v1/finance-reports/subsidy-reconciliation/quarterly/export",
+  "fingerprint": "09bb5c5f",
+  "case_id": "iYiq0h",
+  "code_sample": "curl -X GET 'http://127.0.0.1:8765/api/v1/finance-reports/subsidy-reconciliation/quarterly/export?application_year=1912&quarter=1'",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/finance-reports/subsidy-reconciliation/quarterly/export?application_year=1912&quarter=1",
+      "url_template": "http://127.0.0.1:8765/api/v1/finance-reports/subsidy-reconciliation/quarterly/export",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "iYiq0h"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:12:36 GMT",
+          "server": "uvicorn",
+          "content-length": "271",
+          "content-type": "application/json",
+          "server-timing": "application;dur=2151.4",
+          "x-response-time-ms": "2151.4",
+          "x-correlation-id": "e85679676e7b4dc9a51ebafd58fd4fbd"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"quarterly_subsidy_export_internal_error\",\"message\":\"\u5b63\u5ea6\u88dc\u52a9\u6838\u92b7\u532f\u51fa\u5931\u6557\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"e85679676e7b4dc9a51ebafd58fd4fbd\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 500\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.00591900001745671,
+          "mode": "positive"
+        },
+        "components": {
+          "QUERY": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/finance-reports/subsidy-reconciliation/quarterly/export",
+      "path_parameters": {},
+      "query": {
+        "application_year": 1912,
+        "quarter": 1
+      },
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

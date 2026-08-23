@@ -22,7 +22,7 @@ def test_legacy_review_endpoints_are_gone(endpoint):
     assert error.value.status_code == 410
     assert error.value.detail == {
         "code": "line_review_api_retired",
-        "replacement": "/api/v1/line/review-requests",
+        "replacement": "/api/v1/line/identity/reviews",
     }
 
 
@@ -35,3 +35,7 @@ def test_legacy_staff_review_actions_are_gone(endpoint):
         endpoint("staff_verification", "41")
 
     assert error.value.status_code == 410
+    assert error.value.detail == {
+        "code": "line_review_api_retired",
+        "replacement": "/api/v1/line/identity/reviews",
+    }

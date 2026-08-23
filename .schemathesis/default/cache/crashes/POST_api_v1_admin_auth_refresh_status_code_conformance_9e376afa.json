@@ -1,0 +1,81 @@
+{
+  "operation": "POST /api/v1/admin/auth/refresh",
+  "method": "POST",
+  "path_template": "/api/v1/admin/auth/refresh",
+  "fingerprint": "9e376afa",
+  "case_id": "Uc9eGU",
+  "code_sample": "curl -X POST http://127.0.0.1:64372/api/v1/admin/auth/refresh",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:64372/api/v1/admin/auth/refresh",
+      "url_template": "http://127.0.0.1:64372/api/v1/admin/auth/refresh",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "Uc9eGU",
+        "Content-Length": "0"
+      },
+      "response": {
+        "status_code": 401,
+        "headers": {
+          "date": "Thu, 20 Aug 2026 08:42:36 GMT",
+          "server": "uvicorn",
+          "content-length": "254",
+          "content-type": "application/json",
+          "server-timing": "application;dur=1.8",
+          "x-response-time-ms": "1.8",
+          "cache-control": "no-store",
+          "x-correlation-id": "90709dfd54b04a22a0d18bfa2eb49999"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"forbidden\",\"code\":\"admin_session_required\",\"message\":\"\u7f3a\u5c11\u6709\u6548\u7684\u7ba1\u7406\u54e1 Session\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"90709dfd54b04a22a0d18bfa2eb49999\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 401\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.002218100009486079,
+          "mode": "positive"
+        },
+        "components": {
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/admin/auth/refresh",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

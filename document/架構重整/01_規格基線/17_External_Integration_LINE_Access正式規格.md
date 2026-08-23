@@ -12,7 +12,8 @@
   pytest 與 legacy exit 的實作，必須各自依人工核准的 decision／Work Package 授權。
 - 2026-08-21 LINE four-module specification freeze：M1 Alternative A、M2 deterministic Phase 1、M3
   Scheduling Matching Coordination Phase A–D、M4 runtime target／human escalation ownership 已核准；
-  implementation、schema／DB、provider 與外部副作用仍未授權。
+  後續人工已核准 M1-A、M2-A、M3-A～D、M4-A 的 exact production implementation slice；這不擴張為
+  provider、deployment、production DB、未另行核准 schema 或其他外部副作用授權。
 
 ## 2. Global Integration Boundary
 
@@ -507,6 +508,25 @@ review。唯一例外是WP77核准的Staff HistoricalAdoption：identity與姓�
 timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-only保守合併。Staff歷史來源的
 `IP位址`允許空值，空值以`NULL`保存且不建立review，不影響同列其他合法欄位落地。
 
+### 5.2.1 Workbook atomicity／archive／recovery（2026-08-23人工確認）
+
+- HCM Current採`WHOLE_WORKBOOK + archive_required`。原始workbook以content digest為immutable archive
+  identity；archive寫入與完整性驗證失敗時Apply固定unavailable且0 Domain／DB write。archive成功後若
+  outer transaction rollback，必須compensating delete；delete失敗建立operational anomaly，不得偽造成功。
+- HCM來源若`exact IP + exact normalized name`命中既有Client，固定`review_only`：保存privacy-safe
+  source review／receipt／outbox，0 Client／Order mutation，且不得同時建立partial case。合法HCM案件只因
+  尚無唯一Client BeClass對方時，仍依既有lane建立Client／Order並讓`requires_cooking = NULL`；兩種情境不得混用。
+- Client BeClass、Staff Historical、Historical Orders各採`ROW_ATOMIC_RESUMABLE + archive_required`。
+  每個workbook必須有durable `running → row_committed* → terminal_receipt`與
+  `retryable_interrupted | terminal_failed`；same key＋same canonical workbook只可replay terminal receipt
+  或續跑未terminal rows，same key＋different workbook固定conflict。
+- partial execution必須保存守恆aggregate、row terminal outcome、resume cursor及fresh target versions；UI
+  不得把partial、job accepted或archive success顯示為whole-workbook匯入成功。
+- archive只允許Case Import受控operator依稽核理由讀取；receipt不得含raw bytes、完整PII、原始檔名或local
+  path。retention與encryption由Privacy／Operations擁有，期間及production provider在deployment target另行配置。
+- current persistence尚不足以證明四family的archive及完整running/progress/recovery，實作固定
+  `DB_SCOPE_REQUIRED`；未核准backend／DB successor前，React Apply維持disabled。
+
 ### 5.3 Subsystems／Modules
 
 Subsystems：
@@ -773,10 +793,16 @@ content digest；本節列出的 path 不代表未來版本自動符合本規格
 
 ### M2 routing precedence
 
-production full AI 現在 REJECT；Phase 1 只核准 deterministic harness＋durable manual fallback，Phase 2 維持 proposed。explicit human／wrong 優先於所有自動路由；只有不含 human／wrong marker、且 exact match protected identity alias 的輸入才可進 identity。`reply_provider` commit 前 live drift 仍待 implementation。
+production full AI 現在 REJECT；Phase 1 只核准 deterministic harness＋durable manual fallback，Phase 2 維持 proposed。explicit human／wrong 優先於所有自動路由；只有不含 human／wrong marker、且 exact match protected identity alias 的輸入才可進 identity。Service Help 只建立 committed durable delivery task，不在 webhook transaction 直接呼叫 `reply_provider`。
+
+webhook dispatch 任一業務處理失敗時，當次 business Unit of Work 必須整筆 rollback；rollback完成後才可
+另開 Unit of Work 記錄本次 `retryable_failed`／`terminal_failed`。禁止留下部分 ticket、binding、outbox
+或其他業務 mutation，也禁止讓失敗紀錄跟著原交易一起回滾。
 
 ### M3／M4 boundaries
 
 Scheduling Matching Coordination 是 Scheduling subsystem；`accepted` 只進 fresh-effects check，產生 typed Assignment conversion/rematch request，LINE／Orders／Assignment／Payroll root writer 不被接管。M3 Phase D 只可透過 typed ports 整合 leave／assignment owner。Runtime target registration／reset／enable／disable 共用 0-schema advisory serialization boundary、active singleton、opaque CAS 與 same-key replay；lock failure 固定 0 write，commit 後 release unknown 不回 success 並以原 key 查 receipt。Customer Service 擁有 HIGH escalation；Anomaly 只作 source，escalation 不競寫 `runtime_alert_application`。
 
-本 amendment 只凍結 specification／Work Package identity；不授權 production code、schema／DDL、DB、LINE provider、AI provider、deployment 或 external side effect。
+本 amendment 的 initial freeze 不單獨授權 mutation；後續人工裁決已核准 M1-A、M2-A、M3-A～D、M4-A
+的 exact production implementation slice。LINE／AI provider、deployment、production DB、未另行核准的
+schema／DDL與 external side effect 仍不在授權範圍。

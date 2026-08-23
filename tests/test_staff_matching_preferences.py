@@ -1,4 +1,7 @@
-"""Focused rules and workflow tests for staff matching preferences."""
+"""
+File: test_staff_matching_preferences.py
+Description: 驗證 Staff 偏好 domain 規則與冪等 fingerprint 邊界。
+"""
 
 from __future__ import annotations
 
@@ -112,6 +115,41 @@ def test_same_idempotency_key_rejects_different_profile_payload():
         workflow.apply_profile(7, changed, _request(1, preview.fingerprint, "same-key"))
 
 
+@pytest.mark.parametrize(
+    "changed_request",
+    [
+        lambda request: PreferenceApplyRequest(
+            ExpectedVersion(request.expected_version.value + 1),
+            request.preview_fingerprint,
+            request.idempotency_key,
+            request.actor,
+            request.reason,
+            request.correlation_id,
+        ),
+        lambda request: PreferenceApplyRequest(
+            request.expected_version,
+            PreviewFingerprint("f" * 64),
+            request.idempotency_key,
+            request.actor,
+            request.reason,
+            request.correlation_id,
+        ),
+    ],
+)
+def test_same_idempotency_key_fingerprint_includes_version_and_preview(
+    changed_request,
+):
+    repository = _FakeRepository()
+    workflow = StaffMatchingPreferenceWorkflow(repository, _FakeUnitOfWork)
+    proposed = {"preferred_service_days": {"minimum": 20, "maximum": 30}}
+    preview = workflow.preview_profile(7, proposed)
+    request = _request(preview.version, preview.fingerprint, "fingerprint-key")
+    workflow.apply_profile(7, proposed, request)
+
+    with pytest.raises(ValueError, match="idempotency_conflict"):
+        workflow.apply_profile(7, proposed, changed_request(request))
+
+
 def test_definition_display_name_can_change_but_semantics_cannot():
     repository = _FakeRepository()
     workflow = StaffMatchingPreferenceWorkflow(repository, _FakeUnitOfWork)
@@ -124,11 +162,17 @@ def test_definition_display_name_can_change_but_semantics_cannot():
         PreferenceComparisonOperator.RANGE_WITH_TOLERANCE,
     )
     preview = workflow.preview_definition(renamed)
+    request = _request(preview.version, preview.fingerprint, "definition-key")
     result = workflow.apply_definition(
         renamed,
-        _request(preview.version, preview.fingerprint, "definition-key"),
+        request,
     )
-    assert result == {"preference_key": "preferred_service_days", "version": 2}
+    assert result == {
+        "preference_key": "preferred_service_days",
+        "version": 2,
+        "preview_fingerprint": preview.fingerprint.value,
+        "idempotency_key": "definition-key",
+    }
 
     changed_kind = StaffPreferenceDefinition(
         "preferred_service_days",
@@ -201,6 +245,7 @@ class _FakeRepository:
         self.profile_values = {}
         self.receipts = {}
         self.events = []
+        self.profile_locks = []
 
     def list_definitions(self, *, active_only):
         del active_only
@@ -212,6 +257,10 @@ class _FakeRepository:
 
     def staff_exists(self, staff_id):
         return staff_id == 7
+
+    def lock_profile_aggregate(self, staff_id):
+        assert staff_id == 7
+        self.profile_locks.append(staff_id)
 
     def load_profile(self, staff_id, *, for_update):
         del staff_id, for_update

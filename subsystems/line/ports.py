@@ -1,12 +1,13 @@
 """
 File: ports.py
-Description: 定義 LINE repository、provider、跨 Domain query 與通知規則取消的 typed ports。
+Description: 定義 LINE repository、通知取消、Rich Menu durable step、cleanup redrive 與 provider typed ports。
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from enum import StrEnum
 from typing import Protocol
 
 from domains.line.configuration import (
@@ -38,16 +39,29 @@ from domains.line.media import LineMediaMetadata
 from domains.line.order_group import LineOrderGroupBindingSnapshot
 from domains.line.review import LineReviewDecisionCandidate, LineReviewSnapshot
 from domains.line.platform_user import LineFriendEvent, LinePlatformUserSnapshot
-from domains.line.rich_menu import LineRichMenuPublicationSnapshot
+from domains.line.rich_menu import (
+    LineRichMenuPublicationSnapshot,
+    LineRichMenuPublicationStatus,
+)
 from domains.line.webhook import (
     CanonicalLineWebhookEvent,
     LineWebhookInboxSnapshot,
     LineWebhookProcessingStatus,
 )
 from shared_kernel.clock import BusinessClock
-from shared_kernel.identities import ExpectedVersion, IdempotencyKey, IdempotencyReceipt
+from shared_kernel.fingerprints import PreviewFingerprint
+from shared_kernel.identities import (
+    CorrelationId,
+    ExpectedVersion,
+    IdempotencyKey,
+    IdempotencyReceipt,
+)
 from shared_kernel.ports import OutboxWriter, UnitOfWork
-from shared_kernel.validation import require_canonical_text
+from shared_kernel.validation import (
+    require_canonical_text,
+    require_nonnegative_integer,
+    require_positive_integer,
+)
 from subsystems.line.configuration_contracts import (
     ApplyLineConfigurationCommand,
     ApplyLineConfigurationResult,
@@ -143,6 +157,180 @@ class LineAuditIntent:
                 value,
                 f"LINE audit {field_name}",
                 _AUDIT_IDENTITY_MAXIMUM_LENGTH,
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class LineNotificationCancellationLineage:
+    intent_ids: tuple[int, ...]
+    task_ids: tuple[LineDeliveryTaskId, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.intent_ids, tuple):
+            raise TypeError("LINE notification intent IDs must be a tuple")
+        for intent_id in self.intent_ids:
+            require_positive_integer(intent_id, "LINE notification intent ID")
+        if self.intent_ids != tuple(sorted(set(self.intent_ids))):
+            raise ValueError("LINE notification intent IDs must be sorted and unique")
+        if not isinstance(self.task_ids, tuple) or any(
+            not isinstance(task_id, LineDeliveryTaskId) for task_id in self.task_ids
+        ):
+            raise TypeError("LINE notification task IDs must be a typed tuple")
+        values = tuple(task_id.value for task_id in self.task_ids)
+        if values != tuple(sorted(set(values))):
+            raise ValueError("LINE notification task IDs must be sorted and unique")
+
+
+class LineRichMenuPublicationStep(StrEnum):
+    CREATE = "create"
+    UPLOAD = "upload"
+    LINK = "link"
+    SWITCH = "switch"
+    CLEANUP = "cleanup"
+
+
+@dataclass(frozen=True, slots=True)
+class LineRichMenuStepReceipt:
+    publication_id: LineRichMenuPublicationId
+    step: LineRichMenuPublicationStep
+    request_fingerprint: PreviewFingerprint
+    idempotency_key: IdempotencyKey
+    acknowledged_at: datetime
+    provider_menu_id: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.publication_id, LineRichMenuPublicationId):
+            raise TypeError("LINE Rich Menu publication ID is invalid")
+        if not isinstance(self.step, LineRichMenuPublicationStep):
+            raise TypeError("LINE Rich Menu publication step is invalid")
+        if not isinstance(self.request_fingerprint, PreviewFingerprint):
+            raise TypeError("LINE Rich Menu step fingerprint is invalid")
+        if not isinstance(self.idempotency_key, IdempotencyKey):
+            raise TypeError("LINE Rich Menu step idempotency key is invalid")
+        if self.acknowledged_at.tzinfo is None or self.acknowledged_at.utcoffset() is None:
+            raise ValueError("LINE Rich Menu step acknowledgement must be timezone-aware")
+        if self.provider_menu_id is not None:
+            require_canonical_text(
+                self.provider_menu_id,
+                "LINE provider Rich Menu ID",
+                191,
+            )
+
+
+class LineRichMenuStepAttemptOutcome(StrEnum):
+    SUCCESS = "success"
+    RATE_LIMITED = "rate_limited"
+    REJECTED = "rejected"
+    UNAVAILABLE = "unavailable"
+    TIMEOUT = "timeout"
+    LOST_ACK = "lost_ack"
+
+
+@dataclass(frozen=True, slots=True)
+class LineRichMenuStepAttemptEvent:
+    publication_id: LineRichMenuPublicationId
+    step: LineRichMenuPublicationStep
+    attempt_number: int
+    request_fingerprint: PreviewFingerprint
+    idempotency_key: IdempotencyKey
+    outcome: LineRichMenuStepAttemptOutcome
+    attempted_at: datetime
+    correlation_id: CorrelationId
+    provider_menu_id: str | None = None
+    error_code: str | None = None
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.publication_id, LineRichMenuPublicationId):
+            raise TypeError("LINE Rich Menu publication ID is invalid")
+        if not isinstance(self.step, LineRichMenuPublicationStep):
+            raise TypeError("LINE Rich Menu publication step is invalid")
+        require_positive_integer(
+            self.attempt_number,
+            "LINE Rich Menu step attempt number",
+        )
+        if not isinstance(self.request_fingerprint, PreviewFingerprint):
+            raise TypeError("LINE Rich Menu step attempt fingerprint is invalid")
+        if not isinstance(self.idempotency_key, IdempotencyKey):
+            raise TypeError("LINE Rich Menu step attempt idempotency key is invalid")
+        if not isinstance(self.outcome, LineRichMenuStepAttemptOutcome):
+            raise TypeError("LINE Rich Menu step attempt outcome is invalid")
+        if self.attempted_at.tzinfo is None or self.attempted_at.utcoffset() is None:
+            raise ValueError("LINE Rich Menu step attempt time must be timezone-aware")
+        if not isinstance(self.correlation_id, CorrelationId):
+            raise TypeError("LINE Rich Menu step attempt correlation ID is invalid")
+        if self.outcome is LineRichMenuStepAttemptOutcome.SUCCESS:
+            require_canonical_text(
+                self.provider_menu_id,
+                "LINE provider Rich Menu ID",
+                191,
+            )
+            if self.error_code is not None:
+                raise ValueError("successful Rich Menu attempt cannot contain an error")
+        else:
+            if self.provider_menu_id is not None:
+                raise ValueError("failed Rich Menu attempt cannot contain provider menu ID")
+            require_canonical_text(
+                self.error_code,
+                "LINE Rich Menu step attempt error code",
+                191,
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class LineRichMenuCleanupAnomaly:
+    publication_id: LineRichMenuPublicationId
+    error_code: str
+    occurred_at: datetime
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.publication_id, LineRichMenuPublicationId):
+            raise TypeError("LINE Rich Menu publication ID is invalid")
+        require_canonical_text(self.error_code, "LINE Rich Menu cleanup error code", 191)
+        if self.occurred_at.tzinfo is None or self.occurred_at.utcoffset() is None:
+            raise ValueError("LINE Rich Menu cleanup anomaly time must be timezone-aware")
+
+
+@dataclass(frozen=True, slots=True)
+class LineRichMenuPublicationPage:
+    items: tuple[LineRichMenuPublicationSnapshot, ...]
+    total: int
+    offset: int
+    page_size: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.items, tuple) or any(
+            not isinstance(item, LineRichMenuPublicationSnapshot)
+            for item in self.items
+        ):
+            raise TypeError("LINE Rich Menu publication page items are invalid")
+        require_nonnegative_integer(self.total, "LINE Rich Menu publication total")
+        require_nonnegative_integer(self.offset, "LINE Rich Menu publication offset")
+        require_positive_integer(self.page_size, "LINE Rich Menu publication page size")
+        if self.page_size > 100:
+            raise ValueError("LINE Rich Menu publication page size exceeds maximum")
+        if len(self.items) > self.page_size:
+            raise ValueError("LINE Rich Menu publication page exceeds requested size")
+
+
+@dataclass(frozen=True, slots=True)
+class LineRichMenuCleanupWorkItem(LineRichMenuPublicationWorkItem):
+    published_provider_menu_id: str
+    previous_provider_menu_id: str | None
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        if self.publication.status is not LineRichMenuPublicationStatus.PUBLISHED:
+            raise ValueError("LINE Rich Menu cleanup work must remain published")
+        require_canonical_text(
+            self.published_provider_menu_id,
+            "published LINE provider Rich Menu ID",
+            191,
+        )
+        if self.previous_provider_menu_id is not None:
+            require_canonical_text(
+                self.previous_provider_menu_id,
+                "previous LINE provider Rich Menu ID",
+                191,
             )
 
 
@@ -329,6 +517,13 @@ class LineDeliveryTaskRepositoryPort(Protocol):
 
     def cancel_pending_for_recipient(self, line_user_id: LineUserId) -> int: ...
 
+    def cancel_pending_for_notification_rule(
+        self,
+        task_ids: tuple[LineDeliveryTaskId, ...],
+        *,
+        reason: str,
+    ) -> tuple[LineDeliveryTaskId, ...]: ...
+
     def list_admin(self, query: LineDeliveryAdminQuery) -> LineDeliveryAdminPage: ...
 
     def get_admin(
@@ -359,6 +554,13 @@ class LineDeliveryTaskRepositoryPort(Protocol):
 class LineNotificationRuleRepositoryPort(Protocol):
     def cancel_rule(self, rule_id: str, *, reason: str) -> int: ...
 
+    def lock_and_cancel_rule_intents(
+        self,
+        rule_id: str,
+        *,
+        reason: str,
+    ) -> LineNotificationCancellationLineage: ...
+
     def register_source_event(self, event: object) -> int: ...
 
 
@@ -382,6 +584,13 @@ class LineRichMenuPublicationRepositoryPort(Protocol):
         query: LineRichMenuPublicationQuery,
     ) -> tuple[LineRichMenuPublicationSnapshot, ...]: ...
 
+    def list_page(
+        self,
+        query: LineRichMenuPublicationQuery,
+        *,
+        offset: int = 0,
+    ) -> LineRichMenuPublicationPage: ...
+
     def published_provider_menu_id(self, menu_definition_id: str) -> str | None: ...
 
     def queue(
@@ -392,9 +601,48 @@ class LineRichMenuPublicationRepositoryPort(Protocol):
     def claim(
         self,
         query: ClaimLineRichMenuPublicationsQuery,
-    ) -> tuple[LineRichMenuPublicationWorkItem, ...]: ...
+    ) -> tuple[
+        LineRichMenuPublicationWorkItem | LineRichMenuCleanupWorkItem,
+        ...,
+    ]: ...
 
-    def record(self, command: RecordLineRichMenuPublicationCommand): ...
+    def persist_cleanup_target(
+        self,
+        publication_id: LineRichMenuPublicationId,
+        lease_owner: str,
+        provider_menu_id: str,
+    ) -> None: ...
+
+    def record(
+        self,
+        command: RecordLineRichMenuPublicationCommand,
+    ) -> LineRichMenuPublicationSnapshot: ...
+
+    def list_step_receipts(
+        self,
+        publication_id: LineRichMenuPublicationId,
+    ) -> tuple[LineRichMenuStepReceipt, ...]: ...
+
+    def append_step_receipt(
+        self,
+        receipt: LineRichMenuStepReceipt,
+    ) -> LineRichMenuStepReceipt: ...
+
+    def list_step_attempt_events(
+        self,
+        publication_id: LineRichMenuPublicationId,
+        step: LineRichMenuPublicationStep | None = None,
+    ) -> tuple[LineRichMenuStepAttemptEvent, ...]: ...
+
+    def append_step_attempt_event(
+        self,
+        event: LineRichMenuStepAttemptEvent,
+    ) -> LineRichMenuStepAttemptEvent: ...
+
+    def append_cleanup_anomaly(
+        self,
+        anomaly: LineRichMenuCleanupAnomaly,
+    ) -> None: ...
 
     def next_due_at(self) -> datetime | None: ...
 
@@ -473,6 +721,29 @@ class LineRichMenuProviderPort(Protocol):
     def publish(
         self,
         request: LineRichMenuProviderRequest,
+    ) -> LineRichMenuProviderOutcome: ...
+
+    def create(
+        self,
+        request: LineRichMenuProviderRequest,
+    ) -> LineRichMenuProviderOutcome: ...
+
+    def upload(
+        self,
+        request: LineRichMenuProviderRequest,
+        provider_menu_id: str,
+    ) -> LineRichMenuProviderOutcome: ...
+
+    def upsert_alias(
+        self,
+        request: LineRichMenuProviderRequest,
+        provider_menu_id: str,
+    ) -> LineRichMenuProviderOutcome: ...
+
+    def switch_default(
+        self,
+        request: LineRichMenuProviderRequest,
+        provider_menu_id: str,
     ) -> LineRichMenuProviderOutcome: ...
 
     def delete(self, provider_menu_id: str) -> LineRichMenuProviderOutcome: ...
@@ -602,11 +873,19 @@ __all__ = [
     "LineMediaProviderPort",
     "LiffTokenVerifierPort",
     "LineMessagingProviderPort",
+    "LineNotificationCancellationLineage",
     "LineNotificationRuleRepositoryPort",
     "LineOrderGroupBindingRepositoryPort",
     "LineOutboxRepositoryPort",
     "LineRichMenuProviderPort",
+    "LineRichMenuCleanupAnomaly",
+    "LineRichMenuCleanupWorkItem",
+    "LineRichMenuPublicationStep",
+    "LineRichMenuPublicationPage",
     "LineRichMenuPublicationRepositoryPort",
+    "LineRichMenuStepAttemptEvent",
+    "LineRichMenuStepAttemptOutcome",
+    "LineRichMenuStepReceipt",
     "LineUnitOfWorkPort",
     "LineRuntimeRepositoryPort",
     "LinePlatformUserRepositoryPort",

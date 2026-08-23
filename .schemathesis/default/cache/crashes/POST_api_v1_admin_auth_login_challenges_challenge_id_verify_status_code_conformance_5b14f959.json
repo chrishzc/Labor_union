@@ -1,0 +1,89 @@
+{
+  "operation": "POST /api/v1/admin/auth/login/challenges/{challenge_id}/verify",
+  "method": "POST",
+  "path_template": "/api/v1/admin/auth/login/challenges/{challenge_id}/verify",
+  "fingerprint": "5b14f959",
+  "case_id": "8rw8yG",
+  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"challenge_token\": \"00000000000000000000000000000000\", \"factor_code\": \"000000\"}' http://127.0.0.1:60434/api/v1/admin/auth/login/challenges/0/verify",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:60434/api/v1/admin/auth/login/challenges/0/verify",
+      "url_template": "http://127.0.0.1:60434/api/v1/admin/auth/login/challenges/{challenge_id}/verify",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "8rw8yG",
+        "Content-Type": "application/json",
+        "Content-Length": "80"
+      },
+      "response": {
+        "status_code": 503,
+        "headers": {
+          "date": "Thu, 20 Aug 2026 08:45:52 GMT",
+          "server": "uvicorn",
+          "content-length": "262",
+          "content-type": "application/json",
+          "server-timing": "application;dur=67.0",
+          "x-response-time-ms": "67.0",
+          "cache-control": "no-store",
+          "x-correlation-id": "4ee45bd37cf54e18930b1edd5f8624b6"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"unavailable\",\"code\":\"admin_auth_unavailable\",\"message\":\"\u7ba1\u7406\u54e1\u9a57\u8b49\u670d\u52d9\u66ab\u6642\u7121\u6cd5\u4f7f\u7528\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":true,\"correlation_id\":\"4ee45bd37cf54e18930b1edd5f8624b6\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 503\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0052013000240549445,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "BODY": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/admin/auth/login/challenges/{challenge_id}/verify",
+      "path_parameters": {
+        "challenge_id": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "json",
+        "value": {
+          "challenge_token": "[Filtered]",
+          "factor_code": "000000"
+        }
+      },
+      "media_type": "application/json",
+      "parent_index": null
+    }
+  ]
+}

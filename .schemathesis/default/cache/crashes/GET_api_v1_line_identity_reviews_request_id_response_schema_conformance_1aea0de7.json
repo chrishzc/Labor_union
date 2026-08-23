@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/line/identity/reviews/{request_id}",
+  "method": "GET",
+  "path_template": "/api/v1/line/identity/reviews/{request_id}",
+  "fingerprint": "1aea0de7",
+  "case_id": "2ig6iI",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/line/identity/reviews/1",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/line/identity/reviews/1",
+      "url_template": "http://127.0.0.1:8821/api/v1/line/identity/reviews/{request_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "2ig6iI"
+      },
+      "response": {
+        "status_code": 200,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:45 GMT",
+          "server": "uvicorn",
+          "content-length": "473",
+          "content-type": "application/json",
+          "server-timing": "application;dur=79.3",
+          "x-response-time-ms": "79.3",
+          "x-correlation-id": "773c2351fd3343a5985dd96db2c31d77"
+        },
+        "body": "{\"success\":true,\"message\":\"Success\",\"data\":{\"request_id\":1,\"review_type\":\"staff_verification\",\"status\":\"approved\",\"version\":1,\"subject_type\":\"staff\",\"subject_reference\":\"8892\",\"assigned_admin_id\":null,\"due_at\":null,\"line_user_id_masked\":\"U-va\u2026f-51\",\"display_name\":\"staff #8892\",\"decision_reason\":\"approve validation staff\",\"reviewed_by_actor_id\":\"validation-dataset-seed\",\"reviewed_at\":\"2026-08-10T11:55:06.601357\",\"created_at\":\"2026-08-10T11:55:06.511171\"},\"error\":null}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "response_schema_conformance",
+          "status": "failure",
+          "message": "Response violates schema\n\n{\"assigned_admin_id\":null,\"created_at\":\"2026-08-10T11:55:06.511171\",\"decision_reason\":\"approve validation staff\",\"display_name\":\"staff #8892\",\"due_at\":null,\"line_user_id_masked\":\"U-va\u2026f-51\",\"request_id\":1,\"review_type\":\"staff_verification\",\"reviewed_at\":\"2026-08-10T11:55:06.601357\",\"reviewed_by_actor_id\":\"validation-dataset-seed\",\"status\":\"approved\",\"subject_reference\":\"8892\",\"subject_type\":\"staff\",\"version\":1} is not valid under any of the schemas listed in the 'anyOf' keyword\n\nValidated against the response schema for status code 200.\n\nSchema at /components/schemas/BaseResponse_CanonicalLineReviewResponse_/properties/data:\n\n    {\n        \"anyOf\": [\n            {\n                \"$ref\": \"#/components/schemas/CanonicalLineReviewResponse\"\n            },\n            {\n                \"type\": \"null\"\n            }\n        ]\n    }\n\nValue:\n\n    {\n        \"assigned_admin_id\": null,\n        \"created_at\": \"2026-08-10T11:55:06.511171\",\n        \"decision_reason\": \"approve validation staff\",\n        \"display_name\": \"staff #8892\",\n        \"due_at\": null,\n        \"line_user_id_masked\": \"U-va\\u2026f-51\",\n        \"request_id\": 1,\n        \"review_type\": \"staff_verification\",\n        \"reviewed_at\": \"2026-08-10T11:55:06.601357\",\n        \"reviewed_by_actor_id\": \"validation-dataset-seed\",\n        \"status\": \"approved\",\n        \"subject_reference\": \"8892\",\n        \"subject_type\": \"staff\",\n        \"version\": 1\n    }"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.003996399987954646,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/line/identity/reviews/{request_id}",
+      "path_parameters": {
+        "request_id": 1
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

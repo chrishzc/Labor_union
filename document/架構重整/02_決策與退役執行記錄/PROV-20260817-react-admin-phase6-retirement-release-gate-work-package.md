@@ -1,12 +1,12 @@
 ---
 doc_type: work-package
-declared_status: approved
+declared_status: in-progress
 identity: PROV-20260817-react-admin-phase6-retirement-release-gate
 date: 2026-08-17
 owner: Integration Owner
 specification: PROV-20260817-react-admin-phase6-retirement-release-gate
 spec_path: PROV-20260817-react-admin-phase6-retirement-release-gate-specification.md
-authority: awaiting-exact-human-approval; installation may precede Phase5 completion
+authority: exact-human-approved-validator-installed-not-ready
 approval_required: 核准此 exact Phase 6A Work Package
 approval_evidence: user-replied-核准此-exact-Phase-6A-Work-Package
 absorbs: PROV-20260817-react-admin-phase6a-validator-installation-gate-amendment
@@ -179,6 +179,15 @@ smoke、monitor、migration rehearsal、`pyproject.toml`、`uv.lock`、`.env.exa
 ## Current expected result
 
 以2026-08-17現況執行必須回傳`PHASE6_NOT_READY`，不得以validator本身通過測試宣稱retirement ready。
+
+### 2026-08-20 installation result
+
+- Installation gates I0～I4：PASS。
+- `validator_installation_status=VALIDATOR_INSTALLED_NOT_READY`。
+- `overall_status=PHASE6_NOT_READY`；default readiness fail closed於
+  `SOURCE_RETIREMENT_MANIFEST_INCOMPLETE`。
+- 本Work Package維持`in-progress`；未刪除、搬移或retire任何Streamlit source，亦未改navigation target。
+- Phase5B fresh Windows runtime smoke已PASS；HOST/RUN獨立release approval、Phase6A G4真challenge→TOTP→same-origin API browser，以及逐entry production switch／closed observation仍未閉合，因此不得進入6C removal。
 
 ## DB gate
 

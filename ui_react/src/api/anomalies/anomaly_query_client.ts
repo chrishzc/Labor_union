@@ -1,6 +1,6 @@
 /**
  * File: anomaly_query_client.ts
- * Description: Anomalies 四個唯讀 GET 的 bounded client。
+ * Description: Anomalies 四個唯讀 GET 的 strict client，並以 exact request key 合併 list replay。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -70,6 +70,8 @@ export interface AnomalyQueryClient {
     options?: AnomalyQueryOptions
   ): Promise<ImportWarningReferralView>;
 }
+
+const inFlightListQueries = new Map<string, Promise<unknown>>();
 
 // ============================================================================
 // Internal Helpers
@@ -190,6 +192,47 @@ function decodeStrictResponse<T>(
   return result.data;
 }
 
+function sortedEntries(
+  values: Record<string, string | number | boolean | null | undefined>
+): Array<[string, string | number | boolean | null | undefined]> {
+  return Object.entries(values).sort(([left], [right]) => left.localeCompare(right));
+}
+
+function listQueryCoalescingKey(
+  endpoint: string,
+  options: RequestOptions
+): string | null {
+  if (options.signal !== undefined) return null;
+  return JSON.stringify({
+    endpoint,
+    token: options.token ?? null,
+    headers: sortedEntries(options.headers ?? {}),
+    params: sortedEntries(options.params ?? {}),
+    timeoutMs: options.timeoutMs ?? null,
+    baseUrl: options.baseUrl ?? '',
+  });
+}
+
+function executeCoalescedListQuery<T>(
+  endpoint: string,
+  options: RequestOptions,
+  execute: () => Promise<T>
+): Promise<T> {
+  const key = listQueryCoalescingKey(endpoint, options);
+  if (key === null) return execute();
+
+  const existing = inFlightListQueries.get(key) as Promise<T> | undefined;
+  if (existing !== undefined) return existing;
+
+  const promise = execute();
+  inFlightListQueries.set(key, promise);
+  const clear = () => {
+    if (inFlightListQueries.get(key) === promise) inFlightListQueries.delete(key);
+  };
+  void promise.then(clear, clear);
+  return promise;
+}
+
 // ============================================================================
 // Standalone Query Functions
 // ============================================================================
@@ -223,23 +266,25 @@ export async function queryAnomalies(
     params: queryParams,
   };
 
-  try {
-    const raw = await transport.get<unknown>(endpoint, reqOptions);
-    const envelope: AnomalySummariesResponse = decodeStrictResponse(
-      AnomalySummariesResponseSchema,
-      raw,
-      endpoint
-    );
+  return executeCoalescedListQuery(endpoint, reqOptions, async () => {
+    try {
+      const raw = await transport.get<unknown>(endpoint, reqOptions);
+      const envelope: AnomalySummariesResponse = decodeStrictResponse(
+        AnomalySummariesResponseSchema,
+        raw,
+        endpoint
+      );
 
-    if (!envelope.success) {
-      const msg = envelope.error || envelope.message || '取得異常摘要失敗';
-      throw new AnomalyValidationError(`[${endpoint}] ${msg}`);
+      if (!envelope.success) {
+        const msg = envelope.error || envelope.message || '取得異常摘要失敗';
+        throw new AnomalyValidationError(`[${endpoint}] ${msg}`);
+      }
+
+      return envelope.data;
+    } catch (err) {
+      throw mapErrorToAnomalyQueryError(err, { endpoint });
     }
-
-    return envelope.data;
-  } catch (err) {
-    throw mapErrorToAnomalyQueryError(err, { endpoint });
-  }
+  });
 }
 
 /**
@@ -269,23 +314,25 @@ export async function queryImportWarningTasks(
     params: queryParams,
   };
 
-  try {
-    const raw = await transport.get<unknown>(endpoint, reqOptions);
-    const envelope: ImportWarningTasksResponse = decodeStrictResponse(
-      ImportWarningTasksResponseSchema,
-      raw,
-      endpoint
-    );
+  return executeCoalescedListQuery(endpoint, reqOptions, async () => {
+    try {
+      const raw = await transport.get<unknown>(endpoint, reqOptions);
+      const envelope: ImportWarningTasksResponse = decodeStrictResponse(
+        ImportWarningTasksResponseSchema,
+        raw,
+        endpoint
+      );
 
-    if (!envelope.success) {
-      const msg = envelope.error || envelope.message || '取得匯入警示追蹤清單失敗';
-      throw new AnomalyValidationError(`[${endpoint}] ${msg}`);
+      if (!envelope.success) {
+        const msg = envelope.error || envelope.message || '取得匯入警示追蹤清單失敗';
+        throw new AnomalyValidationError(`[${endpoint}] ${msg}`);
+      }
+
+      return envelope.data;
+    } catch (err) {
+      throw mapErrorToAnomalyQueryError(err, { endpoint });
     }
-
-    return envelope.data;
-  } catch (err) {
-    throw mapErrorToAnomalyQueryError(err, { endpoint });
-  }
+  });
 }
 
 /** 查詢選取異常的 typed detail（GET-only；raw snapshot 會 fail closed）。 */

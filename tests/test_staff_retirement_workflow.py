@@ -26,6 +26,7 @@ from subsystems.staff.retirement_workflow import (
     StaffLifecycleApplyRequest,
     StaffLifecycleWorkflow,
 )
+from shared_kernel.fingerprints import PreviewFingerprint
 
 
 class _UnitOfWork:
@@ -132,6 +133,38 @@ def test_apply_replays_same_idempotency_key_without_second_persist() -> None:
     assert unit_of_work.committed is True
 
 
+def test_lifecycle_command_fingerprint_includes_preview_fingerprint() -> None:
+    repository = _Repository(StaffLifecycleFact(7, StaffLifecycleState.ACTIVE, 0))
+    workflow = StaffLifecycleWorkflow(
+        repository,
+        _UnitOfWork,
+        FixedBusinessClock(
+            datetime(2026, 8, 15, 10, 0, 0, tzinfo=timezone.utc)
+        ),
+    )
+    request = _request(
+        workflow,
+        transition=StaffLifecycleTransition.RETIRE,
+        version=0,
+        key="lifecycle-preview-fingerprint",
+    )
+    workflow.apply(request)
+    changed = StaffLifecycleApplyRequest(
+        request.staff_id,
+        request.transition,
+        request.effective_at,
+        request.reason_code,
+        request.expected_version,
+        PreviewFingerprint("f" * 64),
+        request.idempotency_key,
+        request.actor,
+        request.correlation_id,
+    )
+
+    with pytest.raises(ValueError, match="idempotency_mismatch"):
+        workflow.apply(changed)
+
+
 def test_apply_noop_persists_receipt_without_advancing_state() -> None:
     repository = _Repository(StaffLifecycleFact(7, StaffLifecycleState.RETIRED, 4))
     workflow = StaffLifecycleWorkflow(repository, _UnitOfWork, FixedBusinessClock(datetime(2026, 8, 15, 10, 0, 0, tzinfo=timezone.utc)))
@@ -155,3 +188,20 @@ def test_preview_rejects_future_effective_time_and_invalid_reason() -> None:
         workflow.preview(7, StaffLifecycleTransition.RETIRE, now + timedelta(microseconds=1), "left_union")
     with pytest.raises(ValueError, match="reason_invalid"):
         workflow.preview(7, StaffLifecycleTransition.RETIRE, now, "other")
+
+
+def test_preview_rejects_naive_effective_time() -> None:
+    now = datetime(2026, 8, 15, 10, 0, 0, tzinfo=timezone.utc)
+    workflow = StaffLifecycleWorkflow(
+        _Repository(StaffLifecycleFact(7, StaffLifecycleState.ACTIVE, 0)),
+        _UnitOfWork,
+        FixedBusinessClock(now),
+    )
+
+    with pytest.raises(ValueError, match="effective_at"):
+        workflow.preview(
+            7,
+            StaffLifecycleTransition.RETIRE,
+            datetime(2026, 8, 15, 9, 0, 0),
+            "left_union",
+        )

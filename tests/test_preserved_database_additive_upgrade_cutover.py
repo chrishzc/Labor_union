@@ -1,3 +1,8 @@
+"""
+File: test_preserved_database_additive_upgrade_cutover.py
+Description: 驗證保留資料的 additive migration、metadata 精確比對與失敗關閉。
+"""
+
 from __future__ import annotations
 
 import json
@@ -395,6 +400,37 @@ def test_105_owned_column_subset_is_partial_then_exact() -> None:
         migration._canonical_artifact_metadata_state(partial, part)
         == "partial"
     )
+
+
+def test_rich_menu_option_b_full_metadata_classifies_all_states() -> None:
+    part = "1001_line_rich_menu_publication_step_saga.sql"
+    descriptor = migration._canonical_artifact_descriptor(part)
+    counts = (
+        len(descriptor["indexes"]),
+        len(descriptor["foreign_keys"]),
+        len(descriptor["checks"]),
+    )
+    assert counts == (11, 3, 7)
+    exact = _snapshot_from_descriptor(descriptor)
+    assert migration._canonical_artifact_metadata_state(exact, part) == "exact"
+
+    absent = {key: {} if key == "show_create_tables" else [] for key in exact}
+    assert migration._canonical_artifact_metadata_state(absent, part) == "absent"
+
+    partial = {
+        key: list(value) if isinstance(value, list) else value
+        for key, value in exact.items()
+    }
+    partial["indexes"] = partial["indexes"][:-1]
+    assert migration._canonical_artifact_metadata_state(partial, part) == "partial"
+
+    drift = {
+        key: list(value) if isinstance(value, list) else value
+        for key, value in exact.items()
+    }
+    drift["foreign_keys"] = [dict(row) for row in drift["foreign_keys"]]
+    drift["foreign_keys"][0]["delete_rule"] = "CASCADE"
+    assert migration._canonical_artifact_metadata_state(drift, part) == "drift"
 
 
 def test_source_preflight_defers_trigger_visibility_to_candidate_verification() -> None:

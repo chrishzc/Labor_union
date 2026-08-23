@@ -3,7 +3,10 @@ File: staff.py
 Description: 提供管理員會話保護的 bounded Staff 摘要 cursor 查詢與退役全量入口。
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Annotated
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from api.dependencies.admin_auth import require_admin
 from api.error_contracts import internal_query_error, typed_http_error
@@ -20,17 +23,22 @@ def get_staff_summaries(
     page_size: int = Query(default=200, ge=1, le=200),
     after_id: int | None = Query(default=None, ge=1),
     staff_id: int | None = Query(default=None, ge=1),
+    correlation_id: Annotated[
+        str | None,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = None,
     principal: AdminPrincipal = Depends(require_admin),
 ) -> BaseResponse[StaffSummaryPageView]:
     """Return a bounded staff selector page without exposing the staff master."""
     del principal
+    correlation = correlation_id or uuid4().hex
     if staff_id is not None and after_id is not None:
         raise typed_http_error(
             422,
             "validation",
             "staff_summary_query_params_conflict",
             "staff_id 與 after_id 不得同時提供。",
-            "staff-summary-query",
+            correlation,
         )
     try:
         connection = db_service.get_connection()
@@ -51,7 +59,7 @@ def get_staff_summaries(
         raise internal_query_error(
             "staff_summary_query_internal_error",
             "服務人員摘要查詢失敗。",
-            "staff-summary-query",
+            correlation,
         ) from error
     finally:
         if "connection" in locals():

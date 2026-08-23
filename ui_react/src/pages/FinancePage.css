@@ -24,7 +24,11 @@
 .finance-table td button:disabled { padding:6px 10px; border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-sm); background:var(--md-sys-color-surface-container-high); cursor:not-allowed; }
 .finance-state { margin:var(--space-4) 0; padding:var(--space-4); border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:var(--md-sys-color-surface-container-high); }
 .finance-state.error { border-color:var(--md-sys-color-error); background:var(--md-sys-color-error-container); color:#7f1d1d; }
+.finance-state.unavailable { border-style:dashed; color:var(--md-sys-color-on-surface-variant); }
 .finance-split { display:grid; grid-template-columns:minmax(0,3fr) minmax(260px,2fr); gap:var(--space-5); }
+.finance-detail-block { margin-top:var(--space-5); }
+.finance-detail-block h3 { margin-bottom:var(--space-3); font-size:1rem; letter-spacing:-.01em; }
+.finance-scope-note { margin:var(--space-3) 0; color:var(--md-sys-color-on-surface-variant); font-size:.78rem; font-variant-numeric:tabular-nums; }
 .finance-manifest { display:grid; grid-template-columns:auto 1fr; gap:8px 12px; padding:var(--space-4); border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:var(--md-sys-color-surface); }
 .finance-manifest dt { font-weight:700; color:var(--md-sys-color-on-surface-variant); }
 .finance-manifest dd { overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }

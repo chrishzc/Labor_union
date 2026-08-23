@@ -1,5 +1,5 @@
 rem File: update_local_database.bat
-rem Description: Runs canonical preview before candidate-verified local database update.
+rem Description: Runs the fast qualified additive route; replacement is explicit.
 @echo off
 setlocal EnableExtensions EnableDelayedExpansion
 for %%I in ("%~dp0..\..") do set "PROJECT_ROOT=%%~fI"
@@ -13,7 +13,7 @@ if not exist "%PYTHON%" (
 if /I "%~1"=="--dry-run" (
   "%PYTHON%" -m scripts.launcher_preflight --profile database-update
   if errorlevel 1 exit /b !ERRORLEVEL!
-  "%PYTHON%" -m scripts.update_local_database
+  "%PYTHON%" -m scripts.update_local_database --dry-run
   set "DRY_RUN_EXIT=!ERRORLEVEL!"
   exit /b !DRY_RUN_EXIT!
 )
@@ -21,7 +21,7 @@ if not "%~1"=="" (
   "%PYTHON%" -m scripts.update_local_database %*
   exit /b %ERRORLEVEL%
 )
-echo Previewing preserve-data update for the database configured in .env...
+echo Previewing the qualified local additive update for the database configured in .env...
 "%PYTHON%" -m scripts.update_local_database
 if errorlevel 1 (
   echo [ERROR] Database update preflight failed. Review the reported schema state before retrying.
@@ -29,8 +29,8 @@ if errorlevel 1 (
   exit /b 1
 )
 echo.
-echo Stop API, UI, monitor, and workers before continuing.
-echo A backup and verified candidate are created before the .env database is replaced under the same name.
+echo The default apply is additive-only and does not create a candidate or replace the source.
+echo Use --strategy replacement --allow-long-run only for the separately approved long-running route.
 set /p "UPDATE_CONFIRM=Type UPDATE to continue: "
 if /I not "!UPDATE_CONFIRM!"=="UPDATE" (
   echo Cancelled. No database changes were requested.
@@ -38,6 +38,6 @@ if /I not "!UPDATE_CONFIRM!"=="UPDATE" (
 )
 "%PYTHON%" -m scripts.update_local_database --apply --confirm-configured-database
 set "UPDATE_EXIT=!ERRORLEVEL!"
-if not "!UPDATE_EXIT!"=="0" (echo [ERROR] Database update failed with exit code !UPDATE_EXIT!.) else (echo Database update completed. Restart local services; the configured database now contains the verified upgraded data.)
+if not "!UPDATE_EXIT!"=="0" (echo [ERROR] Database update failed with exit code !UPDATE_EXIT!.) else (echo Database additive update completed. Restart local services if the release requires it.)
 pause
 exit /b !UPDATE_EXIT!

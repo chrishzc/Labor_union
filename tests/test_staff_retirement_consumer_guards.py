@@ -86,6 +86,15 @@ def test_matching_consumers_all_filter_retired_staff() -> None:
         assert "lifecycle_state" in source
 
 
+def test_retirement_consumer_guard_does_not_restore_old_matching_facts():
+    source = Path(
+        "infrastructure/mysql/matching_recommendation_repository.py"
+    ).read_text(encoding="utf-8")
+
+    assert "lifecycle_state" in source
+    assert "retired" in source
+
+
 def test_staff_retirement_release_is_schema_only_and_described() -> None:
     release = json.loads(
         Path("db/migration_releases/labor_union_2026_08_15_staff_retirement_v1.json").read_text(encoding="utf-8")

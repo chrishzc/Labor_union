@@ -37,6 +37,7 @@ export interface SchedulingCurrentClient {
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 const MAXIMUM_RANGE_DAY_COUNT = 62;
+const MILLISECONDS_PER_DAY = 86_400_000;
 let correlationSequence = 0;
 
 function parseIsoDate(value: string, field: string): number {
@@ -133,6 +134,21 @@ function validateProjection(
     projection.days.map((day) => day.calendar_date),
     'days'
   );
+  const startTimestamp = parseIsoDate(query.rangeStart, 'rangeStart');
+  const endTimestamp = parseIsoDate(query.rangeEnd, 'rangeEnd');
+  const expectedDayCount =
+    Math.floor((endTimestamp - startTimestamp) / MILLISECONDS_PER_DAY) + 1;
+  if (projection.days.length !== expectedDayCount) {
+    throw new SchedulingValidationError('days 必須完整涵蓋 request range。');
+  }
+  projection.days.forEach((day, index) => {
+    const expectedDate = new Date(
+      startTimestamp + index * MILLISECONDS_PER_DAY
+    ).toISOString().slice(0, 10);
+    if (day.calendar_date !== expectedDate) {
+      throw new SchedulingValidationError('days 必須依日期連續升冪排列。');
+    }
+  });
   assertUnique(
     projection.case_versions.map((item) => item.case_no),
     'case_versions'

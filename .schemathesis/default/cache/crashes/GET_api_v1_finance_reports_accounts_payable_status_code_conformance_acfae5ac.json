@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/finance-reports/accounts-payable",
+  "method": "GET",
+  "path_template": "/api/v1/finance-reports/accounts-payable",
+  "fingerprint": "acfae5ac",
+  "case_id": "g1rXB9",
+  "code_sample": "curl -X GET 'http://127.0.0.1:8821/api/v1/finance-reports/accounts-payable?target_month=0000-01'",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/finance-reports/accounts-payable?target_month=0000-01",
+      "url_template": "http://127.0.0.1:8821/api/v1/finance-reports/accounts-payable",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "g1rXB9"
+      },
+      "response": {
+        "status_code": 400,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:43 GMT",
+          "server": "uvicorn",
+          "content-length": "264",
+          "content-type": "application/json",
+          "server-timing": "application;dur=83.0",
+          "x-response-time-ms": "83.0",
+          "x-correlation-id": "1eb4d084a6ce4dd1b488bb6af1fbd2f5"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"validation\",\"code\":\"accounts_payable_query_invalid\",\"message\":\"\u61c9\u4ed8\u5e33\u6b3e\u67e5\u8a62\u689d\u4ef6\u7121\u6548\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"1eb4d084a6ce4dd1b488bb6af1fbd2f5\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 400\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.007924399978946894,
+          "mode": "positive"
+        },
+        "components": {
+          "QUERY": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/finance-reports/accounts-payable",
+      "path_parameters": {},
+      "query": {
+        "target_month": "0000-01"
+      },
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

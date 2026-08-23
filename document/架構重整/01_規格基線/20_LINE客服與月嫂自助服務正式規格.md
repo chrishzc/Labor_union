@@ -7,6 +7,11 @@
 - 上位契約：`17_External_Integration_LINE_Access正式規格.md`
 - 視覺來源：`merge` 分支 Rich Menu、客服及 LIFF 面板
 - 執行架構：`wen` canonical LINE inbox、identity、delivery 與 Rich Menu publication
+- 2026-08-21 M2/M4 amendment：production full AI rejected；Phase 1 deterministic harness＋durable manual
+  fallback frozen，Customer Service owns HIGH escalation／automation hold；implementation、schema／DB、provider
+  與外部副作用仍未授權。
+- 2026-08-23 current implementation amendment：M2-A deterministic／manual fallback與M4-A escalation backend
+  已獲人工核准並落地；LINE／AI provider、deployment與未另行核准的schema／DB仍不在此授權範圍。
 
 ## 2. Global 不變量
 
@@ -45,6 +50,9 @@ waiting → handling → resolved
 ### 3.3 交易、冪等與 retry
 
 - inbound event：ticket create/append、狀態事件、ack delivery task 同一 LINE Unit of Work commit。
+- canonical webhook dispatch 任一業務處理失敗時，該 business Unit of Work 必須整筆 rollback；rollback完成後
+  才可另開新的 Unit of Work，只保存`retryable_failed`／`terminal_failed` inbox completion。禁止把部分ticket、
+  binding、outbox或其他業務 mutation與failure completion一起commit。
 - admin reply：鎖定 ticket、驗證 version、保存回覆、更新狀態、audit、delivery task 同交易 commit。
 - inbound idempotency 使用 LINE event ID；admin mutation 使用 caller idempotency key。
 - provider timeout/5xx 只 retry delivery task；validation、authorization、stale conflict 不自動 retry。
@@ -132,3 +140,16 @@ Rich Menu 的「寶寶日誌」開啟月嫂 LIFF。LIFF 只可用 server-side �
 5. 月嫂只能讀取自己的有效 assignment 案件與班表。
 6. merge Rich Menu 圖面／文案可由 wen publication 流程發布並 fan-out。
 7. 客戶前導頁保留 flow ID，兩條路徑都不退回 legacy gateway。
+
+## 2026-08-21 M2／M4 routing and escalation amendment
+
+- explicit human／wrong 優先於所有自動路由。含 `human`／`wrong` marker 的 inbound 不得進 identity alias、AI、Knowledge 或 Service Help 自動回答；只有不含 marker 且 exact match protected identity alias 才可進 identity。
+- production full AI 現在不核准；Phase 1 僅允許 deterministic harness、source-cited typed outcome 與 durable manual fallback，Phase 2 維持 proposed。active automation hold 時連 deterministic auto-reply 也禁止。
+- Customer Service 是 HIGH escalation／ticket／hold／人工處理的 owner；Anomaly 僅提供 source projection。escalation 透過 typed `TicketReferral`／escalation port，不競寫 M2 `service_help` 或 M4 `runtime_alert_application`；Scheduling 不在 escalation transaction。
+- production composition必須注入automation hold／escalation gateway；active hold會在任何deterministic reply、ticket或
+  delivery intent前fail closed。human escalation採`create → claim → handling → resolve`，每步驗證version、
+  idempotency與typed receipt，resolve後才解除hold。
+- `reply_provider` direct path已由durable delivery task取代；Service Help只enqueue，不在webhook transaction呼叫
+  provider。LINE provider仍只能由已提交task的worker執行；本規格不授權AI provider、deployment或新的外部副作用。
+- runtime／LINE管理畫面的audit清單只能使用closed masked typed view；raw details、token、完整identity或額外欄位
+  一律在API client boundary fail closed，不得穿透Streamlit／React render。

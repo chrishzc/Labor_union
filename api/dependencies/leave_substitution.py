@@ -1,4 +1,5 @@
-"""Per-request construction for the leave/substitution workflow."""
+"""File: leave_substitution.py
+Description: 以單一MySQL connection組合請假代班workflow與outer UoW依賴。"""
 
 from __future__ import annotations
 
@@ -12,12 +13,21 @@ from infrastructure.mysql.leave_substitution_impact_ports import (
 from infrastructure.mysql.leave_substitution_repository import (
     MySqlLeaveSubstitutionRepository,
 )
+from infrastructure.mysql.line_delivery_task_repository import (
+    MySqlLineDeliveryTaskRepository,
+)
 from infrastructure.mysql.scheduling_holiday_query import MySqlSchedulingHolidayQuery
+from infrastructure.mysql.staff_leave_intake_repository import (
+    MySqlStaffLeaveIntakeRepository,
+)
 from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from infrastructure.mysql.mysql_adapter import get_connection
 from shared_kernel.clock import SystemBusinessClock
 from subsystems.scheduling.leave_substitution_workflow import (
     LeaveSubstitutionWorkflow,
+)
+from subsystems.scheduling.leave_substitution_linked_request_resolution import (
+    LeaveSubstitutionLinkedRequestResolution,
 )
 
 
@@ -47,6 +57,11 @@ def get_leave_substitution_application():
         MySqlOrdersLeaveImpactPort(connection, SystemBusinessClock()),
         MySqlSchedulingHolidayQuery(connection),
         lambda: MySqlUnitOfWork(connection),
+        LeaveSubstitutionLinkedRequestResolution(
+            MySqlStaffLeaveIntakeRepository(connection),
+            MySqlLineDeliveryTaskRepository(connection),
+            SystemBusinessClock(),
+        ),
     )
     try:
         yield LeaveSubstitutionApplication(connection, repository, workflow)

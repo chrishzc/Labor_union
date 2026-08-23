@@ -116,6 +116,19 @@ describe('staff directory client', () => {
     expect(globalThis.fetch).toHaveBeenCalledTimes(2);
   });
 
+  it('allows an operator retry after a failed next-page request', async () => {
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(response(STAFF_RESPONSE_ONE))
+      .mockRejectedValueOnce(new TypeError('temporary network failure'))
+      .mockResolvedValueOnce(response(STAFF_RESPONSE_TWO));
+    const client = createStaffDirectoryClient();
+    await client.queryPage();
+
+    await expect(client.queryPage({ afterId: 12 })).rejects.toBeTruthy();
+    await expect(client.queryPage({ afterId: 12 })).resolves.toEqual(STAFF_RESPONSE_TWO.data);
+    expect(globalThis.fetch).toHaveBeenCalledTimes(3);
+  });
+
   it('validates bounds and supports an empty page', async () => {
     globalThis.fetch = vi.fn().mockResolvedValue(response(STAFF_EMPTY_RESPONSE));
     const client = createStaffDirectoryClient();

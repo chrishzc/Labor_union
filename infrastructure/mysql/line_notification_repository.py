@@ -16,11 +16,14 @@ from domains.line.delivery import (
     LineRecipientType,
 )
 from domains.line.identities import LineGroupId
+from domains.line.identities import LineDeliveryTaskId
 from shared_kernel.identities import CorrelationId, IdempotencyKey
+from shared_kernel.validation import require_canonical_text
 from subsystems.line.message_configuration import render_message_template
 from subsystems.line.notification_policy import NotificationSourceEvent
 from subsystems.line.notification_schedule import schedule_notification_occurrences
 from subsystems.anomalies.line_notification_anomaly_projector import NotificationDecisionSource
+from subsystems.line.ports import LineNotificationCancellationLineage
 
 
 class MySqlLineNotificationRepository:
@@ -30,15 +33,47 @@ class MySqlLineNotificationRepository:
         self._connection = connection
 
     def cancel_rule(self, rule_id: str, *, reason: str) -> int:
-        """Cancel every unsent intent for one rule in the caller's outer UoW."""
+        """Compatibility wrapper returning the count from the intent owner only."""
+        return len(self.lock_and_cancel_rule_intents(rule_id, reason=reason).intent_ids)
+
+    def lock_and_cancel_rule_intents(
+        self,
+        rule_id: str,
+        *,
+        reason: str,
+    ) -> LineNotificationCancellationLineage:
+        """Lock and cancel intents; delivery-task state belongs to its own repository."""
+        require_canonical_text(rule_id, "LINE notification rule ID", 191)
+        require_canonical_text(reason, "LINE notification cancellation reason", 191)
         with self._connection.cursor() as cursor:
-            cursor.execute(
-                _CANCEL_INTENTS_SQL,
-                (reason, rule_id),
+            cursor.execute(_LOCK_RULE_INTENTS_SQL, (rule_id,))
+            rows = tuple(cursor.fetchall() or ())
+            parsed_rows = tuple(_cancellation_row(row) for row in rows)
+            intent_ids = tuple(
+                sorted(
+                    row[0] for row in parsed_rows
+                )
             )
-            cancelled = int(cursor.rowcount)
-            cursor.execute(_CANCEL_DELIVERY_TASKS_SQL, (reason, rule_id))
-        return cancelled
+            if len(intent_ids) != len(set(intent_ids)):
+                raise RuntimeError("line_notification_intent_cancellation_lineage_invalid")
+            task_values = tuple(row[1] for row in parsed_rows if row[1] is not None)
+            if len(task_values) != len(set(task_values)):
+                raise RuntimeError("line_notification_intent_cancellation_lineage_invalid")
+            task_ids = tuple(
+                sorted(
+                    (LineDeliveryTaskId(value) for value in task_values),
+                    key=lambda task_id: task_id.value,
+                )
+            )
+            if intent_ids:
+                placeholders = ",".join("%s" for _ in intent_ids)
+                cursor.execute(
+                    _CANCEL_INTENTS_BY_ID_SQL.format(placeholders=placeholders),
+                    (reason, *intent_ids),
+                )
+                if int(cursor.rowcount) != len(intent_ids):
+                    raise RuntimeError("line_notification_intent_cancellation_conflict")
+        return LineNotificationCancellationLineage(intent_ids, task_ids)
 
     def mark_delivery_task_provider_accepted(self, delivery_task_id: int) -> None:
         """Keep derived intent state aligned once LINE accepted its linked task."""
@@ -339,12 +374,17 @@ class MySqlLineNotificationRepository:
                 raise RuntimeError("line_notification_intent_task_link_conflict")
 
 
-_CANCEL_INTENTS_SQL = (
-    "UPDATE line_notification_intents AS intent "
-    "JOIN line_notification_decisions AS decision ON decision.id=intent.decision_id "
-    "SET intent.intent_status='cancelled',intent.cancellation_reason=%s,"
-    "intent.cancelled_at_utc=UTC_TIMESTAMP(6) "
-    "WHERE decision.rule_id=%s AND intent.intent_status='scheduled'"
+_LOCK_RULE_INTENTS_SQL = (
+    "SELECT intent.id AS intent_id,intent.delivery_task_id "
+    "FROM line_notification_decisions AS decision "
+    "JOIN line_notification_intents AS intent ON intent.decision_id=decision.id "
+    "WHERE decision.rule_id=%s AND intent.intent_status='scheduled' "
+    "ORDER BY intent.id FOR UPDATE"
+)
+_CANCEL_INTENTS_BY_ID_SQL = (
+    "UPDATE line_notification_intents SET intent_status='cancelled',"
+    "cancellation_reason=%s,cancelled_at_utc=UTC_TIMESTAMP(6) "
+    "WHERE id IN ({placeholders}) AND intent_status='scheduled'"
 )
 _MARK_PROVIDER_ACCEPTED_SQL = (
     "UPDATE line_notification_intents SET intent_status='provider_accepted' "
@@ -557,16 +597,18 @@ def _mask_recipient(value: object) -> str | None:
         return None
     return "***" + value[-4:]
 
-_CANCEL_DELIVERY_TASKS_SQL = (
-    "UPDATE line_delivery_tasks AS task "
-    "JOIN line_notification_intents AS intent ON intent.delivery_task_id=task.id "
-    "JOIN line_notification_decisions AS decision ON decision.id=intent.decision_id "
-    "SET task.processing_status='cancelled',task.error_code=%s,"
-    "task.error_message='notification rule deleted',task.lease_owner=NULL,"
-    "task.lease_acquired_at_utc=NULL,task.lease_expires_at_utc=NULL "
-    "WHERE decision.rule_id=%s AND intent.intent_status='cancelled' "
-    "AND task.processing_status IN ('pending','retryable_failed','processing')"
-)
 
+def _cancellation_row(row: object) -> tuple[int, int | None]:
+    if not isinstance(row, dict) or frozenset(row) != {"intent_id", "delivery_task_id"}:
+        raise RuntimeError("line_notification_intent_cancellation_lineage_invalid")
+    intent_id = row["intent_id"]
+    task_id = row["delivery_task_id"]
+    if not isinstance(intent_id, int) or isinstance(intent_id, bool) or intent_id < 1:
+        raise RuntimeError("line_notification_intent_cancellation_lineage_invalid")
+    if task_id is not None and (
+        not isinstance(task_id, int) or isinstance(task_id, bool) or task_id < 1
+    ):
+        raise RuntimeError("line_notification_intent_cancellation_lineage_invalid")
+    return intent_id, task_id
 
 __all__ = ["MySqlLineNotificationRepository"]

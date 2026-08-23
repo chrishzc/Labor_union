@@ -1,0 +1,96 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-customer-service-human-escalation-2026-08-21-v1",
+  "descriptors": {
+    "1002_customer_service_human_escalation.sql": {
+      "tables": {
+        "customer_service_escalations": [
+          "id",
+          "source_event_identity",
+          "source_kind",
+          "source_fingerprint",
+          "trigger_code",
+          "trigger_policy_version",
+          "ticket_id",
+          "ticket_category",
+          "urgency",
+          "workflow_status",
+          "workflow_version",
+          "hold_scope_ref",
+          "automation_hold_state",
+          "hold_version",
+          "actor_ref",
+          "claim_at_utc",
+          "handling_started_at_utc",
+          "resolved_at_utc",
+          "resolution_code",
+          "resolution_evidence_digest",
+          "masked_context",
+          "idempotency_key",
+          "correlation_id",
+          "masked_alert_intent_ref",
+          "delivery_task_ref",
+          "delivery_outcome_ref",
+          "alert_status",
+          "active_hold_scope_key",
+          "created_at_utc",
+          "updated_at_utc"
+        ],
+        "customer_service_escalation_events": [
+          "id",
+          "escalation_id",
+          "event_type",
+          "expected_escalation_version",
+          "resulting_escalation_version",
+          "expected_ticket_version",
+          "resulting_ticket_version",
+          "expected_hold_version",
+          "resulting_hold_version",
+          "actor_ref",
+          "reason_code",
+          "reason_evidence_digest",
+          "receipt_id",
+          "idempotency_key",
+          "correlation_id",
+          "created_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_customer_service_escalation_events_before_update",
+        "trg_customer_service_escalation_events_before_delete"
+      ],
+      "indexes": {
+        "customer_service_escalations.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "customer_service_escalations.uq_customer_service_escalation_source": {"non_unique": 0, "columns": ["source_event_identity"]},
+        "customer_service_escalations.uq_customer_service_escalation_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "customer_service_escalations.uq_customer_service_escalation_active_scope": {"non_unique": 0, "columns": ["active_hold_scope_key"]},
+        "customer_service_escalations.idx_customer_service_escalation_ticket": {"non_unique": 1, "columns": ["ticket_id", "id"]},
+        "customer_service_escalations.idx_customer_service_escalation_status_time": {"non_unique": 1, "columns": ["workflow_status", "updated_at_utc"]},
+        "customer_service_escalations.idx_customer_service_escalation_trigger_time": {"non_unique": 1, "columns": ["trigger_code", "created_at_utc"]},
+        "customer_service_escalation_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "customer_service_escalation_events.uq_customer_service_escalation_event_receipt": {"non_unique": 0, "columns": ["receipt_id"]},
+        "customer_service_escalation_events.uq_customer_service_escalation_event_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "customer_service_escalation_events.idx_customer_service_escalation_event_stream": {"non_unique": 1, "columns": ["escalation_id", "id"]},
+        "customer_service_escalation_events.idx_customer_service_escalation_event_type_time": {"non_unique": 1, "columns": ["event_type", "created_at_utc"]}
+      },
+      "foreign_keys": {
+        "customer_service_escalations.fk_customer_service_escalation_ticket": {"columns": ["ticket_id"], "referenced_table": "customer_service_tickets", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "customer_service_escalation_events.fk_customer_service_escalation_event_escalation": {"columns": ["escalation_id"], "referenced_table": "customer_service_escalations", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "customer_service_escalations.chk_customer_service_escalation_source_fingerprint": "atom(regexp_like(source_fingerprint,'^[0-9a-f]{64}$'))",
+        "customer_service_escalations.chk_customer_service_escalation_source_kind": "atom(char_length(trim(source_kind))>0)",
+        "customer_service_escalations.chk_customer_service_escalation_policy_version": "atom(char_length(trim(trigger_policy_version))>0)",
+        "customer_service_escalations.chk_customer_service_escalation_scope": "atom(char_length(trim(hold_scope_ref))>0)",
+        "customer_service_escalations.chk_customer_service_escalation_actor": "atom(char_length(trim(actor_ref))>0)",
+        "customer_service_escalations.chk_customer_service_escalation_identities": "and(atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(correlation_id))>0))",
+        "customer_service_escalations.chk_customer_service_escalation_hold_state": "or(and(atom(workflow_status='resolved'),atom(automation_hold_state='released')),and(atom(workflow_status<>'resolved'),atom(automation_hold_state='active')))",
+        "customer_service_escalations.chk_customer_service_escalation_resolution": "or(atom(workflow_status<>'resolved'),and(atom(resolution_codeisnotnull),atom(resolution_evidence_digestisnotnull),atom(char_length(trim(resolution_code))>0),atom(regexp_like(resolution_evidence_digest,'^[0-9a-f]{64}$'))))",
+        "customer_service_escalation_events.chk_customer_service_escalation_event_versions": "and(atom(resulting_escalation_version>=expected_escalation_version),atom(resulting_hold_version>=expected_hold_version),or(atom(expected_ticket_versionisnull),atom(resulting_ticket_versionisnotnull)))",
+        "customer_service_escalation_events.chk_customer_service_escalation_event_actor": "atom(char_length(trim(actor_ref))>0)",
+        "customer_service_escalation_events.chk_customer_service_escalation_event_reason": "and(atom(char_length(trim(reason_code))>0),atom(regexp_like(reason_evidence_digest,'^[0-9a-f]{64}$')))",
+        "customer_service_escalation_events.chk_customer_service_escalation_event_identities": "and(atom(char_length(trim(receipt_id))>0),atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(correlation_id))>0))"
+      }
+    }
+  }
+}

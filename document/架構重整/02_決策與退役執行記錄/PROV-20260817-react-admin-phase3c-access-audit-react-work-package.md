@@ -1,15 +1,16 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: in-progress
 identity: PROV-20260817-react-admin-phase3c-access-audit-react
 date: 2026-08-17
 base_branch: main
-base_head: late-bound-at-approval
+base_head: 0641ed62d20a85289c82aa5a272b73feff715f59
 dirty_baseline: integration-owner-must-capture-before-writer
 base_drift_rule: any relevant path drift requires fresh read and re-freeze before edits
 owner: React Access Integration Owner
+authority: exact-human-approved-2026-08-22
 domain: Access / Security Audit
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-access-account-center-public-contract-hardening PASS; PROV-20260817-access-audit-public-query-hardening PASS
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-access-account-center-public-contract-hardening PASS; PROV-20260817-access-audit-public-query-hardening PASS
 approval_required: 核准此 exact Phase 3C Access Audit React Work Package
 evidence_directory: document/架構重整/03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3c-access-audit-react/
 required_receipts: candidate-change-inventory.md; contract-matrix-freeze-receipt.md; verification-receipt.md; browser-smoke-receipt.md; open-findings.md
@@ -18,6 +19,8 @@ ui_execution_mode: browser-required
 ---
 
 # Phase 3C Access Audit React工作包
+
+人工於2026-08-22批次核准本existing exact Work Package，保持原scope、write set與acceptance並依序施工。
 
 ## Scope與exact write set
 

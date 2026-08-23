@@ -36,6 +36,18 @@ class MySqlStaffRetirementRepository:
             effective_at = effective_at.replace(tzinfo=TAIPEI_TIME_ZONE)
         return StaffLifecycleFact(staff_id, StaffLifecycleState(str(row["lifecycle_state"])), int(row["aggregate_version"]), effective_at, row["reason_code"])
 
+    def load_lifecycle(
+        self, staff_ids: tuple[int, ...], *, for_update: bool = False
+    ) -> tuple[StaffLifecycleFact, ...]:
+        """Read canonical lifecycle facts in deterministic staff lock order."""
+
+        if staff_ids != tuple(sorted(set(staff_ids))) or any(
+            isinstance(staff_id, bool) or not isinstance(staff_id, int) or staff_id <= 0
+            for staff_id in staff_ids
+        ):
+            raise ValueError("staff_lifecycle_ids_not_canonical")
+        return tuple(self.load(staff_id, lock=for_update) for staff_id in staff_ids)
+
     def claim_command(self, request: StaffLifecycleApplyRequest, command_fingerprint: PreviewFingerprint) -> None:
         with self._connection.cursor() as cursor:
             cursor.execute("INSERT IGNORE INTO application_command_claims (idempotency_key,command_family,aggregate_identity,command_fingerprint,correlation_id) VALUES (%s,%s,%s,%s,%s)", (request.idempotency_key.value, "staff_lifecycle", str(request.staff_id), command_fingerprint.value, request.correlation_id.value))

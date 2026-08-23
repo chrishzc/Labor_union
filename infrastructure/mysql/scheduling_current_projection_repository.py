@@ -1,4 +1,7 @@
-"""MySQL read adapter for the current Scheduling projection."""
+"""
+File: scheduling_current_projection_repository.py
+Description: 從 MySQL 載入 current Scheduling assignment、全案首個服務日與占用根事實。
+"""
 
 from __future__ import annotations
 
@@ -89,16 +92,34 @@ def _assignments(cursor, rows):
     if not rows:
         return ()
     assignment_ids = tuple(int(row["assignment_id"]) for row in rows)
+    generation_ids = tuple(sorted({int(row["generation_id"]) for row in rows}))
     official_dates = _official_service_dates(cursor, assignment_ids)
     buffer_dates = _active_buffer_dates(cursor, assignment_ids)
+    case_first_service_dates = _case_first_service_dates(cursor, generation_ids)
     return tuple(
         _assignment_fact(
             row,
+            case_first_service_dates[int(row["generation_id"])],
             official_dates.get(int(row["assignment_id"]), ()),
             buffer_dates.get(int(row["assignment_id"]), ()),
         )
         for row in rows
     )
+
+
+def _case_first_service_dates(cursor, generation_ids):
+    cursor.execute(
+        _CASE_FIRST_SERVICE_SELECT_SQL.format(
+            placeholders=_placeholders(generation_ids)
+        ),
+        generation_ids,
+    )
+    return {
+        int(row["generation_id"]): _as_date(
+            row["first_service_date"], "case first service date"
+        )
+        for row in _mapping_rows(cursor.fetchall(), "case first service dates")
+    }
 
 
 def _official_service_dates(cursor, assignment_ids):
@@ -211,7 +232,7 @@ def _group_waiting_lock_dates(rows):
     return grouped
 
 
-def _assignment_fact(row, official_dates, buffer_dates):
+def _assignment_fact(row, case_first_service_date, official_dates, buffer_dates):
     service_time = _service_time_terms(row)
     return EffectiveAssignmentCurrentFact(
         int(row["assignment_id"]),
@@ -221,6 +242,7 @@ def _assignment_fact(row, official_dates, buffer_dates):
         int(row["staff_id"]),
         _as_date(row["assigned_start_date"], "assigned start date"),
         _as_date(row["assigned_end_date"], "assigned end date"),
+        case_first_service_date,
         official_dates,
         buffer_dates,
         int(row["service_hours_per_day"]),
@@ -314,6 +336,13 @@ _SCHEDULE_SELECT_SQL = (
     "WHERE assignment_id IN ({placeholders}) "
     "AND effective_marker=1 AND is_work_day=1 "
     "ORDER BY assignment_id,work_date"
+)
+_CASE_FIRST_SERVICE_SELECT_SQL = (
+    "SELECT a.generation_id,MIN(ss.work_date) AS first_service_date "
+    "FROM case_staff_assignments a JOIN staff_schedule ss "
+    "ON ss.assignment_id=a.id AND ss.effective_marker=1 AND ss.is_work_day=1 "
+    "WHERE a.generation_id IN ({placeholders}) GROUP BY a.generation_id "
+    "ORDER BY a.generation_id"
 )
 _BUFFER_SELECT_SQL = (
     "SELECT assignment_id,buffer_date FROM scheduling_buffer_days "

@@ -14,6 +14,12 @@
 | [UI 真實業務流程測試資料與驗收主計畫](UI真實業務流程測試資料與驗收主計畫.md) | `approved-planning` | 各 Part 個別完成規格與人工 activation gate。 |
 | [Part 00 全域測試資料治理與 Scenario 契約](Part_00_全域測試資料治理與Scenario契約.md) | `proposed` | 人工確認 Part 00 後才可建立執行 Work Package。 |
 | [React 管理端遷移與 UI 真實業務流程驗收](React管理端遷移與UI真實業務流程驗收計畫.md) | `proposed` | 已確認三項 Orders SOP 業務裁決；仍待確認整體架構與第一包 Access＋System Status exact write set。 |
+| [LINE_運營與智能管理中心視覺化工作台規範](LINE_運營與智能管理中心視覺化工作台規範.md) | `unspecified / review` | 設計成果文件未聲明治理 status；先與正式 17／20／23、React entry registry及owner/SSOT對齊，非正式規格或實作授權。 |
+| [LINE_LIFF_工會手機管理中心規範](LINE_LIFF_工會手機管理中心規範.md) | `approved (self-declared; current conflict/review)` | 文件自稱 approved，但未見對應人工裁決；`alert_group_id`、staff／alert／handoff範圍須與正式規格及現有 schema/owner 重新確認。 |
+| [LINE_LIFF_身分先行與服務登記導流規劃](LINE_LIFF_身分先行與服務登記導流規劃.md) | `proposed` | 只作 onboarding 候選計畫；須先對齊正式 LINE identity／Customer Service owner與binding SSOT，未授權直接寫入或導流。 |
+| [LINE_LIFF_舊客快速身分綁定與防冒領規範](LINE_LIFF_舊客快速身分綁定與防冒領規範.md) | `approved (self-declared; current conflict/review)` | 文件自稱 approved，但其直接 `clients.line_user_id`／role promotion 語意與正式 23 binding SSOT不一致；人工裁決前不得升格或施工。 |
+| [LINE_QA客服知識契約收斂計畫](LINE_QA客服知識契約收斂計畫.md) | `blocked` | `load_workspace_dependencies`／`@oai/artifact-tool` runtime unavailable；Excel 僅 input evidence、非 SSOT，loader 恢復及人工 owner/category/source/approved-answer review 前不得升格或授權 production／AI／provider／DB。 |
+| [LINE 四大模組流程驗收與實作收斂計畫](LINE_四大模組流程驗收與實作收斂計畫.md) | `approved-for-specification-freeze` | M1–M4 specification／Work Package 已凍結；LIFF sandbox E2E、implementation、schema／DB、provider 與 external-side-effect gates 仍未授權。 |
 
 ## 已完成或被取代的計畫
 

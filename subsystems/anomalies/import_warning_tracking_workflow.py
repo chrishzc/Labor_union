@@ -53,6 +53,17 @@ class WarningTransitionPreview:
 
 
 @dataclass(frozen=True, slots=True)
+class WarningTransitionReceipt:
+    occurrence_identity: str
+    before_status: ImportWarningTrackingStatus
+    after_status: ImportWarningTrackingStatus
+    resulting_version: int
+    receipt_identity: str
+    correlation_id: str
+    replayed: bool
+
+
+@dataclass(frozen=True, slots=True)
 class WarningReferralDescriptor:
     """UI-neutral, privacy-safe context for entering an owning workflow."""
 
@@ -76,14 +87,16 @@ class ImportWarningTrackingRepository(Protocol):
     def replay(
         self,
         request: WarningTransitionRequest,
-    ) -> WarningTransitionPreview | None: ...
+    ) -> WarningTransitionReceipt | None: ...
 
     def apply_transition(
         self,
         task: ImportWarningTask,
         request: WarningTransitionRequest,
         preview: WarningTransitionPreview,
-    ) -> WarningTransitionPreview: ...
+    ) -> WarningTransitionReceipt: ...
+
+    def lookup_receipt(self, receipt_identity: str) -> WarningTransitionReceipt | None: ...
 
 
 class ImportWarningTrackingApplication:
@@ -137,18 +150,24 @@ class ImportWarningTrackingApplication:
             target_command=target_command,
         )
 
-    def apply(self, request: WarningTransitionRequest) -> WarningTransitionPreview:
-        replay = self._repository.replay(request)
-        if replay is not None:
-            return replay
+    def apply(self, request: WarningTransitionRequest) -> WarningTransitionReceipt:
         with self._unit_of_work_factory() as unit_of_work:
             replay = self._repository.replay(request)
             if replay is not None:
                 return replay
             task = self._require_task(request.occurrence_identity, for_update=True)
+            replay = self._repository.replay(request)
+            if replay is not None:
+                return replay
             preview = self._preview(task, request)
             receipt = self._repository.apply_transition(task, request, preview)
             unit_of_work.commit()
+        return receipt
+
+    def query_receipt(self, receipt_identity: str) -> WarningTransitionReceipt:
+        receipt = self._repository.lookup_receipt(receipt_identity)
+        if receipt is None:
+            raise ValueError("import_warning_receipt_not_found")
         return receipt
 
     def _require_task(self, occurrence_identity: str, *, for_update: bool) -> ImportWarningTask:
@@ -309,6 +328,7 @@ __all__ = [
     "ImportWarningTrackingApplication",
     "ImportWarningTrackingRepository",
     "WarningTransitionPreview",
+    "WarningTransitionReceipt",
     "WarningTransitionRequest",
     "WarningReferralDescriptor",
     "_display_message",

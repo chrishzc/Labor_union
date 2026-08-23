@@ -16,11 +16,57 @@ describe('scheduling current adapter', () => {
     const row = adaptSchedulingProjection(staff, SCHEDULING_PROJECTION_READY);
 
     expect(row.displayName).toBe('去敏人員甲');
-    expect(row.days.map((day) => day.tone)).toEqual(['active', 'buffer', 'available']);
+    expect(row.days.map((day) => day.tone)).toEqual(['active', 'rest', 'available']);
     expect(row.days[0].caseLabels).toEqual(['CASE-SCH-001']);
     expect(row.projectionToken).toBe('a'.repeat(64));
     expect(matchesSchedulingFilter(row, 'active')).toBe(true);
     expect(matchesSchedulingFilter(row, 'waiting')).toBe(false);
     expect(matchesSchedulingFilter(row, 'leave')).toBe(false);
+  });
+
+  it('preserves server lifecycle status instead of labeling completed service as active', () => {
+    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null });
+    const completedProjection = {
+      ...SCHEDULING_PROJECTION_READY,
+      assignments: SCHEDULING_PROJECTION_READY.assignments.map((assignment) => ({
+        ...assignment,
+        status: 'completed' as const,
+      })),
+      days: SCHEDULING_PROJECTION_READY.days.map((day) => ({
+        ...day,
+        entries: day.entries
+          .filter((entry) => entry.occupancy_kind !== 'assignment_buffer')
+          .map((entry) => ({ ...entry, assignment_status: 'completed' as const })),
+        available: day.entries.every((entry) => entry.occupancy_kind === 'assignment_buffer')
+          ? true
+          : day.available,
+      })),
+    };
+
+    const row = adaptSchedulingProjection(staff, completedProjection);
+
+    expect(row.assignmentStatuses).toEqual(['completed']);
+    expect(row.days[0].statusLabel).toBe('服務已結束');
+    expect(matchesSchedulingFilter(row, 'active')).toBe(false);
+  });
+
+  it('includes assignment buffer occupancy in the waiting filter', () => {
+    const staff = adaptStaffDirectorySummary({ id: 11, name: '去敏人員甲', phone: null });
+    const bufferProjection = {
+      ...SCHEDULING_PROJECTION_READY,
+      days: SCHEDULING_PROJECTION_READY.days.map((day, index) => index === 0 ? {
+        ...day,
+        entries: day.entries.map((entry) => ({
+          ...entry,
+          occupancy_kind: 'assignment_buffer' as const,
+          assignment_status: 'planned' as const,
+        })),
+      } : day),
+    };
+
+    const row = adaptSchedulingProjection(staff, bufferProjection);
+
+    expect(row.occupancyKinds).toContain('assignment_buffer');
+    expect(matchesSchedulingFilter(row, 'waiting')).toBe(true);
   });
 });

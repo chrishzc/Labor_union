@@ -1,0 +1,19 @@
+/**
+ * File: SystemStatusPage.css
+ * Description: 定義 System Status 唯讀快照、查詢狀態與可及性樣式。
+ */
+.system-status-page-header { display:flex; align-items:center; justify-content:space-between; gap:var(--space-4); }
+.system-status-reload-button,.system-status-error button { padding:9px 14px; border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-md); background:var(--md-sys-color-surface-container-high); color:var(--md-sys-color-on-surface); font-weight:700; cursor:pointer; }
+.system-status-reload-button:disabled { cursor:not-allowed; opacity:.64; }
+.system-status-state,.system-status-snapshot { margin-top:var(--space-5); padding:var(--space-6); border:1px solid var(--md-sys-color-outline); border-radius:var(--radius-lg); background:var(--md-sys-color-surface-container); box-shadow:var(--shadow-sm); }
+.system-status-state { display:flex; align-items:center; gap:var(--space-3); color:var(--md-sys-color-on-surface-variant); }
+.system-status-error { border-color:var(--md-sys-color-error); background:var(--md-sys-color-error-container); color:#7f1d1d; flex-wrap:wrap; }
+.system-status-error strong { flex-basis:100%; }
+.system-status-error button { margin-left:auto; background:var(--md-sys-color-surface); color:var(--md-sys-color-on-surface); }
+.system-status-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:var(--space-4); margin:0; }
+.system-status-metrics>div { min-width:0; padding:var(--space-4); border:1px solid var(--md-sys-color-outline-variant); border-radius:var(--radius-md); background:var(--md-sys-color-surface); }
+.system-status-metrics dt { color:var(--md-sys-color-on-surface-variant); font-size:.82rem; font-weight:700; }
+.system-status-metrics dd { margin:var(--space-2) 0 0; overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.system-status-reload-button:focus-visible,.system-status-error button:focus-visible { outline:3px solid var(--md-sys-color-primary); outline-offset:2px; }
+@media(max-width:760px){.system-status-page-header{align-items:stretch;flex-direction:column}.system-status-state,.system-status-snapshot{padding:var(--space-4)}.system-status-metrics{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.system-status-metrics{grid-template-columns:1fr}}

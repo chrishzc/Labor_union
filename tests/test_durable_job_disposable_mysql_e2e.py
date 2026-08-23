@@ -1,97 +1,154 @@
-"""Durable job lifecycle proof that preserves records in the test database."""
+"""
+File: test_durable_job_disposable_mysql_e2e.py
+Description: 以唯一 lu_test DB 驗證 claim 後 crash-resume 不虛構 success 且可安全完成 closed outcome。
+"""
 
 from __future__ import annotations
 
 import os
-from uuid import uuid4
+import uuid
+from pathlib import Path
 
+import pymysql
 import pytest
 
-from infrastructure.mysql.background_job_repository import (
-    BackgroundJobRepository,
-    JobIdempotencyConflict,
-)
-from infrastructure.mysql.mysql_adapter import get_connection
-from shared_kernel.durable_job_queue import DurableJobCommand, DurableJobStateConflict
+from infrastructure.mysql.background_job_repository import BackgroundJobRepository
+from shared_kernel.durable_job_queue import DurableJobCommand
+from subsystems.jobs.durable_job_worker import DurableJobWorker
 
 
-DATABASE = os.getenv("LABOR_UNION_TEST_MYSQL_DATABASE")
-pytestmark = pytest.mark.skipif(
-    not DATABASE or os.getenv("DB_DATABASE") != DATABASE,
-    reason="requires an explicitly configured disposable lu_test_* MySQL database",
-)
+pytestmark = pytest.mark.integration
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_durable_job_retries_once_and_persists_one_receipt():
-    repository, connection = _repository()
-    try:
-        command = _command("retry")
-        assert repository.enqueue_command(command) == command.job_id
-        with pytest.raises(JobIdempotencyConflict) as duplicate:
-            repository.enqueue_command(command)
-        assert duplicate.value.job_id == command.job_id
-
-        first_lease = repository.claim_next_command("verification-worker-a", 60)
-        assert first_lease is not None
-        assert first_lease.command.job_id == command.job_id
-        repository.fail_claimed_job(
-            first_lease,
-            {"error": {"code": "temporary_unavailable"}},
-            retry_after_seconds=0,
-        )
-        second_lease = repository.claim_next_command("verification-worker-b", 60)
-        assert second_lease is not None
-        assert second_lease.command.job_id == command.job_id
-        assert second_lease.attempt_count == 2
-        repository.complete_claimed_job(
-            second_lease,
-            {"result": "verified"},
-            "verification-receipt",
-        )
-
-        stored = repository.get_job(command.job_id)
-        assert stored is not None
-        assert stored.status == "succeeded"
-        assert stored.receipt_payload == {"result": "verified"}
-        assert stored.result_reference == "verification-receipt"
-    finally:
-        connection.close()
-
-
-def test_durable_job_cancellation_rejects_a_claimed_command():
-    repository, connection = _repository()
-    try:
-        command = _command("cancel")
-        repository.enqueue_command(command)
-        repository.cancel_queued_job(command.job_id)
-        assert repository.get_job(command.job_id).status == "cancelled"
-
-        claimed_command = _command("claimed-cancel")
-        repository.enqueue_command(claimed_command)
-        lease = repository.claim_next_command("verification-worker-c", 60)
-        assert lease is not None
-        assert lease.command.job_id == claimed_command.job_id
-        with pytest.raises(DurableJobStateConflict):
-            repository.cancel_queued_job(claimed_command.job_id)
-        repository.fail_claimed_job(lease, {"error": {"code": "test_cleanup"}})
-    finally:
-        connection.close()
-
-
-def _repository() -> tuple[BackgroundJobRepository, object]:
-    connection = get_connection()
-    return BackgroundJobRepository(connection), connection
-
-
-def _command(label: str) -> DurableJobCommand:
-    identity = f"verification-job-{label}-{uuid4().hex}"
-    return DurableJobCommand(
-        job_id=identity,
-        command_identity=identity,
-        command_type="verification.durable_job",
-        command_version=1,
-        payload={"label": label},
-        submitted_by="verification-runner",
-        correlation_id=identity,
-        max_attempts=2,
+def _create_queue_database(database: str) -> None:
+    connection = pymysql.connect(
+        host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        user=os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+        password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+        charset="utf8mb4",
     )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(f"CREATE DATABASE `{database}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+            cursor.execute(f"USE `{database}`")
+            for relative_path in ("db/schema_parts/137_background_jobs.sql", "db/schema_parts/141_durable_background_job_queue.sql"):
+                sql = (PROJECT_ROOT / relative_path).read_text(encoding="utf-8")
+                for statement in (part.strip() for part in sql.split(";") if part.strip()):
+                    cursor.execute(statement)
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def _connect_queue_database(database: str):
+    return pymysql.connect(
+        host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+        port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+        user=os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+        password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+        database=database,
+        charset="utf8mb4",
+        cursorclass=pymysql.cursors.DictCursor,
+    )
+
+
+@pytest.fixture(scope="module")
+def lifecycle_database():
+    required = (
+        "LABOR_UNION_TEST_MYSQL_HOST",
+        "LABOR_UNION_TEST_MYSQL_PORT",
+        "LABOR_UNION_TEST_MYSQL_USER",
+        "LABOR_UNION_TEST_MYSQL_PASSWORD",
+    )
+    missing = [name for name in required if os.environ.get(name) is None]
+    assert not missing, "BLOCKED_ENGINE_EVIDENCE: missing " + ",".join(missing)
+    database = "lu_test_durable_lifecycle_" + uuid.uuid4().hex[:12]
+    previous_database = os.environ.get("DB_DATABASE")
+    os.environ["DB_DATABASE"] = database
+    _create_queue_database(database)
+    try:
+        yield database
+    finally:
+        connection = pymysql.connect(
+            host=os.environ["LABOR_UNION_TEST_MYSQL_HOST"],
+            port=int(os.environ["LABOR_UNION_TEST_MYSQL_PORT"]),
+            user=os.environ["LABOR_UNION_TEST_MYSQL_USER"],
+            password=os.environ["LABOR_UNION_TEST_MYSQL_PASSWORD"],
+            charset="utf8mb4",
+        )
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(f"DROP DATABASE `{database}`")
+            connection.commit()
+        finally:
+            connection.close()
+        if previous_database is None:
+            os.environ.pop("DB_DATABASE", None)
+        else:
+            os.environ["DB_DATABASE"] = previous_database
+
+
+def test_claim_commit_then_crash_keeps_running_without_receipt_until_recovery(
+    lifecycle_database,
+) -> None:
+    identity = "job.crash." + uuid.uuid4().hex
+    command = DurableJobCommand(
+        "job-" + uuid.uuid4().hex,
+        identity,
+        "test.crash.resume",
+        1,
+        {"case": "synthetic"},
+        "system:durable-crash-test",
+        "corr-" + uuid.uuid4().hex,
+        2,
+    )
+    first_connection = _connect_queue_database(lifecycle_database)
+    first_repository = BackgroundJobRepository(first_connection)
+    try:
+        first_connection.begin()
+        first_repository.enqueue_canonical_command(command)
+        first_connection.commit()
+        first_connection.begin()
+        lease = first_repository.claim_next_canonical_command("worker-before-crash", 60)
+        first_connection.commit()
+        assert lease is not None
+        observed = first_repository.get_job(command.job_id)
+        assert observed is not None
+        assert observed.status == "running"
+        assert observed.receipt_payload is None
+        assert observed.error_payload is None
+    finally:
+        first_connection.close()
+
+    recovery_connection = _connect_queue_database(lifecycle_database)
+    recovery_repository = BackgroundJobRepository(recovery_connection)
+    calls = []
+    try:
+        with recovery_connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE background_jobs SET lease_expires_at = DATE_SUB(CURRENT_TIMESTAMP(6), INTERVAL 1 SECOND) "
+                "WHERE job_id = %s",
+                (command.job_id,),
+            )
+        recovery_connection.commit()
+        worker = DurableJobWorker(
+            recovery_repository,
+            recovery_connection,
+            {"test.crash.resume": lambda payload: calls.append(payload) or ({"raw": "ignored"}, "result:recovered")},
+            "worker-after-crash",
+            retry_delay_seconds=0,
+        )
+        assert worker.recover_and_run_once() is True
+        assert calls == [{"case": "synthetic"}]
+        stored = recovery_repository.get_job(command.job_id)
+        assert stored is not None and stored.status == "succeeded"
+        assert stored.receipt_payload == {
+            "kind": "success",
+            "result_reference": "result:recovered",
+            "schema_version": 1,
+        }
+        assert "raw" not in str(stored.receipt_payload)
+    finally:
+        recovery_connection.close()

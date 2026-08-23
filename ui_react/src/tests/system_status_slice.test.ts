@@ -10,16 +10,32 @@ import {
   SYSTEM_STATUS_ENDPOINT,
 } from '../api/system/system_status_client';
 import { MasterLayout } from '../components/MasterLayout';
+import { sessionClient } from '../api/auth/session_client';
+
+function authenticate(): void {
+  sessionClient.setSession('system-status-slice-token', {
+    id: 1,
+    username: 'system-status-admin',
+    display_name: '系統狀態管理員',
+    role: 'system_admin',
+    capabilities: ['system.administration'],
+    is_root: true,
+    access_control_version: 1,
+  });
+}
 
 describe('System Status Vertical Slice & MasterLayout Indicator', () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    sessionClient.clearSession();
+    authenticate();
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    sessionClient.clearSession();
   });
 
   it('fetchPerformanceSnapshot 應符合後端 PerformanceSnapshot 合約規範', async () => {

@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/admin/capability-grants/{admin_user_id}",
+  "method": "GET",
+  "path_template": "/api/v1/admin/capability-grants/{admin_user_id}",
+  "fingerprint": "0360919b",
+  "case_id": "Ivvj0P",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/admin/capability-grants/1",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/admin/capability-grants/1",
+      "url_template": "http://127.0.0.1:8765/api/v1/admin/capability-grants/{admin_user_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "Ivvj0P"
+      },
+      "response": {
+        "status_code": 410,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:11:38 GMT",
+          "server": "uvicorn",
+          "content-length": "246",
+          "content-type": "application/json",
+          "server-timing": "application;dur=5.0",
+          "x-response-time-ms": "5.0",
+          "x-correlation-id": "50fe7b37e51946d3a86eb3b38e0b9a0a"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"not_found\",\"code\":\"resource_retired\",\"message\":\"\u8981\u6c42\u7684\u8cc7\u6e90\u5df2\u505c\u6b62\u63d0\u4f9b\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"50fe7b37e51946d3a86eb3b38e0b9a0a\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 410\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.007356000016443431,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/admin/capability-grants/{admin_user_id}",
+      "path_parameters": {
+        "admin_user_id": 1
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

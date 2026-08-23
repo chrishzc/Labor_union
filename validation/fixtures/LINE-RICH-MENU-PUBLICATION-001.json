@@ -1,0 +1,29 @@
+{
+  "contract": "labor-union-verification-fixture/v1",
+  "scenario_id": "LINE-RICH-MENU-PUBLICATION-001",
+  "revision": 1,
+  "test_kind": "external_input_fixture",
+  "data_classification": "synthetic",
+  "generation_method": "hand-authored fixed menu and fake step outcomes; no production export",
+  "allowed_use": "validation-only",
+  "redaction_policy": "synthetic menu and publication keys only; no recipients, credentials or raw responses",
+  "root_inputs": ["synthetic menu definition", "configuration revision", "preview fingerprint", "fake step outcomes"],
+  "input_values": {
+    "menu_definition": {"menu_key": "MENU-SYN-01", "audience": "internal-test", "layout_revision": 3},
+    "configuration_revision": 5,
+    "preview_fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "apply_command": {"expected_revision": 5, "idempotency_key": "RM-SYN-APPLY-01", "correlation_id": "RM-SYN-CORR-01", "reason": "驗證選單發布流程"},
+    "step_plan": [
+      {"step": "create", "planned_outcome": "acknowledged"},
+      {"step": "upload", "planned_outcome": "lost_ack_then_acknowledged"},
+      {"step": "link", "planned_outcome": "acknowledged"},
+      {"step": "switch", "planned_outcome": "acknowledged"},
+      {"step": "cleanup", "planned_outcome": "operational_failure"}
+    ]
+  },
+  "seed_fields": ["menu_definition", "configuration_revision", "preview_fingerprint", "apply_command", "step_plan"],
+  "derived_fields": ["queue_receipt", "step_receipts", "publication_status", "cleanup_anomaly"],
+  "expected_manifest_path": "validation/expected/phase4/react_admin_rich_menu_publication.json",
+  "fixed_business_clock": "2026-08-20T10:00:00+08:00",
+  "forbidden_direct_seed": ["published state", "provider acknowledgement", "cleanup anomaly", "browser result"]
+}

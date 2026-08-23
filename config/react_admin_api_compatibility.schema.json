@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://labor-union.local/schemas/react_admin_api_compatibility.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract",
+    "registry_revision",
+    "family",
+    "active_revision",
+    "accepted_revisions",
+    "revisions",
+    "registry_digest"
+  ],
+  "properties": {
+    "contract": {"const": "react-admin-api-compatibility/v1"},
+    "registry_revision": {"$ref": "#/$defs/slug"},
+    "family": {"const": "react-admin-api"},
+    "active_revision": {"$ref": "#/$defs/slug"},
+    "accepted_revisions": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/slug"}
+    },
+    "revisions": {
+      "type": "object",
+      "minProperties": 1,
+      "propertyNames": {"$ref": "#/$defs/slug"},
+      "additionalProperties": {"$ref": "#/$defs/revision"}
+    },
+    "registry_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,95}$"
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "revision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {"enum": ["active", "accepted", "closed"]}
+      }
+    }
+  }
+}

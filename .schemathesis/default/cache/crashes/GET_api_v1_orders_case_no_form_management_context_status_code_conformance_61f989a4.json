@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/orders/{case_no}/form-management-context",
+  "method": "GET",
+  "path_template": "/api/v1/orders/{case_no}/form-management-context",
+  "fingerprint": "61f989a4",
+  "case_id": "54WTlZ",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/orders/0/form-management-context",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/orders/0/form-management-context",
+      "url_template": "http://127.0.0.1:8821/api/v1/orders/{case_no}/form-management-context",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "54WTlZ"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:48 GMT",
+          "server": "uvicorn",
+          "content-length": "260",
+          "content-type": "application/json",
+          "server-timing": "application;dur=67.8",
+          "x-response-time-ms": "67.8",
+          "x-correlation-id": "ebfda07660b44a4995ffded8d05dab65"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"not_found\",\"code\":\"form_management_case_not_found\",\"message\":\"\u8868\u55ae\u6848\u4ef6\u8cc7\u6599\u4e0d\u5b58\u5728\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"ebfda07660b44a4995ffded8d05dab65\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.003715400001965463,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/orders/{case_no}/form-management-context",
+      "path_parameters": {
+        "case_no": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

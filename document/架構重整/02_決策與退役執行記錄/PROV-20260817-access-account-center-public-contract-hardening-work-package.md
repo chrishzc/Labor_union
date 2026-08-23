@@ -1,14 +1,15 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: in-progress
 identity: PROV-20260817-access-account-center-public-contract-hardening
 date: 2026-08-17
 base_branch: main
-base_head: late-bound-at-approval
+base_head: 0641ed62d20a85289c82aa5a272b73feff715f59
 dirty_baseline: integration-owner-must-capture-before-writer
 base_drift_rule: any relevant path drift requires fresh read and re-freeze before edits
 owner: Access Control
 domain: Access
+authority: exact-human-approved-2026-08-22
 approval_required: 核准此 exact Access Account Center Public Contract Work Package
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
 ui_execution_mode: browser-required
@@ -16,6 +17,8 @@ prerequisites: PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-2026
 ---
 
 # Access Account Center public contract／React接線工作包
+
+人工於2026-08-22批次核准本existing exact Work Package，保持原scope、write set與acceptance並依序施工。
 
 ## Business boundary
 

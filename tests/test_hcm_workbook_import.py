@@ -1,12 +1,12 @@
 """
 File: test_hcm_workbook_import.py
-Description: 驗證 HCM workbook command receipt 的 replay 與 conflict 邊界。
+Description: 驗證HCM workbook receipt依identity或摘要replay及conflict邊界。
 """
 
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -30,6 +30,9 @@ class _Repository:
 
     def load_receipt(self, key):
         return self.receipts.get(key)
+
+    def load_receipt_by_digest(self, digest):
+        return next((receipt for receipt in self.receipts.values() if receipt["request_fingerprint"] == digest), None)
 
     def claim(self, key, digest, correlation_id):
         existing = self.claims.get(key)
@@ -114,6 +117,21 @@ def test_same_key_and_digest_returns_terminal_workbook_receipt(tmp_path):
     assert replay.replayed_workbook is True
     assert repository.intake_calls == 1
     assert repository.locked == []
+
+
+def test_same_digest_with_a_new_key_returns_the_existing_terminal_receipt(tmp_path):
+    workbook = tmp_path / "hcm.xlsx"
+    workbook.write_bytes(b"same workbook new key")
+    repository = _Repository()
+    service = HcmWorkbookImportService(repository, _Intake(repository))
+
+    first = service.ingest(pd.DataFrame({"案件": ["A"]}), str(workbook), "key-1", "operator", "corr-1")
+    replay = service.ingest(pd.DataFrame({"案件": ["A"]}), str(workbook), "key-2", "operator", "corr-2")
+
+    assert first.replayed_workbook is False
+    assert replay.replayed_workbook is True
+    assert repository.intake_calls == 1
+    assert "key-2" not in repository.claims
 
 
 def test_preview_is_zero_write_and_apply_requires_matching_fingerprint(tmp_path):
@@ -242,3 +260,5 @@ def test_recent_results_keep_legacy_receipt_membership_unavailable(tmp_path):
     assert page.items[0].receipt.legacy_summary_only is True
     assert page.items[0].receipt.row_outcomes_available is False
     assert page.items[0].receipt.row_outcomes == ()
+    assert page.items[0].completed_at.utcoffset() == timedelta(hours=8)
+    assert page.items[0].completed_at.isoformat().endswith("+08:00")

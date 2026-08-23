@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from api.dependencies.internal_service_auth import (
     InternalServicePrincipal,
@@ -10,6 +10,7 @@ from api.dependencies.internal_service_auth import (
     require_operation_service,
 )
 from api.dependencies.private_operations import (
+    inspect_react_admin_artifact_health,
     inspect_runtime_readiness,
     record_monitor_cycle,
     run_durable_job_cycle,
@@ -22,6 +23,7 @@ from api.schemas.private_operations import (
     DurableWorkerCycleRequest,
     MonitorCycleRequest,
     MonitorCycleResponse,
+    ReactAdminArtifactHealthResponse,
     RuntimeReadinessItem,
     RuntimeReadinessResponse,
     WorkerCycleRequest,
@@ -35,6 +37,25 @@ router = APIRouter(
     tags=["Private Runtime Operations"],
     include_in_schema=False,
 )
+
+
+@router.get(
+    "/react-admin/artifact-health",
+    response_model=BaseResponse[ReactAdminArtifactHealthResponse],
+)
+def react_admin_artifact_health(
+    request: Request,
+    _: InternalServicePrincipal = Depends(require_internal_service),
+) -> BaseResponse[ReactAdminArtifactHealthResponse]:
+    try:
+        health = ReactAdminArtifactHealthResponse.model_validate(
+            inspect_react_admin_artifact_health(request)
+        )
+    except Exception as error:
+        raise _operation_unavailable(
+            "react_admin_artifact_health_unavailable", error
+        ) from error
+    return BaseResponse(data=health)
 
 
 @router.post("/check", response_model=BaseResponse[dict[str, str]])

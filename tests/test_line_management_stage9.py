@@ -1,4 +1,7 @@
-"""Stage 9 thin-UI, capability, transport, and architecture boundary tests."""
+"""
+File: test_line_management_stage9.py
+Description: 驗證 Stage 9 薄 UI、能力、傳輸與架構邊界。
+"""
 
 from __future__ import annotations
 
@@ -14,6 +17,7 @@ from ui.components import line_ui_support
 from ui.components.knowledge_management import _allowed_action
 from ui.components.line_order_group_manager import _group_rows
 from ui.components.line_runtime_manager import _details_summary
+from ui.components.line_task_manager import _delivery_query_filters
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +30,8 @@ class _Transport:
     def request(self, method, path, **kwargs):
         call = {"method": method, "path": path, **kwargs}
         self.calls.append(call)
+        if path == "/api/v1/runtime/health-status":
+            return []
         return call
 
 
@@ -96,6 +102,27 @@ def test_line_task_client_forwards_stable_operation_identity(monkeypatch) -> Non
     assert captured["headers"]["Authorization"] == "Bearer session-token"
     assert captured["json"]["idempotency_key"] == "idem-task"
     assert captured["json"]["correlation_id"] == "corr-task"
+
+
+def test_line_task_query_uses_only_safe_source_filters() -> None:
+    rich_menu = _delivery_query_filters("sent", "rich_menu_link", False, 3)
+    onboarding = _delivery_query_filters(None, "general_push", True, 2)
+
+    assert rich_menu == {
+        "status": "sent",
+        "source_type": "rich_menu_link",
+        "page": 3,
+        "page_size": 25,
+    }
+    assert onboarding == {
+        "status": None,
+        "source_type": "follow_schedule",
+        "page": 2,
+        "page_size": 25,
+    }
+    assert "user_id" not in rich_menu
+    assert "task_type" not in rich_menu
+    assert "onboarding_only" not in onboarding
 
 
 def test_rich_menu_client_reads_and_writes_canonical_configuration(monkeypatch) -> None:

@@ -107,6 +107,34 @@ claim 使用 row lock／version；他人已認領回 conflict。resolve 必須�
 
 API 回傳 typed summary、detail 與 allowed actions。財務 occurrence 與 current reminder 可同頁顯示，但不能共用同一 status 語意。
 
+#### Public detail／recovery boundary（2026-08-22，Phase 3D-H）
+
+- `display_snapshot`、occurrence evidence、workflow timeline、action source bindings 與 recovery root snapshot
+  必須輸出 closed typed variants；raw mapping 不得穿越 `/api/v1/anomalies` 或
+  `/api/v1/anomaly-recovery` public boundary。
+- definition-owned `display_fields` 是公開 evidence allowlist。缺欄、額外欄位、未知 evidence kind、
+  非正整數 numeric identity、非法 ISO date、未知 action／schema version 固定回
+  `anomaly_projection_data_integrity_violation`，且 Query 保持零寫入。
+- server-owned identity／version 必須保留為穩定公開值；姓名等 PII 只輸出去敏 variant，private navigation
+  payload 與 internal recovery bindings 不得混入 display fields。
+- recovery action 只公開 owning Domain Preview／Apply metadata、required inputs、capability、completion
+  predicate 與完整 typed source bindings；Anomalies route 不執行 repair，也不得把人工 resolve 描述為根事實已修正。
+
+#### React detail／recovery read-only boundary（2026-08-22，Phase 3D-R）
+
+- React Anomalies Drawer 只能透過 bounded typed GET client 取得 detail、timeline、evidence 與 recovery
+  context；client、schema、adapter 與 page 不得接收 raw dict、拼接 endpoint 或由 definition code 推導業務欄位。
+- `anomalies.drawer.detail`、`anomalies.drawer.timeline`、`anomalies.drawer.evidence`、`.root-evidence` 與
+  `.recovery` 是穩定唯讀 surfaces；`anomalies.card.claim`、`anomalies.drawer.resolve` 及 warning transition
+  必須原生 disabled，不能以 loading、recovery metadata 或人工 resolve 文案冒充根事實已修復。
+- detail／recovery 任一 GET 失敗、404、timeout、abort、stale response 或 schema mismatch，只能在對應
+  Drawer 區塊顯示 typed unavailable／error；不得清空仍有效的摘要、跨 Drawer 污染狀態，或發出 POST／PUT／
+  PATCH／DELETE。Detail 成功與 recovery 失敗是可並存的 partial-failure 結果。
+- recovery positive result 未取得前，UI 不得顯示 repair receipt、完成 predicate 消失或「已修復」；recovery
+  404 只代表目前 context unavailable，不改變 Anomalies root、workflow 或 owning Domain 狀態。
+- Browser 驗收必須以真 FastAPI＋Vite Network↔DOM 證據確認 typed detail redaction 與局部 unavailable；
+  Happy DOM、mock-only、單一 HTTP 200 或 component fixture 不足以證明 recovery positive path。
+
 ### Human-assisted Recovery
 
 異常中心必須讓人員完成「看懂 → 確認 → 操作」，但不直接修改任何 source Domain：
@@ -260,6 +288,17 @@ Projector 失敗可 retry，不回滾來源 Domain。claim／resolve 是獨立�
 append tracking event、更新 current projection、寫 receipt 與 outbox 後一次 commit。owning Domain mutation 不得加入
 這個 tracking transaction；其成功提交後由 committed outbox 或同一 owning transaction 內的 predicate result 驅動 rescan。
 
+Preview固定零寫入；Apply回獨立terminal receipt，含occurrence identity、before/after status、resulting
+version、receipt identity、原始correlation與replayed flag，不回PII、note或raw evidence。receipt identity沿用
+immutable tracking event identity，同key／同payload回同一receipt並標示replayed；同key／異payload回conflict。已認證
+receipt query用於commit結果不明時重查，unknown與malformed receipt必須fail closed。
+
+React presentation必須以strict typed client接續上述狀態機；編輯會使Preview失效，Apply timeout／network／retryable
+503只可保留原payload與同一idempotency key進`outcome_unknown`，receipt觀察失敗則保留已收到receipt。只有authenticated
+receipt re-query的occurrence、before/after status、resulting version、receipt identity與correlation一致才可顯示tracking
+disposition完成。Apply／unknown／re-query期間輸入、分頁與Drawer close均原生鎖定；此完成語意不等於來源根事實修復、
+重新匯入或Anomaly Claim／Resolve。
+
 ## 5. 驗收
 
 - fingerprint 穩定、duplicate event 不重複。
@@ -297,6 +336,7 @@ Commands：
 - `QueryImportWarnings`
 - `PreviewImportWarningTransition`
 - `ApplyImportWarningTransition`
+- `QueryImportWarningTransitionReceipt`
 - `AssociateImportResubmission`
 
 Results 分開回傳 source facts、workflow state、domain blocker、severity、timeline、
@@ -314,6 +354,9 @@ Stable errors：
 - `anomaly_projection_stale`
 - `anomaly_projection_data_integrity_violation`
 - `import_warning_transition_not_allowed`
+- `import_warning_idempotency_mismatch`
+- `import_warning_receipt_not_found`
+- `import_warning_receipt_invalid`
 - `import_warning_resubmission_association_invalid`
 - `import_warning_predicate_owner_unavailable`
 - `recovery_action_not_available`

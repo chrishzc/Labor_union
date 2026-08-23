@@ -7,7 +7,7 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Body, Depends, HTTPException, Path
+from fastapi import APIRouter, Body, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, ConfigDict, Field
 from typing import Any, Dict, List, Literal
 from subsystems.scheduling.matching_plan_workflow import create_matching_plan_version
@@ -335,7 +335,7 @@ def create_matching_plan_version_route(
 
 
 def recommend_staff(
-    case_no: str,
+    case_no: str = Query(..., min_length=1, max_length=50, description="案件編號"),
     filter_region: bool = True,
     filter_schedule: bool = True,
     filter_babies: bool = True,

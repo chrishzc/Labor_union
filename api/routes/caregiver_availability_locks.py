@@ -102,7 +102,7 @@ def _require_actor(principal: AdminPrincipal, actor: str) -> None:
 )
 def preview_waiting_deposit_lock_acquisition(
     case_no: str = Path(..., min_length=1),
-    plan_id: int = Path(..., strict=True, gt=0),
+    plan_id: int = Path(..., gt=0),
     principal: AdminPrincipal = Depends(require_system_admin),
 ):
     del principal
@@ -121,7 +121,7 @@ def preview_waiting_deposit_lock_acquisition(
 def apply_waiting_deposit_lock_acquisition(
     request: WaitingDepositLockApplyBody,
     case_no: str = Path(..., min_length=1),
-    plan_id: int = Path(..., strict=True, gt=0),
+    plan_id: int = Path(..., gt=0),
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
     principal: AdminPrincipal = Depends(require_system_admin),

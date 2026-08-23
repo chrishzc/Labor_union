@@ -45,6 +45,76 @@ class MySqlCustomerServiceRepository:
     def get_by_event_key(self, event_key: str) -> CustomerServiceTicket | None:
         return self._ticket_for_event(event_key)
 
+    def create_or_append_escalation_ticket(self, command: Any) -> CustomerServiceTicket:
+        """Resolve an already-created canonical ticket event without guessing LINE identity.
+
+        M4 receives only an opaque source event identity.  A missing event is therefore
+        fail-closed; ticket creation remains owned by the LINE Customer Service flow.
+        """
+
+        event_identity = getattr(command, "source_event_identity", None)
+        if not isinstance(event_identity, str) or not event_identity.strip():
+            raise CustomerServiceTicketNotFoundError("客服 escalation 缺少 canonical ticket event")
+        ticket = self.get_by_event_key(event_identity)
+        if ticket is None:
+            raise CustomerServiceTicketNotFoundError(
+                "找不到 escalation source 對應的既有客服需求"
+            )
+        return ticket
+
+    def start_handling_for_escalation(
+        self, ticket_id: int, expected_version: int, actor_id: str
+    ) -> CustomerServiceTicket:
+        admin_id = _admin_user_id(actor_id)
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_service_tickets SET status='handling',"
+                "assigned_to_admin_user_id=COALESCE(%s,assigned_to_admin_user_id),"
+                "version=version+1 WHERE id=%s AND version=%s AND status='waiting'",
+                (admin_id, ticket_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise CustomerServiceVersionConflictError("客服需求已更新或不在等待狀態")
+            cursor.execute(
+                _EVENT_INSERT_SQL,
+                (
+                    ticket_id,
+                    f"human-escalation:handling:{ticket_id}:{expected_version}",
+                    "status_changed",
+                    "human_escalation_handling_started",
+                    actor_id,
+                ),
+            )
+        return self.get(ticket_id)
+
+    def resolve_for_escalation(
+        self,
+        ticket_id: int,
+        expected_version: int,
+        actor_id: str,
+        resolution_code: str,
+    ) -> CustomerServiceTicket:
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE customer_service_tickets SET status='resolved',"
+                "resolved_at_utc=UTC_TIMESTAMP(),version=version+1 "
+                "WHERE id=%s AND version=%s AND status='handling'",
+                (ticket_id, expected_version),
+            )
+            if cursor.rowcount != 1:
+                raise CustomerServiceVersionConflictError("客服需求已更新或不在處理狀態")
+            cursor.execute(
+                _EVENT_INSERT_SQL,
+                (
+                    ticket_id,
+                    f"human-escalation:resolve:{ticket_id}:{expected_version}",
+                    "status_changed",
+                    resolution_code,
+                    actor_id,
+                ),
+            )
+        return self.get(ticket_id)
+
     def get(self, ticket_id: int, *, lock: bool = False) -> CustomerServiceTicket:
         suffix = " FOR UPDATE" if lock else ""
         with self._connection.cursor() as cursor:
@@ -182,6 +252,13 @@ def _ticket_view(ticket: CustomerServiceTicket) -> dict[str, Any]:
 
 def _mask(value: str) -> str:
     return value[:4] + "…" + value[-4:] if len(value) > 8 else value[:2] + "***"
+
+
+def _admin_user_id(actor_id: str) -> int | None:
+    if not isinstance(actor_id, str) or not actor_id.startswith("admin:"):
+        return None
+    raw = actor_id.removeprefix("admin:")
+    return int(raw) if raw.isdigit() and int(raw) > 0 else None
 
 
 def _list_filters(

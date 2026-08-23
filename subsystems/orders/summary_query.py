@@ -114,9 +114,10 @@ def _validate_repository_page(
 def _summary_item(row: object) -> OrderSummaryItem:
     if not isinstance(row, Mapping) or set(row) != _SUMMARY_FIELDS:
         raise OrderSummaryContractError("repository row fields are not canonical")
+    case_no = _required_text(row, "case_no", _MAXIMUM_CASE_NO_LENGTH)
     return OrderSummaryItem(
-        case_no=_required_text(row, "case_no", _MAXIMUM_CASE_NO_LENGTH),
-        client_name=_required_text(row, "client_name", 200),
+        case_no=case_no,
+        client_name=_client_name(row, case_no),
         order_status=_required_text(row, "order_status", 100),
         staff_name=_optional_text(row, "staff_name", 200),
         identity_status=_optional_text(row, "identity_status", 100),
@@ -129,6 +130,13 @@ def _summary_item(row: object) -> OrderSummaryItem:
             row, "total_employer_self_pay_payable"
         ),
     )
+
+
+def _client_name(row: Mapping[str, object], case_no: str) -> str:
+    value = row["client_name"]
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return f"待補姓名（{case_no}）"
+    return _required_text(row, "client_name", 200)
 
 
 def _required_text(row: Mapping[str, object], field: str, maximum_length: int) -> str:

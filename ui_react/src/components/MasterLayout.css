@@ -111,28 +111,147 @@
   border-radius: var(--radius-full);
 }
 
-.user-profile-btn {
+.user-profile-capsule {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  background: none;
+  background-color: #ffffff;
   border: 1px solid var(--md-sys-color-outline-variant);
-  padding: 4px 12px;
+  padding: 3px 6px 3px 12px;
   border-radius: var(--radius-full);
-  cursor: pointer;
   font-size: 0.85rem;
   font-weight: 600;
-  transition: background-color 0.2s ease;
+  box-shadow: var(--shadow-sm);
 }
 
-.user-profile-btn:hover {
+.user-profile-name {
+  color: var(--md-sys-color-on-surface);
+  user-select: none;
+}
+
+.logout-action-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   background-color: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface-variant);
+  border: 1px solid transparent;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.logout-action-btn:hover {
+  background-color: #fee2e2;
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+/* Stitch Nurture Core Logout Modal */
+.logout-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(30, 27, 25, 0.45);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: modalFadeIn 0.2s ease;
+}
+
+.logout-modal-card {
+  width: 100%;
+  max-width: 400px;
+  background-color: #ffffff;
+  border-radius: 20px;
+  padding: 28px 32px;
+  box-shadow: 0 16px 36px rgba(74, 69, 67, 0.16);
+  border: 1px solid #f2e2dc;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: modalPop 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.logout-modal-icon {
+  width: 56px;
+  height: 56px;
+  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.8rem;
+  margin-bottom: 16px;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.15);
+}
+
+.logout-modal-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1e1b19;
+  margin-bottom: 8px;
+}
+
+.logout-modal-desc {
+  font-size: 0.88rem;
+  color: #74593f;
+  line-height: 1.5;
+  margin-bottom: 24px;
+}
+
+.logout-modal-actions {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+}
+
+.logout-btn-cancel {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid #dec0b6;
+  background-color: #ffffff;
+  color: #57423b;
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.logout-btn-cancel:hover {
+  background-color: #f5ece9;
+}
+
+.logout-btn-confirm {
+  flex: 1;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: none;
+  background-color: #dc2626;
+  color: #ffffff;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.25);
+  transition: all 0.2s ease;
+}
+
+.logout-btn-confirm:hover {
+  background-color: #b91c1c;
 }
 
 /* App Body Layout: Slim Sidebar + Main Content */
 .app-body {
   display: flex;
   flex: 1;
+  min-width: 0;
 }
 
 .slim-sidebar {
@@ -197,8 +316,10 @@
 
 .main-workspace {
   flex: 1;
+  min-width: 0;
   padding: var(--space-6) var(--space-8);
   max-width: 1600px;
   margin: 0 auto;
   width: 100%;
+  box-sizing: border-box;
 }

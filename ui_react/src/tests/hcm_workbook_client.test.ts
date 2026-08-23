@@ -1,17 +1,20 @@
 /**
  * File: hcm_workbook_client.test.ts
- * Description: 驗證 HCM 真檔快照、multipart Preview、即時 Session 與嚴格失敗邊界。
+ * Description: 驗證HCM真檔快照、multipart Preview／Apply、Apply typed錯誤與嚴格失敗邊界。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import {
   HCM_WORKBOOK_PREVIEW_PATH,
+  HCM_WORKBOOK_APPLY_PATH,
   HCM_WORKBOOK_PREVIEW_TIMEOUT_MS,
   HcmWorkbookSnapshot,
   hcmWorkbookPreviewClient,
   previewHcmWorkbook,
+  applyHcmWorkbook,
 } from '../api/case_import/hcm_workbook_client';
 import {
+  HcmWorkbookApplyError,
   HcmWorkbookContractError,
   HcmWorkbookFileError,
   HcmWorkbookUnauthenticatedError,
@@ -231,14 +234,25 @@ describe('HCM workbook preview client', () => {
     }
   });
 
-  it('沒有 Apply client 或其他 import endpoint，unexpected fetch 不會被吞掉', async () => {
-    expect('apply' in hcmWorkbookPreviewClient).toBe(false);
+  it('Apply送出fingerprint與冪等headers並嚴格解碼receipt', async () => {
+    expect('apply' in hcmWorkbookPreviewClient).toBe(true);
     const snapshot = await HcmWorkbookSnapshot.fromFile(await hcmFile('A'));
-    globalThis.fetch = vi.fn().mockRejectedValue(new Error('unexpected fetch'));
+    const receipt = { source_content_digest: snapshot.sha256, source_row_count: 1, inserted_count: 1, inserted_with_warning_count: 0, exact_replay_count: 0, review_required_count: 0, failed_count: 0, replayed_workbook: false, row_outcomes_available: true, legacy_summary_only: false, row_outcomes: [] };
+    const fetchMock = vi.fn().mockResolvedValue(response({ success: true, message: 'ok', data: receipt, error: null }));
+    globalThis.fetch = fetchMock;
 
-    await expect(previewHcmWorkbook(snapshot)).rejects.toThrow(
-      'HCM 檔案預覽連線失敗，尚未產生可用預覽。'
-    );
-    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+    await expect(applyHcmWorkbook(snapshot, 'c'.repeat(64), { idempotencyKey: 'hcm-apply-1', correlationId: 'hcm-correlation-1' })).resolves.toEqual(receipt);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(HCM_WORKBOOK_APPLY_PATH);
+    const headers = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('X-Preview-Fingerprint')).toBe('c'.repeat(64));
+    expect(headers.get('Idempotency-Key')).toBe('hcm-apply-1');
+    expect(headers.get('X-Correlation-ID')).toBe('hcm-correlation-1');
+  });
+
+  it('Apply暫時不可用時不會誤報成Preview錯誤', async () => {
+    const snapshot = await HcmWorkbookSnapshot.fromFile(await hcmFile('A'));
+    globalThis.fetch = vi.fn().mockResolvedValue(response({}, 503));
+    const request = applyHcmWorkbook(snapshot, 'c'.repeat(64), { idempotencyKey: 'hcm-apply-1', correlationId: 'hcm-correlation-1' });
+    await expect(request).rejects.toBeInstanceOf(HcmWorkbookApplyError);
   });
 });

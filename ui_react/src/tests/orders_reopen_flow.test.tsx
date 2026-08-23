@@ -8,12 +8,15 @@ import React from 'react';
 import { OrdersPage } from '../pages/OrdersPage';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
+import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
+import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import {
   realisticOrderReopenPreviewView,
   realisticOrderReopenReceiptView,
 } from './fixtures/orders/order_mutation_contract_fixtures';
-import { realisticOrderDetail } from './fixtures/orders_real_data_fixtures';
+import { realisticOrderDetail, realisticOrderSummaryPage } from './fixtures/orders_real_data_fixtures';
+import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 import {
   OrderMutationDomainBlockedError,
   ApiTimeoutError,
@@ -50,6 +53,12 @@ describe('Controlled Order Reopen Component Flow Suite', () => {
     });
     vi.spyOn(ordersQueryClient, 'getOrderDetail').mockReset().mockResolvedValue(
       realisticOrderDetail
+    );
+    vi.spyOn(orderStageProjectionClient, 'getOperationalTimelines').mockResolvedValue(
+      buildOrdersStageProjectionFixture(realisticOrderSummaryPage),
+    );
+    vi.spyOn(orderCardProjectionClient, 'getCardProjection').mockRejectedValue(
+      new Error('Card projection intentionally unavailable in reopen flow fixture'),
     );
   });
 

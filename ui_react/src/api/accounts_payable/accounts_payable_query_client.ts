@@ -9,13 +9,28 @@ import { AccountsPayableResponseSchema, type AccountsPayablePreview } from './ac
 import { AccountsPayableQueryError, mapAccountsPayableQueryError } from './accounts_payable_query_errors';
 export interface AccountsPayableQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
 export interface AccountsPayableQueryClient { query(targetMonth: string, options?: AccountsPayableQueryOptions): Promise<AccountsPayablePreview>; }
+
+let correlationSequence = 0;
+
+function nextCorrelationId(): string {
+  correlationSequence += 1;
+  return `accounts-payable-query-${correlationSequence.toString(36)}`;
+}
+
 class DefaultAccountsPayableQueryClient implements AccountsPayableQueryClient {
   async query(targetMonth: string, options?: AccountsPayableQueryOptions): Promise<AccountsPayablePreview> {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(targetMonth)) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_VALIDATION', 'targetMonth必須是YYYY-MM。');
     const token = sessionClient.getToken();
     if (!token) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_UNAUTHENTICATED', '請先登入。', false, 401);
     try {
-      const raw = await transport.get<unknown>('/api/v1/finance-reports/accounts-payable', { signal: options?.signal, timeoutMs: options?.timeoutMs, baseUrl: options?.baseUrl, token, params: { target_month: targetMonth, view: 'summary' } });
+      const raw = await transport.get<unknown>('/api/v1/finance-reports/accounts-payable', {
+        signal: options?.signal,
+        timeoutMs: options?.timeoutMs,
+        baseUrl: options?.baseUrl,
+        token,
+        headers: { 'X-Correlation-ID': nextCorrelationId() },
+        params: { target_month: targetMonth, view: 'summary' },
+      });
       const decoded = AccountsPayableResponseSchema.safeParse(raw);
       if (!decoded.success) throw new ApiDecodeError('Accounts Payable回應結構異常。', decoded.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message, code: issue.code })), raw);
       if (!decoded.data.success) throw new AccountsPayableQueryError('ACCOUNTS_PAYABLE_FAILURE', decoded.data.error ?? decoded.data.message);

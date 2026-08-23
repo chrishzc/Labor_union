@@ -1,0 +1,83 @@
+{
+  "operation": "GET /api/v1/finance-import/batches/{batch_identity}/review-rows",
+  "method": "GET",
+  "path_template": "/api/v1/finance-import/batches/{batch_identity}/review-rows",
+  "fingerprint": "1bf41b20",
+  "case_id": "Ktfu6w",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/finance-import/batches/0/review-rows",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/finance-import/batches/0/review-rows",
+      "url_template": "http://127.0.0.1:8821/api/v1/finance-import/batches/{batch_identity}/review-rows",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "Ktfu6w"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:43 GMT",
+          "server": "uvicorn",
+          "content-length": "270",
+          "content-type": "application/json",
+          "server-timing": "application;dur=78.5",
+          "x-response-time-ms": "78.5",
+          "x-correlation-id": "31d821085e404721a0045be7d7a18658"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"not_found\",\"code\":\"finance_import_batch_not_found\",\"message\":\"\u627e\u4e0d\u5230\u6307\u5b9a\u7684 Finance Import \u6279\u6b21\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"31d821085e404721a0045be7d7a18658\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.00643910001963377,
+          "mode": "positive"
+        },
+        "components": {
+          "QUERY": "positive",
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/finance-import/batches/{batch_identity}/review-rows",
+      "path_parameters": {
+        "batch_identity": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

@@ -1,4 +1,7 @@
-"""Canonical public LIFF identity APIs and capability-protected review APIs."""
+"""
+File: line_identity.py
+Description: 提供 canonical LIFF flow、身分綁定、登記與 review 的 typed API。
+"""
 
 from __future__ import annotations
 
@@ -20,10 +23,6 @@ from api.dependencies.line_identity import (
     get_line_identity_review_application,
 )
 from api.dependencies.line_runtime import publish_line_wakeup_best_effort
-from api.dependencies.provisional_registration import (
-    ProvisionalRegistrationApplication,
-    get_provisional_registration_application,
-)
 from api.schemas.base import BaseResponse
 from api.schemas.line_identity import (
     AdminIdentityBindingRequest,
@@ -58,6 +57,7 @@ from infrastructure.line.liff_token_verifier import (
 from shared_kernel.identities import CorrelationId, ExpectedVersion, IdempotencyKey
 from subsystems.access.authentication_session import AdminPrincipal
 from subsystems.line.identity_application import (
+    LineIdentityApplication,
     LineIdentityAuthenticationError,
     LineIdentityConflictError,
     LineIdentityNotFoundError,
@@ -72,8 +72,10 @@ from subsystems.line.identity_review_application import (
     LineReviewNotFoundError,
 )
 from subsystems.line.review_contracts import DecideLineReviewCommand, LineReviewListQuery
-from subsystems.case_import.provisional_registration_application import (
+from subsystems.case_import.provisional_registration_types import (
     ProvisionalRegistrationConflictError,
+)
+from infrastructure.mysql.provisional_registration_repository import (
     ProvisionalRegistrationStorageError,
 )
 
@@ -250,27 +252,32 @@ def apply_admin(payload: AdminIdentityBindingRequest):
 )
 def apply_provisional_registration(
     payload: ProvisionalRegistrationRequest,
-    application: ProvisionalRegistrationApplication = Depends(
-        get_provisional_registration_application
-    ),
+    application: LineIdentityApplication = Depends(get_line_identity_application),
 ):
     line_user_id = _verified_line_user_id(payload)
-    receipt = _apply_registration(application, payload, line_user_id)
-    identity_status = _complete_registration_identity(payload, line_user_id)
+    receipt, binding = _apply_combined_registration(application, payload, line_user_id)
+    identity_status = binding.status.value
     if receipt.worker_wakeup_required:
         publish_line_wakeup_best_effort()
     return BaseResponse(data=_registration_response(receipt, identity_status))
 
 
-def _apply_registration(application, payload, line_user_id):
+def _apply_combined_registration(application, payload, line_user_id):
     try:
-        return application.apply(_registration_intent(payload, line_user_id))
+        return application.apply_registration(
+            _registration_intent(payload, line_user_id),
+            line_user_id,
+            LineIdentityFlowId(payload.flow_id) if payload.flow_id else None,
+            _correlation_id("registration"),
+        )
     except ProvisionalRegistrationConflictError as error:
         raise _registration_http_error(409, "registration_conflict", str(error)) from error
     except ProvisionalRegistrationDomainError as error:
         raise _registration_http_error(422, error.issue.value, str(error)) from error
     except ProvisionalRegistrationStorageError as error:
         raise _registration_http_error(503, str(error), "登記服務暫時無法使用") from error
+    except (LineIdentityNotFoundError, LineIdentityConflictError) as error:
+        raise _registration_http_error(409, "line_identity_conflict", str(error)) from error
 
 
 def _registration_response(receipt, identity_status):
@@ -282,20 +289,6 @@ def _registration_response(receipt, identity_status):
         replayed=receipt.replayed,
         identity_status=identity_status,
     )
-
-
-def _complete_registration_identity(payload, line_user_id):
-    if not payload.flow_id:
-        return None
-    result = _translate_identity_errors(
-        get_line_identity_application().apply_customer,
-        LineIdentityFlowId(payload.flow_id),
-        line_user_id,
-        CustomerIdentityProof(payload.name.strip(), payload.phone.strip()),
-        _correlation_id("registration"),
-    )
-    publish_line_wakeup_best_effort()
-    return result.status.value
 
 
 @review_router.get(

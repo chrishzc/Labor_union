@@ -1,0 +1,120 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "release_id": "labor-union-matching-coordination-successor-2026-08-22-v1",
+  "descriptors": {
+    "1003_matching_coordination_successor.sql": {
+      "tables": {
+        "matching_coordination_criteria_snapshots": [
+          "id", "snapshot_id", "case_no", "criteria_version", "criteria_snapshot",
+          "source_version_tuple", "criteria_digest", "actor_ref", "occurred_at_utc", "created_at_utc"
+        ],
+        "matching_coordination_package_lineage": [
+          "id", "package_id", "case_no", "criteria_snapshot_id", "parent_package_id",
+          "package_version", "lineage_kind", "package_state", "package_snapshot",
+          "source_version_tuple", "package_digest", "actor_ref", "created_at_utc"
+        ],
+        "matching_coordination_events": [
+          "id", "event_id", "case_no", "criteria_snapshot_id", "package_lineage_id",
+          "event_type", "expected_version", "resulting_version", "event_payload",
+          "source_version_tuple", "event_digest", "actor_ref", "idempotency_key",
+          "correlation_id", "occurred_at_utc", "created_at_utc"
+        ],
+        "matching_coordination_apply_receipts": [
+          "id", "receipt_id", "case_no", "event_id", "criteria_snapshot_id", "package_lineage_id",
+          "command_name", "idempotency_key", "command_fingerprint", "preview_fingerprint",
+          "source_version_tuple", "result_snapshot", "outcome_state", "actor_ref",
+          "correlation_id", "applied_at_utc", "created_at_utc"
+        ],
+        "matching_coordination_outbox": [
+          "id", "reference_id", "event_id", "receipt_id", "case_no", "intent_type",
+          "target_owner", "intent_payload", "source_version_tuple",
+          "reference_digest", "idempotency_key", "correlation_id", "created_at_utc"
+        ]
+      },
+      "indexes": {
+        "matching_coordination_criteria_snapshots.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "matching_coordination_criteria_snapshots.uq_matching_criteria_snapshot_id": {"non_unique": 0, "columns": ["snapshot_id"]},
+        "matching_coordination_criteria_snapshots.uq_matching_criteria_case_version": {"non_unique": 0, "columns": ["case_no", "criteria_version"]},
+        "matching_coordination_criteria_snapshots.idx_matching_criteria_case_time": {"non_unique": 1, "columns": ["case_no", "created_at_utc"]},
+        "matching_coordination_package_lineage.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "matching_coordination_package_lineage.uq_matching_package_id": {"non_unique": 0, "columns": ["package_id"]},
+        "matching_coordination_package_lineage.uq_matching_package_case_version": {"non_unique": 0, "columns": ["case_no", "package_version"]},
+        "matching_coordination_package_lineage.idx_matching_package_criteria": {"non_unique": 1, "columns": ["criteria_snapshot_id", "id"]},
+        "matching_coordination_package_lineage.idx_matching_package_parent": {"non_unique": 1, "columns": ["parent_package_id", "id"]},
+        "matching_coordination_package_lineage.idx_matching_package_state_time": {"non_unique": 1, "columns": ["package_state", "created_at_utc"]},
+        "matching_coordination_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "matching_coordination_events.uq_matching_event_id": {"non_unique": 0, "columns": ["event_id"]},
+        "matching_coordination_events.uq_matching_event_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "matching_coordination_events.idx_matching_event_case_time": {"non_unique": 1, "columns": ["case_no", "id"]},
+        "matching_coordination_events.idx_matching_event_criteria": {"non_unique": 1, "columns": ["criteria_snapshot_id", "id"]},
+        "matching_coordination_events.idx_matching_event_package_time": {"non_unique": 1, "columns": ["package_lineage_id", "id"]},
+        "matching_coordination_events.idx_matching_event_type_time": {"non_unique": 1, "columns": ["event_type", "created_at_utc"]},
+        "matching_coordination_apply_receipts.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "matching_coordination_apply_receipts.uq_matching_receipt_id": {"non_unique": 0, "columns": ["receipt_id"]},
+        "matching_coordination_apply_receipts.uq_matching_receipt_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "matching_coordination_apply_receipts.idx_matching_receipt_event": {"non_unique": 1, "columns": ["event_id", "id"]},
+        "matching_coordination_apply_receipts.idx_matching_receipt_criteria": {"non_unique": 1, "columns": ["criteria_snapshot_id", "id"]},
+        "matching_coordination_apply_receipts.idx_matching_receipt_package": {"non_unique": 1, "columns": ["package_lineage_id", "id"]},
+        "matching_coordination_apply_receipts.idx_matching_receipt_outcome_time": {"non_unique": 1, "columns": ["outcome_state", "created_at_utc"]},
+        "matching_coordination_outbox.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "matching_coordination_outbox.uq_matching_outbox_reference_id": {"non_unique": 0, "columns": ["reference_id"]},
+        "matching_coordination_outbox.uq_matching_outbox_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "matching_coordination_outbox.idx_matching_outbox_event": {"non_unique": 1, "columns": ["event_id", "id"]},
+        "matching_coordination_outbox.idx_matching_outbox_receipt": {"non_unique": 1, "columns": ["receipt_id", "id"]},
+        "matching_coordination_outbox.idx_matching_outbox_created_time": {"non_unique": 1, "columns": ["created_at_utc", "id"]},
+        "matching_coordination_outbox.idx_matching_outbox_case": {"non_unique": 1, "columns": ["case_no", "id"]}
+      },
+      "foreign_keys": {
+        "matching_coordination_package_lineage.fk_matching_package_criteria": {"columns": ["criteria_snapshot_id"], "referenced_table": "matching_coordination_criteria_snapshots", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_coordination_package_lineage.fk_matching_package_parent": {"columns": ["parent_package_id"], "referenced_table": "matching_coordination_package_lineage", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_coordination_events.fk_matching_event_criteria": {"columns": ["criteria_snapshot_id"], "referenced_table": "matching_coordination_criteria_snapshots", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_coordination_events.fk_matching_event_package": {"columns": ["package_lineage_id"], "referenced_table": "matching_coordination_package_lineage", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_coordination_apply_receipts.fk_matching_receipt_event": {"columns": ["event_id"], "referenced_table": "matching_coordination_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_coordination_apply_receipts.fk_matching_receipt_criteria": {"columns": ["criteria_snapshot_id"], "referenced_table": "matching_coordination_criteria_snapshots", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_coordination_apply_receipts.fk_matching_receipt_package": {"columns": ["package_lineage_id"], "referenced_table": "matching_coordination_package_lineage", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_coordination_outbox.fk_matching_outbox_event": {"columns": ["event_id"], "referenced_table": "matching_coordination_events", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "matching_coordination_outbox.fk_matching_outbox_receipt": {"columns": ["receipt_id"], "referenced_table": "matching_coordination_apply_receipts", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "matching_coordination_criteria_snapshots.chk_matching_criteria_identity": "and(atom(char_length(trim(snapshot_id))>0),atom(char_length(trim(case_no))>0))",
+        "matching_coordination_criteria_snapshots.chk_matching_criteria_payload": "and(atom(json_type(criteria_snapshot)='OBJECT'),atom(json_length(criteria_snapshot)>0))",
+        "matching_coordination_criteria_snapshots.chk_matching_criteria_sources": "and(atom(json_type(source_version_tuple)='ARRAY'),atom(json_length(source_version_tuple)>0))",
+        "matching_coordination_criteria_snapshots.chk_matching_criteria_digest": "atom(regexp_like(criteria_digest,'^[0-9a-f]{64}$'))",
+        "matching_coordination_criteria_snapshots.chk_matching_criteria_actor": "atom(char_length(trim(actor_ref))>0)",
+        "matching_coordination_package_lineage.chk_matching_package_identity": "and(atom(char_length(trim(package_id))>0),atom(char_length(trim(case_no))>0))",
+        "matching_coordination_package_lineage.chk_matching_package_payload": "and(atom(json_type(package_snapshot)='OBJECT'),atom(json_length(package_snapshot)>0))",
+        "matching_coordination_package_lineage.chk_matching_package_sources": "and(atom(json_type(source_version_tuple)='ARRAY'),atom(json_length(source_version_tuple)>0))",
+        "matching_coordination_package_lineage.chk_matching_package_digest": "atom(regexp_like(package_digest,'^[0-9a-f]{64}$'))",
+        "matching_coordination_package_lineage.chk_matching_package_actor": "atom(char_length(trim(actor_ref))>0)",
+        "matching_coordination_package_lineage.chk_matching_package_parent": "or(and(atom(lineage_kind='initial'),atom(parent_package_idisnull)),and(atom(lineage_kind<>'initial'),atom(parent_package_idisnotnull)))",
+        "matching_coordination_events.chk_matching_event_identity": "and(atom(char_length(trim(event_id))>0),atom(char_length(trim(case_no))>0),atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(correlation_id))>0))",
+        "matching_coordination_events.chk_matching_event_payload": "and(atom(json_type(event_payload)='OBJECT'),atom(json_length(event_payload)>0))",
+        "matching_coordination_events.chk_matching_event_sources": "and(atom(json_type(source_version_tuple)='ARRAY'),atom(json_length(source_version_tuple)>0))",
+        "matching_coordination_events.chk_matching_event_versions": "atom(resulting_version>=expected_version)",
+        "matching_coordination_events.chk_matching_event_digest": "atom(regexp_like(event_digest,'^[0-9a-f]{64}$'))",
+        "matching_coordination_events.chk_matching_event_actor": "atom(char_length(trim(actor_ref))>0)",
+        "matching_coordination_apply_receipts.chk_matching_receipt_identity": "and(atom(char_length(trim(receipt_id))>0),atom(char_length(trim(command_name))>0),atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(actor_ref))>0),atom(char_length(trim(correlation_id))>0))",
+        "matching_coordination_apply_receipts.chk_matching_receipt_fingerprints": "and(atom(regexp_like(command_fingerprint,'^[0-9a-f]{64}$')),or(atom(preview_fingerprintisnull),atom(regexp_like(preview_fingerprint,'^[0-9a-f]{64}$'))))",
+        "matching_coordination_apply_receipts.chk_matching_receipt_sources": "and(atom(json_type(source_version_tuple)='ARRAY'),atom(json_length(source_version_tuple)>0))",
+        "matching_coordination_apply_receipts.chk_matching_receipt_result": "and(atom(json_type(result_snapshot)='OBJECT'),atom(json_length(result_snapshot)>0))",
+        "matching_coordination_outbox.chk_matching_outbox_identity": "and(atom(char_length(trim(reference_id))>0),atom(char_length(trim(case_no))>0),atom(char_length(trim(idempotency_key))>0),atom(char_length(trim(correlation_id))>0))",
+        "matching_coordination_outbox.chk_matching_outbox_target": "or(and(atom(intent_typein('line_matching_interaction','line_criteria_diff_resend')),atom(target_owner='line_integration')),and(atom(intent_typein('assignment_conversion_requested','rematch_requested')),atom(target_owner='assignment_workflow')),and(atom(intent_type='orders_terms_update_requested'),atom(target_owner='orders_workflow')))",
+        "matching_coordination_outbox.chk_matching_outbox_payload": "and(atom(json_type(intent_payload)='OBJECT'),atom(json_length(intent_payload)>0))",
+        "matching_coordination_outbox.chk_matching_outbox_sources": "and(atom(json_type(source_version_tuple)='ARRAY'),atom(json_length(source_version_tuple)>0))",
+        "matching_coordination_outbox.chk_matching_outbox_digest": "atom(regexp_like(reference_digest,'^[0-9a-f]{64}$'))"
+      },
+      "triggers": [
+        "trg_matching_criteria_snapshots_before_update",
+        "trg_matching_criteria_snapshots_before_delete",
+        "trg_matching_package_lineage_before_update",
+        "trg_matching_package_lineage_before_delete",
+        "trg_matching_coordination_events_before_update",
+        "trg_matching_coordination_events_before_delete",
+        "trg_matching_apply_receipts_before_update",
+        "trg_matching_apply_receipts_before_delete",
+        "trg_matching_outbox_before_update",
+        "trg_matching_outbox_before_delete"
+      ]
+    }
+  }
+}

@@ -10,7 +10,7 @@ import { adaptFinanceImportBatch, adaptFinanceImportManifest } from '../adapters
 import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE, FINANCE_BATCH_RESPONSE, FINANCE_MANIFEST_RESPONSE } from './fixtures/finance/finance_query_contract_fixtures';
 describe('finance query adapters', () => {
   it('preserves server status and masked values without local success inference', () => {
-    expect(adaptClientReceiptQuery(RECEIPT_RESPONSE.data).obligations[0].settlementStatus).toContain('尚未提供');
+    expect(adaptClientReceiptQuery(RECEIPT_RESPONSE.data).obligations[0].settlementStatus).toBe('目前 typed view 未納入結清狀態欄位');
     expect(adaptStaffPayablesQuery(STAFF_PAYABLES_RESPONSE.data).obligations[0].payoutStatus).toBe('payable');
     expect(adaptAccountsPayablePreview(ACCOUNTS_PAYABLE_RESPONSE.data).rows[0].bankDisplay).toContain('********9012');
     expect(adaptFinanceImportBatch(FINANCE_BATCH_RESPONSE.data[0]).status).toBe('review');

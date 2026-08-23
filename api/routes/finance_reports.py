@@ -313,9 +313,11 @@ def preview_quarterly_reconciliation(
 def export_quarterly_reconciliation(
     application_year: int = Query(..., ge=1912),
     quarter: int = Query(..., ge=1, le=4),
+    principal: AdminPrincipal = Depends(require_admin),
 ):
     """Download the selected quarterly reconciliation register."""
     try:
+        del principal
         report = reconciliation_register_query.build_quarterly_subsidy_register(
             application_year, quarter,
         )
@@ -371,9 +373,11 @@ def preview_annual_reconciliation(
 @router.get("/subsidy-reconciliation/annual/export", response_class=XlsxStreamingResponse)
 def export_annual_reconciliation(
     application_year: int = Query(..., ge=1912),
+    principal: AdminPrincipal = Depends(require_admin),
 ):
     """Download the selected annual subsidy summary."""
     try:
+        del principal
         report = reconciliation_register_query.build_annual_subsidy_summary(application_year)
     except ValueError as exc:
         raise typed_http_error(

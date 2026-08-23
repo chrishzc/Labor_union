@@ -1,15 +1,11 @@
 """
 File: test_anomaly_registry_router.py
-Description: 驗證異常清單 HTTP 查詢端點契約、摘要視圖結構、分頁過濾參數、認證授權防護與零異動無副作用特性。
-契約依據: 00_Global_共同契約.md, 06_Anomalies_Domain.md, PROV-20260816-react-admin-phase2d-anomalies-query-specification.md
-變更範圍: 新增異常路由測試，涵蓋 AnomalySummaryView、include_snapshot=false、參數邊界、401/403 驗證與零副作用。
-驗證依據: pytest tests/test_anomaly_registry_router.py 執行全數通過。
-無副作用宣告: 純唯讀契約測試，無狀態變更或資料庫副作用。
+Description: 驗證異常清單 HTTP 查詢、封閉摘要投影、認證邊界與零寫入契約。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from fastapi import FastAPI
@@ -75,8 +71,23 @@ class _FakeAnomalyApplication:
             "limit": limit,
             "offset": offset,
         }
+        summaries = [
+            summary
+            if summary.display_fields
+            else replace(
+                summary,
+                display_fields=tuple(
+                    sorted(
+                        key
+                        for key in summary.display_snapshot
+                        if key != "assignment_a"
+                    )
+                ),
+            )
+            for summary in self.summaries
+        ]
         filtered = [
-            s for s in self.summaries
+            s for s in summaries
             if not active_only or s.projection.predicate_active
         ]
         return tuple(filtered[offset : offset + limit])
@@ -161,8 +172,8 @@ def _default_summaries() -> list[AnomalySummary]:
 
     p4 = _FakeProjection(
         fingerprint=PreviewFingerprint("c" * 64),
-        definition_code="FINANCE-001",
-        source_identity="invoice:201",
+        definition_code="RECEIVABLE-001",
+        source_identity="receivable:201",
         source_version=1,
         predicate_active=True,
         workflow_status=AlertWorkflowStatus.OPEN,
@@ -170,9 +181,13 @@ def _default_summaries() -> list[AnomalySummary]:
     )
     s4 = AnomalySummary(
         projection=p4,
-        source_domain="client_finance",
-        severity=AnomalySeverity.BLOCKING.value,
-        display_snapshot={"amount": 5000, "client_id": 12},
+        source_domain="client_receivable",
+        severity=AnomalySeverity.WARNING.value,
+        display_snapshot={
+            "action": "review_receivable",
+            "case_no": "CASE-201",
+            "overdue_obligations": ["obligation:201"],
+        },
     )
 
     return [s1, s2, s3, s4]
@@ -251,10 +266,10 @@ def test_query_anomalies_default_snapshot_false_contract_structure() -> None:
     assert item1["workflow_status"] == "claimed"
     assert item1["staff_calendar_navigation"] == {"staff_id": 15, "target_date": "2026-08-21"}
 
-    # Third item verification (FINANCE-001 without calendar navigation)
+    # Third item verification (current Registry definition without navigation)
     item2 = payload["data"][2]
-    assert item2["definition_code"] == "FINANCE-001"
-    assert item2["source_domain"] == "client_finance"
+    assert item2["definition_code"] == "RECEIVABLE-001"
+    assert item2["source_domain"] == "client_receivable"
     assert item2["staff_calendar_navigation"] is None
 
 
@@ -272,9 +287,35 @@ def test_query_anomalies_explicit_include_snapshot_false_and_true() -> None:
     res_true = client.get("/api/v1/anomalies?include_snapshot=true")
     assert res_true.status_code == 200
     data_true = res_true.json()["data"]
-    assert data_true[0]["display_snapshot"] == {"staff_id": 14, "holiday_date": "2026-08-20"}
-    assert data_true[1]["display_snapshot"] == {"staff_id": 15, "assignment_a": {"start": "2026-08-21"}}
-    assert data_true[2]["display_snapshot"] == {"amount": 5000, "client_id": 12}
+    assert data_true[0]["display_snapshot"] == {
+        "redaction_version": "anomaly-safe.v1",
+        "definition_code": "SCHEDULE-001",
+        "fields": [
+            {"kind": "date", "key": "holiday_date", "value": "2026-08-20"},
+            {"kind": "identity", "key": "staff_id", "value": "14"},
+        ],
+    }
+    assert data_true[1]["display_snapshot"] == {
+        "redaction_version": "anomaly-safe.v1",
+        "definition_code": "SCHEDULE-003",
+        "fields": [
+            {"kind": "identity", "key": "staff_id", "value": "15"},
+        ],
+    }
+    assert "assignment_a" not in str(data_true[1]["display_snapshot"])
+    assert data_true[2]["display_snapshot"] == {
+        "redaction_version": "anomaly-safe.v1",
+        "definition_code": "RECEIVABLE-001",
+        "fields": [
+            {"kind": "code", "key": "action", "value": "review_receivable"},
+            {"kind": "identity", "key": "case_no", "value": "CASE-201"},
+            {
+                "kind": "identity_list",
+                "key": "overdue_obligations",
+                "value": ["obligation:201"],
+            },
+        ],
+    }
 
 
 def test_query_anomalies_query_parameters_forwarding_and_filtering() -> None:
@@ -325,7 +366,7 @@ def test_query_anomalies_query_parameter_validation_boundaries() -> None:
     assert client.get("/api/v1/anomalies?active_only=not_a_bool").status_code == 422
 
 
-def test_query_anomalies_staff_calendar_navigation_edge_cases() -> None:
+def test_query_anomalies_staff_calendar_navigation_for_valid_projection() -> None:
     # Test SCHEDULE-005 navigation
     p_valid = _FakeProjection(
         fingerprint=PreviewFingerprint("d" * 64),
@@ -343,7 +384,18 @@ def test_query_anomalies_staff_calendar_navigation_edge_cases() -> None:
         display_snapshot={"staff_id": 99, "work_date": "2026-09-01"},
     )
 
-    # Test invalid staff_id (e.g. 0, negative, bool)
+    app_state = _FakeAnomalyApplication([s_valid])
+    client = TestClient(_create_app(app_state))
+
+    response = client.get("/api/v1/anomalies")
+    assert response.status_code == 200
+    assert response.json()["data"][0]["staff_calendar_navigation"] == {
+        "staff_id": 99,
+        "target_date": "2026-09-01",
+    }
+
+
+def test_query_anomalies_malformed_calendar_evidence_fails_closed() -> None:
     p_invalid_staff = _FakeProjection(
         fingerprint=PreviewFingerprint("e" * 64),
         definition_code="SCHEDULE-001",
@@ -377,16 +429,14 @@ def test_query_anomalies_staff_calendar_navigation_edge_cases() -> None:
         display_snapshot={"staff_id": 10, "holiday_date": "not-a-date"},
     )
 
-    app_state = _FakeAnomalyApplication([s_valid, s_invalid_staff, s_invalid_date])
-    client = TestClient(_create_app(app_state))
-
-    response = client.get("/api/v1/anomalies")
-    assert response.status_code == 200
-    data = response.json()["data"]
-
-    assert data[0]["staff_calendar_navigation"] == {"staff_id": 99, "target_date": "2026-09-01"}
-    assert data[1]["staff_calendar_navigation"] is None
-    assert data[2]["staff_calendar_navigation"] is None
+    for summary in (s_invalid_staff, s_invalid_date):
+        client = TestClient(_create_app(_FakeAnomalyApplication([summary])))
+        response = client.get("/api/v1/anomalies")
+        assert response.status_code == 422
+        assert (
+            response.json()["detail"]["error"]["code"]
+            == "anomaly_projection_data_integrity_violation"
+        )
 
 
 def test_query_anomalies_requires_system_admin_authentication() -> None:

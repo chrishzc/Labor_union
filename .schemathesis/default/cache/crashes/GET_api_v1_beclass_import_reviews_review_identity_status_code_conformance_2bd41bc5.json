@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/beclass-import-reviews/{review_identity}",
+  "method": "GET",
+  "path_template": "/api/v1/beclass-import-reviews/{review_identity}",
+  "fingerprint": "2bd41bc5",
+  "case_id": "WXKIIY",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/beclass-import-reviews/0",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/beclass-import-reviews/0",
+      "url_template": "http://127.0.0.1:8821/api/v1/beclass-import-reviews/{review_identity}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "WXKIIY"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:42 GMT",
+          "server": "uvicorn",
+          "content-length": "271",
+          "content-type": "application/json",
+          "server-timing": "application;dur=80.3",
+          "x-response-time-ms": "80.3",
+          "x-correlation-id": "fee9a678c0fd4cfb8c0f79be47fac91a"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"not_found\",\"code\":\"beclass_import_review_not_found\",\"message\":\"BeClass import review row was not found.\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"fee9a678c0fd4cfb8c0f79be47fac91a\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.004756600013934076,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/beclass-import-reviews/{review_identity}",
+      "path_parameters": {
+        "review_identity": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

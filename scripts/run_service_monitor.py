@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+from dataclasses import asdict
 import os
 import socket
 import sys
@@ -32,6 +34,14 @@ def main() -> int:
     instance_id = f"monitor:{socket.gethostname()}:{os.getpid()}"
     identity = runtime_identity("runtime-monitor", instance_id)
     client = PrivateOperationsClient("runtime-monitor")
+    if getattr(arguments, "react_admin_health_check", False):
+        try:
+            attestation = client.react_admin_artifact_health()
+        except PrivateOperationError as error:
+            print(f"[MONITOR] {error}", flush=True)
+            return 1 if error.retryable else 2
+        print(json.dumps(asdict(attestation), ensure_ascii=False, sort_keys=True), flush=True)
+        return 0
     while True:
         exit_code = _run_cycle(client, identity)
         if arguments.once or exit_code == 2:
@@ -143,6 +153,7 @@ def _now() -> datetime:
 def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--once", action="store_true")
+    parser.add_argument("--react-admin-health-check", action="store_true")
     parser.add_argument(
         "--interval-seconds",
         type=float,

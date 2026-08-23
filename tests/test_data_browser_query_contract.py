@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from api.dependencies.admin_auth import require_system_admin
 from api.routes import data_browser_admin
 from api.schemas.data_browser import DataBrowserMaskedPageView
+from api.schemas.errors import GlobalTypedErrorResponseView
 from infrastructure.mysql.data_browser_query_repository import (
     DataBrowserQueryRepository,
     DataBrowserSourceNotFound,
@@ -147,3 +148,23 @@ def test_masked_source_route_returns_typed_page(monkeypatch):
     assert response.status_code == 200
     assert response.json()["data"]["source_id"] == "orders"
     assert response.json()["data"]["items"][0]["display_title"] == "訂單 115000001"
+
+
+def test_masked_source_openapi_declares_global_typed_error_matrix():
+    app = FastAPI()
+    app.include_router(data_browser_admin.router)
+    operation = app.openapi()["paths"][
+        "/api/v1/admin/data-browser/sources/{source_id}"
+    ]["get"]
+
+    assert set(_code for _code in operation["responses"] if _code != "200") >= {
+        "401",
+        "403",
+        "404",
+        "422",
+        "500",
+    }
+    schema_name = GlobalTypedErrorResponseView.__name__
+    for status_code in ("401", "403", "404", "422", "500"):
+        schema = operation["responses"][status_code]["content"]["application/json"]["schema"]
+        assert schema["$ref"].endswith(f"/{schema_name}")

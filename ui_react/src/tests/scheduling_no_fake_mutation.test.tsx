@@ -1,6 +1,6 @@
 /**
  * File: scheduling_no_fake_mutation.test.tsx
- * Description: 驗證 SchedulingPage 初始與切換國定假日 tab 不產生假 mutation，未核准控制維持 disabled。
+ * Description: 驗證 SchedulingPage 國定假日 tab 不自動 mutation，並移除舊未開放控制槽。
  */
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
@@ -31,7 +31,7 @@ describe('SchedulingPage holiday no fake mutation', () => {
     vi.spyOn(holidayClient, 'apply');
   });
 
-  it('初次 render 與切換 tab 不自動呼叫 holiday Preview/Apply，其他 controls 維持 disabled', async () => {
+  it('初次 render 與切換 tab 不自動呼叫 holiday Preview/Apply，舊未開放 controls 不再顯示', async () => {
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
     expect(holidayClient.query).not.toHaveBeenCalled();
@@ -42,9 +42,11 @@ describe('SchedulingPage holiday no fake mutation', () => {
     expect(holidayClient.preview).not.toHaveBeenCalled();
     expect(holidayClient.apply).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '套用國定假日變更' })).toBeDisabled();
-    expect(document.querySelector('[data-control-id="scheduling.holiday.create"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="scheduling.holiday.toggle-rest"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="scheduling.holiday.toggle-pay"]')).toBeDisabled();
-    expect(document.querySelector('[data-control-id="scheduling.holiday.delete"]')).toBeDisabled();
+    expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: '預覽國定假日變更' })).toBeDisabled();
+    expect(document.querySelector('[data-control-id="scheduling.holiday.create"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="scheduling.holiday.toggle-rest"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="scheduling.holiday.toggle-pay"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="scheduling.holiday.delete"]')).not.toBeInTheDocument();
   });
 });

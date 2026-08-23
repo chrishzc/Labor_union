@@ -1,4 +1,7 @@
-"""Typed application contracts for LINE Rich Menu publication."""
+"""
+File: rich_menu_contracts.py
+Description: 定義 LINE Rich Menu publication 的 typed application contracts。
+"""
 
 from __future__ import annotations
 
@@ -203,10 +206,13 @@ class LineRichMenuProviderRequest:
 
 @dataclass(frozen=True, slots=True)
 class LineRichMenuPublicationQuery:
+    menu_definition_id: str | None = None
     statuses: tuple[LineRichMenuPublicationStatus, ...] = ()
     page_size: int = 25
 
     def __post_init__(self) -> None:
+        if self.menu_definition_id is not None:
+            _validate_menu_definition_id(self.menu_definition_id)
         if not isinstance(self.statuses, tuple):
             raise TypeError("LINE Rich Menu statuses must be a tuple")
         if any(not isinstance(item, LineRichMenuPublicationStatus) for item in self.statuses):

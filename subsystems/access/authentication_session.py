@@ -198,6 +198,23 @@ class AdminPrincipal:
         return ROLE_CAPABILITIES.get(self.role, frozenset())
 
 
+@dataclass(frozen=True)
+class AccountCommandReceipt:
+    """Safe, stable result of one Account Center mutation command."""
+
+    operation: str
+    target_account_id: int
+    resulting_access_control_version: int
+    receipt_identity: str
+    replayed: bool
+
+
+@dataclass(frozen=True)
+class AccountCreationResult:
+    account: AdminPrincipal
+    receipt: AccountCommandReceipt
+
+
 def _utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -365,10 +382,10 @@ def list_account_center_users() -> list[AdminPrincipal]:
         conn.close()
 
 
-def create_account_center_user(
+def create_account_center_user_with_receipt(
     *, actor: AdminPrincipal, username: str, password: str, display_name: str,
     linked_line_user_id: str | None = None, reason: str, idempotency_key: str,
-) -> AdminPrincipal:
+) -> AccountCreationResult:
     """Create or safely replay an enabled equal-business account creation command."""
     _require_root_actor(actor, reason)
     normalized_username = username.strip().lower()
@@ -390,7 +407,12 @@ def create_account_center_user(
             )
             if replayed is not None:
                 conn.commit()
-                return replayed
+                return AccountCreationResult(
+                    replayed,
+                    _account_command_receipt(
+                        "account-create", idempotency_key, int(replayed.id or 0), 1, replayed=True,
+                    ),
+                )
             cursor.execute(
                 """INSERT INTO admin_users (username,password_hash,display_name,linked_line_user_id,role)
                 VALUES (%s,%s,%s,%s,'system_admin')""",
@@ -407,10 +429,16 @@ def create_account_center_user(
                 result_snapshot={
                     "id": account_id, "username": normalized_username,
                     "display_name": normalized_name, "role": "system_admin",
+                    "access_control_version": 1,
                 },
             )
         conn.commit()
-        return principal
+        return AccountCreationResult(
+            principal,
+            _account_command_receipt(
+                "account-create", idempotency_key, account_id, 1, replayed=False,
+            ),
+        )
     except pymysql.err.IntegrityError as error:
         conn.rollback()
         raise ValueError("管理員帳號或綁定的 LINE 使用者已存在") from error
@@ -421,7 +449,23 @@ def create_account_center_user(
         conn.close()
 
 
-def set_account_center_enabled(*, actor: AdminPrincipal, account_id: int, enabled: bool, reason: str, expected_version: int, idempotency_key: str) -> None:
+def create_account_center_user(
+    *, actor: AdminPrincipal, username: str, password: str, display_name: str,
+    linked_line_user_id: str | None = None, reason: str, idempotency_key: str,
+) -> AdminPrincipal:
+    """Compatibility entry returning the created account while the API exposes its receipt."""
+    return create_account_center_user_with_receipt(
+        actor=actor,
+        username=username,
+        password=password,
+        display_name=display_name,
+        linked_line_user_id=linked_line_user_id,
+        reason=reason,
+        idempotency_key=idempotency_key,
+    ).account
+
+
+def set_account_center_enabled(*, actor: AdminPrincipal, account_id: int, enabled: bool, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Enable or disable a non-root account and revoke sessions in the same transaction."""
     _require_root_account_action(actor, account_id, reason)
     conn = get_connection()
@@ -430,7 +474,7 @@ def set_account_center_enabled(*, actor: AdminPrincipal, account_id: int, enable
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             if _replay_account_command(cursor, "account-enabled", idempotency_key, actor, account_id, expected_version, reason, {"enabled": enabled}):
                 conn.commit()
-                return
+                return _account_command_receipt("account-enabled", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
             cursor.execute("UPDATE admin_users SET enabled=%s, access_control_version=access_control_version+1 WHERE id=%s", (enabled, account_id))
             if not enabled:
@@ -444,6 +488,7 @@ def set_account_center_enabled(*, actor: AdminPrincipal, account_id: int, enable
             )
             _save_account_command_receipt(cursor, "account-enabled", idempotency_key, actor, account_id, expected_version, reason, {"enabled": enabled})
         conn.commit()
+        return _account_command_receipt("account-enabled", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
         conn.rollback()
         raise
@@ -451,7 +496,7 @@ def set_account_center_enabled(*, actor: AdminPrincipal, account_id: int, enable
         conn.close()
 
 
-def reset_account_center_password(*, actor: AdminPrincipal, account_id: int, password: str, reason: str, expected_version: int, idempotency_key: str) -> None:
+def reset_account_center_password(*, actor: AdminPrincipal, account_id: int, password: str, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Set a new password and revoke all existing sessions atomically."""
     _require_root_account_action(actor, account_id, reason)
     conn = get_connection()
@@ -461,7 +506,7 @@ def reset_account_center_password(*, actor: AdminPrincipal, account_id: int, pas
             payload = {"password_hash": _token_hash(password)}
             if _replay_account_command(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload):
                 conn.commit()
-                return
+                return _account_command_receipt("account-password-reset", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
             cursor.execute("UPDATE admin_users SET password_hash=%s, access_control_version=access_control_version+1 WHERE id=%s", (hash_admin_password(password), account_id))
             cursor.execute(
@@ -474,6 +519,7 @@ def reset_account_center_password(*, actor: AdminPrincipal, account_id: int, pas
             )
             _save_account_command_receipt(cursor, "account-password-reset", idempotency_key, actor, account_id, expected_version, reason, payload)
         conn.commit()
+        return _account_command_receipt("account-password-reset", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
         conn.rollback()
         raise
@@ -481,7 +527,7 @@ def reset_account_center_password(*, actor: AdminPrincipal, account_id: int, pas
         conn.close()
 
 
-def revoke_account_center_sessions(*, actor: AdminPrincipal, account_id: int, reason: str, expected_version: int, idempotency_key: str) -> None:
+def revoke_account_center_sessions(*, actor: AdminPrincipal, account_id: int, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Revoke all sessions for a selected account with an auditable operator reason."""
     _require_root_account_action(actor, account_id, reason)
     conn = get_connection()
@@ -490,7 +536,7 @@ def revoke_account_center_sessions(*, actor: AdminPrincipal, account_id: int, re
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             if _replay_account_command(cursor, "account-sessions-revoke", idempotency_key, actor, account_id, expected_version, reason, {}):
                 conn.commit()
-                return
+                return _account_command_receipt("account-sessions-revoke", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
             cursor.execute("UPDATE admin_users SET access_control_version=access_control_version+1 WHERE id=%s", (account_id,))
             cursor.execute(
@@ -503,6 +549,7 @@ def revoke_account_center_sessions(*, actor: AdminPrincipal, account_id: int, re
             )
             _save_account_command_receipt(cursor, "account-sessions-revoke", idempotency_key, actor, account_id, expected_version, reason, {})
         conn.commit()
+        return _account_command_receipt("account-sessions-revoke", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
         conn.rollback()
         raise
@@ -510,7 +557,7 @@ def revoke_account_center_sessions(*, actor: AdminPrincipal, account_id: int, re
         conn.close()
 
 
-def reset_account_center_mfa(*, actor: AdminPrincipal, account_id: int, reason: str, expected_version: int, idempotency_key: str) -> None:
+def reset_account_center_mfa(*, actor: AdminPrincipal, account_id: int, reason: str, expected_version: int, idempotency_key: str) -> AccountCommandReceipt:
     """Revoke a non-root factor and its sessions; the user must enroll again after password proof."""
     _require_root_account_action(actor, account_id, reason)
     conn = get_connection()
@@ -519,7 +566,7 @@ def reset_account_center_mfa(*, actor: AdminPrincipal, account_id: int, reason: 
         with conn.cursor(pymysql.cursors.DictCursor) as cursor:
             if _replay_account_command(cursor, "account-mfa-reset", idempotency_key, actor, account_id, expected_version, reason, {}):
                 conn.commit()
-                return
+                return _account_command_receipt("account-mfa-reset", idempotency_key, account_id, expected_version + 1, replayed=True)
             _lock_non_root_account(cursor, account_id, expected_version)
             cursor.execute("UPDATE admin_users SET access_control_version=access_control_version+1 WHERE id=%s", (account_id,))
             cursor.execute(
@@ -537,6 +584,7 @@ def reset_account_center_mfa(*, actor: AdminPrincipal, account_id: int, reason: 
             )
             _save_account_command_receipt(cursor, "account-mfa-reset", idempotency_key, actor, account_id, expected_version, reason, {})
         conn.commit()
+        return _account_command_receipt("account-mfa-reset", idempotency_key, account_id, expected_version + 1, replayed=False)
     except Exception:
         conn.rollback()
         raise
@@ -580,6 +628,26 @@ def _account_command_fingerprint(
         ensure_ascii=False, sort_keys=True, separators=(",", ":"),
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _account_command_receipt(
+    operation: str,
+    idempotency_key: str,
+    target_account_id: int,
+    resulting_access_control_version: int,
+    *,
+    replayed: bool,
+) -> AccountCommandReceipt:
+    receipt_identity = hashlib.sha256(
+        f"account-command-receipt:v1:{operation}:{idempotency_key}".encode("utf-8")
+    ).hexdigest()
+    return AccountCommandReceipt(
+        operation=operation,
+        target_account_id=target_account_id,
+        resulting_access_control_version=resulting_access_control_version,
+        receipt_identity=receipt_identity,
+        replayed=replayed,
+    )
 
 
 def _replay_account_command(

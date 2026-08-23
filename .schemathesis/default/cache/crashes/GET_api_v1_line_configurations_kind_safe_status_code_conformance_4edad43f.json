@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/line/configurations/{kind}/safe",
+  "method": "GET",
+  "path_template": "/api/v1/line/configurations/{kind}/safe",
+  "fingerprint": "4edad43f",
+  "case_id": "udBjdR",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/line/configurations/liff/safe",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/line/configurations/liff/safe",
+      "url_template": "http://127.0.0.1:8765/api/v1/line/configurations/{kind}/safe",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "udBjdR"
+      },
+      "response": {
+        "status_code": 503,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:13:05 GMT",
+          "server": "uvicorn",
+          "content-length": "281",
+          "content-type": "application/json",
+          "server-timing": "application;dur=2105.0",
+          "x-response-time-ms": "2105.0",
+          "x-correlation-id": "0fdcc24ee0734db2ac3d654b2398577c"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"unavailable\",\"code\":\"line_configuration_query_unavailable\",\"message\":\"LINE \u8a2d\u5b9a\u67e5\u8a62\u7d50\u679c\u7121\u6cd5\u5b89\u5168\u63d0\u4f9b\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":true,\"correlation_id\":\"0fdcc24ee0734db2ac3d654b2398577c\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 503\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.005952099978458136,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/line/configurations/{kind}/safe",
+      "path_parameters": {
+        "kind": "liff"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

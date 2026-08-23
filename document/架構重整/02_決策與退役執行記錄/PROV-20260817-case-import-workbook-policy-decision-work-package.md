@@ -1,6 +1,6 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-case-import-workbook-policy-decision
 date: 2026-08-17
 base_branch: main
@@ -13,9 +13,18 @@ source_gaps: PROV-20260817-case-import-workbook-atomicity-archive-policy-gap; PR
 approval_required: 核准此 exact Case Import Workbook Policy Decision Work Package，並採用本文推薦值
 ui_execution_mode: not-applicable
 prerequisites: none (docs-only policy decision)
+authority: exact-human-approved-2026-08-23
+decision_outcome: recommended-values-adopted
 ---
 
 # Case Import workbook policy decision 工作包
+
+## 人工裁決（2026-08-23）
+
+人工已exact核准本文推薦值：HCM identity duplicate採`review_only`；HCM Current採
+`WHOLE_WORKBOOK + archive_required`；Client BeClass、Staff Historical、Historical Orders各採
+`ROW_ATOMIC_RESUMABLE + archive_required`。本裁決只凍結規格，不授權production writer、schema／DB、
+React Apply、entry switch或production host。
 
 ## 0. 推薦裁決值
 
@@ -76,3 +85,12 @@ inventory證明既有tables不能表達running/progress/archive recovery，本�
 | Developer acceptance gate | NOT_RUN | 不操作既有資料庫 |
 
 結論：`DB_CHANGE_NOT_READY`。
+
+## 6. Completion receipt
+
+- canonical matrix：`../03_追蹤清單與證據/evidence/PROV-20260817-case-import-workbook-atomicity-archive-policy-gap/workbook-family-decision-matrix.md`
+- 正式規格已同步`01_Orders_Domain.md`、`17_External_Integration_LINE_Access正式規格.md`與
+  `15_正式規格索引與裁決總表.md`。
+- combined atomicity/archive gap與HCM專屬archive gap已由本decision supersede。
+- static inventory顯示現有claim／terminal receipt不足以表達四family所需archive與完整
+  running/progress/recovery，因此production successor固定輸出`DB_SCOPE_REQUIRED`；未執行DDL、migration或DB。

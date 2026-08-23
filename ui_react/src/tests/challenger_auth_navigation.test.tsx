@@ -160,6 +160,8 @@ describe('Adversarial Challenge: URL Hash Navigation & Routing', () => {
       const expectedTabName =
         finalSection === 'operations'
           ? /營運作業/
+          : finalSection === 'line'
+          ? /LINE 專區/
           : finalSection === 'finance'
           ? /帳務作業/
           : /稽核與系統/;

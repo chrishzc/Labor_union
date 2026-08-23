@@ -57,7 +57,7 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 - schema 依 `db/schema_parts/` → `db/schema.sql` → versioned release metadata 的路徑管理，必須 additive、可驗證且可追溯；不得自行套用到正式資料庫。
 - 每次 schema、欄位、constraint、index、trigger、view 或 seed／backfill 變更，都必須同時交付開發者本機資料庫升級路徑；不得只讓 fresh bootstrap 或 disposable test DB 能建立成功。release 必須被 canonical migration chain／catalog 明確收錄，descriptor 必須涵蓋 altered parent columns 與所有 owned objects，且唯讀 migration preview 必須能列出該 release／artifact。未通過 preserve-data source → candidate → verify 驗證前，不得宣稱該 schema 變更完成。
 - `start_local_development` 不負責套用 schema。保留既有資料使用 `scripts/launchers/update_local_database.bat`；捨棄資料並回到模板使用 `reset_DB.bat`，但 fixture 缺失時必須 fail closed。fresh bootstrap、preserve-data upgrade、fixture reset 與 production migration 是四條不同流程，不得互相替代或隱式串接。
-- 本機 MySQL 的標準執行環境是 Docker `mysql_db` container；`mysql` 與 `mysqldump` 不要求存在於主機 `PATH`。當主機 client 缺失時，`scripts.update_local_database` 應自動偵測運行中的 `mysql_db`，或明確傳入 `--mysql-container mysql_db`。先確認 Docker daemon 可存取；不得因主機 `PATH` 缺少 client 而跳過 database engine gate、改用 mock，或直接操作 container 內 root 帳號。
+- 本機 MySQL 的標準執行環境是 Docker `mysql_db` container；`mysql` 與 `mysqldump` 不要求存在於主機 `PATH`。當主機 client 缺失時，`scripts.update_local_database` 應自動偵測運行中的 `mysql_db`，或明確傳入 `--mysql-container mysql_db`。先確認 Docker daemon 可存取；不得因主機 `PATH` 缺少 client 而跳過 database engine gate或改用 mock。依 2026-08-21 人工裁決，本機 development／validation 的 allowlist `lu_test_*` DB 可使用目前已設定的帳號（包括 root）執行已核准 Work Package 的受控驗收；root 不得因此用於 `union_db`、production target、未核准 schema／migration、reset、replacement 或 `--switch`。
 - `scripts.update_local_database --apply` 是開發者本機的完整 replacement flow：candidate 驗證後會替換 configured source，不能作為純 engine gate。純 disposable candidate 驗證使用 `scripts.migrate_preserved_database_additive_schema --rehearsal --apply`／`--verify`，並明確傳入 `--mysql-container mysql_db`、source、candidate 與既有 plan／operation receipts；不得執行 `--switch`。若 source 的既有 owned object 為 `partial` 或 `drift`，runner 必須 fail closed，先處理該 baseline 再驗證新 release。
 - DDL、system seed 與既有業務資料 backfill 必須在 release metadata 中分開聲明。任何 row migration 都要有 dry-run、影響筆數／fingerprint、unresolved review、replay 與 rollback evidence；不得把未宣告的資料轉換藏在 schema part，也不得因開發者本機需要升級而擴張成 production data migration 授權。
 
@@ -70,59 +70,48 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 3. **Static release gate**：確認 schema part、fresh-bootstrap assembly／manifest、canonical release chain、manifest hash／dependency、owned-object descriptor 與開發者操作文件全部互相引用。Runner 實際解析出的 latest release id 與 artifacts 必須包含本次 release；只因檔案存在於 `db/migration_releases/` 不算通過。
 4. **Descriptor gate**：新表與 altered parent columns 都要驗證完整 column contract、indexes、foreign keys、checks、triggers 與 views；`absent／exact／partial／drift` 必須可機械區分，未知 partial／drift 固定 fail closed。
 5. **Read-only plan gate**：`scripts/launchers/update_local_database.bat --dry-run` 只驗證 launcher wiring／依賴，不是 DB migration plan。真正的唯讀本機 plan 使用 `.venv\Scripts\python.exe -m scripts.update_local_database`；輸出必須含 latest release id、待套／續跑／exact artifacts 與 blocked reason，且不得寫 DB。
-6. **Engine verification gate**：先跑 metadata／manifest／plan focused tests，再以 disposable DB 驗證 fresh bootstrap，最後以含上一支援版 schema 與代表性舊資料的 disposable source 驗證 dump → candidate → apply → verify。沒有真實 MySQL evidence 時只能標 `BLOCKED_ENGINE_EVIDENCE`，不得以 mock 或 compile 取代。
+6. **Engine verification gate**：schema／migration 變更仍須先跑 metadata／manifest／plan focused tests，再以 disposable DB 驗證 fresh bootstrap，最後以含上一支援版 schema 與代表性舊資料的 disposable source 驗證 dump → candidate → apply → verify。純 API／UI／Domain mutation 驗收不再強制建立 disposable DB；可依 3.2 在既有 allowlist 開發測試 DB 取得真實 MySQL evidence。沒有任何真實 MySQL evidence 時只能標 `BLOCKED_ENGINE_EVIDENCE`，不得以 mock 或 compile 取代。
 7. **Developer acceptance gate**：只在上述全部 PASS 後，才驗證本機 launcher 實際更新；必須保存 source backup、candidate／replacement receipts、舊資料 preservation、new object exactness、unresolved rows 與 rollback evidence。未經明確授權不得操作任何既有 `union_db`。
 
 每次分析或交付必須輸出一張 gate 結果表，狀態只能使用 `PASS | BLOCKED | NOT_RUN`，並附證據路徑或命令。只要任一必要 gate 為 `BLOCKED`／`NOT_RUN`，總結固定為 `DB_CHANGE_NOT_READY`；不得使用「測試大致正常」或「fresh DB 可建立」宣稱完成。
 
+### 3.2 既有開發測試 DB 的受控驗收裁決
+
+2026-08-21 人工已撤銷「既有 DB 只能 GET」與「所有 DB 驗收必須使用 non-root disposable DB」兩項
+blanket restriction。這項 current 裁決適用於 Phase 3～6 及後續本機 API／UI／Domain 驗收，並取代 active
+文件中僅因上述 blanket restriction 而留下的舊 blocker；歷史 receipt 保留當時 `NOT_RUN` 事實。
+
+- 允許目標：`APP_ENV=development` 或等價 validation profile，且資料庫名稱通過 `lu_test_*` allowlist；每次
+  執行前都要回讀 environment、host、database 與 credential class，target 不符即 fail closed。
+- 允許帳號：使用目前開發環境已設定的 credential，包括 root；不再要求先建立 non-root 帳號。
+- 允許操作：已核准 Work Package 明列的 Query／Preview／Apply、API、browser、worker replay 及受控測試資料
+  建立／修改／清理。每次 mutation 要使用唯一 scenario identity，先盤點目標 rows，只修改本次 owned rows，
+  保存 receipt／before-after readback，並以 scoped cleanup 或明確保留策略結束；不得清理不屬於本次的資料。
+- disposable DB 改為選配隔離工具，不再是一般 mutation／browser gate 的必要條件；若現有資料不足，可依
+  Work Package 選擇補齊既有測試 DB 或另建 disposable DB。
+- 仍禁止：`union_db`、任何 production DB／provider、未核准 DDL、migration、seed／backfill、reset、source
+  replacement、`--switch`、全庫清理及其他破壞性操作。schema／migration 變更仍須完整通過 3.1 的 disposable
+  fresh-bootstrap 與 preserve-data candidate gates，不能用既有 DB runtime 測試取代。
+- 本裁決不擴張任何 Work Package 的業務 scope、owner、public contract、external side effect 或 write set；若
+  某包另有特定資料安全限制（例如 HCM 不合成／不上傳測試 XLSX），該限制仍有效。
+
 ## 4. 專案文件與檔案落點
 
-新增檔案前先分類；同一資訊只能有一個 canonical owner，不得在 `document/`、根目錄與 Agent 暫存區建立競爭 SSOT。
+同一資訊只能有一個owner：current規格放`01_規格基線/`；active decision／Work Package／gap放`02_決策與退役執行記錄/`；active inventory、final receipt與review queue放`03_追蹤清單與證據/`；不再active的歷史放`04_已完成與上線封存/`。測試放`tests/`，fixture放`tests/fixtures/`，跨層驗收契約放`validation/`，schema／release放`db/`，一次性輸出放ignored `scratch/<task-slug>/`。
 
-| 類型 | 正式位置 | 規則 |
-|---|---|---|
-| Global／Domain 正式規格 | `document/架構重整/01_規格基線/` | 更新正式規格索引；人工確認前標明 draft／proposed，不得冒充 approved。 |
-| 架構裁決、Work Package、gap、退役或執行記錄 | `document/架構重整/02_決策與退役執行記錄/` | 記錄 `doc_type`、`declared_status`、date、owner、scope、write set、acceptance 與 out-of-scope，並更新該目錄 `README.md`。 |
-| 盤點、人工 review queue、正式 evidence／receipt | `document/架構重整/03_追蹤清單與證據/` | evidence 放其 `evidence/`，更新索引或 manifest；證據不等於授權。 |
-| 已完成／已上線／已被取代的低頻歷史文件 | `document/架構重整/04_已完成與上線封存/` | 只封存不再 active 的 Work Package、superseded 舊規格與 closed release／receipt；現行正式規格即使已上線仍留在 `01`。封存前須通過 archive gate、更新 inbound links 與 manifest；Agent 日常不得全文載入。 |
-| 功能提案與尚未核准的共享開發計畫 | `document/功能開發計畫/` | 一個 initiative 一份文件，必須標明狀態、owner、Domain、範圍、依賴、驗收條件與更新日期；若影響架構，核准後收斂到 `01`／`02`，不得保留雙 SSOT。 |
-| 不改變業務／架構契約的通用技術 ADR | `document/架構重整/02_決策與退役執行記錄/` | 使用明確 `doc_type: architecture-decision`；若涉及 owner、SSOT、交易或部署裁決，同樣在此記錄完整 Work Package／裁決。 |
-| 穩定的開發指南與通用 pattern | `AGENTS.md` 或 `document/架構重整/00_開發者與Agent導覽.md` | 不得在此放正式業務規格、共同代辦或驗收授權。 |
-| pytest 測試程式 | `tests/` | `test_<business_behavior>.py`；新檔按 Domain／Subsystem／integration／global 邊界歸類，既有平鋪測試只在相關任務中逐步收斂。 |
-| 測試 helper 與 pytest fixture code | `tests/support/`、`tests/conftest.py` | 不得把測試專用邏輯放進 production module 或 `scripts/`。 |
-| 測試專用靜態資料 | `tests/fixtures/<domain>/` | 僅可放最小、去敏、可版本化的 deterministic input；禁止正式資料與個資。 |
-| 跨層機器可讀驗收契約 | `validation/` | `scenarios/`、`expected/`、`fixtures/`、`receipts/` 等必須由 manifest／規格引用；canonical input 與可再生 output 必須分開，未經人工確認不得把現有產物升格為 SSOT。 |
-| schema、release 與維運工具 | `db/schema_parts/`、`db/migration_releases/`、正式規格指定的 cutover release 目錄、`scripts/` | SQL、release metadata 與 operator entry 分開；script 必須有明確輸入、輸出、環境與安全邊界。 |
-| 個人／Agent 暫存、探索、一次性輸出 | `scratch/<task-slug>/` | Git ignored；不得被 production、tests、正式規格或交付流程依賴。 |
-| runtime／debug log | `logs/` 或 `scratch/<task-slug>/logs/` | Git ignored；需長期保存時提煉成去敏 receipt，不提交原始 log。 |
-
-根目錄只放長期有效的 entry point、專案設定、共同索引與治理文件。禁止新增 root `tmp_*`、`.pytest_tmp_*`、`.codex_tmp_*`、`*.log`、cache、臨時簡報或 generated output。pytest 暫存使用唯一的 `--basetemp .pytest_tmp/<task-slug>` 或 OS temp，避免多 Agent 共用。既有 dirty／ignored 暫存物不得因本規範被自動刪除；清理仍需確認用途與授權。
+證據採final receipt優先：原始stdout／stderr、完整HTTP dump、重跑journal、intermediate plan、重複candidate receipt及cache，在final receipt完成且沒有rollback／稽核依賴後應刪除，不得長期堆在`03`。Migration release、source backup、rollback receipt、不可變artifact與current incident evidence保留。刪除前精準搜尋inbound references；有current引用或唯一性不明時不刪。
 
 ## 5. 代辦與專案管理
 
-- 團隊共同代辦必須可版本化、可追蹤且有唯一 owner。功能提案放 `document/功能開發計畫/`；已進入正式架構執行的工作放 `02_決策與退役執行記錄/` 的 Work Package／gap package。
-- 每個共享代辦至少記錄：status、priority、owner、business scenario、Domain／Subsystem、scope、out-of-scope、dependencies、write set、acceptance、required tests、decision／evidence links、updated date。
-- 狀態使用明確且有限的集合：`draft`、`proposed`、`approved`、`in-progress`、`blocked`、`completed`、`superseded`；`completed` 必須連結驗收證據，`blocked` 必須記錄阻塞條件與人工入口。
-- 個人或 Agent 的即時 checklist 放 `scratch/<task-slug>/`，不提交且不構成團隊承諾。不得使用 root `task*.md`、`PROJECT_SPEC.md`、`implementation_plan.md`、checkpoint 或 code comment TODO 作為正式 backlog。
-- production code 中不得留下沒有 owner／issue／Work Package 連結的 `TODO`、`FIXME` 或暫時繞過；無法在本任務完成時，回寫正式代辦並使程式 fail closed。
-- 每個 Work Package 完成、supersede 或封存前，integration owner 必須以其檔名、標題、owner、business scenario 與舊 initiative ID 搜尋 `document/功能開發計畫/`、active `02`／`03` 索引及 current SSOT 的 inbound reference，逐筆裁決為 `current`、`superseded`、`archive-candidate` 或 `needs-successor`。不得因文件未在本次 write set、仍標 `proposed`／`partial`、或只含歷史 checklist，就假定它仍是 active；必須以目前已交付的正式語意、code、release 與驗收 evidence 重判。
-- 工作完成後先在原代辦更新 `completed`、evidence／index 與 release 結果，不另建「完成版」複本。符合 archive gate 後可把不再 active 的 Work Package／舊版本文件移至 `04_已完成與上線封存/`；被取代文件標示 `superseded` 並連結 successor，不靜默覆寫歷史裁決。
-- 「已實作」不等於「可封存」；仍約束 current production 的正式規格永遠留在 `01_規格基線/`。只有 current successor 已完整承接語意，且舊文件不含 active blocker、操作入口或 rollback 責任時，才可封存舊版本。
-- 封存不是依檔名或 status 自動搬移。必須確認 completion／deployment receipt、release identity（如適用）、successor、inbound links、content digest、restore triggers，並更新 `04_已完成與上線封存/archive_manifest.json`。沒有唯一判定時留在原位並進人工 review queue。
-- active 索引只保留 current／in-progress／blocked／awaiting-execution 文件與必要的一行 archive pointer；不得把 archive 全目錄或完整 manifest 注入一般 Agent 上下文。
+- 共享代辦須有status、owner、scenario、scope、dependencies、write set、acceptance、tests與evidence；狀態限`draft | proposed | approved | in-progress | blocked | completed | superseded`。
+- active索引只列current／approved／in-progress／blocked／awaiting-execution。completed／superseded在確認successor、inbound links、rollback責任與final receipt後移出；不另建「完成版」複本。
+- 個人checklist只放ignored `scratch/`；production不得留下無owner／Work Package連結的TODO／FIXME。
 
 ## 6. 分層實作與驗證
 
-- 架構完整確認後，才可依互不重疊的 Source／write set 平行撰寫 production code 與測試。
-- Module 驗證局部 input、output、invariant、exception 與 dependency。
-- Subsystem 驗證 Module 編排、資料形狀、狀態機、交易、replay、partial failure、stale 與 conflict。
-- Domain 驗證從根事實到最終結果的端到端運作。
-- Global 驗證跨 Domain 不變量、entry point、migration、release 與外部副作用主流程。
-- schema／migration 變更至少驗證兩條路徑：空白 disposable DB 的 fresh bootstrap，以及含舊版資料的 preserve-data candidate upgrade。後者必須確認舊表 row count、primary keys、原欄位 projection 與 source fingerprint 不變，新欄位／objects exact，且 partial／drift fail closed。
-- 測試失敗時，以失敗所屬層級作為整體修正單位；不得只修單一 assertion 而破壞同層契約或跨層不變量。
-- 測試資料、candidate、fixture、正式資料庫與外部服務必須明確隔離。任何 snapshot、golden artifact 或 validation dataset 都視為受保護測試資產，除非使用者明確指定，不得刪除、重產或套用至正式資料。
-- Python 測試使用專案 `.venv\Scripts\python.exe -m pytest`，指定有限 timeout；先跑受影響 Module，再依 Subsystem、Domain、Global 逐層擴大，必要時使用 `-W error`。
-- 每個 production、script 或 test 的直接第三方 import，都必須在 `pyproject.toml` 的 `dependencies` 或適當 dependency group 明確聲明；不得依賴 transitive package 恰好存在。變更相依後同步更新 `uv.lock`。
+- 驗證順序為Module → Subsystem → Domain → Global；先focused，最後才full suite。失敗以所屬層級修正，不只改單一assertion。
+- Python使用`.venv\Scripts\python.exe -m pytest`、有限timeout與唯一`--basetemp .pytest_tmp/<task-slug>`。
+- snapshot／golden／validation dataset視為受保護資產。直接第三方import須在`pyproject.toml`聲明並同步`uv.lock`。
 
 ## 7. Dirty worktree、Git 與協作
 
@@ -135,29 +124,13 @@ Streamlit 是可替換的薄顯示層，只能呼叫後端 API 並顯示 typed r
 
 ### 多人協作與合併裁決
 
-- 任務以人可讀的 Work Package／issue／標題，加上 owner、scope、write set 與 base ref 識別。commit SHA 可作為證據，但不得要求或使用內容 hash／fingerprint 作為任務身分、worktree 或 branch 名稱、協作鎖、進度紀錄或衝突裁決依據。
-- hash 只用於既有契約明確要求的不可變、可重現 artifact 完整性，例如 migration SQL、release／descriptor metadata、generated validation release、已核准 snapshot／golden artifact 與其 receipt。hash 不代表 owner、業務授權、任務狀態，也不能決定哪一側變更應保留。
-- 平行工作開始前，協調者必須記錄各 lane 的 owner、base ref、scope、out-of-scope、exact write set、acceptance 與 shared hot spots。`AGENTS.md`、共同 README／index、catalog、manifest、release chain、lockfile、generated authority 與共享 fixture 在同一協作批次只能有一位 integration writer；其他作者只交付自己的內容檔及精確 index delta，不直接競寫 hot spot。
-- handoff、配號與合併前必須比較目前 integration target 與原 base ref，並重查 write set、shared hot spots 及 canonical catalog 自開工後的變更。發現 base drift 時先重讀受影響規格與 diff、重做衝突盤點；不得沿用舊的 next number、index order、manifest position 或驗收假設。
-- 合併或共同編輯前，先建立最小衝突盤點：path、各方意圖與 owner、語意分類、建議處置（`keep both`、`ours`、`theirs`、`successor`、`defer`）。非純文字格式衝突不得自行定案；須由相關 owner 或人工確認處置。
-- 新增帶 ordinal、正式規格編號、Work Package ID、schema part ordinal 或 release ID 的 artifact 時，必須先確認其 namespace 與 canonical catalog owner。平行 lane 一律先使用人可讀、無整數占位的 provisional identity，例如 `PROV-YYYYMMDD-<owner>-<topic>`；不得自行以「目前最大值 + 1」、README 的 next number 或另一 namespace 的空號宣稱 canonical identity，也不得先修改 shared index。
-- canonical ID 只由 integration writer 在最新 integration target 上 late-bind：先精準檢查 active catalog、相關 archive manifest、release chain 及未追蹤檔案，再於同一整合變更中完成配號、檔名、frontmatter、inbound links、catalog／index／manifest。README 或索引記載的目前最大值只能作觀察提示，不是 reservation；catalog 不完整、owner 不明或 base drift 未解決時維持 provisional 並 fail closed。
-- provisional／draft 且尚未被核准、發布、套用或成為 inbound reference 的 identity 可由 integration writer 改名；已進入 canonical catalog、已被引用、已核准、已發布或已套用的 identity 不得為解決碰撞而改號或覆寫。不同業務 lane 保留並分配不同 canonical ID；同一語意須比較契約與驗收證據後指定 successor／superseded／defer，不得以 Git 的 `ours`／`theirs` 取代語意裁決。
-- release ID、schema part ordinal 與文件／Work Package 編號是不同 namespace，不互相借號。已發布或已套用的 migration SQL、release／descriptor metadata 與 digest bytes 永遠不可改號、覆寫或重算；碰撞或修正只能建立有明確 dependency 的 successor artifact，並重跑資料庫變更執行門。
-- 合併協調者只在各 lane 內容 freeze 且語意裁決完成後，一次整合 shared catalog、index 與 manifest order。每次協調完成都要記錄 provisional → canonical mapping、保留、取代、延後項目、仍待驗證的 gate 及最新 base ref。
+- 平行lane先凍結owner、base、scope、write set、acceptance與shared hot spots；共同README／index／catalog／manifest／release chain／lockfile同批次只有一位integration writer。
+- 合併前重查base drift並列path、雙方意圖與`keep both | ours | theirs | successor | defer`；不得用Git側別代替語意裁決。
+- 新identity先用`PROV-YYYYMMDD-<owner>-<topic>`，canonical ID由integration writer在fresh catalog上late-bind。已發布／已套用release與hash-locked artifact不可改號、覆寫或重算。
 
 ## 8. 交付前檢查
 
-1. 變更是否對應一個明確 business scenario、Domain／Subsystem 與已核准範圍？
-2. owner、SSOT、根事實、衍生值、交易與外部副作用邊界是否仍清楚？
-3. 新檔案是否放在本規範指定位置，且沒有建立雙 SSOT 或 root 暫存？
-4. 規格、代辦、code、tests、validation contract、receipt 與索引是否互相可追溯？
-5. 是否保護所有既有 dirty paths，且每一行 diff 都屬於本任務？
-6. 若涉及平行工作或新 identity，是否完成 base-drift／namespace／collision 檢查，由唯一 integration writer 配號並更新 shared hot spots？
-7. 是否完成正確層級的測試、`git diff --check`、UTF-8 與敏感資訊檢查？
-8. 是否明確揭露未完成、未授權、live-drift、skip、風險與需要人工處理的項目？
-9. 若有 DB 變更，canonical release chain、owned-object descriptor、fresh bootstrap、preserve-data dry-run／candidate 驗證與開發者操作文件是否同步完成？
-10. 是否已重新盤點並裁決所有相鄰功能計畫、gap／Work Package 與 inbound references，避免已完成實作留下過期的 `proposed`／`partial` 文件或 active index 列？
+確認scope／owner／SSOT／交易與副作用邊界、dirty paths、文件與code可追溯、正確層級測試、`git diff --check`、strict UTF-8、敏感資訊及所有未完成／未授權／live-drift。DB變更另確認release chain、descriptor、fresh、preserve-data與developer acceptance。
 
 ## graphify
 

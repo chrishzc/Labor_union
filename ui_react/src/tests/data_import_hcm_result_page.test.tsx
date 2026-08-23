@@ -1,6 +1,6 @@
 /**
  * File: data_import_hcm_result_page.test.tsx
- * Description: 驗證 DataImport顯示新增、問題、replay與legacy unavailable，且無upload／Preview／Apply。
+ * Description: 驗證DataImport顯示新增、問題、replay與歷史摘要，且Apply依Preview結果顯示。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -21,8 +21,10 @@ describe('DataImport HCM result review', () => {
     expect(screen.getAllByText(/行動電話/).length).toBeGreaterThan(0);
     expect(screen.getByText('115000003')).toBeInTheDocument();
     expect(hcmImportResultClient.query).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('input[type="file"]')).toBeNull();
-    expect(screen.queryByText(/執行 Preview/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="imports.hcm-current.open-preview"]')).toBeInTheDocument();
+    expect(document.querySelector('[data-control-id="imports.hcm-current.apply"]')).not.toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="imports.hcm-current.apply-guidance"]'))
+      .toHaveTextContent('Apply 下一步：成功完成 Preview 後顯示確認與套用按鈕。');
   });
 
   it('refresh costs one GET and warning navigation is local', async () => {
@@ -35,10 +37,10 @@ describe('DataImport HCM result review', () => {
     expect(hcmImportResultClient.query).toHaveBeenCalledTimes(2);
   });
 
-  it('shows legacy membership unavailable instead of an empty-success claim', async () => {
+  it('shows a neutral legacy summary instead of an empty-success claim', async () => {
     vi.mocked(hcmImportResultClient.query).mockResolvedValue({ items: [{ ...detailedHcmResult, row_outcomes_available: false, legacy_summary_only: true, row_outcomes: [] }], next_cursor: null });
     render(<DataImportPage />);
-    await waitFor(() => expect(screen.getByText(/舊receipt未保存逐列membership/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/歷史摘要 receipt；本批次統計如上/)).toBeInTheDocument());
     expect(screen.queryByText('本批次沒有新增訂單。')).not.toBeInTheDocument();
   });
 });

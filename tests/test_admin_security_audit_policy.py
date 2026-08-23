@@ -7,7 +7,12 @@ from pathlib import Path
 
 from api.routes import admin_audit
 from subsystems.access.authentication_session import AdminPrincipal
-from subsystems.access.security_audit_query import mask_audit_details, mask_ip_address
+from subsystems.access.security_audit_query import (
+    AuditDetailField,
+    AuditDetailItem,
+    mask_audit_details,
+    mask_ip_address,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +40,7 @@ def test_any_authenticated_administrator_can_open_masked_detail(monkeypatch) -> 
     principal = AdminPrincipal(1, "reader", "Reader", "line_viewer")
 
     response = admin_audit.audit_detail(7, principal)
-    assert response.data.id == 7
+    assert response.data.audit_id == 7
 
 
 def test_opening_a_masked_audit_detail_does_not_require_a_reason() -> None:
@@ -44,14 +49,21 @@ def test_opening_a_masked_audit_detail_does_not_require_a_reason() -> None:
     assert "reason" not in parameters
 
 
-def _audit_detail(actor_id: int) -> dict:
-    return {
-        "id": 7, "admin_user_id": actor_id, "actor_display_name": "Actor",
-        "action": "line.review.approve", "resource_type": None, "resource_id": None,
-        "request_path": None, "http_method": "POST", "result_status": 200,
-        "ip_address_masked": "203.0.113.***", "created_at": "2026-08-09T08:00:00",
-        "details": {"reason": "approved"},
-    }
+def _audit_detail(actor_id: int) -> AuditDetailItem:
+    del actor_id
+    from datetime import datetime
+
+    return AuditDetailItem(
+        audit_id=7,
+        occurred_at=datetime.fromisoformat("2026-08-09T08:00:00+08:00"),
+        actor_label_masked="A***",
+        action_family="other",
+        target_label_masked=None,
+        ip_address_masked="203.0.113.***",
+        outcome="success",
+        reason_code="line.review.approve",
+        details=(AuditDetailField("reason", "provided"),),
+    )
 
 
 def test_retention_archives_after_two_years_without_deleting_archive() -> None:

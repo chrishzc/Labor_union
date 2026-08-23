@@ -1,12 +1,13 @@
 ---
-status: proposed
+status: in-progress
 priority: P0
 owner: global-admin-web-presentation
 domain: Global
 subsystem: admin-web-presentation-adapter
 initiative: react-admin-migration
-updated: 2026-08-16
-approval_required: 核准 React 管理端遷移整體架構；每一 production wave 仍需 exact Work Package 核准
+updated: 2026-08-20
+approval_required: 每一 production mutation／entry switch／retirement wave仍需exact Work Package核准
+approval_evidence: user-delegated-phase3-through-phase6-execution-2026-08-20
 prerequisites: Part_00_全域測試資料治理與Scenario契約.md; UI真實業務流程測試資料與驗收主計畫.md
 ---
 
@@ -20,12 +21,17 @@ prerequisites: Part_00_全域測試資料治理與Scenario契約.md; UI真實業
 - 2026-08-16 使用者進一步確認：Desktop React 模板目前的頁面、抽屜、資訊架構與互動大致就是
   目標 UI；遷移主線是保留既有畫面，把 `mockData`、頁面內嵌資料與假 handler 換成 real data／
   real API，而不是先重新設計每一個狀態或要求逐 action 完成產品裁決。
-- 本文件把該目標收斂成可審核的整體架構、切換順序、proposed write set 與 acceptance。
-- 目前尚未取得本文件的人工整體架構確認；因此本輪只授權模板 inventory、current UI/API 對照、
-  readiness audit 與 proposed 文件，不授權 production React／Streamlit／FastAPI／launcher／pytest
-  修改，也不授權 schema、seed、validation DB、部署或 cutover。
-- 人工確認本文件後，仍須依第 10 節把每一波建立成 exact-scope Work Package；不得把確認本文件
-  解讀成一次移除全部 Streamlit 的授權。
+- 本文件已由2026-08-20 Phase3–6正式交接與持續目標確認為in-progress架構；production施工仍只依各自
+  已核准exact Work Package，不因整體目標自動授權schema、既有DB mutation、provider、entry switch或退役。
+- 每一波仍須依第10節建立／執行exact-scope Work Package；不得把整體確認解讀成一次移除全部
+  Streamlit的授權。
+
+### 0.1 2026-08-22營運作業前端優先序
+
+最新人工裁決先完成訂單管理→排班日曆→月嫂名冊→資料匯入。每頁依序通過fixture／focused UI tests、
+allowlisted development `lu_test_*`真MySQL／API／browser、以及另行明確授權後的工會主機真實業務資料驗收。
+`lu_test_*`不是工會真實資料；本機gate失敗不得把候選交給工會主機試錯。此順序調整不授權production host、
+entry switch、schema／migration、provider side effect或未完成安全門的Apply。
 
 ## 1. Business scenario
 
@@ -205,7 +211,8 @@ Approved Admin Edge
   `not-applicable` 或 `blocked`；不能把 React build pass 當成 Domain acceptance。
 - Browser receipt 只證明 UI 可見互動；transaction、replay、rollback、worker／outbox 與 DB invariant
   仍由 pytest／專用 verifier 證明。
-- 測試只連名稱與環境雙 allowlist 的 disposable validation DB；LINE、銀行、付款、補助及外部傳送
+- 測試只連名稱與環境雙 allowlist 的 development／validation DB；依2026-08-21人工裁決，可直接使用既有
+  `lu_test_*` DB與目前設定的credential（包括root），disposable DB為選配。LINE、銀行、付款、補助及外部傳送
   全部使用受控 adapter。
 - Part 00 仍為 `blocked-for-implementation`；本計畫不授權修復 33 案、`115000051` drift、schema manifest、
   seed chain 或 validation DB。
@@ -220,7 +227,10 @@ Approved Admin Edge
 4. Preview／Apply／receipt、action handler、外部 provider、owner／transaction、schema／seed／migration 與 controlled-data Scenario 另立 bounded successor；query 接線不自動解鎖 mutation。
 5. Part 00 的 Scenario／DB receipt 只在該 page slice 宣稱 mutation、controlled data、transaction、worker、external side effect 或跨站 Domain invariant 時成為必要 gate。既有 typed GET 的 real-data UI 接線仍需 success／empty／typed error／auth／timeout／abort／PII evidence，但不因無關 mutation 或 disposable DB engine 而阻塞。
 6. Existing Global error、correlation 與 Scenario verifier 工作包照原範圍收尾；只有該頁實際依賴其 public contract 時才列為前置。舊 central DAG 與 B0～B9 只作 mutation／controlled-data／cross-cutting contract lane routing，不再是所有 query page 的總前置。
-7. 既有資料庫只可用於 GET UI 觀察；不得以既有 DB 執行 mutation、seed、migration、repair 或建立測試資料。
+7. 2026-08-21人工已撤銷「既有DB只能GET」blanket restriction。已核准page slice可在allowlist `lu_test_*`
+   development／validation DB執行受控mutation與建立／修復本次owned測試資料，並須保存唯一scenario identity、
+   before/after readback、receipt及scoped cleanup／保留策略。這不授權schema／migration、全庫seed、reset、
+   replacement、`--switch`、`union_db`或production target。
 
 本節不改變各 Domain 的 SSOT、正式業務規則、既有 Work Package 的狀態或 exact approval；它只改變 page slice 的排程與 gate routing。
 
@@ -421,14 +431,20 @@ Phase 4 Scenario adoption／supplement／test-data gap由同目錄
 `PROV-20260817-react-admin-phase4-scenario-lineage-governance-gap.md`及
 `PROV-20260817-react-admin-phase4-scenario-lineage-governance-work-package.md`；此包完成只代表lineage可追溯，
 不代表任何Phase 4 production、DB、browser或provider操作獲准。
-目前原工作包仍以不可能的Phase3 runtime `PASS`作activation文字；已建立proposed
-`PROV-20260817-react-admin-phase4-scenario-lineage-governance-prerequisite-amendment.md`，等待exact人工核准後才把
-前置收斂為`PHASE3_SCENARIO_LINEAGE_METADATA_READY`。Global Typed Error不阻擋metadata建立，但仍是每個
+2026-08-21 prerequisite amendment已exact核准並完成，Phase4 lineage前置已收斂為
+`PHASE3_SCENARIO_LINEAGE_METADATA_READY`，Durable Core／FI-H的Phase4前置則固定為
+`PHASE4_SCENARIO_LINEAGE_METADATA_READY`。Global Typed Error不阻擋metadata建立，但仍是每個
 Phase4 production writer的獨立硬前置；修訂不得被解讀為runtime解鎖。
 此evidence確認HCM僅Preview、FinancePage仍mock-unsafe、LINE rules/menu僅query-only。尚未完成的Phase 4
 backend／React successors仍為`proposed`，Phase 4B-S-H為`blocked`；HCM Preview與LINE rules／menu
 Query雖已有local-validated成果，也不代表Apply／Mutation、真browser或entry cutover已ready。不能以既有route
 或full React tests綠燈推定已核准。
+
+2026-08-21 Finance FI-H已取得exact human approval，狀態為`approved / blocked-prerequisites`，並已補齊G0–G7與
+Finance XLSX fixture authority。此核准只批准條件式範圍；Phase4尚未輸出
+`PHASE4_SCENARIO_LINEAGE_METADATA_READY`，Durable Job Core／Caller Bridge與合法去識別Finance fixture及
+合法Finance engine evidence亦未完成，故不得啟動writer；該evidence可依2026-08-21裁決使用既有allowlist
+開發測試DB，不再強制non-root disposable DB。HCM不合成／不上傳測試XLSX與Finance fixture authority仍有效。
 
 Phase 4 首波拆成 Phase 4A-P 與 Phase 4A-H。4A-P 已把 HCM current workbook 的真檔 Upload＋Preview
 接入 React並完成local validation，Apply及其他import families原位鎖定；4A-H記錄workbook多重commit、Global typed error、
@@ -459,9 +475,9 @@ Case Import可先核准docs-only
 `PROV-20260817-durable-job-public-outcome-contract-work-package.md`改為`blocked`，必須先裁決
 existing-column canonicalization或additive schema與caller adoption，不能直接核准局部backend施工。
 對應docs-only決策包為
-`PROV-20260817-durable-job-persistence-caller-adoption-decision-work-package.md`，推薦Option A；其PASS只代表
-架構與successor write set凍結，不代表Job runtime或任何Finance／Scheduling流程完成。
-Option A後第一個production successor固定為
+`PROV-20260817-durable-job-persistence-caller-adoption-decision-work-package.md`已於2026-08-21 exact核准Option A並完成
+docs-only裁決；其`DECISION_COMPLETE_OPTION_A_CONDITIONAL`只代表架構與successor write set凍結，不代表MySQL
+engine、Job runtime或任何Finance／Scheduling流程完成。下一個production successor仍須另行exact核准，固定為
 `PROV-20260817-durable-job-core-persistence-worker-contract-work-package.md`；它只建立no-hidden-commit core port，
 不切換caller。Core後先建立`PROV-20260817-durable-job-caller-integration-bridge-work-package.md`，再逐一完成
 六個caller adoption：Assignment Plan、Finance Import三command types、Government Subsidy、Payroll Rebuild、
@@ -517,6 +533,10 @@ lost-ack/crash/timeout續跑；Notification Rules禁止raw definition/Any穿透�
 Knowledge lifecycle必須在query hardening完成後串行施工，source digest僅作server-side fingerprint，
 root/audit/receipt/index-stale marker同一outer UoW，Chroma/reindex仍由index runtime policy gap管理。
 
+Notification Rules backend successor已於2026-08-20完成local focused驗證：closed grammar、Preview零寫入、
+dedicated Save／Delete、replay-before-stale與removed／disabled intent→delivery task同UoW cancellation為`29 passed`；
+這只解除React mutation接線的backend prerequisite，browser/runtime receipt、manual replay、provider與entry cutover仍未完成。
+
 ### Phase 3E／4C：剩餘可見控制的契約收斂
 
 2026-08-17 fresh UI-to-contract audit補出11個仍可見但尚未被前述波次完整承接的能力。此處不把
@@ -549,8 +569,9 @@ LINE三個exact mutation successors與一個owner gap：
 
 三條mutation均拆成backend-first與React successor。三個React包都會修改共享`LineManagementPage.tsx`，
 因此backend/client lanes可在各自contract freeze後平行，但presentation只能由一位Integration Writer依序施工；
-不得由三個模型同時修改頁面。Rich Menu現行preview會寫入且provider步驟不可續跑，必須先收斂；Rules整份PUT
-不能繞過Delete kill switch；Knowledge本波只含item lifecycle，不含reindex/provider。
+不得由三個模型同時修改頁面。Rich Menu backend已收斂為zero-write Preview、typed Apply/API與durable provider
+step evidence／cleanup redrive；但DB engine gate仍`BLOCKED`且React successor尚未施工，因此UI控制不得冒充ready。
+Rules整份PUT不能繞過Delete kill switch；Knowledge本波只含item lifecycle，不含reindex/provider。
 
 另有三個共同前置gap：
 
@@ -596,14 +617,17 @@ Phase 3～6的backend→React→entry→runtime→retirement依賴與shared-hots
 
 - 每次只切一個 entry 的 navigation；保留 Streamlit rollback。
 - 通過觀測、focused regression 與 queue validator 後，才處理下一 entry。
-- 2026-08-17 readiness結果為READY 0／PARTIAL 4／BLOCKED 6；queue仍漏Data Import且完全沒有React
-  entries，所有頁面也缺entry-specific rollback及forward-written-data dual-run evidence。
-- 2026-08-17最新唯讀基線顯示generator可產生532筆，但其中6筆新API仍為`review_required`；
-  generator仍漏Data Import Streamlit entry與全部11個React identities，故queue validator仍失敗，不能把
-  Phase 5基線當作綠燈。這6筆包含Data Browser GET、HCM result GET、兩段式Auth兩個POST與
-  Customer Service update Preview／Apply，須由Phase5A逐筆人工裁決。
-- Phase5A Entry治理／rollback與Phase5B dual-run runtime兩個exact Work Package均為`proposed`，必須分別
-  取得人工核准；完成foundation仍不等於可切任一業務entry。
+- 2026-08-17 的READY 0／PARTIAL 4／BLOCKED 6與「queue漏Data Import／React entries」是Phase5A前歷史基線，
+  已由2026-08-20 Phase5A completion evidence取代，不再作current blocker。各業務entry仍須自己的readiness、
+  forward-written-data與observation evidence，不能因inventory完成而視為cutover-ready。
+- Phase5A歷史Entry治理／rollback基線已完成：10個Streamlit、14個React identities、11筆fixed rollback mapping；
+  `#line-ai-events/#line-liff-studio/#line-security`三筆drift維持`review_required`。Phase5B exact Windows
+  smoke run `7f0d10991ed8daf8`已PASS，8000／8501／5173 ready、GET-only與owned cleanup均成立；Unix runtime
+  仍`NOT_RUN`，且foundation PASS本身不等於可切任一業務entry。
+  Option A entry-target control plane successor先完成11-entry historical baseline；其後System Status exact successor
+  已新增dedicated `#system-status`並完成registry v2。Current inventory為10個Streamlit、15個React identities、12筆
+  fixed rollback mapping；12-entry initial state仍全為Streamlit且尚未provision，未切任何runtime target。三個LINE drift
+  identity維持`review_required`且不納入control plane。
   - `document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase5a-entry-governance-rollback-work-package.md`
   - `document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase5b-dual-run-runtime-foundation-work-package.md`
 - Phase5B固定為最小dual-run foundation：API 8000、Streamlit 8501、React 5173、relative `/api`、
@@ -613,7 +637,8 @@ Phase 3～6的backend→React→entry→runtime→retirement依賴與shared-hots
 - Phase5A/B後第一批entry依序為System Status→Anomalies Query→Orders Query→LINE Query；四個proposed
   per-entry工作包已建立。System Status的dedicated`#system-status`已拆成獨立identity amendment，必須先完成
   source witnesses再執行candidate evidence；Orders明確是一個Streamlit entry對
-  `#orders`與`#order-tracker`兩個React identities。所有candidate包把Phase5A manifest視為唯讀凍結輸入；
+  `#orders`與`#order-tracker`兩個React identities。所有candidate包把Phase5A及System Status successor manifest視為
+  唯讀凍結輸入；
   queue/readiness/evidence只由Integration Owner串行回寫，其他lane不得競寫。
 
   - `document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase5-system-status-entry-identity-amendment-work-package.md`
@@ -630,8 +655,9 @@ Phase 3～6的backend→React→entry→runtime→retirement依賴與shared-hots
 
   所有per-entry包的G0已改為exact prerequisite identities，不再接受`Phase5A/B completed`等模糊文字。
   Orders另須Phase2A boundary remediation PASS；Access須依Account Center→Audit→Durable Job串行閉合；
-  所有包另須Phase3 Scenario Lineage與Global Typed Error Boundary fresh PASS；Phase4頁面還須Phase4 Scenario
-  Lineage PASS。Navigation真的切換時，除了Navigation Switch Decision外，還必須另立且核准該entry的exact
+  所有包另須Global Typed Error Boundary及適用runtime prerequisites fresh PASS；Phase3／Phase4 Scenario Lineage
+  只要求對應`PHASE3_SCENARIO_LINEAGE_METADATA_READY`／`PHASE4_SCENARIO_LINEAGE_METADATA_READY`。Metadata-ready
+  不解除per-entry runtime、DB、browser或switch gate。Navigation真的切換時，除了Navigation Switch Decision外，還必須另立且核准該entry的exact
   runtime switch successor；candidate包本身永遠沒有切換權。
 
 - Fresh audit發現上述per-entry包只擁有readiness tests／queue／evidence，沒有真正切換單一entry navigation的
@@ -689,8 +715,9 @@ Phase 3～6的backend→React→entry→runtime→retirement依賴與shared-hots
   Python dependencies、current docs與tests共同持有；搜尋得到211個候選引用，但歷史evidence不是刪除目標。
 - Phase6拆成：6A fail-closed release gate、6B-HOST production artifact/hosting、6B-RUN runtime callers接管、
   6C逐entry source retirement。
-  production hosting與source retirement缺口已建正式代辦；未滿足Phase5及獨立release核准前不得施工。
-- Phase6A的唯讀validator可在exact核准後提前建立，安裝結果只能是`VALIDATOR_INSTALLED_NOT_READY`且
+  production hosting缺口已由核准的6B-HOST successor取代；source retirement缺口仍保留。未滿足Phase5及
+  各自release前置不得施工。
+- Phase6A唯讀validator已在exact核准後提前安裝，安裝結果為`VALIDATOR_INSTALLED_NOT_READY`且
   current release結果必須輸出`PHASE6_NOT_READY`；它同時驗
   10個legacy identities、Phase5A minimum 11個React baseline及其後所有已核准identity amendments所形成的
   latest exact registry，連同完整API／CLI／UI queue、receipt provenance、React→Streamlit→React雙向
@@ -702,10 +729,11 @@ Phase 3～6的backend→React→entry→runtime→retirement依賴與shared-hots
   固定`INDEPENDENT_MANIFEST_MISMATCH`。HOST/RUN另須machine-readable release approval receipts，不能用
   implementation tests或文字PASS替代。
   - `document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase6-retirement-release-gate-work-package.md`
-- Phase6B-HOST proposed successor推薦FastAPI同源`/admin/`掛載immutable React artifact；hash routes與
+- Phase6B-HOST exact WP已核准，採FastAPI同源`/admin/`掛載immutable React artifact；hash routes與
   root-relative`/api`保持，並要求manifest/digest、CSP/cache、真TOTP browser及current/previous artifact
   rollback。manifest必須allowlist全部served files；private artifact-health只證明active mounted artifact，
-  previous由HOST本機selector驗證。這是public runtime topology，必須另取exact核准，且不等於部署或entry retirement。
+  previous由HOST本機selector驗證。fresh Phase5B Windows prerequisite與HOST G0–G7含真Chrome已PASS；這仍
+  不等於部署、traffic switch或entry retirement。
   - `document/架構重整/02_決策與退役執行記錄/PROV-20260817-react-admin-phase6b-production-hosting-work-package.md`
 - Phase6B-RUN是獨立最小successor，只接管local launcher／preflight／smoke／monitor對HOST frozen typed
   artifact health的兩個獨立read-only probes；不接管ngrok、migration rehearsal、DB observation、alert intent
@@ -744,19 +772,19 @@ Phase 3～6的backend→React→entry→runtime→retirement依賴與shared-hots
 | Access/session browser contract | `implemented-local-verified` | 真 Chrome 已完成 password challenge → TOTP → memory Session；reload/new-tab依人工選擇仍需重新登入 |
 | Runtime response validation | `implemented-foundation` | shared transport、typed errors 與 Zod decoder 已建立；各 Domain client 仍需逐波新增 schema |
 | Bounded API clients | `partial / live-drift` | Auth、Anomalies、HCM Preview、LINE客服／Identity及LINE Rules／Rich Menu Query已建立；Orders Query目前違反八GET allowlist，等待Phase2A remediation |
-| System Status read-only slice | `implemented-browser-verified` | 真Chrome登入後performance snapshot 200，Shell顯示系統在線；未代表entry cutover |
+| System Status read-only slice | `implemented-static-current` | 較早真Chrome證據只涵蓋Shell performance snapshot；新dedicated `#system-status` identity已通過static／component gate，但其browser/API runtime因DB recovery維持NOT_RUN；未代表entry cutover |
 | HCM Import結果／問題檢查 | `page-slice-rebaseline` | 人工裁決不以合成／真xlsx Preview作遷移gate；頁面改顯示本次新增訂單與問題／warning tasks，Apply仍另案 |
 | Accounts Payable preview／download | `blocked-public-contract` | Phase4B-AP-H backend exact successor已proposed；等待人工核准與auth/masking/binary metadata驗證 |
 | Subsidy reconciliation report | `blocked-public-contract` | Phase4B-S authority/backend exact successor已proposed；公式/root-fact不明時必須fail closed |
 | LINE Rules／Rich Menu Query | `completed-local-validated-query-only` | 四個authenticated GET已strict decode並接既有六-tab頁；full React 507 tests通過，所有publish/save/retry仍鎖定 |
 | LINE Delivery／Knowledge FAQ | `blocked-public-contract` | 兩個backend query-only exact successors已proposed；等待人工核准，mutation仍另案 |
-| Entry inventory | `partial` | 10個Streamlit與11個React routes已盤點；queue 526 vs discovery 530，另漏1個Streamlit與11個React entries |
-| Dual-run browser acceptance | `partial` | React 已有 unit／component tests；真 API browser dual-run 與 Streamlit rollback 尚未執行 |
-| Launcher／monitor／CORS | `blocked` | current wiring 綁 Streamlit／8501；React／5173 尚無核准 contract |
+| Entry inventory | `completed-foundation-with-drift` | 10個Streamlit與15個React identities已盤點；12筆具fixed rollback，3筆LINE drift維持review_required |
+| Dual-run browser acceptance | `windows-foundation-validated` | exact Windows 8000／8501／5173 GET-only smoke與owned cleanup PASS；Unix runtime NOT_RUN，entry rollback仍逐包驗證 |
+| Launcher／monitor／CORS | `phase5b-completed-phase6b-run-in-progress` | dual-run launcher、HOST probes及12-entry provision/zero-write attest tooling已完成；queue structural drift已解除，RUN仍受deployment-owned state未實際provision阻擋 |
 | UI scenario catalog integration | `partial` | 本規格先定義 UI 接線驗收；涉及測試資料／DB oracle 的 Part 仍受原主計畫 gate 約束 |
 | Streamlit retirement | `blocked` | replacement evidence、逐 entry 裁決、cutover／rollback 均不存在 |
-| Phase 5 entry cutover | `blocked-foundation` | 0/10 READY；等待Phase5A registry/rollback與Phase5B dual-run exact approval及驗證 |
-| Phase 6 retirement gate | `proposed / not-ready` | release-gate WP與hosting/source gaps已建立；current expected result為PHASE6_NOT_READY |
+| Phase 5 entry cutover | `foundation-completed / no-entry-switched` | Phase5A與Option A control-plane installed-only完成；Phase5B Windows exact smoke fresh PASS，仍未切任何entry |
+| Phase 6 retirement gate | `host-validated / run-static-pass-activation-blocked / not-ready` | HOST G1–G7含真實Chrome及fresh focused 28 PASS；Phase5B fresh Windows smoke已PASS；RUN core/rehearsal與fresh focused 2 PASS，queue 557/557、3 PASS。Option C focused與System Status exact 12-entry control plane均完成；runtime provisioning tooling final 41 PASS，但deployment state仍未建立。validator維持PHASE6_NOT_READY，switch／retirement未完成 |
 
 ### 8.1 下游實作者的逐頁接線矩陣
 

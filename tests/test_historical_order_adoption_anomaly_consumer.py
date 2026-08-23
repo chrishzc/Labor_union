@@ -50,8 +50,17 @@ def test_historical_order_review_is_visible_in_import_alert_tab():
         workflow_version=1,
         severity="warning",
         predicate_active=True,
-        display_snapshot={"masked_case_identity": "AB****89", "issue_codes": ["staff_missing"]},
+        display_snapshot={
+            "redaction_version": "anomaly-safe.v1",
+            "definition_code": "HISTORICAL-ORDER-001",
+            "fields": [
+                {"key": "masked_case_identity", "kind": "masked_text", "value": "AB****89"},
+                {"key": "issue_codes", "kind": "code_list", "value": ["staff_missing"]},
+            ],
+        },
     )
 
     assert panel._filter((review_alert,), panel._IMPORT_CODES) == (review_alert,)
     assert panel._alert_code_label(review_alert.definition_code) == "歷史訂單匯入待人工確認"
+    assert panel._case_no(review_alert) == "AB****89"
+    assert panel._snapshot(review_alert)["issue_codes"] == ["staff_missing"]

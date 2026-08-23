@@ -1,0 +1,61 @@
+{
+  "contract": "migration-release-manifest/v1",
+  "release_id": "labor-union-matching-coordination-successor-2026-08-22-v1",
+  "release_metadata": {
+    "release_name": "Labor Union M3 matching coordination successor persistence",
+    "application_version": "matching-coordination-successor-v1",
+    "published_at": "2026-08-22",
+    "description": "Add immutable M3 lineage, replay receipts, and typed owner-command intents without copying owning roots"
+  },
+  "source_baseline": {
+    "minimum_mysql_version": "8.0",
+    "required_character_set": "utf8mb4",
+    "allowed_owned_object_states": ["absent", "exact"],
+    "forbidden_owned_object_states": ["partial", "drift"],
+    "source_must_be_read_only": true,
+    "maintenance_token_required": true,
+    "baseline_id": "labor-union-schema-assembly-2026-08-15-v1"
+  },
+  "artifacts": [
+    {
+      "name": "1003_matching_coordination_successor.sql",
+      "relative_path": "db/schema_parts/1003_matching_coordination_successor.sql",
+      "sha256": "6dcd656e9d9e7ba66a80b8b884ffa967bb0d35e94420f0879193d6fddf56fbe9",
+      "dependencies": [],
+      "data_effect": "schema_only",
+      "rollback_policy": "code-rollback-preserve-matching-coordination-evidence",
+      "resumable_boundary_policy": "statement-sha256-with-durable-receipt"
+    }
+  ],
+  "backfills": [],
+  "verification_contracts": [
+    {
+      "verification_id": "matching-coordination-successor-owned-objects",
+      "phase": "post-schema",
+      "policy": "candidate-owned-objects-exact",
+      "read_only": true,
+      "blocking": true
+    }
+  ],
+  "application_compatibility": {
+    "minimum_api_contract": "typed-api-v1",
+    "compatible_contracts": ["matching-coordination-successor-v1"],
+    "required_restart_targets": ["api"],
+    "watcher_worker_compatibility": "owner-consumer-required-before-dispatch",
+    "post_cutover_smoke_ids": ["matching-coordination-successor-owned-objects"]
+  },
+  "descriptor_artifact": {
+    "name": "labor_union_2026_08_22_matching_coordination_successor_v1.descriptors.json",
+    "relative_path": "db/migration_releases/labor_union_2026_08_22_matching_coordination_successor_v1.descriptors.json",
+    "sha256": "439850495478f1fb521f0823a0cc4a37f5fabb2bbdc52eda0cb74d32e16d2174",
+    "dependencies": []
+  },
+  "tool_archive_policy": {
+    "artifact_hash_algorithm": "sha256",
+    "backup_archive_policy": "permanent-release-archive",
+    "journal_archive_policy": "append-only-per-operation",
+    "mysqldump_required_options": ["--single-transaction", "--routines", "--events", "--triggers", "--hex-blob"],
+    "receipt_archive_policy": "permanent-release-archive",
+    "restore_required_mode": "new-absent-candidate-only"
+  }
+}

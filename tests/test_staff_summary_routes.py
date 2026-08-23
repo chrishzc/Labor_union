@@ -3,10 +3,11 @@ File: test_staff_summary_routes.py
 Description: 驗證 Staff 摘要 route 的管理員會話、typed 參數衝突與 bounded cursor 回應。
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from api.dependencies.admin_auth import require_admin
+from api.exception_handlers import CorrelationBoundaryMiddleware, install_typed_error_handlers
 from api.routes import staff as staff_routes
 from subsystems.access.authentication_session import AdminPrincipal
 
@@ -44,6 +45,8 @@ class _Connection:
 def _app(*, authenticated: bool) -> FastAPI:
     app = FastAPI()
     app.include_router(staff_routes.router)
+    app.add_middleware(CorrelationBoundaryMiddleware)
+    install_typed_error_handlers(app)
     if authenticated:
         app.dependency_overrides[require_admin] = lambda: AdminPrincipal(
             7,
@@ -51,6 +54,19 @@ def _app(*, authenticated: bool) -> FastAPI:
             "Staff Reader",
             "admin",
         )
+    return app
+
+
+def _app_with_disabled_principal() -> FastAPI:
+    app = FastAPI()
+    app.include_router(staff_routes.router)
+    app.add_middleware(CorrelationBoundaryMiddleware)
+    install_typed_error_handlers(app)
+
+    def reject_disabled_principal():
+        raise HTTPException(status_code=403, detail="目前身分無權執行此操作")
+
+    app.dependency_overrides[require_admin] = reject_disabled_principal
     return app
 
 
@@ -73,13 +89,28 @@ def test_conflicting_cursor_parameters_return_typed_validation_error():
     response = TestClient(_app(authenticated=True)).get(
         "/api/v1/staff/summaries",
         params={"after_id": 1, "staff_id": 2},
+        headers={"X-Correlation-ID": "staff-summary-conflict-01"},
     )
 
     assert response.status_code == 422
     error = response.json()["detail"]["error"]
     assert error["category"] == "validation"
     assert error["code"] == "staff_summary_query_params_conflict"
-    assert error["correlation_id"] == "staff-summary-query"
+    assert error["correlation_id"] == "staff-summary-conflict-01"
+    assert response.headers["X-Correlation-ID"] == "staff-summary-conflict-01"
+
+
+def test_disabled_principal_is_rejected_with_global_typed_error():
+    response = TestClient(_app_with_disabled_principal()).get(
+        "/api/v1/staff/summaries",
+        headers={"X-Correlation-ID": "staff-summary-disabled-01"},
+    )
+
+    assert response.status_code == 403
+    error = response.json()["detail"]["error"]
+    assert error["category"] == "forbidden"
+    assert error["correlation_id"] == "staff-summary-disabled-01"
+    assert response.headers["X-Correlation-ID"] == "staff-summary-disabled-01"
 
 
 def test_authorized_query_returns_bounded_cursor_page(monkeypatch):
@@ -117,4 +148,3 @@ def test_retired_unbounded_endpoint_remains_gone():
     response = TestClient(_app(authenticated=False)).get("/api/v1/staff")
 
     assert response.status_code == 410
-

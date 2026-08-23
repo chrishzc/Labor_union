@@ -13,10 +13,10 @@ describe('Data Browser query adapter', () => {
     ]);
   });
 
-  it('maps only typed cells and unavailable actor label', () => {
+  it('maps typed cells and renders an absent optional actor label neutrally', () => {
     const view = adaptDataBrowserPage(VALID_DATA_BROWSER_PAGE);
     expect(view.rows[0].summary[0]).toEqual({ id: 'status', label: '訂單狀態', value: '服務中' });
-    expect(view.rows[0].actorLabel).toBe('後端未提供');
+    expect(view.rows[0].actorLabel).toBe('—');
   });
 
   it('rejects row source mismatch and duplicate cells', () => {

@@ -9,13 +9,27 @@ import { StaffPayablesResponseSchema, type StaffPayablesQuery } from './staff_pa
 import { StaffPayablesQueryError, mapStaffPayablesQueryError } from './staff_payables_query_errors';
 export interface StaffPayablesQueryOptions { signal?: AbortSignal; timeoutMs?: number; baseUrl?: string; }
 export interface StaffPayablesQueryClient { query(staffId: number, options?: StaffPayablesQueryOptions): Promise<StaffPayablesQuery>; }
+
+let correlationSequence = 0;
+
+function nextCorrelationId(): string {
+  correlationSequence += 1;
+  return `staff-payables-query-${correlationSequence.toString(36)}`;
+}
+
 class DefaultStaffPayablesQueryClient implements StaffPayablesQueryClient {
   async query(staffId: number, options?: StaffPayablesQueryOptions): Promise<StaffPayablesQuery> {
     if (!Number.isInteger(staffId) || staffId <= 0) throw new StaffPayablesQueryError('STAFF_PAYABLES_VALIDATION', 'staffId必須是正整數。');
     const token = sessionClient.getToken();
     if (!token) throw new StaffPayablesQueryError('STAFF_PAYABLES_UNAUTHENTICATED', '請先登入。', false, 401);
     try {
-      const raw = await transport.get<unknown>(`/api/v1/staff-payables/${staffId}`, { signal: options?.signal, timeoutMs: options?.timeoutMs, baseUrl: options?.baseUrl, token });
+      const raw = await transport.get<unknown>(`/api/v1/staff-payables/${staffId}`, {
+        signal: options?.signal,
+        timeoutMs: options?.timeoutMs,
+        baseUrl: options?.baseUrl,
+        token,
+        headers: { 'X-Correlation-ID': nextCorrelationId() },
+      });
       const decoded = StaffPayablesResponseSchema.safeParse(raw);
       if (!decoded.success) throw new ApiDecodeError('Staff Payables回應結構異常。', decoded.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message, code: issue.code })), raw);
       if (!decoded.data.success) throw new StaffPayablesQueryError('STAFF_PAYABLES_FAILURE', decoded.data.error ?? decoded.data.message);

@@ -1,0 +1,81 @@
+{
+  "operation": "GET /api/v1/assignment-schedules/{assignment_id}",
+  "method": "GET",
+  "path_template": "/api/v1/assignment-schedules/{assignment_id}",
+  "fingerprint": "7cac5890",
+  "case_id": "65q8FK",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/assignment-schedules/1",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/assignment-schedules/1",
+      "url_template": "http://127.0.0.1:8821/api/v1/assignment-schedules/{assignment_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "65q8FK"
+      },
+      "response": {
+        "status_code": 400,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:42 GMT",
+          "server": "uvicorn",
+          "content-length": "233",
+          "content-type": "application/json",
+          "server-timing": "application;dur=66.8",
+          "x-response-time-ms": "66.8",
+          "x-correlation-id": "b2b5bcf062684decb1e0778d9805d5d0"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"validation\",\"code\":\"bad_request\",\"message\":\"\u8acb\u6c42\u683c\u5f0f\u4e0d\u6b63\u78ba\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"b2b5bcf062684decb1e0778d9805d5d0\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 400\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0025461000041104853,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/assignment-schedules/{assignment_id}",
+      "path_parameters": {
+        "assignment_id": 1
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

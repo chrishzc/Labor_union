@@ -6,7 +6,7 @@ import { HcmWorkbookContractError } from '../../api/case_import/hcm_workbook_err
 import type { HcmWorkbookPreview } from '../../api/case_import/hcm_workbook_schemas';
 
 export const HCM_WORKBOOK_ROW_DETAIL_UNAVAILABLE =
-  '後端未開放逐列 typed Preview。';
+  'Preview 顯示批次統計；逐列結果會在匯入完成後列出。';
 
 export interface HcmWorkbookPreviewModel {
   sourceContentDigest: string;

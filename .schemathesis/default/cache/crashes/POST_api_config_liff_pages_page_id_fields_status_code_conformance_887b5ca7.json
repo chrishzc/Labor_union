@@ -1,0 +1,91 @@
+{
+  "operation": "POST /api/config/liff/pages/{page_id}/fields",
+  "method": "POST",
+  "path_template": "/api/config/liff/pages/{page_id}/fields",
+  "fingerprint": "887b5ca7",
+  "case_id": "VwI9bq",
+  "code_sample": "curl -X POST -H 'Content-Type: application/json' -d '{\"id\": \"A\", \"label\": \"0\", \"order\": 0, \"type\": \"date\"}' http://127.0.0.1:60434/api/config/liff/pages/0/fields",
+  "sequence": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:60434/api/config/liff/pages/0/fields",
+      "url_template": "http://127.0.0.1:60434/api/config/liff/pages/{page_id}/fields",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "VwI9bq",
+        "Content-Type": "application/json",
+        "Content-Length": "53"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Thu, 20 Aug 2026 08:45:40 GMT",
+          "server": "uvicorn",
+          "content-length": "32",
+          "content-type": "application/json",
+          "server-timing": "application;dur=12.4",
+          "x-response-time-ms": "12.4",
+          "cache-control": "no-store"
+        },
+        "body": "{\"detail\":\"LIFF page not found\"}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 201, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.04268200002843514,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive",
+          "BODY": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/config/liff/pages/{page_id}/fields",
+      "path_parameters": {
+        "page_id": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "json",
+        "value": {
+          "id": "A",
+          "label": "0",
+          "order": 0,
+          "type": "date"
+        }
+      },
+      "media_type": "application/json",
+      "parent_index": null
+    }
+  ]
+}

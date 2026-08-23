@@ -589,15 +589,62 @@ def _validate_descriptor_shapes(descriptors: dict[str, Any]) -> None:
     for descriptor in descriptors.values():
         if not isinstance(descriptor, dict):
             raise TypeError("owned-object descriptor must be an object")
+        metadata_keys = {"indexes", "foreign_keys", "checks"}
         if not {"tables", "triggers"} <= set(descriptor) <= {
-            "tables", "triggers", "views"
+            "tables", "triggers", "views", *metadata_keys
         }:
             raise ValueError("owned-object descriptor keys are invalid")
+        declared_metadata = set(descriptor).intersection(metadata_keys)
+        if declared_metadata and declared_metadata != metadata_keys:
+            raise ValueError("owned metadata descriptors must be declared together")
         if not isinstance(descriptor["tables"], dict):
             raise TypeError("owned tables must be an object")
         if not isinstance(descriptor["triggers"], list):
             raise TypeError("owned triggers must be a list")
         _validate_owned_view_contracts(descriptor.get("views", {}))
+        if metadata_keys <= set(descriptor):
+            _validate_owned_metadata_contracts(descriptor)
+
+
+def _validate_owned_metadata_contracts(descriptor: dict[str, Any]) -> None:
+    for key in ("indexes", "foreign_keys", "checks"):
+        if not isinstance(descriptor[key], dict):
+            raise TypeError(f"owned {key} must be an object")
+    for identity, contract in descriptor["indexes"].items():
+        _validate_owned_metadata_identity(identity)
+        if not isinstance(contract, dict) or set(contract) != {
+            "non_unique", "columns"
+        }:
+            raise ValueError("owned index contract is invalid")
+        if contract["non_unique"] not in {0, 1} or not isinstance(
+            contract["columns"], list
+        ):
+            raise ValueError("owned index contract is invalid")
+    for identity, contract in descriptor["foreign_keys"].items():
+        _validate_owned_metadata_identity(identity)
+        if not isinstance(contract, dict) or set(contract) != {
+            "columns", "referenced_table", "referenced_columns",
+            "update_rule", "delete_rule",
+        }:
+            raise ValueError("owned foreign key contract is invalid")
+        if not isinstance(contract["columns"], list) or not isinstance(
+            contract["referenced_columns"], list
+        ):
+            raise ValueError("owned foreign key contract is invalid")
+    for identity, contract in descriptor["checks"].items():
+        _validate_owned_metadata_identity(identity)
+        if not isinstance(contract, str) or not contract:
+            raise ValueError("owned check contract is invalid")
+
+
+def _validate_owned_metadata_identity(identity: Any) -> None:
+    parts = str(identity).split(".", 1)
+    if len(parts) != 2:
+        raise ValueError("owned metadata identity must be table.object")
+    for part in parts:
+        require_canonical_text(
+            part, "owned metadata identity", _IDENTITY_MAXIMUM_LENGTH
+        )
 
 
 def _validate_owned_view_contracts(views: Any) -> None:
@@ -613,7 +660,7 @@ def _validate_owned_view_contracts(views: Any) -> None:
 def _normalize_owned_descriptor(
     descriptor: dict[str, Any],
 ) -> dict[str, Any]:
-    return {
+    normalized = {
         "tables": {
             table_name: set(columns)
             for table_name, columns in descriptor["tables"].items()
@@ -624,6 +671,24 @@ def _normalize_owned_descriptor(
             for view_name, contract in descriptor.get("views", {}).items()
         },
     }
+    for key in ("indexes", "foreign_keys", "checks"):
+        if key not in descriptor:
+            continue
+        normalized[key] = {
+            tuple(str(identity).split(".", 1)): (
+                {
+                    field: (
+                        tuple(value)
+                        if field in {"columns", "referenced_columns"}
+                        else value
+                    )
+                    for field, value in contract.items()
+                }
+                if isinstance(contract, dict) else contract
+            )
+            for identity, contract in descriptor[key].items()
+        }
+    return normalized
 
 
 def _resolve_artifact_path(

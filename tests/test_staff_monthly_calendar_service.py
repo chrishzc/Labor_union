@@ -1,7 +1,16 @@
-from datetime import date, timedelta
+"""
+File: test_staff_monthly_calendar_service.py
+Description: 驗證月嫂月份排班、等待鎖與服務前防撞緩衝的唯讀投影。
+"""
+
+from datetime import date, datetime, timedelta
 
 from subsystems.scheduling import staff_monthly_calendar_query as staff_monthly_calendar_schedule_service
+from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 import pytest
+
+
+BUSINESS_CLOCK = FixedBusinessClock(datetime(2026, 8, 23, 12, 0, tzinfo=TAIPEI_TIME_ZONE))
 
 
 class FakeCursor:
@@ -180,12 +189,13 @@ def test_get_staff_monthly_calendar_schedule_supports_31_day_month(monkeypatch):
     assert result["days"][-1]["status"] == "available"
 
 
-def test_get_staff_monthly_calendar_schedule_applies_7_day_buffer_when_end_near_next_month(monkeypatch):
+def test_completed_order_never_projects_a_synthetic_7_day_buffer(monkeypatch):
     buffer_rows = [
         {
             "assignment_id": 55,
             "case_no": "115000200",
             "staff_id": 7,
+            "calc_start_date": date(2026, 6, 1),
             "calc_end_date": date(2026, 6, 30),
             "client_name": "客戶 Buffer",
             "order_status": "訂單完成",
@@ -196,16 +206,37 @@ def test_get_staff_monthly_calendar_schedule_applies_7_day_buffer_when_end_near_
     monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
 
     result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
-        staff_id=7, year=2026, month=7
+        staff_id=7, year=2026, month=7, clock=BUSINESS_CLOCK
+    )
+
+    for day in range(1, 8):
+        item = result["days"][day - 1]
+        assert item["status"] == "available"
+        assert item["assignment_id"] is None
+
+
+def test_future_service_keeps_its_post_assignment_collision_buffer(monkeypatch):
+    buffer_rows = [{
+        "assignment_id": 56,
+        "case_no": "115000201",
+        "staff_id": 7,
+        "calc_start_date": date(2026, 12, 1),
+        "calc_end_date": date(2026, 12, 31),
+        "client_name": "客戶 Future",
+        "order_status": "訂單成立",
+        "staff_name": "月嫂甲",
+    }]
+    connection = FakeConnection([{"id": 7}, [], [], [], buffer_rows])
+    monkeypatch.setattr(staff_monthly_calendar_schedule_service, "get_connection", lambda: connection)
+
+    result = staff_monthly_calendar_schedule_service.get_staff_monthly_calendar_schedule(
+        staff_id=7, year=2027, month=1, clock=BUSINESS_CLOCK
     )
 
     for day in range(1, 8):
         item = result["days"][day - 1]
         assert item["status"] == "waiting_deposit_lock"
-        assert item["assignment_id"] == 55
-        assert item["case_no"] == "115000200"
-        assert item["staff_id"] == 7
-        assert item["lock_id"] is None
+        assert item["assignment_id"] == 56
 
 
 def test_get_staff_monthly_calendar_schedule_schedule_only_has_lock_rows(monkeypatch):
@@ -268,6 +299,7 @@ def test_get_staff_monthly_calendar_schedule_cross_month_and_mix(monkeypatch):
             "assignment_id": 60,
             "case_no": "115000201",
             "staff_id": 7,
+            "calc_start_date": date(2026, 6, 1),
             "calc_end_date": date(2026, 6, 28),
             "client_name": "客戶 Buffer 2",
             "order_status": "訂單完成",
@@ -284,10 +316,7 @@ def test_get_staff_monthly_calendar_schedule_cross_month_and_mix(monkeypatch):
     day_1_items = [d for d in result["days"] if d["work_date"] == "2026-07-01"]
     assert any(d["status"] == "waiting_deposit_lock" and d["lock_id"] == 95 for d in day_1_items)
 
-    for day_idx in range(1, 6):
-        date_str = f"2026-07-0{day_idx}"
-        items = [d for d in result["days"] if d["work_date"] == date_str]
-        assert any(d["status"] == "waiting_deposit_lock" and d["assignment_id"] == 60 for d in items)
+    assert not any(item.get("assignment_id") == 60 for item in result["days"])
         
     day_31_items = [d for d in result["days"] if d["work_date"] == "2026-07-31"]
     assert any(d["status"] == "working" and d["assignment_id"] == 20 for d in day_31_items)

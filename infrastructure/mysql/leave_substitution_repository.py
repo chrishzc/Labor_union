@@ -1,4 +1,6 @@
-"""MySQL repository for one typed leave/substitution batch transaction."""
+"""
+File: leave_substitution_repository.py
+Description: 查詢正式assignment schedule，並在單一MySQL交易保存請假代班fact與strict replay receipt。"""
 
 from __future__ import annotations
 
@@ -37,15 +39,72 @@ from subsystems.scheduling.leave_substitution_workflow import (
     LeaveApplyEvidence,
     LeaveBatchHeaderEvidence,
     LeaveOutcomeEvidence,
+    LinkedLeaveRequestResult,
     LeaveSubstitutionApplyRequest,
     LeaveSubstitutionReceipt,
     LeaveSubstitutionWorkflowFacts,
     StoredLeaveSubstitutionReceipt,
-    leave_request_fingerprint,
 )
 
 
 _COMMAND_FAMILY = "scheduling_leave_substitution"
+
+
+class _ExistingLeaveSubstitutionClaim(Exception):
+    pass
+
+
+def _group_effective_assignment_schedules(rows):
+    assignments: dict[int, dict[str, Any]] = {}
+    schedule_identities: dict[int, set[tuple[int, Any]]] = {}
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("invalid leave assignment projection row")
+        assignment_id = int(row["id"])
+        identity = (
+            int(row["staff_id"]),
+            row["assigned_start_date"],
+            row["assigned_end_date"],
+        )
+        assignment = assignments.get(assignment_id)
+        if assignment is None:
+            assignment = {
+                "id": assignment_id,
+                "staff_id": identity[0],
+                "assigned_start_date": identity[1],
+                "assigned_end_date": identity[2],
+                "official_schedules": [],
+            }
+            assignments[assignment_id] = assignment
+            schedule_identities[assignment_id] = set()
+        elif identity != (
+            assignment["staff_id"],
+            assignment["assigned_start_date"],
+            assignment["assigned_end_date"],
+        ):
+            raise ValueError("leave assignment projection identity drift")
+
+        schedule_id = row.get("schedule_id")
+        work_date = row.get("work_date")
+        if schedule_id is None and work_date is None:
+            continue
+        if schedule_id is None or work_date is None:
+            raise ValueError("incomplete official schedule projection")
+        schedule_identity = (int(schedule_id), work_date)
+        if schedule_identity in schedule_identities[assignment_id]:
+            raise ValueError("duplicate official schedule projection")
+        schedule_identities[assignment_id].add(schedule_identity)
+        assignment["official_schedules"].append(
+            {"schedule_id": schedule_identity[0], "work_date": work_date}
+        )
+
+    return tuple(
+        {
+            **assignment,
+            "official_schedules": tuple(assignment["official_schedules"]),
+        }
+        for assignment in assignments.values()
+    )
 
 
 class MySqlLeaveSubstitutionRepository:
@@ -81,18 +140,35 @@ class MySqlLeaveSubstitutionRepository:
     def list_effective_assignments(self, case_no):
         with self._connection.cursor() as cursor:
             cursor.execute(
-                "SELECT a.id,a.staff_id,a.assigned_start_date,a.assigned_end_date "
+                "SELECT a.id,a.staff_id,a.assigned_start_date,a.assigned_end_date,"
+                "s.id AS schedule_id,s.work_date "
                 "FROM scheduling_aggregates g JOIN case_staff_assignments a "
                 "ON a.generation_id=g.effective_generation_id "
+                "LEFT JOIN staff_schedule s "
+                "ON s.generation_id=g.effective_generation_id "
+                "AND s.assignment_id=a.id AND s.effective_marker=1 "
+                "AND s.is_work_day=1 "
                 "WHERE g.case_no=%s AND a.status NOT IN ('cancelled','replaced') "
-                "ORDER BY a.assignment_sequence,a.id",
+                "ORDER BY a.assignment_sequence,a.id,s.work_date,s.id",
                 (case_no,),
             )
-            return tuple(cursor.fetchall())
+            return _group_effective_assignment_schedules(cursor.fetchall())
 
     def preflight_impacted_staff_ids(self, case_no, intent):
         with self._connection.cursor() as cursor:
             return _preflight_staff_ids(cursor, case_no, intent)
+
+    def load_replay_evidence(self, request, command_fingerprint):
+        with self._connection.cursor() as cursor:
+            row = _optional_locked_claim(cursor, request.idempotency_key)
+            if row is None:
+                return None
+            claim_state = _claim_state(request, command_fingerprint, row)
+            evidence_rows = _locked_evidence_rows(
+                cursor,
+                request.idempotency_key.value,
+            )
+        return _apply_evidence(None, claim_state, evidence_rows)
 
     # Kept cohesive because replay must sit between staff and generation locks.
     def load_for_apply(
@@ -100,14 +176,16 @@ class MySqlLeaveSubstitutionRepository:
         request,
         preflight_staff_ids,
         command_fingerprint,
+        after_command_lock,
     ):
         evidence_rows = {}
         occupancy = ()
         lock_ids = ()
         claim_state = CommandClaimState.CREATED
+        linked_request = None
 
         def after_staff_lock(cursor):
-            nonlocal evidence_rows, claim_state
+            nonlocal evidence_rows, claim_state, linked_request
             claim_state = _claim_command(
                 cursor,
                 request,
@@ -117,15 +195,28 @@ class MySqlLeaveSubstitutionRepository:
                 cursor,
                 request.idempotency_key.value,
             )
+            if claim_state is CommandClaimState.CREATED:
+                linked_request = after_command_lock(
+                    _locked_original_assignment_staff(
+                        cursor,
+                        request.case_no,
+                        request.intent.original_assignment_id,
+                    )
+                )
+            else:
+                raise _ExistingLeaveSubstitutionClaim
 
         with self._connection.cursor() as cursor:
             ensure_scheduling_aggregate(cursor, request.case_no)
-            source = load_locked_facts(
-                cursor,
-                request.case_no,
-                preflight_staff_ids,
-                after_staff_lock,
-            )
+            try:
+                source = load_locked_facts(
+                    cursor,
+                    request.case_no,
+                    preflight_staff_ids,
+                    after_staff_lock,
+                )
+            except _ExistingLeaveSubstitutionClaim:
+                return _apply_evidence(None, claim_state, evidence_rows), None
             occupancy, lock_ids = load_occupancy_snapshot(
                 cursor,
                 preflight_staff_ids,
@@ -134,7 +225,7 @@ class MySqlLeaveSubstitutionRepository:
             )
             schedules = _official_schedules(cursor, request.case_no)
         facts = _workflow_facts(source, occupancy, lock_ids, schedules)
-        return _apply_evidence(facts, claim_state, evidence_rows)
+        return _apply_evidence(facts, claim_state, evidence_rows), linked_request
 
     def replace_scheduling_generation(self, candidate, context):
         command = SchedulingReplacementCommand(
@@ -262,6 +353,20 @@ def _preflight_staff_ids(cursor, case_no, intent):
     return tuple(sorted(set(current + substitutes)))
 
 
+def _locked_original_assignment_staff(cursor, case_no, assignment_id):
+    cursor.execute(
+        "SELECT a.staff_id FROM scheduling_aggregates g "
+        "JOIN case_staff_assignments a ON a.generation_id=g.effective_generation_id "
+        "WHERE g.case_no=%s AND a.id=%s "
+        "AND a.status NOT IN ('cancelled','replaced') FOR UPDATE",
+        (case_no, assignment_id),
+    )
+    row = cursor.fetchone()
+    if not isinstance(row, Mapping):
+        raise ValueError("assignment_not_found")
+    return int(row["staff_id"])
+
+
 def _official_schedules(cursor, case_no):
     cursor.execute(_OFFICIAL_SCHEDULE_SQL, (case_no,))
     return tuple(
@@ -311,6 +416,16 @@ def _locked_claim(cursor, key):
     return row
 
 
+def _optional_locked_claim(cursor, key):
+    cursor.execute(
+        "SELECT command_family,aggregate_identity,command_fingerprint "
+        "FROM application_command_claims WHERE idempotency_key=%s FOR UPDATE",
+        (key.value,),
+    )
+    row = cursor.fetchone()
+    return row if isinstance(row, Mapping) else None
+
+
 def _claim_state(request, fingerprint, row):
     matches = (
         str(row["command_family"]) == _COMMAND_FAMILY
@@ -340,6 +455,10 @@ def _apply_evidence(facts, claim_state, rows):
 def _header_evidence(row):
     if not isinstance(row, Mapping):
         return None
+    request_snapshot = _json_object(
+        row["request_snapshot"],
+        "invalid_batch_replay_snapshot",
+    )
     return LeaveBatchHeaderEvidence(
         str(row["batch_key"]),
         str(row["case_no"]),
@@ -349,13 +468,18 @@ def _header_evidence(row):
         str(row["actor"]),
         str(row["reason"]),
         PreviewFingerprint(str(row["request_fingerprint"])),
+        request_snapshot,
     )
 
 
 def _outcome_evidence(row):
     result_fingerprint = PreviewFingerprint(str(row["result_fingerprint"]))
-    if fingerprint_payload(_json_value(row["outcome_snapshot"])) != result_fingerprint:
-        raise RuntimeError("leave_outcome_fingerprint_invalid")
+    try:
+        snapshot = _json_value(row["outcome_snapshot"])
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise RuntimeError("invalid_batch_replay_snapshot") from error
+    if fingerprint_payload(snapshot) != result_fingerprint:
+        raise RuntimeError("invalid_batch_replay_snapshot")
     return LeaveOutcomeEvidence(
         int(row["id"]),
         int(row["item_index"]),
@@ -371,6 +495,11 @@ def _outcome_evidence(row):
 def _stored_receipt(row):
     if not isinstance(row, Mapping):
         return None
+    result_snapshot = _json_object(
+        row["result_snapshot"],
+        "invalid_batch_replay_snapshot",
+    )
+    linked_request = _linked_result(result_snapshot.get("linked_request"))
     receipt = LeaveSubstitutionReceipt(
         batch_key=str(row["batch_key"]),
         case_no=str(row["case_no"]),
@@ -385,10 +514,12 @@ def _stored_receipt(row):
         preview_fingerprint=PreviewFingerprint(
             str(row["preview_fingerprint"])
         ),
+        linked_request=linked_request,
     )
     return StoredLeaveSubstitutionReceipt(
         PreviewFingerprint(str(row["command_fingerprint"])),
         receipt,
+        result_snapshot,
     )
 
 
@@ -402,7 +533,7 @@ def _insert_batch_header(cursor, request, preview, command_fingerprint):
             request.intent.original_assignment_id,
             command_fingerprint.value,
             request.preview_fingerprint.value,
-            leave_request_fingerprint(request.intent).value,
+            fingerprint_payload(request_snapshot).value,
             len(request.intent.items),
             request.actor.actor_id,
             request.reason,
@@ -426,6 +557,14 @@ def _request_snapshot(request):
             }
             for item in request.intent.items
         ],
+        "linked_request": (
+            None
+            if request.linked_request is None
+            else {
+                "request_id": request.linked_request.request_id,
+                "expected_version": request.linked_request.expected_version,
+            }
+        ),
     }
 
 
@@ -547,13 +686,6 @@ def _special_pay_source_identity(key):
 # Expected/result versions and replay snapshot form one receipt row.
 def _receipt_values(stored, scheduling_result, context):
     receipt = stored.receipt
-    snapshot = {
-        "batch_key": receipt.batch_key,
-        "case_no": receipt.case_no,
-        "scheduling_generation": receipt.scheduling_generation,
-        "outcome_event_ids": receipt.outcome_event_ids,
-        "preview_fingerprint": receipt.preview_fingerprint.value,
-    }
     return (
         receipt.batch_key,
         stored.command_fingerprint.value,
@@ -570,7 +702,7 @@ def _receipt_values(stored, scheduling_result, context):
         receipt.payroll_version,
         scheduling_result.scheduling_receipt_id,
         _canonical_json(receipt.outcome_event_ids),
-        _canonical_json(snapshot),
+        _canonical_json(dict(stored.result_snapshot)),
         context.correlation_id.value,
     )
 
@@ -608,6 +740,83 @@ def _json_value(value):
     return json.loads(value) if isinstance(value, str) else value
 
 
+def _json_object(value, code):
+    try:
+        parsed = _json_value(value)
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise RuntimeError(code) from error
+    if not isinstance(parsed, Mapping):
+        raise RuntimeError(code)
+    return dict(parsed)
+
+
+def _linked_result(value):
+    if value is None:
+        return None
+    if not isinstance(value, Mapping) or set(value) != {
+        "request_id",
+        "expected_version",
+        "resolved_version",
+        "status",
+        "receipt_key",
+        "notification_intent",
+        "staff_id",
+    }:
+        raise RuntimeError("invalid_batch_replay_snapshot")
+    try:
+        if any(
+            isinstance(value[key], bool) or not isinstance(value[key], int)
+            for key in ("request_id", "expected_version", "staff_id")
+        ):
+            raise TypeError
+        resolved_version = value["resolved_version"]
+        if resolved_version is not None and (
+            isinstance(resolved_version, bool) or not isinstance(resolved_version, int)
+        ):
+            raise TypeError
+        if value["status"] not in {"accepted_for_processing", "resolved"}:
+            raise ValueError
+        if value["notification_intent"] not in {"not_requested", "enqueued"}:
+            raise ValueError
+        if value["request_id"] <= 0 or value["expected_version"] <= 0 or value["staff_id"] <= 0:
+            raise ValueError
+        receipt_key = value["receipt_key"]
+        if receipt_key is not None and (
+            not isinstance(receipt_key, str) or not receipt_key.strip()
+        ):
+            raise TypeError
+        if value["status"] == "accepted_for_processing" and (
+            resolved_version is not None
+            or receipt_key is not None
+            or value["notification_intent"] != "not_requested"
+        ):
+            raise ValueError
+        if value["status"] == "resolved" and (
+            resolved_version is None
+            or resolved_version <= value["expected_version"]
+            or receipt_key is None
+            or value["notification_intent"] != "enqueued"
+        ):
+            raise ValueError
+        return LinkedLeaveRequestResult(
+            request_id=value["request_id"],
+            expected_version=value["expected_version"],
+            resolved_version=(
+                None
+                if resolved_version is None
+                else resolved_version
+            ),
+            status=value["status"],
+            receipt_key=(
+                None if value["receipt_key"] is None else value["receipt_key"]
+            ),
+            notification_intent=value["notification_intent"],
+            staff_id=value["staff_id"],
+        )
+    except (TypeError, ValueError) as error:
+        raise RuntimeError("invalid_batch_replay_snapshot") from error
+
+
 def _canonical_json(value):
     return json.dumps(
         value,
@@ -627,7 +836,7 @@ _OFFICIAL_SCHEDULE_SQL = (
 
 _HEADER_SELECT_SQL = (
     "SELECT batch_key,case_no,command_fingerprint,preview_fingerprint,"
-    "request_fingerprint,item_count,actor,reason "
+    "request_fingerprint,item_count,actor,reason,request_snapshot "
     "FROM scheduling_leave_substitution_batches WHERE batch_key=%s"
 )
 
@@ -642,7 +851,7 @@ _RECEIPT_SELECT_SQL = (
     "SELECT batch_key,command_fingerprint,preview_fingerprint,case_no,"
     "resulting_order_version,resulting_scheduling_version,"
     "resulting_generation_number,resulting_client_finance_version,"
-    "resulting_payroll_version,outcome_event_ids "
+    "resulting_payroll_version,outcome_event_ids,result_snapshot "
     "FROM scheduling_leave_substitution_receipts WHERE batch_key=%s"
 )
 

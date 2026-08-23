@@ -1,0 +1,79 @@
+{
+  "operation": "GET /api/v1/admin/entry-targets",
+  "method": "GET",
+  "path_template": "/api/v1/admin/entry-targets",
+  "fingerprint": "cac23a18",
+  "case_id": "tdrnU1",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/admin/entry-targets",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/admin/entry-targets",
+      "url_template": "http://127.0.0.1:8765/api/v1/admin/entry-targets",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "tdrnU1"
+      },
+      "response": {
+        "status_code": 503,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:11:40 GMT",
+          "server": "uvicorn",
+          "content-length": "265",
+          "content-type": "application/json",
+          "server-timing": "application;dur=5.7",
+          "x-response-time-ms": "5.7",
+          "x-correlation-id": "6beaf45db1a14a388e22c9b34b74303f"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"unavailable\",\"code\":\"entry_target_state_path_missing\",\"message\":\"Entry target state path \u672a\u8a2d\u5b9a\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":true,\"correlation_id\":\"6beaf45db1a14a388e22c9b34b74303f\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "not_a_server_error",
+          "status": "failure",
+          "message": "Server error"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0035900999791920185,
+          "mode": "positive"
+        },
+        "components": {
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/admin/entry-targets",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

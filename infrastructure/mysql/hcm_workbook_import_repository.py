@@ -1,6 +1,6 @@
 """
 File: hcm_workbook_import_repository.py
-Description: 保存 HCM workbook command claim 與 immutable terminal receipt。
+Description: 保存HCM workbook command claim，並依identity或摘要讀取immutable receipt。
 """
 
 from __future__ import annotations
@@ -38,6 +38,15 @@ class HcmWorkbookImportRepository:
                 "SELECT request_fingerprint,result_snapshot FROM admin_command_receipts "
                 "WHERE command_family=%s AND idempotency_key=%s",
                 (self._FAMILY, key),
+            )
+            return cursor.fetchone()
+
+    def load_receipt_by_digest(self, digest: str):
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT request_fingerprint,result_snapshot FROM admin_command_receipts "
+                "WHERE command_family=%s AND request_fingerprint=%s ORDER BY id ASC LIMIT 1",
+                (self._FAMILY, digest),
             )
             return cursor.fetchone()
 

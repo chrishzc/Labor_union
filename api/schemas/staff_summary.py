@@ -1,4 +1,7 @@
-"""Typed, bounded staff directory query contract."""
+"""
+File: staff_summary.py
+Description: 定義 bounded Staff 摘要 cursor 查詢的嚴格公開契約。
+"""
 
 from pydantic import BaseModel, ConfigDict, Field
 

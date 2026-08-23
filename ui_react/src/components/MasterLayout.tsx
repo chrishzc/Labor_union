@@ -1,6 +1,6 @@
 /**
- * @file MasterLayout.tsx
- * @description 系統主版面容器元件，整合導航標籤、側邊欄、實時效能狀態指示器與登出機制。
+ * File: MasterLayout.tsx
+ * Description: 系統主版面容器元件，以 typed 效能快照、會話主體與明確導航呈現管理端狀態。
  */
 import React, { useEffect, useState } from 'react';
 import './MasterLayout.css';
@@ -8,6 +8,7 @@ import {
   fetchPerformanceSnapshot,
   type PerformanceSnapshot,
 } from '../api/system/system_status_client';
+import { sessionClient } from '../api/auth/session_client';
 
 export type SectionType = 'operations' | 'line' | 'finance' | 'audit';
 export type PageType = 
@@ -24,7 +25,8 @@ export type PageType =
   | 'finance'
   | 'anomalies'
   | 'data-browser'
-  | 'account-management';
+  | 'account-management'
+  | 'system-status';
 
 export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'order-tracker': 'operations',
@@ -44,6 +46,7 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'anomalies': 'audit',
   'data-browser': 'audit',
   'account-management': 'audit',
+  'system-status': 'audit',
 };
 
 export interface NavItem {
@@ -75,6 +78,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'anomalies', icon: '⚠️', label: '異常審核', section: 'audit' },
   { id: 'data-browser', icon: '🔍', label: '數據瀏覽', section: 'audit' },
   { id: 'account-management', icon: '👤', label: '帳號權限', section: 'audit' },
+  { id: 'system-status', icon: '🩺', label: '系統狀態', section: 'audit' },
 ];
 
 export interface MasterLayoutProps {
@@ -94,11 +98,15 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
   onLogout,
   children,
 }) => {
-  const [systemOnline, setSystemOnline] = useState<boolean>(true);
-  const [latencyText, setLatencyText] = useState<string>('在線');
+  const [systemOnline, setSystemOnline] = useState<boolean | null>(null);
+  const [latencyText, setLatencyText] = useState<string>('查詢中');
   const [isDegraded, setIsDegraded] = useState<boolean>(false);
+  const [showLogoutModal, setShowLogoutModal] = useState<boolean>(false);
+  const shellOwnsSystemStatusQuery = currentPage !== 'system-status';
 
   useEffect(() => {
+    if (!shellOwnsSystemStatusQuery) return undefined;
+
     let isMounted = true;
 
     async function loadSystemStatus() {
@@ -136,9 +144,10 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [shellOwnsSystemStatusQuery]);
 
   const visibleNavItems = NAV_ITEMS.filter((item) => item.section === currentSection);
+  const currentUser = sessionClient.getUser();
 
   const handleSectionClick = (section: SectionType) => {
     onSelectSection(section);
@@ -190,19 +199,19 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
           <div
             className="system-status-indicator"
             data-testid="system-status-indicator"
-            title={systemOnline ? `後端 API 運作正常 (${latencyText})` : '後端 API 離線或無法連線'}
+            title={systemOnline === null ? '正在查詢後端 API 狀態' : systemOnline ? `後端 API 運作正常 (${latencyText})` : '後端 API 離線或無法連線'}
           >
             <span
               className={`status-dot ${systemOnline ? (isDegraded ? 'degraded' : 'online') : 'offline'}`}
               style={{
-                backgroundColor: !systemOnline
+                backgroundColor: systemOnline === null || !systemOnline
                   ? '#9ca3af'
                   : isDegraded
                   ? '#ea580c'
                   : '#16a34a',
               }}
             />
-            <span>{systemOnline ? `系統在線 (${latencyText})` : '系統離線'}</span>
+            <span>{systemOnline === null ? '系統狀態查詢中' : systemOnline ? `系統在線 (${latencyText})` : '系統離線'}</span>
           </div>
 
           <button
@@ -214,13 +223,21 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
             }}
           >
             🔔
-            <span className="notification-badge">3</span>
           </button>
 
-          <button className="user-profile-btn" onClick={onLogout} title="點擊登出系統">
-            <span>👤 管理員</span>
-            <span style={{ fontSize: '0.75rem', color: '#999' }}>🚪 登出</span>
-          </button>
+          <div className="user-profile-capsule">
+            <span className="user-profile-name">
+              👤 {currentUser?.display_name || currentUser?.username || '已登入使用者'}
+            </span>
+            <button
+              type="button"
+              className="logout-action-btn"
+              onClick={() => setShowLogoutModal(true)}
+              title="點擊登出系統"
+            >
+              🚪 登出
+            </button>
+          </div>
         </div>
       </header>
 
@@ -242,6 +259,46 @@ export const MasterLayout: React.FC<MasterLayoutProps> = ({
 
         <main className="main-workspace">{children}</main>
       </div>
+
+      {/* Stitch Nurture Core Logout Confirmation Modal */}
+      {showLogoutModal && (
+        <div
+          className="logout-modal-backdrop"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setShowLogoutModal(false);
+          }}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="logout-dialog-title"
+        >
+          <div className="logout-modal-card">
+            <div className="logout-modal-icon">🚪</div>
+            <h2 id="logout-dialog-title" className="logout-modal-title">確定要登出系統嗎？</h2>
+            <p className="logout-modal-desc">
+              登出後將清除當前工作會話，下次進入需重新進行雙重身分驗證。
+            </p>
+            <div className="logout-modal-actions">
+              <button
+                type="button"
+                className="logout-btn-cancel"
+                onClick={() => setShowLogoutModal(false)}
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                className="logout-btn-confirm"
+                onClick={() => {
+                  setShowLogoutModal(false);
+                  onLogout();
+                }}
+              >
+                確認登出
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

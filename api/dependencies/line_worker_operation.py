@@ -1,6 +1,6 @@
 """
 File: line_worker_operation.py
-Description: 組合 canonical LINE worker 與已提交 Scheduling 通知來源的投影工作。
+Description: 組合 canonical LINE worker、Scheduling 通知來源與客服 typed escalation。
 """
 
 from __future__ import annotations
@@ -39,6 +39,7 @@ from infrastructure.mysql.service_day_log_notification_stop_worker import (
 )
 from infrastructure.mysql.line_unit_of_work import open_line_unit_of_work
 from infrastructure.mysql.mysql_adapter import get_connection
+from subsystems.customer_service.escalation_application import HumanEscalationApplication
 from subsystems.line.delivery_worker import LineDeliveryWorker
 from subsystems.line.event_dispatcher import LineEventDispatcher
 from subsystems.line.follow_schedule_application import enqueue_follow_schedule
@@ -126,7 +127,7 @@ def _event_consumer(worker_identity: str, now) -> LineWebhookEventConsumer:
         service_help_application=LineServiceHelpApplication(
             now,
             _identity_flow_url,
-            LineMessagingApiAdapter(_required_access_token()),
+            escalation_gateway=HumanEscalationApplication(open_line_unit_of_work, now),
         ),
         menu_command_application=LineMenuCommandApplication(),
     )

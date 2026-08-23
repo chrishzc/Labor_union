@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "registry_revision": "phase5a-mapped-entries-v2-system-status",
+  "registry_digest": "1d829dc89fda82843907fe134b90d5147b9de44f6263c4d80fc69d3e86ef42de",
+  "revision": 1,
+  "entries": [
+    {"entry_id":"ui-react:#account-management","replacement_group":"access","current_target":"streamlit","streamlit_target":"/?entry=access-management","react_target":"/admin/#account-management","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#anomalies","replacement_group":"anomalies","current_target":"streamlit","streamlit_target":"/?entry=anomalies","react_target":"/admin/#anomalies","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#data-browser","replacement_group":"data-browser","current_target":"streamlit","streamlit_target":"/?entry=data-browser","react_target":"/admin/#data-browser","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#data-import","replacement_group":"data-import","current_target":"streamlit","streamlit_target":"/?entry=data-import","react_target":"/admin/#data-import","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#finance","replacement_group":"finance","current_target":"streamlit","streamlit_target":"/?entry=finance","react_target":"/admin/#finance","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#line-management","replacement_group":"line","current_target":"streamlit","streamlit_target":"/?entry=line-management","react_target":"/admin/#line-management","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#order-tracker","replacement_group":"order-workbench","current_target":"streamlit","streamlit_target":"/?entry=form-management&view=order-tracker","react_target":"/admin/#order-tracker","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#orders","replacement_group":"orders","current_target":"streamlit","streamlit_target":"/?entry=orders","react_target":"/admin/#orders","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#reports","replacement_group":"reports-system","current_target":"streamlit","streamlit_target":"/?entry=system-status&view=reports","react_target":"/admin/#reports","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#scheduling","replacement_group":"staff-scheduling","current_target":"streamlit","streamlit_target":"/?entry=scheduling&view=calendar","react_target":"/admin/#scheduling","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#staff","replacement_group":"staff-scheduling","current_target":"streamlit","streamlit_target":"/?entry=scheduling&view=staff-directory","react_target":"/admin/#staff","required_react_artifact":null,"entry_revision":1},
+    {"entry_id":"ui-react:#system-status","replacement_group":"reports-system","current_target":"streamlit","streamlit_target":"/?entry=system-status","react_target":"/admin/#system-status","required_react_artifact":null,"entry_revision":1}
+  ],
+  "receipts": [],
+  "state_digest": "ecd41979e9aabe0d9d68af8cb09a0e619f66dda538d046cd969c01bbaca2a2f8"
+}

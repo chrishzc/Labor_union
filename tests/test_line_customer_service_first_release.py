@@ -1,10 +1,11 @@
 """
 File: test_line_customer_service_first_release.py
-Description: 驗證客服、Rich Menu 與 LIFF 第一版 canonical 邊界及新舊客服路由共存。
+Description: 驗證客服、Rich Menu、LIFF 與 durable LINE delivery 第一版 canonical 邊界。
 """
 
 from datetime import datetime, timezone
 import hashlib
+import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -22,9 +23,8 @@ from domains.customer_service.ticket import (
     CustomerServiceTransitionError,
     transition_ticket,
 )
-from domains.line.identities import LineProviderMessageId, LineUserId
+from domains.line.identities import LineUserId
 from shared_kernel.migration_release import load_migration_release_manifest
-from subsystems.line.delivery_contracts import LineProviderOutcome, LineProviderOutcomeType
 from subsystems.line.service_help_application import LineServiceHelpApplication
 from subsystems.line.webhook_identity_handlers import LineWebhookIdentityHandlers
 
@@ -66,10 +66,7 @@ class ReplyProvider:
 
     def reply(self, reply_token, message):
         self.calls.append((reply_token, message))
-        return LineProviderOutcome(
-            LineProviderOutcomeType.SUCCESS,
-            provider_message_id=LineProviderMessageId(f"reply:{reply_token}"),
-        )
+        raise AssertionError("service-help must not call LINE provider before commit")
 
 
 def _inbox(event_id="event-1"):
@@ -111,20 +108,20 @@ def test_service_help_menu_is_a_canonical_flex_delivery():
     assert "其他問題" in request.payload_json
 
 
-def test_service_help_uses_reply_token_before_falling_back_to_delivery():
+def test_service_help_never_uses_reply_token_before_durable_delivery():
     unit_of_work = _unit_of_work()
     provider = ReplyProvider()
-    application = LineServiceHelpApplication(
-        lambda: datetime(2026, 8, 11, tzinfo=timezone.utc),
-        reply_provider=provider,
-    )
+    assert "reply_provider" not in inspect.signature(LineServiceHelpApplication).parameters
+    application = LineServiceHelpApplication(lambda: datetime(2026, 8, 11, tzinfo=timezone.utc))
 
     handled = application.handle(_inbox(), unit_of_work, LineUserId("U123456789"), "服務說明")
 
     assert handled is True
-    assert provider.calls[0][0] == "reply-event-1"
-    assert provider.calls[0][1]["type"] == "flex"
-    assert unit_of_work.delivery_tasks.requests == []
+    assert provider.calls == []
+    assert len(unit_of_work.delivery_tasks.requests) == 1
+    request = unit_of_work.delivery_tasks.requests[0]
+    assert request.message_kind.value == "flex"
+    assert request.idempotency_key.value == "service-help:menu:event-1"
 
 
 def test_contact_union_creates_ticket_audit_and_delivery_in_one_uow_boundary():

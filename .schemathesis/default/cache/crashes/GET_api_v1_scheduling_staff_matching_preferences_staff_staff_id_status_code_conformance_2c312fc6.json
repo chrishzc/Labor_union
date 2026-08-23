@@ -1,0 +1,91 @@
+{
+  "operation": "GET /api/v1/scheduling/staff-matching-preferences/staff/{staff_id}",
+  "method": "GET",
+  "path_template": "/api/v1/scheduling/staff-matching-preferences/staff/{staff_id}",
+  "fingerprint": "2c312fc6",
+  "case_id": "WgVT58",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/scheduling/staff-matching-preferences/staff/1",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/scheduling/staff-matching-preferences/staff/1",
+      "url_template": "http://127.0.0.1:8821/api/v1/scheduling/staff-matching-preferences/staff/{staff_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "WgVT58"
+      },
+      "response": {
+        "status_code": 404,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:50 GMT",
+          "server": "uvicorn",
+          "content-length": "245",
+          "content-type": "application/json",
+          "server-timing": "application;dur=65.4",
+          "x-response-time-ms": "65.4",
+          "x-correlation-id": "66d309185f984a2fb7de2d3609a021b1"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"not_found\",\"code\":\"staff_not_found\",\"message\":\"\u6708\u5ac2\u504f\u597d\u64cd\u4f5c\u88ab\u62d2\u7d55\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"66d309185f984a2fb7de2d3609a021b1\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 404\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.005068900005426258,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [
+          {
+            "location": "path",
+            "parameter_name": "staff_id",
+            "resource_name": "Staff",
+            "resource_field": "staff_id",
+            "source_operation": "GET /api/v1/payroll-rebuild/staff/{staff_id}/months/{year}/{month}",
+            "source_status": 200
+          }
+        ],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/scheduling/staff-matching-preferences/staff/{staff_id}",
+      "path_parameters": {
+        "staff_id": 1
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

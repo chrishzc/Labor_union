@@ -1,0 +1,76 @@
+{
+  "operation": "GET /api/line/config",
+  "method": "GET",
+  "path_template": "/api/line/config",
+  "fingerprint": "76d1af8a",
+  "case_id": "KZ2Swh",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/line/config",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/line/config",
+      "url_template": "http://127.0.0.1:8765/api/line/config",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "KZ2Swh"
+      },
+      "response": {
+        "status_code": 410,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:11:29 GMT",
+          "server": "uvicorn",
+          "content-length": "165",
+          "content-type": "application/json",
+          "server-timing": "application;dur=1.3",
+          "x-response-time-ms": "1.3"
+        },
+        "body": "{\"detail\":{\"code\":\"legacy_line_route_retired\",\"message\":\"\u6b64 LINE \u820a\u5165\u53e3\u5df2\u5728 Canonical Runtime \u9000\u51fa\u3002\",\"replacement\":\"/api/v1/line/identity/runtime-config\"}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 410\nDocumented: 200"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.0003815000527538359,
+          "mode": "positive"
+        },
+        "components": {},
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/line/config",
+      "path_parameters": {},
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

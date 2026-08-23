@@ -14,6 +14,7 @@ from api.routes import line_configurations
 from api.routes import line_notification_rules
 from domains.line.configuration import LineConfigurationKind, LineConfigurationSnapshot
 from domains.line.identities import LineConfigurationRevision
+from shared_kernel.fingerprints import PreviewFingerprint
 from subsystems.access.authentication_session import AdminPrincipal
 
 
@@ -79,8 +80,11 @@ def test_delete_rule_creates_a_new_configuration_revision(monkeypatch) -> None:
             assert command["rule_id"] == "baby_log_reminder"
             assert command["expected_revision"] == LineConfigurationRevision(4)
             return type("Result", (), {
+                "rule_id": "baby_log_reminder",
                 "revision": LineConfigurationRevision(5),
+                "preview_fingerprint": PreviewFingerprint("e" * 64),
                 "cancelled_intent_count": 2,
+                "cancelled_task_count": 2,
             })()
 
     application = Application()
@@ -94,13 +98,15 @@ def test_delete_rule_creates_a_new_configuration_revision(monkeypatch) -> None:
     app.dependency_overrides[require_line_configuration_manager] = _principal
     response = TestClient(app).request(
         "DELETE", "/api/v1/line/notification-rules/baby_log_reminder",
-        json={"expected_revision": 4, "reason": "停止舊提醒", "idempotency_key": "delete-rule-1", "correlation_id": "delete-rule-1"},
+        json={"expected_revision": 4, "preview_fingerprint": "e" * 64, "reason": "停止舊提醒", "idempotency_key": "delete-rule-1", "correlation_id": "delete-rule-1"},
     )
     assert response.status_code == 200
     assert response.json()["data"] == {
         "rule_id": "baby_log_reminder",
         "revision": 5,
+        "preview_fingerprint": "e" * 64,
         "cancelled_intent_count": 2,
+        "cancelled_task_count": 2,
     }
 
 
@@ -119,17 +125,18 @@ def test_dedicated_notification_rule_api_supports_get_preview_and_save(monkeypat
             return type("Candidate", (), {
                 "before_revision": expected_revision,
                 "resulting_revision": LineConfigurationRevision(4),
+                "definition_json": '{"rules":[]}',
                 "fingerprint": type("F", (), {"value": "f" * 64})(),
             })()
 
-        def apply(self, **command):
-            calls.append(("apply", command))
+    class Administration:
+        def save(self, **command):
+            calls.append(("save", command))
             return type("Result", (), {
-                "snapshot": LineConfigurationSnapshot(
-                    LineConfigurationKind.NOTIFICATION_RULES,
-                    LineConfigurationRevision(4),
-                    '{"rules":[]}',
-                )
+                "revision": LineConfigurationRevision(4),
+                "preview_fingerprint": PreviewFingerprint("f" * 64),
+                "cancelled_intent_count": 0,
+                "cancelled_task_count": 0,
             })()
 
     application = Application()
@@ -137,6 +144,11 @@ def test_dedicated_notification_rule_api_supports_get_preview_and_save(monkeypat
         line_notification_rules,
         "get_line_configuration_application",
         lambda: application,
+    )
+    monkeypatch.setattr(
+        line_notification_rules,
+        "get_line_notification_rule_administration",
+        lambda: Administration(),
     )
     app = FastAPI()
     app.include_router(line_notification_rules.router)
@@ -154,6 +166,7 @@ def test_dedicated_notification_rule_api_supports_get_preview_and_save(monkeypat
         "/api/v1/line/notification-rules",
         json={
             "expected_revision": 3,
+            "preview_fingerprint": "f" * 64,
             "definition": _definition(),
             "reason": "啟用提醒",
             "idempotency_key": "notification-save-1",
@@ -163,7 +176,7 @@ def test_dedicated_notification_rule_api_supports_get_preview_and_save(monkeypat
     assert saved.status_code == 200
     assert saved.json()["data"]["revision"] == 4
     assert calls[0][0] == "preview"
-    assert calls[1][0] == "apply"
+    assert calls[1][0] == "save"
 
 
 def test_notification_timeline_api_returns_deidentified_evidence(monkeypatch) -> None:

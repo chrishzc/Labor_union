@@ -1,14 +1,15 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: in-progress
 identity: PROV-20260817-access-audit-public-query-hardening
 date: 2026-08-17
 base_branch: main
-base_head: late-bound-at-approval
+base_head: 0641ed62d20a85289c82aa5a272b73feff715f59
 dirty_baseline: integration-owner-must-capture-before-writer
 base_drift_rule: any relevant path drift requires fresh read and re-freeze before edits
 owner: Access Audit Integration Owner
 domain: Access / Security Audit
+authority: exact-human-approved-2026-08-22
 approval_required: 核准此 exact Access Audit Public Query Hardening Work Package
 evidence_directory: document/架構重整/03_追蹤清單與證據/evidence/PROV-20260817-access-audit-public-query-hardening/
 required_receipts: candidate-change-inventory.md; contract-matrix-freeze-receipt.md; verification-receipt.md; open-findings.md
@@ -19,6 +20,8 @@ presentation_prerequisite: Account Center page integration precedes Access Audit
 ---
 
 # Access Audit public Query hardening工作包
+
+人工於2026-08-22批次核准本existing exact Work Package，保持原scope、write set與acceptance並依序施工。
 
 ## 0. Scope
 

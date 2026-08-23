@@ -1,10 +1,14 @@
-"""Read-only dependency checks shared by operator-facing launchers."""
+"""
+File: launcher_preflight.py
+Description: 唯讀檢查 launcher 依賴、React artifact 與 12-entry runtime state 邊界。
+"""
 
 from __future__ import annotations
 
 import argparse
 import importlib.util
 import json
+import os
 from pathlib import Path
 import shutil
 
@@ -14,11 +18,31 @@ from subsystems.line.runtime_cutover import (
     LineRuntimeCutoverError,
     validate_line_worker_runtime,
 )
+from infrastructure.runtime.react_admin_artifact import (
+    ReactAdminArtifactError,
+    load_react_admin_runtime_from_environment,
+)
+from scripts.provision_admin_entry_target_state import attest_state
+from subsystems.access.admin_entry_target_control import EntryTargetError
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 PROFILE_REQUIREMENTS = {
+    "artifact-runtime": {
+        "files": ("api/main.py", "infrastructure/runtime/react_admin_artifact.py"),
+        "modules": ("uvicorn",),
+    },
+    "dual-run": {
+        "commands": ("npm",),
+        "files": (
+            "ui/app.py",
+            "ui_react/package.json",
+            "ui_react/src/main.tsx",
+            "ui_react/index.html",
+        ),
+        "modules": ("uvicorn", "streamlit"),
+    },
     "local-windows": {
         "commands": ("docker-compose",),
         "files": ("docker-compose.yml", "scripts/wait_for_db.py", "ui/app.py"),
@@ -77,13 +101,68 @@ def inspect_profile(profile: str) -> dict[str, object]:
         "modules": missing_modules,
         "configuration": _configuration_issues(profile),
     }
-    return {
+    report = {
         "status": "ready" if not any(issues.values()) else "blocked",
         "profile": profile,
         "project_root": str(PROJECT_ROOT),
         "missing": issues,
         "side_effects": "none",
     }
+    if profile == "artifact-runtime":
+        try:
+            state_path = os.environ.get("ADMIN_ENTRY_TARGET_STATE_PATH", "").strip()
+            if not state_path:
+                raise EntryTargetError(
+                    "unavailable",
+                    "entry_target_state_path_missing",
+                    "Entry target runtime state path 未設定",
+                )
+            report["entry_target_attestation"] = attest_state(Path(state_path))
+            runtime = load_react_admin_runtime_from_environment(workspace_root=PROJECT_ROOT)
+            if runtime is None:
+                raise ReactAdminArtifactError("react admin artifact runtime is not configured")
+            report["artifact_attestation"] = runtime.health_attestation()
+            report["streamlit_rollback"] = {
+                "status": "retained",
+                "health_url": "http://127.0.0.1:8501/_stcore/health",
+            }
+            report["ports"] = [8000, 8501]
+            report["startup_order"] = [
+                "entry-target-preflight",
+                "artifact-preflight",
+                "api",
+                "artifact-private-health",
+                "streamlit",
+            ]
+        except EntryTargetError:
+            issues["configuration"].append("Admin entry target runtime state attestation")
+            report["status"] = "blocked"
+        except (OSError, ReactAdminArtifactError, ValueError):
+            issues["configuration"].append("React admin current/previous selector attestation")
+            report["status"] = "blocked"
+    if profile == "dual-run":
+        report["planned_commands"] = [
+            "python -m uvicorn api.main:app --host 127.0.0.1 --port 8000",
+            "python -m streamlit run ui/app.py --server.address 127.0.0.1 --server.port 8501",
+            "npm run dev -- --host 127.0.0.1 --port 5173 --strictPort",
+        ]
+        report["ports"] = [8000, 8501, 5173]
+        report["health_predicates"] = {
+            "api": "GET /health == 200",
+            "streamlit": "GET /_stcore/health == 200",
+            "react": "GET / == 200, HTML, body contains id=\"root\"",
+            "proxy": "GET /api/... through 5173; browser uses relative /api",
+        }
+        report["startup_order"] = ["api", "streamlit", "react"]
+        report["disabled"] = [
+            "monitor",
+            "LINE delivery",
+            "durable worker",
+            "incident worker",
+            "knowledge worker",
+            "consumer/provider workers",
+        ]
+    return report
 
 
 def run_profile(profile: str) -> int:

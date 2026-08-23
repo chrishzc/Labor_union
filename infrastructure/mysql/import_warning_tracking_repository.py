@@ -7,13 +7,16 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from contextlib import contextmanager
+from dataclasses import replace
 from typing import Iterator
 
 from domains.anomalies.import_warning_tracking import ImportWarningTrackingStatus
 from subsystems.anomalies.import_warning_tracking_workflow import (
     ImportWarningTask,
     WarningTransitionPreview,
+    WarningTransitionReceipt,
     WarningTransitionRequest,
 )
 
@@ -41,7 +44,7 @@ class MySqlImportWarningTrackingRepository:
     def replay(
         self,
         request: WarningTransitionRequest,
-    ) -> WarningTransitionPreview | None:
+    ) -> WarningTransitionReceipt | None:
         fingerprint = _fingerprint(request)
         with _cursor(self._connection) as cursor:
             cursor.execute(
@@ -54,9 +57,26 @@ class MySqlImportWarningTrackingRepository:
             return None
         if str(receipt["command_fingerprint"]) != fingerprint:
             raise ValueError("import_warning_idempotency_mismatch")
-        return _receipt_preview(receipt["result_snapshot"])
+        return replace(_receipt(receipt["result_snapshot"]), replayed=True)
 
-    def apply_transition(self, task: ImportWarningTask, request: WarningTransitionRequest, preview: WarningTransitionPreview) -> WarningTransitionPreview:
+    def lookup_receipt(self, receipt_identity: str) -> WarningTransitionReceipt | None:
+        with _cursor(self._connection) as cursor:
+            cursor.execute(
+                "SELECT r.result_snapshot,e.event_identity "
+                "FROM import_warning_tracking_receipts r "
+                "JOIN import_warning_tracking_events e ON e.id=r.tracking_event_id "
+                "WHERE e.event_identity=%s",
+                (receipt_identity,),
+            )
+            row = cursor.fetchone()
+        if row is None:
+            return None
+        receipt = _receipt(row["result_snapshot"])
+        if receipt.receipt_identity != str(row["event_identity"]):
+            raise ValueError("import_warning_receipt_invalid")
+        return receipt
+
+    def apply_transition(self, task: ImportWarningTask, request: WarningTransitionRequest, preview: WarningTransitionPreview) -> WarningTransitionReceipt:
         fingerprint = _fingerprint(request)
         with _cursor(self._connection) as cursor:
             cursor.execute(
@@ -67,7 +87,7 @@ class MySqlImportWarningTrackingRepository:
             if receipt is not None:
                 if str(receipt["command_fingerprint"]) != fingerprint:
                     raise ValueError("import_warning_idempotency_mismatch")
-                return _receipt_preview(receipt["result_snapshot"])
+                return replace(_receipt(receipt["result_snapshot"]), replayed=True)
             cursor.execute("SELECT id FROM import_warning_occurrences WHERE occurrence_identity=%s FOR UPDATE", (task.occurrence_identity,))
             occurrence = cursor.fetchone()
             if occurrence is None:
@@ -84,7 +104,8 @@ class MySqlImportWarningTrackingRepository:
             )
             if int(cursor.rowcount) != 1:
                 raise ValueError("import_warning_version_conflict")
-            snapshot = _snapshot(preview)
+            receipt_identity = event_identity
+            snapshot = _snapshot(task, preview, request, receipt_identity)
             cursor.execute(
                 "INSERT INTO import_warning_tracking_receipts (idempotency_key,command_fingerprint,occurrence_id,tracking_event_id,expected_version,resulting_version,result_snapshot) VALUES (%s,%s,%s,%s,%s,%s,%s)",
                 (request.idempotency_key.value, fingerprint, occurrence["id"], event_id, preview.expected_version, preview.resulting_version, _json(snapshot)),
@@ -93,7 +114,7 @@ class MySqlImportWarningTrackingRepository:
                 "INSERT INTO import_warning_tracking_outbox (tracking_event_id,intent_key,bounded_snapshot) VALUES (%s,%s,%s)",
                 (event_id, _identity("import-warning-outbox", event_identity), _json({"occurrence_identity": task.occurrence_identity, "owning_lane": task.owning_lane, "logical_code": task.logical_code, "field_path": task.field_path, "tracking_status": preview.resulting_status.value, "tracking_version": preview.resulting_version})),
             )
-        return preview
+        return _receipt(snapshot)
 
 
 @contextmanager
@@ -119,13 +140,19 @@ def _json(value: object) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
 
-def _snapshot(preview: WarningTransitionPreview) -> dict[str, object]:
-    return {"occurrence_identity": preview.occurrence_identity, "expected_version": preview.expected_version, "resulting_status": preview.resulting_status.value, "resulting_version": preview.resulting_version}
+def _snapshot(task: ImportWarningTask, preview: WarningTransitionPreview, request: WarningTransitionRequest, receipt_identity: str) -> dict[str, object]:
+    return {"occurrence_identity": preview.occurrence_identity, "before_status": task.tracking_status.value, "after_status": preview.resulting_status.value, "resulting_version": preview.resulting_version, "receipt_identity": receipt_identity, "correlation_id": request.correlation_id.value}
 
 
-def _receipt_preview(value: object) -> WarningTransitionPreview:
+def _receipt(value: object) -> WarningTransitionReceipt:
     snapshot = json.loads(value) if isinstance(value, str) else value
-    return WarningTransitionPreview(str(snapshot["occurrence_identity"]), int(snapshot["expected_version"]), ImportWarningTrackingStatus(str(snapshot["resulting_status"])), int(snapshot["resulting_version"]))
+    try:
+        receipt = WarningTransitionReceipt(str(snapshot["occurrence_identity"]), ImportWarningTrackingStatus(str(snapshot["before_status"])), ImportWarningTrackingStatus(str(snapshot["after_status"])), int(snapshot["resulting_version"]), str(snapshot["receipt_identity"]), str(snapshot["correlation_id"]), False)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError("import_warning_receipt_invalid") from error
+    if re.fullmatch(r"[0-9a-f]{64}", receipt.receipt_identity) is None:
+        raise ValueError("import_warning_receipt_invalid")
+    return receipt
 
 
 _TASK_FIELDS = "o.occurrence_identity,o.owning_lane,o.logical_code,o.field_path,o.masked_subject,o.issue_codes,t.tracking_status,t.tracking_version"

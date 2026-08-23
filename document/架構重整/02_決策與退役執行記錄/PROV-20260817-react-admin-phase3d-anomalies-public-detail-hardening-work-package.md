@@ -1,13 +1,14 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-react-admin-phase3d-anomalies-public-detail-hardening
 date: 2026-08-17
 owner: Anomalies / Access Integration Owner
 domain: Anomalies
 source_gap: PROV-20260817-react-admin-phase3d-anomalies-warning-mutation-gap
-prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PASS; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase2d-h-closure-gate-amendment PASS; PROV-20260816-react-admin-phase2d-backend-public-contract-hardening PASS
+prerequisites: PROV-20260817-react-admin-phase3-scenario-lineage-governance PHASE3_SCENARIO_LINEAGE_METADATA_READY; PROV-20260817-global-fastapi-typed-error-boundary PASS; PROV-20260817-react-admin-phase2d-h-closure-gate-amendment PASS; PROV-20260816-react-admin-phase2d-backend-public-contract-hardening PASS
 approval_required: 核准此 exact Phase 3D-H Work Package
+approval_status: approved-by-user-and-completed-2026-08-22
 scenario_governance: Part_00_全域測試資料治理與Scenario契約.md
 ui_execution_mode: not-applicable
 base_branch: main
@@ -24,9 +25,9 @@ Controlled lineage採用`ANOM-PROJECTOR-CLOSED-LOOP-003`、`ANOM-SCHEDULING-CLOS
 `ANOM-CLOSED-LOOP-001`；必須由Phase3 scenario matrix記錄supplement/expected/fresh receipt，不得
 直接把舊receipt當本包PASS。
 
-本包為proposed，只修後端Query/detail/recovery public contract；不啟用Claim／Resolve／warning transition，
+本包已於2026-08-22依exact人工核准完成，只修後端Query/detail/recovery public contract；不啟用Claim／Resolve／warning transition，
 不改React、不執行owner repair、不改DB/schema。Phase 2D-H disposable MySQL與affected-scope regression未閉合時，
-本包最高狀態為`implemented-awaiting-phase2d-h-engine-gate`。
+不擴張成本包DB或mutation驗收；本包0 DB change並以current route/application focused evidence收斂。
 
 ## 1. Exact write set
 
@@ -98,11 +99,25 @@ Import Warning transition另由`PROV-20260817-react-admin-phase3d-warning-transi
 | Gate | Status | Evidence |
 |---|---|---|
 | Scope gate | PASS | query/public contract；0 schema |
-| Change inventory | NOT_RUN | 無DB change |
+| Change inventory | PASS | `schema-only=0`、`system-seed=0`、`business-row-backfill=0`、`destructive=0` |
 | Static release gate | NOT_RUN | 無release |
 | Descriptor gate | NOT_RUN | 無owned-object變更 |
 | Read-only plan gate | NOT_RUN | 不適用 |
-| Engine verification gate | NOT_RUN | 上游Phase2D-H仍需閉合 |
+| Engine verification gate | NOT_RUN | 0 DB change；本包Query contract不以DB migration作驗收 |
 | Developer acceptance gate | NOT_RUN | 不操作既有資料庫 |
 
-結論：`DB_CHANGE_NOT_READY`。
+結論：`DB_CHANGE_NOT_READY (0 DB change)`。
+
+## 8. Completion receipt（2026-08-22）
+
+- G0：PASS；exact approval、0 React／Claim／Resolve／warning mutation／DB／provider。
+- G1–G2：PASS；definition-owned typed evidence、timeline、action／recovery variants與
+  unknown／missing／extra／malformed fail-closed均由current route tests覆蓋。
+- G3：PASS；既有router auth／typed error／correlation regression納入focused command。
+- G4–G5：PASS；Query application doubles證明0 mutation，resolve wording明示不代表root repaired。
+- G6：PASS；focused `43 passed in 2.14s`、in-memory compile、strict UTF-8/no BOM、structured header、
+  exact `git diff --check`與PII/raw-dict/secret scan通過。
+- G7：PASS；final receipt與scenario supplement matrix位於
+  `../03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase3d-anomalies-public-detail-hardening/verification-receipt.md`。
+
+完成效果只解鎖Phase 3D-R唯讀React detail/recovery接線；其他mutation與owner repair維持原gate。

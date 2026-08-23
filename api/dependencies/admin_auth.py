@@ -143,9 +143,6 @@ def require_capability(
         request: Request,
         principal: AdminPrincipal = Depends(require_admin),
     ) -> AdminPrincipal:
-        if not admin_auth_is_enabled():
-            request.state.admin_actor = admin_actor_context(principal)
-            return principal
         if not has_required_capability(principal, capability_name):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

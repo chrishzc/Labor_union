@@ -6,6 +6,8 @@ Description: 驗證 release chain，並在隔離候選中安全升級 MySQL sche
 from __future__ import annotations
 
 import argparse
+from contextlib import contextmanager
+from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -173,6 +175,9 @@ DEFAULT_RELEASE_MANIFESTS = (
     "labor_union_2026_08_16_access_control_security_alert_outbox_v1.json",
     "labor_union_2026_08_15_schema_assembly_v1.json",
     "labor_union_2026_08_15_staff_retirement_v1.json",
+    "labor_union_2026_08_20_line_rich_menu_publication_step_saga_v1.json",
+    "labor_union_2026_08_21_customer_service_human_escalation_v1.json",
+    "labor_union_2026_08_22_matching_coordination_successor_v1.json",
 )
 MYSQL_DUMP_MARKER = b"MySQL dump"
 VERIFYABLE_CANDIDATE_STATUSES = frozenset(
@@ -477,7 +482,12 @@ class DatabaseConfig:
     user: str
     password: str
 
-    def connect(self, database: str | None = None):
+    def connect(
+        self,
+        database: str | None = None,
+        *,
+        timeout_seconds: float | None = None,
+    ):
         kwargs: dict[str, Any] = {
             "host": self.host,
             "port": self.port,
@@ -489,6 +499,15 @@ class DatabaseConfig:
         }
         if database:
             kwargs["database"] = database
+        if timeout_seconds is not None:
+            bounded = float(timeout_seconds)
+            if not 0 < bounded <= LOCAL_ADDITIVE_MAX_DURATION_MS / 1000:
+                raise ValueError("database client timeout is outside the local additive bound")
+            # PyMySQL enforces these at the socket boundary.  A Python elapsed
+            # check alone cannot bound a blocked server-side DDL statement.
+            kwargs["connect_timeout"] = bounded
+            kwargs["read_timeout"] = bounded
+            kwargs["write_timeout"] = bounded
         return pymysql.connect(**kwargs)
 
 
@@ -508,11 +527,16 @@ class SeparateDatabaseConfig:
     source: DatabaseDescriptor
     candidate: DatabaseDescriptor
 
-    def connect(self, database: str | None = None):
+    def connect(
+        self,
+        database: str | None = None,
+        *,
+        timeout_seconds: float | None = None,
+    ):
         if database == self.source.database:
-            return self.source.config.connect(database)
+            return self.source.config.connect(database, timeout_seconds=timeout_seconds)
         if database in {None, self.candidate.database}:
-            return self.candidate.config.connect(database)
+            return self.candidate.config.connect(database, timeout_seconds=timeout_seconds)
         raise UpgradeBlocked("database is outside the preserve-data descriptors")
 
 
@@ -1163,6 +1187,21 @@ def _table_evidence(config: DatabaseConfig, database: str) -> dict[str, Any]:
     return evidence
 
 
+def _local_stable_table_fingerprint(
+    count: int, checksum: Any, primary_key_sha256: str | None,
+) -> str:
+    """Stable row evidence independent of dump formatting or auto-increment metadata."""
+    return _sha256_bytes(_canonical_json({
+        "count": int(count),
+        "checksum": checksum,
+        "primary_key_sha256": primary_key_sha256,
+    }))
+
+
+def _local_data_fingerprint(evidence: Mapping[str, str]) -> str:
+    return _sha256_bytes(_canonical_json(dict(sorted(evidence.items()))))
+
+
 def _normalize_database_qualifiers(
     value: Any, databases: Iterable[str]
 ) -> str:
@@ -1467,6 +1506,14 @@ def _owned_classification(
     legacy_knowledge_state = _legacy_knowledge_schema_state(snapshot)
     result: dict[str, str] = {}
     for part, expected in OWNED_OBJECTS.items():
+        if {"indexes", "foreign_keys", "checks"} <= set(expected):
+            result[part] = _release_descriptor_metadata_state(
+                snapshot,
+                part,
+                expected,
+                defer_missing_triggers=defer_missing_triggers,
+            )
+            continue
         if part in PURE_RETIREMENT_ARTIFACTS:
             has_retired_table = any(
                 table in present_columns for table in INTENTIONALLY_RETIRED_EMPTY_TABLES
@@ -1640,6 +1687,1133 @@ def schema_artifacts() -> list[dict[str, Any]]:
             }
         )
     return artifacts
+
+
+def local_additive_release_qualification(
+    release_id: str | None = None,
+    artifact_name: str | None = None,
+) -> dict[str, Any]:
+    """Return the canonical, non-secret qualification projection for local fast updates."""
+    def json_safe(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {str(key): json_safe(item) for key, item in value.items()}
+        if isinstance(value, (set, frozenset, tuple, list)):
+            return [json_safe(item) for item in value]
+        return value
+
+    schema: list[dict[str, Any]] = []
+    backfills: list[dict[str, Any]] = []
+    raw_descriptors = dict(RELEASE_MANIFEST.descriptors)
+    manifests = tuple(
+        manifest for manifest in RELEASE_MANIFEST.manifests
+        if release_id is None or manifest.release_id == release_id
+    )
+    if release_id is not None and not manifests:
+        raise UpgradeBlocked(f"unknown release qualification: {release_id}")
+    for manifest in manifests:
+        for item in manifest.schema_artifacts:
+            artifact = item.artifact
+            if artifact_name is not None and artifact.name != artifact_name:
+                continue
+            path = (ROOT / artifact.relative_path).resolve()
+            actual_hash = _sha256_file(path)
+            if actual_hash != artifact.sha256:
+                raise UpgradeBlocked(f"release artifact hash mismatch: {artifact.name}")
+            canonical = _canonical_artifact_descriptor(artifact.name)
+            descriptor_valid = all(
+                key in canonical for key in ("tables", "indexes", "foreign_keys", "checks", "triggers")
+            )
+            schema.append({
+                "name": artifact.name,
+                "relative_path": artifact.relative_path,
+                "sha256": artifact.sha256,
+                "data_effect": item.data_effect,
+                "dependencies": list(artifact.dependencies),
+                "descriptor": json_safe(canonical),
+                "descriptor_valid": descriptor_valid,
+                "release_id": manifest.release_id,
+            })
+        for item in manifest.backfills:
+            backfills.append({"id": item.backfill_id, "artifact": item.artifact.name})
+    if artifact_name is not None and not schema:
+        raise UpgradeBlocked(f"unknown release artifact qualification: {artifact_name}")
+    selected_names = {item["name"] for item in schema}
+    descriptors = {
+        name: json_safe(value)
+        for name, value in raw_descriptors.items()
+        if not selected_names or name in selected_names
+    }
+    if release_id is not None:
+        if len(manifests) != 1:
+            raise UpgradeBlocked(f"release qualification is ambiguous: {release_id}")
+        selected_fingerprint = manifests[0].fingerprint
+    else:
+        selected_fingerprint = RELEASE_MANIFEST.fingerprint
+    return {
+        "contract": "local-additive-release-qualification/v1",
+        "release_id": release_id or RELEASE_MANIFEST.release_id,
+        "release_fingerprint": selected_fingerprint,
+        "schema_artifacts": schema,
+        "backfills": backfills,
+        "descriptors": descriptors,
+        "application_compatibility": [
+            "fresh-bootstrap",
+            "preserve-data-candidate",
+            "descriptor-exact",
+        ],
+    }
+
+
+def local_additive_source_snapshot(config: DatabaseConfig, source: str) -> dict[str, Any]:
+    """Expose the existing read-only snapshot/classifier as a typed fast-path boundary."""
+    snapshot = _schema_snapshot(config, source)
+    return {"snapshot": snapshot, "owned_states": _owned_classification(snapshot, defer_missing_triggers=True)}
+
+
+def local_additive_target_state(
+    config: DatabaseConfig,
+    source: str,
+    artifact: str,
+    descriptor: Mapping[str, Any],
+    *,
+    snapshot: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the selected target state, reusing an explicit plan snapshot."""
+    if snapshot is None:
+        snapshot = _schema_snapshot(config, source)
+    normalized_descriptor = _normalize_local_descriptor(descriptor)
+    state = _artifact_metadata_state(
+        json.loads(json.dumps(snapshot)),
+        normalized_descriptor,
+        artifact,
+        # Local additive qualification must classify a missing trigger as
+        # partial.  The preserve-data preflight keeps its historical
+        # defer_missing_triggers boundary separately.
+        defer_missing_triggers=False,
+    )
+    owned_tables = set(descriptor.get("tables", {})) | set(descriptor.get("parent_columns", {}))
+    target = {
+        "tables": [row for row in snapshot.get("columns", ()) if row.get("table_name") in descriptor.get("tables", {})],
+        "indexes": [row for row in snapshot.get("indexes", ()) if row.get("table_name") in owned_tables],
+        "foreign_keys": [row for row in snapshot.get("foreign_keys", ()) if row.get("table_name") in owned_tables],
+        "checks": [row for row in snapshot.get("constraints", ()) if row.get("table_name") in owned_tables and row.get("constraint_type") == "CHECK"],
+        "triggers": [row for row in snapshot.get("triggers", ()) if row.get("event_object_table") in owned_tables],
+    }
+    return {
+        "state": state,
+        "targeted_fingerprint": _sha256_bytes(_canonical_json(target)),
+        "server_identity": server_identity(config, source),
+    }
+
+
+def _normalize_local_descriptor(descriptor: Mapping[str, Any]) -> dict[str, Any]:
+    """Convert JSON descriptor lists to the canonical comparator's tuple shape."""
+    normalized = deepcopy(descriptor)
+    for contract_kind in ("indexes", "foreign_keys", "checks"):
+        contracts = normalized.get(contract_kind, {})
+        normalized_contracts: dict[Any, Any] = {}
+        for key, contract in contracts.items():
+            if isinstance(key, str):
+                match = re.fullmatch(
+                    r"\('([A-Za-z0-9_]+)', '([A-Za-z0-9_]+)'\)", key
+                )
+                if match:
+                    key = (match.group(1), match.group(2))
+            normalized_contracts[key] = contract
+        normalized[contract_kind] = normalized_contracts
+    for contract in normalized.get("indexes", {}).values():
+        if isinstance(contract, Mapping) and "columns" in contract:
+            contract["columns"] = tuple(str(item).casefold() for item in contract["columns"])
+        if isinstance(contract, Mapping) and "non_unique" in contract:
+            contract["non_unique"] = int(contract["non_unique"])
+    for contract in normalized.get("foreign_keys", {}).values():
+        if isinstance(contract, Mapping):
+            for key in ("columns", "referenced_columns"):
+                if key in contract:
+                    contract[key] = tuple(contract[key])
+    return normalized
+
+
+def local_additive_descriptor_state(
+    snapshot: Mapping[str, Any], descriptor: Mapping[str, Any], artifact: str,
+) -> str:
+    """Use the canonical descriptor comparator without exposing its implementation."""
+    return _artifact_metadata_state(
+        json.loads(json.dumps(snapshot)),
+        _normalize_local_descriptor(descriptor),
+        artifact,
+        # Post-apply verification is strict: a missing owned trigger is not
+        # an exact compatible projection and cannot be deferred.
+        defer_missing_triggers=False,
+    )
+
+
+# 本機 qualified additive 例外的唯一執行邊界；update_local_database 只負責路由。
+LOCAL_ADDITIVE_MAX_DURATION_MS = 30_000
+LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS = 5
+LOCAL_ADDITIVE_TARGET_PREFIX = "lu_test_"
+
+
+class LocalAdditiveBlocked(RuntimeError):
+    """Bounded, redacted failure for the local-development additive route."""
+
+    def __init__(self, message: str, *, code: str = "additive_blocked") -> None:
+        super().__init__(str(message)[:240])
+        self.code = code
+
+
+def _local_canonical_json(value: Any) -> bytes:
+    return _canonical_json(value)
+
+
+def _local_digest(value: bytes) -> str:
+    return _sha256_bytes(value)
+
+
+def _local_payload_digest(payload: Mapping[str, Any]) -> str:
+    body = dict(payload)
+    body.pop("payload_digest", None)
+    body.pop("_path", None)
+    body.pop("_canonical_artifact", None)
+    return _local_digest(_local_canonical_json(body))
+
+
+def _local_read_qualification(path: Path) -> dict[str, Any]:
+    try:
+        raw = path.read_bytes()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            raise ValueError("qualification receipt has UTF-8 BOM")
+        payload = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise LocalAdditiveBlocked(
+            "qualification receipt is unreadable", code="qualification_invalid"
+        ) from error
+    if not isinstance(payload, dict):
+        raise LocalAdditiveBlocked(
+            "qualification receipt must be an object", code="qualification_invalid"
+        )
+    if payload.get("payload_digest") != _local_payload_digest(payload):
+        raise LocalAdditiveBlocked(
+            "qualification receipt digest mismatch", code="qualification_invalid"
+        )
+    return payload
+
+
+def _local_manifest_artifact(qualification: Mapping[str, Any]) -> tuple[Any, Any]:
+    release_id = qualification.get("release_id")
+    artifact = qualification.get("artifact")
+    if not isinstance(release_id, str) or not isinstance(artifact, Mapping):
+        raise LocalAdditiveBlocked(
+            "qualification identity is incomplete", code="qualification_invalid"
+        )
+    name = artifact.get("name")
+    if not isinstance(name, str):
+        raise LocalAdditiveBlocked(
+            "qualification artifact identity is incomplete", code="qualification_invalid"
+        )
+    canonical = local_additive_release_qualification(release_id, name)
+    items = canonical.get("schema_artifacts", ())
+    if len(items) != 1 or items[0].get("name") != name:
+        raise LocalAdditiveBlocked(
+            "qualification artifact is not canonical", code="qualification_invalid"
+        )
+    matching_manifests = tuple(
+        manifest for manifest in RELEASE_MANIFEST.manifests
+        if manifest.release_id == release_id
+    )
+    if len(matching_manifests) != 1:
+        raise LocalAdditiveBlocked(
+            "qualification manifest selection is unavailable or ambiguous",
+            code="qualification_invalid",
+        )
+    return items[0], matching_manifests[0].descriptor_artifact
+
+
+def _local_manifest_path(release_id: str) -> Path:
+    matches: list[Path] = []
+    for path in sorted((ROOT / "db" / "migration_releases").glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if (
+            payload.get("contract") == "migration-release-manifest/v1"
+            and payload.get("release_id") == release_id
+        ):
+            matches.append(path)
+    if len(matches) != 1:
+        raise LocalAdditiveBlocked(
+            "published release manifest is missing or ambiguous",
+            code="qualification_invalid",
+        )
+    return matches[0]
+
+
+def _local_manifest_inventory(manifest: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": item.artifact.name,
+            "sha256": item.artifact.sha256,
+            "data_effect": item.data_effect,
+            "dependencies": list(item.artifact.dependencies),
+        }
+        for item in manifest.schema_artifacts
+    ]
+
+
+_LOCAL_REQUIRED_PREREQUISITE_NAMES = frozenset({
+    "156_line_publication_media_order_group.sql",
+    "159_line_messaging_publication_runtime.sql",
+})
+
+
+def _local_json_safe(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _local_json_safe(item) for key, item in value.items()}
+    if isinstance(value, (set, frozenset, tuple, list)):
+        return [_local_json_safe(item) for item in value]
+    return value
+
+
+def _local_prerequisite_descriptor(name: str) -> dict[str, Any]:
+    """Return only the current-successor objects required by Rich Menu Option B."""
+    descriptor = deepcopy(_canonical_artifact_descriptor(name))
+    if name == "156_line_publication_media_order_group.sql":
+        table = "line_rich_menu_publication_tasks"
+        descriptor["tables"] = {table: descriptor["tables"][table]}
+        descriptor["indexes"] = {
+            key: value for key, value in descriptor["indexes"].items()
+            if key[0] == table
+        }
+        descriptor["foreign_keys"] = {
+            key: value for key, value in descriptor["foreign_keys"].items()
+            if key[0] == table
+        }
+        descriptor["checks"] = {
+            key: value for key, value in descriptor["checks"].items()
+            if key[0] == table
+        }
+        descriptor["triggers"] = {
+            key: value for key, value in descriptor["triggers"].items()
+            if value["event_object_table"] == table
+        }
+        descriptor["parent_columns"] = {}
+    elif name == "159_line_messaging_publication_runtime.sql":
+        table = "line_rich_menu_publication_step_receipts"
+        descriptor["tables"] = {table: descriptor["tables"][table]}
+        descriptor["indexes"] = {
+            key: value for key, value in descriptor["indexes"].items()
+            if key[0] == table
+        }
+        descriptor["foreign_keys"] = {
+            key: value for key, value in descriptor["foreign_keys"].items()
+            if key[0] == table
+        }
+        descriptor["checks"] = {}
+        descriptor["triggers"] = {
+            key: value for key, value in descriptor["triggers"].items()
+            if value["event_object_table"] == table
+        }
+        descriptor["parent_columns"] = {
+            "line_domain_outbox": {
+                "max_attempts": {
+                    "column_type": "int unsigned",
+                    "is_nullable": "NO",
+                    "column_default": "3",
+                    "extra": "",
+                },
+                "error_message": {
+                    "column_type": "varchar(1000)",
+                    "is_nullable": "YES",
+                    "column_default": None,
+                    "extra": "",
+                },
+            }
+        }
+    else:
+        raise LocalAdditiveBlocked(
+            f"unsupported local prerequisite projection: {name}",
+            code="qualification_invalid",
+        )
+    return _local_json_safe(descriptor)
+
+
+def _local_prerequisite_projection_sha256(projection: Mapping[str, Any]) -> str:
+    return _local_digest(_local_canonical_json(projection))
+
+
+def _local_validate_prerequisite_policy(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Validate local-only prerequisite artifacts independently of published deps."""
+    raw = payload.get("local_prerequisites")
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or not raw:
+        raise LocalAdditiveBlocked(
+            "local additive schema prerequisites are missing",
+            code="qualification_invalid",
+        )
+    prerequisites: list[dict[str, Any]] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            raise LocalAdditiveBlocked(
+                "local additive schema prerequisite is invalid",
+                code="qualification_invalid",
+            )
+        name = item.get("name")
+        relative_path = item.get("relative_path")
+        sha256 = item.get("sha256")
+        required_state = item.get("required_state")
+        projection = item.get("projection")
+        projection_sha256 = item.get("projection_sha256")
+        if (
+            not isinstance(name, str)
+            or not isinstance(relative_path, str)
+            or not isinstance(sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", sha256)
+            or not isinstance(projection, Mapping)
+            or not isinstance(projection_sha256, str)
+            or not re.fullmatch(r"[0-9a-f]{64}", projection_sha256)
+            or required_state != "exact"
+        ):
+            raise LocalAdditiveBlocked(
+                "local additive schema prerequisite contract is invalid",
+                code="qualification_invalid",
+            )
+        prerequisites.append({
+            "name": name,
+            "relative_path": relative_path,
+            "sha256": sha256,
+            "required_state": "exact",
+            "projection": dict(projection),
+            "projection_sha256": projection_sha256,
+        })
+    if {item["name"] for item in prerequisites} != _LOCAL_REQUIRED_PREREQUISITE_NAMES:
+        raise LocalAdditiveBlocked(
+            "local additive schema prerequisites are incomplete",
+            code="qualification_invalid",
+        )
+    if len(prerequisites) != len(_LOCAL_REQUIRED_PREREQUISITE_NAMES):
+        raise LocalAdditiveBlocked(
+            "local additive schema prerequisites are duplicated",
+            code="qualification_invalid",
+        )
+    for item in prerequisites:
+        matches = [
+            artifact for artifact in RELEASE_MANIFEST.artifacts
+            if artifact["name"] == item["name"]
+        ]
+        if len(matches) != 1:
+            raise LocalAdditiveBlocked(
+                f"published prerequisite artifact is unavailable: {item['name']}",
+                code="qualification_invalid",
+            )
+        canonical = matches[0]
+        if (
+            item["relative_path"] != canonical["relative_path"]
+            or item["sha256"] != canonical["sha256"]
+        ):
+            raise LocalAdditiveBlocked(
+                f"local prerequisite artifact identity differs: {item['name']}",
+                code="qualification_hash_mismatch",
+            )
+        path = ROOT / item["relative_path"]
+        if not path.is_file() or _local_digest(path.read_bytes()) != item["sha256"]:
+            raise LocalAdditiveBlocked(
+                f"local prerequisite artifact bytes changed: {item['name']}",
+                code="qualification_hash_mismatch",
+            )
+        canonical_projection = _local_prerequisite_descriptor(item["name"])
+        if item["projection"] != canonical_projection:
+            raise LocalAdditiveBlocked(
+                f"local prerequisite projection differs: {item['name']}",
+                code="qualification_invalid",
+            )
+        if item["projection_sha256"] != _local_prerequisite_projection_sha256(
+            canonical_projection
+        ):
+            raise LocalAdditiveBlocked(
+                f"local prerequisite projection hash differs: {item['name']}",
+                code="qualification_hash_mismatch",
+            )
+    return prerequisites
+
+
+def _local_verify_prerequisite_metadata(
+    snapshot: Mapping[str, Any],
+    qualification: Mapping[str, Any],
+) -> None:
+    """Require exact current metadata for the runtime tables used by Option B."""
+    prerequisites = qualification.get("local_prerequisites")
+    if prerequisites is None:
+        return
+    if not isinstance(prerequisites, list):
+        raise LocalAdditiveBlocked(
+            "local additive schema prerequisites are missing",
+            code="qualification_invalid",
+        )
+    for item in prerequisites:
+        name = str(item["name"])
+        descriptor = item.get("projection")
+        if not isinstance(descriptor, Mapping):
+            raise LocalAdditiveBlocked(
+                f"local prerequisite projection is missing: {name}",
+                code="qualification_invalid",
+            )
+        state = _artifact_metadata_state(
+            json.loads(json.dumps(snapshot)), _normalize_local_descriptor(descriptor), name,
+            defer_missing_triggers=False,
+        )
+        if state != str(item.get("required_state")):
+            raise LocalAdditiveBlocked(
+                f"local prerequisite metadata is {state}: {name}",
+                code="prerequisite_schema_state_blocked",
+            )
+
+
+def _local_validate_target_projection(
+    payload: Mapping[str, Any],
+    artifact: Mapping[str, Any],
+    descriptor_sha256: str,
+) -> None:
+    """Accept full-schema drift only with hash-bound exact owned projections."""
+
+    preserve = payload.get("preserve_data_candidate")
+    fresh = payload.get("fresh_bootstrap")
+    if preserve.get("candidate_schema_fingerprint") == fresh.get("schema_fingerprint"):
+        return
+
+    projection = payload.get("target_projection")
+    policy_evidence = payload.get("policy_evidence")
+    if not isinstance(projection, Mapping) or not isinstance(policy_evidence, Mapping):
+        raise LocalAdditiveBlocked(
+            "fresh/preserve schema fingerprints differ", code="qualification_invalid"
+        )
+    fresh_fingerprint = projection.get("fresh_fingerprint")
+    preserve_fingerprint = projection.get("preserve_candidate_fingerprint")
+    expected = {
+        "contract": "local-additive-target-projection/v1",
+        "artifact_name": artifact.get("name"),
+        "descriptor_sha256": descriptor_sha256,
+        "fresh_state": "exact",
+        "preserve_candidate_state": "exact",
+    }
+    if any(projection.get(key) != value for key, value in expected.items()):
+        raise LocalAdditiveBlocked(
+            "qualified target projection is incomplete or non-exact",
+            code="qualification_invalid",
+        )
+    if (
+        not isinstance(fresh_fingerprint, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", fresh_fingerprint)
+        or fresh_fingerprint != descriptor_sha256
+        or preserve_fingerprint != fresh_fingerprint
+    ):
+        raise LocalAdditiveBlocked(
+            "fresh/preserve target projections differ", code="qualification_invalid"
+        )
+    if (
+        policy_evidence.get("fresh_target_projection_fingerprint")
+        != fresh_fingerprint
+        or policy_evidence.get("preserve_candidate_target_projection_fingerprint")
+        != preserve_fingerprint
+    ):
+        raise LocalAdditiveBlocked(
+            "target projection evidence is not canonically bound",
+            code="qualification_invalid",
+        )
+
+
+def _local_validate_qualification(path: Path) -> dict[str, Any]:
+    payload = _local_read_qualification(path)
+    canonical, descriptor_artifact = _local_manifest_artifact(payload)
+    manifest_path = _local_manifest_path(payload["release_id"])
+    matching_manifest = next(
+        manifest for manifest in RELEASE_MANIFEST.manifests
+        if manifest.release_id == payload["release_id"]
+    )
+    artifact = payload["artifact"]
+    policy = payload.get("policy")
+    if not isinstance(policy, Mapping) or policy.get("local_in_place_eligible") is not True:
+        raise LocalAdditiveBlocked(
+            "release is not local in-place eligible", code="qualification_invalid"
+        )
+    if canonical.get("data_effect") != "schema_only" or artifact.get("data_effect") != canonical.get("data_effect"):
+        raise LocalAdditiveBlocked(
+            "canonical release data effect is not schema_only", code="replacement_required"
+        )
+    if local_additive_release_qualification(payload["release_id"], artifact["name"]).get("backfills"):
+        raise LocalAdditiveBlocked(
+            "release declares backfills and is not local additive", code="replacement_required"
+        )
+    if any(policy.get(key) != 0 for key in ("seed", "backfill", "destructive")):
+        raise LocalAdditiveBlocked(
+            "release has forbidden data effects", code="replacement_required"
+        )
+    _local_validate_prerequisite_policy(payload)
+    if payload.get("published_manifest_sha256") != _sha256_file(manifest_path):
+        raise LocalAdditiveBlocked(
+            "published manifest hash differs from qualification policy",
+            code="qualification_hash_mismatch",
+        )
+    if payload.get("manifest_artifact_inventory") != _local_manifest_inventory(matching_manifest):
+        raise LocalAdditiveBlocked(
+            "published manifest inventory differs from qualification policy",
+            code="qualification_invalid",
+        )
+    metadata_backup = payload.get("metadata_backup")
+    preserve = payload.get("preserve_data_candidate")
+    fresh = payload.get("fresh_bootstrap")
+    policy_evidence = payload.get("policy_evidence")
+    if not isinstance(policy_evidence, Mapping):
+        raise LocalAdditiveBlocked(
+            "local-only qualification policy evidence is missing",
+            code="qualification_invalid",
+        )
+    required_policy_evidence = {
+        "fresh_schema_fingerprint": fresh.get("schema_fingerprint"),
+        "preserve_source_schema_fingerprint": preserve.get("source_schema_fingerprint"),
+        "preserve_candidate_schema_fingerprint": preserve.get("candidate_schema_fingerprint"),
+        "source_dump_sha256": preserve.get("source_dump_sha256"),
+        "candidate_dump_sha256": preserve.get("candidate_dump_sha256"),
+    }
+    if any(
+        policy_evidence.get(key) != value
+        for key, value in required_policy_evidence.items()
+    ):
+        raise LocalAdditiveBlocked(
+            "qualification engine evidence is not canonically bound",
+            code="qualification_invalid",
+        )
+    if payload.get("release_fingerprint") != local_additive_release_qualification(payload["release_id"]).get("release_fingerprint"):
+        raise LocalAdditiveBlocked(
+            "qualification release fingerprint changed", code="qualification_invalid"
+        )
+    if artifact.get("sql_sha256") != canonical.get("sha256"):
+        raise LocalAdditiveBlocked(
+            "qualification SQL hash differs from manifest", code="qualification_hash_mismatch"
+        )
+    if artifact.get("descriptor_sha256") != descriptor_artifact.sha256:
+        raise LocalAdditiveBlocked(
+            "qualification descriptor hash differs from manifest", code="qualification_hash_mismatch"
+        )
+    try:
+        for statement in split_sql(
+            (ROOT / canonical["relative_path"]).read_text(encoding="utf-8")
+        ):
+            _local_classify_statement(statement)
+    except LocalAdditiveBlocked as error:
+        raise LocalAdditiveBlocked(
+            "published release contains a forbidden local additive effect",
+            code="replacement_required",
+        ) from error
+    if not isinstance(metadata_backup, Mapping) or metadata_backup.get("status") != "verified":
+        raise LocalAdditiveBlocked(
+            "verified source backup metadata is required", code="backup_required"
+        )
+    if not isinstance(preserve, Mapping) or preserve.get("status") != "verified":
+        raise LocalAdditiveBlocked(
+            "preserve-data engine qualification is required", code="qualification_required"
+        )
+    if not isinstance(fresh, Mapping) or fresh.get("status") != "verified":
+        raise LocalAdditiveBlocked(
+            "fresh engine qualification is required", code="qualification_required"
+        )
+    if not preserve.get("candidate_schema_fingerprint") or not fresh.get("schema_fingerprint"):
+        raise LocalAdditiveBlocked(
+            "engine qualification fingerprints are incomplete", code="qualification_invalid"
+        )
+    for evidence_key in ("source_dump_sha256", "candidate_dump_sha256"):
+        value = preserve.get(evidence_key)
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise LocalAdditiveBlocked(
+                "preserve-data dump evidence is incomplete", code="qualification_invalid"
+            )
+    _local_validate_target_projection(payload, artifact, descriptor_artifact.sha256)
+    payload["_path"] = path
+    payload["_canonical_artifact"] = canonical
+    return payload
+
+
+def _local_discover_qualification(
+    qualification_path: Path | None = None,
+) -> dict[str, Any]:
+    if qualification_path is not None:
+        path = Path(qualification_path).expanduser().resolve()
+        receipt_root = (ROOT / "validation" / "receipts").resolve()
+        if path.parent != receipt_root or not path.name.startswith(
+            "PROV-"
+        ) or not path.name.endswith(".json"):
+            raise LocalAdditiveBlocked(
+                "explicit qualification must be a published validation receipt",
+                code="qualification_invalid",
+            )
+        return _local_validate_qualification(path)
+    paths = sorted((ROOT / "validation" / "receipts").glob("PROV-*-local-additive-qualification-*.json"))
+    valid: list[dict[str, Any]] = []
+    for path in paths:
+        try:
+            valid.append(_local_validate_qualification(path))
+        except LocalAdditiveBlocked:
+            continue
+    if not valid:
+        raise LocalAdditiveBlocked(
+            "local additive qualification is ambiguous or invalid", code="qualification_ambiguous"
+        )
+    signatures = {
+        _local_digest(_local_canonical_json({
+            key: item.get(key)
+            for key in (
+                "release_id", "release_fingerprint", "artifact",
+                "published_manifest_sha256", "manifest_artifact_inventory",
+                "policy", "policy_evidence",
+            )
+        }))
+        for item in valid
+    }
+    if len(signatures) != 1:
+        raise LocalAdditiveBlocked(
+            "conflicting local additive qualification receipts",
+            code="qualification_ambiguous",
+        )
+    return sorted(valid, key=lambda item: str(item.get("_path", "")))[0]
+
+
+def _local_verify_hashes(qualification: Mapping[str, Any]) -> None:
+    artifact = qualification["artifact"]
+    canonical = qualification["_canonical_artifact"]
+    sql_path = ROOT / canonical["relative_path"]
+    _, descriptor_artifact = _local_manifest_artifact(qualification)
+    descriptor_path = ROOT / descriptor_artifact.relative_path
+    if _local_digest(sql_path.read_bytes()) != artifact["sql_sha256"]:
+        raise LocalAdditiveBlocked("canonical SQL hash changed", code="qualification_hash_mismatch")
+    if _local_digest(descriptor_path.read_bytes()) != artifact["descriptor_sha256"]:
+        raise LocalAdditiveBlocked("canonical descriptor hash changed", code="qualification_hash_mismatch")
+
+
+def _local_connect(config: Any, database: str | None, timeout_ms: int) -> Any:
+    if not 1 <= int(timeout_ms) <= LOCAL_ADDITIVE_MAX_DURATION_MS:
+        raise LocalAdditiveBlocked("database client timeout is invalid", code="duration_invalid")
+    try:
+        return config.connect(database, timeout_seconds=float(timeout_ms) / 1000)
+    except (AttributeError, TypeError, ValueError) as error:
+        raise LocalAdditiveBlocked(
+            "database driver cannot enforce bounded connect/read/write timeouts",
+            code="client_timeout_unavailable",
+        ) from error
+
+
+def _local_verify_backup_rows(config: Any, source: str, expected: Mapping[str, Any]) -> None:
+    """Verify schema and stable row evidence before any in-place DDL."""
+    counts = expected.get("data_row_counts")
+    fingerprints = expected.get("data_fingerprints")
+    expected_global = expected.get("data_fingerprint_sha256")
+    if not isinstance(counts, Mapping) or not isinstance(fingerprints, Mapping):
+        raise LocalAdditiveBlocked("source backup row evidence is missing", code="backup_required")
+    if not isinstance(expected_global, str):
+        raise LocalAdditiveBlocked("source backup data fingerprint is missing", code="backup_required")
+    connection = _local_connect(config, source, LOCAL_ADDITIVE_MAX_DURATION_MS)
+    try:
+        with connection.cursor() as cursor:
+            actual_fingerprints: dict[str, str] = {}
+            for table, expected_count in counts.items():
+                if not re.fullmatch(r"[A-Za-z0-9_]+", str(table)):
+                    raise LocalAdditiveBlocked("source backup table identity is invalid", code="backup_required")
+                cursor.execute(f"SELECT COUNT(*) AS n FROM `{table}`")
+                row = cursor.fetchone() or {}
+                actual = row.get("n", 0) if isinstance(row, Mapping) else row[0]
+                if int(actual) != int(expected_count):
+                    raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
+                cursor.execute(f"CHECKSUM TABLE `{table}`")
+                checksum_row = _normalized_row(cursor.fetchone() or {})
+                checksum = checksum_row.get("checksum")
+                cursor.execute(
+                    "SELECT column_name FROM information_schema.key_column_usage "
+                    "WHERE table_schema=DATABASE() AND table_name=%s "
+                    "AND constraint_name='PRIMARY' ORDER BY ordinal_position",
+                    (table,),
+                )
+                primary = [
+                    _normalized_row(item)["column_name"]
+                    for item in cursor.fetchall()
+                ]
+                pk_hash = None
+                if primary:
+                    projection = ",".join(f"`{column}`" for column in primary)
+                    cursor.execute(
+                        f"SELECT {projection} FROM `{table}` ORDER BY {projection}"
+                    )
+                    pk_hash = _sha256_bytes(_canonical_json(cursor.fetchall()))
+                actual_fingerprints[str(table)] = _local_stable_table_fingerprint(
+                    int(actual), checksum, pk_hash
+                )
+            if actual_fingerprints != dict(fingerprints):
+                raise LocalAdditiveBlocked("source backup row fingerprint changed", code="backup_required")
+            if _local_data_fingerprint(actual_fingerprints) != expected_global:
+                raise LocalAdditiveBlocked("source backup data fingerprint changed", code="backup_required")
+    finally:
+        connection.close()
+
+
+def _local_classify_statement(statement: str) -> str:
+    normalized = re.sub(r"\s+", " ", statement.strip()).casefold()
+    if normalized.startswith("create table"):
+        if re.search(r"\bas\s+select\b|\bselect\b", normalized):
+            raise LocalAdditiveBlocked("CTAS is outside additive allowlist", code="forbidden_sql_effect")
+        return "create_table"
+    if normalized.startswith("drop trigger if exists"):
+        return "drop_trigger_if_exists"
+    if normalized.startswith("create unique index") or normalized.startswith("create index"):
+        return "create_index"
+    if normalized.startswith("create trigger"):
+        body = normalized.split("for each row", 1)[-1]
+        if re.search(r"\b(insert|update|delete|replace|truncate|alter|drop|create)\b", body):
+            raise LocalAdditiveBlocked("trigger DML is outside additive allowlist", code="forbidden_sql_effect")
+        return "create_trigger"
+    if normalized.startswith("alter table"):
+        if re.search(r"\b(drop|modify|change|rename|truncate)\b", normalized):
+            raise LocalAdditiveBlocked("destructive ALTER is outside additive allowlist", code="forbidden_sql_effect")
+        if not re.search(r"\badd\s+(column|index|unique|constraint|fulltext|spatial)\b", normalized):
+            raise LocalAdditiveBlocked("ALTER is not additive", code="forbidden_sql_effect")
+        return "alter_add_only"
+    if re.search(r"\b(insert|update|delete|replace|truncate|load data|call)\b", normalized):
+        raise LocalAdditiveBlocked("SQL statement is outside additive allowlist: data mutation", code="forbidden_sql_effect")
+    raise LocalAdditiveBlocked("SQL statement is outside additive allowlist", code="forbidden_sql_effect")
+
+
+def _local_journal_path(root: Path, source: str) -> Path:
+    return Path(root) / "fast_additive" / f"{source}.journal.jsonl"
+
+
+def _local_receipt_path(root: Path, source: str) -> Path:
+    return Path(root) / "fast_additive" / f"{source}.receipt.json"
+
+
+def _local_append_event(root: Path, source: str, state: str, previous: Mapping[str, Any] | None = None, **fields: Any) -> dict[str, Any]:
+    path = _local_journal_path(root, source)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    event = {
+        "sequence": int((previous or {}).get("sequence", 0)) + 1,
+        "at": _now(),
+        "state": state,
+        "previous_digest": str((previous or {}).get("event_digest", "")),
+        **fields,
+    }
+    event["event_digest"] = _local_digest(_local_canonical_json(event))
+    with path.open("ab") as handle:
+        handle.write(_local_canonical_json(event) + b"\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return event
+
+
+def _local_read_events(root: Path, source: str) -> list[dict[str, Any]]:
+    path = _local_journal_path(root, source)
+    if not path.exists():
+        return []
+    events: list[dict[str, Any]] = []
+    previous = ""
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for expected, line in enumerate((item for item in lines if item), 1):
+            event = json.loads(line)
+            digest = event.pop("event_digest", None)
+            if event.get("sequence") != expected or event.get("previous_digest", "") != previous or digest != _local_digest(_local_canonical_json(event)):
+                raise ValueError("journal integrity")
+            event["event_digest"] = digest
+            events.append(event)
+            previous = digest
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise LocalAdditiveBlocked("additive journal integrity failed", code="journal_invalid") from error
+    return events
+
+
+def _local_write_receipt(root: Path, source: str, payload: Mapping[str, Any]) -> None:
+    path = _local_receipt_path(root, source)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_bytes(_local_canonical_json(payload) + b"\n")
+    with temporary.open("ab") as handle:
+        handle.flush()
+        os.fsync(handle.fileno())
+    temporary.replace(path)
+
+
+def _local_verified_ordinals(events: list[dict[str, Any]], release_id: str, source: str, baseline: str) -> dict[int, str]:
+    verified: dict[int, str] = {}
+    for event in events:
+        if event.get("state") != "statement_verified":
+            continue
+        if event.get("release_id") != release_id or event.get("source_database") != source or event.get("source_schema_sha256") != baseline:
+            raise LocalAdditiveBlocked("additive journal baseline changed", code="journal_conflict")
+        ordinal = event.get("ordinal")
+        statement_hash = event.get("statement_sha256")
+        if not isinstance(ordinal, int) or not isinstance(statement_hash, str):
+            raise LocalAdditiveBlocked("additive journal statement identity is incomplete", code="journal_invalid")
+        if ordinal in verified and verified[ordinal] != statement_hash:
+            raise LocalAdditiveBlocked("additive journal ordinal hash conflict", code="journal_conflict")
+        verified[ordinal] = statement_hash
+    return verified
+
+
+def _local_resume_context(
+    events: list[dict[str, Any]],
+    release_id: str,
+    source: str,
+    statement_hashes: list[str],
+    current_schema_sha256: str,
+) -> tuple[str, dict[int, str]]:
+    """Load an immutable pre-apply baseline and deterministic statement progress."""
+    if not events:
+        return current_schema_sha256, {}
+    baseline_event = events[0]
+    if baseline_event.get("state") != "baseline_captured":
+        raise LocalAdditiveBlocked(
+            "additive journal lacks immutable pre-apply baseline",
+            code="journal_invalid",
+        )
+    baseline = baseline_event.get("source_schema_sha256")
+    recorded_hashes = baseline_event.get("statement_hashes")
+    if (
+        baseline_event.get("release_id") != release_id
+        or baseline_event.get("source_database") != source
+        or not isinstance(baseline, str)
+        or recorded_hashes != statement_hashes
+    ):
+        raise LocalAdditiveBlocked("additive journal baseline changed", code="journal_conflict")
+    verified: dict[int, str] = {}
+    started: set[int] = set()
+    for event in events[1:]:
+        if event.get("release_id") != release_id or event.get("source_database") != source:
+            raise LocalAdditiveBlocked("additive journal identity changed", code="journal_conflict")
+        ordinal = event.get("ordinal")
+        if event.get("state") == "statement_started":
+            if not isinstance(ordinal, int) or not 1 <= ordinal <= len(statement_hashes) or ordinal in started:
+                raise LocalAdditiveBlocked("additive journal statement progression is invalid", code="journal_invalid")
+            started.add(ordinal)
+        elif event.get("state") == "statement_verified":
+            if not isinstance(ordinal, int) or not 1 <= ordinal <= len(statement_hashes) or ordinal in verified:
+                raise LocalAdditiveBlocked("additive journal statement progression is invalid", code="journal_invalid")
+            if event.get("statement_sha256") != statement_hashes[ordinal - 1] or ordinal not in started:
+                raise LocalAdditiveBlocked("additive journal statement hash conflict", code="journal_conflict")
+            verified[ordinal] = str(event["statement_sha256"])
+            started.remove(ordinal)
+    if started:
+        raise LocalAdditiveBlocked(
+            "additive journal contains an unverified DDL outcome",
+            code="resume_uncertain",
+        )
+    if set(verified) != set(range(1, max(verified, default=0) + 1)):
+        raise LocalAdditiveBlocked("additive journal statement progression has a gap", code="journal_invalid")
+    return baseline, verified
+
+
+@contextmanager
+def _local_maintenance_lock(config: Any, source: str, timeout: int) -> Any:
+    connection = _local_connect(config, None, LOCAL_ADDITIVE_MAX_DURATION_MS)
+    lock_name = f"labor_union:additive:{source}"
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s,%s) AS locked", (lock_name, timeout))
+            row = cursor.fetchone() or {}
+            locked = row.get("locked", 0) if isinstance(row, Mapping) else row[0]
+            if int(locked or 0) != 1:
+                raise LocalAdditiveBlocked("additive maintenance lock timeout", code="lock_timeout")
+        yield connection
+    finally:
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT RELEASE_LOCK(%s) AS released", (lock_name,))
+                row = cursor.fetchone() or {}
+                released = row.get("released", 0) if isinstance(row, Mapping) else row[0]
+                if int(released or 0) != 1:
+                    raise LocalAdditiveBlocked("additive maintenance lock was not released", code="lock_release_failed")
+        finally:
+            connection.close()
+
+
+def local_additive_plan(
+    config: Any,
+    source: str,
+    *,
+    receipt_root: Path,
+    qualification_path: Path | None = None,
+) -> dict[str, Any]:
+    if not source.startswith(LOCAL_ADDITIVE_TARGET_PREFIX):
+        raise LocalAdditiveBlocked("daily additive requires a lu_test_* source", code="target_profile_blocked")
+    qualification = (
+        _local_discover_qualification()
+        if qualification_path is None
+        else _local_discover_qualification(qualification_path)
+    )
+    _local_verify_hashes(qualification)
+    metadata_backup = qualification["metadata_backup"]
+    if metadata_backup.get("database") != source:
+        raise LocalAdditiveBlocked(
+            "qualification source database identity differs", code="source_identity_mismatch"
+        )
+    if not database_exists(config, source):
+        raise LocalAdditiveBlocked("source database is absent; recovery is required", code="recovery_required")
+    _local_verify_backup_rows(config, source, metadata_backup)
+    artifact = qualification["_canonical_artifact"]
+    statements = split_sql((ROOT / artifact["relative_path"]).read_text(encoding="utf-8"))
+    statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
+    snapshot = local_additive_source_snapshot(config, source)["snapshot"]
+    _local_verify_prerequisite_metadata(snapshot, qualification)
+    events = _local_read_events(receipt_root, source)
+    resume_baseline, verified = _local_resume_context(
+        events,
+        qualification["release_id"],
+        source,
+        statement_hashes,
+        snapshot["sha256"],
+    )
+    descriptor = local_additive_release_qualification(qualification["release_id"], artifact["name"])["schema_artifacts"][0]["descriptor"]
+    target = local_additive_target_state(
+        config,
+        source,
+        artifact["name"],
+        descriptor,
+        snapshot=snapshot,
+    )
+    state = target["state"]
+    if state != "exact" and not events and snapshot["sha256"] != metadata_backup.get("schema_sha256"):
+        raise LocalAdditiveBlocked(
+            "source schema differs from the verified pre-apply backup baseline",
+            code="backup_required",
+        )
+    if not isinstance(metadata_backup.get("schema_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", metadata_backup["schema_sha256"]):
+        raise LocalAdditiveBlocked("verified source schema digest is missing", code="backup_required")
+    if not isinstance(metadata_backup.get("data_fingerprint_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", metadata_backup["data_fingerprint_sha256"]):
+        raise LocalAdditiveBlocked("verified source data digest is missing", code="backup_required")
+    if state in {"partial"} and not events:
+        raise LocalAdditiveBlocked("owned object state is partial", code="schema_state_blocked")
+    if state in {"drift", "unknown"}:
+        raise LocalAdditiveBlocked(f"owned object state is {state}", code="schema_state_blocked")
+    identity = server_identity(config, source)
+    if str(identity.get("host")) != str(metadata_backup.get("host")) or int(identity.get("port", 0)) != int(metadata_backup.get("port", 0)):
+        raise LocalAdditiveBlocked(
+            "qualification server identity differs", code="source_identity_mismatch"
+        )
+    return {
+        "status": "current" if state == "exact" else "ready",
+        "route": "daily_additive",
+        "selected_strategy": "additive",
+        "target_profile": "local-development",
+        "local_qualified_additive_exception": True,
+        "source_database": source,
+        "source_identity": {"database": source, "server": identity["server"], "schema_sha256": snapshot["sha256"]},
+        "source_schema_sha256": snapshot["sha256"],
+        "release_id": qualification["release_id"],
+        "release_fingerprint": qualification["release_fingerprint"],
+        "artifacts": [{"name": artifact["name"], "state": state, "data_effect": "schema_only"}],
+        "artifact": {"name": artifact["name"], "state": state, "data_effect": "schema_only"},
+        "duration_guard_ms": LOCAL_ADDITIVE_MAX_DURATION_MS,
+        "estimated_duration_ms": 0,
+        "qualification_receipt": str(Path(qualification["_path"]).relative_to(ROOT)),
+        "resume_baseline_schema_sha256": resume_baseline,
+        "verified_ordinals": sorted(verified),
+        "statement_hashes": statement_hashes,
+    }
+
+
+def local_additive_apply(
+    config: Any,
+    source: str,
+    *,
+    receipt_root: Path,
+    duration_guard_ms: int = LOCAL_ADDITIVE_MAX_DURATION_MS,
+    lock_timeout_seconds: int = LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS,
+    qualification_path: Path | None = None,
+) -> dict[str, Any]:
+    if not 1 <= duration_guard_ms <= LOCAL_ADDITIVE_MAX_DURATION_MS:
+        raise LocalAdditiveBlocked("duration guard must be between 1 and 30000 ms", code="duration_invalid")
+    if not 1 <= lock_timeout_seconds <= LOCAL_ADDITIVE_LOCK_TIMEOUT_SECONDS:
+        raise LocalAdditiveBlocked("lock timeout must be between 1 and 5 seconds", code="duration_invalid")
+    preview = local_additive_plan(
+        config,
+        source,
+        receipt_root=receipt_root,
+        qualification_path=qualification_path,
+    )
+    if preview["status"] == "current":
+        return preview
+    qualification = (
+        _local_discover_qualification()
+        if qualification_path is None
+        else _local_discover_qualification(qualification_path)
+    )
+    artifact = qualification["_canonical_artifact"]
+    sql_path = ROOT / artifact["relative_path"]
+    statements = split_sql(sql_path.read_text(encoding="utf-8"))
+    classes = [_local_classify_statement(statement) for statement in statements]
+    started = time_module.monotonic()
+    events = _local_read_events(receipt_root, source)
+    statement_hashes = [_local_digest(statement.encode("utf-8")) for statement in statements]
+    baseline, verified = _local_resume_context(
+        events,
+        qualification["release_id"],
+        source,
+        statement_hashes,
+        preview["source_schema_sha256"],
+    )
+    previous: Mapping[str, Any] | None = events[-1] if events else None
+    if not events:
+        previous = _local_append_event(
+            receipt_root,
+            source,
+            "baseline_captured",
+            None,
+            release_id=qualification["release_id"],
+            source_database=source,
+            source_schema_sha256=baseline,
+            statement_hashes=statement_hashes,
+            data_fingerprint_sha256=qualification["metadata_backup"].get("data_fingerprint_sha256"),
+        )
+    with _local_maintenance_lock(config, source, lock_timeout_seconds):
+        locked_snapshot = local_additive_source_snapshot(config, source)["snapshot"]
+        if not events and locked_snapshot["sha256"] != baseline:
+            raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
+        if server_identity(config, source)["database"] != source:
+            raise LocalAdditiveBlocked("source changed after plan or lock", code="source_changed")
+        connection = _local_connect(config, source, duration_guard_ms)
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute("SET SESSION lock_wait_timeout=%s", (lock_timeout_seconds,))
+                cursor.execute("SET SESSION innodb_lock_wait_timeout=%s", (lock_timeout_seconds,))
+                previous = _local_append_event(receipt_root, source, "maintenance_lock_acquired", previous, release_id=qualification["release_id"], source_database=source, source_schema_sha256=baseline)
+                for ordinal, (statement, statement_class) in enumerate(zip(statements, classes), 1):
+                    statement_hash = _local_digest(statement.encode("utf-8"))
+                    if ordinal in verified:
+                        if verified[ordinal] != statement_hash:
+                            raise LocalAdditiveBlocked("additive journal ordinal hash conflict", code="journal_conflict")
+                        continue
+                    if (time_module.monotonic() - started) * 1000 >= duration_guard_ms:
+                        raise LocalAdditiveBlocked("additive duration guard exceeded", code="blocked_duration_exceeded")
+                    previous = _local_append_event(receipt_root, source, "statement_started", previous, release_id=qualification["release_id"], source_database=source, source_schema_sha256=baseline, ordinal=ordinal, statement_sha256=statement_hash, classification=statement_class)
+                    try:
+                        cursor.execute(statement)
+                    except (TimeoutError, OSError) as error:
+                        raise LocalAdditiveBlocked(
+                            "bounded DDL client timeout; outcome requires reconciliation",
+                            code="blocked_duration_exceeded",
+                        ) from error
+                    elapsed = int((time_module.monotonic() - started) * 1000)
+                    previous = _local_append_event(receipt_root, source, "statement_verified", previous, release_id=qualification["release_id"], source_database=source, source_schema_sha256=baseline, ordinal=ordinal, statement_sha256=statement_hash, classification=statement_class, outcome="applied", elapsed_ms=elapsed)
+                    if elapsed >= duration_guard_ms:
+                        raise LocalAdditiveBlocked("additive duration guard exceeded", code="blocked_duration_exceeded")
+        finally:
+            connection.close()
+        # Keep the post-DDL descriptor read under the named lock so another
+        # local process cannot change the contract between apply and verify.
+        after = local_additive_source_snapshot(config, source)["snapshot"]
+        descriptor = local_additive_release_qualification(qualification["release_id"], artifact["name"])["schema_artifacts"][0]["descriptor"]
+        if local_additive_descriptor_state(after, descriptor, artifact["name"]) != "exact":
+            raise LocalAdditiveBlocked("post-apply descriptor is not exact", code="descriptor_drift")
+    elapsed = int((time_module.monotonic() - started) * 1000)
+    result = {**preview, "status": "completed", "elapsed_ms": elapsed, "post_schema_sha256": after["sha256"]}
+    previous = _local_append_event(receipt_root, source, "completed", previous, release_id=qualification["release_id"], source_database=source, source_schema_sha256=baseline, post_schema_sha256=after["sha256"], elapsed_ms=elapsed)
+    _local_write_receipt(receipt_root, source, result)
+    return result
 
 
 def build_plan(
@@ -2360,12 +3534,52 @@ def _parse_column_definition(definition: str) -> tuple[str, dict[str, Any]]:
         extra_parts.append(
             "on update " + update_match.group(1).casefold()
         )
+    generated_extra = _generated_column_extra(remainder)
+    if generated_extra:
+        extra_parts.append(generated_extra)
     return name, {
         "column_type": column_type,
         "is_nullable": nullable,
         "column_default": default,
         "extra": " ".join(extra_parts),
     }
+
+
+def _generated_column_extra(remainder: str) -> str:
+    """Return MySQL's canonical generated-column EXTRA without false positives."""
+    generated_pattern = re.compile(
+        r"\bGENERATED\s+ALWAYS\s+AS\s*\(", re.I | re.S
+    )
+    quote: str | None = None
+    escaped = False
+    index = 0
+    while index < len(remainder):
+        char = remainder[index]
+        if quote:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            index += 1
+            continue
+        if char in {"'", '"', "`"}:
+            quote = char
+            index += 1
+            continue
+        match = generated_pattern.match(remainder, index)
+        if match:
+            opening = remainder.find("(", index, match.end())
+            _, closing = _extract_parenthesized(remainder, opening)
+            storage = re.search(
+                r"\b(STORED|VIRTUAL)\b", remainder[closing + 1 :], re.I
+            )
+            if storage:
+                return storage.group(1).casefold() + " generated"
+            return "generated"
+        index += 1
+    return ""
 
 
 def _normalize_column_type_contract(value: Any) -> str:
@@ -2821,6 +4035,66 @@ def _canonical_artifact_metadata_state(
     )
 
 
+def _release_descriptor_metadata_state(
+    snapshot: Mapping[str, Any],
+    part_name: str,
+    released: Mapping[str, Any],
+    *,
+    defer_missing_triggers: bool = False,
+) -> str:
+    """Fail closed unless released metadata equals the canonical SQL contract."""
+    canonical = _canonical_artifact_descriptor(part_name)
+    projections = {
+        "tables": {
+            table: set(columns)
+            for table, columns in canonical["tables"].items()
+        },
+        "triggers": set(canonical["triggers"]),
+        "indexes": canonical["indexes"],
+        "foreign_keys": canonical["foreign_keys"],
+        "checks": canonical["checks"],
+    }
+    for kind, expected in projections.items():
+        if released.get(kind) != expected:
+            raise UpgradeBlocked(
+                f"release descriptor differs from canonical SQL: {part_name}:{kind}"
+            )
+    return _artifact_metadata_state(
+        snapshot,
+        canonical,
+        part_name,
+        defer_missing_triggers=defer_missing_triggers,
+    )
+
+
+def _auto_fk_supporting_index_keys(
+    indexes: Mapping[tuple[str, str], Mapping[str, Any]],
+    descriptor: Mapping[str, Any],
+    extra_keys: set[tuple[str, str]],
+) -> set[tuple[str, str]]:
+    """Allow only MySQL's unambiguously named FK-support index side effect."""
+    foreign_keys = descriptor.get("foreign_keys", {})
+    allowed: set[tuple[str, str]] = set()
+    for key in extra_keys:
+        index = indexes[key]
+        if int(index.get("non_unique", 1)) != 1:
+            continue
+        table, index_name = key
+        matches = [
+            fk_key for fk_key, contract in foreign_keys.items()
+            if fk_key[0] == table
+            and tuple(str(column).casefold() for column in contract["columns"])
+            == tuple(index["columns"])
+        ]
+        # INFORMATION_SCHEMA does not expose an origin flag.  MySQL names an
+        # implicit InnoDB supporting index after the FK constraint; requiring
+        # that identity is the mechanical proof that this is not an unrelated
+        # user-owned index with merely overlapping columns.
+        if len(matches) == 1 and index_name == matches[0][1]:
+            allowed.add(key)
+    return allowed
+
+
 # 保持單一 metadata comparator，避免 canonical 與 compatibility 契約判讀分叉。
 def _artifact_metadata_state(
     snapshot: Mapping[str, Any],
@@ -2878,6 +4152,30 @@ def _artifact_metadata_state(
         }
         for row in snapshot["indexes"]
     }
+    # Parent column alterations do not own the parent's pre-existing indexes,
+    # checks, FKs, or triggers.  Only tables represented by an object contract
+    # participate in unknown-owned-object detection.
+    owned_tables = set(required_tables)
+    owned_tables.update(key[0] for key in descriptor["indexes"])
+    owned_tables.update(key[0] for key in descriptor["foreign_keys"])
+    owned_tables.update(key[0] for key in descriptor["checks"])
+    owned_tables.update(
+        str(contract["event_object_table"])
+        for contract in descriptor["triggers"].values()
+    )
+    expected_index_keys = {
+        key for key in descriptor["indexes"] if key[0] in owned_tables
+    }
+    actual_index_keys = {
+        key for key in indexes if key[0] in owned_tables
+    }
+    extra_index_keys = actual_index_keys - expected_index_keys
+    if extra_index_keys - _auto_fk_supporting_index_keys(
+        indexes, descriptor, extra_index_keys
+    ):
+        return "drift"
+    if expected_index_keys - actual_index_keys and actual_index_keys:
+        return "partial"
     for key, expected in descriptor["indexes"].items():
         actual = indexes.get(key)
         owned_presence.append(actual is not None)
@@ -2896,6 +4194,17 @@ def _artifact_metadata_state(
         (row["table_name"], row["constraint_name"]): row
         for row in snapshot.get("foreign_keys", [])
     }
+    expected_foreign_keys = {
+        key for key in descriptor["foreign_keys"] if key[0] in owned_tables
+    }
+    actual_foreign_keys = {
+        key for key, row in constraints.items()
+        if key[0] in owned_tables and row.get("constraint_type") == "FOREIGN KEY"
+    }
+    if actual_foreign_keys - expected_foreign_keys:
+        return "drift"
+    if expected_foreign_keys - actual_foreign_keys and actual_foreign_keys:
+        return "partial"
     show_create_checks: dict[tuple[str, str], str] = {}
     for create_sql in snapshot.get("show_create_tables", {}).values():
         show_create_checks.update(_show_create_check_clauses(create_sql))
@@ -2942,6 +4251,15 @@ def _artifact_metadata_state(
             )
         ):
             return "drift"
+    expected_checks = {key for key in descriptor["checks"] if key[0] in owned_tables}
+    actual_checks = {
+        key for key, row in constraints.items()
+        if key[0] in owned_tables and row.get("constraint_type") == "CHECK"
+    }
+    if actual_checks - expected_checks:
+        return "drift"
+    if expected_checks - actual_checks and actual_checks:
+        return "partial"
     triggers = {
         row["trigger_name"]: {
             "action_timing": str(row["action_timing"]).upper(),
@@ -2961,6 +4279,19 @@ def _artifact_metadata_state(
         }
         for row in snapshot["triggers"]
     }
+    expected_trigger_names = set(descriptor["triggers"])
+    actual_owned_trigger_names = {
+        name for name, value in triggers.items()
+        if value["event_object_table"] in owned_tables
+    }
+    if actual_owned_trigger_names - expected_trigger_names:
+        return "drift"
+    if (
+        expected_trigger_names - actual_owned_trigger_names
+        and not defer_missing_triggers
+        and any(owned_presence)
+    ):
+        return "partial"
     for name, expected in descriptor["triggers"].items():
         actual = triggers.get(name)
         if actual is None and defer_missing_triggers:

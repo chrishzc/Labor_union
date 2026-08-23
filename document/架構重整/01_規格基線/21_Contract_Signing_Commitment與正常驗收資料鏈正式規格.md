@@ -9,6 +9,8 @@
 - 跨域協作者：Orders、Assignments／Scheduling、Client Finance、LINE Integration
 - 歷史來源：`document/架構重整/04_已完成與上線封存/superseded_specs/契約整合與正常測試資料鏈_決策草案.md`
 - 已完成執行範圍：[`56_Contract_Signing_and_UI_Validation_Work_Package.md`](../04_已完成與上線封存/work_packages/56_Contract_Signing_and_UI_Validation_Work_Package.md)
+- 2026-08-21 M3 coordination amendment：customer `accepted` 只代表 matching decision；須經 fresh-effects
+  check 與 Assignment typed conversion/rematch request，不能直接形成 contract、assignment 或 Payroll obligation。
 
 本規格是第 `01`、`02`、`04`、`07`、`10`、`15`、`17` 份正式規格的契約簽署補充裁決。
 若舊條款仍把「客戶簽回」「契約完成」「訂金核銷」「訂單成立」視為同一事件，或要求先建立
@@ -247,3 +249,9 @@ preserved migration 另具 source/target digest、projection rebuild 與 legacy 
 
 完成不得只以 schema、route、測試檔或最終資料存在判定。production DB、外部 LINE、部署與
 cutover 必須另有明確授權及 release receipt。
+
+## 2026-08-21 M3 acceptance-effect amendment
+
+M3 Matching Coordination 可保存 customer acceptance decision 與其 criteria／candidate lineage，但 `accepted` 不等於 Contract Completion、contract identity、formal assignment、official service day 或 Payroll obligation。M3 只能在 fresh downstream facts 後產生 typed `AssignmentConversionRequested`／rematch reference；Orders、Assignment／Scheduling 與 Payroll 各自保留 root writer、Preview／Apply、lock 與 receipt。
+
+任何 conversion mismatch、stale service date、leave／availability conflict 或缺少 Assignment conversion receipt 均 fail closed、零 partial write；本 amendment 不授權 production code、schema／DB、LINE provider、deployment 或 cutover。

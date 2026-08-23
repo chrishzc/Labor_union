@@ -1,9 +1,13 @@
-"""Authenticated Staff Availability Query, Preview, and Apply routes."""
+"""
+File: staff_availability.py
+Description: 提供 Staff Availability authenticated Query、Preview、Apply 與 Global typed error 邊界。
+"""
 
 from __future__ import annotations
 
 from datetime import date
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path, Query
 from pymysql.err import OperationalError, ProgrammingError
@@ -52,13 +56,17 @@ def query_staff_availability_blocks(
     staff_id: int = Path(..., gt=0),
     range_start: date = Query(...),
     range_end: date = Query(...),
+    correlation_id: Annotated[
+        str | None,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = None,
     principal: AdminPrincipal = Depends(require_admin),
     application: StaffAvailabilityApplication = Depends(
         get_staff_availability_application
     ),
 ):
     del principal
-    correlation = CorrelationId("staff-availability-query")
+    correlation = CorrelationId(correlation_id or uuid4().hex)
     return _call(
         lambda: BaseResponse(
             data=[_block_payload(item) for item in application.query(StaffAvailabilityQuery(staff_id, range_start, range_end))],
@@ -75,14 +83,14 @@ def query_staff_availability_blocks(
 def preview_staff_availability_change(
     body: StaffAvailabilityIntentBody,
     staff_id: int = Path(..., gt=0),
-    correlation_id: Annotated[str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = "staff-availability-preview",
+    correlation_id: Annotated[str | None, Header(alias="X-Correlation-ID", min_length=1, max_length=191)] = None,
     principal: AdminPrincipal = Depends(require_admin),
     application: StaffAvailabilityApplication = Depends(
         get_staff_availability_application
     ),
 ):
     del principal
-    correlation = CorrelationId(correlation_id)
+    correlation = CorrelationId(correlation_id or uuid4().hex)
     return _call(
         lambda: BaseResponse(
             data=_preview_payload(
@@ -229,13 +237,23 @@ def _raise_domain_error(error, correlation):
         StaffAvailabilityErrorCode.BLOCK_NOT_FOUND,
     }
     validation = error.code is StaffAvailabilityErrorCode.INVALID_INTENT
-    category = ErrorCategory.NOT_FOUND if not_found else ErrorCategory.VALIDATION if validation else ErrorCategory.CONFLICT
+    idempotency_mismatch = error.code is StaffAvailabilityErrorCode.IDEMPOTENCY_CONFLICT
+    category = (
+        ErrorCategory.NOT_FOUND
+        if not_found
+        else ErrorCategory.VALIDATION
+        if validation
+        else ErrorCategory.IDEMPOTENCY_MISMATCH
+        if idempotency_mismatch
+        else ErrorCategory.CONFLICT
+    )
     typed = TypedError(
         category,
         error.code.value,
         "月嫂不可服務期間異動未通過。",
         correlation,
-        domain_blockers=error.blockers,
+        domain_blockers=tuple(sorted(set(error.blockers))),
+        current_version=_current_version(error.blockers),
     )
     raise _http_error(404 if not_found else 422 if validation else 409, typed)
 
@@ -244,14 +262,14 @@ def _raise_validation_error(error, correlation):
     typed = TypedError(
         ErrorCategory.VALIDATION,
         StaffAvailabilityErrorCode.INVALID_INTENT.value,
-        str(error) or "月嫂不可服務期間輸入無效。",
+        "月嫂不可服務期間輸入無效。",
         correlation,
     )
     raise _http_error(422, typed) from error
 
 
 def _raise_mysql_error(error, correlation):
-    mysql_code = int(error.args[0]) if error.args else 0
+    mysql_code = _mysql_error_code(error)
     schema_not_ready = mysql_code in _SCHEMA_NOT_READY_MYSQL_CODES
     retryable = mysql_code in _RETRYABLE_MYSQL_CODES
     if schema_not_ready:
@@ -268,6 +286,15 @@ def _raise_mysql_error(error, correlation):
         retryable=retryable,
     )
     raise _http_error(503 if schema_not_ready or retryable else 500, typed) from error
+
+
+def _mysql_error_code(error) -> int:
+    if not error.args:
+        return 0
+    try:
+        return int(error.args[0])
+    except (TypeError, ValueError):
+        return 0
 
 
 def _http_error(status_code, error):
@@ -291,6 +318,16 @@ def _typed_error_payload(error):
         "retryable": error.retryable,
         "current_version": error.current_version.value if error.current_version else None,
     }
+
+
+def _current_version(blockers):
+    for blocker in blockers:
+        prefix = "current_version:"
+        if blocker.startswith(prefix):
+            value = blocker[len(prefix) :]
+            if value.isdigit():
+                return ExpectedVersion(int(value))
+    return None
 
 
 __all__ = ["router"]

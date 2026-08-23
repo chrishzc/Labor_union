@@ -15,7 +15,14 @@ class MySqlMatchingRecommendationRepository:
 
     def load_request_facts(self, case_no):
         with self._connection.cursor() as cursor:
-            cursor.execute("SELECT o.planned_start_date,o.planned_end_date,o.service_days,c.city,c.address,c.service_time FROM orders o JOIN clients c ON c.id=o.client_id WHERE o.case_no=%s", (case_no,))
+            cursor.execute(
+                "SELECT o.start_date AS planned_start_date,"
+                "o.end_date AS planned_end_date,o.service_days,"
+                "c.city,c.address,c.service_time "
+                "FROM orders o JOIN clients c ON c.id=o.client_id "
+                "WHERE o.case_no=%s",
+                (case_no,),
+            )
             return cursor.fetchone()
 
     def load_candidates(self, service_dates):

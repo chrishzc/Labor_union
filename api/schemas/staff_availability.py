@@ -1,4 +1,7 @@
-"""Typed HTTP contracts for staff long leave and paused service."""
+"""
+File: staff_availability.py
+Description: 定義 Staff Availability long leave、pause 的 strict HTTP 契約與 receipt。
+"""
 
 from datetime import date
 
@@ -62,7 +65,7 @@ class StaffAvailabilityReceiptView(BaseModel):
     block: StaffUnavailabilityBlockView
     aggregate_version: int = Field(ge=1)
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
-    idempotency_key: str
+    idempotency_key: str = Field(min_length=1, max_length=191)
 
 
 __all__ = [

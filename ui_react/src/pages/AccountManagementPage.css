@@ -96,3 +96,268 @@
 .account-data-table tr:hover {
   background-color: #fffdfc;
 }
+
+.account-page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.account-primary-btn,
+.account-secondary-btn {
+  border-radius: 8px;
+  font-weight: 700;
+  padding: 8px 14px;
+  cursor: pointer;
+}
+
+.account-primary-btn {
+  border: 1px solid #ff7f50;
+  background: #ff7f50;
+  color: #fff;
+  white-space: nowrap;
+}
+
+.account-secondary-btn {
+  border: 1px solid #dec0b6;
+  background: #fff;
+  color: #7c3f2c;
+}
+
+.account-primary-btn:disabled,
+.account-secondary-btn:disabled,
+.account-card-actions button:disabled,
+.account-explanation button:disabled,
+.account-data-table button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.account-query-panel,
+.account-query-state {
+  border: 1px solid #fed9b8;
+  border-radius: 12px;
+  background: #fff8f6;
+  color: #57423b;
+  line-height: 1.6;
+  margin-bottom: 20px;
+  padding: 14px 18px;
+}
+
+.account-query-panel {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  justify-content: space-between;
+}
+
+.account-query-error {
+  align-items: center;
+  background: #fff1f2;
+  border-color: #fecdd3;
+  color: #9f1239;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.account-unavailable {
+  color: #8b6f61;
+  font-style: italic;
+}
+
+.account-card-heading,
+.account-table-toolbar,
+.account-filter-row,
+.account-pagination {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.account-card-name {
+  color: #1e1b19;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.account-status-pill,
+.account-action-pill,
+.account-outcome-pill {
+  border-radius: 9999px;
+  display: inline-block;
+  font-size: 0.76rem;
+  font-weight: 700;
+  padding: 3px 9px;
+}
+
+.account-status-pill.enabled,
+.account-outcome-pill.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.account-status-pill.disabled,
+.account-outcome-pill.failed,
+.account-outcome-pill.denied {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.account-outcome-pill.unknown,
+.account-action-pill {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.account-card-facts {
+  color: #57423b;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.86rem;
+  gap: 5px;
+}
+
+.account-card-actions {
+  border-top: 1px solid #f2e2dc;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 12px;
+}
+
+.account-card-actions button,
+.account-explanation > button,
+.account-data-table button {
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  background: #fff;
+  color: #795548;
+  font-size: 0.8rem;
+  padding: 7px 10px;
+}
+
+.account-explanation {
+  background: #fff;
+  border: 1px solid #dec0b6;
+  border-radius: 18px;
+  box-shadow: 0 4px 20px rgba(74, 69, 67, 0.05);
+  color: #57423b;
+  line-height: 1.6;
+  padding: 28px 32px;
+}
+
+.account-explanation h3 {
+  color: #1e1b19;
+  margin: 0 0 10px;
+}
+
+.account-step-grid {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 24px 0;
+}
+
+.account-step-grid > div {
+  background: #fffdfc;
+  border: 1px solid #dec0b6;
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 20px;
+}
+
+.account-filter-row {
+  justify-content: flex-start;
+  margin-bottom: 16px;
+}
+
+.account-filter-row label {
+  color: #57423b;
+  font-weight: 700;
+}
+
+.account-filter-row input {
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  min-width: 260px;
+  padding: 8px 10px;
+}
+
+.account-table-toolbar {
+  margin-bottom: 16px;
+}
+
+.account-table-toolbar h3,
+.account-table-toolbar p {
+  margin: 0;
+}
+
+.account-table-toolbar p {
+  color: #74593f;
+  font-size: 0.85rem;
+  margin-top: 4px;
+}
+
+.account-pagination {
+  justify-content: center;
+  margin-top: 16px;
+}
+
+.account-pagination button {
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  background: #fff;
+  color: #795548;
+  padding: 7px 12px;
+}
+
+.account-pagination button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.account-job-observation {
+  background: #fffdfc;
+  border: 1px solid #dec0b6;
+  border-radius: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 20px 0;
+  padding: 18px;
+}
+
+.account-job-observation > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+@media (max-width: 800px) {
+  .account-page-header,
+  .account-query-panel,
+  .account-table-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .account-step-grid,
+  .account-job-observation {
+    grid-template-columns: 1fr;
+  }
+
+  .account-filter-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .account-filter-row input {
+    min-width: 0;
+  }
+}

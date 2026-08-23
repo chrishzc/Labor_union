@@ -1,22 +1,26 @@
 /**
  * File: anomalies_no_fake_mutation.test.tsx
- * Description: 驗證 Anomalies 所有變更控制項原生鎖定。
+ * Description: 驗證 Claim／Resolve／root repair 仍鎖定，query-only 互動不產生假 mutation。
  */
 
 import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { AnomaliesPage } from '../pages/AnomaliesPage';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
+import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
 import {
   VALID_ANOMALY_SUMMARY_1,
   VALID_ANOMALY_SUMMARY_2,
   VALID_ANOMALY_SUMMARY_3,
   VALID_IMPORT_WARNING_TASK_HCM,
-  VALID_ANOMALY_DETAIL_VIEW,
   VALID_IMPORT_WARNING_REFERRAL_VIEW,
 } from './fixtures/anomalies/anomaly_query_contract_fixtures';
+import {
+  VALID_ANOMALY_DETAIL_VIEW,
+  VALID_ANOMALY_RECOVERY_CONTEXT_VIEW,
+} from './fixtures/anomalies/anomaly_detail_contract_fixtures';
 
-describe('Anomalies Zero Fake Mutation & GET-Only Lock Verification Suite', () => {
+describe('Anomalies no fake root mutation verification suite', () => {
   let alertSpy: MockInstance;
   let confirmSpy: MockInstance;
   let promptSpy: MockInstance;
@@ -39,8 +43,11 @@ describe('Anomalies Zero Fake Mutation & GET-Only Lock Verification Suite', () =
     vi.spyOn(anomalyQueryClient, 'queryImportWarningTasks').mockResolvedValue([
       VALID_IMPORT_WARNING_TASK_HCM,
     ]);
-    vi.spyOn(anomalyQueryClient, 'queryAnomalyDetail').mockResolvedValue(
+    vi.spyOn(anomalyDetailClient, 'queryAnomalyDetail').mockResolvedValue(
       VALID_ANOMALY_DETAIL_VIEW
+    );
+    vi.spyOn(anomalyDetailClient, 'queryAnomalyRecovery').mockResolvedValue(
+      VALID_ANOMALY_RECOVERY_CONTEXT_VIEW
     );
     vi.spyOn(anomalyQueryClient, 'queryImportWarningReferral').mockResolvedValue(
       VALID_IMPORT_WARNING_REFERRAL_VIEW
@@ -106,7 +113,7 @@ describe('Anomalies Zero Fake Mutation & GET-Only Lock Verification Suite', () =
     expect(promptSpy).not.toHaveBeenCalled();
   });
 
-  it('guarantees zero non-GET requests and zero dialog invocations across all user interactions', async () => {
+  it('guarantees zero non-GET requests and zero dialog invocations across query-only anomaly interactions', async () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {

@@ -1,0 +1,147 @@
+{
+  "schema_version": 1,
+  "requirements_producer": "Global Entry Point Governance Contract Owner",
+  "release_owner_role": "Global Deployment / Entry Point Governance",
+  "registry_revision": "phase5a-baseline-v3-system-status-identity",
+  "legacy_entries": [
+    "ui:01_data_browser.py",
+    "ui:02_orders.py",
+    "ui:03_calendar.py",
+    "ui:04_finance.py",
+    "ui:05_form_management.py",
+    "ui:06_finance_alerts.py",
+    "ui:07_line_management.py",
+    "ui:08_system_status.py",
+    "ui:09_access_management.py",
+    "ui:09_data_import.py"
+  ],
+  "react_entries": [
+    "ui-react:#order-tracker",
+    "ui-react:#orders",
+    "ui-react:#scheduling",
+    "ui-react:#staff",
+    "ui-react:#data-import",
+    "ui-react:#line-management",
+    "ui-react:#reports",
+    "ui-react:#finance",
+    "ui-react:#anomalies",
+    "ui-react:#data-browser",
+    "ui-react:#account-management",
+    "ui-react:#system-status",
+    "ui-react:#line-ai-events",
+    "ui-react:#line-liff-studio",
+    "ui-react:#line-security"
+  ],
+  "required_release_inputs": [
+    "phase5a_entry_registry_receipt",
+    "phase5b_dual_run_receipt",
+    "phase6b_host_release_approval_receipt",
+    "phase6b_run_release_approval_receipt",
+    "phase5_navigation_switch_production_receipts",
+    "phase5_observation_receipts",
+    "retirement_source_inventory"
+  ],
+  "allowed_overall_statuses": [
+    "PHASE6_NOT_READY",
+    "PHASE6_READY_FOR_ENTRY_RETIREMENT",
+    "PHASE6_READY_FOR_FINAL_DEPENDENCY_CLEANUP"
+  ],
+  "allowed_retention_states": [
+    "pending",
+    "active",
+    "completed_not_expired",
+    "expired_approved"
+  ],
+  "allowed_observation_outcomes": [
+    "closed_success",
+    "closed_failure",
+    "outcome_unknown"
+  ],
+  "fail_closed_codes": [
+    "ENTRY_NOT_READY",
+    "ROLLBACK_RECEIPT_MISSING",
+    "FORWARD_DATA_COMPATIBILITY_MISSING",
+    "REACT_ARTIFACT_CONTRACT_MISSING",
+    "RUNTIME_SUCCESSOR_MISSING",
+    "SOURCE_RETIREMENT_MANIFEST_INCOMPLETE",
+    "HUMAN_RELEASE_APPROVAL_MISSING",
+    "FULL_ENTRY_REGISTRY_DRIFT",
+    "RECEIPT_PROVENANCE_INVALID",
+    "BIDIRECTIONAL_ROLLBACK_NOT_PROVEN",
+    "CURRENT_SSOT_SUCCESSOR_MISSING",
+    "ARCHIVE_GATE_INCOMPLETE",
+    "INDEPENDENT_MANIFEST_MISMATCH",
+    "DEPLOYMENT_SSOT_CONFLICT",
+    "PHASE5_ENTRY_SWITCH_MISSING",
+    "PHASE5_ENTRY_SWITCH_OBSERVATION_INCOMPLETE",
+    "PHASE5_ENTRY_TARGET_NOT_REACT",
+    "ROLLBACK_RETENTION_ACTIVE"
+  ],
+  "final_evaluator_schema": {
+    "schema_version": 1,
+    "inventory_top_level": [
+      "schema_version", "inventory_producer", "registry_revision", "base_ref", "generated_at",
+      "scope", "exclude_rules", "reproduction_command", "count_kind", "files_count", "matches_count",
+      "open_findings", "full_registry_sources", "source_receipts", "artifact_bindings", "entries",
+      "remaining_runtime_owners", "historical_evidence_retained", "removal_receipts"
+    ],
+    "release_receipt_top_level": [
+      "schema_version", "receipt_id", "role", "approved_by", "approved_at", "base_ref",
+      "registry_revision", "host_release_approved", "run_release_approved", "host_release", "run_release",
+      "previous_receipt_digest", "receipt_digest"
+    ],
+    "entry_required_fields": [
+      "entry_id", "source_path", "source_digest", "artifact_digest", "base_ref", "git_state",
+      "static_callers", "dynamic_callers", "launcher_callers", "monitor_callers", "migration_rehearsal_callers",
+      "dependency_owner", "test_disposition", "replacement_identity", "current_inbound_links", "archive_inbound_links",
+      "disposition", "release_identity", "deletion_authorization", "restore_procedure", "current_target", "previous_target",
+      "cas_entry_count", "browser_verified", "totp_verified", "switch_receipt", "observation_receipt", "rollback_receipt",
+      "forward_data_receipt", "observation_outcome", "retention_history", "retention_end", "active_rollback_triggers"
+    ],
+    "removal_required_fields": [
+      "removal_receipt_id", "entry_id", "source_digest", "artifact_digest", "base_ref", "release_identity",
+      "deletion_approval", "status", "historical_evidence_retained", "previous_receipt_digest", "receipt_digest"
+    ],
+    "switch_receipt_fields": [
+      "receipt_id", "entry_id", "base_ref", "source_digest", "artifact_digest", "status", "occurred_at",
+      "previous_receipt_digest", "receipt_digest", "manifest_revision", "previous_target", "current_target",
+      "changed_entry_ids", "cas_entry_count", "audit_id", "audit_recorded"
+    ],
+    "observation_receipt_fields": [
+      "receipt_id", "entry_id", "base_ref", "source_digest", "artifact_digest", "status", "occurred_at",
+      "previous_receipt_digest", "receipt_digest", "observation_started_at", "observation_ended_at",
+      "observation_outcome", "command", "http_status", "response_contract", "browser_url", "browser_dom_identity",
+      "network_evidence", "totp_auth_mode", "focused_tests"
+    ],
+    "rollback_receipt_fields": [
+      "receipt_id", "entry_id", "base_ref", "source_digest", "artifact_digest", "status", "occurred_at",
+      "previous_receipt_digest", "receipt_digest", "switch_back_rehearsal_id", "switch_back_manifest_revision",
+      "switch_back_previous_target", "switch_back_current_target", "switch_back_changed_entry_ids",
+      "switch_back_cas_entry_count", "switch_back_audit_id", "switch_back_audit_recorded", "command", "http_status",
+      "response_contract", "focused_tests"
+    ],
+    "forward_receipt_fields": [
+      "receipt_id", "entry_id", "base_ref", "source_digest", "artifact_digest", "status", "occurred_at",
+      "previous_receipt_digest", "receipt_digest", "canonical_query", "react_query", "streamlit_query", "react_requery",
+      "compatibility_proof", "focused_tests"
+    ],
+    "retention_item_fields": ["state", "at"],
+    "rollback_trigger_fields": ["trigger_id", "active"],
+    "inventory_registry_source_fields": ["kind", "locator", "extraction_method", "digest"],
+    "inventory_source_receipt_fields": ["receipt_id", "entry_id", "source_path", "source_digest", "base_ref", "status", "receipt_digest"],
+    "artifact_binding_fields": ["entry_id", "artifact_identity", "artifact_digest", "manifest_revision", "current_target", "previous_target", "status"],
+    "release_component_fields": ["release_id", "package_id", "base_ref", "artifact_digest", "manifest_revision", "api_compatibility", "current_binding", "previous_binding", "retention_identity", "retention_state", "retention_end", "browser_rehearsal", "rollback_rehearsal", "closed_outcome", "approval"],
+    "release_approval_fields": ["approved_by", "approved_at", "role"],
+    "binding_fields": ["entry_selector", "target"],
+    "api_compatibility_fields": ["mode", "manifest_identity", "contract_status"],
+    "browser_evidence_fields": ["command", "http_status", "dom_identity", "network_evidence", "totp_auth_mode"],
+    "rollback_rehearsal_fields": ["command", "status", "previous_artifact_digest", "current_artifact_digest"],
+    "release_identity_fields": ["release_id", "manifest_revision", "artifact_digest", "target"],
+    "deletion_authorization_fields": ["status", "approved_by", "approved_at", "role", "entry_id", "source_digest", "manifest_revision"],
+    "test_disposition_fields": ["status", "focused_tests", "notes"],
+    "replacement_identity_fields": ["entry_id", "target", "route", "owner", "contract"],
+    "restore_procedure_fields": ["command", "source", "owner", "verified"],
+    "compatibility_proof_fields": ["same_root_fact", "same_version", "same_receipt", "same_outbox", "same_anomaly", "same_audit", "proof_status"],
+    "open_finding_fields": ["finding_id", "code", "status", "owner"]
+  }
+}

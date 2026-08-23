@@ -1,13 +1,13 @@
 /**
  * File: order_tracker_adapter.ts
- * Description: 將訂單摘要映射為待階段投影卡片，並保留七階、SOP、LINE及結清的 unavailable 槽位。
+ * Description: 將訂單摘要映射為七階段卡片，並提供 SOP、LINE 與結清業務狀態。
  */
 import type { OrderSummaryItem, OrderSummaryPage } from '../../api/orders/order_query_schemas';
 
-export const TRACKER_STAGE_PROJECTION_UNAVAILABLE = '後端尚未提供 typed stage projection';
-export const TRACKER_ROOT_FACT_LINEAGE_UNAVAILABLE = '後端尚未提供此步驟的 typed root-fact lineage';
-export const TRACKER_NOTIFICATION_TIMELINE_UNAVAILABLE = '後端尚未提供此訂單的 case-scoped LINE timeline';
-export const TRACKER_TYPED_PROJECTION_UNAVAILABLE = '後端尚未提供 typed projection';
+export const TRACKER_STAGE_PROJECTION_UNAVAILABLE = '階段資料目前無法取得，請重新載入。';
+export const TRACKER_ROOT_FACT_LINEAGE_UNAVAILABLE = '尚無此步驟的作業紀錄。';
+export const TRACKER_NOTIFICATION_TIMELINE_UNAVAILABLE = '尚無 LINE 通知紀錄。';
+export const TRACKER_TYPED_PROJECTION_UNAVAILABLE = '尚未登錄';
 
 export type TrackerStageSlotId =
   | 'intake_terms'
@@ -85,21 +85,21 @@ export const TRACKER_SETTLEMENT_SLOTS: readonly TrackerSettlementSlotViewModel[]
     label: '服務完成',
     owner: 'Orders',
     availability: 'unavailable',
-    value: `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（Orders completion）`,
+    value: '尚未完成服務驗收',
   },
   {
     id: 'client-finance',
     label: '客戶款項結清',
     owner: 'Client Finance',
     availability: 'unavailable',
-    value: `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（Client Finance）`,
+    value: '尚未完成客戶款項結清',
   },
   {
     id: 'staff-payroll',
     label: '月嫂薪資核銷',
     owner: 'Staff Payables',
     availability: 'unavailable',
-    value: `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（Staff Payables）`,
+    value: '尚未完成月嫂薪資核銷',
   },
 ] as const;
 
@@ -136,8 +136,8 @@ function displayText(value: string | null, label: string): string {
 
 function formatDateRange(start: string | null, end: string | null, label: string): string {
   if (start && end) return `${start} ～ ${end}`;
-  if (start) return `${start} 起（結束日未提供）`;
-  if (end) return `開始日未提供 ～ ${end}`;
+  if (start) return `${start} 起（結束日待填寫）`;
+  if (end) return `開始日待填寫 ～ ${end}`;
   return `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（${label}）`;
 }
 
@@ -160,18 +160,18 @@ export function adaptTrackerOrderCard(item: OrderSummaryItem): TrackerOrderCardV
     rawOrderStatus: displayText(item.order_status, '原始訂單狀態'),
     identityStatus: displayText(item.identity_status, '身分狀態'),
     assignedStaffName: staffName,
-    assignedStaffDisplay: staffName ?? `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（正式指派月嫂）`,
+    assignedStaffDisplay: staffName ?? '尚未正式指派',
     plannedServiceRange: formatDateRange(item.start_date, item.end_date, '約定服務日期'),
     actualServiceRange: formatDateRange(item.actual_start_date, item.actual_end_date, '實際服務日期'),
     serviceDaysLabel: item.service_days === null
-      ? `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（服務天數）`
+      ? '待補服務天數'
       : `${item.service_days} 天`,
     contractAmountFormatted: item.total_employer_self_pay_payable === null
-      ? `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（契約應付金額）`
+      ? '尚未登錄契約應付金額'
       : `NT$ ${item.total_employer_self_pay_payable.toLocaleString('en-US')}`,
-    clientPhoneText: `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（聯絡電話）`,
-    serviceAddressText: `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（服務地址）`,
-    waitingText: `${TRACKER_TYPED_PROJECTION_UNAVAILABLE}（目前卡點／待辦）`,
+    clientPhoneText: '開啟案件卡片後載入',
+    serviceAddressText: '開啟案件卡片後載入',
+    waitingText: '請依目前階段處理',
     stepsChecklist: createUnavailableSopSteps(),
     notificationTimelineMessage: TRACKER_NOTIFICATION_TIMELINE_UNAVAILABLE,
     settlementSlots: TRACKER_SETTLEMENT_SLOTS,

@@ -1,14 +1,24 @@
 ---
 doc_type: gap
-declared_status: proposed
+declared_status: superseded
 identity: PROV-20260817-case-import-workbook-atomicity-archive-policy-gap
 date: 2026-08-17
 owner: Case Import Integration Owner
 domain: Case Import / Orders Historical Adoption / Staff
 approval_required: 人工裁決各workbook atomicity、source archive policy與HCM identity disposition
+successor: PROV-20260817-case-import-workbook-policy-decision
 ---
 
 # Case Import workbook atomicity／archive／identity disposition gap
+
+## Resolution（2026-08-23）
+
+人工已透過successor exact採用推薦值：HCM duplicate identity為`review_only`、HCM Current為
+`WHOLE_WORKBOOK + archive_required`，三種historical family為
+`ROW_ATOMIC_RESUMABLE + archive_required`。canonical matrix位於
+`../03_追蹤清單與證據/evidence/PROV-20260817-case-import-workbook-atomicity-archive-policy-gap/workbook-family-decision-matrix.md`。
+
+本gap因此`superseded`；production能力盤點結果為`DB_SCOPE_REQUIRED`，但本resolution不授權DB或code。
 
 ## Business scenario
 

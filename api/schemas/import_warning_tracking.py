@@ -54,6 +54,16 @@ class WarningTransitionPreviewView(_StrictModel):
     resulting_version: int = Field(ge=2)
 
 
+class WarningTransitionReceiptView(_StrictModel):
+    occurrence_identity: str = Field(min_length=1, max_length=191)
+    before_status: ImportWarningTrackingStatus
+    after_status: ImportWarningTrackingStatus
+    resulting_version: int = Field(ge=2)
+    receipt_identity: str = Field(pattern=r"^[0-9a-f]{64}$")
+    correlation_id: str = Field(min_length=1, max_length=191)
+    replayed: bool
+
+
 class WarningReferralView(_StrictModel):
     occurrence_identity: str
     expected_version: int = Field(ge=1)
@@ -72,4 +82,5 @@ __all__ = [
     "WarningReferralView",
     "WarningTransitionBody",
     "WarningTransitionPreviewView",
+    "WarningTransitionReceiptView",
 ]

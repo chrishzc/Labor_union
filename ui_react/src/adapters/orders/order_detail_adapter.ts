@@ -1,6 +1,6 @@
 /**
  * File: order_detail_adapter.ts
- * Description: 組合 Orders 四個 Drawer 的 typed facts，缺少 projection 時明確標示 unavailable。
+ * Description: 組合 Orders 四個 Drawer 的 typed facts，並呈現既有精算與取消預覽結果。
  */
 import type {
   ActualStart,
@@ -10,6 +10,10 @@ import type {
   OrderDetail,
   OrderTerms,
 } from '../../api/orders/order_query_schemas';
+import type { ContractSigningStatus } from '../../api/orders/contract_signing_client';
+import type { CandidateContactPool } from '../../api/scheduling/candidate_contact_pool_client';
+import type { SchedulePrecisionResult } from '../../api/scheduling/schedule_precision_client';
+import type { ActiveWaitingDepositPlan } from '../../api/scheduling/waiting_deposit_lock_client';
 import {
   ORDERS_TYPED_PROJECTION_UNAVAILABLE,
   formatServiceRange,
@@ -18,6 +22,12 @@ import {
 
 const unavailable = (scope: string) =>
   `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（${scope}）`;
+
+const readableCandidateReason = (reason: string | null): string | null => {
+  const canonical = reason?.trim() ?? '';
+  if (canonical.length === 0) return null;
+  return /^[?\uFFFD]+$/u.test(canonical) ? '原因文字無法辨識' : canonical;
+};
 
 export interface ServiceDateConfirmationDrawerViewModel {
   caseNo: string;
@@ -38,23 +48,16 @@ export interface ServiceDateConfirmationDrawerViewModel {
 }
 
 export interface CandidatePoolItemViewModel {
+  candidateId: number;
   staffId: number;
   staffName: string;
-  staffPhone: string;
-  experienceYears: number;
-  location: string;
-  skills: string[];
-  matchScore: number;
-  goodConductValid: boolean;
-  medicalExamValid: boolean;
   serviceRange: string;
-  info1Sent: boolean;
-  info1SentAt?: string;
-  info2Sent: boolean;
-  info2SentAt?: string;
+  contactStatus: 'active' | 'selected' | 'withdrawn';
+  info1Status: string;
+  info2Status: string;
   willingness: 'pending' | 'willing' | 'unwilling';
   willingnessLabel: string;
-  selectedForResume: boolean;
+  reason: string | null;
 }
 
 export interface AssignmentSegmentViewModel {
@@ -72,12 +75,10 @@ export interface MatchingWorkbenchDrawerViewModel {
   status: string;
   candidatePool: CandidatePoolItemViewModel[];
   assignmentSegments: AssignmentSegmentViewModel[];
-  candidatePoolUnavailable: string;
-  customerDecision: null;
-  customerDecisionLabel: string;
-  waitingLockAcquired: null;
+  serviceTimeText: string;
+  requiresCookingText: string;
+  waitingLockAcquired: boolean;
   waitingLockText: string;
-  resumeNote: string;
 }
 
 export interface OrderTermsContractDrawerViewModel {
@@ -91,11 +92,11 @@ export interface OrderTermsContractDrawerViewModel {
   floorFeeText: string;
   contractAmount: number | null;
   contractAmountText: string;
-  staffContractSigned: null;
+  staffContractSigned: boolean;
   staffContractSignedText: string;
   depositSettled: boolean | null;
   depositSettledText: string;
-  clientContractSigned: null;
+  clientContractSigned: boolean;
   clientContractSignedText: string;
   domainBlockers: string[];
 }
@@ -138,8 +139,9 @@ export function adaptServiceDateConfirmationDrawer(params: {
   actualStart?: ActualStart | null;
   calendarDetail?: OrderCalendarDetail | null;
   orderDetail?: OrderDetail | null;
+  precision?: SchedulePrecisionResult | null;
 }): ServiceDateConfirmationDrawerViewModel {
-  const { caseNo, actualStart, calendarDetail, orderDetail } = params;
+  const { caseNo, actualStart, calendarDetail, orderDetail, precision } = params;
   const actualStartDate = actualStart?.current_actual_start_date ?? '—';
   return {
     caseNo,
@@ -147,12 +149,16 @@ export function adaptServiceDateConfirmationDrawer(params: {
     hasActualStartDate: actualStart?.current_actual_start_date !== null && actualStart !== null && actualStart !== undefined,
     restDaysSummary: orderDetail?.custom_rest_dates ?? unavailable('排休摘要'),
     serviceMode: calendarDetail?.service_mode ?? unavailable('排班模式'),
-    serviceRangeText: orderDetail
+    serviceRangeText: precision
+      ? `${precision.actual_start_date} ~ ${precision.actual_end_date}`
+      : orderDetail
       ? formatServiceRange(orderDetail.start_date, orderDetail.end_date)
       : unavailable('約定服務起訖日'),
     contractedServiceDays: orderDetail?.service_days ?? null,
-    calculatedServiceDaysText: unavailable('精算服務天數'),
-    restDaysCountText: unavailable('順延天數'),
+    calculatedServiceDaysText: precision
+      ? `${precision.actual_work_days_count} 天（目標 ${precision.target_service_days} 天）`
+      : unavailable('精算服務天數'),
+    restDaysCountText: precision ? `${precision.rest_days_count} 天` : unavailable('順延天數'),
     bufferDateRange: unavailable('服務後緩衝期間'),
     customerConfirmed: null,
     customerConfirmedText: unavailable('客戶確認狀態'),
@@ -165,8 +171,11 @@ export function adaptServiceDateConfirmationDrawer(params: {
 export function adaptMatchingWorkbenchDrawer(params: {
   caseNo: string;
   assignmentPlan?: AssignmentPlan | null;
+  candidateContactPool?: CandidateContactPool | null;
+  activePlan?: ActiveWaitingDepositPlan | null;
+  terms?: OrderTerms | null;
 }): MatchingWorkbenchDrawerViewModel {
-  const { caseNo, assignmentPlan } = params;
+  const { caseNo, assignmentPlan, candidateContactPool, activePlan, terms } = params;
   const assignmentSegments = (assignmentPlan?.assignments ?? []).map((segment) => ({
     key: segment.assignment_id === null
       ? segment.candidate_key ?? `${segment.staff_id}-${segment.sequence}`
@@ -181,23 +190,38 @@ export function adaptMatchingWorkbenchDrawer(params: {
   }));
   return {
     caseNo,
-    planId: unavailable('媒合方案識別'),
-    status: unavailable('媒合狀態'),
-    candidatePool: [],
+    planId: activePlan ? String(activePlan.planId) : '尚無進行中的媒合方案',
+    status: activePlan?.status === 'accepted' ? '已接受' : activePlan?.status === 'proposed' ? '提案中' : '無進行中方案',
+    candidatePool: (candidateContactPool?.candidates ?? []).map((candidate) => ({
+      candidateId: candidate.id,
+      staffId: candidate.staff_id,
+      staffName: candidate.staff_name,
+      serviceRange: `${candidate.service_start_date} ~ ${candidate.service_end_date}`,
+      contactStatus: candidate.status,
+      info1Status: candidate.information['1']?.status ?? '尚未建立',
+      info2Status: candidate.information['2']?.status ?? '尚未建立',
+      willingness: candidate.willingness,
+      willingnessLabel: candidate.willingness === 'willing'
+        ? '願意'
+        : candidate.willingness === 'unwilling' ? '不願意' : '待回覆',
+      reason: readableCandidateReason(candidate.reason),
+    })),
     assignmentSegments,
-    candidatePoolUnavailable: unavailable('候選聯繫池與正式推薦'),
-    customerDecision: null,
-    customerDecisionLabel: unavailable('客戶決策'),
-    waitingLockAcquired: null,
-    waitingLockText: unavailable('等待訂金鎖'),
-    resumeNote: unavailable('履歷說明備註'),
+    serviceTimeText: serviceTimeText(terms),
+    requiresCookingText: terms?.terms.requires_cooking === true
+      ? '需要下廚'
+      : terms?.terms.requires_cooking === false ? '不需下廚' : '資料待補正（下廚料理條款）',
+    waitingLockAcquired: activePlan?.activeLockId !== null && activePlan?.activeLockId !== undefined,
+    waitingLockText: activePlan?.activeLockId
+      ? `已取得等待訂金鎖 #${activePlan.activeLockId}`
+      : activePlan ? '目前尚未取得等待訂金鎖' : '目前沒有可建立鎖定的進行中媒合方案',
   };
 }
 
 function serviceTimeText(terms?: OrderTerms | null): string {
   const time = terms?.terms.service_time;
   if (!time || time.start_time === null || time.end_time === null || time.end_day_offset === null) {
-    return unavailable('服務時段三欄');
+    return '資料待補正（服務時段三欄）';
   }
   return `${time.start_time} ~ ${time.end_time}（${time.end_day_offset === 0 ? '同日' : '跨日'}）`;
 }
@@ -206,14 +230,19 @@ export function adaptOrderTermsContractDrawer(params: {
   caseNo: string;
   terms?: OrderTerms | null;
   completion?: ContractCompletion | null;
+  signing?: ContractSigningStatus | null;
   summary?: OrderSummaryCardViewModel | null;
   orderDetail?: OrderDetail | null;
 }): OrderTermsContractDrawerViewModel {
-  const { caseNo, terms, completion, summary, orderDetail } = params;
+  const { caseNo, terms, completion, signing, summary, orderDetail } = params;
   const requiresCooking = terms?.terms.requires_cooking;
   const floorFee = terms?.terms.floor_fee_ntd ?? orderDetail?.floor_fee ?? null;
   const contractAmount = summary?.contractAmount ?? null;
   const depositSettled = completion?.deposit_settled ?? null;
+  const signedStaffSegments = signing?.staff_segments.filter((segment) => segment.signed_received).length ?? 0;
+  const staffSegmentCount = signing?.staff_segments.length ?? 0;
+  const staffContractSigned = staffSegmentCount > 0 && signedStaffSegments === staffSegmentCount;
+  const clientContractSigned = signing?.client_signed_received ?? false;
   return {
     caseNo,
     clientName: summary?.clientName ?? orderDetail?.client_name ?? unavailable('客戶姓名'),
@@ -227,13 +256,17 @@ export function adaptOrderTermsContractDrawer(params: {
     contractAmount,
     contractAmountText:
       contractAmount === null ? unavailable('合約總金額') : `NT$ ${contractAmount.toLocaleString()}`,
-    staffContractSigned: null,
-    staffContractSignedText: unavailable('月嫂契約簽回狀態'),
+    staffContractSigned,
+    staffContractSignedText: staffSegmentCount === 0
+      ? '尚無月嫂契約分段'
+      : staffContractSigned ? '✅ 全部分段已簽回' : `⏳ 已簽回 ${signedStaffSegments}/${staffSegmentCount} 段`,
     depositSettled,
     depositSettledText:
       depositSettled === null ? unavailable('客戶定金核銷') : depositSettled ? '✅ 已核銷' : '⏳ 待核銷',
-    clientContractSigned: null,
-    clientContractSignedText: unavailable('客戶契約簽回狀態'),
+    clientContractSigned,
+    clientContractSignedText: clientContractSigned
+      ? '✅ 客戶契約已簽回'
+      : signing?.client_document_sent ? '⏳ 已寄送，待客戶簽回' : '尚未寄送客戶契約',
     domainBlockers: (completion?.domain_blockers ?? []).map(localizeDomainBlocker),
   };
 }

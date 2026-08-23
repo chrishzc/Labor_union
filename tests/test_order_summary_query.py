@@ -108,6 +108,15 @@ def test_query_preserves_pending_case_without_planned_terms() -> None:
     assert item.total_employer_self_pay_payable is None
 
 
+def test_query_keeps_import_review_case_visible_when_client_name_is_missing() -> None:
+    row = _row("113000012")
+    row["client_name"] = None
+
+    page = _service((row,)).query(OrderSummaryQueryRequest(1, None))
+
+    assert page.items[0].client_name == "待補姓名（113000012）"
+
+
 def test_query_normalizes_legacy_zero_days_without_a_planned_start() -> None:
     row = _row()
     row.update({"start_date": None, "end_date": None, "service_days": 0})

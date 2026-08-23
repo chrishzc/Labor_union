@@ -131,11 +131,51 @@ function getStage2ErrorMessage(
   return { message: msg, expired: false };
 }
 
+const REMEMBER_COOKIE_NAME = 'remember_admin_username';
+
+function getRememberedUsername(): string | null {
+  try {
+    if (typeof document === 'undefined') return null;
+    const match = document.cookie.match(
+      new RegExp('(?:^|; )' + REMEMBER_COOKIE_NAME.replace(/([.$?*|{}()[\]\\/+^])/g, '\\$1') + '=([^;]*)')
+    );
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch {
+    return null;
+  }
+}
+
+function setRememberedUsername(username: string): void {
+  try {
+    if (typeof document === 'undefined') return;
+    const expires = new Date(Date.now() + 30 * 864e5).toUTCString();
+    document.cookie = `${encodeURIComponent(REMEMBER_COOKIE_NAME)}=${encodeURIComponent(username)}; expires=${expires}; path=/; SameSite=Lax`;
+  } catch {
+    // Ignore in non-browser environments
+  }
+}
+
+function clearRememberedUsername(): void {
+  try {
+    if (typeof document === 'undefined') return;
+    document.cookie = `${encodeURIComponent(REMEMBER_COOKIE_NAME)}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/; SameSite=Lax`;
+  } catch {
+    // Ignore in non-browser environments
+  }
+}
+
 export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
   // Stage 1: Account Login, Stage 2: TOTP 2FA Verification
   const [authStage, setAuthStage] = useState<'stage1' | 'stage2'>('stage1');
 
-  const [username, setUsername] = useState('admin');
+  const [rememberMe, setRememberMe] = useState<boolean>(() => {
+    const saved = getRememberedUsername();
+    return saved !== null && saved.length > 0;
+  });
+  const [username, setUsername] = useState<string>(() => {
+    const saved = getRememberedUsername();
+    return saved && saved.length > 0 ? saved : 'admin';
+  });
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -161,6 +201,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     if (!trimmedPass) {
       setErrorMessage('請輸入密碼');
       return;
+    }
+
+    // Persist or clear remembered username in cookie
+    if (rememberMe) {
+      setRememberedUsername(trimmedUser);
+    } else {
+      clearRememberedUsername();
     }
 
     setIsLoading(true);
@@ -350,19 +397,14 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
 
               <div className="login-options-row">
                 <label className="login-remember-me">
-                  <input type="checkbox" defaultChecked disabled={isLoading} />
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    disabled={isLoading}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                  />
                   <span>記住帳號 (Remember Me)</span>
                 </label>
-                <a
-                  className="login-forgot-link"
-                  href="#forgot"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    alert('請聯絡系統管理員重置密碼');
-                  }}
-                >
-                  忘記密碼？
-                </a>
               </div>
 
               <button className="login-submit-btn" type="submit" disabled={isLoading}>

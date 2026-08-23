@@ -1,4 +1,7 @@
-"""Stage 3 tests for durable LINE intake, dispatch, delivery, and wake timing."""
+"""
+File: test_line_runtime_stage3.py
+Description: 驗證 LINE intake、dispatch failure transaction、delivery 與 wake timing。
+"""
 
 from __future__ import annotations
 
@@ -167,6 +170,29 @@ def test_unsupported_event_is_completed_as_ignored() -> None:
     assert repository.completed.target_status is LineWebhookProcessingStatus.IGNORED
 
 
+def test_dispatch_failure_rolls_back_business_then_records_failure_separately() -> None:
+    event = _claimed_webhook_event()
+    repository = ConsumerInbox(event)
+    factory = IsolatedConsumerUowFactory(repository)
+    consumer = LineWebhookEventConsumer(
+        factory,
+        PartialFailureDispatcher(),
+        "worker:1",
+        lambda: NOW,
+    )
+
+    assert consumer.run_once() == 1
+    assert len(factory.units) == 3
+    assert factory.units[0].committed is True
+    assert factory.units[1].rolled_back is True
+    assert factory.units[1].committed is False
+    assert factory.units[2].committed is True
+    assert factory.persisted_business_writes == []
+    assert repository.completed.target_status is LineWebhookProcessingStatus.RETRYABLE_FAILED
+    assert repository.completed.error_code == "RuntimeError"
+    assert repository.completed.retry_after_seconds == 15
+
+
 def test_delivery_provider_call_occurs_between_claim_and_record_transactions() -> None:
     task = _claimed_delivery_task()
     actions: list[str] = []
@@ -253,6 +279,35 @@ class ConsumerInbox:
     def complete(self, command):
         self.completed = command
         return command.event
+
+
+class IsolatedConsumerUowFactory:
+    def __init__(self, webhook_inbox) -> None:
+        self.webhook_inbox = webhook_inbox
+        self.units = []
+        self.persisted_business_writes = []
+
+    def __call__(self):
+        unit = IsolatedConsumerUow(self)
+        self.units.append(unit)
+        return unit
+
+
+class IsolatedConsumerUow(FakeUow):
+    def __init__(self, factory: IsolatedConsumerUowFactory) -> None:
+        super().__init__(webhook_inbox=factory.webhook_inbox)
+        self._factory = factory
+        self.pending_business_writes = []
+
+    def commit(self) -> None:
+        self._factory.persisted_business_writes.extend(self.pending_business_writes)
+        super().commit()
+
+
+class PartialFailureDispatcher:
+    def dispatch(self, _event, unit_of_work):
+        unit_of_work.pending_business_writes.append("partial-ticket")
+        raise RuntimeError("dispatch unavailable")
 
 
 class DeliveryRepository:

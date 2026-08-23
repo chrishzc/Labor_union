@@ -11,16 +11,28 @@ from domains.line.configuration import (
     LineConfigurationKind,
     build_configuration_candidate,
 )
+from domains.line.canonical_payload import validate_canonical_line_payload_json
+from domains.line.configuration import LineConfigurationSnapshot
 from domains.line.identities import LineConfigurationRevision
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
 from subsystems.line.capabilities import LineCapability, require_line_capability
-from subsystems.line.configuration_contracts import ApplyLineConfigurationCommand
+from subsystems.line.configuration_contracts import (
+    ApplyLineConfigurationCommand,
+    GetLineConfigurationSafeQuery,
+    LineConfigurationQueryContractError,
+    LineConfigurationQueryUnavailableError,
+    LineConfigurationSafeResult,
+    LineConfigurationSafeState,
+)
 from subsystems.line.message_configuration import (
     configuration_definition,
     validate_message_schedules,
     validate_message_templates,
 )
-from domains.line.notification_rules import validate_notification_rules
+from domains.line.notification_rules import (
+    materialize_notification_rules_definition,
+    validate_notification_rules,
+)
 from subsystems.line.ports import LineAuditIntent, LineUnitOfWorkPort
 
 
@@ -36,6 +48,24 @@ class LineConfigurationApplication:
         with self._unit_of_work_factory() as unit_of_work:
             return unit_of_work.configurations.get(kind)
 
+    def get_safe(
+        self,
+        query: GetLineConfigurationSafeQuery,
+        actor: ActorContext,
+    ) -> LineConfigurationSafeResult:
+        require_line_capability(actor, LineCapability.CONFIG_READ)
+        try:
+            with self._unit_of_work_factory() as unit_of_work:
+                snapshot = unit_of_work.configurations.get(query.kind)
+        except Exception as error:
+            raise LineConfigurationQueryUnavailableError() from error
+        try:
+            return _safe_configuration_result(query, snapshot)
+        except LineConfigurationQueryContractError:
+            raise
+        except Exception as error:
+            raise LineConfigurationQueryContractError() from error
+
     def preview(
         self,
         kind: LineConfigurationKind,
@@ -47,6 +77,8 @@ class LineConfigurationApplication:
         with self._unit_of_work_factory() as unit_of_work:
             current = unit_of_work.configurations.get(kind)
             self._validate(unit_of_work, kind, definition)
+        if kind is LineConfigurationKind.NOTIFICATION_RULES:
+            definition = materialize_notification_rules_definition(definition)
         return build_configuration_candidate(
             kind=kind,
             current_revision=current.revision,
@@ -66,6 +98,8 @@ class LineConfigurationApplication:
         correlation_id: CorrelationId,
     ):
         require_line_capability(actor, LineCapability.CONFIG_MANAGE)
+        if kind is LineConfigurationKind.NOTIFICATION_RULES:
+            raise RuntimeError("notification rules require the dedicated mutation contract")
         with self._unit_of_work_factory() as unit_of_work:
             current = unit_of_work.configurations.get(kind)
             self._validate(unit_of_work, kind, definition)
@@ -194,6 +228,29 @@ class LineConfigurationApplication:
             validate_message_schedules(definition, templates)
         elif kind is LineConfigurationKind.NOTIFICATION_RULES:
             validate_notification_rules(definition)
+
+
+def _safe_configuration_result(
+    query: GetLineConfigurationSafeQuery,
+    snapshot: object,
+) -> LineConfigurationSafeResult:
+    if not isinstance(snapshot, LineConfigurationSnapshot):
+        raise LineConfigurationQueryContractError()
+    if snapshot.kind is not query.kind:
+        raise LineConfigurationQueryContractError()
+    if not isinstance(snapshot.revision, LineConfigurationRevision):
+        raise LineConfigurationQueryContractError()
+    validate_canonical_line_payload_json(snapshot.definition_json)
+    state = (
+        LineConfigurationSafeState.EMPTY
+        if snapshot.definition_json == "{}"
+        else LineConfigurationSafeState.CONFIGURED
+    )
+    return LineConfigurationSafeResult(
+        kind=snapshot.kind,
+        revision=snapshot.revision.value,
+        state=state,
+    )
 
 
 __all__ = ["LineConfigurationApplication"]

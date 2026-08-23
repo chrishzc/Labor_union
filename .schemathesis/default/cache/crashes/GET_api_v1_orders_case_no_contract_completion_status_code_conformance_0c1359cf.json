@@ -1,0 +1,79 @@
+{
+  "operation": "GET /api/v1/orders/{case_no}/contract-completion",
+  "method": "GET",
+  "path_template": "/api/v1/orders/{case_no}/contract-completion",
+  "fingerprint": "0c1359cf",
+  "case_id": "a1Id28",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/orders/0/contract-completion",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/orders/0/contract-completion",
+      "url_template": "http://127.0.0.1:8765/api/v1/orders/{case_no}/contract-completion",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "a1Id28"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:14:08 GMT",
+          "server": "uvicorn",
+          "content-length": "243",
+          "content-type": "application/json"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"internal_error\",\"message\":\"\u4f3a\u670d\u5668\u767c\u751f\u672a\u9810\u671f\u932f\u8aa4\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"bf0f185516d44aa19a0af0322fbbaffa\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "status_code_conformance",
+          "status": "failure",
+          "message": "Undocumented HTTP status code\n\nReceived: 500\nDocumented: 200, 422"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.006722399964928627,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/orders/{case_no}/contract-completion",
+      "path_parameters": {
+        "case_no": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

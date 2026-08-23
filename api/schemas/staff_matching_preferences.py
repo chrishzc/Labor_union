@@ -1,4 +1,7 @@
-"""Typed HTTP views for staff matching preference management."""
+"""
+File: staff_matching_preferences.py
+Description: 定義 Staff matching preference Query、Preview、Apply 與 receipt 嚴格契約。
+"""
 
 from __future__ import annotations
 
@@ -115,10 +118,20 @@ class ProfileApplyRequest(StaffPreferenceProfileInput):
     reason: str = Field(min_length=1, max_length=500)
 
 
-class StaffPreferenceApplyReceiptView(BaseModel):
+class StaffPreferenceDefinitionApplyReceiptView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    preference_key: str | None = None
-    staff_id: int | None = Field(default=None, gt=0)
+    preference_key: str = Field(min_length=1, max_length=64)
     version: int = Field(gt=0)
-    values: list[StaffPreferenceValueView] | None = None
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    idempotency_key: str = Field(min_length=1, max_length=191)
+
+
+class StaffPreferenceProfileApplyReceiptView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    staff_id: int = Field(gt=0)
+    version: int = Field(gt=0)
+    values: list[StaffPreferenceValueView]
+    preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    idempotency_key: str = Field(min_length=1, max_length=191)

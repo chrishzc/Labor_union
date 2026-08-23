@@ -8,6 +8,7 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from line import line_bot
+from subsystems.line.runtime_contracts import LineRuntimeMode
 
 
 class _Cursor:
@@ -77,3 +78,49 @@ def test_legacy_first_time_bind_is_retired_in_canonical_runtime(monkeypatch):
     assert exc_info.value.detail["replacement"] == "/api/v1/line/identity/customer/apply"
     assert connection.cursor_instance.statements == []
     assert connection.commits == 0
+
+
+@pytest.mark.parametrize(
+    "call_factory",
+    [
+        lambda: line_bot.get_line_config(),
+        lambda: line_bot.post_client_info(
+            SimpleNamespace(line_id_token="signed-token", line_user_id="U-untrusted")
+        ),
+        lambda: line_bot.get_client_info("U-untrusted"),
+        lambda: line_bot.line_register(
+            SimpleNamespace(
+                name="王小美",
+                phone="0912-345-678",
+                expected_date="2026-09-01",
+                service_days=10,
+                address="masked-address",
+                line_id_token="signed-token",
+                line_user_id="U-untrusted",
+            )
+        ),
+        lambda: line_bot.serve_bind_page(),
+        lambda: line_bot.serve_register_page(),
+    ],
+    ids=[
+        "config",
+        "client-info-post",
+        "client-info-get",
+        "register",
+        "bind-page",
+        "register-page",
+    ],
+)
+def test_all_legacy_liff_surfaces_fail_closed_in_canonical_runtime(monkeypatch, call_factory):
+    monkeypatch.setattr(
+        line_bot,
+        "line_webhook_runtime_mode",
+        lambda: LineRuntimeMode.CANONICAL,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(call_factory())
+
+    assert exc_info.value.status_code == 410
+    assert exc_info.value.detail["code"] == "legacy_line_route_retired"
+    assert exc_info.value.detail["replacement"]

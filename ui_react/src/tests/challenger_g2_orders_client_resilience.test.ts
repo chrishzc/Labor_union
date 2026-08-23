@@ -76,6 +76,34 @@ describe('G2 Orders resilience challenger', () => {
     expect(caught).toMatchObject({ currentVersion: null, domainBlockers: [] });
   });
 
+  it('preserves a canonical business code when mapping conflict and validation responses', async () => {
+    const typedRaw = (category: 'domain_blocked' | 'validation') => ({
+      detail: {
+        error: {
+          category,
+          code: 'client_finance_bootstrap_required',
+          message: 'root missing',
+          field_errors: [],
+          domain_blockers: [],
+          retryable: false,
+          correlation_id: 'fixture-correlation',
+          current_version: null,
+        },
+      },
+    });
+    const get = vi.spyOn(transport, 'get');
+    get.mockRejectedValueOnce(new ApiHttpError(409, 'client_finance_bootstrap_required', 'root missing', false, typedRaw('domain_blocked')));
+    await expect(getOrderDetail('CASE-1')).rejects.toMatchObject({
+      name: 'OrderConflictError',
+      code: 'client_finance_bootstrap_required',
+    });
+    get.mockRejectedValueOnce(new ApiHttpError(422, 'client_finance_bootstrap_required', 'root missing', false, typedRaw('validation')));
+    await expect(getOrderDetail('CASE-1')).rejects.toMatchObject({
+      name: 'OrderValidationError',
+      code: 'client_finance_bootstrap_required',
+    });
+  });
+
   it('uses a new volatile token after logout instead of retaining a constructor snapshot', async () => {
     const token = vi.spyOn(sessionClient, 'getToken')
       .mockReturnValueOnce('before-logout')

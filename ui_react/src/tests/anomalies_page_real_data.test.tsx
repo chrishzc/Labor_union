@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { AnomaliesPage } from '../pages/AnomaliesPage';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
+import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
 import {
   VALID_ANOMALY_SUMMARY_1,
   VALID_ANOMALY_SUMMARY_2,
@@ -17,9 +18,12 @@ import {
   VALID_IMPORT_WARNING_TASK_BECLASS_STF,
   VALID_IMPORT_WARNING_TASK_FINANCE,
   VALID_IMPORT_WARNING_TASK_AUTO_RESOLVED,
-  VALID_ANOMALY_DETAIL_VIEW,
   VALID_IMPORT_WARNING_REFERRAL_VIEW,
 } from './fixtures/anomalies/anomaly_query_contract_fixtures';
+import {
+  VALID_ANOMALY_DETAIL_VIEW,
+  VALID_ANOMALY_RECOVERY_CONTEXT_VIEW,
+} from './fixtures/anomalies/anomaly_detail_contract_fixtures';
 
 describe('AnomaliesPage Real Data Integration Suite', () => {
   beforeEach(() => {
@@ -39,8 +43,11 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       VALID_IMPORT_WARNING_TASK_FINANCE,
       VALID_IMPORT_WARNING_TASK_AUTO_RESOLVED,
     ]);
-    vi.spyOn(anomalyQueryClient, 'queryAnomalyDetail').mockResolvedValue(
+    vi.spyOn(anomalyDetailClient, 'queryAnomalyDetail').mockResolvedValue(
       VALID_ANOMALY_DETAIL_VIEW
+    );
+    vi.spyOn(anomalyDetailClient, 'queryAnomalyRecovery').mockResolvedValue(
+      VALID_ANOMALY_RECOVERY_CONTEXT_VIEW
     );
     vi.spyOn(anomalyQueryClient, 'queryImportWarningReferral').mockResolvedValue(
       VALID_IMPORT_WARNING_REFERRAL_VIEW
@@ -62,7 +69,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     });
 
     // Check gap text on cards
-    const gapTitles = screen.getAllByText('後端尚未提供 typed 顯示摘要');
+    const gapTitles = screen.getAllByText('目前 typed view 未納入摘要欄位');
     expect(gapTitles.length).toBeGreaterThanOrEqual(3);
 
     for (const surfaceId of [
@@ -204,7 +211,7 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     expect(screen.getByText(/領域 \(Domain\)：/)).toBeInTheDocument();
     expect(screen.getByText(/資料版本：/)).toBeInTheDocument();
     expect(screen.getByText(/條件作用中：/)).toBeInTheDocument();
-    expect(screen.getByText(/後端 typed detail\/recovery contract 尚未開放/)).toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="anomalies.drawer.root-evidence"]')).toHaveTextContent('finance_import_row_identity');
 
     // Check staff calendar navigation link
     const navLink = screen.getByRole('link', { name: /前往排班調度 ➔/ });

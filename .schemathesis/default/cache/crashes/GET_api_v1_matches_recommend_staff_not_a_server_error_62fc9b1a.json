@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/matches/recommend-staff",
+  "method": "GET",
+  "path_template": "/api/v1/matches/recommend-staff",
+  "fingerprint": "62fc9b1a",
+  "case_id": "MV9dqO",
+  "code_sample": "curl -X GET 'http://127.0.0.1:8765/api/v1/matches/recommend-staff?case_no=0'",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/matches/recommend-staff?case_no=0",
+      "url_template": "http://127.0.0.1:8765/api/v1/matches/recommend-staff",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "MV9dqO"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:13:39 GMT",
+          "server": "uvicorn",
+          "content-length": "276",
+          "content-type": "application/json",
+          "server-timing": "application;dur=2102.5",
+          "x-response-time-ms": "2102.5",
+          "x-correlation-id": "0e1fe871e3004f54a109d55aeca92d97"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"matching_recommendation_query_internal_error\",\"message\":\"\u6708\u5ac2\u63a8\u85a6\u540d\u55ae\u67e5\u8a62\u5931\u6557\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"0e1fe871e3004f54a109d55aeca92d97\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "not_a_server_error",
+          "status": "failure",
+          "message": "Server error"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.005540099984500557,
+          "mode": "positive"
+        },
+        "components": {
+          "QUERY": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/matches/recommend-staff",
+      "path_parameters": {},
+      "query": {
+        "case_no": "0"
+      },
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

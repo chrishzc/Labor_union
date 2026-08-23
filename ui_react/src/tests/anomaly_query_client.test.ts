@@ -165,6 +165,38 @@ describe('Anomaly Query API Client (Phase 2D Integration)', () => {
         AnomalyValidationError
       );
     });
+
+    it('同 token 與 effective options 的 concurrent list query 只送出一次 GET', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => VALID_ANOMALIES_QUERY_RESPONSE,
+      });
+
+      const first = queryAnomalies({ activeOnly: true, limit: 50 });
+      const replay = queryAnomalies({ activeOnly: true, limit: 50 });
+      const [firstResult, replayResult] = await Promise.all([first, replay]);
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+      expect(firstResult).toEqual(replayResult);
+    });
+
+    it('不同 params 或 request options 不可錯誤共用 list query', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => VALID_ANOMALIES_QUERY_RESPONSE,
+      });
+
+      await Promise.all([
+        queryAnomalies({ activeOnly: true, limit: 25 }, { timeoutMs: 1000 }),
+        queryAnomalies({ activeOnly: true, limit: 50 }, { timeoutMs: 2000 }),
+      ]);
+
+      expect(globalThis.fetch).toHaveBeenCalledTimes(2);
+    });
   });
 
   // ==========================================================================

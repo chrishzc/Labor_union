@@ -5,10 +5,14 @@ Description: 定義異常根事實修復查詢與維運操作的嚴格 HTTP 契�
 
 from __future__ import annotations
 
-from typing import Any
-
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
+from api.schemas.anomaly_registry import (
+    AnomalyDisplaySnapshotView,
+    AnomalySourceBindingView,
+    AnomalyTimelineEventView,
+)
 from domains.anomalies.registry import AlertWorkflowStatus, AnomalySeverity
 
 
@@ -22,7 +26,7 @@ class RecoveryActionView(_StrictModel):
     owning_domain: str
     form_schema_key: str
     source_binding_keys: list[str]
-    source_bindings: dict[str, str | int]
+    source_bindings: list[AnomalySourceBindingView]
     required_operator_inputs: list[str]
     preview_operation: str
     apply_operation: str | None = None
@@ -44,7 +48,28 @@ class FinanceOccurrenceView(_StrictModel):
     finance_import_batch_id: int = Field(gt=0)
     source_version: int = Field(ge=0)
     occurred_at: str
-    bounded_snapshot: dict[str, Any]
+    bounded_snapshot: "AnomalyDisplaySnapshotView"
+
+
+class AnomalyRootFactSnapshotView(_StrictModel):
+    """Root fact 的安全標量與計數投影，不包含原始 identity 或 payload。"""
+
+    occurred_at: datetime
+    source_version: int = Field(ge=0)
+    finance_import_row_identity: str = Field(min_length=1, max_length=191)
+    finance_import_batch_identity: str = Field(min_length=1, max_length=191)
+    original_refund_ledger_entry_identity: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=191,
+    )
+    amount_delta_ntd: int
+    root_condition_active: bool
+    integrity_blocker_active: bool
+    affected_order_identities: list[str] = Field(default_factory=list, max_length=100)
+    affected_obligation_identities: list[str] = Field(default_factory=list, max_length=100)
+    domain_blockers: list[str] = Field(default_factory=list, max_length=20)
+    reason_codes: list[str] = Field(default_factory=list, max_length=20)
 
 
 class AnomalyRecoveryContextView(_StrictModel):
@@ -59,9 +84,9 @@ class AnomalyRecoveryContextView(_StrictModel):
     workflow_version: int = Field(ge=0)
     domain_blocker_active: bool
     projection_freshness: str
-    root_fact_snapshot: dict[str, Any]
+    root_fact_snapshot: AnomalyRootFactSnapshotView
     occurrence_timeline: list[FinanceOccurrenceView]
-    workflow_timeline: list[dict[str, Any]]
+    workflow_timeline: list[AnomalyTimelineEventView]
     available_actions: list[RecoveryActionView]
 
 
@@ -70,10 +95,16 @@ class AnomalyRecoveryTypedErrorView(_StrictModel):
     code: str
     message: str
     correlation_id: str
-    field_errors: list[dict[str, Any]] = Field(default_factory=list)
+    field_errors: list["AnomalyRecoveryFieldErrorView"] = Field(default_factory=list)
     domain_blockers: list[str] = Field(default_factory=list)
     retryable: bool = False
     current_version: int | None = None
+
+
+class AnomalyRecoveryFieldErrorView(_StrictModel):
+    field: str = Field(min_length=1, max_length=191)
+    code: str = Field(min_length=1, max_length=191)
+    message: str = Field(min_length=1, max_length=500)
 
 
 class ScanAnomalyDefinitionBody(_StrictModel):
@@ -102,6 +133,8 @@ class RetryAnomalyProjectorResultView(_StrictModel):
 
 __all__ = [
     "AnomalyRecoveryContextView",
+    "AnomalyRecoveryFieldErrorView",
+    "AnomalyRootFactSnapshotView",
     "AnomalyRecoveryTypedErrorView",
     "FinanceOccurrenceView",
     "RecoveryActionView",

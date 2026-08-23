@@ -199,12 +199,15 @@ def _load_all(
 
 
 def _snapshot(summary: AnomalySummaryView) -> dict[str, Any]:
-    return summary.display_snapshot or {}
+    snapshot = summary.display_snapshot
+    if snapshot is None:
+        return {}
+    return {field.key: field.value for field in snapshot.fields}
 
 
 def _case_no(summary: AnomalySummaryView) -> str:
     snapshot = _snapshot(summary)
-    value = snapshot.get("case_no")
+    value = snapshot.get("case_no") or snapshot.get("masked_case_identity")
     return str(value) if value else summary.source_identity
 
 

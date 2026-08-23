@@ -1,0 +1,82 @@
+{
+  "operation": "GET /api/v1/government-subsidy/claim-batches/{batch_id}",
+  "method": "GET",
+  "path_template": "/api/v1/government-subsidy/claim-batches/{batch_id}",
+  "fingerprint": "f9689b3e",
+  "case_id": "xlafNs",
+  "code_sample": "curl -X GET http://127.0.0.1:8821/api/v1/government-subsidy/claim-batches/1",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8821/api/v1/government-subsidy/claim-batches/1",
+      "url_template": "http://127.0.0.1:8821/api/v1/government-subsidy/claim-batches/{batch_id}",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "xlafNs"
+      },
+      "response": {
+        "status_code": 422,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 07:01:44 GMT",
+          "server": "uvicorn",
+          "content-length": "284",
+          "content-type": "application/json",
+          "server-timing": "application;dur=179.8",
+          "x-response-time-ms": "179.8",
+          "x-correlation-id": "02c778f149c64dc59c7a0ea2faae0beb"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"validation\",\"code\":\"government_subsidy_assignment_facts_stale\",\"message\":\"\u653f\u5e9c\u88dc\u52a9\u8acb\u6c42\u672a\u901a\u904e\u8cc7\u6599\u9a57\u8b49\u3002\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"02c778f149c64dc59c7a0ea2faae0beb\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "response_schema_conformance",
+          "status": "failure",
+          "message": "Response violates schema\n\n{\"error\":{\"category\":\"validation\",\"code\":\"government_subsidy_assignment_facts_stale\",\"correlation_id\":\"02c778f149c64dc59c7a0ea2faae0beb\",\"current_version\":null,\"domain_blockers\":[],\"field_errors\":[],\"message\":\"\u653f\u5e9c\u88dc\u52a9\u8acb\u6c42\u672a\u901a\u904e\u8cc7\u6599\u9a57\u8b49\u3002\",\"retryable\":false}} is not of type \"array\"\n\nValidated against the response schema for status code 422.\n\nSchema at /components/schemas/HTTPValidationError/properties/detail:\n\n    {\n        \"type\": \"array\",\n        \"items\": {\n            \"$ref\": \"#/components/schemas/ValidationError\"\n        },\n        \"title\": \"Detail\"\n    }\n\nValue:\n\n    {\n        \"error\": {\n            \"category\": \"validation\",\n            \"code\": \"government_subsidy_assignment_facts_stale\",\n            \"correlation_id\": \"02c778f149c64dc59c7a0ea2faae0beb\",\n            \"current_version\": null,\n            \"domain_blockers\": [],\n            \"field_errors\": [],\n            \"message\": \"\\u653f\\u5e9c\\u88dc\\u52a9\\u8acb\\u6c42\\u672a\\u901a\\u904e\\u8...\n            \"retryable\": false\n        }\n    }"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.004436399962287396,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/government-subsidy/claim-batches/{batch_id}",
+      "path_parameters": {
+        "batch_id": 1
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

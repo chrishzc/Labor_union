@@ -1,13 +1,13 @@
 ---
 doc_type: work-package
-declared_status: proposed
+declared_status: completed
 identity: PROV-20260817-react-admin-phase3d-data-browser-part-identity-decision
 date: 2026-08-17
 owner: React Validation Governance Integration Owner
 domain: Global Validation Governance / Data Browser
 source_gap: PROV-20260817-react-admin-phase3d-data-browser-part-identity-gap
-authority: awaiting-exact-human-approval
-approval_required: 核准此 exact Data Browser UI Part Identity Decision Work Package，並採用 Option A
+authority: 2026-08-22 human exact approval of Option A
+approval_required: satisfied
 prerequisites: none (docs-only identity decision)
 base_branch: main
 base_head: late-bound-at-approval
@@ -74,3 +74,12 @@ path、entry identity與rollback mapping，不能只寫「歸在異常」。
 | Developer acceptance | NOT_RUN | 不操作既有DB |
 
 結論：`DB_CHANGE_NOT_READY`。
+
+## 5. Decision receipt（2026-08-22）
+
+採用Option A並late-bind canonical identity為Part `17`，唯一目錄為
+`validation/ui_business_workflows/part_17_data_browser/`，semantic identity為`part-data-browser`。owner為
+Data Browser masked Query／typed detail validation；entry固定`ui-react:#data-browser`，rollback identity固定
+`data-browser`並指向legacy `ui:01_data_browser.py`。fresh掃描確認既有Part只有04／09／14，無Part 17或未追蹤
+collision。source allowlist／masking contract仍由Phase 3D-DB-H擁有，source correction仍由owning Domain承接；
+本決策不修改lineage catalog／scenario bytes，不授權production、DB、entry switch或retirement。

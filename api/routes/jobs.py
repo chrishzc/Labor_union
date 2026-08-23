@@ -12,6 +12,7 @@ from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.jobs import (
     JobFailureOutcomeView,
+    JobObservationView,
     JobResponse,
     JobSuccessOutcomeView,
 )
@@ -20,6 +21,60 @@ from shared_kernel.durable_job_queue import DurableJobStateConflict
 from subsystems.jobs.command_application import DurableJobCancellationApplication
 
 router = APIRouter(prefix="/api/v1/jobs", tags=["Jobs"])
+
+_OBSERVED_COMMAND_TYPES = frozenset(
+    {
+        "assignment_plan_apply",
+        "finance_import_historical_reprocess_apply",
+        "finance_import_batch_apply",
+        "finance_import_correction_apply",
+        "orders_auto_completion_apply",
+        "government_subsidy_apply",
+        "payroll_rebuild_apply",
+        "staff_payout_apply",
+    }
+)
+
+
+@router.get(
+    "/{job_id}/observation",
+    response_model=BaseResponse[JobObservationView],
+)
+def get_job_observation(
+    job_id: str,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    repository: BackgroundJobRepository = Depends(get_job_repository),
+) -> BaseResponse[JobObservationView]:
+    """Return a safe job execution-state view without terminal payloads."""
+    del principal
+    job = repository.get_job(job_id)
+    if not job:
+        raise typed_http_error(
+            404,
+            "not_found",
+            "job_not_found",
+            "Job was not found.",
+            f"job-observation:{job_id}",
+        )
+    if job.command_type not in _OBSERVED_COMMAND_TYPES:
+        raise typed_http_error(
+            503,
+            "unavailable",
+            "job_observation_unavailable",
+            "此背景工作類型尚未開放安全查詢投影。",
+            f"job-observation:{job_id}",
+            retryable=False,
+        )
+    return BaseResponse(
+        data=JobObservationView(
+            job_id=job.job_id,
+            command_type=job.command_type,
+            status=job.status,
+            attempt_count=job.attempt_count,
+            max_attempts=job.max_attempts,
+        ),
+        message="成功取得背景工作執行狀態",
+    )
 
 @router.get("/{job_id}", response_model=BaseResponse[JobResponse])
 def get_job_status(

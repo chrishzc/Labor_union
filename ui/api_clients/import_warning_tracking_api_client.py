@@ -1,6 +1,6 @@
 """
 File: import_warning_tracking_api_client.py
-Description: 提供匯入警示追蹤 API 的 typed Query、Preview 與 Apply client。
+Description: 提供匯入警示追蹤 API 的 typed Query、Preview、Apply receipt 與查詢 client。
 """
 
 from collections.abc import Mapping
@@ -10,7 +10,7 @@ import requests
 from pydantic import ValidationError
 
 from api.schemas.base import BaseResponse
-from api.schemas.import_warning_tracking import ImportWarningTaskView, WarningTransitionBody, WarningTransitionPreviewView
+from api.schemas.import_warning_tracking import ImportWarningTaskView, WarningTransitionBody, WarningTransitionPreviewView, WarningTransitionReceiptView
 
 
 class ImportWarningTrackingApiError(RuntimeError):
@@ -28,13 +28,16 @@ class ImportWarningTrackingApiClient:
         return tuple(self._request("GET", "/api/v1/import-warning-tracking/tasks", params={"active_only": str(active_only).lower()}, response_type=list[ImportWarningTaskView]))
 
     def preview(self, occurrence_identity: str, body: WarningTransitionBody, *, idempotency_key: str, correlation_id: str) -> WarningTransitionPreviewView:
-        return self._command("preview", occurrence_identity, body, idempotency_key, correlation_id)
+        return self._command("preview", occurrence_identity, body, idempotency_key, correlation_id, WarningTransitionPreviewView)
 
-    def apply(self, occurrence_identity: str, body: WarningTransitionBody, *, idempotency_key: str, correlation_id: str) -> WarningTransitionPreviewView:
-        return self._command("apply", occurrence_identity, body, idempotency_key, correlation_id)
+    def apply(self, occurrence_identity: str, body: WarningTransitionBody, *, idempotency_key: str, correlation_id: str) -> WarningTransitionReceiptView:
+        return self._command("apply", occurrence_identity, body, idempotency_key, correlation_id, WarningTransitionReceiptView)
 
-    def _command(self, operation: str, occurrence_identity: str, body: WarningTransitionBody, idempotency_key: str, correlation_id: str) -> WarningTransitionPreviewView:
-        return self._request("POST", f"/api/v1/import-warning-tracking/tasks/{occurrence_identity}/{operation}", payload=body.model_dump(), headers={"Idempotency-Key": idempotency_key, "X-Correlation-ID": correlation_id}, response_type=WarningTransitionPreviewView)
+    def query_receipt(self, receipt_identity: str) -> WarningTransitionReceiptView:
+        return self._request("GET", f"/api/v1/import-warning-tracking/receipts/{receipt_identity}", response_type=WarningTransitionReceiptView)
+
+    def _command(self, operation: str, occurrence_identity: str, body: WarningTransitionBody, idempotency_key: str, correlation_id: str, response_type):
+        return self._request("POST", f"/api/v1/import-warning-tracking/tasks/{occurrence_identity}/{operation}", payload=body.model_dump(), headers={"Idempotency-Key": idempotency_key, "X-Correlation-ID": correlation_id}, response_type=response_type)
 
     def _request(self, method: str, path: str, *, response_type: Any, params=None, payload=None, headers=None):
         try:

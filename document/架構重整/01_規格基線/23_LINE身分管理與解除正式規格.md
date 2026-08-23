@@ -6,6 +6,9 @@
 - 人工確認日期：2026-08-11
 - 上位契約：`17_External_Integration_LINE_Access正式規格.md`
 - 關聯契約：`20_LINE客服與月嫂自助服務正式規格.md`
+- 2026-08-21 M1 Alternative A amendment：`line_identity_bindings` 唯一 writer、Case Import 擁有 provisional
+  registration、onboarding 是 binding projection outcome 而非 role promotion；implementation、schema／DB、
+  provider 與真實 E2E 仍須另案 gate。
 
 ## 2. Global 與 Domain 邊界
 
@@ -78,3 +81,10 @@ LINE 管理中心新增「身分管理」，並將「LINE 下方選單」改名�
 4. 成功後 binding 為 revoked，owner projection 為 NULL，解除時間、actor、reason 與事件可追溯。
 5. retry、provider-success/process-crash replay、stale version、owner conflict 與 manual override 均有測試。
 6. canonical Rich Menu current revision 顯示「服務登記／服務說明」；divergent 人工 revision 不被自動覆蓋。
+
+## 2026-08-21 M1 ownership amendment
+
+- `line_identity_bindings` 與 binding events 由 LINE Identity application 作唯一 writer；`clients.line_user_id`、`staff.line_user_id`、`admin_users.linked_line_user_id` 只作 owner projection。
+- `provisional_client_registrations` 的 provisional registration 由 Case Import 擁有；LIFF onboarding 成功只表示 binding／projection outcome，不得直接 promotion customer／staff／admin role，也不得覆蓋其他 Domain root。
+- legacy direct writers、舊 approve writer 與 `bind.html` 必須 guarded／readonly 或 `410`，逐 caller 建立 replacement、focused regression 與 restore trigger 後退出。Customer Service 的 `binding_failed_assistance` 可提供人工協助；dual-role／two-failure escalation 尚未實作，交 M4 escalation。
+- 真實 verified-token／LIFF browser／registration／binding／Rich Menu E2E 仍需 sandbox config；本正式規格同步不把現況 evidence 宣稱為 PASS，也不授權 provider、schema／DB 或 route cutover。

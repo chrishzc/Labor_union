@@ -1,0 +1,77 @@
+{
+  "contract": "migration-owned-object-descriptors/v1",
+  "descriptors": {
+    "1001_line_rich_menu_publication_step_saga.sql": {
+      "tables": {
+        "line_rich_menu_publication_step_acknowledgements": [
+          "id",
+          "publication_id",
+          "step_name",
+          "request_fingerprint",
+          "idempotency_key",
+          "provider_menu_id",
+          "acknowledged_at_utc",
+          "created_at_utc"
+        ],
+        "line_rich_menu_publication_step_attempt_events": [
+          "id",
+          "publication_id",
+          "step_name",
+          "attempt_number",
+          "request_fingerprint",
+          "idempotency_key",
+          "outcome",
+          "provider_menu_id",
+          "error_code",
+          "attempted_at_utc",
+          "correlation_id",
+          "created_at_utc"
+        ],
+        "line_rich_menu_publication_cleanup_anomalies": [
+          "id",
+          "publication_id",
+          "request_fingerprint",
+          "idempotency_key",
+          "error_code",
+          "occurred_at_utc",
+          "created_at_utc"
+        ]
+      },
+      "triggers": [
+        "trg_line_rich_menu_step_ack_before_update",
+        "trg_line_rich_menu_step_ack_before_delete",
+        "trg_line_rich_menu_step_attempt_before_update",
+        "trg_line_rich_menu_step_attempt_before_delete",
+        "trg_line_rich_menu_cleanup_anomaly_before_update",
+        "trg_line_rich_menu_cleanup_anomaly_before_delete"
+      ],
+      "indexes": {
+        "line_rich_menu_publication_step_acknowledgements.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "line_rich_menu_publication_step_acknowledgements.uq_line_rich_menu_step_ack": {"non_unique": 0, "columns": ["publication_id", "step_name"]},
+        "line_rich_menu_publication_step_acknowledgements.uq_line_rich_menu_step_ack_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "line_rich_menu_publication_step_acknowledgements.idx_line_rich_menu_step_ack_publication": {"non_unique": 1, "columns": ["publication_id", "id"]},
+        "line_rich_menu_publication_step_attempt_events.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "line_rich_menu_publication_step_attempt_events.uq_line_rich_menu_step_attempt": {"non_unique": 0, "columns": ["publication_id", "step_name", "attempt_number"]},
+        "line_rich_menu_publication_step_attempt_events.uq_line_rich_menu_step_attempt_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "line_rich_menu_publication_step_attempt_events.idx_line_rich_menu_step_attempt_publication": {"non_unique": 1, "columns": ["publication_id", "step_name", "attempt_number"]},
+        "line_rich_menu_publication_cleanup_anomalies.PRIMARY": {"non_unique": 0, "columns": ["id"]},
+        "line_rich_menu_publication_cleanup_anomalies.uq_line_rich_menu_cleanup_anomaly_idempotency": {"non_unique": 0, "columns": ["idempotency_key"]},
+        "line_rich_menu_publication_cleanup_anomalies.idx_line_rich_menu_cleanup_anomaly_publication": {"non_unique": 1, "columns": ["publication_id", "id"]}
+      },
+      "foreign_keys": {
+        "line_rich_menu_publication_step_acknowledgements.fk_line_rich_menu_step_ack_publication": {"columns": ["publication_id"], "referenced_table": "line_rich_menu_publication_tasks", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "line_rich_menu_publication_step_attempt_events.fk_line_rich_menu_step_attempt_publication": {"columns": ["publication_id"], "referenced_table": "line_rich_menu_publication_tasks", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"},
+        "line_rich_menu_publication_cleanup_anomalies.fk_line_rich_menu_cleanup_anomaly_publication": {"columns": ["publication_id"], "referenced_table": "line_rich_menu_publication_tasks", "referenced_columns": ["id"], "update_rule": "RESTRICT", "delete_rule": "RESTRICT"}
+      },
+      "checks": {
+        "line_rich_menu_publication_step_acknowledgements.chk_line_rich_menu_step_ack_fingerprint": "atom(regexp_like(request_fingerprint,'^[0-9a-f]{64}$'))",
+        "line_rich_menu_publication_step_acknowledgements.chk_line_rich_menu_step_ack_provider_id": "atom(char_length(trim(provider_menu_id))>0)",
+        "line_rich_menu_publication_step_attempt_events.chk_line_rich_menu_step_attempt_number": "atom(attempt_number>0)",
+        "line_rich_menu_publication_step_attempt_events.chk_line_rich_menu_step_attempt_fingerprint": "atom(regexp_like(request_fingerprint,'^[0-9a-f]{64}$'))",
+        "line_rich_menu_publication_step_attempt_events.chk_line_rich_menu_step_attempt_outcome": "or(and(atom(outcome='success'),atom(provider_menu_idisnotnull),atom(char_length(trim(provider_menu_id))>0),atom(error_codeisnull)),and(atom(outcome<>'success'),atom(provider_menu_idisnull),atom(error_codeisnotnull),atom(char_length(trim(error_code))>0)))",
+        "line_rich_menu_publication_cleanup_anomalies.chk_line_rich_menu_cleanup_anomaly_fingerprint": "atom(regexp_like(request_fingerprint,'^[0-9a-f]{64}$'))",
+        "line_rich_menu_publication_cleanup_anomalies.chk_line_rich_menu_cleanup_anomaly_error": "atom(char_length(trim(error_code))>0)"
+      }
+    }
+  }
+}

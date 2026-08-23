@@ -4,7 +4,7 @@
  */
 import type { OrderSummaryItem, OrderSummaryPage } from '../../api/orders/order_query_schemas';
 
-export const ORDERS_TYPED_PROJECTION_UNAVAILABLE = '後端尚未提供 typed projection';
+export const ORDERS_TYPED_PROJECTION_UNAVAILABLE = '尚未登錄';
 
 export type WorkflowStage =
   | 'intake_terms'
@@ -70,14 +70,14 @@ export interface OrderSummaryPageViewModel {
 
 export function formatServiceRange(startDate: string | null, endDate: string | null): string {
   if (startDate && endDate) return `${startDate} ~ ${endDate}`;
-  if (startDate) return `${startDate} 起（訖日未提供）`;
-  if (endDate) return `起日未提供 ~ ${endDate}`;
-  return '後端未提供約定服務起訖日';
+  if (startDate) return `${startDate} 起（訖日待填寫）`;
+  if (endDate) return `起日待填寫 ~ ${endDate}`;
+  return '約定服務起訖日待補齊';
 }
 
 export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardViewModel {
   const serviceDays = item.service_days;
-  const contractAmount = item.total_employer_self_pay_payable;
+  const employerSelfPayPayable = item.total_employer_self_pay_payable;
   const staffName = item.staff_name?.trim() || null;
   return {
     id: item.case_no,
@@ -85,19 +85,21 @@ export function adaptOrderSummaryItem(item: OrderSummaryItem): OrderSummaryCardV
     clientPhone: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（聯絡電話）`,
     serviceRange: formatServiceRange(item.start_date, item.end_date),
     serviceDays,
-    serviceDaysLabel: serviceDays === null ? ORDERS_TYPED_PROJECTION_UNAVAILABLE : `${serviceDays} 天`,
+    serviceDaysLabel: serviceDays === null ? '待補服務天數' : `${serviceDays} 天`,
     serviceAddress: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（服務地址）`,
     actualStartDate: item.actual_start_date,
     actualEndDate: item.actual_end_date,
     orderStatus: item.order_status,
-    contractAmount,
+    contractAmount: employerSelfPayPayable,
     contractAmountFormatted:
-      contractAmount === null ? ORDERS_TYPED_PROJECTION_UNAVAILABLE : `NT$ ${contractAmount.toLocaleString()}`,
+      employerSelfPayPayable === null
+        ? '尚未登錄契約應付金額'
+        : `NT$ ${employerSelfPayPayable.toLocaleString()}`,
     depositSettled: null,
     depositSettledText: `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（客戶款項）`,
     assignedDoulaName: staffName,
     assignedDoulaDisplay:
-      staffName ?? `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（正式指派月嫂）`,
+      staffName ?? '尚未正式指派',
     serviceTimeTuple: null,
     requiresCooking: null,
     floorFee: null,

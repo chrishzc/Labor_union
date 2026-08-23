@@ -1,12 +1,13 @@
 ---
 doc_type: gap-package
-declared_status: proposed
+declared_status: superseded
 identity: PROV-20260817-react-admin-phase3d-data-browser-part-identity-gap
 date: 2026-08-17
 owner: React Validation Governance / Data Browser Integration Owner
 domain: Global Validation Governance / Data Browser
 source_work_packages: PROV-20260817-react-admin-phase3-scenario-lineage-governance; PROV-20260817-react-admin-phase3d-db-query-public-contract-hardening
 approval_required: 人工裁決 Data Browser 的 canonical UI Part identity 與驗收 owner
+resolution: 2026-08-22 Option A由PROV-20260817-react-admin-phase3d-data-browser-part-identity-decision完成
 prerequisites: none (docs-only gap)
 base_branch: main
 base_head: late-bound-at-approval

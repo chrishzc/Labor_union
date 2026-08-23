@@ -3,6 +3,8 @@
 ## 目的與使用方式
 
 本文件是進入程式碼前的快速導航，不取代正式規格、人工裁決或部署決策。
+執行 React 管理端 Phase 3–6 遷移時，另先讀[Phase 3–6 執行 SOP](./00_Phase3-6執行SOP.md)，
+用其控制 Phase 順序、測試次數、runtime batch、工具阻塞與 evidence 收斂。
 要修改某個業務流程時，先依下列順序閱讀：
 
 1. 根目錄 `AGENTS.md`：工作區規則、dirty worktree 與驗證方式。

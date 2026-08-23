@@ -16,7 +16,28 @@ if [[ "${1:-}" == "--dry-run" ]]; then
     exit 1
   fi
   "$PY" -m scripts.launcher_preflight --profile local-unix
+  "$PY" -m scripts.launcher_preflight --profile dual-run
+  if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
+    "$PY" -m scripts.launcher_preflight --profile artifact-runtime
+  fi
   exit $?
+fi
+
+if [[ "${1:-}" == "--smoke-test" ]]; then
+  if [[ -x .venv/bin/python ]]; then
+    PY="$PWD/.venv/bin/python"
+  elif [[ -x .venv/Scripts/python.exe ]]; then
+    PY="$PWD/.venv/Scripts/python.exe"
+  else
+    echo "Missing project virtual-environment Python."
+    exit 1
+  fi
+  exec "$PY" -m scripts.smoke_local_development_launcher
+fi
+
+if [[ "${1:-}" == "--artifact-runtime-smoke" ]]; then
+  if [[ -x .venv/bin/python ]]; then PY="$PWD/.venv/bin/python"; else PY="$PWD/.venv/Scripts/python.exe"; fi
+  exec "$PY" -m scripts.smoke_local_development_launcher --artifact-runtime
 fi
 
 if [[ ! -x .venv/bin/python ]]; then
@@ -27,6 +48,10 @@ fi
 PY="$PWD/.venv/bin/python"
 export APP_ENV="${APP_ENV:-development}"
 export INTERNAL_SERVICE_SHARED_KEY="${INTERNAL_SERVICE_SHARED_KEY:-$("${PY}" -c 'import secrets; print(secrets.token_urlsafe(32))')}"
+
+if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
+  "$PY" -m scripts.launcher_preflight --profile artifact-runtime
+fi
 
 choose_db_port() {
   if ! lsof -iTCP:3306 -sTCP:LISTEN >/dev/null 2>&1; then
@@ -41,6 +66,18 @@ DB_PORT="$(choose_db_port)"
 docker compose up -d
 "$PY" scripts/wait_for_db.py --port "$DB_PORT"
 "$PY" -m uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+if [[ "${REACT_ADMIN_RUNTIME_PROFILE:-}" == "artifact-runtime" ]]; then
+  API_READY=0
+  for _ in {1..30}; do
+    if "$PY" -c 'from urllib.request import urlopen; raise SystemExit(0 if urlopen("http://127.0.0.1:8000/health", timeout=2).status == 200 else 1)' >/dev/null 2>&1; then
+      API_READY=1
+      break
+    fi
+    sleep 1
+  done
+  [[ "$API_READY" == "1" ]] || { echo "FastAPI did not become ready."; exit 1; }
+  "$PY" -m scripts.run_service_monitor --react-admin-health-check
+fi
 "$PY" -m streamlit run ui/app.py --server.address 0.0.0.0 --server.port 8501 &
 "$PY" -m scripts.run_line_worker &
 "$PY" -m scripts.run_service_monitor &

@@ -85,11 +85,13 @@ function decodePage(raw: unknown): StaffDirectoryPage {
 
 class DefaultStaffDirectoryClient implements StaffDirectoryClient {
   private readonly requestedCursors = new Set<number>();
+  private readonly pendingCursors = new Set<number>();
   private readonly returnedCursors = new Set<number>();
   private readonly loadedIds = new Set<number>();
 
   public resetPagination(): void {
     this.requestedCursors.clear();
+    this.pendingCursors.clear();
     this.returnedCursors.clear();
     this.loadedIds.clear();
   }
@@ -100,10 +102,13 @@ class DefaultStaffDirectoryClient implements StaffDirectoryClient {
   ): Promise<StaffDirectoryPage> {
     validateParams(params);
     if (params.afterId === undefined && params.staffId === undefined) this.resetPagination();
-    if (params.afterId !== undefined && this.requestedCursors.has(params.afterId)) {
+    if (
+      params.afterId !== undefined
+      && (this.requestedCursors.has(params.afterId) || this.pendingCursors.has(params.afterId))
+    ) {
       throw new StaffDirectoryValidationError(`cursor ${params.afterId} 已查詢過。`);
     }
-    if (params.afterId !== undefined) this.requestedCursors.add(params.afterId);
+    if (params.afterId !== undefined) this.pendingCursors.add(params.afterId);
     const query: Record<string, number> = { page_size: params.pageSize ?? 200 };
     if (params.afterId !== undefined) query.after_id = params.afterId;
     if (params.staffId !== undefined) query.staff_id = params.staffId;
@@ -131,8 +136,13 @@ class DefaultStaffDirectoryClient implements StaffDirectoryClient {
       }
       if (page.next_cursor !== null) this.returnedCursors.add(page.next_cursor);
       for (const id of pageIds) this.loadedIds.add(id);
+      if (params.afterId !== undefined) {
+        this.pendingCursors.delete(params.afterId);
+        this.requestedCursors.add(params.afterId);
+      }
       return page;
     } catch (error) {
+      if (params.afterId !== undefined) this.pendingCursors.delete(params.afterId);
       throw mapStaffDirectoryError(error);
     }
   }

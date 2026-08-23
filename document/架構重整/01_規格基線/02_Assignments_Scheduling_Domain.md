@@ -35,7 +35,7 @@
 - assignment 的整段連續區間都占用月嫂，休假不能被誤判為可接其他案件。
 - 一般洽談不占檔期；客戶確認後才形成 waiting-deposit lock。
 - 訂金逾期只形成異常，不自動釋放。
-- 每個 assignment 預計結束日後七天為獨立 buffer；全案第一個正式服務開始時同交易解除全部 buffer。
+- 每個尚未開始服務的 assignment 預計結束日後七天為獨立 buffer；全案第一個正式服務開始時同交易解除全部 buffer。Current Query 亦須以全案第一個正式服務時刻排除已開始／已完成案件的 stale active buffer root，不得讓 persistence marker 覆蓋 `planned／active／completed` lifecycle。
 - 國定假日不自動雙倍薪；只接受明確 special-pay event。
 - 全部服務完成後不得取消訂單或縮減月嫂完整履約薪資。
 
@@ -148,6 +148,11 @@ Batch replay：
 
 Calendar 亦顯示 current 長假／暫停接案的日期、kind 與原因。這些日期不可標為可接案、正式服務日、
 assignment leave outcome 或七日 buffer；取消後保留歷史但不再出現在 current availability projection。
+
+Calendar／React 只能顯示 Scheduling typed projection 的 `planned／active／completed` 與逐日
+`assignment_status`；不得依 Orders label、瀏覽器日期、occupancy tone 或是否含案件編號自行推導「服務中」。
+`assignment_buffer`／`waiting_deposit_buffer` 永不得標為服務中；完成 assignment 的歷史服務日顯示
+「服務已結束」，但仍維持唯讀歷史可見性。
 
 Calendar 的「可進行出勤精算案件」必須先以 Scheduling 的單一批次 read
 `staff/{staff_id}/assignment-schedules` 取得該月嫂未取消的正式 assignment `case_no` 集合，
@@ -305,6 +310,11 @@ Stable errors：
 - 代班只替換同一服務日 owner；順延才移動服務日期。兩者都必須維持合約服務日數守恆。
 - Apply 必須 fresh rebuild 並重新檢查 blocker、versions、fingerprint 與 occupancy，禁止信任 UI snapshot。
 - `SchedulingHolidayQuery` 是 Preview／Apply 共用的版本化、fail-closed read port；國定假日預設為休假、扣除服務日並順延。Holiday facts 必須納入 Preview fingerprint，Apply 必須 fresh-read 並鎖定同一 planning horizon；無法讀取時回 `holiday_calendar_unavailable`。
+- Holiday 管理 Query 必須回傳 closed typed rows、`source_identity`、calendar version 與明確
+  planning horizon；Preview 為零寫入，Apply 以同一 horizon fresh-lock、驗 expected version 與
+  fingerprint，並把 holiday mutation 與 immutable receipt 放在單一 outer UoW。Cache 只在
+  commit 後失效，失效失敗不得改寫已提交 receipt。`is_double_pay_default`僅為相容參考，
+  不得由 UI 或 Scheduling 自動產生 Payroll 規則。
 - Leave／substitution Calendar Preview 的 API view、UI client 與 route payload 必須以同一
   `LeaveSubstitutionPreviewView` 驗證；成功 envelope 的 nullable `error` 不得被 UI 誤判為
   失敗。UI 只 render typed candidate、holiday rows 與 apply readiness。
@@ -344,3 +354,12 @@ Historical Order Adoption 可保存一或兩位來源月嫂的不可變配對 ev
 
 歷史 assignment 即使有起訖日，仍不等於 assignment-owned official service days。缺少逐日 ownership
 與 rate snapshot 時 Payroll 固定回 blocker；不得按連續曆日猜算工時、薪資或應付義務。
+
+## 2026-08-21 M3 Matching Coordination amendment
+
+Scheduling 正式收納 `Matching Coordination` 為本 Domain 內的 subsystem／bounded coordination capability；它擁有 criteria snapshot、candidate/package、decision lineage 與 fresh rematch orchestration，但不擁有 Orders terms、正式 assignment、official service dates、leave outcome 或 Payroll obligation。
+
+- `accepted` 只代表 customer decision；後續必須 fresh-read downstream effects，最多產生 typed Assignment conversion/rematch request 或 reference。Matching Coordination 不寫 Orders、Assignment 或 Payroll。
+- Phase D 只能透過 typed ports 讀取 Scheduling Leave／Assignment canonical receipt、提交 conversion/rematch request 並保存 reference；不得接管 `leave_substitution`、`assignment_plan` 或其 root writer。
+- Query 唯讀、Preview 零寫入、Apply 仍由 owning workflow 取得 fresh facts、lock、single outer UoW 與 receipt；跨域協調不改變本 Domain 的 assignment／leave／service-day SSOT。
+- M3 Phase E schema 只屬候選 inventory／spec planning，未授權 DDL、seed、backfill、destructive 或資料庫操作；若需變更，另立 approved schema Work Package 並重跑全部 DB gates。

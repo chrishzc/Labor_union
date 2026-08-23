@@ -1,3 +1,7 @@
+<#
+File: configure_local_admin_no_auth.ps1
+Description: 將本機開發環境設為管理端免登入並保留 dry-run preflight。
+#>
 [CmdletBinding()]
 param(
     [switch]$DryRun
@@ -21,6 +25,7 @@ if ($DryRun) {
 $desired = [ordered]@{
     APP_ENV = "development"
     ENABLE_ADMIN_AUTH = "false"
+    ACCESS_CONTROL_PROFILE = "local_bypass"
 }
 
 $existing = @()
@@ -55,3 +60,4 @@ Set-Content -Path $envFile -Value $next -Encoding UTF8
 Write-Host "[OK] .env updated:"
 Write-Host "APP_ENV=$($desired['APP_ENV'])"
 Write-Host "ENABLE_ADMIN_AUTH=$($desired['ENABLE_ADMIN_AUTH'])"
+Write-Host "ACCESS_CONTROL_PROFILE=$($desired['ACCESS_CONTROL_PROFILE'])"

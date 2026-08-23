@@ -1,10 +1,6 @@
 /**
- * @file challenger_2_anomaly_adapter_kpi_stress.test.ts
- * @description 挑戰者 2 (teamwork_preview_challenger) 異常適配器、KPI 統計、極限壓力與匯入警示隔離驗證。
- * 契約依據: PROV-20260816 Phase 2D CONTRACT_MATRIX.md。
- * 變更範圍: 獨立壓力與對抗性測試套件 (無副作用、不修改生產代碼)。
- * 驗證依據: 包含 1000+ 筆極限數據、全組合過濾、不變量驗證與 6 種匯入警示狀態隔離驗證。
- * 無副作用宣告: 純唯讀測試，無網路或全域狀態副作用。
+ * File: challenger_2_anomaly_adapter_kpi_stress.test.ts
+ * Description: 驗證 Anomalies 適配器、KPI 與匯入警示隔離。
  */
 
 import { describe, it, expect } from 'vitest';
@@ -47,7 +43,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
         id: 'mock-1',
         fingerprint: 'a'.repeat(64),
         code: 'TEST-001',
-        title: '後端尚未提供 typed 顯示摘要',
+        title: '目前 typed view 未納入摘要欄位',
         severity: '🔴 嚴重阻擋',
         severityClass: 'critical',
         status: '✅ 已排除',
@@ -55,10 +51,10 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
         rawWorkflowStatus: 'resolved',
         rawDomain: 'scheduling',
         category: '排班調度',
-        relatedEntity: '後端尚未提供',
-        description: '後端尚未提供 typed 顯示摘要',
-        suggestedAction: '後端尚未提供',
-        rootEvidence: '後端 typed detail/recovery contract 尚未開放',
+        relatedEntity: '目前 typed view 未納入關聯實體欄位',
+        description: '目前 typed view 未納入描述欄位',
+        suggestedAction: '目前 typed view 未納入建議處理欄位',
+        rootEvidence: '目前 typed view 未納入根事實明細欄位',
         staffCalendarNavigation: null,
         metadata: {
           sourceDomain: 'scheduling',
@@ -80,7 +76,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
         id: 'mock-2',
         fingerprint: 'b'.repeat(64),
         code: 'TEST-002',
-        title: '後端尚未提供 typed 顯示摘要',
+        title: '目前 typed view 未納入摘要欄位',
         severity: '🟡 警示待補',
         severityClass: 'warning',
         status: '✅ 已排除',
@@ -88,10 +84,10 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
         rawWorkflowStatus: 'resolved',
         rawDomain: 'case_import',
         category: '匯入資料',
-        relatedEntity: '後端尚未提供',
-        description: '後端尚未提供 typed 顯示摘要',
-        suggestedAction: '後端尚未提供',
-        rootEvidence: '後端 typed detail/recovery contract 尚未開放',
+        relatedEntity: '目前 typed view 未納入關聯實體欄位',
+        description: '目前 typed view 未納入描述欄位',
+        suggestedAction: '目前 typed view 未納入建議處理欄位',
+        rootEvidence: '目前 typed view 未納入根事實明細欄位',
         staffCalendarNavigation: null,
         metadata: {
           sourceDomain: 'case_import',
@@ -132,7 +128,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
           id: `item-${index}`,
           fingerprint: hex,
           code: `CODE-${index}`,
-          title: '後端尚未提供 typed 顯示摘要',
+          title: '目前 typed view 未納入摘要欄位',
           severity: isBlocking ? '🔴 嚴重阻擋' : '🟡 警示待補',
           severityClass: isBlocking ? 'critical' : 'warning',
           status: status === 'open' ? '🟡 待處理' : status === 'claimed' ? '🔵 已認領' : '✅ 已排除',
@@ -140,10 +136,10 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
           rawWorkflowStatus: status,
           rawDomain: domain,
           category: mapDomainToCategory(domain),
-          relatedEntity: '後端尚未提供',
-          description: '後端尚未提供 typed 顯示摘要',
-          suggestedAction: '後端尚未提供',
-          rootEvidence: '後端 typed detail/recovery contract 尚未開放',
+          relatedEntity: '目前 typed view 未納入關聯實體欄位',
+          description: '目前 typed view 未納入描述欄位',
+          suggestedAction: '目前 typed view 未納入建議處理欄位',
+          rootEvidence: '目前 typed view 未納入根事實明細欄位',
           staffCalendarNavigation: null,
           metadata: {
             sourceDomain: domain,
@@ -203,7 +199,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
           id: `rand-${i}`,
           fingerprint: hex,
           code: `RAND-${i}`,
-          title: '後端尚未提供 typed 顯示摘要',
+          title: '目前 typed view 未納入摘要欄位',
           severity: severity === 'blocking' ? '🔴 嚴重阻擋' : '🟡 警示待補',
           severityClass: severity === 'blocking' ? 'critical' : 'warning',
           status: status === 'open' ? '🟡 待處理' : status === 'claimed' ? '🔵 已認領' : '✅ 已排除',
@@ -211,10 +207,10 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
           rawWorkflowStatus: status,
           rawDomain: domain,
           category: mapDomainToCategory(domain),
-          relatedEntity: '後端尚未提供',
-          description: '後端尚未提供 typed 顯示摘要',
-          suggestedAction: '後端尚未提供',
-          rootEvidence: '後端 typed detail/recovery contract 尚未開放',
+          relatedEntity: '目前 typed view 未納入關聯實體欄位',
+          description: '目前 typed view 未納入描述欄位',
+          suggestedAction: '目前 typed view 未納入建議處理欄位',
+          rootEvidence: '目前 typed view 未納入根事實明細欄位',
           staffCalendarNavigation: null,
           metadata: {
             sourceDomain: domain,
@@ -284,7 +280,7 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
             id: `item-${hex.slice(-4)}`,
             fingerprint: hex,
             code: `ANOM-${domain}-${sev}-${st}`,
-            title: '後端尚未提供 typed 顯示摘要',
+            title: '目前 typed view 未納入摘要欄位',
             severity: sev === 'blocking' ? '🔴 嚴重阻擋' : '🟡 警示待補',
             severityClass: sev === 'blocking' ? 'critical' : 'warning',
             status: st === 'open' ? '🟡 待處理' : st === 'claimed' ? '🔵 已認領' : '✅ 已排除',
@@ -292,10 +288,10 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
             rawWorkflowStatus: st,
             rawDomain: domain,
             category: mapDomainToCategory(domain),
-            relatedEntity: '後端尚未提供',
-            description: '後端尚未提供 typed 顯示摘要',
-            suggestedAction: '後端尚未提供',
-            rootEvidence: '後端 typed detail/recovery contract 尚未開放',
+            relatedEntity: '目前 typed view 未納入關聯實體欄位',
+            description: '目前 typed view 未納入描述欄位',
+            suggestedAction: '目前 typed view 未納入建議處理欄位',
+            rootEvidence: '目前 typed view 未納入根事實明細欄位',
             staffCalendarNavigation: null,
             metadata: {
               sourceDomain: domain,
@@ -586,11 +582,11 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
 
       const adapted = adaptAnomalySummary(dto);
 
-      expect(adapted.title).toBe('後端尚未提供 typed 顯示摘要');
-      expect(adapted.description).toBe('後端尚未提供 typed 顯示摘要');
-      expect(adapted.relatedEntity).toBe('後端尚未提供');
-      expect(adapted.suggestedAction).toBe('後端尚未提供');
-      expect(adapted.rootEvidence).toBe('後端 typed detail/recovery contract 尚未開放');
+      expect(adapted.title).toBe('目前 typed view 未納入摘要欄位');
+      expect(adapted.description).toBe('目前 typed view 未納入描述欄位');
+      expect(adapted.relatedEntity).toBe('目前 typed view 未納入關聯實體欄位');
+      expect(adapted.suggestedAction).toBe('目前 typed view 未納入建議處理欄位');
+      expect(adapted.rootEvidence).toBe('目前 typed view 未納入根事實明細欄位');
       expect(adapted.category).toBe('其他');
       expect(adapted.status).toBe('✅ 已排除');
       expect(adapted.severity).toBe('🟡 警示待補');

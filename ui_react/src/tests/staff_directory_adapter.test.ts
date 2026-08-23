@@ -1,6 +1,6 @@
 /**
  * File: staff_directory_adapter.test.ts
- * Description: 驗證 Staff 摘要 adapter 只映射 id、name、phone 並保留 null unavailable 語意。
+ * Description: 驗證 Staff 摘要 adapter 只映射 id、name、phone，並中性呈現合法 null。
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -20,11 +20,11 @@ describe('staff directory adapter', () => {
     });
   });
 
-  it('renders nullable fields as unavailable labels without business defaults', () => {
+  it('renders nullable fields neutrally without inventing business defaults', () => {
     const page = adaptStaffDirectoryPage(STAFF_PAGE_ONE);
 
     expect(page.items[1].displayName).toBe('服務人員摘要 #12');
-    expect(page.items[1].displayPhone).toBe('後端未提供');
+    expect(page.items[1].displayPhone).toBe('—');
     expect(page.nextCursor).toBe(12);
     expect(Object.keys(page.items[1]).sort()).toEqual([
       'displayName',
@@ -35,4 +35,3 @@ describe('staff directory adapter', () => {
     ]);
   });
 });
-

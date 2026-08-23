@@ -150,11 +150,11 @@ describe('Anomaly Query Adapter Suite', () => {
       expect(adapted.category).toBe('排班調度');
 
       // Gaps verification
-      expect(adapted.title).toBe('後端尚未提供 typed 顯示摘要');
-      expect(adapted.description).toBe('後端尚未提供 typed 顯示摘要');
-      expect(adapted.relatedEntity).toBe('後端尚未提供');
-      expect(adapted.suggestedAction).toBe('後端尚未提供');
-      expect(adapted.rootEvidence).toBe('後端 typed detail/recovery contract 尚未開放');
+      expect(adapted.title).toBe('目前 typed view 未納入摘要欄位');
+      expect(adapted.description).toBe('目前 typed view 未納入描述欄位');
+      expect(adapted.relatedEntity).toBe('目前 typed view 未納入關聯實體欄位');
+      expect(adapted.suggestedAction).toBe('目前 typed view 未納入建議處理欄位');
+      expect(adapted.rootEvidence).toBe('目前 typed view 未納入根事實明細欄位');
 
       // Navigation & Metadata
       expect(adapted.staffCalendarNavigation).toEqual({

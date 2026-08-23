@@ -31,7 +31,11 @@ def test_apply_appends_event_receipt_and_outbox_once() -> None:
         receipt = application.apply(request)
         replay = application.apply(request)
 
-        assert receipt == replay
+        assert receipt.receipt_identity == replay.receipt_identity
+        assert receipt.correlation_id == replay.correlation_id
+        assert receipt.replayed is False
+        assert replay.replayed is True
+        assert application.query_receipt(receipt.receipt_identity) == receipt
         assert receipt.resulting_version == 2
         with connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) AS count FROM import_warning_tracking_events WHERE occurrence_id=(SELECT id FROM import_warning_occurrences WHERE occurrence_identity=%s)", (identity,))

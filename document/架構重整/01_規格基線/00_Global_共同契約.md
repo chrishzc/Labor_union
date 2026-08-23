@@ -44,6 +44,21 @@ Global 只定義跨 Domain 不得被破壞的不變量及共用技術契約，�
 20. 長任務可回 `202 Accepted` 與 durable job identity，但 worker 仍執行同一原子
     application command；不得把 ledger、allocation、lifecycle 或 receipt 拆成多次 commit。
 
+### 2.1 Durable Job canonical equality（2026-08-21 Option A）
+
+本節是已核准的Global契約，production adoption仍須依Core、Bridge及各caller successor完成，不因文件裁決而自動生效：
+
+- business equality固定為`command_type + command_version + canonical_payload + submitted_by`；correlation ID只供
+  觀測，不參與equality。
+- canonical payload只接受JSON object、string keys與finite JSON values；UTF-8 serialization固定sorted keys、compact
+  separators、`ensure_ascii=False`及`allow_nan=False`。Typed schema下`1`與`1.0`是不同payload；若MySQL JSON
+  round-trip無法保存此差異，Option A固定`BLOCKED_DB_SUCCESSOR_REQUIRED`。
+- canonical idempotency key必須先符合`^[a-z0-9][a-z0-9._:-]{0,190}$`；uppercase在進DB前拒絕，禁止silent lowercase。
+- `submitted_by`必須是immutable actor identity，例如`admin_user_id:<positive-id>`或已核准的`system:<owner>`；不得用
+  display username。
+- terminal receipt/error必須使用closed command-type discriminator與schema version；禁止raw map穿透public view。
+- canonical repository不得hidden commit／rollback；application composition是唯一outer Unit of Work與commit owner。
+
 ## 3. 依賴方向
 
 ```text

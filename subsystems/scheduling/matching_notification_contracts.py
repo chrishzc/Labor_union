@@ -1,9 +1,11 @@
-"""Typed commands and results for canonical matching notifications."""
+"""File: matching_notification_contracts.py
+Description: 定義 M3 assignment conversion 後雙向 LINE intent 的 typed contracts。
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
 
 from domains.line.identities import LineDeliveryTaskId, LineUserId
@@ -15,6 +17,10 @@ from domains.scheduling.matching_communication import (
     MatchingPlanReference,
     MatchingResponseSource,
 )
+from domains.scheduling.matching_coordination import (
+    MatchingCrossDomainRequest,
+    MatchingRequestKind,
+)
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import (
     ActorContext,
@@ -23,6 +29,10 @@ from shared_kernel.identities import (
     IdempotencyKey,
 )
 from shared_kernel.validation import require_canonical_text, require_positive_integer
+from subsystems.scheduling.matching_assignment_conversion import (
+    AssignmentConversionResultState,
+    CanonicalAssignmentConversionReceipt,
+)
 
 _REASON_MAXIMUM_LENGTH = 500
 
@@ -139,6 +149,94 @@ class MatchingNotificationAudience:
 
 
 @dataclass(frozen=True, slots=True)
+class NotifyAssignmentConversionCommand:
+    request: MatchingCrossDomainRequest
+    receipt: CanonicalAssignmentConversionReceipt
+    customer: MatchingNotificationAudience
+    caregiver: MatchingNotificationAudience
+    actor: ActorContext
+    scheduled_at: datetime
+    idempotency_key: IdempotencyKey
+    correlation_id: CorrelationId
+
+    def __post_init__(self) -> None:
+        typed_values = (
+            (self.request, MatchingCrossDomainRequest, "request"),
+            (self.receipt, CanonicalAssignmentConversionReceipt, "receipt"),
+            (self.customer, MatchingNotificationAudience, "customer"),
+            (self.caregiver, MatchingNotificationAudience, "caregiver"),
+            (self.actor, ActorContext, "actor"),
+            (self.scheduled_at, datetime, "scheduled_at"),
+            (self.idempotency_key, IdempotencyKey, "idempotency_key"),
+            (self.correlation_id, CorrelationId, "correlation_id"),
+        )
+        for value, expected_type, field_name in typed_values:
+            if not isinstance(value, expected_type):
+                raise TypeError(f"assignment conversion notification {field_name} must be {expected_type.__name__}")
+        if self.request.request_kind is not MatchingRequestKind.ASSIGNMENT_CONVERSION_REQUESTED:
+            raise ValueError("assignment conversion notification request kind is invalid")
+        if not self.request.candidate_id:
+            raise ValueError("assignment conversion notification request requires a candidate")
+        if self.receipt.result_state is not AssignmentConversionResultState.CONVERTED:
+            raise ValueError("assignment conversion notification receipt must be converted")
+        if (
+            self.receipt.request_id != self.request.request_id
+            or self.receipt.package_id != self.request.package_id
+            or self.receipt.package_version != self.request.package_version
+            or self.receipt.criteria_snapshot_id != self.request.criteria_snapshot_id
+            or self.receipt.candidate_id != self.request.candidate_id
+            or self.receipt.source_versions != self.request.source_versions
+        ):
+            raise ValueError("assignment conversion notification receipt does not match request")
+        if not isinstance(self.customer.line_user_id, LineUserId):
+            raise TypeError("assignment conversion customer line_user_id must be LineUserId")
+        if not isinstance(self.caregiver.line_user_id, LineUserId):
+            raise TypeError("assignment conversion caregiver line_user_id must be LineUserId")
+        if self.customer.subject_reference != self.request.case_no:
+            raise ValueError("assignment conversion customer subject reference does not match case")
+        if self.caregiver.subject_reference != self.request.candidate_id:
+            raise ValueError("assignment conversion caregiver subject reference does not match candidate")
+        if self.scheduled_at.tzinfo is None or self.scheduled_at.utcoffset() is None:
+            raise ValueError("assignment conversion notification time must be timezone-aware")
+
+    @property
+    def fingerprint(self) -> PreviewFingerprint:
+        request = self.request
+        return fingerprint_payload(
+            {
+                "request": {
+                    "request_id": request.request_id,
+                    "request_kind": request.request_kind.value,
+                    "case_no": request.case_no,
+                    "package_id": request.package_id,
+                    "package_version": request.package_version,
+                    "criteria_snapshot_id": request.criteria_snapshot_id,
+                    "candidate_id": request.candidate_id,
+                    "source_versions": tuple(item.as_payload() for item in request.source_versions),
+                    "lineage_event_id": request.lineage_event_id,
+                    "reason": request.reason,
+                },
+                "receipt": {
+                    "fingerprint": self.receipt.receipt_fingerprint.value,
+                    "assignment_reference": self.receipt.assignment_reference,
+                },
+                "customer": {
+                    "line_user_id": self.customer.line_user_id.value,
+                    "display_name": self.customer.display_name,
+                    "subject_reference": self.customer.subject_reference,
+                },
+                "caregiver": {
+                    "line_user_id": self.caregiver.line_user_id.value,
+                    "display_name": self.caregiver.display_name,
+                    "subject_reference": self.caregiver.subject_reference,
+                },
+                "actor_id": self.actor.actor_id,
+                "scheduled_at": self.scheduled_at.astimezone(timezone.utc).isoformat(),
+            }
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class MatchingSegmentContact:
     segment_id: int
     segment_order: int
@@ -187,6 +285,23 @@ class MatchingNotificationResult:
 
     def __post_init__(self) -> None:
         require_positive_integer(self.intent_id, "matching notification intent ID")
+
+
+@dataclass(frozen=True, slots=True)
+class AssignmentConversionNotificationResult:
+    request_id: str
+    customer_task_id: LineDeliveryTaskId
+    caregiver_task_id: LineDeliveryTaskId
+    replayed: bool
+
+    def __post_init__(self) -> None:
+        require_canonical_text(self.request_id, "assignment conversion notification request ID", 191)
+        if not isinstance(self.customer_task_id, LineDeliveryTaskId):
+            raise TypeError("assignment conversion customer task ID must be LineDeliveryTaskId")
+        if not isinstance(self.caregiver_task_id, LineDeliveryTaskId):
+            raise TypeError("assignment conversion caregiver task ID must be LineDeliveryTaskId")
+        if not isinstance(self.replayed, bool):
+            raise TypeError("assignment conversion notification replayed must be bool")
 
 
 @dataclass(frozen=True, slots=True)
@@ -240,12 +355,14 @@ def _require_matching_version(
 
 
 __all__ = [
+    "AssignmentConversionNotificationResult",
     "MatchingNotificationAudience",
     "MatchingContactState",
     "MatchingNotificationProjectionStatus",
     "MatchingNotificationResult",
     "MatchingResponseResult",
     "MatchingSegmentContact",
+    "NotifyAssignmentConversionCommand",
     "RecordCaregiverLineResponseCommand",
     "RecordCustomerLineDecisionCommand",
     "RecordManualMatchingResponseCommand",

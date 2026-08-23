@@ -1,0 +1,79 @@
+{
+  "operation": "GET /api/v1/orders/{case_no}/client-finance/receipt-reconciliation",
+  "method": "GET",
+  "path_template": "/api/v1/orders/{case_no}/client-finance/receipt-reconciliation",
+  "fingerprint": "664aac79",
+  "case_id": "jQS7Sz",
+  "code_sample": "curl -X GET http://127.0.0.1:8765/api/v1/orders/0/client-finance/receipt-reconciliation",
+  "sequence": [
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:8765/api/v1/orders/0/client-finance/receipt-reconciliation",
+      "url_template": "http://127.0.0.1:8765/api/v1/orders/{case_no}/client-finance/receipt-reconciliation",
+      "headers": {
+        "User-Agent": "schemathesis/4.24.3",
+        "Accept-Encoding": "gzip, deflate, zstd",
+        "Accept": "*/*",
+        "Connection": "keep-alive",
+        "X-Schemathesis-TestCaseId": "jQS7Sz"
+      },
+      "response": {
+        "status_code": 500,
+        "headers": {
+          "date": "Fri, 21 Aug 2026 09:14:03 GMT",
+          "server": "uvicorn",
+          "content-length": "243",
+          "content-type": "application/json"
+        },
+        "body": "{\"detail\":{\"error\":{\"category\":\"internal\",\"code\":\"internal_error\",\"message\":\"\u4f3a\u670d\u5668\u767c\u751f\u672a\u9810\u671f\u932f\u8aa4\",\"field_errors\":[],\"domain_blockers\":[],\"retryable\":false,\"correlation_id\":\"d9e6f3b725764c59879ded60a189d1d5\",\"current_version\":null}}}"
+      },
+      "link": null,
+      "checks": [
+        {
+          "name": "not_a_server_error",
+          "status": "failure",
+          "message": "Server error"
+        }
+      ],
+      "meta": {
+        "generation": {
+          "time": 0.005806200031656772,
+          "mode": "positive"
+        },
+        "components": {
+          "PATH": "positive",
+          "HEADER": "positive"
+        },
+        "phase": {
+          "name": "fuzzing",
+          "data": {
+            "type": "FuzzingPhaseData",
+            "description": "Positive test case",
+            "location": null,
+            "parameter": null,
+            "parameter_location": null,
+            "mutations": []
+          }
+        },
+        "pool_draws": [],
+        "pool_misses": [],
+        "semantic_draws": [],
+        "dictionary_draws": [],
+        "constants_draws": [],
+        "raw_containers": {}
+      },
+      "path": "/api/v1/orders/{case_no}/client-finance/receipt-reconciliation",
+      "path_parameters": {
+        "case_no": "0"
+      },
+      "query": {},
+      "case_headers": {},
+      "cookies": {},
+      "case_body": {
+        "encoding": "none"
+      },
+      "media_type": null,
+      "parent_index": null
+    }
+  ]
+}

@@ -84,4 +84,21 @@ describe('SchedulingPage holiday policy flow', () => {
     expect(holidayClient.preview).not.toHaveBeenCalled();
     expect(holidayClient.apply).not.toHaveBeenCalled();
   });
+
+  it('查詢區間變更後鎖住舊日曆 Preview，提示重新查詢而不送出 stale request', async () => {
+    render(<SchedulingPage />);
+    await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
+    await waitFor(() => expect(holidayClient.query).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText('國定假日名稱'), { target: { value: '驗收假日' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽國定假日變更' }));
+    await waitFor(() => expect(holidayClient.preview).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText('國定假日查詢迄日'), { target: { value: '2026-11-30' } });
+
+    expect(screen.getByRole('button', { name: '預覽國定假日變更' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '套用國定假日變更' })).toBeDisabled();
+    expect(screen.getByText('查詢區間已變更，請重新查詢日曆後再建立 Preview。')).toBeInTheDocument();
+    expect(screen.getByText('Preview 後的查詢區間或變更欄位已調整；請重新查詢並建立新的 Preview，才能套用。')).toBeInTheDocument();
+  });
 });

@@ -35,4 +35,30 @@ describe('Data Browser real-data page', () => {
     await waitFor(() => expect(screen.getByText('已複製去敏資料')).toBeInTheDocument());
     expect(navigator.clipboard.writeText).toHaveBeenCalledTimes(1);
   });
+
+  it('retries the same cursor after a next-page failure without duplicating loaded rows', async () => {
+    vi.mocked(dataBrowserQueryClient.querySource)
+      .mockResolvedValueOnce({ ...VALID_DATA_BROWSER_PAGE, next_cursor: '115000001' })
+      .mockRejectedValueOnce(new Error('temporary page failure'))
+      .mockResolvedValueOnce({
+        ...VALID_DATA_BROWSER_PAGE,
+        items: VALID_DATA_BROWSER_PAGE.items.map((item) => ({
+          ...item,
+          row_identity: '115000002',
+          display_title: '訂單 115000002',
+        })),
+        next_cursor: null,
+      });
+
+    render(<DataBrowserPage />);
+    await waitFor(() => expect(screen.getByText('訂單 115000001')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '載入下一頁' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '重試下一頁' })).toBeInTheDocument());
+    expect(screen.getByText('訂單 115000001')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '重試下一頁' }));
+    await waitFor(() => expect(screen.getByText('訂單 115000002')).toBeInTheDocument());
+    expect(dataBrowserQueryClient.querySource).toHaveBeenCalledTimes(3);
+    expect(screen.getAllByText(/訂單 11500000[12]/)).toHaveLength(2);
+  });
 });
