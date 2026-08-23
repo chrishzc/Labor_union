@@ -1,6 +1,6 @@
 /**
  * File: line_identity_client.ts
- * Description: 呼叫 LINE 身分綁定 list/detail 與解除 Preview/Apply，逐次注入記憶體 Session 並嚴格解碼。
+ * Description: 呼叫 LINE 身分查詢、更正、解除與失敗維護端點，逐次注入記憶體 Session 並嚴格解碼。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -11,6 +11,9 @@ import {
   LineIdentityBindingListQuerySchema,
   LineIdentityBindingPageViewSchema,
   LineIdentityBindingViewSchema,
+  LineIdentityReplacementApplyRequestSchema,
+  LineIdentityReplacementPreviewViewSchema,
+  LineIdentityRevocationActionRequestSchema,
   LineIdentityRevocationApplyRequestSchema,
   LineIdentityRevocationPreviewViewSchema,
   LineIdentityRevocationRequestViewSchema,
@@ -18,6 +21,9 @@ import {
   type LineIdentityBindingListQuery,
   type LineIdentityBindingPageView,
   type LineIdentityBindingView,
+  type LineIdentityReplacementApplyRequest,
+  type LineIdentityReplacementPreviewView,
+  type LineIdentityRevocationActionRequest,
   type LineIdentityRevocationApplyRequest,
   type LineIdentityRevocationPreviewView,
   type LineIdentityRevocationRequestView,
@@ -37,6 +43,16 @@ export interface LineIdentityClient {
     lineUserId: string,
     options?: LineIdentityRequestOptions
   ): Promise<LineIdentityBindingView>;
+  previewReplacement(
+    lineUserId: string,
+    targetSubjectReference: string,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReplacementPreviewView>;
+  applyReplacement(
+    lineUserId: string,
+    payload: LineIdentityReplacementApplyRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityBindingView>;
   previewRevocation(
     lineUserId: string,
     options?: LineIdentityRequestOptions
@@ -44,6 +60,16 @@ export interface LineIdentityClient {
   applyRevocation(
     lineUserId: string,
     payload: LineIdentityRevocationApplyRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityRevocationRequestView>;
+  retryRevocation(
+    requestId: number,
+    payload: LineIdentityRevocationActionRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityRevocationRequestView>;
+  manualCompleteRevocation(
+    requestId: number,
+    payload: LineIdentityRevocationActionRequest,
     options?: LineIdentityRequestOptions
   ): Promise<LineIdentityRevocationRequestView>;
 }
@@ -75,6 +101,27 @@ function bindingPath(lineUserId: string): string {
     );
   }
   return `/api/v1/line/identity-bindings/${encodeURIComponent(lineUserId)}`;
+}
+
+function revocationRequestPath(requestId: number): string {
+  if (!Number.isInteger(requestId) || requestId <= 0) {
+    throw new LineIdentityClientError(
+      'REQUEST_INVALID',
+      'LINE 身分解除申請識別值必須為正整數。'
+    );
+  }
+  return `/api/v1/line/identity-bindings/revocations/${requestId}`;
+}
+
+function requiredText(value: string, label: string, maxLength: number): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized || normalized.length > maxLength) {
+    throw new LineIdentityClientError(
+      'REQUEST_INVALID',
+      `${label}不可為空白且不得超過 ${maxLength} 字。`
+    );
+  }
+  return normalized;
 }
 
 function decodeEnvelope<T extends z.ZodTypeAny>(
@@ -125,6 +172,50 @@ export async function getLineIdentityBinding(
   }
 }
 
+export async function previewLineIdentityReplacement(
+  lineUserId: string,
+  targetSubjectReference: string,
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityReplacementPreviewView> {
+  try {
+    const target = requiredText(targetSubjectReference, '更正對象識別值', 191);
+    const raw = await transport.post(
+      `${bindingPath(lineUserId)}/replacement/preview`,
+      undefined,
+      { ...requestOptions(options), params: { target_subject_reference: target } }
+    );
+    return decodeEnvelope(LineIdentityReplacementPreviewViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'preview');
+  }
+}
+
+export async function applyLineIdentityReplacement(
+  lineUserId: string,
+  payload: LineIdentityReplacementApplyRequest,
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityBindingView> {
+  try {
+    const normalizedPayload = LineIdentityReplacementApplyRequestSchema.parse({
+      ...payload,
+      target_subject_reference: requiredText(
+        payload.target_subject_reference,
+        '更正對象識別值',
+        191
+      ),
+      reason: requiredText(payload.reason, '更正原因', 1000),
+    });
+    const raw = await transport.post(
+      `${bindingPath(lineUserId)}/replacement/apply`,
+      normalizedPayload,
+      requestOptions(options)
+    );
+    return decodeEnvelope(LineIdentityBindingViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'apply');
+  }
+}
+
 export async function previewLineIdentityRevocation(
   lineUserId: string,
   options?: LineIdentityRequestOptions
@@ -162,6 +253,43 @@ export async function applyLineIdentityRevocation(
   }
 }
 
+async function submitRevocationAction(
+  requestId: number,
+  action: 'retry' | 'manual-complete',
+  payload: LineIdentityRevocationActionRequest,
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityRevocationRequestView> {
+  try {
+    const normalizedPayload = LineIdentityRevocationActionRequestSchema.parse({
+      reason: requiredText(payload.reason, '維護原因', 1000),
+    });
+    const raw = await transport.post(
+      `${revocationRequestPath(requestId)}/${action}`,
+      normalizedPayload,
+      requestOptions(options)
+    );
+    return decodeEnvelope(LineIdentityRevocationRequestViewSchema, raw);
+  } catch (error) {
+    throw mapLineIdentityError(error, 'apply');
+  }
+}
+
+export function retryLineIdentityRevocation(
+  requestId: number,
+  payload: LineIdentityRevocationActionRequest,
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityRevocationRequestView> {
+  return submitRevocationAction(requestId, 'retry', payload, options);
+}
+
+export function manualCompleteLineIdentityRevocation(
+  requestId: number,
+  payload: LineIdentityRevocationActionRequest,
+  options?: LineIdentityRequestOptions
+): Promise<LineIdentityRevocationRequestView> {
+  return submitRevocationAction(requestId, 'manual-complete', payload, options);
+}
+
 class DefaultLineIdentityClient implements LineIdentityClient {
   listBindings(
     query?: LineIdentityBindingListQuery,
@@ -177,6 +305,22 @@ class DefaultLineIdentityClient implements LineIdentityClient {
     return getLineIdentityBinding(lineUserId, options);
   }
 
+  previewReplacement(
+    lineUserId: string,
+    targetSubjectReference: string,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityReplacementPreviewView> {
+    return previewLineIdentityReplacement(lineUserId, targetSubjectReference, options);
+  }
+
+  applyReplacement(
+    lineUserId: string,
+    payload: LineIdentityReplacementApplyRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityBindingView> {
+    return applyLineIdentityReplacement(lineUserId, payload, options);
+  }
+
   previewRevocation(
     lineUserId: string,
     options?: LineIdentityRequestOptions
@@ -190,6 +334,22 @@ class DefaultLineIdentityClient implements LineIdentityClient {
     options?: LineIdentityRequestOptions
   ): Promise<LineIdentityRevocationRequestView> {
     return applyLineIdentityRevocation(lineUserId, payload, options);
+  }
+
+  retryRevocation(
+    requestId: number,
+    payload: LineIdentityRevocationActionRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityRevocationRequestView> {
+    return retryLineIdentityRevocation(requestId, payload, options);
+  }
+
+  manualCompleteRevocation(
+    requestId: number,
+    payload: LineIdentityRevocationActionRequest,
+    options?: LineIdentityRequestOptions
+  ): Promise<LineIdentityRevocationRequestView> {
+    return manualCompleteLineIdentityRevocation(requestId, payload, options);
   }
 }
 

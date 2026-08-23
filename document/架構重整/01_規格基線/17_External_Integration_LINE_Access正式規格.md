@@ -524,8 +524,10 @@ timestamps、unknown boolean 不覆寫。銀行與關聯集合同樣採empty-onl
   不得把partial、job accepted或archive success顯示為whole-workbook匯入成功。
 - archive只允許Case Import受控operator依稽核理由讀取；receipt不得含raw bytes、完整PII、原始檔名或local
   path。retention與encryption由Privacy／Operations擁有，期間及production provider在deployment target另行配置。
-- current persistence尚不足以證明四family的archive及完整running/progress/recovery，實作固定
-  `DB_SCOPE_REQUIRED`；未核准backend／DB successor前，React Apply維持disabled。
+- 四 family 的 current successor 已具備 archive 與 `running → row_committed* → terminal_receipt`／
+  resumable recovery，React 已完成 Preview → Apply → receipt → exact replay 的 runtime 驗收；此處原
+  `DB_SCOPE_REQUIRED`／Apply disabled 敘述已由 `15` §15 的較新裁決取代。任何新 persistence 或 schema
+  變更仍須另過 DB scope gate，不得由既有 runtime 驗收推定授權。
 
 ### 5.3 Subsystems／Modules
 

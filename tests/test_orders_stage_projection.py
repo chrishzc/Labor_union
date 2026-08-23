@@ -26,6 +26,7 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "order_updated_at": NOW,
         "import_receipt_id": 1,
         "import_created_at": NOW,
+        "imported_terms_complete": 1,
         "terms_event_id": 2,
         "terms_version": 2,
         "terms_created_at": NOW,
@@ -110,6 +111,34 @@ def test_missing_owner_fact_is_local_unavailable_and_never_copies_prior_stage() 
     assert item.stages[6].status == "in_progress"
     assert item.stages[6].settlement[1].status == "unavailable"
     assert item.stages[3].status == "completed"
+
+
+def test_imported_complete_terms_finish_step_one_without_a_terms_change_event() -> None:
+    row = _row("HCM-IMPORTED-STEP3")
+    row.update({"terms_event_id": None, "terms_version": None, "terms_created_at": None})
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.sop_steps[0].status == "completed"
+    assert item.sop_steps[2].status == "completed"
+
+
+def test_imported_terms_missing_any_required_root_fact_keep_step_one_in_progress() -> None:
+    row = _row("HCM-INCOMPLETE-TERMS")
+    row.update({
+        "imported_terms_complete": 0,
+        "terms_event_id": None,
+        "terms_version": None,
+        "terms_created_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.sop_steps[0].status == "in_progress"
 
 
 def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage() -> None:
@@ -306,5 +335,16 @@ def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
     assert "matching_response_events" in connection.last_cursor.sql
     assert "contract_signing_events" in connection.last_cursor.sql
     assert "signing.matching_plan_id = plan.id" in connection.last_cursor.sql
+    for required_terms_clause in (
+        "o.start_date IS NOT NULL",
+        "o.service_days > 0",
+        "o.service_hours_per_day > 0",
+        "o.floor_fee IS NOT NULL",
+        "o.service_start_time IS NOT NULL",
+        "o.service_end_time IS NOT NULL",
+        "o.service_end_day_offset IN (0, 1)",
+    ):
+        assert required_terms_clause in connection.last_cursor.sql
+    assert "AS imported_terms_complete" in connection.last_cursor.sql
     assert "LIMIT %s" in connection.last_cursor.sql
     assert not hasattr(connection, "commit")

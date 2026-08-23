@@ -1,14 +1,18 @@
 /**
  * File: line_identity_client.test.ts
- * Description: 驗證 LINE 身分四個核准端點、逐次 Session、嚴格解碼、錯誤映射與請求預算。
+ * Description: 驗證 LINE 身分查詢、更正、解除與維護端點、逐次 Session、嚴格解碼及錯誤映射。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
 import {
   applyLineIdentityRevocation,
+  applyLineIdentityReplacement,
   getLineIdentityBinding,
   listLineIdentityBindings,
+  manualCompleteLineIdentityRevocation,
   previewLineIdentityRevocation,
+  previewLineIdentityReplacement,
+  retryLineIdentityRevocation,
 } from '../api/line_identity/line_identity_client';
 import { LineIdentityClientError } from '../api/line_identity/line_identity_errors';
 import {
@@ -139,6 +143,77 @@ describe('LINE Identity Client（Phase 3A Lane D）', () => {
     });
     expect(headers['Idempotency-Key']).toBeUndefined();
     expect(headers['X-Correlation-ID']).toBeUndefined();
+  });
+
+  it('replacement Preview 使用 query parameter，Apply 保留 caller identity 並嚴格解碼', async () => {
+    const preview = {
+      binding: BOUND_IDENTITY_FIXTURE,
+      target_subject_reference: 'CLIENT TARGET/002',
+      target_subject_name: '更正客戶乙',
+      blockers: [],
+    };
+    const replaced = {
+      ...BOUND_IDENTITY_FIXTURE,
+      version: 8,
+      subject_reference: 'CLIENT TARGET/002',
+      subject_name: '更正客戶乙',
+    };
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(envelope(preview)))
+      .mockResolvedValueOnce(jsonResponse(envelope(replaced)));
+
+    await expect(
+      previewLineIdentityReplacement(FIXTURE_LINE_USER_ID, ' CLIENT TARGET/002 ')
+    ).resolves.toEqual(preview);
+    await expect(
+      applyLineIdentityReplacement(FIXTURE_LINE_USER_ID, {
+        expected_version: 7,
+        target_subject_reference: ' CLIENT TARGET/002 ',
+        reason: ' 綁定到錯誤客戶 ',
+        idempotency_key: 'replacement-intent-001',
+        correlation_id: 'replacement-correlation-001',
+      })
+    ).resolves.toEqual(replaced);
+
+    expect(vi.mocked(globalThis.fetch).mock.calls[0][0]).toBe(
+      `/api/v1/line/identity-bindings/${FIXTURE_LINE_USER_ID}/replacement/preview?target_subject_reference=CLIENT+TARGET%2F002`
+    );
+    expect(JSON.parse(String(vi.mocked(globalThis.fetch).mock.calls[1][1]?.body))).toEqual({
+      expected_version: 7,
+      target_subject_reference: 'CLIENT TARGET/002',
+      reason: '綁定到錯誤客戶',
+      idempotency_key: 'replacement-intent-001',
+      correlation_id: 'replacement-correlation-001',
+    });
+  });
+
+  it('retry 與 manual-complete 只傳既有 public contract 的 reason', async () => {
+    globalThis.fetch = vi
+      .fn()
+      .mockResolvedValue(jsonResponse(envelope(REVOCATION_REQUEST_FIXTURE)));
+
+    await retryLineIdentityRevocation(91, { reason: ' 重新執行安全回復 ' });
+    await manualCompleteLineIdentityRevocation(91, { reason: ' 已確認永久失敗 ' });
+
+    const [retryUrl, retryOptions] = vi.mocked(globalThis.fetch).mock.calls[0];
+    const [manualUrl, manualOptions] = vi.mocked(globalThis.fetch).mock.calls[1];
+    expect(retryUrl).toBe('/api/v1/line/identity-bindings/revocations/91/retry');
+    expect(manualUrl).toBe('/api/v1/line/identity-bindings/revocations/91/manual-complete');
+    expect(JSON.parse(String(retryOptions?.body))).toEqual({ reason: '重新執行安全回復' });
+    expect(JSON.parse(String(manualOptions?.body))).toEqual({ reason: '已確認永久失敗' });
+  });
+
+  it('maintenance request id 與空白 replacement target 在網路前 fail closed', async () => {
+    globalThis.fetch = vi.fn();
+
+    await expect(
+      retryLineIdentityRevocation(0, { reason: '重試' })
+    ).rejects.toMatchObject({ code: 'REQUEST_INVALID' });
+    await expect(
+      previewLineIdentityReplacement(FIXTURE_LINE_USER_ID, '   ')
+    ).rejects.toMatchObject({ code: 'REQUEST_INVALID' });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
   it('每次 request 都重新取得 current memory token，不快取舊 token', async () => {

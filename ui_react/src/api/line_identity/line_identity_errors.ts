@@ -1,6 +1,6 @@
 /**
  * File: line_identity_errors.ts
- * Description: 將 LINE 身分管理 transport 與 typed domain errors 映射為不洩漏原始內容的前端錯誤。
+ * Description: 將 LINE 身分查詢、更正、解除及維護錯誤映射為不洩漏原始內容的前端 typed error。
  */
 import {
   ApiAbortError,
@@ -20,7 +20,12 @@ export type LineIdentityDomainErrorCode =
   | 'line_identity_default_menu_not_published'
   | 'line_identity_owner_projection_conflict'
   | 'line_identity_menu_reset_failed'
-  | 'line_identity_manual_completion_forbidden';
+  | 'line_identity_manual_completion_forbidden'
+  | 'line_identity_binding_not_bound'
+  | 'line_identity_subject_unchanged'
+  | 'line_identity_replacement_subject_not_found'
+  | 'line_identity_replacement_subject_already_bound'
+  | 'line_identity_revocation_not_retryable';
 
 export type LineIdentityClientErrorCode =
   | 'UNAUTHENTICATED'
@@ -43,6 +48,11 @@ const DOMAIN_ERROR_CODES = new Set<LineIdentityDomainErrorCode>([
   'line_identity_owner_projection_conflict',
   'line_identity_menu_reset_failed',
   'line_identity_manual_completion_forbidden',
+  'line_identity_binding_not_bound',
+  'line_identity_subject_unchanged',
+  'line_identity_replacement_subject_not_found',
+  'line_identity_replacement_subject_already_bound',
+  'line_identity_revocation_not_retryable',
 ]);
 
 export class LineIdentityClientError extends Error {

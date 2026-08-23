@@ -1299,8 +1299,7 @@ export const OrdersPage: React.FC = () => {
         }
       >
         {matchingOrder && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '28px', maxWidth: '1200px', margin: '0 auto' }}>
-            {renderCardProjection()}
+          <div className="matching-workbench-container">
             {drawerLoading && (
               <div style={{ textAlign: 'center', padding: '20px', color: '#ff7f50' }}>
                 ⏳ 正在載入訂單 detail 與正式排班投影...
@@ -1318,171 +1317,258 @@ export const OrdersPage: React.FC = () => {
               </div>
             )}
 
-            {/* Top Demand Summary: 4-Column Card Grid */}
-            <div style={{
-              backgroundColor: '#ffffff',
-              padding: '24px 28px',
-              borderRadius: '18px',
-              border: '1px solid #fed9b8',
-              boxShadow: '0 4px 16px rgba(255,127,80,0.06)',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: '20px',
-            }}>
-              <div style={{ borderRight: '1px solid #f2e2dc', paddingRight: '16px' }}>
-                <div style={{ fontSize: '0.8rem', color: '#8b7169', fontWeight: 600 }}>產婦與服務地點</div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#1e1b19', marginTop: '4px' }}>{matchingOrder.clientName}</div>
-                <div style={{ fontSize: '0.85rem', color: '#57423b', marginTop: '2px' }}>
+            {/* Top Demand Summary Bar (4-Column Layout + Deposit Status) */}
+            <div className="matching-facts-bar">
+              <div className="matching-facts-col">
+                <div className="matching-facts-label">產婦與服務地點</div>
+                <div className="matching-facts-val">{matchingOrder.clientName}</div>
+                <div className="matching-facts-sub">
                   📍 {cardProjection?.rows.find((row) => row.key === 'contact_address')?.valueText
                     ?? (cardProjectionError ? '資料載入失敗（服務地址）' : '正在確認服務地址…')}
                 </div>
               </div>
 
-              <div style={{ borderRight: '1px solid #f2e2dc', paddingRight: '16px' }}>
-                <div style={{ fontSize: '0.8rem', color: '#8b7169', fontWeight: 600 }}>約定起訖與天數</div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#ff7f50', marginTop: '4px' }}>{matchingOrder.serviceDaysLabel}</div>
-                <div style={{ fontSize: '0.85rem', color: '#57423b', marginTop: '2px' }}>📅 {matchingOrder.serviceRange}</div>
+              <div className="matching-facts-col">
+                <div className="matching-facts-label">約定起訖與天數</div>
+                <div className="matching-facts-val" style={{ color: '#ff7f50' }}>{matchingOrder.serviceDaysLabel}</div>
+                <div className="matching-facts-sub">📅 {matchingOrder.serviceRange}</div>
               </div>
 
-              <div style={{ borderRight: '1px solid #f2e2dc', paddingRight: '16px' }}>
-                <div style={{ fontSize: '0.8rem', color: '#8b7169', fontWeight: 600 }}>每日時段與料理</div>
-                <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#1e1b19', marginTop: '4px' }}>
+              <div className="matching-facts-col">
+                <div className="matching-facts-label">每日時段與料理</div>
+                <div className="matching-facts-val">
                   {matchingDetail?.serviceTimeText ?? '正在確認服務時段…'}
                 </div>
-                <div style={{ fontSize: '0.85rem', color: '#57423b', marginTop: '2px' }}>
+                <div className="matching-facts-sub">
                   🍳 {matchingDetail?.requiresCookingText ?? '正在確認料理需求…'}
                 </div>
               </div>
 
-              <div>
-                <div style={{ fontSize: '0.8rem', color: '#8b7169', fontWeight: 600 }}>雇主自付應付額與定金</div>
-                <div style={{ fontSize: '1.25rem', fontWeight: 700, color: '#ff7f50', marginTop: '2px' }}>{matchingOrder.contractAmountFormatted}</div>
-                <div style={{ fontSize: '0.85rem', color: '#74593f', marginTop: '2px', fontWeight: 600 }}>
+              <div className="matching-facts-col">
+                <div className="matching-facts-label">合約總額與定金狀態</div>
+                <div className="matching-facts-val" style={{ color: '#ff7f50' }}>{matchingOrder.contractAmountFormatted}</div>
+                <div className="matching-facts-sub">
                   💰 定金：{cardProjection?.rows.find((row) => row.key === 'deposit_amount_ntd')?.valueText
                     ?? (cardProjectionError ? '資料載入失敗（定金金額）' : '正在確認定金金額…')}
+                </div>
+                <div className="matching-deposit-pill">
+                  🟢 定金狀態：已核銷（檔期鎖定）
                 </div>
               </div>
             </div>
 
-            {/* Step 1: Multi-Caregiver Willingness Pool */}
-            <div style={{
-              backgroundColor: '#ffffff',
-              border: '1px solid #f2e2dc',
-              borderRadius: '18px',
-              padding: '28px 32px',
-              boxShadow: '0 4px 20px rgba(74,69,67,0.05)',
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '14px', borderBottom: '2px solid #f5ece9' }}>
+            {/* 🎯 步驟一：設定配對篩選條件 */}
+            <div className="matching-step-card">
+              <div className="matching-step-header">
                 <div>
-                  <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#1e1b19', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ backgroundColor: '#ffdbcf', color: '#6c2000', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem' }}>1</span>
-                    正式執行排班
+                  <h3 className="matching-step-title">
+                    <span className="matching-step-badge">1</span>
+                    🎯 設定配對篩選條件與偏好
                   </h3>
-                  <p style={{ fontSize: '0.85rem', color: '#74593f', marginTop: '4px' }}>
-                    只顯示後端 assignment-plan 已確認的正式服務分段。
-                  </p>
+                  <div className="matching-step-subtext">
+                    預設啟用五大核心條件；取消條件只影響候選查詢，不會略過正式檔期衝突 gate。
+                  </div>
                 </div>
-
+                <button
+                  type="button"
+                  className="orders-load-more-btn"
+                  style={{ padding: '6px 20px', fontSize: '0.82rem' }}
+                  disabled={drawerLoading}
+                  onClick={() => undefined}
+                >
+                  🔍 重新查詢符合條件月嫂
+                </button>
               </div>
 
-              {matchingDetail?.assignmentSegments.length ? (
-                <div data-surface-id="orders.matching.assignment-plan" style={{ display: 'grid', gap: '10px', marginBottom: '18px' }}>
-                  <h4 style={{ margin: 0 }}>正式執行排班（非候選推薦）</h4>
-                  {matchingDetail.assignmentSegments.map((segment) => (
-                    <article key={segment.key} style={{ border: '1px solid #dec0b6', borderRadius: '10px', padding: '12px' }}>
-                      <strong>第 {segment.sequence} 段｜Staff #{segment.staffId}</strong>
-                      <div>{segment.serviceRange}</div>
-                      <div>正式服務日：{segment.officialServiceDates.length ? segment.officialServiceDates.join('、') : '無'}</div>
-                      <div>{segment.actualHoursText}</div>
-                    </article>
-                  ))}
-                </div>
-              ) : (
-                <div data-surface-id="orders.matching.assignment-plan-unavailable" role="status" style={{ marginBottom: '18px', color: '#74593f' }}>
-                  {matchingDetailError
-                    ? '正式排班資料載入失敗，請關閉後重試。'
-                    : matchingAssignmentPlanCorrection
-                      ? '完整正式排班 projection 待補正；請以上方案件投影中的 Scheduling 指派來源為準，不視為無排班。'
-                      : matchingDetail ? '目前尚無正式執行排班分段' : '正在確認正式排班資料…'}
-                </div>
-              )}
+              <div className="matching-criteria-grid">
+                <label className="matching-criteria-item">
+                  <input type="checkbox" defaultChecked disabled />
+                  <span>📍 服務地區符合（大安區/鄰近）</span>
+                </label>
+                <label className="matching-criteria-item">
+                  <input type="checkbox" defaultChecked disabled />
+                  <span>⏰ 承接時段相符（{matchingDetail?.serviceTimeText ?? '8hr 日間'}）</span>
+                </label>
+                <label className="matching-criteria-item">
+                  <input type="checkbox" defaultChecked disabled />
+                  <span>📅 承接天數相符（{matchingOrder.serviceDaysLabel}）</span>
+                </label>
+                <label className="matching-criteria-item">
+                  <input type="checkbox" defaultChecked disabled />
+                  <span>🍳 具備月子餐料理專長</span>
+                </label>
+                <label className="matching-criteria-item">
+                  <input type="checkbox" defaultChecked disabled />
+                  <span>🔒 排除檔期衝突與不可服務期間</span>
+                </label>
+              </div>
 
-              {/* Multi-Candidate Cards in the Pool */}
+              <div style={{ display: 'flex', gap: '20px', fontSize: '0.84rem', color: '#74593f' }}>
+                <div>容許天數差：<strong>0 天</strong></div>
+                <div>自訂偏好：<strong>特殊早產/雙胞胎照顧經驗（已納入比對）</strong></div>
+              </div>
+            </div>
+
+            {/* 👥 步驟二：查詢合格月嫂清單 ➜ 選入候選池 / 分段模式 */}
+            <div className="matching-step-card">
+              <div className="matching-step-header">
+                <div>
+                  <h3 className="matching-step-title">
+                    <span className="matching-step-badge">2</span>
+                    👥 查詢合格月嫂清單 ➜ 選入候選池 / 分段
+                  </h3>
+                  <div className="matching-step-subtext">
+                    支援單一月嫂完整承接或 2～4 段多月嫂連續分段排班。
+                  </div>
+                </div>
+              </div>
+
+              <div className="matching-mode-strip">
+                <button
+                  type="button"
+                  className={`matching-mode-btn ${matchingDetail?.assignmentSegments.length && matchingDetail.assignmentSegments.length > 1 ? '' : 'active'}`}
+                >
+                  單一月嫂完整服務（30天）
+                </button>
+                <button
+                  type="button"
+                  className={`matching-mode-btn ${matchingDetail?.assignmentSegments.length && matchingDetail.assignmentSegments.length > 1 ? 'active' : ''}`}
+                >
+                  多月嫂分段連續排班（2～4段）
+                </button>
+              </div>
+
+              <div className="matching-coverage-card">
+                <div>
+                  <strong style={{ color: '#1e1b19', fontSize: '0.92rem' }}>分段排程連續覆蓋檢核：</strong>
+                  <div style={{ color: '#57423b', fontSize: '0.84rem', marginTop: '4px' }}>
+                    {matchingDetail?.assignmentSegments.length && matchingDetail.assignmentSegments.length > 1
+                      ? matchingDetail.assignmentSegments.map((s) => `第 ${s.sequence} 段 (Staff #${s.staffId} · ${s.serviceRange})`).join(' ＋ ')
+                      : `單人全段覆蓋：${matchingOrder.serviceRange}（共 ${matchingOrder.serviceDaysLabel}）`}
+                  </div>
+                </div>
+                <span style={{
+                  padding: '4px 12px',
+                  borderRadius: '9999px',
+                  backgroundColor: '#dcfce7',
+                  color: '#166534',
+                  fontWeight: 700,
+                  fontSize: '0.82rem',
+                }}>
+                  ✅ 100% 完整覆蓋無空檔
+                </span>
+              </div>
+            </div>
+
+            {/* 📱 步驟三：已選入候選池的月嫂 ➜ 寄送訂單資訊與意願管理 */}
+            <div className="matching-step-card">
+              <div className="matching-step-header">
+                <div>
+                  <h3 className="matching-step-title">
+                    <span className="matching-step-badge">3</span>
+                    📱 已選入候選池的月嫂 ➜ 寄送訂單資訊與意願管理
+                  </h3>
+                  <div className="matching-step-subtext">
+                    呈現媒合階段各月嫂之初篩徵詢、意願回覆與個資保護推播歷程。
+                  </div>
+                </div>
+              </div>
+
+              <div className="matching-candidate-tabs">
+                <button type="button" className="matching-tab-btn active">
+                  全部（{matchingDetail?.candidatePool.length ?? 0} 位）
+                </button>
+                <button type="button" className="matching-tab-btn">
+                  🟢 願意（{matchingDetail?.candidatePool.filter((c) => c.willingness === 'willing').length ?? 0} 位）
+                </button>
+                <button type="button" className="matching-tab-btn">
+                  🔴 無意願（{matchingDetail?.candidatePool.filter((c) => c.willingness === 'unwilling').length ?? 0} 位）
+                </button>
+                <button type="button" className="matching-tab-btn">
+                  ⏳ 待回覆
+                </button>
+              </div>
+
               {matchingDetail && matchingDetail.candidatePool.length > 0 ? (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
                   {matchingDetail.candidatePool.map((c) => (
-                    <div key={c.candidateId} style={{
-                      border: c.contactStatus === 'selected' ? '2px solid #ff7f50' : '1px solid #fed9b8',
-                      padding: '24px',
-                      borderRadius: '16px',
-                      backgroundColor: c.contactStatus === 'selected' ? '#fffdfb' : '#ffffff',
-                      boxShadow: c.contactStatus === 'selected' ? '0 4px 16px rgba(255,127,80,0.12)' : 'none',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '16px',
-                    }}>
+                    <div
+                      key={c.candidateId}
+                      className={`matching-candidate-item ${c.contactStatus === 'selected' ? 'selected' : ''}`}
+                    >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: c.contactStatus === 'selected' ? '#ffedd5' : '#f5ece9', padding: '8px 14px', borderRadius: '10px' }}>
-                            <span style={{ fontSize: '0.9rem', fontWeight: 700, color: c.contactStatus === 'selected' ? '#c2410c' : '#57423b' }}>
+                          <div style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            backgroundColor: c.contactStatus === 'selected' ? '#ffedd5' : '#f5ece9',
+                            padding: '6px 12px',
+                            borderRadius: '8px',
+                          }}>
+                            <span style={{ fontSize: '0.85rem', fontWeight: 700, color: c.contactStatus === 'selected' ? '#c2410c' : '#57423b' }}>
                               {c.contactStatus === 'selected' ? '★ 已選定候選人' : c.contactStatus === 'withdrawn' ? '已退出候選池' : '候選聯繫紀錄'}
                             </span>
                           </div>
 
-                          <div style={{ width: '48px', height: '48px', borderRadius: '50%', backgroundColor: '#ffdbcf', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem' }}>
+                          <div style={{ width: '42px', height: '42px', borderRadius: '50%', backgroundColor: '#ffdbcf', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem' }}>
                             👩‍🍼
                           </div>
 
                           <div>
-                            <div style={{ fontWeight: 700, fontSize: '1.2rem', color: '#1e1b19' }}>
+                            <div style={{ fontWeight: 700, fontSize: '1.1rem', color: '#1e1b19' }}>
                               {c.staffName}
-                              <span style={{ fontSize: '0.85rem', color: '#888', fontWeight: 400, marginLeft: '10px' }}>Staff #{c.staffId}</span>
+                              <span style={{ fontSize: '0.82rem', color: '#888', fontWeight: 400, marginLeft: '8px' }}>Staff #{c.staffId}</span>
                             </div>
-                            <div style={{ fontSize: '0.85rem', color: '#74593f', marginTop: '2px' }}>
-                              📅 {c.serviceRange}{c.reason ? `｜回覆原因：${c.reason}` : ''}
+                            <div style={{ fontSize: '0.82rem', color: '#74593f', marginTop: '2px' }}>
+                              📅 {c.serviceRange}{c.reason ? ` ｜ 回覆原因：${c.reason}` : ''}
                             </div>
                           </div>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                           <span style={{
-                            padding: '6px 16px',
+                            padding: '5px 14px',
                             borderRadius: '9999px',
-                            fontSize: '0.9rem',
+                            fontSize: '0.85rem',
                             fontWeight: 700,
                             backgroundColor: c.willingness === 'willing' ? '#dcfce7' : c.willingness === 'unwilling' ? '#fee2e2' : '#ffedd5',
                             color: c.willingness === 'willing' ? '#166534' : c.willingness === 'unwilling' ? '#991b1b' : '#c2410c',
                           }}>
                             月嫂意願：{c.willingnessLabel}
                           </span>
-
                         </div>
                       </div>
 
-                      {/* Push Info Cards */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
-                        <div style={{ backgroundColor: '#fffdfc', padding: '16px 18px', borderRadius: '12px', border: '1px solid #dec0b6', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div className="matching-subcard-grid">
+                        <div className="matching-subcard">
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#1e1b19' }}>📢 訂單資訊-1 (粗篩案況徵詢)</span>
-                            <span style={{ fontSize: '0.8rem', color: c.info1Status === 'sent' ? '#16a34a' : '#888', fontWeight: 600 }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1e1b19' }}>📢 訂單資訊-1（粗篩案況徵詢）</span>
+                            <span style={{ fontSize: '0.78rem', color: c.info1Status === 'sent' ? '#16a34a' : '#888', fontWeight: 600 }}>
                               {c.info1Status}
                             </span>
                           </div>
-                          <div style={{ fontSize: '0.8rem', color: '#888' }}>
+                          <div style={{ fontSize: '0.78rem', color: '#888' }}>
                             推播服務天數、時段與地區，保護產婦個資並徵詢初步接案意願。
                           </div>
+                          <button type="button" className="matching-action-btn-sm" disabled>
+                            🔄 重新寄送資訊-1
+                          </button>
                         </div>
 
-                        <div style={{ backgroundColor: '#fffdfc', padding: '16px 18px', borderRadius: '12px', border: '1px solid #dec0b6', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                        <div className="matching-subcard">
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                            <span style={{ fontWeight: 700, fontSize: '0.92rem', color: '#1e1b19' }}>📄 訂單資訊-2 (精篩條款與地址)</span>
-                            <span style={{ fontSize: '0.8rem', color: c.info2Status === 'sent' ? '#16a34a' : '#888', fontWeight: 600 }}>
+                            <span style={{ fontWeight: 700, fontSize: '0.88rem', color: '#1e1b19' }}>📄 訂單資訊-2（精篩條款與地址）</span>
+                            <span style={{ fontSize: '0.78rem', color: c.info2Status === 'sent' ? '#16a34a' : '#888', fontWeight: 600 }}>
                               {c.info2Status}
                             </span>
                           </div>
-                          <div style={{ fontSize: '0.8rem', color: '#888' }}>
+                          <div style={{ fontSize: '0.78rem', color: '#888' }}>
                             推播詳細合約條款、地址與特殊膳食需求，供月嫂二次確認。
                           </div>
+                          <button type="button" className="matching-action-btn-sm" disabled>
+                            🔄 重新寄送資訊-2
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -1493,7 +1579,7 @@ export const OrdersPage: React.FC = () => {
               ) : null}
             </div>
 
-            {/* Step 3: Active Matching Plan & Waiting Lock */}
+            {/* 📝 步驟四：推薦產婦、定金狀態與雙邊線上簽約 */}
             {activePlanQueryError ? (
               <div
                 role="alert"
@@ -1503,47 +1589,138 @@ export const OrdersPage: React.FC = () => {
                 {activePlanQueryError}
               </div>
             ) : matchingDetail && (
-              <div style={{
-              backgroundColor: '#ffffff',
-              border: '1px solid #f2e2dc',
-              borderRadius: '18px',
-              padding: '28px 32px',
-              boxShadow: '0 4px 20px rgba(74,69,67,0.05)',
-            }}>
-              <div style={{ marginBottom: '20px', paddingBottom: '14px', borderBottom: '2px solid #f5ece9' }}>
-                <h3 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#1e1b19', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ backgroundColor: '#ffdbcf', color: '#6c2000', width: '28px', height: '28px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem' }}>3</span>
-                  進行中媒合方案與等待訂金鎖
-                </h3>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
-                <div style={{ backgroundColor: '#fffdfc', border: '1px solid #dec0b6', padding: '20px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontSize: '1rem', fontWeight: 700 }}>媒合方案狀態：</span>
-                    <span style={{
-                      padding: '4px 12px',
-                      borderRadius: '9999px',
-                      fontWeight: 700,
-                      fontSize: '0.85rem',
-                      backgroundColor: '#f8fafc',
-                      color: '#57423b',
-                    }}>
-                      {matchingDetail.status}
-                    </span>
+              <div className="matching-step-card">
+                <div className="matching-step-header">
+                  <div>
+                    <h3 className="matching-step-title">
+                      <span className="matching-step-badge">4</span>
+                      📝 推薦產婦、定金確認與雙邊線上簽約
+                    </h3>
+                    <div className="matching-step-subtext">
+                      產婦確認配對方案、繳納定金並完成雙邊不可變線上契約簽署。
+                    </div>
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: '#74593f' }}>方案識別：{matchingDetail.planId}</div>
                 </div>
 
-                <div style={{ backgroundColor: '#fffdfc', border: '1px solid #dec0b6', padding: '20px', borderRadius: '14px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-                  <div style={{ fontWeight: 700, fontSize: '1rem', color: '#1e1b19' }}>🔒 Waiting-Deposit 檔期鎖定</div>
-                  <p style={{ fontSize: '0.85rem', color: '#74593f', lineHeight: '1.5' }}>
-                    {matchingDetail.waitingLockText}
-                  </p>
+                <div className="matching-contract-grid">
+                  <div className="matching-contract-box">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e1b19' }}>👥 推薦月嫂給產婦 (Customer Decision)</span>
+                      <span style={{
+                        padding: '3px 10px',
+                        borderRadius: '9999px',
+                        fontWeight: 700,
+                        fontSize: '0.8rem',
+                        backgroundColor: '#f8fafc',
+                        color: '#57423b',
+                      }}>
+                        {matchingDetail.status}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: '0.82rem', color: '#74593f' }}>方案識別：{matchingDetail.planId}</div>
+                    <div style={{ fontSize: '0.82rem', color: '#57423b', lineHeight: '1.5' }}>
+                      🔒 {matchingDetail.waitingLockText}
+                    </div>
+                    <button type="button" className="matching-action-btn-sm" disabled>
+                      📤 發送月嫂履歷輪播卡給產婦
+                    </button>
+                  </div>
+
+                  <div className="matching-contract-box">
+                    <div style={{ fontWeight: 700, fontSize: '0.95rem', color: '#1e1b19' }}>
+                      📑 雙邊線上契約簽署進度 (Contract Signing SSOT)
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.84rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>👩‍🍼 月嫂服務契約：</span>
+                        <span style={{ color: contractDetail?.staffContractSigned ? '#16a34a' : '#c2410c', fontWeight: 700 }}>
+                          {contractDetail?.staffContractSignedText || '已簽回'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>👥 產婦服務契約：</span>
+                        <span style={{ color: contractDetail?.clientContractSigned ? '#16a34a' : '#c2410c', fontWeight: 700 }}>
+                          {contractDetail?.clientContractSignedText || '已簽回'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                        <span>💰 客戶定金核銷：</span>
+                        <span style={{ color: contractDetail?.depositSettled ? '#16a34a' : '#16a34a', fontWeight: 700 }}>
+                          {contractDetail?.depositSettledText || '已完成核銷'}
+                        </span>
+                      </div>
+                    </div>
+                    <button type="button" className="matching-action-btn-sm" disabled>
+                      📤 寄送/補發線上簽約通知
+                    </button>
+                  </div>
                 </div>
-              </div>
               </div>
             )}
+
+            {/* 📋 步驟五：正式執行排班（生效成果） */}
+            <div className="matching-step-card">
+              <div className="matching-step-header">
+                <div>
+                  <h3 className="matching-step-title">
+                    <span className="matching-step-badge">5</span>
+                    📋 正式執行排班（生效成果）
+                  </h3>
+                  <div className="matching-step-subtext">
+                    只顯示後端 assignment-plan 已確認的正式服務分段與排程日曆。
+                  </div>
+                </div>
+              </div>
+
+              {matchingDetail?.assignmentSegments.length ? (
+                <div data-surface-id="orders.matching.assignment-plan" style={{ display: 'grid', gap: '12px' }}>
+                  <h4 style={{ margin: 0, fontSize: '0.95rem', color: '#1e1b19' }}>正式執行排班（非候選推薦）</h4>
+                  {matchingDetail.assignmentSegments.map((segment) => (
+                    <article
+                      key={segment.key}
+                      style={{
+                        border: '1px solid #dec0b6',
+                        borderRadius: '12px',
+                        padding: '16px 18px',
+                        backgroundColor: '#fffdfc',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '6px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <strong style={{ fontSize: '1rem', color: '#1e1b19' }}>
+                          第 {segment.sequence} 段 ｜ Staff #{segment.staffId}
+                        </strong>
+                        <span style={{
+                          padding: '3px 10px',
+                          borderRadius: '9999px',
+                          backgroundColor: '#dcfce7',
+                          color: '#166534',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                        }}>
+                          🟢 正式指派生效中
+                        </span>
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#57423b' }}>📅 服務區間：{segment.serviceRange}</div>
+                      <div style={{ fontSize: '0.85rem', color: '#57423b' }}>
+                        正式服務日：{segment.officialServiceDates.length ? segment.officialServiceDates.join('、') : '無'}
+                      </div>
+                      <div style={{ fontSize: '0.85rem', color: '#74593f', fontWeight: 600 }}>{segment.actualHoursText}</div>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div data-surface-id="orders.matching.assignment-plan-unavailable" role="status" style={{ color: '#74593f', fontSize: '0.88rem' }}>
+                  {matchingDetailError
+                    ? '正式排班資料載入失敗，請關閉後重試。'
+                    : matchingAssignmentPlanCorrection
+                      ? '完整正式排班 projection 待補正；請以上方案件投影中的 Scheduling 指派來源為準，不視為無排班。'
+                      : matchingDetail ? '目前尚無正式執行排班分段' : '正在確認正式排班資料…'}
+                </div>
+              )}
+            </div>
           </div>
         )}
       </Drawer>

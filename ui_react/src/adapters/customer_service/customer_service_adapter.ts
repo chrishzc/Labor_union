@@ -1,6 +1,6 @@
 /**
  * File: customer_service_adapter.ts
- * Description: 將客服 typed DTO 轉為 UI 顯示模型，缺少的列表欄位明確標為未提供。
+ * Description: 將客服 typed DTO 轉為 UI 顯示模型，列表摘要缺值時引導操作者開啟 canonical 明細。
  */
 import type {
   CustomerServiceCategory,
@@ -73,7 +73,7 @@ export interface CustomerServiceResolvePreviewModel {
 }
 
 export const CUSTOMER_SERVICE_LIST_SUMMARY_UNAVAILABLE =
-  '後端尚未提供列表問題摘要';
+  '請開啟明細查看訊息';
 
 export function customerServiceCategoryLabel(
   category: CustomerServiceCategory

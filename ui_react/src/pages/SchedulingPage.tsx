@@ -1,6 +1,6 @@
 /**
  * File: SchedulingPage.tsx
- * Description: 顯示完整月份排班甘特，並提供獨立資格查詢與受控調度工作台。
+ * Description: 顯示完整月份排班甘特，並提供資格、調度與 M3 媒合協調工作台。
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './SchedulingPage.css';
@@ -64,8 +64,9 @@ import {
   schedulePrecisionClient,
   type SchedulePrecisionResult,
 } from '../api/scheduling/schedule_precision_client';
+import { MatchingCoordinationWorkbench } from '../components/MatchingCoordinationWorkbench';
 
-type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays' | 'leave_inbox';
+type SchedulingTab = 'calendar' | 'leave_sub' | 'holidays' | 'leave_inbox' | 'matching';
 type StatusFilter = 'all' | 'active' | 'waiting' | 'leave';
 
 interface MonthSelection {
@@ -1523,6 +1524,13 @@ export const SchedulingPage: React.FC = () => {
         >
           📥 4. 請假待辦收件匣
         </button>
+        <button
+          data-surface-id="scheduling.tab.matching"
+          className={`scheduling-tab-btn ${activeTab === 'matching' ? 'active' : ''}`}
+          onClick={() => setActiveTab('matching')}
+        >
+          🤝 5. 媒合協調工作台
+        </button>
       </nav>
 
       {activeTab === 'calendar' && (
@@ -1900,6 +1908,7 @@ export const SchedulingPage: React.FC = () => {
       {activeTab === 'leave_inbox' && (
         <StaffLeaveInboxWorkspace />
       )}
+      {activeTab === 'matching' && <MatchingCoordinationWorkbench />}
     </div>
   );
 };

@@ -1,6 +1,6 @@
 /**
  * File: customer_service_schemas.ts
- * Description: 定義客服查詢與結案 Preview／Apply 的嚴格 Zod 公開契約。
+ * Description: 定義客服查詢、狀態更新、LINE 回覆與結案 Preview／Apply 的嚴格 Zod 契約。
  */
 import { z } from 'zod';
 
@@ -150,6 +150,31 @@ export const CustomerServiceResolveApplyRequestSchema = z
   .strict();
 export type CustomerServiceResolveApplyRequest = z.infer<
   typeof CustomerServiceResolveApplyRequestSchema
+>;
+
+export const CustomerServiceUpdateRequestSchema = z
+  .object({
+    status: CustomerServiceStatusSchema,
+    internal_note: z.string().max(4000).nullable(),
+    expected_version: z.number().int().nonnegative(),
+    idempotency_key: z.string().min(1).max(191),
+  })
+  .strict();
+export type CustomerServiceUpdateRequest = z.infer<
+  typeof CustomerServiceUpdateRequestSchema
+>;
+
+export const CustomerServiceReplyRequestSchema = z
+  .object({
+    reply_text: z.string().trim().min(1).max(2000),
+    resolve: z.boolean(),
+    internal_note: z.string().max(4000).nullable(),
+    expected_version: z.number().int().nonnegative(),
+    idempotency_key: z.string().min(1).max(191),
+  })
+  .strict();
+export type CustomerServiceReplyRequest = z.infer<
+  typeof CustomerServiceReplyRequestSchema
 >;
 
 export const CustomerServiceSummaryResponseSchema = z

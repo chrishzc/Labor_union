@@ -17,6 +17,14 @@ SELECT o.case_no,
        o.updated_at AS order_updated_at,
        import_fact.import_receipt_id,
        import_fact.import_created_at,
+       CASE WHEN o.start_date IS NOT NULL
+                  AND o.service_days > 0
+                  AND o.service_hours_per_day > 0
+                  AND o.floor_fee IS NOT NULL
+                  AND o.service_start_time IS NOT NULL
+                  AND o.service_end_time IS NOT NULL
+                  AND o.service_end_day_offset IN (0, 1)
+            THEN 1 ELSE 0 END AS imported_terms_complete,
        terms_fact.terms_event_id,
        terms_fact.terms_version,
        terms_fact.terms_created_at,

@@ -1,12 +1,13 @@
 /**
  * File: line_identity_adapter.ts
- * Description: 將 LINE 身分 typed DTO 轉為遮罩展示模型，排除 provider、actor、原因與原始錯誤內容。
+ * Description: 將 LINE 身分查詢、更正、解除與維護 DTO 轉為遮罩展示模型，排除 provider 與原始錯誤。
  */
 import type {
   LineBindingSubjectType,
   LineIdentityBindingPageView,
   LineIdentityBindingStatus,
   LineIdentityBindingView,
+  LineIdentityReplacementPreviewView,
   LineIdentityRevocationPreviewView,
   LineIdentityRevocationRequestView,
   LineIdentityRevocationStatus,
@@ -46,6 +47,21 @@ export interface LineIdentityRevocationAcceptedViewModel {
   status: LineIdentityRevocationStatus;
   statusLabel: string;
   pendingBindingVersion: number;
+  attemptCount: number;
+  notice: string;
+}
+
+export interface LineIdentityReplacementPreviewViewModel {
+  binding: LineIdentityBindingRowViewModel;
+  targetSubjectName: string;
+  blockers: string[];
+  hasBlockers: boolean;
+}
+
+export interface LineIdentityMaintenanceResultViewModel {
+  requestId: number;
+  status: LineIdentityRevocationStatus;
+  statusLabel: string;
   attemptCount: number;
   notice: string;
 }
@@ -113,6 +129,21 @@ function blockerLabel(blocker: string): string {
   }
 }
 
+function replacementBlockerLabel(blocker: string): string {
+  switch (blocker) {
+    case 'line_identity_binding_not_bound':
+      return '目前綁定狀態不允許更正對象';
+    case 'line_identity_subject_unchanged':
+      return '新對象與目前綁定對象相同';
+    case 'line_identity_replacement_subject_not_found':
+      return '找不到同角色的更正對象';
+    case 'line_identity_replacement_subject_already_bound':
+      return '更正對象已綁定其他 LINE 身分';
+    default:
+      return '伺服器回報未識別的更正阻擋原因';
+  }
+}
+
 export function adaptLineIdentityBinding(
   binding: LineIdentityBindingView
 ): LineIdentityBindingRowViewModel {
@@ -154,6 +185,23 @@ export function adaptLineIdentityRevocationPreview(
   };
 }
 
+export function adaptLineIdentityReplacementPreview(
+  preview: LineIdentityReplacementPreviewView
+): LineIdentityReplacementPreviewViewModel {
+  return {
+    binding: adaptLineIdentityBinding(preview.binding),
+    targetSubjectName: preview.target_subject_name,
+    blockers: preview.blockers.map(replacementBlockerLabel),
+    hasBlockers: preview.blockers.length > 0,
+  };
+}
+
+export function adaptLineIdentityReplacementResult(
+  binding: LineIdentityBindingView
+): LineIdentityBindingRowViewModel {
+  return adaptLineIdentityBinding(binding);
+}
+
 export function adaptLineIdentityRevocationAccepted(
   request: LineIdentityRevocationRequestView
 ): LineIdentityRevocationAcceptedViewModel {
@@ -165,5 +213,21 @@ export function adaptLineIdentityRevocationAccepted(
     attemptCount: request.attempt_count,
     // Apply 只代表 durable 解除申請已受理；完成必須以後續綁定／請求查詢為準。
     notice: '解除申請已受理；仍須重新查詢綁定狀態確認後續完成結果。',
+  };
+}
+
+export function adaptLineIdentityMaintenanceResult(
+  request: LineIdentityRevocationRequestView,
+  operation: 'retry' | 'manual_complete'
+): LineIdentityMaintenanceResultViewModel {
+  return {
+    requestId: request.request_id,
+    status: request.status,
+    statusLabel: revocationStatusLabel(request.status),
+    attemptCount: request.attempt_count,
+    notice:
+      operation === 'retry'
+        ? '已重新排入 Rich Menu 回復流程；請稍後重新查詢確認完成結果。'
+        : '人工完成已受理；請重新查詢綁定狀態確認 owner projection 已清除。',
   };
 }

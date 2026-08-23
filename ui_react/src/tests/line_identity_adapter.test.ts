@@ -1,11 +1,14 @@
 /**
  * File: line_identity_adapter.test.ts
- * Description: 驗證 LINE 身分展示模型遮罩、解除未完成語意與機密欄位不穿透。
+ * Description: 驗證 LINE 身分更正、解除與維護展示模型遮罩、未完成語意及機密欄位不穿透。
  */
 import { describe, expect, it } from 'vitest';
 import {
   adaptLineIdentityBinding,
   adaptLineIdentityBindingPage,
+  adaptLineIdentityMaintenanceResult,
+  adaptLineIdentityReplacementPreview,
+  adaptLineIdentityReplacementResult,
   adaptLineIdentityRevocationAccepted,
   adaptLineIdentityRevocationPreview,
   maskLineUserId,
@@ -77,6 +80,33 @@ describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
     expect(JSON.stringify(result)).not.toContain('provider-secret-in-blocker');
   });
 
+  it('replacement Preview 只呈現目標名稱與安全 blocker，不穿透 subject reference', () => {
+    const preview = adaptLineIdentityReplacementPreview({
+      binding: BOUND_IDENTITY_FIXTURE,
+      target_subject_reference: 'CLIENT-PRIVATE-002',
+      target_subject_name: '更正客戶乙',
+      blockers: ['line_identity_replacement_subject_already_bound'],
+    });
+
+    expect(preview.targetSubjectName).toBe('更正客戶乙');
+    expect(preview.blockers).toEqual(['更正對象已綁定其他 LINE 身分']);
+    expect(JSON.stringify(preview)).not.toContain('CLIENT-PRIVATE-002');
+  });
+
+  it('replacement result 維持 LINE ID 遮罩且不輸出 subject reference', () => {
+    const result = adaptLineIdentityReplacementResult({
+      ...BOUND_IDENTITY_FIXTURE,
+      version: 8,
+      subject_reference: 'CLIENT-PRIVATE-002',
+      subject_name: '更正客戶乙',
+    });
+
+    expect(result.subjectName).toBe('更正客戶乙');
+    expect(result.version).toBe(8);
+    expect(JSON.stringify(result)).not.toContain('CLIENT-PRIVATE-002');
+    expect(JSON.stringify(result)).not.toContain(FIXTURE_LINE_USER_ID);
+  });
+
   it('pending apply result 明確表示申請受理而非已解除', () => {
     const result = adaptLineIdentityRevocationAccepted(REVOCATION_REQUEST_FIXTURE);
 
@@ -116,5 +146,22 @@ describe('LINE Identity Adapter（Phase 3A Lane D）', () => {
     expect(serialized).not.toContain(REVOCATION_REQUEST_FIXTURE.requested_by_actor_id);
     expect(serialized).not.toContain(REVOCATION_REQUEST_FIXTURE.reason);
     expect(serialized).not.toContain('private raw provider response');
+  });
+
+  it('maintenance result 區分重新排入與人工完成，但不宣稱 provider 已成功', () => {
+    const retry = adaptLineIdentityMaintenanceResult(
+      { ...REVOCATION_REQUEST_FIXTURE, status: 'menu_reset_failed' },
+      'retry'
+    );
+    const manual = adaptLineIdentityMaintenanceResult(
+      { ...REVOCATION_REQUEST_FIXTURE, status: 'manual_completed' },
+      'manual_complete'
+    );
+
+    expect(retry.notice).toContain('重新排入');
+    expect(retry.notice).toContain('重新查詢');
+    expect(manual.statusLabel).toBe('人工解除完成');
+    expect(manual.notice).toContain('重新查詢');
+    expect(JSON.stringify([retry, manual])).not.toContain(FIXTURE_LINE_USER_ID);
   });
 });

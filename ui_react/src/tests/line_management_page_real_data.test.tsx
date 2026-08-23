@@ -1,6 +1,6 @@
 /**
  * File: line_management_page_real_data.test.tsx
- * Description: 驗證 LINE 管理頁以 typed client 資料呈現六頁籤、客服 KPI 與遮罩身分清單。
+ * Description: 驗證 LINE 管理頁以 typed client 呈現六個 canonical 頁籤、客服 KPI 與遮罩身分。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -48,7 +48,7 @@ describe('LINE 管理頁真實資料呈現', () => {
 
     await waitFor(() => expect(screen.getByText('#31')).toBeInTheDocument());
     expect(screen.getByText('2')).toBeInTheDocument();
-    expect(screen.getByText('後端尚未提供列表問題摘要')).toBeInTheDocument();
+    expect(screen.getByText('請開啟明細查看訊息')).toBeInTheDocument();
     expect(screen.queryByText('TKT-2026-001')).not.toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: /[1-6]\./ })).toHaveLength(6);
     expect(globalThis.fetch).not.toHaveBeenCalled();

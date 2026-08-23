@@ -1,6 +1,6 @@
 /**
  * File: line_rich_menu_query_flow.test.tsx
- * Description: 驗證 Rich Menu 設定與單一 loaded-scope 說明來自 query client，且敏感 action 原生鎖定。
+ * Description: 驗證 Rich Menu 設定與發布紀錄來自 query client，且未授權 provider action 不進入畫面。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -26,7 +26,7 @@ function dependencies(): { customer: CustomerServiceQueryClient; identity: LineI
 afterEach(() => vi.restoreAllMocks());
 
 describe('LINE Rich Menu query-only 接線', () => {
-  it('顯示真實 menu label 與單一 loaded-scope publication 說明，且 action 原生鎖定', async () => {
+  it('顯示真實 menu label 與 publication，且不暴露 provider action', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
     const { customer, identity, configuration } = dependencies();
@@ -34,14 +34,11 @@ describe('LINE Rich Menu query-only 接線', () => {
     fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
 
     await waitFor(() => expect(screen.getByText('案件進度')).toBeInTheDocument());
-    expect(screen.getAllByText(/僅顯示本次 loaded scope/)).toHaveLength(1);
-    expect(screen.getByText('僅顯示本次 loaded scope（最多 100 筆），不代表完整歷史總數。')).toBeInTheDocument();
+    expect(screen.getByText('目前載入最多 100 筆。')).toBeInTheDocument();
     expect(screen.getByText('已發布')).toBeInTheDocument();
     expect(screen.queryByText('case_progress')).not.toBeInTheDocument();
     expect(screen.queryByText(/https?:\/\//)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /發布至 LINE/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '上傳圖片' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '刪除選單' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
     expect(configuration.getRichMenuConfiguration).toHaveBeenCalledTimes(1);
     expect(configuration.listRichMenuPublications).toHaveBeenCalledTimes(1);
 
@@ -50,7 +47,7 @@ describe('LINE Rich Menu query-only 接線', () => {
       19,
       expect.objectContaining({ signal: expect.any(AbortSignal) }),
     ));
-    expect(screen.getByRole('button', { name: '重新發布' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '重新發布' })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

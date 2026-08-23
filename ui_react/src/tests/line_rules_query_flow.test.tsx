@@ -1,6 +1,6 @@
 /**
  * File: line_rules_query_flow.test.tsx
- * Description: 驗證通知規則只在頁籤啟用時查詢，呈現真實 catalog／empty 並維持 mutation 鎖定。
+ * Description: 驗證通知規則只在頁籤啟用時查詢，呈現真實 catalog／empty 且不暴露 mutation。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -41,7 +41,7 @@ describe('LINE 通知規則 query-only 接線', () => {
     expect(screen.queryByText('FLOW-04')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /deposit_notice/ }));
     expect(screen.getByText('訂金確認')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /儲存並發布/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 

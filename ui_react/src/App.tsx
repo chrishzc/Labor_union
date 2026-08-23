@@ -1,6 +1,6 @@
 /**
  * File: App.tsx
- * Description: 應用程式根元件，實作 URL Hash 路由同步、認證守衛與 ErrorBoundary 容錯防護。
+ * Description: 應用程式根元件，實作 URL Hash 路由、認證守衛與單一 LINE canonical 工作區。
  */
 import React, { useEffect, useState } from 'react';
 import './styles/design-tokens.css';
@@ -20,9 +20,6 @@ import { SchedulingPage } from './pages/SchedulingPage';
 import { StaffPage } from './pages/StaffPage';
 import { DataImportPage } from './pages/DataImportPage';
 import { LineManagementPage } from './pages/LineManagementPage';
-import { AiEventStudio } from './pages/line_management/AiEventStudio';
-import { LiffCardStudio } from './pages/line_management/LiffCardStudio';
-import { AlertGroupSecurity } from './pages/line_management/AlertGroupSecurity';
 import { ReportsPage } from './pages/ReportsPage';
 import { FinancePage } from './pages/FinancePage';
 import { AnomaliesPage } from './pages/AnomaliesPage';
@@ -34,11 +31,11 @@ import './pages/LineManagementPage.css';
 const HASH_ALIASES: Record<string, PageType> = {
   line: 'line-management',
   'line-management': 'line-management',
-  'line-ai': 'line-ai-events',
-  'line-ai-events': 'line-ai-events',
-  'line-studio': 'line-liff-studio',
-  'line-liff-studio': 'line-liff-studio',
-  'line-security': 'line-security',
+  'line-ai': 'line-management',
+  'line-ai-events': 'line-management',
+  'line-studio': 'line-management',
+  'line-liff-studio': 'line-management',
+  'line-security': 'line-management',
 };
 
 function getPageFromHash(): PageType {
@@ -123,39 +120,6 @@ export const App: React.FC = () => {
 
         {/* LINE Hub Section */}
         {currentPage === 'line-management' && <LineManagementPage />}
-        {currentPage === 'line-ai-events' && (
-          <div className="line-page-wrapper">
-            <div className="page-header-banner line-page-header">
-              <div>
-                <h1 className="page-title">🤖 LINE AI 客服事件與意圖規則管理</h1>
-                <p className="page-subtitle">可視化管理 Tag 語意錨點標籤、官方核定回覆範本與 Live 實時對話模擬器。</p>
-              </div>
-            </div>
-            <AiEventStudio />
-          </div>
-        )}
-        {currentPage === 'line-liff-studio' && (
-          <div className="line-page-wrapper">
-            <div className="page-header-banner line-page-header">
-              <div>
-                <h1 className="page-title">🪟 LIFF 8大表單與 Flex 卡片 Live 預覽中心</h1>
-                <p className="page-subtitle">8 大受保護 LIFF 表單 ＋ 4 大 Flex 卡片高擬真手機模擬器與實機測試。</p>
-              </div>
-            </div>
-            <LiffCardStudio />
-          </div>
-        )}
-        {currentPage === 'line-security' && (
-          <div className="line-page-wrapper">
-            <div className="page-header-banner line-page-header">
-              <div>
-                <h1 className="page-title">🔒 幹部通知群組與系統安全配置</h1>
-                <p className="page-subtitle">全系統唯一幹部異常通報群組狀態監控與最高權限管理員一鍵清空重設。</p>
-              </div>
-            </div>
-            <AlertGroupSecurity />
-          </div>
-        )}
 
         {/* Finance Section */}
         {currentPage === 'finance' && <FinancePage />}

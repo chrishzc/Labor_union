@@ -1,6 +1,6 @@
 /**
  * File: line_identity_schemas.ts
- * Description: 定義 LINE 身分綁定查詢、解除預覽與解除申請的嚴格 Zod 公開契約。
+ * Description: 定義 LINE 身分查詢、對象更正、解除與人工維護操作的嚴格 Zod 公開契約。
  */
 import { z } from 'zod';
 
@@ -63,12 +63,37 @@ export const LineIdentityRevocationPreviewViewSchema = z
   })
   .strict();
 
+export const LineIdentityReplacementPreviewViewSchema = z
+  .object({
+    binding: LineIdentityBindingViewSchema,
+    target_subject_reference: z.string(),
+    target_subject_name: z.string(),
+    blockers: z.array(z.string()),
+  })
+  .strict();
+
 export const LineIdentityRevocationApplyRequestSchema = z
   .object({
     expected_version: z.number().int().nonnegative(),
     reason: z.string().min(1).max(1000),
     idempotency_key: z.string().min(1).max(191),
     correlation_id: z.string().min(1).max(191),
+  })
+  .strict();
+
+export const LineIdentityReplacementApplyRequestSchema = z
+  .object({
+    expected_version: z.number().int().nonnegative(),
+    target_subject_reference: z.string().min(1).max(191),
+    reason: z.string().min(1).max(1000),
+    idempotency_key: z.string().min(1).max(191),
+    correlation_id: z.string().min(1).max(191),
+  })
+  .strict();
+
+export const LineIdentityRevocationActionRequestSchema = z
+  .object({
+    reason: z.string().min(1).max(1000),
   })
   .strict();
 
@@ -131,8 +156,17 @@ export type LineIdentityBindingPageView = z.infer<
 export type LineIdentityRevocationPreviewView = z.infer<
   typeof LineIdentityRevocationPreviewViewSchema
 >;
+export type LineIdentityReplacementPreviewView = z.infer<
+  typeof LineIdentityReplacementPreviewViewSchema
+>;
 export type LineIdentityRevocationApplyRequest = z.infer<
   typeof LineIdentityRevocationApplyRequestSchema
+>;
+export type LineIdentityReplacementApplyRequest = z.infer<
+  typeof LineIdentityReplacementApplyRequestSchema
+>;
+export type LineIdentityRevocationActionRequest = z.infer<
+  typeof LineIdentityRevocationActionRequestSchema
 >;
 export type LineIdentityRevocationRequestView = z.infer<
   typeof LineIdentityRevocationRequestViewSchema

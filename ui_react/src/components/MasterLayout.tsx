@@ -1,6 +1,6 @@
 /**
  * File: MasterLayout.tsx
- * Description: 系統主版面容器元件，以 typed 效能快照、會話主體與明確導航呈現管理端狀態。
+ * Description: 系統主版面容器元件，以 typed 效能快照、會話主體與 canonical 導航呈現管理端狀態。
  */
 import React, { useEffect, useState } from 'react';
 import './MasterLayout.css';
@@ -19,9 +19,6 @@ export type PageType =
   | 'data-import'
   | 'reports'
   | 'line-management'
-  | 'line-ai-events'
-  | 'line-liff-studio'
-  | 'line-security'
   | 'finance'
   | 'anomalies'
   | 'data-browser'
@@ -37,9 +34,6 @@ export const PAGE_SECTION_MAP: Record<PageType, SectionType> = {
   'reports': 'operations',
 
   'line-management': 'line',
-  'line-ai-events': 'line',
-  'line-liff-studio': 'line',
-  'line-security': 'line',
 
   'finance': 'finance',
 
@@ -66,10 +60,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'reports', icon: '📊', label: '營運報表', section: 'operations' },
 
   // LINE Section
-  { id: 'line-management', icon: '📋', label: '客服與選單', section: 'line' },
-  { id: 'line-ai-events', icon: '🤖', label: 'AI事件管理', section: 'line' },
-  { id: 'line-liff-studio', icon: '🪟', label: 'LIFF與卡片', section: 'line' },
-  { id: 'line-security', icon: '🔒', label: '群組與安全', section: 'line' },
+  { id: 'line-management', icon: '💬', label: 'LINE 作業中心', section: 'line' },
 
   // Finance Section
   { id: 'finance', icon: '💰', label: '帳務中心', section: 'finance' },

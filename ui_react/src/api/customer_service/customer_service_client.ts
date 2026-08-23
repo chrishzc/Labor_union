@@ -1,6 +1,6 @@
 /**
  * File: customer_service_client.ts
- * Description: 以即時記憶體 Session 呼叫客服查詢與結案 Preview／Apply 白名單端點。
+ * Description: 以即時 Session 呼叫客服查詢、狀態更新、LINE durable 回覆與結案端點。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -16,17 +16,21 @@ import {
   CustomerServiceDetailResponseSchema,
   CustomerServiceListParamsSchema,
   CustomerServicePageResponseSchema,
+  CustomerServiceReplyRequestSchema,
   CustomerServiceResolveApplyRequestSchema,
   CustomerServiceResolvePreviewRequestSchema,
   CustomerServiceResolvePreviewResponseSchema,
   CustomerServiceSummaryResponseSchema,
+  CustomerServiceUpdateRequestSchema,
   type CustomerServiceDetail,
   type CustomerServiceListParams,
   type CustomerServicePage,
+  type CustomerServiceReplyRequest,
   type CustomerServiceResolveApplyRequest,
   type CustomerServiceResolvePreview,
   type CustomerServiceResolvePreviewRequest,
   type CustomerServiceSummary,
+  type CustomerServiceUpdateRequest,
 } from './customer_service_schemas';
 
 export interface CustomerServiceRequestOptions {
@@ -67,6 +71,19 @@ export interface CustomerServiceClient {
     ticketId: number,
     payload: CustomerServiceResolveApplyRequest,
     options: CustomerServiceApplyOptions
+  ): Promise<CustomerServiceDetail>;
+}
+
+export interface CustomerServiceActionsClient {
+  updateTicket(
+    ticketId: number,
+    payload: CustomerServiceUpdateRequest,
+    options?: CustomerServiceRequestOptions
+  ): Promise<CustomerServiceDetail>;
+  replyTicket(
+    ticketId: number,
+    payload: CustomerServiceReplyRequest,
+    options?: CustomerServiceRequestOptions
   ): Promise<CustomerServiceDetail>;
 }
 
@@ -200,6 +217,43 @@ export async function getCustomerServiceTicketDetail(
   });
 }
 
+export async function updateCustomerServiceTicket(
+  ticketId: number,
+  payload: CustomerServiceUpdateRequest,
+  options?: CustomerServiceRequestOptions
+): Promise<CustomerServiceDetail> {
+  return callCustomerService(async () => {
+    const validTicketId = validateTicketId(ticketId);
+    const validPayload = parseRequest(CustomerServiceUpdateRequestSchema, payload);
+    const raw = await transport.request(
+      `/api/v1/customer-service/tickets/${encodeURIComponent(String(validTicketId))}`,
+      {
+        ...currentRequestOptions(options),
+        method: 'PATCH',
+        body: validPayload,
+      }
+    );
+    return decodeSuccessfulEnvelope(CustomerServiceDetailResponseSchema, raw);
+  });
+}
+
+export async function replyCustomerServiceTicket(
+  ticketId: number,
+  payload: CustomerServiceReplyRequest,
+  options?: CustomerServiceRequestOptions
+): Promise<CustomerServiceDetail> {
+  return callCustomerService(async () => {
+    const validTicketId = validateTicketId(ticketId);
+    const validPayload = parseRequest(CustomerServiceReplyRequestSchema, payload);
+    const raw = await transport.post(
+      `/api/v1/customer-service/tickets/${encodeURIComponent(String(validTicketId))}/reply`,
+      validPayload,
+      currentRequestOptions(options)
+    );
+    return decodeSuccessfulEnvelope(CustomerServiceDetailResponseSchema, raw);
+  });
+}
+
 export async function previewCustomerServiceResolve(
   ticketId: number,
   payload: CustomerServiceResolvePreviewRequest,
@@ -260,7 +314,9 @@ export async function applyCustomerServiceResolve(
   });
 }
 
-class DefaultCustomerServiceClient implements CustomerServiceClient {
+class DefaultCustomerServiceClient
+  implements CustomerServiceClient, CustomerServiceActionsClient
+{
   public getSummary(
     options?: CustomerServiceRequestOptions
   ): Promise<CustomerServiceSummary> {
@@ -281,6 +337,22 @@ class DefaultCustomerServiceClient implements CustomerServiceClient {
     return getCustomerServiceTicketDetail(ticketId, options);
   }
 
+  public updateTicket(
+    ticketId: number,
+    payload: CustomerServiceUpdateRequest,
+    options?: CustomerServiceRequestOptions
+  ): Promise<CustomerServiceDetail> {
+    return updateCustomerServiceTicket(ticketId, payload, options);
+  }
+
+  public replyTicket(
+    ticketId: number,
+    payload: CustomerServiceReplyRequest,
+    options?: CustomerServiceRequestOptions
+  ): Promise<CustomerServiceDetail> {
+    return replyCustomerServiceTicket(ticketId, payload, options);
+  }
+
   public previewResolve(
     ticketId: number,
     payload: CustomerServiceResolvePreviewRequest,
@@ -298,9 +370,9 @@ class DefaultCustomerServiceClient implements CustomerServiceClient {
   }
 }
 
-export function createCustomerServiceClient(): CustomerServiceClient {
+export function createCustomerServiceClient(): CustomerServiceClient & CustomerServiceActionsClient {
   return new DefaultCustomerServiceClient();
 }
 
-export const customerServiceClient: CustomerServiceClient =
+export const customerServiceClient: CustomerServiceClient & CustomerServiceActionsClient =
   createCustomerServiceClient();

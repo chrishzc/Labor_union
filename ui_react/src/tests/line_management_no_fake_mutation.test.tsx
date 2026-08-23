@@ -1,6 +1,6 @@
 /**
  * File: line_management_no_fake_mutation.test.tsx
- * Description: 驗證 LINE query-only slice 的未開放控制項原生鎖定、零 Preview／Apply 與零直接網路請求。
+ * Description: 驗證 LINE successor 不暴露未授權控制項，且未觸發 Preview／Apply 或 provider 請求。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +18,7 @@ type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBin
 afterEach(() => vi.restoreAllMocks());
 
 describe('LINE 管理頁禁止假 mutation', () => {
-  it('所有未核准控制項均為 native disabled 且零 mutation', async () => {
+  it('未授權控制項不進入畫面，合法流程在未操作前維持零 mutation', async () => {
     const fetchSpy = vi.fn().mockRejectedValue(new Error('unexpected network'));
     vi.stubGlobal('fetch', fetchSpy);
 
@@ -52,45 +52,35 @@ describe('LINE 管理頁禁止假 mutation', () => {
 
     render(<LineManagementPage customerService={customer} lineIdentity={identity} lineConfiguration={configuration} />);
     await waitFor(() => expect(screen.getByText('#31')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: '開啟 LINE' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: '開啟 LINE' })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
-    await screen.findByText('客服結案 mutation 未開放');
-    expect(screen.getByRole('button', { name: '預覽結案（未開放）' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '確認結案（未開放）' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '重試結案（未開放）' })).toBeDisabled();
+    await screen.findByRole('button', { name: '預覽結案' });
+    expect(screen.queryByRole('button', { name: /未開放/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
     fireEvent.click(screen.getByRole('button', { name: /2\. 多角色 Rich Menu/ }));
     await screen.findByText('案件進度');
-    expect(screen.getByRole('button', { name: /發布至 LINE/ })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '上傳圖片' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '刪除選單' })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /發布至 LINE|上傳圖片|刪除選單/ })).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /3\. LINE 身分綁定/ }));
     await screen.findByText('U123••••cdef');
-    expect(screen.getByRole('button', { name: /產生綁定邀請/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /產生綁定邀請/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看明細' }));
-    await screen.findByText('身分解除 mutation 未開放');
-    expect(screen.getByRole('button', { name: '預覽解除（未開放）' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '提交解除（未開放）' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '觀察解除（未開放）' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '改綁其他身分' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '重試 Rich Menu 回復' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '人工完成' })).toBeDisabled();
+    await screen.findByRole('button', { name: '預覽解除' });
+    expect(screen.queryByRole('button', { name: /觀察解除|改綁其他身分|重試 Rich Menu 回復|人工完成/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
     fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
     await screen.findByText('deposit_notice');
-    expect(screen.getByRole('button', { name: /建立新通知規則/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /建立新通知規則/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /deposit_notice/ }));
-    expect(screen.getByRole('button', { name: /儲存並發布/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
-    fireEvent.click(screen.getByRole('button', { name: /5\. 智慧客服 FAQ/ }));
-    expect(screen.getByRole('button', { name: /新增 FAQ/ })).toBeDisabled();
-    fireEvent.click(screen.getByRole('button', { name: /6\. 三方服務群組/ }));
-    expect(screen.getByRole('button', { name: /建立三方群組/ })).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /智慧客服 FAQ/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /5\. 三方服務群組/ }));
+    expect(screen.queryByRole('button', { name: /建立三方群組/ })).not.toBeInTheDocument();
 
     expect(previewResolve).not.toHaveBeenCalled();
     expect(applyResolve).not.toHaveBeenCalled();

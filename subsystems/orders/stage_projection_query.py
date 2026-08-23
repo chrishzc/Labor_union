@@ -23,6 +23,7 @@ StageStatus = Literal["not_started", "in_progress", "blocked", "completed", "una
 
 _ROW_FIELDS = frozenset({
     "case_no", "order_version", "order_updated_at", "import_receipt_id", "import_created_at",
+    "imported_terms_complete",
     "terms_event_id", "terms_version", "terms_created_at", "matching_plan_id", "matching_plan_version",
     "matching_plan_status", "matching_created_at", "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
     "willingness_accepted_count", "willingness_contacted_at", "willingness_replied_at",
@@ -198,7 +199,8 @@ def _stages(row: Mapping[str, object], case_no: str, evaluated_at: datetime) -> 
 
 def _intake_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     imported = row["import_receipt_id"] is not None
-    terms = row["terms_event_id"] is not None
+    imported_terms_complete = _binary_flag(row, "imported_terms_complete")
+    terms = row["terms_event_id"] is not None or (imported and imported_terms_complete)
     source = _source("Case Import / Orders", "case-import-and-terms", _maximum_version(row, "order_version", "terms_version"))
     if imported and terms:
         return _stage(1, "intake_terms", "進件與補件", "Case Import / Orders", "completed", source, _latest(row, "import_created_at", "terms_created_at"), actions=(_get("orders.terms.query", f"/api/v1/orders/{case_no}/terms"),))
@@ -430,6 +432,13 @@ def _nonnegative_int(row: Mapping[str, object], field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise OrderStageProjectionContractError(f"{field} must be a nonnegative integer")
     return value
+
+
+def _binary_flag(row: Mapping[str, object], field: str) -> bool:
+    value = _nonnegative_int(row, field)
+    if value not in {0, 1}:
+        raise OrderStageProjectionContractError(f"{field} must be zero or one")
+    return bool(value)
 
 
 def _optional_int(row: Mapping[str, object], field: str) -> int | None:

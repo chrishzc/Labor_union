@@ -271,17 +271,15 @@ def test_merge_menu_copy_uses_canonical_entry_and_verified_staff_liff_targets():
     assert "userId" not in staff_orders
 
 
-def test_staff_self_service_does_not_expose_unapproved_leave_mutation():
-    route = (
-        PROJECT_ROOT / "api/routes/line_staff_self_service.py"
-    ).read_text(encoding="utf-8")
+def test_staff_self_service_exposes_only_the_approved_scheduling_mutations():
     schedule = (
         PROJECT_ROOT / "line/static/staff_schedule.html"
     ).read_text(encoding="utf-8")
 
-    assert "leave-requests" not in route
-    assert "._connection" not in route
-    assert "leave-requests" not in schedule
+    assert "/api/v1/line/staff-self-service/leave-requests" in schedule
+    assert "/api/v1/line/staff-self-service/service-day-logs" in schedule
+    assert "/api/v1/line/staff-self-service/service-day-media" in schedule
+    assert "LINE provider" not in schedule
 
 
 def test_identity_flow_requires_and_forwards_client_idempotency_key(monkeypatch):
