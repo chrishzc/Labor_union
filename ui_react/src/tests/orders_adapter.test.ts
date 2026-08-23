@@ -88,7 +88,7 @@ describe('Orders Drawer adapters', () => {
     expect(view.candidatePool).toEqual([]);
     expect(view.status).toBe('無進行中方案');
     expect(view.waitingLockAcquired).toBe(false);
-    expect(view.serviceTimeText).toContain(ORDERS_TYPED_PROJECTION_UNAVAILABLE);
+    expect(view.serviceTimeText).toBe('資料待補正（服務時段三欄）');
   });
 
   it('does not expose replacement-question-mark corruption as a candidate reason', () => {

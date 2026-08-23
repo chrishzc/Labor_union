@@ -1217,6 +1217,7 @@ export const SchedulingPage: React.FC = () => {
   const directoryPendingCursorRef = useRef<number | null>(null);
   const calendarControllerRef = useRef<AbortController | null>(null);
   const calendarLoadedKeyRef = useRef<Map<number, string>>(new Map());
+  const calendarRetryStaffIdsRef = useRef<Set<number>>(new Set());
   const eligibilityControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
@@ -1329,9 +1330,10 @@ export const SchedulingPage: React.FC = () => {
   // 甘特矩陣中的每一列都必須有自己的 server projection，不能只查目前選取的人員。
   useEffect(() => {
     if (staffList.length === 0) return undefined;
-    const rangeKey = `${range.rangeStart}:${range.rangeEnd}:${retryGeneration}`;
+    const rangeKey = `${range.rangeStart}:${range.rangeEnd}`;
     const staffToLoad = staffList.filter(
-      (staff) => calendarLoadedKeyRef.current.get(staff.id) !== rangeKey,
+      (staff) => calendarLoadedKeyRef.current.get(staff.id) !== rangeKey
+        || calendarRetryStaffIdsRef.current.has(staff.id),
     );
     if (staffToLoad.length === 0) return undefined;
 
@@ -1370,6 +1372,7 @@ export const SchedulingPage: React.FC = () => {
       }));
       if (!mountedRef.current || controller.signal.aborted || cancelled) return;
       results.forEach((result) => calendarLoadedKeyRef.current.set(result.staffId, rangeKey));
+      results.forEach((result) => calendarRetryStaffIdsRef.current.delete(result.staffId));
       setCalendarRows((current) => {
         const next = { ...current };
         results.forEach((result) => {
@@ -1458,6 +1461,15 @@ export const SchedulingPage: React.FC = () => {
 
   const prevMonthName = `${month.month === 1 ? 12 : month.month - 1}月`;
   const nextMonthName = `${month.month === 12 ? 1 : month.month + 1}月`;
+
+  const retryFailedCalendarRows = () => {
+    const failedStaffIds = staffList
+      .filter((staff) => calendarRows[staff.id]?.kind === 'error')
+      .map((staff) => staff.id);
+    if (failedStaffIds.length === 0) return;
+    calendarRetryStaffIdsRef.current = new Set(failedStaffIds);
+    setRetryGeneration((current) => current + 1);
+  };
 
   return (
     <div data-surface-id="scheduling.page" className="scheduling-gantt-page">
@@ -1770,7 +1782,7 @@ export const SchedulingPage: React.FC = () => {
               {renderError(calendarError)}
               <button
                 data-control-id="scheduling.calendar.retry"
-                onClick={() => setRetryGeneration((v) => v + 1)}
+                onClick={retryFailedCalendarRows}
               >
                 重試月曆查詢
               </button>

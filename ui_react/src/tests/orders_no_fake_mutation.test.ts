@@ -14,6 +14,8 @@ import { contractSigningClient } from '../api/orders/contract_signing_client';
 import { orderCancellationClient } from '../api/orders/order_cancellation_client';
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
+import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
+import { waitingDepositLockClient } from '../api/scheduling/waiting_deposit_lock_client';
 import { OrdersPage } from '../pages/OrdersPage';
 import {
   realisticActualStart,
@@ -49,6 +51,16 @@ describe('OrdersPage zero fake mutation', () => {
     vi.spyOn(ordersQueryClient, 'getActualStart').mockResolvedValue(realisticActualStart);
     vi.spyOn(ordersQueryClient, 'getContractCompletion').mockResolvedValue(realisticContractCompletion);
     vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue(realisticAssignmentPlan);
+    vi.spyOn(candidateContactPoolClient, 'query').mockResolvedValue({
+      pool_id: null,
+      case_no: 'ORD-2026-0801',
+      candidates: [],
+    });
+    vi.spyOn(waitingDepositLockClient, 'queryPlan').mockResolvedValue({
+      planId: 19,
+      status: 'proposed',
+      activeLockId: null,
+    });
     vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue(realisticServiceDateQueryView);
     vi.spyOn(orderStageProjectionClient, 'getOperationalTimelines').mockResolvedValue(
       buildOrdersStageProjectionFixture(operableSummaryPage),
@@ -114,6 +126,8 @@ describe('OrdersPage zero fake mutation', () => {
     expect(screen.queryByRole('button', { name: /傳送已勾選月嫂履歷給客戶/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /產生並建立等待訂金鎖/ })).not.toBeInTheDocument();
     expect(ordersQueryClient.getAssignmentPlan).toHaveBeenCalledOnce();
+    expect(candidateContactPoolClient.query).toHaveBeenCalledOnce();
+    expect(waitingDepositLockClient.queryPlan).toHaveBeenCalledOnce();
   });
 
   it('offers cancellation Query and Preview without exposing Apply', async () => {

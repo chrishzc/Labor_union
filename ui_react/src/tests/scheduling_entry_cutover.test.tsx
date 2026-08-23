@@ -91,6 +91,11 @@ function projectionResponse(
   mode: 'ready' | 'empty'
 ): unknown {
   if (mode === 'empty') {
+    const days = datesInRange(rangeStart, rangeEnd).map((calendarDate) => ({
+      calendar_date: calendarDate,
+      available: true,
+      entries: [],
+    }));
     return {
       success: true,
       message: '成功取得目前排班投影',
@@ -100,7 +105,7 @@ function projectionResponse(
         range_end: rangeEnd,
         evaluated_at: '2026-08-21T09:00:00+08:00',
         assignments: [],
-        days: [],
+        days,
         case_versions: [],
         projection_token: 'b'.repeat(64),
       },
@@ -207,9 +212,9 @@ function eligibilityResponse(url: URL): Response {
           review_dates: [],
           status: 'unavailable',
         },
-        partial_data: ['test_data_incomplete'],
+        partial_data: ['service_time_terms_incomplete'],
       }],
-      partial_data: ['test_data_incomplete'],
+      partial_data: ['service_time_terms_incomplete'],
     },
     error: null,
   });
@@ -305,7 +310,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     vi.restoreAllMocks();
   });
 
-  it('initial load queries only directory and selected calendar; eligibility waits for an explicit case', async () => {
+  it('initial load queries directory and every visible calendar; eligibility waits for an explicit case', async () => {
     authenticate();
     const requests = installFetchStub('ready');
 
@@ -316,7 +321,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     });
     expect(window.location.hash).toBe('#scheduling');
     expect(requestsAt(requests, STAFF_SUMMARY_ENDPOINT)).toHaveLength(1);
-    expect(calendarRequests(requests)).toHaveLength(1);
+    expect(calendarRequests(requests)).toHaveLength(2);
     expect(requestsAt(requests, ELIGIBILITY_ENDPOINT)).toHaveLength(0);
     expectOnlyGet(requests);
   });
@@ -331,7 +336,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     const now = new Date();
     const expectedDays = new Date(Date.UTC(now.getFullYear(), now.getMonth() + 1, 0)).getUTCDate();
     expect(document.querySelectorAll('.gantt-day-header-col[data-date]')).toHaveLength(expectedDays);
-    expect(calendarRequests(requests)).toHaveLength(1);
+    expect(calendarRequests(requests)).toHaveLength(2);
   });
 
   it('queries eligibility for an unassigned candidate from explicit case and staff controls', async () => {
@@ -339,7 +344,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     const requests = installFetchStub('empty');
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(calendarRequests(requests)).toHaveLength(1));
+    await waitFor(() => expect(calendarRequests(requests)).toHaveLength(2));
 
     fireEvent.change(screen.getByRole('textbox', { name: '資格查詢案件編號' }), {
       target: { value: 'CASE-INDEPENDENT-001' },
@@ -357,23 +362,26 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(document.body.textContent).not.toMatch(/測試資料不足|測試資料不完整|test_data_incomplete|unavailable/i);
   });
 
-  it('staff and month changes add one calendar GET each, while search/filter/tabs add zero', async () => {
+  it('preloaded staff selection adds zero GETs and a month change reloads every visible row', async () => {
     authenticate();
     const requests = installFetchStub('ready');
 
     render(<StrictMode><App /></StrictMode>);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-011').length).toBeGreaterThan(0));
     const initial = calendarRequests(requests).length;
+    const initialRangeStart = calendarRequests(requests).at(-1)?.query.get('range_start');
 
     fireEvent.change(screen.getByRole('combobox', { name: /^服務人員$/ }), { target: { value: '12' } });
-    await waitFor(() => expect(calendarRequests(requests)).toHaveLength(initial + 1));
-    expect(calendarRequests(requests).at(-1)?.path).toContain('/staff/12/current-calendar');
+    expect(calendarRequests(requests)).toHaveLength(initial);
 
     fireEvent.click(screen.getByRole('button', { name: /查看下個月/ }));
     await waitFor(() => expect(calendarRequests(requests)).toHaveLength(initial + 2));
-    expect(calendarRequests(requests).at(-1)?.query.get('range_start')).not.toBe(
-      calendarRequests(requests).at(-2)?.query.get('range_start')
-    );
+    const monthReloads = calendarRequests(requests).slice(-2);
+    expect(monthReloads.map((request) => request.path)).toEqual(expect.arrayContaining([
+      expect.stringContaining('/staff/11/current-calendar'),
+      expect.stringContaining('/staff/12/current-calendar'),
+    ]));
+    expect(monthReloads.every((request) => request.query.get('range_start') !== initialRangeStart)).toBe(true);
 
     fireEvent.change(screen.getByPlaceholderText('按月嫂姓名或編號...'), { target: { value: '不存在' } });
     fireEvent.click(screen.getByRole('button', { name: /🟡 待派單\/Buffer/ }));
@@ -385,24 +393,26 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expectOnlyGet(requests);
   });
 
-  it('explicit retry adds exactly one GET and recovers a retryable calendar error', async () => {
+  it('explicit retry reloads only the failed row and preserves successful rows', async () => {
     authenticate();
     const requests = installFetchStub('retry');
 
     render(<StrictMode><App /></StrictMode>);
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/排班日曆服務暫時無法回應/));
-    expect(calendarRequests(requests)).toHaveLength(1);
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/1 位服務人員的排班投影載入失敗/));
+    expect(calendarRequests(requests)).toHaveLength(2);
 
     fireEvent.click(screen.getByRole('button', { name: '重試月曆查詢' }));
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-011').length).toBeGreaterThan(0));
-    expect(calendarRequests(requests)).toHaveLength(2);
+    expect(calendarRequests(requests)).toHaveLength(3);
+    expect(calendarRequests(requests).filter((request) => request.path.includes('/staff/11/'))).toHaveLength(2);
+    expect(calendarRequests(requests).filter((request) => request.path.includes('/staff/12/'))).toHaveLength(1);
     expectOnlyGet(requests);
   });
 
   it.each([
-    ['empty', '目前範圍沒有 server projection。'],
+    ['empty', '本月無排班占用'],
     ['terms_incomplete', 'service_time_terms_incomplete'],
-    ['unavailable', '排班日曆服務暫時無法回應'],
+    ['unavailable', '2 位服務人員的排班投影載入失敗'],
   ] as const)('keeps %s explicit and never fabricates occupancy', async (mode, expectedText) => {
     authenticate();
     const requests = installFetchStub(mode);
@@ -413,7 +423,7 @@ describe('Scheduling #scheduling query entry cutover candidate', () => {
     expect(screen.queryByText('正式服務日', { selector: '.span-case-name' })).not.toBeInTheDocument();
     if (mode === 'unavailable') expect(document.body.textContent).not.toMatch(/unavailable/i);
     expect(requestsAt(requests, STAFF_SUMMARY_ENDPOINT)).toHaveLength(1);
-    expect(calendarRequests(requests)).toHaveLength(1);
+    expect(calendarRequests(requests)).toHaveLength(2);
     expectOnlyGet(requests);
   });
 

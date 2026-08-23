@@ -361,97 +361,363 @@
 .tracker-drawer {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 20px;
 }
 
-/* Stitch Nurture Core Drawer Top Hero Capsule */
-.drawer-hero-capsule {
+/* Header Status & Order Identity Row */
+.drawer-header-status-row {
   display: flex;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 4px;
+}
+
+.drawer-title-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.drawer-title-capsule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.drawer-main-title {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 750;
+  color: #1e1b19;
+  letter-spacing: -0.01em;
+}
+
+.drawer-order-status-badge {
+  padding: 4px 12px;
+  border-radius: 9999px;
+  background-color: #fed9b8;
+  color: #795d43;
+  font-size: 0.78rem;
+  font-weight: 700;
+  border: 1px solid rgba(116, 89, 63, 0.2);
+}
+
+.drawer-order-id-label {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #795d43;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 600;
+}
+
+/* 4-Column Summary Info Row (Stitch Exact Pattern) */
+.drawer-summary-strip {
+  display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 16px 20px;
-  background-color: #ffffff;
-  border-radius: 14px;
+  background-color: #fbf2ef;
+  padding: 14px 18px;
+  border-radius: 12px;
   border: 1px solid #dec0b6;
-  box-shadow: 0px 4px 12px rgba(74, 69, 67, 0.08);
+  gap: 8px;
 }
 
-.drawer-hero-client {
+.drawer-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.drawer-summary-icon {
+  font-size: 1.25rem;
+  color: #74593f;
+}
+
+.drawer-summary-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.drawer-summary-label {
+  font-size: 0.72rem;
+  color: #795d43;
+  font-weight: 600;
+}
+
+.drawer-summary-val {
+  font-size: 0.88rem;
+  font-weight: 650;
+  color: #1e1b19;
+}
+
+.drawer-val-amount {
+  color: #a43c12;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.drawer-val-staff {
+  color: #a43c12;
+  font-weight: 700;
+}
+
+.drawer-summary-divider {
+  width: 1px;
+  height: 28px;
+  background-color: #dec0b6;
+  margin: 0 4px;
+}
+
+/* Tabs (Underline Navigation Style) */
+.tracker-tabs-stitch {
+  display: flex;
+  gap: 24px;
+  border-bottom: 1px solid #dec0b6;
+  margin-top: 4px;
+}
+
+.tracker-tab-btn {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 4px 12px;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #795d43;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tracker-tab-btn:hover {
+  color: #1e1b19;
+}
+
+.tracker-tab-btn.active {
+  border-bottom-color: #ff7f50;
+  color: #ff7f50;
+}
+
+.tracker-tab-content-sop {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* Horizontal Compact Steps Progress (Steps 1-10) */
+.steps-progress-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background-color: #f5ece9;
+  padding: 12px 18px;
+  border-radius: 14px;
+  border: 1px solid rgba(222, 192, 182, 0.4);
+}
+
+.steps-progress-chain {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.step-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.step-circle--done {
+  background-color: #ff7f50;
+  color: #ffffff;
+}
+
+.step-chain-line {
+  height: 3px;
+  width: 24px;
+  border-radius: 2px;
+}
+
+.step-chain-line--done {
+  background-color: #ff7f50;
+}
+
+.step-pill-middle {
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: #795d43;
+  background-color: #e9e1de;
+  padding: 3px 10px;
+  border-radius: 9999px;
+}
+
+.steps-progress-label {
+  font-size: 0.82rem;
+  font-weight: 750;
+  color: #a43c12;
+}
+
+/* Step 11 Expanded Section */
+.step-expanded-section {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.step-expanded-header {
   display: flex;
   align-items: center;
   gap: 12px;
 }
 
-.drawer-hero-avatar {
-  width: 44px;
-  height: 44px;
+.step-expanded-badge {
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
-  background-color: rgba(255, 127, 80, 0.15);
+  border: 2px solid #ff7f50;
+  color: #ff7f50;
+  background-color: rgba(255, 127, 80, 0.1);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.3rem;
-  border: 1px solid rgba(255, 127, 80, 0.25);
+  font-weight: 800;
+  font-size: 0.92rem;
 }
 
-.drawer-hero-label {
-  display: block;
-  font-size: 0.72rem;
-  color: #795d43;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  margin-bottom: 2px;
-}
-
-.drawer-hero-name {
-  font-size: 1.15rem;
+.step-expanded-title {
+  margin: 0;
+  font-size: 1.2rem;
   font-weight: 750;
   color: #1e1b19;
 }
 
-.drawer-hero-meta {
+/* Info Callout Box */
+.step-info-callout {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 10px;
+  background-color: #fed9b8;
+  border: 1px solid rgba(116, 89, 63, 0.3);
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-left: 44px;
 }
 
-.drawer-hero-badge-id {
-  padding: 4px 10px;
-  border-radius: 6px;
-  background-color: #f5ece9;
-  color: #a43c12;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-weight: 750;
-  font-size: 0.82rem;
+.step-info-icon {
+  font-size: 1.1rem;
+}
+
+.step-info-text {
+  margin: 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #57423b;
+}
+
+/* 3 Independent Settlement Cards */
+.tracker-settlement-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-left: 44px;
+}
+
+.settlement-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  background-color: #ffffff;
   border: 1px solid #dec0b6;
+  border-radius: 14px;
+  padding: 16px 20px;
+  box-shadow: 0px 4px 12px rgba(74, 69, 67, 0.06);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
-.drawer-hero-badge-days {
-  padding: 4px 10px;
-  border-radius: 6px;
-  background-color: #ffdbcf;
-  color: #6c2000;
-  font-weight: 700;
+.settlement-card:hover {
+  box-shadow: 0px 8px 20px rgba(255, 127, 80, 0.12);
+  transform: translateY(-1px);
+}
+
+.settlement-card--completed {
+  border-color: #a5d6a7;
+}
+
+.settlement-card--pending {
+  border-color: #ffdab9;
+}
+
+.settlement-card-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background-color: #fbf2ef;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+.settlement-card--completed .settlement-card-icon {
+  background-color: #e8f5e9;
+}
+
+.settlement-card--pending .settlement-card-icon {
+  background-color: #fed9b8;
+}
+
+.settlement-card-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.settlement-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.settlement-card-title {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 750;
+  color: #1e1b19;
+}
+
+.settlement-card-time {
+  font-size: 0.74rem;
+  color: #795d43;
+}
+
+.settlement-card-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  color: #57423b;
+  line-height: 1.4;
+}
+
+.settlement-card-link {
   font-size: 0.8rem;
+  font-weight: 750;
+  color: #ff7f50;
+  white-space: nowrap;
+  cursor: pointer;
 }
 
-.drawer-hero-amount-group {
-  text-align: right;
-  padding-left: 8px;
-  border-left: 1px solid #dec0b6;
-}
-
-.drawer-hero-amount {
-  font-size: 1.15rem;
-  font-weight: 800;
+.settlement-card-link:hover {
   color: #a43c12;
-  font-variant-numeric: tabular-nums;
 }
 
+/* SOP Complete Checklist */
 .tracker-summary-panel,
 .tracker-tab-panel {
   padding: 18px 20px;
@@ -484,6 +750,12 @@
   color: #74593f;
   font-size: 0.78rem;
   font-weight: 700;
+}
+
+.panel-subtitle {
+  margin: -6px 0 12px;
+  font-size: 0.85rem;
+  color: #74593f;
 }
 
 .panel-sub-header {
@@ -559,73 +831,20 @@
   border-radius: 6px;
 }
 
-.tracker-settlement-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.tracker-settlement-grid article {
-  padding: 14px;
-  border: 1px dashed #a8a29e;
-  border-radius: 10px;
-  background: #fafaf9;
-}
-
-.tracker-settlement-grid span {
-  color: #78716c;
-  font-size: 0.72rem;
-  font-weight: 700;
-}
-
-.tracker-settlement-grid h4,
-.tracker-settlement-grid p {
-  margin: 5px 0 0;
-}
-
-.tracker-settlement-grid p {
-  color: #57534e;
-  font-size: 0.8rem;
-  line-height: 1.5;
-}
-
-.tracker-tabs {
-  display: flex;
-  gap: 8px;
-  border-bottom: 2px solid #f5ece9;
-  padding-bottom: 8px;
-}
-
-.tracker-tabs button {
-  min-height: 40px;
-  padding: 8px 14px;
-  border: 1px solid #d5aaa0;
-  border-radius: 8px;
-  background: #fff;
-  color: #57423b;
-  font-weight: 750;
-  cursor: pointer;
-}
-
-.tracker-tabs button[aria-selected='true'] {
-  border-color: #c2410c;
-  background: #c2410c;
-  color: #fff;
-}
-
+/* SOP Step List */
 .tracker-sop-list {
   display: flex;
   flex-direction: column;
-  gap: 9px;
+  gap: 10px;
 }
 
 .tracker-sop-step {
   display: flex;
-  gap: 12px;
-  padding: 12px;
-  border: 1px solid #d6d3d1;
-  border-radius: 9px;
-  background: #fafaf9;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid #dec0b6;
+  border-radius: 12px;
+  background: #ffffff;
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
 
@@ -635,9 +854,9 @@
 }
 
 .tracker-sop-step--in_progress {
-  border-color: #f59e0b;
-  background: #fffbeb;
-  box-shadow: inset 4px 0 0 #d97706, 0 3px 10px rgb(154 52 18 / 10%);
+  border-color: #ff7f50;
+  background: #fff8f6;
+  box-shadow: inset 4px 0 0 #ff7f50, 0 4px 12px rgba(255, 127, 80, 0.1);
 }
 
 .tracker-sop-step--blocked {
@@ -653,12 +872,13 @@
 .tracker-sop-number {
   display: grid;
   place-items: center;
-  flex: 0 0 30px;
-  height: 30px;
+  flex: 0 0 32px;
+  height: 32px;
   border-radius: 50%;
   background: #e7e5e4;
   color: #44403c;
   font-weight: 800;
+  font-size: 0.85rem;
 }
 
 .tracker-sop-step--completed .tracker-sop-number {
@@ -667,7 +887,7 @@
 }
 
 .tracker-sop-step--in_progress .tracker-sop-number {
-  background: #c2410c;
+  background: #ff7f50;
   color: #fff;
 }
 
@@ -684,11 +904,25 @@
   opacity: 1;
 }
 
+.tracker-sop-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
 .tracker-sop-title-row {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.tracker-sop-title-row h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 750;
+  color: #1e1b19;
 }
 
 .tracker-sop-title-row strong {
@@ -699,25 +933,21 @@
   font-size: 0.72rem;
 }
 
-.tracker-sop-list h4,
-.tracker-sop-list p {
+.tracker-sop-body p {
   margin: 0;
-}
-
-.tracker-sop-list p {
-  margin-top: 4px;
   color: #57534e;
-  font-size: 0.8rem;
-  line-height: 1.5;
+  font-size: 0.82rem;
+  line-height: 1.45;
 }
 
 .tracker-sop-status {
   display: inline-block;
-  margin-top: 7px;
-  padding: 2px 7px;
+  margin-top: 5px;
+  padding: 2px 8px;
   border-radius: 6px;
   font-size: 0.75rem;
   font-weight: 750;
+  align-self: flex-start;
 }
 
 .tracker-sop-status--completed {
@@ -739,6 +969,101 @@
 .tracker-sop-status--unavailable {
   background: #e7e5e4;
   color: #57534e;
+}
+
+/* LINE Notification Timeline */
+.line-notification-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.notification-card {
+  padding: 14px 16px;
+  border-radius: 12px;
+  background: #fbf2ef;
+  border: 1px solid #dec0b6;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.notification-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.notification-badge-event {
+  font-weight: 750;
+  font-size: 0.85rem;
+  color: #a43c12;
+}
+
+.notification-badge-delivery {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background: #ffedd5;
+  color: #9a3412;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.notification-card-body p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: #57423b;
+  line-height: 1.4;
+}
+
+.no-records-note {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #795d43;
+}
+
+/* Drawer Footer Actions */
+.drawer-footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+}
+
+.tracker-close-button {
+  padding: 8px 24px;
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #74593f;
+  font-weight: 750;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tracker-close-button:hover {
+  background: #fbf2ef;
+}
+
+.tracker-action-primary-btn {
+  padding: 8px 24px;
+  border: none;
+  border-radius: 8px;
+  background: #ff7f50;
+  color: #ffffff;
+  font-weight: 750;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0px 4px 12px rgba(255, 127, 80, 0.2);
+  transition: all 0.2s ease;
+}
+
+.tracker-action-primary-btn:hover {
+  background: #e66a3d;
+  box-shadow: 0px 6px 16px rgba(255, 127, 80, 0.3);
 }
 
 .tracker-disabled-action {

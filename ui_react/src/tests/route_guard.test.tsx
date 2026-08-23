@@ -1,6 +1,6 @@
 /**
- * @file route_guard.test.tsx
- * @description 驗證路由認證守衛、深層連結阻擋、URL Hash 雙向同步與登出狀態遷移。
+ * File: route_guard.test.tsx
+ * Description: 驗證路由認證守衛、深層連結阻擋、URL Hash 雙向同步、確認式登出與狀態遷移。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
@@ -223,6 +223,10 @@ describe('Route Guard & Shell Hash Navigation', () => {
     const logoutBtn = screen.getByTitle('點擊登出系統');
     await act(async () => {
       fireEvent.click(logoutBtn);
+    });
+    expect(screen.getByRole('dialog', { name: '確定要登出系統嗎？' })).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '確認登出' }));
     });
 
     await waitFor(() => {

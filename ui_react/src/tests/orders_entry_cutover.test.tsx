@@ -25,6 +25,8 @@ const CALENDAR_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/calendar-detail`;
 const TERMS_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/terms`;
 const COMPLETION_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/contract-completion`;
 const ASSIGNMENT_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/assignment-plan`;
+const CANDIDATE_POOL_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/candidate-contact-pool`;
+const ACTIVE_PLAN_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/matching-plans/active`;
 const CARD_PROJECTION_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/card-projection`;
 const CONTRACT_SIGNING_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/contract-signing`;
 const CANCELLATION_QUERY_ENDPOINT = `${ORDER_DETAIL_ENDPOINT}/cancellation`;
@@ -154,6 +156,15 @@ function installFetchStub(options: FetchStubOptions = {}): FetchRecord[] {
     if (path === TERMS_ENDPOINT) return jsonResponse(orderEnvelope(realisticOrderTerms));
     if (path === COMPLETION_ENDPOINT) return jsonResponse(orderEnvelope(realisticContractCompletion));
     if (path === ASSIGNMENT_ENDPOINT) return jsonResponse(orderEnvelope(realisticAssignmentPlan));
+    if (path === CANDIDATE_POOL_ENDPOINT) return jsonResponse(orderEnvelope({
+      pool_id: null,
+      case_no: 'ORD-2026-0801',
+      candidates: [],
+    }));
+    if (path === ACTIVE_PLAN_ENDPOINT) return jsonResponse(orderEnvelope({
+      plan: { id: 19, case_no: 'ORD-2026-0801', status: 'proposed' },
+      availability_lock: null,
+    }));
     if (path === CARD_PROJECTION_ENDPOINT) return jsonResponse(cardProjectionEnvelope());
     if (path === CONTRACT_SIGNING_ENDPOINT) return jsonResponse(orderEnvelope({
       case_no: 'ORD-2026-0801', staff_segments: [], commitment_id: null,
@@ -245,6 +256,8 @@ describe('Orders #orders entry static subgate', () => {
       terms: countPath(requests, TERMS_ENDPOINT),
       completion: countPath(requests, COMPLETION_ENDPOINT),
       assignment: countPath(requests, ASSIGNMENT_ENDPOINT),
+      candidatePool: countPath(requests, CANDIDATE_POOL_ENDPOINT),
+      activePlan: countPath(requests, ACTIVE_PLAN_ENDPOINT),
       card: countPath(requests, CARD_PROJECTION_ENDPOINT),
       signing: countPath(requests, CONTRACT_SIGNING_ENDPOINT),
       cancellation: countPath(requests, CANCELLATION_QUERY_ENDPOINT),
@@ -258,6 +271,8 @@ describe('Orders #orders entry static subgate', () => {
     expect(countPath(requests, COMPLETION_ENDPOINT) - initialQueryCounts.completion).toBe(1);
     expect(countPath(requests, CALENDAR_ENDPOINT) - initialQueryCounts.calendar).toBe(0);
     expect(countPath(requests, ASSIGNMENT_ENDPOINT) - initialQueryCounts.assignment).toBe(0);
+    expect(countPath(requests, CANDIDATE_POOL_ENDPOINT) - initialQueryCounts.candidatePool).toBe(0);
+    expect(countPath(requests, ACTIVE_PLAN_ENDPOINT) - initialQueryCounts.activePlan).toBe(0);
     expect(countPath(requests, CARD_PROJECTION_ENDPOINT) - initialQueryCounts.card).toBe(1);
     expect(countPath(requests, CONTRACT_SIGNING_ENDPOINT) - initialQueryCounts.signing).toBe(1);
     expect(screen.queryByText(/後端.*提供|未開放|未納入/)).not.toBeInTheDocument();
@@ -268,6 +283,8 @@ describe('Orders #orders entry static subgate', () => {
     await waitFor(() => expect(screen.getByText('正式執行排班（非候選推薦）')).toBeInTheDocument());
     expect(countPath(requests, ORDER_DETAIL_ENDPOINT) - initialQueryCounts.detail).toBe(2);
     expect(countPath(requests, ASSIGNMENT_ENDPOINT) - initialQueryCounts.assignment).toBe(1);
+    expect(countPath(requests, CANDIDATE_POOL_ENDPOINT) - initialQueryCounts.candidatePool).toBe(1);
+    expect(countPath(requests, ACTIVE_PLAN_ENDPOINT) - initialQueryCounts.activePlan).toBe(1);
     expect(countPath(requests, TERMS_ENDPOINT) - beforeMatchingTerms).toBe(1);
     expect(countPath(requests, COMPLETION_ENDPOINT) - initialQueryCounts.completion).toBe(1);
     expect(countPath(requests, CARD_PROJECTION_ENDPOINT) - initialQueryCounts.card).toBe(2);
