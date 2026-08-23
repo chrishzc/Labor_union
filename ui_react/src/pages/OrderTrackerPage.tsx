@@ -135,6 +135,20 @@ function cardProjectionContactValue(
   return cardProjectionValue(state.data[field], String, '尚未登錄');
 }
 
+function formatFriendlyTimestamp(value: string | null): string {
+  if (!value) return '尚無事件時間';
+  const date = new Date(value);
+  if (!isNaN(date.getTime()) && value.includes('-')) {
+    const yyyy = date.getFullYear();
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
+  }
+  return value.replace('T', ' ');
+}
+
 export const OrderTrackerPage: React.FC = () => {
   const [queryState, setQueryState] = useState<TrackerQueryState>({ kind: 'loading' });
   const [stageProjectionState, setStageProjectionState] = useState<StageProjectionQueryState>({ kind: 'loading' });
@@ -672,121 +686,131 @@ export const OrderTrackerPage: React.FC = () => {
                   </div>
                 )}
 
-                {/* Horizontal Compact Steps Progress (Steps 1-10) */}
-                <div className="steps-progress-indicator">
-                  <div className="steps-progress-chain">
-                    <div className="step-circle step-circle--done">✓</div>
-                    <div className="step-chain-line step-chain-line--done" />
-                    <div className="step-circle step-circle--done">✓</div>
-                    <div className="step-chain-line step-chain-line--done" />
-                    <div className="step-pill-middle">... (步驟 3-9)</div>
-                    <div className="step-chain-line step-chain-line--done" />
-                    <div className="step-circle step-circle--done">✓</div>
-                  </div>
-                  <div className="steps-progress-label">步驟 1-10 已完成</div>
-                </div>
-
-                {/* Step 11 Expanded Section */}
-                <section className="step-expanded-section">
-                  <div className="step-expanded-header">
-                    <div className="step-expanded-badge">11</div>
-                    <h3 className="step-expanded-title">完工後續處理</h3>
-                  </div>
-
-                  {/* Warning / Info Callout Box */}
-                  <div className="step-info-callout">
-                    <span className="step-info-icon">ℹ️</span>
-                    <p className="step-info-text">此案服務已完成，但帳務尚未全部結清。</p>
-                  </div>
-
-                  {/* 3 Independent Settlement Cards */}
-                  {selectedTimeline && (
-                    <div className="tracker-settlement-grid" aria-label="三個獨立結清投影">
-                      {(stageByCode(selectedTimeline, 'settlement_payout')?.settlement ?? []).map((slot) => {
-                        const isCompleted = slot.status === 'completed';
-                        const titleMap: Record<string, string> = {
-                          'service-completion': '服務履約：服務已完成',
-                          'client-finance': '客戶款項：尾款待銀行核銷',
-                          'staff-payroll': '月嫂薪資：薪資待出款核銷',
-                        };
-                        const iconMap: Record<string, string> = {
-                          'service-completion': '✅',
-                          'client-finance': '📋',
-                          'staff-payroll': '⏳',
-                        };
-                        return (
-                          <article
-                            key={slot.code}
-                            className={`settlement-card ${isCompleted ? 'settlement-card--completed' : 'settlement-card--pending'}`}
-                            data-surface-id={`order-tracker.settlement.${slot.code}`}
-                          >
-                            <div className="settlement-card-icon">
-                              {iconMap[slot.code] ?? '📄'}
-                            </div>
-                            <div className="settlement-card-main">
-                              <div className="settlement-card-top">
-                                <h4 className="settlement-card-title">{titleMap[slot.code] ?? slot.code}</h4>
-                                <span className="settlement-card-time">
-                                  最後更新: {formatProjectionTimestamp(slot.occurred_at)}
-                                </span>
-                              </div>
-                              <p className="settlement-card-desc">
-                                {stageStatusLabel(slot.status)}
-                                {slot.availability_reason ? ` · ${stageAvailabilityLabel(slot.availability_reason)}` : ''}
-                                {slot.source.owner ? ` (owner: ${slot.source.owner})` : ''}
-                              </p>
-                            </div>
-                            <span className="settlement-card-link">查看明細 →</span>
-                          </article>
-                        );
-                      })}
-                    </div>
-                  )}
-                </section>
-
-                {/* 11 Steps Complete Detail SOP List */}
+                {/* 11 Steps Complete Detail SOP Timeline */}
                 <section className="tracker-summary-panel">
                   <div className="panel-header-row">
                     <h3 className="panel-title">📋 工會因果鏈 11 步驟標準作業完整檢核</h3>
                   </div>
                   {selectedTimeline ? (
-                    <div className="tracker-sop-list" role="list" aria-label="11 步 SOP 狀態">
-                      {selectedTimeline.sop_steps.map((step) => (
-                        <article
-                          key={step.ordinal}
-                          role="listitem"
-                          className={`tracker-sop-step tracker-sop-step--${step.status}`}
-                          data-surface-id={`order-tracker.sop.step.${step.ordinal}`}
-                          data-status={step.status}
-                          aria-current={step.ordinal === selectedCurrentStepOrdinal ? 'step' : undefined}
-                        >
-                          <span className="tracker-sop-number">
-                            {step.status === 'completed' ? (
-                              <input
-                                type="checkbox"
-                                checked
-                                disabled
-                                aria-label={`步驟 ${step.ordinal} 已完成`}
-                              />
-                            ) : step.ordinal}
-                          </span>
-                          <div className="tracker-sop-body">
-                            <div className="tracker-sop-title-row">
-                              <h4>{step.label}</h4>
-                              {step.ordinal === selectedCurrentStepOrdinal && <strong>目前執行</strong>}
+                    <div className="tracker-sop-timeline" role="list" aria-label="11 步 SOP 狀態">
+                      {selectedTimeline.sop_steps.map((step) => {
+                        const isCurrent = step.ordinal === selectedCurrentStepOrdinal;
+                        const isCompleted = step.status === 'completed';
+                        return (
+                          <article
+                            key={step.ordinal}
+                            role="listitem"
+                            className={`tracker-sop-step tracker-sop-step--${step.status} ${isCurrent ? 'tracker-sop-step--current' : ''}`}
+                            data-surface-id={`order-tracker.sop.step.${step.ordinal}`}
+                            data-status={step.status}
+                            aria-current={isCurrent ? 'step' : undefined}
+                          >
+                            <div className="tracker-sop-node-track">
+                              <div className="tracker-sop-node-line" />
+                              <div className="tracker-sop-number">
+                                {isCompleted ? (
+                                  <>
+                                    <input
+                                      type="checkbox"
+                                      checked
+                                      disabled
+                                      className="sr-only"
+                                      aria-label={`步驟 ${step.ordinal} 已完成`}
+                                    />
+                                    <span className="sop-done-check">✓</span>
+                                  </>
+                                ) : (
+                                  step.ordinal
+                                )}
+                              </div>
                             </div>
-                            <p>
-                              {step.blockers[0]?.message
-                                ?? step.warnings[0]?.message
-                                ?? stageAvailabilityLabel(step.availability_reason)
-                                ?? `owner：${step.owner}`}
-                            </p>
-                            <span className={`tracker-sop-status tracker-sop-status--${step.status}`}>
-                              {stageStatusLabel(step.status)}　{formatProjectionTimestamp(step.occurred_at)}
-                            </span>
-                          </div>
-                        </article>
-                      ))}
+                            <div className="tracker-sop-card-body">
+                              <div className="tracker-sop-header-row">
+                                <div className="tracker-sop-title-wrap">
+                                  <span className="tracker-sop-step-tag">Step {step.ordinal}</span>
+                                  <h4 className="tracker-sop-title">{step.label}</h4>
+                                </div>
+                                <div className="tracker-sop-status-pill-wrap">
+                                  {isCurrent && <span className="sop-current-pill">🎯 <span>目前執行</span></span>}
+                                  <span className={`tracker-sop-status tracker-sop-status--${step.status}`}>
+                                    {isCompleted && '🟢 '}
+                                    {step.status === 'in_progress' && '🟠 '}
+                                    {step.status === 'blocked' && '🔴 '}
+                                    {(step.status === 'not_started' || step.status === 'unavailable') && '⚪ '}
+                                    {stageStatusLabel(step.status)}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="tracker-sop-meta-row">
+                                <span className="tracker-sop-owner">🏢 {step.owner}</span>
+                                <span className="tracker-sop-time">🕒 {formatFriendlyTimestamp(step.occurred_at)}</span>
+                              </div>
+
+                              {(step.blockers[0]?.message || step.warnings[0]?.message || stageAvailabilityLabel(step.availability_reason)) && (
+                                <div className={`tracker-sop-callout ${step.status === 'blocked' ? 'callout--blocked' : 'callout--info'}`}>
+                                  <span className="callout-icon">{step.status === 'blocked' ? '⚠️' : 'ℹ️'}</span>
+                                  <p>
+                                    {step.blockers[0]?.message
+                                      ?? step.warnings[0]?.message
+                                      ?? stageAvailabilityLabel(step.availability_reason)}
+                                  </p>
+                                </div>
+                              )}
+
+                              {/* Step 11 Embedded 3 Settlement Cards */}
+                              {step.ordinal === 11 && (
+                                <div className="step-11-settlement-wrap">
+                                  <div className="step-info-callout">
+                                    <span className="step-info-icon">ℹ️</span>
+                                    <p className="step-info-text">三大獨立結算投影：服務履約、客戶款項與月嫂薪資獨立推進。</p>
+                                  </div>
+                                  <div className="tracker-settlement-grid" aria-label="三個獨立結清投影">
+                                    {(stageByCode(selectedTimeline, 'settlement_payout')?.settlement ?? []).map((slot) => {
+                                      const isSlotCompleted = slot.status === 'completed';
+                                      const titleMap: Record<string, string> = {
+                                        'service-completion': '服務履約：服務已完成',
+                                        'client-finance': '客戶款項：尾款待銀行核銷',
+                                        'staff-payroll': '月嫂薪資：薪資待出款核銷',
+                                      };
+                                      const iconMap: Record<string, string> = {
+                                        'service-completion': '✅',
+                                        'client-finance': '📋',
+                                        'staff-payroll': '⏳',
+                                      };
+                                      return (
+                                        <article
+                                          key={slot.code}
+                                          className={`settlement-card ${isSlotCompleted ? 'settlement-card--completed' : 'settlement-card--pending'}`}
+                                          data-surface-id={`order-tracker.settlement.${slot.code}`}
+                                        >
+                                          <div className="settlement-card-icon">
+                                            {iconMap[slot.code] ?? '📄'}
+                                          </div>
+                                          <div className="settlement-card-main">
+                                            <div className="settlement-card-top">
+                                              <h4 className="settlement-card-title">{titleMap[slot.code] ?? slot.code}</h4>
+                                              <span className="settlement-card-time">
+                                                最後更新: {formatProjectionTimestamp(slot.occurred_at)}
+                                              </span>
+                                            </div>
+                                            <p className="settlement-card-desc">
+                                              {stageStatusLabel(slot.status)}
+                                              {slot.availability_reason ? ` · ${stageAvailabilityLabel(slot.availability_reason)}` : ''}
+                                              {slot.source.owner ? ` (owner: ${slot.source.owner})` : ''}
+                                            </p>
+                                          </div>
+                                          <span className="settlement-card-link">查看明細 →</span>
+                                        </article>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </article>
+                        );
+                      })}
                     </div>
                   ) : (
                     <p role={stageProjectionState.kind === 'loading' ? 'status' : 'alert'}>

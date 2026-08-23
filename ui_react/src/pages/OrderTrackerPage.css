@@ -505,121 +505,6 @@
   gap: 20px;
 }
 
-/* Horizontal Compact Steps Progress (Steps 1-10) */
-.steps-progress-indicator {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background-color: #f5ece9;
-  padding: 12px 18px;
-  border-radius: 14px;
-  border: 1px solid rgba(222, 192, 182, 0.4);
-}
-
-.steps-progress-chain {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.step-circle {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.78rem;
-  font-weight: 800;
-}
-
-.step-circle--done {
-  background-color: #ff7f50;
-  color: #ffffff;
-}
-
-.step-chain-line {
-  height: 3px;
-  width: 24px;
-  border-radius: 2px;
-}
-
-.step-chain-line--done {
-  background-color: #ff7f50;
-}
-
-.step-pill-middle {
-  font-size: 0.75rem;
-  font-weight: 650;
-  color: #795d43;
-  background-color: #e9e1de;
-  padding: 3px 10px;
-  border-radius: 9999px;
-}
-
-.steps-progress-label {
-  font-size: 0.82rem;
-  font-weight: 750;
-  color: #a43c12;
-}
-
-/* Step 11 Expanded Section */
-.step-expanded-section {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.step-expanded-header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.step-expanded-badge {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  border: 2px solid #ff7f50;
-  color: #ff7f50;
-  background-color: rgba(255, 127, 80, 0.1);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 0.92rem;
-}
-
-.step-expanded-title {
-  margin: 0;
-  font-size: 1.2rem;
-  font-weight: 750;
-  color: #1e1b19;
-}
-
-/* Info Callout Box */
-.step-info-callout {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  background-color: #fed9b8;
-  border: 1px solid rgba(116, 89, 63, 0.3);
-  padding: 12px 16px;
-  border-radius: 10px;
-  margin-left: 44px;
-}
-
-.step-info-icon {
-  font-size: 1.1rem;
-}
-
-.step-info-text {
-  margin: 0;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #57423b;
-}
-
 /* 3 Independent Settlement Cards */
 .tracker-settlement-grid {
   display: flex;
@@ -831,144 +716,229 @@
   border-radius: 6px;
 }
 
-/* SOP Step List */
-.tracker-sop-list {
+/* SOP Connected Timeline */
+.tracker-sop-timeline {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 16px;
+  position: relative;
 }
 
 .tracker-sop-step {
   display: flex;
   gap: 14px;
-  padding: 14px 16px;
-  border: 1px solid #dec0b6;
-  border-radius: 12px;
-  background: #ffffff;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  position: relative;
+  align-items: stretch;
 }
 
-.tracker-sop-step--completed {
-  border-color: #86b994;
-  background: #f0fdf4;
+.tracker-sop-node-track {
+  width: 36px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  flex-shrink: 0;
 }
 
-.tracker-sop-step--in_progress {
-  border-color: #ff7f50;
-  background: #fff8f6;
-  box-shadow: inset 4px 0 0 #ff7f50, 0 4px 12px rgba(255, 127, 80, 0.1);
+.tracker-sop-node-line {
+  position: absolute;
+  top: 36px;
+  bottom: -16px;
+  width: 2px;
+  background-color: #e9e1de;
+  z-index: 1;
 }
 
-.tracker-sop-step--blocked {
-  border-color: #fca5a5;
-  background: #fef2f2;
-}
-
-.tracker-sop-step--unavailable {
-  border-style: dashed;
-  background: #f5f5f4;
+.tracker-sop-step:last-child .tracker-sop-node-line {
+  display: none;
 }
 
 .tracker-sop-number {
-  display: grid;
-  place-items: center;
-  flex: 0 0 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  background: #e7e5e4;
-  color: #44403c;
+  background-color: #f5ece9;
+  color: #74593f;
+  border: 1px solid #dec0b6;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-weight: 800;
   font-size: 0.85rem;
+  z-index: 2;
 }
 
 .tracker-sop-step--completed .tracker-sop-number {
-  background: #166534;
-  color: #fff;
+  background-color: #e8f5e9;
+  color: #166534;
+  border-color: #86efac;
 }
 
-.tracker-sop-step--in_progress .tracker-sop-number {
-  background: #ff7f50;
-  color: #fff;
+.tracker-sop-step--in_progress .tracker-sop-number,
+.tracker-sop-step--current .tracker-sop-number {
+  background-color: #ff7f50;
+  color: #ffffff;
+  border-color: #ff7f50;
+  box-shadow: 0 0 0 4px rgba(255, 127, 80, 0.2);
 }
 
 .tracker-sop-step--blocked .tracker-sop-number {
-  background: #b91c1c;
-  color: #fff;
+  background-color: #fee2e2;
+  color: #991b1b;
+  border-color: #fca5a5;
 }
 
-.tracker-sop-number input[type='checkbox'] {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: #166534;
-  opacity: 1;
+.sop-done-check {
+  font-weight: 850;
+  font-size: 1rem;
 }
 
-.tracker-sop-body {
+.tracker-sop-card-body {
   flex: 1;
+  padding: 14px 18px;
+  border-radius: 14px;
+  background-color: #ffffff;
+  border: 1px solid #f0e7e4;
+  box-shadow: 0px 2px 8px rgba(74, 69, 67, 0.04);
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  gap: 8px;
+  transition: all 0.2s ease;
 }
 
-.tracker-sop-title-row {
+.tracker-sop-step--current .tracker-sop-card-body {
+  border-color: #ffdab9;
+  box-shadow: 0px 4px 16px rgba(255, 127, 80, 0.1);
+}
+
+.tracker-sop-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.tracker-sop-title-wrap {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
   gap: 8px;
 }
 
-.tracker-sop-title-row h4 {
+.tracker-sop-step-tag {
+  font-size: 0.72rem;
+  font-weight: 750;
+  text-transform: uppercase;
+  color: #a43c12;
+  background-color: #ffdbcf;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.tracker-sop-title {
   margin: 0;
   font-size: 0.95rem;
   font-weight: 750;
   color: #1e1b19;
 }
 
-.tracker-sop-title-row strong {
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #ffedd5;
-  color: #9a3412;
-  font-size: 0.72rem;
+.tracker-sop-status-pill-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
 }
 
-.tracker-sop-body p {
-  margin: 0;
-  color: #57534e;
-  font-size: 0.82rem;
-  line-height: 1.45;
+.sop-current-pill {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  background-color: #ff7f50;
+  color: #ffffff;
+  font-size: 0.72rem;
+  font-weight: 750;
 }
 
 .tracker-sop-status {
-  display: inline-block;
-  margin-top: 5px;
-  padding: 2px 8px;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  font-weight: 750;
-  align-self: flex-start;
+  padding: 3px 10px;
+  border-radius: 9999px;
+  font-size: 0.74rem;
+  font-weight: 700;
 }
 
 .tracker-sop-status--completed {
-  background: #dcfce7;
+  background-color: #e8f5e9;
   color: #166534;
 }
 
 .tracker-sop-status--in_progress {
-  background: #ffedd5;
+  background-color: #ffedd5;
   color: #9a3412;
 }
 
 .tracker-sop-status--blocked {
-  background: #fee2e2;
+  background-color: #fee2e2;
   color: #991b1b;
 }
 
 .tracker-sop-status--not_started,
 .tracker-sop-status--unavailable {
-  background: #e7e5e4;
-  color: #57534e;
+  background-color: #f5ece9;
+  color: #74593f;
+}
+
+.tracker-sop-meta-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: #74593f;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tracker-sop-owner {
+  font-weight: 600;
+}
+
+.tracker-sop-time {
+  font-variant-numeric: tabular-nums;
+  color: #8b7169;
+}
+
+.tracker-sop-callout {
+  padding: 8px 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.tracker-sop-callout p {
+  margin: 0;
+}
+
+.callout--info {
+  background-color: #fbf2ef;
+  border: 1px solid rgba(222, 192, 182, 0.5);
+  color: #57423b;
+}
+
+.callout--blocked {
+  background-color: #fef2f2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+}
+
+.step-11-settlement-wrap {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.step-11-settlement-wrap .tracker-settlement-grid {
+  margin-left: 0;
 }
 
 /* LINE Notification Timeline */
