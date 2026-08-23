@@ -552,7 +552,7 @@
   gap: 14px;
   background-color: #fffdfc;
   border: 1px solid #fed9b8;
-  border-radius: 12px;
+  border-radius: 14px;
   padding: 16px 20px;
   margin-bottom: 18px;
 }
@@ -574,3 +574,532 @@
   font-weight: 800;
   color: #1e1b19;
 }
+
+/* ==========================================================================
+   Sub-layouts: Tab 1 (SSOT Contract Cards & Snapshot)
+   ========================================================================== */
+
+.contract-ssot-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+}
+
+.contract-ssot-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 20px 22px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.contract-ssot-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.contract-ssot-title {
+  font-size: 1rem;
+  font-weight: 750;
+  color: #1e1b19;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.contract-status-pill {
+  padding: 3px 12px;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.contract-status-pill.success {
+  background-color: #dcfce7;
+  color: #166534;
+}
+
+.contract-status-pill.pending {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.contract-ssot-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.86rem;
+  color: #57423b;
+}
+
+.contract-evidence-btn {
+  padding: 8px 14px;
+  background-color: #ffffff;
+  border: 1px solid #dec0b6;
+  color: #ff7f50;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.contract-evidence-btn:hover {
+  background-color: #fff8f6;
+  border-color: #ff7f50;
+}
+
+.contract-terms-snapshot-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.04);
+}
+
+.contract-snapshot-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 24px;
+  margin-top: 14px;
+}
+
+.contract-snapshot-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background-color: #fffdfb;
+  border-radius: 8px;
+  border: 1px solid #f5ece9;
+  font-size: 0.88rem;
+}
+
+/* ==========================================================================
+   Sub-layouts: Tab 2 (Order Terms 2-Column Split Workbench)
+   ========================================================================== */
+
+.order-terms-workbench-layout {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.terms-edit-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+}
+
+.terms-diff-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.terms-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 16px;
+  margin-top: 14px;
+}
+
+.terms-form-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #57423b;
+}
+
+.terms-form-grid input,
+.terms-form-grid select {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid #dec0b6;
+  font-size: 0.88rem;
+  background-color: #fdfcfb;
+  transition: border-color 0.2s ease;
+}
+
+.terms-form-grid input:focus,
+.terms-form-grid select:focus {
+  outline: none;
+  border-color: #ff7f50;
+  box-shadow: 0 0 0 3px rgba(255, 127, 80, 0.12);
+}
+
+.terms-diff-comparison {
+  background-color: #fffdfb;
+  border: 1px solid #f2e2dc;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.terms-diff-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.86rem;
+  color: #57423b;
+}
+
+.terms-diff-arrow {
+  color: #ff7f50;
+  font-weight: 800;
+}
+
+.terms-system-notice {
+  background-color: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
+  padding: 12px 14px;
+  color: #92400e;
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+/* ==========================================================================
+   Sub-layouts: Tab 3 (Service Calendar 2-Column Split & Month Grid)
+   ========================================================================== */
+
+.service-calendar-workbench-layout {
+  display: grid;
+  grid-template-columns: 1.25fr 0.75fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.calendar-matrix-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+}
+
+.calendar-preview-sidebar {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.calendar-month-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f2e2dc;
+}
+
+.calendar-weekdays-row {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  text-align: center;
+  font-size: 0.8rem;
+  font-weight: 750;
+  color: #8b7169;
+  margin-bottom: 8px;
+}
+
+.calendar-days-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+}
+
+.calendar-date-cell {
+  aspect-ratio: 1.15;
+  border-radius: 10px;
+  border: 1px solid #f0e6e2;
+  background-color: #ffffff;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #1e1b19;
+  text-align: left;
+}
+
+.calendar-date-cell:hover:not(:disabled) {
+  border-color: #ff7f50;
+  background-color: #fff8f6;
+}
+
+.calendar-date-cell.selected {
+  border: 2px solid #ff7f50;
+  background-color: #fff4ed;
+  color: #c2410c;
+  box-shadow: 0 2px 8px rgba(255, 127, 80, 0.15);
+}
+
+.calendar-date-cell-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background-color: #ffdbcf;
+  color: #9a3412;
+  text-align: center;
+}
+
+.calendar-selected-list {
+  max-height: 240px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+}
+
+.calendar-selected-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #fffdfb;
+  border-radius: 8px;
+  border: 1px solid #f5ece9;
+  font-size: 0.84rem;
+}
+
+.actual-start-workbench-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+}
+
+/* ==========================================================================
+   Card Projection (案件聯絡、條款與指派資料)
+   ========================================================================== */
+
+.orders-card-projection-container {
+  background-color: #fffdfc;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 18px 22px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+}
+
+.card-projection-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #fed9b8;
+}
+
+.card-projection-title {
+  font-size: 1.05rem;
+  font-weight: 750;
+  color: #ff7f50;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-projection-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background-color: #ffedd5;
+  color: #9a3412;
+  border: 1px solid #fed7aa;
+}
+
+.card-projection-subtitle {
+  font-size: 0.8rem;
+  color: #8b7169;
+  font-weight: 500;
+}
+
+.card-projection-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-top: 14px;
+}
+
+@media (max-width: 960px) {
+  .card-projection-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .card-projection-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card-projection-item {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 10px;
+  padding: 10px 14px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 4px;
+  transition: all 0.2s ease;
+}
+
+.card-projection-item:hover {
+  border-color: #ff7f50;
+  box-shadow: 0 2px 8px rgba(255, 127, 80, 0.1);
+}
+
+.card-projection-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.card-projection-item-label {
+  font-size: 0.78rem;
+  color: #8b7169;
+  font-weight: 700;
+}
+
+.card-projection-item-status {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.card-projection-item-status.blocked {
+  background-color: #fee2e2;
+  color: #991b1b;
+}
+
+.card-projection-item-status.unavailable {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
+.card-projection-item-value {
+  font-size: 0.95rem;
+  font-weight: 750;
+  color: #1e1b19;
+  word-break: break-word;
+}
+
+.card-projection-item-meta {
+  font-size: 0.72rem;
+  color: #a89087;
+  line-height: 1.3;
+}
+
+.card-projection-assignments {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px dashed #fed9b8;
+}
+
+.card-projection-assignments-title {
+  font-size: 0.92rem;
+  font-weight: 750;
+  color: #57423b;
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.card-projection-empty-assignments {
+  background-color: #fff8f6;
+  border: 1px dashed #fed9b8;
+  border-radius: 10px;
+  padding: 12px 16px;
+  color: #8b7169;
+  font-size: 0.86rem;
+}
+
+.card-projection-segments-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.card-projection-segment-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 10px;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card-projection-segment-header {
+  font-size: 0.86rem;
+  font-weight: 750;
+  color: #ff7f50;
+  border-bottom: 1px solid #fed9b8;
+  padding-bottom: 4px;
+}
+
+.card-projection-segment-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.card-projection-segment-row {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.84rem;
+  color: #57423b;
+}
+
+.card-projection-segment-label {
+  font-weight: 700;
+  color: #8b7169;
+}
+
+.card-projection-segment-val {
+  font-weight: 700;
+  color: #1e1b19;
+}
+
+.card-projection-segment-meta {
+  font-size: 0.72rem;
+  color: #a89087;
+}
+

@@ -15,6 +15,7 @@ import { orderCancellationClient } from '../api/orders/order_cancellation_client
 import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
 import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
+import { matchingCandidateWorkflowClient } from '../api/scheduling/matching_candidate_workflow_client';
 import { waitingDepositLockClient } from '../api/scheduling/waiting_deposit_lock_client';
 import { OrdersPage } from '../pages/OrdersPage';
 import {
@@ -63,6 +64,16 @@ describe('OrdersPage zero fake mutation', () => {
       planId: 19,
       status: 'proposed',
       activeLockId: null,
+    });
+    vi.spyOn(matchingCandidateWorkflowClient, 'searchSingleCaregiver').mockResolvedValue({
+      case_no: 'ORD-2026-0801',
+      planned_start_date: '2026-09-01',
+      planned_end_date: '2026-09-30',
+      feasibility: 'complete',
+      complete_combinations: [],
+      segment_candidates: [],
+      candidate_options: [],
+      conflicts: [],
     });
     vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue(realisticServiceDateQueryView);
     vi.spyOn(orderStageProjectionClient, 'getOperationalTimelines').mockResolvedValue(
@@ -166,7 +177,8 @@ describe('OrdersPage zero fake mutation', () => {
     expect(screen.queryByText('定金狀態：已核銷（檔期鎖定）')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: '🔍 重新查詢符合條件月嫂' }));
-    await waitFor(() => expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(matchingCandidateWorkflowClient.searchSingleCaregiver).toHaveBeenCalledOnce());
+    expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(2);
   });
 
   it('offers cancellation Query and Preview without exposing Apply', async () => {

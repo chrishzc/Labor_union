@@ -368,42 +368,95 @@ export const OrdersPage: React.FC = () => {
   };
 
   const renderCardProjection = () => (
-    <section data-surface-id="orders.card-projection" style={{ backgroundColor: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid #cbd5e1' }}>
-      <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '8px' }}>案件聯絡、條款與指派資料</h3>
-      {cardProjectionLoading && <div role="status">⏳ 正在載入案件資料…</div>}
-      {cardProjectionError && !cardProjectionLoading && (
-        <div role="alert" style={{ color: '#991b1b' }}>{ORDERS_CARD_PROJECTION_UNAVAILABLE}：{cardProjectionError}</div>
+    <section
+      data-surface-id="orders.card-projection"
+      className="orders-card-projection-container"
+    >
+      <div className="card-projection-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <h3 className="card-projection-title">📋 案件聯絡、條款與指派資料</h3>
+          {cardProjection && (
+            <span className="card-projection-badge">SSOT 根事實</span>
+          )}
+        </div>
+        <span className="card-projection-subtitle">
+          跨領域核心資料投影（Client 聯絡、Orders 條款、Finance 定金與 Scheduling 指派）
+        </span>
+      </div>
+
+      {cardProjectionLoading && (
+        <div role="status" style={{ padding: '14px 0', color: '#ff7f50', fontWeight: 600, fontSize: '0.9rem' }}>
+          ⏳ 正在載入案件資料…
+        </div>
       )}
+
+      {cardProjectionError && !cardProjectionLoading && (
+        <div
+          role="alert"
+          style={{
+            marginTop: '12px',
+            padding: '10px 14px',
+            borderRadius: '8px',
+            backgroundColor: '#fef2f2',
+            border: '1px solid #fecaca',
+            color: '#991b1b',
+            fontSize: '0.88rem',
+            fontWeight: 600,
+          }}
+        >
+          {ORDERS_CARD_PROJECTION_UNAVAILABLE}：{cardProjectionError}
+        </div>
+      )}
+
       {cardProjection && (
         <>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+          <div className="card-projection-grid">
             {cardProjection.rows.map((item) => (
-              <div key={item.key}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                  <strong>{item.label}</strong><span>{item.valueText}</span>
+              <div key={item.key} className="card-projection-item">
+                <div className="card-projection-item-header">
+                  <strong className="card-projection-item-label">{item.label}</strong>
+                  {item.availability !== 'available' && (
+                    <span className={`card-projection-item-status ${item.availability}`}>
+                      {item.availability === 'blocked' ? '受阻' : '待補正'}
+                    </span>
+                  )}
                 </div>
-                <small style={{ color: '#64748b' }}>{item.metadataText}</small>
+                <div className="card-projection-item-value">{item.valueText}</div>
+                <small className="card-projection-item-meta">{item.metadataText}</small>
               </div>
             ))}
           </div>
-          <div style={{ marginTop: '12px' }}>
-            <strong>正式指派分段</strong>
+
+          <div className="card-projection-assignments">
+            <strong className="card-projection-assignments-title">👩‍🍼 正式指派分段</strong>
             {cardProjection.assignmentSegments.length === 0 ? (
-              <p style={{ marginBottom: 0 }}>
+              <p className="card-projection-empty-assignments" style={{ margin: 0 }}>
                 {cardProjection.assignmentSegmentsAvailability === 'available'
                   ? '目前尚無正式指派分段。'
                   : cardProjection.assignmentSegmentsMessage}
               </p>
-            ) : cardProjection.assignmentSegments.map((segment) => (
-              <div key={segment.key} style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid #e2e8f0' }}>
-                {segment.rows.map((item) => (
-                  <div key={item.key}>
-                    <span>{item.label}：{item.valueText}</span>
-                    <small style={{ display: 'block', color: '#64748b' }}>{item.metadataText}</small>
+            ) : (
+              <div className="card-projection-segments-grid">
+                {cardProjection.assignmentSegments.map((segment, sIdx) => (
+                  <div key={segment.key} className="card-projection-segment-card">
+                    <div className="card-projection-segment-header">
+                      <span>正式分段 #{sIdx + 1}</span>
+                    </div>
+                    <div className="card-projection-segment-fields">
+                      {segment.rows.map((item) => (
+                        <div key={item.key} className="card-projection-segment-row">
+                          <div>
+                            <span className="card-projection-segment-label">{item.label}：</span>
+                            <span className="card-projection-segment-val">{item.valueText}</span>
+                          </div>
+                          <small className="card-projection-segment-meta">{item.metadataText}</small>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 ))}
               </div>
-            ))}
+            )}
           </div>
         </>
       )}
@@ -1925,53 +1978,61 @@ export const OrdersPage: React.FC = () => {
 
             {/* Tab 1: 雙邊線上契約與定金 (SSOT) */}
             {activeContractTab === 'contract' && contractDetail && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div className="matching-contract-grid">
-                  <div className="matching-contract-box">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong style={{ fontSize: '1rem', color: '#1e1b19' }}>👩‍🍼 月嫂服務契約 (Staff Contract)</strong>
-                      <span style={{ padding: '3px 10px', borderRadius: '9999px', backgroundColor: contractDetail.staffContractSigned ? '#dcfce7' : '#fef3c7', color: contractDetail.staffContractSigned ? '#166534' : '#92400e', fontSize: '0.78rem', fontWeight: 700 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                <div className="contract-ssot-grid">
+                  <div className="contract-ssot-card">
+                    <div className="contract-ssot-header">
+                      <strong className="contract-ssot-title">👩‍🍼 月嫂服務契約</strong>
+                      <span className={`contract-status-pill ${contractDetail.staffContractSigned ? 'success' : 'pending'}`}>
                         {contractDetail.staffContractSigned ? '🟢 已線上簽回' : '🟡 待簽署'}
                       </span>
                     </div>
-                    <div style={{ fontSize: '0.85rem', color: '#57423b' }}>
-                      服務人員：{(contractOrder || dateConfirmOrder)?.assignedDoulaDisplay || '—'}
+                    <div className="contract-ssot-body">
+                      <div>服務人員：{(contractOrder || dateConfirmOrder)?.assignedDoulaDisplay || '—'}</div>
+                      <div>簽署進度：<span>{contractDetail.staffContractSignedText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（月嫂契約簽回）`}</span></div>
                     </div>
-                    <div style={{ fontSize: '0.85rem', color: '#57423b' }}>
-                      簽署進度：<span>{contractDetail.staffContractSignedText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（月嫂契約簽回）`}</span>
-                    </div>
+                    <button type="button" className="contract-evidence-btn" disabled={!contractDetail.staffContractSigned}>
+                      👁️ 檢視月嫂契約簽署存證
+                    </button>
                   </div>
 
-                  <div className="matching-contract-box">
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong style={{ fontSize: '1rem', color: '#1e1b19' }}>👥 產婦服務契約 (Client Contract)</strong>
-                      <span style={{ padding: '3px 10px', borderRadius: '9999px', backgroundColor: contractDetail.clientContractSigned ? '#dcfce7' : '#fef3c7', color: contractDetail.clientContractSigned ? '#166534' : '#92400e', fontSize: '0.78rem', fontWeight: 700 }}>
+                  <div className="contract-ssot-card">
+                    <div className="contract-ssot-header">
+                      <strong className="contract-ssot-title">👥 產婦服務契約</strong>
+                      <span className={`contract-status-pill ${contractDetail.clientContractSigned ? 'success' : 'pending'}`}>
                         {contractDetail.clientContractSigned ? '🟢 已線上簽回' : '🟡 待簽署'}
                       </span>
                     </div>
-                    <div style={{ fontSize: '0.85rem', color: '#57423b' }}>
-                      立約產婦：{contractDetail.clientName}
+                    <div className="contract-ssot-body">
+                      <div>立約產婦：{contractDetail.clientName}</div>
+                      <div>簽署進度：<span>{contractDetail.clientContractSignedText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（客戶契約簽回）`}</span></div>
                     </div>
-                    <div style={{ fontSize: '0.85rem', color: '#57423b' }}>
-                      簽署進度：<span>{contractDetail.clientContractSignedText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（客戶契約簽回）`}</span>
-                    </div>
+                    <button type="button" className="contract-evidence-btn" disabled={!contractDetail.clientContractSigned}>
+                      👁️ 檢視產婦契約簽署存證
+                    </button>
                   </div>
 
-                  <div className="matching-contract-box" style={{ gridColumn: '1 / -1' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <strong style={{ fontSize: '1rem', color: '#1e1b19' }}>💰 客戶定金核銷存證 (Deposit Settlement)</strong>
-                      <span style={{ padding: '3px 10px', borderRadius: '9999px', backgroundColor: contractDetail.depositSettled ? '#dcfce7' : '#fef3c7', color: contractDetail.depositSettled ? '#166534' : '#92400e', fontSize: '0.78rem', fontWeight: 700 }}>
+                  <div className="contract-ssot-card">
+                    <div className="contract-ssot-header">
+                      <strong className="contract-ssot-title">💰 客戶定金核銷</strong>
+                      <span className={`contract-status-pill ${contractDetail.depositSettled ? 'success' : 'pending'}`}>
                         {contractDetail.depositSettled ? '🟢 已全額核銷' : '🟡 待核銷'}
                       </span>
                     </div>
-                    <div style={{ fontSize: '0.85rem', color: '#57423b' }}>
-                      核銷狀態：<span>{contractDetail.depositSettledText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（客戶定金核銷）`}</span>
+                    <div className="contract-ssot-body">
+                      <div>核銷狀態：<span>{contractDetail.depositSettledText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（客戶定金核銷）`}</span></div>
+                      <div style={{ fontWeight: 700, color: contractDetail.depositSettled ? '#166534' : '#c2410c' }}>
+                        {contractDetail.depositSettled ? '🔒 檔期已鎖定 (定金已入帳)' : '🟡 待收到定金後鎖定檔期'}
+                      </div>
                     </div>
+                    <button type="button" className="contract-evidence-btn">
+                      🧾 檢視定金收據明細
+                    </button>
                   </div>
                 </div>
 
                 {contractDetail.domainBlockers && contractDetail.domainBlockers.length > 0 ? (
-                  <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', padding: '14px', borderRadius: '10px' }}>
+                  <div style={{ backgroundColor: '#fef2f2', border: '1px solid #fecaca', padding: '14px 18px', borderRadius: '12px' }}>
                     <div style={{ fontWeight: 700, color: '#991b1b', marginBottom: '6px' }}>🛑 完工阻擋檢核項目：</div>
                     <ul style={{ margin: 0, paddingLeft: '20px', color: '#b91c1c', fontSize: '0.85rem' }}>
                       {contractDetail.domainBlockers.map((b, idx) => (
@@ -1980,215 +2041,285 @@ export const OrdersPage: React.FC = () => {
                     </ul>
                   </div>
                 ) : (
-                  <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '14px', borderRadius: '10px', color: '#166534', fontWeight: 600, fontSize: '0.88rem' }}>
+                  <div style={{ backgroundColor: '#f0fdf4', border: '1px solid #bbf7d0', padding: '14px 18px', borderRadius: '12px', color: '#166534', fontWeight: 600, fontSize: '0.88rem' }}>
                     ✅ 雙邊契約簽署齊備且定金已全額核銷，本訂單無任何履約阻擋。
                   </div>
                 )}
 
-                {/* Terms Summary & Mutation Form directly accessible in Tab 1 */}
-                <div style={{ backgroundColor: '#fff8f6', padding: '16px', borderRadius: '12px', border: '1px solid #f2e2dc' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#ff7f50', marginBottom: '8px' }}>正式 Order Terms (不可原地修改)</h3>
-                  <p><strong>客戶姓名：</strong>{contractDetail?.clientName || (contractOrder || dateConfirmOrder)?.clientName}</p>
-                  <p><strong>服務起訖：</strong>{contractDetail?.serviceRange || (contractOrder || dateConfirmOrder)?.serviceRange}（{contractDetail?.serviceDays === null || contractDetail?.serviceDays === undefined ? ORDERS_TYPED_PROJECTION_UNAVAILABLE : `${contractDetail.serviceDays} 天`}）</p>
-                  <p><strong>每日時段 Tuple：</strong>{contractDetail?.serviceTimeText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（服務時段）`}</p>
-                  <p><strong>下廚料理條款：</strong>{contractDetail?.requiresCookingText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（下廚料理條款）`}</p>
-                  <p><strong>樓層加給費：</strong>{contractDetail?.floorFeeText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（樓層加給）`}</p>
-                  <p><strong>雇主自付應付額：</strong>{contractDetail?.contractAmountText || (contractOrder || dateConfirmOrder)?.contractAmountFormatted}</p>
-                </div>
-
-                <section data-surface-id="orders.terms.mutation" style={{ border: '1px solid #fed9b8', padding: '16px', borderRadius: '12px', backgroundColor: '#ffffff' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '6px', color: '#ff7f50' }}>編修訂單服務條款（Preview → Apply）</h3>
-                  <p style={{ marginTop: 0, color: '#74593f', fontSize: '0.85rem' }}>
-                    每次 Apply 都會重查四個 domain version；Preview 本身不寫入。
-                  </p>
-                  {termsQuery?.service_data_locked && (
-                    <div role="status" style={{ marginBottom: '10px', color: '#9a3412' }}>
-                      此案件的服務根事實已鎖定，依既有規則不可再變更條款。
+                {/* 2-Column Split Terms Workbench */}
+                <div className="order-terms-workbench-layout">
+                  {/* Left Column: Edit Form */}
+                  <div className="terms-edit-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                      <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ff7f50', margin: 0 }}>📝 編輯約定服務條款</h3>
                     </div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px 14px' }}>
-                    <label>計畫服務開始日
-                      <input aria-label="計畫服務開始日" type="date" value={termsDraft.plannedStartDate} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('plannedStartDate', event.target.value)} />
-                    </label>
-                    <label>服務天數
-                      <input aria-label="服務天數" type="number" min="1" value={termsDraft.serviceDays} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('serviceDays', event.target.value)} />
-                    </label>
-                    <label>每日服務時數
-                      <input aria-label="每日服務時數" type="number" min="1" value={termsDraft.serviceHoursPerDay} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('serviceHoursPerDay', event.target.value)} />
-                    </label>
-                    <label>下廚料理需求
-                      <select aria-label="下廚料理需求" value={termsDraft.requiresCooking} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
-                        <option value="">請明確選擇</option>
-                        <option value="yes">需要下廚</option>
-                        <option value="no">不需下廚</option>
-                      </select>
-                    </label>
-                    <label>樓層加給（NTD）
-                      <input aria-label="樓層加給" type="number" min="0" value={termsDraft.floorFeeNtd} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('floorFeeNtd', event.target.value)} />
-                    </label>
-                    <label>每日開始時間
-                      <input aria-label="每日開始時間" type="time" value={termsDraft.startTime} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('startTime', event.target.value)} />
-                    </label>
-                    <label>每日結束時間
-                      <input aria-label="每日結束時間" type="time" value={termsDraft.endTime} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('endTime', event.target.value)} />
-                    </label>
-                    <label>結束日偏移
-                      <select aria-label="結束日偏移" value={termsDraft.endDayOffset} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
-                        <option value="0">同日</option>
-                        <option value="1">隔日</option>
-                      </select>
-                    </label>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={termsMutationLocked || !termsDraftReady}
-                    onClick={() => void previewOrderTerms()}
-                    style={{ marginTop: '12px' }}
-                  >
-                    {termsMutationStatus === 'previewing' ? '條款 Preview 處理中…' : '預覽訂單條款變更'}
-                  </button>
-                  {termsPreview && (
-                    <div style={{ marginTop: '12px', background: '#fff8f6', borderRadius: '10px', padding: '12px' }}>
-                      <strong>Preview 已產生</strong>
-                      <div>服務日期：{termsPreview.after.planned_start_date}｜{termsPreview.after.service_days} 天</div>
-                      <div>每日時段：{termsPreview.after.service_time.start_time} ～ {termsPreview.after.service_time.end_time}</div>
-                      <div>Fingerprint：{termsPreview.preview_fingerprint.slice(0, 12)}…</div>
-                      <label style={{ display: 'block', marginTop: '8px' }}>變更原因
-                        <textarea aria-label="訂單條款變更原因" rows={2} maxLength={500} value={termsReason} disabled={termsMutationLocked} onChange={(event) => setTermsReason(event.target.value)} />
-                      </label>
-                      <button type="button" disabled={termsMutationLocked || termsReason.trim().length === 0} onClick={() => void applyOrderTerms()}>
-                        {termsMutationStatus === 'applying' ? '條款套用中…' : '確認套用訂單條款'}
+                    <p style={{ marginTop: '2px', marginBottom: '12px', color: '#74593f', fontSize: '0.82rem' }}>
+                      每次 Apply 都會重查四個 domain version；Preview 本身不寫入。
+                    </p>
+                    {termsQuery?.service_data_locked && (
+                      <div role="status" style={{ marginBottom: '10px', color: '#9a3412', fontSize: '0.84rem' }}>
+                        此案件的服務根事實已鎖定，依既有規則不可再變更條款。
+                      </div>
+                    )}
+                    <section data-surface-id="orders.terms.mutation">
+                      <div className="terms-form-grid">
+                        <label>計畫服務開始日
+                          <input aria-label="計畫服務開始日" type="date" value={termsDraft.plannedStartDate} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('plannedStartDate', event.target.value)} />
+                        </label>
+                        <label>服務天數
+                          <input aria-label="服務天數" type="number" min="1" value={termsDraft.serviceDays} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('serviceDays', event.target.value)} />
+                        </label>
+                        <label>每日服務時數
+                          <input aria-label="每日服務時數" type="number" min="1" value={termsDraft.serviceHoursPerDay} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('serviceHoursPerDay', event.target.value)} />
+                        </label>
+                        <label>下廚料理需求
+                          <select aria-label="下廚料理需求" value={termsDraft.requiresCooking} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
+                            <option value="">請明確選擇</option>
+                            <option value="yes">需要下廚</option>
+                            <option value="no">不需下廚</option>
+                          </select>
+                        </label>
+                        <label>樓層加給（NTD）
+                          <input aria-label="樓層加給" type="number" min="0" value={termsDraft.floorFeeNtd} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('floorFeeNtd', event.target.value)} />
+                        </label>
+                        <label>每日開始時間
+                          <input aria-label="每日開始時間" type="time" value={termsDraft.startTime} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('startTime', event.target.value)} />
+                        </label>
+                        <label>每日結束時間
+                          <input aria-label="每日結束時間" type="time" value={termsDraft.endTime} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('endTime', event.target.value)} />
+                        </label>
+                        <label>結束日偏移
+                          <select aria-label="結束日偏移" value={termsDraft.endDayOffset} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
+                            <option value="0">同日</option>
+                            <option value="1">隔日</option>
+                          </select>
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-secondary-action"
+                        style={{ marginTop: '16px', width: '100%', padding: '10px' }}
+                        disabled={termsMutationLocked || !termsDraftReady}
+                        onClick={() => void previewOrderTerms()}
+                      >
+                        {termsMutationStatus === 'previewing' ? '條款 Preview 處理中…' : '預覽訂單條款變更'}
                       </button>
+                    </section>
+                  </div>
+
+                  {/* Right Column: Diff & Apply */}
+                  <div className="terms-diff-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#1e1b19', margin: 0 }}>✨ 預覽條款變更 (Diff)</h3>
+                      {termsPreview && <strong style={{ color: '#ff7f50', fontSize: '0.88rem' }}>Preview 已產生</strong>}
                     </div>
-                  )}
-                  {termsReceipt && (
-                    <div role="status" style={{ marginTop: '10px', color: '#166534', fontWeight: 700 }}>
-                      條款已套用（Order v{termsReceipt.order_version}；正式服務日 {termsReceipt.official_service_day_count} 天）
-                    </div>
-                  )}
-                  {termsMutationError && <div role="alert" style={{ marginTop: '10px', color: '#b91c1c' }}>{termsMutationError}</div>}
-                </section>
+                    {termsPreview ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div className="terms-diff-comparison">
+                          <div className="terms-diff-row">
+                            <span>服務起訖</span>
+                            <span style={{ fontWeight: 700 }}>{termsPreview.after.planned_start_date} <span className="terms-diff-arrow">→</span> {termsPreview.after.service_days} 天</span>
+                          </div>
+                          <div className="terms-diff-row">
+                            <span>每日時段</span>
+                            <span style={{ fontWeight: 700 }}>{termsPreview.after.service_time.start_time} ～ {termsPreview.after.service_time.end_time}</span>
+                          </div>
+                          <div className="terms-diff-row" style={{ fontSize: '0.78rem', color: '#8b7169' }}>
+                            <span>Fingerprint</span>
+                            <span>{termsPreview.preview_fingerprint.slice(0, 12)}…</span>
+                          </div>
+                        </div>
+
+                        <div className="terms-system-notice">
+                          ⚠️ <strong>系統提示</strong>：變更天數將重新計算總費用，並可能影響已排定的服務日曆。請確認後再套用。
+                        </div>
+
+                        <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem' }}>
+                          變更原因 (Audit Log)
+                          <textarea
+                            aria-label="訂單條款變更原因"
+                            className="mutation-reason-input"
+                            rows={2}
+                            maxLength={500}
+                            value={termsReason}
+                            disabled={termsMutationLocked}
+                            onChange={(event) => setTermsReason(event.target.value)}
+                            style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-primary-action"
+                          style={{ width: '100%', padding: '11px', background: '#c2410c' }}
+                          disabled={termsMutationLocked || termsReason.trim().length === 0}
+                          onClick={() => void applyOrderTerms()}
+                        >
+                          {termsMutationStatus === 'applying' ? '條款套用中…' : '確認套用訂單條款'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8b7169', backgroundColor: '#fffdfb', borderRadius: '10px', border: '1px dashed #dec0b6', fontSize: '0.88rem' }}>
+                        💡 請在左側輸入或調整條款後，點擊「預覽訂單條款變更」進行比對與試算。
+                      </div>
+                    )}
+                    {termsReceipt && (
+                      <div role="status" style={{ marginTop: '4px', color: '#166534', fontWeight: 700, fontSize: '0.88rem' }}>
+                        條款已套用（Order v{termsReceipt.order_version}；正式服務日 {termsReceipt.official_service_day_count} 天）
+                      </div>
+                    )}
+                    {termsMutationError && <div role="alert" style={{ color: '#b91c1c', fontSize: '0.85rem' }}>{termsMutationError}</div>}
+                  </div>
+                </div>
               </div>
             )}
 
             {/* Tab 2: 約定服務條款管理 (Order Terms) */}
             {activeContractTab === 'terms' && contractDetail && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <div style={{ backgroundColor: '#fff8f6', padding: '16px', borderRadius: '12px', border: '1px solid #f2e2dc' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#ff7f50', marginBottom: '8px' }}>正式 Order Terms (不可原地修改)</h3>
-                  <p><strong>客戶姓名：</strong>{contractDetail?.clientName || (contractOrder || dateConfirmOrder)?.clientName}</p>
-                  <p><strong>服務起訖：</strong>{contractDetail?.serviceRange || (contractOrder || dateConfirmOrder)?.serviceRange}（{contractDetail?.serviceDays === null || contractDetail?.serviceDays === undefined ? ORDERS_TYPED_PROJECTION_UNAVAILABLE : `${contractDetail.serviceDays} 天`}）</p>
-                  <p><strong>每日時段 Tuple：</strong>{contractDetail?.serviceTimeText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（服務時段）`}</p>
-                  <p><strong>下廚料理條款：</strong>{contractDetail?.requiresCookingText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（下廚料理條款）`}</p>
-                  <p><strong>樓層加給費：</strong>{contractDetail?.floorFeeText || `${ORDERS_TYPED_PROJECTION_UNAVAILABLE}（樓層加給）`}</p>
-                  <p><strong>雇主自付應付額：</strong>{contractDetail?.contractAmountText || (contractOrder || dateConfirmOrder)?.contractAmountFormatted}</p>
-                </div>
-
-                <section data-surface-id="orders.terms.mutation" style={{ border: '1px solid #fed9b8', padding: '16px', borderRadius: '12px', backgroundColor: '#ffffff' }}>
-                  <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '6px', color: '#ff7f50' }}>編修訂單服務條款（Preview → Apply）</h3>
-                  <p style={{ marginTop: 0, color: '#74593f', fontSize: '0.85rem' }}>
-                    每次 Apply 都會重查四個 domain version；Preview 本身不寫入。
-                  </p>
-                  {termsQuery?.service_data_locked && (
-                    <div role="status" style={{ marginBottom: '10px', color: '#9a3412' }}>
-                      此案件的服務根事實已鎖定，依既有規則不可再變更條款。
-                    </div>
-                  )}
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '10px 14px' }}>
-                    <label>計畫服務開始日
-                      <input aria-label="計畫服務開始日" type="date" value={termsDraft.plannedStartDate} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('plannedStartDate', event.target.value)} />
-                    </label>
-                    <label>服務天數
-                      <input aria-label="服務天數" type="number" min="1" value={termsDraft.serviceDays} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('serviceDays', event.target.value)} />
-                    </label>
-                    <label>每日服務時數
-                      <input aria-label="每日服務時數" type="number" min="1" value={termsDraft.serviceHoursPerDay} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('serviceHoursPerDay', event.target.value)} />
-                    </label>
-                    <label>下廚料理需求
-                      <select aria-label="下廚料理需求" value={termsDraft.requiresCooking} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
-                        <option value="">請明確選擇</option>
-                        <option value="yes">需要下廚</option>
-                        <option value="no">不需下廚</option>
-                      </select>
-                    </label>
-                    <label>樓層加給（NTD）
-                      <input aria-label="樓層加給" type="number" min="0" value={termsDraft.floorFeeNtd} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('floorFeeNtd', event.target.value)} />
-                    </label>
-                    <label>每日開始時間
-                      <input aria-label="每日開始時間" type="time" value={termsDraft.startTime} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('startTime', event.target.value)} />
-                    </label>
-                    <label>每日結束時間
-                      <input aria-label="每日結束時間" type="time" value={termsDraft.endTime} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('endTime', event.target.value)} />
-                    </label>
-                    <label>結束日偏移
-                      <select aria-label="結束日偏移" value={termsDraft.endDayOffset} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
-                        <option value="0">同日</option>
-                        <option value="1">隔日</option>
-                      </select>
-                    </label>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={termsMutationLocked || !termsDraftReady}
-                    onClick={() => void previewOrderTerms()}
-                    style={{ marginTop: '12px' }}
-                  >
-                    {termsMutationStatus === 'previewing' ? '條款 Preview 處理中…' : '預覽訂單條款變更'}
-                  </button>
-                  {termsPreview && (
-                    <div style={{ marginTop: '12px', background: '#fff8f6', borderRadius: '10px', padding: '12px' }}>
-                      <strong>Preview 已產生</strong>
-                      <div>服務日期：{termsPreview.after.planned_start_date}｜{termsPreview.after.service_days} 天</div>
-                      <div>每日時段：{termsPreview.after.service_time.start_time} ～ {termsPreview.after.service_time.end_time}</div>
-                      <div>Fingerprint：{termsPreview.preview_fingerprint.slice(0, 12)}…</div>
-                      <label style={{ display: 'block', marginTop: '8px' }}>變更原因
-                        <textarea aria-label="訂單條款變更原因" rows={2} maxLength={500} value={termsReason} disabled={termsMutationLocked} onChange={(event) => setTermsReason(event.target.value)} />
-                      </label>
-                      <button type="button" disabled={termsMutationLocked || termsReason.trim().length === 0} onClick={() => void applyOrderTerms()}>
-                        {termsMutationStatus === 'applying' ? '條款套用中…' : '確認套用訂單條款'}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                <div className="order-terms-workbench-layout">
+                  {/* Left Column: Edit Form */}
+                  <div className="terms-edit-card">
+                    <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ff7f50', margin: 0 }}>📝 編輯約定服務條款</h3>
+                    <p style={{ marginTop: '2px', marginBottom: '12px', color: '#74593f', fontSize: '0.82rem' }}>
+                      每次 Apply 都會重查四個 domain version；Preview 本身不寫入。
+                    </p>
+                    {termsQuery?.service_data_locked && (
+                      <div role="status" style={{ marginBottom: '10px', color: '#9a3412', fontSize: '0.84rem' }}>
+                        此案件的服務根事實已鎖定，依既有規則不可再變更條款。
+                      </div>
+                    )}
+                    <section data-surface-id="orders.terms.mutation">
+                      <div className="terms-form-grid">
+                        <label>計畫服務開始日
+                          <input aria-label="計畫服務開始日" type="date" value={termsDraft.plannedStartDate} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('plannedStartDate', event.target.value)} />
+                        </label>
+                        <label>服務天數
+                          <input aria-label="服務天數" type="number" min="1" value={termsDraft.serviceDays} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('serviceDays', event.target.value)} />
+                        </label>
+                        <label>每日服務時數
+                          <input aria-label="每日服務時數" type="number" min="1" value={termsDraft.serviceHoursPerDay} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('serviceHoursPerDay', event.target.value)} />
+                        </label>
+                        <label>下廚料理需求
+                          <select aria-label="下廚料理需求" value={termsDraft.requiresCooking} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('requiresCooking', event.target.value as OrderTermsDraft['requiresCooking'])}>
+                            <option value="">請明確選擇</option>
+                            <option value="yes">需要下廚</option>
+                            <option value="no">不需下廚</option>
+                          </select>
+                        </label>
+                        <label>樓層加給（NTD）
+                          <input aria-label="樓層加給" type="number" min="0" value={termsDraft.floorFeeNtd} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('floorFeeNtd', event.target.value)} />
+                        </label>
+                        <label>每日開始時間
+                          <input aria-label="每日開始時間" type="time" value={termsDraft.startTime} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('startTime', event.target.value)} />
+                        </label>
+                        <label>每日結束時間
+                          <input aria-label="每日結束時間" type="time" value={termsDraft.endTime} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('endTime', event.target.value)} />
+                        </label>
+                        <label>結束日偏移
+                          <select aria-label="結束日偏移" value={termsDraft.endDayOffset} disabled={termsMutationLocked} onChange={(event) => updateTermsDraft('endDayOffset', event.target.value as OrderTermsDraft['endDayOffset'])}>
+                            <option value="0">同日</option>
+                            <option value="1">隔日</option>
+                          </select>
+                        </label>
+                      </div>
+                      <button
+                        type="button"
+                        className="btn-secondary-action"
+                        style={{ marginTop: '16px', width: '100%', padding: '10px' }}
+                        disabled={termsMutationLocked || !termsDraftReady}
+                        onClick={() => void previewOrderTerms()}
+                      >
+                        {termsMutationStatus === 'previewing' ? '條款 Preview 處理中…' : '預覽訂單條款變更'}
                       </button>
+                    </section>
+                  </div>
+
+                  {/* Right Column: Diff & Apply */}
+                  <div className="terms-diff-card">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#1e1b19', margin: 0 }}>✨ 預覽條款變更 (Diff)</h3>
+                      {termsPreview && <strong style={{ color: '#ff7f50', fontSize: '0.88rem' }}>Preview 已產生</strong>}
                     </div>
-                  )}
-                  {termsReceipt && (
-                    <div role="status" style={{ marginTop: '10px', color: '#166534', fontWeight: 700 }}>
-                      條款已套用（Order v{termsReceipt.order_version}；正式服務日 {termsReceipt.official_service_day_count} 天）
-                    </div>
-                  )}
-                  {termsMutationError && <div role="alert" style={{ marginTop: '10px', color: '#b91c1c' }}>{termsMutationError}</div>}
-                </section>
+                    {termsPreview ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div className="terms-diff-comparison">
+                          <div className="terms-diff-row">
+                            <span>服務起訖</span>
+                            <span style={{ fontWeight: 700 }}>{termsPreview.after.planned_start_date} <span className="terms-diff-arrow">→</span> {termsPreview.after.service_days} 天</span>
+                          </div>
+                          <div className="terms-diff-row">
+                            <span>每日時段</span>
+                            <span style={{ fontWeight: 700 }}>{termsPreview.after.service_time.start_time} ～ {termsPreview.after.service_time.end_time}</span>
+                          </div>
+                          <div className="terms-diff-row" style={{ fontSize: '0.78rem', color: '#8b7169' }}>
+                            <span>Fingerprint</span>
+                            <span>{termsPreview.preview_fingerprint.slice(0, 12)}…</span>
+                          </div>
+                        </div>
+
+                        <div className="terms-system-notice">
+                          ⚠️ <strong>系統提示</strong>：變更天數將重新計算總費用，並可能影響已排定的服務日曆。請確認後再套用。
+                        </div>
+
+                        <label style={{ display: 'block', fontWeight: 700, fontSize: '0.85rem' }}>
+                          變更原因 (Audit Log)
+                          <textarea
+                            aria-label="訂單條款變更原因"
+                            className="mutation-reason-input"
+                            rows={2}
+                            maxLength={500}
+                            value={termsReason}
+                            disabled={termsMutationLocked}
+                            onChange={(event) => setTermsReason(event.target.value)}
+                            style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-primary-action"
+                          style={{ width: '100%', padding: '11px', background: '#c2410c' }}
+                          disabled={termsMutationLocked || termsReason.trim().length === 0}
+                          onClick={() => void applyOrderTerms()}
+                        >
+                          {termsMutationStatus === 'applying' ? '條款套用中…' : '確認套用訂單條款'}
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ padding: '24px 16px', textAlign: 'center', color: '#8b7169', backgroundColor: '#fffdfb', borderRadius: '10px', border: '1px dashed #dec0b6', fontSize: '0.88rem' }}>
+                        💡 請在左側輸入或調整條款後，點擊「預覽訂單條款變更」進行比對與試算。
+                      </div>
+                    )}
+                    {termsReceipt && (
+                      <div role="status" style={{ marginTop: '4px', color: '#166534', fontWeight: 700, fontSize: '0.88rem' }}>
+                        條款已套用（Order v{termsReceipt.order_version}；正式服務日 {termsReceipt.official_service_day_count} 天）
+                      </div>
+                    )}
+                    {termsMutationError && <div role="alert" style={{ color: '#b91c1c', fontSize: '0.85rem' }}>{termsMutationError}</div>}
+                  </div>
+                </div>
               </div>
             )}
 
             {/* Tab 3: 實質服務日曆與天數精算 (Service Calendar & Precision) */}
             {activeContractTab === 'calendar' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                <section
-                  data-surface-id="orders.drawer.service-dates"
-                  style={{ backgroundColor: '#ffffff', border: '1px solid #cbd5e1', padding: '20px', borderRadius: '14px' }}
-                >
-                  <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f766e', marginBottom: '12px' }}>
-                    正式服務日期確認
-                  </h3>
-
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '18px' }}>
+                <section data-surface-id="orders.drawer.service-dates">
                   {serviceDatesDraft?.queryView && (
                     <>
-                      <div className="service-dates-meta-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '14px', fontSize: '0.85rem' }}>
-                        <span>合約服務天數：{serviceDatesDraft.queryView.contracted_service_days} 天</span>
-                        <span>目前確認版本：{serviceDatesDraft.queryView.current_version === null ? '尚未確認' : `v${serviceDatesDraft.queryView.current_version}`}</span>
-                        <span>已確認日期：{serviceDatesDraft.queryView.current_dates.length > 0 ? serviceDatesDraft.queryView.current_dates.join(', ') : '無'}</span>
-                      </div>
-
-                      {/* Schedule Precision Controls Bar */}
-                      <div style={{ backgroundColor: '#fffdfc', border: '1px solid #fed9b8', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.92rem', color: '#ff7f50', marginBottom: '10px' }}>
-                          🧮 出勤天數精算與排休順延控制
+                      {/* Precision Controls & Metric Bar */}
+                      <div style={{ backgroundColor: '#ffffff', border: '1px solid #fed9b8', borderRadius: '14px', padding: '18px 22px', marginBottom: '18px', boxShadow: '0 4px 16px rgba(255, 127, 80, 0.05)' }}>
+                        <div className="service-dates-meta-row" style={{ display: 'flex', flexWrap: 'wrap', gap: '14px', marginBottom: '14px', fontSize: '0.85rem', color: '#57423b' }}>
+                          <span>合約服務天數：{serviceDatesDraft.queryView.contracted_service_days} 天</span>
+                          <span>目前確認版本：{serviceDatesDraft.queryView.current_version === null ? '尚未確認' : `v${serviceDatesDraft.queryView.current_version}`}</span>
+                          <span>已確認日期：{serviceDatesDraft.queryView.current_dates.length > 0 ? serviceDatesDraft.queryView.current_dates.join(', ') : '無'}</span>
                         </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '12px', alignItems: 'flex-end' }}>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: '14px', alignItems: 'flex-end', marginBottom: '14px' }}>
                           <div>
-                            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '6px' }}>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 700, color: '#57423b', marginBottom: '4px' }}>
                               實際開工基準：
                             </div>
-                            <div style={{ padding: '7px 10px', borderRadius: '8px', backgroundColor: '#f1f5f9', border: '1px solid #dec0b6', fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>
+                            <div style={{ padding: '8px 12px', borderRadius: '8px', backgroundColor: '#f1f5f9', border: '1px solid #dec0b6', fontSize: '0.9rem', fontWeight: 600, color: '#334155' }}>
                               📅 {actualStartDraft || termsDraft.plannedStartDate || '2026-09-01'}
                             </div>
                           </div>
@@ -2201,7 +2332,7 @@ export const OrdersPage: React.FC = () => {
                               value={precisionMode}
                               disabled={serviceDatesLocked}
                               onChange={(event) => setPrecisionMode(event.target.value as '週休1日' | '週休2日' | '連續服務')}
-                              style={{ width: '100%', padding: '7px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
+                              style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.88rem', backgroundColor: '#fff' }}
                             >
                               <option value="週休1日">週休 1 日</option>
                               <option value="週休2日">週休 2 日</option>
@@ -2210,24 +2341,17 @@ export const OrdersPage: React.FC = () => {
                           </div>
                           <button
                             type="button"
+                            className="btn-primary-action"
                             disabled={serviceDatesLocked || precisionCalculating}
                             onClick={() => void runSchedulePrecision((contractOrder || dateConfirmOrder)!.id)}
-                            style={{
-                              padding: '8px 18px',
-                              backgroundColor: '#ff7f50',
-                              color: '#fff',
-                              border: 'none',
-                              borderRadius: '8px',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                            }}
+                            style={{ padding: '9px 20px', fontSize: '0.88rem' }}
                           >
                             {precisionCalculating ? '精算中…' : '🧮 執行出勤天數精算'}
                           </button>
                         </div>
 
                         {precisionResult && (
-                          <div className="precision-stat-grid" style={{ marginTop: '14px' }}>
+                          <div className="precision-stat-grid" style={{ marginBottom: 0 }}>
                             <div className="precision-stat-box">
                               <span className="precision-stat-label">合約目標天數</span>
                               <span className="precision-stat-val">{precisionResult.target_service_days} 天</span>
@@ -2257,130 +2381,186 @@ export const OrdersPage: React.FC = () => {
                         )}
                       </div>
 
-                      {/* Selectable Date Matrix */}
-                      <div data-surface-id="orders.date.service-date-selection" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}>
-                        {serviceDatesDraft.queryView.selectable_dates.map((date) => {
-                          const selected = serviceDatesDraft.selectedDates.includes(date);
-                          return (
-                            <button
-                              key={date}
-                              data-control-id="orders.date.service-date-select"
-                              type="button"
-                              aria-pressed={selected}
-                              disabled={serviceDatesLocked}
-                              onClick={() =>
-                                changeServiceDateSelection(
-                                  (contractOrder || dateConfirmOrder)!.id,
-                                  selected
-                                    ? serviceDatesDraft.selectedDates.filter((value) => value !== date)
-                                    : [...serviceDatesDraft.selectedDates, date]
-                                )
-                              }
-                              style={{
-                                padding: '7px 10px',
-                                borderRadius: '8px',
-                                border: selected ? '1px solid #0d9488' : '1px solid #cbd5e1',
-                                background: selected ? '#ccfbf1' : '#fff',
-                                color: '#0f766e',
-                                cursor: serviceDatesLocked ? 'not-allowed' : 'pointer',
-                              }}
-                            >
-                              {date}
-                            </button>
-                          );
-                        })}
-                      </div>
+                      {/* 2-Column Split: Calendar Matrix & Selected Preview Sidebar */}
+                      <div className="service-calendar-workbench-layout">
+                        {/* Left Column: Calendar Matrix */}
+                        <div className="calendar-matrix-card">
+                          <div className="calendar-month-header">
+                            <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#0f766e', margin: 0 }}>
+                              📅 正式服務日期確認（日曆排盤）
+                            </h3>
+                            <div style={{ display: 'flex', gap: '8px' }}>
+                              <button
+                                type="button"
+                                className="btn-secondary-action"
+                                style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+                                disabled={serviceDatesLocked}
+                                onClick={() => changeServiceDateSelection((contractOrder || dateConfirmOrder)!.id, serviceDatesDraft.queryView!.suggested_dates)}
+                              >
+                                帶入建議日期
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-secondary-action"
+                                style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+                                disabled={serviceDatesLocked || serviceDatesDraft.selectedDates.length === 0}
+                                onClick={() => changeServiceDateSelection((contractOrder || dateConfirmOrder)!.id, [])}
+                              >
+                                清除全部
+                              </button>
+                            </div>
+                          </div>
 
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '12px' }}>
-                        <button
-                          type="button"
-                          disabled={serviceDatesLocked}
-                          onClick={() => changeServiceDateSelection((contractOrder || dateConfirmOrder)!.id, serviceDatesDraft.queryView!.suggested_dates)}
-                        >
-                          帶入建議日期
-                        </button>
-                        <button
-                          type="button"
-                          data-control-id="orders.date.service-date-preview"
-                          disabled={
-                            serviceDatesLocked ||
-                            serviceDatesDraft.status === 'preview_loading' ||
-                            serviceDatesDraft.selectedDates.length !== serviceDatesDraft.queryView.contracted_service_days
-                          }
-                          onClick={() => previewServiceDates((contractOrder || dateConfirmOrder)!.id)}
-                        >
-                          {serviceDatesDraft.status === 'preview_loading' ? '預覽處理中…' : '預覽正式服務日期'}
-                        </button>
+                          <div className="calendar-weekdays-row">
+                            <span>日 (Sun)</span>
+                            <span>一 (Mon)</span>
+                            <span>二 (Tue)</span>
+                            <span>三 (Wed)</span>
+                            <span>四 (Thu)</span>
+                            <span>五 (Fri)</span>
+                            <span>六 (Sat)</span>
+                          </div>
+
+                          <div className="calendar-days-grid" data-surface-id="orders.date.service-date-selection">
+                            {serviceDatesDraft.queryView.selectable_dates.map((date) => {
+                              const selected = serviceDatesDraft.selectedDates.includes(date);
+                              return (
+                                <button
+                                  key={date}
+                                  data-control-id="orders.date.service-date-select"
+                                  type="button"
+                                  aria-label={date}
+                                  aria-pressed={selected}
+                                  className={`calendar-date-cell ${selected ? 'selected' : ''}`}
+                                  disabled={serviceDatesLocked}
+                                  onClick={() =>
+                                    changeServiceDateSelection(
+                                      (contractOrder || dateConfirmOrder)!.id,
+                                      selected
+                                        ? serviceDatesDraft.selectedDates.filter((value) => value !== date)
+                                        : [...serviceDatesDraft.selectedDates, date]
+                                    )
+                                  }
+                                >
+                                  <span>{date}</span>
+                                  {selected && <span className="calendar-date-cell-badge">8hr / 排班</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Right Column: Selected Dates Preview Sidebar */}
+                        <div className="calendar-preview-sidebar">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <strong style={{ fontSize: '0.96rem', color: '#1e1b19' }}>已選服務日清單</strong>
+                            <span style={{ fontSize: '0.8rem', fontWeight: 750, color: serviceDatesDraft.selectedDates.length === serviceDatesDraft.queryView.contracted_service_days ? '#166534' : '#c2410c' }}>
+                              已排 {serviceDatesDraft.selectedDates.length} / {serviceDatesDraft.queryView.contracted_service_days} 天
+                            </span>
+                          </div>
+
+                          <div className="calendar-selected-list">
+                            {serviceDatesDraft.selectedDates.length > 0 ? (
+                              serviceDatesDraft.selectedDates.map((date) => (
+                                <div key={date} className="calendar-selected-item">
+                                  <span>📅 {date}</span>
+                                  <span style={{ color: '#0f766e', fontWeight: 700 }}>8hr</span>
+                                </div>
+                              ))
+                            ) : (
+                              <div style={{ textAlign: 'center', padding: '16px', color: '#8b7169', fontSize: '0.82rem' }}>
+                                尚未勾選出勤日期
+                              </div>
+                            )}
+                          </div>
+
+                          <button
+                            type="button"
+                            data-control-id="orders.date.service-date-preview"
+                            className="btn-secondary-action"
+                            disabled={
+                              serviceDatesLocked ||
+                              serviceDatesDraft.status === 'preview_loading' ||
+                              serviceDatesDraft.selectedDates.length !== serviceDatesDraft.queryView.contracted_service_days
+                            }
+                            onClick={() => previewServiceDates((contractOrder || dateConfirmOrder)!.id)}
+                          >
+                            {serviceDatesDraft.status === 'preview_loading' ? '預覽處理中…' : '預覽正式服務日期'}
+                          </button>
+
+                          {serviceDatesDraft?.previewView && (
+                            <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '10px', padding: '12px' }}>
+                              <h4 style={{ color: '#0f766e', margin: '0 0 6px 0', fontSize: '0.88rem' }}>服務週次精算預覽</h4>
+                              {serviceDatesDraft.previewView.weeks.map((week) => (
+                                <div key={week.week_number} style={{ marginBottom: '4px', fontSize: '0.82rem', color: '#134e4a' }}>
+                                  第 {week.week_number} 週：{week.period_start} ～ {week.period_end}（{week.service_dates.join(', ')}）
+                                </div>
+                              ))}
+
+                              <label style={{ display: 'block', fontWeight: 700, fontSize: '0.84rem', marginTop: '10px' }}>
+                                確認原因 (Audit Log)
+                                <textarea
+                                  className="mutation-reason-input"
+                                  rows={2}
+                                  maxLength={500}
+                                  value={serviceDatesDraft.reason}
+                                  disabled={serviceDatesLocked}
+                                  onChange={(event) => updateServiceDatesReason((contractOrder || dateConfirmOrder)!.id, event.target.value)}
+                                  style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
+                                />
+                              </label>
+
+                              <button
+                                type="button"
+                                data-control-id="orders.date.service-date-apply"
+                                className="btn-primary-action"
+                                style={{ marginTop: '10px', width: '100%', background: '#0f766e' }}
+                                disabled={serviceDatesLocked || serviceDatesDraft.reason.trim().length === 0}
+                                onClick={() => void applyServiceDatesFlow((contractOrder || dateConfirmOrder)!.id).catch(() => undefined)}
+                              >
+                                確認套用服務日期
+                              </button>
+                            </div>
+                          )}
+
+                          {serviceDatesDraft?.status === 'outcome_unknown' && (
+                            <div role="alert" style={{ color: '#9a3412', fontSize: '0.84rem' }}>
+                              服務日期確認回應逾時或未明；只可用原 Payload 與原 Key 重試。
+                              <button type="button" onClick={() => void retryServiceDatesApplyFlow((contractOrder || dateConfirmOrder)!.id).catch(() => undefined)}>
+                                重試提交
+                              </button>
+                            </div>
+                          )}
+                          {(serviceDatesDraft?.status === 'observed' || serviceDatesDraft?.status === 'receipt_received' || serviceDatesDraft?.status === 'requery_loading') && serviceDatesDraft.receiptView && (
+                            <div role="status" style={{ color: '#166534', fontWeight: 700, fontSize: '0.84rem' }}>
+                              服務日期已確認成功（Confirmed v{serviceDatesDraft.receiptView.confirmed_version}）
+                            </div>
+                          )}
+                          {serviceDatesDraft?.status === 'observation_failed' && (
+                            <div role="alert" style={{ color: '#9a3412', fontSize: '0.84rem' }}>
+                              套用 receipt 已收到，但重新查詢失敗：{serviceDatesDraft.error?.message}
+                              <button type="button" onClick={() => void retryServiceDatesObservationFlow((contractOrder || dateConfirmOrder)!.id).catch(() => undefined)}>
+                                重試觀察
+                              </button>
+                            </div>
+                          )}
+                          {(serviceDatesDraft?.status === 'typed_error' || serviceDatesDraft?.status === 'stale') && (
+                            <div role="alert" style={{ color: '#b91c1c', fontSize: '0.84rem' }}>
+                              {serviceDatesDraft.error?.message ?? '服務日期操作失敗，請重新查詢。'}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </>
                   )}
-
-                  {serviceDatesDraft?.previewView && (
-                    <div style={{ background: '#fff', border: '1px solid #99f6e4', borderRadius: '10px', padding: '14px' }}>
-                      <h4 style={{ color: '#0f766e', marginBottom: '8px' }}>服務週次精算預覽</h4>
-                      {serviceDatesDraft.previewView.weeks.map((week) => (
-                        <div key={week.week_number} style={{ marginBottom: '6px', fontSize: '0.85rem' }}>
-                          第 {week.week_number} 週：{week.period_start} ～ {week.period_end}（{week.service_dates.join(', ')}）
-                        </div>
-                      ))}
-                      <label style={{ display: 'block', marginTop: '10px', fontWeight: 700 }}>
-                        確認原因
-                        <textarea
-                          className="mutation-reason-input"
-                          rows={3}
-                          maxLength={500}
-                          value={serviceDatesDraft.reason}
-                          disabled={serviceDatesLocked}
-                          onChange={(event) => updateServiceDatesReason((contractOrder || dateConfirmOrder)!.id, event.target.value)}
-                          style={{ display: 'block', width: '100%', marginTop: '6px' }}
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        data-control-id="orders.date.service-date-apply"
-                        disabled={serviceDatesLocked || serviceDatesDraft.reason.trim().length === 0}
-                        onClick={() => void applyServiceDatesFlow((contractOrder || dateConfirmOrder)!.id).catch(() => undefined)}
-                        style={{ marginTop: '10px' }}
-                      >
-                        確認套用服務日期
-                      </button>
-                    </div>
-                  )}
-
-                  {serviceDatesDraft?.status === 'outcome_unknown' && (
-                    <div role="alert" style={{ marginTop: '12px', color: '#9a3412' }}>
-                      服務日期確認回應逾時或未明；只可用原 Payload 與原 Key 重試。
-                      <button type="button" onClick={() => void retryServiceDatesApplyFlow((contractOrder || dateConfirmOrder)!.id).catch(() => undefined)}>
-                        重試提交
-                      </button>
-                    </div>
-                  )}
-                  {(serviceDatesDraft?.status === 'observed' || serviceDatesDraft?.status === 'receipt_received' || serviceDatesDraft?.status === 'requery_loading') && serviceDatesDraft.receiptView && (
-                    <div role="status" style={{ marginTop: '12px', color: '#166534', fontWeight: 700 }}>
-                      服務日期已確認成功（Confirmed v{serviceDatesDraft.receiptView.confirmed_version}）
-                    </div>
-                  )}
-                  {serviceDatesDraft?.status === 'observation_failed' && (
-                    <div role="alert" style={{ marginTop: '12px', color: '#9a3412' }}>
-                      套用 receipt 已收到，但重新查詢失敗：{serviceDatesDraft.error?.message}
-                      <button type="button" onClick={() => void retryServiceDatesObservationFlow((contractOrder || dateConfirmOrder)!.id).catch(() => undefined)}>
-                        重試觀察
-                      </button>
-                    </div>
-                  )}
-                  {(serviceDatesDraft?.status === 'typed_error' || serviceDatesDraft?.status === 'stale') && (
-                    <div role="alert" style={{ marginTop: '12px', color: '#b91c1c' }}>
-                      {serviceDatesDraft.error?.message ?? '服務日期操作失敗，請重新查詢。'}
-                    </div>
-                  )}
                 </section>
 
-                {/* 實際服務開始日 */}
-                <div style={{ backgroundColor: '#ffffff', border: '1px solid #fed9b8', padding: '20px', borderRadius: '14px' }}>
-                  <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#ff7f50', marginBottom: '12px' }}>
-                    實際服務開始日
+                {/* 實際服務開始日專區 */}
+                <div className="actual-start-workbench-card">
+                  <h3 style={{ fontSize: '1.05rem', fontWeight: 750, color: '#ff7f50', margin: '0 0 12px 0' }}>
+                    🚩 實際服務開始日（Actual Start Date）
                   </h3>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '14px' }}>
                     <div>
                       <label htmlFor="edit-actual-start-date" style={{ display: 'block', fontSize: '0.85rem', fontWeight: 700, color: '#57423b', marginBottom: '6px' }}>
                         實際服務開始日：
@@ -2395,39 +2575,40 @@ export const OrdersPage: React.FC = () => {
                           setActualStartPreview(null);
                           setActualStartReceipt(null);
                         }}
-                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.95rem', fontWeight: 600, backgroundColor: '#f8fafc' }}
+                        style={{ width: '100%', padding: '8px 12px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.95rem', fontWeight: 600, backgroundColor: '#fdfcfb' }}
                       />
                       <button
                         type="button"
+                        className="btn-secondary-action"
                         disabled={actualStartLocked || actualStartQuery === null || actualStartDraft.length === 0}
                         onClick={() => void previewActualStart()}
-                        style={{ marginTop: '8px' }}
+                        style={{ marginTop: '10px', width: '100%' }}
                       >
                         {actualStartStatus === 'previewing' ? '實際開工日 Preview 處理中…' : '預覽實際開工日變更'}
                       </button>
                     </div>
-                    <div style={{ backgroundColor: '#fff8f6', border: '1px solid #fed9b8', borderRadius: '10px', padding: '12px' }}>
-                      <strong>最新根事實版本</strong>
-                      <div>計畫開始日：{actualStartQuery?.planned_start_date ?? '查詢中'}</div>
-                      <div>目前實際開始日：{actualStartQuery?.current_actual_start_date ?? '尚未登錄'}</div>
-                      <div>Order v{actualStartQuery?.order_version ?? '—'}｜Scheduling v{actualStartQuery?.scheduling_version ?? '—'}</div>
+                    <div style={{ backgroundColor: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '10px', padding: '14px' }}>
+                      <strong style={{ fontSize: '0.9rem', color: '#1e1b19' }}>最新根事實版本</strong>
+                      <div style={{ fontSize: '0.85rem', color: '#57423b', marginTop: '6px' }}>計畫開始日：{actualStartQuery?.planned_start_date ?? '查詢中'}</div>
+                      <div style={{ fontSize: '0.85rem', color: '#57423b' }}>目前實際開始日：{actualStartQuery?.current_actual_start_date ?? '尚未登錄'}</div>
+                      <div style={{ fontSize: '0.82rem', color: '#8b7169', marginTop: '4px' }}>Order v{actualStartQuery?.order_version ?? '—'} ｜ Scheduling v{actualStartQuery?.scheduling_version ?? '—'}</div>
                     </div>
                   </div>
 
                   {actualStartQuery?.service_data_locked && (
-                    <div role="status" style={{ color: '#92400e', marginBottom: '10px' }}>
+                    <div role="status" style={{ color: '#92400e', marginBottom: '10px', fontSize: '0.84rem' }}>
                       本案服務資料已鎖定；目前只能查詢，需先依既有解鎖流程處理後才能更正。
                     </div>
                   )}
                   {actualStartPreview && (
-                    <div style={{ backgroundColor: '#fff8f6', border: '1px solid #fed9b8', borderRadius: '10px', padding: '14px', marginBottom: '12px' }}>
-                      <strong>實際開工日 Preview 已產生</strong>
-                      <div>日期：{actualStartPreview.before_actual_start_date ?? '尚未登錄'} → {actualStartPreview.after_actual_start_date}</div>
-                      <div>預計結束日：{actualStartPreview.actual_end_date}</div>
-                      <div>正式服務日：{actualStartPreview.actual_start.official_service_dates.length} 天</div>
-                      <div>重建指派：{actualStartPreview.scheduling.assignments.length} 段</div>
-                      <label style={{ display: 'block', marginTop: '8px' }}>
-                        套用原因
+                    <div style={{ backgroundColor: '#fffdfb', border: '1px solid #fed9b8', borderRadius: '12px', padding: '16px', marginBottom: '14px' }}>
+                      <strong style={{ color: '#ff7f50', fontSize: '0.92rem' }}>實際開工日 Preview 已產生</strong>
+                      <div style={{ fontSize: '0.86rem', color: '#57423b', marginTop: '6px' }}>日期：{actualStartPreview.before_actual_start_date ?? '尚未登錄'} → {actualStartPreview.after_actual_start_date}</div>
+                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>預計結束日：{actualStartPreview.actual_end_date}</div>
+                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>正式服務日：{actualStartPreview.actual_start.official_service_dates.length} 天</div>
+                      <div style={{ fontSize: '0.86rem', color: '#57423b' }}>重建指派：{actualStartPreview.scheduling.assignments.length} 段</div>
+                      <label style={{ display: 'block', marginTop: '10px', fontWeight: 700, fontSize: '0.84rem' }}>
+                        套用原因 (Audit Log)
                         <textarea
                           aria-label="實際開工日變更原因"
                           rows={2}
@@ -2435,10 +2616,13 @@ export const OrdersPage: React.FC = () => {
                           value={actualStartReason}
                           disabled={actualStartLocked}
                           onChange={(event) => setActualStartReason(event.target.value)}
+                          style={{ width: '100%', marginTop: '6px', padding: '8px 10px', borderRadius: '8px', border: '1px solid #dec0b6' }}
                         />
                       </label>
                       <button
                         type="button"
+                        className="btn-primary-action"
+                        style={{ marginTop: '10px', width: '100%', padding: '11px', background: '#c2410c' }}
                         disabled={actualStartLocked || actualStartReason.trim().length === 0}
                         onClick={() => void applyActualStart()}
                       >
@@ -2447,11 +2631,11 @@ export const OrdersPage: React.FC = () => {
                     </div>
                   )}
                   {actualStartReceipt && (
-                    <div role="status" style={{ color: '#166534', fontWeight: 700, marginBottom: '10px' }}>
+                    <div role="status" style={{ color: '#166534', fontWeight: 700, marginBottom: '10px', fontSize: '0.86rem' }}>
                       實際開工日已套用（Order v{actualStartReceipt.order_version}；{actualStartReceipt.official_service_day_count} 個正式服務日）
                     </div>
                   )}
-                  {actualStartError && <div role="alert" style={{ color: '#b91c1c', marginBottom: '10px' }}>{actualStartError}</div>}
+                  {actualStartError && <div role="alert" style={{ color: '#b91c1c', marginBottom: '10px', fontSize: '0.85rem' }}>{actualStartError}</div>}
                 </div>
               </div>
             )}

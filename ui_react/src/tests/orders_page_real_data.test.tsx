@@ -18,6 +18,10 @@ import { orderTermsMutationClient } from '../api/orders/order_terms_mutation_cli
 import { orderActualStartClient } from '../api/orders/order_actual_start_client';
 import { OrderConflictError, OrderValidationError } from '../api/orders/order_query_errors';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
+import {
+  matchingCandidateWorkflowClient,
+  type MatchingAvailability,
+} from '../api/scheduling/matching_candidate_workflow_client';
 import { waitingDepositLockClient } from '../api/scheduling/waiting_deposit_lock_client';
 import { transport } from '../api/shared/transport';
 import { ApiDecodeError, ApiHttpError, ApiNetworkError } from '../api/shared/typed_errors';
@@ -237,6 +241,103 @@ describe('OrdersPage query real-data slice', () => {
     expect(screen.getByText('無進行中方案')).toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="orders.matching.active-plan-query-error"]')).toBeNull();
     expect(screen.queryByText(/後端.*提供|未開放|未納入/)).not.toBeInTheDocument();
+  });
+
+  it('completes the sanctioned candidate workflow through real UI controls and typed readbacks', async () => {
+    useOperableSummary();
+    const availability: MatchingAvailability = {
+      case_no: 'ORD-2026-0801',
+      planned_start_date: '2026-08-01',
+      planned_end_date: '2026-08-30',
+      feasibility: 'complete',
+      complete_combinations: [[{ segment_index: 0, staff_id: 8892, start_date: '2026-08-01', end_date: '2026-08-30' }]],
+      segment_candidates: [{ segment_index: 0, staff_id: 8892, start_date: '2026-08-01', end_date: '2026-08-30' }],
+      candidate_options: [{
+        segment_index: 0,
+        staff_id: 8892,
+        staff_name: '測試可接月嫂',
+        coverage_day_count: 30,
+        available_ranges: [{ start_date: '2026-08-01', end_date: '2026-08-30' }],
+        case_period_start: '2026-08-01',
+        case_period_end: '2026-08-30',
+        required_service_dates: ['2026-08-01'],
+        supported_service_dates: ['2026-08-01'],
+        supported_ranges: [{ start_date: '2026-08-01', end_date: '2026-08-30', service_day_count: 1 }],
+        supported_day_count: 1,
+        required_day_count: 1,
+        full_case_coverage: true,
+        selected_segment_start: '2026-08-01',
+        selected_segment_end: '2026-08-30',
+        full_selected_segment_coverage: true,
+        uncovered_segment_dates: [],
+        source_scheduling_version: 4,
+        filter_results: { schedule: true },
+      }],
+      conflicts: [],
+    };
+    let poolCandidates: Array<{
+      id: number; staff_id: number; service_start_date: string; service_end_date: string;
+      status: 'active'; created_at: string; staff_name: string;
+      willingness: 'pending' | 'willing'; reason: string | null;
+      information: { '1': null; '2': null };
+    }> = [];
+    let activePlan = false;
+    vi.mocked(candidateContactPoolClient.query).mockImplementation(async (caseNo) => ({
+      pool_id: poolCandidates.length ? 8 : null,
+      case_no: caseNo,
+      candidates: poolCandidates,
+    }));
+    vi.spyOn(matchingCandidateWorkflowClient, 'searchSingleCaregiver').mockResolvedValue(availability);
+    vi.spyOn(candidateContactPoolClient, 'addCandidates').mockImplementation(async () => {
+      poolCandidates = [{
+        id: 17, staff_id: 8892, service_start_date: '2026-08-01', service_end_date: '2026-08-30',
+        status: 'active', created_at: '2026-08-23T10:00:00', staff_name: '測試可接月嫂',
+        willingness: 'pending', reason: null, information: { '1': null, '2': null },
+      }];
+      return { pool_id: 8, candidate_ids: [17], status: 'recorded' };
+    });
+    vi.spyOn(candidateContactPoolClient, 'sendInformation').mockResolvedValue({
+      status: 'queued', event_id: 31, line_task_id: 52,
+    });
+    vi.spyOn(candidateContactPoolClient, 'recordWillingness').mockImplementation(async () => {
+      poolCandidates = poolCandidates.map((candidate) => ({ ...candidate, willingness: 'willing' }));
+      return { status: 'recorded', event_id: 32 };
+    });
+    vi.spyOn(matchingCandidateWorkflowClient, 'createSingleCaregiverPlan').mockImplementation(async () => {
+      activePlan = true;
+      return {
+        plan_id: 51, case_no: 'ORD-2026-0801', version: 1, status: 'proposed', result: 'created',
+        segments: [{ segment_order: 1, staff_id: 8892, assigned_start_date: '2026-08-01', assigned_end_date: '2026-08-30' }],
+      };
+    });
+    vi.mocked(waitingDepositLockClient.queryPlan).mockImplementation(async () => {
+      if (!activePlan) throw new ApiHttpError(404, 'HTTP_404', 'active matching plan not found');
+      return { planId: 51, status: 'proposed', activeLockId: null };
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]);
+
+    fireEvent.click(await screen.findByRole('button', { name: /重新查詢符合條件月嫂/ }));
+    expect(await screen.findByText(/測試可接月嫂/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('button', { name: /加入候選聯繫池/ }));
+    await screen.findByText(/已回讀確認 1 位月嫂加入候選聯繫池/);
+
+    fireEvent.click(screen.getByRole('button', { name: /重新寄送資訊-1/ }));
+    await screen.findByText(/訂單資訊-1 已建立可靠發送任務 #52/);
+    fireEvent.click(screen.getByRole('button', { name: '更新候選意願' }));
+    await screen.findByText(/意願為願意/);
+
+    const formalPlanButton = screen.getByRole('button', { name: '建立正式單月嫂配對方案' });
+    expect(formalPlanButton).toBeEnabled();
+    fireEvent.click(formalPlanButton);
+    await screen.findByText(/已回讀確認正式單月嫂方案 #51/);
+    expect(matchingCandidateWorkflowClient.searchSingleCaregiver).toHaveBeenCalledOnce();
+    expect(candidateContactPoolClient.addCandidates).toHaveBeenCalledOnce();
+    expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(7);
+    expect(matchingCandidateWorkflowClient.createSingleCaregiverPlan).toHaveBeenCalledOnce();
   });
 
   it('uses available card projection facts in the matching demand summary', async () => {
