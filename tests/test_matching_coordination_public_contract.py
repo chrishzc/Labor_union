@@ -443,12 +443,17 @@ def test_leave_preview_maps_typed_result_and_rejects_unknown_state() -> None:
         original_work_date=date(2026, 8, 22),
         resulting_work_date=date(2026, 8, 22),
         outcome_event_ids=("event-1",),
+        source_versions=tuple(
+            _source(kind, index) for index, kind in enumerate(SOURCE_KINDS)
+        ),
         receipt_fingerprint=PreviewFingerprint("d" * 64),
+        preview_fingerprint=PreviewFingerprint("e" * 64),
         substitute_staff_id=11,
     )
     response = LeaveImpactPreviewResponse.model_validate(result)
     assert response.resolution_type == "substitute"
     assert response.receipt_fingerprint == "d" * 64
+    assert response.preview_fingerprint == "e" * 64
     with pytest.raises(ValidationError):
         LeaveImpactPreviewResponse.model_validate(
             {**response.model_dump(), "result_state": "unknown"}
@@ -602,6 +607,9 @@ def test_apply_transport_requests_and_receipt_are_closed() -> None:
             **common,
             package_id="package-1",
             leave_reference="leave-receipt-1",
+            criteria_snapshot_id="snapshot-1",
+            expected_leave_version=1,
+            original_staff_id=7,
         ),
         ApplyServiceDateRematchRequest(
             **common,

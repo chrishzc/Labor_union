@@ -19,6 +19,7 @@ from api.error_contracts import typed_http_error
 from api.schemas.base import BaseResponse
 from api.schemas.matching_coordination import (
     ApplyInitialCriteriaRequest,
+    ApplyLeaveImpactRequest,
     ApplyCriteriaDiffRequest,
     ApplyCaregiverSelectionRequest,
     ApplyCustomerDecisionRequest,
@@ -30,6 +31,8 @@ from api.schemas.matching_coordination import (
     MatchingCriteriaSnapshotView,
     MatchingPackageTransportView,
     PreviewInitialCriteriaRequest,
+    PreviewLeaveImpactRequest,
+    LeaveImpactPreviewResponse,
     PreviewCriteriaDiffRequest,
     PreviewMatchingPackageRequest,
     PreviewRematchRequest,
@@ -58,11 +61,13 @@ from subsystems.scheduling.matching_coordination_application import (
 )
 from subsystems.scheduling.matching_coordination_contracts import (
     ApplyInitialCriteriaSnapshot,
+    ApplyLeaveImpactOnMatching,
     ApplyCriteriaDiffResend,
     ApplyCaregiverSelection,
     ApplyCustomerMatchingDecision,
     ApplyZeroCandidateAlternative,
     PreviewCriteriaDiffResend,
+    PreviewLeaveImpactOnMatching,
     PreviewMatchingPackage,
     PreviewRematch,
     PreviewServiceDateChangeRematch,
@@ -75,6 +80,10 @@ from subsystems.scheduling.matching_coordination_contracts import (
 from subsystems.scheduling.matching_coordination_workflow import (
     MatchingCoordinationWorkflowError,
     ServiceDateShiftAvailabilityConfirmation,
+)
+from subsystems.scheduling.matching_leave_integration import (
+    MatchingLeaveImpactRequest,
+    MatchingLeaveIntegrationError,
 )
 
 
@@ -321,6 +330,60 @@ def preview_rematch(
 
 
 @router.post(
+    "/{case_no}/preview/leave-impact",
+    response_model=BaseResponse[LeaveImpactPreviewResponse],
+)
+def preview_leave_impact(
+    body: PreviewLeaveImpactRequest,
+    case_no: str = Path(min_length=1, max_length=50),
+    correlation_header: Annotated[
+        str | None,
+        Header(alias="X-Correlation-ID", min_length=1, max_length=191),
+    ] = None,
+    principal: AdminPrincipal = Depends(require_system_admin),
+    composition: MatchingCoordinationComposition = Depends(
+        get_matching_coordination_composition
+    ),
+):
+    correlation = CorrelationId(correlation_header or uuid4().hex)
+    expected_sources = _source_tuple(body.expected_source_versions)
+    command = PreviewLeaveImpactOnMatching(
+        case_no=case_no,
+        actor=_actor(principal),
+        reason=body.reason,
+        correlation_id=correlation,
+        idempotency_key=IdempotencyKey(
+            "preview:"
+            + fingerprint_payload(
+                {
+                    "case_no": case_no,
+                    "receipt_key": body.receipt_key,
+                    "correlation_id": correlation.value,
+                }
+            ).value
+        ),
+        expected_source_versions=expected_sources,
+        package_id=body.package_id,
+        leave_reference=body.receipt_key,
+    )
+    request = MatchingLeaveImpactRequest(
+        receipt_key=body.receipt_key,
+        case_no=case_no,
+        package_id=body.package_id,
+        criteria_snapshot_id=body.criteria_snapshot_id,
+        expected_leave_version=body.expected_leave_version,
+        original_staff_id=body.original_staff_id,
+        expected_source_versions=expected_sources,
+        correlation_id=correlation,
+    )
+    try:
+        result = composition.application.preview_leave_impact(command, request)
+        return BaseResponse(data=LeaveImpactPreviewResponse.model_validate(result))
+    except Exception as error:
+        _raise_matching_error(error, correlation)
+
+
+@router.post(
     "/{case_no}/preview/service-date-rematch",
     response_model=BaseResponse[ServiceDateRematchPreviewResponse],
 )
@@ -377,6 +440,46 @@ def preview_service_date_rematch(
                 ),
             )
         return BaseResponse(data=response)
+    except Exception as error:
+        _raise_matching_error(error, correlation)
+
+
+@router.post(
+    "/{case_no}/apply/leave-impact",
+    response_model=BaseResponse[MatchingApplyReceiptResponse],
+)
+def apply_leave_impact(
+    body: ApplyLeaveImpactRequest,
+    idempotency_header: Annotated[
+        str, Header(alias="Idempotency-Key", min_length=1, max_length=191)
+    ],
+    correlation_header: Annotated[
+        str, Header(alias="X-Correlation-ID", min_length=1, max_length=191)
+    ],
+    case_no: Annotated[str, Path(min_length=1, max_length=50)],
+    principal: AdminPrincipal = Depends(require_system_admin),
+    composition: MatchingCoordinationComposition = Depends(
+        get_matching_coordination_composition
+    ),
+):
+    correlation = CorrelationId(correlation_header)
+    command = ApplyLeaveImpactOnMatching(
+        case_no=case_no,
+        actor=_actor(principal),
+        reason=body.reason,
+        correlation_id=correlation,
+        idempotency_key=IdempotencyKey(idempotency_header),
+        expected_source_versions=_source_tuple(body.expected_source_versions),
+        package_id=body.package_id,
+        leave_reference=body.leave_reference,
+        criteria_snapshot_id=body.criteria_snapshot_id,
+        expected_leave_version=body.expected_leave_version,
+        original_staff_id=body.original_staff_id,
+        preview_fingerprint=PreviewFingerprint(body.preview_fingerprint),
+    )
+    try:
+        result = composition.application.apply(command)
+        return BaseResponse(data=MatchingApplyReceiptResponse.model_validate(result))
     except Exception as error:
         _raise_matching_error(error, correlation)
 
@@ -674,7 +777,14 @@ def _actor(principal: AdminPrincipal) -> ActorContext:
 
 
 def _raise_matching_error(error: Exception, correlation: CorrelationId) -> None:
-    if isinstance(error, (MatchingApplicationError, MatchingCoordinationWorkflowError)):
+    if isinstance(
+        error,
+        (
+            MatchingApplicationError,
+            MatchingCoordinationWorkflowError,
+            MatchingLeaveIntegrationError,
+        ),
+    ):
         typed = error.error
         raise typed_http_error(
             409,

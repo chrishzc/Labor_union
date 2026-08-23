@@ -996,10 +996,11 @@ export const OrdersPage: React.FC = () => {
       )}
 
       {!loading && !error && pageData?.nextCursor && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '8px', margin: '20px 0' }}>
-          {nextPageError && <div role="alert">載入下一頁失敗：{nextPageError}</div>}
+        <div className="orders-pagination-container">
+          {nextPageError && <div className="orders-pagination-error" role="alert">載入下一頁失敗：{nextPageError}</div>}
           <button
             type="button"
+            className="orders-load-more-btn"
             data-control-id="orders.query.next-page"
             disabled={nextPageLoading}
             onClick={() => void fetchNextOrderSummaries()}

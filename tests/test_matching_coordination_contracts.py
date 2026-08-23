@@ -83,7 +83,15 @@ def test_all_sixteen_commands_have_stable_names_and_common_identity() -> None:
         PreviewRematch(**_common(), criteria_snapshot_id="snapshot-1"),
         ApplyRematch(**_common(), criteria_snapshot_id="snapshot-1", package_id="package-1", preview_fingerprint=fp),
         PreviewLeaveImpactOnMatching(**_common(), package_id="package-1", leave_reference="leave-1"),
-        ApplyLeaveImpactOnMatching(**_common(), package_id="package-1", leave_reference="leave-1", preview_fingerprint=fp),
+        ApplyLeaveImpactOnMatching(
+            **_common(),
+            package_id="package-1",
+            leave_reference="leave-1",
+            criteria_snapshot_id="snapshot-1",
+            expected_leave_version=1,
+            original_staff_id=17,
+            preview_fingerprint=fp,
+        ),
         PreviewServiceDateChangeRematch(
             **_common(),
             criteria_snapshot_id="snapshot-1",

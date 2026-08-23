@@ -436,10 +436,19 @@ class LeaveImpactPreviewResponse(MatchingCoordinationSchema):
     original_work_date: date
     resulting_work_date: date
     outcome_event_ids: tuple[str, ...]
+    source_versions: MatchingSourceTupleView
     receipt_fingerprint: Sha256
+    preview_fingerprint: Sha256
     substitute_staff_id: int | None = Field(default=None, gt=0)
 
-    @field_validator("receipt_fingerprint", mode="before")
+    @field_validator("source_versions", mode="before")
+    @classmethod
+    def _source_versions_view(cls, value: Any) -> Any:
+        if isinstance(value, (tuple, list)):
+            return {"items": value}
+        return value
+
+    @field_validator("receipt_fingerprint", "preview_fingerprint", mode="before")
     @classmethod
     def _fingerprint_value(cls, value: Any) -> Any:
         return getattr(value, "value", value)
@@ -586,6 +595,9 @@ class ApplyLeaveImpactRequest(MatchingCoordinationSchema):
     expected_source_versions: MatchingSourceTupleView
     package_id: str = Field(min_length=1, max_length=191)
     leave_reference: str = Field(min_length=1, max_length=191)
+    criteria_snapshot_id: str = Field(min_length=1, max_length=191)
+    expected_leave_version: int = Field(gt=0)
+    original_staff_id: int = Field(gt=0)
     preview_fingerprint: Sha256
 
 

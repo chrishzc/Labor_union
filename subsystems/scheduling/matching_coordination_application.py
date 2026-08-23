@@ -5,7 +5,7 @@ Description: 編排 M3 typed Query／Preview／Apply 與單一 outer Unit of Wor
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from typing import Callable, Protocol, TypeAlias
 
@@ -21,6 +21,7 @@ from shared_kernel.identities import CorrelationId, IdempotencyKey
 from domains.scheduling.staff_availability import StaffAvailabilityFacts
 from subsystems.scheduling.matching_coordination_contracts import (
     ApplyInitialCriteriaSnapshot,
+    ApplyLeaveImpactOnMatching,
     ApplyServiceDateChangeRematch,
     MatchingApplyReceipt,
     MatchingCommand,
@@ -45,7 +46,6 @@ from subsystems.scheduling.matching_coordination_workflow import (
 from subsystems.scheduling.matching_leave_integration import (
     MatchingLeaveImpactRequest,
     MatchingLeaveImpactResult,
-    MatchingLeaveIntegration,
 )
 
 
@@ -239,6 +239,21 @@ class MatchingCoordinationApplication:
                     service_date_inputs.availability,
                 )
                 preview_fingerprint = outcome.source_fingerprint
+            elif isinstance(command, ApplyLeaveImpactOnMatching):
+                leave_result = self._evaluate_leave_impact(
+                    command,
+                    facts,
+                    receipt_key=command.leave_reference,
+                    criteria_snapshot_id=command.criteria_snapshot_id,
+                    expected_leave_version=command.expected_leave_version,
+                    original_staff_id=command.original_staff_id,
+                )
+                if command.expected_source_versions != leave_result.source_versions:
+                    raise self._blocked(
+                        command.correlation_id, "matching_leave_reference_stale"
+                    )
+                facts = replace(facts, source_versions=leave_result.source_versions)
+                preview_fingerprint = leave_result.preview_fingerprint
             else:
                 preview_fingerprint = _preview_fingerprint(command, facts)
             receipt = self._workflow.apply(
@@ -302,11 +317,52 @@ class MatchingCoordinationApplication:
         """Evaluate a canonical leave receipt without mutating Scheduling roots."""
 
         evaluator = self._leave_impact
+        facts = self._facts_reader.load(command.case_no)
+        if request.expected_source_versions != command.expected_source_versions:
+            raise self._blocked(command.correlation_id, "matching_leave_reference_stale")
+        if command.expected_source_versions != facts.source_versions:
+            raise self._blocked(command.correlation_id, "matching_source_version_conflict")
+        return self._evaluate_leave_impact(
+            command,
+            facts,
+            receipt_key=request.receipt_key,
+            criteria_snapshot_id=request.criteria_snapshot_id,
+            expected_leave_version=request.expected_leave_version,
+            original_staff_id=request.original_staff_id,
+        )
+
+    def _evaluate_leave_impact(
+        self,
+        command: PreviewLeaveImpactOnMatching | ApplyLeaveImpactOnMatching,
+        facts: MatchingCoordinationFacts,
+        *,
+        receipt_key: str,
+        criteria_snapshot_id: str,
+        expected_leave_version: int,
+        original_staff_id: int,
+    ) -> MatchingLeaveImpactResult:
+        evaluator = self._leave_impact
         if evaluator is None:
             raise self._blocked(command.correlation_id, "matching_leave_reference_stale")
-        if request.package_id != command.package_id or request.case_no != command.case_no:
-            raise self._blocked(command.correlation_id, "matching_leave_reference_stale")
-        return evaluator.evaluate(request)
+        if (
+            facts.package is None
+            or command.package_id != facts.package.package_id
+            or criteria_snapshot_id != facts.snapshot.snapshot_id
+            or facts.package.criteria_snapshot_id != criteria_snapshot_id
+        ):
+            raise self._blocked(command.correlation_id, "matching_package_stale")
+        return evaluator.evaluate(
+            MatchingLeaveImpactRequest(
+                receipt_key=receipt_key,
+                case_no=command.case_no,
+                package_id=command.package_id,
+                criteria_snapshot_id=criteria_snapshot_id,
+                expected_leave_version=expected_leave_version,
+                original_staff_id=original_staff_id,
+                expected_source_versions=facts.source_versions,
+                correlation_id=command.correlation_id,
+            )
+        )
 
     def preview_service_date_rematch(
         self,

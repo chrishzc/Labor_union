@@ -21,6 +21,9 @@ from infrastructure.mysql.matching_coordination_facts_adapter import (
 from infrastructure.mysql.matching_coordination_repository import (
     MySqlMatchingCoordinationRepository,
 )
+from infrastructure.mysql.leave_substitution_repository import (
+    MySqlLeaveSubstitutionRepository,
+)
 from infrastructure.mysql.mysql_adapter import get_connection
 from infrastructure.mysql.order_terms_repository import MySqlOrderTermsRepository
 from infrastructure.mysql.service_date_confirmation_repository import (
@@ -45,6 +48,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyServiceDateChangeRematch,
     PreviewServiceDateChangeRematch,
 )
+from subsystems.scheduling.matching_leave_integration import MatchingLeaveIntegration
 
 
 @dataclass(slots=True)
@@ -67,6 +71,7 @@ def get_matching_coordination_composition():
     staff_profile = MySqlStaffMatchingPreferenceRepository(connection)
     staff_lifecycle = MySqlStaffRetirementRepository(connection)
     staff_availability = MySqlStaffAvailabilityRepository(connection)
+    leave_references = MySqlLeaveSubstitutionRepository(connection)
     availability = MatchingAvailabilityQueryAdapter(
         service_dates,
         staff_availability,
@@ -90,6 +95,7 @@ def get_matching_coordination_composition():
         facts,
         repository,
         lambda: MySqlUnitOfWork(connection),
+        leave_impact=MatchingLeaveIntegration(leave_references),
         service_date_input_loader=lambda command, for_update: _load_service_date_input(
             command,
             service_dates=service_dates,

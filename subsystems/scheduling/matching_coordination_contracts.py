@@ -291,7 +291,22 @@ class PreviewLeaveImpactOnMatching(MatchingCommand):
 class ApplyLeaveImpactOnMatching(MatchingCommand):
     package_id: str
     leave_reference: str
+    criteria_snapshot_id: str
+    expected_leave_version: int
+    original_staff_id: int
     preview_fingerprint: PreviewFingerprint
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        require_canonical_text(self.package_id, "package ID", 191)
+        require_canonical_text(self.leave_reference, "leave reference", 191)
+        require_canonical_text(
+            self.criteria_snapshot_id, "criteria snapshot ID", 191
+        )
+        if self.expected_leave_version <= 0:
+            raise ValueError("expected_leave_version must be positive")
+        if self.original_staff_id <= 0:
+            raise ValueError("original_staff_id must be positive")
 
 
 @dataclass(frozen=True, slots=True)

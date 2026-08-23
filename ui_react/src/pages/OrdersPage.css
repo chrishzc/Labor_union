@@ -201,3 +201,55 @@
 .btn-cancel-preview:hover {
   background-color: #fff1f2;
 }
+
+/* Orders Pagination */
+.orders-pagination-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  margin: 32px 0 24px;
+}
+
+.orders-load-more-btn {
+  padding: 10px 32px;
+  border-radius: 9999px;
+  background-color: #ffffff;
+  border: 1px solid #dec0b6;
+  color: #a43c12;
+  font-size: 0.88rem;
+  font-weight: 750;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(74, 69, 67, 0.06);
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.orders-load-more-btn:hover:not(:disabled) {
+  background-color: #fbf2ef;
+  border-color: #ff7f50;
+  color: #ff7f50;
+  box-shadow: 0 4px 14px rgba(255, 127, 80, 0.15);
+  transform: translateY(-1px);
+}
+
+.orders-load-more-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  background-color: #f5ece9;
+  border-color: #e9e1de;
+  color: #795d43;
+}
+
+.orders-pagination-error {
+  padding: 8px 16px;
+  border-radius: 8px;
+  background-color: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+  font-size: 0.82rem;
+  font-weight: 600;
+}

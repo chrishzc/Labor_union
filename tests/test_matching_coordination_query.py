@@ -840,15 +840,12 @@ def _leave_reference(
     return CanonicalSchedulingLeaveReference(
         receipt_key=receipt_key,
         case_no="CASE-001",
-        package_id="package:1",
-        criteria_snapshot_id="snapshot:CASE-001",
         leave_version=leave_version,
         original_staff_id=7,
         resolution_type=LeaveResolutionType.SUBSTITUTE,
         original_work_date=date(2026, 9, 1),
         resulting_work_date=date(2026, 9, 1),
         outcome_event_ids=("leave-event:1",),
-        source_versions=_sources(),
         receipt_fingerprint=fingerprint,
         substitute_staff_id=8,
     )

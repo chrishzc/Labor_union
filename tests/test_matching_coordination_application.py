@@ -24,6 +24,7 @@ from domains.scheduling.matching_coordination import (
     build_zero_candidate_alternative,
 )
 from domains.scheduling.staff_availability import StaffAvailabilityFacts
+from domains.scheduling.leave_substitution import LeaveResolutionType
 from shared_kernel.errors import ErrorCategory, TypedError
 from shared_kernel.fingerprints import PreviewFingerprint, fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -36,15 +37,22 @@ from subsystems.scheduling.matching_coordination_contracts import (
     ApplyCaregiverSelection,
     ApplyCriteriaDiffResend,
     ApplyCustomerMatchingDecision,
+    ApplyLeaveImpactOnMatching,
     ApplyServiceDateChangeRematch,
     ApplyZeroCandidateAlternative,
     MatchingApplyReceipt,
     MatchingCommandName,
     PreviewCriteriaDiffResend,
     PreviewMatchingPackage,
+    PreviewLeaveImpactOnMatching,
     PreviewServiceDateChangeRematch,
     PreviewZeroCandidateAlternative,
     QueryMatchingCoordination,
+)
+from subsystems.scheduling.matching_leave_integration import (
+    CanonicalSchedulingLeaveReference,
+    MatchingLeaveImpactRequest,
+    MatchingLeaveIntegration,
 )
 from subsystems.scheduling.matching_coordination_workflow import (
     MatchingCoordinationFacts,
@@ -215,6 +223,32 @@ class _ServiceDateInputLoader:
         return self.inputs
 
 
+class _LeaveReferencePort:
+    def __init__(self, reference, operations: list[str]) -> None:
+        self.reference = reference
+        self.operations = operations
+
+    def get_canonical_receipt(self, receipt_key: str):
+        self.operations.append("leave-receipt")
+        assert receipt_key == "leave-receipt-1"
+        return self.reference
+
+
+def _leave_reference() -> CanonicalSchedulingLeaveReference:
+    return CanonicalSchedulingLeaveReference(
+        receipt_key="leave-receipt-1",
+        case_no="CASE-001",
+        leave_version=2,
+        original_staff_id=7,
+        resolution_type=LeaveResolutionType.SUBSTITUTE,
+        original_work_date=date(2026, 9, 1),
+        resulting_work_date=date(2026, 9, 1),
+        outcome_event_ids=("leave-outcome-1",),
+        receipt_fingerprint=PreviewFingerprint("d" * 64),
+        substitute_staff_id=11,
+    )
+
+
 def _application(facts: MatchingCoordinationFacts, operations: list[str], workflow=None):
     repository = _Repository(operations)
     unit = _Unit(operations)
@@ -247,6 +281,153 @@ def test_query_returns_full_typed_result_and_is_read_only() -> None:
     assert operations == ["load"]
     assert repository.saved == []
     assert unit.commits == 0
+
+
+def test_leave_preview_reads_current_m3_facts_and_binds_owner_receipt() -> None:
+    operations: list[str] = []
+    facts = _facts()
+    integration = MatchingLeaveIntegration(
+        _LeaveReferencePort(_leave_reference(), operations)
+    )
+    application = MatchingCoordinationApplication(
+        _Reader(facts, operations),
+        _Repository(operations),
+        lambda: _Unit(operations),
+        leave_impact=integration,
+    )
+    command = PreviewLeaveImpactOnMatching(
+        **_common(facts, "preview:leave:1"),
+        package_id="package-1",
+        leave_reference="leave-receipt-1",
+    )
+    request = MatchingLeaveImpactRequest(
+        receipt_key="leave-receipt-1",
+        case_no="CASE-001",
+        package_id="package-1",
+        criteria_snapshot_id="snapshot-1",
+        expected_leave_version=2,
+        original_staff_id=7,
+        expected_source_versions=facts.source_versions,
+        correlation_id=command.correlation_id,
+    )
+
+    result = application.preview_leave_impact(command, request)
+
+    assert operations == ["load", "leave-receipt"]
+    assert result.result_state == "leave_substituted"
+    assert result.source_versions != facts.source_versions
+    assert next(
+        item
+        for item in result.source_versions
+        if item.source_kind == "leave_request_or_outcome"
+    ).source_id == "leave-receipt-1"
+
+
+def test_leave_apply_rechecks_owner_receipt_inside_outer_transaction() -> None:
+    operations: list[str] = []
+    facts = _facts()
+    integration = MatchingLeaveIntegration(
+        _LeaveReferencePort(_leave_reference(), operations)
+    )
+    preview = integration.evaluate(
+        MatchingLeaveImpactRequest(
+            receipt_key="leave-receipt-1",
+            case_no="CASE-001",
+            package_id="package-1",
+            criteria_snapshot_id="snapshot-1",
+            expected_leave_version=2,
+            original_staff_id=7,
+            expected_source_versions=facts.source_versions,
+            correlation_id=CorrelationId("corr-matching-1"),
+        )
+    )
+    operations.clear()
+    repository = _Repository(operations)
+    unit = _Unit(operations)
+    application = MatchingCoordinationApplication(
+        _Reader(facts, operations),
+        repository,
+        lambda: unit,
+        leave_impact=integration,
+    )
+    command = ApplyLeaveImpactOnMatching(
+        **{
+            **_common(facts, "matching:leave:1"),
+            "expected_source_versions": preview.source_versions,
+        },
+        package_id="package-1",
+        leave_reference="leave-receipt-1",
+        criteria_snapshot_id="snapshot-1",
+        expected_leave_version=2,
+        original_staff_id=7,
+        preview_fingerprint=preview.preview_fingerprint,
+    )
+
+    receipt = application.apply(command)
+
+    assert receipt.result_state == "rematch_required"
+    assert receipt.source_versions == preview.source_versions
+    assert operations == [
+        "begin",
+        "claim",
+        "lock",
+        "fresh",
+        "leave-receipt",
+        "lineage",
+        "receipt",
+        "intents",
+        "commit",
+    ]
+    assert unit.commits == 1
+
+
+def test_leave_apply_rejects_stale_preview_before_persistence() -> None:
+    operations: list[str] = []
+    facts = _facts()
+    integration = MatchingLeaveIntegration(
+        _LeaveReferencePort(_leave_reference(), operations)
+    )
+    current = integration.evaluate(
+        MatchingLeaveImpactRequest(
+            receipt_key="leave-receipt-1",
+            case_no="CASE-001",
+            package_id="package-1",
+            criteria_snapshot_id="snapshot-1",
+            expected_leave_version=2,
+            original_staff_id=7,
+            expected_source_versions=facts.source_versions,
+            correlation_id=CorrelationId("corr-matching-1"),
+        )
+    )
+    operations.clear()
+    repository = _Repository(operations)
+    unit = _Unit(operations)
+    application = MatchingCoordinationApplication(
+        _Reader(facts, operations),
+        repository,
+        lambda: unit,
+        leave_impact=integration,
+    )
+    command = ApplyLeaveImpactOnMatching(
+        **{
+            **_common(facts, "matching:leave:stale"),
+            "expected_source_versions": current.source_versions,
+        },
+        package_id="package-1",
+        leave_reference="leave-receipt-1",
+        criteria_snapshot_id="snapshot-1",
+        expected_leave_version=2,
+        original_staff_id=7,
+        preview_fingerprint=PreviewFingerprint("0" * 64),
+    )
+
+    with pytest.raises(MatchingCoordinationWorkflowError) as captured:
+        application.apply(command)
+
+    assert captured.value.error.code == "matching_invalid_replay_snapshot"
+    assert repository.saved == []
+    assert unit.commits == 0
+    assert unit.rollbacks == 1
 
 
 def test_preview_is_zero_write() -> None:

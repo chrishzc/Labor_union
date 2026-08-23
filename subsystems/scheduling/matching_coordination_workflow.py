@@ -492,7 +492,23 @@ class MatchingCoordinationWorkflow:
                 preview_fingerprint,
                 result_state="rematch_required",
             )
-        if isinstance(request, (ApplyRematch, ApplyLeaveImpactOnMatching)):
+        if isinstance(request, ApplyLeaveImpactOnMatching):
+            if (
+                facts.package is None
+                or request.package_id != facts.package.package_id
+                or request.criteria_snapshot_id != facts.snapshot.snapshot_id
+                or facts.package.criteria_snapshot_id != request.criteria_snapshot_id
+            ):
+                raise _workflow_error(
+                    request.correlation_id, "matching_package_stale"
+                )
+            return self._receipt(
+                request,
+                facts,
+                preview_fingerprint,
+                result_state="rematch_required",
+            )
+        if isinstance(request, ApplyRematch):
             if facts.package is None:
                 raise _workflow_error(request.correlation_id, "matching_package_not_found")
             requested_package = getattr(request, "package_id", None)
