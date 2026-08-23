@@ -803,6 +803,8 @@ webhook dispatch 任一業務處理失敗時，當次 business Unit of Work 必�
 
 Scheduling Matching Coordination 是 Scheduling subsystem；`accepted` 只進 fresh-effects check，產生 typed Assignment conversion/rematch request，LINE／Orders／Assignment／Payroll root writer 不被接管。M3 Phase D 只可透過 typed ports 整合 leave／assignment owner。Runtime target registration／reset／enable／disable 共用 0-schema advisory serialization boundary、active singleton、opaque CAS 與 same-key replay；lock failure 固定 0 write，commit 後 release unknown 不回 success 並以原 key 查 receipt。Customer Service 擁有 HIGH escalation；Anomaly 只作 source，escalation 不競寫 `runtime_alert_application`。
 
+M3 的 service-date Apply 必須在單一 outer UoW 內 fresh-lock owner service dates、assignment與shifted-date availability後重算preview。leave Preview／Apply只讀Scheduling-owned immutable canonical receipt；Apply須在同一outer UoW重新讀取並把receipt identity、version與fingerprint綁入完整M3 source tuple。package／criteria／leave version／original staff／preview任一stale時，必須在M3 lineage、receipt與intent前rollback；M3不得藉此寫Leave、Orders、Assignment、Payroll或直接呼叫LINE provider。
+
 本 amendment 的 initial freeze 不單獨授權 mutation；後續人工裁決已核准 M1-A、M2-A、M3-A～D、M4-A
 的 exact production implementation slice。LINE／AI provider、deployment、production DB、未另行核准的
 schema／DDL與 external side effect 仍不在授權範圍。

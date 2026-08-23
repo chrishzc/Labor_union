@@ -42,6 +42,7 @@ from api.routes import (
     historical_order_adoption,
     staff_historical_workbook,
     finance_reports,
+    operations_reports,
     financial_adjustment,
     government_subsidy,
     holidays,
@@ -283,6 +284,7 @@ app.include_router(historical_order_adoption.router)
 app.include_router(staff_historical_workbook.router)
 app.include_router(beclass_import_review.router)
 app.include_router(finance_reports.router)
+app.include_router(operations_reports.router)
 app.include_router(government_subsidy.router)
 app.include_router(anomaly_registry.router)
 app.include_router(anomaly_recovery.router)

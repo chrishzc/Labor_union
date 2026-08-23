@@ -1,7 +1,28 @@
 {
   "schema": "labor-union-document-archive/v1",
-  "updated_at": "2026-08-16",
+  "updated_at": "2026-08-23",
   "entries": [
+    {
+      "archive_id": "ARCH-20260823-line-four-module-backend-closeout",
+      "source_path": "document/功能開發計畫/LINE_四大模組流程驗收與實作收斂計畫.md",
+      "archive_path": "document/架構重整/04_已完成與上線封存/superseded_specs/LINE_四大模組流程驗收與實作收斂計畫.md",
+      "doc_type": "feature-plan",
+      "final_status": "completed",
+      "completed_at": "2026-08-23",
+      "deployed_at": null,
+      "release_identity": null,
+      "successor_path": "document/架構重整/01_規格基線/15_正式規格索引與裁決總表.md",
+      "evidence_paths": [],
+      "content_sha256": "0d0541ac1c60e3957c80da44fa9dd7fb89d54d9a6d00773727ea18d00a051a1f",
+      "archived_at": "2026-08-23",
+      "archived_by": "Codex on user request",
+      "reason": "User directed archival after the approved backend convergence and waived or retained ownership of the remaining external E2E gates; those gates remain NOT_RUN, not PASS.",
+      "restore_triggers": [
+        "new LINE four-module backend requirement",
+        "production or provider rollout",
+        "external E2E incident"
+      ]
+    },
     {
       "archive_id": "PROV-20260815-archive-waiver-wp73",
       "source_path": "document/架構重整/02_決策與退役執行記錄/73_ADR001_HCM_Web_Upload_and_Historical_Import_Lanes_Work_Package.md",

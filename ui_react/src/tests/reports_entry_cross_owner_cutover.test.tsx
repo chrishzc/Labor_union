@@ -1,17 +1,20 @@
 /**
  * File: reports_entry_cross_owner_cutover.test.tsx
- * Description: 驗證 #reports 的季度／年度GET、weekly與匯出停用及跨owner邊界。
+ * Description: 驗證 #reports 的營運週報三分頁、季度／年度 regression 與跨 owner GET 邊界。
  */
 import { StrictMode } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../App';
 import { sessionClient } from '../api/auth/session_client';
+import { weeklyReportWeekEnd } from '../api/reports/weekly_operations_report_query_client';
 import type { SubsidyReportPreview } from '../api/reports/subsidy_report_query_schemas';
 import { SUBSIDY_REPORT_RESPONSE } from './fixtures/reports/subsidy_report_query_contract_fixtures';
+import { WEEKLY_OPERATIONS_REPORT } from './fixtures/reports/weekly_operations_report_contract_fixtures';
 
 const QUARTERLY_ENDPOINT = '/api/v1/finance-reports/subsidy-reconciliation/quarterly';
 const ANNUAL_ENDPOINT = '/api/v1/finance-reports/subsidy-reconciliation/annual';
+const WEEKLY_ENDPOINT = '/api/v1/operations-reports/weekly';
 const SYSTEM_STATUS_ENDPOINT = '/api/v1/system/status/performance-snapshot';
 
 type FetchRecord = {
@@ -22,6 +25,7 @@ type FetchRecord = {
 
 type FetchStubOptions = {
   reportResponse?: (kind: 'quarterly' | 'annual', year: number, quarter: number | null, call: number) => Response;
+  weeklyResponse?: (weekStart: string, call: number) => Response;
 };
 
 function requestUrl(input: string | URL | Request): URL {
@@ -50,6 +54,20 @@ function reportEnvelope(
       period_kind: kind,
       application_year: year,
       quarter,
+    },
+    error: null,
+  };
+}
+
+function weeklyEnvelope(weekStart: string, data = WEEKLY_OPERATIONS_REPORT): unknown {
+  const weekEnd = weeklyReportWeekEnd(weekStart);
+  return {
+    success: true,
+    message: '成功取得營運週報',
+    data: {
+      ...data,
+      period: { ...data.period, week_start: weekStart, week_end: weekEnd, week_label: `${weekStart}～${weekEnd}` },
+      service_rows: data.service_rows.map((row) => ({ ...row, week_start: weekStart, week_end: weekEnd })),
     },
     error: null,
   };
@@ -88,12 +106,21 @@ function typedUnavailableResponse(): unknown {
   };
 }
 
-function emptyReportData(): SubsidyReportPreview {
+function emptyWeeklyData() {
   return {
-    ...SUBSIDY_REPORT_RESPONSE.data,
-    total_row_count: 0,
-    total_amount_ntd: 0,
-    partitions: SUBSIDY_REPORT_RESPONSE.data.partitions.map((partition) => ({
+    ...WEEKLY_OPERATIONS_REPORT,
+    summary: {
+      ...WEEKLY_OPERATIONS_REPORT.summary,
+      application_count: 0,
+      general_eligible_count: 0,
+      subsidized_eligible_count: 0,
+      rejection_unpartitioned_count: 0,
+      order_established_count: 0,
+      incomplete_count: 0,
+    },
+    case_rows: [],
+    service_rows: [],
+    subsidy_partitions: WEEKLY_OPERATIONS_REPORT.subsidy_partitions.map((partition) => ({
       ...partition,
       row_count: 0,
       total_amount_ntd: 0,
@@ -115,6 +142,11 @@ function installFetchStub(options: FetchStubOptions = {}): FetchRecord[] {
     });
 
     if (path === SYSTEM_STATUS_ENDPOINT) return jsonResponse(systemStatusEnvelope());
+    if (path === WEEKLY_ENDPOINT) {
+      reportCalls += 1;
+      const weekStart = url.searchParams.get('week_start') ?? '';
+      return options.weeklyResponse?.(weekStart, reportCalls) ?? jsonResponse(weeklyEnvelope(weekStart));
+    }
     if (path !== QUARTERLY_ENDPOINT && path !== ANNUAL_ENDPOINT) {
       throw new Error(`Unexpected API path: ${path}`);
     }
@@ -167,7 +199,7 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode #reports 僅呈現季度／年度報表且不混入其他 owner 頁面', async () => {
+  it('actual StrictMode #reports 呈現週報三分頁並保留補助報表，不混入其他 owner', async () => {
     authenticate();
     const requests = installFetchStub();
 
@@ -177,32 +209,36 @@ describe('Reports #reports cross-owner entry static subgate', () => {
       </StrictMode>,
     );
 
-    await waitFor(() => expect(screen.getByText('CASE-RPT-001')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('CASE-WEEK-001')).toBeInTheDocument());
     expect(window.location.hash).toBe('#reports');
-    expect(screen.getByText('📊 工會補助核銷報表')).toBeInTheDocument();
+    expect(screen.getByText('📊 工會營運與補助報表')).toBeInTheDocument();
     expect(screen.queryByText('🩺 系統狀態')).not.toBeInTheDocument();
     expect(document.querySelector('[data-surface-id="system-status.page"]')).toBeNull();
 
-    const initialQuarterlyCount = countPath(requests, QUARTERLY_ENDPOINT);
-    expect(screen.getByText(/補助總額/)).toBeInTheDocument();
+    expect(countPath(requests, WEEKLY_ENDPOINT)).toBe(1);
+    expect(screen.getAllByRole('tab')).toHaveLength(3);
+    expect(document.querySelector('[data-control-id="reports.export.full-workbook"]')).toBeEnabled();
+    fireEvent.click(screen.getByRole('tab', { name: '補助案件統計表' }));
     expect(screen.getAllByText(/NT\$ 12,000/).length).toBeGreaterThan(0);
     expect(screen.getByText(/A\*+/)).toBeInTheDocument();
     expect(screen.getByText('此類別目前沒有資料。')).toBeInTheDocument();
-    expect(document.querySelector('[data-control-id="reports.export.full-workbook"]')).toBeNull();
+
+    fireEvent.change(screen.getByLabelText('報表範圍'), { target: { value: 'quarterly' } });
+    await waitFor(() => expect(screen.getByText('CASE-RPT-001')).toBeInTheDocument());
     expect(document.querySelector('[data-control-id="reports.export.quarterly-xlsx"]')).toBeEnabled();
 
-    fireEvent.change(screen.getByLabelText('檢視'), { target: { value: 'annual' } });
+    fireEvent.change(screen.getByLabelText('報表範圍'), { target: { value: 'annual' } });
     await waitFor(() => expect(screen.getByText(/2026 年度/)).toBeInTheDocument());
     expect(countPath(requests, ANNUAL_ENDPOINT)).toBe(1);
     expect(document.querySelector('[data-control-id="reports.export.annual-xlsx"]')).toBeEnabled();
     expect(screen.queryByText(/未開放|後端尚未提供/)).not.toBeInTheDocument();
 
-    // TEST_DATA_INCOMPLETE：fixture只有一筆去敏季度列；不把它當成完整production coverage。
-    expect(initialQuarterlyCount).toBe(1);
+    expect(countPath(requests, QUARTERLY_ENDPOINT)).toBe(1);
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
     expect(requests.every((request) => [
       QUARTERLY_ENDPOINT,
       ANNUAL_ENDPOINT,
+      WEEKLY_ENDPOINT,
       SYSTEM_STATUS_ENDPOINT,
     ].includes(request.path))).toBe(true);
   });
@@ -210,7 +246,7 @@ describe('Reports #reports cross-owner entry static subgate', () => {
   it('empty report 維持明確空狀態，不以fixture補成假資料', async () => {
     authenticate();
     const emptyRequests = installFetchStub({
-      reportResponse: (kind, year, quarter) => jsonResponse(reportEnvelope(kind, year, quarter, emptyReportData())),
+      weeklyResponse: (weekStart) => jsonResponse(weeklyEnvelope(weekStart, emptyWeeklyData())),
     });
 
     render(
@@ -219,9 +255,9 @@ describe('Reports #reports cross-owner entry static subgate', () => {
       </StrictMode>,
     );
 
-    await waitFor(() => expect(screen.getByText('此期間沒有補助核銷資料。')).toBeInTheDocument());
-    expect(screen.queryByText('CASE-RPT-001')).not.toBeInTheDocument();
-    expect(countPath(emptyRequests, QUARTERLY_ENDPOINT)).toBe(1);
+    await waitFor(() => expect(screen.getByText('此期間沒有可列入報表的資料。')).toBeInTheDocument());
+    expect(screen.queryByText('CASE-WEEK-001')).not.toBeInTheDocument();
+    expect(countPath(emptyRequests, WEEKLY_ENDPOINT)).toBe(1);
     expect(emptyRequests.every((request) => request.method === 'GET')).toBe(true);
   });
 
@@ -229,8 +265,8 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     authenticate();
     let retryRequested = false;
     const unavailableRequests = installFetchStub({
-      reportResponse: (kind, year, quarter) => retryRequested
-        ? jsonResponse(reportEnvelope(kind, year, quarter))
+      weeklyResponse: (weekStart) => retryRequested
+        ? jsonResponse(weeklyEnvelope(weekStart))
         : jsonResponse(typedUnavailableResponse(), 503),
     });
 
@@ -241,11 +277,11 @@ describe('Reports #reports cross-owner entry static subgate', () => {
     );
 
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('補助報表服務暫時無法使用'));
-    expect(countPath(unavailableRequests, QUARTERLY_ENDPOINT)).toBe(1);
+    expect(countPath(unavailableRequests, WEEKLY_ENDPOINT)).toBe(1);
     retryRequested = true;
-    fireEvent.click(screen.getByRole('button', { name: '重新載入' }));
-    await waitFor(() => expect(screen.getByText('CASE-RPT-001')).toBeInTheDocument());
-    expect(countPath(unavailableRequests, QUARTERLY_ENDPOINT)).toBe(2);
+    fireEvent.click(screen.getByRole('button', { name: '重試' }));
+    await waitFor(() => expect(screen.getByText('CASE-WEEK-001')).toBeInTheDocument());
+    expect(countPath(unavailableRequests, WEEKLY_ENDPOINT)).toBe(2);
     expect(unavailableRequests.every((request) => request.method === 'GET')).toBe(true);
   });
 });

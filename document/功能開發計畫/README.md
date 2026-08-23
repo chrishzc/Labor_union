@@ -19,7 +19,6 @@
 | [LINE_LIFF_身分先行與服務登記導流規劃](LINE_LIFF_身分先行與服務登記導流規劃.md) | `proposed` | 只作 onboarding 候選計畫；須先對齊正式 LINE identity／Customer Service owner與binding SSOT，未授權直接寫入或導流。 |
 | [LINE_LIFF_舊客快速身分綁定與防冒領規範](LINE_LIFF_舊客快速身分綁定與防冒領規範.md) | `approved (self-declared; current conflict/review)` | 文件自稱 approved，但其直接 `clients.line_user_id`／role promotion 語意與正式 23 binding SSOT不一致；人工裁決前不得升格或施工。 |
 | [LINE_QA客服知識契約收斂計畫](LINE_QA客服知識契約收斂計畫.md) | `blocked` | `load_workspace_dependencies`／`@oai/artifact-tool` runtime unavailable；Excel 僅 input evidence、非 SSOT，loader 恢復及人工 owner/category/source/approved-answer review 前不得升格或授權 production／AI／provider／DB。 |
-| [LINE 四大模組流程驗收與實作收斂計畫](LINE_四大模組流程驗收與實作收斂計畫.md) | `approved-for-specification-freeze` | M1–M4 specification／Work Package 已凍結；LIFF sandbox E2E、implementation、schema／DB、provider 與 external-side-effect gates 仍未授權。 |
 
 ## 已完成或被取代的計畫
 
@@ -34,6 +33,7 @@
 | 單月嫂預設與預計服務日期表傳送 | [superseded plan](../架構重整/04_已完成與上線封存/superseded_specs/00_P0_月嫂配對中心_單月嫂預設與預計服務日期表傳送改善計畫.md) | [02 Assignments／Scheduling](../架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md) |
 | 月嫂配對中心剩餘功能 | [completed plan](../架構重整/04_已完成與上線封存/superseded_specs/00_P0_月嫂配對中心_剩餘功能收斂計畫.md) | [24 Staff Matching Preferences 正式規格](../架構重整/01_規格基線/24_Staff_Matching_Preferences與不可服務期間正式規格.md) |
 | Scheduling 月嫂請假申請待辦 | [superseded plan](../架構重整/04_已完成與上線封存/superseded_specs/Scheduling_月嫂請假申請待辦與管理端處理開發計畫.md) | [02 Assignments／Scheduling](../架構重整/01_規格基線/02_Assignments_Scheduling_Domain.md)；實作 evidence 為 [ARCH-20260815-099](../架構重整/04_已完成與上線封存/work_packages/PROV-20260815-scheduling-line-staff-leave-intake-work-package.md)。 |
+| LINE 四大模組流程驗收與實作收斂 | [completed plan](../架構重整/04_已完成與上線封存/superseded_specs/LINE_四大模組流程驗收與實作收斂計畫.md) | [15 正式規格索引](../架構重整/01_規格基線/15_正式規格索引與裁決總表.md)、[17 LINE Access](../架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md) 與 [20 LINE客服／自助服務](../架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md)；外部 E2E 延期項目日後另開任務。 |
 | ADR-001 Import Architecture Refactor | [superseded ADR](../架構重整/04_已完成與上線封存/superseded_specs/ADR-001-import-architecture-refactor.md) | 現行匯入語意由 [15 正式規格索引](../架構重整/01_規格基線/15_正式規格索引與裁決總表.md) 與各 Domain 規格擁有；入口退役待辦已移至 [active work package](../架構重整/02_決策與退役執行記錄/Import_Entry_and_Legacy_Writer_Retirement_工作包.md)。 |
 
 `completed` 不代表自動封存。只有 current successor 已完整承接語意、evidence 與 inbound links

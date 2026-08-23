@@ -104,6 +104,10 @@ request 結案；timeout／5xx 只由既有 worker 重試。
 請假審核 API、管理 client 與 UI caller 屬 Scheduling；不得附加到 LINE identity review route
 或 `LineAdminApiClient`。LINE Integration 只接受已提交的通知 intent 並回報 delivery outcome。
 
+Scheduling Matching Coordination 可唯讀引用已提交的 canonical Leave/Substitution receipt 作為 rematch
+source fact；Preview不得寫入，Apply須在自己的單一outer UoW內fresh-read該immutable receipt並驗證case、
+leave version與original staff。M3只保存receipt reference與自己的lineage，不得改寫請假、排班或代班根事實。
+
 Typed errors：
 
 - `liff_token_invalid`

@@ -1,4 +1,7 @@
-"""Read-only subsidy reconciliation registers and annual summaries."""
+"""
+File: reconciliation_register_query.py
+Description: 依既有補助公式建立季度、年度及截止日唯讀核銷資料。
+"""
 
 from __future__ import annotations
 
@@ -211,6 +214,28 @@ def _filtered_rows(application_year: int, claim_quarter: int | None) -> tuple[li
     return _with_serials(general), _with_serials(subsidized)
 
 
+def build_year_to_date_subsidy_rows(application_year: int, cutoff_date: date) -> dict:
+    """Return owner-calculated rows completed from January 1 through cutoff_date."""
+    if not isinstance(application_year, int) or application_year < 1912:
+        raise ValueError("application_year must be a Gregorian year")
+    if not isinstance(cutoff_date, date) or cutoff_date < date(application_year, 1, 1):
+        raise ValueError("cutoff_date must not precede application_year")
+    rows = []
+    for source in _fetch_completed_cases():
+        row = _to_register_row(source)
+        if row is None:
+            continue
+        completion = row["服務結束"]
+        if completion.year == application_year and completion <= cutoff_date:
+            rows.append(row)
+    rows.sort(key=lambda row: row["市府訂單號碼"])
+    general, subsidized = _partition_rows(rows)
+    return {
+        "general_citizen_rows": _with_serials(general),
+        "subsidized_citizen_rows": _with_serials(subsidized),
+    }
+
+
 def build_quarterly_subsidy_register(application_year: int, quarter: int) -> dict:
     """Build a register for the selected completion-year quarter."""
     _validate_year_and_quarter(application_year, quarter)
@@ -232,4 +257,3 @@ def build_annual_subsidy_summary(application_year: int) -> dict:
         "subsidized_citizen_rows": subsidized_rows,
         "xlsx_bytes": _build_workbook(ANNUAL_HEADERS, general_rows, subsidized_rows, "\u5e74\u5ea6\u7e3d\u8868"),
     }
-

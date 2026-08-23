@@ -1,10 +1,10 @@
 ---
 doc_type: feature-plan
-declared_status: approved
-status: approved-for-specification-freeze
+declared_status: completed
+status: archived
 identity: LINE-four-module-flow-acceptance-and-implementation-convergence
 date: 2026-08-20
-updated: 2026-08-21
+updated: 2026-08-23
 priority: P1
 owner: LINE Integration Architecture Integration Owner（待人工確認）
 domain: LINE Integration / Customer Service / Access / Runtime Monitoring
@@ -59,7 +59,7 @@ external_diagram:
 |---|---|---|
 | M1. LIFF 表單與身分升級 | `M1-A backend completed / sandbox E2E user-waived` | Alternative A、canonical binding與已知legacy guarded／410已完成focused驗證；真實LIFF sandbox E2E由使用者略過，日後有問題另開任務 |
 | M2. AI Agent 路由與 Harness | `M2-A backend completed / module partial` | production full AI rejected；deterministic Tier 1、durable manual fallback與direct provider exit已完成；Tier 2 AI、provider與QA gates deferred／blocked |
-| M3. 雙向智慧協調與派案博弈 | `approved-for-specification-freeze / M3-A implementation-authorized / partial` | 13 個 source-version typed projections 與 A–E internal typed behavior 已有 current focused evidence；concrete owner adapters、public coordination Query／Preview／Apply entrypoint 與完整 cross-domain E2E 仍 pending。`accepted` 只代表 decision→fresh-effects→Assignment conversion/rematch request，不寫 Orders、Assignment 或 Payroll；Phase E schema未授權 |
+| M3. 雙向智慧協調與派案博弈 | `approved backend scope completed / real E2E user-owned` | Query／Preview／Apply、owner adapters、fresh-lock、criteria/willingness/recontact、leave canonical receipt與service-date rematch均已收斂；`accepted` 仍只產生 typed Assignment conversion/rematch request，不寫 Orders、Assignment 或 Payroll。真實 DB/API／跨域 UI 驗收不宣稱 PASS |
 | M4. 管理端、異常與轉真人 | `M4-A backend completed / module partial` | singleton／typed API／closed masked audit與human escalation create→claim→handling→resolve完成；React presentation、provider與完整human E2E仍 deferred |
 
 因此，現階段可平行施工的是已核准的 M1-A、M2-A、M3-A、M4-A exact slices；M1 sandbox E2E 只能使用受控 LINE sandbox。這些 slice 仍不得升格為四模組整體完成；未完成分支、provider、rollout、current DB 與 cross-module evidence 仍保留原 gate。
@@ -79,11 +79,11 @@ Eraser 圖面是需求輸入；圖面上的 acceptance 是依 `15`～`24`、curr
 
 ### 2.2 Canonical repository references
 
-- Formal LINE boundary：[17 External Integration LINE Access](../架構重整/01_規格基線/17_External_Integration_LINE_Access正式規格.md)、[20 LINE Customer Service](../架構重整/01_規格基線/20_LINE客服與月嫂自助服務正式規格.md)、[23 LINE Identity](../架構重整/01_規格基線/23_LINE身分管理與解除正式規格.md)。
-- Module 1 decision candidate：[LIFF binding ownership reconciliation](../架構重整/02_決策與退役執行記錄/PROV-20260820-line-liff-binding-ownership-reconciliation.md)。
-- Module 2 blocked plan：[LINE QA knowledge contract](LINE_QA客服知識契約收斂計畫.md)；authorization boundary：[LINE／Knowledge authorization normalization](../架構重整/02_決策與退役執行記錄/PROV-20260817-line-knowledge-authorization-normalization-work-package.md)。
-- Cross-module infrastructure evidence（不是 M3 canonical evidence）：[Delivery query receipt](../架構重整/03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase4c-line-delivery-public-query-hardening/verification-receipt.md)、[Notification Rules receipt](../架構重整/03_追蹤清單與證據/evidence/PROV-20260817-react-admin-phase4c-line-notification-rules-mutation/verification-receipt.md)、[Rich Menu Option B gate receipt](../架構重整/03_追蹤清單與證據/evidence/2026-08-20_rich_menu_option_b_schema_gate_receipt.md)、[LINE Configuration receipt](../架構重整/03_追蹤清單與證據/evidence/PROV-20260820-line-configuration-typed-redacted-query-hardening/verification-receipt.md)。
-- Module 4 decision candidate：[runtime alert target contract](../架構重整/02_決策與退役執行記錄/PROV-20260820-line-runtime-alert-target-admin-contract.md)。
+- Formal LINE boundary：[17 External Integration LINE Access](../../01_規格基線/17_External_Integration_LINE_Access正式規格.md)、[20 LINE Customer Service](../../01_規格基線/20_LINE客服與月嫂自助服務正式規格.md)、[23 LINE Identity](../../01_規格基線/23_LINE身分管理與解除正式規格.md)。
+- Module 1 decision candidate：[LIFF binding ownership reconciliation](../../02_決策與退役執行記錄/PROV-20260820-line-liff-binding-ownership-reconciliation.md)。
+- Module 2 blocked plan：[LINE QA knowledge contract](../../../功能開發計畫/LINE_QA客服知識契約收斂計畫.md)；authorization boundary的歷史identity為 `PROV-20260817-line-knowledge-authorization-normalization-work-package`，原路徑在封存時已不存在。
+- Cross-module infrastructure evidence（不是 M3 canonical evidence）：Delivery query、Notification Rules與LINE Configuration的歷史receipt路徑在封存時已不存在；仍可追溯的[Rich Menu Option B gate receipt](../../03_追蹤清單與證據/evidence/2026-08-20_rich_menu_option_b_schema_gate_receipt.md)保留連結。
+- Module 4 decision candidate的歷史identity為 `PROV-20260820-line-runtime-alert-target-admin-contract`，原路徑在封存時已不存在；current裁決以正式規格索引為準。
 
 ### 2.3 每個模組的 diagram completeness gate
 
@@ -367,3 +367,15 @@ tamper hardening、rematch Preview／Apply與service-date專用Preview已完成�
 service-date Apply fresh-lock、canonical owner receipt composition／saga閉環與具M3 schema的real DB/API E2E。leave typed preview核心雖已存在，
 production composition目前沒有canonical leave-receipt owner port；只加fake可過的route不算完成。因此 M3
 維持 `partial / NOT_READY`，不得宣稱四條 Eraser business flow全部完成。
+
+## 16. 2026-08-23 backend closeout 與封存裁決
+
+本節取代前文較早的 M3 pending/current-byte 敘述。本次最後兩個小包已完成：
+
+- service-date Apply 在既有 outer UoW 內鎖定 M3 root，fresh-read owner service dates、assignment 與 shifted-date availability，重算 preview；stale fingerprint 在 lineage／receipt 前 fail closed。
+- leave Preview／Apply 已接入 Scheduling-owned immutable canonical receipt。Preview 唯讀核對 case、package、criteria、leave version、original staff 與完整 source tuple；Apply 在同一 outer UoW 重新讀 receipt，將 canonical leave identity/version/fingerprint 綁入 M3 source tuple，過期或不一致即 rollback。M3 不寫 Leave、Orders、Assignment、Payroll 或 LINE provider 根事實。
+- closed public routes包含 `preview/leave-impact`、`apply/leave-impact`、`preview/service-date-rematch` 與 `apply/service-date-rematch`；Apply要求 client-supplied idempotency與correlation。
+- 全部 scoped `test_matching_coordination_*.py` regression為 `165 passed`；OpenAPI readback包含兩支 leave routes。pytest cache permission warning不影響測試結果。
+
+依最新人工裁決，本計畫以 backend 收斂完成封存；不把下列外部項目虛報為 PASS：M1 sandbox LIFF E2E由使用者略過、M2 Tier 2 AI／provider未採用、M3 real DB/API／跨域 UI E2E由使用者自行驗收、M4 React／provider E2E延期。若日後發現問題，應另開新任務，不重新啟用本計畫或擴張本次 owner／schema／provider範圍。
+
