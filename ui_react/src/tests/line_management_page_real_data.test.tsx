@@ -20,7 +20,7 @@ import {
   REVOCATION_REQUEST_FIXTURE,
 } from './fixtures/line_identity/line_identity_contract_fixtures';
 
-function clients(): { customer: CustomerServiceClient; identity: LineIdentityClient } {
+function clients(): { customer: CustomerServiceClient; identity: Pick<LineIdentityClient, 'listBindings' | 'getBinding' | 'previewRevocation' | 'applyRevocation'> } {
   return {
     customer: {
       getSummary: vi.fn().mockResolvedValue(CUSTOMER_SERVICE_SUMMARY_FIXTURE),

@@ -51,6 +51,8 @@ export interface CandidatePoolItemViewModel {
   candidateId: number;
   staffId: number;
   staffName: string;
+  serviceStartDate: string;
+  serviceEndDate: string;
   serviceRange: string;
   contactStatus: 'active' | 'selected' | 'withdrawn';
   info1Status: string;
@@ -196,6 +198,8 @@ export function adaptMatchingWorkbenchDrawer(params: {
       candidateId: candidate.id,
       staffId: candidate.staff_id,
       staffName: candidate.staff_name,
+      serviceStartDate: candidate.service_start_date,
+      serviceEndDate: candidate.service_end_date,
       serviceRange: `${candidate.service_start_date} ~ ${candidate.service_end_date}`,
       contactStatus: candidate.status,
       info1Status: candidate.information['1']?.status ?? '尚未建立',

@@ -15,7 +15,7 @@ import { LINE_NOTIFICATION_RULES_CATALOG_FIXTURE, LINE_RICH_MENU_CONFIGURATION_F
 
 function dependencies(rules: LineNotificationRulesCatalog = LINE_NOTIFICATION_RULES_CATALOG_FIXTURE): {
   customer: CustomerServiceClient;
-  identity: LineIdentityClient;
+  identity: Pick<LineIdentityClient, 'listBindings' | 'getBinding' | 'previewRevocation' | 'applyRevocation'>;
   configuration: LineConfigurationQueryClient;
 } {
   return {

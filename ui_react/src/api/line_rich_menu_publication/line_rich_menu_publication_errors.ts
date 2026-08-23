@@ -21,22 +21,30 @@ export type LineRichMenuPublicationErrorCategory =
   | 'contract';
 
 export class LineRichMenuPublicationError extends Error {
-  public readonly name = 'LineRichMenuPublicationError';
+  public override readonly name: string = 'LineRichMenuPublicationError';
+  public readonly category: LineRichMenuPublicationErrorCategory;
+  public readonly code: string;
+  public readonly status?: number;
+  public readonly retryable: boolean;
 
   constructor(
-    public readonly category: LineRichMenuPublicationErrorCategory,
-    public readonly code: string,
+    category: LineRichMenuPublicationErrorCategory,
+    code: string,
     message: string,
-    public readonly status?: number,
-    public readonly retryable = false
+    status?: number,
+    retryable = false
   ) {
     super(message);
+    this.category = category;
+    this.code = code;
+    this.status = status;
+    this.retryable = retryable;
     Object.setPrototypeOf(this, new.target.prototype);
   }
 }
 
 export class LineRichMenuPublicationRequestError extends LineRichMenuPublicationError {
-  public override readonly name = 'LineRichMenuPublicationRequestError';
+  public override readonly name: string = 'LineRichMenuPublicationRequestError';
 
   constructor(message: string) {
     super('request', 'line_rich_menu_publication_request_invalid', message, 422);
@@ -44,7 +52,7 @@ export class LineRichMenuPublicationRequestError extends LineRichMenuPublication
 }
 
 export class LineRichMenuPublicationUnauthenticatedError extends LineRichMenuPublicationError {
-  public override readonly name = 'LineRichMenuPublicationUnauthenticatedError';
+  public override readonly name: string = 'LineRichMenuPublicationUnauthenticatedError';
 
   constructor() {
     super(

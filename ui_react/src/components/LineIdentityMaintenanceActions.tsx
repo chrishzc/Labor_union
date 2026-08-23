@@ -2,7 +2,7 @@
  * File: LineIdentityMaintenanceActions.tsx
  * Description: 提供 LINE 身分對象更正與解除失敗維護操作，強制 Preview、確認與安全錯誤呈現。
  */
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   adaptLineIdentityMaintenanceResult,
   adaptLineIdentityReplacementPreview,

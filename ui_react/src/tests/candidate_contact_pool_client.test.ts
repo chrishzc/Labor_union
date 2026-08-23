@@ -1,6 +1,6 @@
 /**
  * File: candidate_contact_pool_client.test.ts
- * Description: 驗證候選聯繫池查詢與可靠資訊發送的 closed decode、identity 及認證邊界。
+ * Description: 驗證候選聯繫池查詢、加入、意願與可靠資訊發送的 closed decode 及認證邊界。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { sessionClient } from '../api/auth/session_client';
@@ -122,6 +122,54 @@ describe('candidateContactPoolClient', () => {
       }),
       { token: 'volatile-token' },
     );
+  });
+
+  it('adds availability-checked candidates with actor and event identity', async () => {
+    const post = vi.spyOn(transport, 'post').mockResolvedValue(successEnvelope({
+      pool_id: 9,
+      candidate_ids: [17],
+      status: 'recorded',
+    }));
+
+    await expect(candidateContactPoolClient.addCandidates('CASE-POOL-001', [{
+      staff_id: 8892,
+      start_date: '2026-09-01',
+      end_date: '2026-09-05',
+    }])).resolves.toEqual({ pool_id: 9, candidate_ids: [17], status: 'recorded' });
+    expect(post).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates',
+      expect.objectContaining({
+        candidates: [{ staff_id: 8892, start_date: '2026-09-01', end_date: '2026-09-05' }],
+        actor: 'operator-1',
+        event_key: expect.stringMatching(/^orders-candidate-pool-add-/),
+      }),
+      { token: 'volatile-token' },
+    );
+  });
+
+  it('records manual willingness and rejects an empty unwilling reason before transport', async () => {
+    const put = vi.spyOn(transport, 'put').mockResolvedValue(successEnvelope({
+      status: 'recorded',
+      event_id: 45,
+    }));
+
+    await expect(candidateContactPoolClient.recordWillingness(
+      'CASE-POOL-001', 17, 'willing', '',
+    )).resolves.toEqual({ status: 'recorded', event_id: 45 });
+    expect(put).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-POOL-001/candidate-contact-pool/candidates/17/willingness',
+      expect.objectContaining({
+        willingness: 'willing',
+        reason: '人工補登願意',
+        actor: 'operator-1',
+      }),
+      { token: 'volatile-token' },
+    );
+
+    await expect(candidateContactPoolClient.recordWillingness(
+      'CASE-POOL-001', 17, 'unwilling', ' ',
+    )).rejects.toThrow('必須填寫');
+    expect(put).toHaveBeenCalledTimes(1);
   });
 
   it('fails closed before sending when session identity is missing', async () => {

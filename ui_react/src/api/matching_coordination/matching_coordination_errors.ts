@@ -58,21 +58,35 @@ export type MatchingCoordinationErrorCategory =
 
 export class MatchingCoordinationClientError extends ApiError {
   public readonly name: string = 'MatchingCoordinationClientError';
+  public readonly category: MatchingCoordinationErrorCategory;
+  public readonly code: string;
+  public readonly status?: number;
+  public readonly retryable: boolean;
+  public readonly correlationId?: string;
+  public readonly fieldErrors: readonly z.infer<typeof MatchingFieldErrorSchema>[];
+  public readonly domainBlockers: readonly string[];
+  public readonly currentVersion: number | null;
 
   constructor(
-    public readonly category: MatchingCoordinationErrorCategory,
-    public readonly code: string,
+    category: MatchingCoordinationErrorCategory,
+    code: string,
     message: string,
-    public readonly status?: number,
-    public readonly retryable = false,
-    public readonly correlationId?: string,
-    public readonly fieldErrors: readonly z.infer<
-      typeof MatchingFieldErrorSchema
-    >[] = [],
-    public readonly domainBlockers: readonly string[] = [],
-    public readonly currentVersion: number | null = null
+    status?: number,
+    retryable = false,
+    correlationId?: string,
+    fieldErrors: readonly z.infer<typeof MatchingFieldErrorSchema>[] = [],
+    domainBlockers: readonly string[] = [],
+    currentVersion: number | null = null
   ) {
     super(message);
+    this.category = category;
+    this.code = code;
+    this.status = status;
+    this.retryable = retryable;
+    this.correlationId = correlationId;
+    this.fieldErrors = fieldErrors;
+    this.domainBlockers = domainBlockers;
+    this.currentVersion = currentVersion;
   }
 }
 

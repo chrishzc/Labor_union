@@ -2,7 +2,7 @@
  * File: line_management_no_fake_mutation.test.tsx
  * Description: 驗證 LINE successor 不暴露未授權控制項，且未觸發 Preview／Apply 或 provider 請求。
  */
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CustomerServiceClient } from '../api/customer_service/customer_service_client';
 import type { LineIdentityClient } from '../api/line_identity/line_identity_client';
@@ -72,9 +72,11 @@ describe('LINE 管理頁禁止假 mutation', () => {
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 
     fireEvent.click(screen.getByRole('button', { name: /4\. 通知規則/ }));
-    await screen.findByText('deposit_notice');
+    const ruleWorkspace = (await screen.findByRole('heading', { name: /通知規則與發送任務/ })).closest('section');
+    expect(ruleWorkspace).not.toBeNull();
+    const ruleCard = await within(ruleWorkspace as HTMLElement).findByRole('button', { name: /deposit_notice/ });
     expect(screen.queryByRole('button', { name: /建立新通知規則/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /deposit_notice/ }));
+    fireEvent.click(ruleCard);
     expect(screen.queryByRole('button', { name: /儲存並發布|手動重播/ })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '關閉' }));
 

@@ -11,7 +11,7 @@ import { CUSTOMER_SERVICE_DETAIL_FIXTURE, CUSTOMER_SERVICE_PAGE_FIXTURE, CUSTOME
 import { BINDING_PAGE_FIXTURE, BOUND_IDENTITY_FIXTURE, FIXTURE_LINE_USER_ID, REVOCATION_PREVIEW_FIXTURE, REVOCATION_REQUEST_FIXTURE } from './fixtures/line_identity/line_identity_contract_fixtures';
 
 type CustomerServiceQueryClient = Pick<CustomerServiceClient, 'getSummary' | 'listTickets' | 'getTicketDetail'>;
-type LineIdentityQueryClient = LineIdentityClient;
+type LineIdentityQueryClient = Pick<LineIdentityClient, 'listBindings' | 'getBinding' | 'previewRevocation' | 'applyRevocation'>;
 
 afterEach(() => vi.restoreAllMocks());
 

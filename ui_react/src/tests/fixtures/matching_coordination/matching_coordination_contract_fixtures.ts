@@ -38,7 +38,7 @@ export const MATCHING_SNAPSHOT = {
   snapshot_id: 'snapshot-1',
   case_no: 'CASE-001',
   criteria_version: 1,
-  criteria: [['district', '北區']],
+  criteria: [['district', '北區'] as [string, unknown]],
   source_versions: MATCHING_SOURCE_TUPLE.items,
   fingerprint: SHA_A,
   created_at: '2026-08-23T01:00:00+08:00',
@@ -48,11 +48,11 @@ export const MATCHING_SNAPSHOT = {
 export const MATCHING_CANDIDATE = {
   candidate_id: 'candidate-1',
   staff_id: 7,
-  eligibility: 'eligible',
+  eligibility: 'eligible' as const,
   criteria_results: [],
   rejection_reasons: [],
   coverage_evidence: ['2026-08-24'],
-  willingness: 'pending',
+  willingness: 'pending' as const,
   notification_lineage: [],
   staff_name: '測試月嫂',
 };
@@ -60,7 +60,7 @@ export const MATCHING_CANDIDATE = {
 export const MATCHING_PACKAGE = {
   package_id: 'package-1',
   version: 1,
-  mode: 'single',
+  mode: 'single' as const,
   segments: [
     { staff_id: 7, service_dates: ['2026-08-24'], sequence: 1 },
   ],
@@ -70,7 +70,7 @@ export const MATCHING_PACKAGE = {
   source_versions: MATCHING_SOURCE_TUPLE,
   blockers: [],
   warnings: [],
-  state: 'awaiting_caregiver_willingness',
+  state: 'awaiting_caregiver_willingness' as const,
   fingerprint: SHA_B,
 };
 
@@ -143,14 +143,14 @@ export const MATCHING_SERVICE_DATE_REMATCH = {
 
 export const MATCHING_APPLY_RECEIPT = {
   receipt_id: 'receipt-1',
-  command_name: 'ApplyInitialCriteriaSnapshot',
+  command_name: 'ApplyInitialCriteriaSnapshot' as const,
   command_fingerprint: SHA_A,
   preview_fingerprint: SHA_B,
   source_versions: MATCHING_SOURCE_TUPLE,
   decision_event_id: null,
   package_id: 'package-1',
   outbox_intent_ids: [],
-  result_state: 'criteria_snapshotted',
+  result_state: 'criteria_snapshotted' as const,
   cross_domain_request: null,
   zero_candidate_decision: null,
   willingness_lineage: null,

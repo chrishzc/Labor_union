@@ -36,7 +36,7 @@ describe('customer service adapter', () => {
     const page = adaptCustomerServicePage(CUSTOMER_SERVICE_PAGE_FIXTURE);
     expect(page.items[0].issueSummary).toBeNull();
     expect(CUSTOMER_SERVICE_LIST_SUMMARY_UNAVAILABLE).toBe(
-      '後端尚未提供列表問題摘要'
+      '請開啟明細查看訊息'
     );
     expect(page.items[0].categoryLabel).toBe('修改登記資料');
     expect(page.items[0].statusLabel).toBe('處理中');

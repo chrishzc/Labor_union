@@ -342,6 +342,14 @@ describe('OrdersPage query real-data slice', () => {
 
   it('uses the signing GET and renders real staff/client signed status', async () => {
     useOperableSummary();
+    const projection = unavailableCardProjection('ORD-2026-0801');
+    projection.contact_address = {
+      ...projection.contact_address,
+      value: '臺中市西區測試路 1 號',
+      availability: 'available',
+      availability_reason: null,
+    };
+    vi.mocked(orderCardProjectionClient.getCardProjection).mockResolvedValueOnce(projection);
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
     await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]));
@@ -352,6 +360,10 @@ describe('OrdersPage query real-data slice', () => {
     expect(contractSigningClient.query).toHaveBeenCalledTimes(1);
     expect(screen.getByText('✅ 客戶契約已簽回')).toBeInTheDocument();
     expect(screen.getByText('⏳ 待核銷')).toBeInTheDocument();
+    const locationFact = screen.getByText('產婦與地點').closest('.matching-fact-item');
+    if (!locationFact) throw new Error('找不到 unified contract Drawer 的產婦與地點區域。');
+    expect(locationFact).toHaveTextContent('臺中市西區測試路 1 號');
+    expect(locationFact).not.toHaveTextContent('地址待確認');
   });
 
   it.each([

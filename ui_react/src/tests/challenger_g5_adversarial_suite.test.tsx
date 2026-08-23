@@ -5,12 +5,17 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
+import { contractSigningClient } from '../api/orders/contract_signing_client';
 import { orderCancellationClient } from '../api/orders/order_cancellation_client';
+import { orderCardProjectionClient } from '../api/orders/order_card_projection_client';
+import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
 import { candidateContactPoolClient } from '../api/scheduling/candidate_contact_pool_client';
 import { waitingDepositLockClient } from '../api/scheduling/waiting_deposit_lock_client';
+import { ApiHttpError } from '../api/shared/typed_errors';
 import { OrdersPage } from '../pages/OrdersPage';
+import type { OrdersCardProjection } from '../api/orders/order_card_projection_schemas';
 import {
   realisticActualStart,
   realisticAssignmentPlan,
@@ -21,12 +26,42 @@ import {
   realisticOrderTerms,
 } from './fixtures/orders_real_data_fixtures';
 import { realisticServiceDateQueryView } from './fixtures/orders/order_mutation_contract_fixtures';
+import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((next) => { resolve = next; });
   return { promise, resolve };
 }
+
+function unavailableCardProjection(caseNo: string): OrdersCardProjection {
+  const field = <T,>(owner: string, value: T | null = null) => ({
+    value,
+    owner,
+    source_identity: `fixture:${caseNo}:${owner}`,
+    source_version: '1',
+    availability: value === null ? 'unavailable' as const : 'available' as const,
+    availability_reason: value === null ? 'fixture_root_fact_missing' : null,
+  });
+  return {
+    case_no: caseNo,
+    contact_phone: field<string>('Client'),
+    contact_address: field<string>('Client'),
+    requires_cooking: field<boolean>('Orders'),
+    floor_fee_ntd: field<number>('Orders'),
+    deposit_amount_ntd: field<number>('Client Finance'),
+    deposit_settlement_state: field<'unsettled' | 'settled'>('Client Finance'),
+    deposit_settled_on: field<string>('Client Finance'),
+    actual_start_date: field<string>('Orders'),
+    actual_end_date: field<string>('Orders'),
+    assignment_segments: field<[]>( 'Scheduling', []),
+  };
+}
+
+const operableSummaryPage = {
+  ...realisticOrderSummaryPage,
+  items: realisticOrderSummaryPage.items.map((item, index) => index === 0 ? { ...item, order_status: '洽談中' } : item),
+};
 
 function orderCard(caseNo: string): HTMLElement {
   const card = screen.getByText(caseNo).closest<HTMLElement>('.order-card');
@@ -38,7 +73,7 @@ describe('G5 OrdersPage adversarial suite', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     orderMutationFlowStore.clearAll();
-    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue(realisticOrderSummaryPage);
+    vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue(operableSummaryPage);
     vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue(realisticOrderDetail);
     vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockResolvedValue(realisticOrderCalendarDetail);
     vi.spyOn(ordersQueryClient, 'getOrderTerms').mockImplementation(async (caseNo) => ({
@@ -50,7 +85,10 @@ describe('G5 OrdersPage adversarial suite', () => {
       delivery_type: null, residence_type: null, city: null, identity_status: null,
     });
     vi.spyOn(ordersQueryClient, 'getActualStart').mockResolvedValue(realisticActualStart);
-    vi.spyOn(ordersQueryClient, 'getContractCompletion').mockResolvedValue(realisticContractCompletion);
+    vi.spyOn(ordersQueryClient, 'getContractCompletion').mockImplementation(async (caseNo) => ({
+      ...realisticContractCompletion,
+      case_no: caseNo,
+    }));
     vi.spyOn(ordersQueryClient, 'getAssignmentPlan').mockResolvedValue(realisticAssignmentPlan);
     vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue(realisticServiceDateQueryView);
     vi.spyOn(candidateContactPoolClient, 'query').mockImplementation(async (caseNo) => ({
@@ -58,11 +96,18 @@ describe('G5 OrdersPage adversarial suite', () => {
       case_no: caseNo,
       candidates: [],
     }));
-    vi.spyOn(waitingDepositLockClient, 'queryPlan').mockResolvedValue({
-      planId: 701,
-      status: 'proposed',
-      activeLockId: null,
-    });
+    vi.spyOn(contractSigningClient, 'query').mockImplementation(async (caseNo) => ({
+      case_no: caseNo,
+      staff_segments: [{ segment_id: 1, staff_id: 101, sent: true, signed_received: true }],
+      commitment_id: 1,
+      client_document_sent: true,
+      client_signed_received: true,
+      contract_identity: `CONTRACT-${caseNo}`,
+      documents: [],
+    }));
+    vi.spyOn(waitingDepositLockClient, 'queryPlan').mockRejectedValue(
+      new ApiHttpError(404, 'HTTP_404', 'active matching plan not found'),
+    );
     vi.spyOn(orderCancellationClient, 'query').mockImplementation(async (caseNo) => ({
       case_no: caseNo,
       lifecycle_status: '訂單成立',
@@ -79,6 +124,10 @@ describe('G5 OrdersPage adversarial suite', () => {
       confirmed_service_days: [],
       caregiver_options: [],
     }));
+    vi.spyOn(orderStageProjectionClient, 'getOperationalTimelines').mockResolvedValue(
+      buildOrdersStageProjectionFixture(operableSummaryPage)
+    );
+    vi.spyOn(orderCardProjectionClient, 'getCardProjection').mockImplementation(async (caseNo) => unavailableCardProjection(caseNo));
   });
 
   it('discards a stale matching assignment response after fast case switching', async () => {
@@ -93,22 +142,35 @@ describe('G5 OrdersPage adversarial suite', () => {
     }));
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
-    await act(async () => fireEvent.click(within(orderCard('ORD-2026-0802')).getByRole('button', { name: /媒合與正式排班/ })));
-    await act(async () => fireEvent.click(within(orderCard('ORD-2026-0803')).getByRole('button', { name: /媒合與正式排班/ })));
-    second.resolve({
-      ...realisticAssignmentPlan,
-      case_no: 'ORD-2026-0803',
-      assignments: [{ ...realisticAssignmentPlan.assignments[0], staff_id: 222 }],
+    await act(async () => {
+      fireEvent.click(within(orderCard('ORD-2026-0801')).getByRole('button', { name: /媒合與正式排班/ }));
     });
-    await screen.findByText(/Staff #222/);
-    first.resolve({
-      ...realisticAssignmentPlan,
-      case_no: 'ORD-2026-0802',
-      assignments: [{ ...realisticAssignmentPlan.assignments[0], staff_id: 111 }],
+    await act(async () => {
+      fireEvent.click(within(orderCard('ORD-2026-0802')).getByRole('button', { name: /媒合與正式排班/ }));
+    });
+    await act(async () => {
+      second.resolve({
+        ...realisticAssignmentPlan,
+        case_no: 'ORD-2026-0802',
+        assignments: [{ ...realisticAssignmentPlan.assignments[0], staff_id: 222 }],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const staff222Elements = await screen.findAllByText(/Staff #222/);
+    expect(staff222Elements.length).toBeGreaterThanOrEqual(1);
+    await act(async () => {
+      first.resolve({
+        ...realisticAssignmentPlan,
+        case_no: 'ORD-2026-0801',
+        assignments: [{ ...realisticAssignmentPlan.assignments[0], staff_id: 111 }],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
     });
     await act(async () => Promise.resolve());
-    expect(screen.queryByText(/Staff #111/)).not.toBeInTheDocument();
-    expect(screen.getByText(/Staff #222/)).toBeInTheDocument();
+    expect(screen.queryAllByText(/Staff #111/)).toHaveLength(0);
+    expect(screen.getAllByText(/Staff #222/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('keeps one summary request on initial mount', async () => {
