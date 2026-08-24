@@ -78,7 +78,7 @@ describe('Anomalies no fake root mutation verification suite', () => {
     expect(promptSpy).not.toHaveBeenCalled();
   });
 
-  it('verifies resolve textarea and resolve button in Drawer are strictly disabled', async () => {
+  it('keeps generic Resolve disabled when no registered Finance correction form exists', async () => {
     render(<AnomaliesPage />);
 
     await waitFor(() => {
@@ -94,16 +94,14 @@ describe('Anomalies no fake root mutation verification suite', () => {
       expect(screen.getByText(/⚠️ 異常排查與修復處置/)).toBeInTheDocument();
     });
 
-    // Check textarea
-    const textarea = screen.getByPlaceholderText(/\[查詢模式\] 排除異常處置紀錄需待變更合約開放/);
-    expect(textarea).toBeDisabled();
-    expect(textarea).toHaveAttribute('data-control-id', 'anomalies.drawer.resolve-reason');
+    expect(screen.getByText('此異常沒有已註冊的 Finance Import correction 表單；請依 owning Domain 的 typed action 處理。')).toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).toBeNull();
 
     // Check resolve button
     const resolveBtn = screen.getByRole('button', { name: /確認排除異常/ });
     expect(resolveBtn).toBeDisabled();
     expect(resolveBtn).toHaveAttribute('data-control-id', 'anomalies.drawer.resolve');
-    expect(resolveBtn).toHaveAttribute('title', expect.stringContaining('[查詢模式]'));
+    expect(resolveBtn).toHaveAttribute('title', expect.stringContaining('通用 Resolve'));
 
     // Attempt click
     fireEvent.click(resolveBtn);

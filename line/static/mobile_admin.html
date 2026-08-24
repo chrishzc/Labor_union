@@ -107,10 +107,11 @@ async function postJson(url, body) {
 async function init() {
   try {
     target = targetFromUrl() === "staff_review" ? "staff_review" : "customer_service";
-    const configResponse = await fetch("/api/line/config");
-    const config = await configResponse.json();
-    if (!config.liff_id) throw new Error("LIFF 尚未完成設定");
-    await liff.init({liffId: config.liff_id});
+    const configResponse = await fetch("/api/v1/line/identity/runtime-config");
+    const configResult = await configResponse.json();
+    const liffId = configResult.data?.liff_id;
+    if (!configResponse.ok || !liffId) throw new Error("LIFF 尚未完成設定");
+    await liff.init({liffId});
     if (!liff.isLoggedIn()) { liff.login({redirectUri: location.href}); return; }
     idToken = liff.getIDToken() || "";
     if (!idToken) throw new Error("無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。");

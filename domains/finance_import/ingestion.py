@@ -5,7 +5,7 @@ Description: 定義 Finance 初始分類、匯入 receipt 與安全 attempt 根�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from typing import Literal
 
@@ -64,6 +64,7 @@ class FinanceWorkbookIngestionReceipt:
     duplicate_occurrence_count: int
     source_warning_count: int = 0
     source_warning_created_count: int = 0
+    replayed: bool = False
 
 
 @dataclass(frozen=True, slots=True)

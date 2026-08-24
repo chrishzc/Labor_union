@@ -15,7 +15,11 @@ import pytest
 from infrastructure.mysql.client_beclass_workbook_import_repository import (
     ClientBeClassWorkbookImportRepository,
 )
+from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
+    MySqlHcmBeClassReconciliationAdapter,
+)
 from infrastructure.mysql.mysql_adapter import get_connection
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
 from subsystems.case_import.client_beclass_workbook_import import (
     ClientBeClassWorkbookConflict,
@@ -117,6 +121,8 @@ def test_typed_workbook_apply_isolates_dirty_rows_replays_and_conflicts(tmp_path
         _create_case(connection, case_no, client_name, client_phone)
         service = ClientBeClassWorkbookImportService(
             ClientBeClassWorkbookImportRepository(connection),
+            MySqlHcmBeClassReconciliationAdapter(connection),
+            lambda: MySqlUnitOfWork(connection),
         )
         workbook = _write_workbook(
             tmp_path / "client-beclass.xlsx",

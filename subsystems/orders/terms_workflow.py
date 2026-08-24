@@ -1,8 +1,6 @@
-"""Orders terms transaction contracts.
-
-This source restores the canonical public contracts consumed by the MySQL
-adapters.  Behavioural workflow recovery is kept separate from these stable
-cross-domain persistence contracts.
+"""
+File: terms_workflow.py
+Description: 協調 Orders Terms 的 Query／Preview／Apply、跨域影響與原子 receipt。
 """
 
 from __future__ import annotations
@@ -13,17 +11,28 @@ from enum import StrEnum
 from typing import Any
 
 from domains.client_finance.obligation_planning import (
+    build_preassignment_client_finance_noop,
     build_client_finance_terms_impact,
 )
 from domains.orders.lifecycle import build_terms_lifecycle_impact
-from domains.orders.terms import validate_terms_change
-from domains.scheduling.generation import build_generation_candidate
+from domains.orders.terms import (
+    is_unique_cooking_requirement_correction,
+    validate_terms_change,
+)
+from domains.scheduling.generation import (
+    build_generation_candidate,
+    build_preassignment_cooking_correction_candidate,
+    build_preassignment_terms_candidate,
+)
 from shared_kernel.clock import BusinessClock
 from shared_kernel.errors import TypedError
 from shared_kernel.errors import ErrorCategory
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.ports import UnitOfWork
-from subsystems.payroll.terms_impact import build_payroll_terms_impact
+from subsystems.payroll.terms_impact import (
+    build_payroll_terms_impact,
+    build_preassignment_payroll_noop,
+)
 
 
 _TERMS_SOURCE_EVENT_FAMILY = "order-terms"
@@ -34,6 +43,7 @@ class TermsWorkflowFacts:
     order: Any
     scheduling: Any
     planned_service_dates: tuple[Any, ...]
+    planned_end_date: Any
     client_finance: Any
     payroll: Any
     lifecycle: Any
@@ -67,6 +77,7 @@ class OrderTermsPreview:
     client_finance_impact: Any
     payroll_impact: Any
     lifecycle_impact: Any
+    planned_end_date: Any
     fingerprint: Any
 
 
@@ -203,15 +214,26 @@ class OrderTermsWorkflow:
         command_fingerprint = _command_fingerprint(request)
         staff_ids = self._repository.preflight_impacted_staff_ids(request.case_no)
         with self._unit_of_work_factory() as unit_of_work:
-            replay = self._claim_or_replay(request, command_fingerprint)
-            if replay is not None:
-                return replay
-            facts = self._repository.load_for_apply(request.case_no, staff_ids)
-            preview = self._fresh_preview(request, facts, staff_ids)
-            receipt = _build_receipt(preview)
-            self._persist(request, preview, command_fingerprint, receipt)
+            receipt = self._apply_in_current_uow(
+                request, command_fingerprint, staff_ids
+            )
             unit_of_work.commit()
             return receipt
+
+    def apply_in_current_uow(self, request: OrderTermsApplyRequest) -> Any:
+        command_fingerprint = _command_fingerprint(request)
+        staff_ids = self._repository.preflight_impacted_staff_ids(request.case_no)
+        return self._apply_in_current_uow(request, command_fingerprint, staff_ids)
+
+    def _apply_in_current_uow(self, request, command_fingerprint, staff_ids):
+        replay = self._claim_or_replay(request, command_fingerprint)
+        if replay is not None:
+            return replay
+        facts = self._repository.load_for_apply(request.case_no, staff_ids)
+        preview = self._fresh_preview(request, facts, staff_ids)
+        receipt = _build_receipt(preview)
+        self._persist(request, preview, command_fingerprint, receipt)
+        return receipt
 
     def _claim_or_replay(self, request, command_fingerprint):
         claim_state = self._repository.claim_command(request, command_fingerprint)
@@ -255,18 +277,20 @@ class OrderTermsWorkflow:
         validate_terms_change(facts.order, proposed_terms)
         scheduling = _scheduling_candidate(facts, proposed_terms)
         change_identity = f"terms:{scheduling.case_no}:{scheduling.generation_number}"
-        client_finance = build_client_finance_terms_impact(
-            facts.client_finance,
-            proposed_terms,
-            scheduling,
-            change_identity,
-        )
-        payroll = build_payroll_terms_impact(
-            facts.payroll,
-            scheduling,
-            proposed_terms,
-            change_identity,
-        )
+        if not facts.scheduling.segments:
+            client_finance = build_preassignment_client_finance_noop(
+                facts.client_finance, proposed_terms, scheduling, change_identity
+            )
+            payroll = build_preassignment_payroll_noop(
+                facts.payroll, scheduling, proposed_terms, change_identity
+            )
+        else:
+            client_finance = build_client_finance_terms_impact(
+                facts.client_finance, proposed_terms, scheduling, change_identity
+            )
+            payroll = build_payroll_terms_impact(
+                facts.payroll, scheduling, proposed_terms, change_identity
+            )
         lifecycle = build_terms_lifecycle_impact(
             facts.lifecycle,
             proposed_terms,
@@ -291,28 +315,30 @@ class OrderTermsWorkflow:
                 correlation_id=request.correlation_id,
             )
         )
-        self._repository.persist_client_finance_impact(
-            ClientFinanceImpactPersistenceCommand(
-                candidate=preview.client_finance_impact,
-                idempotency_key=request.idempotency_key,
-                actor=request.actor,
-                reason=request.reason,
-                correlation_id=request.correlation_id,
-                source_event_family=_TERMS_SOURCE_EVENT_FAMILY,
-                source_event_id=event_id,
+        if _client_finance_impact_mutates(preview.client_finance_impact):
+            self._repository.persist_client_finance_impact(
+                ClientFinanceImpactPersistenceCommand(
+                    candidate=preview.client_finance_impact,
+                    idempotency_key=request.idempotency_key,
+                    actor=request.actor,
+                    reason=request.reason,
+                    correlation_id=request.correlation_id,
+                    source_event_family=_TERMS_SOURCE_EVENT_FAMILY,
+                    source_event_id=event_id,
+                )
             )
-        )
-        self._repository.persist_payroll_impact(
-            PayrollImpactPersistenceCommand(
-                candidate=preview.payroll_impact,
-                assignment_resolution=scheduling_result.assignment_resolution,
-                idempotency_key=request.idempotency_key,
-                actor=request.actor,
-                reason=request.reason,
-                correlation_id=request.correlation_id,
-                source_event_id=event_id,
+        if _payroll_impact_mutates(preview.payroll_impact):
+            self._repository.persist_payroll_impact(
+                PayrollImpactPersistenceCommand(
+                    candidate=preview.payroll_impact,
+                    assignment_resolution=scheduling_result.assignment_resolution,
+                    idempotency_key=request.idempotency_key,
+                    actor=request.actor,
+                    reason=request.reason,
+                    correlation_id=request.correlation_id,
+                    source_event_id=event_id,
+                )
             )
-        )
         lifecycle_event_id = self._repository.persist_lifecycle_impact(
             LifecycleImpactPersistenceCommand(
                 candidate=preview.lifecycle_impact,
@@ -332,7 +358,7 @@ class OrderTermsWorkflow:
                 terms=request.proposed_terms,
                 expected_order_version=preview.order_version,
                 resulting_order_version=receipt.order_version,
-                planned_end_date=_planned_end_date(preview.scheduling),
+                planned_end_date=preview.planned_end_date,
                 actual_end_date=preview.lifecycle_impact.actual_end_date,
                 lifecycle_status=preview.lifecycle_impact.after_status,
             )
@@ -350,6 +376,20 @@ class OrderTermsWorkflow:
 
 
 def _scheduling_candidate(facts, proposed_terms):
+    if not facts.scheduling.segments:
+        if is_unique_cooking_requirement_correction(
+            facts.order.terms, proposed_terms
+        ):
+            return build_preassignment_cooking_correction_candidate(
+                facts.scheduling,
+                facts.order.terms,
+                proposed_terms,
+            )
+        return build_preassignment_terms_candidate(
+            facts.scheduling,
+            facts.order.terms,
+            proposed_terms,
+        )
     day_shift = (
         proposed_terms.planned_start_date - facts.order.terms.planned_start_date
     ).days
@@ -371,7 +411,15 @@ def _scheduling_candidate(facts, proposed_terms):
     )
 
 
-def _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle):
+def _preview_result(
+    facts,
+    proposed_terms,
+    scheduling,
+    client_finance,
+    payroll,
+    lifecycle,
+):
+    planned_end_date = _planned_end_date(scheduling, facts.planned_end_date)
     return OrderTermsPreview(
         before=facts.order.terms,
         after=proposed_terms,
@@ -384,11 +432,30 @@ def _preview_result(facts, proposed_terms, scheduling, client_finance, payroll, 
         client_finance_impact=client_finance,
         payroll_impact=payroll,
         lifecycle_impact=lifecycle,
-        fingerprint=fingerprint_payload(_preview_fingerprint_payload(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle)),
+        planned_end_date=planned_end_date,
+        fingerprint=fingerprint_payload(
+            _preview_fingerprint_payload(
+                facts,
+                proposed_terms,
+                scheduling,
+                client_finance,
+                payroll,
+                lifecycle,
+                planned_end_date,
+            )
+        ),
     )
 
 
-def _preview_fingerprint_payload(facts, proposed_terms, scheduling, client_finance, payroll, lifecycle):
+def _preview_fingerprint_payload(
+    facts,
+    proposed_terms,
+    scheduling,
+    client_finance,
+    payroll,
+    lifecycle,
+    planned_end_date,
+):
     return {
         "case_no": facts.order.case_no,
         "terms": proposed_terms.canonical_payload(),
@@ -400,6 +467,7 @@ def _preview_fingerprint_payload(facts, proposed_terms, scheduling, client_finan
         "client_finance": client_finance.fingerprint.value,
         "payroll": payroll.fingerprint.value,
         "lifecycle": lifecycle.fingerprint.value,
+        "planned_end_date": planned_end_date.isoformat(),
     }
 
 
@@ -429,8 +497,21 @@ def _build_receipt(preview):
     )
 
 
-def _planned_end_date(scheduling):
-    return max(value for item in scheduling.assignments for value in item.service_dates)
+def _planned_end_date(scheduling, current_planned_end_date):
+    service_dates = tuple(
+        value for item in scheduling.assignments for value in item.service_dates
+    )
+    if service_dates:
+        return max(service_dates)
+    return current_planned_end_date
+
+
+def _client_finance_impact_mutates(candidate):
+    return candidate.resulting_account_version != candidate.expected_account_version
+
+
+def _payroll_impact_mutates(candidate):
+    return candidate.resulting_payroll_version != candidate.expected_payroll_version
 
 
 def _validate_versions(request, facts):

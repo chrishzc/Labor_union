@@ -180,7 +180,8 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
 
     expect(window.location.hash).toBe('#anomalies');
     expect(screen.getByText('🔴 嚴重阻擋')).toBeInTheDocument();
-    expect(screen.getAllByText('目前 typed view 未納入摘要欄位').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('異常偵測項目').length).toBeGreaterThan(0);
+    expect(screen.queryByText(/目前 typed view 未納入/)).not.toBeInTheDocument();
     expect(screen.queryByText('已成功載入異常')).not.toBeInTheDocument();
     expectInitialListBudget(requests);
     expectOnlyGet(requests);
@@ -207,7 +208,7 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     expectOnlyGet(requests);
   });
 
-  it('keeps claim, resolve and root repair disabled; lazy detail/referral remain GET-only', async () => {
+  it('keeps generic claim and resolve disabled; lazy detail/referral remain GET-only', async () => {
     authenticate();
     const { requests } = installFetchStub();
 
@@ -236,7 +237,7 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
     });
 
     expect(screen.getByRole('button', { name: /確認排除異常/ })).toBeDisabled();
-    expect(screen.getByPlaceholderText(/排除異常處置紀錄需待變更合約開放/)).toBeDisabled();
+    expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /確認排除異常/ }));
     expect(screen.queryByText('排除成功')).not.toBeInTheDocument();
 
@@ -248,7 +249,7 @@ describe('Anomalies #anomalies entry cutover query candidate', () => {
       expect(screen.getByText('owner_preview_apply')).toBeInTheDocument();
     });
 
-    const transitionButton = screen.getByRole('button', { name: 'Claim／Resolve 與來源修復仍未開放' });
+    const transitionButton = screen.getByRole('button', { name: '請依上方轉介流程處理來源資料' });
     expect(transitionButton).toBeDisabled();
     fireEvent.click(transitionButton);
     expect(screen.queryByText('狀態變更成功')).not.toBeInTheDocument();

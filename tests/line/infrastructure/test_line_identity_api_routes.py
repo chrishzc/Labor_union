@@ -5,6 +5,9 @@ Description: 驗證 canonical LINE identity API 的 typed payload、驗證身分
 
 from types import SimpleNamespace
 
+import pytest
+from fastapi import HTTPException
+
 from api.routes import line_identity
 from api.schemas.line_identity import (
     CustomerIdentityRequest,
@@ -94,6 +97,21 @@ def test_registration_uses_verified_line_identity_and_wakes_new_task(monkeypatch
     assert captured[0][0].line_user_id == "U-registration"
     assert response.data.beclass_record_id == 23
     assert wakes == [True]
+
+
+def test_registration_maps_customer_owner_conflict_to_typed_409(monkeypatch) -> None:
+    application = SimpleNamespace(
+        apply_registration=lambda *_: (_ for _ in ()).throw(
+            RuntimeError("customer_identity_binding_conflict")
+        )
+    )
+    monkeypatch.setattr(line_identity, "_verified_line_user_id", lambda _: LineUserId("U-registration"))
+
+    with pytest.raises(HTTPException) as captured:
+        line_identity.apply_provisional_registration(_registration_payload(), application)
+
+    assert captured.value.status_code == 409
+    assert captured.value.detail["code"] == "customer_identity_binding_conflict"
 
 
 def _registration_payload():

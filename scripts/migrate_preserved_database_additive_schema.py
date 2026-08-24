@@ -2340,15 +2340,20 @@ def _local_discover_qualification(
     if qualification_path is not None:
         path = Path(qualification_path).expanduser().resolve()
         receipt_root = (ROOT / "validation" / "receipts").resolve()
-        if path.parent != receipt_root or not path.name.startswith(
-            "PROV-"
-        ) or not path.name.endswith(".json"):
+        try:
+            path.relative_to(receipt_root)
+        except ValueError:
+            raise LocalAdditiveBlocked(
+                "explicit qualification must be a published validation receipt",
+                code="qualification_invalid",
+            ) from None
+        if not path.name.startswith("PROV-") or not path.name.endswith(".json"):
             raise LocalAdditiveBlocked(
                 "explicit qualification must be a published validation receipt",
                 code="qualification_invalid",
             )
         return _local_validate_qualification(path)
-    paths = sorted((ROOT / "validation" / "receipts").glob("PROV-*-local-additive-qualification-*.json"))
+    paths = sorted((ROOT / "validation" / "receipts").rglob("PROV-*-local-additive-qualification-*.json"))
     valid: list[dict[str, Any]] = []
     for path in paths:
         try:

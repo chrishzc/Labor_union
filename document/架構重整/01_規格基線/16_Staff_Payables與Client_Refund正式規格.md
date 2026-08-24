@@ -118,6 +118,11 @@ Commands：
 7. 更新 projection、version、outbox 與 receipt；
 8. 由 outer Unit of Work 單次 commit。
 
+HTTP Preview 的 `candidate` 必須是 closed typed public view（不可向管理端透傳
+`dict[str, Any]`）；各 Apply route 回 `202 JobAccepted` 時只表示 durable command 已排入，
+不表示付款、ledger event、allocation 或 resulting status 已完成。完成結果只能由後續 job
+outcome／canonical bank fact 讀回判定。
+
 事件別 guard：
 
 - 一般 payout：選定銀行出款與選定 payable obligation 精確相等；

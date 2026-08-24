@@ -1,4 +1,7 @@
-"""Typed client for formal schedule reads and leave/substitution commands."""
+"""
+File: leave_substitution_api_client.py
+Description: 呼叫請假代班 typed API，驗證正式排班、Preview、Apply 與統一錯誤回應。
+"""
 
 from __future__ import annotations
 
@@ -10,11 +13,11 @@ import requests
 from pydantic import BaseModel, ValidationError
 
 from api.schemas.base import BaseResponse
+from api.schemas.errors import GlobalTypedErrorView
 from api.schemas.leave_substitution import (
     LeaveAssignmentSummaryView,
     LeaveSubstitutionPreviewView,
     LeaveSubstitutionReceiptView,
-    LeaveSubstitutionTypedErrorView,
 )
 
 
@@ -24,7 +27,7 @@ T = TypeVar("T", bound=BaseModel)
 @dataclass(slots=True)
 class LeaveSubstitutionApiError(RuntimeError):
     status_code: int | None
-    error: LeaveSubstitutionTypedErrorView
+    error: GlobalTypedErrorView
 
     def __str__(self) -> str:
         return self.error.message
@@ -73,13 +76,25 @@ class LeaveSubstitutionApiClient:
 def _http_error(response) -> LeaveSubstitutionApiError:
     try:
         detail = response.json().get("detail")
-        return LeaveSubstitutionApiError(response.status_code, LeaveSubstitutionTypedErrorView.model_validate(detail.get("error")))
+        return LeaveSubstitutionApiError(response.status_code, GlobalTypedErrorView.model_validate(detail.get("error")))
     except (AttributeError, TypeError, ValidationError, ValueError):
         return _error(response.status_code, "leave_substitution_request_failed", "請假與代班請求失敗。", response.status_code in {502, 503, 504})
 
 
 def _error(status_code, code, message, retryable=False) -> LeaveSubstitutionApiError:
-    return LeaveSubstitutionApiError(status_code, LeaveSubstitutionTypedErrorView(category="unavailable" if retryable else "internal", code=code, message=message, correlation_id="leave-substitution-ui", retryable=retryable))
+    return LeaveSubstitutionApiError(
+        status_code,
+        GlobalTypedErrorView(
+            category="unavailable" if retryable else "internal",
+            code=code,
+            message=message,
+            correlation_id="leave-substitution-ui",
+            field_errors=[],
+            domain_blockers=[],
+            retryable=retryable,
+            current_version=None,
+        ),
+    )
 
 
 def _positive_id(value: int) -> int:

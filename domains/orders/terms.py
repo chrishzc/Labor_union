@@ -1,8 +1,11 @@
-"""Pure Orders Terms roots, validation, and canonical payloads."""
+"""
+File: terms.py
+Description: 定義 Orders Terms 根事實、唯一料理需求補正與通用驗證。
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
@@ -115,11 +118,28 @@ class OrderAggregateFacts:
             raise TypeError("service data locked must be bool")
 
 
+def is_unique_cooking_requirement_correction(
+    current_terms: OrderTerms,
+    proposed_terms: OrderTerms,
+) -> bool:
+    """Allow only the Case Import-owned unknown-to-known cooking correction."""
+    return (
+        current_terms.requires_cooking is None
+        and proposed_terms.requires_cooking is not None
+        and replace(proposed_terms, requires_cooking=None) == current_terms
+    )
+
+
 def validate_terms_change(
     current: OrderAggregateFacts,
     proposed_terms: OrderTerms,
 ) -> None:
     if current.service_data_locked:
         raise ValueError("service_data_locked")
-    if not proposed_terms.service_time.complete:
+    if (
+        not proposed_terms.service_time.complete
+        and not is_unique_cooking_requirement_correction(
+            current.terms, proposed_terms
+        )
+    ):
         raise ValueError("service_time_terms_incomplete")

@@ -10,15 +10,14 @@ from dataclasses import dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Protocol
 
 import pandas as pd
 
 from domains.case_import.client_beclass_validation import CLIENT_BECLASS_REQUIRED_HEADERS, validate_client_beclass_row
 from domains.case_import.client_beclass_binding import ClientCaseBindingStatus
-from infrastructure.mysql.client_beclass_workbook_import_repository import ClientBeClassWorkbookImportRepository
-from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from shared_kernel.fingerprints import fingerprint_payload
+from shared_kernel.ports import UnitOfWork
 from subsystems.case_import.beclass_review_intake import masked_review_identifier, record_invalid_beclass_row
 from domains.case_import.beclass_import_review import BeClassImportSourceKind
 
@@ -96,9 +95,38 @@ class ClientBeClassWorkbookUnavailable(RuntimeError):
     pass
 
 
+class BoundCaseCookingReconciliationPort(Protocol):
+    def reconcile(self, case_no: str) -> object: ...
+
+
+class ClientBeClassWorkbookImportRepositoryPort(Protocol):
+    def acquire_lock(self, key: str) -> bool: ...
+    def release_lock(self, key: str) -> None: ...
+    def load_workbook_receipt(self, key: str): ...
+    def load_row_receipt(self, key: str): ...
+    def source_state(self, payload: dict[str, object]) -> str: ...
+    def resolve_client_case_binding(self, name, phone, *, for_update: bool): ...
+    def claim_workbook(self, key, fingerprint, correlation_id) -> str: ...
+    def claim_row(self, key, fingerprint, correlation_id) -> str: ...
+    def create_bound_source_if_absent(self, payload, client_case) -> int | None: ...
+    def require_matching_client_root(self, receipt) -> None: ...
+    def bound_case_no_for_root(self, root_id: int | None) -> str | None: ...
+    def bound_source_for_query(self, query_no: str): ...
+    def bound_case_nos_for_workbook(self, digest: str) -> tuple[str, ...]: ...
+    def save_row_receipt(self, *args) -> None: ...
+    def save_workbook_receipt(self, *args) -> None: ...
+
+
 class ClientBeClassWorkbookImportService:
-    def __init__(self, repository: ClientBeClassWorkbookImportRepository) -> None:
+    def __init__(
+        self,
+        repository: ClientBeClassWorkbookImportRepositoryPort,
+        reconciliation: BoundCaseCookingReconciliationPort,
+        unit_of_work_factory: Callable[[], UnitOfWork],
+    ) -> None:
         self._repository = repository
+        self._reconciliation = reconciliation
+        self._unit_of_work_factory = unit_of_work_factory
 
     def preview(self, source_path: str) -> ClientBeClassWorkbookPreview:
         workbook = _load_workbook(source_path)
@@ -110,7 +138,7 @@ class ClientBeClassWorkbookImportService:
             raise ClientBeClassWorkbookUnavailable("client_beclass_workbook_coordinator_lock_timeout")
         try:
             workbook = _load_workbook(source_path)
-            replay = self._stored_replay(key, workbook.digest)
+            replay = self._stored_replay_and_reconcile(key, workbook.digest)
             if replay is not None:
                 return replay
             preview = self.preview(source_path)
@@ -148,11 +176,16 @@ class ClientBeClassWorkbookImportService:
         source_identity = _source_identity(workbook.digest, row_number)
         payload = _normalized_payload(row)
         fingerprint = fingerprint_payload(payload).value
-        with MySqlUnitOfWork(self._repository.connection) as unit_of_work:
+        with self._unit_of_work_factory() as unit_of_work:
             stored = self._repository.load_row_receipt(source_identity)
             if stored is not None:
                 _require_same_fingerprint(stored, fingerprint)
                 self._repository.require_matching_client_root(stored)
+                case_no = self._repository.bound_case_no_for_root(
+                    stored.get("root_id")
+                )
+                if case_no is not None:
+                    self._reconciliation.reconcile(case_no)
                 unit_of_work.commit()
                 return "exact_replay"
             self._repository.claim_row(source_identity, fingerprint, correlation_id)
@@ -170,7 +203,19 @@ class ClientBeClassWorkbookImportService:
                 return "review_required"
             source_state = self._repository.source_state(payload)
             if source_state == "exact":
-                self._repository.save_row_receipt(source_identity, fingerprint, None, "existing_source", None, actor)
+                bound_source = self._repository.bound_source_for_query(
+                    str(payload["query_no"])
+                )
+                if bound_source is not None:
+                    self._reconciliation.reconcile(bound_source["case_no"])
+                self._repository.save_row_receipt(
+                    source_identity,
+                    fingerprint,
+                    None if bound_source is None else bound_source["root_id"],
+                    "existing_source",
+                    None,
+                    actor,
+                )
                 unit_of_work.commit()
                 return "existing_source"
             if source_state == "conflict":
@@ -191,8 +236,9 @@ class ClientBeClassWorkbookImportService:
                 )
                 unit_of_work.commit()
                 return outcome
+            bound_root = resolution.bound_root()
             source_id = self._repository.create_bound_source_if_absent(
-                payload, resolution.bound_root()
+                payload, bound_root
             )
             if source_id is None:
                 outcome = "existing_source"
@@ -206,6 +252,7 @@ class ClientBeClassWorkbookImportService:
                 self._repository.save_row_receipt(source_identity, fingerprint, None, outcome, review_identity, actor)
                 unit_of_work.commit()
                 return outcome
+            self._reconciliation.reconcile(str(bound_root["case_no"]))
             self._repository.save_row_receipt(source_identity, fingerprint, source_id, "created", None, actor)
             unit_of_work.commit()
             return "created"
@@ -237,22 +284,36 @@ class ClientBeClassWorkbookImportService:
             issue_codes=(issue_code,),
         )
 
-    def _stored_replay(self, key: str, digest: str) -> ClientBeClassWorkbookReceipt | None:
-        stored = self._repository.load_workbook_receipt(key)
-        if stored is None:
-            return None
-        if stored["request_fingerprint"] != digest:
-            raise ClientBeClassWorkbookConflict("client_beclass_workbook_idempotency_conflict")
-        return ClientBeClassWorkbookReceipt(**{**json.loads(stored["result_snapshot"]), "replayed_workbook": True})
+    def _stored_replay_and_reconcile(
+        self, key: str, digest: str
+    ) -> ClientBeClassWorkbookReceipt | None:
+        with self._unit_of_work_factory() as unit_of_work:
+            stored = self._repository.load_workbook_receipt(key)
+            if stored is None:
+                unit_of_work.commit()
+                return None
+            if stored["request_fingerprint"] != digest:
+                raise ClientBeClassWorkbookConflict(
+                    "client_beclass_workbook_idempotency_conflict"
+                )
+            for case_no in self._repository.bound_case_nos_for_workbook(digest):
+                self._reconciliation.reconcile(case_no)
+            unit_of_work.commit()
+            return ClientBeClassWorkbookReceipt(
+                **{
+                    **json.loads(stored["result_snapshot"]),
+                    "replayed_workbook": True,
+                }
+            )
 
     def _claim_workbook(self, key: str, digest: str, correlation_id: str) -> None:
-        with MySqlUnitOfWork(self._repository.connection) as unit_of_work:
+        with self._unit_of_work_factory() as unit_of_work:
             if self._repository.claim_workbook(key, digest, correlation_id) == "conflict":
                 raise ClientBeClassWorkbookConflict("client_beclass_workbook_idempotency_conflict")
             unit_of_work.commit()
 
     def _save_workbook_receipt(self, key: str, digest: str, preview: str, actor: str, receipt: ClientBeClassWorkbookReceipt) -> None:
-        with MySqlUnitOfWork(self._repository.connection) as unit_of_work:
+        with self._unit_of_work_factory() as unit_of_work:
             self._repository.save_workbook_receipt(key, digest, preview, actor, receipt.as_dict())
             unit_of_work.commit()
 

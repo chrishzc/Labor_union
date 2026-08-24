@@ -169,6 +169,48 @@ def test_matching_schedule_sources_project_to_bounded_matching_label(
     assert "provider-secret" not in response.text
 
 
+def test_scheduling_leave_notification_projects_to_bounded_assignment_label(
+    monkeypatch,
+) -> None:
+    class _LeaveNotificationApplication(_Application):
+        def list(self, _query, _actor):
+            record = replace(
+                _record(), source_aggregate_type="scheduling_staff_leave_request"
+            )
+            return LineDeliveryAdminPage((record,), 1, 1, 25)
+
+    client = _client(monkeypatch, _LeaveNotificationApplication())
+    response = client.get("/api/v1/line/tasks")
+
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert item["source_type"] == "assignment"
+    assert item["task_type"] == "assignment"
+    assert "U-secret" not in response.text
+    assert "CASE-secret" not in response.text
+
+
+def test_provisional_registration_projects_to_bounded_identity_label(
+    monkeypatch,
+) -> None:
+    class _ProvisionalRegistrationApplication(_Application):
+        def list(self, _query, _actor):
+            record = replace(
+                _record(), source_aggregate_type="provisional_registration"
+            )
+            return LineDeliveryAdminPage((record,), 1, 1, 25)
+
+    client = _client(monkeypatch, _ProvisionalRegistrationApplication())
+    response = client.get("/api/v1/line/tasks")
+
+    assert response.status_code == 200
+    item = response.json()["data"]["items"][0]
+    assert item["source_type"] == "identity"
+    assert item["task_type"] == "identity"
+    assert "U-secret" not in response.text
+    assert "CASE-secret" not in response.text
+
+
 def test_delivery_query_malformed_public_record_fails_closed(monkeypatch) -> None:
     class _MalformedApplication(_Application):
         def list(self, _query, _actor):

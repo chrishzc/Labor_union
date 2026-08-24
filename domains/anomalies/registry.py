@@ -516,6 +516,17 @@ def _schedule_coverage_definition() -> AnomalyDefinition:
                 True,
             ),
         ),
+        display_fields=(
+            "affected_obligation_identities",
+            "affected_order_identities",
+            "amount_delta_ntd",
+            "domain_blockers",
+            "finance_import_batch_id",
+            "finance_import_row_id",
+            "integrity_blocker_active",
+            "reason_codes",
+            "root_condition_active",
+        ),
     )
 
 
@@ -867,6 +878,17 @@ def _finance_manual_review_definition() -> AnomalyDefinition:
                 required_capability="finance_import.correct_and_post",
                 completion_predicate="finance_import_manual_review_cleared",
             ),
+        ),
+        display_fields=(
+            "affected_obligation_identities",
+            "affected_order_identities",
+            "amount_delta_ntd",
+            "domain_blockers",
+            "finance_import_batch_id",
+            "finance_import_row_id",
+            "integrity_blocker_active",
+            "reason_codes",
+            "root_condition_active",
         ),
     )
 

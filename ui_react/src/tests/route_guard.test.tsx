@@ -1,6 +1,6 @@
 /**
  * File: route_guard.test.tsx
- * Description: 驗證路由認證守衛、深層連結阻擋、URL Hash 雙向同步、確認式登出與狀態遷移。
+ * Description: 驗證認證守衛、URL Hash 與帶 query 的 bounded deep-link 路由。
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
@@ -206,6 +206,23 @@ describe('Route Guard & Shell Hash Navigation', () => {
     await waitFor(() => {
       const activeNav = screen.getByTitle('排班日曆');
       expect(activeNav).toHaveClass('active');
+    });
+  });
+
+  it('帶 bounded query 的 scheduling hash 仍應識別為排班頁', async () => {
+    sessionClient.setSession('valid-token', {
+      id: 1,
+      username: 'admin',
+      display_name: '系統管理員',
+      role: 'system_admin',
+      capabilities: ['system.administration'],
+    });
+    window.location.hash = '#scheduling?tab=leave_sub&case_no=CASE-DL-001';
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTitle('排班日曆')).toHaveClass('active');
     });
   });
 

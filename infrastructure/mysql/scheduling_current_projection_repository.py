@@ -266,14 +266,15 @@ def _service_time_terms(row):
 
 
 def _waiting_lock_fact(row, locked_dates):
+    assigned_end_date = _as_date(row["assigned_end_date"], "lock end date")
     return WaitingDepositLockCurrentFact(
         int(row["lock_id"]),
         int(row["segment_id"]),
         str(row["case_no"]),
         int(row["staff_id"]),
         _as_date(row["assigned_start_date"], "lock start date"),
-        _as_date(row["assigned_end_date"], "lock end date"),
-        locked_dates,
+        assigned_end_date,
+        tuple(item for item in locked_dates if item <= assigned_end_date),
     )
 
 

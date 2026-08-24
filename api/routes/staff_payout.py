@@ -622,14 +622,17 @@ def _recovery_adjustment_preview_payload(preview):
     }
 
 
-def _preview_payload(preview, event_type):
-    return {
-        "event_type": event_type.value,
-        "staff_payables_version": preview.staff_payables_version,
-        "bank_facts_version": preview.bank_facts_version,
-        "candidate": _materialize(preview.candidate),
-        "preview_fingerprint": preview.fingerprint.value,
-    }
+def _preview_payload(preview, event_type) -> StaffPayoutPreviewView:
+    """Convert the Domain candidate once at the HTTP boundary into its closed public view."""
+    return StaffPayoutPreviewView.model_validate(
+        {
+            "event_type": event_type.value,
+            "staff_payables_version": preview.staff_payables_version,
+            "bank_facts_version": preview.bank_facts_version,
+            "candidate": _materialize(preview.candidate),
+            "preview_fingerprint": preview.fingerprint.value,
+        }
+    )
 
 
 def _canonical_integer_identities(values) -> tuple[str, ...]:

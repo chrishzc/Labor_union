@@ -372,6 +372,26 @@ def test_publish_preview_not_found_is_typed_and_redacted(monkeypatch) -> None:
     assert connection.commit_count == 0
 
 
+def test_publish_preview_identifies_missing_liff_readiness_without_disclosing_configuration(monkeypatch) -> None:
+    connection = _Connection()
+    rich_menu_application = _RichMenuApplication(
+        failure=ValueError("LINE_LIFF_ID is required for LIFF Rich Menu actions")
+    )
+    client, _requests = _client(monkeypatch, connection, rich_menu_application)
+
+    response = client.post(
+        "/api/v1/line/rich-menus/default_menu/publish-preview",
+        headers={"X-Correlation-ID": "rich-menu-preview-liff-readiness"},
+    )
+
+    assert response.status_code == 422
+    error = response.json()["detail"]["error"]
+    assert error["code"] == "rich_menu_preview_invalid"
+    assert error["message"] == "LIFF 設定尚未完成；目前不能建立發布預覽。"
+    assert "LINE_LIFF_ID" not in response.text
+    assert connection.commit_count == 0
+
+
 def test_publication_list_and_detail_are_closed_redacted_projections(monkeypatch) -> None:
     connection = _Connection()
     application = _PublicationApplication()

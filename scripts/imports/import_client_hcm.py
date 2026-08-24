@@ -40,7 +40,7 @@ from subsystems.case_import.hcm_adapter import (
     calculate_hcm_service_end_date,
     parse_hcm_service_time,
 )
-from subsystems.case_import.hcm_beclass_reconciliation import (
+from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
     reconcile_hcm_beclass_cooking,
 )
 from shared_kernel.identities import (

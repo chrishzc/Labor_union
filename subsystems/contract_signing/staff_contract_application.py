@@ -1,4 +1,7 @@
-"""Send and record staff contract signatures as immutable workflow facts."""
+"""
+File: staff_contract_application.py
+Description: 建立月嫂契約簽署與簽約前承諾；承諾服務日必須精確符合訂單天數。
+"""
 
 from __future__ import annotations
 
@@ -413,6 +416,7 @@ def _create_commitment_if_ready(connection, case_no, plan_id, actor_id):
         if existing is not None:
             return int(existing["id"])
         segments = _plan_segments(connection, plan_id)
+        service_days = _commitment_service_days(connection, case_no, segments)
         snapshot = _sha256(_canonical_json(segments).encode())
         key = f"precontract-commitment:{case_no}:{plan_id}:{snapshot[:16]}"
         cursor.execute(
@@ -420,12 +424,11 @@ def _create_commitment_if_ready(connection, case_no, plan_id, actor_id):
             (case_no, plan_id, key, snapshot, actor_id),
         )
         commitment_id = int(cursor.lastrowid)
-        for segment in segments:
-            for service_date in _inclusive_dates(segment["assigned_start_date"], segment["assigned_end_date"]):
-                cursor.execute(
-                    "INSERT INTO precontract_service_commitment_days (commitment_id,matching_segment_id,staff_id,service_date) VALUES (%s,%s,%s,%s)",
-                    (commitment_id, segment["id"], segment["staff_id"], service_date),
-                )
+        for segment, service_date in service_days:
+            cursor.execute(
+                "INSERT INTO precontract_service_commitment_days (commitment_id,matching_segment_id,staff_id,service_date) VALUES (%s,%s,%s,%s)",
+                (commitment_id, segment["id"], segment["staff_id"], service_date),
+            )
         return commitment_id
 
 
@@ -473,6 +476,63 @@ def _plan_segments(connection, plan_id):
             (plan_id,),
         )
         return list(cursor.fetchall())
+
+
+def _commitment_service_days(connection, case_no, segments):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT order_row.start_date,order_row.service_days,client.service_type "
+            "FROM orders order_row JOIN clients client ON client.id=order_row.client_id "
+            "WHERE order_row.case_no=%s FOR UPDATE",
+            (case_no,),
+        )
+        terms = cursor.fetchone()
+        cursor.execute("SELECT holiday_date FROM holidays")
+        holiday_dates = {row["holiday_date"] for row in cursor.fetchall()}
+    if terms is None:
+        raise ValueError("contract_signing_case_facts_not_found")
+    return _allocate_commitment_service_days(terms, segments, holiday_dates)
+
+
+def _allocate_commitment_service_days(terms, segments, holiday_dates):
+    start_date = terms["start_date"]
+    target_days = int(terms["service_days"] or 0)
+    if start_date is None or target_days <= 0:
+        raise ValueError("precontract_service_dates_incomplete")
+    rest_weekdays = _rest_weekdays(terms["service_type"])
+    planned_dates = _planned_service_dates(start_date, target_days, rest_weekdays, holiday_dates)
+    allocations = []
+    for service_date in planned_dates:
+        owners = [
+            segment for segment in segments
+            if segment["assigned_start_date"] <= service_date <= segment["assigned_end_date"]
+        ]
+        if len(owners) != 1:
+            raise ValueError("precontract_service_days_mismatch")
+        allocations.append((owners[0], service_date))
+    if len(allocations) != target_days:
+        raise ValueError("precontract_service_days_mismatch")
+    return tuple(allocations)
+
+
+def _rest_weekdays(service_mode):
+    if service_mode == "週休1日":
+        return frozenset({6})
+    if service_mode == "週休2日":
+        return frozenset({5, 6})
+    if service_mode == "連續服務":
+        return frozenset()
+    raise ValueError("precontract_service_mode_invalid")
+
+
+def _planned_service_dates(start_date, target_days, rest_weekdays, holiday_dates):
+    dates = []
+    current = start_date
+    while len(dates) < target_days:
+        if current.weekday() not in rest_weekdays and current not in holiday_dates:
+            dates.append(current)
+        current += timedelta(days=1)
+    return tuple(dates)
 
 
 def _inclusive_dates(start, end):

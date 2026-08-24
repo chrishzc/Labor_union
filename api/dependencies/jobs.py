@@ -7,6 +7,7 @@ from collections.abc import Iterator
 
 from fastapi import HTTPException
 
+from api.dependencies.admin_auth import admin_auth_is_enabled
 from api.error_contracts import typed_http_error
 from infrastructure.mysql.background_job_repository import BackgroundJobRepository
 from infrastructure.mysql.mysql_adapter import get_connection
@@ -47,6 +48,13 @@ def get_durable_job_cancellation() -> Iterator[DurableJobCancellationApplication
 def immutable_admin_job_actor(principal: AdminPrincipal, correlation_id: str) -> str:
     if isinstance(principal.id, int) and principal.id > 0:
         return f"admin_user_id:{principal.id}"
+    if (
+        not admin_auth_is_enabled()
+        and principal.id is None
+        and principal.username == "development-bypass"
+        and principal.role == "system_admin"
+    ):
+        return "system:local_bypass"
     raise typed_http_error(
         403,
         "authorization",

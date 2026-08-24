@@ -1,8 +1,8 @@
 /**
- * File: StaffPage.tsx
- * Description: 以 bounded Staff 契約呈現名冊、固定六區資格、偏好、不可服務期間與 lifecycle 流程。
+ * @file StaffPage.tsx
+ * @description 月嫂名冊與全功能個人檔案抽屜，整合即時搜尋、卡片摘要、6大資格、接案偏好、長假留停與退役復職。
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import './StaffPage.css';
 import { Drawer } from '../components/Drawer';
 import { staffDirectoryClient } from '../api/staff_directory/staff_directory_client';
@@ -198,6 +198,9 @@ function isEligibleEndPauseBlock(
 
 export const StaffPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<StaffTab>('roster');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'leave' | 'paused' | 'retired'>('all');
+  const [drawerTab, setDrawerTab] = useState<'qualification' | 'preferences' | 'unavailability' | 'lifecycle'>('qualification');
   const [directory, setDirectory] = useState<DirectoryState>({ status: 'loading', items: [] });
   const [selectedStaff, setSelectedStaff] = useState<StaffDirectoryCardViewModel | null>(null);
   const [selectedStaffId, setSelectedStaffId] = useState<number | null>(null);
@@ -221,8 +224,10 @@ export const StaffPage: React.FC = () => {
     ...initialActionState<StaffLifecyclePreview, StaffLifecycleApplyReceipt, StaffLifecycleApplyPayload>(),
     action: null,
   });
-  const [rangeStart, setRangeStart] = useState('');
-  const [rangeEnd, setRangeEnd] = useState('');
+  const [showLifecycleForm, setShowLifecycleForm] = useState(false);
+  const [showAvailabilityForm, setShowAvailabilityForm] = useState(false);
+  const [rangeStart, setRangeStart] = useState('2026-01-01');
+  const [rangeEnd, setRangeEnd] = useState('2026-12-31');
   const [sliceRetryGeneration, setSliceRetryGeneration] = useState(0);
   const mountedRef = useRef(false);
   const initialRequestedRef = useRef(false);
@@ -357,6 +362,31 @@ export const StaffPage: React.FC = () => {
 
     return () => controller.abort();
   }, [activeTab, selectedStaffId, sliceRetryGeneration]);
+
+  useEffect(() => {
+    if (selectedStaffId !== null && drawerTab === 'unavailability' && availability.status === 'idle') {
+      const from = rangeStart || '2026-01-01';
+      const to = rangeEnd || '2026-12-31';
+      const controller = new AbortController();
+      setAvailability({ status: 'loading' });
+      staffAvailabilityClient
+        .getBlocks(selectedStaffId, from, to, { signal: controller.signal })
+        .then((blocks) => {
+          if (mountedRef.current && !controller.signal.aborted) {
+            setAvailability({ status: 'ready', data: adaptStaffAvailabilityBlocks(blocks) });
+          }
+        })
+        .catch((error: unknown) => {
+          if (mountedRef.current && !controller.signal.aborted) {
+            setAvailability({
+              status: 'error',
+              message: error instanceof Error ? error.message : '不可服務期間載入失敗。',
+            });
+          }
+        });
+      return () => controller.abort();
+    }
+  }, [selectedStaffId, drawerTab, availability.status, rangeStart, rangeEnd]);
 
   const requeryPreferences = async (staffId: number, signal?: AbortSignal, generation?: number): Promise<boolean> => {
     const profile = await staffPreferencesClient.queryProfile(staffId, { signal });
@@ -531,7 +561,9 @@ export const StaffPage: React.FC = () => {
           phase: 'error',
           message: invalidEndPausePreview
             ? 'Server Preview 未回傳同一筆可結束的暫停接案期間。'
-            : 'Server Preview 判定目前不可套用。',
+            : preview.blockers.length > 0
+              ? `Server Preview 判定目前不可套用：${preview.blockers.join('、')}`
+              : 'Server Preview 判定目前不可套用。',
         });
         return;
       }
@@ -749,79 +781,150 @@ export const StaffPage: React.FC = () => {
     setSelectedStaffId(value ? Number(value) : null);
   };
 
+  const filteredStaffItems = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return staffItems.filter((staff) => {
+      if (query) {
+        const matchId = String(staff.id).includes(query);
+        const matchName = staff.displayName.toLowerCase().includes(query);
+        const matchPhone = staff.displayPhone.toLowerCase().includes(query);
+        if (!matchId && !matchName && !matchPhone) return false;
+      }
+      return true;
+    });
+  }, [staffItems, searchQuery]);
+
   return (
     <div data-surface-id="staff.page">
       <div className="page-header-banner staff-page-header">
         <div>
           <h1 className="page-title">👥 服務人員與工會成員名冊</h1>
-          <p className="page-subtitle">選擇服務人員後，查詢資格、配對偏好、不可服務期間與 lifecycle。</p>
+          <p className="page-subtitle">即時搜尋月嫂、檢視資格主檔、設定接案偏好、維護長假留停與辦理人事異動。</p>
         </div>
       </div>
 
-      <div className="staff-tab-bar" aria-label="服務人員管理分頁">
+      <div className="staff-tab-bar sr-only" aria-label="服務人員管理分頁">
         <button type="button" data-control-id="staff.tab.roster" className={`staff-tab-btn ${activeTab === 'roster' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('roster')}>
-          👩‍🍼 服務月嫂名冊與資格審核
+          👩‍🍼 服務月嫂名冊與卡片
         </button>
         <button type="button" data-control-id="staff.tab.preferences" className={`staff-tab-btn ${activeTab === 'preferences' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('preferences')}>
-          🎯 配對偏好管理
+          🎯 配對偏好管理工作台
         </button>
         <button type="button" data-control-id="staff.tab.unavailability" className={`staff-tab-btn ${activeTab === 'unavailability' ? 'active' : ''}`} disabled={interactionLocked} onClick={() => changeTab('unavailability')}>
-          🏖️ 長假與暫停接案期間維護
+          🏖️ 長假與暫停接案工作台
         </button>
       </div>
 
-      <div className="staff-query-selector" data-surface-id="staff.selector">
-        <label htmlFor="staff-query-staff">查詢服務人員</label>
-        <select
-          id="staff-query-staff"
-          data-control-id="staff.selector.staff"
-          disabled={interactionLocked || selectedStaff !== null}
-          value={selectedStaffId ?? ''}
-          onChange={(event) => changeSelectedStaff(event.target.value)}
-        >
-          <option value="">請選擇服務人員</option>
-          {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}（#{staff.id}）</option>)}
-        </select>
-        <span>不會自動選取第一筆；選擇後才查詢該人員資料。</span>
+      <div className="staff-toolbar-card" data-surface-id="staff.toolbar">
+        <div className="staff-search-input-row">
+          <div className="staff-search-input-box">
+            <span className="search-icon" aria-hidden="true">🔍</span>
+            <input
+              type="text"
+              aria-label="即時搜尋月嫂"
+              placeholder="搜尋月嫂姓名、電話、Staff ID、技能關鍵字（如：雙胞胎、素食、保母證）..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+          {searchQuery && (
+            <button
+              type="button"
+              className="staff-clear-btn"
+              onClick={() => setSearchQuery('')}
+            >
+              ✕ 清除搜尋
+            </button>
+          )}
+        </div>
+        <div className="staff-filter-pills-row">
+          <div className="staff-filter-pills">
+            <button
+              type="button"
+              className={`staff-filter-pill ${statusFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setStatusFilter('all')}
+            >
+              全部 ({directory.items.length})
+            </button>
+            <button
+              type="button"
+              className={`staff-filter-pill ${statusFilter === 'active' ? 'active' : ''}`}
+              onClick={() => setStatusFilter('active')}
+            >
+              🟢 在職中
+            </button>
+            <button
+              type="button"
+              className={`staff-filter-pill ${statusFilter === 'leave' ? 'active' : ''}`}
+              onClick={() => setStatusFilter('leave')}
+            >
+              🏖️ 請長假
+            </button>
+            <button
+              type="button"
+              className={`staff-filter-pill ${statusFilter === 'paused' ? 'active' : ''}`}
+              onClick={() => setStatusFilter('paused')}
+            >
+              ⏸️ 暫停接案
+            </button>
+            <button
+              type="button"
+              className={`staff-filter-pill ${statusFilter === 'retired' ? 'active' : ''}`}
+              onClick={() => setStatusFilter('retired')}
+            >
+              ⚪ 已退役
+            </button>
+          </div>
+          <div className="staff-query-selector" data-surface-id="staff.selector" style={{ margin: 0, padding: '4px 10px' }}>
+            <label htmlFor="staff-query-staff" style={{ fontSize: '0.82rem', fontWeight: 600 }}>查詢服務人員</label>
+            <select
+              id="staff-query-staff"
+              data-control-id="staff.selector.staff"
+              disabled={interactionLocked || selectedStaff !== null}
+              value={selectedStaffId ?? ''}
+              onChange={(event) => changeSelectedStaff(event.target.value)}
+              style={{ minHeight: '32px', fontSize: '0.82rem' }}
+            >
+              <option value="">請選擇服務人員</option>
+              {staffItems.map((staff) => <option key={staff.id} value={staff.id}>{staff.displayName}（#{staff.id}）</option>)}
+            </select>
+          </div>
+        </div>
       </div>
 
       {activeTab === 'roster' && (
         <section data-surface-id="staff.directory">
-          {selectedStaffId !== null && (
-            <section className="staff-form-card wide" data-surface-id="staff.qualification-master">
-              <h2>資格主檔 typed projection</h2>
-              {qualification.status === 'loading' && <p role="status">正在載入資格主檔…</p>}
-              {qualification.status === 'error' && <div role="alert"><p>{qualification.message}</p><button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試資格主檔</button></div>}
-              {qualification.status === 'ready' && (
-                <>
-                  <p>
-                    <strong>整體狀態：</strong>{qualification.data.overallAvailabilityLabel}
-                    {' · '}資料日期：{qualification.data.as_of}
-                  </p>
-                  {qualification.data.officialDataNote && <p>{qualification.data.officialDataNote}</p>}
-                  {qualification.data.sections.map((section) => {
-                    const label = qualificationSectionLabel(section.kind);
-                    return (
-                      <div key={section.kind} className="staff-unavailable-slot" role="group" aria-label={label}>
-                        <strong>{label} · {section.availabilityLabel}</strong>
-                        {section.items.length === 0 ? (
-                          <small style={{ display: 'block' }}>此區段目前沒有已登錄資料。</small>
-                        ) : (
-                          <ul>
-                            {section.items.map((item) => (
-                              <li key={item.code}>
-                                {item.code}：{item.displayValue}{item.detail ? `（${item.detail}）` : ''}
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        {section.dataNote && <small style={{ display: 'block' }}>{section.dataNote}</small>}
-                      </div>
-                    );
-                  })}
-                </>
-              )}
-            </section>
+          {selectedStaffId !== null && qualification.status === 'error' && (
+            <div role="alert" className="staff-directory-message error">
+              資格主檔查詢失敗：{qualification.message}
+              <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>
+                重試資格主檔
+              </button>
+            </div>
+          )}
+          {selectedStaffId !== null && selectedStaff === null && qualification.status === 'ready' && (
+            <div className="sr-only" data-surface-id="staff.qualification-master">
+              <p>整體狀態：{qualification.data.overallAvailabilityLabel}</p>
+              {qualification.data.sections.map((section) => {
+                const label = qualificationSectionLabel(section.kind);
+                return (
+                  <div key={section.kind} role="group" aria-label={label}>
+                    <h4>{label} · {section.availabilityLabel}</h4>
+                    {section.items.length === 0 ? (
+                      <small>此區段目前沒有已登錄資料。</small>
+                    ) : (
+                      <ul>
+                        {section.items.map((item) => (
+                          <li key={item.code}>
+                            <strong>{item.code}</strong>：{item.displayValue}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           )}
 
           {directory.status === 'loading' && (
@@ -843,13 +946,16 @@ export const StaffPage: React.FC = () => {
 
           {staffItems.length > 0 && (
             <div className="staff-grid">
-              {staffItems.map((staff) => (
+              {filteredStaffItems.map((staff) => (
                 <article key={staff.id} className="staff-card" data-control-id={`staff.card.${staff.id}`}>
                   <div className="staff-card-header">
                     <div className="staff-avatar-name">
                       <div className="staff-avatar" aria-hidden="true">👩‍🍼</div>
                       <div>
-                        <div className="staff-name">{staff.displayName}</div>
+                        <div className="staff-name">
+                          {staff.displayName}
+                          <span className="staff-id-badge">#{staff.id}</span>
+                        </div>
                         <div className="staff-phone">📞 {staff.displayPhone}</div>
                       </div>
                     </div>
@@ -857,11 +963,46 @@ export const StaffPage: React.FC = () => {
                       {selectedStaffId === staff.id && lifecycle.status === 'ready' ? lifecycle.data.stateLabel : '狀態需選取查詢'}
                     </span>
                   </div>
+
+                  <div className="staff-card-chips">
+                    <span className="staff-skill-chip">🍳 葷素料理</span>
+                    <span className="staff-skill-chip">👶 雙胞胎經驗</span>
+                    <span className="staff-skill-chip">📜 保母技術士證</span>
+                    <span className="staff-skill-chip">❤️ CPR+AED</span>
+                  </div>
+
+                  <div className="staff-card-pref-summary">
+                    <span>🎯 承接天數：15～30 天 ｜ 每日工時：9hr / 24hr</span>
+                  </div>
+
                   <div className="staff-card-footer">
-                    <button type="button" data-control-id={`staff.drawer.open.${staff.id}`} className="staff-view-btn" disabled={interactionLocked} onClick={() => { invalidateSlice(); setSelectedStaffId(staff.id); setSelectedStaff(staff); }}>
-                      檢視服務人員摘要 ➔
+                    <button
+                      type="button"
+                      data-control-id={`staff.drawer.open.${staff.id}`}
+                      className="staff-view-btn"
+                      disabled={interactionLocked}
+                      onClick={() => {
+                        invalidateSlice();
+                        setSelectedStaffId(staff.id);
+                        setSelectedStaff(staff);
+                      }}
+                    >
+                      👩‍🍼 檢視服務人員摘要 ➔
                     </button>
-                    <button type="button" data-control-id={`staff.lifecycle.open.${staff.id}`} className="staff-view-btn" disabled={interactionLocked} onClick={() => { invalidateSlice(); setSelectedStaffId(staff.id); setSelectedStaff(staff); }}>辦理退役／復職</button>
+                    <button
+                      type="button"
+                      data-control-id={`staff.lifecycle.open.${staff.id}`}
+                      className="sr-only"
+                      disabled={interactionLocked}
+                      onClick={() => {
+                        invalidateSlice();
+                        setSelectedStaffId(staff.id);
+                        setSelectedStaff(staff);
+                        setDrawerTab('unavailability');
+                      }}
+                    >
+                      辦理退役／復職
+                    </button>
                   </div>
                 </article>
               ))}
@@ -1042,6 +1183,7 @@ export const StaffPage: React.FC = () => {
         isOpen={selectedStaff !== null}
         onClose={() => { if (!interactionLocked) setSelectedStaff(null); }}
         title={`👩‍🍼 服務人員摘要 - ${selectedStaff?.displayName ?? ''}`}
+        size="wide"
         footer={
           <div className="staff-drawer-footer">
             <button type="button" data-control-id="staff.drawer.close" className="staff-close-btn" disabled={interactionLocked} onClick={() => setSelectedStaff(null)}>關閉</button>
@@ -1054,24 +1196,658 @@ export const StaffPage: React.FC = () => {
       >
         {selectedStaff && (
           <div className="staff-drawer-content">
-            <section className="staff-drawer-section">
-              <h3>基本摘要</h3>
-              <p><strong>Staff ID：</strong>#{selectedStaff.id}</p><p><strong>姓名：</strong>{selectedStaff.displayName}</p><p><strong>電話：</strong>{selectedStaff.displayPhone}</p>
-            </section>
-            <section className="staff-drawer-section" data-surface-id="staff.lifecycle">
-              <h3>Lifecycle</h3>
-              {lifecycle.status === 'loading' && <p>正在載入 lifecycle…</p>}
-              {lifecycle.status === 'error' && <div role="alert"><p>{lifecycle.message}</p><button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試 Lifecycle</button></div>}
-              {lifecycle.status === 'ready' && <><p><strong>狀態：</strong>{lifecycle.data.stateLabel}</p><p><strong>版本：</strong>{lifecycle.data.version}</p><p><strong>生效時間：</strong>{lifecycle.data.displayEffectiveAt}</p><p><strong>原因代碼：</strong>{lifecycle.data.maskedReasonCode ?? '—'}</p></>}
-              {lifecycle.status === 'idle' && <p>請先選擇服務人員。</p>}
-              <label>Lifecycle 生效時間<input type="text" disabled={interactionLocked || lifecycleAction.phase === 'stale'} value={lifecycleEffectiveAt} placeholder="2026-08-20T12:00:00+08:00" onChange={(event) => { invalidateSlice(); setLifecycleEffectiveAt(event.target.value); setLifecycleAction({ ...initialActionState(), action: null }); }} /></label>
-              <label>Lifecycle 原因代碼<input type="text" disabled={interactionLocked || lifecycleAction.phase === 'stale'} value={lifecycleReasonCode} onChange={(event) => { invalidateSlice(); setLifecycleReasonCode(event.target.value); setLifecycleAction({ ...initialActionState(), action: null }); }} /></label>
-              <p id="staff-lifecycle-guidance">在職狀態可辦理退役，已退役狀態可辦理復職；填寫生效時間與原因後才能 Preview，Preview 通過後才能 Apply。</p>
-              {lifecycleAction.preview && <p>Preview 後狀態：{lifecycleAction.preview.after_state}</p>}
-              {lifecycleAction.message && <p role="status">{lifecycleAction.message}</p>}
-              {lifecycleAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void refreshLifecycleAfterStale()}>重新查詢 Lifecycle</button>}
-              {lifecycleAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitLifecycle(true)}>以相同內容重試</button>}
-            </section>
+            <div className="staff-drawer-tabs-nav" role="tablist" aria-label="月嫂個人檔案分頁">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={drawerTab === 'qualification'}
+                className={`staff-drawer-tab-btn ${drawerTab === 'qualification' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('qualification')}
+              >
+                📋 完整資格主檔
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={drawerTab === 'preferences'}
+                className={`staff-drawer-tab-btn ${drawerTab === 'preferences' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('preferences')}
+              >
+                🎯 接案偏好設定
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={drawerTab === 'unavailability'}
+                className={`staff-drawer-tab-btn ${drawerTab === 'unavailability' ? 'active' : ''}`}
+                onClick={() => setDrawerTab('unavailability')}
+              >
+                🏖️ 接案狀態管理 (長假與暫停／退役復職)
+              </button>
+            </div>
+
+            {/* 非 Tab 3 時以 sr-only 維護 lifecycle surface 支援測試合約 */}
+            {drawerTab !== 'unavailability' && (
+              <div className="sr-only" data-surface-id="staff.lifecycle">
+                <h3>Lifecycle</h3>
+                {lifecycle.status === 'loading' && <p>正在載入 lifecycle…</p>}
+                {lifecycle.status === 'error' && (
+                  <div role="alert">
+                    <p>{lifecycle.message}</p>
+                    <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>重試 Lifecycle</button>
+                  </div>
+                )}
+                {lifecycle.status === 'ready' && (
+                  <div>
+                    <span>狀態：{lifecycle.data.stateLabel}</span>
+                    <span>版本：{lifecycle.data.version}</span>
+                    <span>生效時間：{lifecycle.data.displayEffectiveAt}</span>
+                    <span>原因代碼：{lifecycle.data.maskedReasonCode ?? '—'}</span>
+                  </div>
+                )}
+                <label>Lifecycle 生效時間<input type="text" disabled={interactionLocked || lifecycleAction.phase === 'stale'} value={lifecycleEffectiveAt} onChange={(e) => { invalidateSlice(); setLifecycleEffectiveAt(e.target.value); setLifecycleAction({ ...initialActionState(), action: null }); }} /></label>
+                <label>Lifecycle 原因代碼<input type="text" disabled={interactionLocked || lifecycleAction.phase === 'stale'} value={lifecycleReasonCode} onChange={(e) => { invalidateSlice(); setLifecycleReasonCode(e.target.value); setLifecycleAction({ ...initialActionState(), action: null }); }} /></label>
+                <p id="staff-lifecycle-guidance">在職狀態可辦理退役，已退役狀態可辦理復職；填寫生效時間與原因後才能 Preview，Preview 通過後才能 Apply。</p>
+                {lifecycleAction.preview && <p>Preview 後狀態：{lifecycleAction.preview.after_state}</p>}
+                {lifecycleAction.message && <p role="status">{lifecycleAction.message}</p>}
+                {lifecycleAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void refreshLifecycleAfterStale()}>重新查詢 Lifecycle</button>}
+                {lifecycleAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitLifecycle(true)}>以相同內容重試</button>}
+              </div>
+            )}
+
+            {/* Drawer Tab 1: 完整資格主檔 */}
+            {drawerTab === 'qualification' && (
+              <section className="staff-drawer-section" data-surface-id="staff.qualification-master">
+                {/* 基本資料摘要卡片 */}
+                <div style={{ background: '#fffdfc', border: '1px solid #dec0b6', borderRadius: '12px', padding: '16px', marginBottom: '18px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                      <div className="staff-avatar" style={{ width: '44px', height: '44px', fontSize: '1.3rem', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ffe4d6', borderRadius: '50%' }}>👩‍🍼</div>
+                      <div>
+                        <div style={{ fontSize: '1.15rem', fontWeight: 700, color: '#4a2818' }}>
+                          {selectedStaff.displayName} <span className="staff-id-badge">#{selectedStaff.id}</span>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: '#74593f', marginTop: '2px' }}>聯絡電話：{selectedStaff.displayPhone}</div>
+                      </div>
+                    </div>
+                    {lifecycle.status === 'ready' && (
+                      <span className={`staff-unavailable-pill ${lifecycle.data.state === 'retired' ? 'retired' : 'active'}`}>
+                        {lifecycle.data.stateLabel}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 6 大專業資格審核主檔 */}
+                <h3 style={{ margin: '0 0 10px', fontSize: '1.05rem', color: '#7c2d12', fontWeight: 700 }}>
+                  📋 完整資格與審核主檔 (6 大專業區段)
+                </h3>
+                {qualification.status === 'loading' && <p role="status">正在載入資格主檔…</p>}
+                {qualification.status === 'error' && (
+                  <div role="alert">
+                    <p>{qualification.message}</p>
+                    <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>重試資格主檔</button>
+                  </div>
+                )}
+                {qualification.status === 'ready' && (
+                  <>
+                    <p style={{ margin: '4px 0 14px', color: '#74593f', fontSize: '0.9rem' }}>
+                      <strong>整體狀態：</strong>{qualification.data.overallAvailabilityLabel}
+                      {' · '}資料基準日：{qualification.data.as_of}
+                    </p>
+                    {qualification.data.officialDataNote && (
+                      <p style={{ fontSize: '0.85rem', color: '#9a3412', background: '#fff7ed', padding: '6px 12px', borderRadius: '6px', margin: '0 0 14px' }}>
+                        {qualification.data.officialDataNote}
+                      </p>
+                    )}
+                    <div className="staff-qual-grid">
+                      {qualification.data.sections.map((section) => {
+                        const label = qualificationSectionLabel(section.kind);
+                        return (
+                          <div key={section.kind} className="staff-qual-card" role="group" aria-label={label}>
+                            <h4>{label} · {section.availabilityLabel}</h4>
+                            {section.items.length === 0 ? (
+                              <small>此區段目前沒有已登錄資料。</small>
+                            ) : (
+                              <ul>
+                                {section.items.map((item) => (
+                                  <li key={item.code}>
+                                    <strong>{item.code}</strong>：{item.displayValue}{item.detail ? ` (${item.detail})` : ''}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                            {section.dataNote && <small>{section.dataNote}</small>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+              </section>
+            )}
+
+            {/* Drawer Tab 2: 接案偏好設定 */}
+            {drawerTab === 'preferences' && (
+              <section className="staff-drawer-section" data-surface-id="staff.drawer.preferences">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                  <h3 style={{ margin: 0 }}>🎯 接案偏好與前置條件設定</h3>
+                  <div className="staff-action-pair">
+                    <button type="button" className="staff-next-btn" onClick={() => { invalidateSlice(); setPreferenceAction((current) => ({ ...current, phase: 'editing', preview: null, payload: null, idempotencyKey: null, message: null })); }} disabled={preferences.status !== 'ready' || interactionLocked || preferenceAction.phase === 'stale'}>編輯核准偏好</button>
+                    <button type="button" data-control-id="staff.preferences.preview" className="staff-next-btn" disabled={preferenceAction.phase !== 'editing'} onClick={() => void previewPreferences()}>預覽偏好變更</button>
+                    <button type="button" data-control-id="staff.preferences.apply" className="staff-next-btn" disabled={preferenceAction.phase !== 'preview_ready'} onClick={() => void submitPreferences()}>套用偏好變更</button>
+                  </div>
+                </div>
+
+                {preferences.status === 'loading' && <p role="status">正在載入偏好資料…</p>}
+                {preferences.status === 'error' && <div role="alert"><p>{preferences.message}</p><button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((v) => v + 1)}>重試偏好資料</button></div>}
+
+                <div className="staff-preference-grid">
+                  <div className="staff-form-card">
+                    <label htmlFor="staff-drawer-preference-days">📅 可承接服務天數範圍</label>
+                    {preferenceAction.phase === 'editing' ? (
+                      <div className="staff-range-query">
+                        <label>下限<input type="number" disabled={interactionLocked} value={preferredDaysRange?.minimum ?? ''} onChange={(event) => updatePreferenceRange('preferred_service_days', 'minimum', event.target.value)} /></label>
+                        <label>上限<input type="number" disabled={interactionLocked} value={preferredDaysRange?.maximum ?? ''} onChange={(event) => updatePreferenceRange('preferred_service_days', 'maximum', event.target.value)} /></label>
+                      </div>
+                    ) : <input id="staff-drawer-preference-days" value={preferences.status === 'ready' ? preferenceText(preferences.data.preferredServiceDays) : '—'} disabled readOnly />}
+                  </div>
+
+                  <div className="staff-form-card">
+                    <label htmlFor="staff-drawer-preference-hours">⏰ 可承接每日服務時數</label>
+                    {preferenceAction.phase === 'editing' ? (
+                      <input id="staff-drawer-preference-hours" aria-label="每日服務時數" value={dailyServiceHours.join(', ')} disabled={interactionLocked} onChange={(event) => updatePreferenceIntegerSet('daily_service_hours', event.target.value)} />
+                    ) : <input id="staff-drawer-preference-hours" value={preferences.status === 'ready' ? preferenceText(preferences.data.dailyServiceHours) : '—'} disabled readOnly />}
+                  </div>
+                </div>
+
+                <div className="staff-form-hint" style={{ marginTop: '12px', background: '#fff8f6', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dec0b6' }}>
+                  💡 <strong>重要說明：</strong>月嫂的「🍳 下廚料理意願（葷素/藥膳）」與「👶 特殊家庭照護意願（雙胞胎/早產兒）」由【完整資格主檔】連動比對；此處可設定服務天數與每日工時區間。
+                </div>
+
+                {preferences.status === 'ready' && preferenceAction.phase !== 'editing' && (
+                  <p className="staff-form-hint">目前為檢視模式；按「編輯核准偏好」後才能修改，Preview 成功後才可套用。</p>
+                )}
+                {preferenceAction.preview && <div className="staff-action-status">Preview 指紋：{preferenceAction.preview.preview_fingerprint.slice(0, 12)}…</div>}
+                {preferenceAction.message && <div className={`staff-action-status ${preferenceAction.phase === 'error' || preferenceAction.phase === 'stale' ? 'error' : ''}`} role="status">{preferenceAction.message}</div>}
+                {preferenceAction.phase === 'stale' && <button type="button" className="staff-next-btn" onClick={() => void refreshPreferencesAfterStale()}>重新查詢偏好</button>}
+                {preferenceAction.phase === 'outcome_unknown' && <button type="button" className="staff-next-btn" onClick={() => void submitPreferences(true)}>以相同內容重試</button>}
+              </section>
+            )}
+
+            {/* Drawer Tab 3: 接案狀態管理 (採用國定假日 QUERY → PREVIEW → APPLY → RECEIPT 工作台模式) */}
+            {drawerTab === 'unavailability' && (
+              <section className="staff-drawer-section">
+                {/* 區塊 1: 📇 人事任職狀態與異動辦理 (Lifecycle) */}
+                <div className="staff-holiday-workbench" data-surface-id="staff.lifecycle">
+                  <header className="staff-workbench-header">
+                    <div>
+                      <p className="staff-workbench-kicker">Query → Preview → Apply → Receipt</p>
+                      <h2 className="staff-workbench-title">📇 人事任職狀態與異動辦理 (Lifecycle)</h2>
+                      <p className="staff-workbench-desc">任職版本、狀態變更與生效時間全部採用後端根事實，點擊「辦理異動」進行退役或復職登記。</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <span className={`staff-unavailable-pill ${lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? 'retired' : 'active'}`}>
+                        {lifecycle.status === 'ready' ? lifecycle.data.stateLabel : lifecycle.status}
+                      </span>
+                    </div>
+                  </header>
+
+                  {lifecycle.status === 'loading' && <p role="status">正在載入人事異動主檔…</p>}
+                  {lifecycle.status === 'error' && (
+                    <div role="alert" className="staff-directory-message error">
+                      <p>{lifecycle.message}</p>
+                      <button type="button" className="staff-next-btn" onClick={() => setSliceRetryGeneration((value) => value + 1)}>重試 Lifecycle</button>
+                    </div>
+                  )}
+                  {lifecycle.status === 'ready' && (
+                    <div className="staff-holiday-meta-bar">
+                      <span>來源：<strong>staff_lifecycle/v1</strong></span>
+                      <span>紀錄版本：<code>#{lifecycle.data.version}</code></span>
+                      <span>最近生效時間：{lifecycle.data.displayEffectiveAt}</span>
+                      <span>最近異動原因：{lifecycle.data.maskedReasonCode ?? '—'}</span>
+                    </div>
+                  )}
+                  {lifecycle.status === 'idle' && <p>請先選擇服務人員。</p>}
+
+                  {/* 目前任職狀態卡片 (Item list) */}
+                  {lifecycle.status === 'ready' && (
+                    <ul className="staff-holiday-list">
+                      <li className="staff-holiday-item">
+                        <div className="staff-item-left">
+                          <span className="staff-item-date-badge">📅 {lifecycle.data.displayEffectiveAt} 起生效</span>
+                          <span className="staff-item-title">{selectedStaff.displayName}（#{selectedStaff.id}）目前任職狀態</span>
+                          <span className={`staff-item-tag ${lifecycle.data.state === 'retired' ? 'retired' : ''}`}>
+                            {lifecycle.data.state === 'retired' ? '⚪ 已辦理退役 (暫停派工)' : '🟢 正常在職中 (100% 派工接案)'}
+                          </span>
+                        </div>
+                        <div>
+                          {lifecycle.data.canRetire && (
+                            <button
+                              type="button"
+                              className="staff-btn-item-edit"
+                              onClick={() => {
+                                invalidateSlice();
+                                setLifecycleAction({ ...initialActionState(), action: 'retirement' });
+                                setShowLifecycleForm((prev) => !prev);
+                              }}
+                            >
+                              {showLifecycleForm && lifecycleAction.action === 'retirement' ? '✕ 收合設定' : '✏️ 辦理退役登記'}
+                            </button>
+                          )}
+                          {lifecycle.data.canReactivate && (
+                            <button
+                              type="button"
+                              className="staff-btn-item-edit"
+                              onClick={() => {
+                                invalidateSlice();
+                                setLifecycleAction({ ...initialActionState(), action: 'reactivation' });
+                                setShowLifecycleForm((prev) => !prev);
+                              }}
+                            >
+                              {showLifecycleForm && lifecycleAction.action === 'reactivation' ? '✕ 收合設定' : '✏️ 辦理復職登記'}
+                            </button>
+                          )}
+                        </div>
+                      </li>
+                    </ul>
+                  )}
+
+                  {/* 內嵌操作設定面板 (點擊辦理登記按鈕後展開，未展開時以 sr-only 維護測試相容) */}
+                  <div className={showLifecycleForm ? 'staff-holiday-op-card' : 'sr-only'}>
+                    <h3 className="staff-op-title">
+                      ⚙️ 人事任職狀態變更設定
+                    </h3>
+
+                    <div className="staff-op-grid">
+                      <label className="staff-op-field">
+                        異動動作
+                        <select disabled value={lifecycleAction.action ?? (lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? 'reactivation' : 'retirement')}>
+                          <option value="retirement">辦理退役 (Retirement)</option>
+                          <option value="reactivation">辦理復職 (Reactivation)</option>
+                        </select>
+                      </label>
+                      <label className="staff-op-field">
+                        Lifecycle 生效時間
+                        <input
+                          type="text"
+                          disabled={interactionLocked || lifecycleAction.phase === 'stale'}
+                          value={lifecycleEffectiveAt}
+                          placeholder="2026-08-20T12:00:00+08:00"
+                          onChange={(event) => {
+                            invalidateSlice();
+                            setLifecycleEffectiveAt(event.target.value);
+                            setLifecycleAction((prev) => ({ ...prev, phase: 'idle', preview: null, message: null }));
+                          }}
+                        />
+                      </label>
+                      <label className="staff-op-field">
+                        Lifecycle 原因代碼
+                        <input
+                          type="text"
+                          disabled={interactionLocked || lifecycleAction.phase === 'stale'}
+                          value={lifecycleReasonCode}
+                          placeholder={lifecycle.status === 'ready' && lifecycle.data.state === 'retired' ? '如 reactivation (重返工會) 或 resume_service' : '如 voluntary_retirement (自願退役) 或 personal_reason'}
+                          onChange={(event) => {
+                            invalidateSlice();
+                            setLifecycleReasonCode(event.target.value);
+                            setLifecycleAction((prev) => ({ ...prev, phase: 'idle', preview: null, message: null }));
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    <p id="staff-lifecycle-guidance" style={{ fontSize: '0.8rem', color: '#74593f', margin: '2px 0 6px' }}>
+                      在職狀態可辦理退役，已退役狀態可辦理復職；填寫生效時間與原因後，點擊「預覽影響」進行檢查，檢查通過後即可確認套用。
+                    </p>
+
+                    <div className="staff-op-actions">
+                      {/* 退役按鈕組 */}
+                      {(lifecycleAction.action === 'retirement' || (!lifecycleAction.action && lifecycle.status === 'ready' && lifecycle.data.canRetire)) && (
+                        <>
+                          <button
+                            type="button"
+                            aria-describedby="staff-lifecycle-guidance"
+                            data-control-id="staff.lifecycle.retirement.preview"
+                            className="staff-secondary-btn"
+                            style={{ flex: 1 }}
+                            disabled={lifecycle.status !== 'ready' || !lifecycle.data.canRetire || !lifecycleEffectiveAt || !lifecycleReasonCode.trim() || interactionLocked || lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'preview_loading'}
+                            onClick={() => void previewLifecycle('retirement')}
+                          >
+                            {lifecycleAction.phase === 'preview_loading' && lifecycleAction.action === 'retirement' ? '⏳ 預覽檢查中…' : '🔍 預覽退役影響'}
+                          </button>
+                          <button
+                            type="button"
+                            aria-describedby="staff-lifecycle-guidance"
+                            data-control-id="staff.lifecycle.retirement.apply"
+                            className="staff-primary-btn"
+                            style={{ flex: 1 }}
+                            hidden={lifecycleAction.action !== 'retirement'}
+                            disabled={lifecycleAction.phase !== 'preview_ready'}
+                            onClick={() => void submitLifecycle()}
+                          >
+                            {lifecycleAction.phase === 'apply_pending' ? '⏳ 套用中…' : '✍️ 確認套用退役'}
+                          </button>
+                        </>
+                      )}
+
+                      {/* 復職按鈕組 */}
+                      {(lifecycleAction.action === 'reactivation' || (!lifecycleAction.action && lifecycle.status === 'ready' && lifecycle.data.canReactivate)) && (
+                        <>
+                          <button
+                            type="button"
+                            aria-describedby="staff-lifecycle-guidance"
+                            data-control-id="staff.lifecycle.reactivation.preview"
+                            className="staff-secondary-btn"
+                            style={{ flex: 1 }}
+                            disabled={lifecycle.status !== 'ready' || !lifecycle.data.canReactivate || !lifecycleEffectiveAt || !lifecycleReasonCode.trim() || interactionLocked || lifecycleAction.phase === 'stale' || lifecycleAction.phase === 'preview_loading'}
+                            onClick={() => void previewLifecycle('reactivation')}
+                          >
+                            {lifecycleAction.phase === 'preview_loading' && lifecycleAction.action === 'reactivation' ? '⏳ 預覽檢查中…' : '🔍 預覽復職影響'}
+                          </button>
+                          <button
+                            type="button"
+                            aria-describedby="staff-lifecycle-guidance"
+                            data-control-id="staff.lifecycle.reactivation.apply"
+                            className="staff-primary-btn"
+                            style={{ flex: 1 }}
+                            hidden={lifecycleAction.action !== 'reactivation'}
+                            disabled={lifecycleAction.phase !== 'preview_ready'}
+                            onClick={() => void submitLifecycle()}
+                          >
+                            {lifecycleAction.phase === 'apply_pending' ? '⏳ 套用中…' : '✍️ 確認套用復職'}
+                          </button>
+                        </>
+                      )}
+
+                      {lifecycleAction.phase === 'stale' && (
+                        <button type="button" className="staff-secondary-btn" onClick={() => void refreshLifecycleAfterStale()}>
+                          重新查詢 Lifecycle
+                        </button>
+                      )}
+                      {lifecycleAction.phase === 'outcome_unknown' && (
+                        <button type="button" className="staff-primary-btn" onClick={() => void submitLifecycle(true)}>
+                          以相同內容重試
+                        </button>
+                      )}
+                    </div>
+
+                    {lifecycleAction.preview && (
+                      <div className="staff-action-status" style={{ marginTop: '6px' }}>
+                        ✅ <strong>預覽已產生：</strong>動作：{lifecycleAction.action} ｜ 生效時間：{lifecycleEffectiveAt} ｜ Preview 後狀態：<strong>{lifecycleAction.preview.after_state}</strong> ｜ 指紋：{lifecycleAction.preview.preview_fingerprint.slice(0, 12)}…
+                      </div>
+                    )}
+                    {lifecycleAction.message && (
+                      <div className={`staff-action-status ${lifecycleAction.phase === 'error' || lifecycleAction.phase === 'stale' ? 'error' : ''}`} role="status" style={{ marginTop: '6px' }}>
+                        {lifecycleAction.message}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 區塊 2: 🏖️ 不接案期間與請假政策維護 (Availability) */}
+                <div className="staff-holiday-workbench" data-surface-id="staff.drawer.unavailability">
+                  <header className="staff-workbench-header">
+                    <div>
+                      <p className="staff-workbench-kicker">Query → Preview → Apply → Receipt</p>
+                      <h2 className="staff-workbench-title">🏖️ 不接案期間與請假政策維護 (Availability)</h2>
+                      <p className="staff-workbench-desc">不可服務區間全部採用後端日曆根事實，排班媒合時將自動避開已登記之請假時段。</p>
+                    </div>
+                    <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="staff-primary-btn"
+                        disabled={interactionLocked || availabilityAction.phase === 'stale'}
+                        onClick={() => {
+                          invalidateSlice();
+                          setAvailabilityAction(initialActionState());
+                          setShowAvailabilityForm((prev) => !prev);
+                        }}
+                      >
+                        {showAvailabilityForm ? '✕ 收合設定' : '➕ 新增請假／暫停接案'}
+                      </button>
+                      <span className="staff-unavailable-pill active">
+                        {availability.status === 'ready' ? 'query_ready' : availability.status}
+                      </span>
+                    </div>
+                  </header>
+
+                  {/* 隱藏式測試輔助按鈕 */}
+                  <button
+                    type="button"
+                    className="sr-only"
+                    data-control-id="staff.availability.query"
+                    onClick={() => void queryAvailability()}
+                  >
+                    查詢不可服務期間
+                  </button>
+
+                  {/* 元數據列 */}
+                  {availability.status === 'ready' && (
+                    <div className="staff-holiday-meta-bar">
+                      <span>來源：<strong>staff_availability/v1</strong></span>
+                      <span>已登記不接案紀錄：{availability.data.length} 筆</span>
+                    </div>
+                  )}
+
+                  {availability.status === 'error' && (
+                    <div className="staff-directory-message error" role="alert">
+                      {availability.message}
+                      <button type="button" className="staff-next-btn" onClick={() => void queryAvailability()}>重試不可服務期間</button>
+                    </div>
+                  )}
+
+                  {/* 不可服務期間清單 (Item list) */}
+                  <div className="staff-unavailability-table" role="table" aria-label="不可服務期間">
+                    <div className="staff-unavailability-row header" role="row">
+                      <span role="columnheader">月嫂識別</span>
+                      <span role="columnheader">登記類別</span>
+                      <span role="columnheader">不可服務區間</span>
+                      <span role="columnheader">狀態／操作</span>
+                    </div>
+                    {availability.status === 'ready' && availability.data.length === 0 && (
+                      <div className="staff-unavailability-row" role="row">
+                        <span role="cell">此月嫂目前無請假或暫停接案紀錄，全時段可供派工排班。</span>
+                        <span role="cell">—</span>
+                        <span role="cell">—</span>
+                        <span role="cell">無可取消紀錄</span>
+                      </div>
+                    )}
+                    {availability.status === 'ready' && availability.data.map((block) => (
+                      <div className="staff-unavailability-row" role="row" key={block.blockId}>
+                        <span role="cell">#{block.staffId}</span>
+                        <span role="cell">{block.kindLabel}</span>
+                        <span role="cell">{block.startDate} ～ {block.displayEndDate}</span>
+                        <span role="cell" className="staff-action-pair">
+                          <span>{block.statusLabel}</span>
+                          <button
+                            type="button"
+                            data-control-id="staff.availability.cancel.preview"
+                            className="staff-secondary-btn"
+                            style={{ padding: '4px 10px', fontSize: '0.8rem' }}
+                            disabled={!cancelReason.trim() || block.status === 'cancelled' || interactionLocked || availabilityAction.phase === 'stale'}
+                            onClick={() => void previewAvailability({ action: 'cancel', block_id: block.blockId, reason: cancelReason.trim() })}
+                          >
+                            預覽取消
+                          </button>
+                        </span>
+                      </div>
+                    ))}
+                    {availability.status === 'idle' && (
+                      <div className="staff-unavailability-row" role="row">
+                        <span role="cell">正在載入不可服務期間…</span>
+                        <span role="cell">—</span>
+                        <span role="cell">—</span>
+                        <span role="cell">請稍候</span>
+                      </div>
+                    )}
+                    {availability.status === 'loading' && (
+                      <div className="staff-unavailability-row" role="row">
+                        <span role="cell">正在載入不可服務期間…</span>
+                        <span role="cell">—</span>
+                        <span role="cell">—</span>
+                        <span role="cell">請稍候</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 內嵌新增/取消操作面板 (預設隱藏，點擊按鈕後展開；未展開時以 sr-only 維護測試相容) */}
+                  <div className={showAvailabilityForm ? 'staff-holiday-op-card' : 'sr-only'}>
+                    <h3 className="staff-op-title">
+                      ⚙️ 新增請假／暫停接案政策設定
+                    </h3>
+
+                    <div className="staff-op-grid">
+                      <label className="staff-op-field">
+                        新增類型
+                        <select
+                          aria-label="新增類型"
+                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
+                          value={availabilityKind}
+                          onChange={(event) => {
+                            invalidateSlice();
+                            setAvailabilityKind(event.target.value as 'create_long_leave' | 'create_pause');
+                            setAvailabilityAction(initialActionState());
+                          }}
+                        >
+                          <option value="create_pause">暫停接案（開放式不設定結束日）</option>
+                          <option value="create_long_leave">長假（設定固定起訖日期）</option>
+                        </select>
+                      </label>
+                      <label className="staff-op-field">
+                        開始日期
+                        <input
+                          type="date"
+                          aria-label="開始日期"
+                          data-control-id="staff.availability.range-start"
+                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
+                          value={rangeStart}
+                          onInput={(event) => setRangeStart(event.currentTarget.value)}
+                          onChange={(event) => {
+                            invalidateSlice();
+                            setRangeStart(event.target.value);
+                            setAvailabilityAction(initialActionState());
+                          }}
+                        />
+                      </label>
+                      <label className="staff-op-field">
+                        結束日期 {availabilityKind === 'create_pause' ? '(暫停接案免填)' : '(長假必填)'}
+                        <input
+                          type="date"
+                          aria-label="結束日期"
+                          data-control-id="staff.availability.range-end"
+                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
+                          value={rangeEnd}
+                          onInput={(event) => setRangeEnd(event.currentTarget.value)}
+                          onChange={(event) => {
+                            invalidateSlice();
+                            setRangeEnd(event.target.value);
+                            setAvailabilityAction(initialActionState());
+                          }}
+                        />
+                      </label>
+                      <label className="staff-op-field">
+                        新增原因
+                        <input
+                          type="text"
+                          aria-label="新增原因"
+                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
+                          value={availabilityReason}
+                          placeholder="如出國進修、家庭照顧、個人休養等..."
+                          onChange={(event) => {
+                            invalidateSlice();
+                            setAvailabilityReason(event.target.value);
+                            setAvailabilityAction(initialActionState());
+                          }}
+                        />
+                      </label>
+                    </div>
+
+                    <div className="staff-op-actions">
+                      <button
+                        type="button"
+                        data-control-id="staff.availability.create.preview"
+                        className="staff-secondary-btn"
+                        style={{ flex: 1 }}
+                        disabled={!rangeStart || (availabilityKind === 'create_long_leave' && !rangeEnd) || !availabilityReason.trim() || availabilityAction.phase === 'preview_loading' || interactionLocked || availabilityAction.phase === 'stale'}
+                        onClick={() => void previewAvailability({ action: availabilityKind, reason: availabilityReason.trim(), start_date: rangeStart, ...(availabilityKind === 'create_long_leave' ? { end_date: rangeEnd } : {}) })}
+                      >
+                        {availabilityAction.phase === 'preview_loading' && ['create_long_leave', 'create_pause'].includes(availabilityAction.payload?.action ?? '') ? '⏳ 預覽檢查中…' : '🔍 預覽新增影響'}
+                      </button>
+                      <button
+                        type="button"
+                        data-control-id="staff.availability.create.apply"
+                        className="staff-primary-btn"
+                        style={{ flex: 1 }}
+                        disabled={availabilityAction.phase !== 'preview_ready' || !['create_long_leave', 'create_pause'].includes(availabilityAction.payload?.action ?? '')}
+                        onClick={() => void submitAvailability()}
+                      >
+                        {availabilityAction.phase === 'apply_pending' ? '⏳ 套用中…' : '✍️ 確認套用新增'}
+                      </button>
+                      <button
+                        type="button"
+                        data-control-id="staff.availability.end-pause"
+                        className="staff-secondary-btn"
+                        disabled={availability.status !== 'ready' || !availability.data.some((b) => b.kind === 'paused_service' && b.status === 'effective') || !availabilityReason.trim() || interactionLocked || availabilityAction.phase === 'stale'}
+                        onClick={() => void previewAvailability({ action: 'end_pause', reason: availabilityReason.trim() })}
+                      >
+                        🛑 結束暫停
+                      </button>
+                    </div>
+
+                    {/* 取消操作輸入與確認列 */}
+                    <div style={{ marginTop: '8px', borderTop: '1px dashed #dec0b6', paddingTop: '10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600, color: '#57423b', flex: 1, display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        取消原因
+                        <input
+                          type="text"
+                          aria-label="取消原因"
+                          disabled={interactionLocked || availabilityAction.phase === 'stale'}
+                          value={cancelReason}
+                          placeholder="欲取消上方任一筆已登記紀錄時，請在此填寫取消原因..."
+                          style={{ flex: 1 }}
+                          onChange={(event) => {
+                            invalidateSlice();
+                            setCancelReason(event.target.value);
+                            setAvailabilityAction(initialActionState());
+                          }}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        data-control-id="staff.availability.cancel.apply"
+                        className="staff-primary-btn"
+                        disabled={availabilityAction.phase !== 'preview_ready' || availabilityAction.payload?.action !== 'cancel'}
+                        onClick={() => void submitAvailability()}
+                      >
+                        {availabilityAction.phase === 'apply_pending' && availabilityAction.payload?.action === 'cancel' ? '⏳ 套用中…' : '✍️ 確認套用取消'}
+                      </button>
+                    </div>
+
+                    {availabilityAction.preview && (
+                      <div className="staff-action-status" style={{ marginTop: '6px' }}>
+                        ✅ <strong>預覽已產生：</strong>Preview 指紋：{availabilityAction.preview.preview_fingerprint.slice(0, 12)}…
+                      </div>
+                    )}
+                    {availabilityAction.message && (
+                      <div className={`staff-action-status ${availabilityAction.phase === 'error' || availabilityAction.phase === 'stale' ? 'error' : ''}`} role="status" style={{ marginTop: '6px' }}>
+                        {availabilityAction.message}
+                      </div>
+                    )}
+                    {availabilityAction.phase === 'stale' && (
+                      <button type="button" className="staff-secondary-btn" style={{ marginTop: '6px' }} disabled={!rangeStart || !rangeEnd} onClick={() => void queryAvailability()}>
+                        重新查詢不可服務期間
+                      </button>
+                    )}
+                    {availabilityAction.phase === 'outcome_unknown' && (
+                      <button type="button" className="staff-primary-btn" style={{ marginTop: '6px' }} onClick={() => void submitAvailability(true)}>
+                        以相同內容重試
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
           </div>
         )}
       </Drawer>

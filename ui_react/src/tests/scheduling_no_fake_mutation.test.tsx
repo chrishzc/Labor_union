@@ -41,8 +41,9 @@ describe('SchedulingPage holiday no fake mutation', () => {
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     expect(holidayClient.preview).not.toHaveBeenCalled();
     expect(holidayClient.apply).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '套用國定假日變更' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '查詢國定假日政策' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
+    expect(screen.getByRole('button', { name: '套用國定假日變更' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '預覽國定假日變更' })).toBeDisabled();
     expect(document.querySelector('[data-control-id="scheduling.holiday.create"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-control-id="scheduling.holiday.toggle-rest"]')).not.toBeInTheDocument();

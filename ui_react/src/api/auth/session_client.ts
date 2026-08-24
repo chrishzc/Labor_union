@@ -48,6 +48,9 @@ const DEVELOPMENT_BYPASS_USER: AdminPublic = {
 };
 
 function getInitialToken(): string | null {
+  if (DEVELOPMENT_BYPASS_ENABLED) {
+    return 'development-bypass';
+  }
   try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       const storedToken = window.sessionStorage.getItem(STORAGE_KEY_TOKEN);
@@ -58,10 +61,13 @@ function getInitialToken(): string | null {
   } catch {
     // ignore in environments without sessionStorage
   }
-  return DEVELOPMENT_BYPASS_ENABLED ? 'development-bypass' : null;
+  return null;
 }
 
 function getInitialUser(): AdminPublic | null {
+  if (DEVELOPMENT_BYPASS_ENABLED) {
+    return DEVELOPMENT_BYPASS_USER;
+  }
   try {
     if (typeof window !== 'undefined' && window.sessionStorage) {
       const raw = window.sessionStorage.getItem(STORAGE_KEY_USER);
@@ -72,7 +78,7 @@ function getInitialUser(): AdminPublic | null {
   } catch {
     // ignore parse errors or missing storage
   }
-  return DEVELOPMENT_BYPASS_ENABLED ? DEVELOPMENT_BYPASS_USER : null;
+  return null;
 }
 
 let inMemoryToken: string | null = getInitialToken();

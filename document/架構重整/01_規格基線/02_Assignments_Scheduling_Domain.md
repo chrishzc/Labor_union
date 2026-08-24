@@ -57,6 +57,8 @@
 ### Waiting Deposit Lock
 
 只提供 Acquire、Release-to-unbound、Cancel、Convert。訂金有效性由 Client Finance typed port 提供。服務區間與 buffer 同時查衝突，每次轉移保存事件。
+lock day 只對應該分段的正式服務日；固定週休不是 lock day。七日 buffer 是獨立衍生占用，
+不得被 current projection 當成正式服務日，亦不得要求固定週休有 lock day。
 
 ### Assignment Plan
 
@@ -344,6 +346,14 @@ Scheduling／Matching 擁有 case-owned Candidate Contact Pool。它只擁有候
 - 多位月嫂共同服務仍是顯式 multi-caregiver fallback plan，不能由候選聯繫池直接轉換。
 - 選定、撤回或取消不得刪除候選聯繫歷史。正式 plan 後的日期表、客戶與月嫂雙方確認及 assignment gate 僅針對該正式 plan recipients。
 
+### 人工媒合確認（2026-08-24）
+
+LINE identity、recipient binding 或 delivery 缺漏時，已登入的內部操作者可透過正式 matching-plan
+manual response 記錄特定 segment 的月嫂意願與客戶決策。每筆皆須 actor、非空 reason、目前 plan
+version、idempotency identity 與回讀；不得偽造 LINE delivery 或省略正式 plan recipient。LINE callback
+仍必須驗證 recipient／delivery state。客戶接受仍只形成 matching decision，後續鎖定、契約與 execution
+各自遵守其既有 Preview／Apply gate。
+
 ## Historical pairing evidence（2026-08-13）
 
 Historical Order Adoption 可保存一或兩位來源月嫂的不可變配對 evidence。月嫂姓名空白、找不到或
@@ -362,4 +372,5 @@ Scheduling 正式收納 `Matching Coordination` 為本 Domain 內的 subsystem�
 - `accepted` 只代表 customer decision；後續必須 fresh-read downstream effects，最多產生 typed Assignment conversion/rematch request 或 reference。Matching Coordination 不寫 Orders、Assignment 或 Payroll。
 - Phase D 只能透過 typed ports 讀取 Scheduling Leave／Assignment canonical receipt、提交 conversion/rematch request 並保存 reference；不得接管 `leave_substitution`、`assignment_plan` 或其 root writer。
 - Query 唯讀、Preview 零寫入、Apply 仍由 owning workflow 取得 fresh facts、lock、single outer UoW 與 receipt；跨域協調不改變本 Domain 的 assignment／leave／service-day SSOT。
+- 首次建立 criteria snapshot 的 Preview 沒有既存 snapshot 可供瀏覽器取得 source tuple，必須由後端 fresh-read owner facts 並在回應中回傳 canonical tuple；該 Preview 不接受 client source-version assertion。後續 Apply 必須攜帶 Preview 回傳的完整 canonical tuple 與 fingerprint，並重新 fresh-read 驗證。
 - M3 Phase E schema 只屬候選 inventory／spec planning，未授權 DDL、seed、backfill、destructive 或資料庫操作；若需變更，另立 approved schema Work Package 並重跑全部 DB gates。

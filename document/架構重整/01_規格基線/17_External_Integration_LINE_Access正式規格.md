@@ -791,7 +791,7 @@ content digest；本節列出的 path 不代表未來版本自動符合本規格
 
 ### Identity／M1
 
-`line_identity_bindings` 與 binding events 由 LINE Identity application 作唯一 writer；Case Import 擁有 `provisional_client_registrations` 的 provisional registration。LIFF onboarding 是 binding projection outcome，不是 role promotion；customer／staff／admin root facts 仍由各 Domain 擁有。legacy direct writers 必須 guarded／readonly 或 `410` 並逐 caller 退出。Customer Service 可提供 `binding_failed_assistance`，但 dual-role／two-failure escalation 由 M4 successor 處理；真實 LIFF／verified-token E2E 仍需 sandbox config，規格不宣稱 PASS。
+`line_identity_bindings` 與 binding events 由 LINE Identity application 作唯一 writer；Case Import 擁有 `provisional_client_registrations` 的 provisional registration。LIFF onboarding 是 binding projection outcome，不是 role promotion；customer／staff／admin root facts 仍由各 Domain 擁有。legacy direct writers 必須 guarded／readonly 或 `410` 並逐 caller 退出。Customer Service 可提供 `binding_failed_assistance`，但 dual-role／two-failure escalation 由 M4 successor 處理；真實 LIFF／verified-token E2E 仍需 sandbox config，規格不宣稱 PASS。僅在 development／test 且 server 明確設定 `LIFF_REQUIRE_ID_TOKEN=false` 時，canonical registration page 可用受控 development LINE identity 完成同一 typed registration／binding UoW；LIFF runtime config 缺失本身不得在 production 或未提供受控 identity 時解鎖表單。
 
 ### M2 routing precedence
 

@@ -34,7 +34,7 @@ export const TRACKER_STAGE_SLOTS: readonly TrackerStageSlotViewModel[] = [
   ['matching_willingness', '2. 👩‍🍼 媒合與徵詢意願', '候選意願與媒合進度', '#ffedd5', '#9a3412'],
   ['client_review', '3. 👥 推薦客戶與確認', '正式推薦與客戶確認', '#fef3c7', '#854d0e'],
   ['contract_deposit', '4. 📝 雙邊簽約與定金', '契約與定金核銷', '#f3e8ff', '#6b21a8'],
-  ['date_confirmation', '5. 📅 確認實際服務日期', '正式服務日期與排程確認', '#ccfbf1', '#0f766e'],
+  ['date_confirmation', '5. 📅 確認事前服務日期', '依精算結果確認正式服務日期', '#ccfbf1', '#0f766e'],
   ['active_service', '6. 🚀 正式服務履約', '出勤、請假與服務履約', '#dcfce7', '#166534'],
   ['settlement_payout', '7. 🏁 完工結案與請款', '完成、客戶款項與月嫂薪資', '#fee2e2', '#991b1b'],
 ].map(([id, title, description, badgeColor, textColor]) => ({
@@ -57,7 +57,7 @@ const SOP_STEP_NAMES = [
   '產生並寄送月嫂服務契約（月嫂簽回）',
   '客戶定金核銷（訂單成立）',
   '產生並寄送客戶契約（客戶簽回）',
-  '填寫實際開始日與雙方確認服務日期',
+  '確認事前服務日期（精算）',
   '轉換正式排班與服務履約',
   '完工驗收、時數核對與尾款／薪資結清',
 ] as const;

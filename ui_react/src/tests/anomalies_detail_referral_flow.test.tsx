@@ -61,8 +61,22 @@ describe('Anomalies lazy Drawer query flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '查看警示詳情' }));
     await waitFor(() => expect(anomalyQueryClient.queryImportWarningReferral).toHaveBeenCalledTimes(1));
     expect(screen.getByText('owner_preview_apply')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Claim／Resolve 與來源修復仍未開放' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '請依上方轉介流程處理來源資料' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '開啟追蹤狀態變更' })).toBeEnabled();
+  });
+
+  it('distinguishes an unavailable owner repair flow from a backend outage', async () => {
+    vi.mocked(anomalyQueryClient.queryImportWarningReferral).mockRejectedValue(
+      new (await import('../api/anomalies/anomaly_query_errors')).AnomalyValidationError(
+        '匯入警示指令無法完成。',
+        [],
+        'import_warning_referral_unavailable',
+      ),
+    );
+    render(<AnomaliesPage />);
+    await waitFor(() => expect(screen.getByText('HCM-FIELD-001')).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '查看警示詳情' }));
+    await waitFor(() => expect(screen.getByText('此警示尚未支援來源修復；可更新追蹤狀態，但不會修改來源根事實。')).toBeInTheDocument());
   });
 
   it('保留成功 detail，並將 recovery 404 限縮為局部錯誤', async () => {

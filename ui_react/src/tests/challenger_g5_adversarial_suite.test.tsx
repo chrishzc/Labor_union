@@ -2,7 +2,7 @@
  * File: challenger_g5_adversarial_suite.test.tsx
  * Description: 對 OrdersPage 競態、壞契約、request budget 與 unavailable 行為做對抗驗證。
  */
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { contractSigningClient } from '../api/orders/contract_signing_client';
@@ -191,8 +191,13 @@ describe('G5 OrdersPage adversarial suite', () => {
   it('never renders inferred refund or recommendation success in unavailable slots', async () => {
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
-    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /取消試算/ })[0]));
-    expect(await screen.findByText('取消前根事實')).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(within(orderCard('ORD-2026-0801')).getByRole('button', { name: /條款與契約/ }));
+    });
+    await act(async () => {
+      fireEvent.click(await screen.findByRole('button', { name: /訂單取消與退款試算/ }));
+    });
+    await waitFor(() => expect(orderCancellationClient.query).toHaveBeenCalledOnce());
     expect(screen.queryByText(/全額退還/)).not.toBeInTheDocument();
     expect(screen.queryByText(/已勾選推薦此履歷/)).not.toBeInTheDocument();
     expect(screen.queryByText(/後端.*提供|未開放|未納入/)).not.toBeInTheDocument();

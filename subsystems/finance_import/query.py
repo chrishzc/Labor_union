@@ -1,4 +1,7 @@
-"""Read formal Finance Import batch, review, and reprocess projections."""
+"""
+File: query.py
+Description: 讀取 Finance Import batch、review、reprocess 與已遮罩的 terminal receipt projection。
+"""
 
 from __future__ import annotations
 
@@ -82,6 +85,33 @@ class FinanceImportReprocessRunSummary:
     completed_at: datetime
 
 
+@dataclass(frozen=True, slots=True)
+class FinanceImportBatchApplyReceipt:
+    """Read-only typed terminal receipt, keyed by the immutable Apply idempotency key."""
+
+    batch_identity: str
+    resulting_batch_version: int
+    preview_fingerprint: str
+    reconciled_count: int
+    existing_count: int
+    pending_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class FinanceImportCorrectionApplyReceipt:
+    """Read-only typed terminal receipt for one durable Finance Import correction."""
+
+    row_identity: str
+    batch_identity: str
+    resulting_batch_version: int
+    classification_event_count: int
+    ledger_entry_count: int
+    allocation_count: int
+    reconciliation_receipt_count: int
+    alert_resolved_event_count: int
+    preview_fingerprint: str
+
+
 class FinanceImportQueryNotFound(ValueError):
     """Raised when a formal Finance Import batch does not exist."""
 
@@ -118,6 +148,36 @@ class FinanceImportQueryService:
         if row is None:
             raise FinanceImportQueryNotFound("finance import batch was not found")
         return _batch_manifest(row)
+
+    def get_batch_apply_receipt(
+        self, idempotency_key: str
+    ) -> FinanceImportBatchApplyReceipt | None:
+        key = idempotency_key.strip()
+        if not key or len(key) > 191:
+            raise ValueError("finance_import_apply_receipt_key_invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT result_snapshot FROM finance_import_apply_receipts "
+                "WHERE idempotency_key=%s",
+                (key,),
+            )
+            row = cursor.fetchone()
+        return None if row is None else _batch_apply_receipt(row)
+
+    def get_correction_apply_receipt(
+        self, idempotency_key: str
+    ) -> FinanceImportCorrectionApplyReceipt | None:
+        key = idempotency_key.strip()
+        if not key or len(key) > 191:
+            raise ValueError("finance_import_correction_receipt_key_invalid")
+        with self._connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT result_snapshot FROM finance_import_correction_receipts "
+                "WHERE idempotency_key=%s",
+                (key,),
+            )
+            row = cursor.fetchone()
+        return None if row is None else _correction_apply_receipt(row)
 
     def list_review_rows(
         self,
@@ -353,6 +413,55 @@ def _reprocess_run(row: dict[str, Any]) -> FinanceImportReprocessRunSummary:
         int(row["pending_count"]), str(row["status"]), row["created_at"],
         row["completed_at"],
     )
+
+
+def _batch_apply_receipt(row: dict[str, Any]) -> FinanceImportBatchApplyReceipt:
+    snapshot = row.get("result_snapshot")
+    parsed = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+    if not isinstance(parsed, dict) or set(parsed) != {
+        "batch_identity", "resulting_batch_version", "preview_fingerprint",
+        "reconciled_count", "existing_count", "pending_count",
+    }:
+        raise ValueError("finance_import_apply_receipt_contract_invalid")
+    batch_identity = parsed["batch_identity"]
+    fingerprint = parsed["preview_fingerprint"]
+    numbers = tuple(parsed[key] for key in ("resulting_batch_version", "reconciled_count", "existing_count", "pending_count"))
+    if not isinstance(batch_identity, str) or not batch_identity.strip() or not isinstance(fingerprint, str) or len(fingerprint) != 64 or any(not isinstance(value, int) or isinstance(value, bool) for value in numbers):
+        raise ValueError("finance_import_apply_receipt_contract_invalid")
+    if numbers[0] < 1 or any(value < 0 for value in numbers[1:]):
+        raise ValueError("finance_import_apply_receipt_contract_invalid")
+    return FinanceImportBatchApplyReceipt(batch_identity, numbers[0], fingerprint, numbers[1], numbers[2], numbers[3])
+
+
+def _correction_apply_receipt(
+    row: dict[str, Any],
+) -> FinanceImportCorrectionApplyReceipt:
+    snapshot = row.get("result_snapshot")
+    parsed = json.loads(snapshot) if isinstance(snapshot, str) else snapshot
+    required = {
+        "row_identity", "batch_identity", "resulting_batch_version",
+        "classification_event_count", "ledger_entry_count", "allocation_count",
+        "reconciliation_receipt_count", "alert_resolved_event_count",
+        "preview_fingerprint",
+    }
+    if not isinstance(parsed, dict) or set(parsed) != required:
+        raise ValueError("finance_import_correction_receipt_contract_invalid")
+    identities = (parsed["row_identity"], parsed["batch_identity"])
+    fingerprint = parsed["preview_fingerprint"]
+    number_keys = (
+        "resulting_batch_version", "classification_event_count", "ledger_entry_count",
+        "allocation_count", "reconciliation_receipt_count", "alert_resolved_event_count",
+    )
+    numbers = tuple(parsed[key] for key in number_keys)
+    if (
+        any(not isinstance(value, str) or not value.strip() for value in identities)
+        or not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+        or any(not isinstance(value, int) or isinstance(value, bool) for value in numbers)
+        or any(value < 1 for value in numbers)
+    ):
+        raise ValueError("finance_import_correction_receipt_contract_invalid")
+    return FinanceImportCorrectionApplyReceipt(*identities, *numbers, fingerprint)
 
 
 def _integer_money(row: dict[str, Any]) -> int:

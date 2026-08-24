@@ -1,3 +1,8 @@
+"""
+File: mysql_adapter.py
+Description: 提供既有 MySQL 存取與服務日精算 adapter；人工服務日只覆蓋固定週休。
+"""
+
 import os
 import json
 import re
@@ -829,6 +834,7 @@ def calculate_attendance_schedule(
     service_mode: str = '週休1日', 
     custom_rest_weekdays: list = None,
     custom_leave_dates: set = None,
+    custom_work_dates: set = None,
     custom_holiday_rest_dates: set = None,
     monthly_salary_base: float = 0.0
 ) -> dict:
@@ -860,6 +866,7 @@ def calculate_attendance_schedule(
     N = int(target_service_days or 20)
     
     leave_dates = set(custom_leave_dates) if custom_leave_dates is not None else set()
+    work_dates = set(custom_work_dates) if custom_work_dates is not None else set()
     
     # 讀取國定假日對照表
     conn = get_connection()
@@ -905,7 +912,7 @@ def calculate_attendance_schedule(
         # 1. 符合每週預設排休 (例如週休二日之六日)
         # 2. 或單日排休選單點選 (leave_dates)
         # 3. 或國定假日選單勾選放假
-        is_weekday_rest = curr.weekday() in rest_weekdays
+        is_weekday_rest = curr.weekday() in rest_weekdays and curr not in work_dates
         
         if is_holiday:
             is_rest = is_weekday_rest or (curr in leave_dates) or (curr in holiday_rest_dates)

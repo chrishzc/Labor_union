@@ -52,6 +52,7 @@ describe('SchedulingPage holiday policy flow', () => {
     fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
     await waitFor(() => expect(holidayClient.query).toHaveBeenCalledTimes(1));
 
+    fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
     fireEvent.change(screen.getByLabelText('國定假日日期'), {
       target: { value: HOLIDAY_APPLY_REQUEST.holiday_date },
     });
@@ -79,6 +80,7 @@ describe('SchedulingPage holiday policy flow', () => {
     render(<SchedulingPage />);
     await waitFor(() => expect(screen.getAllByText('CASE-SCH-001').length).toBeGreaterThan(0));
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
+    fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
     expect(screen.getByRole('button', { name: '套用國定假日變更' })).toBeDisabled();
     expect(screen.queryByText(/雙倍薪金額|coverage|eligibility|結束日/)).not.toBeInTheDocument();
     expect(holidayClient.preview).not.toHaveBeenCalled();
@@ -91,6 +93,7 @@ describe('SchedulingPage holiday policy flow', () => {
     fireEvent.click(screen.getByRole('button', { name: /國定假日政策/ }));
     fireEvent.click(screen.getByRole('button', { name: '查詢國定假日政策' }));
     await waitFor(() => expect(holidayClient.query).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '➕ 新增國定假日' }));
     fireEvent.change(screen.getByLabelText('國定假日名稱'), { target: { value: '驗收假日' } });
     fireEvent.click(screen.getByRole('button', { name: '預覽國定假日變更' }));
     await waitFor(() => expect(holidayClient.preview).toHaveBeenCalledTimes(1));

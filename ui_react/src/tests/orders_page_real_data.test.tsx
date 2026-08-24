@@ -35,7 +35,10 @@ import {
   realisticOrderSummaryPage,
   realisticOrderTerms,
 } from './fixtures/orders_real_data_fixtures';
-import { realisticServiceDateQueryView } from './fixtures/orders/order_mutation_contract_fixtures';
+import {
+  realisticOrderReopenPreviewView,
+  realisticServiceDateQueryView,
+} from './fixtures/orders/order_mutation_contract_fixtures';
 import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 
 function unavailableCardProjection(caseNo: string): OrdersCardProjection {
@@ -159,6 +162,7 @@ describe('OrdersPage query real-data slice', () => {
       preview_fingerprint: 'c'.repeat(64),
     } as never);
     vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue(realisticServiceDateQueryView);
+    vi.spyOn(ordersMutationClient, 'previewReopen').mockResolvedValue(realisticOrderReopenPreviewView);
   });
 
   it('renders raw server statuses and filters with the server seven-stage projection', async () => {
@@ -271,7 +275,12 @@ describe('OrdersPage query real-data slice', () => {
         full_selected_segment_coverage: true,
         uncovered_segment_dates: [],
         source_scheduling_version: 4,
-        filter_results: { schedule: true },
+        filter_results: {
+          region: true,
+          cooking: true,
+          preferred_service_days: true,
+          daily_service_hours: true,
+        },
       }],
       conflicts: [],
     };
@@ -321,7 +330,7 @@ describe('OrdersPage query real-data slice', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /重新查詢符合條件月嫂/ }));
     expect(await screen.findByText(/測試可接月嫂/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('checkbox'));
+    fireEvent.click(screen.getByRole('checkbox', { name: /測試可接月嫂/ }));
     fireEvent.click(screen.getByRole('button', { name: /加入候選聯繫池/ }));
     await screen.findByText(/已回讀確認 1 位月嫂加入候選聯繫池/);
 
@@ -338,6 +347,98 @@ describe('OrdersPage query real-data slice', () => {
     expect(candidateContactPoolClient.addCandidates).toHaveBeenCalledOnce();
     expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(7);
     expect(matchingCandidateWorkflowClient.createSingleCaregiverPlan).toHaveBeenCalledOnce();
+  });
+
+  it('disables formal-plan creation when the current plan already has a waiting-deposit lock', async () => {
+    useOperableSummary();
+    const createFormalPlanSpy = vi.spyOn(matchingCandidateWorkflowClient, 'createSingleCaregiverPlan');
+    vi.mocked(candidateContactPoolClient.query).mockResolvedValue({
+      pool_id: 8,
+      case_no: 'ORD-2026-0801',
+      candidates: [{
+        id: 17, staff_id: 8892, service_start_date: '2026-08-01', service_end_date: '2026-08-30',
+        status: 'active', created_at: '2026-08-23T10:00:00', staff_name: '測試可接月嫂',
+        willingness: 'willing', reason: null, information: { '1': null, '2': null },
+      }],
+    });
+    vi.mocked(waitingDepositLockClient.queryPlan).mockResolvedValue({
+      planId: 51,
+      status: 'accepted',
+      activeLockId: 91,
+    });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]);
+
+    const formalPlanButton = await screen.findByRole('button', { name: '建立正式單月嫂配對方案' });
+    expect(formalPlanButton).toBeDisabled();
+    expect(formalPlanButton).toHaveAttribute('title', '目前方案已取得等待訂金鎖，不能重新建立媒合方案。');
+    expect(screen.getByRole('button', { name: /重新寄送資訊-1/ })).toBeDisabled();
+    expect(screen.getByText('目前方案已取得等待訂金鎖；候選聯繫紀錄已鎖定，請依定金與簽約流程繼續。')).toBeInTheDocument();
+    fireEvent.click(formalPlanButton);
+    expect(createFormalPlanSpy).not.toHaveBeenCalled();
+  });
+
+  it('maps an unready matching preference source to the Client BeClass corrective action', async () => {
+    useOperableSummary();
+    vi.spyOn(matchingCandidateWorkflowClient, 'searchSingleCaregiver').mockRejectedValue(
+      new ApiHttpError(
+        409,
+        'matching_preference_source_not_ready',
+        '月嫂分段檔期查詢未通過',
+      ),
+    );
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /重新查詢符合條件月嫂/ }));
+
+    expect(await screen.findByText(
+      '下廚料理需求尚未就緒；請先從資料匯入中心匯入並唯一配對 Client BeClass，再重新查詢月嫂。',
+    )).toHaveAttribute('role', 'alert');
+    expect(screen.queryByText(/最新完整承接候選（0 位）/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/目前沒有月嫂能完整承接/)).not.toBeInTheDocument();
+  });
+
+  it('requires exact service dates before a matching query can treat days as formal coverage', async () => {
+    useOperableSummary();
+    vi.spyOn(matchingCandidateWorkflowClient, 'searchSingleCaregiver').mockRejectedValue(
+      new ApiHttpError(
+        409,
+        'official_service_dates_incomplete',
+        '月嫂分段檔期查詢未通過。',
+      ),
+    );
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /重新查詢符合條件月嫂/ }));
+
+    expect(await screen.findByText(
+      '尚未確認精確服務日期；請先完成日期精算與休假調整，再重新查詢月嫂。',
+    )).toHaveAttribute('role', 'alert');
+    expect(screen.queryByText(/最新完整承接候選（0 位）/)).not.toBeInTheDocument();
+  });
+
+  it('explains that a settled order cannot restart negotiation availability search', async () => {
+    useOperableSummary();
+    vi.spyOn(matchingCandidateWorkflowClient, 'searchSingleCaregiver').mockRejectedValue(
+      new ApiHttpError(
+        409,
+        'caregiver_availability_stage_conflict',
+        '月嫂分段檔期查詢未通過。',
+      ),
+    );
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /重新查詢符合條件月嫂/ }));
+
+    expect(await screen.findByText(
+      '此案已不在洽談階段，不能重新查詢候選月嫂；請依既有正式方案、定金與簽約流程繼續。',
+    )).toHaveAttribute('role', 'alert');
+    expect(screen.queryByText(/最新完整承接候選（0 位）/)).not.toBeInTheDocument();
   });
 
   it('uses available card projection facts in the matching demand summary', async () => {
@@ -567,8 +668,8 @@ describe('OrdersPage query real-data slice', () => {
     await screen.findByText('ORD-2026-0801');
     fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
     await screen.findByDisplayValue('2026-09-01');
-    fireEvent.click(screen.getByRole('button', { name: '預覽訂單條款變更' }));
-    await screen.findByText('Preview 已產生');
+    fireEvent.click(screen.getByRole('button', { name: /預覽訂單條款變更/ }));
+    await screen.findByText(/條款變更比對/);
     expect(orderTermsMutationClient.preview).toHaveBeenCalledWith(
       'ORD-2026-0801',
       expect.objectContaining({
@@ -579,21 +680,21 @@ describe('OrdersPage query real-data slice', () => {
         }),
       }),
     );
-    expect(screen.getByRole('button', { name: '確認套用訂單條款' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /確認套用訂單條款/ })).toBeDisabled();
   });
 
   it('queries and previews cancellation effects without exposing Apply', async () => {
     useOperableSummary();
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
-    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /取消試算/ })[0]));
-    await screen.findByText('取消前根事實');
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ }));
+    await screen.findByText(/實際開始日：尚未開始/);
     expect(orderCancellationClient.query).toHaveBeenCalledWith('ORD-2026-0801', expect.any(AbortSignal));
-    fireEvent.click(screen.getByRole('button', { name: '產生取消預覽' }));
-    await screen.findByText('取消影響預覽（零寫入）');
+    fireEvent.click(screen.getByRole('button', { name: /預覽取消與退款試算/ }));
+    await screen.findByText(/退款試算結果/);
     expect(orderCancellationClient.preview).toHaveBeenCalledWith('ORD-2026-0801', [], expect.any(AbortSignal));
     expect(screen.queryByRole('button', { name: /確認執行取消/ })).not.toBeInTheDocument();
-    expect(ordersQueryClient.getOrderDetail).not.toHaveBeenCalled();
     expect(ordersQueryClient.getAssignmentPlan).not.toHaveBeenCalled();
   });
 
@@ -601,19 +702,20 @@ describe('OrdersPage query real-data slice', () => {
     useOperableSummary();
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
-    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /確認服務日期/ })[0]));
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /實質服務日曆/ })));
     await waitFor(() => expect(ordersMutationClient.getServiceDates).toHaveBeenCalledOnce());
-    expect(ordersQueryClient.getOrderDetail).not.toHaveBeenCalled();
-    expect(ordersQueryClient.getOrderCalendarDetail).not.toHaveBeenCalled();
+    expect(ordersQueryClient.getOrderCalendarDetail).toHaveBeenCalledOnce();
     expect(ordersQueryClient.getActualStart).toHaveBeenCalledTimes(1);
-    expect(screen.getByText('最新根事實版本')).toBeInTheDocument();
+    expect(screen.queryByText('最新根事實版本')).not.toBeInTheDocument();
   });
 
   it('exposes an editable actual-start Preview while Apply remains reason-gated', async () => {
     useOperableSummary();
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
-    fireEvent.click(screen.getAllByRole('button', { name: /確認服務日期/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: /實質服務日曆/ })));
     await screen.findByDisplayValue('2026-09-01');
     fireEvent.click(screen.getByRole('button', { name: '預覽實際開工日變更' }));
     await screen.findByText('實際開工日 Preview 已產生');
@@ -622,5 +724,54 @@ describe('OrdersPage query real-data slice', () => {
       { new_actual_start_date: '2026-09-01' },
     );
     expect(screen.getByRole('button', { name: '確認套用實際開工日' })).toBeDisabled();
+  });
+
+  it('creates a server-validated multi-caregiver plan from the fallback control', async () => {
+    useOperableSummary();
+    const availability: MatchingAvailability = {
+      case_no: 'ORD-2026-0801', planned_start_date: '2026-08-01', planned_end_date: '2026-08-30',
+      feasibility: 'complete',
+      complete_combinations: [[
+        { segment_index: 0, staff_id: 8892, start_date: '2026-08-01', end_date: '2026-08-15' },
+        { segment_index: 1, staff_id: 8893, start_date: '2026-08-16', end_date: '2026-08-30' },
+      ]],
+      segment_candidates: [], candidate_options: [], conflicts: [],
+    };
+    vi.spyOn(matchingCandidateWorkflowClient, 'searchSingleCaregiver').mockResolvedValue({
+      ...availability,
+      complete_combinations: [],
+      candidate_options: [],
+    });
+    vi.spyOn(matchingCandidateWorkflowClient, 'searchSegmentedCaregivers').mockResolvedValue(availability);
+    vi.spyOn(matchingCandidateWorkflowClient, 'createMatchingPlan').mockResolvedValue({
+      plan_id: 52, case_no: 'ORD-2026-0801', version: 1, status: 'proposed', result: 'created',
+      segments: [
+        { segment_order: 1, staff_id: 8892, assigned_start_date: '2026-08-01', assigned_end_date: '2026-08-15' },
+        { segment_order: 2, staff_id: 8893, assigned_start_date: '2026-08-16', assigned_end_date: '2026-08-30' },
+      ],
+    });
+    vi.mocked(waitingDepositLockClient.queryPlan)
+      .mockRejectedValueOnce(new ApiHttpError(404, 'HTTP_404', 'active matching plan not found'))
+      .mockResolvedValue({ planId: 52, status: 'proposed', activeLockId: null });
+
+    render(<OrdersPage />);
+    await screen.findByText('ORD-2026-0801');
+    fireEvent.click(screen.getAllByRole('button', { name: /媒合與正式排班/ })[0]);
+    fireEvent.click(await screen.findByRole('button', { name: '🔍 重新查詢符合條件月嫂' }));
+    fireEvent.click(await screen.findByRole('button', { name: '查詢多月嫂連續分段備案' }));
+    await screen.findByText('備案 1');
+    fireEvent.click(screen.getByRole('button', { name: '建立此 2 段正式多月嫂方案' }));
+
+    await screen.findByText(/已回讀確認正式 2 段多月嫂方案 #52/);
+    expect(matchingCandidateWorkflowClient.searchSegmentedCaregivers).toHaveBeenCalledWith(
+      'ORD-2026-0801',
+      2,
+      [],
+      { region: true, cooking: true, preferred_service_days: true, daily_service_hours: true },
+    );
+    expect(matchingCandidateWorkflowClient.createMatchingPlan).toHaveBeenCalledWith('ORD-2026-0801', [
+      { staff_id: 8892, start_date: '2026-08-01', end_date: '2026-08-15' },
+      { staff_id: 8893, start_date: '2026-08-16', end_date: '2026-08-30' },
+    ]);
   });
 });

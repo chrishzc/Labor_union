@@ -1,4 +1,7 @@
-"""Administrative API for caregiver availability-lock lifecycle actions."""
+"""
+File: caregiver_availability_locks.py
+Description: 提供等待訂金檔期鎖 typed Preview／Apply，並回傳可處理的業務阻擋。
+"""
 
 from __future__ import annotations
 
@@ -325,6 +328,30 @@ def _waiting_lock_value_error(error, correlation):
             "目前配對方案狀態不允許鎖定檔期。",
             correlation,
             blockers=("invalid_scheduling_intent",),
+        )
+    if message == "active staff service commitment is required":
+        return _typed_waiting_lock_error(
+            ErrorCategory.DOMAIN_BLOCKED,
+            "staff_service_commitment_required",
+            "月嫂尚未完成簽約前服務承諾，不能建立等待訂金檔期鎖。",
+            correlation,
+            blockers=("staff_service_commitment_required",),
+        )
+    if message == "active staff service commitment days mismatch":
+        return _typed_waiting_lock_error(
+            ErrorCategory.DOMAIN_BLOCKED,
+            "staff_service_commitment_days_mismatch",
+            "月嫂簽約前服務日與訂單約定天數不一致，請重新建立正確媒合方案。",
+            correlation,
+            blockers=("staff_service_commitment_days_mismatch",),
+        )
+    if message == "customer has not accepted the matching plan":
+        return _typed_waiting_lock_error(
+            ErrorCategory.DOMAIN_BLOCKED,
+            "customer_matching_acceptance_required",
+            "客戶尚未接受正式媒合方案，不能建立等待訂金檔期鎖。",
+            correlation,
+            blockers=("customer_matching_acceptance_required",),
         )
     return _typed_waiting_lock_error(
         ErrorCategory.VALIDATION,

@@ -1,4 +1,7 @@
-"""Typed HTTP client for Scheduling staff matching preferences."""
+"""
+File: staff_matching_preferences_api_client.py
+Description: 呼叫服務人員媒合偏好 Query、Preview、Apply，並驗證 definition 與 profile 各自 receipt。
+"""
 
 from __future__ import annotations
 
@@ -13,10 +16,11 @@ from api.schemas.base import BaseResponse
 from api.schemas.staff_matching_preferences import (
     DefinitionPreviewView,
     ProfilePreviewView,
-    StaffPreferenceApplyReceiptView,
+    StaffPreferenceDefinitionApplyReceiptView,
     StaffPreferenceDefinitionInput,
     StaffPreferenceDefinitionView,
     StaffPreferenceProfileInput,
+    StaffPreferenceProfileApplyReceiptView,
     StaffPreferenceProfileView,
 )
 
@@ -50,7 +54,7 @@ class StaffMatchingPreferencesApiClient:
 
     def apply_definition(self, key, definition, expected_version, fingerprint, reason, command_id):
         return self._request(
-            "POST", f"/definitions/{key}/apply", StaffPreferenceApplyReceiptView,
+            "POST", f"/definitions/{key}/apply", StaffPreferenceDefinitionApplyReceiptView,
             json={"definition": definition.model_dump(mode="json"), "expected_version": expected_version,
                   "preview_fingerprint": fingerprint, "reason": reason},
             command_id=command_id,
@@ -64,7 +68,7 @@ class StaffMatchingPreferencesApiClient:
 
     def apply_profile(self, staff_id, profile, expected_version, fingerprint, reason, command_id):
         return self._request(
-            "POST", f"/staff/{staff_id}/apply", StaffPreferenceApplyReceiptView,
+            "POST", f"/staff/{staff_id}/apply", StaffPreferenceProfileApplyReceiptView,
             json={**profile.model_dump(mode="json"), "expected_version": expected_version,
                   "preview_fingerprint": fingerprint, "reason": reason},
             command_id=command_id,

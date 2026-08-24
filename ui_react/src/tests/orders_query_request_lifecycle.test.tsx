@@ -96,10 +96,12 @@ describe('Orders query request lifecycle', () => {
     render(<OrdersPage />);
     await screen.findByText('ORD-2026-0801');
 
-    fireEvent.click(screen.getAllByRole('button', { name: /確認服務日期/ })[0]);
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    const calendarTab = await screen.findByRole('button', { name: /實質服務日曆/ });
+    fireEvent.click(calendarTab);
     await waitFor(() => expect(ordersMutationClient.getServiceDates).toHaveBeenCalledTimes(1));
     const signal = vi.mocked(ordersMutationClient.getServiceDates).mock.calls[0]?.[1]?.signal;
-    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
     expect(signal?.aborted).toBe(true);
 
     await act(async () => {

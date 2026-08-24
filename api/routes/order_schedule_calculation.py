@@ -1,8 +1,6 @@
 """
-================================================================================
-檔案名稱: api/routes/order_schedule_calculation.py
-功能說明: 出勤排班與順延完工日精算 API 路由 (OrderScheduleCalculationRouter)
-================================================================================
+File: order_schedule_calculation.py
+Description: 接收 typed 出勤精算條件並轉交 Scheduling subsystem，不在 route 重算日期。
 """
 
 from fastapi import APIRouter, HTTPException
@@ -23,6 +21,7 @@ def calculate_schedule(req: ScheduleCalculationRequest):
             service_mode=req.service_mode,
             custom_holiday_rest_dates=req.custom_holiday_rest_dates,
             custom_leave_dates=req.custom_leave_dates,
+            custom_work_dates=req.custom_work_dates,
             custom_rest_weekdays=req.custom_rest_weekdays,
             monthly_salary_base=req.monthly_salary_base,
         )

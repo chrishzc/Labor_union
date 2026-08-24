@@ -537,6 +537,15 @@ Stable errors：
 - FastAPI：需要遠端管理入口時映射相同 contract，不另寫業務邏輯。
 - Streamlit：只顯示 typed query／preview／apply result；本輪不提供 reprocess Apply UI。
 
+### 9.1 React 正常匯入 terminal receipt
+
+React 正常匯入固定為 `Upload/Ingest → Batch Preview → confirmed durable Apply → terminal receipt`。Ingest
+與 Apply 的相同 idempotency key 必須分別回原 receipt／同一 job，並以 server-authoritative `replayed`
+明示重播；不得以新的 command identity 偽裝 retry。Apply 的 `202 Accepted` 只代表 durable job 受理，
+只有 batch job 進入 `succeeded` 且由 `finance_import_apply_receipts` 的 immutable typed receipt 查回
+`resulting_batch_version`、`reconciled_count`、`existing_count`、`pending_count` 時，UI 才可顯示正式
+入帳完成。job 的通用 `result_reference` 不是 receipt substitute，也不得公開 raw job payload。
+
 現況 `scripts/file_watcher.py` 使用位置參數呼叫已要求 `--excel-path` 的 CLI，且自行處理 `IMPORT-002`；這是 live drift，不是新架構契約。
 
 ## 10. pytest 分層

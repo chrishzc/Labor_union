@@ -56,6 +56,8 @@ Global 只定義跨 Domain 不得被破壞的不變量及共用技術契約，�
 - canonical idempotency key必須先符合`^[a-z0-9][a-z0-9._:-]{0,190}$`；uppercase在進DB前拒絕，禁止silent lowercase。
 - `submitted_by`必須是immutable actor identity，例如`admin_user_id:<positive-id>`或已核准的`system:<owner>`；不得用
   display username。
+- 僅於`APP_ENV`為development/dev/local/test、`ACCESS_CONTROL_PROFILE=local_bypass`且
+  `ENABLE_ADMIN_AUTH=false`的本機驗收，固定可用`system:local_bypass`；production或一般無ID principal一律拒絕。
 - terminal receipt/error必須使用closed command-type discriminator與schema version；禁止raw map穿透public view。
 - canonical repository不得hidden commit／rollback；application composition是唯一outer Unit of Work與commit owner。
 

@@ -1,4 +1,7 @@
-"""Caregiver segment availability search router."""
+"""
+File: caregiver_segment_availability.py
+Description: 提供月嫂媒合可用性查詢，並將來源未備妥轉為 typed 409 conflict。
+"""
 
 from __future__ import annotations
 
@@ -147,7 +150,10 @@ class CaregiverCandidateOption(BaseModel):
     segment_index: int
     staff_id: int
     staff_name: str
-    coverage_day_count: int = Field(ge=1)
+    # A filtered candidate may remain useful diagnostic evidence even when every
+    # required service day is blocked.  Zero is therefore a valid partial-search
+    # result, not a response-contract violation.
+    coverage_day_count: int = Field(ge=0)
     available_ranges: list[CaregiverAvailabilityRange]
     case_period_start: date
     case_period_end: date
@@ -190,7 +196,11 @@ class CaregiverSegmentAvailabilityResponse(BaseModel):
 def _value_to_status(message: str) -> int:
     if message == "case not found":
         return 404
-    if message == "case is not in negotiation stage":
+    if message in {
+        "case is not in negotiation stage",
+        "matching_preference_source_not_ready",
+        "official_service_dates_incomplete",
+    }:
         return 409
     return 422
 
@@ -200,6 +210,10 @@ def _value_to_error_code(message: str) -> str:
         return "caregiver_availability_case_not_found"
     if message == "case is not in negotiation stage":
         return "caregiver_availability_stage_conflict"
+    if message == "matching_preference_source_not_ready":
+        return message
+    if message == "official_service_dates_incomplete":
+        return message
     return "caregiver_availability_request_invalid"
 
 

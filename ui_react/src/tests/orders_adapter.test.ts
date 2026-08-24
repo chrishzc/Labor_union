@@ -91,6 +91,17 @@ describe('Orders Drawer adapters', () => {
     expect(view.serviceTimeText).toBe('資料待補正（服務時段三欄）');
   });
 
+  it('uses the matching communication readback instead of stale active-plan status', () => {
+    const view = adaptMatchingWorkbenchDrawer({
+      caseNo: 'CASE-COMMUNICATION-1',
+      activePlan: { planId: 26, status: 'proposed', activeLockId: null, communicationVersion: 2 },
+      customerDecision: 'accepted',
+    });
+
+    expect(view.status).toBe('已接受');
+    expect(view.waitingLockAcquired).toBe(false);
+  });
+
   it('does not expose replacement-question-mark corruption as a candidate reason', () => {
     const view = adaptMatchingWorkbenchDrawer({
       caseNo: '115000015',

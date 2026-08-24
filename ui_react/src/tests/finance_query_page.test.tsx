@@ -13,7 +13,7 @@ import { financeImportQueryClient } from '../api/finance_import/finance_import_q
 import { FinancePage } from '../pages/FinancePage';
 import { RECEIPT_RESPONSE, STAFF_PAYABLES_RESPONSE, ACCOUNTS_PAYABLE_RESPONSE, FINANCE_BATCH_RESPONSE, FINANCE_MANIFEST_RESPONSE } from './fixtures/finance/finance_query_contract_fixtures';
 
-describe('FinancePage query-only presentation', () => {
+describe('FinancePage query and guarded import presentation', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue({ items: [{ case_no: 'CASE-FIN-001', client_name: '去敏客戶', order_status: '服務中', staff_name: null, identity_status: null, start_date: null, end_date: null, actual_start_date: null, actual_end_date: null, service_days: null, total_employer_self_pay_payable: null }], next_cursor: null, etag: 'c'.repeat(64) });
@@ -25,7 +25,7 @@ describe('FinancePage query-only presentation', () => {
     vi.spyOn(financeImportQueryClient, 'getManifest').mockResolvedValue(FINANCE_MANIFEST_RESPONSE.data);
   });
 
-  it('loads only the active tab and keeps mutation controls disabled', async () => {
+  it('loads only the active tab and requires a selected workbook before import controls appear', async () => {
     render(<FinancePage />);
     await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
     expect(ordersQueryClient.getOrderSummaries).toHaveBeenCalledTimes(1);
@@ -49,6 +49,19 @@ describe('FinancePage query-only presentation', () => {
     await waitFor(() => expect(screen.getAllByText('BATCH-FIN-021').length).toBeGreaterThan(0));
     expect(financeImportQueryClient.listBatches).toHaveBeenCalledTimes(1);
     expect(financeImportQueryClient.getManifest).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="finance.finance-import.upload"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
+  });
+
+  it('searches up to the bounded server page so a new case can be selected for receipt review', async () => {
+    render(<FinancePage />);
+    await waitFor(() => expect(screen.getByText('OBL-C-1')).toBeInTheDocument());
+
+    fireEvent.change(screen.getByLabelText('搜尋案件'), { target: { value: '116990824' } });
+
+    await waitFor(() => expect(ordersQueryClient.getOrderSummaries).toHaveBeenLastCalledWith(
+      { page_size: 200, query_text: '116990824' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    ));
   });
 });

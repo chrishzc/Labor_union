@@ -54,6 +54,59 @@ class ClientBeClassWorkbookImportRepository:
             return "absent"
         return "exact" if _comparable_source(stored) == _comparable_source(payload) else "conflict"
 
+    def bound_source_for_query(self, query_no: str):
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT id,bound_case_no FROM beclass_records "
+                "WHERE query_no=%s LIMIT 1 FOR UPDATE",
+                (query_no,),
+            )
+            row = cursor.fetchone()
+        if row is None or row["bound_case_no"] is None:
+            return None
+        return {"root_id": int(row["id"]), "case_no": str(row["bound_case_no"])}
+
+    def bound_case_no_for_root(self, root_id: int | None) -> str | None:
+        if root_id is None:
+            return None
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bound_case_no FROM beclass_records WHERE id=%s FOR UPDATE",
+                (root_id,),
+            )
+            row = cursor.fetchone()
+        return None if row is None or row["bound_case_no"] is None else str(row["bound_case_no"])
+
+    def bound_case_nos_for_workbook(self, digest: str) -> tuple[str, ...]:
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT result_snapshot FROM admin_command_receipts "
+                "WHERE command_family=%s AND idempotency_key LIKE %s",
+                (self._ROW_FAMILY, f"client-beclass-workbook:{digest}:row:%"),
+            )
+            root_ids = tuple(
+                sorted(
+                    {
+                        int(root_id)
+                        for row in cursor.fetchall()
+                        if (root_id := json.loads(row["result_snapshot"]).get("root_id"))
+                        is not None
+                    }
+                )
+            )
+            if not root_ids:
+                return ()
+            placeholders = ",".join(["%s"] * len(root_ids))
+            cursor.execute(
+                "SELECT bound_case_no FROM beclass_records "
+                f"WHERE id IN ({placeholders}) AND bound_case_no IS NOT NULL "
+                "ORDER BY bound_case_no FOR UPDATE",
+                root_ids,
+            )
+            return tuple(
+                sorted({str(row["bound_case_no"]) for row in cursor.fetchall()})
+            )
+
     def claim_workbook(self, key: str, fingerprint: str, correlation_id: str) -> str:
         return self._claim(key, self._WORKBOOK_FAMILY, fingerprint, correlation_id)
 

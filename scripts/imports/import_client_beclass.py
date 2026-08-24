@@ -53,12 +53,14 @@ from subsystems.case_import.beclass_review_intake import (
     masked_review_identifier,
     record_invalid_beclass_row,
 )
-from subsystems.case_import.hcm_beclass_reconciliation import (
+from infrastructure.mysql.hcm_beclass_reconciliation_adapter import (
+    MySqlHcmBeClassReconciliationAdapter,
     reconcile_hcm_beclass_cooking,
 )
 from infrastructure.mysql.client_beclass_workbook_import_repository import (
     ClientBeClassWorkbookImportRepository,
 )
+from infrastructure.mysql.unit_of_work import MySqlUnitOfWork
 from subsystems.case_import.client_beclass_workbook_import import (
     ClientBeClassWorkbookConflict,
     ClientBeClassWorkbookImportService,
@@ -165,7 +167,9 @@ def _typed_historical_import(excel_path):
     connection = pymysql.connect(**DB_CONFIG, cursorclass=pymysql.cursors.DictCursor)
     try:
         service = ClientBeClassWorkbookImportService(
-            ClientBeClassWorkbookImportRepository(connection)
+            ClientBeClassWorkbookImportRepository(connection),
+            MySqlHcmBeClassReconciliationAdapter(connection),
+            lambda: MySqlUnitOfWork(connection),
         )
         preview = service.preview(excel_path)
         digest = fingerprint_workbook(excel_path)
@@ -351,7 +355,17 @@ def _reconcile_without_rolling_back_beclass(connection, query_no):
     if not query_no:
         return "identity_conflict"
     try:
-        result = reconcile_hcm_beclass_cooking(connection, str(query_no))
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT bound_case_no FROM beclass_records WHERE query_no=%s",
+                (str(query_no),),
+            )
+            row = cursor.fetchone()
+        if row is None or row["bound_case_no"] is None:
+            return "pending_counterpart"
+        result = reconcile_hcm_beclass_cooking(
+            connection, str(row["bound_case_no"])
+        )
     except Exception as error:
         print(f"[配對待重試] BeClass root 已建立；reconciliation稍後重試：{type(error).__name__}")
         return "failed_retryable"

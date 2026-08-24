@@ -149,12 +149,11 @@ describe('Anomaly Query Adapter Suite', () => {
       expect(adapted.rawDomain).toBe('scheduling');
       expect(adapted.category).toBe('排班調度');
 
-      // Gaps verification
-      expect(adapted.title).toBe('目前 typed view 未納入摘要欄位');
-      expect(adapted.description).toBe('目前 typed view 未納入描述欄位');
-      expect(adapted.relatedEntity).toBe('目前 typed view 未納入關聯實體欄位');
-      expect(adapted.suggestedAction).toBe('目前 typed view 未納入建議處理欄位');
-      expect(adapted.rootEvidence).toBe('目前 typed view 未納入根事實明細欄位');
+      expect(adapted.title).toBe('異常偵測項目');
+      expect(adapted.description).toBe('來源領域：scheduling；來源版本：v2');
+      expect(adapted.relatedEntity).toBe(dto.source_identity);
+      expect(adapted.suggestedAction).toBe('開啟詳情查看可執行的處置。');
+      expect(adapted.rootEvidence).toBe(`來源識別：${dto.source_identity}`);
 
       // Navigation & Metadata
       expect(adapted.staffCalendarNavigation).toEqual({

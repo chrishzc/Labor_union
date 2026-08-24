@@ -21,6 +21,7 @@ def _option_b_receipt() -> Path:
         migration.ROOT
         / "validation"
         / "receipts"
+        / "phase4"
         / "PROV-20260821-local-additive-qualification-rich-menu-option-b.json"
     )
 
@@ -241,6 +242,12 @@ def test_explicit_qualification_selects_only_a_published_receipt(
 
     assert migration._local_discover_qualification(selected) == {
         "selected": "PROV-selected.json"
+    }
+    nested = receipt_root / "phase4" / "PROV-nested.json"
+    nested.parent.mkdir()
+    nested.write_text("{}", encoding="utf-8")
+    assert migration._local_discover_qualification(nested) == {
+        "selected": "PROV-nested.json"
     }
     with pytest.raises(migration.LocalAdditiveBlocked):
         migration._local_discover_qualification(tmp_path / "scratch.json")

@@ -1,4 +1,7 @@
-"""Atomic acquisition of a waiting-for-deposit caregiver availability lock."""
+"""
+File: availability_lock_acquisition_workflow.py
+Description: 原子建立等待訂金檔期鎖；只接受精確且有效的簽約前服務承諾。
+"""
 
 from __future__ import annotations
 
@@ -117,17 +120,85 @@ def _require_customer_matching_acceptance(cursor: Any, plan_id: int) -> None:
         raise ValueError("customer has not accepted the matching plan")
 
 
-def _require_active_precontract_commitment(cursor: Any, plan_id: int) -> None:
+def _require_active_precontract_commitment(cursor: Any, plan_id: int) -> list[dict[str, Any]]:
     """A lock may reserve a signed commitment, never an unsigned proposal."""
     cursor.execute(
-        "SELECT commitment.id FROM precontract_service_commitments commitment "
+        "SELECT commitment.id,commitment.case_no FROM precontract_service_commitments commitment "
         "LEFT JOIN precontract_service_commitment_events terminal "
         "ON terminal.commitment_id=commitment.id "
         "WHERE commitment.matching_plan_id=%s AND terminal.id IS NULL FOR UPDATE",
         (plan_id,),
     )
-    if not isinstance(cursor.fetchone(), dict):
+    commitment = cursor.fetchone()
+    if not isinstance(commitment, dict):
         raise ValueError("active staff service commitment is required")
+    cursor.execute(
+        "SELECT order_row.service_days,COUNT(day_row.id) AS commitment_days,"
+        "COUNT(DISTINCT day_row.service_date) AS distinct_service_dates "
+        "FROM orders order_row LEFT JOIN precontract_service_commitment_days day_row "
+        "ON day_row.commitment_id=%s WHERE order_row.case_no=%s FOR UPDATE",
+        (commitment["id"], commitment["case_no"]),
+    )
+    days = cursor.fetchone()
+    if not isinstance(days, dict) or any(
+        not isinstance(days.get(key), int)
+        for key in ("service_days", "commitment_days", "distinct_service_dates")
+    ) or days["service_days"] <= 0 or (
+        days["commitment_days"] != days["service_days"]
+        or days["distinct_service_dates"] != days["service_days"]
+    ):
+        raise ValueError("active staff service commitment days mismatch")
+    cursor.execute(
+        "SELECT matching_segment_id,staff_id,service_date "
+        "FROM precontract_service_commitment_days WHERE commitment_id=%s "
+        "ORDER BY matching_segment_id,staff_id,service_date FOR UPDATE",
+        (commitment["id"],),
+    )
+    commitment_days = _rows(cursor, "invalid active staff service commitment days")
+    expected = {"matching_segment_id", "staff_id", "service_date"}
+    if any(
+        set(row) != expected
+        or isinstance(row["matching_segment_id"], bool)
+        or not isinstance(row["matching_segment_id"], int)
+        or row["matching_segment_id"] <= 0
+        or isinstance(row["staff_id"], bool)
+        or not isinstance(row["staff_id"], int)
+        or row["staff_id"] <= 0
+        or row["service_date"].__class__ is not date
+        for row in commitment_days
+    ):
+        raise ValueError("invalid active staff service commitment days")
+    return commitment_days
+
+
+def _with_exact_commitment_lock_rows(
+    snapshot: dict[str, Any], commitment_days: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Replace calendar-range lock rows with immutable signed service days."""
+    segment_staff = {
+        (row["segment_id"], row["staff_id"])
+        for row in snapshot["segments"]
+    }
+    lock_rows = [
+        {
+            "segment_id": row["matching_segment_id"],
+            "staff_id": row["staff_id"],
+            "lock_date": row["service_date"].isoformat(),
+        }
+        for row in commitment_days
+    ]
+    if (
+        len(lock_rows) != len({(row["staff_id"], row["lock_date"]) for row in lock_rows})
+        or any((row["segment_id"], row["staff_id"]) not in segment_staff for row in lock_rows)
+    ):
+        raise ValueError("active staff service commitment does not match plan segments")
+    return {
+        **snapshot,
+        "lock_rows": sorted(
+            lock_rows,
+            key=lambda row: (row["lock_date"], row["segment_id"], row["staff_id"]),
+        ),
+    }
 
 
 def _has_client_signed_contract(cursor: Any, case_no: str, plan_id: int) -> bool:
@@ -296,12 +367,18 @@ def _occupancy_conflicts(cursor: Any, snapshot: dict[str, Any]) -> list[dict[str
 
 
 def _proposed_occupancy_rows(snapshot):
+    service_dates_by_segment: dict[tuple[int, int], list[date]] = {}
+    for row in snapshot["lock_rows"]:
+        service_dates_by_segment.setdefault(
+            (int(row["segment_id"]), int(row["staff_id"])), []
+        ).append(date.fromisoformat(row["lock_date"]))
     segments = tuple(
         WaitingDepositSegment(
             int(row["segment_id"]),
             int(row["staff_id"]),
             date.fromisoformat(row["assigned_start_date"]),
             date.fromisoformat(row["assigned_end_date"]),
+            tuple(service_dates_by_segment[(int(row["segment_id"]), int(row["staff_id"]))]),
         )
         for row in snapshot["segments"]
     )
@@ -489,12 +566,15 @@ def acquire_caregiver_availability_lock(
             raise ValueError("staff mutex result does not match matching plan")
         order_row, locked_plan, locked_segments = _lock_snapshot(cursor, request["case_no"], request["plan_id"])
         locked_snapshot = _canonical_snapshot(request["case_no"], request["plan_id"], order_row, locked_plan, locked_segments)
-        _require_active_precontract_commitment(cursor, request["plan_id"])
+        if locked_snapshot != preliminary_snapshot:
+            raise ValueError("matching plan changed while acquiring lock")
+        commitment_days = _require_active_precontract_commitment(cursor, request["plan_id"])
+        locked_snapshot = _with_exact_commitment_lock_rows(
+            locked_snapshot, commitment_days
+        )
         _require_customer_pre_execution_commitment(
             cursor, request["case_no"], request["plan_id"],
         )
-        if locked_snapshot != preliminary_snapshot:
-            raise ValueError("matching plan changed while acquiring lock")
         conflicts = _occupancy_conflicts(cursor, locked_snapshot)
         cursor.execute(
             "SELECT id, lock_id, event_type, event_key, actor, reason, payload "
@@ -604,7 +684,8 @@ def preview_caregiver_availability_lock(
         )
         if plan["status"] != "proposed" or plan["is_active"] != 1:
             raise ValueError("matching plan is not an active proposed plan")
-        _require_active_precontract_commitment(cursor, request["plan_id"])
+        commitment_days = _require_active_precontract_commitment(cursor, request["plan_id"])
+        snapshot = _with_exact_commitment_lock_rows(snapshot, commitment_days)
         _require_customer_pre_execution_commitment(
             cursor, request["case_no"], request["plan_id"],
         )

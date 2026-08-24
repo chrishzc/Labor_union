@@ -7,7 +7,16 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './AnomaliesPage.css';
 import { Drawer } from '../components/Drawer';
 import { anomalyQueryClient } from '../api/anomalies/anomaly_query_client';
+import { AnomalyValidationError } from '../api/anomalies/anomaly_query_errors';
 import { anomalyDetailClient } from '../api/anomalies/anomaly_detail_client';
+import type { AnomalyRecoveryContextView, RecoveryAction } from '../api/anomalies/anomaly_detail_schemas';
+import {
+  financeImportCorrectionClient,
+  type FinanceImportCorrectionJobAccepted,
+  type FinanceImportCorrectionJobOutcome,
+  type FinanceImportCorrectionPreview,
+  type FinanceImportCorrectionSelection,
+} from '../api/finance_import/finance_import_correction_client';
 import { importWarningTransitionClient } from '../api/import_warning/import_warning_transition_client';
 import { ImportWarningTransitionError } from '../api/import_warning/import_warning_transition_errors';
 import type { WarningTransitionRequest } from '../api/import_warning/import_warning_transition_schemas';
@@ -40,9 +49,35 @@ type WarningFlowStatus =
   | 'receipt_received' | 'requery_loading' | 'observed' | 'stale'
   | 'outcome_unknown' | 'observation_failed' | 'typed_error';
 
+type CorrectionFlowStatus = 'idle' | 'preview_loading' | 'preview_ready' | 'apply_pending' | 'accepted' | 'observing' | 'completed' | 'typed_error';
+
+const ANOMALY_PAGE_SIZE = 200;
+
 function warningKey(prefix: string): string {
   if (typeof globalThis.crypto?.randomUUID === 'function') return `${prefix}-${globalThis.crypto.randomUUID()}`;
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function financeCorrectionAction(context: AnomalyRecoveryContextView | null): RecoveryAction | null {
+  if (!context) return null;
+  return context.available_actions.find((action) =>
+    action.form_schema_key === 'finance_import.correction.v1'
+    && action.owning_domain === 'finance_import'
+    && action.requires_preview
+    && action.apply_operation !== null
+    && action.source_binding_keys.length === 2
+    && action.source_binding_keys.includes('finance_import_row_identity')
+    && action.source_binding_keys.includes('source_version')
+    && action.source_bindings.length === 2
+  ) ?? null;
+}
+
+function correctionClassification(action: RecoveryAction): FinanceImportCorrectionSelection['classification_type'] {
+  return action.action_key === 'classify_client_refund_return' ? 'client_refund_return' : 'client_receipt';
+}
+
+function correctionBinding(action: RecoveryAction, key: string): string | number | null {
+  return action.source_bindings.find((binding) => binding.key === key)?.value ?? null;
 }
 
 export const AnomaliesPage: React.FC = () => {
@@ -52,6 +87,7 @@ export const AnomaliesPage: React.FC = () => {
   const [selectedWarning, setSelectedWarning] = useState<ImportWarningTaskViewModel | null>(null);
 
   const [anomalyDetail, setAnomalyDetail] = useState<AnomalyDetailBundleViewModel | null>(null);
+  const [anomalyRecovery, setAnomalyRecovery] = useState<AnomalyRecoveryContextView | null>(null);
   const [anomalyDetailLoading, setAnomalyDetailLoading] = useState(false);
   const [anomalyDetailError, setAnomalyDetailError] = useState<string | null>(null);
   const [anomalyRecoveryError, setAnomalyRecoveryError] = useState<string | null>(null);
@@ -64,10 +100,22 @@ export const AnomaliesPage: React.FC = () => {
   const [warningPreview, setWarningPreview] = useState<ImportWarningTransitionPreviewViewModel | null>(null);
   const [warningReceipt, setWarningReceipt] = useState<ImportWarningTransitionReceiptViewModel | null>(null);
   const [warningFlowError, setWarningFlowError] = useState<string | null>(null);
+  const [correctionClassificationType, setCorrectionClassificationType] = useState<FinanceImportCorrectionSelection['classification_type']>('client_receipt');
+  const [correctionObligations, setCorrectionObligations] = useState('');
+  const [correctionRefundLedgerEntry, setCorrectionRefundLedgerEntry] = useState('');
+  const [correctionReason, setCorrectionReason] = useState('');
+  const [correctionEvidence, setCorrectionEvidence] = useState('');
+  const [correctionPreview, setCorrectionPreview] = useState<FinanceImportCorrectionPreview | null>(null);
+  const [correctionAccepted, setCorrectionAccepted] = useState<FinanceImportCorrectionJobAccepted | null>(null);
+  const [correctionOutcome, setCorrectionOutcome] = useState<FinanceImportCorrectionJobOutcome | null>(null);
+  const [correctionFlowStatus, setCorrectionFlowStatus] = useState<CorrectionFlowStatus>('idle');
+  const [correctionError, setCorrectionError] = useState<string | null>(null);
 
   // Dual-lane State: Anomalies
   const [anomalies, setAnomalies] = useState<AnomalySummaryViewModel[]>([]);
   const [anomaliesLoading, setAnomaliesLoading] = useState<boolean>(true);
+  const [anomaliesLoadingMore, setAnomaliesLoadingMore] = useState<boolean>(false);
+  const [anomaliesHasMore, setAnomaliesHasMore] = useState<boolean>(false);
   const [anomaliesError, setAnomaliesError] = useState<string | null>(null);
 
   // Dual-lane State: Import Warnings
@@ -77,6 +125,7 @@ export const AnomaliesPage: React.FC = () => {
 
   // Race condition guards
   const anomalyRequestSeq = useRef<number>(0);
+  const anomalyNextOffset = useRef<number>(0);
   const importWarningRequestSeq = useRef<number>(0);
   const drawerRequestSeq = useRef<number>(0);
   const drawerAbortController = useRef<AbortController | null>(null);
@@ -84,6 +133,8 @@ export const AnomaliesPage: React.FC = () => {
   const warningPreviewKey = useRef(warningKey('warning-preview'));
   const warningApplyKey = useRef(warningKey('warning-apply'));
   const warningCorrelationId = useRef(warningKey('warning-transition'));
+  const correctionApplyKey = useRef(warningKey('finance-correction-apply'));
+  const correctionCorrelationId = useRef(warningKey('finance-correction'));
   const warningFlowLocked = ['apply_pending', 'receipt_received', 'requery_loading', 'outcome_unknown'].includes(warningFlowStatus);
 
   // Fetch Anomalies from live API
@@ -93,10 +144,12 @@ export const AnomaliesPage: React.FC = () => {
     setAnomaliesError(null);
 
     try {
-      const rawList = await anomalyQueryClient.queryAnomalies({ activeOnly: true });
+      const rawList = await anomalyQueryClient.queryAnomalies({ activeOnly: true, limit: ANOMALY_PAGE_SIZE, offset: 0 });
       if (seq === anomalyRequestSeq.current) {
         const adaptedList = rawList.map(adaptAnomalySummary);
         setAnomalies(adaptedList);
+        anomalyNextOffset.current = rawList.length;
+        setAnomaliesHasMore(rawList.length === ANOMALY_PAGE_SIZE);
       }
     } catch (err) {
       if (seq === anomalyRequestSeq.current) {
@@ -107,6 +160,31 @@ export const AnomaliesPage: React.FC = () => {
       if (seq === anomalyRequestSeq.current) {
         setAnomaliesLoading(false);
       }
+    }
+  }, []);
+
+  const loadMoreAnomalies = useCallback(async () => {
+    const seq = ++anomalyRequestSeq.current;
+    const offset = anomalyNextOffset.current;
+    setAnomaliesLoadingMore(true);
+    setAnomaliesError(null);
+    try {
+      const rawList = await anomalyQueryClient.queryAnomalies({ activeOnly: true, limit: ANOMALY_PAGE_SIZE, offset });
+      if (seq === anomalyRequestSeq.current) {
+        const adaptedList = rawList.map(adaptAnomalySummary);
+        setAnomalies((current) => {
+          const known = new Set(current.map((item) => item.id));
+          return [...current, ...adaptedList.filter((item) => !known.has(item.id))];
+        });
+        anomalyNextOffset.current = offset + rawList.length;
+        setAnomaliesHasMore(rawList.length === ANOMALY_PAGE_SIZE);
+      }
+    } catch (err) {
+      if (seq === anomalyRequestSeq.current) {
+        setAnomaliesError(err instanceof Error ? err.message : '載入更多異常資料失敗');
+      }
+    } finally {
+      if (seq === anomalyRequestSeq.current) setAnomaliesLoadingMore(false);
     }
   }, []);
 
@@ -142,6 +220,7 @@ export const AnomaliesPage: React.FC = () => {
     setSelectedAnomaly(null);
     setSelectedWarning(null);
     setAnomalyDetail(null);
+    setAnomalyRecovery(null);
     setWarningReferral(null);
     setAnomalyDetailLoading(false);
     setWarningReferralLoading(false);
@@ -149,6 +228,11 @@ export const AnomaliesPage: React.FC = () => {
     setWarningPreview(null);
     setWarningReceipt(null);
     setWarningFlowError(null);
+    setCorrectionPreview(null);
+    setCorrectionAccepted(null);
+    setCorrectionOutcome(null);
+    setCorrectionFlowStatus('idle');
+    setCorrectionError(null);
   }, [warningFlowLocked]);
 
   const openAnomalyDrawer = useCallback((anomaly: AnomalySummaryViewModel) => {
@@ -159,6 +243,7 @@ export const AnomaliesPage: React.FC = () => {
     setSelectedAnomaly(anomaly);
     setSelectedWarning(null);
     setAnomalyDetail(null);
+    setAnomalyRecovery(null);
     setAnomalyDetailError(null);
     setAnomalyRecoveryError(null);
     setAnomalyDetailLoading(true);
@@ -172,6 +257,20 @@ export const AnomaliesPage: React.FC = () => {
           if (detailResult.status === 'rejected') throw detailResult.reason;
           const recovery = recoveryResult.status === 'fulfilled' ? recoveryResult.value : null;
           setAnomalyDetail(adaptAnomalyDetailBundle(detailResult.value, recovery));
+          setAnomalyRecovery(recovery);
+          const action = financeCorrectionAction(recovery);
+          correctionApplyKey.current = warningKey('finance-correction-apply');
+          correctionCorrelationId.current = warningKey('finance-correction');
+          setCorrectionPreview(null);
+          setCorrectionAccepted(null);
+          setCorrectionOutcome(null);
+          setCorrectionFlowStatus('idle');
+          setCorrectionError(null);
+          setCorrectionClassificationType(action ? correctionClassification(action) : 'client_receipt');
+          setCorrectionObligations(recovery?.root_fact_snapshot.affected_obligation_identities.join('\n') ?? '');
+          setCorrectionRefundLedgerEntry(recovery?.root_fact_snapshot.original_refund_ledger_entry_identity ?? '');
+          setCorrectionReason('');
+          setCorrectionEvidence('');
           if (recoveryResult.status === 'rejected') {
             setAnomalyRecoveryError(recoveryResult.reason instanceof Error ? recoveryResult.reason.message : 'recovery context 暫時無法取得');
           }
@@ -225,7 +324,11 @@ export const AnomaliesPage: React.FC = () => {
       })
       .catch((err: unknown) => {
         if (seq === drawerRequestSeq.current && !controller.signal.aborted) {
-          setWarningReferralError(err instanceof Error ? err.message : '後端 typed referral contract 尚未開放');
+          setWarningReferralError(
+            err instanceof AnomalyValidationError && err.upstreamCode === 'import_warning_referral_unavailable'
+              ? '此警示尚未支援來源修復；可更新追蹤狀態，但不會修改來源根事實。'
+              : err instanceof Error ? err.message : '轉介資訊暫時無法取得，請關閉後重試。',
+          );
         }
       })
       .finally(() => {
@@ -364,6 +467,92 @@ export const AnomaliesPage: React.FC = () => {
     }
   };
 
+  const invalidateCorrectionPreview = () => {
+    if (correctionFlowStatus === 'apply_pending' || correctionFlowStatus === 'observing') return;
+    correctionApplyKey.current = warningKey('finance-correction-apply');
+    correctionCorrelationId.current = warningKey('finance-correction');
+    setCorrectionPreview(null);
+    setCorrectionAccepted(null);
+    setCorrectionOutcome(null);
+    setCorrectionError(null);
+    setCorrectionFlowStatus('idle');
+  };
+
+  const correctionRequest = (): FinanceImportCorrectionSelection | null => {
+    const action = financeCorrectionAction(anomalyRecovery);
+    const rowIdentity = action ? correctionBinding(action, 'finance_import_row_identity') : null;
+    const obligations = correctionObligations.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    const evidence = correctionEvidence.split(/\r?\n/).map((value) => value.trim()).filter(Boolean);
+    if (!action || typeof rowIdentity !== 'string' || !rowIdentity || !correctionReason.trim() || obligations.length === 0 || evidence.length === 0) return null;
+    return {
+      row_identity: rowIdentity,
+      classification_type: correctionClassificationType,
+      target_obligation_identities: obligations,
+      refund_ledger_entry_identity: correctionRefundLedgerEntry.trim() || null,
+      allow_partial_refund_recovery: false,
+      allow_refund_overage_recovery: false,
+      allow_client_receipt_overage: false,
+      reason: correctionReason.trim(),
+      evidence,
+    };
+  };
+
+  const previewCorrection = async () => {
+    const request = correctionRequest();
+    if (!request) {
+      setCorrectionError('請填寫分類、至少一筆義務識別、理由與佐證。');
+      return;
+    }
+    setCorrectionFlowStatus('preview_loading');
+    setCorrectionError(null);
+    try {
+      const preview = await financeImportCorrectionClient.preview(request);
+      if (preview.candidate.row_identity !== request.row_identity || preview.candidate.classification_type !== request.classification_type) throw new Error('Preview 與目前 Finance Import 更正輸入不一致。');
+      setCorrectionPreview(preview);
+      setCorrectionFlowStatus('preview_ready');
+    } catch (error) {
+      setCorrectionPreview(null);
+      setCorrectionFlowStatus('typed_error');
+      setCorrectionError(error instanceof Error ? error.message : 'Finance Import 更正 Preview 無法完成。');
+    }
+  };
+
+  const observeCorrectionOutcome = async (accepted = correctionAccepted) => {
+    if (!accepted) return;
+    setCorrectionFlowStatus('observing');
+    setCorrectionError(null);
+    try {
+      const outcome = await financeImportCorrectionClient.queryOutcome(accepted.job_id);
+      if (outcome.status === 'succeeded' && outcome.receipt === null) throw new Error('已完成的 Finance Import 更正 job 缺少 terminal receipt。');
+      setCorrectionOutcome(outcome);
+      if (outcome.status === 'succeeded' && outcome.receipt) {
+        setCorrectionFlowStatus('completed');
+        await fetchAnomalies();
+      } else {
+        setCorrectionFlowStatus('accepted');
+      }
+    } catch (error) {
+      setCorrectionFlowStatus('typed_error');
+      setCorrectionError(error instanceof Error ? error.message : 'Finance Import 更正 receipt 暫時無法取得。');
+    }
+  };
+
+  const applyCorrection = async () => {
+    const request = correctionRequest();
+    if (!request || !correctionPreview || correctionFlowStatus !== 'preview_ready') return;
+    setCorrectionFlowStatus('apply_pending');
+    setCorrectionError(null);
+    try {
+      const accepted = await financeImportCorrectionClient.apply(correctionPreview, request, { idempotencyKey: correctionApplyKey.current, correlationId: correctionCorrelationId.current });
+      setCorrectionAccepted(accepted);
+      setCorrectionFlowStatus('accepted');
+      await observeCorrectionOutcome(accepted);
+    } catch (error) {
+      setCorrectionFlowStatus('typed_error');
+      setCorrectionError(error instanceof Error ? error.message : 'Finance Import 更正 Apply 無法完成。');
+    }
+  };
+
   useEffect(() => {
     fetchAnomalies();
     fetchImportWarnings();
@@ -377,6 +566,8 @@ export const AnomaliesPage: React.FC = () => {
 
   const kpis = calculateAnomalyKPIs(anomalies);
   const filteredAnomalies = filterAnomalies(anomalies, selectedCategory, selectedStatusFilter);
+  const correctionAction = financeCorrectionAction(anomalyRecovery);
+  const correctionLocked = correctionFlowStatus === 'apply_pending' || correctionFlowStatus === 'observing';
 
   return (
     <div data-surface-id="anomalies.page">
@@ -545,16 +736,16 @@ export const AnomaliesPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Middle: Details & Related Entity */}
+              {/* Middle: typed source identity and summary metadata */}
               <div style={{ fontSize: '0.88rem', color: '#57423b', lineHeight: '1.5' }}>
-                <div><strong>關聯案件 / 實體：</strong><span style={{ color: '#c2410c', fontWeight: 600 }}>{anm.relatedEntity}</span></div>
-                <div style={{ marginTop: '2px' }}><strong>異常描述：</strong>{anm.description}</div>
+                <div><strong>來源識別：</strong><span style={{ color: '#c2410c', fontWeight: 600 }}>{anm.relatedEntity}</span></div>
+                <div style={{ marginTop: '2px' }}><strong>偵測資訊：</strong>{anm.description}</div>
               </div>
 
               {/* Bottom Actions Row */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '10px', borderTop: '1px dashed #f2e2dc' }}>
                 <div style={{ fontSize: '0.8rem', color: '#888' }}>
-                  💡 建議處置：{anm.suggestedAction}
+                  💡 {anm.suggestedAction}
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -578,6 +769,18 @@ export const AnomaliesPage: React.FC = () => {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {!anomaliesLoading && anomaliesHasMore && (
+        <div className="anomalies-pagination">
+          <button
+            type="button"
+            data-control-id="anomalies.list.load-more"
+            disabled={anomaliesLoadingMore}
+            onClick={() => void loadMoreAnomalies()}
+          >
+            {anomaliesLoadingMore ? '正在載入更多異常…' : '載入更多異常'}
+          </button>
         </div>
       )}
       </section>
@@ -693,7 +896,7 @@ export const AnomaliesPage: React.FC = () => {
                 <button
                   data-control-id="anomalies.drawer.resolve"
                   disabled={true}
-                  title="[查詢模式] 排除功能需待變更合約開放"
+                  title="通用 Resolve 只管理待辦，不能取代 owning Domain 的根事實修復。"
                   style={{ padding: '8px 20px', backgroundColor: '#94a3b8', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'not-allowed' }}
                 >
                   確認排除異常 (Resolve)
@@ -705,7 +908,7 @@ export const AnomaliesPage: React.FC = () => {
                   title="Warning disposition 不代表來源根事實已修復"
                   style={{ padding: '8px 20px', backgroundColor: '#94a3b8', color: '#fff', border: 'none', borderRadius: '8px', fontWeight: 700, cursor: 'not-allowed' }}
                 >
-                  Claim／Resolve 與來源修復仍未開放
+                  請依上方轉介流程處理來源資料
                 </button>
               )}
             </div>
@@ -728,8 +931,8 @@ export const AnomaliesPage: React.FC = () => {
                 <strong>領域 (Domain)：</strong>{selectedAnomaly.metadata.sourceDomain}<br />
                 <strong>資料版本：</strong>v{selectedAnomaly.metadata.sourceVersion} ｜ <strong>工作流版本：</strong>v{selectedAnomaly.metadata.workflowVersion}<br />
                 <strong>條件作用中：</strong>{selectedAnomaly.metadata.predicateActive ? '是 (Active)' : '否 (Inactive)'}<br />
-                <strong>關聯實體：</strong>{selectedAnomaly.relatedEntity}<br />
-                <strong>異常詳情：</strong>{selectedAnomaly.description}
+                <strong>來源識別：</strong>{selectedAnomaly.relatedEntity}<br />
+                <strong>偵測資訊：</strong>{selectedAnomaly.description}
               </p>
             </div>
 
@@ -796,20 +999,35 @@ export const AnomaliesPage: React.FC = () => {
               </>}
             </div>
 
-            {/* Resolution Form (Locked in Query Mode) */}
-            <div style={{ border: '1px solid #dec0b6', padding: '16px', borderRadius: '12px', backgroundColor: '#fff' }}>
-              <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e1b19', marginBottom: '10px' }}>
-                ✍️ 排除異常處置紀錄 (Resolve Reason)：
-              </h4>
-              <textarea
-                data-control-id="anomalies.drawer.resolve-reason"
-                disabled={true}
-                rows={3}
-                value=""
-                placeholder="[查詢模式] 排除異常處置紀錄需待變更合約開放..."
-                style={{ width: '100%', padding: '10px 14px', borderRadius: '8px', border: '1px solid #dec0b6', fontSize: '0.9rem', backgroundColor: '#f9f9f9', cursor: 'not-allowed' }}
-              />
-            </div>
+            {correctionAction ? (
+              <section data-surface-id="anomalies.finance-correction" style={{ border: '1px solid #b7d8d1', padding: '16px', borderRadius: '12px', backgroundColor: '#f5fffc' }}>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#115e59', marginBottom: '6px' }}>帳務異常根事實修復</h4>
+                <p style={{ fontSize: '0.84rem', color: '#365b55', marginTop: 0 }}>此表單只執行「{correctionAction.label}」的 Finance Import typed Preview／Apply；不會 Claim／Resolve 通用異常待辦。</p>
+                <div className="anomaly-recovery-metadata-row"><span>來源銀行列</span><span>{String(correctionBinding(correctionAction, 'finance_import_row_identity') ?? '—')}</span></div>
+                <label className="import-warning-transition-field"><span>分類類型</span><select data-control-id="anomalies.finance-correction.classification" value={correctionClassificationType} disabled={correctionLocked} onChange={(event) => { setCorrectionClassificationType(event.target.value as FinanceImportCorrectionSelection['classification_type']); invalidateCorrectionPreview(); }}>
+                  <option value="client_receipt">客戶收款</option><option value="client_refund">客戶退款</option><option value="client_refund_return">客戶退款退匯</option><option value="client_subsidy_return">客戶補助退回</option><option value="government_subsidy">政府補助</option><option value="staff_payout">月嫂付款</option>
+                </select></label>
+                <label className="import-warning-transition-field"><span>正式義務識別（每行一筆）</span><textarea data-control-id="anomalies.finance-correction.obligations" value={correctionObligations} disabled={correctionLocked} rows={3} onChange={(event) => { setCorrectionObligations(event.target.value); invalidateCorrectionPreview(); }} placeholder="例：client-obligation:123" /></label>
+                <label className="import-warning-transition-field"><span>原退款 ledger 識別（需要時填寫）</span><input data-control-id="anomalies.finance-correction.refund-ledger" value={correctionRefundLedgerEntry} disabled={correctionLocked} onChange={(event) => { setCorrectionRefundLedgerEntry(event.target.value); invalidateCorrectionPreview(); }} placeholder="例：client-ledger-entry:123" /></label>
+                <label className="import-warning-transition-field"><span>更正理由</span><textarea data-control-id="anomalies.finance-correction.reason" value={correctionReason} disabled={correctionLocked} rows={2} maxLength={500} onChange={(event) => { setCorrectionReason(event.target.value); invalidateCorrectionPreview(); }} /></label>
+                <label className="import-warning-transition-field"><span>佐證（每行一筆）</span><textarea data-control-id="anomalies.finance-correction.evidence" value={correctionEvidence} disabled={correctionLocked} rows={3} onChange={(event) => { setCorrectionEvidence(event.target.value); invalidateCorrectionPreview(); }} placeholder="例：receipt:123" /></label>
+                <div className="import-warning-transition-actions">
+                  <button type="button" data-control-id="anomalies.finance-correction.preview" disabled={correctionLocked || correctionFlowStatus === 'preview_loading'} onClick={() => void previewCorrection()}>{correctionFlowStatus === 'preview_loading' ? '預覽中…' : '產生更正 Preview'}</button>
+                  <button type="button" data-control-id="anomalies.finance-correction.apply" disabled={correctionFlowStatus !== 'preview_ready'} onClick={() => void applyCorrection()}>確認並提交更正 Apply</button>
+                  {correctionAccepted && correctionFlowStatus !== 'completed' && <button type="button" data-control-id="anomalies.finance-correction.observe" disabled={correctionLocked} onClick={() => void observeCorrectionOutcome()}>重新查詢 terminal receipt</button>}
+                </div>
+                {correctionPreview && <div className="import-warning-transition-preview"><strong>Preview（零寫入）</strong><span>{correctionPreview.candidate.classification_type} · {correctionPreview.candidate.owning_domain} · NT$ {correctionPreview.candidate.bank_amount_ntd.toLocaleString('en-US')}</span></div>}
+                {correctionAccepted && <div className="import-warning-transition-receipt"><strong>Durable Apply 已受理</strong><span>{correctionAccepted.job_id} · replayed={String(correctionAccepted.replayed)}</span></div>}
+                {correctionOutcome?.receipt && <div className="import-warning-transition-observed"><strong>Terminal receipt</strong><span>{correctionOutcome.receipt.row_identity} · batch v{correctionOutcome.receipt.resulting_batch_version} · ledger {correctionOutcome.receipt.ledger_entry_count} · allocation {correctionOutcome.receipt.allocation_count}</span></div>}
+                {correctionAccepted && correctionOutcome && correctionOutcome.status !== 'succeeded' && <div className="import-warning-transition-warning">Worker 狀態為 {correctionOutcome.status}；尚未取得 terminal receipt，不能宣稱帳務更正完成。</div>}
+                {correctionError && <div className="anomalies-detail-error">{correctionError}</div>}
+              </section>
+            ) : (
+              <div style={{ border: '1px solid #dec0b6', padding: '16px', borderRadius: '12px', backgroundColor: '#fff' }}>
+                <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e1b19', marginBottom: '10px' }}>根事實修復</h4>
+                <div className="anomalies-detail-empty">此異常沒有已註冊的 Finance Import correction 表單；請依 owning Domain 的 typed action 處理。</div>
+              </div>
+            )}
           </div>
         )}
         {selectedWarning && (
@@ -818,7 +1036,7 @@ export const AnomaliesPage: React.FC = () => {
               <h4 style={{ fontSize: '0.95rem', fontWeight: 700, color: '#1e1b19', marginBottom: '10px' }}>🔗 Owning referral（唯讀）</h4>
               {warningReferralLoading && <div className="anomalies-loading">正在載入匯入警示導向...</div>}
               {!warningReferralLoading && (warningReferralError || !warningReferral) && (
-                <div style={{ color: '#888' }}>後端 typed referral contract 尚未開放</div>
+                <div style={{ color: '#888' }}>{warningReferralError ?? '轉介資訊暫時無法取得，請關閉後重試。'}</div>
               )}
               {!warningReferralLoading && warningReferral && (
                 <div style={{ color: '#57423b', lineHeight: '1.7' }}>

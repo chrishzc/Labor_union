@@ -57,7 +57,7 @@ export interface AnomalySummaryViewModel {
   id: string; // fingerprint identity
   fingerprint: string;
   code: string; // definition_code
-  title: string; // "目前 typed view 未納入摘要欄位" (Gap)
+  title: string;
   severity: string; // "🔴 嚴重阻擋" | "🟡 警示待補"
   severityClass: 'critical' | 'warning';
   status: string; // "🟡 待處理" | "🔵 已認領" | "✅ 已排除"
@@ -65,10 +65,10 @@ export interface AnomalySummaryViewModel {
   rawWorkflowStatus: AnomalyWorkflowStatus;
   rawDomain: string;
   category: AnomalyDomainCategory;
-  relatedEntity: string; // "目前 typed view 未納入關聯實體欄位" (Gap)
-  description: string; // "目前 typed view 未納入描述欄位" (Gap)
-  suggestedAction: string; // "目前 typed view 未納入建議處理欄位" (Gap)
-  rootEvidence: string; // "目前 typed view 未納入根事實明細欄位" (Gap)
+  relatedEntity: string;
+  description: string;
+  suggestedAction: string;
+  rootEvidence: string;
   staffCalendarNavigation: StaffCalendarNavigationView | null;
   metadata: AnomalyMetadataViewModel;
 }
@@ -230,7 +230,7 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
     id: dto.fingerprint,
     fingerprint: dto.fingerprint,
     code: dto.definition_code,
-    title: '目前 typed view 未納入摘要欄位',
+    title: '異常偵測項目',
     severity: severityLabel,
     severityClass,
     status: statusLabel,
@@ -238,10 +238,10 @@ export function adaptAnomalySummary(dto: AnomalySummaryView): AnomalySummaryView
     rawWorkflowStatus: dto.workflow_status,
     rawDomain: dto.source_domain,
     category: mapDomainToCategory(dto.source_domain),
-    relatedEntity: '目前 typed view 未納入關聯實體欄位',
-    description: '目前 typed view 未納入描述欄位',
-    suggestedAction: '目前 typed view 未納入建議處理欄位',
-    rootEvidence: '目前 typed view 未納入根事實明細欄位',
+    relatedEntity: dto.source_identity,
+    description: `來源領域：${dto.source_domain}；來源版本：v${dto.source_version}`,
+    suggestedAction: '開啟詳情查看可執行的處置。',
+    rootEvidence: `來源識別：${dto.source_identity}`,
     staffCalendarNavigation: dto.staff_calendar_navigation ?? null,
     metadata: {
       sourceDomain: dto.source_domain,

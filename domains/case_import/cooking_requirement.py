@@ -1,4 +1,7 @@
-"""Pure normalization rules for the BeClass cooking requirement answer."""
+"""
+File: cooking_requirement.py
+Description: 將 BeClass 受控單選或核取欄位正規化為案件下廚需求。
+"""
 
 from __future__ import annotations
 
@@ -27,6 +30,7 @@ _ANSWER_VALUES = {
     "素食": True,
     "不用料理/訂月餐": False,
 }
+_SELECTED_MARKERS = frozenset({"1", "TRUE", "V", "Y", "YES", "✓", "✔", "是"})
 
 
 def normalize_cooking_requirement(survey_details: Mapping[str, object]) -> bool:
@@ -44,16 +48,33 @@ def normalize_cooking_requirement(survey_details: Mapping[str, object]) -> bool:
 
 
 def _controlled_answers(survey_details: Mapping[str, object]) -> set[str]:
-    answers: set[str] = set()
+    scalar_answers: set[str] = set()
     for question in _QUESTION_ALIASES:
         if question not in survey_details:
             continue
         answer = survey_details[question]
         if isinstance(answer, str) and answer.strip():
-            answers.add(answer.strip())
+            scalar_answers.add(answer.strip())
             continue
-        answers.add("")
-    return answers
+        scalar_answers.add("")
+    checkbox_answers = {
+        answer
+        for answer in _ANSWER_VALUES
+        if _is_selected_marker(survey_details.get(answer))
+    }
+    if not checkbox_answers:
+        return scalar_answers
+    return checkbox_answers | {
+        answer for answer in scalar_answers if answer in _ANSWER_VALUES
+    }
+
+
+def _is_selected_marker(value: object) -> bool:
+    if value is True:
+        return True
+    if not isinstance(value, str):
+        return False
+    return value.strip().upper() in _SELECTED_MARKERS
 
 
 def _missing() -> CookingRequirementDomainError:

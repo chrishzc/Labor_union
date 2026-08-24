@@ -1,8 +1,11 @@
-"""Ingest a finance workbook into staging and initial canonical classification."""
+"""
+File: ingestion.py
+Description: 將銀行工作簿安全入庫、保留初始分類與可辨識的冪等重播 receipt。
+"""
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -118,7 +121,7 @@ def _ingest_or_replay(
     with connection.cursor() as cursor:
         replay = _find_replay(cursor, idempotency_key, command_fingerprint)
         if replay is not None:
-            return replay
+            return replace(replay, replayed=True)
         progress.phase = "staging"
         staged = stage_finance_rows(
             cursor,

@@ -158,7 +158,7 @@ def lock_staff_mutexes(cursor: Any, staff_ids: tuple[int, ...]) -> None:
     if staff_ids != tuple(sorted(set(staff_ids))):
         raise ValueError("staff mutex ids must be canonical")
     if not staff_ids:
-        raise ValueError("scheduling_impacted_staff_required")
+        return
     placeholders = ",".join("%s" for _ in staff_ids)
     cursor.execute(
         f"SELECT id FROM staff WHERE id IN ({placeholders}) ORDER BY id FOR UPDATE",
@@ -288,6 +288,7 @@ def _facts_from_rows(
             service_started=order_row["actual_start_date"] is not None,
         ),
         planned_service_dates=official_dates,
+        planned_end_date=order_row["end_date"],
         client_finance=client_finance,
         payroll=payroll,
         lifecycle=lifecycle,
@@ -709,7 +710,7 @@ def _mysql_time(value: Any) -> time | None:
 
 
 _ORDER_SQL = (
-    "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,o.service_days,"
+    "SELECT o.case_no,o.status,o.lifecycle_version,o.start_date,o.end_date,o.service_days,"
     "o.service_hours_per_day,o.requires_cooking,o.floor_fee,o.service_start_time,"
     "o.service_end_time,o.service_end_day_offset,o.actual_start_date,"
     "o.staff_payment_due_date,clients.identity_status AS client_identity_status,"

@@ -1,4 +1,7 @@
-"""Pure planning of client obligations after an Orders Terms change."""
+"""
+File: obligation_planning.py
+Description: 規劃客戶帳務義務，並表達未排班條款補正的零寫入影響。
+"""
 
 from __future__ import annotations
 
@@ -270,6 +273,43 @@ def build_client_finance_terms_impact(
 ) -> ClientFinanceTermsCandidate:
     facts = _materialize_terms_facts(source_facts, order_terms, scheduling)
     return build_client_finance_terms_candidate(facts, change_identity)
+
+
+def build_preassignment_client_finance_noop(
+    source_facts: ClientFinanceTermsSourceFacts,
+    order_terms: OrderTerms,
+    scheduling: SchedulingGenerationCandidate,
+    change_identity: str,
+) -> ClientFinanceTermsCandidate:
+    _validate_identity(change_identity, "change identity")
+    if source_facts.case_no != scheduling.case_no or scheduling.assignments:
+        raise ValueError("preassignment_client_finance_facts_conflict")
+    if source_facts.existing_obligations or source_facts.open_nonstage_obligation_count:
+        raise ValueError("preassignment_client_finance_obligation_conflict")
+    settlement = ClientSettlementProjection(
+        False,
+        False,
+        fingerprint_payload({"mode": "preassignment", "settlement": "none"}),
+    )
+    return ClientFinanceTermsCandidate(
+        source_facts.case_no,
+        source_facts.account_version,
+        source_facts.account_version,
+        (),
+        (),
+        settlement,
+        (),
+        fingerprint_payload(
+            {
+                "mode": "preassignment_noop",
+                "case_no": source_facts.case_no,
+                "account_version": source_facts.account_version,
+                "terms": order_terms.canonical_payload(),
+                "scheduling_generation": scheduling.generation_number,
+                "settlement": settlement.fingerprint.value,
+            }
+        ),
+    )
 
 
 def build_client_finance_cancellation_impact(

@@ -9,7 +9,7 @@ import { ApiDecodeError, ApiHttpError } from '../shared/typed_errors';
 
 const Fingerprint = z.string().regex(/^[0-9a-f]{64}$/);
 const ActivePlanSchema = z.object({
-  plan: z.object({ id: z.number().int().positive(), case_no: z.string().min(1), status: z.enum(['proposed', 'accepted']) }).passthrough(),
+  plan: z.object({ id: z.number().int().positive(), case_no: z.string().min(1), status: z.enum(['proposed', 'accepted']), version: z.number().int().nonnegative() }).passthrough(),
   availability_lock: z.object({ lock_id: z.number().int().positive(), status: z.string() }).passthrough().nullable(),
 }).passthrough();
 const PreviewSchema = z.strictObject({
@@ -31,6 +31,7 @@ export interface ActiveWaitingDepositPlan {
   planId: number;
   status: string;
   activeLockId: number | null;
+  communicationVersion?: number;
 }
 
 function options(idempotencyKey?: string): RequestOptions {
@@ -56,7 +57,12 @@ export const waitingDepositLockClient = {
     );
     const data = decode(ActivePlanSchema, raw, '方案查詢');
     if (data.plan.case_no !== caseNo) throw new ApiDecodeError('預約鎖定方案案件 identity 不一致。');
-    return { planId: data.plan.id, status: data.plan.status, activeLockId: data.availability_lock?.lock_id ?? null };
+    return {
+      planId: data.plan.id,
+      status: data.plan.status,
+      activeLockId: data.availability_lock?.lock_id ?? null,
+      communicationVersion: data.plan.version,
+    };
   },
   async preview(caseNo: string, planId: number): Promise<WaitingDepositPreview> {
     const raw = await transport.post<unknown>(`/api/v1/orders/${encodeURIComponent(caseNo)}/matching-plans/${planId}/waiting-deposit-lock/acquire/preview`, undefined, options());

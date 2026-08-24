@@ -159,10 +159,6 @@
 
 <script charset="utf-8" src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
 <script>
-    let currentUserId = '';
-    let runtimePage = null;
-
-    // 嘗試從 URL 獲取 fallback userId
     const urlParams = new URLSearchParams(window.location.search);
     function parseLiffStateParams() {
         const rawState = urlParams.get('liff.state') || '';
@@ -172,7 +168,6 @@
         return new URLSearchParams(rawState);
     }
     const liffStateParams = parseLiffStateParams();
-    const urlUserId = urlParams.get('userId');
     const targetPage = urlParams.get('target') || liffStateParams.get('target');
     const targetPaths = {
         registration: '/line-registration',
@@ -181,80 +176,42 @@
         customer_service: '/line-mobile-admin?target=customer_service',
         staff_review: '/line-mobile-admin?target=staff_review'
     };
-    if (urlUserId) {
-        currentUserId = urlUserId;
-    }
+    const actions = [
+        { path: targetPaths.registration, icon: '📝', label: '客戶服務登記', description: '填寫或補正服務申請資料' },
+        { path: targetPaths.staff_order_search, icon: '📋', label: '月嫂案件查詢', description: '查看本人可處理的案件' },
+        { path: targetPaths.staff_schedule, icon: '📅', label: '月嫂服務行程', description: '查看排班、請假與服務紀錄' },
+    ];
 
     async function initLiff() {
         try {
-            const [lineResponse, runtimeResponse] = await Promise.all([
-                fetch('/api/line/config'),
-                fetch('/api/config/liff/runtime?page=gateway')
-            ]);
-            if (!lineResponse.ok || !runtimeResponse.ok) throw new Error('無法獲取 LIFF 設定');
-            const config = await lineResponse.json();
-            const runtime = await runtimeResponse.json();
-            runtimePage = runtime.page;
-            applyRuntime(runtime);
-
-            if (!config.liff_id) {
-                if (currentUserId) {
-                    if (targetPaths[targetPage]) {
-                        navigateTo(targetPaths[targetPage]);
-                        return;
-                    }
-                    return;
-                }
-                throw new Error('LIFF ID 尚未設定');
-            }
-            await liff.init({ liffId: config.liff_id });
+            const response = await fetch('/api/v1/line/identity/runtime-config');
+            const result = await response.json();
+            const liffId = result.data?.liff_id;
+            if (!response.ok || !liffId) throw new Error('LIFF 尚未完成設定，請聯絡工會人員。');
+            await liff.init({ liffId });
             
             if (!liff.isLoggedIn()) {
                 liff.login({ redirectUri: window.location.href });
                 return;
             }
 
-            const profile = await liff.getProfile();
-            currentUserId = profile.userId;
+            if (!liff.getIDToken()) throw new Error('無法取得 LINE 登入憑證，請確認 LIFF 已啟用 openid。');
             if (targetPaths[targetPage]) {
                 navigateTo(targetPaths[targetPage]);
                 return;
             }
-            
+            renderActions();
             document.getElementById('loaderOverlay').style.display = 'none';
         } catch (err) {
             console.error('LIFF Initialization failed', err);
-            // 如果 LIFF 失敗但 URL 有 userId，我們也放行
-            if (currentUserId) {
-                if (targetPaths[targetPage]) {
-                    navigateTo(targetPaths[targetPage]);
-                    return;
-                }
-                document.getElementById('loaderOverlay').style.display = 'none';
-            } else {
-                document.getElementById('loaderText').textContent = runtimePage?.content?.load_error || '載入失敗，請嘗試重新整理。';
-                setTimeout(() => { document.getElementById('loaderOverlay').style.display = 'none'; }, 1500);
-            }
+            document.getElementById('loaderText').textContent = err instanceof Error ? err.message : '載入失敗，請嘗試重新整理。';
         }
     }
 
-    function applyRuntime(runtime) {
-        const theme = runtime.theme;
-        const page = runtime.page;
-        const root = document.documentElement.style;
-        root.setProperty('--primary', theme.primary_color);
-        root.setProperty('--primary-hover', theme.primary_hover_color);
-        root.setProperty('--bg-gradient', theme.background);
-        root.setProperty('--text-dark', theme.text_color);
-        root.setProperty('--text-muted', theme.muted_text_color);
-        document.body.style.fontFamily = theme.font_family;
-        document.getElementById('pageLogo').textContent = page.content.logo || '';
-        document.getElementById('pageTitle').textContent = page.title;
-        document.getElementById('pageSubtitle').textContent = page.subtitle;
-        document.getElementById('loaderText').textContent = page.loading_text;
+    function renderActions() {
         const container = document.getElementById('actionsContainer');
         container.replaceChildren();
-        page.actions.forEach(action => {
+        actions.forEach(action => {
             const card = document.createElement('a');
             card.href = '#';
             card.className = 'option-card';
@@ -278,13 +235,8 @@
 
     function navigateTo(path) {
         document.getElementById('loaderOverlay').style.display = 'flex';
-        document.getElementById('loaderText').textContent = runtimePage?.content?.redirect_loading_text || '正在為您跳轉...';
-        
-        let url = path;
-        if (currentUserId) {
-            url += `?userId=${encodeURIComponent(currentUserId)}`;
-        }
-        window.location.href = url;
+        document.getElementById('loaderText').textContent = '正在為您跳轉...';
+        window.location.href = path;
     }
 
     window.onload = initLiff;

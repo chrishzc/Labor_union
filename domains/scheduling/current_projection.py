@@ -1,6 +1,6 @@
 """
 File: current_projection.py
-Description: 依正式服務時刻投影 current Scheduling 狀態、占用與已開工案件的 buffer 釋放。
+Description: 依正式服務日投影目前排班狀態、占用與已開工案件的 buffer 釋放。
 """
 
 from __future__ import annotations
@@ -741,12 +741,15 @@ def _validate_waiting_lock_dates(waiting_lock):
     _require_date(waiting_lock.assigned_end_date, "lock end date")
     if waiting_lock.assigned_end_date < waiting_lock.assigned_start_date:
         raise ValueError("waiting lock interval is inverted")
-    expected = _inclusive_dates(
-        waiting_lock.assigned_start_date,
-        waiting_lock.assigned_end_date,
-    )
-    if waiting_lock.locked_service_dates != expected:
-        raise ValueError("waiting lock must cover its full service interval")
+    service_dates = waiting_lock.locked_service_dates
+    if not service_dates or service_dates != tuple(sorted(set(service_dates))):
+        raise ValueError("waiting lock service dates must be canonical and nonempty")
+    if any(
+        item < waiting_lock.assigned_start_date
+        or item > waiting_lock.assigned_end_date
+        for item in service_dates
+    ):
+        raise ValueError("waiting lock service date is outside assignment interval")
 
 
 def _validate_staff_ownership(facts):

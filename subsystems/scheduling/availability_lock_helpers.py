@@ -477,7 +477,27 @@ def build_acquired_event_payload(
         )
     if canonical_segments != rebuilt["segments"]:
         raise ValueError("plan_snapshot.segments are not canonical")
-    if canonical_lock_rows != rebuilt["lock_rows"]:
+    if not canonical_lock_rows:
+        raise ValueError("plan_snapshot.lock_rows are required")
+    segment_ranges = {
+        (row["segment_id"], row["staff_id"]): (
+            row["assigned_start_date"], row["assigned_end_date"],
+        )
+        for row in rebuilt["segments"]
+    }
+    for row in canonical_lock_rows:
+        service_range = segment_ranges.get((row["segment_id"], row["staff_id"]))
+        if service_range is None:
+            raise ValueError("plan_snapshot lock row does not match a segment")
+        service_date = date.fromisoformat(row["lock_date"])
+        if not service_range[0] <= service_date.isoformat() <= service_range[1]:
+            raise ValueError("plan_snapshot lock row is outside its segment")
+    if canonical_lock_rows != sorted(
+        canonical_lock_rows,
+        key=lambda row: (row["lock_date"], row["segment_id"], row["staff_id"]),
+    ) or len(canonical_lock_rows) != len(
+        {(row["segment_id"], row["staff_id"], row["lock_date"]) for row in canonical_lock_rows}
+    ):
         raise ValueError("plan_snapshot.lock_rows are not canonical")
 
     return {
@@ -487,7 +507,7 @@ def build_acquired_event_payload(
         "lock_id": request["lock_id"],
         "segments": [dict(segment) for segment in rebuilt["segments"]],
         "staff_ids": list(rebuilt["staff_ids"]),
-        "lock_rows": [dict(row) for row in rebuilt["lock_rows"]],
+        "lock_rows": [dict(row) for row in canonical_lock_rows],
         "case_start_date": rebuilt["case_start_date"],
         "case_end_date": rebuilt["case_end_date"],
     }
@@ -529,5 +549,4 @@ def normalize_lock_acquisition_inputs(
         "canonical_conflicts": canonical_conflicts,
         "acquired_event_payload": acquired_event_payload,
     }
-
 

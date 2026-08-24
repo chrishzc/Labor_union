@@ -351,27 +351,25 @@ def test_hcm_existing_case_without_matching_receipt_becomes_hcm_review(monkeypat
     assert captured
 
 
-def test_unique_pair_with_ambiguous_cooking_creates_review_without_changing_order(monkeypatch):
+def test_unique_pair_with_ambiguous_cooking_creates_review_without_changing_order():
     review_calls = []
-    monkeypatch.setattr(
-        reconciliation,
-        "_load_pair_facts",
-        lambda *_: {
+    class Port:
+        def load_pair_facts(self, _case_no):
+            return {
             "hcm_count": 1,
             "beclass_count": 1,
             "beclass_id": 9,
             "survey_details": {},
             "requires_cooking": None,
-        },
-    )
-    monkeypatch.setattr(reconciliation, "_record_cooking_review", lambda *args: review_calls.append(args))
-    monkeypatch.setattr(
-        reconciliation,
-        "_apply_cooking_terms",
-        lambda *_: pytest.fail("ambiguous cooking must not update Orders"),
-    )
+            }
 
-    result = reconciliation.reconcile_hcm_beclass_cooking(object(), "115000009")
+        def record_cooking_review(self, *args):
+            review_calls.append(args)
+
+        def apply_cooking_terms(self, *_args):
+            pytest.fail("ambiguous cooking must not update Orders")
+
+    result = reconciliation.reconcile_hcm_beclass_cooking(Port(), "115000009")
 
     assert result.status == "cooking_review_required"
     assert review_calls

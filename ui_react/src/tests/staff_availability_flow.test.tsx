@@ -103,6 +103,22 @@ describe('Staff availability flow', () => {
     expect(screen.getByText('已觀察最新不可服務期間')).toBeInTheDocument();
   });
 
+  it('server Preview blocker 必須直接顯示，且不得啟用 Apply', async () => {
+    vi.mocked(staffAvailabilityClient.previewChange).mockResolvedValueOnce({
+      ...STAFF_AVAILABILITY_PREVIEW_RESPONSE.data!,
+      can_apply: false,
+      blockers: ['STAFF_AVAILABILITY_INTERVAL_CONFLICT'],
+    });
+    await openAvailability();
+
+    fireEvent.change(screen.getByLabelText('新增原因'), { target: { value: '去敏衝突驗收' } });
+    fireEvent.click(screen.getByRole('button', { name: '預覽新增' }));
+
+    await waitFor(() => expect(screen.getByText(/STAFF_AVAILABILITY_INTERVAL_CONFLICT/)).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: '套用新增' })).toBeDisabled();
+    expect(staffAvailabilityClient.applyChange).not.toHaveBeenCalled();
+  });
+
   it('cancel 使用 append-only block identity，requery 失敗仍保留 receipt 觀察狀態', async () => {
     await openAvailability();
     fireEvent.change(screen.getByLabelText('取消原因'), { target: { value: '恢復可服務' } });

@@ -105,11 +105,28 @@ def test_default_service_registration_menu_opens_the_registration_liff_page() ->
     assert "registration: '/line-registration'" in gateway
 
 
+def test_gateway_and_mobile_admin_use_canonical_liff_config_without_url_identity_bypass() -> None:
+    gateway = (ROOT / "line" / "static" / "gateway.html").read_text(encoding="utf-8")
+    mobile_admin = (ROOT / "line" / "static" / "mobile_admin.html").read_text(encoding="utf-8")
+
+    assert "/api/v1/line/identity/runtime-config" in gateway
+    assert "/api/v1/line/identity/runtime-config" in mobile_admin
+    assert "/api/line/config" not in gateway
+    assert "/api/config/liff/runtime" not in gateway
+    assert "urlUserId" not in gateway
+    assert "?userId=" not in gateway
+    assert "/api/line/config" not in mobile_admin
+
+
 def test_registration_page_uses_only_canonical_identity_endpoints() -> None:
     source = (ROOT / "line" / "static" / "register.html").read_text(encoding="utf-8")
 
     assert "/api/v1/line/identity/runtime-config" in source
     assert "/api/v1/line/identity/registration/apply" in source
+    assert "function canUseDevelopmentIdentityFallback(error)" in source
+    assert "developmentLineUserId.trim() !== ''" in source
+    assert "error?.message === 'LIFF 尚未完成設定。'" in source
+    assert "const code = detail?.code || detail?.error?.code || result?.error?.code;" in source
     assert "/api/line/register" not in source
     assert "/api/line/config" not in source
 

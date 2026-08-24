@@ -18,6 +18,7 @@ from domains.scheduling.matching_coordination import (
     MatchingSourceVersion,
     SOURCE_KINDS,
     StableRejectionReason,
+    build_criteria_snapshot,
 )
 from shared_kernel.fingerprints import fingerprint_payload
 from shared_kernel.identities import ActorContext, CorrelationId, IdempotencyKey
@@ -44,6 +45,7 @@ from subsystems.scheduling.matching_coordination_contracts import (
     QueryMatchingCoordination,
     command_fingerprint,
     candidate_view,
+    snapshot_view,
 )
 
 
@@ -114,6 +116,34 @@ def test_all_sixteen_commands_have_stable_names_and_common_identity() -> None:
 
     assert [item.command_name.value for item in values] == [item.value for item in MatchingCommandName]
     assert all(command_fingerprint(item).value for item in values)
+
+
+def test_initial_preview_allows_no_prior_client_source_tuple() -> None:
+    command = PreviewInitialCriteriaSnapshot(
+        **{**_common(), "expected_source_versions": None}
+    )
+
+    assert command.expected_source_versions is None
+    with pytest.raises(TypeError, match="source versions are required"):
+        ApplyInitialCriteriaSnapshot(
+            **{**_common(), "expected_source_versions": None},
+            preview_fingerprint=fingerprint_payload({"preview": "initial"}),
+        )
+
+
+def test_snapshot_view_thaws_nested_immutable_criteria_for_transport() -> None:
+    snapshot = build_criteria_snapshot(
+        snapshot_id="matching:CASE-001:criteria:1:transport",
+        case_no="CASE-001",
+        criteria_version=1,
+        criteria={"nested": {"service": ("day-1", "day-2")}},
+        source_versions=_sources(),
+        created_at=datetime(2026, 8, 22, tzinfo=timezone.utc),
+    )
+
+    view = snapshot_view(snapshot)
+
+    assert dict(view.criteria)["nested"] == {"service": ("day-1", "day-2")}
 
 
 @pytest.mark.parametrize(

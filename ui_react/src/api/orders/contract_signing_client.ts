@@ -46,6 +46,29 @@ const EnvelopeSchema = z.strictObject({
 
 export type ContractSigningStatus = z.infer<typeof ContractSigningStatusSchema>;
 
+export interface ContractDocumentDownloadArtifact {
+  blob: Blob;
+  filename: string;
+  mimeType: string;
+}
+
+function filenameFromHeader(value: string | null, fallback: string): string {
+  const match = value?.match(/filename="?([^";]+)"?/i);
+  const filename = match?.[1]?.trim();
+  return filename && filename.length <= 255 ? filename : fallback;
+}
+
+async function downloadError(response: Response): Promise<ApiHttpError> {
+  const raw = await response.json().catch(() => undefined);
+  return new ApiHttpError(
+    response.status,
+    `HTTP_${response.status}`,
+    `契約文件下載失敗（HTTP ${response.status}）。`,
+    response.status >= 500,
+    raw,
+  );
+}
+
 export const contractSigningClient = {
   async query(caseNo: string, options?: { signal?: AbortSignal }): Promise<ContractSigningStatus> {
     const canonicalCaseNo = caseNo.trim();
@@ -72,5 +95,37 @@ export const contractSigningClient = {
       throw new Error('契約簽署狀態案件識別不一致。');
     }
     return envelope.data;
+  },
+
+  async downloadDocument(
+    caseNo: string,
+    documentVersionId: number,
+    signal?: AbortSignal,
+  ): Promise<ContractDocumentDownloadArtifact> {
+    const canonicalCaseNo = caseNo.trim();
+    if (!canonicalCaseNo) throw new Error('案件編號不得為空。');
+    if (!Number.isInteger(documentVersionId) || documentVersionId <= 0) {
+      throw new Error('契約文件版本識別無效。');
+    }
+    const token = sessionClient.getToken();
+    if (!token) throw new ApiHttpError(401, 'UNAUTHENTICATED', '請先登入。');
+    const response = await fetch(
+      `/api/v1/orders/${encodeURIComponent(canonicalCaseNo)}/contract-signing/documents/${documentVersionId}/download`,
+      { method: 'GET', headers: { Authorization: `Bearer ${token}` }, signal },
+    );
+    if (!response.ok) throw await downloadError(response);
+    const mimeType = response.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase() ?? '';
+    if (!mimeType || mimeType === 'application/json') {
+      throw new ApiHttpError(422, 'CONTRACT_DOCUMENT_DOWNLOAD_MEDIA_TYPE', '契約文件下載回應缺少可用檔案類型。');
+    }
+    const blob = await response.blob();
+    if (blob.size === 0) {
+      throw new ApiHttpError(422, 'CONTRACT_DOCUMENT_DOWNLOAD_EMPTY', '契約文件下載內容為空。');
+    }
+    return {
+      blob,
+      mimeType,
+      filename: filenameFromHeader(response.headers.get('content-disposition'), `contract-${canonicalCaseNo}-${documentVersionId}`),
+    };
   },
 };

@@ -1,25 +1,6 @@
 """
-================================================================================
-檔案名稱: ui/pages/03_calendar.py
-功能說明: 服務人員行事曆與檔期調控獨立頁面 (CalendarUI)
-專案名稱: Lobar Union - 服務人員與訂單管理系統
-建立日期: 2026-07-03
-架構規範: 已從 OrderUI 完全解耦的獨立行事曆頁面
-================================================================================
-職責與業務規則:
-1. 提供服務人員 (月嫂) 檔期行事曆檢視與切換。
-2. 兩階段操作選單 (ADR-v12-01, ADR-v13-01):
-   - 「1. 執行操作」: [不連動，單純看行事曆 | 訂單匹配 | 出勤天數精算]
-   - 「2. 訂單選擇」: 動態過濾對應狀態案件 (預設為無)。
-3. 四色 HTML 月曆 (⚪白/🟡黃/🔴紅/🟢綠底):
-   - 🟢 綠底休假: 輸入單日排休調整時，月曆表格即時同步呈現綠底標示。
-   - 🔴 紅底工作日: 每增加 1 天綠底休假，後續紅底工作日與完工日自動向後動態順延展延。
-   - ⚪ 解鎖備用期: 在「出勤天數精算」下，凡屬 target_order 且超出完工日之舊預排黃底日期強制抹除解鎖為白底。
-4. 出勤天數精算與動態排假 (RULE[AGENTS.md]):
-   - 確定實際服務開始日 (actual_start_date) 之案件解鎖精算面板。
-   - 國定假日單日獨立個體決策: 勾選放假順延 1 天，未勾選照常上班。
-5. 導覽約束: ui/app.py 動態載入與 Streamlit `/calendar` 直接入口都必須呼叫同一個 show()。
-================================================================================
+File: 03_calendar.py
+Description: Streamlit 月嫂排班入口，僅以 typed API 顯示月曆、配對與請假代班工作區。
 """
 
 import streamlit as st
@@ -36,11 +17,11 @@ from ui.api_clients.order_calendar_detail_api_client import (
     OrderCalendarDetailApiError,
 )
 from ui.api_clients.order_actual_start_api_client import ActualStartApiClient
+from ui.api_clients.order_lifecycle_control_api_client import (
+    OrderLifecycleControlApiClient,
+    OrderLifecycleControlApiError,
+)
 from ui.pages.order.actual_start_panel import render_actual_start_panel
-class OrderLifecycleAdminApiClient:
-    def __init__(self, *args, **kwargs): pass
-    def get_control_state(self, *args, **kwargs): return None
-class OrderLifecycleAdminApiError(Exception): pass
 from ui.api_clients.order_summary_api_client import OrderSummaryApiClient
 from ui.api_clients.staff_summary_api_client import StaffSummaryApiClient
 from ui.api_clients.leave_substitution_api_client import (
@@ -267,12 +248,6 @@ def _multi_caregiver_request(path, *, method="GET", payload=None):
     return body.get("data") or {}
 
 
-def _current_admin_actor() -> str:
-    profile = st.session_state.get("line_admin_profile") or {}
-    username = profile.get("username") if isinstance(profile, dict) else None
-    return str(username or "development-bypass").strip()
-
-
 def _calendar_has_unsaved_leave_changes() -> bool:
     return any(
         (
@@ -417,10 +392,13 @@ def _render_assignment_leave_resolution(
 
 
 def _load_actual_start_control_state(case_no):
-    client = OrderLifecycleAdminApiClient(_current_admin_actor())
+    client = OrderLifecycleControlApiClient(
+        base_url=resolve_api_base_url(),
+        headers=build_admin_headers(),
+    )
     try:
-        return client.get_control_state(case_no)
-    except (OrderLifecycleAdminApiError, ValueError) as error:
+        return client.query(case_no).model_dump(mode="json")
+    except (OrderLifecycleControlApiError, ValueError) as error:
         st.error(f"無法取得權威生命週期控制狀態：{error}")
         return None
 

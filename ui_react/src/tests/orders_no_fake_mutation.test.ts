@@ -123,7 +123,8 @@ describe('OrdersPage zero fake mutation', () => {
   it('removes fake date-side manual mutations', async () => {
     render(React.createElement(OrdersPage));
     await screen.findByText('ORD-2026-0801');
-    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /確認服務日期/ })[0]));
+    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]));
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: /實質服務日曆/ })));
     await waitFor(() => expect(ordersMutationClient.getServiceDates).toHaveBeenCalledOnce());
     expect(screen.queryByRole('button', { name: /轉入正式服務履約/ })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /電話補登客戶確認/ })).not.toBeInTheDocument();
@@ -181,15 +182,14 @@ describe('OrdersPage zero fake mutation', () => {
     expect(candidateContactPoolClient.query).toHaveBeenCalledTimes(2);
   });
 
-  it('offers cancellation Query and Preview without exposing Apply', async () => {
+  it('does not expose an untyped cancellation Apply control', async () => {
     render(React.createElement(OrdersPage));
     await screen.findByText('ORD-2026-0801');
-    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /取消試算/ })[0]));
-    await screen.findByText('取消前根事實');
-    fireEvent.click(screen.getByRole('button', { name: '產生取消預覽' }));
-    await screen.findByText('取消影響預覽（零寫入）');
+    await act(async () => fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]));
+    await act(async () => fireEvent.click(await screen.findByRole('button', { name: /訂單取消、退款與受控重開/ })));
+    await waitFor(() => expect(orderCancellationClient.query).toHaveBeenCalledOnce());
     expect(screen.queryByRole('button', { name: /確認執行取消/ })).not.toBeInTheDocument();
-    expect(orderCancellationClient.preview).toHaveBeenCalledOnce();
+    expect(orderCancellationClient.preview).not.toHaveBeenCalled();
     expect(window.alert).not.toHaveBeenCalled();
   });
 

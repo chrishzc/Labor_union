@@ -68,9 +68,9 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
       expect(screen.getByText('BECLASS-CLI-002')).toBeInTheDocument();
     });
 
-    // Check gap text on cards
-    const gapTitles = screen.getAllByText('目前 typed view 未納入摘要欄位');
-    expect(gapTitles.length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText('異常偵測項目').length).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText(/目前 typed view 未納入/)).not.toBeInTheDocument();
+    expect(anomalyQueryClient.queryAnomalies).toHaveBeenCalledWith({ activeOnly: true, limit: 200, offset: 0 });
 
     for (const surfaceId of [
       'anomalies.page',
@@ -98,6 +98,31 @@ describe('AnomaliesPage Real Data Integration Suite', () => {
     // VALID_ANOMALY_SUMMARY_3: warning + resolved -> resolved (not active warning)
     const kpiValues = screen.getAllByText('1 筆');
     expect(kpiValues.length).toBe(4); // critical, warning, open, claimed all equal 1
+  });
+
+  it('loads the next bounded page so a late Finance Import correction is reachable', async () => {
+    const firstPage = Array.from({ length: 200 }, (_, index) => ({
+      ...VALID_ANOMALY_SUMMARY_1,
+      fingerprint: index.toString(16).padStart(64, '0'),
+      source_identity: `schedule:fixture-${index}`,
+    }));
+    const financeImportAnomaly = {
+      ...VALID_ANOMALY_SUMMARY_2,
+      fingerprint: 'f'.repeat(64),
+      definition_code: 'finance_import_manual_review',
+      source_domain: 'finance_import',
+      source_identity: 'finance-import-row:94',
+    };
+    vi.spyOn(anomalyQueryClient, 'queryAnomalies')
+      .mockResolvedValueOnce(firstPage)
+      .mockResolvedValueOnce([financeImportAnomaly]);
+
+    render(<AnomaliesPage />);
+    await waitFor(() => expect(screen.getByRole('button', { name: '載入更多異常' })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: '載入更多異常' }));
+
+    await waitFor(() => expect(screen.getByText('finance-import-row:94')).toBeInTheDocument());
+    expect(anomalyQueryClient.queryAnomalies).toHaveBeenNthCalledWith(2, { activeOnly: true, limit: 200, offset: 200 });
   });
 
   it('filters anomaly cards by domain category tabs', async () => {

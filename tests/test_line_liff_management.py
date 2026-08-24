@@ -110,7 +110,6 @@ def test_liff_identity_uses_verified_subject(monkeypatch):
 @pytest.mark.parametrize(
     ("filename", "page_id"),
     [
-        ("gateway.html", "gateway"),
         ("bind.html", "bind"),
         ("register.html", "registration"),
     ],
@@ -119,6 +118,14 @@ def test_liff_pages_consume_public_runtime_config(filename: str, page_id: str):
     source = (ROOT / "line" / "static" / filename).read_text(encoding="utf-8")
     assert f"/api/config/liff/runtime?page={page_id}" in source
     assert "textContent" in source
+
+
+def test_gateway_consumes_canonical_identity_runtime_config_without_identity_in_url():
+    source = (ROOT / "line" / "static" / "gateway.html").read_text(encoding="utf-8")
+
+    assert "/api/v1/line/identity/runtime-config" in source
+    assert "/api/config/liff/runtime?page=gateway" not in source
+    assert "?userId=" not in source
 
 
 def test_bind_and_registration_send_id_token_to_backend():

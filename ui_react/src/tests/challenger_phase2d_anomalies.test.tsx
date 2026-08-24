@@ -365,10 +365,8 @@ describe('Adversarial Challenger 1: Phase 2D Integration Deep Stress-Testing', (
       fireEvent.click(resolveBtn);
       fireEvent.keyDown(resolveBtn, { key: 'Enter', code: 'Enter' });
 
-      // Find disabled textarea
-      const textarea = screen.getByPlaceholderText(/\[查詢模式\] 排除異常處置紀錄需待變更合約開放/);
-      expect(textarea).toBeDisabled();
-      fireEvent.change(textarea, { target: { value: 'Attempted hack' } });
+      // A generic text field cannot impersonate an owning-Domain correction.
+      expect(document.querySelector('[data-surface-id="anomalies.finance-correction"]')).toBeNull();
 
       // Verify no requests / dialogs
       expect((globalThis.fetch as any).mock.calls.length).toBe(initialFetchCount);

@@ -196,6 +196,61 @@ class StaffPayoutEventView(_StrictModel):
     reconciliation_reference: str
 
 
+class StaffPayoutMoneyView(_StrictModel):
+    amount: int
+
+
+class StaffPayoutAllocationPreviewView(_StrictModel):
+    bank_fact_identity: str
+    obligation_identity: str
+    amount: StaffPayoutMoneyView
+
+
+class StaffPayoutLedgerEventPreviewView(_StrictModel):
+    identity: str
+    event_type: Literal["payout", "return", "reversal"]
+    status: Literal["succeeded"]
+    staff_id: int = Field(gt=0)
+    amount: StaffPayoutMoneyView
+    finance_import_fact_identity: str | None = None
+    reversal_of_event_identity: str | None = None
+
+
+class StaffPayoutObligationLinkPreviewView(_StrictModel):
+    event_identity: str
+    obligation_identity: str
+    allocated_amount: StaffPayoutMoneyView
+
+
+class StaffOverpaymentRecoveryCandidateView(_StrictModel):
+    identity: str
+    staff_id: int = Field(gt=0)
+    original_amount: StaffPayoutMoneyView
+    source_bank_fact_identities: list[str]
+    source_obligation_identities: list[str]
+
+
+class StaffPayoutCandidatePreviewView(_StrictModel):
+    staff_id: int = Field(gt=0)
+    bank_total: StaffPayoutMoneyView
+    obligation_total: StaffPayoutMoneyView
+    allocations: list[StaffPayoutAllocationPreviewView]
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    events: list[StaffPayoutLedgerEventPreviewView]
+    obligation_links: list[StaffPayoutObligationLinkPreviewView]
+    resulting_status: Literal["payable", "partially_paid", "completed", "recovery_required", "anomaly"]
+    difference_mode: Literal["underpayment", "overpayment"] | None = None
+    recovery: StaffOverpaymentRecoveryCandidateView | None = None
+
+
+class StaffPayoutReopenCandidatePreviewView(_StrictModel):
+    staff_id: int = Field(gt=0)
+    event: StaffPayoutLedgerEventPreviewView
+    obligation_links: list[StaffPayoutObligationLinkPreviewView]
+    resulting_status: Literal["payable", "partially_paid", "completed", "recovery_required", "anomaly"]
+    fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class StaffPayablesQueryView(_StrictModel):
     staff_id: int = Field(gt=0)
     staff_payables_version: int = Field(ge=0)
@@ -207,7 +262,7 @@ class StaffPayoutPreviewView(_StrictModel):
     event_type: str
     staff_payables_version: int = Field(ge=0)
     bank_facts_version: int = Field(ge=0)
-    candidate: dict[str, Any]
+    candidate: StaffPayoutCandidatePreviewView | StaffPayoutReopenCandidatePreviewView
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
@@ -247,6 +302,8 @@ __all__ = [
     "ReversalPreviewBody",
     "StaffPayablesQueryView",
     "StaffPayoutPreviewView",
+    "StaffPayoutCandidatePreviewView",
+    "StaffPayoutReopenCandidatePreviewView",
     "StaffPayoutDifferenceSourceView",
     "StaffPayoutReceiptView",
     "StaffPayoutTypedErrorView",

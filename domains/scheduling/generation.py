@@ -1,4 +1,7 @@
-"""Pure scheduling generation replacement candidate builder."""
+"""
+File: generation.py
+Description: 建立版本化排班世代候選，區分未指派條款補正與正式指派重建。
+"""
 
 from __future__ import annotations
 
@@ -198,6 +201,61 @@ def build_generation_candidate(
         ),
         assignments=assignments,
         buffers=buffers,
+    )
+
+
+def build_preassignment_terms_candidate(
+    facts: SchedulingGenerationFacts,
+    current_terms: OrderTerms,
+    proposed_terms: OrderTerms,
+) -> SchedulingGenerationCandidate:
+    """Build an empty generation only when Terms do not alter schedule shape."""
+    if facts.segments:
+        raise ValueError("preassignment scheduling facts must not contain segments")
+    if facts.service_started:
+        raise ValueError("preassignment_service_started_conflict")
+    if (
+        proposed_terms.planned_start_date != current_terms.planned_start_date
+        or proposed_terms.service_days != current_terms.service_days
+    ):
+        raise ValueError("scheduling_segments_required")
+    return SchedulingGenerationCandidate(
+        case_no=facts.case_no,
+        generation_number=facts.generation_number + 1,
+        expected_aggregate_version=facts.aggregate_version,
+        resulting_aggregate_version=facts.aggregate_version + 1,
+        cancelled_assignment_ids=(),
+        assignments=(),
+        buffers=(),
+    )
+
+
+def build_preassignment_cooking_correction_candidate(
+    facts: SchedulingGenerationFacts,
+    current_terms: OrderTerms,
+    proposed_terms: OrderTerms,
+) -> SchedulingGenerationCandidate:
+    """Allow a uniquely sourced cooking correction without rewriting service shape."""
+    if facts.segments:
+        raise ValueError("preassignment scheduling facts must not contain segments")
+    if (
+        proposed_terms.planned_start_date != current_terms.planned_start_date
+        or proposed_terms.service_days != current_terms.service_days
+        or proposed_terms.service_hours_per_day != current_terms.service_hours_per_day
+        or proposed_terms.floor_fee != current_terms.floor_fee
+        or proposed_terms.service_time != current_terms.service_time
+    ):
+        raise ValueError("preassignment_cooking_correction_must_not_change_schedule")
+    if proposed_terms.requires_cooking is None:
+        raise ValueError("preassignment_cooking_correction_requires_decision")
+    return SchedulingGenerationCandidate(
+        case_no=facts.case_no,
+        generation_number=facts.generation_number + 1,
+        expected_aggregate_version=facts.aggregate_version,
+        resulting_aggregate_version=facts.aggregate_version + 1,
+        cancelled_assignment_ids=(),
+        assignments=(),
+        buffers=(),
     )
 
 

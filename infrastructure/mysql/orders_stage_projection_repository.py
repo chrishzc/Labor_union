@@ -28,6 +28,13 @@ SELECT o.case_no,
        terms_fact.terms_event_id,
        terms_fact.terms_version,
        terms_fact.terms_created_at,
+       candidate_pool.pool_id AS candidate_pool_id,
+       candidate_pool.pool_created_at AS candidate_pool_created_at,
+       COALESCE(candidate_pool.candidate_count, 0) AS candidate_pool_candidate_count,
+       COALESCE(candidate_pool.contacted_count, 0) AS candidate_pool_contacted_count,
+       candidate_pool.contacted_at AS candidate_pool_contacted_at,
+       COALESCE(candidate_pool.replied_count, 0) AS candidate_pool_replied_count,
+       candidate_pool.replied_at AS candidate_pool_replied_at,
        plan.id AS matching_plan_id,
        plan.version AS matching_plan_version,
        plan.status AS matching_plan_status,
@@ -87,6 +94,22 @@ SELECT o.case_no,
               MAX(created_at) AS terms_created_at
          FROM order_terms_change_events GROUP BY case_no
   ) terms_fact ON terms_fact.case_no = o.case_no
+  LEFT JOIN (
+       SELECT pool.case_no,
+              pool.id AS pool_id,
+              pool.created_at AS pool_created_at,
+              COUNT(DISTINCT entry.id) AS candidate_count,
+              COUNT(DISTINCT CASE WHEN event.event_type IN ('info_1_sent', 'info_2_sent') THEN entry.id END) AS contacted_count,
+              MAX(CASE WHEN event.event_type IN ('info_1_sent', 'info_2_sent') THEN event.occurred_at END) AS contacted_at,
+              COUNT(DISTINCT CASE WHEN event.event_type = 'willingness_changed' THEN entry.id END) AS replied_count,
+              MAX(CASE WHEN event.event_type = 'willingness_changed' THEN event.occurred_at END) AS replied_at
+         FROM caregiver_candidate_contact_pools pool
+         LEFT JOIN caregiver_candidate_contact_entries entry
+           ON entry.pool_id = pool.id AND entry.active_marker = 1
+         LEFT JOIN caregiver_candidate_contact_events event
+           ON event.pool_id = pool.id AND event.candidate_id = entry.id
+        GROUP BY pool.case_no, pool.id, pool.created_at
+  ) candidate_pool ON candidate_pool.case_no = o.case_no
   LEFT JOIN caregiver_matching_plans plan
     ON plan.case_no = o.case_no AND plan.is_active = 1
   LEFT JOIN (

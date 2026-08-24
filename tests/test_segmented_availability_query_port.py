@@ -1,3 +1,8 @@
+"""
+File: test_segmented_availability_query_port.py
+Description: 驗證媒合可用性查詢能透過注入的 fresh-facts port 執行。
+"""
+
 from datetime import date
 
 from subsystems.scheduling import segmented_availability_query as service
@@ -15,6 +20,7 @@ class FactsPort:
                 "status": "洽談中",
                 "start_date": "2026-07-01",
                 "end_date": "2026-07-02",
+                "requires_cooking": False,
             },
             "staff_rows": [{"id": 1}],
             "assignments": [],

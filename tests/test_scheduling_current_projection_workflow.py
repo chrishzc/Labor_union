@@ -17,8 +17,12 @@ from domains.scheduling.current_projection import (
     SchedulingOccupancyKind,
     StaffUnavailabilityCurrentFact,
     StoredEffectiveOccupancyFact,
+    WaitingDepositLockCurrentFact,
 )
 from domains.orders.terms import ServiceTimeTerms
+from infrastructure.mysql.scheduling_current_projection_repository import (
+    _waiting_lock_fact,
+)
 from shared_kernel.clock import FixedBusinessClock, TAIPEI_TIME_ZONE
 from subsystems.scheduling.current_projection_workflow import (
     SchedulingCurrentProjectionWorkflow,
@@ -87,6 +91,100 @@ def test_current_projection_marks_long_leave_as_unavailable():
     assert result.days[0].available is False
     assert result.days[0].entries[0].occupancy_kind is SchedulingOccupancyKind.STAFF_UNAVAILABILITY
     assert result.days[2].available is True
+
+
+def test_current_projection_accepts_waiting_lock_for_official_days_only():
+    """固定週休不屬於等待訂金鎖的正式服務日，七日 buffer 另行投影。"""
+    waiting_lock = WaitingDepositLockCurrentFact(
+        7,
+        9,
+        "CASE-WAITING-REST",
+        11,
+        date(2026, 9, 10),
+        date(2026, 9, 16),
+        (
+            date(2026, 9, 10),
+            date(2026, 9, 11),
+            date(2026, 9, 14),
+            date(2026, 9, 15),
+            date(2026, 9, 16),
+        ),
+    )
+    facts = SchedulingCurrentFacts(11, (), (), (waiting_lock,))
+
+    result = SchedulingCurrentProjectionWorkflow(
+        _FactsRepository(facts),
+        FixedBusinessClock(datetime(2026, 8, 24, 9, 0, tzinfo=TAIPEI_TIME_ZONE)),
+    ).query(SchedulingCurrentQuery(11, date(2026, 9, 10), date(2026, 9, 23)))
+
+    service_days = {
+        day.calendar_date
+        for day in result.days
+        if any(
+            entry.occupancy_kind is SchedulingOccupancyKind.WAITING_DEPOSIT_SERVICE
+            for entry in day.entries
+        )
+    }
+    buffer_days = {
+        day.calendar_date
+        for day in result.days
+        if any(
+            entry.occupancy_kind is SchedulingOccupancyKind.WAITING_DEPOSIT_BUFFER
+            for entry in day.entries
+        )
+    }
+
+    assert service_days == {
+        date(2026, 9, 10),
+        date(2026, 9, 11),
+        date(2026, 9, 14),
+        date(2026, 9, 15),
+        date(2026, 9, 16),
+    }
+    assert buffer_days == {
+        date(2026, 9, 17),
+        date(2026, 9, 18),
+        date(2026, 9, 19),
+        date(2026, 9, 20),
+        date(2026, 9, 21),
+        date(2026, 9, 22),
+        date(2026, 9, 23),
+    }
+
+
+def test_waiting_lock_repository_excludes_stored_buffer_dates_from_service_facts():
+    fact = _waiting_lock_fact(
+        {
+            "lock_id": 7,
+            "segment_id": 9,
+            "case_no": "CASE-WAITING-REST",
+            "staff_id": 11,
+            "assigned_start_date": date(2026, 9, 10),
+            "assigned_end_date": date(2026, 9, 16),
+        },
+        (
+            date(2026, 9, 10),
+            date(2026, 9, 11),
+            date(2026, 9, 14),
+            date(2026, 9, 15),
+            date(2026, 9, 16),
+            date(2026, 9, 17),
+            date(2026, 9, 18),
+            date(2026, 9, 19),
+            date(2026, 9, 20),
+            date(2026, 9, 21),
+            date(2026, 9, 22),
+            date(2026, 9, 23),
+        ),
+    )
+
+    assert fact.locked_service_dates == (
+        date(2026, 9, 10),
+        date(2026, 9, 11),
+        date(2026, 9, 14),
+        date(2026, 9, 15),
+        date(2026, 9, 16),
+    )
 
 
 def _assignment_with_active_buffer(

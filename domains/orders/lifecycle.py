@@ -55,8 +55,8 @@ class LifecycleImpactCandidate:
     case_no: str
     before_status: OrderLifecycleStatus
     after_status: OrderLifecycleStatus
-    actual_end_date: date
-    completion_instant: datetime
+    actual_end_date: date | None
+    completion_instant: datetime | None
     business_date: date
     service_completion_reached: bool
     service_data_lock_was_present: bool
@@ -74,7 +74,11 @@ def build_terms_lifecycle_impact(
 ) -> LifecycleImpactCandidate:
     _validate_inputs(root_facts, scheduling, evaluation_at)
     actual_end_date = _actual_end_date(scheduling)
-    completion_instant = order_terms.service_time.completion_instant(actual_end_date)
+    completion_instant = (
+        order_terms.service_time.completion_instant(actual_end_date)
+        if actual_end_date is not None
+        else None
+    )
     completion_reached = _service_completion_reached(
         root_facts,
         order_terms,
@@ -109,11 +113,12 @@ def _validate_inputs(root_facts, scheduling, evaluation_at):
 
 
 def _actual_end_date(scheduling):
-    return max(
+    service_dates = tuple(
         value
         for assignment in scheduling.assignments
         for value in assignment.service_dates
     )
+    return max(service_dates) if service_dates else None
 
 
 def _service_completion_reached(
@@ -123,6 +128,8 @@ def _service_completion_reached(
     completion_instant,
     evaluation_at,
 ):
+    if completion_instant is None:
+        return False
     official_day_count = sum(
         len(item.service_dates) for item in scheduling.assignments
     )
@@ -197,8 +204,10 @@ def _candidate(
     payload = {
         "before_status": root_facts.current_status.value,
         "after_status": after_status.value,
-        "actual_end_date": actual_end_date.isoformat(),
-        "completion_instant": completion_instant.isoformat(),
+        "actual_end_date": actual_end_date.isoformat() if actual_end_date else None,
+        "completion_instant": (
+            completion_instant.isoformat() if completion_instant else None
+        ),
         "service_completion_reached": completion_reached,
         "service_data_lock_should_exist": service_lock,
         "client_settlement_fingerprint": client_settlement.fingerprint.value,

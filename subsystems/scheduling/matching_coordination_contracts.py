@@ -5,6 +5,7 @@ Description: 定義 M3 Matching Coordination 的 typed commands、views 與錯�
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import fields, is_dataclass, dataclass
 from datetime import date, datetime
 from enum import StrEnum
@@ -135,7 +136,7 @@ class MatchingCommand:
     reason: str
     correlation_id: CorrelationId
     idempotency_key: IdempotencyKey
-    expected_source_versions: MatchingSourceTuple
+    expected_source_versions: MatchingSourceTuple | None
 
     def __post_init__(self) -> None:
         require_canonical_text(self.case_no, "case number", 50)
@@ -146,6 +147,10 @@ class MatchingCommand:
             raise TypeError("matching command correlation_id must be CorrelationId")
         if not isinstance(self.idempotency_key, IdempotencyKey):
             raise TypeError("matching command idempotency_key must be IdempotencyKey")
+        if self.expected_source_versions is None:
+            if isinstance(self, PreviewInitialCriteriaSnapshot):
+                return
+            raise TypeError("matching source versions are required")
         _validate_sources(self.expected_source_versions)
 
     @property
@@ -179,6 +184,10 @@ class QueryMatchingCoordination:
 @dataclass(frozen=True, slots=True)
 class PreviewInitialCriteriaSnapshot(MatchingCommand):
     """Preview the first immutable criteria projection from owner facts."""
+
+    # No prior client-side tuple exists before the first snapshot. The
+    # application fresh-reads its source tuple while producing this preview.
+    expected_source_versions: MatchingSourceTuple | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -570,7 +579,29 @@ class MatchingApplyReceipt:
 
 
 def snapshot_view(snapshot: MatchingCriteriaSnapshot) -> MatchingCriteriaSnapshotView:
-    return MatchingCriteriaSnapshotView(snapshot.snapshot_id, snapshot.case_no, snapshot.criteria_version, tuple(sorted(snapshot.criteria.items())), snapshot.source_versions, snapshot.fingerprint, snapshot.created_at, snapshot.superseded_by)
+    return MatchingCriteriaSnapshotView(
+        snapshot.snapshot_id,
+        snapshot.case_no,
+        snapshot.criteria_version,
+        tuple(
+            (key, _transport_criteria_value(value))
+            for key, value in sorted(snapshot.criteria.items())
+        ),
+        snapshot.source_versions,
+        snapshot.fingerprint,
+        snapshot.created_at,
+        snapshot.superseded_by,
+    )
+
+
+def _transport_criteria_value(value: Any) -> Any:
+    """Thaw immutable criteria only at the transport boundary."""
+
+    if isinstance(value, Mapping):
+        return {key: _transport_criteria_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return tuple(_transport_criteria_value(item) for item in value)
+    return value
 
 
 def candidate_view(candidate: MatchingCandidateResult) -> MatchingCandidateResultView:

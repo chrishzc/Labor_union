@@ -17,7 +17,7 @@ from pymysql.err import OperationalError
 
 from api.dependencies.admin_auth import require_system_admin
 from api.dependencies.anomaly_registry import get_anomaly_application
-from api.routes.anomaly_registry import router
+from api.routes.anomaly_registry import _summary_payload, router
 from api.schemas.anomaly_registry import (
     AnomalySummaryView,
     AnomalyWorkflowReceiptView,
@@ -273,6 +273,28 @@ def test_query_anomalies_default_snapshot_false_contract_structure() -> None:
     assert item2["staff_calendar_navigation"] is None
 
 
+def test_finance_manual_review_list_omits_snapshot_without_validating_detail_fields() -> None:
+    summary = AnomalySummary(
+        projection=_FakeProjection(
+            fingerprint=PreviewFingerprint("d" * 64),
+            definition_code="finance_import_manual_review",
+            source_identity="finance-import-row:94",
+            source_version=1,
+            predicate_active=True,
+            workflow_status=AlertWorkflowStatus.OPEN,
+            workflow_version=0,
+        ),
+        source_domain="finance_import",
+        severity=AnomalySeverity.WARNING,
+        display_snapshot={"untyped_legacy_field": "must stay out of list"},
+        display_fields=("finance_import_row_id",),
+    )
+
+    payload = _summary_payload(summary, include_snapshot=False)
+
+    assert payload["display_snapshot"] is None
+
+
 def test_query_anomalies_explicit_include_snapshot_false_and_true() -> None:
     app_state = _FakeAnomalyApplication()
     client = TestClient(_create_app(app_state))
@@ -431,7 +453,7 @@ def test_query_anomalies_malformed_calendar_evidence_fails_closed() -> None:
 
     for summary in (s_invalid_staff, s_invalid_date):
         client = TestClient(_create_app(_FakeAnomalyApplication([summary])))
-        response = client.get("/api/v1/anomalies")
+        response = client.get("/api/v1/anomalies?include_snapshot=true")
         assert response.status_code == 422
         assert (
             response.json()["detail"]["error"]["code"]

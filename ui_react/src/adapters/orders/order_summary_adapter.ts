@@ -26,7 +26,7 @@ export const ORDER_FILTER_OPTIONS: readonly FilterOption[] = [
   { label: '2. 媒合與徵詢意願', stage: 'matching_willingness' },
   { label: '3. 推薦客戶確認', stage: 'client_review' },
   { label: '4. 雙邊簽約定金', stage: 'contract_deposit' },
-  { label: '5. 確認實際服務日期', stage: 'date_confirmation' },
+  { label: '5. 確認事前服務日期', stage: 'date_confirmation' },
   { label: '6. 正式服務中', stage: 'active_service' },
   { label: '7. 完工結案請款', stage: 'settlement_payout' },
 ];

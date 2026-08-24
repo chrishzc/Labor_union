@@ -228,7 +228,7 @@ describe('Finance #finance entry static subgate', () => {
     vi.restoreAllMocks();
   });
 
-  it('actual StrictMode 四個 workspace 維持 active-tab selector/detail exact GET budget 且所有 mutation disabled', async () => {
+  it('actual StrictMode 四個 workspace 維持 active-tab selector/detail exact GET budget，匯入流程在未選檔前保持 guarded', async () => {
     authenticate();
     const requests = installFetchStub();
     render(<StrictMode><App /></StrictMode>);
@@ -267,14 +267,11 @@ describe('Finance #finance entry static subgate', () => {
     expect(countPath(requests, FINANCE_MANIFEST_ENDPOINT)).toBe(1);
     expect(countPath(requests, FINANCE_REVIEW_ENDPOINT)).toBe(1);
     expect(countPath(requests, FINANCE_REPROCESS_ENDPOINT)).toBe(1);
-    for (const control of [
-      'finance.finance-import.upload',
-      'finance.finance-import.preview',
-      'finance.finance-import.apply',
-      'finance.finance-import.reprocess',
-    ]) {
+    for (const control of ['finance.finance-import.upload', 'finance.finance-import.reprocess']) {
       expect(document.querySelector(`[data-control-id="${control}"]`)).toBeDisabled();
     }
+    expect(document.querySelector('[data-control-id="finance.finance-import.preview"]')).toBeDisabled();
+    expect(document.querySelector('[data-control-id="finance.finance-import.apply"]')).toBeNull();
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
   });
 

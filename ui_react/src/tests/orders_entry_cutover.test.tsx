@@ -243,7 +243,7 @@ describe('Orders #orders entry static subgate', () => {
       '2. 媒合與徵詢意願',
       '3. 推薦客戶確認',
       '4. 雙邊簽約定金',
-      '5. 確認實際服務日期',
+      '5. 確認事前服務日期',
       '6. 正式服務中',
       '7. 完工結案請款',
     ]) {
@@ -291,16 +291,14 @@ describe('Orders #orders entry static subgate', () => {
     expect(screen.queryByText(/後端.*提供|未開放|未納入/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
 
-    const beforeCancellation = requests.length;
-    fireEvent.click(screen.getAllByRole('button', { name: /取消試算/ })[0]);
-    await waitFor(() => expect(screen.getByText('取消前根事實')).toBeInTheDocument());
-    await waitFor(() => expect(countPath(requests, CARD_PROJECTION_ENDPOINT) - initialQueryCounts.card).toBe(3));
-    expect(countPath(requests, CANCELLATION_QUERY_ENDPOINT) - initialQueryCounts.cancellation).toBe(1);
-    expect(requests.length).toBe(beforeCancellation + 2);
+    fireEvent.click(screen.getAllByRole('button', { name: /條款與契約/ })[0]);
+    const cancelTabBtn = await screen.findByRole('button', { name: /訂單取消與退款試算/ });
+    fireEvent.click(cancelTabBtn);
+    await waitFor(() => expect(countPath(requests, CANCELLATION_QUERY_ENDPOINT) - initialQueryCounts.cancellation).toBe(1));
 
-    // Service Dates、Controlled Reopen 屬 Phase 2B；本子門只確認存在且不觸發其 POST。
-    expect(screen.getAllByRole('button', { name: /確認服務日期/ }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('button', { name: /重啟訂單/ }).length).toBeGreaterThan(0);
+    // 驗證 5-Tab 導航按鈕完整存在
+    expect(screen.getByRole('button', { name: /實質服務日曆/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /受控重開訂單/ })).toBeInTheDocument();
     expect(requests.every((request) => request.method === 'GET')).toBe(true);
   });
 

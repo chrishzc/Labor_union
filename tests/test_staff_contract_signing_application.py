@@ -1,4 +1,9 @@
-from datetime import datetime
+"""
+File: test_staff_contract_signing_application.py
+Description: 驗證月嫂契約簽回、交易回滾與簽約前精確服務日承諾規則。
+"""
+
+from datetime import date, datetime
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -60,6 +65,42 @@ def test_staff_signed_return_rejects_same_key_with_different_signed_content(monk
 
     with pytest.raises(ValueError, match="contract_signature_idempotency_conflict"):
         application.record_signed_return(_command())
+
+
+def test_commitment_uses_weekly_two_rest_days_instead_of_calendar_interval():
+    segment = {
+        "id": 26,
+        "staff_id": 537,
+        "assigned_start_date": date(2026, 9, 10),
+        "assigned_end_date": date(2026, 9, 16),
+    }
+
+    allocations = staff_signing._allocate_commitment_service_days(
+        {"start_date": date(2026, 9, 10), "service_days": 5, "service_type": "週休2日"},
+        [segment],
+        set(),
+    )
+
+    assert [service_date for _segment, service_date in allocations] == [
+        date(2026, 9, 10), date(2026, 9, 11), date(2026, 9, 14),
+        date(2026, 9, 15), date(2026, 9, 16),
+    ]
+
+
+def test_commitment_rejects_segments_that_do_not_cover_every_planned_service_day():
+    segment = {
+        "id": 26,
+        "staff_id": 537,
+        "assigned_start_date": date(2026, 9, 10),
+        "assigned_end_date": date(2026, 9, 15),
+    }
+
+    with pytest.raises(ValueError, match="precontract_service_days_mismatch"):
+        staff_signing._allocate_commitment_service_days(
+            {"start_date": date(2026, 9, 10), "service_days": 5, "service_type": "週休2日"},
+            [segment],
+            set(),
+        )
 
 
 class _ReplayConnection:

@@ -220,7 +220,10 @@ _SOURCE_TYPE_GROUPS = {
     LineDeliveryPublicSourceType.CUSTOMER_SERVICE: ("customer_service_ticket",),
     LineDeliveryPublicSourceType.CONTRACT: ("contract_document_version",),
     LineDeliveryPublicSourceType.FOLLOW_SCHEDULE: ("line_follow_schedule",),
-    LineDeliveryPublicSourceType.IDENTITY: ("line_identity",),
+    LineDeliveryPublicSourceType.IDENTITY: (
+        "line_identity",
+        "provisional_registration",
+    ),
     LineDeliveryPublicSourceType.IDENTITY_REVIEW: ("line_review_request",),
     LineDeliveryPublicSourceType.RICH_MENU: ("rich_menu_link", "rich_menu_unlink"),
     LineDeliveryPublicSourceType.RICH_MENU_LINK: ("rich_menu_link",),
@@ -238,7 +241,10 @@ _SOURCE_TYPE_GROUPS = {
     ),
     LineDeliveryPublicSourceType.ORDER: ("order",),
     LineDeliveryPublicSourceType.FINANCE: ("client_finance_account",),
-    LineDeliveryPublicSourceType.ASSIGNMENT: ("case_staff_assignment",),
+    LineDeliveryPublicSourceType.ASSIGNMENT: (
+        "case_staff_assignment",
+        "scheduling_staff_leave_request",
+    ),
 }
 _SOURCE_TYPE_BY_AGGREGATE = {
     aggregate: public_type

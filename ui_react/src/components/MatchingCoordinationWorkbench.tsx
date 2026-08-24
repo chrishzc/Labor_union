@@ -3,6 +3,7 @@
  * Description: 提供 M3 媒合協調 Query、七種 Preview 與八種 Apply 的 typed 進階操作台。
  */
 import React, { useMemo, useState } from 'react';
+import './MatchingCoordinationWorkbench.css';
 import {
   matchingCoordinationClient,
 } from '../api/matching_coordination/matching_coordination_client';
@@ -18,6 +19,7 @@ import type {
   CriteriaDiff,
   LeaveImpactPreviewResponse,
   MatchingCriteriaSnapshot,
+  MatchingSourceTuple,
   MatchingPackage,
   PreviewCriteriaDiffRequest,
   PreviewInitialCriteriaRequest,
@@ -61,23 +63,40 @@ interface PreviewSummary {
   details: string[];
 }
 
-const OPERATIONS: ReadonlyArray<readonly [Operation, string]> = [
-  ['previewInitialCriteria', 'Preview｜建立初始條件快照'],
-  ['previewMatchingPackage', 'Preview｜建立媒合方案'],
-  ['previewCriteriaDiff', 'Preview｜條件差異與重新聯絡'],
-  ['previewZeroCandidate', 'Preview｜零候選替代方案'],
-  ['previewRematch', 'Preview｜重新媒合'],
-  ['previewLeaveImpact', 'Preview｜請假影響'],
-  ['previewServiceDateRematch', 'Preview｜服務日期變更'],
-  ['applyInitialCriteria', 'Apply｜提交初始條件'],
-  ['applyCriteriaDiff', 'Apply｜提交條件差異'],
-  ['applyCaregiverSelection', 'Apply｜月嫂意願決定'],
-  ['applyCustomerDecision', 'Apply｜客戶媒合決定'],
-  ['applyZeroCandidate', 'Apply｜零候選決定'],
-  ['applyRematch', 'Apply｜提交重新媒合'],
-  ['applyLeaveImpact', 'Apply｜提交請假影響'],
-  ['applyServiceDateRematch', 'Apply｜提交服務日期變更'],
+const OPERATION_GROUPS: ReadonlyArray<readonly [string, ReadonlyArray<readonly [Operation, string]>]> = [
+  ['一般媒合流程', [
+    ['previewInitialCriteria', '1. 試算初始媒合條件'],
+    ['applyInitialCriteria', '2. 確認建立媒合條件快照'],
+    ['previewMatchingPackage', '3. 試算可推薦月嫂與服務分段'],
+    ['applyCaregiverSelection', '4. 確認月嫂意願與推薦組合'],
+    ['applyCustomerDecision', '5. 登錄客戶媒合決定'],
+  ]],
+  ['條件變更與例外處理', [
+    ['previewCriteriaDiff', '試算條件差異與重新聯絡'],
+    ['applyCriteriaDiff', '確認條件差異處理'],
+    ['previewZeroCandidate', '試算零候選替代方案'],
+    ['applyZeroCandidate', '確認零候選處理'],
+    ['previewRematch', '試算重新媒合'],
+    ['applyRematch', '確認重新媒合'],
+    ['previewLeaveImpact', '試算月嫂請假影響'],
+    ['applyLeaveImpact', '確認請假影響處理'],
+    ['previewServiceDateRematch', '試算服務日期變更'],
+    ['applyServiceDateRematch', '確認服務日期變更'],
+  ]],
 ];
+
+const OPERATIONS = OPERATION_GROUPS.flatMap(([, operations]) => operations);
+
+const REQUIRED_PREVIEW: Partial<Record<Operation, Operation>> = {
+  applyInitialCriteria: 'previewInitialCriteria',
+  applyCaregiverSelection: 'previewMatchingPackage',
+  applyCustomerDecision: 'previewMatchingPackage',
+  applyCriteriaDiff: 'previewCriteriaDiff',
+  applyZeroCandidate: 'previewZeroCandidate',
+  applyRematch: 'previewRematch',
+  applyLeaveImpact: 'previewLeaveImpact',
+  applyServiceDateRematch: 'previewServiceDateRematch',
+};
 
 function operationIdentity(prefix: string): string {
   const suffix = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -92,8 +111,13 @@ function displayMatchingError(caught: unknown, fallback: string): string {
   return message || fallback;
 }
 
-function templateFor(operation: Operation, current: MatchingCoordinationQueryView | null, fingerprint: string | null): string {
-  const sourceVersions = current?.sourceVersions ?? { items: [] };
+function templateFor(
+  operation: Operation,
+  current: MatchingCoordinationQueryView | null,
+  fingerprint: string | null,
+  initialSourceVersions: MatchingSourceTuple | null = null,
+): string {
+  const sourceVersions = current?.sourceVersions ?? initialSourceVersions;
   const snapshotId = current?.snapshot.snapshot_id ?? '';
   const matchingPackage = current?.matchingPackage;
   const packageId = matchingPackage?.package_id ?? '';
@@ -125,22 +149,34 @@ function packageSummary(title: string, value: MatchingPackage): PreviewSummary {
   return { title, status: value.state, identity: value.package_id, fingerprint: value.fingerprint, details: [`候選 ${value.candidate_results.length} 人`, `區段 ${value.segments.length} 段`, ...value.blockers, ...value.warnings] };
 }
 
-export const MatchingCoordinationWorkbench: React.FC = () => {
-  const [caseNo, setCaseNo] = useState('');
+export interface MatchingCoordinationWorkbenchProps {
+  /** The owning matching drawer supplies its current case; standalone use remains editable. */
+  initialCaseNo?: string;
+}
+
+export const MatchingCoordinationWorkbench: React.FC<MatchingCoordinationWorkbenchProps> = ({ initialCaseNo = '' }) => {
+  const [caseNo, setCaseNo] = useState(initialCaseNo);
   const [operation, setOperation] = useState<Operation>('previewInitialCriteria');
   const [payloadText, setPayloadText] = useState(() => templateFor('previewInitialCriteria', null, null));
   const [query, setQuery] = useState<MatchingCoordinationQueryView | null>(null);
   const [preview, setPreview] = useState<PreviewSummary | null>(null);
   const [receipt, setReceipt] = useState<MatchingApplyReceiptView | null>(null);
   const [lastPreviewFingerprint, setLastPreviewFingerprint] = useState<string | null>(null);
+  const [lastPreviewOperation, setLastPreviewOperation] = useState<Operation | null>(null);
+  const [initialPreviewSourceVersions, setInitialPreviewSourceVersions] = useState<MatchingSourceTuple | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isApply = operation.startsWith('apply');
+  const embeddedInOrderWorkflow = initialCaseNo.trim().length > 0;
   const operationLabel = useMemo(() => OPERATIONS.find(([id]) => id === operation)?.[1] ?? operation, [operation]);
+  const requiredPreview = REQUIRED_PREVIEW[operation];
+  const hasRequiredPreview = !isApply || (
+    lastPreviewOperation === requiredPreview && lastPreviewFingerprint !== null
+  );
 
   const loadTemplate = (nextOperation = operation) => {
-    setPayloadText(templateFor(nextOperation, query, lastPreviewFingerprint));
+    setPayloadText(templateFor(nextOperation, query, lastPreviewFingerprint, initialPreviewSourceVersions));
     setConfirmed(false);
     setError(null);
   };
@@ -152,7 +188,9 @@ export const MatchingCoordinationWorkbench: React.FC = () => {
     try {
       const value = toMatchingCoordinationQueryView(await matchingCoordinationClient.query(caseNo.trim(), { expected_source_versions: null }));
       setQuery(value);
-      setPayloadText(templateFor(operation, value, lastPreviewFingerprint));
+      setLastPreviewFingerprint(null);
+      setLastPreviewOperation(null);
+      setPayloadText(templateFor(operation, value, null, initialPreviewSourceVersions));
     } catch (caught: unknown) {
       setError(displayMatchingError(caught, '媒合協調查詢失敗。'));
     } finally {
@@ -161,7 +199,7 @@ export const MatchingCoordinationWorkbench: React.FC = () => {
   };
 
   const runOperation = async () => {
-    if (!caseNo.trim() || (isApply && !confirmed)) return;
+    if (!caseNo.trim() || (isApply && (!confirmed || !hasRequiredPreview))) return;
     setBusy(true);
     setError(null);
     setPreview(null);
@@ -174,6 +212,7 @@ export const MatchingCoordinationWorkbench: React.FC = () => {
       switch (operation) {
         case 'previewInitialCriteria': {
           const value: MatchingCriteriaSnapshot = await matchingCoordinationClient.previewInitialCriteria(caseNo.trim(), parsed as PreviewInitialCriteriaRequest, options);
+          setInitialPreviewSourceVersions({ items: value.source_versions });
           summary = { title: '初始條件快照', status: 'previewed', identity: value.snapshot_id, fingerprint: value.fingerprint, details: [`條件版本 ${value.criteria_version}`, `條件 ${value.criteria.length} 項`] };
           break;
         }
@@ -212,6 +251,7 @@ export const MatchingCoordinationWorkbench: React.FC = () => {
       if (summary) {
         setPreview(summary);
         setLastPreviewFingerprint(summary.fingerprint);
+        setLastPreviewOperation(operation);
       }
       if (applyReceipt) {
         setReceipt(applyReceipt);
@@ -226,14 +266,32 @@ export const MatchingCoordinationWorkbench: React.FC = () => {
   };
 
   return (
-    <section className="gantt-hero-card" data-surface-id="scheduling.matching-coordination">
-      <div className="line-section-heading"><div><h2>媒合與正式排班查詢工作台</h2><p>所有結果由 Matching Coordination 後端規則產生；Query／Preview 零寫入，Apply 會重新驗證來源版本。</p></div></div>
-      <div className="waiting-lock-control"><label htmlFor="matching-case-no">案件編號</label><input id="matching-case-no" value={caseNo} onChange={(event) => { setCaseNo(event.target.value); setQuery(null); }} /><button type="button" disabled={!caseNo.trim() || busy} onClick={() => void runQuery()}>{busy ? '處理中…' : '查詢媒合根事實'}</button></div>
-      {query && <><div className="line-detail-grid"><div><span>條件快照</span><strong>{query.snapshot.snapshot_id}</strong></div><div><span>條件版本</span><strong>{query.snapshot.criteria_version}</strong></div><div><span>媒合方案</span><strong>{query.matchingPackage?.package_id ?? '尚未建立'}</strong></div><div><span>來源版本</span><strong>{query.expectedSourceVersionsMatch ? '一致' : '已變更'}</strong></div><div><span>候選人</span><strong>{query.candidates.length}</strong></div><div><span>拒絕歷史</span><strong>{query.refusalHistory.length}</strong></div></div>{query.candidates.length > 0 && <div className="line-table-scroll"><table className="line-data-table"><thead><tr><th>服務人員</th><th>資格</th><th>意願</th><th>拒絕原因</th></tr></thead><tbody>{query.candidates.map((candidate) => <tr key={candidate.candidate_id}><td>{candidate.staff_name}</td><td>{candidate.eligibility}</td><td>{candidate.willingness}</td><td>{candidate.rejection_reasons.join('、') || '無'}</td></tr>)}</tbody></table></div>}</>}
-      <div className="line-action-panel"><label htmlFor="matching-operation">操作</label><select id="matching-operation" value={operation} onChange={(event) => { const next = event.target.value as Operation; setOperation(next); setPayloadText(templateFor(next, query, lastPreviewFingerprint)); setConfirmed(false); }}>{OPERATIONS.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><button type="button" onClick={() => loadTemplate()}>依目前查詢重建欄位模板</button><label htmlFor="matching-payload">Typed request 欄位</label><textarea id="matching-payload" rows={18} spellCheck={false} value={payloadText} onChange={(event) => { setPayloadText(event.target.value); setConfirmed(false); }} />{isApply && <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />我已核對 Preview、來源版本與即將提交的決定</label>}<button type="button" disabled={!caseNo.trim() || busy || (isApply && !confirmed)} onClick={() => void runOperation()}>{busy ? '處理中…' : operationLabel}</button></div>
-      {preview && <div className="line-preview-result" role="status"><h3>{preview.title}</h3><p>{preview.status}｜{preview.identity}</p>{preview.fingerprint && <p>fingerprint：{preview.fingerprint}</p>}<ul>{preview.details.map((detail, index) => <li key={`${detail}-${index}`}>{detail}</li>)}</ul></div>}
-      {receipt && <div className="line-success" role="status"><h3>Apply 已提交</h3><p>{receipt.commandName}｜{receipt.resultState}</p><p>receipt：{receipt.receiptId}</p></div>}
-      {error && <div className="line-error" role="alert">{error}</div>}
+    <section className="matching-coordination-workbench" data-surface-id="orders.matching.m3-coordination">
+      <header className="matching-coordination-header">
+        <div><h2>{embeddedInOrderWorkflow ? '先核對本案媒合條件' : '建立媒合條件與確認決定'}</h2><p>{embeddedInOrderWorkflow ? '先依訂單、服務日期與篩選規則核對；確認後再到下一步查詢可聯繫的月嫂。' : '依目前案件根事實試算；確認提交前會再次核對來源版本。'}</p></div>
+      </header>
+      <div className="matching-coordination-query-row">
+        {embeddedInOrderWorkflow ? <p className="matching-coordination-case-context">案件 {caseNo}</p> : <label htmlFor="matching-case-no">案件編號<input id="matching-case-no" value={caseNo} onChange={(event) => { setCaseNo(event.target.value); setQuery(null); setInitialPreviewSourceVersions(null); }} /></label>}
+        <button type="button" disabled={!caseNo.trim() || busy} onClick={() => void runQuery()}>{busy ? '處理中…' : embeddedInOrderWorkflow ? '重新核對案件資料' : '查詢媒合根事實'}</button>
+      </div>
+      {query && <><div className="matching-coordination-facts"><div><span>{embeddedInOrderWorkflow ? '已讀取的條件版本' : '條件快照'}</span><strong>{embeddedInOrderWorkflow ? `第 ${query.snapshot.criteria_version} 版` : query.snapshot.snapshot_id}</strong></div><div><span>媒合方案</span><strong>{query.matchingPackage?.package_id ?? '尚未建立'}</strong></div><div><span>來源版本</span><strong>{query.expectedSourceVersionsMatch ? '一致，可繼續' : '已變更，請重新核對'}</strong></div><div><span>候選人</span><strong>{query.candidates.length}</strong></div><div><span>拒絕歷史</span><strong>{query.refusalHistory.length}</strong></div></div>{!embeddedInOrderWorkflow && query.candidates.length > 0 && <div className="matching-coordination-table"><table><thead><tr><th>服務人員</th><th>資格</th><th>意願</th><th>拒絕原因</th></tr></thead><tbody>{query.candidates.map((candidate) => <tr key={candidate.candidate_id}><td>{candidate.staff_name}</td><td>{candidate.eligibility}</td><td>{candidate.willingness}</td><td>{candidate.rejection_reasons.join('、') || '無'}</td></tr>)}</tbody></table></div>}</>}
+      {embeddedInOrderWorkflow ? <div className="matching-coordination-business-panel">
+        <div><strong>本步要確認什麼？</strong><p>服務日期、服務區域、每日時段、承接天數與料理需求是否可作為候選篩選條件。檔期衝突仍會由下一步的正式 gate 判定。</p></div>
+        <button type="button" className="matching-coordination-primary" disabled={!caseNo.trim() || busy} onClick={() => { setOperation('previewInitialCriteria'); loadTemplate('previewInitialCriteria'); void runOperation(); }}>{busy ? '處理中…' : '核對媒合條件'}</button>
+        {preview?.title === '初始條件快照' && <div className="matching-coordination-next-step" role="status"><strong>條件已核對</strong><span>{preview.details.join('｜')}</span><span>下一步：在下方「查詢合格月嫂清單」取得符合條件的候選人。</span></div>}
+        <details className="matching-coordination-exception"><summary>條件變更、無候選或月嫂請假的處理</summary><p>發生例外時，先在既有媒合步驟更新案件條件或候選資料，再重新核對；不在此直接變更正式指派或契約。</p></details>
+      </div> : <div className="matching-coordination-action-panel">
+        <label htmlFor="matching-operation">目前要處理的業務<select id="matching-operation" value={operation} onChange={(event) => { const next = event.target.value as Operation; setOperation(next); setPayloadText(templateFor(next, query, lastPreviewFingerprint, initialPreviewSourceVersions)); setConfirmed(false); }}>{OPERATION_GROUPS.map(([groupLabel, operations]) => <optgroup key={groupLabel} label={groupLabel}>{operations.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</optgroup>)}</select></label>
+        <p className="matching-coordination-flow-note">先完成試算，再確認提交；系統會依本次查詢重建欄位。</p>
+        <button type="button" className="matching-coordination-secondary" onClick={() => loadTemplate()}>依目前查詢重建欄位</button>
+        <label className="matching-coordination-payload" htmlFor="matching-payload">系統交換欄位<textarea id="matching-payload" rows={12} spellCheck={false} value={payloadText} onChange={(event) => { setPayloadText(event.target.value); setConfirmed(false); }} /></label>
+        {isApply && <label className="matching-coordination-confirm"><input type="checkbox" checked={confirmed} disabled={!hasRequiredPreview} onChange={(event) => setConfirmed(event.target.checked)} />我已核對試算結果、來源版本與即將提交的決定</label>}
+        {isApply && !hasRequiredPreview && <p className="matching-coordination-flow-note" role="status">請先完成「{REQUIRED_PREVIEW[operation] ? OPERATIONS.find(([id]) => id === REQUIRED_PREVIEW[operation])?.[1] : '對應試算'}」。</p>}
+        <button type="button" className="matching-coordination-primary" disabled={!caseNo.trim() || busy || (isApply && (!confirmed || !hasRequiredPreview))} onClick={() => void runOperation()}>{busy ? '處理中…' : isApply ? '確認提交此業務決定' : '執行試算'}</button>
+      </div>}
+      {!embeddedInOrderWorkflow && preview && <div className="matching-coordination-preview" role="status"><h3>{preview.title}</h3><p>{preview.status}｜{preview.identity}</p>{preview.fingerprint && <p>fingerprint：{preview.fingerprint}</p>}<ul>{preview.details.map((detail, index) => <li key={`${detail}-${index}`}>{detail}</li>)}</ul></div>}
+      {receipt && <div className="matching-coordination-success" role="status"><h3>Apply 已提交</h3><p>{receipt.commandName}｜{receipt.resultState}</p><p>receipt：{receipt.receiptId}</p></div>}
+      {error && <div className="matching-coordination-error" role="alert">{error}</div>}
     </section>
   );
 };

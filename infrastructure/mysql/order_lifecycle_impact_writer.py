@@ -1,4 +1,7 @@
-"""MySQL writer for the typed lifecycle impact inside Orders Terms Apply."""
+"""
+File: order_lifecycle_impact_writer.py
+Description: 寫入 Orders 條款造成的 typed lifecycle 事件、資料鎖與 outbox。
+"""
 
 from __future__ import annotations
 
@@ -74,11 +77,19 @@ def _append_orders_outbox(cursor, command, lifecycle_event_id):
 def _lifecycle_payload(command):
     candidate = command.candidate
     return {
-        "actual_end_date": candidate.actual_end_date.isoformat(),
+        "actual_end_date": (
+            candidate.actual_end_date.isoformat()
+            if candidate.actual_end_date is not None
+            else None
+        ),
         "after_status": candidate.after_status.value,
         "alert_codes": candidate.alert_codes,
         "before_status": candidate.before_status.value,
-        "completion_instant": candidate.completion_instant.isoformat(),
+        "completion_instant": (
+            candidate.completion_instant.isoformat()
+            if candidate.completion_instant is not None
+            else None
+        ),
         "correlation_id": command.correlation_id.value,
         "reason": command.reason,
         "resulting_order_version": command.resulting_order_version,

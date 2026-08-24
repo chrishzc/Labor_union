@@ -1,8 +1,12 @@
-"""Typed API endpoints for the staff-first, client-second contract flow."""
+"""
+File: contract_signing.py
+Description: 提供契約簽署與不可變文件下載的 typed API，下載須授權、驗證封存內容並記錄稽核。
+"""
 
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Path, Request, UploadFile
 from fastapi.responses import Response
@@ -148,11 +152,22 @@ def download_contract_document(
             details={"case_no": case_no, "sha256": str(document["sha256"])},
         )
         filename = str(document["original_filename"]).replace('"', "")
+        suffix = filename.rsplit(".", 1)[-1] if "." in filename else "bin"
+        safe_filename = f"contract_document_{document_version_id}.{suffix}"
         return Response(content=content, media_type=str(document["mime_type"]), headers={
-            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Disposition": (
+                f'attachment; filename="{safe_filename}"; '
+                f"filename*=UTF-8''{quote(filename, safe='')}"
+            ),
         })
-    except ValueError as error:
-        raise typed_http_error(404, "not_found", str(error), "找不到或無法驗證契約文件。", f"contract-document:{document_version_id}") from error
+    except (ValueError, OSError) as error:
+        raise typed_http_error(
+            404,
+            "not_found",
+            "contract_document_not_found",
+            "找不到或無法驗證契約文件。",
+            f"contract-document:{document_version_id}",
+        ) from error
     finally:
         connection.close()
 

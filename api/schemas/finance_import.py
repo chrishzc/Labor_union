@@ -101,6 +101,15 @@ class FinanceWorkbookIngestionReceiptView(_StrictModel):
     duplicate_occurrence_count: int = Field(ge=0)
     source_warning_count: int = Field(default=0, ge=0)
     source_warning_created_count: int = Field(default=0, ge=0)
+    replayed: bool = False
+
+
+class FinanceImportJobAcceptedView(_StrictModel):
+    """Accepted Finance Import command with its exact idempotency replay state."""
+
+    job_id: str = Field(min_length=1, max_length=191)
+    status_url: str = Field(min_length=1, max_length=255)
+    replayed: bool
 
 
 class FinanceImportBatchApplyBody(FinanceImportBatchPreviewBody):
@@ -201,6 +210,17 @@ class FinanceImportBatchReceiptView(_StrictModel):
     pending_count: int = Field(ge=0)
 
 
+class FinanceImportBatchJobOutcomeView(_StrictModel):
+    """Closed terminal view for a batch Apply durable job; never exposes raw payloads."""
+
+    job_id: str = Field(min_length=1, max_length=191)
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    attempt_count: int = Field(ge=0)
+    max_attempts: int = Field(ge=0)
+    result_reference: str | None = Field(default=None, min_length=1, max_length=191)
+    receipt: FinanceImportBatchReceiptView | None = None
+
+
 class FinanceImportCorrectionSelectionBody(_StrictModel):
     row_identity: str = Field(min_length=1, max_length=191)
     classification_type: Literal[
@@ -268,6 +288,17 @@ class FinanceImportCorrectionReceiptView(_StrictModel):
     preview_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+class FinanceImportCorrectionJobOutcomeView(_StrictModel):
+    """Closed terminal view for a correction durable job; never exposes raw payloads."""
+
+    job_id: str = Field(min_length=1, max_length=191)
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    attempt_count: int = Field(ge=0)
+    max_attempts: int = Field(ge=0)
+    result_reference: str | None = Field(default=None, min_length=1, max_length=191)
+    receipt: FinanceImportCorrectionReceiptView | None = None
+
+
 class RefundReturnReviewPreviewBody(_StrictModel):
     finance_import_row_id: StrictInt = Field(gt=0)
     original_refund_ledger_entry_id: StrictInt = Field(gt=0)
@@ -309,12 +340,14 @@ class FinanceImportTypedErrorView(_StrictModel):
 
 __all__ = [
     "FinanceImportBatchApplyBody",
+    "FinanceImportBatchJobOutcomeView",
     "FinanceImportBatchManifestView",
     "FinanceImportBatchPreviewBody",
     "FinanceImportBatchPreviewView",
     "FinanceImportBatchReceiptView",
     "FinanceImportBatchSummaryView",
     "FinanceImportCorrectionApplyBody",
+    "FinanceImportCorrectionJobOutcomeView",
     "FinanceImportCorrectionPreviewView",
     "FinanceImportCorrectionReceiptView",
     "FinanceImportCorrectionSelectionBody",
@@ -322,6 +355,7 @@ __all__ = [
     "FinanceImportHistoricalReprocessPlanView",
     "FinanceImportHistoricalReprocessPreviewBody",
     "FinanceImportHistoricalReprocessReceiptView",
+    "FinanceImportJobAcceptedView",
     "HistoricalOwnerSelectionBody",
     "FinanceImportReprocessRunPageView",
     "FinanceImportReprocessRunSummaryView",

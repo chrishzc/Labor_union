@@ -49,6 +49,7 @@ from subsystems.scheduling.matching_notification_contracts import (
     MatchingContactState,
     MatchingSegmentContact,
     NotifyAssignmentConversionCommand,
+    RecordManualMatchingResponseCommand,
     RequestCaregiverInformationCommand,
 )
 
@@ -86,6 +87,16 @@ class _MatchingRepository:
 
     def project_intent(self, *arguments):
         self.projection_arguments = arguments
+
+    def append_response(self, **arguments):
+        self.response_arguments = arguments
+        return SimpleNamespace(
+            event_id=51,
+            plan=arguments["plan"],
+            source=arguments["source"],
+            caregiver_willingness=None,
+            customer_decision=CustomerMatchingDecision(arguments["response_value"]),
+        )
 
 
 class _DeliveryRepository:
@@ -213,12 +224,33 @@ def test_assignment_conversion_command_rejects_mismatched_receipt_and_customer_s
                 package_version=command.receipt.package_version + 1,
             ),
         )
-
     with pytest.raises(ValueError, match="customer subject reference"):
         replace(
             command,
             customer=replace(command.customer, subject_reference="CASE-WRONG"),
         )
+
+
+def test_manual_customer_decision_allows_documented_non_line_confirmation() -> None:
+    unit_of_work = _UnitOfWork(_state())
+    application = MatchingNotificationApplication(lambda: unit_of_work, lambda: NOW)
+    command = RecordManualMatchingResponseCommand(
+        MatchingPlanReference("CASE-1", 10, 0),
+        None,
+        None,
+        CustomerMatchingDecision.ACCEPTED,
+        "電話確認客戶接受正式方案",
+        ActorContext("admin:1", ("line.matching.override",)),
+        ExpectedVersion(0),
+        IdempotencyKey("manual-customer:1"),
+        CorrelationId("manual-customer-correlation:1"),
+    )
+
+    result = application.record_manual_response(command)
+
+    assert result.customer_decision is CustomerMatchingDecision.ACCEPTED
+    assert unit_of_work.committed
+    assert unit_of_work.matching_notifications.response_arguments["line_user_id"] is None
 
 
 def test_caregiver_card_intent_action_and_delivery_share_one_commit() -> None:

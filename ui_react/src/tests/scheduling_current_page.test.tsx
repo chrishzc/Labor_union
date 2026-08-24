@@ -1,6 +1,6 @@
 /**
  * File: scheduling_current_page.test.tsx
- * Description: 驗證 Scheduling 名冊續頁、完整月軸、typed controls、request budget 與錯誤狀態。
+ * Description: 驗證 Scheduling 投影、typed controls 與 bounded deep-link 行為。
  */
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +17,7 @@ import {
 describe('SchedulingPage query-only presentation', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    window.location.hash = '#scheduling';
     vi.spyOn(staffDirectoryClient, 'queryPage').mockResolvedValue({
       items: [
         { id: 11, name: '去敏人員甲', phone: null },
@@ -37,6 +38,41 @@ describe('SchedulingPage query-only presentation', () => {
       })
     );
     vi.spyOn(staffLeaveInboxClient, 'list').mockResolvedValue([]);
+  });
+
+  it('從 allowlist deep-link 直接開啟請假代班並安全解碼案件編號', () => {
+    window.location.hash = '#scheduling?tab=leave_sub&case_no=%20CASE-DL-001%20';
+
+    render(<SchedulingPage />);
+
+    expect(screen.getByRole('textbox', { name: '請假代班訂單編號' })).toHaveValue('CASE-DL-001');
+    expect(document.querySelector('[data-surface-id="scheduling.tab.leave_sub"]')).toHaveClass('active');
+    expect(document.querySelector('[data-surface-id="scheduling.calendar"]')).not.toBeInTheDocument();
+  });
+
+  it('未知 deep-link tab fail closed 回到 calendar 且不預填隱藏工作區', () => {
+    window.location.hash = '#scheduling?tab=not_allowed&case_no=CASE-DL-002';
+
+    render(<SchedulingPage />);
+
+    expect(screen.getByRole('region', { name: '排班甘特月曆與服務人員 occupancy' })).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '請假代班訂單編號' })).not.toBeInTheDocument();
+    expect(document.querySelector('[data-surface-id="scheduling.tab.calendar"]')).toHaveClass('active');
+
+    fireEvent.click(screen.getByRole('button', { name: /服務中請假與代班/ }));
+    expect(screen.getByRole('textbox', { name: '請假代班訂單編號' })).toHaveValue('');
+  });
+
+  it.each([
+    ['malformed percent', '%E0%A4%A'],
+    ['超過 50 字', 'A'.repeat(51)],
+    ['控制字元', 'CASE%00DL-003'],
+  ])('不預填不合法 case_no：%s', (_scenario, encodedCaseNo) => {
+    window.location.hash = `#scheduling?tab=leave_sub&case_no=${encodedCaseNo}`;
+
+    render(<SchedulingPage />);
+
+    expect(screen.getByRole('textbox', { name: '請假代班訂單編號' })).toHaveValue('');
   });
 
   it('anchors calendar today to Asia/Taipei instead of the browser local timezone', () => {

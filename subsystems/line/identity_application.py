@@ -202,6 +202,7 @@ class LineIdentityApplication:
                 preview,
                 CustomerIdentityProof(intent.name.strip(), intent.phone.strip()),
                 correlation_id,
+                owner_projection_line_user_id=(line_user_id if not outcome.replayed else None),
             )
             unit_of_work.commit()
         return outcome, result
@@ -313,6 +314,7 @@ class LineIdentityApplication:
         preview,
         proof,
         correlation_id,
+        owner_projection_line_user_id=None,
     ):
         candidate = preview.candidate
         if candidate is None:
@@ -331,7 +333,7 @@ class LineIdentityApplication:
             unit_of_work.customers.bind_customer(
                 candidate.subject_reference,
                 preview.line_user_id,
-                candidate.currently_bound_line_user_id,
+                owner_projection_line_user_id or candidate.currently_bound_line_user_id,
             )
             result = _bind_result(
                 unit_of_work,

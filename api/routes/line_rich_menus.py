@@ -457,11 +457,16 @@ def create_rich_menu_publish_preview(
             "Rich Menu 設定已變更，請重新查詢後再預覽。",
         )
     except ValueError as error:
+        message = (
+            "LIFF 設定尚未完成；目前不能建立發布預覽。"
+            if str(error) == "LINE_LIFF_ID is required for LIFF Rich Menu actions"
+            else "Rich Menu 預覽資料未通過驗證。"
+        )
         _raise_preview_error(
             422,
             "validation",
             "rich_menu_preview_invalid",
-            "Rich Menu 預覽資料未通過驗證。",
+            message,
         )
     except Exception as error:
         _raise_preview_error(

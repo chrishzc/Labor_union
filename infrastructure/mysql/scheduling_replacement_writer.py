@@ -71,7 +71,10 @@ def persist_scheduling_replacement(
 def _assignment_resolution(command, assignment_ids):
     if assignment_ids:
         return AssignmentIdentityResolution(assignment_ids)
-    if command.command_family != "orders_cancellation_rebuild":
+    if command.command_family not in {
+        "orders_cancellation_rebuild",
+        "orders_terms_rebuild",
+    }:
         raise ValueError("empty scheduling replacement is cancellation-only")
     return EmptyAssignmentIdentityResolution()
 
@@ -316,6 +319,8 @@ def _cancel_previous_leave_occupancy(
 
 def _cancel_previous_assignments(cursor, command, previous_generation_id) -> None:
     expected_ids = tuple(command.candidate.cancelled_assignment_ids)
+    if not expected_ids:
+        return
     placeholders = ",".join("%s" for _ in expected_ids)
     cursor.execute(
         "UPDATE case_staff_assignments SET status='cancelled',"

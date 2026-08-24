@@ -104,16 +104,19 @@ export class AnomalyForbiddenError extends AnomalyQueryError {
  */
 export class AnomalyValidationError extends AnomalyQueryError {
   public override readonly name = 'AnomalyValidationError';
+  public readonly upstreamCode?: string;
 
   constructor(
     message = '異常查詢請求參數或資料結構驗證失敗 (HTTP 422)',
-    fieldErrors: FieldValidationError[] = []
+    fieldErrors: FieldValidationError[] = [],
+    upstreamCode?: string,
   ) {
     super('ANOMALY_QUERY_VALIDATION_ERROR', message, {
       status: 422,
       retryable: false,
       fieldErrors,
     });
+    this.upstreamCode = upstreamCode;
   }
 }
 
@@ -258,7 +261,7 @@ export function mapErrorToAnomalyQueryError(
           fieldErrors.push({ field, message });
         }
       }
-      return new AnomalyValidationError(err.message, fieldErrors);
+      return new AnomalyValidationError(err.message, fieldErrors, err.code);
     }
     if (
       err.status === 503 ||

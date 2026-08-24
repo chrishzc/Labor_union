@@ -206,10 +206,17 @@ export const MatchingCoordinationQueryRequestSchema = z
   .strict();
 
 export const PreviewInitialCriteriaRequestSchema = z
-  .object({ reason, expected_source_versions: MatchingSourceTupleSchema })
+  .object({
+    reason,
+    expected_source_versions: MatchingSourceTupleSchema.nullable()
+      .optional()
+      .default(null),
+  })
   .strict();
 
-export const ApplyInitialCriteriaRequestSchema = PreviewInitialCriteriaRequestSchema.extend({
+export const ApplyInitialCriteriaRequestSchema = z.object({
+  reason,
+  expected_source_versions: MatchingSourceTupleSchema,
   preview_fingerprint: sha256,
 }).strict();
 

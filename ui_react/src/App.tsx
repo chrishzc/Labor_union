@@ -1,6 +1,6 @@
 /**
  * File: App.tsx
- * Description: 應用程式根元件，實作 URL Hash 路由、認證守衛與單一 LINE canonical 工作區。
+ * Description: 應用程式根元件，實作含 bounded query 的 Hash 路由、認證守衛與頁面切換。
  */
 import React, { useEffect, useState } from 'react';
 import './styles/design-tokens.css';
@@ -39,12 +39,12 @@ const HASH_ALIASES: Record<string, PageType> = {
 };
 
 function getPageFromHash(): PageType {
-  const hash = window.location.hash.replace(/^#\/?/, '');
-  if (hash in HASH_ALIASES) {
-    return HASH_ALIASES[hash];
+  const hashPath = window.location.hash.replace(/^#\/?/, '').split('?', 1)[0];
+  if (hashPath in HASH_ALIASES) {
+    return HASH_ALIASES[hashPath];
   }
-  if (hash in PAGE_SECTION_MAP) {
-    return hash as PageType;
+  if (hashPath in PAGE_SECTION_MAP) {
+    return hashPath as PageType;
   }
   return 'order-tracker';
 }

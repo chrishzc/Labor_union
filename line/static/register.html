@@ -1,4 +1,8 @@
 <!DOCTYPE html>
+<!--
+File: register.html
+Description: 提供 LIFF 客戶服務登記，並僅在受控 development identity 下支援無 LIFF 設定的驗證。
+-->
 <html lang="zh-Hant-TW">
 <head>
     <meta charset="UTF-8">
@@ -545,12 +549,23 @@
 
     function showInitializationError(error) {
         const status = document.getElementById('statusMessage');
+        if (canUseDevelopmentIdentityFallback(error)) {
+            status.textContent = 'LINE LIFF 尚未設定；目前使用受控開發測試身分驗證登記流程。';
+            status.className = 'status-message';
+            status.style.display = 'block';
+            return;
+        }
         status.textContent = error.message || '頁面初始化失敗，請回到 LINE 重新開啟。';
         status.className = 'status-message error';
         status.style.display = 'block';
         document.querySelectorAll('#registerForm input, #registerForm button').forEach(
             control => control.disabled = true
         );
+    }
+
+    function canUseDevelopmentIdentityFallback(error) {
+        return developmentLineUserId.trim() !== ''
+            && error?.message === 'LIFF 尚未完成設定。';
     }
 
     document.addEventListener("DOMContentLoaded", () => {
@@ -1055,8 +1070,12 @@
     });
 
     function registrationErrorMessage(result) {
-        if (typeof result.detail === 'string') return result.detail;
-        if (result.detail?.message) return result.detail.message;
+        const detail = result?.detail;
+        if (typeof detail === 'string') return detail;
+        const code = detail?.code || detail?.error?.code || result?.error?.code;
+        const message = detail?.message || detail?.error?.message || result?.error?.message;
+        if (code && message) return `${code}：${message}`;
+        if (message) return message;
         return '發生未知錯誤，請重試。';
     }
 </script>

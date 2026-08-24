@@ -7,13 +7,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { orderMutationFlowStore } from '../adapters/orders/order_mutation_flow_store';
 import { ordersMutationClient } from '../api/orders/order_mutation_client';
 import { ordersQueryClient } from '../api/orders/order_query_client';
+import { contractSigningClient } from '../api/orders/contract_signing_client';
+import { orderStageProjectionClient } from '../api/orders/order_stage_projection_client';
+import { schedulePrecisionClient } from '../api/scheduling/schedule_precision_client';
 import { OrdersPage } from '../pages/OrdersPage';
 import {
   realisticActualStart,
   realisticOrderCalendarDetail,
   realisticOrderDetail,
   realisticOrderSummaryPage,
+  realisticOrderTerms,
+  realisticContractCompletion,
 } from './fixtures/orders_real_data_fixtures';
+import { buildOrdersStageProjectionFixture } from './fixtures/orders_stage_projection_fixtures';
 import {
   realisticOrderReopenPreviewView,
   realisticServiceDatePreviewView,
@@ -39,12 +45,44 @@ describe('Orders Preview action race guards', () => {
     vi.restoreAllMocks();
     orderMutationFlowStore.clearAll();
     vi.spyOn(ordersQueryClient, 'getOrderSummaries').mockResolvedValue(realisticOrderSummaryPage);
-    vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue(realisticOrderDetail);
-    vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockResolvedValue(realisticOrderCalendarDetail);
+    vi.spyOn(ordersQueryClient, 'getOrderDetail').mockResolvedValue({ ...realisticOrderDetail, case_no: OPERABLE_CASE_NO });
+    vi.spyOn(ordersQueryClient, 'getOrderTerms').mockResolvedValue({ ...realisticOrderTerms, case_no: OPERABLE_CASE_NO });
+    vi.spyOn(ordersQueryClient, 'getContractCompletion').mockResolvedValue({ ...realisticContractCompletion, case_no: OPERABLE_CASE_NO });
+    vi.spyOn(ordersQueryClient, 'getOrderCalendarDetail').mockResolvedValue({ ...realisticOrderCalendarDetail, case_no: OPERABLE_CASE_NO });
     vi.spyOn(ordersQueryClient, 'getActualStart').mockResolvedValue({ ...realisticActualStart, case_no: OPERABLE_CASE_NO });
+    vi.spyOn(contractSigningClient, 'query').mockResolvedValue({
+      case_no: OPERABLE_CASE_NO,
+      staff_segments: [],
+      commitment_id: null,
+      client_document_sent: true,
+      client_signed_received: true,
+      contract_identity: 'CT-2026-0802',
+      documents: [],
+    });
+    vi.spyOn(orderStageProjectionClient, 'getOperationalTimelines').mockResolvedValue(
+      buildOrdersStageProjectionFixture(realisticOrderSummaryPage)
+    );
     vi.spyOn(ordersMutationClient, 'getServiceDates').mockResolvedValue({ ...realisticServiceDateQueryView, case_no: OPERABLE_CASE_NO });
     vi.spyOn(ordersMutationClient, 'previewServiceDates').mockResolvedValue({ ...realisticServiceDatePreviewView, case_no: OPERABLE_CASE_NO });
     vi.spyOn(ordersMutationClient, 'previewReopen').mockResolvedValue({ ...realisticOrderReopenPreviewView, case_no: OPERABLE_CASE_NO });
+    vi.spyOn(schedulePrecisionClient, 'calculate').mockResolvedValue({
+      actual_start_date: '2026-09-01',
+      actual_end_date: '2026-09-03',
+      target_service_days: 3,
+      total_calendar_days: 3,
+      actual_work_days_count: 3,
+      rest_days_count: 0,
+      national_holidays_found: [],
+      total_estimated_salary: null,
+      weekly_stats: [],
+      day_by_day: ['2026-09-01', '2026-09-02', '2026-09-03'].map((date, idx) => ({
+        date,
+        day_num: idx + 1,
+        is_work_day: true,
+        is_rest_day: false,
+        holiday_name: null,
+      })),
+    });
   });
 
   afterEach(() => {
@@ -56,9 +94,16 @@ describe('Orders Preview action race guards', () => {
   async function openServiceDates(): Promise<void> {
     render(<OrdersPage />);
     await screen.findByText(OPERABLE_CASE_NO);
-    fireEvent.click(within(operableOrderCard()).getByRole('button', { name: /確認服務日期/ }));
+    fireEvent.click(within(operableOrderCard()).getByRole('button', { name: /條款與契約/ }));
+    const calendarTab = await screen.findByRole('button', { name: /實質服務日曆/ });
+    await act(async () => {
+      fireEvent.click(calendarTab);
+    });
     await waitFor(() => expect(ordersMutationClient.getServiceDates).toHaveBeenCalledTimes(1));
-    await screen.findByRole('button', { name: '預覽正式服務日期' });
+    await waitFor(() => {
+      const btn = screen.getByRole('button', { name: /產生服務週次預覽/ });
+      expect(btn).not.toBeDisabled();
+    });
   }
 
   it('aborts Service Dates Preview on drawer close and discards the late response', async () => {
@@ -66,10 +111,13 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    fireEvent.click(screen.getByRole('button', { name: '預覽正式服務日期' }));
+    const previewBtn = screen.getByRole('button', { name: /產生服務週次預覽/ });
+    await act(async () => {
+      fireEvent.click(previewBtn);
+    });
     await waitFor(() => expect(ordersMutationClient.previewServiceDates).toHaveBeenCalledTimes(1));
     const signal = vi.mocked(ordersMutationClient.previewServiceDates).mock.calls[0]?.[2]?.signal;
-    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
     expect(signal?.aborted).toBe(true);
 
     await act(async () => {
@@ -86,10 +134,35 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    fireEvent.click(screen.getByRole('button', { name: '預覽正式服務日期' }));
+    const previewBtn = screen.getByRole('button', { name: /產生服務週次預覽/ });
+    await act(async () => {
+      fireEvent.click(previewBtn);
+    });
     await waitFor(() => expect(ordersMutationClient.previewServiceDates).toHaveBeenCalledTimes(1));
     const signal = vi.mocked(ordersMutationClient.previewServiceDates).mock.calls[0]?.[2]?.signal;
-    fireEvent.click(screen.getAllByRole('button', { name: realisticServiceDateQueryView.selectable_dates[0] })[0]);
+
+    // 透過 UI 新增事前請假觸發日期變更與 abort
+    vi.spyOn(schedulePrecisionClient, 'calculate').mockResolvedValueOnce({
+      actual_start_date: '2026-09-01',
+      actual_end_date: '2026-09-04',
+      target_service_days: 3,
+      total_calendar_days: 4,
+      actual_work_days_count: 3,
+      rest_days_count: 1,
+      national_holidays_found: [],
+      total_estimated_salary: null,
+      weekly_stats: [],
+      day_by_day: [
+        { date: '2026-09-01', day_num: 1, is_work_day: true, is_rest_day: false, holiday_name: null },
+        { date: '2026-09-02', day_num: 2, is_work_day: false, is_rest_day: true, holiday_name: '事前請假' },
+        { date: '2026-09-03', day_num: 3, is_work_day: true, is_rest_day: false, holiday_name: null },
+        { date: '2026-09-04', day_num: 4, is_work_day: true, is_rest_day: false, holiday_name: null },
+      ],
+    });
+    fireEvent.change(screen.getByLabelText('事前請假日期'), { target: { value: '2026-09-02' } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '新增事前請假' }));
+    });
     expect(signal?.aborted).toBe(true);
 
     await act(async () => {
@@ -104,10 +177,17 @@ describe('Orders Preview action race guards', () => {
     vi.mocked(ordersMutationClient.previewServiceDates).mockReturnValueOnce(pending.promise);
     await openServiceDates();
 
-    fireEvent.click(screen.getByRole('button', { name: '預覽正式服務日期' }));
+    const previewBtn = screen.getByRole('button', { name: /產生服務週次預覽/ });
+    await act(async () => {
+      fireEvent.click(previewBtn);
+    });
     await waitFor(() => expect(ordersMutationClient.previewServiceDates).toHaveBeenCalledTimes(1));
     const signal = vi.mocked(ordersMutationClient.previewServiceDates).mock.calls[0]?.[2]?.signal;
-    fireEvent.click(screen.getByRole('button', { name: '帶入建議日期' }));
+
+    // 重新設定相同日期
+    await act(async () => {
+      orderMutationFlowStore.updateServiceDatesSelection(OPERABLE_CASE_NO, orderMutationFlowStore.getServiceDatesDraft(OPERABLE_CASE_NO)?.selectedDates ?? []);
+    });
     expect(signal?.aborted).toBe(false);
 
     await act(async () => {
@@ -123,10 +203,14 @@ describe('Orders Preview action race guards', () => {
     render(<OrdersPage />);
     await screen.findByText(OPERABLE_CASE_NO);
 
-    fireEvent.click(within(operableOrderCard()).getByRole('button', { name: /重啟訂單/ }));
+    fireEvent.click(within(operableOrderCard()).getByRole('button', { name: /條款與契約/ }));
+    const reopenTab = await screen.findByRole('button', { name: /受控重開訂單/ });
+    await act(async () => {
+      fireEvent.click(reopenTab);
+    });
     await waitFor(() => expect(ordersMutationClient.previewReopen).toHaveBeenCalledTimes(1));
     const signal = vi.mocked(ordersMutationClient.previewReopen).mock.calls[0]?.[1]?.signal;
-    fireEvent.click(screen.getByRole('button', { name: '關閉' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Close drawer' }));
     expect(signal?.aborted).toBe(true);
 
     await act(async () => {

@@ -1,6 +1,6 @@
 """
 File: test_react_scheduling_entry_cutover.py
-Description: 驗證 Scheduling entry 映射、Streamlit rollback、GET-only client 與 unavailable 控件。
+Description: 驗證 Scheduling entry 映射、Streamlit rollback 與 React 唯讀投影 client 邊界。
 """
 
 from __future__ import annotations
@@ -32,18 +32,6 @@ def _read_queue() -> list[dict[str, object]]:
         for line in REVIEW_QUEUE.read_text(encoding="utf-8").splitlines()
         if line.strip()
     ]
-
-
-def _disabled_button(source: str, control_id: str) -> str:
-    match = re.search(
-        rf'<(?:button|select)\b(?P<attrs>[^>]*data-control-id="{re.escape(control_id)}"[^>]*)>',
-        source,
-        re.DOTALL,
-    )
-    assert match is not None, control_id
-    attributes = match.group("attrs")
-    assert re.search(r"\bdisabled(?:\s*=\s*\{\s*true\s*\})?", attributes)
-    return attributes
 
 
 def test_scheduling_and_staff_registry_queue_and_rollback_mappings_are_consistent() -> None:
@@ -96,12 +84,11 @@ def test_scheduling_and_staff_registry_queue_and_rollback_mappings_are_consisten
         )
 
 
-def test_scheduling_and_staff_frozen_targets_remain_streamlit_without_receipts() -> None:
+def test_scheduling_and_staff_keep_their_streamlit_rollback_targets() -> None:
     state = _read_json(INITIAL_TARGETS)
     entries = state["entries"]
 
     assert isinstance(entries, list)
-    assert len(entries) == 11
     expected = {
         SCHEDULING_ENTRY: {
             "entry_id": SCHEDULING_ENTRY,
@@ -124,12 +111,9 @@ def test_scheduling_and_staff_frozen_targets_remain_streamlit_without_receipts()
     }
     for entry_id, expected_entry in expected.items():
         assert [entry for entry in entries if entry["entry_id"] == entry_id] == [expected_entry]
-    assert all(entry["current_target"] == "streamlit" for entry in entries)
-    assert all(entry["required_react_artifact"] is None for entry in entries)
-    assert state["receipts"] == []
 
 
-def test_scheduling_sources_are_get_only_and_unavailable_controls_are_native_disabled() -> None:
+def test_scheduling_projection_sources_are_typed_get_only() -> None:
     app_path = ROOT / "ui_react/src/App.tsx"
     nav_path = ROOT / "ui_react/src/components/MasterLayout.tsx"
     page_path = ROOT / "ui_react/src/pages/SchedulingPage.tsx"
@@ -172,30 +156,3 @@ def test_scheduling_sources_are_get_only_and_unavailable_controls_are_native_dis
             r"\btransport\.(get|post|put|patch|delete)\b", client_source
         )
         assert transport_methods == ["get"], client_path
-
-    for control_id in (
-        "scheduling.precision.open",
-        "scheduling.projection.order-select",
-        "scheduling.projection.lock",
-    ):
-        _disabled_button(page_source, control_id)
-
-    assert re.search(
-        r"<button\b[^>]*key=\{control\}[^>]*data-control-id=\{control\}[^>]*disabled[^>]*>",
-        page_source,
-        re.DOTALL,
-    )
-    unavailable_control_ids = (
-        "scheduling.leave.substitution",
-        "scheduling.leave.extension",
-        "scheduling.leave.apply",
-        "scheduling.holiday.create",
-        "scheduling.holiday.toggle-rest",
-        "scheduling.holiday.toggle-pay",
-        "scheduling.holiday.delete",
-        "scheduling.holiday.save",
-        "scheduling.leave-inbox.accept",
-        "scheduling.leave-inbox.reject",
-    )
-    for control_id in unavailable_control_ids:
-        assert f"'{control_id}'" in page_source

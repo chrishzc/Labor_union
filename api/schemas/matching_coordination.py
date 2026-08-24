@@ -261,10 +261,12 @@ class MatchingCoordinationQueryRequest(MatchingCoordinationSchema):
 
 class PreviewInitialCriteriaRequest(MatchingCoordinationSchema):
     reason: str = Field(min_length=1, max_length=500)
+    expected_source_versions: MatchingSourceTupleView | None = None
+
+
+class ApplyInitialCriteriaRequest(MatchingCoordinationSchema):
+    reason: str = Field(min_length=1, max_length=500)
     expected_source_versions: MatchingSourceTupleView
-
-
-class ApplyInitialCriteriaRequest(PreviewInitialCriteriaRequest):
     preview_fingerprint: Sha256
 
 

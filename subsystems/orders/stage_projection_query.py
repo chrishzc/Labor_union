@@ -24,7 +24,9 @@ StageStatus = Literal["not_started", "in_progress", "blocked", "completed", "una
 _ROW_FIELDS = frozenset({
     "case_no", "order_version", "order_updated_at", "import_receipt_id", "import_created_at",
     "imported_terms_complete",
-    "terms_event_id", "terms_version", "terms_created_at", "matching_plan_id", "matching_plan_version",
+    "terms_event_id", "terms_version", "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
+    "candidate_pool_candidate_count", "candidate_pool_contacted_count", "candidate_pool_contacted_at",
+    "candidate_pool_replied_count", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
     "matching_plan_status", "matching_created_at", "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
     "willingness_accepted_count", "willingness_contacted_at", "willingness_replied_at",
     "resume_attempt_count", "resume_sent_count", "resume_sent_at", "matching_segment_count", "staff_contract_sent_count",
@@ -151,7 +153,8 @@ class OrderStageProjectionQueryService:
         evaluated_at = self._clock.now()
         items = tuple(_timeline(row, evaluated_at) for row in rows[: request.page_size])
         identities = tuple(item.case_no for item in items)
-        if identities != tuple(sorted(identities)) or len(identities) != len(set(identities)):
+        identity_keys = tuple(identity.casefold() for identity in identities)
+        if identity_keys != tuple(sorted(identity_keys)) or len(identity_keys) != len(set(identity_keys)):
             raise OrderStageProjectionContractError("case page identity is duplicate or unordered")
         next_cursor = items[-1].case_no if len(rows) > request.page_size else None
         counts = {code: 0 for code in _STAGE_CODES}
@@ -213,6 +216,8 @@ def _intake_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
 def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     plan_id = row["matching_plan_id"]
     status = row["matching_plan_status"]
+    candidate_pool_id = _optional_int(row, "candidate_pool_id")
+    candidate_count = _nonnegative_int(row, "candidate_pool_candidate_count")
     if plan_id is not None and (isinstance(plan_id, bool) or not isinstance(plan_id, int) or plan_id <= 0):
         raise OrderStageProjectionContractError("matching_plan_id must be a positive integer")
     if plan_id is not None and status not in {"draft", "proposed", "accepted", "rejected", "superseded", "cancelled"}:
@@ -223,6 +228,18 @@ def _matching_stage(row: Mapping[str, object], case_no: str) -> StageProjection:
     if replied_count > willingness_count or accepted_count > replied_count:
         raise OrderStageProjectionContractError("willingness counts are inconsistent")
     source = _source("Assignments / Scheduling", f"caregiver-matching-plan:{plan_id}" if plan_id is not None else None, _optional_int(row, "matching_plan_version"))
+    if plan_id is None and candidate_pool_id is not None and candidate_count:
+        return _stage(
+            2,
+            "matching_willingness",
+            "媒合與徵詢意願",
+            "Assignments / Scheduling",
+            "in_progress",
+            _source("Assignments / Scheduling", f"candidate-contact-pool:{candidate_pool_id}", None),
+            _optional_datetime(row, "candidate_pool_created_at"),
+            warnings=(_notice("formal_matching_plan_not_created", "候選聯繫與意願確認完成後，才能建立正式媒合方案。"),),
+            actions=(_get("orders.assignment_plan.query", f"/api/v1/orders/{case_no}/assignment-plan"),),
+        )
     if plan_id is None:
         return _unavailable_stage(2, "matching_willingness", "媒合與徵詢意願", "Assignments / Scheduling", "matching_plan_lineage_missing")
     if status == "accepted":
@@ -344,6 +361,12 @@ def _settlement_part(code: str, owner: str, identity: object, version: int | Non
 def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjection, ...]) -> tuple[SopStepProjection, ...]:
     stage = {item.code: item for item in stages}
     plan_id = row["matching_plan_id"]
+    candidate_pool_id = _optional_int(row, "candidate_pool_id")
+    candidate_count = _nonnegative_int(row, "candidate_pool_candidate_count")
+    pool_contacted_count = _nonnegative_int(row, "candidate_pool_contacted_count")
+    pool_replied_count = _nonnegative_int(row, "candidate_pool_replied_count")
+    pool_contacted_at = _optional_datetime(row, "candidate_pool_contacted_at")
+    pool_replied_at = _optional_datetime(row, "candidate_pool_replied_at")
     contact_attempt_count = _nonnegative_int(row, "willingness_contact_attempt_count")
     contacted_count = _nonnegative_int(row, "willingness_count")
     replied_count = _nonnegative_int(row, "willingness_replied_count")
@@ -356,7 +379,9 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     client_sent_count = _nonnegative_int(row, "client_contract_sent_count")
     client_signed_count = _nonnegative_int(row, "client_contract_signed_count")
     if (
-        contacted_count > contact_attempt_count
+        pool_contacted_count > candidate_count
+        or pool_replied_count > candidate_count
+        or contacted_count > contact_attempt_count
         or replied_count > contact_attempt_count
         or accepted_count > replied_count
         or staff_sent_count > segment_count
@@ -366,8 +391,25 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
         or client_signed_count > client_sent_count
     ):
         raise OrderStageProjectionContractError("SOP owner fact counts are inconsistent")
-    contact_status: StageStatus = "completed" if segment_count and contacted_count >= segment_count else "in_progress" if contact_attempt_count else "not_started" if plan_id is not None else "unavailable"
-    reply_status: StageStatus = "completed" if segment_count and replied_count >= segment_count else "in_progress" if replied_count else "not_started" if plan_id is not None else "unavailable"
+    contact_status: StageStatus = (
+        "completed"
+        if candidate_count and pool_contacted_count >= candidate_count and pool_contacted_at is not None
+        else "in_progress"
+        if pool_contacted_count
+        else "not_started"
+        if candidate_pool_id is not None
+        else "unavailable"
+    )
+    reply_status: StageStatus = (
+        "completed"
+        if candidate_count and pool_replied_count >= candidate_count
+        else "in_progress"
+        if pool_replied_count
+        else "not_started"
+        if candidate_pool_id is not None
+        else "unavailable"
+    )
+    pool_status: StageStatus = "completed" if candidate_count else "in_progress" if candidate_pool_id is not None else "unavailable"
     recommendation_status: StageStatus = "completed" if resume_sent_count else "in_progress" if resume_attempt_count or accepted_count else "not_started" if plan_id is not None else "unavailable"
     staff_contract_status: StageStatus = "completed" if segment_count and staff_signed_count == segment_count else "in_progress" if staff_sent_count or staff_signed_count else "not_started" if plan_id is not None else "unavailable"
     client_contract_status: StageStatus = "completed" if client_signed_count else "in_progress" if client_sent_count else "not_started" if plan_id is not None else "unavailable"
@@ -375,19 +417,17 @@ def _steps(row: Mapping[str, object], case_no: str, stages: tuple[StageProjectio
     deposit_status: StageStatus = "completed" if deposit_count and not _nonnegative_int(row, "deposit_open_count") else "blocked" if deposit_count else "unavailable"
     return (
         _step_from_stage(1, "intake_validation", "進件報名與資料完整性驗證", stage["intake_terms"]),
-        _step_from_stage(2, "matching_pool", "媒合月嫂候選人加入意願池", stage["matching_willingness"]),
-        _standalone_step(3, "caregiver_line_delivery", "發送訂單資訊詢問月嫂意願（LINE）", "Assignments / LINE Delivery", contact_status, _optional_datetime(row, "willingness_contacted_at"), "matching_contact_lineage_missing" if contact_status == "unavailable" else None),
-        _standalone_step(4, "caregiver_willingness_reply", "月嫂回傳接案意願", "Assignments / LINE", reply_status, _optional_datetime(row, "willingness_replied_at"), "matching_willingness_lineage_missing" if reply_status == "unavailable" else None),
+        _standalone_step(2, "matching_pool", "媒合月嫂候選人加入意願池", "Assignments / Scheduling", pool_status, _optional_datetime(row, "matching_created_at"), "matching_plan_lineage_missing" if pool_status == "unavailable" else None),
+        _standalone_step(3, "caregiver_line_delivery", "發送訂單資訊詢問月嫂意願（LINE）", "Assignments / LINE Delivery", contact_status, pool_contacted_at, "candidate_contact_pool_missing" if contact_status == "unavailable" else None),
+        _standalone_step(4, "caregiver_willingness_reply", "月嫂回傳接案意願", "Assignments / LINE", reply_status, pool_replied_at, "candidate_contact_pool_missing" if reply_status == "unavailable" else None),
         _step_from_stage(5, "formal_recommendation", "寄送月嫂履歷給客戶確認", stage["client_review"]),
         _standalone_step(6, "caregiver_contract", "產生並寄送月嫂服務契約（月嫂簽回）", "Contract Signing", staff_contract_status, _latest(row, "staff_contract_signed_at", "staff_contract_sent_at"), "staff_contract_signing_lineage_missing" if staff_contract_status == "unavailable" else None),
         _standalone_step(7, "deposit_settlement", "客戶定金核銷（訂單成立）", "Client Finance", deposit_status, _optional_datetime(row, "deposit_updated_at"), "deposit_obligation_missing" if deposit_status == "unavailable" else None, blockers=(_notice("deposit_not_settled", "定金 obligation 尚未結清。"),) if deposit_status == "blocked" else ()),
         _standalone_step(8, "client_contract", "產生並寄送客戶契約（客戶簽回）", "Contract Signing / Orders", client_contract_status, _latest(row, "client_contract_signed_at", "client_contract_sent_at"), "client_contract_signing_lineage_missing" if client_contract_status == "unavailable" else None),
-        _step_from_stage(9, "confirmed_service_dates", "填寫實際開始日與雙方確認服務日期", stage["date_confirmation"]),
+        _step_from_stage(9, "confirmed_service_dates", "確認事前服務日期（精算）", stage["date_confirmation"]),
         _step_from_stage(10, "formal_service", "轉換正式排班與服務履約", stage["active_service"]),
         _step_from_stage(11, "settlement_close", "完工驗收、時數核對與尾款／薪資結清", stage["settlement_payout"]),
     )
-
-
 def _step_from_stage(ordinal: int, code: str, label: str, stage: StageProjection) -> SopStepProjection:
     return SopStepProjection(ordinal, code, label, stage.owner, stage.status, stage.occurred_at, stage.blockers, stage.warnings, stage.available_actions, stage.availability_reason)
 
@@ -513,16 +553,13 @@ def _timeline_payload(item: OrderOperationalTimeline) -> dict[str, object]:
 
 
 def _current_stage(stages: tuple[StageProjection, ...]) -> str | None:
-    actionable = next((stage.code for stage in stages if stage.status in {"blocked", "in_progress", "not_started"}), None)
-    if actionable is not None:
-        return actionable
-    completed_indexes = tuple(index for index, stage in enumerate(stages) if stage.status == "completed")
-    if not completed_indexes:
+    if all(stage.status == "unavailable" for stage in stages):
         return None
-    latest_completed = completed_indexes[-1]
-    if latest_completed + 1 < len(stages):
-        return stages[latest_completed + 1].code
-    return stages[latest_completed].code
+    service_stage = stages[_STAGE_CODES.index("active_service")]
+    if service_stage.status == "completed":
+        return "settlement_payout"
+    current = next((stage for stage in stages if stage.status != "completed"), None)
+    return stages[-1].code if current is None else current.code
 
 
 __all__ = ["MAXIMUM_PAGE_SIZE", "OrderOperationalTimelinePage", "OrderStageProjectionContractError", "OrderStageProjectionQueryService", "OrderStageProjectionRepository", "StageProjectionQuery"]

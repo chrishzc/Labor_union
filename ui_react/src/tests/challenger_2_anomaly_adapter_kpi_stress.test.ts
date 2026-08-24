@@ -562,10 +562,10 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
   });
 
   // ==========================================================================
-  // Section 5: Adapt Anomaly Summary Integrity & Fallback Gap Tests
+  // Section 5: Adapt Anomaly Summary Integrity & Typed Source Projection Tests
   // ==========================================================================
-  describe('adaptAnomalySummary Robustness & Public Contract Gaps', () => {
-    it('[Adapter-1] Preserves strict public contract gap markers', () => {
+  describe('adaptAnomalySummary Robustness & Typed Source Projection', () => {
+    it('[Adapter-1] projects only typed source facts when display snapshot is absent', () => {
       const dto: AnomalySummaryView = {
         fingerprint: 'e'.repeat(64),
         definition_code: 'GAP-TEST-001',
@@ -582,11 +582,11 @@ describe('Challenger 2 — Phase 2D Adapter & KPI Stress-Testing Suite', () => {
 
       const adapted = adaptAnomalySummary(dto);
 
-      expect(adapted.title).toBe('目前 typed view 未納入摘要欄位');
-      expect(adapted.description).toBe('目前 typed view 未納入描述欄位');
-      expect(adapted.relatedEntity).toBe('目前 typed view 未納入關聯實體欄位');
-      expect(adapted.suggestedAction).toBe('目前 typed view 未納入建議處理欄位');
-      expect(adapted.rootEvidence).toBe('目前 typed view 未納入根事實明細欄位');
+      expect(adapted.title).toBe('異常偵測項目');
+      expect(adapted.description).toBe('來源領域：unknown_source；來源版本：v5');
+      expect(adapted.relatedEntity).toBe('src:42');
+      expect(adapted.suggestedAction).toBe('開啟詳情查看可執行的處置。');
+      expect(adapted.rootEvidence).toBe('來源識別：src:42');
       expect(adapted.category).toBe('其他');
       expect(adapted.status).toBe('✅ 已排除');
       expect(adapted.severity).toBe('🟡 警示待補');

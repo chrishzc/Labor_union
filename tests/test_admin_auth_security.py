@@ -17,6 +17,7 @@ from api.dependencies.admin_auth import (
     require_line_menu_publisher,
     require_line_task_controller,
 )
+from api.dependencies.jobs import immutable_admin_job_actor
 from api.routes.admin_auth import _local_developer_session_enabled
 from subsystems.access.authentication_session import (
     AdminPrincipal,
@@ -177,6 +178,20 @@ def test_local_bypass_still_enforces_registered_and_denied_capabilities(monkeypa
         with pytest.raises(HTTPException) as raised:
             require_capability(capability)(request, principal)
         assert raised.value.status_code == 403
+
+
+def test_local_bypass_uses_only_the_explicit_development_durable_job_actor(monkeypatch):
+    monkeypatch.setenv("APP_ENV", "development")
+    monkeypatch.setenv("ENABLE_ADMIN_AUTH", "false")
+    monkeypatch.setenv("ACCESS_CONTROL_PROFILE", "local_bypass")
+    bypass = AdminPrincipal(None, "development-bypass", "開發模式管理員", "system_admin")
+
+    assert immutable_admin_job_actor(bypass, "test-correlation") == "system:local_bypass"
+
+    monkeypatch.setenv("APP_ENV", "production")
+    with pytest.raises(HTTPException) as raised:
+        immutable_admin_job_actor(bypass, "test-correlation")
+    assert raised.value.status_code == 403
 
 
 @pytest.mark.parametrize(

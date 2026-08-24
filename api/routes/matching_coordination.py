@@ -156,7 +156,11 @@ def preview_initial_criteria(
                 {"case_no": case_no, "correlation_id": correlation.value}
             ).value
         ),
-        expected_source_versions=_source_tuple(body.expected_source_versions),
+        expected_source_versions=(
+            None
+            if body.expected_source_versions is None
+            else _source_tuple(body.expected_source_versions)
+        ),
     )
     try:
         result = composition.application.preview(command)

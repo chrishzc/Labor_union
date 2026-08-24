@@ -1,8 +1,6 @@
-"""Segmented caregiver availability search service.
-
-Pure helpers for constraints/combination enumeration remain in
-`caregiver_segment_availability_service.py`. This module only owns DB loading,
-date normalization and data shaping.
+"""
+File: segmented_availability_query.py
+Description: 讀取媒合可用性 fresh facts，遇到來源未備妥時 fail closed，再產生候選結果。
 """
 
 from __future__ import annotations
@@ -103,6 +101,8 @@ def search_segmented_caregiver_availability(
         raise ValueError("case not found")
     if order_row["status"] != "洽談中":
         raise ValueError("case is not in negotiation stage")
+    if order_row.get("requires_cooking") is None:
+        raise ValueError("matching_preference_source_not_ready")
 
     planned_start = _as_optional_date(order_row["start_date"], "planned_start_date")
     planned_end = _as_optional_date(order_row["end_date"], "planned_end_date")
@@ -207,8 +207,12 @@ def search_segmented_caregiver_availability(
 def _required_service_dates(confirmed_rows, planned_start, planned_end):
     if confirmed_rows:
         return tuple(_as_optional_date(row["service_date"], "confirmed_service_date") for row in confirmed_rows)
-    return tuple(planned_start + timedelta(days=offset)
-                 for offset in range((planned_end - planned_start).days + 1))
+    # A planned interval is not an exact service-date set: it can include fixed
+    # rest days, holidays, and adjusted leave.  Treating every calendar day as
+    # a formal service day would let matching create a plan that cannot conserve
+    # ``orders.service_days`` through contract and assignment conversion.
+    del planned_start, planned_end
+    raise ValueError("official_service_dates_incomplete")
 
 
 def _expand_staff_unavailability_days(row, window_start, window_end):

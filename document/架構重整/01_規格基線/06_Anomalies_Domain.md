@@ -120,17 +120,27 @@ API 回傳 typed summary、detail 與 allowed actions。財務 occurrence 與 cu
 - recovery action 只公開 owning Domain Preview／Apply metadata、required inputs、capability、completion
   predicate 與完整 typed source bindings；Anomalies route 不執行 repair，也不得把人工 resolve 描述為根事實已修正。
 
-#### React detail／recovery read-only boundary（2026-08-22，Phase 3D-R）
+#### React detail／recovery dispatcher boundary（2026-08-24）
 
 - React Anomalies Drawer 只能透過 bounded typed GET client 取得 detail、timeline、evidence 與 recovery
   context；client、schema、adapter 與 page 不得接收 raw dict、拼接 endpoint 或由 definition code 推導業務欄位。
 - `anomalies.drawer.detail`、`anomalies.drawer.timeline`、`anomalies.drawer.evidence`、`.root-evidence` 與
-  `.recovery` 是穩定唯讀 surfaces；`anomalies.card.claim`、`anomalies.drawer.resolve` 及 warning transition
-  必須原生 disabled，不能以 loading、recovery metadata 或人工 resolve 文案冒充根事實已修復。
+  `.recovery` 是穩定讀取 surfaces；`anomalies.card.claim` 與通用 `anomalies.drawer.resolve` 必須原生 disabled，
+  不能以 loading、recovery metadata 或人工 resolve 文案冒充根事實已修復。
+- 唯一例外是 recovery context 明確註冊 `form_schema_key=finance_import.correction.v1`、owner 為
+  `finance_import`、完整 `finance_import_row_identity`／`source_version` bindings 且具有 Preview／Apply
+  operation 的 action。React 只能以該 action 的 source binding 預填不可編輯銀行列，再讓人員輸入該
+  typed form 所要求的有限 selection、reason 與 evidence；未知 schema、缺 binding、owner／operation 不符
+  一律不渲染表單且 fail closed。
+- Finance correction 固定為 Preview 零寫入 → same preview versions／fingerprint 的 durable Apply → 只讀
+  `correction-outcome` terminal receipt re-query。`202 Accepted` 只表示 worker 已受理；只有 `succeeded`
+  且 strict immutable receipt 可讀回時才顯示根事實修正完成，並重新查詢 anomaly。queued／running／failed、
+  outcome error 或缺 receipt 不得宣稱修正完成。
 - detail／recovery 任一 GET 失敗、404、timeout、abort、stale response 或 schema mismatch，只能在對應
   Drawer 區塊顯示 typed unavailable／error；不得清空仍有效的摘要、跨 Drawer 污染狀態，或發出 POST／PUT／
-  PATCH／DELETE。Detail 成功與 recovery 失敗是可並存的 partial-failure 結果。
-- recovery positive result 未取得前，UI 不得顯示 repair receipt、完成 predicate 消失或「已修復」；recovery
+  PATCH／DELETE（已註冊 Finance correction Apply 除外）。Detail 成功與 recovery 失敗是可並存的
+  partial-failure 結果。
+- 未取得 terminal receipt 前，UI 不得顯示 repair receipt、完成 predicate 消失或「已修復」；recovery
   404 只代表目前 context unavailable，不改變 Anomalies root、workflow 或 owning Domain 狀態。
 - Browser 驗收必須以真 FastAPI＋Vite Network↔DOM 證據確認 typed detail redaction 與局部 unavailable；
   Happy DOM、mock-only、單一 HTTP 200 或 component fixture 不足以證明 recovery positive path。

@@ -1,3 +1,8 @@
+"""
+File: test_caregiver_segment_availability_service.py
+Description: 驗證月嫂分段可用性查詢的唯讀、邊界、來源與資源釋放契約。
+"""
+
 from datetime import date
 
 import pytest
@@ -18,7 +23,10 @@ class QueryAwareCursor:
         self.executed.append((statement, tuple(params) if params is not None else None))
 
         if "FROM orders o" in statement and "WHERE o.case_no = %s" in statement:
-            self.current = self.fixture.get("order")
+            current = self.fixture.get("order")
+            self.current = None if current is None else dict(current)
+            if self.current is not None:
+                self.current.setdefault("requires_cooking", False)
             return
 
         if "FROM staff s" in statement or "FROM staff WHERE" in statement:

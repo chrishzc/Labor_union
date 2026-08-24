@@ -1,12 +1,12 @@
 """
-================================================================================
-檔案名稱: tests/test_order_schedule_calculation_service.py
-功能說明: 驗證 OrderScheduleCalculationService 排休聯集合併與完整參數轉傳功能
-================================================================================
+File: test_order_schedule_calculation_service.py
+Description: 驗證服務日期精算的假日、請假與固定排休覆寫規則。
 """
 
 import pytest
 from datetime import date
+from api.routes.order_schedule_calculation import calculate_schedule
+from api.schemas.orders import ScheduleCalculationRequest
 from subsystems.scheduling.attendance_schedule_query import calculate_order_attendance_schedule
 
 
@@ -72,3 +72,55 @@ def test_order_schedule_calculation_custom_weekdays_and_salary():
 
     assert "actual_end_date" in res
     assert res.get("target_service_days") == 10
+
+
+def test_fixed_rest_can_be_overridden_to_work_but_not_holiday_or_leave():
+    """人工服務日只覆寫固定週休，不能跨越更高優先序的休假。"""
+    fixed_rest_overridden = calculate_order_attendance_schedule(
+        actual_start_date=date(2026, 9, 12),
+        target_service_days=2,
+        service_mode="週休2日",
+        custom_work_dates=[date(2026, 9, 12)],
+    )
+
+    cells = {item["date"]: item for item in fixed_rest_overridden["day_by_day"]}
+    assert cells[date(2026, 9, 12)]["is_work_day"] is True
+    assert cells[date(2026, 9, 13)]["is_rest_day"] is True
+    assert fixed_rest_overridden["actual_end_date"] == date(2026, 9, 14)
+
+    leave_wins = calculate_order_attendance_schedule(
+        actual_start_date=date(2026, 9, 12),
+        target_service_days=1,
+        service_mode="週休2日",
+        custom_work_dates=[date(2026, 9, 12)],
+        custom_leave_dates=[date(2026, 9, 12)],
+    )
+    leave_cells = {item["date"]: item for item in leave_wins["day_by_day"]}
+    assert leave_cells[date(2026, 9, 12)]["is_rest_day"] is True
+
+
+def test_schedule_route_forwards_custom_work_dates(monkeypatch):
+    """路由不得遺失固定排休覆寫，避免 UI 成功點擊但 server 收不到條件。"""
+    received = {}
+
+    def _calculate(**kwargs):
+        received.update(kwargs)
+        return {"actual_end_date": date(2026, 9, 12)}
+
+    monkeypatch.setattr(
+        "api.routes.order_schedule_calculation"
+        ".attendance_schedule_query.calculate_order_attendance_schedule",
+        _calculate,
+    )
+
+    response = calculate_schedule(
+        ScheduleCalculationRequest(
+            actual_start_date=date(2026, 9, 12),
+            target_service_days=1,
+            service_mode="週休2日",
+            custom_work_dates=[date(2026, 9, 12)],
+        )
+    )
+
+    assert received["custom_work_dates"] == [date(2026, 9, 12)]
+    assert response.data["actual_end_date"] == date(2026, 9, 12)

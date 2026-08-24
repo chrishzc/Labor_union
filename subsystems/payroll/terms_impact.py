@@ -1,7 +1,6 @@
-"""Build the Payroll impact of an Orders terms or cancellation change.
-
-This subsystem converts immutable scheduling root facts into the staff
-obligation actions that the Payroll repository persists in the same UoW.
+"""
+File: terms_impact.py
+Description: 建立條款異動的薪資影響，並表達未排班案件的零寫入候選。
 """
 
 from __future__ import annotations
@@ -169,6 +168,46 @@ def build_payroll_terms_impact_candidate(facts: PayrollTermsImpactFacts, change_
 def build_payroll_terms_impact(source_facts: PayrollTermsSourceFacts, scheduling: SchedulingGenerationCandidate, order_terms: OrderTerms, change_identity: str) -> PayrollTermsImpactCandidate:
     facts = _impact_facts(source_facts, scheduling, order_terms)
     return build_payroll_terms_impact_candidate(facts, change_identity)
+
+
+def build_preassignment_payroll_noop(
+    source_facts: PayrollTermsSourceFacts,
+    scheduling: SchedulingGenerationCandidate,
+    order_terms: OrderTerms,
+    change_identity: str,
+) -> PayrollTermsImpactCandidate:
+    require_canonical_text(change_identity, "change identity", _IDENTITY_MAXIMUM_LENGTH)
+    if source_facts.case_no != scheduling.case_no or scheduling.assignments:
+        raise ValueError("preassignment_payroll_facts_conflict")
+    if source_facts.source_terms:
+        raise ValueError("preassignment_source_assignment_conflict")
+    if source_facts.existing_obligations:
+        raise ValueError("preassignment_payroll_obligation_conflict")
+    terms = PayrollTerms(
+        order_terms.service_days,
+        order_terms.service_hours_per_day,
+        order_terms.floor_fee,
+    )
+    payroll = build_case_payroll_candidate((), (), terms)
+    return PayrollTermsImpactCandidate(
+        source_facts.case_no,
+        source_facts.payroll_version,
+        source_facts.payroll_version,
+        payroll,
+        (),
+        (),
+        (),
+        fingerprint_payload(
+            {
+                "mode": "preassignment_noop",
+                "case_no": source_facts.case_no,
+                "payroll_version": source_facts.payroll_version,
+                "terms": order_terms.canonical_payload(),
+                "scheduling_generation": scheduling.generation_number,
+                "payroll": payroll.fingerprint.value,
+            }
+        ),
+    )
 
 
 def build_payroll_cancellation_impact(source_facts: PayrollTermsSourceFacts, scheduling: SchedulingGenerationCandidate, order_terms: OrderTerms, change_identity: str) -> PayrollTermsImpactCandidate:

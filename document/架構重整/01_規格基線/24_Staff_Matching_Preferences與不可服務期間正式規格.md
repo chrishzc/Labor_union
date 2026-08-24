@@ -89,6 +89,8 @@ Modules 必須是純函式，不讀 DB、不取得現在時間、不 import API�
 - 唯一配對後，Case Import reconciliation 才可將 BeClass 問卷的明確 yes／no source value透過
   typed Orders command補入 canonical `requires_cooking`。空白、矛盾或自由文字無法唯一判定時回
   `case_import_cooking_requirement_ambiguous` 進 Import Review，但不撤銷已建立的 HCM roots。
+- 此補正僅能改寫 `requires_cooking`；歷史 root 有 `actual_start_date` 而尚無正式 Scheduling segment
+  時仍可執行，不得順帶變更日期、時段、工時、費用或其他服務條款。服務資料鎖形成後固定拒絕。
 - 原始 `survey_details` 保留為來源 evidence；正規化後布林值進 reconciliation fingerprint、event與
   Orders root。不得在 Matching Query 每次重新解析自由文字。
 - 月嫂料理能力使用 `staff_cooking_skills`。案件不需要下廚時條件為 `not_applicable`；需要下廚時，

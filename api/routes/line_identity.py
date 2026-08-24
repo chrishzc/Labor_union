@@ -278,6 +278,18 @@ def _apply_combined_registration(application, payload, line_user_id):
         raise _registration_http_error(503, str(error), "登記服務暫時無法使用") from error
     except (LineIdentityNotFoundError, LineIdentityConflictError) as error:
         raise _registration_http_error(409, "line_identity_conflict", str(error)) from error
+    except RuntimeError as error:
+        code = str(error)
+        if code in {
+            "customer_identity_binding_conflict",
+            "line_identity_already_used_by_customer",
+        }:
+            raise _registration_http_error(
+                409,
+                code,
+                "此客戶的 LINE 身分綁定已變更，請由管理端確認後再處理。",
+            ) from error
+        raise
 
 
 def _registration_response(receipt, identity_status):

@@ -30,6 +30,13 @@ def _row(case_no: str = "CASE-001") -> dict[str, object]:
         "terms_event_id": 2,
         "terms_version": 2,
         "terms_created_at": NOW,
+        "candidate_pool_id": 1,
+        "candidate_pool_created_at": NOW,
+        "candidate_pool_candidate_count": 1,
+        "candidate_pool_contacted_count": 1,
+        "candidate_pool_contacted_at": NOW,
+        "candidate_pool_replied_count": 1,
+        "candidate_pool_replied_at": NOW,
         "matching_plan_id": 3,
         "matching_plan_version": 1,
         "matching_plan_status": "accepted",
@@ -125,6 +132,66 @@ def test_imported_complete_terms_finish_step_one_without_a_terms_change_event() 
     assert item.sop_steps[2].status == "completed"
 
 
+def test_matching_pool_step_completes_from_candidate_pool_fact_before_customer_acceptance() -> None:
+    row = _row("MATCHING-POOL-COMPLETED")
+    row["matching_plan_status"] = "proposed"
+    row["willingness_count"] = 1
+    row["willingness_replied_count"] = 1
+    row["willingness_accepted_count"] = 1
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[1].status == "in_progress"
+    assert item.sop_steps[1].status == "completed"
+    assert item.sop_steps[2].status == "completed"
+    assert item.sop_steps[3].status == "completed"
+
+
+def test_candidate_pool_steps_do_not_require_a_formal_matching_plan() -> None:
+    row = _row("CANDIDATE-POOL-BEFORE-PLAN")
+    row.update({
+        "matching_plan_id": None,
+        "matching_plan_version": None,
+        "matching_plan_status": None,
+        "matching_created_at": None,
+        "candidate_pool_id": 31,
+        "candidate_pool_candidate_count": 2,
+        "candidate_pool_contacted_count": 2,
+        "candidate_pool_contacted_at": NOW,
+        "candidate_pool_replied_count": 2,
+        "candidate_pool_replied_at": NOW,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[1].status == "in_progress"
+    assert item.stages[1].source.identity == "candidate-contact-pool:31"
+    assert [step.status for step in item.sop_steps[1:4]] == ["completed"] * 3
+
+
+def test_line_delivery_step_never_completes_without_contact_timestamp() -> None:
+    row = _row("LINE-DELIVERY-TIMESTAMP-MISSING")
+    row.update({
+        "matching_segment_count": 1,
+        "willingness_count": 1,
+        "willingness_replied_count": 1,
+        "willingness_accepted_count": 1,
+        "willingness_contacted_at": None,
+        "candidate_pool_contacted_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.sop_steps[2].status == "in_progress"
+    assert item.sop_steps[2].occurred_at is None
+
+
 def test_imported_terms_missing_any_required_root_fact_keep_step_one_in_progress() -> None:
     row = _row("HCM-INCOMPLETE-TERMS")
     row.update({
@@ -141,11 +208,34 @@ def test_imported_terms_missing_any_required_root_fact_keep_step_one_in_progress
     assert item.sop_steps[0].status == "in_progress"
 
 
+def test_preassignment_confirmed_dates_are_not_mislabeled_as_actual_start() -> None:
+    """事前精算可先確認日期，但不代表已建立正式指派或開始服務。"""
+    row = _row("PREASSIGNMENT-DATES")
+    row.update({
+        "assignment_count": 0,
+        "assignment_active_count": 0,
+        "assignment_completed_count": 0,
+        "assignment_updated_at": None,
+        "assignment_first_service_date": None,
+        "assignment_last_service_date": None,
+        "scheduling_version": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.sop_steps[8].status == "completed"
+    assert item.sop_steps[8].label == "確認事前服務日期（精算）"
+    assert item.sop_steps[9].status == "unavailable"
+
+
 def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage() -> None:
     row = _row("LEGACY-ROOTLESS-001")
     for field in (
         "import_receipt_id", "import_created_at", "terms_event_id", "terms_version",
-        "terms_created_at", "matching_plan_id", "matching_plan_version",
+        "terms_created_at", "candidate_pool_id", "candidate_pool_created_at",
+        "candidate_pool_contacted_at", "candidate_pool_replied_at", "matching_plan_id", "matching_plan_version",
         "matching_plan_status", "matching_created_at", "willingness_contacted_at",
         "willingness_replied_at", "resume_sent_at", "staff_contract_sent_at",
         "staff_contract_signed_at", "client_contract_sent_at", "client_contract_signed_at",
@@ -159,7 +249,8 @@ def test_rootless_historical_order_is_isolated_without_guessing_a_business_stage
         row[field] = None
     for field in (
         "willingness_contact_attempt_count", "willingness_count", "willingness_replied_count",
-        "willingness_accepted_count", "resume_attempt_count", "resume_sent_count",
+        "willingness_accepted_count", "candidate_pool_candidate_count", "candidate_pool_contacted_count",
+        "candidate_pool_replied_count", "resume_attempt_count", "resume_sent_count",
         "matching_segment_count", "staff_contract_sent_count", "staff_contract_signed_count",
         "client_contract_sent_count", "client_contract_signed_count", "deposit_obligation_count",
         "deposit_open_count", "assignment_count", "assignment_active_count",
@@ -245,11 +336,94 @@ def test_completed_service_advances_to_settlement_even_when_settlement_roots_are
     assert item.current_stage_code == "settlement_payout"
 
 
+def test_out_of_order_service_dates_do_not_skip_the_missing_matching_stage() -> None:
+    row = _row("116990823")
+    row.update({
+        "matching_plan_id": None,
+        "matching_plan_version": None,
+        "matching_plan_status": None,
+        "matching_created_at": None,
+        "candidate_pool_id": None,
+        "candidate_pool_created_at": None,
+        "candidate_pool_candidate_count": 0,
+        "candidate_pool_contacted_count": 0,
+        "candidate_pool_contacted_at": None,
+        "candidate_pool_replied_count": 0,
+        "candidate_pool_replied_at": None,
+        "willingness_contact_attempt_count": 0,
+        "willingness_count": 0,
+        "willingness_replied_count": 0,
+        "willingness_accepted_count": 0,
+        "willingness_contacted_at": None,
+        "willingness_replied_at": None,
+        "resume_attempt_count": 0,
+        "resume_sent_count": 0,
+        "resume_sent_at": None,
+        "matching_segment_count": 0,
+        "staff_contract_sent_count": 0,
+        "staff_contract_sent_at": None,
+        "staff_contract_signed_count": 0,
+        "staff_contract_signed_at": None,
+        "client_contract_sent_count": 0,
+        "client_contract_sent_at": None,
+        "client_contract_signed_count": 0,
+        "client_contract_signed_at": None,
+        "contract_event_id": None,
+        "contract_created_at": None,
+        "deposit_obligation_count": 0,
+        "deposit_open_count": 0,
+        "deposit_updated_at": None,
+        "assignment_count": 0,
+        "assignment_active_count": 0,
+        "assignment_completed_count": 0,
+        "assignment_updated_at": None,
+        "assignment_first_service_date": None,
+        "assignment_last_service_date": None,
+        "service_completion_identity": None,
+        "service_completed_at": None,
+        "client_obligation_count": 0,
+        "client_open_count": 0,
+        "client_updated_at": None,
+        "staff_obligation_count": 0,
+        "staff_open_count": 0,
+        "staff_updated_at": None,
+    })
+
+    item = OrderStageProjectionQueryService(_Repository((row,)), BUSINESS_CLOCK).query(
+        StageProjectionQuery(50)
+    ).items[0]
+
+    assert item.stages[0].status == "completed"
+    assert item.stages[1].status == "unavailable"
+    assert item.stages[4].status == "completed"
+    assert item.current_stage_code == "matching_willingness"
+
+
+def test_page_order_validation_uses_mysql_case_insensitive_cursor_order() -> None:
+    mysql_order = (_row("WP85-single-001"), _row("WP85-UI-001"))
+
+    page = OrderStageProjectionQueryService(
+        _Repository(mysql_order), BUSINESS_CLOCK
+    ).query(StageProjectionQuery(50))
+
+    assert tuple(item.case_no for item in page.items) == (
+        "WP85-single-001",
+        "WP85-UI-001",
+    )
+    with pytest.raises(OrderStageProjectionContractError, match="duplicate or unordered"):
+        OrderStageProjectionQueryService(
+            _Repository(tuple(reversed(mysql_order))), BUSINESS_CLOCK
+        ).query(StageProjectionQuery(50))
+
+
 def test_sop_matching_and_two_party_contract_steps_use_distinct_owner_facts() -> None:
     row = _row()
     row.update({
         "willingness_replied_count": 1,
         "matching_segment_count": 2,
+        "candidate_pool_candidate_count": 2,
+        "candidate_pool_contacted_count": 2,
+        "candidate_pool_replied_count": 1,
         "resume_attempt_count": 0,
         "resume_sent_count": 0,
         "staff_contract_sent_count": 0,
@@ -330,6 +504,8 @@ def test_mysql_repository_uses_one_bounded_select_and_never_commits() -> None:
     assert connection.last_cursor.params == ("CASE-009", 51)
     assert connection.last_cursor.sql.count("SELECT") >= 1
     assert "staff_schedule" in connection.last_cursor.sql
+    assert "caregiver_candidate_contact_pools" in connection.last_cursor.sql
+    assert "caregiver_candidate_contact_events" in connection.last_cursor.sql
     assert "service_start_time" in connection.last_cursor.sql
     assert "matching_notification_intents" in connection.last_cursor.sql
     assert "matching_response_events" in connection.last_cursor.sql

@@ -1,3 +1,8 @@
+"""
+File: test_cooking_requirement.py
+Description: 驗證 BeClass 單選與核取欄位的下廚需求正規化及 fail-closed。
+"""
+
 import pytest
 
 from domains.case_import.cooking_requirement import (
@@ -81,5 +86,29 @@ def test_free_text_is_not_scanned_for_keywords():
 
     with pytest.raises(CookingRequirementDomainError) as captured:
         normalize_cooking_requirement(survey)
+
+    assert captured.value.issue is CookingRequirementIssue.MISSING
+
+
+def test_controlled_checkbox_wins_over_periodic_composite_question_text():
+    survey = {
+        "月子餐點調理喜好/飲食習慣：": "葷食、可以接受中藥補品",
+        "葷食": "Y",
+        "素食": None,
+    }
+
+    assert normalize_cooking_requirement(survey) is True
+
+
+def test_multiple_controlled_checkboxes_are_ambiguous():
+    with pytest.raises(CookingRequirementDomainError) as captured:
+        normalize_cooking_requirement({"葷食": "Y", "不用料理/訂月餐": "Y"})
+
+    assert captured.value.issue is CookingRequirementIssue.AMBIGUOUS
+
+
+def test_unselected_controlled_checkboxes_remain_missing():
+    with pytest.raises(CookingRequirementDomainError) as captured:
+        normalize_cooking_requirement({"葷食": "", "素食": None})
 
     assert captured.value.issue is CookingRequirementIssue.MISSING

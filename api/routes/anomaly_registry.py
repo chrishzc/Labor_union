@@ -175,10 +175,14 @@ def _workflow_request(
 def _summary_payload(summary, *, include_snapshot=True):
     projection = summary.projection
     raw_snapshot = summary.display_snapshot
-    display_snapshot = _safe_display_snapshot(
-        projection.definition_code,
-        summary.display_fields,
-        raw_snapshot,
+    display_snapshot = (
+        _safe_display_snapshot(
+            projection.definition_code,
+            summary.display_fields,
+            raw_snapshot,
+        )
+        if include_snapshot
+        else None
     )
     return {
         "fingerprint": projection.fingerprint.value,
@@ -258,6 +262,8 @@ _IDENTITY_EVIDENCE_FIELDS = frozenset(
         "staff_id",
         "task_id",
         "underpayment_identity",
+        "finance_import_batch_id",
+        "finance_import_row_id",
     }
 )
 _MASKED_TEXT_EVIDENCE_FIELDS = frozenset(
@@ -298,10 +304,13 @@ _CODE_EVIDENCE_FIELDS = frozenset(
     }
 )
 _CODE_LIST_EVIDENCE_FIELDS = frozenset(
-    {"drift_fields", "error_codes", "integrity_blockers", "issue_codes", "reason_codes"}
+    {"domain_blockers", "drift_fields", "error_codes", "integrity_blockers", "issue_codes", "reason_codes"}
 )
+_BOOLEAN_EVIDENCE_FIELDS = frozenset({"integrity_blocker_active", "root_condition_active"})
 _IDENTITY_LIST_EVIDENCE_FIELDS = frozenset(
     {
+        "affected_obligation_identities",
+        "affected_order_identities",
         "advance_candidates",
         "candidate_batch_ids",
         "item_outstanding",
@@ -364,6 +373,16 @@ def _safe_display_snapshot(
 def _private_navigation_fields(definition_code: str) -> frozenset[str]:
     if definition_code == "SCHEDULE-003":
         return frozenset({"assignment_a"})
+    if definition_code == "finance_import_manual_review":
+        return frozenset(
+            {
+                "definition_code",
+                "occurred_at",
+                "original_refund_ledger_entry_id",
+                "recovery_bindings",
+                "source_version",
+            }
+        )
     return frozenset()
 
 
@@ -388,6 +407,10 @@ def _evidence_payload(key: str, value: object) -> dict[str, object]:
             "key": key,
             "value": _identity_list(value),
         }
+    if key in _BOOLEAN_EVIDENCE_FIELDS:
+        if not isinstance(value, bool):
+            raise ValueError("anomaly_projection_data_integrity_violation")
+        return {"kind": "boolean", "key": key, "value": value}
     raise ValueError("anomaly_projection_data_integrity_violation")
 
 

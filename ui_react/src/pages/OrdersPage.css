@@ -1,6 +1,6 @@
 /**
  * File: OrdersPage.css
- * Description: 訂單卡片、篩選與操作區的響應式版面。
+ * Description: 訂單卡片、篩選、媒合與 full-width 服務日曆操作區的響應式版面。
  */
 
 .orders-filter-bar {
@@ -778,22 +778,67 @@
 }
 
 /* ==========================================================================
-   Sub-layouts: Tab 3 (Service Calendar 2-Column Split & Month Grid)
+   Sub-layouts: Tab 3 (Full-width Service Calendar & Month Grid)
    ========================================================================== */
 
 .service-calendar-workbench-layout {
   display: grid;
-  grid-template-columns: 1.25fr 0.75fr;
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
 
 .calendar-matrix-card {
+  width: 100%;
   background-color: #ffffff;
   border: 1px solid #fed9b8;
   border-radius: 14px;
   padding: 22px 24px;
   box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+}
+
+.service-date-confirmation-panel {
+  width: 100%;
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+}
+
+.service-date-confirmation-actions {
+  width: 100%;
+}
+
+.leave-substitution-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  padding: 18px 20px;
+  border: 1px solid #a7d9d2;
+  border-radius: 12px;
+  background: #f0fdfa;
+  color: #134e4a;
+}
+
+.leave-substitution-entry p {
+  margin: 6px 0 0;
+  color: #476763;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+
+.leave-substitution-entry .btn-secondary-action {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .leave-substitution-entry {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 .calendar-preview-sidebar {
@@ -830,24 +875,28 @@
 .calendar-days-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 6px;
+  gap: 10px;
 }
 
 .calendar-date-cell {
-  aspect-ratio: 1.15;
+  min-height: 112px;
   border-radius: 10px;
   border: 1px solid #f0e6e2;
   background-color: #ffffff;
-  padding: 6px;
+  padding: 12px;
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  cursor: pointer;
+  cursor: default;
   transition: all 0.15s ease;
-  font-size: 0.85rem;
+  font-size: 1rem;
   font-weight: 700;
   color: #1e1b19;
   text-align: left;
+}
+
+button.calendar-date-cell {
+  cursor: pointer;
 }
 
 .calendar-date-cell:hover:not(:disabled) {
@@ -862,8 +911,19 @@
   box-shadow: 0 2px 8px rgba(255, 127, 80, 0.15);
 }
 
+.calendar-date-cell.manual-rest {
+  border: 2px solid #b45309;
+  background-color: #fffbeb;
+  color: #92400e;
+}
+
+.calendar-date-cell.automatic-rest {
+  background-color: #f8fafc;
+  color: #64748b;
+}
+
 .calendar-date-cell-badge {
-  font-size: 0.68rem;
+  font-size: 0.78rem;
   font-weight: 700;
   padding: 2px 4px;
   border-radius: 4px;
@@ -1101,5 +1161,264 @@
 .card-projection-segment-meta {
   font-size: 0.72rem;
   color: #a89087;
+}
+
+/* ==========================================================================
+   Contract Document Live Preview & 3-Tab Layout Enhancements
+   ========================================================================== */
+
+.contract-doc-preview-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.contract-doc-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 18px;
+  background-color: #fff8f6;
+  border-bottom: 1px solid #fed9b8;
+}
+
+.contract-doc-view-toggle {
+  display: flex;
+  gap: 6px;
+}
+
+.contract-doc-toggle-btn {
+  padding: 5px 14px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  border: 1px solid #dec0b6;
+  background-color: #ffffff;
+  color: #57423b;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.contract-doc-toggle-btn.active {
+  background-color: #ff7f50;
+  border-color: #ff7f50;
+  color: #ffffff;
+}
+
+.contract-doc-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.contract-doc-tool-btn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: 1px solid #dec0b6;
+  background-color: #ffffff;
+  color: #74593f;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+}
+
+.contract-doc-tool-btn:hover {
+  background-color: #fef3eb;
+  border-color: #ff7f50;
+  color: #c2410c;
+}
+
+.contract-doc-sheet {
+  padding: 24px 28px;
+  background-color: #fffdfc;
+  font-family: 'Noto Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  color: #1e1b19;
+  line-height: 1.6;
+  font-size: 0.86rem;
+  position: relative;
+  overflow-y: auto;
+  max-height: 520px;
+}
+
+.contract-doc-watermark {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-30deg);
+  font-size: 3.5rem;
+  font-weight: 900;
+  color: rgba(255, 127, 80, 0.05);
+  pointer-events: none;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.contract-doc-header {
+  text-align: center;
+  border-bottom: 2px solid #ff7f50;
+  padding-bottom: 12px;
+  margin-bottom: 16px;
+}
+
+.contract-doc-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #1e1b19;
+  margin: 0 0 4px 0;
+}
+
+.contract-doc-meta-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.76rem;
+  color: #74593f;
+  margin-top: 6px;
+}
+
+.contract-doc-parties {
+  background-color: #fff8f6;
+  border: 1px solid #fed9b8;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  display: grid;
+  gap: 6px;
+  font-size: 0.84rem;
+}
+
+.contract-doc-clauses {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.contract-doc-clause-item {
+  border-left: 3px solid #ff7f50;
+  padding-left: 10px;
+}
+
+.contract-doc-clause-title {
+  font-weight: 750;
+  color: #1e1b19;
+  font-size: 0.86rem;
+  margin-bottom: 2px;
+}
+
+.contract-doc-clause-body {
+  color: #4a3c36;
+  font-size: 0.82rem;
+}
+
+.contract-doc-clause-highlight {
+  color: #c2410c;
+  font-weight: 700;
+  background-color: #ffedd5;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.contract-doc-stamps-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-top: 14px;
+  border-top: 1px dashed #dec0b6;
+  padding-top: 14px;
+}
+
+.contract-doc-stamp-card {
+  border: 1px solid #dec0b6;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background-color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.contract-doc-stamp-title {
+  font-weight: 750;
+  color: #57423b;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.contract-doc-seal {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid #166534;
+  color: #166534;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 0.76rem;
+  font-weight: 800;
+  transform: rotate(-3deg);
+  background-color: rgba(22, 101, 52, 0.04);
+}
+
+.contract-doc-seal.pending {
+  border-color: #c2410c;
+  color: #c2410c;
+  background-color: rgba(194, 65, 12, 0.04);
+}
+
+/* Tab 3 Consolidated Split Grid */
+.cancellation-reopen-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.cancellation-reopen-card {
+  background-color: #ffffff;
+  border: 1px solid #fed9b8;
+  border-radius: 14px;
+  padding: 22px 24px;
+  box-shadow: 0 4px 16px rgba(255, 127, 80, 0.05);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.cancellation-calc-box {
+  background-color: #fff8f6;
+  border: 1px solid #fed9b8;
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 0.84rem;
+}
+
+.cancellation-calc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.reopen-version-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  background-color: #fff8f6;
+  border: 1px solid #fed9b8;
+  border-radius: 8px;
+  padding: 10px;
+  text-align: center;
+  font-size: 0.8rem;
 }
 

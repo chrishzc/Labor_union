@@ -608,6 +608,35 @@ describe('Anomaly Query API Client (Phase 2D Integration)', () => {
       }
     });
 
+    it('保留 typed 422 的 upstream code，讓 UI 不把未支援的 referral 誤報為服務故障', async () => {
+      globalThis.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        statusText: 'Unprocessable Entity',
+        headers: new Headers({ 'content-type': 'application/json' }),
+        json: async () => ({
+          detail: {
+            error: {
+              category: 'domain_blocked',
+              code: 'import_warning_referral_unavailable',
+              message: '此警示尚未支援來源修復；可更新追蹤狀態，但不會修改來源根事實。',
+              field_errors: [],
+              domain_blockers: [],
+              retryable: false,
+              correlation_id: 'import-warning-referral',
+              current_version: null,
+            },
+          },
+        }),
+      });
+
+      await expect(queryImportWarningReferral({ occurrenceIdentity: 'FINANCE-ROW-001', expectedVersion: 1 }))
+        .rejects.toMatchObject({
+          upstreamCode: 'import_warning_referral_unavailable',
+          status: 422,
+        });
+    });
+
     it('HTTP 503: 應映射為 AnomalyServiceUnavailableError 且標記 retryable: true', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue({
         ok: false,

@@ -40,7 +40,9 @@ def test_registration_commits_roots_projection_and_intents_once() -> None:
     assert uow.commits == 1
     assert uow.rollbacks == 0
     assert uow.registration.candidates
-    assert uow.customer.bind_calls == [("17", LineUserId("U-registration"), None)]
+    assert uow.customer.bind_calls == [
+        ("17", LineUserId("U-registration"), LineUserId("U-registration"))
+    ]
     assert len(uow.outbox.items) == 1
     assert len(uow.delivery.items) == 1
 
@@ -59,7 +61,9 @@ def test_registration_does_not_require_preexisting_customer_lookup() -> None:
     assert receipt.client_id == 17
     assert binding.status.value == "bound"
     assert uow.commits == 1
-    assert uow.customer.bind_calls == [("17", LineUserId("U-registration"), None)]
+    assert uow.customer.bind_calls == [
+        ("17", LineUserId("U-registration"), LineUserId("U-registration"))
+    ]
     assert uow.customer.resolve_calls == 0
 
 

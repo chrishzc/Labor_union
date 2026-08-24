@@ -45,4 +45,35 @@ describe('contractSigningClient', () => {
     });
     await expect(contractSigningClient.query('CASE-1')).rejects.toThrow();
   });
+
+  it('downloads an immutable document only through the versioned authorized route', async () => {
+    const fetchStub = vi.fn().mockResolvedValue(new Response(new Blob(['pdf'], { type: 'application/pdf' }), {
+      status: 200,
+      headers: {
+        'content-type': 'application/pdf',
+        'content-disposition': 'attachment; filename="signed-contract.pdf"',
+      },
+    }));
+    vi.stubGlobal('fetch', fetchStub);
+
+    await expect(contractSigningClient.downloadDocument('CASE-1', 7)).resolves.toMatchObject({
+      filename: 'signed-contract.pdf',
+      mimeType: 'application/pdf',
+    });
+    expect(fetchStub).toHaveBeenCalledWith(
+      '/api/v1/orders/CASE-1/contract-signing/documents/7/download',
+      expect.objectContaining({ method: 'GET', headers: { Authorization: 'Bearer token' } }),
+    );
+  });
+
+  it('preserves the typed server error when an archived document is unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      detail: { error: { code: 'archive file missing', message: '找不到或無法驗證契約文件。' } },
+    }), { status: 404, headers: { 'content-type': 'application/json' } })));
+
+    await expect(contractSigningClient.downloadDocument('CASE-1', 7)).rejects.toMatchObject({
+      status: 404,
+      raw: { detail: { error: { message: '找不到或無法驗證契約文件。' } } },
+    });
+  });
 });

@@ -75,6 +75,7 @@ export interface MatchingWorkbenchDrawerViewModel {
   caseNo: string;
   planId: string;
   status: string;
+  customerProfilesStatus: string | null;
   candidatePool: CandidatePoolItemViewModel[];
   assignmentSegments: AssignmentSegmentViewModel[];
   serviceTimeText: string;
@@ -175,9 +176,11 @@ export function adaptMatchingWorkbenchDrawer(params: {
   assignmentPlan?: AssignmentPlan | null;
   candidateContactPool?: CandidateContactPool | null;
   activePlan?: ActiveWaitingDepositPlan | null;
+  customerDecision?: 'pending' | 'accepted' | 'declined' | 'contact_requested' | null;
+  customerProfilesStatus?: string | null;
   terms?: OrderTerms | null;
 }): MatchingWorkbenchDrawerViewModel {
-  const { caseNo, assignmentPlan, candidateContactPool, activePlan, terms } = params;
+  const { caseNo, assignmentPlan, candidateContactPool, activePlan, customerDecision, customerProfilesStatus, terms } = params;
   const assignmentSegments = (assignmentPlan?.assignments ?? []).map((segment) => ({
     key: segment.assignment_id === null
       ? segment.candidate_key ?? `${segment.staff_id}-${segment.sequence}`
@@ -193,7 +196,10 @@ export function adaptMatchingWorkbenchDrawer(params: {
   return {
     caseNo,
     planId: activePlan ? String(activePlan.planId) : '尚無進行中的媒合方案',
-    status: activePlan?.status === 'accepted' ? '已接受' : activePlan?.status === 'proposed' ? '提案中' : '無進行中方案',
+    status: customerDecision === 'accepted' || activePlan?.status === 'accepted'
+      ? '已接受'
+      : activePlan?.status === 'proposed' ? '提案中' : '無進行中方案',
+    customerProfilesStatus: customerProfilesStatus ?? null,
     candidatePool: (candidateContactPool?.candidates ?? []).map((candidate) => ({
       candidateId: candidate.id,
       staffId: candidate.staff_id,

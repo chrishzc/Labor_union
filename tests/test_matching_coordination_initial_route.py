@@ -332,12 +332,12 @@ def test_preview_initial_criteria_is_closed_typed_and_server_derives_actor() -> 
         headers={"X-Correlation-ID": "corr-preview-1"},
         json={
             "reason": "initialize matching",
-            "expected_source_versions": _source_body(),
         },
     )
 
     assert response.status_code == 200
     assert response.json()["data"]["snapshot_id"].startswith("matching:CASE-001")
+    assert application.preview_command.expected_source_versions is None
     assert application.preview_command.actor.actor_id == "system-admin"
     assert application.preview_command.correlation_id.value == "corr-preview-1"
 

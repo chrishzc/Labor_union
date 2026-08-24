@@ -132,6 +132,7 @@ def _error_message(code: str) -> str:
         "import_warning_transition_not_allowed": "目前匯入警示狀態不允許此轉態。",
         "import_warning_receipt_not_found": "找不到指定的匯入警示 receipt。",
         "import_warning_receipt_invalid": "匯入警示 receipt 資料不符合契約。",
+        "import_warning_referral_unavailable": "此警示尚未支援來源修復；可更新追蹤狀態，但不會修改來源根事實。",
     }.get(code, "匯入警示指令無法完成。")
 
 

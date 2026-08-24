@@ -28,7 +28,7 @@ from api.dependencies.finance_import import (
     get_refund_return_review_application,
 )
 from api.schemas.base import BaseResponse
-from api.schemas.jobs import JobAcceptedResponse, JobResponse
+from api.schemas.jobs import JobResponse
 from api.dependencies.jobs import (
     durable_job_conflict_http_error,
     get_durable_job_application,
@@ -43,12 +43,14 @@ from subsystems.jobs.command_application import DurableJobCommandApplication
 from subsystems.jobs.contracts import DurableJobCommandConflict
 from api.schemas.finance_import import (
     FinanceImportBatchApplyBody,
+    FinanceImportBatchJobOutcomeView,
     FinanceImportBatchManifestView,
     FinanceImportBatchPreviewBody,
     FinanceImportBatchPreviewView,
     FinanceImportBatchReceiptView,
     FinanceImportBatchSummaryView,
     FinanceImportCorrectionApplyBody,
+    FinanceImportCorrectionJobOutcomeView,
     FinanceImportCorrectionPreviewView,
     FinanceImportCorrectionReceiptView,
     FinanceImportCorrectionSelectionBody,
@@ -60,6 +62,7 @@ from api.schemas.finance_import import (
     FinanceImportReprocessRunPageView,
     FinanceImportReviewRowPageView,
     FinanceWorkbookIngestionReceiptView,
+    FinanceImportJobAcceptedView,
     RefundReturnReviewApplyBody,
     RefundReturnReviewPreviewBody,
     RefundReturnReviewPreviewView,
@@ -138,6 +141,132 @@ def query_finance_import_job(
     return BaseResponse(
         data=_job_response(job, correlation_id),
         message="成功取得 Finance Import job 狀態",
+    )
+
+
+@router.get(
+    "/jobs/{job_id}/batch-outcome",
+    response_model=BaseResponse[FinanceImportBatchJobOutcomeView],
+)
+def query_finance_import_batch_job_outcome(
+    job_id: str,
+    principal: AdminPrincipal = Depends(require_admin),
+    repository: BackgroundJobRepository = Depends(get_job_repository),
+    query_service=Depends(get_finance_import_query_service),
+) -> BaseResponse[FinanceImportBatchJobOutcomeView]:
+    """Return only the typed receipt for the Finance Import batch-apply command."""
+    del principal
+    correlation_id = f"finance-import-batch-job:{job_id}"
+    job = repository.get_job(job_id)
+    if job is None or job.command_type != "finance_import_batch_apply":
+        raise typed_http_error(
+            404,
+            "not_found",
+            "finance_import_batch_job_not_found",
+            "Finance Import batch Apply job was not found.",
+            correlation_id,
+        )
+    public_job = _job_response(job, correlation_id)
+    receipt = None
+    if public_job.status == "succeeded":
+        try:
+            stored = query_service.get_batch_apply_receipt(job.command_identity)
+            receipt = None if stored is None else FinanceImportBatchReceiptView.model_validate(
+                _materialize(stored)
+            )
+        except ValueError as error:
+            raise typed_http_error(
+                503,
+                "unavailable",
+                "finance_import_batch_receipt_unavailable",
+                "Finance Import batch receipt is unavailable through the typed contract.",
+                correlation_id,
+            ) from error
+        if receipt is None:
+            raise typed_http_error(
+                503,
+                "unavailable",
+                "finance_import_batch_receipt_unavailable",
+                "Finance Import batch receipt is unavailable through the typed contract.",
+                correlation_id,
+            )
+    return BaseResponse(
+        data=FinanceImportBatchJobOutcomeView(
+            job_id=public_job.job_id,
+            status=public_job.status,
+            attempt_count=public_job.attempt_count,
+            max_attempts=public_job.max_attempts,
+            result_reference=(
+                public_job.outcome.result_reference
+                if public_job.outcome is not None and public_job.outcome.kind == "success"
+                else None
+            ),
+            receipt=receipt,
+        ),
+        message="成功取得 Finance Import batch Apply terminal outcome",
+    )
+
+
+@router.get(
+    "/jobs/{job_id}/correction-outcome",
+    response_model=BaseResponse[FinanceImportCorrectionJobOutcomeView],
+)
+def query_finance_import_correction_job_outcome(
+    job_id: str,
+    principal: AdminPrincipal = Depends(require_admin),
+    repository: BackgroundJobRepository = Depends(get_job_repository),
+    query_service=Depends(get_finance_import_query_service),
+) -> BaseResponse[FinanceImportCorrectionJobOutcomeView]:
+    """Return only the typed receipt for a Finance Import correction job."""
+    del principal
+    correlation_id = f"finance-import-correction-job:{job_id}"
+    job = repository.get_job(job_id)
+    if job is None or job.command_type != "finance_import_correction_apply":
+        raise typed_http_error(
+            404,
+            "not_found",
+            "finance_import_correction_job_not_found",
+            "Finance Import correction job was not found.",
+            correlation_id,
+        )
+    public_job = _job_response(job, correlation_id)
+    receipt = None
+    if public_job.status == "succeeded":
+        try:
+            stored = query_service.get_correction_apply_receipt(job.command_identity)
+            receipt = None if stored is None else FinanceImportCorrectionReceiptView.model_validate(
+                _materialize(stored)
+            )
+        except ValueError as error:
+            raise typed_http_error(
+                503,
+                "unavailable",
+                "finance_import_correction_receipt_unavailable",
+                "Finance Import correction receipt is unavailable through the typed contract.",
+                correlation_id,
+            ) from error
+        if receipt is None:
+            raise typed_http_error(
+                503,
+                "unavailable",
+                "finance_import_correction_receipt_unavailable",
+                "Finance Import correction receipt is unavailable through the typed contract.",
+                correlation_id,
+            )
+    return BaseResponse(
+        data=FinanceImportCorrectionJobOutcomeView(
+            job_id=public_job.job_id,
+            status=public_job.status,
+            attempt_count=public_job.attempt_count,
+            max_attempts=public_job.max_attempts,
+            result_reference=(
+                public_job.outcome.result_reference
+                if public_job.outcome is not None and public_job.outcome.kind == "success"
+                else None
+            ),
+            receipt=receipt,
+        ),
+        message="成功取得 Finance Import correction Apply terminal outcome",
     )
 
 
@@ -251,7 +380,7 @@ async def ingest_finance_import_workbook(
     workbook: UploadFile = File(...),
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     ingestion_service=Depends(get_finance_import_ingestion_service),
 ):
     correlation = CorrelationId(correlation_id)
@@ -288,7 +417,7 @@ async def ingest_finance_import_workbook(
 def preview_finance_import_batch(
     body: FinanceImportBatchPreviewBody,
     correlation_id: _CorrelationHeader = "finance-import-preview",
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     application: FinanceImportApplication = Depends(
         get_finance_import_application
     ),
@@ -335,7 +464,7 @@ def preview_historical_finance_reprocess(
 
 @router.post(
     "/historical-reprocess/apply",
-    response_model=BaseResponse[JobAcceptedResponse],
+    response_model=BaseResponse[FinanceImportJobAcceptedView],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def apply_historical_finance_reprocess(
@@ -424,14 +553,14 @@ def _historical_owner_selection_payload(selection):
 # Kept whole so authenticated actor and command identity remain one boundary.
 @router.post(
     "/batches/apply",
-    response_model=BaseResponse[JobAcceptedResponse],
+    response_model=BaseResponse[FinanceImportJobAcceptedView],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def apply_finance_import_batch(
     body: FinanceImportBatchApplyBody,
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     correlation = CorrelationId(correlation_id)
@@ -480,7 +609,7 @@ def _batch_apply_job_command(job_id, request) -> DurableJobCommand:
 def preview_finance_import_correction(
     body: FinanceImportCorrectionSelectionBody,
     correlation_id: _CorrelationHeader = "finance-import-correction-preview",
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     application: FinanceImportApplication = Depends(
         get_finance_import_application
     ),
@@ -503,7 +632,7 @@ def preview_finance_import_correction(
 def preview_refund_return_review(
     body: RefundReturnReviewPreviewBody,
     correlation_id: _CorrelationHeader = "refund-return-review-preview",
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     application=Depends(get_refund_return_review_application),
 ):
     del principal
@@ -525,7 +654,7 @@ def apply_refund_return_review(
     body: RefundReturnReviewApplyBody,
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     application=Depends(get_refund_return_review_application),
 ):
     request = RefundReturnReviewApplyRequest(
@@ -546,14 +675,14 @@ def apply_refund_return_review(
 # Kept whole so actor, versions, fingerprint, and idempotency stay one boundary.
 @router.post(
     "/corrections/apply",
-    response_model=BaseResponse[JobAcceptedResponse],
+    response_model=BaseResponse[FinanceImportJobAcceptedView],
     status_code=status.HTTP_202_ACCEPTED,
 )
 def apply_finance_import_correction(
     body: FinanceImportCorrectionApplyBody,
     idempotency_key: _IdempotencyHeader = ...,
     correlation_id: _CorrelationHeader = ...,
-    principal: AdminPrincipal = Depends(require_system_admin),
+    principal: AdminPrincipal = Depends(require_admin),
     job_application: DurableJobCommandApplication = Depends(get_durable_job_application),
 ):
     correlation = CorrelationId(correlation_id)
@@ -581,9 +710,10 @@ def _durable_acceptance(job_application, command, correlation_id):
     except DurableJobCommandConflict as error:
         raise durable_job_conflict_http_error(error, correlation_id) from error
     return BaseResponse(
-        data=JobAcceptedResponse(
+        data=FinanceImportJobAcceptedView(
             job_id=acceptance.job_id,
             status_url=f"/api/v1/jobs/{acceptance.job_id}",
+            replayed=acceptance.replayed,
         ),
         message="202 Accepted",
     )

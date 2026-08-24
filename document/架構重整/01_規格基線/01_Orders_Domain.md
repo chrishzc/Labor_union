@@ -59,6 +59,8 @@ Orders 不擁有：
   分開顯示；不得把讀取失敗或缺根事實偽裝為尚未完成。
 - 媒合聯繫、月嫂意願、客戶履歷推薦、月嫂簽回、訂金核銷、客戶簽回各讀取自己的
   immutable owner fact；不得用同一 Contract Completion event 代替月嫂與客戶兩種簽回。
+- Step 2「媒合月嫂候選人加入意願池」只依 Assignments／Scheduling 的候選池／聯繫根事實完成；
+  不得等待客戶接受正式方案。七階段的 Stage 2 仍依其完整媒合狀態投影，兩者不可互相覆寫。
 - 正式服務履約只依 effective assignment-owned official service dates、完整 service-time tuple 與
   `BusinessClock` 投影 `not_started／in_progress／completed`；不得依可過期的 assignment status count。
 - 正式服務完成後，current stage 必須前進至完工結案與請款，即使其中某個 settlement owner
@@ -106,6 +108,8 @@ Apply：
 - HCM 與 Client BeClass 唯一配對後，Case Import reconciliation 才可從明確 yes／no source
   經 typed Orders command 補入 `requires_cooking`；問卷空白、矛盾或自由文字無法唯一判定時保留
   `case_import_cooking_requirement_ambiguous` review，但不得回滾或刪除已匯入的 HCM roots；
+- 此一唯一來源補正只改料理條款；即使歷史 root 已有 `actual_start_date`、但尚無正式 Scheduling
+  segment，仍可補入。不得藉此變更服務日期、時段、工時、費用或其他服務形狀；服務資料鎖仍為硬性 blocker；
 - 原始 `survey_details` 保留為來源 evidence，但 Matching 只讀 Orders root；
 - 服務資料鎖形成後不得修改。
 
@@ -210,6 +214,17 @@ AutoComplete 與 Scheduling leave-substitution Apply 必須序列化於同一 Or
 - 延遲訂金核銷後仍須人工重新確認真正開始日。
 - Apply 同交易重建 assignments、正式服務日、actual end、未核銷薪資／帳務日期及 lifecycle。
 - 原過期日期到新確認日期之間不得補造服務日。
+
+#### 3.4.1 事前服務日期精算與排休覆寫
+
+- 在尚未形成正式 assignment 前，服務日期確認 UI 必須由 server 精算：`週休1日` 預設週日、
+  `週休2日` 預設週六與週日；國定假日預設休假，事前請假由人工明示。
+- 固定週休可由人工覆寫為服務日，並以 `custom_work_dates` 重跑 server 精算；此欄位只覆寫
+  固定週休，不能覆寫國定假日休假或事前請假。取消覆寫後必須恢復該固定週休。
+- UI 不得自行加減、重排或提交服務日；每次覆寫都必須重新取得目標合約天數完全守恆、且全數位於
+  server `selectable_dates` 的結果，才可進入既有服務日期 Preview／Apply。
+- 本節只確認 Orders 的事前服務日期，不得直接切換 `staff_schedule.is_work_day`、建立 assignment
+  或替代正式請假／代班流程；正式排班後的請假與代班仍由 Scheduling 擁有。
 
 ### 3.5 Cancellation
 

@@ -34,7 +34,6 @@ def test_queue_has_no_unreviewed_entries() -> None:
         for page in (
             "order-tracker", "orders", "scheduling", "staff", "data-import", "line-management",
             "reports", "finance", "anomalies", "data-browser", "account-management", "system-status",
-            "line-ai-events", "line-liff-studio", "line-security",
         )
     }
 

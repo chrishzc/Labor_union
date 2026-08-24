@@ -1,6 +1,6 @@
 /**
  * File: schedule_precision_client.ts
- * Description: 以 strict contract 呼叫訂單出勤精算並只呈現 server 計算結果。
+ * Description: 以 strict contract 傳送固定週休、假日、請假及人工服務日覆核，回傳 server 精算結果。
  */
 import { z } from 'zod';
 import { sessionClient } from '../auth/session_client';
@@ -12,6 +12,9 @@ export const SchedulePrecisionRequestSchema = z.strictObject({
   actual_start_date: DateText,
   target_service_days: z.number().int().positive(),
   service_mode: z.enum(['週休1日', '週休2日', '連續服務']),
+  custom_holiday_rest_dates: z.array(DateText).optional(),
+  custom_leave_dates: z.array(DateText).optional(),
+  custom_work_dates: z.array(DateText).optional(),
 });
 const SchedulePrecisionResultSchema = z.strictObject({
   actual_start_date: DateText,

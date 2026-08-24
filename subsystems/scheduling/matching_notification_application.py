@@ -428,7 +428,8 @@ def _append_manual_response(unit_of_work, command, state, occurred_at):
             state.customer_decision, command.customer_decision,
             plan_is_active=state.plan_is_active,
             recipient_matches=True,
-            profiles_are_available=state.customer_profiles_status is not None,
+            # 人工補登已由內部操作者保存原因與 audit；不得被 LINE recipient／delivery 缺漏阻擋。
+            profiles_are_available=True,
         )
         response_type = "customer_decision"
     return unit_of_work.matching_notifications.append_response(

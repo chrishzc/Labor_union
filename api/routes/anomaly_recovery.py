@@ -6,7 +6,7 @@ Description: 提供異常根事實、事件歷程與修復動作的封閉唯讀 
 from __future__ import annotations
 
 from dataclasses import fields, is_dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from enum import Enum
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Path
@@ -248,7 +248,7 @@ def _root_snapshot_payload(snapshot) -> AnomalyRootFactSnapshotView:
     if not all(_safe_code(item) for item in blockers + reasons):
         raise ValueError("root snapshot codes are invalid")
     return AnomalyRootFactSnapshotView(
-        occurred_at=snapshot["occurred_at"],
+        occurred_at=_datetime_value(snapshot["occurred_at"]),
         source_version=snapshot["source_version"],
         finance_import_row_identity=_identity_value(snapshot["finance_import_row_id"]),
         finance_import_batch_identity=_identity_value(snapshot["finance_import_batch_id"]),
@@ -293,6 +293,10 @@ def _occurrence_payload(occurrence) -> FinanceOccurrenceView:
     fields = [
         field_builders[key](key, snapshot[key])
         for key in sorted(set(snapshot) - internal_keys)
+        if not (
+            key == "original_refund_ledger_entry_id"
+            and snapshot[key] is None
+        )
     ]
 
     return FinanceOccurrenceView(
@@ -446,10 +450,20 @@ def _boolean_field(key: str, value: object) -> dict[str, object]:
 
 
 def _date_field(key: str, value: object) -> dict[str, object]:
+    return {"kind": "datetime", "key": key, "value": _datetime_value(value)}
+
+
+def _datetime_value(value: object) -> str:
     materialized = _materialize(value)
     if not isinstance(materialized, str) or not materialized.strip():
-        raise ValueError("date evidence is invalid")
-    return {"kind": "datetime", "key": key, "value": materialized}
+        raise ValueError("datetime evidence is invalid")
+    try:
+        parsed = datetime.fromisoformat(materialized)
+    except ValueError as error:
+        raise ValueError("datetime evidence is invalid") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.isoformat()
 
 
 def _code_list_field(key: str, value: object) -> dict[str, object]:
